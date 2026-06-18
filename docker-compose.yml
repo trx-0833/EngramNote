@@ -1,0 +1,89 @@
+# EngramNote Docker Compose 配置
+# 开发模式：仅 backend + frontend（使用 SQLite + 文件系统 broker）
+# 生产模式：包含 PostgreSQL + Redis + MinIO
+
+services:
+  # ---- 应用服务 ----
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据目录
+      - backend-data:/app/data
+      # 挂载 .env 配置文件（包含 API 密钥等敏感信息）
+      - ./backend/.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- 生产基础设施（可选） ----
+  # 取消注释以下服务以使用 PostgreSQL + Redis + MinIO
+
+  # postgres:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_DB: engramnote
+  #     POSTGRES_USER: engram
+  #     POSTGRES_PASSWORD: engram123
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U engram -d engramnote"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # minio:
+  #   image: minio/minio
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   volumes:
+  #     - minio_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "mc", "ready", "local"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  backend-data:
+  # pgdata:
+  # minio_data:
