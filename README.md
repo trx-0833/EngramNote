@@ -112,10 +112,31 @@ docker compose down
 ```
 
 Docker 配置使用国内镜像源：
+- Docker Hub: `docker.1ms.run` + `docker.m.daocloud.io`（在 Docker Desktop → Settings → Docker Engine 中配置 `registry-mirrors`）
 - pip: 清华源 `https://pypi.tuna.tsinghua.edu.cn/simple`
 - npm: 淘宝源 `https://registry.npmmirror.com`
 
 > 注意：Docker 镜像不包含 mineru 和嵌入模型（文件过大），生产环境需挂载本地模型目录。
+
+### Docker 数据目录迁移
+
+默认 Docker 数据存储在 C 盘（`C:\Users\<用户>\AppData\Local\Docker\wsl`），镜像和构建缓存可能占用数 GB。如果 C 盘空间不足，可通过符号链接迁移到其他盘：
+
+```powershell
+# 1. 关闭 Docker Desktop 和 WSL
+wsl --shutdown
+
+# 2. 将数据目录复制到 D 盘
+Copy-Item -Path "$env:LOCALAPPDATA\Docker\wsl" -Destination "D:\DockerData\wsl_backup" -Recurse
+
+# 3. 删除原目录（需管理员权限）
+Remove-Item -Path "$env:LOCALAPPDATA\Docker\wsl" -Recurse -Force
+
+# 4. 创建符号链接（需管理员权限）
+New-Item -ItemType SymbolicLink -Path "$env:LOCALAPPDATA\Docker\wsl" -Target "D:\DockerData\wsl_backup"
+```
+
+> 迁移后重启 Docker Desktop 即可正常使用，所有镜像和容器数据将存储在 D 盘。
 
 ## 项目结构
 
