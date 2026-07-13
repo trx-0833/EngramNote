@@ -70,13 +70,13 @@ export default function Dashboard() {
   const maxReviewCount = Math.max(...weeklyTrend.map(d => d.review_count), 1)
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0' }}>
+    <div className="page-enter">
       {/* 欢迎区域 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: 'var(--space-sm)' }}>
+        <h1 className="heading-serif gradient-text" style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}>
           欢迎使用 EngramNote
         </h1>
-        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}>
+        <p className="fade-in" style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}>
           AI 驱动的学习笔记管理与知识库工具
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
@@ -89,7 +89,7 @@ export default function Dashboard() {
         </div>
         {/* 新用户引导 */}
         {recentNotes.length === 0 && !loading && (
-          <div className="card" style={{ marginTop: 'var(--space-md)', borderLeft: '4px solid var(--color-primary)', background: 'var(--color-primary-light)' }}>
+          <div className="card card-accent-gold" style={{ marginTop: 'var(--space-md)', background: 'var(--color-primary-light)' }}>
             <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>快速开始</p>
             <ol style={{ paddingLeft: 'var(--space-lg)', color: 'var(--color-text-secondary)', fontSize: '0.9rem', lineHeight: 1.8 }}>
               <li>点击「上传新资料」上传 PDF、Word 或图片文件</li>
@@ -104,33 +104,33 @@ export default function Dashboard() {
       {/* 今日学习报告 */}
       {dailyReport && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
+          <h2 className="heading-serif" style={{ fontSize: '1.25rem', marginBottom: 'var(--space-md)' }}>
             今日学习报告 ({dailyReport.date})
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-md)' }}>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+            <div className="stat-card stat-card-blue">
+              <div className="stat-number">
                 {dailyReport.new_mastered}
               </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>新掌握</div>
+              <div className="stat-label">新掌握</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+            <div className="stat-card stat-card-green">
+              <div className="stat-number">
                 {dailyReport.total_reviews}
               </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>复习次数</div>
+              <div className="stat-label">复习次数</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+            <div className="stat-card stat-card-gold">
+              <div className="stat-number">
                 {dailyReport.today_accuracy}%
               </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>正确率</div>
+              <div className="stat-label">正确率</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+            <div className="stat-card stat-card-purple">
+              <div className="stat-number">
                 {formatTime(dailyReport.total_review_time_ms)}
               </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>复习时长</div>
+              <div className="stat-label">复习时长</div>
             </div>
           </div>
 
@@ -158,13 +158,12 @@ export default function Dashboard() {
         {/* 待复习卡片 */}
         {reviewStats && reviewStats.due_count > 0 && (
           <div
-            className="card"
+            className="card card-accent-left"
             style={{
               cursor: 'pointer',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              borderLeft: '4px solid var(--color-primary)',
             }}
             onClick={() => navigate('/review')}
             role="button"
@@ -184,7 +183,7 @@ export default function Dashboard() {
 
         {/* 薄弱点列表 */}
         {weakPoints.length > 0 && (
-          <div className="card" style={{ borderLeft: '4px solid #f44336' }}>
+          <div className="card card-accent-error">
             <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>薄弱点</h3>
             {weakPoints.map(wp => (
               <div
@@ -224,7 +223,7 @@ export default function Dashboard() {
       {/* 7天趋势柱状图 */}
       {weeklyTrend.length > 0 && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
+          <h2 className="heading-serif" style={{ fontSize: '1.25rem', marginBottom: 'var(--space-md)' }}>
             本周复习趋势
           </h2>
           <div className="card" style={{ padding: 'var(--space-lg)' }}>
@@ -232,14 +231,8 @@ export default function Dashboard() {
               {weeklyTrend.map(day => (
                 <div key={day.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   {/* 柱状图 */}
-                  <div style={{
-                    width: '100%',
-                    maxWidth: 40,
+                  <div className={`trend-bar${day.accuracy < 60 ? ' trend-bar-warning' : ''}`} style={{
                     height: Math.max(day.review_count / maxReviewCount * 80, 4),
-                    background: day.accuracy >= 60 ? 'var(--color-primary)' : '#ff9800',
-                    borderRadius: '4px 4px 0 0',
-                    transition: 'height 0.3s ease',
-                    position: 'relative',
                   }}>
                     {/* 数量标签 */}
                     {day.review_count > 0 && (
@@ -280,7 +273,7 @@ export default function Dashboard() {
       {/* 最近笔记区域 */}
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>最近笔记</h2>
+          <h2 className="heading-serif" style={{ fontSize: '1.25rem' }}>最近笔记</h2>
           <button className="btn btn-secondary" onClick={() => navigate('/notes')}>
             查看全部
           </button>
@@ -297,7 +290,7 @@ export default function Dashboard() {
             {recentNotes.map((note) => (
               <article
                 key={note.id}
-                className="card"
+                className="card card-hover"
                 style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 onClick={() => navigate(`/notes/${note.id}`)}
                 role="button"

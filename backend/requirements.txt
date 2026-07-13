@@ -13,6 +13,12 @@ numpy>=1.24.0
 sentence-transformers>=2.2.0
 chromadb>=0.4.0
 
+# ASR 语音转写（重量级依赖，仅使用 ASR 功能时需要）
+openai>=1.0.0
+soundfile>=0.12.0
+# torch>=2.0.0          # 需单独安装：pip install torch --index-url https://download.pytorch.org/whl/cpu
+# qwen-asr>=0.1.0       # 需单独安装：pip install qwen-asr
+
 # 可选：PostgreSQL 支持（取消注释以启用）
 # asyncpg>=0.30.0
 # alembic>=1.13.0

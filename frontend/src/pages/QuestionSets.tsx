@@ -3,11 +3,21 @@
  * @description 展示当前用户所有问答题，按所属笔记分组，每组可折叠/展开
  * 仿照 KnowledgeCards 页面结构，将每份文档的问答题集展示出来
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getQuestions, type QuizItem } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
+
+function parseOptions(optionsStr: string | null): string[] {
+  if (!optionsStr) return []
+  try {
+    const parsed = JSON.parse(optionsStr)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
 import ErrorDisplay from '../components/ErrorDisplay'
 import { questionTypeLabels, questionTypeColors, difficultyLabels, difficultyColors } from '../utils/labels'
 
@@ -27,13 +37,11 @@ export default function QuestionSets() {
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set())
   const [filterType, setFilterType] = useState<string>('all')
   const [filterDifficulty, setFilterDifficulty] = useState<string>('all')
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const noteId = searchParams.get('note_id') || undefined
 
-  useEffect(() => {
-    fetchQuestions()
-  }, [noteId])
-
-  async function fetchQuestions() {
+  const fetchQuestions = useCallback(async (keyword?: string) => {
     setLoading(true)
     try {
       // 后端 page_size 上限为 100，需分页加载全部题目
@@ -42,7 +50,7 @@ export default function QuestionSets() {
       const pageSize = 100
       let totalCount = 0
       do {
-        const data = await getQuestions(page, pageSize, noteId)
+        const data = await getQuestions(page, pageSize, noteId, keyword)
         allItems.push(...data.items)
         totalCount = data.total
         page++
@@ -56,6 +64,17 @@ export default function QuestionSets() {
     } finally {
       setLoading(false)
     }
+  }, [noteId])
+
+  useEffect(() => {
+    fetchQuestions(searchKeyword || undefined)
+  }, [noteId, fetchQuestions, searchKeyword])
+
+  function handleSearchChange(value: string) {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => {
+      setSearchKeyword(value)
+    }, 300)
   }
 
   function groupByNote(questions: QuizItem[]): NoteGroup[] {
@@ -103,12 +122,32 @@ export default function QuestionSets() {
   )
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0' }}>
+    <div className="page-enter">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)', flexWrap: 'wrap', gap: 'var(--space-sm)' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>问题集</h1>
+        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>问题集</h1>
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
           共 {total} 道题{filterType !== 'all' || filterDifficulty !== 'all' ? `，筛选后 ${totalFiltered} 道` : ''}
         </span>
+      </div>
+
+      {/* 搜索栏 */}
+      <div style={{ marginBottom: 'var(--space-md)' }}>
+        <input
+          type="text"
+          placeholder="搜索题目内容..."
+          onChange={e => handleSearchChange(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            border: '1px solid var(--color-border)',
+            borderRadius: '8px',
+            fontSize: '0.875rem',
+            outline: 'none',
+            background: 'var(--color-bg)',
+            color: 'var(--color-text)',
+            boxSizing: 'border-box',
+          }}
+        />
       </div>
 
       {/* 筛选栏 */}
@@ -123,8 +162,7 @@ export default function QuestionSets() {
           ].map(opt => (
             <button
               key={opt.value}
-              className={`btn ${filterType === opt.value ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+              className={`filter-pill ${filterType === opt.value ? 'filter-pill-active' : ''}`}
               onClick={() => setFilterType(opt.value)}
             >
               {opt.label}
@@ -141,8 +179,7 @@ export default function QuestionSets() {
           ].map(opt => (
             <button
               key={opt.value}
-              className={`btn ${filterDifficulty === opt.value ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+              className={`filter-pill ${filterDifficulty === opt.value ? 'filter-pill-active' : ''}`}
               onClick={() => setFilterDifficulty(opt.value)}
             >
               {opt.label}
@@ -165,23 +202,20 @@ export default function QuestionSets() {
             return (
               <div key={group.note_id} style={{ marginBottom: 'var(--space-md)' }}>
                 <div
+                  className="card"
                   onClick={() => toggleGroup(group.note_id)}
                   style={{
                     cursor: 'pointer',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    padding: 'var(--space-sm) var(--space-md)',
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '8px',
                     marginBottom: expandedNotes.has(group.note_id) ? 'var(--space-sm)' : 0,
                     transition: 'margin-bottom 0.15s',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                    <span style={{ fontSize: '0.8rem', userSelect: 'none' }}>
-                      {expandedNotes.has(group.note_id) ? '▼' : '▶'}
+                    <span className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}>
+                      ▶
                     </span>
                     <strong>{group.note_title}</strong>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
@@ -206,10 +240,7 @@ export default function QuestionSets() {
                     {filtered.map(q => (
                       <div
                         key={q.id}
-                        className="card"
-                        style={{ transition: 'box-shadow 0.2s' }}
-                        onMouseEnter={e => (e.currentTarget.style.boxShadow = 'var(--shadow-md)')}
-                        onMouseLeave={e => (e.currentTarget.style.boxShadow = 'var(--shadow-sm)')}
+                        className="card card-hover"
                       >
                         {/* 题目头部：题型 + 难度标签 */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-sm)' }}>
@@ -249,7 +280,7 @@ export default function QuestionSets() {
                         {/* 选择题选项 */}
                         {q.question_type === 'choice' && q.options && (
                           <div style={{ marginBottom: 'var(--space-sm)' }}>
-                            {(JSON.parse(q.options) as string[]).map((opt, i) => (
+                            {parseOptions(q.options).map((opt, i) => (
                               <div key={i} style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', padding: '2px 0', paddingLeft: 'var(--space-sm)' }}>
                                 {opt}
                               </div>

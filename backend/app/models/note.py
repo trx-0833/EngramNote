@@ -43,6 +43,19 @@ class SourceType(str, enum.Enum):
     xlsx = "xlsx"
     audio = "audio"
     video = "video"
+    markdown = "markdown"
+
+
+class NoteRole(str, enum.Enum):
+    """
+    笔记角色枚举
+
+    标识笔记的类型角色，用于区分学习资料和用户自己的笔记：
+    - material: 学习资料（从外部文档上传转换而来）
+    - personal_note: 我的笔记（用户自己撰写的笔记）
+    """
+    material = "material"
+    personal_note = "personal_note"
 
 
 class NoteStatus(str, enum.Enum):
@@ -123,6 +136,10 @@ class Note(BaseModel):
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # 处理失败时的错误信息，成功时为 None
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 所属文件夹，可选，为 None 表示未归入任何文件夹
+    folder_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("folders.id"), index=True, nullable=True)
+    # 笔记角色，区分学习资料和用户自己的笔记，默认为学习资料
+    note_role: Mapped[NoteRole] = mapped_column(Enum(NoteRole), default=NoteRole.material, nullable=False)
     # 扩展元数据，使用 JSON 类型兼容 SQLite 和 PostgreSQL
     # Python 属性名用 metadata_（带下划线），数据库列名映射为 metadata
     # 避免与 SQLAlchemy 的 metadata 属性冲突

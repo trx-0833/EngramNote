@@ -54,36 +54,23 @@ async def get_daily_report(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = today_start.strftime("%Y-%m-%d")
 
-    # 今日复习总数
-    today_total_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+    # 合并查询：今日复习总数、正确数、总时长
+    today_stats = await db.execute(
+        select(
+            func.count().label("total"),
+            func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+            func.coalesce(func.sum(ReviewLog.time_spent_ms), 0).label("time_spent"),
+        ).where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
         )
     )
-    today_total = today_total_result.scalar() or 0
-
-    # 今日正确数
-    today_correct_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
-            ReviewLog.user_id == user_id,
-            ReviewLog.review_at >= today_start,
-            ReviewLog.is_correct == True,
-        )
-    )
-    today_correct = today_correct_result.scalar() or 0
-
-    # 今日复习总时长
-    today_time_result = await db.execute(
-        select(func.coalesce(func.sum(ReviewLog.time_spent_ms), 0)).where(
-            ReviewLog.user_id == user_id,
-            ReviewLog.review_at >= today_start,
-        )
-    )
-    today_time = today_time_result.scalar() or 0
+    row = today_stats.one()
+    today_total = row.total or 0
+    today_correct = row.correct or 0
+    today_time = row.time_spent or 0
 
     # 今日新掌握知识点数：今日首次答对（quality >= 3）的 QuizItem 数量
-    # 即：今日答对的题目中，review_count 为 1 的（说明是首次答对）
     new_mastered_result = await db.execute(
         select(func.count(distinct(ReviewLog.quiz_id))).select_from(ReviewLog).join(
             QuizItem, QuizItem.id == ReviewLog.quiz_id
@@ -96,37 +83,25 @@ async def get_daily_report(
     )
     new_mastered = new_mastered_result.scalar() or 0
 
-    # 各题型正确率
+    # 各题型正确率：合并为单条查询
+    type_stats = await db.execute(
+        select(
+            QuizItem.question_type,
+            func.count().label("total"),
+            func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+        ).join(ReviewLog, ReviewLog.quiz_id == QuizItem.id).where(
+            ReviewLog.user_id == user_id,
+            ReviewLog.review_at >= today_start,
+        ).group_by(QuizItem.question_type)
+    )
+    type_rows = type_stats.all()
     type_accuracy = []
-    for qt in QuestionType:
-        type_total_result = await db.execute(
-            select(func.count()).select_from(ReviewLog).join(
-                QuizItem, QuizItem.id == ReviewLog.quiz_id
-            ).where(
-                ReviewLog.user_id == user_id,
-                ReviewLog.review_at >= today_start,
-                QuizItem.question_type == qt,
-            )
-        )
-        type_total = type_total_result.scalar() or 0
-
-        type_correct_result = await db.execute(
-            select(func.count()).select_from(ReviewLog).join(
-                QuizItem, QuizItem.id == ReviewLog.quiz_id
-            ).where(
-                ReviewLog.user_id == user_id,
-                ReviewLog.review_at >= today_start,
-                QuizItem.question_type == qt,
-                ReviewLog.is_correct == True,
-            )
-        )
-        type_correct = type_correct_result.scalar() or 0
-
+    for row in type_rows:
         type_accuracy.append({
-            "question_type": qt.value,
-            "total": type_total,
-            "correct": type_correct,
-            "accuracy": round(type_correct / type_total * 100, 1) if type_total > 0 else 0,
+            "question_type": row.question_type.value if hasattr(row.question_type, 'value') else str(row.question_type),
+            "total": row.total,
+            "correct": row.correct,
+            "accuracy": round(row.correct / row.total * 100, 1) if row.total > 0 else 0,
         })
 
     # 薄弱点数量
@@ -166,41 +141,45 @@ async def get_weekly_trend(
         Dict: 7天趋势数据
     """
     now = datetime.now(timezone.utc)
-    items = []
-    total_reviews = 0
-    total_correct = 0
+    seven_days_ago = now - timedelta(days=6)
+    week_start = seven_days_ago.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # 按 UTC 日期边界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题
+    daily_map = {}
     for i in range(6, -1, -1):
         day = now - timedelta(days=i)
         day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
+        day_str = day_start.strftime("%Y-%m-%d")
 
-        day_total_result = await db.execute(
-            select(func.count()).select_from(ReviewLog).where(
+        day_stats = await db.execute(
+            select(
+                func.count().label("total"),
+                func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+            ).where(
                 ReviewLog.user_id == user_id,
                 ReviewLog.review_at >= day_start,
                 ReviewLog.review_at < day_end,
             )
         )
-        day_total = day_total_result.scalar() or 0
+        row = day_stats.one()
+        daily_map[day_str] = {"total": row.total or 0, "correct": row.correct or 0}
 
-        day_correct_result = await db.execute(
-            select(func.count()).select_from(ReviewLog).where(
-                ReviewLog.user_id == user_id,
-                ReviewLog.review_at >= day_start,
-                ReviewLog.review_at < day_end,
-                ReviewLog.is_correct == True,
-            )
-        )
-        day_correct = day_correct_result.scalar() or 0
-
+    items = []
+    total_reviews = 0
+    total_correct = 0
+    for i in range(6, -1, -1):
+        day = now - timedelta(days=i)
+        day_str = day.strftime("%Y-%m-%d")
+        day_data = daily_map.get(day_str, {"total": 0, "correct": 0})
+        day_total = day_data["total"]
+        day_correct = day_data["correct"]
         items.append({
-            "date": day_start.strftime("%Y-%m-%d"),
+            "date": day_str,
             "review_count": day_total,
             "correct_count": day_correct,
             "accuracy": round(day_correct / day_total * 100, 1) if day_total > 0 else 0,
         })
-
         total_reviews += day_total
         total_correct += day_correct
 

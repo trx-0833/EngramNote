@@ -20,6 +20,7 @@ AI 理解管道异步任务模块
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
 from sqlalchemy import select
@@ -95,6 +96,16 @@ async def _understand_document(note_id: str):
     Args:
         note_id: 笔记 ID
     """
+    start_time = time.monotonic()
+    logger.info("文档理解开始: note_id=%s", note_id)
+
+    # 检查笔记是否已被用户删除（状态为 failed 且 error_message 为 "用户手动删除"）
+    session_factory = _get_understand_session()
+    async with session_factory() as session:
+        note = await session.get(Note, note_id)
+        if not note or (note.status == NoteStatus.failed and note.error_message == "用户手动删除"):
+            logger.info(f"笔记 {note_id} 已被用户删除，跳过理解任务")
+            return
     from ..services.storage_service import get_object_bytes, ensure_buckets_exist
     from ..services.understanding_service import process_note_understanding
 
@@ -155,6 +166,12 @@ async def _understand_document(note_id: str):
     # 7. 更新笔记状态为 archived
     await _update_note_status(note_id, NoteStatus.archived)
 
+    elapsed = time.monotonic() - start_time
+    logger.info(
+        "文档理解完成: note_id=%s, card_count=%d, elapsed=%.1fs",
+        note_id, result.get("total_cards", 0), elapsed,
+    )
+
     # 8. 自动触发题目生成
     try:
         generate_questions_task.delay(note_id)
@@ -162,7 +179,38 @@ async def _understand_document(note_id: str):
         logger.warning(f"触发题目生成任务失败 (note_id={note_id}): {e}")
 
 
-async def _generate_questions(note_id: str):
+def _questions_for_card(card: dict, target_categories: Optional[list], target_difficulty: Optional[str]) -> list:
+    """
+    根据卡片类别与目标类别，决定该卡片应生成的题目数量与难度
+
+    - 盲点卡片（blind_spot）在目标类别中：2 题，1 中 + 1 难
+    - 拓展卡片（extension）在目标类别中：1 题，难
+    - 其他情况：1 题，难度由 LLM 判定（None）
+
+    Args:
+        card: 知识卡片字典，需含 card_category 字段
+        target_categories: 目标卡片类别列表，如 ["blind_spot"]；为 None 或空时按默认行为
+        target_difficulty: 目标难度倾向（暂不强制使用，仅作为提示）
+
+    Returns:
+        list: 题目需求列表，每项形如 {"count": int, "difficulty": Optional[str]}
+    """
+    cat = card.get("card_category")
+    if target_categories and cat in target_categories:
+        if cat == "blind_spot":
+            # 盲点：2 题，1 中 + 1 难
+            return [
+                {"count": 1, "difficulty": "medium"},
+                {"count": 1, "difficulty": "hard"},
+            ]
+        elif cat == "extension":
+            # 拓展：1 题，难
+            return [{"count": 1, "difficulty": "hard"}]
+    # 默认（非目标或无 target）：1 题，难度由 LLM 判定
+    return [{"count": 1, "difficulty": None}]
+
+
+async def _generate_questions(note_id: str, target_categories: Optional[list] = None, target_difficulty: Optional[str] = None):
     """
     执行题目生成的核心逻辑（多轮对话模式）
 
@@ -172,18 +220,31 @@ async def _generate_questions(note_id: str):
     完整流程：
     1. 从数据库获取笔记关联的所有知识卡片
     2. 创建多轮对话会话
-    3. 将卡片分批（每批10个），在同一窗口中依次追问
+    3. 将卡片分批（每批30个），在同一窗口中依次追问
     4. 题目存入 quiz_items 表
+
+    当 target_categories 非空时，启用定向出题：盲点卡生成 1 中 + 1 难，
+    拓展卡生成 1 难；并在批次 prompt 中标注每卡期望题数与难度。
+    target_categories 为 None 时，行为与原系统完全一致（每卡 1 题）。
 
     Args:
         note_id: 笔记 ID
+        target_categories: 目标卡片类别列表，如 ["blind_spot"]、["extension"]；默认 None
+        target_difficulty: 目标难度倾向（暂不强制使用，仅作为提示）；默认 None
     """
     from ..models.knowledge_card import KnowledgeCard
     from ..models.quiz_item import QuizItem, QuestionType, DifficultyLevel
     from ..services.llm_service import LLMService
 
-    llm_service = LLMService()
+    # 检查笔记是否已被用户删除
     session_factory = _get_understand_session()
+    async with session_factory() as session:
+        note = await session.get(Note, note_id)
+        if not note or (note.status == NoteStatus.failed and note.error_message == "用户手动删除"):
+            logger.info(f"笔记 {note_id} 已被用户删除，跳过题目生成任务")
+            return
+
+    llm_service = LLMService()
 
     # 1. 获取知识卡片（立即提取属性值，避免 commit 后延迟加载问题）
     async with session_factory() as session:
@@ -204,6 +265,7 @@ async def _generate_questions(note_id: str):
                 "title": card.title,
                 "content": card.content,
                 "card_type": card.card_type.value,
+                "card_category": card.card_category.value,
             }
             for card in cards
         ]
@@ -224,7 +286,15 @@ async def _generate_questions(note_id: str):
                 cards_text += f"\n--- 知识点 {i+1} ---\n"
                 cards_text += f"标题：{card['title']}\n"
                 cards_text += f"类型：{card['card_type']}\n"
+                if target_categories:
+                    # 定向出题模式：追加类别与题数/难度提示
+                    cards_text += f"类别：{card['card_category']}\n"
                 cards_text += f"内容：{card['content'][:500]}\n"
+                if target_categories:
+                    reqs = _questions_for_card(card, target_categories, target_difficulty)
+                    total_q = sum(r["count"] for r in reqs)
+                    diff_hint = ",".join(r["difficulty"] for r in reqs if r["difficulty"]) or "自动"
+                    cards_text += f"[本知识点需生成 {total_q} 道题，难度倾向：{diff_hint}]\n"
 
             # 在同一对话窗口中追问
             response = await question_session.ask(cards_text)
@@ -249,8 +319,14 @@ async def _generate_questions(note_id: str):
                     except ValueError:
                         question_type = QuestionType.choice
 
-                    # 验证 difficulty
-                    diff_str = q.get("difficulty", "medium")
+                    # 验证 difficulty（优先使用 LLM 返回值，若为空则用定向出题建议）
+                    diff_str = q.get("difficulty")
+                    if not diff_str:
+                        if target_categories:
+                            reqs = _questions_for_card(card, target_categories, target_difficulty)
+                            diff_str = reqs[0]["difficulty"] if reqs and reqs[0]["difficulty"] else "medium"
+                        else:
+                            diff_str = "medium"
                     try:
                         difficulty = DifficultyLevel(diff_str)
                     except ValueError:
@@ -369,7 +445,7 @@ def understand_document_task(self, note_id: str):
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_questions_task(self, note_id: str):
+def generate_questions_task(self, note_id: str, target_categories: Optional[list] = None, target_difficulty: Optional[str] = None):
     """
     Celery 任务：题目生成
 
@@ -378,9 +454,11 @@ def generate_questions_task(self, note_id: str):
     Args:
         self: Celery 任务实例
         note_id: 笔记 ID
+        target_categories: 目标卡片类别列表，如 ["blind_spot"]、["extension"]；默认 None（兼容原行为）
+        target_difficulty: 目标难度倾向（暂不强制使用，仅作为提示）；默认 None
     """
     try:
-        asyncio.run(_generate_questions(note_id))
+        asyncio.run(_generate_questions(note_id, target_categories, target_difficulty))
     except Exception as exc:
         logger.error(f"题目生成任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:

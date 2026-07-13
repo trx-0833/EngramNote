@@ -4,14 +4,14 @@
  * 上传后自动轮询后端转换状态，转换完成后自动跳转到笔记详情页。
  * 支持的文件格式：PDF、图片、Office 文档、音视频文件。
  */
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadFile, getUploadStatus } from '../api/client'
+import { uploadFile, getUploadStatus, getNotes, type Note } from '../api/client'
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
   '.pdf', '.png', '.jpg', '.jpeg', '.docx', '.pptx', '.xlsx',
-  '.mp4', '.mp3', '.wav', '.m4a',
+  '.mp4', '.mp3', '.wav', '.m4a', '.md',
 ]
 
 /** 解析后端选项 */
@@ -19,6 +19,12 @@ const BACKEND_OPTIONS = [
   { value: '', label: '自动', description: '使用后端默认配置' },
   { value: 'pipeline', label: '本地解析', description: '使用本地模型解析（需要本地环境支持）' },
   { value: 'vlm-http-client', label: '云端解析', description: '使用云端API解析（需要API Token）' },
+] as const
+
+/** 笔记角色选项 */
+const NOTE_ROLE_OPTIONS = [
+  { value: 'material', label: '学习资料' },
+  { value: 'personal_note', label: '我的笔记' },
 ] as const
 
 /**
@@ -53,6 +59,29 @@ export default function Upload() {
   const [status, setStatus] = useState<string | null>(null)
   /** 解析后端选择，空字符串表示使用后端默认配置 */
   const [parseBackend, setParseBackend] = useState('')
+  /** 笔记角色选择，默认为学习资料 */
+  const [noteRole, setNoteRole] = useState('material')
+  /** 可关联的学习资料列表（仅 personal_note 时加载） */
+  const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
+  /** 已选中的关联资料 ID 列表 */
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+
+  // 当选择"我的笔记"角色时加载可关联的学习资料
+  useEffect(() => {
+    if (noteRole === 'personal_note') {
+      const loadMaterials = async () => {
+        try {
+          const data = await getNotes(1, 100, undefined, 'material')
+          setAvailableMaterials(data.items || [])
+        } catch (err) {
+          console.error('加载资料列表失败:', err)
+        }
+      }
+      loadMaterials()
+    } else {
+      setSelectedMaterialIds([])
+    }
+  }, [noteRole])
 
   /**
    * 处理文件上传
@@ -74,7 +103,7 @@ export default function Upload() {
 
     try {
       // 调用上传 API，后端创建笔记记录并开始异步转换
-      const note = await uploadFile(file, parseBackend || undefined)
+      const note = await uploadFile(file, parseBackend || undefined, noteRole, selectedMaterialIds)
       setNoteId(note.id)
       setStatus('文件已上传，正在转换...')
 
@@ -175,32 +204,25 @@ export default function Upload() {
   }
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0', maxWidth: '600px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-lg)' }}>
+    <div className="page-enter" style={{ maxWidth: '640px', margin: '0 auto' }}>
+      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>
         上传学习资料
       </h1>
 
       {/* 拖拽上传区域：支持点击和拖拽两种方式 */}
       <div
-        className="card"
+        className={`upload-zone${dragActive ? ' upload-zone-active' : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
         style={{
-          // 拖拽激活时边框变为主色调，背景变为主色调浅色
-          border: dragActive ? '2px dashed var(--color-primary)' : '2px dashed var(--color-border)',
-          borderRadius: 'var(--radius-lg)',
-          padding: 'var(--space-xl)',
-          textAlign: 'center',
-          cursor: uploading ? 'wait' : 'pointer', // 上传中显示等待光标
-          transition: 'border-color 0.15s ease',
-          background: dragActive ? 'var(--color-primary-light)' : 'var(--color-surface)',
+          cursor: uploading ? 'wait' : 'pointer',
         }}
         role="button"
         tabIndex={0}
         aria-label="点击或拖拽文件上传"
-        onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click() }} // 支持键盘 Enter 键触发文件选择
+        onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click() }}
       >
         {/* 隐藏的文件输入框，通过 ref 触发 */}
         <input
@@ -216,7 +238,7 @@ export default function Upload() {
           {uploading ? '处理中...' : '点击或拖拽文件到此处'}
         </p>
         <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-          支持 PDF、图片、Office 文档、音视频文件
+          支持 PDF、图片、Office 文档、音视频、Markdown 文件
         </p>
         {/* 显示所有支持的文件扩展名 */}
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
@@ -231,11 +253,10 @@ export default function Upload() {
           {BACKEND_OPTIONS.map((option) => (
             <button
               key={option.value}
-              className={`btn ${parseBackend === option.value ? 'btn-primary' : 'btn-secondary'}`}
+              className={`filter-pill${parseBackend === option.value ? ' filter-pill-active' : ''}`}
               onClick={() => setParseBackend(option.value)}
               disabled={uploading}
               title={option.description}
-              style={{ fontSize: '0.875rem' }}
             >
               {option.label}
             </button>
@@ -245,6 +266,47 @@ export default function Upload() {
           {BACKEND_OPTIONS.find((o) => o.value === parseBackend)?.description}
         </p>
       </div>
+
+      {/* 笔记角色选择 */}
+      <div className="card" style={{ marginTop: 'var(--space-md)' }}>
+        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>笔记类型</p>
+        <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+          {NOTE_ROLE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className={`filter-pill${noteRole === option.value ? ' filter-pill-active' : ''}`}
+              onClick={() => setNoteRole(option.value)}
+              disabled={uploading}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 关联学习资料（仅 personal_note 时显示） */}
+      {noteRole === 'personal_note' && availableMaterials.length > 0 && (
+        <div className="card" style={{ marginTop: 'var(--space-md)' }}>
+          <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>关联学习资料（可选）</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: '200px', overflowY: 'auto' }}>
+            {availableMaterials.map(m => (
+              <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={selectedMaterialIds.includes(m.id)}
+                  onChange={(e) => {
+                    setSelectedMaterialIds(prev =>
+                      e.target.checked ? [...prev, m.id] : prev.filter(id => id !== m.id)
+                    )
+                  }}
+                  disabled={uploading}
+                />
+                <span>{m.title}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 处理状态反馈 */}
       {status && (

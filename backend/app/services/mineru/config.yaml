@@ -1,0 +1,25 @@
+# MinerU 文档转换配置
+# 迁移自 mineru_plus 项目，适配 EngramNote 项目规范
+
+document:
+  backend: pipeline
+  device: cpu
+  timeout: 300
+  formula_enable: true
+  table_enable: true
+  make_mode: mm_md
+  lang: null
+  output_dir: null
+  log_level: INFO
+  log_dir: logs
+  max_workers: 1
+  modelscope_model_dir: null
+  chunk_size: 200
+  chunk_overlap: 5
+  watermark_patterns:
+    - "©\\s*\\d{4}"
+    - "Copyright"
+    - "版权所有"
+  max_blank_lines: 2
+  server_url: null
+  model_version: null

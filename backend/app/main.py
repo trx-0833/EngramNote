@@ -16,17 +16,20 @@ FastAPI 应用入口模块
 """
 
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.router import api_router
 from .config import get_settings
+from .core.logging_config import setup_logging
 from .database import init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
 
 # 获取全局配置
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -40,6 +43,9 @@ async def lifespan(app: FastAPI):
     Args:
         app: FastAPI 应用实例
     """
+    # 启动时：初始化日志配置
+    setup_logging()
+    logger.info("EngramNote 应用启动")
     # 启动时：初始化数据库，创建所有数据表
     await init_db()
     yield

@@ -9,6 +9,7 @@ ConversationSession 多轮对话模式单元测试
 5. _parse_questions_response JSON 解析容错
 6. 知识提取会话的 system prompt 验证
 7. 题目生成会话的 system prompt 验证
+8. UnderstandingSession 子类:不累积历史原文、标题列表去重、容错与上限
 """
 
 import asyncio
@@ -284,12 +285,13 @@ def test_parse_questions_response_list_response():
 
 def test_create_understanding_session():
     """测试 create_understanding_session() 返回正确配置的会话"""
-    from app.services.llm_service import LLMService, ConversationSession
+    from app.services.llm_service import LLMService, ConversationSession, UnderstandingSession
 
     llm_service = LLMService()
     session = llm_service.create_understanding_session()
 
     assert isinstance(session, ConversationSession)
+    assert isinstance(session, UnderstandingSession)  # 应返回子类
     assert session._temperature == 0.3
     assert session._max_tokens == 4096
     assert session._response_format == {"type": "json_object"}
@@ -396,6 +398,178 @@ async def test_question_session_full_flow():
     # 注意：chat 接收的是 _messages 的引用，mock 记录的是最终状态
     # 最终状态：system + 3轮对话 = 7条消息
     assert len(third_call_messages) == 7  # system + 3*(user + assistant)
+
+
+# ---- UnderstandingSession 子类测试 ----
+
+
+@pytest.mark.asyncio
+async def test_understanding_session_no_history_accumulation():
+    """测试 UnderstandingSession 不累积历史原文,只追加标题列表"""
+    from app.services.llm_service import UnderstandingSession
+
+    mock_llm = MagicMock()
+    responses = [
+        json.dumps({"chapters": [{"chapter_title": "ch1", "summary": "s1", "points": [{"title": "概念1", "content": "c1"}]}]}),
+        json.dumps({"chapters": [{"chapter_title": "ch2", "summary": "s2", "points": [{"title": "定义1", "content": "c2"}]}]}),
+        json.dumps({"chapters": [{"chapter_title": "ch3", "summary": "s3", "points": [{"title": "问答1", "content": "c3"}]}]}),
+    ]
+    mock_llm.chat = AsyncMock(side_effect=responses)
+
+    session = UnderstandingSession(
+        mock_llm,
+        system_prompt="你是知识提取助手",
+        temperature=0.3,
+        response_format={"type": "json_object"},
+    )
+
+    # 第1次 ask:无历史标题
+    await session.ask("章节1内容")
+    first_call_messages = mock_llm.chat.call_args_list[0][0][0]
+    assert len(first_call_messages) == 2  # system + user
+    assert "已提取知识点标题" not in first_call_messages[1]["content"]
+
+    # 第2次 ask:应包含第1次提取的标题,不包含历史原文
+    await session.ask("章节2内容")
+    second_call_messages = mock_llm.chat.call_args_list[1][0][0]
+    assert len(second_call_messages) == 2  # 仍只有 system + user
+    assert "概念1" in second_call_messages[1]["content"]
+    assert "已提取知识点标题" in second_call_messages[1]["content"]
+    assert "章节1内容" not in second_call_messages[1]["content"]
+
+    # 第3次 ask:应包含前2次提取的所有标题,不包含历史原文
+    await session.ask("章节3内容")
+    third_call_messages = mock_llm.chat.call_args_list[2][0][0]
+    assert len(third_call_messages) == 2  # 仍只有 system + user
+    assert "概念1" in third_call_messages[1]["content"]
+    assert "定义1" in third_call_messages[1]["content"]
+    assert "章节1内容" not in third_call_messages[1]["content"]
+    assert "章节2内容" not in third_call_messages[1]["content"]
+
+    # 验证标题计数
+    assert session.extracted_titles_count == 3
+    assert session.turn_count == 3
+
+
+@pytest.mark.asyncio
+async def test_understanding_session_titles_extraction_fallback():
+    """测试 UnderstandingSession 标题提取容错:非 JSON 响应不阻塞主流程"""
+    from app.services.llm_service import UnderstandingSession
+
+    mock_llm = MagicMock()
+    # 第1次返回非 JSON,第2次返回正常 JSON
+    responses = [
+        "这不是JSON",
+        json.dumps({"points": [{"title": "概念1", "content": "c1"}]}),
+    ]
+    mock_llm.chat = AsyncMock(side_effect=responses)
+
+    session = UnderstandingSession(
+        mock_llm,
+        system_prompt="你是知识提取助手",
+        response_format={"type": "json_object"},
+    )
+
+    # 第1次 ask:非 JSON 响应,不应抛异常
+    result1 = await session.ask("章节1内容")
+    assert result1 == "这不是JSON"
+    assert session.extracted_titles_count == 0  # 标题未增长
+
+    # 第2次 ask:正常 JSON 响应,标题增长
+    result2 = await session.ask("章节2内容")
+    assert session.extracted_titles_count == 1
+
+    # 第2次 user 消息不应包含标题提示(因为第1次没提取到标题)
+    second_call_messages = mock_llm.chat.call_args_list[1][0][0]
+    assert "已提取知识点标题" not in second_call_messages[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_understanding_session_max_titles_limit():
+    """测试 UnderstandingSession 标题列表上限:超过 MAX_TITLES 时只保留最近200条"""
+    from app.services.llm_service import UnderstandingSession
+
+    mock_llm = MagicMock()
+    # 生成 251 个响应,每个含1个标题 "标题N"
+    responses = [
+        json.dumps({"points": [{"title": f"标题{i+1}", "content": "c"}]})
+        for i in range(251)
+    ]
+    mock_llm.chat = AsyncMock(side_effect=responses)
+
+    session = UnderstandingSession(
+        mock_llm,
+        system_prompt="你是知识提取助手",
+        response_format={"type": "json_object"},
+    )
+
+    # 执行 251 次 ask
+    for i in range(251):
+        await session.ask(f"章节{i+1}内容")
+
+    # 验证累计标题数 = 251(内部列表不裁剪)
+    assert session.extracted_titles_count == 251
+
+    # 验证第251次 user 消息只包含最近 200 条标题
+    # 注意:第251次 ask 时,标题251还没被提取,所以 user 消息含前250条中最后200条 = 标题51..标题250
+    last_call_messages = mock_llm.chat.call_args_list[250][0][0]
+    user_content = last_call_messages[1]["content"]
+    # 改用按行精确匹配,避免 "标题1" 子串误匹配 "标题100"/"标题199" 等
+    lines = user_content.split("\n")
+    assert "- 标题51" in lines    # 第200条倒数的开始
+    assert "- 标题250" in lines   # 最后已提取的标题
+    # 第50条及之前应被裁剪
+    assert "- 标题50" not in lines
+    assert "- 标题1" not in lines
+    # 标题251 在 ask 返回后才提取,不应出现在 user 消息中
+    assert "- 标题251" not in lines
+
+    # 回归验证:turn_count 应等于 ask() 次数(251),而非标题数(也是 251,本测试无法区分)
+    # 真正的区分测试见 test_understanding_session_turn_count_matches_ask_count
+    assert session.turn_count == 251
+
+
+@pytest.mark.asyncio
+async def test_understanding_session_turn_count_matches_ask_count():
+    """回归测试:当一次 ask 提取多个标题时,turn_count 仍等于 ask() 次数而非标题数
+
+    此测试防止 turn_count 语义被偷换为 len(_extracted_titles) 的 bug 再次出现。
+    场景:2 次 ask,每次响应含 5 个标题 → turn_count 应为 2,extracted_titles_count 应为 10。
+    """
+    from app.services.llm_service import UnderstandingSession
+
+    mock_llm = MagicMock()
+    # 每次 ask 返回 5 个标题
+    multi_points_response = json.dumps({
+        "chapters": [{
+            "chapter_title": "ch",
+            "summary": "s",
+            "points": [{"title": f"标题{i}", "content": "c"} for i in range(5)],
+        }]
+    })
+    mock_llm.chat = AsyncMock(side_effect=[multi_points_response, multi_points_response])
+
+    session = UnderstandingSession(
+        mock_llm,
+        system_prompt="你是知识提取助手",
+        response_format={"type": "json_object"},
+    )
+
+    # 2 次 ask,每次提取 5 个标题
+    await session.ask("章节1内容")
+    await session.ask("章节2内容")
+
+    # 关键断言:turn_count 等于 ask 次数(2),而非标题数(10)
+    assert session.turn_count == 2
+    # extracted_titles_count 等于标题总数(10)
+    assert session.extracted_titles_count == 10
+
+    # 验证第2次 ask 的 user 消息包含前5个标题(去重提示)
+    second_call_messages = mock_llm.chat.call_args_list[1][0][0]
+    user_content = second_call_messages[1]["content"]
+    lines = user_content.split("\n")
+    assert "- 标题0" in lines
+    assert "- 标题4" in lines
 
 
 if __name__ == "__main__":

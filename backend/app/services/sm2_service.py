@@ -171,10 +171,14 @@ def quality_from_answer(
         # 填空题：完全匹配或部分匹配
         if user_lower == correct_lower:
             return 5
-        # 检查部分匹配（答案包含在用户回答中，或反过来）
-        if correct_lower in user_lower or user_lower in correct_lower:
-            return 3
-        # 检查关键词重叠
+        # 部分匹配：要求至少3个字符，且长度比例 > 0.5
+        if len(correct_lower) >= 3 and len(user_lower) >= 3:
+            if correct_lower in user_lower or user_lower in correct_lower:
+                shorter = min(len(correct_lower), len(user_lower))
+                longer = max(len(correct_lower), len(user_lower))
+                if shorter / longer > 0.5:
+                    return 3
+        # 关键词重叠检查（基于字符级集合）
         user_words = set(user_lower)
         correct_words = set(correct_lower)
         overlap = len(user_words & correct_words)

@@ -22,14 +22,17 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+import logging
+
 from .config import get_settings
 
 # 获取全局配置
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
-# ✅ 提示当前模式
+# 提示当前模式
 if settings.debug:
-    print("⚠️  当前处于 DEBUG 模式")
+    logger.warning("当前处于 DEBUG 模式")
 
 # 获取数据库连接 URL
 database_url = settings.get_database_url()
@@ -98,9 +101,177 @@ async def init_db():
     根据所有模型的 metadata 自动创建对应的数据表。
     此方法适用于开发环境快速启动，生产环境建议使用 Alembic 进行数据库迁移管理。
     使用 engine.begin() 确保建表操作在事务中执行。
+
+    注意：create_all() 只创建不存在的表，不会对已有表做 ALTER TABLE。
+    因此在 SQLite 开发模式下，额外执行简易迁移以补充缺失的列。
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # 对 SQLite：检查并补充已有表缺失的列
+        if _is_sqlite:
+            await _migrate_sqlite(conn)
+
+
+async def _migrate_sqlite(conn):
+    """
+    SQLite 简易迁移：检查并添加已有表缺失的列
+
+    create_all() 只创建不存在的表，不会对已有表做 ALTER TABLE。
+    此函数检查模型定义的列与实际表的列差异，自动添加缺失列。
+    仅适用于开发环境的简易迁移，生产环境应使用 Alembic。
+
+    Args:
+        conn: 异步数据库连接（engine.begin() 上下文中的连接）
+    """
+    from sqlalchemy import inspect, text
+
+    def _do_migrate(sync_conn):
+        inspector = inspect(sync_conn)
+        table_names = inspector.get_table_names()
+
+        # 检查 notes 表是否缺少列
+        if 'notes' in table_names:
+            existing_columns = {col['name'] for col in inspector.get_columns('notes')}
+            if 'folder_id' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE notes ADD COLUMN folder_id VARCHAR REFERENCES folders(id)"
+                ))
+                logger.info("SQLite 迁移: 已为 notes 表添加 folder_id 列")
+            if 'note_role' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 notes 表添加 note_role 列")
+
+        # 检查并创建 note_material_links 表（防御性建表，正常情况下 create_all 已创建）
+        if 'note_material_links' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS note_material_links (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    user_id VARCHAR NOT NULL REFERENCES users(id),
+                    personal_note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    material_note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    UNIQUE (personal_note_id, material_note_id)
+                )
+                """
+            ))
+            logger.info("SQLite 迁移: 已创建 note_material_links 表")
+
+        # 检查并创建 note_annotations 表（防御性建表，正常情况下 create_all 已创建）
+        if 'note_annotations' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS note_annotations (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    user_id VARCHAR NOT NULL REFERENCES users(id),
+                    note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    view_mode VARCHAR(20) NOT NULL,
+                    type VARCHAR(20) NOT NULL,
+                    text_content TEXT NOT NULL,
+                    context_before TEXT DEFAULT '' NOT NULL,
+                    context_after TEXT DEFAULT '' NOT NULL,
+                    color VARCHAR(20),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            ))
+            logger.info("SQLite 迁移: 已创建 note_annotations 表")
+
+        # 检查 assessment_results 表是否缺少 link_signature / is_stale 列
+        if 'assessment_results' in table_names:
+            existing_columns = {col['name'] for col in inspector.get_columns('assessment_results')}
+            if 'link_signature' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE assessment_results ADD COLUMN link_signature VARCHAR(64)"
+                ))
+                logger.info("SQLite 迁移: 已为 assessment_results 表添加 link_signature 列")
+            if 'is_stale' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE assessment_results ADD COLUMN is_stale BOOLEAN DEFAULT 0 NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 assessment_results 表添加 is_stale 列")
+
+        # 检查 knowledge_cards 表是否缺少新增的 6 列
+        # （card_category / is_key_point / is_difficulty / mastery_level / source_note_ids / parent_card_id）
+        # 对应 Alembic 003 迁移；create_all 不会 ALTER 已有表，需在此补齐
+        if 'knowledge_cards' in table_names:
+            existing_columns = {col['name'] for col in inspector.get_columns('knowledge_cards')}
+            if 'card_category' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN card_category VARCHAR DEFAULT 'regular' NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 card_category 列")
+            if 'is_key_point' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN is_key_point BOOLEAN DEFAULT 0 NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 is_key_point 列")
+            if 'is_difficulty' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN is_difficulty BOOLEAN DEFAULT 0 NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 is_difficulty 列")
+            if 'mastery_level' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN mastery_level FLOAT DEFAULT 0 NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 mastery_level 列")
+            if 'source_note_ids' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN source_note_ids JSON"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 source_note_ids 列")
+            if 'parent_card_id' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN parent_card_id VARCHAR"
+                ))
+                logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 parent_card_id 列")
+                # 为 parent_card_id 创建索引以加速拓展卡片查询
+                try:
+                    sync_conn.execute(text(
+                        "CREATE INDEX ix_knowledge_cards_parent_card_id ON knowledge_cards (parent_card_id)"
+                    ))
+                    logger.info("SQLite 迁移: 已为 knowledge_cards.parent_card_id 创建索引")
+                except Exception:
+                    # 索引已存在时忽略
+                    pass
+
+        # ---- 孤儿数据清理 ----
+        # 在级联删除修复之前，删除笔记/卡片不会级联删除关联数据，
+        # 加上 SQLite 默认不启用外键约束，可能存在指向已删除父记录的孤儿数据。
+        # 按外键依赖顺序从叶子到根清理，避免清理顺序导致二次孤儿。
+        orphan_checks = [
+            # (表名, 孤儿字段, 父表名, 父字段, 操作类型: delete 或 nullify)
+            ("review_logs", "quiz_id", "quiz_items", "id", "delete"),
+            ("review_logs", "note_id", "notes", "id", "delete"),
+            ("quiz_items", "card_id", "knowledge_cards", "id", "delete"),
+            ("quiz_items", "note_id", "notes", "id", "delete"),
+            ("knowledge_cards", "note_id", "notes", "id", "delete"),
+            ("card_relations", "card_id_1", "knowledge_cards", "id", "delete"),
+            ("card_relations", "card_id_2", "knowledge_cards", "id", "delete"),
+            ("notes", "folder_id", "folders", "id", "nullify"),
+        ]
+
+        for table, col, parent_table, parent_col, action in orphan_checks:
+            if table not in table_names or parent_table not in table_names:
+                continue
+            if action == "delete":
+                result = sync_conn.execute(text(
+                    f"DELETE FROM {table} WHERE {col} IS NOT NULL AND {col} NOT IN (SELECT {parent_col} FROM {parent_table})"
+                ))
+            elif action == "nullify":
+                result = sync_conn.execute(text(
+                    f"UPDATE {table} SET {col} = NULL WHERE {col} IS NOT NULL AND {col} NOT IN (SELECT {parent_col} FROM {parent_table})"
+                ))
+            if result.rowcount > 0:
+                logger.info(f"孤儿数据清理: 从 {table} 中清理了 {result.rowcount} 条 {col} 孤儿记录")
+
+    await conn.run_sync(_do_migrate)
 
 
 if __name__ == "__main__":

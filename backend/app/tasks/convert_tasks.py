@@ -3,8 +3,8 @@
 
 本模块定义了 Celery 异步任务，负责将上传的文档转换为 Markdown 格式。
 根据文件类型调用不同的转换引擎：
-- PDF/图片/Office 文档 → 调用 mineru_plus 进行文档解析
-- 音视频 → 调用 asr_plus 进行语音转写
+- PDF/图片/Office 文档 → 调用 mineru 子包进行文档解析
+- 音视频 → 调用 asr 子包进行语音转写
 
 主要职责：
 - 定义 Celery 任务 convert_document_task
@@ -24,10 +24,11 @@
 
 from typing import Optional
 
-import sys
 import os
 import tempfile
+import time
 import traceback
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -37,6 +38,10 @@ from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# _update_note_status 允许更新的字段白名单（C-3: 防止任意字段写入）
+_UPDATABLE_NOTE_FIELDS = {"title", "page_count", "original_md_path", "clean_md_path", "metadata_"}
 
 # Celery 任务中需要独立的数据库连接（不在 FastAPI 上下文中）
 # 这些全局变量在首次使用时延迟初始化
@@ -86,9 +91,9 @@ async def _update_note_status(note_id: str, status: NoteStatus, error_message: O
         note.status = status
         if error_message:
             note.error_message = error_message
-        # 动态更新附加字段
+        # 动态更新附加字段（仅允许白名单中的字段）
         for key, value in kwargs.items():
-            if hasattr(note, key):
+            if key in _UPDATABLE_NOTE_FIELDS:
                 setattr(note, key, value)
         await session.commit()
 
@@ -100,8 +105,8 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
     完整流程：
     1. 从对象存储下载原始文件到临时目录
     2. 根据文件类型选择转换引擎：
-       a. 文档类（PDF/图片/Office）→ 调用 mineru_plus 转换为 Markdown
-       b. 音视频 → 调用 asr_plus 转写为文本，再通过 DeepSeek 润色
+       a. 文档类（PDF/图片/Office）→ 调用 mineru 子包转换为 Markdown
+       b. 音视频 → 调用 asr 子包完成转写、标点恢复和标题生成
     3. 将转换结果（Markdown）上传到对象存储
     4. 更新笔记状态和元数据
 
@@ -110,6 +115,16 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
         file_path: 原始文件在对象存储中的路径
         source_type: 文件来源类型（pdf/image/docx/pptx/xlsx/audio/video）
     """
+    start_time = time.monotonic()
+    logger.info("文档转换开始: note_id=%s, source_type=%s", note_id, source_type)
+
+    # 检查笔记是否已被用户删除（状态为 failed 且 error_message 为 "用户手动删除"）
+    session_factory = _get_sync_session()
+    async with session_factory() as session:
+        note = await session.get(Note, note_id)
+        if not note or (note.status == NoteStatus.failed and note.error_message == "用户手动删除"):
+            logger.info(f"笔记 {note_id} 已被用户删除，跳过转换任务")
+            return
     from ..services.storage_service import (
         download_file,
         upload_bytes,
@@ -131,23 +146,18 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
         metadata = {}
 
         if source_type_enum in (SourceType.pdf, SourceType.image, SourceType.docx, SourceType.pptx, SourceType.xlsx):
-            # 2a. 文档类 → 调用 mineru_plus 转换
+            # 2a. 文档类 → 调用 mineru 子包转换
             try:
-                # 将 mineru_plus 所在目录加入 sys.path，使其可被 import
-                mineru_plus_path = os.path.join(os.path.dirname(settings.database_url), "..", "..", "mineru_plus")
-                # 使用绝对路径定位项目根目录下的 mineru_plus 模块
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-                mineru_plus_path = os.path.join(project_root, "mineru_plus")
-                if mineru_plus_path not in sys.path:
-                    sys.path.insert(0, os.path.dirname(mineru_plus_path))
-
-                from mineru_plus.converter import convert
+                from ..services.mineru.converter import convert
                 result = convert(
                     local_file,
                     backend=backend or settings.mineru_backend,
                     lang="ch",
                     formula_enable=True,
-                    table_enable=True,)
+                    table_enable=True,
+                    api_token=settings.mineru_api_token,
+                    server_url=settings.mineru_server_url,
+                )
 
                 if result.success:
                     markdown_content = result.markdown_content
@@ -159,65 +169,82 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
                         metadata_=metadata,
                     )
                 else:
-                    # mineru_plus 返回失败结果
+                    # mineru 返回失败结果
+                    elapsed = time.monotonic() - start_time
+                    logger.error("Mineru 转换失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
                     await _update_note_status(
                         note_id, NoteStatus.failed,
                         error_message=f"Mineru 转换失败: {result.error}",
                     )
                     return
             except Exception as e:
-                # mineru_plus 调用异常（如模块未安装、文件损坏等）
+                # mineru 调用异常（如模块未安装、文件损坏等）
+                elapsed = time.monotonic() - start_time
+                logger.error("Mineru 调用异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
                 await _update_note_status(
                     note_id, NoteStatus.failed,
                     error_message=f"Mineru 调用异常: {traceback.format_exc()}",
                 )
                 return
 
-        elif source_type_enum in (SourceType.audio, SourceType.video):
-            # 2b. 音视频 → 调用 asr_plus 转写
+        elif source_type_enum == SourceType.markdown:
+            # 2c. Markdown 文件 → 无需转换，直接读取内容
             try:
-                # 定位项目根目录下的 asr_plus 模块
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-                asr_plus_path = os.path.join(project_root, "asr_plus")
-                if asr_plus_path not in sys.path:
-                    sys.path.insert(0, os.path.dirname(asr_plus_path))
-
-                from asr_plus.asr_engine import ASREngine, restore_punctuation, generate_title
-
-                # ASR 语音转写
-                engine = ASREngine.get_instance()
-                transcribed_text, detected_lang = engine.transcribe_file(local_file, language="Chinese")
-
-                # 使用 DeepSeek 对转写文本进行润色（添加标点、分段）
-                if transcribed_text.strip():
-                    polished_text = restore_punctuation(
-                        transcribed_text,
-                        api_key=settings.deepseek_api_key,
-                        base_url=settings.deepseek_base_url,
-                        model=settings.deepseek_model,
-                    )
-                    # 使用 DeepSeek 根据内容生成标题
-                    title = generate_title(
-                        transcribed_text,
-                        api_key=settings.deepseek_api_key,
-                        base_url=settings.deepseek_base_url,
-                        model=settings.deepseek_model,
-                    )
-                else:
-                    # 转写结果为空
-                    polished_text = ""
-                    title = "空转录"
-
-                # 组装 Markdown 内容：标题 + 润色后的转写文本
-                markdown_content = f"# {title}\n\n{polished_text}"
-                metadata = {"detected_language": detected_lang}
-
+                with open(local_file, "r", encoding="utf-8") as f:
+                    markdown_content = f.read()
                 await _update_note_status(
                     note_id, NoteStatus.converted,
-                    metadata_=metadata,
                 )
             except Exception as e:
-                # ASR 转写异常（如模型未加载、音频格式不支持等）
+                elapsed = time.monotonic() - start_time
+                logger.error("Markdown 读取失败: note_id=%s, elapsed=%.1fs", note_id, elapsed)
+                await _update_note_status(
+                    note_id, NoteStatus.failed,
+                    error_message=f"Markdown 文件读取失败: {traceback.format_exc()}",
+                )
+                return
+
+        elif source_type_enum in (SourceType.audio, SourceType.video):
+            # 2b. 音视频 → 调用 asr 子包转写
+            try:
+                from ..services.asr import convert as asr_convert
+
+                result = asr_convert(
+                    local_file,
+                    language=settings.asr_language or None,
+                    use_cache=True,
+                    enable_punctuation=settings.asr_enable_punctuation,
+                    enable_title_generation=settings.asr_enable_title_generation,
+                    cache_dir=settings.asr_cache_dir or None,
+                )
+
+                if result.success:
+                    markdown_content = result.markdown_content
+                    metadata = result.metadata or {}
+
+                    # 将 ASR 生成的标题更新到笔记
+                    if result.title and result.title != "未命名":
+                        await _update_note_status(
+                            note_id, NoteStatus.converted,
+                            title=result.title,
+                            metadata_=metadata,
+                        )
+                    else:
+                        await _update_note_status(
+                            note_id, NoteStatus.converted,
+                            metadata_=metadata,
+                        )
+                else:
+                    elapsed = time.monotonic() - start_time
+                    logger.error("ASR 转写失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+                    await _update_note_status(
+                        note_id, NoteStatus.failed,
+                        error_message=f"ASR 转写失败: {result.error}",
+                    )
+                    return
+            except Exception as e:
+                elapsed = time.monotonic() - start_time
+                logger.error("ASR 转写异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
                 await _update_note_status(
                     note_id, NoteStatus.failed,
                     error_message=f"ASR 转写异常: {traceback.format_exc()}",
@@ -248,6 +275,9 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
                 # 清洗任务触发失败不影响转换结果
                 pass
 
+    elapsed = time.monotonic() - start_time
+    logger.info("文档转换完成: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
 def convert_document_task(self, note_id: str, file_path: str, source_type: str, backend: Optional[str] = None):
@@ -275,6 +305,7 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
     try:
         asyncio.run(_convert_document(note_id, file_path, source_type, backend))
     except Exception as exc:
+        logger.error("转换任务异常: note_id=%s, source_type=%s, error=%s", note_id, source_type, exc)
         # 转换失败，尝试重试
         try:
             self.retry(exc=exc)

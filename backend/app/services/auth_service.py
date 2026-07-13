@@ -19,6 +19,7 @@ JWT 认证服务模块
 
 from typing import Optional
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -31,6 +32,7 @@ from ..models.user import User
 from ..schemas.user import UserRegisterRequest
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -147,6 +149,7 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    logger.info("用户注册成功: user_id=%s, username=%s", user.id, user.username)
     return user
 
 
@@ -172,4 +175,5 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
         return None
     if not verify_password(password, user.hashed_password):
         return None
+    logger.info("用户登录成功: user_id=%s, username=%s", user.id, user.username)
     return user

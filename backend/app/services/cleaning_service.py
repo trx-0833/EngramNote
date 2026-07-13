@@ -162,10 +162,13 @@ def split_into_chunks(
     将 Markdown 文本按段落边界分割为重叠块
 
     分块策略：
-    1. 按段落（双换行符）将文本拆分为段落单元
-    2. 将段落合并为块，直到接近 chunk_size（按字符数计算）
-    3. 相邻块之间有 overlap 大小的重叠，避免语义断裂
-    4. 记录每个块在原文中的行号范围，便于后续定位
+    1. 识别标题层级，按标题边界优先拆分
+    2. 按段落（双换行符）将文本拆分为段落单元
+    3. 将段落合并为块，直到接近 chunk_size（按字符数计算）
+    4. 避免在代码块、列表项、续行处拆分
+    5. 相邻块之间有 overlap 大小的重叠，避免语义断裂
+    6. 超长标题下的子块重复标题前缀
+    7. 记录每个块的标题层级路径（heading_context）
 
     Args:
         text: Markdown 文本
@@ -179,6 +182,7 @@ def split_into_chunks(
             - start_line: 在原文中的起始行号（从 0 开始）
             - end_line: 在原文中的结束行号
             - char_count: 字符数
+            - heading_context: 标题层级路径（如 "一级 > 二级 > 三级"）
     """
     if not text or not text.strip():
         return []
@@ -186,38 +190,119 @@ def split_into_chunks(
     chunk_size = chunk_size or settings.chunk_size
     overlap = overlap or settings.chunk_overlap
 
-    # 按段落分割
+    # ============================================================
+    # 步骤1：解析标题位置，构建标题层级
+    # ============================================================
+    heading_pattern = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
+    lines = text.split("\n")
+
+    # 计算每行所属的标题路径
+    line_heading_context: List[str] = [""] * len(lines)
+    heading_stack: List[Tuple[int, str]] = []  # [(level, title)]
+    in_code_block = False
+
+    for line_idx, line in enumerate(lines):
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+        if in_code_block:
+            if heading_stack:
+                line_heading_context[line_idx] = " > ".join(h[1] for h in heading_stack)
+            continue
+        match = heading_pattern.match(line)
+        if match:
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            while heading_stack and heading_stack[-1][0] >= level:
+                heading_stack.pop()
+            heading_stack.append((level, title))
+        if heading_stack:
+            line_heading_context[line_idx] = " > ".join(h[1] for h in heading_stack)
+
+    # ============================================================
+    # 步骤2：按段落分割，考虑标题边界
+    # ============================================================
     paragraphs = re.split(r"\n\n+", text)
-    # 过滤空段落
     paragraphs = [p for p in paragraphs if p.strip()]
 
     if not paragraphs:
         return []
 
-    chunks = []
-    current_chunk_parts = []
-    current_size = 0
-    chunk_start_para_idx = 0
-
-    # 计算每个段落在原文中的行号范围
-    lines = text.split("\n")
+    # 计算每个段落在原文中的行号范围和标题上下文
     para_line_ranges = []
+    para_heading_contexts = []
     line_idx = 0
     for para in paragraphs:
         para_lines = para.split("\n")
         start_line = line_idx
         end_line = line_idx + len(para_lines) - 1
         para_line_ranges.append((start_line, end_line))
+        # 取段落首行的标题上下文
+        if start_line < len(line_heading_context):
+            para_heading_contexts.append(line_heading_context[start_line])
+        else:
+            para_heading_contexts.append("")
         line_idx = end_line + 1
-        # 跳过段落间的空行
         while line_idx < len(lines) and not lines[line_idx].strip():
             line_idx += 1
 
+    # ============================================================
+    # 步骤3：判断是否在特殊上下文中（代码块/列表/续行）
+    # ============================================================
+    def _is_in_special_context(para_text: str, all_lines: List[str], start: int, end: int) -> bool:
+        """判断段落是否处于特殊上下文，不应作为拆分点"""
+        # 检查是否在代码块内
+        code_block_active = False
+        for li in range(start, min(end + 1, len(all_lines))):
+            if all_lines[li].strip().startswith("```"):
+                code_block_active = not code_block_active
+            if code_block_active:
+                return True
+
+        # 检查段落是否是列表项
+        first_line_stripped = para_text.lstrip()
+        if re.match(r"^[-*]\s+", first_line_stripped):
+            return True
+        if re.match(r"^\d+[.)]\s+", first_line_stripped):
+            return True
+
+        # 检查段落前一行是否以续行符号结尾（中英文冒号）
+        if start > 0 and start - 1 < len(all_lines):
+            prev_line = all_lines[start - 1].rstrip()
+            if prev_line and prev_line[-1] in ("：", ":"):
+                return True
+
+        return False
+
+    # ============================================================
+    # 步骤4：将段落合并为块，考虑标题边界和特殊上下文
+    # ============================================================
+    chunks: List[Dict] = []
+    current_chunk_parts: List[str] = []
+    current_size = 0
+    chunk_start_para_idx = 0
+    chunk_heading_context = ""
+
     for i, para in enumerate(paragraphs):
         para_len = len(para)
+        para_heading = para_heading_contexts[i]
 
-        # 如果当前块 + 当前段落超过 chunk_size，且当前块非空，则提交当前块
+        # 判断是否应该在此段落前拆分
+        should_split = False
         if current_size + para_len > chunk_size and current_chunk_parts:
+            should_split = True
+            # 如果当前段落处于特殊上下文，推迟拆分
+            if _is_in_special_context(para, lines, para_line_ranges[i][0], para_line_ranges[i][1]):
+                # 仅当加上此段后不会超过 2 倍 chunk_size 时推迟
+                if current_size + para_len <= chunk_size * 2:
+                    should_split = False
+
+        # 如果遇到新标题且当前块非空，优先拆分（标题边界）
+        if current_chunk_parts and para_heading != chunk_heading_context:
+            match = heading_pattern.match(para.split("\n")[0] if para.split("\n") else "")
+            if match and current_size > 0:
+                should_split = True
+
+        if should_split:
             chunk_content = "\n\n".join(current_chunk_parts)
             start_line = para_line_ranges[chunk_start_para_idx][0]
             end_line = para_line_ranges[i - 1][1]
@@ -228,6 +313,7 @@ def split_into_chunks(
                 "start_line": start_line,
                 "end_line": end_line,
                 "char_count": len(chunk_content),
+                "heading_context": chunk_heading_context,
             })
 
             # 计算重叠：保留最后几个段落作为下一个块的开头
@@ -238,14 +324,17 @@ def split_into_chunks(
                 if overlap_size + len(part) > overlap:
                     break
                 overlap_parts.insert(0, part)
-                overlap_size += len(part) + 2  # +2 for \n\n
+                overlap_size += len(part) + 2
 
             current_chunk_parts = overlap_parts
             current_size = overlap_size
             chunk_start_para_idx = i - len(overlap_parts)
 
+        # 更新当前块的标题上下文
+        if not current_chunk_parts:
+            chunk_heading_context = para_heading
         current_chunk_parts.append(para)
-        current_size += para_len + 2  # +2 for \n\n separator
+        current_size += para_len + 2
 
     # 提交最后一个块
     if current_chunk_parts:
@@ -259,9 +348,62 @@ def split_into_chunks(
             "start_line": start_line,
             "end_line": end_line,
             "char_count": len(chunk_content),
+            "heading_context": chunk_heading_context,
         })
 
-    return chunks
+    # ============================================================
+    # 步骤5：对超长标题块进行子分块，重复标题前缀
+    # ============================================================
+    final_chunks: List[Dict] = []
+    for chunk in chunks:
+        if len(chunk["content"]) > chunk_size and chunk["heading_context"]:
+            # 按 chunk_size 再次拆分，但为子块添加标题前缀
+            heading_prefix = ""
+            for h_line in chunk["content"].split("\n"):
+                if heading_pattern.match(h_line):
+                    heading_prefix = h_line + "\n\n"
+                    break
+
+            sub_paragraphs = re.split(r"\n\n+", chunk["content"])
+            sub_parts: List[str] = []
+            current_part = ""
+            for sp in sub_paragraphs:
+                if sp.strip():
+                    if len(current_part) + len(sp) > chunk_size and current_part:
+                        sub_parts.append(current_part)
+                        current_part = sp + "\n\n"
+                    else:
+                        current_part += sp + "\n\n"
+            if current_part.strip():
+                sub_parts.append(current_part)
+
+            if len(sub_parts) <= 1:
+                final_chunks.append(chunk)
+                continue
+
+            for idx, part in enumerate(sub_parts):
+                # 为子块添加标题前缀（如果存在且子块不以标题开头）
+                if heading_prefix and idx > 0 and not heading_pattern.match(part.lstrip()):
+                    part_content = heading_prefix + part
+                else:
+                    part_content = part
+                final_chunks.append({
+                    "index": len(final_chunks),
+                    "content": part_content,
+                    "start_line": chunk["start_line"],
+                    "end_line": chunk["end_line"],
+                    "char_count": len(part_content),
+                    "heading_context": chunk["heading_context"],
+                })
+        else:
+            chunk["index"] = len(final_chunks)
+            final_chunks.append(chunk)
+
+    # 重新编号
+    for i, chunk in enumerate(final_chunks):
+        chunk["index"] = i
+
+    return final_chunks
 
 
 def generate_clean_copy(
@@ -274,6 +416,10 @@ def generate_clean_copy(
 
     对于被标记为重复的块，用 HTML 注释包裹，用户可随时恢复。
     保留首个出现的重复块，其余标记为重复。
+
+    注意：split_into_chunks 产生的 chunk 可能有行范围重叠（overlap 机制），
+    因此不能按 chunk 遍历输出行（会导致重叠行重复输出），
+    改为逐行遍历，每行只输出一次。
 
     Args:
         original_text: 原始 Markdown 文本
@@ -307,34 +453,59 @@ def generate_clean_copy(
         duplicate_map[idx] = dup
         stats["duplicate_blocks_marked"] += 1
 
-    # 重新分块，对重复块进行标记
+    # 重新分块，获取行范围信息
     chunks = split_into_chunks(cleaned_text)
     stats["total_blocks"] = len(chunks)
 
     if not chunks:
         return cleaned_text, stats
 
-    # 构建清洗副本：将重复块用 HTML 注释包裹
     lines = cleaned_text.split("\n")
-    result_lines = []
+
+    # 构建"行 → 所属 chunk"映射
+    # 如果一行同时被 duplicate 和 non-duplicate chunk 覆盖，
+    # 优先视为 non-duplicate（保留首次出现，不标记为重复）
+    line_in_non_dup: set[int] = set()
+    line_to_dup_info: Dict[int, Dict] = {}  # line_idx -> dup_info
 
     for chunk in chunks:
-        start_line = chunk["start_line"]
-        end_line = chunk["end_line"]
         chunk_index = chunk["index"]
+        for line_idx in range(chunk["start_line"], chunk["end_line"] + 1):
+            if chunk_index in duplicate_indices:
+                if line_idx not in line_to_dup_info:
+                    line_to_dup_info[line_idx] = duplicate_map[chunk_index]
+            else:
+                line_in_non_dup.add(line_idx)
 
-        if chunk_index in duplicate_indices:
-            dup_info = duplicate_map[chunk_index]
-            # 用 HTML 注释标记重复块
-            result_lines.append(f"<!-- duplicate: block_{dup_info['duplicate_of']} similarity={dup_info['similarity']:.2f} -->")
-            for line_idx in range(start_line, end_line + 1):
-                if line_idx < len(lines):
-                    result_lines.append(lines[line_idx])
+    # 仅当一行只被 duplicate chunk 覆盖时，才标记为 duplicate
+    duplicate_lines: set[int] = set()
+    for line_idx in line_to_dup_info:
+        if line_idx not in line_in_non_dup:
+            duplicate_lines.add(line_idx)
+
+    # 逐行输出，每行只输出一次
+    result_lines = []
+    in_duplicate = False
+
+    for line_idx in range(len(lines)):
+        is_dup = line_idx in duplicate_lines
+
+        if is_dup and not in_duplicate:
+            dup_info = line_to_dup_info[line_idx]
+            result_lines.append(
+                f"<!-- duplicate: block_{dup_info['duplicate_of']} "
+                f"similarity={dup_info['similarity']:.2f} -->"
+            )
+            in_duplicate = True
+
+        if not is_dup and in_duplicate:
             result_lines.append("<!-- /duplicate -->")
-        else:
-            for line_idx in range(start_line, end_line + 1):
-                if line_idx < len(lines):
-                    result_lines.append(lines[line_idx])
+            in_duplicate = False
+
+        result_lines.append(lines[line_idx])
+
+    if in_duplicate:
+        result_lines.append("<!-- /duplicate -->")
 
     return "\n".join(result_lines), stats
 

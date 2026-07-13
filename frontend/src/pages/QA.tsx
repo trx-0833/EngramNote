@@ -44,8 +44,8 @@ export default function QA() {
   }
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0', maxWidth: '800px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-lg)' }}>智能问答</h1>
+    <div className="page-enter" style={{ maxWidth: '800px', margin: '0 auto' }}>
+      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>智能问答</h1>
 
       {/* 输入区域 */}
       <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
@@ -71,16 +71,16 @@ export default function QA() {
       {history.length === 0 ? (
         <EmptyState message="输入问题开始问答" description="AI 将基于你所有笔记的内容进行回答" />
       ) : (
-        history.map((record, idx) => (
-          <div key={idx} style={{ marginBottom: 'var(--space-md)' }}>
+        history.map((record) => (
+          <div key={record.question + record.answer.slice(0, 20)} style={{ marginBottom: 'var(--space-md)' }}>
             {/* 问题 */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-sm)' }}>
-              <div style={{ background: 'var(--color-primary)', color: 'white', padding: 'var(--space-sm) var(--space-md)', borderRadius: '12px 12px 4px 12px', maxWidth: '70%' }}>
+              <div className="qa-user-bubble">
                 {record.question}
               </div>
             </div>
             {/* 回答 */}
-            <div className="card">
+            <div className="card qa-ai-card">
               <div style={{ lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{record.answer}</div>
               {/* 引用来源 */}
               {record.sources.length > 0 && (

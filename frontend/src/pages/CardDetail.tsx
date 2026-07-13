@@ -47,8 +47,8 @@ export default function CardDetail() {
   async function handleSave() {
     if (!card) return
     try {
-      const updated = await updateKnowledgeCard(card.id, { title: editTitle, content: editContent })
-      setCard(updated)
+      await updateKnowledgeCard(card.id, { title: editTitle, content: editContent })
+      await fetchCard()  // 重新获取完整数据，避免 note_title 丢失
       setEditing(false)
     } catch (err) {
       alert(err instanceof Error ? err.message : '保存失败')
@@ -56,7 +56,7 @@ export default function CardDetail() {
   }
 
   async function handleDelete() {
-    if (!card || !confirm('确定删除此知识卡片？关联的题目也将被删除。')) return
+    if (!card || !confirm('确定删除此知识卡片？将同时删除关联的练习题目、复习记录和知识图谱关系。此操作不可恢复。')) return
     try {
       await deleteKnowledgeCard(card.id)
       navigate('/cards')
@@ -72,6 +72,17 @@ export default function CardDetail() {
     setEditing(false)
   }
 
+  /** 安全解析题目选项 JSON */
+  function parseOptions(optionsStr: string | null): string[] {
+    if (!optionsStr) return []
+    try {
+      const parsed = JSON.parse(optionsStr)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
   if (loading) return <LoadingSpinner />
   if (error || !card) {
     return (
@@ -83,9 +94,9 @@ export default function CardDetail() {
   }
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0' }}>
+    <div className="page-enter">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-lg)' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>{card.title}</h1>
+        <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>{card.title}</h1>
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           {editing ? (
             <>
@@ -169,13 +180,9 @@ export default function CardDetail() {
                 <span className="badge">{difficultyLabels[q.difficulty] || q.difficulty}</span>
               </div>
               <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>{idx + 1}. {q.question}</p>
-              {q.options && (
-                <div style={{ marginBottom: 'var(--space-sm)', paddingLeft: 'var(--space-md)' }}>
-                  {JSON.parse(q.options).map((opt: string, i: number) => (
+              {q.options && parseOptions(q.options).map((opt, i) => (
                     <p key={i} style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{opt}</p>
                   ))}
-                </div>
-              )}
               <button
                 className="btn btn-secondary"
                 style={{ fontSize: '0.8rem' }}

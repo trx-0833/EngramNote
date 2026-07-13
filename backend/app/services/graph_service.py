@@ -1,0 +1,631 @@
+"""
+知识图谱服务模块
+
+本模块提供知识图谱的核心业务逻辑，包括图数据查询、
+自动建议关系、确认/拒绝/创建/删除关系等功能。
+
+主要职责：
+- 获取用户的完整图谱数据（节点 + 边）
+- 获取自动建议的关系列表
+- 基于嵌入向量相似度自动建议卡片关系
+- 确认、拒绝、手动创建和删除关系
+
+设计决策：
+- 自动建议使用卡片标题的嵌入向量计算两两相似度
+- 相似度阈值 0.75，平衡精度和召回率
+- 单次最多处理 200 张卡片，避免计算量过大
+- 手动创建的关系直接为 confirmed 状态
+"""
+
+import asyncio
+import logging
+from typing import Any, Dict, List
+
+import numpy as np
+from sqlalchemy import select, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models.card_relation import CardRelation, RelationType, RelationStatus
+from ..models.knowledge_card import KnowledgeCard
+from ..schemas.graph import GraphData, GraphNode, GraphEdge, SuggestedRelation
+from ..services.embedding_service import EmbeddingService
+
+logger = logging.getLogger(__name__)
+
+# 自动建议的相似度阈值
+SIMILARITY_THRESHOLD = 0.75
+# 单次最多处理的卡片数量
+MAX_CARDS_FOR_SUGGEST = 200
+
+
+def _compute_pairwise_similarity(vectors: List[List[float]]) -> np.ndarray:
+    """
+    使用 numpy 向量化计算两两余弦相似度矩阵
+
+    Args:
+        vectors: 向量列表
+
+    Returns:
+        np.ndarray: n×n 相似度矩阵
+    """
+    mat = np.array(vectors, dtype=np.float32)
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1, norms)  # 避免除零
+    normalized = mat / norms
+    sim_matrix = normalized @ normalized.T
+    return sim_matrix
+
+
+async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
+    """
+    获取用户的完整知识图谱数据
+
+    查询用户的所有知识卡片作为节点，
+    查询 confirmed 和 suggested 状态的关系作为边，
+    构建完整的图谱数据结构。
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        GraphData: 包含节点列表和边列表的图谱数据
+    """
+    # 查询用户所有知识卡片
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(KnowledgeCard.user_id == user_id)
+    )
+    cards = list(cards_result.scalars().all())
+
+    # 查询用户 confirmed 和 suggested 状态的关系
+    relations_result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.user_id == user_id,
+            CardRelation.status.in_([RelationStatus.confirmed, RelationStatus.suggested]),
+        )
+    )
+    relations = list(relations_result.scalars().all())
+
+    # 统计每张卡片的 confirmed 关系数
+    relation_count_map: Dict[str, int] = {}
+    for rel in relations:
+        if rel.status == RelationStatus.confirmed:
+            relation_count_map[rel.card_id_1] = relation_count_map.get(rel.card_id_1, 0) + 1
+            relation_count_map[rel.card_id_2] = relation_count_map.get(rel.card_id_2, 0) + 1
+
+    # 构建节点
+    nodes = [
+        GraphNode(
+            id=card.id,
+            title=card.title,
+            card_type=card.card_type,
+            note_id=card.note_id,
+            relation_count=relation_count_map.get(card.id, 0),
+        )
+        for card in cards
+    ]
+
+    # 构建边
+    edges = [
+        GraphEdge(
+            id=rel.id,
+            source=rel.card_id_1,
+            target=rel.card_id_2,
+            relation_type=rel.relation_type,
+            status=rel.status,
+            similarity_score=rel.similarity_score,
+        )
+        for rel in relations
+    ]
+
+    return GraphData(nodes=nodes, edges=edges)
+
+
+async def get_suggested_relations(
+    user_id: str,
+    db: AsyncSession,
+) -> List[SuggestedRelation]:
+    """
+    获取用户的自动建议关系列表
+
+    查询 status=suggested 的关系，并关联知识卡片获取标题。
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        List[SuggestedRelation]: 建议关系列表
+    """
+    # 查询 suggested 状态的关系
+    relations_result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.user_id == user_id,
+            CardRelation.status == RelationStatus.suggested,
+        )
+    )
+    relations = list(relations_result.scalars().all())
+
+    if not relations:
+        return []
+
+    # 收集所有涉及的卡片 ID
+    card_ids = set()
+    for rel in relations:
+        card_ids.add(rel.card_id_1)
+        card_ids.add(rel.card_id_2)
+
+    # 批量查询卡片标题
+    cards_result = await db.execute(
+        select(KnowledgeCard.id, KnowledgeCard.title).where(
+            KnowledgeCard.id.in_(card_ids)
+        )
+    )
+    card_title_map = {row.id: row.title for row in cards_result.all()}
+
+    # 构建建议关系列表
+    suggested = []
+    for rel in relations:
+        suggested.append(SuggestedRelation(
+            id=rel.id,
+            card_id_1=rel.card_id_1,
+            card_id_2=rel.card_id_2,
+            card_1_title=card_title_map.get(rel.card_id_1, "(未知)"),
+            card_2_title=card_title_map.get(rel.card_id_2, "(未知)"),
+            similarity_score=rel.similarity_score,
+        ))
+
+    return suggested
+
+
+async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
+    """
+    基于嵌入向量相似度自动建议卡片关系
+
+    流程：
+    1. 获取用户所有知识卡片（最多 200 张）
+    2. 使用 EmbeddingService 编码卡片标题
+    3. 计算两两相似度
+    4. 相似度超过阈值（0.75）且不存在已有关系的，创建 suggested 状态的关系
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        int: 新创建的建议关系数量
+    """
+    # 获取用户所有知识卡片，限制数量
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(KnowledgeCard.user_id == user_id)
+        .limit(MAX_CARDS_FOR_SUGGEST)
+    )
+    cards = list(cards_result.scalars().all())
+
+    if len(cards) < 2:
+        return 0
+
+    # 编码卡片标题（CPU 密集，放入线程池避免阻塞事件循环）
+    embedding_service = EmbeddingService()
+    titles = [card.title for card in cards]
+    loop = asyncio.get_event_loop()
+    vectors = await loop.run_in_executor(None, embedding_service.encode, titles)
+
+    if not vectors:
+        return 0
+
+    # 查询已有的所有关系（含 rejected），避免重复建议
+    existing_result = await db.execute(
+        select(CardRelation).where(CardRelation.user_id == user_id)
+    )
+    existing_relations = list(existing_result.scalars().all())
+
+    # 构建已有关系集合：(min_id, max_id) -> relation
+    existing_pairs: Dict[tuple, CardRelation] = {}
+    for rel in existing_relations:
+        pair_key = tuple(sorted([rel.card_id_1, rel.card_id_2]))
+        existing_pairs[pair_key] = rel
+
+    # 使用 numpy 向量化计算相似度矩阵（CPU 密集，放入线程池）
+    sim_matrix = await loop.run_in_executor(None, _compute_pairwise_similarity, vectors)
+
+    # 遍历上三角，创建建议
+    new_count = 0
+    new_relations = []
+
+    for i in range(len(cards)):
+        for j in range(i + 1, len(cards)):
+            similarity = float(sim_matrix[i][j])
+
+            if similarity >= SIMILARITY_THRESHOLD:
+                card_id_1 = cards[i].id
+                card_id_2 = cards[j].id
+                pair_key = tuple(sorted([card_id_1, card_id_2]))
+
+                # 如果已有关系，跳过
+                if pair_key in existing_pairs:
+                    continue
+
+                # 无向关系统一排序存储，确保 card_id_1 <= card_id_2
+                stored_id_1, stored_id_2 = card_id_1, card_id_2
+                if card_id_1 > card_id_2:
+                    stored_id_1, stored_id_2 = card_id_2, card_id_1
+
+                relation = CardRelation(
+                    user_id=user_id,
+                    card_id_1=stored_id_1,
+                    card_id_2=stored_id_2,
+                    relation_type=RelationType.related,
+                    status=RelationStatus.suggested,
+                    similarity_score=round(similarity, 4),
+                )
+                new_relations.append(relation)
+                existing_pairs[pair_key] = relation  # 防止同一对重复创建
+                new_count += 1
+
+    # 批量添加
+    for rel in new_relations:
+        db.add(rel)
+
+    if new_count > 0:
+        await db.commit()
+        logger.info(f"自动建议关系: user={user_id[:8]}, 新增 {new_count} 条建议")
+
+    return new_count
+
+
+async def confirm_relation(
+    relation_id: str,
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    确认一条建议关系
+
+    将 status 从 suggested 更新为 confirmed。
+
+    Args:
+        relation_id: 关系 ID
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 操作结果
+    """
+    result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.id == relation_id,
+            CardRelation.user_id == user_id,
+        )
+    )
+    relation = result.scalars().first()
+
+    if not relation:
+        return {"success": False, "error": "关系不存在"}
+
+    if relation.status != RelationStatus.suggested:
+        return {"success": False, "error": "该关系不是建议状态，无法确认"}
+
+    relation.status = RelationStatus.confirmed
+    await db.commit()
+
+    logger.info(f"确认关系: user={user_id[:8]}, relation={relation_id[:8]}")
+    return {"success": True, "relation_id": relation_id}
+
+
+async def reject_relation(
+    relation_id: str,
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    拒绝一条建议关系
+
+    将 status 从 suggested 更新为 rejected。
+
+    Args:
+        relation_id: 关系 ID
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 操作结果
+    """
+    result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.id == relation_id,
+            CardRelation.user_id == user_id,
+        )
+    )
+    relation = result.scalars().first()
+
+    if not relation:
+        return {"success": False, "error": "关系不存在"}
+
+    if relation.status != RelationStatus.suggested:
+        return {"success": False, "error": "该关系不是建议状态，无法拒绝"}
+
+    relation.status = RelationStatus.rejected
+    await db.commit()
+
+    logger.info(f"拒绝关系: user={user_id[:8]}, relation={relation_id[:8]}")
+    return {"success": True, "relation_id": relation_id}
+
+
+async def create_relation(
+    card_id_1: str,
+    card_id_2: str,
+    relation_type: str,
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    手动创建一条卡片关系
+
+    验证两张卡片都属于该用户，且不存在重复关系后，
+    创建 confirmed 状态的关系。
+
+    Args:
+        card_id_1: 卡片 1 ID
+        card_id_2: 卡片 2 ID
+        relation_type: 关系类型字符串
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 操作结果，成功时包含 relation_id
+    """
+    # 验证卡片归属
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(
+            KnowledgeCard.id.in_([card_id_1, card_id_2]),
+            KnowledgeCard.user_id == user_id,
+        )
+    )
+    cards = list(cards_result.scalars().all())
+
+    if len(cards) != 2:
+        return {"success": False, "error": "卡片不存在或不属于当前用户"}
+
+    # 验证关系类型
+    try:
+        rel_type = RelationType(relation_type)
+    except ValueError:
+        return {"success": False, "error": f"无效的关系类型: {relation_type}"}
+
+    # 无向关系统一排序存储，确保 card_id_1 <= card_id_2
+    stored_id_1, stored_id_2 = card_id_1, card_id_2
+    if rel_type in (RelationType.related, RelationType.contrast):
+        if card_id_1 > card_id_2:
+            stored_id_1, stored_id_2 = card_id_2, card_id_1
+
+    # 检查重复关系（排除 rejected 状态，允许用户重新创建被拒绝的关系）
+    pair_key = tuple(sorted([card_id_1, card_id_2]))
+    existing_result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.user_id == user_id,
+            or_(
+                and_(CardRelation.card_id_1 == pair_key[0], CardRelation.card_id_2 == pair_key[1]),
+                and_(CardRelation.card_id_1 == pair_key[1], CardRelation.card_id_2 == pair_key[0]),
+            ),
+        )
+    )
+    existing = existing_result.scalars().first()
+
+    if existing:
+        if existing.status == RelationStatus.rejected:
+            # 复用已拒绝的记录，更新为 confirmed
+            existing.status = RelationStatus.confirmed
+            existing.relation_type = rel_type
+            existing.similarity_score = None
+            existing.card_id_1 = stored_id_1
+            existing.card_id_2 = stored_id_2
+            await db.commit()
+            await db.refresh(existing)
+            logger.info(
+                f"重新创建关系(复用rejected): user={user_id[:8]}, "
+                f"card1={stored_id_1[:8]}, card2={stored_id_2[:8]}, type={relation_type}"
+            )
+            return {"success": True, "relation_id": existing.id}
+        return {"success": False, "error": "这两张卡片之间已存在关系"}
+
+    # 创建关系
+    relation = CardRelation(
+        user_id=user_id,
+        card_id_1=stored_id_1,
+        card_id_2=stored_id_2,
+        relation_type=rel_type,
+        status=RelationStatus.confirmed,
+        similarity_score=None,
+    )
+    db.add(relation)
+    await db.commit()
+    await db.refresh(relation)
+
+    logger.info(
+        f"手动创建关系: user={user_id[:8]}, "
+        f"card1={stored_id_1[:8]}, card2={stored_id_2[:8]}, type={relation_type}"
+    )
+    return {"success": True, "relation_id": relation.id}
+
+
+async def delete_relation(
+    relation_id: str,
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    删除一条卡片关系
+
+    验证关系属于该用户后删除。
+
+    Args:
+        relation_id: 关系 ID
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 操作结果
+    """
+    result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.id == relation_id,
+            CardRelation.user_id == user_id,
+        )
+    )
+    relation = result.scalars().first()
+
+    if not relation:
+        return {"success": False, "error": "关系不存在"}
+
+    await db.delete(relation)
+    await db.commit()
+
+    logger.info(f"删除关系: user={user_id[:8]}, relation={relation_id[:8]}")
+    return {"success": True, "relation_id": relation_id}
+
+
+async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str, Any]:
+    """
+    基于 LLM 批量推断知识卡片间的语义关系（prerequisite/subsequent/contrast）
+
+    流程：
+    1. 获取用户最多 100 张知识卡片
+    2. 查询用户已有的所有 CardRelation（任意状态），构建已存在卡片对集合
+    3. 分批（每批 20 张）调用 LLM 推断关系，整批卡片对都已有关系则跳过
+    4. 校验 LLM 返回的每条关系（ID 在批次内、relation_type 合法、卡片对未存在），
+       创建 suggested 状态的 CardRelation
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 操作结果，包含 success/new_count/skipped_count/message
+    """
+    # 局部导入避免影响模块加载时的依赖图
+    from ..services.llm_service import LLMService
+
+    # 1. 查询用户的知识卡片，限制 100 张
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(KnowledgeCard.user_id == user_id).limit(100)
+    )
+    cards = list(cards_result.scalars().all())
+
+    if len(cards) < 2:
+        return {"success": True, "new_count": 0, "skipped_count": 0, "message": "卡片数量不足"}
+
+    # 2. 查询用户已有的所有关系（含 confirmed/suggested/rejected），构建已存在卡片对集合
+    existing_result = await db.execute(
+        select(CardRelation).where(CardRelation.user_id == user_id)
+    )
+    existing_relations = list(existing_result.scalars().all())
+    existing_pairs: set = set()
+    for rel in existing_relations:
+        pair_key = tuple(sorted([rel.card_id_1, rel.card_id_2]))
+        existing_pairs.add(pair_key)
+
+    # 3. 分批调用 LLM 推断关系
+    llm_service = LLMService()
+    BATCH_SIZE = 20
+    valid_relation_types = {"prerequisite", "subsequent", "contrast"}
+    new_count = 0
+    skipped_count = 0
+    new_relations: List[CardRelation] = []
+
+    for start in range(0, len(cards), BATCH_SIZE):
+        batch_cards = cards[start:start + BATCH_SIZE]
+        batch_ids = {c.id for c in batch_cards}
+
+        # 先过滤候选对：若该批内所有卡片对都已有关系，则跳过该批
+        all_pairs_count = len(batch_cards) * (len(batch_cards) - 1) // 2
+        existing_in_batch = 0
+        for i in range(len(batch_cards)):
+            for j in range(i + 1, len(batch_cards)):
+                pair_key = tuple(sorted([batch_cards[i].id, batch_cards[j].id]))
+                if pair_key in existing_pairs:
+                    existing_in_batch += 1
+        if all_pairs_count > 0 and existing_in_batch == all_pairs_count:
+            continue
+
+        # 构建卡片摘要
+        cards_summary = [
+            {
+                "id": c.id,
+                "title": c.title,
+                "card_type": c.card_type.value,
+                "content": c.content,
+            }
+            for c in batch_cards
+        ]
+
+        # 调用 LLM 推断关系（单批异常不中断整体流程）
+        try:
+            relations = await llm_service.infer_card_relations(cards_summary)
+        except Exception as e:
+            logger.warning(
+                f"LLM 推断关系异常(批次 {start // BATCH_SIZE + 1}): "
+                f"user={user_id[:8]}, error={e}"
+            )
+            continue
+
+        # 校验并创建关系
+        for rel in relations:
+            card_id_a = rel.get("card_id_a")
+            card_id_b = rel.get("card_id_b")
+            relation_type = rel.get("relation_type")
+
+            # 校验 ID 都在本批卡片集合中
+            if card_id_a not in batch_ids or card_id_b not in batch_ids:
+                continue
+
+            # 校验关系类型合法
+            if relation_type not in valid_relation_types:
+                continue
+
+            # 再次校验该卡片对不在已有关系集合中（防 LLM 幻觉）
+            pair_key = tuple(sorted([card_id_a, card_id_b]))
+            if pair_key in existing_pairs:
+                skipped_count += 1
+                continue
+
+            # 转换关系类型枚举
+            try:
+                rel_type = RelationType(relation_type)
+            except ValueError:
+                continue
+
+            # 有向关系（prerequisite/subsequent）保持 LLM 给的顺序；
+            # 无向关系（contrast）按 ID 字典序排序存储
+            if rel_type == RelationType.contrast:
+                stored_id_1, stored_id_2 = sorted([card_id_a, card_id_b])
+            else:
+                stored_id_1, stored_id_2 = card_id_a, card_id_b
+
+            new_relation = CardRelation(
+                user_id=user_id,
+                card_id_1=stored_id_1,
+                card_id_2=stored_id_2,
+                relation_type=rel_type,
+                status=RelationStatus.suggested,
+                similarity_score=None,
+            )
+            new_relations.append(new_relation)
+            existing_pairs.add(pair_key)  # 防止同批内重复
+            new_count += 1
+
+    # 4. 批量添加并提交
+    for rel in new_relations:
+        db.add(rel)
+    if new_count > 0:
+        await db.commit()
+
+    logger.info(
+        f"语义关系推断: user={user_id[:8]}, 新增 {new_count} 条建议, 跳过 {skipped_count} 条已有关系"
+    )
+    return {
+        "success": True,
+        "new_count": new_count,
+        "skipped_count": skipped_count,
+        "message": f"新增 {new_count} 条语义关系建议，跳过 {skipped_count} 条已有关系",
+    }

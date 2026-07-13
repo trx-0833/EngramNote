@@ -24,7 +24,12 @@ from .upload import router as upload_router
 from .cleaning import router as cleaning_router
 from .understanding import router as understanding_router
 from .review import router as review_router
+from .quick_review import router as quick_review_router
 from .report import router as report_router
+from .graph import router as graph_router
+from .folders import router as folders_router
+from .assessment import router as assessment_router
+from .knowledge import router as knowledge_router
 
 # 创建总路由器，所有子路由将挂载到此路由器
 api_router = APIRouter()
@@ -41,5 +46,15 @@ api_router.include_router(cleaning_router, prefix="/cleaning", tags=["清洗"])
 api_router.include_router(understanding_router, prefix="/understanding", tags=["理解"])
 # 注册复习模块路由，前缀 /review，OpenAPI 标签为"复习"
 api_router.include_router(review_router, prefix="/review", tags=["复习"])
+# 注册快速复习路由，前缀 /review，OpenAPI 标签为"复习"
+api_router.include_router(quick_review_router, prefix="/review", tags=["复习"])
 # 注册学习报告路由，前缀 /report，OpenAPI 标签为"学习报告"
 api_router.include_router(report_router, prefix="/report", tags=["学习报告"])
+# 注册知识图谱路由，前缀 /graph，OpenAPI 标签为"知识图谱"
+api_router.include_router(graph_router, prefix="/graph", tags=["知识图谱"])
+# 注册文件夹路由，前缀 /folders，OpenAPI 标签为"文件夹"
+api_router.include_router(folders_router, prefix="/folders", tags=["文件夹"])
+# 注册学习评估路由，前缀 /assessment，OpenAPI 标签为"学习评估"
+api_router.include_router(assessment_router, prefix="/assessment", tags=["学习评估"])
+# 注册知识点管理路由，前缀 /knowledge，OpenAPI 标签为"知识点管理"
+api_router.include_router(knowledge_router, prefix="/knowledge", tags=["知识点管理"])

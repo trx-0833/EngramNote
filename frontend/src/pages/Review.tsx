@@ -49,8 +49,8 @@ export default function Review() {
       if (dueData.items.length === 0) {
         setCompleted(true)
       }
-    } catch (e: any) {
-      setError(e.message || '加载失败')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
@@ -77,14 +77,15 @@ export default function Review() {
       // 刷新统计（更新今日已完成数）
       const newStats = await getReviewStats()
       setStats(newStats)
-    } catch (e: any) {
-      if (e.message?.includes('每日上限')) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '提交失败'
+      if (msg.includes('每日上限')) {
         // 达到每日限额，跳到完成页面
         setCompleted(true)
         const newStats = await getReviewStats()
         setStats(newStats)
       } else {
-        setError(e.message || '提交失败')
+        setError(msg)
       }
     }
   }
@@ -162,15 +163,9 @@ export default function Review() {
     const reachedDailyLimit = todayDone >= dailyLimit
 
     return (
-      <div style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
         <h2>复习完成</h2>
-        <div style={{
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 8,
-          padding: 'var(--space-lg)',
-          marginBottom: 'var(--space-lg)',
-        }}>
+        <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h3>本次复习统计</h3>
           <p>答题数: {sessionTotal}</p>
           <p>正确数: {sessionCorrect}</p>
@@ -178,13 +173,7 @@ export default function Review() {
         </div>
 
         {stats && (
-          <div style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 8,
-            padding: 'var(--space-lg)',
-            marginBottom: 'var(--space-lg)',
-          }}>
+          <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
             <h3>总体统计</h3>
             <p>今日已完成: {todayDone} / {dailyLimit}</p>
             <p>今日正确率: {stats.today_accuracy}%</p>
@@ -196,14 +185,7 @@ export default function Review() {
         )}
 
         {reachedDailyLimit ? (
-          <div style={{
-            background: 'rgba(255, 152, 0, 0.1)',
-            border: '1px solid #ff9800',
-            borderRadius: 8,
-            padding: 'var(--space-md)',
-            marginBottom: 'var(--space-md)',
-            textAlign: 'center',
-          }}>
+          <div className="card card-accent-warning" style={{ textAlign: 'center', marginBottom: 'var(--space-md)' }}>
             <p style={{ fontWeight: 600, color: '#ff9800' }}>今日已完成 {dailyLimit} 道题，休息一下吧！</p>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>明天再来继续复习</p>
           </div>
@@ -232,7 +214,7 @@ export default function Review() {
   const options = parseOptions(quiz.options)
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
+    <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
       {/* 进度条 */}
       <div style={{
         display: 'flex',
@@ -243,19 +225,9 @@ export default function Review() {
         <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
           {currentIndex + 1} / {quizzes.length}
         </span>
-        <div style={{
-          flex: 1,
-          height: 6,
-          background: 'var(--color-border)',
-          borderRadius: 3,
-          overflow: 'hidden',
-        }}>
-          <div style={{
+        <div className="progress-bar" style={{ flex: 1 }}>
+          <div className="progress-bar-fill" style={{
             width: `${((currentIndex + (current.submitted ? 1 : 0)) / quizzes.length) * 100}%`,
-            height: '100%',
-            background: 'var(--color-primary)',
-            borderRadius: 3,
-            transition: 'width 0.3s ease',
           }} />
         </div>
         <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
@@ -264,13 +236,7 @@ export default function Review() {
       </div>
 
       {/* 题目卡片 */}
-      <div style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 8,
-        padding: 'var(--space-lg)',
-        marginBottom: 'var(--space-lg)',
-      }}>
+      <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
         {/* 题目头部 */}
         <div style={{
           display: 'flex',
@@ -319,19 +285,11 @@ export default function Review() {
                 {options.map((opt, i) => (
                   <button
                     key={i}
+                    className={`quiz-option${current.userAnswer === opt ? ' quiz-option-selected' : ''}`}
                     onClick={() => {
                       const newQuizzes = [...quizzes]
                       newQuizzes[currentIndex] = { ...current, userAnswer: opt }
                       setQuizzes(newQuizzes)
-                    }}
-                    style={{
-                      padding: 'var(--space-sm) var(--space-md)',
-                      textAlign: 'left',
-                      border: `2px solid ${current.userAnswer === opt ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                      borderRadius: 6,
-                      background: current.userAnswer === opt ? 'rgba(25, 118, 210, 0.08)' : 'var(--color-surface)',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
                     }}
                   >
                     {opt}
@@ -399,13 +357,7 @@ export default function Review() {
         ) : (
           <>
             {/* 判分结果 */}
-            <div style={{
-              padding: 'var(--space-md)',
-              borderRadius: 6,
-              marginBottom: 'var(--space-md)',
-              background: current.result?.is_correct ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)',
-              border: `1px solid ${current.result?.is_correct ? '#4caf50' : '#f44336'}`,
-            }}>
+            <div className={current.result?.is_correct ? 'feedback-correct' : 'feedback-incorrect'} style={{ marginBottom: 'var(--space-md)' }}>
               <p style={{ fontWeight: 600, color: current.result?.is_correct ? '#4caf50' : '#f44336' }}>
                 {current.result?.is_correct ? '回答正确!' : '回答错误'}
               </p>

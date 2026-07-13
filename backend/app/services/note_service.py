@@ -18,22 +18,33 @@
 - 关键词搜索使用 ilike 实现模糊匹配，不区分大小写
 """
 
-from typing import Optional, Tuple, List
+from __future__ import annotations
 
-from sqlalchemy import select, func
+from typing import Optional, Tuple, List
+import asyncio
+import logging
+import uuid
+
+from sqlalchemy import select, func, delete as sql_delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.note import Note, NoteStatus
+from ..models.note import Note, NoteStatus, NoteRole
 from ..models.user import User
+from ..models.knowledge_card import KnowledgeCard
+from ..models.quiz_item import QuizItem
+from ..models.review_log import ReviewLog
+from ..models.card_relation import CardRelation
 from ..schemas.note import NoteUpdateRequest
 from ..services.storage_service import (
     delete_file,
     get_object_bytes,
     get_presigned_url,
+    upload_bytes,
 )
 from ..config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 async def get_notes_list(
@@ -43,6 +54,7 @@ async def get_notes_list(
     page_size: int = 20,
     keyword: Optional[str] = None,
     note_status: Optional[NoteStatus] = None,
+    note_role: Optional[str] = None,
 ) -> Tuple[list[Note], int]:
     """
     获取用户的笔记列表（分页）
@@ -71,6 +83,10 @@ async def get_notes_list(
     # 可选：按状态筛选
     if note_status is not None:
         query = query.where(Note.status == note_status)
+
+    # 可选：按笔记角色筛选（material / personal_note）
+    if note_role is not None:
+        query = query.where(Note.note_role == NoteRole(note_role))
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
     if keyword:
@@ -174,42 +190,333 @@ async def update_note(db: AsyncSession, note: Note, req: NoteUpdateRequest) -> N
 
 async def delete_note(db: AsyncSession, note: Note):
     """
-    删除笔记及其关联的存储文件
+    删除笔记及其所有关联数据
 
-    删除顺序：
-    1. 删除对象存储中的原始文件
-    2. 删除对象存储中的原始 Markdown 文件
-    3. 删除对象存储中的清洗后 Markdown 文件
-    4. 删除数据库中的笔记记录
+    删除顺序（按外键依赖，从叶子到根）：
+    1. ReviewLog（依赖 QuizItem）
+    2. CardRelation（依赖 KnowledgeCard）
+    3. QuizItem（依赖 KnowledgeCard + Note）
+    4. KnowledgeCard（依赖 Note）
+    5. MinIO 存储文件
+    6. Note 记录
 
-    存储文件删除失败时静默忽略（文件可能已不存在或存储服务不可用），
-    确保数据库记录始终能正常删除。
+    对于处理中状态（converting/cleaning/learning）的笔记：
+    先将状态标记为 failed，阻止后续 Celery 任务继续处理，
+    等待 0.5 秒让正在运行的任务检测到状态变更后提前退出，再执行级联删除。
 
     Args:
         db: 异步数据库会话
         note: 要删除的笔记对象
     """
-    # 删除 MinIO 中的原始文件
+    note_id = note.id
+
+    # ---- 处理中状态安全删除 ----
+    processing_statuses = {
+        NoteStatus.converting, NoteStatus.cleaning, NoteStatus.learning,
+    }
+    if note.status in processing_statuses:
+        note.status = NoteStatus.failed
+        note.error_message = "用户手动删除"
+        await db.commit()
+        logger.info(f"笔记 {note_id[:8]} 处于处理中状态，已标记为 failed")
+        # 等待一小段时间，让正在执行的 Celery 任务有机会检测到状态变更
+        await asyncio.sleep(0.5)
+
+    # ---- 级联删除（按外键依赖顺序） ----
+
+    # 1. 查找该笔记下所有知识卡片 ID
+    card_ids_result = await db.execute(
+        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
+    )
+    card_ids = [row[0] for row in card_ids_result.all()]
+
+    if card_ids:
+        # 2. 删除关联的卡片关系
+        await db.execute(
+            sql_delete(CardRelation).where(
+                or_(
+                    CardRelation.card_id_1.in_(card_ids),
+                    CardRelation.card_id_2.in_(card_ids),
+                )
+            )
+        )
+
+        # 3. 查找关联的题目 ID
+        quiz_ids_result = await db.execute(
+            select(QuizItem.id).where(QuizItem.note_id == note_id)
+        )
+        quiz_ids = [row[0] for row in quiz_ids_result.all()]
+
+        if quiz_ids:
+            # 4. 删除关联的复习记录
+            await db.execute(
+                sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids))
+            )
+
+        # 5. 删除关联的题目
+        await db.execute(
+            sql_delete(QuizItem).where(QuizItem.note_id == note_id)
+        )
+
+        # 6. 删除关联的知识卡片
+        await db.execute(
+            sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
+        )
+
+    # ---- 清理笔记-资料链接 ----
+    # 删除涉及该笔记的所有链接（正向和反向）
+    await delete_note_material_links(db, note_id)
+
+    # ---- 清理批注 ----
+    from ..models.note_annotation import NoteAnnotation
+    ann_result = await db.execute(
+        select(NoteAnnotation).where(NoteAnnotation.note_id == note_id)
+    )
+    for ann in ann_result.scalars().all():
+        await db.delete(ann)
+
+    # ---- 标记引用该笔记的 AssessmentResult 为 stale ----
+    from ..models.assessment import AssessmentResult
+    ar_result = await db.execute(
+        select(AssessmentResult).where(AssessmentResult.user_id == note.user_id)
+    )
+    for ar in ar_result.scalars().all():
+        if note_id in (ar.material_note_ids or []) or note_id in (ar.personal_note_ids or []):
+            ar.is_stale = True
+    await db.commit()
+
+    # ---- 删除 MinIO 文件 ----
     if note.original_file_path:
         try:
             delete_file(settings.minio_bucket_original, note.original_file_path)
-        except Exception:
-            pass  # 文件可能已不存在，忽略删除失败
+        except Exception as e:
+            logger.warning(f"删除原始文件失败: {note.original_file_path}, 错误: {e}")
 
-    # 删除 MinIO 中的原始 Markdown 文件
     if note.original_md_path:
         try:
             delete_file(settings.minio_bucket_markdown, note.original_md_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"删除原始Markdown失败: {note.original_md_path}, 错误: {e}")
 
-    # 删除 MinIO 中的清洗后 Markdown 文件
     if note.clean_md_path:
         try:
             delete_file(settings.minio_bucket_markdown, note.clean_md_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"删除清洗Markdown失败: {note.clean_md_path}, 错误: {e}")
 
-    # 最后删除数据库记录
+    # ---- 删除笔记记录 ----
     await db.delete(note)
     await db.commit()
+    logger.info(f"已删除笔记: id={note_id[:8]}, 标题={note.title}")
+
+
+# ==================== 笔记-资料链接管理 ====================
+
+async def create_note_material_links(db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]) -> None:
+    """批量创建笔记-资料链接，忽略已存在的；校验 material 归属和角色"""
+    from ..models.note_material_link import NoteMaterialLink
+    if not material_note_ids:
+        return
+    # 校验所有 material_note_ids 归属当前用户且角色为 material
+    valid_result = await db.execute(
+        select(Note).where(
+            Note.id.in_(material_note_ids),
+            Note.user_id == user_id,
+            Note.note_role == NoteRole.material,
+        )
+    )
+    valid_ids = {n.id for n in valid_result.scalars().all()}
+    for material_id in material_note_ids:
+        if material_id not in valid_ids:
+            logger.warning(f"跳过非法 material_id: {material_id}（不属于用户或非 material 角色）")
+            continue
+        # 检查是否已存在
+        existing = await db.execute(
+            select(NoteMaterialLink).where(
+                NoteMaterialLink.personal_note_id == personal_note_id,
+                NoteMaterialLink.material_note_id == material_id,
+            )
+        )
+        if not existing.scalars().first():
+            link = NoteMaterialLink(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                personal_note_id=personal_note_id,
+                material_note_id=material_id,
+            )
+            db.add(link)
+    await db.commit()
+
+
+async def get_linked_materials(db: AsyncSession, user_id: str, personal_note_id: str) -> List[Note]:
+    """获取笔记关联的资料列表"""
+    from ..models.note_material_link import NoteMaterialLink
+    result = await db.execute(
+        select(Note).join(
+            NoteMaterialLink, NoteMaterialLink.material_note_id == Note.id
+        ).where(
+            NoteMaterialLink.personal_note_id == personal_note_id,
+            NoteMaterialLink.user_id == user_id,
+        )
+    )
+    return result.scalars().all()
+
+
+async def get_linked_personal_notes(db: AsyncSession, user_id: str, material_note_id: str) -> List[Note]:
+    """获取引用该资料的笔记列表（反向查询）"""
+    from ..models.note_material_link import NoteMaterialLink
+    result = await db.execute(
+        select(Note).join(
+            NoteMaterialLink, NoteMaterialLink.personal_note_id == Note.id
+        ).where(
+            NoteMaterialLink.material_note_id == material_note_id,
+            NoteMaterialLink.user_id == user_id,
+        )
+    )
+    return result.scalars().all()
+
+
+async def update_note_material_links(db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]) -> bool:
+    """更新笔记-资料链接，返回是否发生变化"""
+    from ..models.note_material_link import NoteMaterialLink
+    # 获取当前链接
+    result = await db.execute(
+        select(NoteMaterialLink).where(NoteMaterialLink.personal_note_id == personal_note_id)
+    )
+    current_links = result.scalars().all()
+    current_ids = {link.material_note_id for link in current_links}
+    new_ids = set(material_note_ids)
+
+    if current_ids == new_ids:
+        return False  # 无变化
+
+    # 删除不再需要的链接
+    for link in current_links:
+        if link.material_note_id not in new_ids:
+            await db.delete(link)
+
+    # 新增新链接
+    for material_id in new_ids - current_ids:
+        link = NoteMaterialLink(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            personal_note_id=personal_note_id,
+            material_note_id=material_id,
+        )
+        db.add(link)
+
+    await db.commit()
+    return True
+
+
+async def delete_note_material_links(db: AsyncSession, note_id: str) -> None:
+    """删除涉及该笔记的所有链接（正向和反向）"""
+    from ..models.note_material_link import NoteMaterialLink
+    result = await db.execute(
+        select(NoteMaterialLink).where(
+            (NoteMaterialLink.personal_note_id == note_id) |
+            (NoteMaterialLink.material_note_id == note_id)
+        )
+    )
+    links = result.scalars().all()
+    for link in links:
+        await db.delete(link)
+    await db.commit()
+
+
+# ==================== 笔记批注管理 ====================
+
+async def create_annotation(db: AsyncSession, user_id: str, note_id: str, view_mode: str, type: str, text_content: str, context_before: str = "", context_after: str = "", color: Optional[str] = None) -> NoteAnnotation:
+    """创建批注"""
+    from ..models.note_annotation import NoteAnnotation
+    annotation = NoteAnnotation(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        note_id=note_id,
+        view_mode=view_mode,
+        type=type,
+        text_content=text_content,
+        context_before=context_before,
+        context_after=context_after,
+        color=color,
+    )
+    db.add(annotation)
+    await db.commit()
+    await db.refresh(annotation)
+    return annotation
+
+
+async def get_annotations(db: AsyncSession, note_id: str, user_id: str, view_mode: Optional[str] = None) -> List[NoteAnnotation]:
+    """获取笔记的批注列表"""
+    from ..models.note_annotation import NoteAnnotation
+    query = select(NoteAnnotation).where(
+        NoteAnnotation.note_id == note_id,
+        NoteAnnotation.user_id == user_id,
+    )
+    if view_mode:
+        query = query.where(NoteAnnotation.view_mode == view_mode)
+    query = query.order_by(NoteAnnotation.created_at.desc())
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+async def delete_annotation(db: AsyncSession, annotation_id: str, user_id: str, note_id: str) -> bool:
+    """删除批注，校验 note_id 归属"""
+    from ..models.note_annotation import NoteAnnotation
+    result = await db.execute(
+        select(NoteAnnotation).where(
+            NoteAnnotation.id == annotation_id,
+            NoteAnnotation.user_id == user_id,
+            NoteAnnotation.note_id == note_id,
+        )
+    )
+    annotation = result.scalars().first()
+    if annotation:
+        await db.delete(annotation)
+        await db.commit()
+        return True
+    return False
+
+
+async def save_note_content(db: AsyncSession, note: Note, content: str, target: str = "clean") -> bool:
+    """
+    保存用户编辑的 Markdown 内容到对象存储
+
+    Args:
+        db: 异步数据库会话
+        note: 笔记对象
+        content: Markdown 文本内容
+        target: 写入目标，"clean" 写入 clean_md_path，"original" 写入 original_md_path
+
+    Returns:
+        bool: 写入成功返回 True，路径为空返回 False
+
+    注意：不新增数据库字段，直接覆盖对象存储中的 markdown 文件
+    """
+    # 根据目标选择写入路径
+    if target == "clean":
+        path = note.clean_md_path
+    else:
+        path = note.original_md_path
+
+    if not path:
+        return False  # 路径为空，资料未转换完成
+
+    # 将内容转为字节流
+    content_bytes = content.encode("utf-8")
+
+    # 调用 storage_service 写入对象存储
+    upload_bytes(
+        settings.minio_bucket_markdown,
+        path,
+        content_bytes,
+        content_type="text/markdown",
+    )
+
+    logger.info(f"已保存笔记内容: note_id={note.id[:8]}, target={target}, size={len(content_bytes)} bytes")
+
+    # 刷新 updated_at（onupdate=func.now() 仅在 ORM 字段更新时触发，对象存储写入不触发）
+    note.updated_at = func.now()
+    await db.commit()
+    await db.refresh(note)
+    return True

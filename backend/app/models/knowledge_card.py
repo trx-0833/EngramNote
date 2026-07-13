@@ -15,9 +15,9 @@
 """
 
 import enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Enum, String, Text, JSON, ForeignKey
+from sqlalchemy import Enum, String, Text, JSON, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel
@@ -39,6 +39,20 @@ class CardType(str, enum.Enum):
     definition = "definition"
 
 
+class CardCategory(str, enum.Enum):
+    """
+    知识卡片分类枚举
+
+    标识知识点的来源分类，用于联合分析、盲点检测与拓展生成：
+    - regular: 常规知识点
+    - blind_spot: 盲点（资料有但笔记未覆盖）
+    - extension: 拓展知识点（基于掌握度生成）
+    """
+    regular = "regular"
+    blind_spot = "blind_spot"
+    extension = "extension"
+
+
 class KnowledgeCard(BaseModel):
     """
     知识卡片模型
@@ -57,6 +71,12 @@ class KnowledgeCard(BaseModel):
         chapter_title: 所属章节标题
         source_text: 原始出处文本
         metadata_: 扩展元数据（JSON 格式）
+        card_category: 卡片分类（常规/盲点/拓展），用于联合分析与拓展生成
+        is_key_point: 是否标记为重点
+        is_difficulty: 是否标记为难点
+        mastery_level: 掌握度（0.0~1.0）
+        source_note_ids: 卡片来源的笔记 ID 列表（拓展卡片可关联多个源笔记）
+        parent_card_id: 父卡片 ID（拓展卡片的父卡片），外键关联 knowledge_cards 表
         created_at: 创建时间（继承自 BaseModel）
         updated_at: 更新时间（继承自 BaseModel）
     """
@@ -71,3 +91,9 @@ class KnowledgeCard(BaseModel):
     chapter_title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     source_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
+    card_category: Mapped[CardCategory] = mapped_column(Enum(CardCategory), default=CardCategory.regular, nullable=False)
+    is_key_point: Mapped[bool] = mapped_column(default=False, nullable=False)
+    is_difficulty: Mapped[bool] = mapped_column(default=False, nullable=False)
+    mastery_level: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    source_note_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    parent_card_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("knowledge_cards.id"), nullable=True, index=True)

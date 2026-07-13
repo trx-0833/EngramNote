@@ -18,12 +18,18 @@
 """
 
 import math
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ..config import get_settings, DATA_DIR
 
 settings = get_settings()
+
+# 模块级单例：缓存已加载的 SentenceTransformer 模型实例
+# 避免每次 EmbeddingService() 调用都从磁盘重新加载 ~2.2GB 模型
+_cached_model = None
+_cached_model_name = None
 
 
 class EmbeddingService:
@@ -32,6 +38,7 @@ class EmbeddingService:
 
     使用 sentence-transformers 模型将文本转换为向量表示。
     模型通过 ModelScope 下载（国内镜像，无需翻墙），首次调用 encode() 时延迟加载。
+    多次创建 EmbeddingService 实例共享同一个模型对象，避免重复加载。
 
     使用方式：
         service = EmbeddingService()
@@ -40,7 +47,12 @@ class EmbeddingService:
     """
 
     def __init__(self):
-        self._model = None
+        global _cached_model, _cached_model_name
+        # 复用已加载的模型实例
+        if _cached_model is not None and _cached_model_name == settings.embedding_model:
+            self._model = _cached_model
+        else:
+            self._model = None
         self._model_name = settings.embedding_model
 
     def _ensure_model(self):
@@ -50,17 +62,31 @@ class EmbeddingService:
         优先通过 ModelScope 下载模型到本地缓存目录，
         然后用 sentence-transformers 从本地路径加载。
         ModelScope 是国内镜像，下载速度快且稳定。
+        加载后缓存到模块级单例，后续实例直接复用。
         """
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
+        global _cached_model, _cached_model_name
+        if self._model is not None:
+            return
 
-            # 尝试从 ModelScope 下载模型到本地
-            model_path = self._download_from_modelscope(self._model_name)
-            if model_path:
+        from sentence_transformers import SentenceTransformer
+
+        # 尝试从 ModelScope 下载模型到本地
+        model_path = self._download_from_modelscope(self._model_name)
+        if model_path:
+            # 从本地路径加载时，设置 HF_HUB_OFFLINE=1 阻止 SentenceTransformer
+            # 尝试连接 HuggingFace 下载 modules.json 等额外文件
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            try:
                 self._model = SentenceTransformer(model_path)
-            else:
-                # ModelScope 下载失败，回退到 HuggingFace（需网络）
-                self._model = SentenceTransformer(self._model_name)
+            finally:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+        else:
+            # ModelScope 下载失败，回退到 HuggingFace（需网络）
+            self._model = SentenceTransformer(self._model_name)
+
+        # 缓存到模块级单例
+        _cached_model = self._model
+        _cached_model_name = self._model_name
 
     @staticmethod
     def _download_from_modelscope(model_name: str) -> Optional[str]:
@@ -69,6 +95,9 @@ class EmbeddingService:
         ModelScope 的模型名格式与 HuggingFace 不同：
         HuggingFace: "BAAI/bge-m3"
         ModelScope:  "Xorbits/bge-m3"（ModelScope 上的镜像）
+
+        优化：先检查本地缓存是否已存在，避免每次都调用 snapshot_download
+        扫描目录和检查远程更新，减少文件 I/O 和网络请求。
 
         Args:
             model_name: HuggingFace 格式的模型名
@@ -86,10 +115,16 @@ class EmbeddingService:
         if not ms_model_name:
             return None
 
+        # 先检查本地缓存是否已存在，避免每次都调用 snapshot_download
+        cache_dir = str(DATA_DIR / "models")
+        local_model_dir = os.path.join(cache_dir, ms_model_name.replace("/", os.sep))
+        config_file = os.path.join(local_model_dir, "config.json")
+        if os.path.isfile(config_file):
+            return local_model_dir
+
         try:
             from modelscope import snapshot_download
             # 下载到项目的 data/models/ 目录，避免占用 C 盘空间
-            cache_dir = str(DATA_DIR / "models")
             model_dir = snapshot_download(
                 ms_model_name,
                 cache_dir=cache_dir,
@@ -312,6 +347,14 @@ class VectorStore:
             for j in range(i + 1, n):
                 if metadatas[j]["block_index"] in already_duplicate:
                     continue  # 已被标记为重复的块跳过
+
+                # 跳过行范围有重叠的 chunk 对（重叠是分块策略的正常结果，非真正重复）
+                i_start = metadatas[i].get("start_line", 0)
+                i_end = metadatas[i].get("end_line", 0)
+                j_start = metadatas[j].get("start_line", 0)
+                j_end = metadatas[j].get("end_line", 0)
+                if i_start <= j_end and j_start <= i_end:
+                    continue
 
                 similarity = EmbeddingService.compute_similarity(
                     embeddings[i], embeddings[j]

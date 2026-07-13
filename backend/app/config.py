@@ -106,13 +106,13 @@ class Settings(BaseSettings):
     # Mineru 服务器 URL
     mineru_server_url: str = "https://mineru.net/api/v4/extract/task"
     # Mineru 解析后端选择："pipeline" 使用本地模型，"vlm-http-client" 使用云端API，"hybrid-http-client" 使用混合模式
-    mineru_backend: str = "pipeline"  # "pipeline" 或 "vlm-http-client" 或 "hybrid-http-client"
+    mineru_backend: str = "vlm-http-client"  # "pipeline" 或 "vlm-http-client" 或 "hybrid-http-client"
 
     # ---- 文件上传限制 ----
     # 最大上传文件大小（MB）
     max_upload_size_mb: int = 500
     # 允许的文件扩展名（逗号分隔）
-    allowed_extensions: str = ".pdf,.png,.jpg,.jpeg,.docx,.pptx,.xlsx,.mp4,.mp3,.wav,.m4a"
+    allowed_extensions: str = ".pdf,.png,.jpg,.jpeg,.docx,.pptx,.xlsx,.mp4,.mp3,.wav,.m4a,.md"
 
     # ---- AI 清洗管道配置 ----
     # 嵌入模型名称，用于文本向量化（去重检测）
@@ -135,14 +135,36 @@ class Settings(BaseSettings):
     # LLM 每分钟最大请求数 (0 = 不限流)
     llm_max_rpm: int = 10
 
+    # ---- ASR 语音转写配置 ----
+    # ASR 模型路径（空则使用默认 modelscope 缓存路径）
+    asr_model_path: str = ""
+    # ASR 转写语言（空字符串为自动检测，"Chinese" 强制中文）
+    asr_language: str = "Chinese"
+    # ASR 是否启用标点恢复
+    asr_enable_punctuation: bool = True
+    # ASR 是否启用标题生成
+    asr_enable_title_generation: bool = True
+    # ASR 缓存目录（空则使用默认 ~/.cache/asr_converter）
+    asr_cache_dir: str = ""
+    # Silero VAD 模型本地目录（空则使用 data/models/silero-vad/）
+    vad_model_dir: str = ""
+
+    # ---- 日志配置 ----
+    log_level: str = "INFO"
+    log_dir: str = ""
+    log_max_bytes: int = 10 * 1024 * 1024  # 10MB
+    log_backup_count: int = 30
+
     # ---- 应用基本配置 ----
     app_name: str = "EngramNote"
     # 调试模式，开启后 SQLAlchemy 会输出 SQL 日志
     debug: bool = True
 
     # pydantic-settings 配置：从 .env 文件加载，忽略多余字段
+    # 使用绝对路径确保 Celery worker 等子进程也能正确找到 .env 文件
     model_config = {
-        "env_file": ".env",
+        "env_file": str(PROJECT_ROOT / ".env"),
+        # "env_file": ".env",
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
@@ -202,6 +224,20 @@ class Settings(BaseSettings):
         if self.storage_dir:
             return Path(self.storage_dir)
         return STORAGE_DIR
+
+    def get_log_dir(self) -> Path:
+        """
+        获取日志目录路径
+
+        如果显式配置了 log_dir，则使用配置值；
+        否则默认使用 data/logs 目录。
+
+        Returns:
+            Path: 日志目录的 Path 对象
+        """
+        if self.log_dir:
+            return Path(self.log_dir)
+        return DATA_DIR / "logs"
 
     def get_celery_broker_url(self) -> str:
         """

@@ -20,7 +20,9 @@
 
 from typing import Optional
 
+import time
 import traceback
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -30,6 +32,10 @@ from ..config import get_settings
 from ..models.note import Note, NoteStatus
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# _update_note_status 允许更新的字段白名单
+_UPDATABLE_NOTE_FIELDS = {"title", "page_count", "original_md_path", "clean_md_path", "metadata_"}
 
 # Celery 任务中需要独立的数据库连接
 _clean_engine = None
@@ -95,7 +101,7 @@ async def _update_note_status(note_id: str, status: NoteStatus, error_message: O
         if error_message:
             note.error_message = error_message
         for key, value in kwargs.items():
-            if hasattr(note, key):
+            if key in _UPDATABLE_NOTE_FIELDS:
                 setattr(note, key, value)
         await session.commit()
 
@@ -119,6 +125,16 @@ async def _clean_document(note_id: str):
     Args:
         note_id: 笔记 ID
     """
+    start_time = time.monotonic()
+    logger.info("文档清洗开始: note_id=%s", note_id)
+
+    # 检查笔记是否已被用户删除（状态为 failed 且 error_message 为 "用户手动删除"）
+    session_factory = _get_clean_session()
+    async with session_factory() as session:
+        note = await session.get(Note, note_id)
+        if not note or (note.status == NoteStatus.failed and note.error_message == "用户手动删除"):
+            logger.info(f"笔记 {note_id} 已被用户删除，跳过清洗任务")
+            return
     from ..services.storage_service import (
         get_object_bytes,
         upload_bytes,
@@ -258,6 +274,9 @@ async def _clean_document(note_id: str):
         metadata_=metadata,
     )
 
+    elapsed = time.monotonic() - start_time
+    logger.info("文档清洗完成: note_id=%s, elapsed=%.1fs", note_id, elapsed)
+
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
 def clean_document_task(self, note_id: str):
@@ -277,9 +296,6 @@ def clean_document_task(self, note_id: str):
         note_id: 笔记 ID
     """
     import asyncio
-    import logging
-
-    logger = logging.getLogger(__name__)
 
     try:
         # 检查笔记是否已被用户停止清洗

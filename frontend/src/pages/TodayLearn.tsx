@@ -148,7 +148,7 @@ export default function TodayLearn() {
     const dailyLimit = 50
     const todayDone = stats?.today_done ?? 0
     return (
-      <div style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
         <h2 style={{ marginBottom: 'var(--space-lg)' }}>今日复习完成</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h3>本次统计</h3>
@@ -180,16 +180,15 @@ export default function TodayLearn() {
     const options = parseOptions(quiz.options)
 
     return (
-      <div style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
+      <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
         {/* 进度条 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)' }}>
           <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
             {currentIndex + 1} / {quizzes.length}
           </span>
-          <div style={{ flex: 1, height: 6, background: 'var(--color-border)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{
+          <div className="progress-bar" style={{ flex: 1 }}>
+            <div className="progress-bar-fill" style={{
               width: `${((currentIndex + (current.submitted ? 1 : 0)) / quizzes.length) * 100}%`,
-              height: '100%', background: 'var(--color-primary)', borderRadius: 3, transition: 'width 0.3s ease',
             }} />
           </div>
           <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
@@ -215,15 +214,10 @@ export default function TodayLearn() {
               {quiz.question_type === 'choice' && options.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
                   {options.map((opt, i) => (
-                    <button key={i} onClick={() => {
+                    <button key={i} className={`quiz-option${current.userAnswer === opt ? ' quiz-option-selected' : ''}`} onClick={() => {
                       const newQuizzes = [...quizzes]
                       newQuizzes[currentIndex] = { ...current, userAnswer: opt }
                       setQuizzes(newQuizzes)
-                    }} style={{
-                      padding: 'var(--space-sm) var(--space-md)', textAlign: 'left',
-                      border: `2px solid ${current.userAnswer === opt ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                      borderRadius: 6, background: current.userAnswer === opt ? 'rgba(25, 118, 210, 0.08)' : 'var(--color-surface)',
-                      cursor: 'pointer', transition: 'all 0.2s',
                     }}>{opt}</button>
                   ))}
                 </div>
@@ -248,11 +242,7 @@ export default function TodayLearn() {
             </>
           ) : (
             <>
-              <div style={{
-                padding: 'var(--space-md)', borderRadius: 6, marginBottom: 'var(--space-md)',
-                background: current.result?.is_correct ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)',
-                border: `1px solid ${current.result?.is_correct ? '#4caf50' : '#f44336'}`,
-              }}>
+              <div className={current.result?.is_correct ? 'feedback-correct' : 'feedback-incorrect'} style={{ marginBottom: 'var(--space-md)' }}>
                 <p style={{ fontWeight: 600, color: current.result?.is_correct ? '#4caf50' : '#f44336' }}>
                   {current.result?.is_correct ? '回答正确!' : '回答错误'}
                 </p>
@@ -276,8 +266,8 @@ export default function TodayLearn() {
   const todayDone = stats?.today_done ?? 0
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-lg)' }}>今日学习</h1>
+    <div className="page-enter">
+      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>今日学习</h1>
 
       {error && <ErrorDisplay message={error} onRetry={loadData} />}
 
@@ -288,21 +278,21 @@ export default function TodayLearn() {
             今日报告 ({dailyReport.date})
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 'var(--space-md)' }}>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>{dailyReport.new_mastered}</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>新掌握</div>
+            <div className="stat-card stat-card-blue">
+              <div className="stat-number">{dailyReport.new_mastered}</div>
+              <div className="stat-label">新掌握</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>{dailyReport.total_reviews}</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>复习次数</div>
+            <div className="stat-card stat-card-green">
+              <div className="stat-number">{dailyReport.total_reviews}</div>
+              <div className="stat-label">复习次数</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>{dailyReport.today_accuracy}%</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>正确率</div>
+            <div className="stat-card stat-card-gold">
+              <div className="stat-number">{dailyReport.today_accuracy}%</div>
+              <div className="stat-label">正确率</div>
             </div>
-            <div className="card" style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>{formatTime(dailyReport.total_review_time_ms)}</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>复习时长</div>
+            <div className="stat-card stat-card-purple">
+              <div className="stat-number">{formatTime(dailyReport.total_review_time_ms)}</div>
+              <div className="stat-label">复习时长</div>
             </div>
           </div>
         </section>
@@ -313,8 +303,8 @@ export default function TodayLearn() {
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>待复习任务</h2>
         {dueCount > 0 ? (
           <div
-            className="card"
-            style={{ cursor: 'pointer', borderLeft: '4px solid var(--color-primary)' }}
+            className="card card-accent-left"
+            style={{ cursor: 'pointer' }}
             onClick={startReview}
             role="button"
             tabIndex={0}
@@ -329,10 +319,9 @@ export default function TodayLearn() {
               <button className="btn btn-primary">开始复习</button>
             </div>
             {/* 进度条 */}
-            <div style={{ marginTop: 'var(--space-md)', height: 6, background: 'var(--color-border)', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{
+            <div className="progress-bar" style={{ marginTop: 'var(--space-md)' }}>
+              <div className="progress-bar-fill" style={{
                 width: `${Math.min((todayDone / 50) * 100, 100)}%`,
-                height: '100%', background: 'var(--color-primary)', borderRadius: 3, transition: 'width 0.3s ease',
               }} />
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
@@ -348,7 +337,7 @@ export default function TodayLearn() {
       {weakPoints.length > 0 && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>薄弱点</h2>
-          <div className="card" style={{ borderLeft: '4px solid #f44336' }}>
+          <div className="card card-accent-error">
             {weakPoints.map(wp => (
               <div
                 key={wp.card_id}

@@ -44,6 +44,8 @@ export interface Note {
   title: string;
   /** 来源类型，如 pdf、image、docx、pptx、xlsx、audio、video */
   source_type: string;
+  /** 笔记角色：material（学习资料）或 personal_note（我的笔记） */
+  note_role?: string;
   /**
    * 笔记处理状态，流转顺序：
    * uploading → converting → converted → cleaning → cleaned → learning → archived
@@ -70,6 +72,8 @@ export interface NoteDetail extends Note {
   clean_md_content: string | null;
   /** 文件元数据，如 PDF 的作者、标题等信息 */
   metadata_: Record<string, unknown> | null;
+  /** 视频流地址，仅 source_type 为 video 时有值 */
+  video_url?: string;
 }
 
 /** 笔记列表分页响应 */
@@ -209,6 +213,7 @@ export function notifyTokenExpired(): void {
 /**
  * 通用请求封装函数
  * 自动附加 Content-Type 和 Authorization 头，统一处理错误响应。
+ * 已导出，供 api/ 目录下的模块化 API 文件复用。
  *
  * @typeParam T - 响应数据的类型
  * @param path - API 路径（不含基础路径前缀，如 /auth/login）
@@ -216,7 +221,7 @@ export function notifyTokenExpired(): void {
  * @returns 解析后的 JSON 响应数据
  * @throws 当响应状态码非 2xx 时抛出 Error，包含后端返回的 detail 信息
  */
-async function request<T>(
+export async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -314,10 +319,12 @@ export async function getMe(): Promise<User> {
  * @param keyword - 搜索关键词，可选，用于按标题模糊匹配
  * @returns 分页笔记列表响应
  */
-export async function getNotes(page = 1, pageSize = 20, keyword?: string): Promise<NoteListResponse> {
+export async function getNotes(page = 1, pageSize = 20, keyword?: string, noteRole?: string): Promise<NoteListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   // 仅在提供了关键词时才附加 keyword 参数
   if (keyword) params.set('keyword', keyword);
+  // 仅在提供了笔记角色时才附加 note_role 参数
+  if (noteRole) params.set('note_role', noteRole);
   return request<NoteListResponse>(`/notes?${params}`);
 }
 
@@ -347,6 +354,27 @@ export async function updateNote(noteId: string, data: { title?: string }): Prom
   });
 }
 
+export type NoteContentTarget = 'clean' | 'original'
+
+/**
+ * 更新笔记的 Markdown 内容
+ *
+ * @param noteId - 笔记 ID
+ * @param content - Markdown 内容字符串
+ * @param target - 更新目标：clean（清洗版）或 original（原始版），默认 clean
+ * @returns 更新后的笔记信息
+ */
+export async function updateNoteContent(
+  noteId: string,
+  content: string,
+  target: NoteContentTarget = 'clean'
+): Promise<Note> {
+  return request<Note>(`/notes/${noteId}/content`, {
+    method: 'PUT',
+    body: JSON.stringify({ content, target }),
+  });
+}
+
 /**
  * 归档/取消归档笔记
  */
@@ -357,10 +385,26 @@ export async function archiveNote(noteId: string): Promise<Note> {
 }
 
 /**
+ * 更新笔记角色
+ * 在学习资料（material）和我的笔记（personal_note）之间切换。
+ *
+ * @param noteId - 笔记 ID
+ * @param noteRole - 新的笔记角色值：material 或 personal_note
+ * @returns 更新后的笔记信息
+ */
+export async function updateNoteRole(noteId: string, noteRole: string): Promise<Note> {
+  return request<Note>(`/notes/${noteId}/role?note_role=${encodeURIComponent(noteRole)}`, {
+    method: 'PATCH',
+  });
+}
+
+/**
  * 获取已归档笔记列表
  */
-export async function getArchivedNotes(page = 1, pageSize = 20): Promise<NoteListResponse> {
+export async function getArchivedNotes(page = 1, pageSize = 20, noteRole?: string): Promise<NoteListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  // 仅在提供了笔记角色时才附加 note_role 参数
+  if (noteRole) params.set('note_role', noteRole);
   return request<NoteListResponse>(`/notes/archive?${params}`);
 }
 
@@ -372,6 +416,133 @@ export async function getArchivedNotes(page = 1, pageSize = 20): Promise<NoteLis
  */
 export async function deleteNote(noteId: string): Promise<void> {
   return request<void>(`/notes/${noteId}`, { method: 'DELETE' });
+}
+
+// --- 批注相关类型 ---
+
+/**
+ * 批注信息
+ */
+export interface Annotation {
+  id: string;
+  note_id: string;
+  view_mode: string;
+  type: 'highlight' | 'underline';
+  text_content: string;
+  context_before: string;
+  context_after: string;
+  color: string | null;
+  created_at: string;
+}
+
+/**
+ * 批注列表响应
+ */
+export interface AnnotationListResponse {
+  annotations: Annotation[];
+}
+
+// --- 批注 API ---
+
+/**
+ * 获取笔记批注列表
+ *
+ * @param noteId - 笔记 ID
+ * @param viewMode - 视图模式：original 或 clean
+ * @returns 批注列表响应
+ */
+export async function getAnnotations(noteId: string, viewMode: string): Promise<AnnotationListResponse> {
+  return request<AnnotationListResponse>(`/notes/${noteId}/annotations?view_mode=${viewMode}`);
+}
+
+/**
+ * 创建批注
+ *
+ * @param noteId - 笔记 ID
+ * @param data - 批注数据
+ * @returns 创建后的批注信息
+ */
+export async function createAnnotation(
+  noteId: string,
+  data: {
+    view_mode: string;
+    type: 'highlight' | 'underline';
+    text_content: string;
+    context_before: string;
+    context_after: string;
+    color?: string;
+  }
+): Promise<Annotation> {
+  return request<Annotation>(`/notes/${noteId}/annotations`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * 删除批注
+ *
+ * @param noteId - 笔记 ID
+ * @param annotationId - 批注 ID
+ */
+export async function deleteAnnotation(noteId: string, annotationId: string): Promise<void> {
+  await request<{ success: boolean }>(`/notes/${noteId}/annotations/${annotationId}`, {
+    method: 'DELETE',
+  });
+}
+
+// --- 笔记-资料链接相关类型 ---
+
+/** 已关联的学习资料 */
+export interface LinkedMaterial {
+  id: string;
+  title: string;
+  source_type: string | null;
+}
+
+/** 引用该资料的个人笔记 */
+export interface LinkedPersonalNote {
+  id: string;
+  title: string;
+}
+
+/** 笔记链接关系响应 */
+export interface NoteLinksResponse {
+  personal_note_id: string;
+  linked_materials: LinkedMaterial[];
+  linked_personal_notes: LinkedPersonalNote[];
+}
+
+/** 更新链接关系响应 */
+export interface UpdateLinksResponse {
+  changed: boolean;
+}
+
+// --- 链接管理 API ---
+
+/**
+ * 获取笔记的链接关系
+ * 返回该笔记关联的学习资料列表，以及引用该资料的个人笔记列表。
+ *
+ * @param noteId - 笔记 ID
+ * @returns 链接关系响应
+ */
+export async function getNoteLinks(noteId: string): Promise<NoteLinksResponse> {
+  return request<NoteLinksResponse>(`/notes/${noteId}/links`);
+}
+
+/**
+ * 更新笔记关联的学习资料
+ *
+ * @param noteId - 笔记 ID
+ * @param materialNoteIds - 学习资料笔记 ID 列表
+ * @returns 更新结果，包含是否发生变化
+ */
+export async function updateNoteLinks(noteId: string, materialNoteIds: string[]): Promise<UpdateLinksResponse> {
+  return request<UpdateLinksResponse>(`/notes/${noteId}/links`, {
+    method: 'PUT',
+    body: JSON.stringify({ material_note_ids: materialNoteIds }),
+  });
 }
 
 // --- 上传 API ---
@@ -386,11 +557,15 @@ export async function deleteNote(noteId: string): Promise<void> {
  *                  不传则使用后端默认配置
  * @returns 新创建的笔记记录（状态为 uploading）
  */
-export async function uploadFile(file: File, backend?: string): Promise<Note> {
+export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[]): Promise<Note> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   if (backend) formData.append('backend', backend);
+  if (noteRole) formData.append('note_role', noteRole);
+  if (linkedMaterialIds && linkedMaterialIds.length > 0) {
+    formData.append('linked_material_ids', JSON.stringify(linkedMaterialIds));
+  }
 
   // 文件上传不设置 Content-Type，让浏览器自动设置 multipart/form-data 边界
   const response = await fetch(`${API_BASE}/upload`, {
@@ -421,6 +596,17 @@ export async function uploadFile(file: File, backend?: string): Promise<Note> {
  */
 export async function getUploadStatus(noteId: string): Promise<{ id: string; status: string; error_message: string | null }> {
   return request(`/upload/${noteId}/status`);
+}
+
+/**
+ * 重试转换失败的笔记
+ * 仅对 status 为 failed 的笔记有效，会重新提交 Celery 转换任务。
+ *
+ * @param noteId - 笔记 ID
+ * @returns 重试后的笔记状态
+ */
+export async function retryConvert(noteId: string): Promise<{ id: string; status: string; error_message: string | null }> {
+  return request(`/upload/${noteId}/retry`, { method: 'POST' });
 }
 
 // --- 清洗 API ---
@@ -516,6 +702,12 @@ export interface KnowledgeCard {
   chapter_title: string | null;
   source_text: string | null;
   metadata_: Record<string, unknown> | null;
+  card_category: 'regular' | 'blind_spot' | 'extension';
+  is_key_point: boolean;
+  is_difficulty: boolean;
+  mastery_level: number;
+  source_note_ids: string[] | null;
+  parent_card_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -632,9 +824,10 @@ export async function getChapterSummaries(noteId: string): Promise<{ note_id: st
 /**
  * 获取知识卡片列表
  */
-export async function getKnowledgeCards(page = 1, pageSize = 20, noteId?: string): Promise<KnowledgeCardListResponse> {
+export async function getKnowledgeCards(page = 1, pageSize = 20, noteId?: string, keyword?: string): Promise<KnowledgeCardListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (noteId) params.set('note_id', noteId);
+  if (keyword) params.set('keyword', keyword);
   return request<KnowledgeCardListResponse>(`/understanding/cards?${params}`);
 }
 
@@ -667,9 +860,10 @@ export async function generateQuestions(noteId: string): Promise<GenerateQuestio
 /**
  * 获取题目列表
  */
-export async function getQuestions(page = 1, pageSize = 20, noteId?: string): Promise<QuizItemListResponse> {
+export async function getQuestions(page = 1, pageSize = 20, noteId?: string, keyword?: string): Promise<QuizItemListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (noteId) params.set('note_id', noteId);
+  if (keyword) params.set('keyword', keyword);
   return request<QuizItemListResponse>(`/understanding/questions?${params}`);
 }
 
@@ -828,6 +1022,17 @@ export interface WeakPointsResponse {
   total: number;
 }
 
+// --- 快速复习相关类型定义 ---
+
+/** 快速复习题目（复用 DueQuiz 类型） */
+export type QuickQuiz = DueQuiz
+
+/** 快速复习响应 */
+export interface QuickReviewResponse {
+  items: QuickQuiz[];
+  total: number;
+}
+
 // --- 复习调度 API ---
 
 /**
@@ -863,6 +1068,35 @@ export async function getReviewHistory(page = 1, pageSize = 20): Promise<ReviewH
   return request<ReviewHistoryResponse>(`/review/history?${params}`);
 }
 
+/**
+ * 获取指定笔记的快速复习题目
+ * 用于笔记上传并完成理解后，立即复习该笔记关联的所有题目。
+ *
+ * @param noteId - 笔记 ID
+ * @returns 快速复习题目列表
+ */
+export async function getQuickReview(noteId: string): Promise<QuickReviewResponse> {
+  return request<QuickReviewResponse>(`/review/quick/${noteId}`);
+}
+
+/**
+ * 提交快速复习答案
+ * 与 submitAnswer 不同，此接口不受每日复习上限限制，
+ * 用于"立即学习"场景。
+ *
+ * @param noteId - 笔记 ID
+ * @param quizId - 题目 ID
+ * @param userAnswer - 用户答案
+ * @param timeSpentMs - 答题耗时（毫秒）
+ * @returns 提交答案响应
+ */
+export async function submitQuickReviewAnswer(noteId: string, quizId: string, userAnswer: string, timeSpentMs = 0): Promise<SubmitAnswerResponse> {
+  return request<SubmitAnswerResponse>(`/review/quick/${noteId}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({ quiz_id: quizId, user_answer: userAnswer, time_spent_ms: timeSpentMs }),
+  });
+}
+
 // --- 学习报告 API ---
 
 /**
@@ -885,4 +1119,370 @@ export async function getWeeklyTrend(): Promise<WeeklyTrendResponse> {
 export async function getWeakPoints(limit = 5): Promise<WeakPointsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
   return request<WeakPointsResponse>(`/report/weak-points?${params}`);
+}
+
+// --- 评估相关类型定义 ---
+
+/** 评估结果 */
+export interface AssessmentResult {
+  /** 评估 ID */
+  id: string;
+  /** 评估模式：compare（笔记比对）或 quiz（开放性问题） */
+  mode: 'compare' | 'quiz';
+  /** 评分详情 */
+  scores: Record<string, any>;
+  /** 综合评分 */
+  overall_score: number;
+  /** 改进建议 */
+  suggestions: string;
+  /** 问题列表（quiz 模式） */
+  quiz_questions?: Array<{ index: number; question: string; key_points: string[] }>;
+  /** 答题结果列表（quiz 模式） */
+  quiz_answers?: Array<Record<string, any>>;
+  /** 创建时间（ISO 8601 格式） */
+  created_at: string;
+}
+
+/** 评估历史条目 */
+export interface AssessmentHistoryItem {
+  /** 评估 ID */
+  id: string;
+  /** 评估模式 */
+  mode: string;
+  /** 综合评分 */
+  overall_score: number;
+  /** 创建时间（ISO 8601 格式） */
+  created_at: string;
+}
+
+// --- 评估 API ---
+
+/**
+ * 笔记比对评估
+ * 比较学习资料与个人笔记的内容覆盖度、深度和清晰度。
+ *
+ * @param materialNoteIds - 学习资料笔记 ID 列表
+ * @param personalNoteIds - 个人笔记 ID 列表
+ * @returns 评估结果
+ */
+export async function compareAssessment(materialNoteIds: string[], personalNoteIds: string[]): Promise<AssessmentResult> {
+  return request<AssessmentResult>('/assessment/compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      material_note_ids: materialNoteIds,
+      personal_note_ids: personalNoteIds,
+    }),
+  });
+}
+
+/**
+ * 生成开放性问题
+ * 基于学习资料生成开放性问题，供用户作答。
+ *
+ * @param materialNoteIds - 学习资料笔记 ID 列表
+ * @returns 评估结果（含问题列表）
+ */
+export async function generateQuiz(materialNoteIds: string[], personalNoteId?: string): Promise<AssessmentResult> {
+  const body: Record<string, any> = { material_note_ids: materialNoteIds };
+  if (personalNoteId) body.personal_note_id = personalNoteId;
+  return request<AssessmentResult>('/assessment/generate-quiz', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * 提交开放性问题答案
+ *
+ * @param assessmentId - 评估 ID
+ * @param answers - 答案列表
+ * @returns 评估结果（含评判结果）
+ */
+export async function submitQuizAnswers(assessmentId: string, answers: Array<{ question_index: number; answer: string }>): Promise<AssessmentResult> {
+  return request<AssessmentResult>('/assessment/submit-answer', {
+    method: 'POST',
+    body: JSON.stringify({
+      assessment_id: assessmentId,
+      answers,
+    }),
+  });
+}
+
+/**
+ * 获取笔记的评估历史
+ *
+ * @param noteId - 笔记 ID
+ * @returns 评估历史列表
+ */
+export async function getAssessmentHistory(noteId: string): Promise<AssessmentHistoryItem[]> {
+  return request<AssessmentHistoryItem[]>(`/assessment/history/${noteId}`);
+}
+
+// --- 知识图谱相关类型定义 ---
+
+/** 图谱节点，对应一张知识卡片 */
+export interface GraphNode {
+  /** 节点唯一标识（卡片 ID） */
+  id: string;
+  /** 卡片标题 */
+  title: string;
+  /** 卡片类型：concept / formula / qa / definition */
+  card_type: string;
+  /** 所属笔记 ID */
+  note_id: string;
+  /** 关联边数量 */
+  relation_count: number;
+}
+
+/** 图谱边，对应卡片间的关系 */
+export interface GraphEdge {
+  /** 边唯一标识 */
+  id: string;
+  /** 起点节点 ID */
+  source: string;
+  /** 终点节点 ID */
+  target: string;
+  /** 关系类型：related / prerequisite / subsequent / contrast */
+  relation_type: string;
+  /** 边状态：suggested / confirmed */
+  status: string;
+  /** 相似度分数 */
+  similarity_score: number | null;
+}
+
+/** 图谱数据，包含节点和边 */
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+/** 建议关系 */
+export interface SuggestedRelation {
+  /** 建议关系 ID */
+  id: string;
+  /** 卡片 1 ID */
+  card_id_1: string;
+  /** 卡片 2 ID */
+  card_id_2: string;
+  /** 卡片 1 标题 */
+  card_1_title: string;
+  /** 卡片 2 标题 */
+  card_2_title: string;
+  /** 相似度分数 */
+  similarity_score: number;
+}
+
+// --- 知识图谱 API ---
+
+/**
+ * 获取知识图谱数据
+ * 返回所有节点和边，用于力导向图可视化。
+ *
+ * @returns 图谱数据
+ */
+export async function getGraphData(): Promise<GraphData> {
+  return request<GraphData>('/graph');
+}
+
+/**
+ * 获取建议关系列表
+ * 返回系统自动检测到的潜在关联，供用户确认或拒绝。
+ *
+ * @returns 建议关系列表
+ */
+export async function getSuggestions(): Promise<{ items: SuggestedRelation[] }> {
+  return request<{ items: SuggestedRelation[] }>('/graph/suggestions');
+}
+
+/**
+ * 确认建议关系
+ * 将 suggested 状态的边转为 confirmed。
+ *
+ * @param relationId - 建议关系 ID
+ */
+export async function confirmRelation(relationId: string): Promise<any> {
+  return request('/graph/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ relation_id: relationId }),
+  });
+}
+
+/**
+ * 拒绝建议关系
+ * 删除 suggested 状态的边。
+ *
+ * @param relationId - 建议关系 ID
+ */
+export async function rejectRelation(relationId: string): Promise<any> {
+  return request('/graph/reject', {
+    method: 'POST',
+    body: JSON.stringify({ relation_id: relationId }),
+  });
+}
+
+/**
+ * 创建卡片间关系
+ * 手动在两张卡片之间建立指定类型的关联。
+ *
+ * @param cardId1 - 卡片 1 ID
+ * @param cardId2 - 卡片 2 ID
+ * @param relationType - 关系类型
+ */
+export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<any> {
+  return request('/graph/relation', {
+    method: 'POST',
+    body: JSON.stringify({ card_id_1: cardId1, card_id_2: cardId2, relation_type: relationType }),
+  });
+}
+
+/**
+ * 删除关系
+ * 删除已确认的关系边。
+ *
+ * @param relationId - 关系 ID
+ */
+export async function deleteRelation(relationId: string): Promise<any> {
+  return request(`/graph/relation/${relationId}`, {
+    method: 'DELETE',
+  });
+}
+
+// --- 文件夹相关类型定义 ---
+
+/** 文件夹内的笔记概要 */
+export interface NoteInFolder {
+  /** 笔记 ID */
+  id: string;
+  /** 笔记标题 */
+  title: string;
+  /** 来源类型 */
+  source_type: string;
+  /** 处理状态 */
+  status: string;
+  /** 文件大小（字节） */
+  file_size: number;
+  /** 创建时间（ISO 8601 格式） */
+  created_at: string;
+}
+
+/** 文件夹信息 */
+export interface Folder {
+  /** 文件夹 ID */
+  id: string;
+  /** 所属用户 ID */
+  user_id: string;
+  /** 文件夹名称 */
+  name: string;
+  /** 文件夹描述 */
+  description: string | null;
+  /** 文件夹日期（ISO 8601 格式） */
+  folder_date: string;
+  /** 创建时间（ISO 8601 格式） */
+  created_at: string;
+  /** 文件夹内笔记数量 */
+  note_count: number;
+}
+
+/** 文件夹详情，包含笔记列表 */
+export interface FolderDetail extends Folder {
+  /** 文件夹内的笔记列表 */
+  notes: NoteInFolder[];
+}
+
+// --- 文件夹 API ---
+
+/**
+ * 创建文件夹
+ *
+ * @param name - 文件夹名称
+ * @param description - 文件夹描述（可选）
+ * @param folderDate - 文件夹日期，ISO 格式如 "2024-01-15"（可选，默认今天）
+ * @returns 新创建的文件夹信息
+ */
+export async function createFolder(name: string, description?: string, folderDate?: string): Promise<Folder> {
+  return request<Folder>('/folders', {
+    method: 'POST',
+    body: JSON.stringify({ name, description, folder_date: folderDate }),
+  });
+}
+
+/**
+ * 获取文件夹列表
+ *
+ * @param days - 查询最近多少天的文件夹，默认 7 天
+ * @returns 文件夹列表
+ */
+export async function getFolders(days = 7): Promise<Folder[]> {
+  const params = new URLSearchParams({ days: String(days) });
+  return request<Folder[]>(`/folders?${params}`);
+}
+
+/**
+ * 获取文件夹详情（包含笔记列表）
+ *
+ * @param folderId - 文件夹 ID
+ * @returns 文件夹详情
+ */
+export async function getFolderDetail(folderId: string): Promise<FolderDetail> {
+  return request<FolderDetail>(`/folders/${folderId}`);
+}
+
+/**
+ * 更新文件夹信息（当前用于重命名）
+ *
+ * @param folderId - 文件夹 ID
+ * @param name - 新文件夹名称
+ * @returns 更新后的文件夹信息
+ */
+export async function updateFolder(folderId: string, name: string): Promise<Folder> {
+  return request<Folder>(`/folders/${folderId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+}
+
+/**
+ * 删除文件夹（仅允许删除空文件夹）
+ *
+ * @param folderId - 文件夹 ID
+ * @returns 操作结果
+ */
+export async function deleteFolder(folderId: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/folders/${folderId}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * 上传文件到指定文件夹
+ * 在原有 uploadFile 基础上增加 folder_id 参数。
+ *
+ * @param file - 要上传的文件对象
+ * @param folderId - 目标文件夹 ID
+ * @param backend - 解析后端选择（可选）
+ * @returns 新创建的笔记记录
+ */
+export async function uploadFileToFolder(file: File, folderId: string, backend?: string): Promise<Note> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('folder_id', folderId);
+  if (backend) formData.append('backend', backend);
+
+  const response = await fetch(`${API_BASE}/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `上传失败: ${response.status}`);
+  }
+
+  return response.json();
 }

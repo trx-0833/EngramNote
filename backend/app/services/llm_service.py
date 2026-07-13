@@ -33,7 +33,7 @@ import httpx
 
 from ..config import get_settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
 
 
@@ -61,17 +61,17 @@ class RateLimiter:
         """获取一个令牌，等待直到有可用令牌"""
         if self.max_rpm <= 0:
             return
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_refill
-            self._tokens = min(self.max_rpm, self._tokens + elapsed * (self.max_rpm / 60.0))
-            self._last_refill = now
-            if self._tokens >= 1:
-                self._tokens -= 1
-                return
-            wait_time = (1.0 - self._tokens) * (60.0 / self.max_rpm)
-        await asyncio.sleep(wait_time)
-        await self.acquire()
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last_refill
+                self._tokens = min(self.max_rpm, self._tokens + elapsed * (self.max_rpm / 60.0))
+                self._last_refill = now
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return
+                wait_time = (1.0 - self._tokens) * (60.0 / self.max_rpm)
+            await asyncio.sleep(wait_time)
 
 
 class ConversationSession:
@@ -92,6 +92,7 @@ class ConversationSession:
         max_tokens: int = 4096,
         response_format: Optional[Dict] = None,
         max_context_pairs: int = 30,
+        scene: Optional[str] = None,
     ):
         """
         Args:
@@ -101,6 +102,7 @@ class ConversationSession:
             max_tokens: 最大生成 token 数
             response_format: 响应格式约束
             max_context_pairs: 保留的最大对话轮次（1轮=1 user + 1 assistant）
+            scene: 场景标识，用于日志记录
         """
         self._llm = llm_service
         self._messages: List[Dict[str, str]] = [
@@ -110,6 +112,7 @@ class ConversationSession:
         self._max_tokens = max_tokens
         self._response_format = response_format
         self._max_context_pairs = max_context_pairs
+        self._scene = scene
 
     async def ask(self, user_content: str) -> str:
         """
@@ -130,6 +133,7 @@ class ConversationSession:
             temperature=self._temperature,
             max_tokens=self._max_tokens,
             response_format=self._response_format,
+            scene=self._scene,
         )
         self._messages.append({"role": "assistant", "content": response})
         self._trim_if_needed()
@@ -154,8 +158,246 @@ class ConversationSession:
 
     @property
     def turn_count(self) -> int:
-        """当前对话轮次（1轮 = 1次 ask 调用）"""
+        """当前对话轮次(1轮 = 1次 ask 调用)"""
         return (len(self._messages) - 1) // 2
+
+
+class UnderstandingSession(ConversationSession):
+    """
+    知识提取专用会话:用轻量级标题列表替代完整历史原文
+
+    与基类 ConversationSession 的区别:
+    - 不在 _messages 中累积历史 user/assistant 消息(避免 Token 浪费)
+    - 维护 _extracted_titles 列表,每次 ask() 后从容错解析响应中提取新标题
+    - 下次 ask() 时,在 user_content 末尾追加"[已提取知识点标题(请勿重复)]"提示
+    - 第N轮请求只包含 system + 当前章节 + 之前所有标题,不包含历史原文
+
+    属性语义:
+    - turn_count: ask() 调用次数(与基类语义一致,用于"对话轮次"日志)
+    - extracted_titles_count: 已提取标题总数(用于业务统计,可能大于 turn_count)
+
+    Token 节省:第N轮请求的 input tokens 从 O(N×章节长度) 降为 O(章节长度 + N×标题长度)
+    实测 17 章文档第6轮:从 ~72000 tokens 降为 ~8100 tokens(节省 89%)
+    """
+
+    MAX_TITLES = 200  # 标题列表上限,防止极端长文档导致列表本身过长
+
+    def __init__(self, llm_service: "LLMService", system_prompt: str, **kwargs):
+        super().__init__(llm_service, system_prompt, **kwargs)
+        self._extracted_titles: List[str] = []
+        self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
+
+    async def ask(self, user_content: str) -> str:
+        """
+        知识提取专用 ask:不累积历史原文,只追加已提取标题列表
+
+        Args:
+            user_content: 当前批次的章节合并内容(由调用方构建)
+
+        Returns:
+            str: LLM 响应(JSON 字符串)
+        """
+        # 构建去重提示:当前内容 + 已提取标题(如有)
+        context_hint = ""
+        if self._extracted_titles:
+            titles = self._extracted_titles[-self.MAX_TITLES:]
+            context_hint = (
+                "\n\n[已提取知识点标题(请勿重复提取以下知识点)]:\n"
+                + "\n".join(f"- {t}" for t in titles)
+            )
+
+        # 关键优化:每次只用 system + 当前 user 消息,不累积历史
+        messages = [
+            self._messages[0],  # system
+            {"role": "user", "content": user_content + context_hint},
+        ]
+
+        response = await self._llm.chat(
+            messages,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            response_format=self._response_format,
+            scene=self._scene,
+        )
+
+        # 解析响应,提取新标题加入轻量级列表(容错,失败不阻塞主流程)
+        self._ask_count += 1
+        self._extract_new_titles(response)
+
+        return response
+
+    def _extract_new_titles(self, response: str) -> None:
+        """
+        从多章节 JSON 响应中提取知识点标题,追加到 _extracted_titles
+
+        支持的响应格式(与 _parse_understanding_response 对齐):
+        - 多章节: {"chapters": [{"points": [{"title": "..."}, ...]}, ...]}
+        - 单章节(兼容): {"summary": "...", "points": [{"title": "..."}, ...]}
+
+        解析失败时记 warning 日志,不抛异常(降级为本轮无去重提示)。
+        """
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            logger.warning(
+                f"UnderstandingSession 标题提取:JSON 解析失败,本轮降级为无去重: {response[:200]}"
+            )
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        # 多章节格式
+        chapters = data.get("chapters")
+        if isinstance(chapters, list):
+            for ch in chapters:
+                if isinstance(ch, dict):
+                    for p in ch.get("points", []) or []:
+                        if isinstance(p, dict) and p.get("title"):
+                            self._extracted_titles.append(str(p["title"]))
+            return
+
+        # 单章节格式(兼容)
+        for key in ["points", "knowledge_points", "items", "data"]:
+            points = data.get(key)
+            if isinstance(points, list):
+                for p in points:
+                    if isinstance(p, dict) and p.get("title"):
+                        self._extracted_titles.append(str(p["title"]))
+                return
+
+    @property
+    def turn_count(self) -> int:
+        """ask() 调用次数(与基类语义一致,基类按 _messages 长度推算,子类不累积消息故单独计数)"""
+        return self._ask_count
+
+    @property
+    def extracted_titles_count(self) -> int:
+        """已提取的标题总数(用于日志)"""
+        return len(self._extracted_titles)
+
+
+class CombinedAnalysisSession(ConversationSession):
+    """
+    联合分析专用会话:用轻量级标题列表替代完整历史原文
+
+    与 UnderstandingSession 类似的轻量级模式:
+    - 不在 _messages 中累积历史 user/assistant 消息(避免 Token 浪费)
+    - 维护 _extracted_titles 列表,每次 ask() 后从容错解析响应中提取新标题
+    - 下次 ask() 时,在 user_content 末尾追加"[已提取知识点标题(请勿重复)]"提示
+    - 第N轮请求只包含 system + 当前章节资料 + 用户笔记 + 之前所有标题
+
+    与 UnderstandingSession 的区别:
+    - ask() 接收双参数:material_chapter_content(章节资料) + personal_note_content(用户笔记全文)
+    - 响应结构包含 regular_points(已掌握) 和 blind_spots(盲点) 两类
+    - _extract_new_titles 同时从两个键提取标题
+
+    Token 节省:与 UnderstandingSession 同思路,从 O(N×章节长度) 降为 O(章节长度 + N×标题长度)
+    """
+
+    MAX_TITLES = 200  # 标题列表上限,防止极端长文档导致列表本身过长
+
+    def __init__(self, llm_service: "LLMService", system_prompt: str, **kwargs):
+        super().__init__(llm_service, system_prompt, **kwargs)
+        self._extracted_titles: List[str] = []
+        self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
+
+    async def ask(self, material_chapter_content: str, personal_note_content: str) -> str:
+        """
+        联合分析专用 ask:不累积历史原文,只追加已提取标题列表
+
+        Args:
+            material_chapter_content: 当前章节学习资料
+            personal_note_content: 用户笔记全文
+
+        Returns:
+            str: LLM 响应(JSON 字符串)
+        """
+        # 构建去重提示:已提取标题(如有)
+        context_hint = ""
+        if self._extracted_titles:
+            titles = self._extracted_titles[-self.MAX_TITLES:]
+            context_hint = (
+                "\n\n[已提取知识点标题(请勿重复提取以下知识点)]:\n"
+                + "\n".join(f"- {t}" for t in titles)
+            )
+
+        # 关键优化:每次只用 system + 当前 user 消息,不累积历史
+        user_content = (
+            f"## 本章节学习资料：\n{material_chapter_content}\n\n"
+            f"## 用户笔记（全文）：\n{personal_note_content}\n\n"
+            f"请针对本章节资料与用户笔记做联合分析。"
+            + context_hint
+        )
+        messages = [
+            self._messages[0],  # system
+            {"role": "user", "content": user_content},
+        ]
+
+        response = await self._llm.chat(
+            messages,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            response_format=self._response_format,
+            scene=self._scene,
+        )
+
+        # 解析响应,提取新标题加入轻量级列表(容错,失败不阻塞主流程)
+        self._ask_count += 1
+        self._extract_new_titles(response)
+
+        return response
+
+    def _extract_new_titles(self, response: str) -> None:
+        """
+        从联合分析 JSON 响应中提取知识点标题,追加到 _extracted_titles
+
+        支持的响应格式:
+        - 联合分析: {"chapter_title": "...", "regular_points": [{"title": "..."}], "blind_spots": [{"title": "..."}]}
+        - 多章节(兼容): {"chapters": [{"points": [{"title": "..."}, ...]}, ...]}
+        - 单章节(兼容): {"points": [{"title": "..."}, ...]}
+
+        解析失败时记 warning 日志,不抛异常(降级为本轮无去重提示)。
+        """
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            logger.warning(
+                f"CombinedAnalysisSession 标题提取:JSON 解析失败,本轮降级为无去重: {response[:200]}"
+            )
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        # 多章节格式(兼容 UnderstandingSession)
+        chapters = data.get("chapters")
+        if isinstance(chapters, list):
+            for ch in chapters:
+                if isinstance(ch, dict):
+                    for p in ch.get("points", []) or []:
+                        if isinstance(p, dict) and p.get("title"):
+                            self._extracted_titles.append(str(p["title"]))
+            return
+
+        # 联合分析格式:同时提取 regular_points 和 blind_spots 中的标题
+        # 兼容单章节格式:遍历所有 points-like 键
+        for key in ["regular_points", "blind_spots", "points", "knowledge_points", "items", "data"]:
+            points = data.get(key)
+            if isinstance(points, list):
+                for p in points:
+                    if isinstance(p, dict) and p.get("title"):
+                        self._extracted_titles.append(str(p["title"]))
+
+    @property
+    def turn_count(self) -> int:
+        """ask() 调用次数(与基类语义一致,基类按 _messages 长度推算,子类不累积消息故单独计数)"""
+        return self._ask_count
+
+    @property
+    def extracted_titles_count(self) -> int:
+        """已提取的标题总数(用于日志)"""
+        return len(self._extracted_titles)
 
 
 class LLMService:
@@ -189,6 +431,7 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         response_format: Optional[Dict] = None,
+        scene: Optional[str] = None,
     ) -> str:
         """
         通用聊天接口（OpenAI 兼容格式）
@@ -219,6 +462,14 @@ class LLMService:
         if response_format:
             payload["response_format"] = response_format
 
+        logger.debug(
+            f"LLM 请求 | scene={scene} | provider={self._provider} | model={self._model} | "
+            f"temperature={temperature} | max_tokens={max_tokens} | url={url}\n"
+            f"messages={json.dumps(messages, ensure_ascii=False, indent=2)}"
+        )
+
+        start_time = time.monotonic()
+
         async with self._semaphore:
             await self._rate_limiter.acquire()
 
@@ -229,13 +480,18 @@ class LLMService:
                         resp = await client.post(url, json=payload, headers=headers)
                         resp.raise_for_status()
                         data = resp.json()
-                        return data["choices"][0]["message"]["content"]
+                        elapsed_ms = (time.monotonic() - start_time) * 1000
+                        usage = data.get("usage", {})
+                        content = data["choices"][0]["message"]["content"]
+                        logger.info(
+                            f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
+                            f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
+                            f"total_tokens={usage.get('total_tokens')} | elapsed={elapsed_ms:.0f}ms\n"
+                            f"response={content}"
+                        )
+                        return content
                 except Exception as e:
                     last_error = e
-                    logger.warning(
-                        f"LLM API 调用失败 (attempt {attempt + 1}/{self._max_retries}, "
-                        f"provider={self._provider}, model={self._model}): {e}"
-                    )
                     if attempt < self._max_retries - 1:
                         if "429" in str(e):
                             delay = min(30 * (attempt + 1), 120)
@@ -243,11 +499,21 @@ class LLMService:
                         else:
                             delay = min(self._retry_delay * (2 ** attempt), 60)
                             delay = delay * (0.5 + random.random() * 0.5)
+                        logger.warning(
+                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
+                            f"provider={self._provider} | model={self._model} | error={e} | "
+                            f"next_delay={delay:.1f}s"
+                        )
                         await asyncio.sleep(delay)
+                    else:
+                        logger.warning(
+                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
+                            f"provider={self._provider} | model={self._model} | error={e}"
+                        )
 
         raise Exception(
             f"LLM API 调用失败，重试 {self._max_retries} 次后仍出错 "
-            f"(provider={self._provider}, model={self._model}): {last_error}"
+            f"(scene={scene}, provider={self._provider}, model={self._model}): {last_error}"
         )
 
     async def summarize_chapter(self, chapter_title: str, chapter_content: str) -> str:
@@ -280,7 +546,7 @@ class LLMService:
                 "content": f"章节标题：{chapter_title}\n\n章节内容：\n{chapter_content}",
             },
         ]
-        return await self.chat(messages, temperature=0.3, max_tokens=1024)
+        return await self.chat(messages, temperature=0.3, max_tokens=1024, scene="summarize_chapter")
 
     async def extract_knowledge_points(
         self, chapter_title: str, chapter_content: str
@@ -336,6 +602,7 @@ class LLMService:
             temperature=0.3,
             max_tokens=4096,
             response_format={"type": "json_object"},
+            scene="extract_knowledge",
         )
 
         try:
@@ -429,6 +696,7 @@ class LLMService:
             temperature=0.5,
             max_tokens=4096,
             response_format={"type": "json_object"},
+            scene="generate_questions",
         )
 
         try:
@@ -521,6 +789,7 @@ class LLMService:
             temperature=0.5,
             max_tokens=8192,
             response_format={"type": "json_object"},
+            scene="generate_questions",
         )
 
         try:
@@ -599,7 +868,7 @@ class LLMService:
                 "content": f"参考资料：\n{context}\n\n问题：{question}",
             },
         ]
-        return await self.chat(messages, temperature=0.5, max_tokens=2048)
+        return await self.chat(messages, temperature=0.5, max_tokens=2048, scene="rag_answer")
 
     def create_understanding_session(self) -> ConversationSession:
         """
@@ -639,13 +908,14 @@ class LLMService:
             "4. 不要与之前已提取的知识点重复\n"
             "5. 只返回 JSON 对象，不要其他文字"
         )
-        return ConversationSession(
+        return UnderstandingSession(
             self,
             system_prompt,
             temperature=0.3,
             max_tokens=4096,
             response_format={"type": "json_object"},
             max_context_pairs=30,
+            scene="extract_knowledge",
         )
 
     def create_question_session(self) -> ConversationSession:
@@ -686,3 +956,181 @@ class LLMService:
             response_format={"type": "json_object"},
             max_context_pairs=30,
         )
+
+    def create_combined_analysis_session(self) -> ConversationSession:
+        """
+        创建联合分析的多轮对话会话
+
+        将学习资料各章节 + 用户笔记全文依次送入,LLM 对每个章节做联合分析:
+        - regular_points: 资料和用户笔记都覆盖到的知识点
+        - blind_spots: 资料中有但用户笔记未覆盖到的知识点
+
+        Returns:
+            CombinedAnalysisSession: 联合分析对话会话
+        """
+        system_prompt = (
+            "你是一个专业的学习分析助手。我将依次给你学习资料的各个章节以及用户的完整笔记，请对每个章节做联合分析。\n\n"
+            "知识点类型说明：\n"
+            "- concept: 概念类，需要理解记忆的知识点\n"
+            "- formula: 公式类，数学公式、化学方程式等\n"
+            "- qa: 问答对，以问答形式呈现的知识\n"
+            "- definition: 定义类，需要精确记忆的定义\n\n"
+            "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
+            "{\n"
+            '  "chapter_title": "章节标题",\n'
+            '  "regular_points": [\n'
+            '    {"card_type": "concept", "title": "知识点标题", "content": "知识点内容", '
+            '"source_text": "原始出处文本", "is_key_point": false, "is_difficulty": false}\n'
+            "  ],\n"
+            '  "blind_spots": [\n'
+            '    {"card_type": "concept", "title": "盲点知识点标题", "content": "盲点内容", '
+            '"source_text": "原始出处文本", "is_key_point": false, "is_difficulty": false}\n'
+            "  ]\n"
+            "}\n\n"
+            "要求：\n"
+            "1. regular_points：资料和用户笔记都覆盖到的知识点\n"
+            "2. blind_spots：资料中有但用户笔记未覆盖到的知识点\n"
+            "3. is_key_point/is_difficulty：根据知识点重要性和难度给出 true/false 建议\n"
+            "4. 每个知识点应独立完整，不依赖上下文也能理解\n"
+            "5. source_text 应尽量引用资料原文\n"
+            "6. 不要与之前已提取的知识点重复\n"
+            "7. 只返回 JSON 对象，不要其他文字"
+        )
+        return CombinedAnalysisSession(
+            self,
+            system_prompt,
+            temperature=0.3,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
+            max_context_pairs=30,
+            scene="extract_combined",
+        )
+
+    async def generate_extension_knowledge(
+        self,
+        card_title: str,
+        card_content: str,
+        material_context: str = "",
+    ) -> List[Dict[str, Any]]:
+        """
+        基于已掌握的父卡片 + 关联资料生成进阶拓展知识点
+
+        Args:
+            card_title: 父卡片标题
+            card_content: 父卡片内容
+            material_context: 关联资料上下文(可选)
+
+        Returns:
+            List[Dict]: 拓展知识点列表,每个包含:
+                - card_type: 类型(默认 concept)
+                - title: 拓展知识点标题
+                - content: 拓展知识点内容
+                - source_text: 原始出处文本或空
+        """
+        system_prompt = (
+            "你是一个专业的知识拓展助手。我将给你一个已掌握的知识点及其关联资料，请生成1-3个进阶拓展知识点。\n\n"
+            "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
+            "{\n"
+            '  "extensions": [\n'
+            '    {"card_type": "concept", "title": "拓展知识点标题", "content": "拓展知识点内容", '
+            '"source_text": "原始出处文本或空"}\n'
+            "  ]\n"
+            "}\n\n"
+            "要求：\n"
+            "1. 拓展知识点应在原知识点基础上有进阶、关联或深化\n"
+            "2. 每个知识点应独立完整\n"
+            "3. 只返回 JSON 对象，不要其他文字"
+        )
+        user_prompt = (
+            f"## 已掌握知识点：\n标题：{card_title}\n内容：{card_content}\n\n"
+            f"## 关联资料：\n{material_context}\n\n"
+            f"请生成1-3个进阶拓展知识点。"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        response = await self.chat(
+            messages,
+            temperature=0.5,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
+            scene="generate_extension",
+        )
+
+        try:
+            result = json.loads(response)
+            if isinstance(result, dict):
+                return result.get("extensions", [])
+            return []
+        except json.JSONDecodeError:
+            logger.warning(f"拓展知识点生成结果 JSON 解析失败: {response[:200]}")
+            return []
+
+    async def infer_card_relations(
+        self,
+        cards_summary: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        批量推断卡片间语义关系(前置/后续/对比)
+
+        Args:
+            cards_summary: 卡片摘要列表,每个含 {id, title, card_type, content}
+                (content 将被截断到 300 字)
+
+        Returns:
+            List[Dict]: 关系列表,每个包含:
+                - card_id_a: 卡片A的id
+                - card_id_b: 卡片B的id
+                - relation_type: 关系类型(prerequisite/subsequent/contrast)
+                - reason: 推断理由
+        """
+        system_prompt = (
+            "你是一个专业的知识图谱构建助手。我将给你若干知识卡片的摘要，请推断它们之间的语义关系。\n\n"
+            "关系类型说明：\n"
+            "- prerequisite: card_a 是 card_b 的前置知识（学 a 才能懂 b）\n"
+            "- subsequent: card_a 是 card_b 的后续知识（b 的延伸是 a）\n"
+            "- contrast: 两张卡片内容形成对比\n\n"
+            "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
+            "{\n"
+            '  "relations": [\n'
+            '    {"card_id_a": "卡片id1", "card_id_b": "卡片id2", '
+            '"relation_type": "prerequisite", "reason": "推断理由"}\n'
+            "  ]\n"
+            "}\n\n"
+            "要求：\n"
+            "1. 只推断确实存在的关系，不要强行关联\n"
+            "2. relation_type 必须是 prerequisite/subsequent/contrast 之一\n"
+            "3. card_id_a 和 card_id_b 必须是给定卡片列表中的 id\n"
+            "4. 每对卡片最多一种关系\n"
+            "5. 只返回 JSON 对象，不要其他文字"
+        )
+        # 把 cards_summary 格式化为文本,每个卡片一行(content 截断到 300 字)
+        cards_text_lines = []
+        for c in cards_summary:
+            cards_text_lines.append(
+                f"- [id={c['id']}] {c['title']} ({c['card_type']}): {c['content'][:300]}"
+            )
+        user_prompt = "\n".join(cards_text_lines)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        response = await self.chat(
+            messages,
+            temperature=0.3,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
+            scene="infer_relations",
+        )
+
+        try:
+            result = json.loads(response)
+            if isinstance(result, dict):
+                return result.get("relations", [])
+            return []
+        except json.JSONDecodeError:
+            logger.warning(f"卡片关系推断结果 JSON 解析失败: {response[:200]}")
+            return []

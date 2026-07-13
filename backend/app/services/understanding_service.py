@@ -12,7 +12,7 @@ AI 理解管道服务模块
 - 检测知识卡片之间的重复
 
 设计决策：
-- 章节切分基于 Markdown 标题（#、##、###），不依赖 NLP
+- 章节切分基于 Markdown 标题（#、##、###、####），不依赖 NLP
 - 没有标题的文本归入"未命名章节"
 - 所有章节在同一对话窗口内处理，LLM 可参考之前结果避免重复
 - 摘要和知识点提取合并为一次 API 调用，减少请求次数
@@ -22,7 +22,7 @@ AI 理解管道服务模块
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -39,10 +39,13 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
     根据 Markdown 标题层级切分章节
 
     切分策略：
-    - 按 #、##、### 标题切分
+    - 按 #、##、###、#### 标题切分
     - 没有标题的文本作为"未命名章节"
     - 每个章节保留标题和内容
     - 记录章节在原文中的位置索引
+    - 跟踪标题层级路径（hierarchical_path）
+    - 合并短章节（内容 < 200 字符）
+    - 拆分长章节（内容 > 8000 字符）
 
     Args:
         markdown_text: Markdown 格式的文本
@@ -52,18 +55,20 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
             - chapter_index: 章节索引（从0开始）
             - chapter_title: 章节标题
             - content: 章节内容（不含标题行）
-            - level: 标题层级（1-3，0表示未命名章节）
+            - level: 标题层级（1-4，0表示未命名章节）
+            - hierarchical_path: 标题层级路径（如 "一级 > 二级 > 三级"）
     """
     if not markdown_text or not markdown_text.strip():
         return []
 
     lines = markdown_text.split("\n")
     chapters: List[Dict[str, Any]] = []
+    heading_stack: List[Tuple[int, str]] = []  # [(level, title), ...]
     current_chapter: Optional[Dict[str, Any]] = None
     unnamed_index = 0
 
-    # 匹配 Markdown 标题行（# 到 ###）
-    heading_pattern = re.compile(r"^(#{1,3})\s+(.+)$")
+    # 匹配 Markdown 标题行（# 到 ####）
+    heading_pattern = re.compile(r"^(#{1,4})\s+(.+)$")
 
     for line in lines:
         match = heading_pattern.match(line)
@@ -74,21 +79,34 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
 
             level = len(match.group(1))
             title = match.group(2).strip()
+
+            # 更新标题栈：弹出同级或更深层的标题
+            while heading_stack and heading_stack[-1][0] >= level:
+                heading_stack.pop()
+            heading_stack.append((level, title))
+            hierarchical_path = " > ".join(h[1] for h in heading_stack)
+
             current_chapter = {
                 "chapter_index": len(chapters),
                 "chapter_title": title,
                 "content": "",
                 "level": level,
+                "hierarchical_path": hierarchical_path,
             }
         else:
             # 非标题行，追加到当前章节
             if current_chapter is None:
                 # 标题前的文本，归入未命名章节
+                chapter_title = f"未命名章节_{unnamed_index}"
+                heading_stack_copy = heading_stack.copy()
+                heading_stack_copy.append((0, chapter_title))
+                hierarchical_path = " > ".join(h[1] for h in heading_stack_copy)
                 current_chapter = {
                     "chapter_index": 0,
-                    "chapter_title": f"未命名章节_{unnamed_index}",
+                    "chapter_title": chapter_title,
                     "content": "",
                     "level": 0,
+                    "hierarchical_path": hierarchical_path,
                 }
                 unnamed_index += 1
             current_chapter["content"] += line + "\n"
@@ -108,9 +126,55 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
             "chapter_title": "全文",
             "content": markdown_text,
             "level": 0,
+            "hierarchical_path": "全文",
         })
 
-    return chapters
+    # 合并短章节（内容 < 200 字符）
+    merged: List[Dict[str, Any]] = []
+    for chapter in chapters:
+        if merged and len(chapter["content"].strip()) < 200:
+            # 合并到前一个章节
+            merged[-1]["content"] += "\n\n" + chapter["content"]
+        else:
+            merged.append(chapter)
+
+    # 合并后重新编号
+    for i, chapter in enumerate(merged):
+        chapter["chapter_index"] = i
+    chapters = merged
+
+    # 拆分长章节（内容 > 8000 字符）
+    result: List[Dict[str, Any]] = []
+    for chapter in chapters:
+        if len(chapter["content"]) > 8000:
+            # 按段落边界拆分
+            paragraphs = re.split(r"\n\n+", chapter["content"])
+            sub_parts: List[str] = []
+            current_part = ""
+            for para in paragraphs:
+                if para.strip():
+                    if len(current_part) + len(para) > 8000 and current_part:
+                        sub_parts.append(current_part)
+                        current_part = para + "\n\n"
+                    else:
+                        current_part += para + "\n\n"
+            if current_part.strip():
+                sub_parts.append(current_part)
+
+            for idx, part in enumerate(sub_parts):
+                suffix = f" (续{idx + 1})" if len(sub_parts) > 1 else ""
+                result.append({
+                    "chapter_index": len(result),
+                    "chapter_title": chapter["chapter_title"] + suffix,
+                    "content": part,
+                    "level": chapter["level"],
+                    "hierarchical_path": chapter["hierarchical_path"] + suffix,
+                })
+        else:
+            chapter["chapter_index"] = len(result)
+            result.append(chapter)
+
+    return result
 
 
 async def generate_chapter_summary(
@@ -437,7 +501,7 @@ async def detect_card_duplicates(
         select(KnowledgeCard).where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.id != card.id,
-        )
+        ).limit(500)
     )
     existing_cards = result.scalars().all()
     if not existing_cards:

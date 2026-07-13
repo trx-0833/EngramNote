@@ -1,11 +1,11 @@
 /**
  * @file 统一标签映射
- * @description 集中管理各页面共用的标签映射，消除重复定义
+ * @description 集中管理各页面共用的标签映射，颜色更和谐
  */
 
 /** 来源类型到中文标签的映射 */
 export const sourceTypeLabels: Record<string, string> = {
-  pdf: 'PDF', image: '图片', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', audio: '音频', video: '视频',
+  pdf: 'PDF', image: '图片', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', audio: '音频', video: '视频', markdown: 'Markdown',
 }
 
 /** 笔记状态到中文标签的映射 */
@@ -22,7 +22,7 @@ export const cardTypeLabels: Record<string, string> = {
 
 /** 知识卡片类型到颜色的映射 */
 export const cardTypeColors: Record<string, string> = {
-  concept: '#3b82f6', formula: '#8b5cf6', qa: '#10b981', definition: '#f59e0b',
+  concept: '#0f3460', formula: '#6d28d9', qa: '#2d8a56', definition: '#c9a959',
 }
 
 /** 题目类型到中文标签的映射 */
@@ -32,7 +32,7 @@ export const questionTypeLabels: Record<string, string> = {
 
 /** 题目类型到颜色的映射 */
 export const questionTypeColors: Record<string, string> = {
-  choice: '#3b82f6', fill_blank: '#8b5cf6', short_answer: '#10b981',
+  choice: '#0f3460', fill_blank: '#6d28d9', short_answer: '#2d8a56',
 }
 
 /** 难度到中文标签的映射 */
@@ -42,5 +42,15 @@ export const difficultyLabels: Record<string, string> = {
 
 /** 难度到颜色的映射 */
 export const difficultyColors: Record<string, string> = {
-  easy: '#10b981', medium: '#f59e0b', hard: '#ef4444',
+  easy: '#2d8a56', medium: '#c9a959', hard: '#c0392b',
+}
+
+/** 知识卡片分类到中文标签的映射 */
+export const cardCategoryLabels: Record<string, string> = {
+  regular: '常规', blind_spot: '盲点', extension: '拓展',
+}
+
+/** 知识卡片分类到颜色的映射 */
+export const cardCategoryColors: Record<string, string> = {
+  regular: '#6b7280', blind_spot: '#c0392b', extension: '#2d8a56',
 }

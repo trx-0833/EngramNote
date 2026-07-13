@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getNotes, getArchivedNotes, deleteNote, type Note } from '../api/client'
+import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
@@ -39,8 +39,13 @@ export default function NotesList() {
   const [page, setPage] = useState(1)
   /** 搜索关键词 */
   const [keyword, setKeyword] = useState('')
-  /** 是否只显示已归档笔记 */
-  const [showArchived, setShowArchived] = useState(false)
+  /** 当前笔记角色筛选：material=学习资料，personal_note=我的笔记 */
+  const [noteRole, setNoteRole] = useState<'material' | 'personal_note'>('material')
+  /** 各角色下是否只显示已审阅笔记，保持两个 Tab 下已审阅筛选独立 */
+  const [archivedByRole, setArchivedByRole] = useState<Record<string, boolean>>({
+    material: false,
+    personal_note: false,
+  })
   /** 数据加载状态 */
   const [loading, setLoading] = useState(true)
   /** 错误信息 */
@@ -54,9 +59,10 @@ export default function NotesList() {
     setLoading(true)
     setError('')
     try {
+      const showArchived = archivedByRole[noteRole]
       const res = showArchived
-        ? await getArchivedNotes(page, pageSize)
-        : await getNotes(page, pageSize, keyword || undefined)
+        ? await getArchivedNotes(page, pageSize, noteRole)
+        : await getNotes(page, pageSize, keyword || undefined, noteRole)
       setNotes(res.items)
       setTotal(res.total)
     } catch (err) {
@@ -68,7 +74,7 @@ export default function NotesList() {
 
   useEffect(() => {
     fetchNotes()
-  }, [page, keyword, showArchived])
+  }, [page, keyword, noteRole, archivedByRole[noteRole]])
 
   /**
    * 处理删除笔记
@@ -80,7 +86,7 @@ export default function NotesList() {
   async function handleDelete(noteId: string, e: React.MouseEvent) {
     e.stopPropagation() // 阻止冒泡，避免触发卡片 onClick 导航
     // 删除操作不可恢复，需要用户二次确认
-    if (!confirm('确定删除此笔记？此操作不可恢复。')) return
+    if (!confirm('确定删除此笔记？将同时删除关联的知识卡片、练习题目、复习记录和图谱关系。此操作不可恢复。')) return
 
     try {
       await deleteNote(noteId)
@@ -92,39 +98,84 @@ export default function NotesList() {
     }
   }
 
+  /**
+   * 处理重试转换失败的笔记
+   * 调用 retryConvert API，成功后更新本地状态
+   */
+  async function handleRetry(noteId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      const result = await retryConvert(noteId)
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === noteId
+            ? { ...n, status: result.status, error_message: result.error_message }
+            : n
+        )
+      )
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '重试失败')
+    }
+  }
+
   /** 计算总页数，用于分页控件 */
   const totalPages = Math.ceil(total / pageSize)
 
   return (
-    <div style={{ padding: 'var(--space-lg) 0' }}>
+    <div className="page-enter">
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
       <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
-        <input
-          type="search"
-          placeholder="搜索笔记标题..."
-          value={keyword}
-          onChange={(e) => { setKeyword(e.target.value); setPage(1) }}
-          style={{ maxWidth: '400px' }}
-          aria-label="搜索笔记"
-        />
+        <div className="search-input-wrapper">
+          <svg className="search-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="search"
+            placeholder="搜索笔记标题..."
+            value={keyword}
+            onChange={(e) => { setKeyword(e.target.value); setPage(1) }}
+            aria-label="搜索笔记"
+          />
+        </div>
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
           共 {total} 条
         </span>
       </div>
 
+      {/* 笔记角色 Tab 切换：学习资料 / 我的笔记 */}
+      <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)', flexWrap: 'wrap' }}>
+        <button
+          className={`filter-pill ${noteRole === 'material' ? 'filter-pill-active' : ''}`}
+          onClick={() => { setNoteRole('material'); setPage(1) }}
+        >
+          学习资料
+        </button>
+        <button
+          className={`filter-pill ${noteRole === 'personal_note' ? 'filter-pill-active' : ''}`}
+          onClick={() => { setNoteRole('personal_note'); setPage(1) }}
+        >
+          我的笔记
+        </button>
+      </div>
+
       {/* 筛选标签：全部 / 已审阅 */}
       <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
         <button
-          className={`btn ${!showArchived ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ fontSize: '0.8rem' }}
-          onClick={() => { setShowArchived(false); setPage(1) }}
+          className={`filter-pill ${!archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
+          onClick={() => {
+            setArchivedByRole(prev => ({ ...prev, [noteRole]: false }))
+            setPage(1)
+          }}
         >
           全部
         </button>
         <button
-          className={`btn ${showArchived ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ fontSize: '0.8rem' }}
-          onClick={() => { setShowArchived(true); setPage(1) }}
+          className={`filter-pill ${archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
+          onClick={() => {
+            setArchivedByRole(prev => ({ ...prev, [noteRole]: true }))
+            setPage(1)
+          }}
         >
           已审阅
         </button>
@@ -148,7 +199,7 @@ export default function NotesList() {
           {notes.map((note) => (
             <article
               key={note.id}
-              className="card"
+              className="card card-hover"
               style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               onClick={() => navigate(`/notes/${note.id}`)}
               role="button"
@@ -190,6 +241,17 @@ export default function NotesList() {
               </div>
               {/* 操作按钮区域 */}
               <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                {/* 重试按钮，仅 failed 状态显示 */}
+                {note.status === 'failed' && (
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                    onClick={(e) => handleRetry(note.id, e)}
+                    aria-label={`重试 ${note.title}`}
+                  >
+                    重试
+                  </button>
+                )}
                 {/* 删除按钮，需要阻止事件冒泡 */}
                 <button
                   className="btn btn-danger"

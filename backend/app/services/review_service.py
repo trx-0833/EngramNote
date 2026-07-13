@@ -32,7 +32,7 @@ from ..services.sm2_service import calculate_sm2, quality_from_answer
 logger = logging.getLogger(__name__)
 
 
-DAILY_REVIEW_LIMIT = 50  # 每日最大答题数
+DAILY_REVIEW_LIMIT = 10  # 每日最大答题数
 
 
 async def get_due_quizzes(
@@ -116,6 +116,7 @@ async def submit_answer(
     user_answer: str,
     time_spent_ms: int,
     db: AsyncSession,
+    skip_daily_limit: bool = False,
 ) -> Dict[str, Any]:
     """
     提交答案并更新 SM-2 调度参数
@@ -134,6 +135,7 @@ async def submit_answer(
         user_answer: 用户答案
         time_spent_ms: 答题耗时（毫秒）
         db: 数据库会话
+        skip_daily_limit: 是否跳过每日答题限额检查（快速复习场景使用）
 
     Returns:
         Dict: 判分结果，包含 is_correct, quality, correct_answer, explanation, next_review_at 等
@@ -149,18 +151,19 @@ async def submit_answer(
     if not quiz:
         return {"error": "题目不存在"}
 
-    # 1.5 检查每日答题限额
+    # 1.5 检查每日答题限额（快速复习场景跳过此检查）
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_done_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
-            ReviewLog.user_id == user_id,
-            ReviewLog.review_at >= today_start,
+    if not skip_daily_limit:
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_done_result = await db.execute(
+            select(func.count()).select_from(ReviewLog).where(
+                ReviewLog.user_id == user_id,
+                ReviewLog.review_at >= today_start,
+            )
         )
-    )
-    today_done = today_done_result.scalar() or 0
-    if today_done >= DAILY_REVIEW_LIMIT:
-        return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {DAILY_REVIEW_LIMIT}"}
+        today_done = today_done_result.scalar() or 0
+        if today_done >= DAILY_REVIEW_LIMIT:
+            return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {DAILY_REVIEW_LIMIT}"}
 
     # 2. 判断正误，计算 SM-2 评分
     correct_answer = quiz.answer
@@ -205,6 +208,15 @@ async def submit_answer(
         f"答题提交: user={user_id[:8]}, quiz={quiz_id[:8]}, "
         f"correct={is_correct}, quality={quality}, interval={sm2_result.interval}"
     )
+
+    # 答题后非阻塞刷新关联卡片掌握度（失败不影响答题响应）
+    try:
+        from .mastery_service import refresh_card_mastery
+        await refresh_card_mastery(quiz.card_id, db)
+    except Exception as mastery_err:
+        logger.warning(
+            f"刷新卡片掌握度失败 (card_id={quiz.card_id}): {mastery_err}"
+        )
 
     # 6. 返回判分结果
     # 解析选项（选择题）
@@ -265,17 +277,26 @@ async def get_review_stats(
     )
     today_done = today_done_result.scalar() or 0
 
-    # 今日待复习数（next_review_at <= now 或为 None）
-    due_count_result = await db.execute(
-        select(func.count()).select_from(QuizItem).where(
-            QuizItem.user_id == user_id,
-            (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
-        )
-    )
-    # 今日待复习数（考虑每日限额）
-    due_count = due_count_result.scalar() or 0
+    # 今日待复习数（next_review_at <= now 或为 None），考虑每日限额
     remaining_quota = max(0, DAILY_REVIEW_LIMIT - today_done)
-    due_count = min(due_count, remaining_quota)
+    if remaining_quota <= 0:
+        due_count = 0
+    else:
+        # 使用子查询加 LIMIT，避免扫描全表
+        due_subq = (
+            select(func.count())
+            .select_from(
+                select(QuizItem.id)
+                .where(
+                    QuizItem.user_id == user_id,
+                    (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+                )
+                .limit(remaining_quota)
+                .subquery()
+            )
+        )
+        due_count_result = await db.execute(due_subq)
+        due_count = due_count_result.scalar() or 0
 
     # 今日正确数
     today_correct_result = await db.execute(

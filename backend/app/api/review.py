@@ -79,6 +79,8 @@ async def submit_answer(
     )
 
     if "error" in result:
+        if "上限" in result["error"]:
+            raise HTTPException(status_code=429, detail=result["error"])
         raise HTTPException(status_code=404, detail=result["error"])
 
     return SubmitAnswerResponse(

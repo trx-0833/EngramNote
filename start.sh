@@ -1,75 +1,132 @@
 #!/bin/bash
-# EngramNote 一键启动脚本 (Linux/Mac)
+# ============================================================
+# EngramNote One-Click Start Script (Linux/Mac)
+# 自动检测脚本目录，无需手动配置路径
+# ============================================================
 
-echo "========================================"
-echo "  EngramNote 一键启动脚本"
-echo "========================================"
+set -e
+
+# ---- 自动获取项目目录（脚本所在目录） ----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+BACKEND_DIR="$PROJECT_DIR/backend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+BACKEND_PORT=8000
+FRONTEND_PORT=5173
+
+# ---- Conda 环境配置（按需修改） ----
+# 如果使用 conda，取消下面两行注释并修改路径
+# CONDA_BASE="$HOME/anaconda3"
+# CONDA_ENV="mineru_env"
+CONDA_BASE=""
+CONDA_ENV="mineru_env"
+
+echo ""
+echo "============================================================"
+echo "  EngramNote - One Click Start"
+echo "============================================================"
+echo "  Project: $PROJECT_DIR"
 echo ""
 
-# 项目根目录
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+# ---- 0. 运行环境检测 ----
+echo "[0/5] Checking environment..."
+cd "$PROJECT_DIR"
+python check_env.py --check || {
+    echo ""
+    echo "[WARN] 环境检测发现问题，建议运行：python check_env.py --fix"
+    read -p "是否继续启动？(y/N) " continue
+    if [[ "$continue" != "y" && "$continue" != "Y" ]]; then
+        echo "[INFO] 启动已取消。请先修复环境问题。"
+        exit 1
+    fi
+}
+echo "[OK] Environment check passed"
+echo ""
 
-# 检查 Python 环境
-# 优先使用 conda 环境，否则使用系统 Python
-if command -v conda &> /dev/null; then
-    eval "$(conda shell.bash hook)"
-    conda activate mineru_env 2>/dev/null
-    PYTHON="python"
-elif [ -f "$HOME/anaconda3/envs/mineru_env/bin/python" ]; then
-    PYTHON="$HOME/anaconda3/envs/mineru_env/bin/python"
+# ---- 1. 激活 Conda 环境（如配置） ----
+echo "[1/5] Preparing Python environment..."
+if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+    source "$CONDA_BASE/etc/profile.d/conda.sh"
+    conda activate "$CONDA_ENV" || {
+        echo "[ERROR] Cannot activate conda env [$CONDA_ENV]"
+        echo "        Please verify: conda env list"
+        exit 1
+    }
+    echo "[OK] Conda env [$CONDA_ENV] activated"
 else
-    PYTHON="python"
+    echo "[OK] Using system Python"
 fi
 
-echo "[✓] Python 环境:"
-$PYTHON --version
+# ---- 2. 检查后端依赖 ----
+echo ""
+echo "[2/5] Checking backend dependencies..."
+cd "$BACKEND_DIR"
+python -c "import fastapi" 2>/dev/null || {
+    echo "[INFO] Installing backend dependencies (tsinghua mirror)..."
+    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+}
+echo "[OK] Backend dependencies ready"
 
-# 检查 Node.js
-if ! command -v node &> /dev/null; then
-    echo "[错误] 未找到 Node.js，请安装 Node.js 18+"
-    exit 1
+# ---- 3. 检查前端依赖 ----
+echo ""
+echo "[3/5] Checking frontend dependencies..."
+cd "$FRONTEND_DIR"
+if [ ! -d "node_modules" ]; then
+    echo "[INFO] Installing frontend dependencies (taobao mirror)..."
+    npm install --registry=https://registry.npmmirror.com
 fi
-echo "[✓] Node.js 环境:"
-node --version
+echo "[OK] Frontend dependencies ready"
 
+# ---- 4. 创建数据目录 ----
 echo ""
-echo "正在启动各服务..."
+echo "[4/5] Checking data directories..."
+mkdir -p "$BACKEND_DIR/data/db"
+mkdir -p "$BACKEND_DIR/data/storage"
+mkdir -p "$BACKEND_DIR/data/celery/broker"
+mkdir -p "$BACKEND_DIR/data/celery/results"
+mkdir -p "$BACKEND_DIR/data/chroma"
+mkdir -p "$BACKEND_DIR/data/logs"
+mkdir -p "$BACKEND_DIR/data/models/silero-vad"
+echo "[OK] Data directories ready"
+
+# ---- 5. 启动服务 ----
+echo ""
+echo "[5/5] Starting services..."
 echo ""
 
-# 启动后端 uvicorn
-echo "[1/3] 启动后端服务 (uvicorn)..."
-cd "$SCRIPT_DIR/backend"
-$PYTHON -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload-dir app &
+echo "[START] Backend API (port $BACKEND_PORT)..."
+cd "$BACKEND_DIR"
+python -m uvicorn app.main:app --reload --port "$BACKEND_PORT" --reload-dir app &
 BACKEND_PID=$!
 
-# 等待后端启动
+echo "Waiting 3s for backend to initialize..."
 sleep 3
 
-# 启动 Celery worker
-echo "[2/3] 启动 Celery worker..."
-cd "$SCRIPT_DIR/backend"
-$PYTHON -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo -Q celery &
+echo "[START] Celery Worker..."
+cd "$BACKEND_DIR"
+python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info &
 CELERY_PID=$!
 
-# 启动前端开发服务器
-echo "[3/3] 启动前端开发服务器 (Vite)..."
-cd "$SCRIPT_DIR/frontend"
+echo "[START] Frontend dev server (port $FRONTEND_PORT)..."
+cd "$FRONTEND_DIR"
 npm run dev &
 FRONTEND_PID=$!
 
+# ---- Done ----
 echo ""
-echo "========================================"
-echo "  所有服务已启动！"
-echo "  后端: http://localhost:8000"
-echo "  前端: http://localhost:5173"
-echo "  API 文档: http://localhost:8000/docs"
-echo "========================================"
+echo "============================================================"
+echo "  All services started!"
+echo "============================================================"
 echo ""
-echo "按 Ctrl+C 停止所有服务..."
+echo "  Backend API:  http://localhost:$BACKEND_PORT"
+echo "  API Docs:      http://localhost:$BACKEND_PORT/docs"
+echo "  Frontend:      http://localhost:$FRONTEND_PORT"
+echo ""
+echo "  Press Ctrl+C to stop all services."
+echo ""
+echo "  Note: First file upload may take ~30s (loading embedding model)."
+echo ""
 
-# 捕获退出信号，停止所有子进程
-trap "echo '正在停止服务...'; kill $BACKEND_PID $CELERY_PID $FRONTEND_PID 2>/dev/null; exit 0" INT TERM
-
-# 等待
+# 捕获 Ctrl+C 信号，停止所有进程
+trap "kill $BACKEND_PID $CELERY_PID $FRONTEND_PID 2>/dev/null; exit" INT TERM
 wait

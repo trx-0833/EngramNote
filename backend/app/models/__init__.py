@@ -2,19 +2,33 @@
 
 from .user import User
 from .note import Note, SourceType, NoteStatus
-from .knowledge_card import KnowledgeCard, CardType
+from .folder import Folder
+from .knowledge_card import KnowledgeCard, CardType, CardCategory
 from .quiz_item import QuizItem, QuestionType, DifficultyLevel
 from .review_log import ReviewLog
+from .card_relation import CardRelation, RelationType, RelationStatus
+from .assessment import AssessmentResult, AssessmentMode
+from .note_material_link import NoteMaterialLink
+from .note_annotation import NoteAnnotation
 
 __all__ = [
     "User",
     "Note",
     "SourceType",
     "NoteStatus",
+    "Folder",
     "KnowledgeCard",
     "CardType",
+    "CardCategory",
     "QuizItem",
     "QuestionType",
     "DifficultyLevel",
     "ReviewLog",
+    "CardRelation",
+    "RelationType",
+    "RelationStatus",
+    "AssessmentResult",
+    "AssessmentMode",
+    "NoteMaterialLink",
+    "NoteAnnotation",
 ]

@@ -22,10 +22,10 @@ AI 理解管道 API 模块
 - RAG 问答跨用户所有笔记检索
 """
 
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete as sql_delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -33,6 +33,8 @@ from ..models.note import Note, NoteStatus
 from ..models.user import User
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
+from ..models.review_log import ReviewLog
+from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
 from ..schemas.knowledge import (
     UnderstandingStartResponse,
@@ -51,6 +53,8 @@ from ..schemas.knowledge import (
 )
 from ..services.note_service import get_note_detail
 from ..services.understanding_service import detect_card_duplicates
+from ..services.rag_service import RAGService
+from ..tasks.understand_tasks import understand_document_task, generate_questions_task
 from ..config import get_settings
 
 settings = get_settings()
@@ -81,32 +85,38 @@ async def start_understanding(
 
     # 如果是 archived 状态，先删除该笔记的旧知识卡片和题目
     if note.status == NoteStatus.archived:
-        # 删除旧知识卡片
-        result = await db.execute(
-            select(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
+        # 批量删除关联的复习记录
+        quiz_ids_result = await db.execute(
+            select(QuizItem.id).where(QuizItem.note_id == note_id)
         )
-        old_cards = result.scalars().all()
-        for card in old_cards:
-            # 先删除关联的题目
-            q_result = await db.execute(
-                select(QuizItem).where(QuizItem.card_id == card.id)
+        quiz_ids = [row[0] for row in quiz_ids_result.all()]
+        if quiz_ids:
+            await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
+        # 批量删除关联的卡片关系
+        card_ids_result = await db.execute(
+            select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
+        )
+        card_ids = [row[0] for row in card_ids_result.all()]
+        if card_ids:
+            await db.execute(
+                sql_delete(CardRelation).where(
+                    or_(
+                        CardRelation.card_id_1.in_(card_ids),
+                        CardRelation.card_id_2.in_(card_ids),
+                    )
+                )
             )
-            old_questions = q_result.scalars().all()
-            for q in old_questions:
-                await db.delete(q)
-            await db.delete(card)
+        # 批量删除关联题目和知识卡片
+        await db.execute(sql_delete(QuizItem).where(QuizItem.note_id == note_id))
+        await db.execute(sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
         await db.commit()
 
     # 更新状态为 learning
-    db_note_result = await db.execute(select(Note).where(Note.id == note_id))
-    db_note = db_note_result.scalars().first()
-    if db_note:
-        db_note.status = NoteStatus.learning
-        db_note.error_message = None
-        await db.commit()
+    note.status = NoteStatus.learning
+    note.error_message = None
+    await db.commit()
 
     # 触发 Celery 理解任务
-    from ..tasks.understand_tasks import understand_document_task
     understand_document_task.delay(note_id)
 
     return UnderstandingStartResponse(
@@ -228,14 +238,20 @@ async def get_all_cards(
     page: int = Query(1, ge=1),
     page_size: int = Query(999, ge=1, le=9999),
     note_id: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None, description="搜索关键词，匹配标题或内容"),
 ):
-    """获取当前用户所有知识卡片（分页）"""
-    from ..models.note import Note
-
+    """获取当前用户所有知识卡片（分页），支持关键词搜索"""
     # 构建查询条件
     conditions = [KnowledgeCard.user_id == current_user.id]
     if note_id:
         conditions.append(KnowledgeCard.note_id == note_id)
+    if keyword:
+        conditions.append(
+            or_(
+                KnowledgeCard.title.ilike(f"%{keyword}%"),
+                KnowledgeCard.content.ilike(f"%{keyword}%"),
+            )
+        )
 
     # 计算总数
     count_query = select(func.count()).select_from(KnowledgeCard).where(*conditions)
@@ -284,7 +300,16 @@ async def get_card_detail(
     if not card:
         raise HTTPException(status_code=404, detail="知识卡片不存在")
 
-    return KnowledgeCardResponse.model_validate(card)
+    # JOIN Note 表获取笔记标题
+    note_result = await db.execute(
+        select(Note.title).where(Note.id == card.note_id)
+    )
+    note_title_row = note_result.first()
+    note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+
+    item = KnowledgeCardResponse.model_validate(card)
+    item.note_title = note_title
+    return item
 
 
 @router.put("/cards/{card_id}", response_model=KnowledgeCardResponse)
@@ -295,8 +320,6 @@ async def update_card(
     db: AsyncSession = Depends(get_db),
 ):
     """编辑知识卡片的标题和内容"""
-    from ..models.knowledge_card import KnowledgeCard
-
     result = await db.execute(
         select(KnowledgeCard).where(
             KnowledgeCard.id == card_id,
@@ -313,7 +336,17 @@ async def update_card(
         card.content = req.content
     await db.commit()
     await db.refresh(card)
-    return KnowledgeCardResponse.model_validate(card)
+
+    # JOIN Note 表获取笔记标题
+    note_result = await db.execute(
+        select(Note.title).where(Note.id == card.note_id)
+    )
+    note_title_row = note_result.first()
+    note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+
+    item = KnowledgeCardResponse.model_validate(card)
+    item.note_title = note_title
+    return item
 
 
 @router.delete("/cards/{card_id}", status_code=204)
@@ -322,10 +355,7 @@ async def delete_card(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
-    """删除知识卡片及关联的题目"""
-    from ..models.knowledge_card import KnowledgeCard
-    from ..models.quiz_item import QuizItem
-
+    """删除知识卡片及关联的题目、复习记录和图谱关系"""
     result = await db.execute(
         select(KnowledgeCard).where(
             KnowledgeCard.id == card_id,
@@ -336,6 +366,27 @@ async def delete_card(
     if not card:
         raise HTTPException(status_code=404, detail="知识卡片不存在")
 
+    # 删除关联的卡片关系
+    await db.execute(
+        sql_delete(CardRelation).where(
+            or_(
+                CardRelation.card_id_1 == card_id,
+                CardRelation.card_id_2 == card_id,
+            )
+        )
+    )
+
+    # 删除关联的复习记录
+    quiz_ids_result = await db.execute(
+        select(QuizItem.id).where(QuizItem.card_id == card_id)
+    )
+    quiz_ids = [row[0] for row in quiz_ids_result.all()]
+    if quiz_ids:
+        await db.execute(
+            sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids))
+        )
+
+    # 删除关联的题目
     q_result = await db.execute(
         select(QuizItem).where(QuizItem.card_id == card_id)
     )
@@ -357,8 +408,6 @@ async def get_card_duplicates(
     将笔记中的每张卡片与用户所有其他卡片做 n-gram 关键词匹配，
     返回相似度过高的重复候选列表。
     """
-    from ..models.knowledge_card import KnowledgeCard
-
     result = await db.execute(
         select(KnowledgeCard).where(
             KnowledgeCard.note_id == note_id,
@@ -391,8 +440,6 @@ async def ask_question(
 
     基于用户所有笔记的内容回答问题。
     """
-    from ..services.rag_service import RAGService
-
     rag_service = RAGService()
     result = await rag_service.answer_question(
         question=req.question,
@@ -420,6 +467,8 @@ async def generate_questions(
     note_id: str,
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
+    target_categories: Optional[List[str]] = Query(None, description="目标卡片类别，如 blind_spot/extension"),
+    target_difficulty: Optional[str] = Query(None, description="目标难度倾向"),
 ):
     """触发题目生成"""
     note = await get_note_detail(db, note_id, current_user.id)
@@ -438,9 +487,8 @@ async def generate_questions(
     if card_count == 0:
         raise HTTPException(status_code=400, detail="该笔记暂无知识卡片，请先触发理解管道")
 
-    # 触发 Celery 题目生成任务
-    from ..tasks.understand_tasks import generate_questions_task
-    generate_questions_task.delay(note_id)
+    # 触发 Celery 题目生成任务（透传定向出题参数）
+    generate_questions_task.delay(note_id, target_categories, target_difficulty)
 
     return GenerateQuestionsResponse(
         note_id=note_id,
@@ -504,11 +552,14 @@ async def get_all_questions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     note_id: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None, description="搜索关键词，匹配题目内容"),
 ):
-    """获取当前用户所有题目（分页）"""
+    """获取当前用户所有题目（分页），支持关键词搜索"""
     conditions = [QuizItem.user_id == current_user.id]
     if note_id:
         conditions.append(QuizItem.note_id == note_id)
+    if keyword:
+        conditions.append(QuizItem.question.ilike(f"%{keyword}%"))
 
     # 计算总数
     count_query = select(func.count()).select_from(QuizItem).where(*conditions)

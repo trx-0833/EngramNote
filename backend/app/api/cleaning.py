@@ -87,13 +87,9 @@ async def start_cleaning(
         )
 
     # 先将数据库状态更新为 cleaning，避免前端刷新时仍显示旧状态
-    from sqlalchemy import select
-    result = await db.execute(select(Note).where(Note.id == note_id))
-    db_note = result.scalars().first()
-    if db_note:
-        db_note.status = NoteStatus.cleaning
-        db_note.error_message = None
-        await db.commit()
+    note.status = NoteStatus.cleaning
+    note.error_message = None
+    await db.commit()
 
     # 触发 Celery 清洗任务
     from ..tasks.clean_tasks import clean_document_task
@@ -137,13 +133,9 @@ async def stop_cleaning(
         )
 
     # 更新笔记状态为清洗失败
-    from sqlalchemy import select
-    result = await db.execute(select(Note).where(Note.id == note_id))
-    db_note = result.scalars().first()
-    if db_note:
-        db_note.status = NoteStatus.cleaning_failed
-        db_note.error_message = "用户手动停止清洗"
-        await db.commit()
+    note.status = NoteStatus.cleaning_failed
+    note.error_message = "用户手动停止清洗"
+    await db.commit()
 
     return CleaningStopResponse(
         id=note_id,
@@ -324,13 +316,8 @@ async def restore_duplicate_block(
         ]
         note.metadata_["duplicates_detail"] = duplicates_detail
         note.metadata_["duplicate_blocks"] = len(duplicates_detail)
-        # 需要显式更新 metadata_ 字段
-        from sqlalchemy import select
-        result = await db.execute(select(Note).where(Note.id == note_id))
-        db_note = result.scalars().first()
-        if db_note:
-            db_note.metadata_ = note.metadata_
-            await db.commit()
+        note.metadata_ = dict(note.metadata_)  # 触发 SQLAlchemy 检测 JSON 字段变更
+        await db.commit()
 
     return BlockOperationResponse(
         note_id=note_id,
@@ -392,12 +379,8 @@ async def delete_duplicate_block(
         ]
         note.metadata_["duplicates_detail"] = duplicates_detail
         note.metadata_["duplicate_blocks"] = len(duplicates_detail)
-        from sqlalchemy import select
-        result = await db.execute(select(Note).where(Note.id == note_id))
-        db_note = result.scalars().first()
-        if db_note:
-            db_note.metadata_ = note.metadata_
-            await db.commit()
+        note.metadata_ = dict(note.metadata_)  # 触发 SQLAlchemy 检测 JSON 字段变更
+        await db.commit()
 
     return BlockOperationResponse(
         note_id=note_id,
