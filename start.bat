@@ -1,13 +1,14 @@
 @echo off
+chcp 65001 > nul
 setlocal enabledelayedexpansion
 title EngramNote
 
 :: ============================================================
 ::  EngramNote One-Click Start Script (Windows)
-::  自动检测脚本目录，无需手动配置路径
+::  Auto-detect script directory, no manual path configuration needed
 :: ============================================================
 
-:: ---- 自动获取项目目录（脚本所在目录） ----
+:: ---- Auto-detect project directory (where script is located) ----
 set "PROJECT_DIR=%~dp0"
 set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 set "BACKEND_DIR=%PROJECT_DIR%\backend"
@@ -15,12 +16,20 @@ set "FRONTEND_DIR=%PROJECT_DIR%\frontend"
 set "BACKEND_PORT=8000"
 set "FRONTEND_PORT=5173"
 
-:: ---- Conda 环境配置（按需修改） ----
-:: 如果使用 conda，请设置 CONDA_BASE 为你的 conda 安装路径
-:: 例如：set "CONDA_BASE=C:\Users\你的用户名\anaconda3"
-:: 如果不使用 conda，留空即可（使用系统 Python）
-set "CONDA_BASE="
+:: ---- Conda environment config (auto-detect, no manual config needed) ----
 set "CONDA_ENV=mineru_env"
+set "CONDA_BASE="
+
+:: Auto-detect conda installation path (common locations)
+if exist "%USERPROFILE%\anaconda3\condabin\conda.bat" (
+    set "CONDA_BASE=%USERPROFILE%\anaconda3"
+) else if exist "%USERPROFILE%\miniconda3\condabin\conda.bat" (
+    set "CONDA_BASE=%USERPROFILE%\miniconda3"
+) else if exist "C:\ProgramData\anaconda3\condabin\conda.bat" (
+    set "CONDA_BASE=C:\ProgramData\anaconda3"
+)
+:: If auto-detect fails, uncomment and modify the next line:
+:: set "CONDA_BASE=C:\Users\YOUR_USERNAME\anaconda3"
 
 echo.
 echo ============================================================
@@ -29,26 +38,8 @@ echo ============================================================
 echo   Project: %PROJECT_DIR%
 echo.
 
-:: ---- 0. 运行环境检测 ----
-echo [0/5] Checking environment...
-cd /d "%PROJECT_DIR%"
-python check_env.py --check
-if errorlevel 1 (
-    echo.
-    echo [WARN] 环境检测发现问题，建议运行：python check_env.py --fix
-    echo        是否继续启动？(Y/N)
-    set /p continue=
-    if /i "!continue!" neq "Y" (
-        echo [INFO] 启动已取消。请先修复环境问题。
-        pause
-        exit /b 1
-    )
-)
-echo [OK] Environment check passed
-echo.
-
-:: ---- 1. 激活 Conda 环境（如配置） ----
-echo [1/5] Preparing Python environment...
+:: ---- Step 1: Activate Conda environment (must run before check_env.py) ----
+echo [1/7] Preparing Python environment...
 if defined CONDA_BASE (
     if exist "%CONDA_BASE%\condabin\conda.bat" (
         call "%CONDA_BASE%\condabin\conda.bat" activate %CONDA_ENV%
@@ -65,16 +56,64 @@ if defined CONDA_BASE (
         echo        Using system Python instead.
     )
 ) else (
-    echo [OK] Using system Python
+    echo [WARN] Conda not detected, using system Python
+    echo        To use conda, edit CONDA_BASE at the top of this script.
 )
 
-:: ---- 2. 检查后端依赖 ----
+:: ---- Step 2: Detect Node.js/npm path (auto-detect nvm-windows) ----
 echo.
-echo [2/5] Checking backend dependencies...
+echo [2/7] Checking Node.js/npm path...
+set "NVM_SYMLINK_PATH="
+
+:: Check if npm is already in PATH
+where npm >nul 2>nul
+if errorlevel 1 (
+    :: npm not in PATH, try common nvm-windows locations
+    if exist "C:\nvm4w\nodejs\npm.cmd" (
+        set "NVM_SYMLINK_PATH=C:\nvm4w\nodejs"
+    ) else if exist "%NVM_SYMLINK%\npm.cmd" (
+        set "NVM_SYMLINK_PATH=%NVM_SYMLINK%"
+    ) else if exist "%USERPROFILE%\AppData\Local\nvm\nodejs\npm.cmd" (
+        set "NVM_SYMLINK_PATH=%USERPROFILE%\AppData\Local\nvm\nodejs"
+    )
+
+    if defined NVM_SYMLINK_PATH (
+        set "PATH=%NVM_SYMLINK_PATH%;%PATH%"
+        echo [OK] Node.js path added to PATH: %NVM_SYMLINK_PATH%
+    ) else (
+        echo [WARN] npm not detected. Please ensure Node.js 18+ is installed.
+        echo        Download: https://nodejs.org/
+    )
+) else (
+    echo [OK] npm is already in PATH
+)
+
+:: ---- Step 3: Run environment check (using activated Python environment) ----
+echo.
+echo [3/7] Checking environment...
+cd /d "%PROJECT_DIR%"
+set PYTHONIOENCODING=utf-8
+python check_env.py --check
+if errorlevel 1 (
+    echo.
+    echo [WARN] Environment check found issues. Run: python check_env.py --fix
+    echo        Continue startup? ^(Y/N^)
+    set /p continue=
+    if /i "!continue!" neq "Y" (
+        echo [INFO] Startup cancelled. Please fix environment issues first.
+        pause
+        exit /b 1
+    )
+)
+echo [OK] Environment check passed
+
+:: ---- Step 4: Check backend dependencies ----
+echo.
+echo [4/7] Checking backend dependencies...
 cd /d "%BACKEND_DIR%"
 python -c "import fastapi" 2>nul
 if errorlevel 1 (
-    echo [INFO] Installing backend dependencies (tsinghua mirror)...
+    echo [INFO] Installing backend dependencies ^(tsinghua mirror^)...
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
     if errorlevel 1 (
         echo [ERROR] Backend dependency install failed
@@ -85,12 +124,12 @@ if errorlevel 1 (
     echo [OK] Backend dependencies ready
 )
 
-:: ---- 3. 检查前端依赖 ----
+:: ---- Step 5: Check frontend dependencies ----
 echo.
-echo [3/5] Checking frontend dependencies...
+echo [5/7] Checking frontend dependencies...
 cd /d "%FRONTEND_DIR%"
 if not exist "node_modules" (
-    echo [INFO] Installing frontend dependencies (taobao mirror)...
+    echo [INFO] Installing frontend dependencies ^(taobao mirror^)...
     npm install --registry=https://registry.npmmirror.com
     if errorlevel 1 (
         echo [ERROR] Frontend dependency install failed
@@ -101,9 +140,9 @@ if not exist "node_modules" (
     echo [OK] Frontend dependencies ready
 )
 
-:: ---- 4. 创建数据目录 ----
+:: ---- Step 6: Create data directories ----
 echo.
-echo [4/5] Checking data directories...
+echo [6/7] Checking data directories...
 if not exist "%BACKEND_DIR%\data\db" mkdir "%BACKEND_DIR%\data\db"
 if not exist "%BACKEND_DIR%\data\storage" mkdir "%BACKEND_DIR%\data\storage"
 if not exist "%BACKEND_DIR%\data\celery\broker" mkdir "%BACKEND_DIR%\data\celery\broker"
@@ -113,9 +152,9 @@ if not exist "%BACKEND_DIR%\data\logs" mkdir "%BACKEND_DIR%\data\logs"
 if not exist "%BACKEND_DIR%\data\models\silero-vad" mkdir "%BACKEND_DIR%\data\models\silero-vad"
 echo [OK] Data directories ready
 
-:: ---- 5. 启动服务 ----
+:: ---- Step 7: Start services ----
 echo.
-echo [5/5] Starting services...
+echo [7/7] Starting services...
 echo.
 
 echo [START] Backend API (port %BACKEND_PORT%)...

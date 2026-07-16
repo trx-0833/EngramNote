@@ -51,6 +51,9 @@ MODELS = {
         "name": "BGE-M3 嵌入模型",
         "modelscope_id": "Xorbits/bge-m3",
         "cache_paths": [
+            # D 盘项目目录（embedding_service.py 实际下载位置，优先检查）
+            MODELS_DIR / "Xorbits" / "bge-m3",
+            # C 盘 ModelScope 默认缓存
             MODELSCOPE_CACHE / "Xorbits" / "bge-m3",
             Path.home() / ".cache" / "huggingface" / "hub" / "models--BAAI--bge-m3",
         ],
@@ -69,6 +72,10 @@ MODELS = {
         "name": "MinerU Pipeline 模型 (PDF-Extract-Kit-1.0)",
         "modelscope_id": "OpenDataLab/PDF-Extract-Kit-1.0",
         "cache_paths": [
+            # D 盘项目目录（优先检查）
+            MODELS_DIR / "OpenDataLab" / "PDF-Extract-Kit-1.0",
+            MODELS_DIR / "OpenDataLab" / "PDF-Extract-Kit-1___0",
+            # C 盘 ModelScope 默认缓存
             MODELSCOPE_CACHE / "models" / "OpenDataLab" / "PDF-Extract-Kit-1___0",
             MODELSCOPE_CACHE / "models" / "OpenDataLab" / "PDF-Extract-Kit-1.0",
         ],
@@ -80,6 +87,10 @@ MODELS = {
         "name": "MinerU VLM 模型 (MinerU2.5-Pro-2604-1.2B)",
         "modelscope_id": "OpenDataLab/MinerU2.5-Pro-2604-1.2B",
         "cache_paths": [
+            # D 盘项目目录（优先检查）
+            MODELS_DIR / "OpenDataLab" / "MinerU2.5-Pro-2604-1.2B",
+            MODELS_DIR / "OpenDataLab" / "MinerU2___5-Pro-2604-1___2B",
+            # C 盘 ModelScope 默认缓存
             MODELSCOPE_CACHE / "models" / "OpenDataLab" / "MinerU2___5-Pro-2604-1___2B",
             MODELSCOPE_CACHE / "models" / "OpenDataLab" / "MinerU2.5-Pro-2604-1.2B",
         ],
@@ -91,6 +102,10 @@ MODELS = {
         "name": "Qwen3-ASR-0.6B 语音识别模型",
         "modelscope_id": "Qwen/Qwen3-ASR-0.6B",
         "cache_paths": [
+            # D 盘项目目录（优先检查）
+            MODELS_DIR / "Qwen" / "Qwen3-ASR-0.6B",
+            MODELS_DIR / "Qwen" / "Qwen3-ASR-0___6B",
+            # C 盘 ModelScope 默认缓存
             MODELSCOPE_CACHE / "models" / "Qwen" / "Qwen3-ASR-0___6B",
             MODELSCOPE_CACHE / "models" / "Qwen" / "Qwen3-ASR-0.6B",
         ],
@@ -146,7 +161,11 @@ def record_fixed():
 # 辅助：ModelScope 下载
 # ============================================================
 def download_from_modelscope(model_id, cache_subdir=None):
-    """通过 ModelScope 下载模型，返回模型路径或 None"""
+    """通过 ModelScope 下载模型，返回模型路径或 None
+
+    下载到项目 data/models/ 目录（D 盘），避免占用 C 盘空间。
+    与 embedding_service.py 的下载行为保持一致。
+    """
     try:
         from modelscope import snapshot_download
     except ImportError:
@@ -159,29 +178,71 @@ def download_from_modelscope(model_id, cache_subdir=None):
         from modelscope import snapshot_download
 
     info(f"正在从 ModelScope 下载：{model_id}")
-    model_dir = snapshot_download(model_id, cache_dir=str(MODELSCOPE_CACHE))
+    # 下载到项目 data/models/ 目录，避免占用 C 盘空间
+    # 与 embedding_service.py 的 cache_dir = str(DATA_DIR / "models") 保持一致
+    model_dir = snapshot_download(model_id, cache_dir=str(MODELS_DIR))
     return model_dir
 
+def _read_env_config():
+    """读取 backend/.env 中的模型路径配置（ASR_MODEL_PATH 等）"""
+    env_file = BACKEND_DIR / ".env"
+    config = {}
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if v:  # 只记录非空值
+                    config[k] = v
+    return config
+
 def find_model_cache(model_key):
-    """检查模型是否已缓存，返回路径或 None"""
+    """检查模型是否已缓存，返回路径或 None
+
+    检查顺序：
+    1. .env 中配置的自定义路径（ASR_MODEL_PATH 等）
+    2. local_path（项目内固定路径，如 silero-vad）
+    3. cache_paths（含 D 盘项目目录 + C 盘 modelscope/huggingface 缓存）
+    4. modelscope_id 编码后的路径（C 盘和 D 盘两种可能）
+    """
     model = MODELS[model_key]
-    # 检查本地路径
+
+    # 1. 检查 .env 中配置的自定义路径（仅对 ASR 模型）
+    if model_key == "qwen_asr":
+        env_config = _read_env_config()
+        asr_path = env_config.get("ASR_MODEL_PATH", "")
+        if asr_path:
+            p = Path(asr_path)
+            if p.exists():
+                return p
+
+    # 2. 检查本地路径
     if "local_path" in model:
         if model["local_path"].exists():
             return model["local_path"]
-    # 检查缓存路径
+
+    # 3. 检查 cache_paths（已包含 D 盘项目目录 + C 盘缓存路径）
     if "cache_paths" in model:
         for p in model["cache_paths"]:
             if p.exists():
                 return p
-        # 模糊匹配（ModelScope 会把 '.' 编码为 '___'）
+
+        # 4. 检查 modelscope_id 编码后的路径（C 盘和 D 盘两种可能）
         if "modelscope_id" in model:
             encoded = model["modelscope_id"].replace(".", "___")
-            for p in [MODELSCOPE_CACHE, MODELSCOPE_CACHE / "models"]:
-                if p.exists():
-                    for item in p.rglob("*"):
-                        if item.is_dir() and encoded.split("/")[-1] in item.name:
-                            return item
+            org, name = encoded.split("/")
+            # C 盘 ModelScope 缓存的两种路径
+            for base in [MODELSCOPE_CACHE / "models" / org / name,
+                         MODELSCOPE_CACHE / org / name]:
+                if base.exists():
+                    return base
+            # D 盘项目目录下的编码路径
+            for base in [MODELS_DIR / org / name,
+                         MODELS_DIR / org / model["modelscope_id"].split("/")[1]]:
+                if base.exists():
+                    return base
     return None
 
 # ============================================================
@@ -237,7 +298,12 @@ def check_node():
         return False
 
     try:
-        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=10)
+        # Windows 上 npm 是 .cmd 文件，需要 shell=True 才能找到
+        result = subprocess.run(
+            ["npm", "--version"],
+            capture_output=True, text=True, timeout=10,
+            shell=True
+        )
         ok(f"npm v{result.stdout.strip()}")
         record_pass()
     except FileNotFoundError:
@@ -265,13 +331,14 @@ REQUIRED_PACKAGES = {
     "multipart": "python-multipart",
     "openai": "openai",
     "soundfile": "soundfile",
-    "torch": "torch",
     "yaml": "pyyaml",
+    # torch 移入 OPTIONAL_PACKAGES（需从 pytorch.org 专用源安装）
 }
 
-# 可选包：qwen_asr（ASR 音视频转写用）
+# 可选包：torch 和 qwen_asr（需专用源安装，不列入必需检测）
 OPTIONAL_PACKAGES = {
     "qwen_asr": ("qwen-asr", "ASR 音视频转写"),
+    "torch": ("torch", "PyTorch（嵌入模型和 ASR 依赖，需从 pytorch.org 安装）"),
 }
 
 def check_backend_deps(auto_fix=False):
@@ -772,6 +839,11 @@ def print_summary():
     print(f"    python check_env.py --download-mineru  # 仅 MinerU 模型")
     print(f"    python check_env.py --download-asr     # 仅 ASR 模型")
 
+    # 根据检测结果设置退出码：有失败项时 exit 1，让启动脚本能感知
+    if results["fail"] > 0:
+        sys.exit(1)
+    # warnings 不阻止启动，exit 0
+
 def main():
     print(f"\n{Color.BOLD}{Color.CYAN}")
     print("  ╔═══════════════════════════════════════════╗")
@@ -817,10 +889,8 @@ def main():
     elif check_only:
         info("已启用 --check 模式：仅检测不修复")
 
-    fix = auto_fix or (not check_only and not download_mineru and not download_asr)
-    # 默认（无参数）= 仅检测
-    if not auto_fix and not download_mineru and not download_asr:
-        fix = False
+    # 简化：只有 --fix 时才修复（默认无参数 = 仅检测）
+    fix = auto_fix
 
     # 执行检测
     check_python()
