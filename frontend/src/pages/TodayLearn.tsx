@@ -6,8 +6,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getDueQuizzes, submitAnswer, getReviewStats, getDailyReport, getWeakPoints,
+  getDueQuizzes, submitAnswer, getReviewStats, getDailyReport, getWeakPoints, getDailyPlan,
   type DueQuiz, type SubmitAnswerResponse, type ReviewStats, type DailyReport, type WeakPoint,
+  type DailyPlanResponse, type RecommendedTask,
 } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
@@ -30,6 +31,8 @@ export default function TodayLearn() {
   const [stats, setStats] = useState<ReviewStats | null>(null)
   const [dailyReport, setDailyReport] = useState<DailyReport | null>(null)
   const [weakPoints, setWeakPoints] = useState<WeakPoint[]>([])
+  /** 今日每日推荐任务 */
+  const [dailyPlan, setDailyPlan] = useState<DailyPlanResponse | null>(null)
 
   // 答题状态
   const [quizzes, setQuizzes] = useState<QuizState[]>([])
@@ -46,14 +49,16 @@ export default function TodayLearn() {
     setLoading(true)
     setError('')
     try {
-      const [statsData, reportRes, weakRes] = await Promise.all([
+      const [statsData, reportRes, weakRes, planRes] = await Promise.all([
         getReviewStats().catch(() => null),
         getDailyReport().catch(() => null),
         getWeakPoints(5).catch(() => null),
+        getDailyPlan().catch(() => null),
       ])
       if (statsData) setStats(statsData)
       if (reportRes) setDailyReport(reportRes)
       if (weakRes) setWeakPoints(weakRes.items)
+      if (planRes) setDailyPlan(planRes)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     } finally {
@@ -271,6 +276,19 @@ export default function TodayLearn() {
 
       {error && <ErrorDisplay message={error} onRetry={loadData} />}
 
+      {/* 每日推荐任务（位于页面顶部，按类别分组展示） */}
+      {dailyPlan && dailyPlan.total_count > 0 && (
+        <section style={{ marginBottom: 'var(--space-xl)' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+            每日推荐任务
+          </h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}>
+            {dailyPlan.plan_date} · 已完成 {dailyPlan.completed_count} / {dailyPlan.total_count}
+          </p>
+          <DailyPlanSection plan={dailyPlan} navigate={navigate} />
+        </section>
+      )}
+
       {/* 今日学习报告摘要 */}
       {dailyReport && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
@@ -361,6 +379,131 @@ export default function TodayLearn() {
           </div>
         </section>
       )}
+    </div>
+  )
+}
+
+/**
+ * 每日推荐任务展示组件
+ * 按任务类型分组（薄弱点 / 复习 / 新资料），
+ * 每个任务展示标题与优先级徽章，含 quiz_id/note_id 的任务可点击跳转
+ */
+interface DailyPlanSectionProps {
+  plan: DailyPlanResponse
+  navigate: (path: string) => void
+}
+
+/** 任务类型到中文标签的映射 */
+const dailyTaskTypeLabels: Record<string, string> = {
+  weak_point: '薄弱点',
+  review: '复习',
+  new_material: '新资料',
+}
+
+/** 优先级到颜色与中文标签的映射 */
+const priorityMeta: Record<number, { color: string; label: string }> = {
+  1: { color: '#f44336', label: '高' },
+  2: { color: '#ff9800', label: '中' },
+  3: { color: '#10b981', label: '低' },
+}
+
+function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
+  // 兼容 recommended_tasks 的两种结构：数组形式 / 对象分组形式
+  const tasks: RecommendedTask[] = (() => {
+    const raw = plan.recommended_tasks as unknown
+    if (Array.isArray(raw)) {
+      return raw as RecommendedTask[]
+    }
+    if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, RecommendedTask[]>
+      const merged: RecommendedTask[] = []
+      for (const key of Object.keys(obj)) {
+        const arr = obj[key]
+        if (Array.isArray(arr)) {
+          merged.push(...arr)
+        }
+      }
+      return merged
+    }
+    return []
+  })()
+
+  // 按任务类型分组
+  const grouped: Record<string, RecommendedTask[]> = {}
+  for (const t of tasks) {
+    if (!grouped[t.task_type]) grouped[t.task_type] = []
+    grouped[t.task_type].push(t)
+  }
+
+  // 三类任务的展示顺序
+  const categories: Array<'weak_point' | 'review' | 'new_material'> = ['weak_point', 'review', 'new_material']
+
+  return (
+    <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
+      {categories.map(cat => {
+        const arr = grouped[cat]
+        if (!arr || arr.length === 0) return null
+        // 同类任务按优先级升序排序（1=最高优先）
+        const sorted = [...arr].sort((a, b) => a.priority - b.priority)
+        return (
+          <div key={cat} className="card" style={{ padding: 'var(--space-md)' }}>
+            <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>
+              {dailyTaskTypeLabels[cat] || cat}
+              <span style={{ marginLeft: 'var(--space-sm)', fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 400 }}>
+                共 {arr.length} 项
+              </span>
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+              {sorted.map((task, idx) => {
+                // 是否可点击跳转
+                const clickable = !!task.quiz_id || !!task.note_id
+                const prio = priorityMeta[task.priority] || { color: 'var(--color-text-secondary)', label: String(task.priority) }
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: 'var(--space-xs) var(--space-sm)',
+                      borderRadius: 4,
+                      background: clickable ? 'var(--color-surface)' : 'transparent',
+                      cursor: clickable ? 'pointer' : 'default',
+                      border: clickable ? '1px solid var(--color-border)' : '1px solid transparent',
+                    }}
+                    onClick={() => {
+                      if (task.quiz_id) navigate('/review')
+                      else if (task.note_id) navigate(`/notes/${task.note_id}`)
+                    }}
+                    role={clickable ? 'button' : undefined}
+                    tabIndex={clickable ? 0 : undefined}
+                    onKeyDown={(e) => {
+                      if (!clickable) return
+                      if (e.key === 'Enter') {
+                        if (task.quiz_id) navigate('/review')
+                        else if (task.note_id) navigate(`/notes/${task.note_id}`)
+                      }
+                    }}
+                  >
+                    <span style={{ fontSize: '0.9rem', flex: 1 }}>{task.title}</span>
+                    {/* 优先级徽章 */}
+                    <span style={{
+                      fontSize: '0.7rem',
+                      padding: '1px 6px',
+                      borderRadius: 3,
+                      color: '#fff',
+                      background: prio.color,
+                      marginLeft: 'var(--space-sm)',
+                    }}>
+                      {prio.label}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

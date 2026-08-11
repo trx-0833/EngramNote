@@ -54,8 +54,11 @@ class Settings(BaseSettings):
     # ---- 文件存储配置 ----
     # 存储后端选择："local" 使用本地文件系统，"minio" 使用 MinIO 对象存储
     storage_backend: str = "local"  # "local" 或 "minio"
-    # 本地存储目录，默认为 data/storage
+    # 本地存储目录（兼容旧配置，优先使用 vault_dir），默认为 data/storage
     storage_dir: str = ""
+    # Vault 根目录：项目隔离 + 状态旁载的目录结构根（如 ~/MarkdownVault），
+    # 为空时默认 data/vault；storage_dir 已配置时以其作为 vault 根
+    vault_dir: str = ""
 
     # ---- MinIO 配置（仅在 storage_backend="minio" 时使用） ----
     minio_endpoint: str = "localhost:9000"
@@ -149,6 +152,32 @@ class Settings(BaseSettings):
     # Silero VAD 模型本地目录（空则使用 data/models/silero-vad/）
     vad_model_dir: str = ""
 
+    # ---- SMTP 邮件配置（可选，配置后用于复习提醒邮件） ----
+    # SMTP 服务器地址（如 smtp.qq.com、smtp.gmail.com），留空则禁用邮件提醒
+    smtp_host: str = ""
+    # SMTP 服务器端口（587 为 STARTTLS 常用端口，465 为 SSL 常用端口）
+    smtp_port: int = 587
+    # SMTP 登录用户名（通常为邮箱地址）
+    smtp_user: str = ""
+    # SMTP 登录密码（部分邮箱需使用授权码而非登录密码）
+    smtp_password: str = ""
+    # 发件人邮箱地址（留空时使用 smtp_user）
+    smtp_from: str = ""
+    # 是否启用 STARTTLS 加密传输
+    smtp_use_tls: bool = True
+
+    # ---- 复习提醒配置 ----
+    # 提醒轮询间隔（秒），Celery 定时任务扫描到期复习的频率
+    reminder_poll_interval_seconds: int = 600
+    # 免打扰时段开始时间（24 小时制，22 表示 22:00 之后不发送提醒）
+    reminder_quiet_hours_start: int = 22
+    # 免打扰时段结束时间（24 小时制，8 表示 08:00 之后恢复发送提醒）
+    reminder_quiet_hours_end: int = 8
+    # 是否启用邮件复习提醒
+    email_reminder_enabled: bool = False
+    # 每日邮件提醒发送时间（24 小时制，9 表示每天 09:00 发送）
+    email_reminder_hour: int = 9
+
     # ---- 日志配置 ----
     log_level: str = "INFO"
     log_dir: str = ""
@@ -221,6 +250,26 @@ class Settings(BaseSettings):
         Returns:
             Path: 本地存储目录的 Path 对象
         """
+        if self.storage_dir:
+            return Path(self.storage_dir)
+        return STORAGE_DIR
+
+    def get_vault_dir(self) -> Path:
+        """
+        获取 Vault 根目录路径（项目隔离 + 状态旁载结构的根）
+
+        优先级：vault_dir > storage_dir（旧配置兼容）> 旧默认存储 data/storage。
+
+        注意：空配置时回落 STORAGE_DIR（data/storage）而非 data/vault，
+        以兼容存量数据——历史笔记文件均位于 data/storage/markdown/、
+        data/storage/original-files/ 等 bucket 子目录下，若默认指向空的
+        data/vault 会导致所有旧笔记内容读取不到（前端显示空白）。
+
+        Returns:
+            Path: Vault 根目录的 Path 对象
+        """
+        if self.vault_dir:
+            return Path(self.vault_dir)
         if self.storage_dir:
             return Path(self.storage_dir)
         return STORAGE_DIR

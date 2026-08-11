@@ -1,5 +1,4 @@
-"""
-知识图谱 API 模块
+"""知识图谱 API 模块
 
 本模块提供知识图谱相关的 HTTP 接口，包括获取图谱数据、
 查看/确认/拒绝建议关系、手动创建关系和删除关系等操作。
@@ -19,7 +18,7 @@
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -31,6 +30,9 @@ from ..schemas.graph import (
     ConfirmRelationRequest,
     RejectRelationRequest,
     CreateRelationRequest,
+    BatchConfirmRequest,
+    BatchRejectRequest,
+    GraphSearchResponse,
 )
 from ..services import graph_service
 from ..services.graph_service import suggest_semantic_relations
@@ -53,6 +55,67 @@ async def get_graph(
         user_id=current_user.id,
         db=db,
     )
+
+
+@router.get("/stats")
+async def get_graph_stats(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取知识图谱统计数据
+
+    返回节点数、边数、关系类型分布、孤立节点数等统计信息。
+    """
+    return await graph_service.get_graph_stats(
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+@router.get("/search", response_model=GraphSearchResponse)
+async def search_graph(
+    q: str = Query("", description="搜索关键词"),
+    limit: int = Query(20, description="最大返回数量"),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    搜索知识卡片
+
+    按标题和内容模糊匹配用户的卡片，返回搜索结果。
+    """
+    if not q.strip():
+        return {"items": [], "total": 0}
+
+    items = await graph_service.search_nodes(
+        user_id=current_user.id,
+        keyword=q.strip(),
+        db=db,
+        limit=limit,
+    )
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/node/{node_id}/subgraph")
+async def get_node_subgraph(
+    node_id: str,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取某个节点及其直接邻居的子图
+
+    返回中心节点详情和所有与之直接相连的邻居节点及边。
+    """
+    result = await graph_service.get_node_subgraph(
+        node_id=node_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="节点不存在或无权访问")
+    return result
 
 
 @router.get("/suggestions", response_model=list[SuggestedRelation])
@@ -130,6 +193,48 @@ async def reject_relation(
         raise HTTPException(status_code=400, detail=result.get("error", "操作失败"))
 
     return result
+
+
+@router.post("/batch-confirm")
+async def batch_confirm(
+    req: BatchConfirmRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    批量确认建议关系
+
+    一次性确认多条建议关系。
+    """
+    if not req.relation_ids:
+        raise HTTPException(status_code=400, detail="关系 ID 列表不能为空")
+
+    return await graph_service.batch_confirm_suggestions(
+        relation_ids=req.relation_ids,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+@router.post("/batch-reject")
+async def batch_reject(
+    req: BatchRejectRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    批量拒绝建议关系
+
+    一次性拒绝多条建议关系。
+    """
+    if not req.relation_ids:
+        raise HTTPException(status_code=400, detail="关系 ID 列表不能为空")
+
+    return await graph_service.batch_reject_suggestions(
+        relation_ids=req.relation_ids,
+        user_id=current_user.id,
+        db=db,
+    )
 
 
 @router.post("/relation")

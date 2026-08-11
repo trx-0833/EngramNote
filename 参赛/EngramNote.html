@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EngramNote · AI 辅助整理笔记生成知识库及测评 | TRAE AI 创造力大赛</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-primary: #0a0e1a;
+    --bg-secondary: #111827;
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --bg-card-hover: rgba(255, 255, 255, 0.07);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-cyan: #06b6d4;
+    --accent-purple: #a855f7;
+    --accent-blue: #3b82f6;
+    --accent-green: #10b981;
+    --accent-yellow: #fbbf24;
+    --accent-pink: #ec4899;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.15);
+    --shadow-glow: 0 0 60px rgba(6, 182, 212, 0.15);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* 背景装饰 */
+  .bg-decoration {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .bg-decoration::before,
+  .bg-decoration::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.3;
+  }
+
+  .bg-decoration::before {
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--accent-cyan) 0%, transparent 70%);
+    top: -200px;
+    left: -200px;
+    animation: float1 20s ease-in-out infinite;
+  }
+
+  .bg-decoration::after {
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, var(--accent-purple) 0%, transparent 70%);
+    top: 40%;
+    right: -150px;
+    animation: float2 25s ease-in-out infinite;
+  }
+
+  @keyframes float1 {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(100px, 80px); }
+  }
+
+  @keyframes float2 {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(-80px, -60px); }
+  }
+
+  /* 网格背景 */
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 32px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 顶部导航 */
+  .navbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+    background: rgba(10, 14, 26, 0.75);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .navbar-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 32px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 18px;
+  }
+
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+  }
+
+  .track-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.15), rgba(168, 85, 247, 0.15));
+    border: 1px solid var(--border-strong);
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--accent-cyan);
+  }
+
+  .track-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+  }
+
+  /* Hero 区块 */
+  .hero {
+    padding: 100px 0 80px;
+    text-align: center;
+    position: relative;
+  }
+
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+  }
+
+  .hero-tag .spark {
+    color: var(--accent-yellow);
+  }
+
+  .hero h1 {
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 24px;
+    letter-spacing: -0.02em;
+  }
+
+  .hero h1 .gradient-text {
+    background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 50%, var(--accent-purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    display: inline-block;
+  }
+
+  .hero-subtitle {
+    font-size: clamp(16px, 2vw, 20px);
+    color: var(--text-secondary);
+    max-width: 720px;
+    margin: 0 auto 40px;
+    line-height: 1.8;
+  }
+
+  .hero-stats {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    flex-wrap: wrap;
+    margin-top: 60px;
+    padding: 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .stat-item {
+    text-align: center;
+  }
+
+  .stat-number {
+    font-size: 36px;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
+  /* 通用区块 */
+  .section {
+    padding: 80px 0;
+  }
+
+  .section-header {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+
+  .section-label {
+    display: inline-block;
+    padding: 6px 16px;
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.15), rgba(168, 85, 247, 0.15));
+    border: 1px solid var(--border-strong);
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--accent-cyan);
+    margin-bottom: 20px;
+    letter-spacing: 0.1em;
+  }
+
+  .section-title {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 700;
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+  }
+
+  .section-desc {
+    font-size: 17px;
+    color: var(--text-secondary);
+    max-width: 640px;
+    margin: 0 auto;
+    line-height: 1.7;
+  }
+
+  /* 核心循环流程图 */
+  .loop-diagram {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 48px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(6, 182, 212, 0.08), transparent 70%);
+    pointer-events: none;
+  }
+
+  .loop-steps {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    gap: 0;
+    flex-wrap: wrap;
+    position: relative;
+  }
+
+  .loop-step {
+    flex: 1;
+    min-width: 180px;
+    max-width: 220px;
+    padding: 28px 20px;
+    text-align: center;
+    position: relative;
+  }
+
+  .loop-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 20px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    position: relative;
+    transition: transform 0.3s ease;
+  }
+
+  .loop-step:hover .loop-icon {
+    transform: translateY(-6px) scale(1.05);
+  }
+
+  .loop-step:nth-child(1) .loop-icon { background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05)); border: 1px solid rgba(6, 182, 212, 0.3); }
+  .loop-step:nth-child(3) .loop-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.05)); border: 1px solid rgba(59, 130, 246, 0.3); }
+  .loop-step:nth-child(5) .loop-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(168, 85, 247, 0.05)); border: 1px solid rgba(168, 85, 247, 0.3); }
+  .loop-step:nth-child(7) .loop-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.05)); border: 1px solid rgba(16, 185, 129, 0.3); }
+  .loop-step:nth-child(9) .loop-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(251, 191, 36, 0.05)); border: 1px solid rgba(251, 191, 36, 0.3); }
+
+  .loop-step-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+  }
+
+  .loop-step-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .loop-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 24px;
+    min-width: 30px;
+    opacity: 0.5;
+  }
+
+  /* 功能卡片网格 */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+  }
+
+  .feature-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .feature-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-strong);
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .feature-card:hover::before {
+    opacity: 1;
+  }
+
+  .feature-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    margin-bottom: 20px;
+  }
+
+  .feature-card:nth-child(1) .feature-icon { background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05)); border: 1px solid rgba(6, 182, 212, 0.3); }
+  .feature-card:nth-child(2) .feature-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(168, 85, 247, 0.05)); border: 1px solid rgba(168, 85, 247, 0.3); }
+  .feature-card:nth-child(3) .feature-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.05)); border: 1px solid rgba(59, 130, 246, 0.3); }
+  .feature-card:nth-child(4) .feature-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.05)); border: 1px solid rgba(16, 185, 129, 0.3); }
+  .feature-card:nth-child(5) .feature-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(251, 191, 36, 0.05)); border: 1px solid rgba(251, 191, 36, 0.3); }
+  .feature-card:nth-child(6) .feature-icon { background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(236, 72, 153, 0.05)); border: 1px solid rgba(236, 72, 153, 0.3); }
+
+  .feature-title {
+    font-size: 19px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+  }
+
+  .feature-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 16px;
+  }
+
+  .feature-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .feature-tag {
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* 技术架构 */
+  .tech-stack {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 48px;
+  }
+
+  .tech-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .tech-layer {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 20px 24px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    transition: all 0.2s ease;
+  }
+
+  .tech-layer:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border-strong);
+  }
+
+  .layer-label {
+    min-width: 120px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .layer-items {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .tech-chip {
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+  }
+
+  .tech-chip:hover {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(168, 85, 247, 0.1));
+    border-color: var(--accent-cyan);
+    transform: translateY(-1px);
+  }
+
+  /* 管道流程纵向 */
+  .pipeline-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .pipeline-node {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 24px 28px;
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    position: relative;
+    transition: all 0.2s ease;
+  }
+
+  .pipeline-node:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-card-hover);
+  }
+
+  .pipeline-node-num {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 18px;
+    flex-shrink: 0;
+    box-shadow: 0 8px 20px rgba(6, 182, 212, 0.2);
+  }
+
+  .pipeline-node-content h4 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+  }
+
+  .pipeline-node-content p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  .pipeline-arrow {
+    height: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--accent-cyan);
+    font-size: 20px;
+    opacity: 0.6;
+  }
+
+  /* 场景案例 */
+  .scenarios-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .scenario-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 28px;
+    transition: all 0.3s ease;
+  }
+
+  .scenario-card:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-card-hover);
+    transform: translateY(-3px);
+  }
+
+  .scenario-emoji {
+    font-size: 36px;
+    margin-bottom: 16px;
+  }
+
+  .scenario-card h4 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: var(--text-primary);
+  }
+
+  .scenario-card p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  /* CTA */
+  .cta-section {
+    padding: 100px 0;
+    text-align: center;
+  }
+
+  .cta-box {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(168, 85, 247, 0.1));
+    border: 1px solid var(--border-strong);
+    border-radius: 32px;
+    padding: 64px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cta-box::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px;
+    height: 800px;
+    background: radial-gradient(circle, rgba(6, 182, 212, 0.1), transparent 60%);
+    pointer-events: none;
+  }
+
+  .cta-box h2 {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 800;
+    margin-bottom: 20px;
+    position: relative;
+  }
+
+  .cta-box p {
+    font-size: 17px;
+    color: var(--text-secondary);
+    margin-bottom: 36px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+    position: relative;
+    line-height: 1.8;
+  }
+
+  .cta-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    position: relative;
+  }
+
+  .btn {
+    padding: 14px 28px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    color: white;
+    box-shadow: 0 10px 30px rgba(6, 182, 212, 0.3);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 40px rgba(6, 182, 212, 0.4);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
+  }
+
+  .btn-ghost:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--accent-cyan);
+  }
+
+  /* Footer */
+  .footer {
+    padding: 40px 0;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  /* 滚动动画 */
+  .reveal {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.8s ease, transform 0.8s ease;
+  }
+
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    .container { padding: 0 20px; }
+    .hero { padding: 60px 0 50px; }
+    .hero-stats { gap: 24px; padding: 24px; }
+    .stat-number { font-size: 28px; }
+    .section { padding: 60px 0; }
+    .tech-stack { padding: 28px; }
+    .tech-layer { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .layer-label { min-width: auto; }
+    .loop-arrow { display: none; }
+    .loop-steps { flex-direction: column; }
+    .loop-step { max-width: 100%; }
+    .cta-box { padding: 40px 24px; }
+  }
+
+  /* 对比视图 */
+  .compare-box {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+  }
+
+  .compare-side {
+    padding: 20px;
+    border-radius: 14px;
+  }
+
+  .compare-side.before {
+    background: rgba(239, 68, 68, 0.05);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  .compare-side.after {
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+  }
+
+  .compare-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .compare-side.before .compare-label { color: #ef4444; }
+  .compare-side.after .compare-label { color: var(--accent-green); }
+
+  .compare-list { list-style: none; }
+  .compare-list li {
+    font-size: 14px;
+    padding: 8px 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    padding-left: 20px;
+    position: relative;
+  }
+  .compare-list li::before {
+    content: '✗';
+    position: absolute;
+    left: 0;
+    color: #ef4444;
+    font-weight: 700;
+  }
+  .compare-side.after .compare-list li::before {
+    content: '✓';
+    color: var(--accent-green);
+  }
+
+  .compare-divider {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent-cyan);
+  }
+
+  @media (max-width: 768px) {
+    .compare-box { grid-template-columns: 1fr; }
+    .compare-divider { text-align: center; }
+  }
+
+  /* 亮点列表 */
+  .highlights-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+  }
+
+  .highlight-item {
+    padding: 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    transition: all 0.2s ease;
+  }
+
+  .highlight-item:hover {
+    border-color: var(--accent-cyan);
+    background: var(--bg-card-hover);
+  }
+
+  .highlight-item h5 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: var(--accent-cyan);
+  }
+
+  .highlight-item p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="bg-decoration"></div>
+
+<!-- 顶部导航 -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <div class="logo">
+      <div class="logo-icon">🧠</div>
+      <span>EngramNote</span>
+    </div>
+    <div class="track-badge">
+      <span class="dot"></span>
+      赛道：学习工作
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-tag reveal">
+      <span class="spark">✨</span>
+      TRAE AI 创造力大赛 · 报名作品
+      <span class="spark">✨</span>
+    </div>
+    <h1 class="reveal">
+      AI 辅助整理笔记<br>
+      <span class="gradient-text">生成知识库及测评</span>
+    </h1>
+    <p class="hero-subtitle reveal">
+      以原始学习资料为起点，经过自动化清洗和 AI 理解，<br>
+      构建个人结构化知识库，通过间隔重复与智能问答，<br>
+      形成「输入 → 内化 → 长期记忆」的学习闭环。
+    </p>
+
+    <div class="hero-stats reveal">
+      <div class="stat-item">
+        <div class="stat-number">5+</div>
+        <div class="stat-label">核心功能模块</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">10+</div>
+        <div class="stat-label">API 端点</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">3</div>
+        <div class="stat-label">AI 处理管道</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">∞</div>
+        <div class="stat-label">可扩展知识节点</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 学习闭环 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">CORE LOOP</span>
+      <h2 class="section-title">五阶段学习闭环</h2>
+      <p class="section-desc">从资料摄入到长期记忆，AI 全流程辅助你完成知识的沉淀与内化</p>
+    </div>
+
+    <div class="loop-diagram reveal">
+      <div class="loop-steps">
+        <div class="loop-step">
+          <div class="loop-icon">📥</div>
+          <div class="loop-step-title">资料摄入</div>
+          <div class="loop-step-desc">支持 PDF / Office / 图片 / 音视频等多格式</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step">
+          <div class="loop-icon">🧹</div>
+          <div class="loop-step-title">AI 清洗</div>
+          <div class="loop-step-desc">规则去噪 + 向量去重 + 三视图对比</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step">
+          <div class="loop-icon">🤖</div>
+          <div class="loop-step-title">AI 理解</div>
+          <div class="loop-step-desc">章节摘要 · 知识点提取 · 题库生成</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step">
+          <div class="loop-icon">📚</div>
+          <div class="loop-step-title">知识归档</div>
+          <div class="loop-step-desc">结构化知识库 + 双向链接 + 去重合并</div>
+        </div>
+        <div class="loop-arrow">→</div>
+        <div class="loop-step">
+          <div class="loop-icon">🔄</div>
+          <div class="loop-step-title">间隔复习</div>
+          <div class="loop-step-desc">SM-2 算法调度 · 薄弱点分析 · 学习报告</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 创意背景与痛点 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">WHY</span>
+      <h2 class="section-title">为什么做这个项目</h2>
+      <p class="section-desc">我们都经历过的学习低效，是时候用 AI 来改变了</p>
+    </div>
+
+    <div class="compare-box reveal">
+      <div class="compare-side before">
+        <div class="compare-label">传统学习方式</div>
+        <ul class="compare-list">
+          <li>海量资料堆积，从未真正消化</li>
+          <li>手动整理笔记耗时且易遗漏关键</li>
+          <li>知识点分散无关联，无法形成体系</li>
+          <li>学过即忘，缺乏有效复习机制</li>
+          <li>无法快速检索和提问已学内容</li>
+          <li>没有测评反馈，不知道薄弱点</li>
+        </ul>
+      </div>
+      <div class="compare-divider">➡</div>
+      <div class="compare-side after">
+        <div class="compare-label">EngramNote 解决方案</div>
+        <ul class="compare-list">
+          <li>统一管理所有学习资料，一键入库</li>
+          <li>AI 自动清洗去重，保留核心内容</li>
+          <li>自动提取概念/公式/问答对，结构化呈现</li>
+          <li>基于遗忘曲线的间隔复习调度</li>
+          <li>RAG 智能问答，随时提问你的知识库</li>
+          <li>自动生成题目，精准定位薄弱点</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 核心功能 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">FEATURES</span>
+      <h2 class="section-title">六大核心功能</h2>
+      <p class="section-desc">每一项都解决学习过程中的真实痛点</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon">📄</div>
+        <h3 class="feature-title">多格式智能解析</h3>
+        <p class="feature-desc">通过 MinerU 统一解析 PDF、Office 文档、图片为结构化 Markdown；音视频通过 Qwen-ASR 转写后由 DeepSeek 自动润色校对。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">MinerU</span>
+          <span class="feature-tag">Qwen-ASR</span>
+          <span class="feature-tag">LaTeX 公式</span>
+          <span class="feature-tag">表格识别</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-icon">🧹</div>
+        <h3 class="feature-title">AI 清洗管道</h3>
+        <p class="feature-desc">规则清洗去除页眉页脚水印；BGE-M3 向量 + 余弦相似度自动识别重复段落；三视图（原始/清洗/对比）支持手动恢复删除。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">BGE-M3</span>
+          <span class="feature-tag">Chroma DB</span>
+          <span class="feature-tag">Diff 对比</span>
+          <span class="feature-tag">语义去重</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-icon">💡</div>
+        <h3 class="feature-title">AI 理解与摘要</h3>
+        <p class="feature-desc">按 Markdown 标题切分章节，多轮对话窗口内依次调用 DeepSeek 生成章节摘要、提取概念卡、公式卡、问答卡等结构化知识点。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">DeepSeek V4</span>
+          <span class="feature-tag">ConversationSession</span>
+          <span class="feature-tag">结构化输出</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-icon">📚</div>
+        <h3 class="feature-title">知识库与双向链接</h3>
+        <p class="feature-desc">知识卡片按笔记分组归档，支持编辑/删除；自动去重合并相似卡片；卡片与原始笔记双向链接，随时溯源查看上下文。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">分组折叠</span>
+          <span class="feature-tag">双向链接</span>
+          <span class="feature-tag">去重检测</span>
+          <span class="feature-tag">卡片管理</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-icon">❓</div>
+        <h3 class="feature-title">RAG 智能问答</h3>
+        <p class="feature-desc">基于你的个人知识库做问答检索。使用知识卡片中文 n-gram 匹配召回相关内容，由 LLM 整合给出准确回答并标注引用来源。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">RAG</span>
+          <span class="feature-tag">语义检索</span>
+          <span class="feature-tag">引用溯源</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-icon">📝</div>
+        <h3 class="feature-title">题目生成与测评</h3>
+        <p class="feature-desc">基于知识点自动生成选择/填空/简答多种题型。计划引入 SM-2 间隔重复算法，根据答题正确率和耗时智能调度复习，生成学习报告。</p>
+        <div class="feature-tags">
+          <span class="feature-tag">多题型</span>
+          <span class="feature-tag">SM-2 算法</span>
+          <span class="feature-tag">薄弱点分析</span>
+          <span class="feature-tag">学习报告</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 技术管道流程 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">PIPELINE</span>
+      <h2 class="section-title">从文件到知识库的完整流水线</h2>
+      <p class="section-desc">用户只需一次上传，后端自动完成 4 大阶段处理</p>
+    </div>
+
+    <div class="pipeline-flow reveal">
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">1</div>
+        <div class="pipeline-node-content">
+          <h4>上传与转换 · Upload & Convert</h4>
+          <p>用户拖拽上传文件 → 后端根据类型路由到 MinerU（文档类）或 ASR（音视频类）→ 输出带页码标记的 Markdown，笔记状态：converted。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">2</div>
+        <div class="pipeline-node-content">
+          <h4>清洗与去重 · Cleaning & Deduplication</h4>
+          <p>Celery 异步任务：规则清洗 → 文本分块（500 tokens）→ BGE-M3 向量生成 → Chroma 存储 → 余弦相似度 >0.85 标记重复 → 生成清洗副本。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">3</div>
+        <div class="pipeline-node-content">
+          <h4>理解与提取 · Understanding & Extraction</h4>
+          <p>按标题切分章节 → ConversationSession 内逐章调用 DeepSeek：同时输出摘要 + 概念卡 + 公式卡 + 问答卡 → 批量生成题目，关联到每张卡片。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">4</div>
+        <div class="pipeline-node-content">
+          <h4>归档与检索 · Archive & Retrieval</h4>
+          <p>笔记状态转入 archived → 卡片按笔记分组折叠展示 → n-gram 关键词匹配支持全文问答 → 用户可编辑/删除卡片，实现人机协作精修。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 技术栈 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">TECH STACK</span>
+      <h2 class="section-title">简洁可靠的技术栈</h2>
+      <p class="section-desc">遵循最小依赖原则，每层都有清晰的职责边界</p>
+    </div>
+
+    <div class="tech-stack reveal">
+      <div class="tech-layers">
+        <div class="tech-layer">
+          <div class="layer-label">前端</div>
+          <div class="layer-items">
+            <span class="tech-chip">React 18</span>
+            <span class="tech-chip">TypeScript</span>
+            <span class="tech-chip">Vite</span>
+            <span class="tech-chip">marked.js</span>
+            <span class="tech-chip">highlight.js</span>
+          </div>
+        </div>
+
+        <div class="tech-layer">
+          <div class="layer-label">后端</div>
+          <div class="layer-items">
+            <span class="tech-chip">FastAPI</span>
+            <span class="tech-chip">Python 3.10</span>
+            <span class="tech-chip">SQLAlchemy 2.0</span>
+            <span class="tech-chip">Pydantic</span>
+            <span class="tech-chip">httpx</span>
+          </div>
+        </div>
+
+        <div class="tech-layer">
+          <div class="layer-label">数据存储</div>
+          <div class="layer-items">
+            <span class="tech-chip">SQLite</span>
+            <span class="tech-chip">Chroma DB</span>
+            <span class="tech-chip">本地文件系统</span>
+            <span class="tech-chip">PostgreSQL（生产）</span>
+          </div>
+        </div>
+
+        <div class="tech-layer">
+          <div class="layer-label">任务队列</div>
+          <div class="layer-items">
+            <span class="tech-chip">Celery</span>
+            <span class="tech-chip">文件系统 broker</span>
+            <span class="tech-chip">Redis（生产）</span>
+          </div>
+        </div>
+
+        <div class="tech-layer">
+          <div class="layer-label">AI 模型</div>
+          <div class="layer-items">
+            <span class="tech-chip">DeepSeek V4-Pro</span>
+            <span class="tech-chip">GLM-4.7-Flash</span>
+            <span class="tech-chip">BAAI/BGE-M3</span>
+            <span class="tech-chip">MinerU 3.1.12</span>
+            <span class="tech-chip">Qwen3-ASR-0.6B</span>
+          </div>
+        </div>
+
+        <div class="tech-layer">
+          <div class="layer-label">设计原则</div>
+          <div class="layer-items">
+            <span class="tech-chip">最小依赖</span>
+            <span class="tech-chip">分层架构</span>
+            <span class="tech-chip">异步优先</span>
+            <span class="tech-chip">原始数据不可篡改</span>
+            <span class="tech-chip">人机协作</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 应用场景 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">USE CASES</span>
+      <h2 class="section-title">适合谁来使用</h2>
+      <p class="section-desc">只要你需要学习和整理知识，EngramNote 就能帮到你</p>
+    </div>
+
+    <div class="scenarios-grid">
+      <div class="scenario-card reveal">
+        <div class="scenario-emoji">🎓</div>
+        <h4>学生 / 考研党</h4>
+        <p>教材批量入库，AI 提取考点自动生成题库；考前 RAG 问答随时查漏补缺；间隔复习确保长期记忆。</p>
+      </div>
+
+      <div class="scenario-card reveal">
+        <div class="scenario-emoji">💼</div>
+        <h4>职场专业人士</h4>
+        <p>会议录音转写整理、专业论文速阅、技术文档自动汇总；构建个人可检索的专业知识库。</p>
+      </div>
+
+      <div class="scenario-card reveal">
+        <div class="scenario-emoji">📖</div>
+        <h4>研究者 / 自学者</h4>
+        <p>论文阅读笔记自动关联相关概念；跨文献知识点自动合并去重；问答模式随时与「自己的文献库」对话。</p>
+      </div>
+
+      <div class="scenario-card reveal">
+        <div class="scenario-emoji">🧑‍🏫</div>
+        <h4>教师 / 培训师</h4>
+        <p>一键从课程资料生成题库；根据学员错题自动推送薄弱点相关题目；生成学习报告辅助教学决策。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 创新亮点 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">INNOVATIONS</span>
+      <h2 class="section-title">项目创新亮点</h2>
+      <p class="section-desc">不只是一个笔记工具，而是一个完整的学习操作系统</p>
+    </div>
+
+    <div class="highlights-list reveal">
+      <div class="highlight-item">
+        <h5>🎯 端到端学习闭环</h5>
+        <p>从「资料摄入」到「长期记忆」打通完整链路，每个阶段均有 AI 辅助，而非孤立的功能集合。</p>
+      </div>
+
+      <div class="highlight-item">
+        <h5>🧩 原始数据不可篡改</h5>
+        <p>AI 清洗与理解结果独立存储，原始 Markdown 永远保留。用户可通过三视图随时溯源，避免 AI 幻觉导致的数据丢失。</p>
+      </div>
+
+      <div class="highlight-item">
+        <h5>🤝 人机协作编辑</h5>
+        <p>AI 给出的知识点和题目不是终点，而是草稿。用户可以随时编辑、删除、补充卡片，实现精修与个性化。</p>
+      </div>
+
+      <div class="highlight-item">
+        <h5>⚡ 本地优先策略</h5>
+        <p>向量模型本地运行（BGE-M3 + Chroma），SQLite 零配置启动；大模型调用通过 API，可选完全本地化部署保护隐私。</p>
+      </div>
+
+      <div class="highlight-item">
+        <h5>📊 渐进式智能</h5>
+        <p>随着用户数据积累，去重准确率会越来越高；薄弱点分析和个性化出题将基于历史答题表现持续优化。</p>
+      </div>
+
+      <div class="highlight-item">
+        <h5>🔗 双向链接溯源</h5>
+        <p>每张知识卡片都关联回原始笔记的具体章节，用户可以随时查看 AI 提取该知识点的上下文，保证可解释性。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 开发路线 -->
+<section class="section">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-label">ROADMAP</span>
+      <h2 class="section-title">开发进展与规划</h2>
+      <p class="section-desc">核心流水线已跑通，持续完善测评与统计模块</p>
+    </div>
+
+    <div class="pipeline-flow reveal">
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">✓</div>
+        <div class="pipeline-node-content">
+          <h4>第 1-4 周 · 基础与清洗管道</h4>
+          <p>✅ FastAPI + React 脚手架；用户注册登录 JWT；笔记 CRUD；MinerU / ASR 转换；BGE-M3 + Chroma 清洗去重；三视图 Diff 对比 UI。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">✓</div>
+        <div class="pipeline-node-content">
+          <h4>第 5-6 周 · AI 理解与问答</h4>
+          <p>✅ ConversationSession 多轮对话窗口；章节摘要 + 知识点卡片提取；多题型题库生成；RAG 智能问答；知识库 + 卡片详情页面。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">✓</div>
+        <div class="pipeline-node-content">
+          <h4>第 7 周 · 归档与卡片管理</h4>
+          <p>✅ 笔记归档/取消归档；卡片编辑与级联删除；卡片去重检测；双向链接跳转；端到端全流程集成测试（上传→转换→清洗→理解→62张卡片）。</p>
+        </div>
+      </div>
+
+      <div class="pipeline-arrow">▼</div>
+
+      <div class="pipeline-node">
+        <div class="pipeline-node-num">⏳</div>
+        <div class="pipeline-node-content">
+          <h4>第 8-12 周 · 测评与学习闭环</h4>
+          <p>🔵 SM-2 间隔重复算法实现；每日复习任务生成器；答题界面与即时反馈；薄弱点分析；学习报告聚合（今日新掌握/薄弱点清单/学习时长）。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-box reveal">
+      <h2>让 AI 成为你的第二大脑 🧠</h2>
+      <p>
+        不再让海量资料沉睡在硬盘，不再让学过的知识随风而逝。<br>
+        EngramNote 用 AI 把你的阅读与学习过程，沉淀为可检索、可复习、可对话的个人知识库。
+      </p>
+      <div class="cta-buttons">
+        <button class="btn btn-primary" onclick="alert('感谢关注 EngramNote！项目正在持续开发中 🚀')">
+          ⭐ 为项目点赞
+        </button>
+        <button class="btn btn-ghost" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+          ↑ 返回顶部
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container">
+    <p>🧠 <strong>EngramNote</strong> · AI 辅助整理笔记生成知识库及测评</p>
+    <p style="margin-top: 8px;">TRAE AI 创造力大赛 · 学习工作赛道 · 2026</p>
+  </div>
+</footer>
+
+<script>
+  // 滚动渐入动画
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+  document.querySelectorAll('.reveal').forEach((el) => {
+    observer.observe(el);
+  });
+
+  // 页面加载时即显示首屏内容
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.hero .reveal').forEach((el, i) => {
+      setTimeout(() => el.classList.add('visible'), i * 150);
+    });
+  });
+</script>
+
+</body>
+</html>

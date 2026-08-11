@@ -4,7 +4,7 @@ Week1-2 修改验证测试
 验证开发时间表中 Week1-2 发现的 6 个问题是否已完全修复：
 1. Token过期前端告警（后端 401 返回验证）
 2. 用户名校验（仅英文+数字，前后端一致）
-3. mineru_plus 页码标签插入
+3. mineru_plus 页码标签插入（已集成至 app/services/mineru）
 4. mineru_backend 配置（config.py + convert_tasks.py）
 5. 上传选择本地/云端解析（upload.py + client.ts）
 6. PDF体积膨胀修复确认
@@ -27,15 +27,8 @@ import pytest
 # ---------------------------------------------------------------------------
 # 路径设置：确保能导入项目模块
 # ---------------------------------------------------------------------------
-BACKEND_DIR = Path(__file__).resolve().parent.parent  # D:\test\EngramNote\backend
-ENGRAMNOTE_DIR = BACKEND_DIR.parent                   # D:\test\EngramNote
-TEST_ROOT_DIR = ENGRAMNOTE_DIR.parent                 # D:\test（mineru_plus 在此目录下）
-MINERU_PLUS_DIR = TEST_ROOT_DIR / "mineru_plus"
-
-# 将 D:\test 加入 sys.path（使 mineru_plus 可被 import）
-_test_root = str(TEST_ROOT_DIR)
-if _test_root not in sys.path:
-    sys.path.insert(0, _test_root)
+BACKEND_DIR = Path(__file__).resolve().parent.parent  # EngramNote/backend
+ENGRAMNOTE_DIR = BACKEND_DIR.parent                   # EngramNote
 
 # 将 backend 目录加入 sys.path（使 app 可被 import）
 _backend_dir = str(BACKEND_DIR)
@@ -43,17 +36,17 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 # 测试用真实 PDF 文件路径
-REAL_PDF_PATH = r"D:\test\resources1\劳动合同书-田润鑫.pdf"
+REAL_PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
 
-# .env 文件路径（包含 MINERU_API_TOKEN 等配置）
-ENV_FILE = TEST_ROOT_DIR / ".env"
+# .env 文件路径（包含 MINERU_API_TOKEN 等配置），使用项目内 backend/.env
+ENV_FILE = BACKEND_DIR / ".env"
 
 
 def _load_env_for_mineru():
     """从 .env 文件加载 MinerU API 配置到环境变量
 
-    mineru_plus 的 config_loader 通过 _load_env_config() 读取环境变量
-    MINERU_API_TOKEN 和 MINERU_SERVER_URL。此函数确保这些环境变量可用。
+    mineru_plus 的 config_loader 已集成到 app.services.mineru，通过 _load_env_config()
+    读取环境变量 MINERU_API_TOKEN 和 MINERU_SERVER_URL。此函数确保这些环境变量可用。
     """
     if not ENV_FILE.exists():
         return
@@ -256,7 +249,7 @@ class TestUsernameValidation:
 
 
 # ===========================================================================
-# 修改3：mineru_plus 页码标签插入
+# 修改3：mineru_plus 页码标签插入（已集成至 app/services/mineru）
 # ===========================================================================
 
 
@@ -269,7 +262,7 @@ class TestPageMarkerInsertion:
 
     def test_basic_insertion_with_synthetic_data(self):
         """使用构造的 content_list 数据测试基本插入逻辑"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         # 构造 3 页 content_list
         content_list = [
@@ -324,7 +317,7 @@ class TestPageMarkerInsertion:
 
     def test_start_page_offset(self):
         """分块场景：start_page_id=5 时页码应从6开始"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         content_list = [
             {"type": "text", "page_idx": 0, "text": "分块内容A"},
@@ -356,7 +349,7 @@ class TestPageMarkerInsertion:
 
     def test_empty_content_list_returns_original(self):
         """空 content_list 应返回原始 Markdown 不变"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         md_content = "原始内容\n不变\n"
 
@@ -376,7 +369,7 @@ class TestPageMarkerInsertion:
 
     def test_missing_content_list_file_returns_original(self):
         """content_list.json 不存在时应返回原始 Markdown 不变"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         md_content = "原始内容\n不变\n"
         nonexistent_path = Path("/tmp/nonexistent_content_list_12345.json")
@@ -388,7 +381,7 @@ class TestPageMarkerInsertion:
 
     def test_duplicate_text_across_pages(self):
         """不同页有相同首文本时，页码标签应按顺序插入而非错乱"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         # page_idx=0 和 page_idx=2 的首文本都是 "你好"
         content_list = [
@@ -430,7 +423,7 @@ class TestPageMarkerInsertion:
 
     def test_aside_text_excluded(self):
         """aside_text/header/footer 等辅助类型不应作为页码定位标记"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         # page_idx=0 的第一个 item 是 aside_text，应被跳过
         # page_idx=1 的第一个 item 是 header，应被跳过
@@ -469,7 +462,7 @@ class TestPageMarkerInsertion:
 
     def test_page_markers_order_is_sequential(self):
         """页码标签在 markdown 中的出现顺序必须与页码递增一致"""
-        from mineru_plus.converter import _insert_page_markers_from_content_list
+        from app.services.mineru.converter import _insert_page_markers_from_content_list
 
         # 模拟真实场景：4页文档，page 0 和 page 2 首文本相同
         content_list = [
@@ -520,7 +513,7 @@ class TestPageMarkerInsertion:
         调用 convert() 转换 劳动合同书-田润鑫.pdf（使用 vlm-http-client 云端后端），
         验证返回的 markdown_content 中包含 <!-- page=N --> 标签。
 
-        此测试需要 MINERU_API_TOKEN 已配置（从 D:\\test\\.env 加载）。
+        此测试需要 MINERU_API_TOKEN 已配置（从 backend/.env 加载）。
         云端转换可能需要 2-5 分钟，超时设为 600 秒。
         """
         if not os.path.exists(REAL_PDF_PATH):
@@ -534,10 +527,10 @@ class TestPageMarkerInsertion:
         if not api_token:
             pytest.skip(
                 "MINERU_API_TOKEN 未配置，跳过云端 PDF 转换测试。"
-                "请在 D:\\test\\.env 中设置 MINERU_API_TOKEN"
+                "请在 backend/.env 中设置 MINERU_API_TOKEN"
             )
 
-        from mineru_plus.converter import convert
+        from app.services.mineru.converter import convert
 
         start_time = time.time()
         print(f"\n  开始云端 API 转换: {REAL_PDF_PATH}")
@@ -769,9 +762,9 @@ class TestPdfBloatFix:
 
     def test_intake_uses_pymupdf_insert_pdf(self):
         """intake.py 中 _split_pdf 应使用 PyMuPDF 的 insert_pdf"""
-        intake_path = MINERU_PLUS_DIR / "intake.py"
+        intake_path = BACKEND_DIR / "app" / "services" / "mineru" / "intake.py"
         if not intake_path.exists():
-            pytest.skip("mineru_plus/intake.py 文件不存在")
+            pytest.skip("app/services/mineru/intake.py 文件不存在")
 
         source = intake_path.read_text(encoding="utf-8")
 
@@ -782,9 +775,9 @@ class TestPdfBloatFix:
 
     def test_intake_has_strip_unused_resources(self):
         """intake.py 应包含 _strip_unused_resources 函数"""
-        intake_path = MINERU_PLUS_DIR / "intake.py"
+        intake_path = BACKEND_DIR / "app" / "services" / "mineru" / "intake.py"
         if not intake_path.exists():
-            pytest.skip("mineru_plus/intake.py 文件不存在")
+            pytest.skip("app/services/mineru/intake.py 文件不存在")
 
         source = intake_path.read_text(encoding="utf-8")
 

@@ -9,12 +9,16 @@
 - 提交答案（POST /api/review/submit）
 - 获取复习统计（GET /api/review/stats）
 - 获取复习历史（GET /api/review/history）
+- 获取复习提醒概览（GET /api/review/reminders）
 
 设计决策：
 - 所有接口需要用户认证，且只能操作自己的数据
 - 提交答案后即时返回判分结果和 SM-2 更新信息
 - 到期题目按 next_review_at 升序排列
+- /reminders 端点放在所有路径参数路由之前，避免 "reminders" 被识别为 review_id
 """
+
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,10 +33,16 @@ from ..schemas.review import (
     SubmitAnswerResponse,
     ReviewStatsResponse,
     ReviewHistoryResponse,
+    ReminderResponse,
 )
 from ..services import review_service
+from ..services.notification_service import NotificationService
 
 router = APIRouter()
+
+# 模块级通知服务实例，避免每次请求重复创建
+_notification_service = NotificationService()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/due", response_model=DueQuizListResponse)
@@ -131,3 +141,39 @@ async def get_review_history(
         page_size=page_size,
     )
     return ReviewHistoryResponse(**result)
+
+
+@router.get("/reminders", response_model=ReminderResponse)
+async def get_reminders(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取复习提醒概览
+
+    返回当前用户的复习提醒数据，包括：
+    - due_count: 已到期或尚未安排复习的题目数
+    - due_in_1h_count: 未来 1 小时内到期的题目数
+    - weak_point_count: 掌握度低于 60 的知识卡片数
+    - last_reminded_at: 上次提醒时间（暂未持久化，固定为 None）
+
+    注意：本路由需放在任何 /{review_id} 路径参数路由之前，
+    避免 "reminders" 被识别为 review_id。
+    """
+    try:
+        reminders = await _notification_service.get_reminders(
+            user_id=current_user.id, db=db
+        )
+        return ReminderResponse(**reminders)
+    except HTTPException:
+        # 透传已知的 HTTP 异常
+        raise
+    except Exception as e:
+        logger.error(
+            "获取复习提醒失败: user_id=%s, err=%s",
+            current_user.id, e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail="获取复习提醒数据失败"
+        )

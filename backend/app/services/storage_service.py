@@ -32,33 +32,50 @@ settings = get_settings()
 
 def _get_storage_root() -> Path:
     """
-    获取存储根目录
+    获取存储根目录（Vault 根）
+
+    Vault 根目录即本地模式下的存储根，object_name 已包含完整的
+    "用户/项目/source|output|history|cache" 结构，直接映射到该根之下。
 
     Returns:
-        Path: 存储根目录路径
+        Path: Vault 根目录路径
     """
-    return settings.get_storage_dir()
+    return settings.get_vault_dir()
 
 
 def _resolve_path(bucket: str, object_name: str) -> Path:
     """
-    将 bucket/object_name 映射为本地文件系统的绝对路径
+    将 object_name 映射为本地文件系统的绝对路径
 
-    同时执行路径遍历安全检查，确保解析后的路径仍在 bucket 目录下，
+    Vault 结构下 object_name 已含完整路径（bucket 仅对 MinIO 有意义，
+    本地模式忽略 bucket 直接映射到 Vault 根，保持单一可浏览目录树）。
+
+    兼容历史数据：早期笔记的 object_name 可能是无 bucket 前缀的相对路径
+    （如 {user_id}/{folder_id}/original.md），对应文件实际位于
+    "{bucket}/{object_name}" 下；已带 bucket 前缀或新 vault 结构
+    （含 source/output/history/cache 段）的路径则无需处理。
+
+    同时执行路径遍历安全检查，确保解析后的路径仍在 Vault 根目录下，
     防止恶意 object_name（如 "../../etc/passwd"）访问存储目录之外的文件。
 
     Args:
-        bucket: 存储桶名称（映射为目录名）
+        bucket: 存储桶名称（本地模式仅在兼容旧路径时用于补前缀）
         object_name: 对象名称（映射为相对文件路径）
 
     Returns:
         Path: 本地文件系统的绝对路径
 
     Raises:
-        ValueError: 路径遍历攻击检测，object_name 试图访问 bucket 目录之外的文件
+        ValueError: 路径遍历攻击检测，object_name 试图访问 Vault 根目录之外的文件
     """
-    root = _get_storage_root() / bucket
-    path = root / object_name
+    root = _get_storage_root()
+    obj = object_name.replace("\\", "/")
+    # 兼容旧数据：无 bucket 前缀且非新 vault 结构时补上 bucket 前缀
+    vault_segments = ("source", "output", "history", "cache")
+    is_vault_path = any(seg in obj.split("/") for seg in vault_segments)
+    if not is_vault_path and not obj.startswith(bucket + "/"):
+        obj = f"{bucket}/{obj}"
+    path = root / obj
     # 安全检查：防止路径遍历攻击
     # resolve() 会解析所有 ".." 和符号链接，得到真实路径
     path = path.resolve()
@@ -70,14 +87,113 @@ def _resolve_path(bucket: str, object_name: str) -> Path:
 
 def ensure_buckets_exist():
     """
-    确保所需的 bucket 目录存在
+    确保存储目录/存储桶存在
 
-    创建原始文件桶和 Markdown 桶对应的目录。
-    在文件上传前调用，确保存储目录结构就绪。
+    本地模式：创建 Vault 根目录（各项目子目录在上传时懒创建）。
+    MinIO 模式：确保原始文件桶和 Markdown 桶存在。
+    在文件上传前调用，确保存储结构就绪。
     """
     root = _get_storage_root()
-    for bucket_name in [settings.minio_bucket_original, settings.minio_bucket_markdown]:
-        (root / bucket_name).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
+    if settings.storage_backend == "minio":
+        client = _get_minio_client()
+        for bucket_name in [settings.minio_bucket_original, settings.minio_bucket_markdown]:
+            if not client.bucket_exists(bucket_name):
+                client.make_bucket(bucket_name)
+
+
+def ensure_project_dirs(prefix: str, subdirs=None):
+    """
+    创建项目的 Vault 目录树（source/output/history/cache 等）
+
+    创建项目时预建目录树，让用户在磁盘上即可看到并放入文件，
+    无需等待首个文件上传（懒创建）才生成目录。
+
+    Args:
+        prefix: 项目前缀 {user_id}/{project_slug}
+        subdirs: 需要创建的子目录列表（默认 PROJECT_SUBDIRS）
+    """
+    from .vault_path import PROJECT_SUBDIRS as _DEFAULT_SUBDIRS
+    for subdir in (subdirs if subdirs is not None else _DEFAULT_SUBDIRS):
+        object_name = f"{prefix}/{subdir}/"
+        if settings.storage_backend == "minio":
+            # MinIO 无真实目录概念，写入一个占位对象使目录树在浏览器可见
+            upload_bytes(
+                settings.minio_bucket_original,
+                object_name + ".gitkeep",
+                b"",
+                "application/octet-stream",
+            )
+        else:
+            path = _resolve_path(settings.minio_bucket_original, object_name.rstrip("/"))
+            path.mkdir(parents=True, exist_ok=True)
+
+
+def remove_project_dir(prefix: str):
+    """
+    删除项目的整个 Vault 目录树
+
+    删除项目时调用，物理清理磁盘/对象存储中的项目目录。
+
+    Args:
+        prefix: 项目前缀 {user_id}/{project_slug}
+    """
+    if settings.storage_backend == "minio":
+        from minio import DeleteObject
+        client = _get_minio_client()
+        objects = [
+            DeleteObject(obj.object_name)
+            for obj in client.list_objects(
+                settings.minio_bucket_original, prefix=f"{prefix}/", recursive=True
+            )
+        ]
+        if objects:
+            client.remove_objects(settings.minio_bucket_original, objects)
+    else:
+        root = _get_storage_root()
+        path = root / prefix
+        path = path.resolve()
+        root_resolved = root.resolve()
+        if str(path).startswith(str(root_resolved)) and path.exists():
+            import shutil
+            shutil.rmtree(path)
+
+
+def list_source_files(prefix: str):
+    """
+    列出项目 source/ 目录下的文件
+
+    用于「扫描导入」：用户手动把文件放入磁盘 source/ 目录后，
+    程序据此识别新文件并创建笔记。
+
+    Args:
+        prefix: 项目前缀 {user_id}/{project_slug}
+
+    Returns:
+        list[tuple[str, int]]: source/ 下相对文件路径与文件大小（字节）的列表
+    """
+    if settings.storage_backend == "minio":
+        client = _get_minio_client()
+        source_prefix = f"{prefix}/source/"
+        return [
+            (obj.object_name[len(source_prefix):], obj.size)
+            for obj in client.list_objects(
+                settings.minio_bucket_original, prefix=source_prefix, recursive=True
+            )
+            if not obj.object_name.endswith("/") and not obj.object_name.endswith(".gitkeep")
+        ]
+    else:
+        root = _get_storage_root()
+        source_dir = root / prefix / "source"
+        if not source_dir.exists():
+            return []
+        result = []
+        for dirpath, _dirnames, filenames in os.walk(source_dir):
+            for fname in filenames:
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, source_dir).replace("\\", "/")
+                result.append((rel, os.path.getsize(full)))
+        return result
 
 
 def upload_file(bucket: str, object_name: str, file_path: str, content_type: str = "application/octet-stream"):

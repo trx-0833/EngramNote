@@ -71,5 +71,30 @@ celery_app.conf.update(
 # 而我们的任务直接定义在 app.tasks.convert_tasks 中，
 # 所以使用 include 参数显式导入
 celery_app.conf.update(
-    include=["app.tasks.convert_tasks", "app.tasks.clean_tasks", "app.tasks.understand_tasks"],
+    include=[
+        "app.tasks.convert_tasks",
+        "app.tasks.clean_tasks",
+        "app.tasks.understand_tasks",
+        "app.tasks.embedding_tasks",
+        "app.tasks.reminder_tasks",
+    ],
+)
+
+# Celery Beat 定时任务调度配置
+# 时区已在上方设置为 Asia/Shanghai，crontab 将使用上海时间
+from celery.schedules import crontab
+
+celery_app.conf.update(
+    beat_schedule={
+        # 每日 00:30 刷新学习目标进度（活跃目标的 progress_cache、状态流转）
+        "refresh-goal-progress-daily": {
+            "task": "app.tasks.reminder_tasks.refresh_goal_progress_task",
+            "schedule": crontab(hour=0, minute=30),
+        },
+        # 每日 09:00 发送复习提醒邮件（仅对开启邮件提醒的用户）
+        "send-daily-review-email": {
+            "task": "app.tasks.reminder_tasks.send_daily_review_email",
+            "schedule": crontab(hour=9, minute=0),
+        },
+    },
 )

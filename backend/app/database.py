@@ -130,6 +130,30 @@ async def _migrate_sqlite(conn):
         inspector = inspect(sync_conn)
         table_names = inspector.get_table_names()
 
+        # 检查并创建 projects 表（防御性建表，对应 Alembic 005 迁移）
+        # 需在 notes.project_id 列添加之前执行，避免 ALTER REFERENCES 找不到目标表
+        if 'projects' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    user_id VARCHAR NOT NULL REFERENCES users(id),
+                    name VARCHAR(200) NOT NULL,
+                    slug VARCHAR(60) NOT NULL,
+                    description TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_projects_user_id ON projects (user_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_projects_slug ON projects (slug)"
+            ))
+            logger.info("SQLite 迁移: 已创建 projects 表")
+
         # 检查 notes 表是否缺少列
         if 'notes' in table_names:
             existing_columns = {col['name'] for col in inspector.get_columns('notes')}
@@ -138,6 +162,11 @@ async def _migrate_sqlite(conn):
                     "ALTER TABLE notes ADD COLUMN folder_id VARCHAR REFERENCES folders(id)"
                 ))
                 logger.info("SQLite 迁移: 已为 notes 表添加 folder_id 列")
+            if 'project_id' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE notes ADD COLUMN project_id VARCHAR REFERENCES projects(id)"
+                ))
+                logger.info("SQLite 迁移: 已为 notes 表添加 project_id 列")
             if 'note_role' not in existing_columns:
                 sync_conn.execute(text(
                     "ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"
@@ -181,6 +210,89 @@ async def _migrate_sqlite(conn):
                 """
             ))
             logger.info("SQLite 迁移: 已创建 note_annotations 表")
+
+        # 检查并创建 note_versions 表（防御性建表，对应 Alembic 004 迁移）
+        if 'note_versions' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS note_versions (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    version_number INTEGER NOT NULL,
+                    source VARCHAR(20) NOT NULL,
+                    content_size INTEGER NOT NULL,
+                    change_summary TEXT,
+                    storage_path VARCHAR NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_note_versions_note_id ON note_versions (note_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_note_versions_user_id ON note_versions (user_id)"
+            ))
+            logger.info("SQLite 迁移: 已创建 note_versions 表")
+
+        # 检查并创建 learning_goals 表（防御性建表，对应 Alembic 004 迁移）
+        if 'learning_goals' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS learning_goals (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name VARCHAR(200) NOT NULL,
+                    type VARCHAR(20) NOT NULL DEFAULT 'weekly',
+                    scope_notes JSON,
+                    scope_folders JSON,
+                    target_mastery FLOAT NOT NULL DEFAULT 80.0,
+                    deadline DATETIME,
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    progress_cache FLOAT DEFAULT 0.0 NOT NULL,
+                    last_progress_refresh DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_learning_goals_user_id ON learning_goals (user_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_learning_goals_status ON learning_goals (status)"
+            ))
+            logger.info("SQLite 迁移: 已创建 learning_goals 表")
+
+        # 检查并创建 daily_plans 表（防御性建表，对应 Alembic 004 迁移）
+        if 'daily_plans' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS daily_plans (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    goal_id VARCHAR NOT NULL REFERENCES learning_goals(id) ON DELETE CASCADE,
+                    user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    plan_date DATETIME NOT NULL,
+                    recommended_tasks JSON,
+                    completed_count INTEGER DEFAULT 0 NOT NULL,
+                    total_count INTEGER DEFAULT 0 NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_daily_plans_user_id ON daily_plans (user_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_daily_plans_goal_id ON daily_plans (goal_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_daily_plans_plan_date ON daily_plans (plan_date)"
+            ))
+            logger.info("SQLite 迁移: 已创建 daily_plans 表")
 
         # 检查 assessment_results 表是否缺少 link_signature / is_stale 列
         if 'assessment_results' in table_names:
@@ -255,6 +367,7 @@ async def _migrate_sqlite(conn):
             ("card_relations", "card_id_1", "knowledge_cards", "id", "delete"),
             ("card_relations", "card_id_2", "knowledge_cards", "id", "delete"),
             ("notes", "folder_id", "folders", "id", "nullify"),
+            ("notes", "project_id", "projects", "id", "nullify"),
         ]
 
         for table, col, parent_table, parent_col, action in orphan_checks:

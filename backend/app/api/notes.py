@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
+from ..models.project import Project
 from ..models.user import User
 from ..schemas.note import (
     NoteContentUpdateRequest,
@@ -42,6 +43,13 @@ from ..schemas.note_annotation import (
     AnnotationResponse,
     AnnotationListResponse,
 )
+from ..schemas.note_version import (
+    NoteVersionResponse,
+    NoteVersionListResponse,
+    NoteVersionDiffResponse,
+    NoteVersionRestoreRequest,
+)
+from ..services.version_service import version_service
 from ..api.auth import get_current_user_dependency
 from ..config import get_settings
 from ..services import note_service
@@ -60,20 +68,52 @@ settings = get_settings()
 router = APIRouter()
 
 
-def _build_note_response(note: Note) -> NoteResponse:
-    """构建 NoteResponse，如果是视频类型则填充 video_url"""
+def _fill_project_name(resp: NoteResponse, note: Note, names: dict) -> None:
+    """为响应填充 project_name（来自预查询的项目名映射）"""
+    resp.project_name = names.get(note.project_id)
+
+
+async def _load_project_names(db: AsyncSession, notes) -> dict:
+    """批量查询笔记所属项目名，返回 {project_id: name} 映射"""
+    project_ids = {n.project_id for n in notes if n.project_id}
+    if not project_ids:
+        return {}
+    result = await db.execute(
+        select(Project.id, Project.name).where(Project.id.in_(project_ids))
+    )
+    return dict(result.all())
+
+
+async def _build_note_response(db: AsyncSession, note: Note) -> NoteResponse:
+    """构建单个 NoteResponse（含项目名），视频类型填充 video_url"""
     resp = NoteResponse.model_validate(note)
+    names = await _load_project_names(db, [note])
+    _fill_project_name(resp, note, names)
     if note.source_type == SourceType.video:
         resp.video_url = f"/api/notes/{note.id}/video"
     return resp
 
 
+async def _build_note_responses(db: AsyncSession, notes) -> list[NoteResponse]:
+    """批量构建 NoteResponse（一次查询所有项目名，避免 N+1）"""
+    names = await _load_project_names(db, notes)
+    responses = []
+    for n in notes:
+        resp = NoteResponse.model_validate(n)
+        _fill_project_name(resp, n, names)
+        if n.source_type == SourceType.video:
+            resp.video_url = f"/api/notes/{n.id}/video"
+        responses.append(resp)
+    return responses
+
+
 @router.get("", response_model=NoteListResponse)
 async def list_notes(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     keyword: Optional[str] = None,
     note_role: Optional[str] = Query(None, description="笔记角色过滤：material 或 personal_note"),
+    project_id: Optional[str] = Query(None, description="按项目过滤"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,9 +125,10 @@ async def list_notes(
 
     Args:
         page: 页码，从 1 开始，默认第 1 页
-        page_size: 每页数量，默认 20，最大 100
+        page_size: 每页数量，默认 20，最大 1000（项目"添加笔记"面板一次拉取候选需要）
         keyword: 搜索关键词，按标题模糊匹配（可选）
         note_role: 笔记角色过滤（可选），material 或 personal_note
+        project_id: 按项目过滤（可选）
         current_user: 当前认证用户
         db: 异步数据库会话
 
@@ -102,10 +143,11 @@ async def list_notes(
                 detail=f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
             )
     notes, total = await get_notes_list(
-        db, current_user.id, page, page_size, keyword, note_role=note_role
+        db, current_user.id, page, page_size, keyword, note_role=note_role, project_id=project_id
     )
+    items = await _build_note_responses(db, notes)
     return NoteListResponse(
-        items=[_build_note_response(n) for n in notes],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -115,7 +157,7 @@ async def list_notes(
 @router.get("/archive", response_model=NoteListResponse)
 async def list_archived_notes(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     note_role: Optional[str] = Query(None, description="笔记角色过滤：material 或 personal_note"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
@@ -135,8 +177,9 @@ async def list_archived_notes(
     notes, total = await get_notes_list(
         db, current_user.id, page, page_size, note_status=NoteStatus.archived, note_role=note_role
     )
+    items = await _build_note_responses(db, notes)
     return NoteListResponse(
-        items=[_build_note_response(n) for n in notes],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -177,6 +220,8 @@ async def get_note(
     resp = NoteDetailResponse.model_validate(note)
     resp.original_md_content = original_md
     resp.clean_md_content = clean_md
+    names = await _load_project_names(db, [note])
+    _fill_project_name(resp, note, names)
     if note.source_type == SourceType.video:
         resp.video_url = f"/api/notes/{note.id}/video"
     return resp
@@ -211,7 +256,7 @@ async def update_note_api(
         raise HTTPException(status_code=404, detail="笔记不存在")
 
     updated = await update_note(db, note, req)
-    return _build_note_response(updated)
+    return await _build_note_response(db, updated)
 
 
 @router.put("/{note_id}/content", response_model=NoteResponse)
@@ -260,7 +305,7 @@ async def update_note_content(
         )
 
     # 5. 返回更新后的笔记信息
-    return _build_note_response(note)
+    return await _build_note_response(db, note)
 
 
 @router.post("/{note_id}/archive", response_model=NoteResponse)
@@ -305,7 +350,10 @@ async def archive_note_api(
     note.error_message = None
     await db.commit()
     await db.refresh(note)
-    return _build_note_response(note)
+    # 归档状态变更同步写穿 meta 镜像
+    from ..services.vault_meta import write_note_meta
+    write_note_meta(note)
+    return await _build_note_response(db, note)
 
 
 @router.get("/{note_id}/links", response_model=LinkListResponse)
@@ -524,7 +572,7 @@ async def update_note_role(
     note.note_role = NoteRole(note_role)
     await db.commit()
     await db.refresh(note)
-    return _build_note_response(note)
+    return await _build_note_response(db, note)
 
 
 def _resolve_storage_path(bucket: str, object_name: str) -> Path:
@@ -633,3 +681,183 @@ async def stream_video(
             "Content-Length": str(file_size),
         },
     )
+
+
+# ============================================================
+# 笔记版本历史 API
+# ============================================================
+
+
+@router.get("/{note_id}/versions", response_model=NoteVersionListResponse)
+async def list_note_versions(
+    note_id: str,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取笔记的版本历史列表
+
+    返回指定笔记的所有版本快照，按版本号倒序排列（最新版本在前）。
+    调用前会先校验笔记归属权，确保用户只能查询自己笔记的版本历史。
+
+    Args:
+        note_id: 笔记 ID
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        NoteVersionListResponse: 包含版本列表和总数的响应
+
+    Raises:
+        HTTPException 404: 笔记不存在或不属于当前用户
+    """
+    # 校验笔记归属权
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+
+    # 查询版本历史
+    versions = await version_service.list_versions(note_id, current_user.id, db)
+    return NoteVersionListResponse(
+        versions=[NoteVersionResponse.model_validate(v) for v in versions],
+        total=len(versions),
+    )
+
+
+@router.get("/{note_id}/versions/diff", response_model=NoteVersionDiffResponse)
+async def diff_note_versions(
+    note_id: str,
+    v1: int = Query(..., description="旧版本号"),
+    v2: int = Query(..., description="新版本号"),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    对比两个版本的行级 diff
+
+    使用 difflib.ndiff 生成差异，将每行标注为 added / removed / unchanged。
+    注意：该路由必须注册在 /{version_number} 路由之前，否则 "diff" 会被
+    FastAPI 当作 version_number 进行匹配。
+
+    Args:
+        note_id: 笔记 ID
+        v1: 旧版本号
+        v2: 新版本号
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        NoteVersionDiffResponse: 包含两版本号和 diff 行列表的响应
+
+    Raises:
+        HTTPException 404: 笔记不存在或任一版本不存在
+    """
+    # 校验笔记归属权
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+
+    # 生成 diff
+    try:
+        diff_data = await version_service.diff_versions(
+            note_id, v1, v2, current_user.id, db
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return NoteVersionDiffResponse(
+        v1_number=diff_data["v1_number"],
+        v2_number=diff_data["v2_number"],
+        diff_lines=diff_data["diff_lines"],
+    )
+
+
+@router.get("/{note_id}/versions/{version_number}")
+async def get_note_version_content(
+    note_id: str,
+    version_number: int,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    预览指定版本的 Markdown 内容
+
+    从对象存储中读取指定版本的 Markdown 文本内容。
+    该路由注册在 /diff 之后，避免 "diff" 被当作 version_number 匹配。
+
+    Args:
+        note_id: 笔记 ID
+        version_number: 版本号
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        dict: 包含 content（Markdown 文本）和 version_number 的响应
+
+    Raises:
+        HTTPException 404: 笔记不存在或版本不存在
+    """
+    # 校验笔记归属权
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+
+    # 读取版本内容
+    try:
+        content = await version_service.get_version_content(
+            note_id, version_number, current_user.id, db
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {"content": content, "version_number": version_number}
+
+
+@router.post("/{note_id}/versions/{version_number}/restore", response_model=NoteVersionResponse)
+async def restore_note_version(
+    note_id: str,
+    version_number: int,
+    req: NoteVersionRestoreRequest = None,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    恢复指定历史版本为当前内容
+
+    流程：
+    1. 先为笔记当前内容创建一个新版本快照（USER_EDIT 来源）
+    2. 用目标版本内容覆盖当前 Markdown 文件
+    3. 返回新创建的快照版本信息
+
+    Args:
+        note_id: 笔记 ID
+        version_number: 要恢复的目标版本号
+        req: 恢复请求体（含可选的 confirm 字段，预留用于二次确认）
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        NoteVersionResponse: 恢复前为当前内容创建的新版本快照信息
+
+    Raises:
+        HTTPException 404: 笔记或目标版本不存在
+        HTTPException 400: 笔记无可写入的 Markdown 路径
+    """
+    # 校验笔记归属权
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+
+    # 恢复版本
+    try:
+        new_version = await version_service.restore_version(
+            note_id, version_number, current_user.id, db
+        )
+    except ValueError as e:
+        # 区分"版本不存在"和"笔记路径缺失"两种错误
+        message = str(e)
+        if "不存在" in message and "版本" in message:
+            raise HTTPException(status_code=404, detail=message)
+        raise HTTPException(status_code=400, detail=message)
+
+    return NoteVersionResponse.model_validate(new_version)

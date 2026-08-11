@@ -22,9 +22,12 @@ AI 理解管道 API 模块
 - RAG 问答跨用户所有笔记检索
 """
 
+import json
+import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, delete as sql_delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,10 +57,12 @@ from ..schemas.knowledge import (
 from ..services.note_service import get_note_detail
 from ..services.understanding_service import detect_card_duplicates
 from ..services.rag_service import RAGService
+from ..services.llm_service import LLMService
 from ..tasks.understand_tasks import understand_document_task, generate_questions_task
 from ..config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -83,38 +88,41 @@ async def start_understanding(
             detail=f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
         )
 
-    # 如果是 archived 状态，先删除该笔记的旧知识卡片和题目
-    if note.status == NoteStatus.archived:
-        # 批量删除关联的复习记录
-        quiz_ids_result = await db.execute(
-            select(QuizItem.id).where(QuizItem.note_id == note_id)
-        )
-        quiz_ids = [row[0] for row in quiz_ids_result.all()]
-        if quiz_ids:
-            await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
-        # 批量删除关联的卡片关系
-        card_ids_result = await db.execute(
-            select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
-        )
-        card_ids = [row[0] for row in card_ids_result.all()]
-        if card_ids:
-            await db.execute(
-                sql_delete(CardRelation).where(
-                    or_(
-                        CardRelation.card_id_1.in_(card_ids),
-                        CardRelation.card_id_2.in_(card_ids),
-                    )
+    # 重新学习前清空旧产物（无论当前状态），避免重复卡片
+    # 批量删除关联的复习记录
+    quiz_ids_result = await db.execute(
+        select(QuizItem.id).where(QuizItem.note_id == note_id)
+    )
+    quiz_ids = [row[0] for row in quiz_ids_result.all()]
+    if quiz_ids:
+        await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
+    # 批量删除关联的卡片关系
+    card_ids_result = await db.execute(
+        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
+    )
+    card_ids = [row[0] for row in card_ids_result.all()]
+    if card_ids:
+        await db.execute(
+            sql_delete(CardRelation).where(
+                or_(
+                    CardRelation.card_id_1.in_(card_ids),
+                    CardRelation.card_id_2.in_(card_ids),
                 )
             )
-        # 批量删除关联题目和知识卡片
-        await db.execute(sql_delete(QuizItem).where(QuizItem.note_id == note_id))
-        await db.execute(sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
-        await db.commit()
+        )
+    # 批量删除关联题目和知识卡片
+    await db.execute(sql_delete(QuizItem).where(QuizItem.note_id == note_id))
+    await db.execute(sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
+    await db.commit()
 
     # 更新状态为 learning
     note.status = NoteStatus.learning
     note.error_message = None
     await db.commit()
+    await db.refresh(note)
+    # 状态写穿镜像
+    from ..services.vault_meta import write_note_meta
+    write_note_meta(note)
 
     # 触发 Celery 理解任务
     understand_document_task.delay(note_id)
@@ -459,6 +467,96 @@ async def ask_question(
             for s in result.get("sources", [])
         ],
         provider=result.get("provider", ""),
+    )
+
+
+@router.post("/ask/stream")
+async def ask_question_stream(
+    req: QuestionRequest,
+    current_user: User = Depends(get_current_user_dependency),
+):
+    """
+    RAG 问答流式接口（SSE）
+
+    通过 Server-Sent Events 逐 token 返回 LLM 生成的回答，
+    适合前端实时展示生成过程。
+
+    流程：
+    1. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）
+    2. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）
+    3. 调用 llm_service.chat_stream() 流式生成回答
+    4. 流式结束后发送 sources 与 done 事件
+
+    SSE 事件格式：
+    - event: token   data: {"content": "..."}                每个 token 片段
+    - event: sources data: {"sources": [...], "provider": "..."}  流式结束后返回引用来源
+    - event: done    data: {}                                结束标记
+    - event: error   data: {"message": "..."}                异常情况
+    """
+
+    async def event_stream():
+        try:
+            # 1. 检索阶段（不调用 LLM）
+            rag_service = RAGService()
+            retrieval = await rag_service.retrieve_context(
+                question=req.question,
+                user_id=current_user.id,
+            )
+            context = retrieval["context"]
+            sources = retrieval["sources"]
+            provider = retrieval["provider"]
+
+            # 2. 构建 messages（system prompt 与 LLMService.rag_answer 保持一致以命中缓存）
+            llm_service = LLMService()
+            if not context.strip():
+                # 无检索结果，使用 LLM 自身知识回答
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
+                                   "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。",
+                    },
+                    {"role": "user", "content": req.question},
+                ]
+            else:
+                # 基于检索上下文回答（与 rag_answer 一致的 prompt）
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是一个知识渊博的学习助手。请根据提供的参考资料回答用户问题。\n\n"
+                            "回答原则：\n"
+                            "1. 优先使用参考资料：如果参考资料中包含相关信息，请以其为主要依据\n"
+                            "2. 自主知识补充：如果参考资料不足或没有相关信息，可以结合你自己的知识来回答，"
+                            "但请说明这部分是基于你的知识补充的\n"
+                            "3. 诚实标注：如果回答中既有参考资料的内容，也有你自己的知识，请尽量区分\n"
+                            "4. 回答应详细有用：不要简单地回复没有相关信息，而是尽力提供有价值的回答\n"
+                            "5. 适当引用：回答中可引用参考资料中的原文来增强可信度"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"参考资料：\n{context}\n\n问题：{req.question}",
+                    },
+                ]
+
+            # 3. 流式输出 token
+            async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
+                yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+
+            # 4. 发送 sources 事件
+            yield f"event: sources\ndata: {json.dumps({'sources': sources, 'provider': provider}, ensure_ascii=False)}\n\n"
+
+            # 5. 发送 done 事件
+            yield "event: done\ndata: {}\n\n"
+        except Exception as e:
+            logger.warning(f"SSE 流式问答失败: {e}", exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.note import Note, NoteStatus, NoteRole
 from ..models.user import User
+from ..models.note_version import NoteVersion
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
@@ -42,6 +43,8 @@ from ..services.storage_service import (
     upload_bytes,
 )
 from ..config import get_settings
+from . import vault_path
+from .vault_meta import write_note_meta
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -55,6 +58,7 @@ async def get_notes_list(
     keyword: Optional[str] = None,
     note_status: Optional[NoteStatus] = None,
     note_role: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Tuple[list[Note], int]:
     """
     获取用户的笔记列表（分页）
@@ -73,6 +77,8 @@ async def get_notes_list(
         page_size: 每页数量
         keyword: 搜索关键词，按标题模糊匹配（可选）
         note_status: 按状态筛选（可选）
+        note_role: 按笔记角色筛选（可选）
+        project_id: 按项目筛选（可选）
 
     Returns:
         Tuple[list[Note], int]: (笔记列表, 总数)
@@ -87,6 +93,10 @@ async def get_notes_list(
     # 可选：按笔记角色筛选（material / personal_note）
     if note_role is not None:
         query = query.where(Note.note_role == NoteRole(note_role))
+
+    # 可选：按项目筛选
+    if project_id is not None:
+        query = query.where(Note.project_id == project_id)
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
     if keyword:
@@ -218,6 +228,8 @@ async def delete_note(db: AsyncSession, note: Note):
         note.status = NoteStatus.failed
         note.error_message = "用户手动删除"
         await db.commit()
+        await db.refresh(note)
+        write_note_meta(note)
         logger.info(f"笔记 {note_id[:8]} 处于处理中状态，已标记为 failed")
         # 等待一小段时间，让正在执行的 Celery 任务有机会检测到状态变更
         await asyncio.sleep(0.5)
@@ -303,6 +315,32 @@ async def delete_note(db: AsyncSession, note: Note):
             delete_file(settings.minio_bucket_markdown, note.clean_md_path)
         except Exception as e:
             logger.warning(f"删除清洗Markdown失败: {note.clean_md_path}, 错误: {e}")
+
+    # ---- 删除 Vault 状态旁载 meta/*.json ----
+    if note.original_file_path:
+        try:
+            prefix = vault_path.derive_prefix(note)
+            base = vault_path.derive_base(note)
+            if prefix and base:
+                delete_file(settings.minio_bucket_markdown, vault_path.meta_object(prefix, base))
+        except Exception as e:
+            logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
+
+    # ---- 删除版本历史记录及其存储文件（history/versions/v{N}.md） ----
+    try:
+        ver_result = await db.execute(
+            select(NoteVersion).where(NoteVersion.note_id == note_id)
+        )
+        versions = ver_result.scalars().all()
+        for version in versions:
+            if version.storage_path:
+                try:
+                    delete_file(settings.minio_bucket_markdown, version.storage_path)
+                except Exception as e:
+                    logger.warning(f"删除版本存储文件失败: {version.storage_path}, 错误: {e}")
+            await db.delete(version)
+    except Exception as e:
+        logger.warning(f"清理版本历史失败: note_id={note_id}, 错误: {e}")
 
     # ---- 删除笔记记录 ----
     await db.delete(note)
@@ -482,6 +520,9 @@ async def save_note_content(db: AsyncSession, note: Note, content: str, target: 
     """
     保存用户编辑的 Markdown 内容到对象存储
 
+    在覆盖现有 markdown 文件前，先读取当前内容并创建版本快照，
+    以支持版本历史查看与历史版本恢复。版本创建失败不影响主保存流程。
+
     Args:
         db: 异步数据库会话
         note: 笔记对象
@@ -502,6 +543,36 @@ async def save_note_content(db: AsyncSession, note: Note, content: str, target: 
     if not path:
         return False  # 路径为空，资料未转换完成
 
+    # ---- 在覆盖前为当前内容创建版本快照 ----
+    # 版本创建失败不应阻塞主保存流程，仅记录警告日志
+    try:
+        # 读取当前 Markdown 文件内容（覆盖前的快照）
+        current_content = ""
+        try:
+            current_bytes = get_object_bytes(settings.minio_bucket_markdown, path)
+            current_content = current_bytes.decode("utf-8")
+        except Exception as read_err:
+            # 文件可能尚不存在（首次保存），以空内容创建版本快照
+            logger.debug(
+                f"读取当前 Markdown 失败（可能首次保存）: note_id={note.id[:8]}, err={read_err}"
+            )
+
+        # 懒加载 version_service，避免循环导入
+        from ..services.version_service import version_service
+        from ..models.note_version import VersionSource
+
+        await version_service.create_version(
+            note_id=note.id,
+            user_id=note.user_id,
+            content=current_content,
+            source=VersionSource.USER_EDIT.value,
+            db=db,
+        )
+    except Exception as e:
+        logger.warning(
+            f"创建版本快照失败，继续执行主保存流程: note_id={note.id[:8]}, err={e}"
+        )
+
     # 将内容转为字节流
     content_bytes = content.encode("utf-8")
 
@@ -519,4 +590,6 @@ async def save_note_content(db: AsyncSession, note: Note, content: str, target: 
     note.updated_at = func.now()
     await db.commit()
     await db.refresh(note)
+    # 内容变更后同步状态旁载 meta（更新时间/路径变更）
+    write_note_meta(note)
     return True

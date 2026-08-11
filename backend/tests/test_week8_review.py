@@ -16,6 +16,7 @@
 """
 
 import json
+import os
 import time
 import sys
 from pathlib import Path
@@ -23,7 +24,7 @@ from pathlib import Path
 import httpx
 
 BASE_URL = "http://localhost:8000/api"
-PDF_PATH = r"D:\test\resources1\劳动合同书-田润鑫.pdf"
+PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
 
 # 测试用户
 TEST_USER = {

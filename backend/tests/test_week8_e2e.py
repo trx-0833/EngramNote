@@ -146,7 +146,7 @@ def main():
     # 插入笔记
     cur.execute("""
         INSERT INTO notes (id, user_id, title, source_type, status, original_file_path, original_md_path, file_size, created_at, updated_at)
-        VALUES (?, ?, '测试笔记-劳动合同', 'pdf', 'archived', 'test/test.pdf', 'test/test.md', 1024, ?, ?)
+        VALUES (?, ?, '测试笔记-劳动合同', 'pdf', 'archived', 'test/default/source/test.pdf', 'test/default/output/markdown/test.md', 1024, ?, ?)
     """, (note_id, user_id, now, now))
     conn.commit()
     conn.close()

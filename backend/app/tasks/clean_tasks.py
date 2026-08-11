@@ -20,16 +20,18 @@
 
 from typing import Optional
 
+import os
 import time
-import traceback
 import logging
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
+from ..services import vault_path
+from ..services.vault_meta import write_note_meta
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -78,6 +80,23 @@ async def _get_note_status(note_id: str) -> Optional[NoteStatus]:
         return note.status if note else None
 
 
+async def _is_cleaning_stopped(note_id: str) -> bool:
+    """
+    检查笔记是否已被用户停止清洗
+
+    在清洗任务各阶段边界调用，若笔记状态已被 stop API 置为
+    cleaning_failed，则提前终止，避免继续执行耗时步骤并在结尾覆盖状态。
+
+    Args:
+        note_id: 笔记 ID
+
+    Returns:
+        bool: 用户已停止清洗返回 True；笔记不存在时返回 False
+    """
+    current_status = await _get_note_status(note_id)
+    return current_status == NoteStatus.cleaning_failed
+
+
 async def _update_note_status(note_id: str, status: NoteStatus, error_message: Optional[str] = None, **kwargs):
     """
     更新笔记状态
@@ -104,6 +123,71 @@ async def _update_note_status(note_id: str, status: NoteStatus, error_message: O
             if key in _UPDATABLE_NOTE_FIELDS:
                 setattr(note, key, value)
         await session.commit()
+        await session.refresh(note)
+        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
+        write_note_meta(note)
+
+
+def _clean_md_path_from_original(original_md_path: str) -> str:
+    """
+    由原始 Markdown 对象名推导清洗副本对象名
+
+    命名关联法则：{P}/output/markdown/{base}.md → {P}/output/markdown/{base}.clean.md
+
+    Args:
+        original_md_path: 原始 Markdown 对象名
+
+    Returns:
+        str: 清洗副本对象名
+    """
+    parts = original_md_path.split("/")
+    prefix = "/".join(parts[:2])
+    base = os.path.splitext(parts[-1])[0]
+    return vault_path.clean_object(prefix, base)
+
+
+async def _create_auto_clean_version(note_id: str, user_id: str, clean_md_path: str) -> None:
+    """
+    在清洗覆盖现有 clean.md 前，为旧内容创建 auto_clean 版本快照
+
+    若 clean.md 尚不存在（首次清洗），则跳过版本创建。
+    版本创建失败仅记录警告日志，不阻塞清洗主流程。
+
+    Args:
+        note_id: 笔记 ID
+        user_id: 用户 ID
+        clean_md_path: 即将被覆盖的 clean.md 存储路径
+    """
+    from ..services.storage_service import get_object_bytes
+    from ..services.version_service import version_service
+    from ..models.note_version import VersionSource
+
+    # 先尝试读取现有 clean.md 内容
+    try:
+        old_bytes = get_object_bytes(settings.minio_bucket_markdown, clean_md_path)
+        old_content = old_bytes.decode("utf-8")
+    except Exception:
+        # 文件不存在（首次清洗），无需创建版本
+        return
+
+    if not old_content:
+        return
+
+    # 创建版本快照
+    session_factory = _get_clean_session()
+    try:
+        async with session_factory() as session:
+            await version_service.create_version(
+                note_id=note_id,
+                user_id=user_id,
+                content=old_content,
+                source=VersionSource.AUTO_CLEAN.value,
+                db=session,
+            )
+    except Exception as e:
+        logger.warning(
+            f"创建清洗版本快照失败，继续执行清洗主流程: note_id={note_id[:8]}, err={e}"
+        )
 
 
 async def _clean_document(note_id: str):
@@ -185,14 +269,25 @@ async def _clean_document(note_id: str):
         )
         return
 
+    # 检查用户是否已停止清洗
+    if await _is_cleaning_stopped(note_id):
+        logger.info(f"用户已停止清洗，跳过清洗流程 (note_id={note_id})")
+        return
+
     # 3. 规则化清洗
     cleaned_text, clean_stats = clean_rules(original_text)
 
     # 4. 文本分块
     chunks = split_into_chunks(cleaned_text)
     if not chunks:
+        # 检查用户是否已停止清洗（短文本直接保存前）
+        if await _is_cleaning_stopped(note_id):
+            logger.info(f"用户已停止清洗，跳过短文本保存 (note_id={note_id})")
+            return
         # 文本太短无法分块，直接保存清洗结果
-        clean_md_path = original_md_path.rsplit("/", 1)[0] + "/clean.md"
+        clean_md_path = _clean_md_path_from_original(original_md_path)
+        # 覆盖前为旧 clean.md 创建版本快照（首次清洗时跳过）
+        await _create_auto_clean_version(note_id, user_id, clean_md_path)
         upload_bytes(
             settings.minio_bucket_markdown,
             clean_md_path,
@@ -210,6 +305,11 @@ async def _clean_document(note_id: str):
         )
         return
 
+    # 检查用户是否已停止清洗（嵌入生成前，避免加载模型耗时）
+    if await _is_cleaning_stopped(note_id):
+        logger.info(f"用户已停止清洗，跳过嵌入生成 (note_id={note_id})")
+        return
+
     # 5. 生成嵌入向量
     try:
         embedding_service = EmbeddingService()
@@ -220,6 +320,11 @@ async def _clean_document(note_id: str):
             note_id, NoteStatus.cleaning_failed,
             error_message=f"嵌入向量生成失败: {str(e)}",
         )
+        return
+
+    # 检查用户是否已停止清洗（向量存储前）
+    if await _is_cleaning_stopped(note_id):
+        logger.info(f"用户已停止清洗，跳过向量存储 (note_id={note_id})")
         return
 
     # 6. 存储向量到 Chroma
@@ -243,8 +348,15 @@ async def _clean_document(note_id: str):
     # 8. 生成清洗副本
     clean_copy, copy_stats = generate_clean_copy(original_text, cleaned_text, duplicates)
 
+    # 检查用户是否已停止清洗（上传清洗副本前）
+    if await _is_cleaning_stopped(note_id):
+        logger.info(f"用户已停止清洗，跳过清洗副本上传 (note_id={note_id})")
+        return
+
     # 9. 上传清洗副本到对象存储
-    clean_md_path = original_md_path.rsplit("/", 1)[0] + "/clean.md"
+    clean_md_path = _clean_md_path_from_original(original_md_path)
+    # 覆盖前为旧 clean.md 创建版本快照（首次清洗时跳过）
+    await _create_auto_clean_version(note_id, user_id, clean_md_path)
     upload_bytes(
         settings.minio_bucket_markdown,
         clean_md_path,
@@ -267,6 +379,11 @@ async def _clean_document(note_id: str):
             for d in duplicates
         ],
     }
+
+    # 检查用户是否已停止清洗（写入最终状态前）
+    if await _is_cleaning_stopped(note_id):
+        logger.info(f"用户已停止清洗，跳过最终状态写入 (note_id={note_id})")
+        return
 
     await _update_note_status(
         note_id, NoteStatus.cleaned,

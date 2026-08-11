@@ -13,11 +13,12 @@
 - 上传流程：校验 → 创建笔记记录 → 保存文件 → 触发异步转换
 - 使用临时文件中转上传内容，避免大文件占用内存
 - Celery 不可用时标记任务失败但不删除已保存的文件，支持手动重试
-- 文件存储路径格式为 {user_id}/{note_id}/{filename}，确保用户间隔离
+- 文件存储路径格式为 {user_id}/{project_slug}/source/...（未选择项目时为 {user_id}/inbox/source/...），确保用户间隔离
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -33,11 +34,14 @@ import logging
 from ..config import get_settings
 from ..database import get_db
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
+from ..models.project import Project
 from ..models.user import User
 from ..schemas.note import NoteResponse, NoteStatusResponse
 from ..api.auth import get_current_user_dependency
 from ..services import note_service
+from ..services import vault_path
 from ..services.storage_service import upload_file, ensure_buckets_exist
+from ..services.vault_meta import write_note_meta
 from ..tasks.convert_tasks import convert_document_task
 
 settings = get_settings()
@@ -46,28 +50,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 文件扩展名到 SourceType 的映射，决定文件的处理方式
+# 单一来源为 vault_path.EXT_TO_SOURCE_TYPE（upload 与扫描导入共用）
 _EXT_TO_SOURCE_TYPE = {
-    ".pdf": SourceType.pdf,
-    ".png": SourceType.image,
-    ".jpg": SourceType.image,
-    ".jpeg": SourceType.image,
-    ".docx": SourceType.docx,
-    ".pptx": SourceType.pptx,
-    ".xlsx": SourceType.xlsx,
-    ".mp4": SourceType.video,
-    ".mkv": SourceType.video,
-    ".mov": SourceType.video,
-    ".mp3": SourceType.audio,
-    ".wav": SourceType.audio,
-    ".m4a": SourceType.audio,
-    ".flac": SourceType.audio,
-    ".ogg": SourceType.audio,
-    ".aac": SourceType.audio,
-    ".md": SourceType.markdown,
+    ext: SourceType(v) for ext, v in vault_path.EXT_TO_SOURCE_TYPE.items()
 }
 
 # 允许的扩展名集合，用于上传校验
-ALLOWED_EXTS = set(_EXT_TO_SOURCE_TYPE.keys())
+ALLOWED_EXTS = vault_path.ALLOWED_EXTS
 
 
 @router.post("", response_model=NoteResponse, status_code=status.HTTP_201_CREATED)
@@ -75,6 +64,7 @@ async def upload_document(
     file: UploadFile = File(...),
     backend: Optional[str] = Form(None),
     folder_id: Optional[str] = Form(None),
+    project_id: Optional[str] = Form(None),
     note_role: Optional[str] = Form("material"),
     linked_material_ids: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user_dependency),
@@ -95,6 +85,8 @@ async def upload_document(
         backend: 解析后端选择（可选），如 "pipeline"（本地）或 "vlm-http-client"（云端），
                  为 None 时使用 config.py 中的 mineru_backend 默认值
         folder_id: 所属文件夹 ID（可选），上传文件归入指定文件夹
+        project_id: 所属项目 ID（可选），上传文件归入指定项目；
+                    留空时不归属任何项目（project_id 为 None），物理前缀为 inbox
         current_user: 当前认证用户
         db: 异步数据库会话
 
@@ -119,8 +111,19 @@ async def upload_document(
     # 根据扩展名确定文件来源类型
     source_type = _EXT_TO_SOURCE_TYPE[ext]
 
-    # 2. 流式读取文件到临时文件，同时校验大小
+    # 1.5 解析所属项目：未指定时不归属任何项目（物理前缀为 inbox）
+    project = None
+    if project_id:
+        proj_result = await db.execute(
+            select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
+        )
+        project = proj_result.scalars().first()
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在")
+
+    # 2. 流式读取文件到临时文件，同时校验大小并计算 SHA-256 哈希
     max_size = settings.max_upload_size_mb * 1024 * 1024
+    sha256 = hashlib.sha256()
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp_path = tmp.name
         total_size = 0
@@ -135,24 +138,26 @@ async def upload_document(
                     status_code=400,
                     detail=f"文件大小超过限制 ({settings.max_upload_size_mb}MB)",
                 )
+            sha256.update(chunk)
             tmp.write(chunk)
+    file_hash = sha256.hexdigest()
 
     # 3. 创建笔记记录
     note_id = str(uuid.uuid4())
 
-    # 从上传文件名提取可读的文件夹名，替代原来的 note_id 作为目录名
+    # 从上传文件名提取主干（命名关联法则：md 名与 source 名同主干，仅扩展名不同）
     # 1. 取文件名（不含扩展名）
     # 2. 清理非法字符，截断到 50 字符
     # 3. 追加 8 位随机字符防止同名冲突
     raw_name = os.path.splitext(file.filename)[0]
-    safe_name = "".join(c for c in raw_name if c.isalnum() or c in ('-', '_', ' ', '.')).strip()[:50]
+    safe_stem = "".join(c for c in raw_name if c.isalnum() or c in ('-', '_', ' ', '.')).strip()[:50]
     random_suffix = os.urandom(4).hex()  # 8 位十六进制
-    folder_name = f"{safe_name}_{random_suffix}" if safe_name else random_suffix
+    base = f"{safe_stem}_{random_suffix}" if safe_stem else random_suffix
 
-    # 对象存储路径格式：{user_id}/{可读文件夹名}/{note_id+扩展名}，确保用户间隔离
+    # Vault 对象路径：{user_id}/{project_slug}/source/{base}{ext}；无项目时落到 {user_id}/inbox
+    prefix = vault_path.project_prefix(current_user.id, project.slug) if project else vault_path.inbox_prefix(current_user.id)
     safe_ext = os.path.splitext(file.filename)[1].lower()
-    safe_filename = f"{note_id}{safe_ext}"
-    object_name = f"{current_user.id}/{folder_name}/{safe_filename}"
+    object_name = vault_path.source_object(prefix, base, safe_ext)
 
     # 校验 note_role 值是否合法
     try:
@@ -170,11 +175,14 @@ async def upload_document(
         status=NoteStatus.uploading,
         file_size=total_size,
         folder_id=folder_id,
+        project_id=project.id if project else None,
         note_role=note_role_enum,
+        metadata_={"file_hash": file_hash},
     )
     db.add(note)
     await db.commit()
     await db.refresh(note)
+    write_note_meta(note)
 
     # 如果是个人笔记且传入了关联资料 ID，创建笔记-资料链接
     if note_role == "personal_note" and linked_material_ids:
@@ -216,6 +224,8 @@ async def upload_document(
         note.status = NoteStatus.failed
         note.error_message = f"文件上传失败: {str(e)}"
         await db.commit()
+        await db.refresh(note)
+        write_note_meta(note)
         logger.error("文件上传失败: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试")
 
@@ -223,6 +233,7 @@ async def upload_document(
     note.status = NoteStatus.converting
     await db.commit()
     await db.refresh(note)
+    write_note_meta(note)
 
     try:
         # 异步触发文档转换任务（Mineru 或 ASR），传递用户选择的解析后端
@@ -233,6 +244,7 @@ async def upload_document(
         note.error_message = f"转换任务提交失败: {str(e)}"
         await db.commit()
         await db.refresh(note)
+        write_note_meta(note)
 
     resp = NoteResponse.model_validate(note)
     if note.source_type == SourceType.video:
@@ -320,6 +332,7 @@ async def retry_convert(
     note.status = NoteStatus.converting
     await db.commit()
     await db.refresh(note)
+    write_note_meta(note)
 
     # 重新提交转换任务
     try:
@@ -333,6 +346,7 @@ async def retry_convert(
         note.error_message = f"重试提交失败: {str(e)}"
         await db.commit()
         await db.refresh(note)
+        write_note_meta(note)
 
     logger.info("重试转换: note_id=%s, source_type=%s", note_id, note.source_type.value)
 

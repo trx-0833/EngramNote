@@ -138,6 +138,8 @@ class Note(BaseModel):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 所属文件夹，可选，为 None 表示未归入任何文件夹
     folder_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("folders.id"), index=True, nullable=True)
+    # 所属项目，可选，为 None 表示未归入任何项目（可之后通过项目页"添加笔记"归入）
+    project_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("projects.id"), index=True, nullable=True)
     # 笔记角色，区分学习资料和用户自己的笔记，默认为学习资料
     note_role: Mapped[NoteRole] = mapped_column(Enum(NoteRole), default=NoteRole.material, nullable=False)
     # 扩展元数据，使用 JSON 类型兼容 SQLite 和 PostgreSQL

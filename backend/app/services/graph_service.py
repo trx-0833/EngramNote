@@ -19,7 +19,7 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sqlalchemy import select, and_, or_
@@ -628,4 +628,325 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         "new_count": new_count,
         "skipped_count": skipped_count,
         "message": f"新增 {new_count} 条语义关系建议，跳过 {skipped_count} 条已有关系",
+    }
+
+
+# =============================================================================
+# 新增：图谱统计、搜索、子图、批量操作、布局保存
+# =============================================================================
+
+
+async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
+    """
+    获取用户知识图谱的统计数据
+
+    返回节点数、边数、按关系类型的分布、孤立节点数等。
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 包含 total_nodes, total_edges, confirmed_edges, suggested_edges,
+              relation_type_distribution, isolated_nodes
+    """
+    # 查询用户所有知识卡片
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(KnowledgeCard.user_id == user_id)
+    )
+    cards = list(cards_result.scalars().all())
+    total_nodes = len(cards)
+
+    # 查询所有关系
+    relations_result = await db.execute(
+        select(CardRelation).where(CardRelation.user_id == user_id)
+    )
+    relations = list(relations_result.scalars().all())
+
+    confirmed = sum(1 for r in relations if r.status == RelationStatus.confirmed)
+    suggested = sum(1 for r in relations if r.status == RelationStatus.suggested)
+
+    # 按关系类型分布
+    type_counts: Dict[str, int] = {}
+    for r in relations:
+        if r.status == RelationStatus.confirmed:
+            type_counts[r.relation_type.value] = type_counts.get(r.relation_type.value, 0) + 1
+
+    type_distribution = [
+        {"relation_type": k, "count": v}
+        for k, v in sorted(type_counts.items(), key=lambda x: -x[1])
+    ]
+
+    # 孤立节点：没有任何关系（confirmed 或 suggested）的卡片
+    linked_node_ids: set = set()
+    for r in relations:
+        linked_node_ids.add(r.card_id_1)
+        linked_node_ids.add(r.card_id_2)
+    isolated = sum(1 for c in cards if c.id not in linked_node_ids)
+
+    return {
+        "total_nodes": total_nodes,
+        "total_edges": len(relations),
+        "confirmed_edges": confirmed,
+        "suggested_edges": suggested,
+        "relation_type_distribution": type_distribution,
+        "isolated_nodes": isolated,
+    }
+
+
+async def search_nodes(
+    user_id: str,
+    keyword: str,
+    db: AsyncSession,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    搜索用户的知识卡片（按标题模糊匹配）
+
+    Args:
+        user_id: 用户 ID
+        keyword: 搜索关键词
+        db: 数据库会话
+        limit: 最大返回数
+
+    Returns:
+        List[Dict]: 匹配的卡片列表，含 id/title/card_type/note_id/relation_count
+    """
+    from sqlalchemy import or_
+
+    # 查询匹配的卡片
+    cards_result = await db.execute(
+        select(KnowledgeCard).where(
+            KnowledgeCard.user_id == user_id,
+            or_(
+                KnowledgeCard.title.ilike(f"%{keyword}%"),
+                KnowledgeCard.content.ilike(f"%{keyword}%"),
+            ),
+        ).limit(limit)
+    )
+    cards = list(cards_result.scalars().all())
+
+    if not cards:
+        return []
+
+    card_ids = [c.id for c in cards]
+
+    # 统计每张卡片的关系数
+    relation_counts: Dict[str, int] = {}
+    for cid in card_ids:
+        counts_result = await db.execute(
+            select(CardRelation).where(
+                CardRelation.user_id == user_id,
+                CardRelation.status == RelationStatus.confirmed,
+                (CardRelation.card_id_1 == cid) | (CardRelation.card_id_2 == cid),
+            )
+        )
+        relation_counts[cid] = len(list(counts_result.scalars().all()))
+
+    return [
+        {
+            "id": card.id,
+            "title": card.title,
+            "card_type": card.card_type.value,
+            "note_id": card.note_id,
+            "relation_count": relation_counts.get(card.id, 0),
+        }
+        for card in cards
+    ]
+
+
+async def get_node_subgraph(
+    node_id: str,
+    user_id: str,
+    db: AsyncSession,
+) -> Optional[Dict[str, Any]]:
+    """
+    获取某个节点及其直接邻居的子图
+
+    返回中心节点 + 邻居节点 + 之间的边。
+
+    Args:
+        node_id: 中心节点 ID
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Optional[Dict]: 包含 center_node, neighbor_nodes, edges；节点不存在返回 None
+    """
+    # 查询中心节点
+    card_result = await db.execute(
+        select(KnowledgeCard).where(
+            KnowledgeCard.id == node_id,
+            KnowledgeCard.user_id == user_id,
+        )
+    )
+    center = card_result.scalars().first()
+    if not center:
+        return None
+
+    # 查询涉及该节点的所有关系
+    relations_result = await db.execute(
+        select(CardRelation).where(
+            CardRelation.user_id == user_id,
+            CardRelation.status.in_([RelationStatus.confirmed, RelationStatus.suggested]),
+            (CardRelation.card_id_1 == node_id) | (CardRelation.card_id_2 == node_id),
+        )
+    )
+    relations = list(relations_result.scalars().all())
+
+    # 收集邻居节点 ID
+    neighbor_ids: set = set()
+    edges_data = []
+    for rel in relations:
+        other_id = rel.card_id_2 if rel.card_id_1 == node_id else rel.card_id_1
+        neighbor_ids.add(other_id)
+        edges_data.append({
+            "id": rel.id,
+            "source": rel.card_id_1,
+            "target": rel.card_id_2,
+            "relation_type": rel.relation_type.value,
+            "status": rel.status.value,
+            "similarity_score": rel.similarity_score,
+        })
+
+    # 查询邻居节点详情
+    neighbors = []
+    if neighbor_ids:
+        neighbors_result = await db.execute(
+            select(KnowledgeCard).where(
+                KnowledgeCard.id.in_(neighbor_ids),
+                KnowledgeCard.user_id == user_id,
+            )
+        )
+        for n in neighbors_result.scalars().all():
+            # 统计邻居的关系数
+            n_count = await db.execute(
+                select(CardRelation).where(
+                    CardRelation.user_id == user_id,
+                    CardRelation.status == RelationStatus.confirmed,
+                    (CardRelation.card_id_1 == n.id) | (CardRelation.card_id_2 == n.id),
+                )
+            )
+            rel_count = len(list(n_count.scalars().all()))
+            neighbors.append({
+                "id": n.id,
+                "title": n.title,
+                "card_type": n.card_type.value,
+                "note_id": n.note_id,
+                "relation_count": rel_count,
+            })
+
+    # 统计中心节点关系数
+    center_count = sum(
+        1 for r in relations if r.status == RelationStatus.confirmed
+    )
+
+    return {
+        "center_node": {
+            "id": center.id,
+            "title": center.title,
+            "card_type": center.card_type.value,
+            "note_id": center.note_id,
+            "relation_count": center_count,
+        },
+        "neighbor_nodes": neighbors,
+        "edges": edges_data,
+    }
+
+
+async def batch_confirm_suggestions(
+    relation_ids: List[str],
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    批量确认建议关系
+
+    将所有指定的 suggested 状态关系更新为 confirmed。
+
+    Args:
+        relation_ids: 关系 ID 列表
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 包含 success、confirmed_count 和 failed_count
+    """
+    confirmed_count = 0
+    failed_count = 0
+
+    for rid in relation_ids:
+        result = await db.execute(
+            select(CardRelation).where(
+                CardRelation.id == rid,
+                CardRelation.user_id == user_id,
+                CardRelation.status == RelationStatus.suggested,
+            )
+        )
+        rel = result.scalars().first()
+        if rel:
+            rel.status = RelationStatus.confirmed
+            confirmed_count += 1
+        else:
+            failed_count += 1
+
+    if confirmed_count > 0:
+        await db.commit()
+        logger.info(
+            f"批量确认: user={user_id[:8]}, 确认 {confirmed_count} 条, 失败 {failed_count} 条"
+        )
+
+    return {
+        "success": True,
+        "confirmed_count": confirmed_count,
+        "failed_count": failed_count,
+    }
+
+
+async def batch_reject_suggestions(
+    relation_ids: List[str],
+    user_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """
+    批量拒绝建议关系
+
+    将所有指定的 suggested 状态关系更新为 rejected。
+
+    Args:
+        relation_ids: 关系 ID 列表
+        user_id: 用户 ID
+        db: 数据库会话
+
+    Returns:
+        Dict: 包含 success、rejected_count 和 failed_count
+    """
+    rejected_count = 0
+    failed_count = 0
+
+    for rid in relation_ids:
+        result = await db.execute(
+            select(CardRelation).where(
+                CardRelation.id == rid,
+                CardRelation.user_id == user_id,
+                CardRelation.status == RelationStatus.suggested,
+            )
+        )
+        rel = result.scalars().first()
+        if rel:
+            rel.status = RelationStatus.rejected
+            rejected_count += 1
+        else:
+            failed_count += 1
+
+    if rejected_count > 0:
+        await db.commit()
+        logger.info(
+            f"批量拒绝: user={user_id[:8]}, 拒绝 {rejected_count} 条, 失败 {failed_count} 条"
+        )
+
+    return {
+        "success": True,
+        "rejected_count": rejected_count,
+        "failed_count": failed_count,
     }

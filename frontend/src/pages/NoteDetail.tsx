@@ -44,6 +44,7 @@ import CleaningPanel from '../components/CleaningPanel'
 import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
+import VersionHistory from '../components/VersionHistory'
 import { statusLabels } from '../utils/labels'
 
 /** 视图模式 */
@@ -89,6 +90,9 @@ export default function NoteDetail() {
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
 
+  /** 版本历史面板显示状态 */
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
+
   /** 获取笔记详情 */
   const fetchNote = useCallback(async () => {
     if (!noteId) return
@@ -99,8 +103,8 @@ export default function NoteDetail() {
       if ((data.status === 'cleaned' || data.status === 'archived' || data.status === 'learning_failed') && data.clean_md_content && viewModeRef.current === 'original') {
         setViewMode('clean')
       }
-      // 获取关联知识卡片
-      if (data.status === 'archived' || data.status === 'learning' || data.status === 'learning_failed') {
+      // 获取关联知识卡片（已学习过的笔记取消审阅后状态为 cleaned，也需加载旧卡片）
+      if (data.status === 'archived' || data.status === 'learning' || data.status === 'learning_failed' || data.metadata_?.learned_at !== undefined) {
         try {
           const cardData = await getKnowledgeCards(1, 999, noteId)
           setRelatedCards(cardData.items)
@@ -311,7 +315,7 @@ export default function NoteDetail() {
   async function handleDelete() {
     if (!note) return
     const isProcessing = ['converting', 'cleaning', 'learning'].includes(note.status)
-    const hasCards = note.status === 'archived' || note.status === 'learning_failed'
+    const hasCards = hasLearned
     let msg = '确定删除此笔记？'
     if (isProcessing) {
       msg += '\n\n⚠️ 此笔记正在处理中，删除将中断处理流程。'
@@ -546,6 +550,8 @@ export default function NoteDetail() {
   // 编辑预览的 HTML
   const editPreviewHtml = marked.parse(editContent) as string
 
+  // 是否已学习过（metadata 中记录了学习成功时间，或处于已归档/学习失败状态）
+  const hasLearned = note?.metadata_?.learned_at !== undefined || note?.status === 'archived' || note?.status === 'learning_failed'
   // 是否可以显示清洗版（cleaned/archived/learning_failed 状态都可以查看）
   const canShowClean = (note.status === 'cleaned' || note.status === 'archived' || note.status === 'learning_failed') && !!note.clean_md_content
   // 是否可以显示 diff（cleaned/archived/learning_failed 状态都可以查看）
@@ -568,6 +574,14 @@ export default function NoteDetail() {
                 编辑
               </button>
             )}
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowVersionHistory(true)}
+              disabled={['uploading', 'converting'].includes(note.status)}
+              title="查看版本历史"
+            >
+              版本历史
+            </button>
             {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
               <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>立即复习</button>
             )}
@@ -593,6 +607,11 @@ export default function NoteDetail() {
         {/* 笔记元信息标签行 */}
         <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
           <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
+          {note.project_name && (
+            <span className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
+              {note.project_name}
+            </span>
+          )}
           <span className={`status-${note.status}`}>{statusLabels[note.status] || note.status}</span>
           <select
             value={note.note_role || 'material'}
@@ -850,6 +869,15 @@ export default function NoteDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 版本历史面板：模态浮层形式 */}
+      {showVersionHistory && (
+        <VersionHistory
+          noteId={note.id}
+          onClose={() => setShowVersionHistory(false)}
+          onRestored={fetchNote}
+        />
       )}
 
       {/* 关联知识卡片区域 */}

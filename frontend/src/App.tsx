@@ -23,7 +23,9 @@ import QuestionSets from './pages/QuestionSets'
 import TodayLearn from './pages/TodayLearn'
 import QuickReview from './pages/QuickReview'
 import DailyMaterials from './pages/DailyMaterials'
+import Projects from './pages/Projects'
 import LearningAssessment from './pages/LearningAssessment'
+import LearningGoals from './pages/LearningGoals'
 import Sidebar from './components/Sidebar'
 
 /**
@@ -70,8 +72,10 @@ function AppRoutes() {
             <Route path="/review" element={<Review />} />
             <Route path="/today" element={<TodayLearn />} />
             <Route path="/daily" element={<DailyMaterials />} />
+            <Route path="/projects" element={<Projects />} />
             <Route path="/review/quick/:noteId" element={<QuickReview />} />
             <Route path="/assessment" element={<LearningAssessment />} />
+            <Route path="/goals" element={<LearningGoals />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

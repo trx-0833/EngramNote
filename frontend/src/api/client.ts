@@ -46,6 +46,10 @@ export interface Note {
   source_type: string;
   /** 笔记角色：material（学习资料）或 personal_note（我的笔记） */
   note_role?: string;
+  /** 所属项目 ID（可选） */
+  project_id?: string | null;
+  /** 所属项目名称（可选） */
+  project_name?: string | null;
   /**
    * 笔记处理状态，流转顺序：
    * uploading → converting → converted → cleaning → cleaned → learning → archived
@@ -557,12 +561,13 @@ export async function updateNoteLinks(noteId: string, materialNoteIds: string[])
  *                  不传则使用后端默认配置
  * @returns 新创建的笔记记录（状态为 uploading）
  */
-export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[]): Promise<Note> {
+export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[], projectId?: string): Promise<Note> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   if (backend) formData.append('backend', backend);
   if (noteRole) formData.append('note_role', noteRole);
+  if (projectId) formData.append('project_id', projectId);
   if (linkedMaterialIds && linkedMaterialIds.length > 0) {
     formData.append('linked_material_ids', JSON.stringify(linkedMaterialIds));
   }
@@ -1347,6 +1352,89 @@ export async function deleteRelation(relationId: string): Promise<any> {
   });
 }
 
+/** 图谱统计数据 */
+export interface GraphStats {
+  total_nodes: number;
+  total_edges: number;
+  confirmed_edges: number;
+  suggested_edges: number;
+  relation_type_distribution: Array<{ relation_type: string; count: number }>;
+  isolated_nodes: number;
+}
+
+/**
+ * 获取知识图谱统计数据
+ */
+export async function getGraphStats(): Promise<GraphStats> {
+  return request<GraphStats>('/graph/stats');
+}
+
+/** 图搜索节点 */
+export interface GraphSearchNode {
+  id: string;
+  title: string;
+  card_type: string;
+  note_id: string;
+  relation_count: number;
+}
+
+/** 图搜索结果 */
+export interface GraphSearchResult {
+  items: GraphSearchNode[];
+  total: number;
+}
+
+/**
+ * 搜索图谱中的节点
+ *
+ * @param keyword - 搜索关键词
+ * @param limit - 最大返回数量
+ */
+export async function searchGraphNodes(keyword: string, limit = 20): Promise<GraphSearchResult> {
+  const params = new URLSearchParams({ q: keyword, limit: String(limit) });
+  return request<GraphSearchResult>(`/graph/search?${params}`);
+}
+
+/** 节点子图响应 */
+export interface NodeSubgraph {
+  center_node: GraphNode;
+  neighbor_nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+/**
+ * 获取某个节点及其直接邻居的子图
+ *
+ * @param nodeId - 节点 ID
+ */
+export async function getNodeSubgraph(nodeId: string): Promise<NodeSubgraph> {
+  return request<NodeSubgraph>(`/graph/node/${nodeId}/subgraph`);
+}
+
+/**
+ * 批量确认建议关系
+ *
+ * @param relationIds - 建议关系 ID 列表
+ */
+export async function batchConfirmRelations(relationIds: string[]): Promise<any> {
+  return request('/graph/batch-confirm', {
+    method: 'POST',
+    body: JSON.stringify({ relation_ids: relationIds }),
+  });
+}
+
+/**
+ * 批量拒绝建议关系
+ *
+ * @param relationIds - 建议关系 ID 列表
+ */
+export async function batchRejectRelations(relationIds: string[]): Promise<any> {
+  return request('/graph/batch-reject', {
+    method: 'POST',
+    body: JSON.stringify({ relation_ids: relationIds }),
+  });
+}
+
 // --- 文件夹相关类型定义 ---
 
 /** 文件夹内的笔记概要 */
@@ -1453,6 +1541,168 @@ export async function deleteFolder(folderId: string): Promise<{ message: string 
   });
 }
 
+/** 项目信息（项目隔离 + 状态旁载 Vault 结构的项目层） */
+export interface Project {
+  /** 项目 ID */
+  id: string;
+  /** 所属用户 ID */
+  user_id: string;
+  /** 项目显示名称，如 "Transformer 论文" */
+  name: string;
+  /** Vault 目录名（每用户唯一，创建后不可变） */
+  slug: string;
+  /** 项目描述 */
+  description: string | null;
+  /** 项目内笔记数量 */
+  note_count: number;
+  /** Vault 相对路径，如 {user_id}/{slug}，对应磁盘目录 */
+  vault_path: string;
+  /** 创建时间（ISO 8601 格式） */
+  created_at: string;
+  /** 更新时间（ISO 8601 格式） */
+  updated_at: string;
+}
+
+/** 项目详情，包含项目下的笔记列表 */
+export interface ProjectDetail extends Project {
+  notes: NoteInFolder[];
+}
+
+// --- 项目 API ---
+
+/**
+ * 创建项目
+ *
+ * @param name - 项目名称
+ * @param description - 项目描述（可选）
+ * @returns 新创建的项目信息
+ */
+export async function createProject(name: string, description?: string): Promise<Project> {
+  return request<Project>('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, description }),
+  });
+}
+
+/**
+ * 获取项目列表
+ *
+ * @returns 项目列表（含笔记数量）
+ */
+export async function getProjects(): Promise<Project[]> {
+  return request<Project[]>('/projects');
+}
+
+/**
+ * 获取项目详情（包含笔记列表）
+ *
+ * @param projectId - 项目 ID
+ * @returns 项目详情
+ */
+export async function getProjectDetail(projectId: string): Promise<ProjectDetail> {
+  return request<ProjectDetail>(`/projects/${projectId}`);
+}
+
+/**
+ * 更新项目（仅改显示名/描述，slug 不可变）
+ *
+ * @param projectId - 项目 ID
+ * @param name - 新项目名称
+ * @param description - 新项目描述
+ * @returns 更新后的项目信息
+ */
+export async function updateProject(
+  projectId: string,
+  name?: string,
+  description?: string,
+): Promise<Project> {
+  return request<Project>(`/projects/${projectId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name, description }),
+  });
+}
+
+/**
+ * 删除项目（仅允许删除空项目）
+ *
+ * @param projectId - 项目 ID
+ * @returns 操作结果
+ */
+export async function deleteProject(projectId: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/projects/${projectId}`, {
+    method: 'DELETE',
+  });
+}
+
+// --- 项目扫描导入 ---
+
+/** 扫描导入的单条新笔记信息 */
+export interface ScanImportDetail {
+  id: string;
+  title: string;
+  status: string;
+  source_type: string | null;
+  path: string;
+}
+
+/** 被跳过的文件信息 */
+export interface ScanSkipDetail {
+  path: string;
+  reason: string;
+}
+
+/** 扫描 source/ 目录并导入新文件的响应 */
+export interface ScanImportResponse {
+  project_id: string;
+  project_name: string;
+  scanned: number;
+  imported: number;
+  skipped: number;
+  unsupported: number;
+  imported_notes: ScanImportDetail[];
+  skipped_details: ScanSkipDetail[];
+  unsupported_details: ScanSkipDetail[];
+}
+
+/**
+ * 扫描导入：将手动放入项目 source/ 目录的新文件识别为笔记
+ *
+ * @param projectId - 项目 ID
+ * @returns 扫描结果统计
+ */
+export async function scanProject(projectId: string): Promise<ScanImportResponse> {
+  return request<ScanImportResponse>(`/projects/${projectId}/scan`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * 将笔记批量添加到项目
+ *
+ * @param projectId - 目标项目 ID
+ * @param noteIds - 要添加的笔记 ID 列表
+ * @returns 添加结果统计（added / not_found）
+ */
+export async function addNotesToProject(projectId: string, noteIds: string[]): Promise<{ added: number; not_found: number }> {
+  return request<{ added: number; not_found: number }>(`/projects/${projectId}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ note_ids: noteIds }),
+  });
+}
+
+/**
+ * 将笔记从项目中移出
+ *
+ * @param projectId - 项目 ID
+ * @param noteId - 要移出的笔记 ID
+ * @returns 操作结果
+ */
+export async function removeNoteFromProject(projectId: string, noteId: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/projects/${projectId}/notes/${noteId}`, {
+    method: 'DELETE',
+  });
+}
+
 /**
  * 上传文件到指定文件夹
  * 在原有 uploadFile 基础上增加 folder_id 参数。
@@ -1462,12 +1712,13 @@ export async function deleteFolder(folderId: string): Promise<{ message: string 
  * @param backend - 解析后端选择（可选）
  * @returns 新创建的笔记记录
  */
-export async function uploadFileToFolder(file: File, folderId: string, backend?: string): Promise<Note> {
+export async function uploadFileToFolder(file: File, folderId: string, backend?: string, projectId?: string): Promise<Note> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   formData.append('folder_id', folderId);
   if (backend) formData.append('backend', backend);
+  if (projectId) formData.append('project_id', projectId);
 
   const response = await fetch(`${API_BASE}/upload`, {
     method: 'POST',
@@ -1485,4 +1736,231 @@ export async function uploadFileToFolder(file: File, folderId: string, backend?:
   }
 
   return response.json();
+}
+
+// --- 流式问答 API ---
+
+/**
+ * 流式问答 SSE 流
+ * 返回一个 ReadableStream，调用方需自行解析 SSE 事件：
+ * - event: token / data: {"content":"..."}
+ * - event: sources / data: {"sources":[...],"provider":"..."}
+ * - event: done / data: {}
+ * - event: error / data: {"message":"..."}
+ */
+export async function askQuestionStream(question: string): Promise<ReadableStream<Uint8Array>> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const response = await fetch(`${API_BASE}/understanding/ask/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ question }),
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    const detail = Array.isArray(error.detail)
+      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
+      : (error.detail || `请求失败: ${response.status}`);
+    throw new Error(detail);
+  }
+  if (!response.body) {
+    throw new Error('浏览器不支持流式响应');
+  }
+  return response.body;
+}
+
+// --- 版本历史类型定义 ---
+
+/** 笔记版本快照信息 */
+export interface NoteVersion {
+  id: string;
+  note_id: string;
+  version_number: number;
+  source: string;
+  content_size: number;
+  change_summary: string | null;
+  created_at: string;
+}
+
+/** 版本列表响应 */
+export interface NoteVersionListResponse {
+  versions: NoteVersion[];
+  total: number;
+}
+
+/** 单行 diff 数据 */
+export interface NoteVersionDiffLine {
+  type: 'added' | 'removed' | 'unchanged';
+  content: string;
+}
+
+/** 版本对比 diff 响应 */
+export interface NoteVersionDiffResponse {
+  v1_number: number;
+  v2_number: number;
+  diff_lines: NoteVersionDiffLine[];
+}
+
+// --- 版本历史 API ---
+
+/** 获取笔记的版本历史列表 */
+export async function listVersions(noteId: string): Promise<NoteVersionListResponse> {
+  return request<NoteVersionListResponse>(`/notes/${noteId}/versions`);
+}
+
+/** 预览指定版本的内容 */
+export async function getVersion(noteId: string, versionNumber: number): Promise<{ content: string; version_number: number }> {
+  return request(`/notes/${noteId}/versions/${versionNumber}`);
+}
+
+/** 对比两个版本的差异 */
+export async function diffVersions(noteId: string, v1: number, v2: number): Promise<NoteVersionDiffResponse> {
+  return request<NoteVersionDiffResponse>(`/notes/${noteId}/versions/diff?v1=${v1}&v2=${v2}`);
+}
+
+/** 恢复指定历史版本 */
+export async function restoreVersion(noteId: string, versionNumber: number): Promise<NoteVersion> {
+  return request<NoteVersion>(`/notes/${noteId}/versions/${versionNumber}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+// --- 学习目标类型定义 ---
+
+/** 学习目标 */
+export interface LearningGoal {
+  id: string;
+  user_id: string;
+  name: string;
+  type: 'daily' | 'weekly';
+  scope_notes: string[];
+  scope_folders: string[];
+  target_mastery: number;
+  deadline: string | null;
+  status: 'active' | 'completed' | 'expired' | 'archived' | 'deleted';
+  progress_cache: number;
+  last_progress_refresh: string | null;
+  progress_percentage: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 目标列表响应 */
+export interface GoalListResponse {
+  goals: LearningGoal[];
+  total: number;
+}
+
+/** 推荐任务 */
+export interface RecommendedTask {
+  task_type: 'review' | 'new_material' | 'weak_point';
+  quiz_id: string | null;
+  note_id: string | null;
+  card_id: string | null;
+  priority: number;
+  title: string;
+}
+
+/** 每日计划响应 */
+export interface DailyPlanResponse {
+  id: string;
+  goal_id: string;
+  plan_date: string;
+  recommended_tasks: Record<string, unknown>;
+  completed_count: number;
+  total_count: number;
+}
+
+// --- 学习目标 API ---
+
+/** 创建学习目标 */
+export async function createGoal(data: {
+  name: string;
+  type?: 'daily' | 'weekly';
+  scope_notes?: string[];
+  scope_folders?: string[];
+  target_mastery?: number;
+  deadline?: string;
+}): Promise<LearningGoal> {
+  return request<LearningGoal>('/goals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/** 获取学习目标列表 */
+export async function getGoals(status?: string): Promise<GoalListResponse> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return request<GoalListResponse>(`/goals${query}`);
+}
+
+/** 获取单个学习目标详情 */
+export async function getGoal(goalId: string): Promise<LearningGoal> {
+  return request<LearningGoal>(`/goals/${goalId}`);
+}
+
+/** 更新学习目标 */
+export async function updateGoal(goalId: string, data: {
+  name?: string;
+  type?: 'daily' | 'weekly';
+  scope_notes?: string[];
+  scope_folders?: string[];
+  target_mastery?: number;
+  deadline?: string;
+}): Promise<LearningGoal> {
+  return request<LearningGoal>(`/goals/${goalId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/** 归档学习目标 */
+export async function archiveGoal(goalId: string): Promise<LearningGoal> {
+  return request<LearningGoal>(`/goals/${goalId}/archive`, {
+    method: 'POST',
+  });
+}
+
+/** 删除学习目标（软删除） */
+export async function deleteGoal(goalId: string): Promise<void> {
+  return request<void>(`/goals/${goalId}`, {
+    method: 'DELETE',
+  });
+}
+
+/** 获取今日推荐任务 */
+export async function getDailyPlan(): Promise<DailyPlanResponse> {
+  return request<DailyPlanResponse>('/goals/daily-plan');
+}
+
+// --- 复习提醒类型定义 ---
+
+/** 复习提醒响应 */
+export interface ReminderResponse {
+  /** 当前到期需要复习的题目数 */
+  due_count: number;
+  /** 1小时内到期的题目数 */
+  due_in_1h_count: number;
+  /** 薄弱知识点数 */
+  weak_point_count: number;
+  /** 上次提醒时间 */
+  last_reminded_at: string | null;
+}
+
+// --- 复习提醒 API ---
+
+/** 获取复习提醒数据 */
+export async function getReminders(): Promise<ReminderResponse> {
+  return request<ReminderResponse>('/review/reminders');
 }

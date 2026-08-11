@@ -20,6 +20,7 @@
 """
 
 import difflib
+import logging
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -52,6 +53,7 @@ from ..config import get_settings
 
 settings = get_settings()
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # --- API 端点 ---
@@ -90,10 +92,18 @@ async def start_cleaning(
     note.status = NoteStatus.cleaning
     note.error_message = None
     await db.commit()
+    await db.refresh(note)
+    # 状态写穿镜像
+    from ..services.vault_meta import write_note_meta
+    write_note_meta(note)
 
     # 触发 Celery 清洗任务
     from ..tasks.clean_tasks import clean_document_task
-    clean_document_task.delay(note_id)
+    task = clean_document_task.delay(note_id)
+    # 记录任务 ID 到笔记元数据，便于停止时撤销任务
+    note.metadata_ = dict(note.metadata_ or {})
+    note.metadata_["clean_task_id"] = task.id
+    await db.commit()
 
     return CleaningStartResponse(
         id=note_id,
@@ -135,7 +145,21 @@ async def stop_cleaning(
     # 更新笔记状态为清洗失败
     note.status = NoteStatus.cleaning_failed
     note.error_message = "用户手动停止清洗"
+
+    # 尽力撤销正在运行的清洗任务（失败仅记日志，不影响原流程）
+    task_id = (note.metadata_ or {}).get("clean_task_id")
+    if task_id:
+        try:
+            from ..tasks.celery_app import celery_app
+            celery_app.control.revoke(task_id)
+        except Exception as e:
+            logger.warning(f"撤销清洗任务失败: task_id={task_id}, err={e}")
+
     await db.commit()
+    await db.refresh(note)
+    # 状态写穿镜像
+    from ..services.vault_meta import write_note_meta
+    write_note_meta(note)
 
     return CleaningStopResponse(
         id=note_id,

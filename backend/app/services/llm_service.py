@@ -516,6 +516,110 @@ class LLMService:
             f"(scene={scene}, provider={self._provider}, model={self._model}): {last_error}"
         )
 
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        scene: str = "rag_answer_stream",
+    ):
+        """
+        流式聊天接口（OpenAI 兼容 SSE 流式响应）
+
+        通过 SSE 流式接收 LLM 响应，逐 token 返回内容，适合需要实时
+        展示生成过程的前端场景（如 RAG 问答流式回答）。
+
+        与 chat() 的区别：
+        - 使用 stream=True 接收 SSE 响应
+        - 不做重试（流式重试语义复杂，由调用方处理）
+        - 不支持 response_format / max_tokens 参数（流式场景一般不需要）
+        - httpx 错误时记录 warning 并原样抛出
+
+        调用方应使用与 chat() 一致的 system prompt 前缀以命中 DeepSeek 提示词缓存。
+
+        Args:
+            messages: 消息列表，格式 [{"role": "user", "content": "..."}]
+            scene: 场景标识，用于日志记录
+
+        Yields:
+            str: 模型生成的文本内容片段（token 粒度）
+
+        Raises:
+            httpx.HTTPError: HTTP 调用失败时抛出，由调用方处理
+        """
+        url = f"{self._base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: Dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "stream": True,
+            "temperature": 0.3,
+        }
+
+        logger.debug(
+            f"LLM 流式请求 | scene={scene} | provider={self._provider} | model={self._model} | "
+            f"temperature=0.3 | url={url}\n"
+            f"messages={json.dumps(messages, ensure_ascii=False, indent=2)}"
+        )
+
+        start_time = time.monotonic()
+        total_content: List[str] = []
+        usage: Dict[str, Any] = {}
+
+        async with self._semaphore:
+            await self._rate_limiter.acquire()
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with client.stream(
+                        "POST", url, json=payload, headers=headers
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data_str = line[len("data:"):].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
+                                    f"line={data_str[:200]}"
+                                )
+                                continue
+                            # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
+                            chunk_usage = chunk.get("usage")
+                            if isinstance(chunk_usage, dict):
+                                usage = chunk_usage
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content")
+                            if content:
+                                total_content.append(content)
+                                yield content
+            except httpx.HTTPError as e:
+                logger.warning(
+                    f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
+                    f"model={self._model} | error={e}"
+                )
+                raise
+
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        full_response = "".join(total_content)
+        logger.info(
+            f"LLM 流式响应完成 | scene={scene} | provider={self._provider} | model={self._model} | "
+            f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
+            f"total_tokens={usage.get('total_tokens')} | "
+            f"prompt_cache_hit_tokens={usage.get('prompt_cache_hit_tokens')} | "
+            f"prompt_cache_miss_tokens={usage.get('prompt_cache_miss_tokens')} | "
+            f"elapsed={elapsed_ms:.0f}ms\n"
+            f"response={full_response}"
+        )
+
     async def summarize_chapter(self, chapter_title: str, chapter_content: str) -> str:
         """
         章节摘要生成

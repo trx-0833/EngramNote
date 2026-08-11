@@ -28,10 +28,11 @@ print(f"User ID: {user_id}")
 
 note_id = str(uuid.uuid4())
 
-# clean_md_path 应该只存相对路径（不含 bucket 名）
-# bucket = "markdown"，所以路径应该是 user_id/note_id/clean.md
-clean_md_path = f"{user_id}/{note_id}/clean.md"
-original_md_path = f"{user_id}/{note_id}/original.md"
+# Vault 结构：{user_id}/default 项目下，source 与 output/markdown 同主干（命名关联法则）
+# base 与 source 文件名主干一致：source/{base}.pdf ↔ output/markdown/{base}.md
+base = note_id
+clean_md_path = f"{user_id}/default/output/markdown/{base}.clean.md"
+original_md_path = f"{user_id}/default/output/markdown/{base}.md"
 
 c.execute("""
     INSERT INTO notes (id, user_id, title, source_type, original_file_path, original_md_path, clean_md_path, status, file_size, page_count)
@@ -41,7 +42,7 @@ c.execute("""
     user_id,
     "劳动合同书-田润鑫",
     "pdf",
-    f"{user_id}/{note_id}/劳动合同书-田润鑫.pdf",
+    f"{user_id}/default/source/{base}.pdf",
     original_md_path,
     clean_md_path,
     "cleaned",
@@ -52,17 +53,21 @@ conn.commit()
 conn.close()
 print(f"Created note: {note_id}, status=cleaned")
 
-# 复制已有的 Markdown 文件到新路径
+# 复制已有的 Markdown 文件到 Vault 新路径
 src_dir = "data/storage/markdown/15a92671-7123-491b-9733-54e59063e6fd/93b47cff-6f38-4b83-a6f3-ab6d34fcc140"
-dst_dir = f"data/storage/markdown/{user_id}/{note_id}"
+dst_dir = f"data/vault/{user_id}/default/output/markdown"
 os.makedirs(dst_dir, exist_ok=True)
 
-for fname in ["original.md", "clean.md"]:
-    src = os.path.join(src_dir, fname)
-    dst = os.path.join(dst_dir, fname)
+file_map = {
+    "original.md": f"{base}.md",
+    "clean.md": f"{base}.clean.md",
+}
+for src_fname, dst_fname in file_map.items():
+    src = os.path.join(src_dir, src_fname)
+    dst = os.path.join(dst_dir, dst_fname)
     if os.path.exists(src):
         shutil.copy2(src, dst)
-        print(f"Copied {fname}: {os.path.getsize(dst)} bytes")
+        print(f"Copied {src_fname} -> {dst_fname}: {os.path.getsize(dst)} bytes")
 
 # 2. 触发理解管道
 start = requests.post(f"{BASE}/understanding/{note_id}/start", headers=headers)

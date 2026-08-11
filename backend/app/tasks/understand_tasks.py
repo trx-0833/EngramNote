@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from .celery_app import celery_app
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
+from ..services.vault_meta import write_note_meta
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -78,6 +80,9 @@ async def _update_note_status(note_id: str, status: NoteStatus, error_message: O
             if hasattr(note, key):
                 setattr(note, key, value)
         await session.commit()
+        await session.refresh(note)
+        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
+        write_note_meta(note)
 
 
 async def _understand_document(note_id: str):
@@ -163,8 +168,14 @@ async def _understand_document(note_id: str):
         f"{result['total_cards']} 个知识卡片"
     )
 
-    # 7. 更新笔记状态为 archived
-    await _update_note_status(note_id, NoteStatus.archived)
+    # 7. 更新笔记状态为 archived，并记录学习成功时间（合并到现有 metadata_，避免覆盖 clean_stats 等）
+    async with session_factory() as session:
+        result = await session.execute(select(Note).where(Note.id == note_id))
+        current_note = result.scalars().first()
+        current_meta = current_note.metadata_ if current_note else None
+    metadata_ = dict(current_meta or {})
+    metadata_["learned_at"] = datetime.now(timezone.utc).isoformat()
+    await _update_note_status(note_id, NoteStatus.archived, metadata_=metadata_)
 
     elapsed = time.monotonic() - start_time
     logger.info(

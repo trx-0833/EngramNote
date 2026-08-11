@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..models.quiz_item import QuestionType, DifficultyLevel
 
@@ -101,3 +101,24 @@ class ReviewHistoryResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# --- 复习提醒响应模型 ---
+
+class ReminderResponse(BaseModel):
+    """
+    复习提醒响应
+
+    返回当前用户的复习提醒概览数据，包括到期题目数、
+    1 小时内到期题目数、薄弱知识点数和上次提醒时间。
+
+    字段与 notification_service.NotificationService.get_reminders() 返回的字典键一致。
+    """
+    due_count: int = Field(description="当前到期需要复习的题目数")
+    due_in_1h_count: int = Field(description="1小时内到期的题目数")
+    weak_point_count: int = Field(description="薄弱知识点数（mastery_level < 60）")
+    last_reminded_at: Optional[datetime] = Field(
+        default=None, description="上次提醒时间"
+    )
+
+    model_config = ConfigDict(from_attributes=True)

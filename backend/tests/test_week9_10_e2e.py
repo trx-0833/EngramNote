@@ -1,7 +1,7 @@
 """
 第9-10周全流程端到端测试
 
-使用真实PDF文件 "D:\\test\\resources1\\劳动合同书-田润鑫.pdf" 跑完全流程：
+使用 TEST_PDF_PATH 环境变量指定的真实PDF文件（默认 D:\\test\\resources1\\劳动合同书-田润鑫.pdf） 跑完全流程：
 1. 注册/登录
 2. 上传PDF文件
 3. 轮询转换状态直到完成
@@ -26,7 +26,7 @@ import time
 import httpx
 
 BASE_URL = "http://localhost:8000/api"
-PDF_PATH = r"D:\test\resources1\劳动合同书-田润鑫.pdf"
+PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
 
 client = httpx.Client(timeout=120.0)
 

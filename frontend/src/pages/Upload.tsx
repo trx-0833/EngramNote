@@ -6,7 +6,7 @@
  */
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadFile, getUploadStatus, getNotes, type Note } from '../api/client'
+import { uploadFile, getUploadStatus, getNotes, getProjects, type Note, type Project } from '../api/client'
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -61,10 +61,28 @@ export default function Upload() {
   const [parseBackend, setParseBackend] = useState('')
   /** 笔记角色选择，默认为学习资料 */
   const [noteRole, setNoteRole] = useState('material')
+  /** 项目列表 */
+  const [projects, setProjects] = useState<Project[]>([])
+  /** 选中的项目 ID（空表示不归属任何项目） */
+  const [selectedProjectId, setSelectedProjectId] = useState('')
   /** 可关联的学习资料列表（仅 personal_note 时加载） */
   const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
   /** 已选中的关联资料 ID 列表 */
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+
+  // 加载项目列表，默认不选择项目（留空则不归属任何项目）
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const data = await getProjects()
+        setProjects(data)
+        setSelectedProjectId('')
+      } catch (err) {
+        console.error('加载项目列表失败:', err)
+      }
+    }
+    loadProjects()
+  }, [])
 
   // 当选择"我的笔记"角色时加载可关联的学习资料
   useEffect(() => {
@@ -103,7 +121,7 @@ export default function Upload() {
 
     try {
       // 调用上传 API，后端创建笔记记录并开始异步转换
-      const note = await uploadFile(file, parseBackend || undefined, noteRole, selectedMaterialIds)
+      const note = await uploadFile(file, parseBackend || undefined, noteRole, selectedMaterialIds, selectedProjectId || undefined)
       setNoteId(note.id)
       setStatus('文件已上传，正在转换...')
 
@@ -267,6 +285,26 @@ export default function Upload() {
         </p>
       </div>
 
+      {/* 项目选择 */}
+      <div className="card" style={{ marginTop: 'var(--space-md)' }}>
+        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>所属项目</p>
+        <select
+          className="filter-select"
+          value={selectedProjectId}
+          onChange={(e) => setSelectedProjectId(e.target.value)}
+          disabled={uploading}
+          style={{ width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}
+        >
+          <option value="">不选择项目</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>{project.name}</option>
+          ))}
+        </select>
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+          留空则不归属任何项目，可稍后在「项目」页面将笔记添加进项目。
+        </p>
+      </div>
+
       {/* 笔记角色选择 */}
       <div className="card" style={{ marginTop: 'var(--space-md)' }}>
         <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>笔记类型</p>
@@ -300,8 +338,10 @@ export default function Upload() {
                     )
                   }}
                   disabled={uploading}
+                  // 覆盖全局 input{width:100%}，否则 checkbox 撑满整行、标题被挤成 0 宽
+                  style={{ width: 'auto', margin: 0, padding: 0, flexShrink: 0 }}
                 />
-                <span>{m.title}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>{m.title}</span>
               </label>
             ))}
           </div>

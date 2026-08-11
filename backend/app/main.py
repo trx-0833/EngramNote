@@ -13,6 +13,14 @@ FastAPI 应用入口模块
 - 使用 lifespan 上下文管理器替代 on_event 装饰器（FastAPI 推荐方式）
 - CORS 仅允许开发服务器域名，生产环境应配置为实际前端域名
 - 所有 API 路由统一挂载到 /api 前缀，便于反向代理和版本管理
+
+Celery 启动说明（独立进程，不嵌入 FastAPI）：
+- 启动 Celery Worker（处理异步任务）：
+    celery -A app.tasks.celery_app worker --loglevel=info
+- 启动 Celery Beat（定时任务调度器）：
+    celery -A app.tasks.celery_app beat --loglevel=info
+- Beat 必须作为独立进程运行，不能嵌入 FastAPI 进程，
+  否则在多 worker 部署时会导致重复调度。
 """
 
 from contextlib import asynccontextmanager

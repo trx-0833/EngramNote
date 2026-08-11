@@ -17,6 +17,8 @@ class NoteResponse(BaseModel):
     source_type: SourceType
     status: NoteStatus
     note_role: str = "material"
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
     file_size: int
     page_count: Optional[int] = None
     error_message: Optional[str] = None

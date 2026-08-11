@@ -28,8 +28,10 @@ from .quick_review import router as quick_review_router
 from .report import router as report_router
 from .graph import router as graph_router
 from .folders import router as folders_router
+from .projects import router as projects_router
 from .assessment import router as assessment_router
 from .knowledge import router as knowledge_router
+from .goals import router as goals_router
 
 # 创建总路由器，所有子路由将挂载到此路由器
 api_router = APIRouter()
@@ -54,7 +56,11 @@ api_router.include_router(report_router, prefix="/report", tags=["学习报告"]
 api_router.include_router(graph_router, prefix="/graph", tags=["知识图谱"])
 # 注册文件夹路由，前缀 /folders，OpenAPI 标签为"文件夹"
 api_router.include_router(folders_router, prefix="/folders", tags=["文件夹"])
+# 注册项目路由，前缀 /projects，OpenAPI 标签为"项目"
+api_router.include_router(projects_router, prefix="/projects", tags=["项目"])
 # 注册学习评估路由，前缀 /assessment，OpenAPI 标签为"学习评估"
 api_router.include_router(assessment_router, prefix="/assessment", tags=["学习评估"])
 # 注册知识点管理路由，前缀 /knowledge，OpenAPI 标签为"知识点管理"
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["知识点管理"])
+# 注册学习目标路由，前缀 /goals，OpenAPI 标签为"学习目标"
+api_router.include_router(goals_router, prefix="/goals", tags=["学习目标"])

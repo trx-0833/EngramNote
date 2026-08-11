@@ -1,7 +1,7 @@
 """
 第11周全流程端到端测试
 
-使用真实PDF文件 "D:\\test\\resources1\\劳动合同书-田润鑫.pdf" 跑完全流程，
+使用 TEST_PDF_PATH 环境变量指定的真实PDF文件（默认 D:\\engramnote\\resource\\tests\\劳动合同书-田润鑫.pdf） 跑完全流程，
 验证第11周前端打磨改动是否准确生效：
 
 1. 注册/登录（验证 AuthContext 逻辑）
@@ -30,7 +30,7 @@ import time
 import httpx
 
 BASE_URL = "http://localhost:8000/api"
-PDF_PATH = r"D:\test\resources1\劳动合同书-田润鑫.pdf"
+PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
 
 client = httpx.Client(timeout=120.0)
 

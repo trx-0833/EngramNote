@@ -12,11 +12,14 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getNotes, getReviewStats, getDailyReport, getWeeklyTrend, getWeakPoints,
+  getGoals, getDailyPlan,
   type Note, type ReviewStats, type DailyReport, type WeeklyTrendItem, type WeakPoint,
+  type LearningGoal, type DailyPlanResponse, type RecommendedTask,
 } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
+import ReminderBanner from '../components/ReminderBanner'
 import { sourceTypeLabels, statusLabels, cardTypeLabels, questionTypeLabels } from '../utils/labels'
 
 /**
@@ -31,23 +34,31 @@ export default function Dashboard() {
   const [dailyReport, setDailyReport] = useState<DailyReport | null>(null)
   const [weeklyTrend, setWeeklyTrend] = useState<WeeklyTrendItem[]>([])
   const [weakPoints, setWeakPoints] = useState<WeakPoint[]>([])
+  /** 激活学习目标列表（用于今日目标概要） */
+  const [goals, setGoals] = useState<LearningGoal[]>([])
+  /** 今日每日推荐任务 */
+  const [dailyPlan, setDailyPlan] = useState<DailyPlanResponse | null>(null)
 
   async function fetchRecent() {
     setLoading(true)
     setError('')
     try {
-      const [notesRes, statsRes, reportRes, trendRes, weakRes] = await Promise.all([
+      const [notesRes, statsRes, reportRes, trendRes, weakRes, goalsRes, planRes] = await Promise.all([
         getNotes(1, 5),
         getReviewStats().catch(() => null),
         getDailyReport().catch(() => null),
         getWeeklyTrend().catch(() => null),
         getWeakPoints(3).catch(() => null),
+        getGoals('active').catch(() => null),
+        getDailyPlan().catch(() => null),
       ])
       setRecentNotes(notesRes.items)
       if (statsRes) setReviewStats(statsRes)
       if (reportRes) setDailyReport(reportRes)
       if (trendRes) setWeeklyTrend(trendRes.items)
       if (weakRes) setWeakPoints(weakRes.items)
+      if (goalsRes) setGoals(goalsRes.goals)
+      if (planRes) setDailyPlan(planRes)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败，请重试')
     } finally {
@@ -71,6 +82,9 @@ export default function Dashboard() {
 
   return (
     <div className="page-enter">
+      {/* 复习提醒横幅（自包含组件，根据权限与待复习数自动展示） */}
+      <ReminderBanner />
+
       {/* 欢迎区域 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
         <h1 className="heading-serif gradient-text" style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}>
@@ -100,6 +114,94 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* 今日学习目标概要 + 每日推荐任务 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)', marginBottom: 'var(--space-xl)' }}>
+        {/* 今日学习目标卡片 */}
+        <div
+          className="card card-accent-left"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/goals')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter') navigate('/goals') }}
+        >
+          <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>今日学习目标</h3>
+          {goals.length === 0 ? (
+            <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+              还没有学习目标，点击创建
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
+                进行中目标 {goals.length} 个
+              </p>
+              {/* 整体平均进度 */}
+              <div style={{ marginBottom: 'var(--space-xs)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                  <span>平均进度</span>
+                  <span>
+                    {Math.round(
+                      goals.reduce((sum, g) => sum + (g.progress_percentage ?? 0), 0) / goals.length
+                    )}%
+                  </span>
+                </div>
+                <div className="progress-bar">
+                  <div
+                    className="progress-bar-fill"
+                    style={{
+                      width: `${Math.min(
+                        Math.max(
+                          goals.reduce((sum, g) => sum + (g.progress_percentage ?? 0), 0) / goals.length,
+                          0
+                        ),
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              {/* 列出前 3 个目标名称 */}
+              {goals.slice(0, 3).map(g => (
+                <div
+                  key={g.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '4px 0',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>{g.name}</span>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>
+                    {g.progress_percentage ?? 0}%
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* 每日推荐任务卡片 */}
+        <div className="card card-accent-gold">
+          <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>每日推荐任务</h3>
+          {!dailyPlan || dailyPlan.total_count === 0 ? (
+            <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+              今日暂无推荐任务
+            </p>
+          ) : (
+            <>
+              {/* 总体进度 */}
+              <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
+                {dailyPlan.plan_date} · 已完成 {dailyPlan.completed_count} / {dailyPlan.total_count}
+              </p>
+              {/* 按类别统计任务数 */}
+              <DailyTaskBreakdown plan={dailyPlan} navigate={navigate} />
+            </>
+          )}
+        </div>
+      </div>
 
       {/* 今日学习报告 */}
       {dailyReport && (
@@ -317,6 +419,104 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+/**
+ * 每日推荐任务分类展示
+ * 后端可能返回数组形式或对象形式，统一做兼容处理
+ */
+interface DailyTaskBreakdownProps {
+  plan: DailyPlanResponse
+  navigate: (path: string) => void
+}
+
+/** 任务类型到中文标签的映射 */
+const taskTypeLabels: Record<string, string> = {
+  weak_points: '薄弱点',
+  review: '复习',
+  new_materials: '新资料',
+}
+
+function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
+  // 将 recommended_tasks 统一规整为 RecommendedTask[] 数组
+  // 兼容两种后端结构：数组形式 或 按类别分组的对象形式
+  const tasks: RecommendedTask[] = (() => {
+    const raw = plan.recommended_tasks as unknown
+    if (Array.isArray(raw)) {
+      return raw as RecommendedTask[]
+    }
+    // 对象形式：{"weak_points": [...], "review": [...], "new_materials": [...]}
+    if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, RecommendedTask[]>
+      const merged: RecommendedTask[] = []
+      for (const key of Object.keys(obj)) {
+        const arr = obj[key]
+        if (Array.isArray(arr)) {
+          merged.push(...arr)
+        }
+      }
+      return merged
+    }
+    return []
+  })()
+
+  // 按任务类型分组统计
+  const grouped: Record<string, RecommendedTask[]> = {}
+  for (const t of tasks) {
+    if (!grouped[t.task_type]) grouped[t.task_type] = []
+    grouped[t.task_type].push(t)
+  }
+
+  return (
+    <div>
+      {(['weak_point', 'review', 'new_material'] as const).map(cat => {
+        const arr = grouped[cat]
+        if (!arr || arr.length === 0) return null
+        return (
+          <div key={cat} style={{ marginBottom: 'var(--space-xs)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                {taskTypeLabels[cat] || cat}
+              </span>
+              <span style={{
+                fontSize: '0.75rem',
+                padding: '1px 6px',
+                borderRadius: 3,
+                background: 'var(--color-primary-light, #e3f2fd)',
+                color: 'var(--color-primary)',
+              }}>
+                {arr.length} 个
+              </span>
+            </div>
+            {/* 展示前 2 条任务标题作为示例 */}
+            {arr.slice(0, 2).map((task, idx) => {
+              // 含 quiz_id 的任务点击跳转复习页
+              const clickable = !!task.quiz_id || !!task.note_id
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--color-text-secondary)',
+                    paddingLeft: 'var(--space-sm)',
+                    padding: '2px 0 2px var(--space-sm)',
+                    cursor: clickable ? 'pointer' : 'default',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (task.quiz_id) navigate('/review')
+                    else if (task.note_id) navigate(`/notes/${task.note_id}`)
+                  }}
+                >
+                  · {task.title}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
     </div>
   )
 }

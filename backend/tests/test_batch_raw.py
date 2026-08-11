@@ -1,8 +1,9 @@
 """测试批量题目生成的 API 返回格式 - 直接打印原始响应"""
 import asyncio
 import json
+import os
 import sys
-sys.path.insert(0, 'D:/test/EngramNote/backend')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 async def test():
     from app.services.llm_service import LLMService

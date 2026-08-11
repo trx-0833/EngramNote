@@ -82,6 +82,14 @@
   --sidebar-item-hover: var(--color-primary-light);
   --sidebar-item-active: var(--color-primary-light);
   --sidebar-section-title: var(--color-text-tertiary);
+
+  /* ── 知识图谱（水墨丹青视觉重构）── */
+  --graph-paper: #f5f0e4;          /* 宣纸底 */
+  --graph-paper-deep: #efe8d8;     /* 宣纸深一档 */
+  --graph-ink: rgba(26, 26, 46, 0.55);       /* 墨色 */
+  --graph-ink-faint: rgba(26, 26, 46, 0.14); /* 淡墨 */
+  --graph-frame: #d8d0be;          /* 装裱画框外线 */
+  --graph-frame-inner: #e6dfcd;    /* 装裱画框内线 */
 }
 
 *, *::before, *::after {
@@ -1494,16 +1502,17 @@ h1, h2, h3 {
 
 /* ── 知识图谱（视觉重构）── */
 
-/* 图谱容器：方格纸背景 + 径向光晕（桌灯效果） */
+/* 图谱容器：水墨丹青视觉重构 —— 宣纸底 + 四角墨色晕染 + 装裱画框
+   原: .graph-canvas { background: radial-gradient(ellipse at center, rgba(15, 52, 96, 0.04) 0%, transparent 70%), linear-gradient(rgba(15, 52, 96, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 52, 96, 0.03) 1px, transparent 1px), var(--color-bg); background-size: 100% 100%, 24px 24px, 24px 24px, auto; border: 1px solid var(--color-border-light); border-radius: var(--radius-md); overflow: hidden; position: relative; } */
 .graph-canvas {
   background:
-    radial-gradient(ellipse at center, rgba(15, 52, 96, 0.04) 0%, transparent 70%),
-    linear-gradient(rgba(15, 52, 96, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 52, 96, 0.03) 1px, transparent 1px),
-    var(--color-bg);
-  background-size: 100% 100%, 24px 24px, 24px 24px, auto;
-  border: 1px solid var(--color-border-light);
+    radial-gradient(ellipse at 18% 12%, rgba(45, 138, 86, 0.07) 0%, transparent 55%),   /* 青绿晕染（左上，远山） */
+    radial-gradient(ellipse at 86% 84%, rgba(192, 57, 43, 0.055) 0%, transparent 55%),  /* 赭石晕染（右下，印章余韵） */
+    radial-gradient(ellipse at 50% 46%, rgba(26, 26, 46, 0.045) 0%, transparent 62%),   /* 中央墨晕 */
+    var(--graph-paper);                                                                  /* 宣纸底 */
+  border: 1px solid var(--graph-frame);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-md);               /* 装裱双层画框 */
   overflow: hidden;
   position: relative;
 }
@@ -1566,8 +1575,9 @@ h1, h2, h3 {
 .graph-legend-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 3px; /* 印章式小圆角方块（原: 50%） */
   display: inline-block;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 /* 工具栏按钮 */
@@ -1680,7 +1690,8 @@ h1, h2, h3 {
   border-radius: 1px;
 }
 
-/* 缩放控件容器 */
+/* 缩放控件容器（水墨重构：宣纸底 + 装裱色边）
+   原: .graph-controls { position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); padding: 4px; box-shadow: var(--shadow-sm); z-index: 5; } */
 .graph-controls {
   position: absolute;
   bottom: 12px;
@@ -1688,11 +1699,11 @@ h1, h2, h3 {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
+  background: rgba(245, 240, 228, 0.92);
+  border: 1px solid var(--graph-frame);
   border-radius: var(--radius-sm);
   padding: 4px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-sm);
   z-index: 5;
 }
 
@@ -1724,17 +1735,18 @@ h1, h2, h3 {
   transform: scale(0.92);
 }
 
-/* Minimap 缩略图 */
+/* Minimap 缩略图（水墨重构：宣纸半透明底 + 装裱色边框）
+   原: .graph-minimap { position: absolute; bottom: 12px; left: 12px; width: 140px; height: 90px; background: rgba(255, 255, 255, 0.92); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); z-index: 5; pointer-events: none; overflow: hidden; } */
 .graph-minimap {
   position: absolute;
   bottom: 12px;
   left: 12px;
   width: 140px;
   height: 90px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--color-border-light);
+  background: rgba(245, 240, 228, 0.92);
+  border: 1px solid var(--graph-frame);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-sm);
   z-index: 5;
   pointer-events: none;
   overflow: hidden;
@@ -1760,6 +1772,237 @@ h1, h2, h3 {
   background: var(--gradient-gold);
   border-radius: 9999px;
   transition: width 0.4s var(--ease-out-expo);
+}
+
+/* ── 知识图谱增强样式 ── */
+
+/* 统计面板网格 */
+.graph-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: var(--space-sm);
+}
+
+.graph-stat-item {
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  text-align: center;
+  border: 1px solid var(--color-border);
+}
+
+.graph-stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+.graph-stat-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* 统计柱状图 */
+.graph-stats-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 0.75rem;
+}
+
+.graph-stats-bar-label {
+  width: 36px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.graph-stats-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-bg);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.graph-stats-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.5s var(--ease-out-expo);
+  min-width: 2px;
+}
+
+.graph-stats-bar-count {
+  width: 20px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* 搜索框 */
+.graph-search-box {
+  position: relative;
+  margin-left: var(--space-md);
+}
+
+.graph-search-input {
+  width: 180px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.2s, width 0.2s;
+}
+
+.graph-search-input:focus {
+  width: 240px;
+  border-color: var(--color-primary);
+}
+
+.graph-search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.graph-search-spinner {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: graph-spin 0.6s linear infinite;
+}
+
+@keyframes graph-spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* 搜索下拉结果 */
+.graph-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  z-index: 100;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.graph-search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.8rem;
+}
+
+.graph-search-result-item:hover {
+  background: var(--color-primary-light);
+}
+
+.graph-search-result-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graph-search-result-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.graph-search-result-type {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* 类型过滤器选择框 */
+.graph-filter-select {
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  outline: none;
+  cursor: pointer;
+}
+
+.graph-filter-select:focus {
+  border-color: var(--color-primary);
+}
+
+/* 邻居节点列表 */
+.graph-neighbor-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.graph-neighbor-item:hover {
+  background: var(--color-primary-light);
+  border-color: var(--color-border);
+}
+
+.graph-neighbor-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graph-neighbor-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-neighbor-rel {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  margin-top: 1px;
+}
+
+.graph-neighbor-count {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
 }
 
 /* ── 学习评估（视觉重构）── */
@@ -1809,6 +2052,17 @@ h1, h2, h3 {
   border-color: var(--color-primary);
   border-left-width: 3px;
   background: var(--color-primary-light);
+}
+
+/* 修复：全局 input{width:100%} 会撑满 flex 容器中的裸 checkbox，
+   把同行的标题/文本挤成 0 宽（见 Projects 添加笔记面板候选列表）。
+   此处统一回归 checkbox 固有尺寸；specificity 更高的具体规则（如
+   .note-select-card / modal 内 16px）仍按自身定义生效。 */
+input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .note-select-card input[type="checkbox"] {

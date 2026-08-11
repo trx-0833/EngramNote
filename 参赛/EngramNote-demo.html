@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EngramNote · 试用模板 · AI 辅助整理笔记生成知识库及测评</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-primary: #0a0e1a;
+    --bg-secondary: #111827;
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --bg-card-hover: rgba(255, 255, 255, 0.07);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-cyan: #06b6d4;
+    --accent-purple: #a855f7;
+    --accent-blue: #3b82f6;
+    --accent-green: #10b981;
+    --accent-yellow: #fbbf24;
+    --accent-pink: #ec4899;
+    --accent-red: #ef4444;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.15);
+    --gradient: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.7;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .bg-decoration {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .bg-decoration::before {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, var(--accent-cyan) 0%, transparent 70%);
+    top: -200px; left: -150px; opacity: 0.2; filter: blur(80px);
+  }
+  .bg-decoration::after {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, var(--accent-purple) 0%, transparent 70%);
+    bottom: -100px; right: -150px; opacity: 0.2; filter: blur(80px);
+  }
+  .grid-bg {
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* 顶部导航 */
+  .navbar {
+    position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(20px);
+    background: rgba(10, 14, 26, 0.85);
+    border-bottom: 1px solid var(--border);
+  }
+  .navbar-inner {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 32px; max-width: 1200px; margin: 0 auto;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+  .logo-icon {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: var(--gradient); display: flex; align-items: center; justify-content: center;
+    font-size: 18px; box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+  }
+  .progress-hint { font-size: 13px; color: var(--text-secondary); }
+
+  /* 步骤条 */
+  .stepper-wrap {
+    position: sticky; top: 63px; z-index: 50;
+    background: rgba(10, 14, 26, 0.8);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+  }
+  .stepper {
+    display: flex; justify-content: space-between; align-items: center;
+    max-width: 1000px; margin: 0 auto; padding: 0 32px;
+    position: relative;
+  }
+  .stepper::before {
+    content: ''; position: absolute; top: 18px; left: 10%; right: 10%;
+    height: 2px; background: var(--border); z-index: 0;
+  }
+  .step-progress {
+    position: absolute; top: 18px; left: 10%;
+    height: 2px; background: var(--gradient);
+    z-index: 1; transition: width 0.5s ease;
+    width: 0%;
+  }
+  .step {
+    display: flex; flex-direction: column; align-items: center;
+    position: relative; z-index: 2; flex: 1; cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .step-circle {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--bg-secondary); border: 2px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; transition: all 0.3s ease;
+  }
+  .step.active .step-circle {
+    background: var(--gradient); border-color: transparent;
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+    transform: scale(1.1);
+  }
+  .step.done .step-circle {
+    background: var(--accent-green); border-color: var(--accent-green);
+    color: white;
+  }
+  .step-label {
+    margin-top: 8px; font-size: 12px; color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .step.active .step-label { color: var(--text-primary); font-weight: 600; }
+  .step.done .step-label { color: var(--accent-green); }
+
+  /* 主容器 */
+  .main {
+    max-width: 1100px; margin: 0 auto; padding: 40px 32px 80px;
+    position: relative; z-index: 1;
+  }
+
+  /* 内容卡片 */
+  .content-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 40px;
+    transition: all 0.4s ease;
+    animation: fadeSlideIn 0.5s ease;
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .content-card.hidden { display: none; }
+
+  .section-title {
+    font-size: 28px; font-weight: 800; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .section-title .emoji { font-size: 28px; }
+  .section-desc { font-size: 15px; color: var(--text-secondary); margin-bottom: 32px; }
+
+  /* 按钮 */
+  .btn {
+    padding: 12px 24px; border-radius: 12px; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s ease; border: none; display: inline-flex;
+    align-items: center; gap: 8px;
+  }
+  .btn-primary {
+    background: var(--gradient); color: white;
+    box-shadow: 0 6px 20px rgba(6, 182, 212, 0.25);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(6, 182, 212, 0.35); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-ghost {
+    background: transparent; color: var(--text-primary);
+    border: 1px solid var(--border-strong);
+  }
+  .btn-ghost:hover { background: var(--bg-card-hover); border-color: var(--accent-cyan); }
+  .btn-sm { padding: 8px 16px; font-size: 13px; }
+
+  .btn-row { display: flex; justify-content: space-between; margin-top: 32px; gap: 16px; }
+  .btn-row-right { justify-content: flex-end; }
+
+  /* 文本输入区 */
+  textarea {
+    width: 100%; min-height: 280px; padding: 20px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 16px; color: var(--text-primary);
+    font-family: inherit; font-size: 14px; line-height: 1.8;
+    resize: vertical; transition: border-color 0.2s ease;
+  }
+  textarea:focus { outline: none; border-color: var(--accent-cyan); }
+
+  .sample-btns {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
+  }
+  .sample-btn {
+    padding: 6px 14px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 20px; font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; transition: all 0.2s ease;
+  }
+  .sample-btn:hover { background: var(--bg-card-hover); border-color: var(--accent-cyan); color: var(--text-primary); }
+
+  /* Loading 状态 */
+  .loading-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px;
+    text-align: center;
+    margin: 24px 0;
+    display: none;
+  }
+  .loading-box.show { display: block; animation: fadeSlideIn 0.5s ease; }
+  .loading-spinner {
+    width: 48px; height: 48px; margin: 0 auto 20px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent-cyan);
+    border-radius: 50%; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 15px; color: var(--text-secondary); }
+  .loading-steps { margin-top: 16px; font-size: 13px; color: var(--text-muted); }
+  .loading-steps .line { opacity: 0; transform: translateX(-10px); transition: all 0.3s ease; margin: 6px 0; }
+  .loading-steps .line.show { opacity: 1; transform: translateX(0); }
+  .loading-steps .line.done::before { content: '✓ '; color: var(--accent-green); }
+
+  /* 清洗对比视图 */
+  .compare-view {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+    margin: 20px 0;
+  }
+  .compare-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .compare-panel-header {
+    padding: 14px 20px; font-size: 13px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-original .compare-panel-header { color: var(--accent-yellow); background: rgba(251, 191, 36, 0.05); }
+  .panel-cleaned .compare-panel-header { color: var(--accent-green); background: rgba(16, 185, 129, 0.05); }
+  .compare-panel-body {
+    padding: 20px; font-size: 14px; line-height: 1.8;
+    max-height: 400px; overflow-y: auto; color: var(--text-secondary);
+  }
+  .duplicate-mark {
+    background: rgba(251, 191, 36, 0.15); color: var(--accent-yellow);
+    text-decoration: line-through; padding: 0 4px; border-radius: 4px;
+  }
+  .noise-mark {
+    background: rgba(239, 68, 68, 0.15); color: var(--accent-red);
+    text-decoration: line-through; padding: 0 4px; border-radius: 4px;
+  }
+  .clean-stats {
+    display: flex; gap: 16px; margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .stat-pill {
+    padding: 10px 18px; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: 12px; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .stat-pill .num { font-size: 18px; font-weight: 800; color: var(--accent-cyan); }
+
+  /* 知识卡片 */
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin-top: 24px;
+  }
+  .knowledge-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    animation: fadeSlideIn 0.5s ease;
+  }
+  .knowledge-card:hover {
+    border-color: var(--accent-cyan);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(6, 182, 212, 0.15);
+  }
+  .card-type {
+    display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 600;
+    border-radius: 8px; margin-bottom: 12px;
+  }
+  .card-type.concept { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
+  .card-type.formula { background: rgba(168, 85, 247, 0.15); color: var(--accent-purple); }
+  .card-type.qa { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+  .card-type.definition { background: rgba(251, 191, 36, 0.15); color: var(--accent-yellow); }
+  .card-title { font-size: 16px; font-weight: 700; margin-bottom: 10px; color: var(--text-primary); }
+  .card-content { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .card-tags { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card-tag {
+    font-size: 11px; padding: 3px 8px; background: rgba(255,255,255,0.03);
+    border-radius: 6px; color: var(--text-muted);
+  }
+
+  /* 卡片详情模态框 */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    display: none; align-items: center; justify-content: center;
+    z-index: 200; backdrop-filter: blur(4px);
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-strong);
+    border-radius: 20px; padding: 32px; max-width: 600px; width: 90%;
+    max-height: 85vh; overflow-y: auto;
+    animation: modalIn 0.3s ease;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-close {
+    position: absolute; top: 16px; right: 16px;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-secondary); cursor: pointer; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+  }
+  .modal-close:hover { background: var(--accent-red); color: white; border-color: var(--accent-red); }
+
+  /* RAG 问答 */
+  .chat-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    display: flex; flex-direction: column;
+    height: 550px; overflow: hidden;
+  }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 24px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .chat-msg {
+    display: flex; gap: 12px; max-width: 85%;
+    animation: fadeSlideIn 0.3s ease;
+  }
+  .chat-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .chat-avatar {
+    width: 36px; height: 36px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .chat-msg.ai .chat-avatar { background: var(--gradient); }
+  .chat-msg.user .chat-avatar { background: var(--accent-blue); }
+  .chat-bubble {
+    padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.7;
+  }
+  .chat-msg.ai .chat-bubble { background: var(--bg-card); border: 1px solid var(--border); }
+  .chat-msg.user .chat-bubble { background: var(--accent-blue); color: white; }
+  .chat-source {
+    font-size: 11px; color: var(--text-muted); margin-top: 8px;
+    padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .chat-input-area {
+    padding: 16px; border-top: 1px solid var(--border);
+    background: var(--bg-card); display: flex; gap: 10px;
+  }
+  .chat-input {
+    flex: 1; padding: 12px 16px; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary);
+    font-size: 14px; font-family: inherit;
+  }
+  .chat-input:focus { outline: none; border-color: var(--accent-cyan); }
+  .suggestion-chips {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+  }
+  .chip {
+    padding: 6px 14px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 20px; font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; transition: all 0.2s ease;
+  }
+  .chip:hover { border-color: var(--accent-cyan); color: var(--text-primary); }
+
+  /* 测评 */
+  .quiz-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 24px; padding: 16px 20px;
+    background: var(--bg-secondary); border-radius: 14px;
+    border: 1px solid var(--border);
+  }
+  .quiz-progress-text { font-size: 14px; font-weight: 600; }
+  .quiz-score { font-size: 14px; color: var(--accent-cyan); }
+  .quiz-question {
+    font-size: 18px; font-weight: 600; margin-bottom: 20px;
+    line-height: 1.6;
+  }
+  .quiz-question .q-type {
+    font-size: 11px; padding: 3px 8px; background: var(--accent-purple);
+    color: white; border-radius: 6px; margin-right: 10px; vertical-align: middle;
+    font-weight: 500;
+  }
+  .quiz-options { display: flex; flex-direction: column; gap: 10px; }
+  .quiz-option {
+    padding: 16px 20px; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: 12px;
+    cursor: pointer; font-size: 14px; transition: all 0.2s ease;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .quiz-option:hover:not(.disabled):not(.correct):not(.wrong) {
+    border-color: var(--accent-cyan); background: var(--bg-card-hover);
+  }
+  .quiz-option .opt-letter {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--bg-card); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; flex-shrink: 0;
+  }
+  .quiz-option.disabled { opacity: 0.6; cursor: not-allowed; }
+  .quiz-option.correct {
+    border-color: var(--accent-green); background: rgba(16, 185, 129, 0.1);
+  }
+  .quiz-option.correct .opt-letter { background: var(--accent-green); color: white; }
+  .quiz-option.wrong {
+    border-color: var(--accent-red); background: rgba(239, 68, 68, 0.1);
+  }
+  .quiz-option.wrong .opt-letter { background: var(--accent-red); color: white; }
+  .quiz-feedback {
+    margin-top: 20px; padding: 16px 20px; border-radius: 12px;
+    font-size: 13px; line-height: 1.7; display: none;
+  }
+  .quiz-feedback.show { display: block; animation: fadeSlideIn 0.3s ease; }
+  .quiz-feedback.correct { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--accent-green); }
+  .quiz-feedback.wrong { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--accent-red); }
+  .quiz-feedback strong { display: block; margin-bottom: 6px; }
+
+  /* 测评结果页 */
+  .result-summary {
+    text-align: center; padding: 40px 20px;
+  }
+  .result-circle {
+    width: 160px; height: 160px; margin: 0 auto 24px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent-cyan) 0deg, var(--accent-cyan) var(--score-degree), var(--border) var(--score-degree));
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .result-circle-inner {
+    width: 130px; height: 130px; border-radius: 50%;
+    background: var(--bg-secondary);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .result-score-num { font-size: 40px; font-weight: 800; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .result-score-label { font-size: 13px; color: var(--text-muted); }
+
+  .result-details {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin: 32px 0;
+  }
+  .result-detail-item {
+    padding: 16px; background: var(--bg-secondary);
+    border-radius: 12px; border: 1px solid var(--border);
+    text-align: center;
+  }
+  .result-detail-item .label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .result-detail-item .value { font-size: 22px; font-weight: 800; color: var(--accent-cyan); }
+
+  .weak-points { margin-top: 24px; }
+  .weak-points h4 { font-size: 15px; margin-bottom: 12px; color: var(--accent-yellow); }
+  .weak-point {
+    padding: 12px 16px; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent-yellow);
+    border-radius: 10px; margin-bottom: 10px; font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .weak-point b { color: var(--text-primary); }
+
+  /* 欢迎区 */
+  .welcome-hero {
+    text-align: center; padding: 40px 20px 60px;
+  }
+  .welcome-hero h1 {
+    font-size: 42px; font-weight: 800; margin-bottom: 16px;
+    background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .welcome-hero p { font-size: 16px; color: var(--text-secondary); max-width: 500px; margin: 0 auto 32px; }
+  .feature-preview {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;
+    margin-top: 40px;
+  }
+  .feature-preview-item {
+    padding: 24px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; text-align: center; transition: all 0.2s ease;
+  }
+  .feature-preview-item:hover { border-color: var(--accent-cyan); transform: translateY(-2px); }
+  .feature-preview-emoji { font-size: 32px; margin-bottom: 12px; }
+  .feature-preview-item h4 { font-size: 15px; margin-bottom: 6px; }
+  .feature-preview-item p { font-size: 12px; color: var(--text-muted); }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    .main { padding: 20px 16px 60px; }
+    .content-card { padding: 24px; }
+    .stepper { padding: 0 16px; }
+    .navbar-inner { padding: 12px 16px; }
+    .step-label { font-size: 10px; }
+    .compare-view { grid-template-columns: 1fr; }
+    .welcome-hero h1 { font-size: 32px; }
+    .section-title { font-size: 22px; }
+  }
+
+  /* 滚动条美化 */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent-cyan); }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="bg-decoration"></div>
+
+<!-- 顶部导航 -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <div class="logo">
+      <div class="logo-icon">🧠</div>
+      <span>EngramNote · 试用模板</span>
+    </div>
+    <div class="progress-hint" id="progressHint">第 1 步 / 共 5 步 · 加油！</div>
+  </div>
+</nav>
+
+<!-- 步骤条 -->
+<div class="stepper-wrap">
+  <div class="stepper">
+    <div class="step active" data-step="0"><div class="step-circle">1</div><div class="step-label">输入笔记</div></div>
+    <div class="step" data-step="1"><div class="step-circle">2</div><div class="step-label">AI 清洗</div></div>
+    <div class="step" data-step="2"><div class="step-circle">3</div><div class="step-label">知识提取</div></div>
+    <div class="step" data-step="3"><div class="step-circle">4</div><div class="step-label">智能问答</div></div>
+    <div class="step" data-step="4"><div class="step-circle">5</div><div class="step-label">测评练习</div></div>
+    <div class="step-progress" id="stepProgress"></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- 步骤 0: 欢迎页 -->
+  <div class="content-card" id="content-0">
+    <div class="welcome-hero">
+      <div style="font-size: 64px; margin-bottom: 16px;">🧠✨</div>
+      <h1>体验 AI 驱动的学习闭环</h1>
+      <p>从一篇原始笔记开始，经过 AI 清洗、知识点提取、智能问答到测评练习，完整体验 EngramNote 的核心能力。</p>
+      <button class="btn btn-primary" onclick="goToStep(1)">
+        🚀 开始试用
+      </button>
+    </div>
+
+    <div class="feature-preview">
+      <div class="feature-preview-item">
+        <div class="feature-preview-emoji">📝</div>
+        <h4>输入笔记</h4>
+        <p>粘贴或选择示例文本</p>
+      </div>
+      <div class="feature-preview-item">
+        <div class="feature-preview-emoji">🧹</div>
+        <h4>AI 清洗</h4>
+        <p>去噪、去重、精简</p>
+      </div>
+      <div class="feature-preview-item">
+        <div class="feature-preview-emoji">💡</div>
+        <h4>知识提取</h4>
+        <p>概念卡 / 公式卡 / 问答对</p>
+      </div>
+      <div class="feature-preview-item">
+        <div class="feature-preview-emoji">🤖</div>
+        <h4>RAG 问答</h4>
+        <p>基于知识库对话</p>
+      </div>
+      <div class="feature-preview-item">
+        <div class="feature-preview-emoji">📊</div>
+        <h4>测评练习</h4>
+        <p>选择题 + 薄弱点分析</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 步骤 1: 输入笔记 -->
+  <div class="content-card hidden" id="content-1">
+    <h2 class="section-title"><span class="emoji">📝</span>第一步：输入你的笔记内容</h2>
+    <p class="section-desc">粘贴一篇学习笔记（如学术论文、教材内容、技术博客等），或选择内置示例快速体验。</p>
+
+    <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">💡 快速体验：选一个示例 →</div>
+    <div class="sample-btns">
+      <button class="sample-btn" onclick="loadSample('ai')">🤖 人工智能入门</button>
+      <button class="sample-btn" onclick="loadSample('web')">🌐 Web 开发教程</button>
+      <button class="sample-btn" onclick="loadSample('bio')">🧬 细胞生物学</button>
+    </div>
+
+    <textarea id="noteInput" placeholder="在这里粘贴你的笔记内容，支持 Markdown 格式...
+
+你也可以直接点击上方的示例按钮加载示例文本。
+
+---
+提示：较长的笔记内容会有更好的提取效果。"></textarea>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goToStep(0)">← 返回</button>
+      <button class="btn btn-primary" id="goToCleanBtn" onclick="submitNote()">提交给 AI 处理 →</button>
+    </div>
+  </div>
+
+  <!-- 步骤 2: AI 清洗 -->
+  <div class="content-card hidden" id="content-2">
+    <h2 class="section-title"><span class="emoji">🧹</span>第二步：AI 清洗与去重</h2>
+    <p class="section-desc">AI 会自动识别笔记中的冗余内容、页眉页脚水印，并进行去重处理。下方对比视图展示了「原始文本」与「清洗后文本」的差异。</p>
+
+    <div class="loading-box" id="cleaningLoader">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">AI 正在清洗你的笔记...</div>
+      <div class="loading-steps">
+        <div class="line" id="cleanLine1">① 解析 Markdown 结构...</div>
+        <div class="line" id="cleanLine2">② 去除页眉页脚与水印...</div>
+        <div class="line" id="cleanLine3">③ 向量相似度去重分析...</div>
+        <div class="line" id="cleanLine4">④ 生成干净副本 ✓</div>
+      </div>
+    </div>
+
+    <div id="cleaningResult" style="display: none;">
+      <div class="clean-stats">
+        <div class="stat-pill"><span class="num" id="statOrig">—</span><span>原始行数</span></div>
+        <div class="stat-pill"><span class="num" id="statClean">—</span><span>清洗后</span></div>
+        <div class="stat-pill"><span class="num" id="statReduce">—</span><span>精简率</span></div>
+        <div class="stat-pill"><span class="num" id="statDup">—</span><span>检测到重复</span></div>
+      </div>
+
+      <div class="compare-view">
+        <div class="compare-panel panel-original">
+          <div class="compare-panel-header">
+            <span>📄 原始笔记</span>
+            <span style="font-size: 11px; color: var(--text-muted);">（带噪声）</span>
+          </div>
+          <div class="compare-panel-body" id="originalText"></div>
+        </div>
+        <div class="compare-panel panel-cleaned">
+          <div class="compare-panel-header">
+            <span>✨ 清洗后</span>
+            <span style="font-size: 11px; color: var(--text-muted);">（可编辑）</span>
+          </div>
+          <div class="compare-panel-body" id="cleanedText"></div>
+        </div>
+      </div>
+
+      <div style="font-size: 13px; color: var(--text-muted); margin-top: 16px; padding: 12px 16px; background: var(--bg-secondary); border-radius: 10px; border-left: 3px solid var(--accent-yellow);">
+        💡 <b>设计理念：</b> EngramNote 从不修改原始笔记，清洗结果作为独立的「工作副本」保存。用户可以随时撤回 AI 的清洗决定，确保数据安全。
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goToStep(1)">← 返回修改</button>
+      <button class="btn btn-primary" id="goToCardsBtn" onclick="goToStep(3)">下一步：提取知识卡片 →</button>
+    </div>
+  </div>
+
+  <!-- 步骤 3: 知识卡片 -->
+  <div class="content-card hidden" id="content-3">
+    <h2 class="section-title"><span class="emoji">💡</span>第三步：AI 提取知识卡片</h2>
+    <p class="section-desc">AI 会根据笔记内容自动提取核心概念、定义、公式和问答对，每一张卡片都关联回原文。点击卡片可查看详情。</p>
+
+    <div class="loading-box" id="cardsLoader">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">AI 正在分析内容结构...</div>
+      <div class="loading-steps">
+        <div class="line" id="cardLine1">① 按标题切分章节...</div>
+        <div class="line" id="cardLine2">② 调用 DeepSeek 理解上下文...</div>
+        <div class="line" id="cardLine3">③ 提取概念卡 / 公式卡 / 问答对...</div>
+        <div class="line" id="cardLine4">④ 生成卡片元数据 ✓</div>
+      </div>
+    </div>
+
+    <div id="cardsResult" style="display: none;">
+      <div class="clean-stats">
+        <div class="stat-pill"><span class="num" id="cardTotal">0</span><span>张卡片</span></div>
+        <div class="stat-pill"><span class="num" id="cardConcept">0</span><span>个概念</span></div>
+        <div class="stat-pill"><span class="num" id="cardFormula">0</span><span>个公式</span></div>
+        <div class="stat-pill"><span class="num" id="cardQA">0</span><span>个问答对</span></div>
+        <div class="stat-pill"><span class="num" id="cardDef">0</span><span>个定义</span></div>
+      </div>
+
+      <div class="cards-grid" id="cardsGrid"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goToStep(2)">← 返回清洗</button>
+      <button class="btn btn-primary" onclick="goToStep(4)">下一步：智能问答 →</button>
+    </div>
+  </div>
+
+  <!-- 步骤 4: RAG 问答 -->
+  <div class="content-card hidden" id="content-4">
+    <h2 class="section-title"><span class="emoji">🤖</span>第四步：与你的知识库对话</h2>
+    <p class="section-desc">提问你的笔记，AI 会从刚才提取的知识卡片中检索相关内容，并给出准确回答，同时标注引用来源。</p>
+
+    <div class="suggestion-chips" id="suggestionChips">
+      <!-- 动态生成的建议问题 -->
+    </div>
+
+    <div class="chat-container">
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-msg ai">
+          <div class="chat-avatar">🤖</div>
+          <div class="chat-bubble">
+            你好！我已经学习了你刚才输入的笔记内容。你可以向我提问任何相关问题，我会基于笔记内容给出回答并标注引用来源。
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <input type="text" class="chat-input" id="chatInput" placeholder="输入你的问题，例如：什么是机器学习？" onkeypress="if(event.key==='Enter') sendChat()">
+        <button class="btn btn-primary btn-sm" onclick="sendChat()">发送 →</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goToStep(3)">← 返回卡片</button>
+      <button class="btn btn-primary" onclick="goToStep(5)">下一步：测评练习 →</button>
+    </div>
+  </div>
+
+  <!-- 步骤 5: 测评 -->
+  <div class="content-card hidden" id="content-5">
+    <h2 class="section-title"><span class="emoji">📊</span>第五步：题目测评与薄弱点分析</h2>
+    <p class="section-desc">基于知识卡片自动生成的选择题。认真作答，最后会有你的答题分析和薄弱点建议。</p>
+
+    <div id="quizArea">
+      <div class="quiz-header">
+        <div class="quiz-progress-text">第 <span id="quizCurrent">1</span> / <span id="quizTotal">5</span> 题</div>
+        <div class="quiz-score">当前得分：<span id="quizScore">0</span></div>
+      </div>
+      <div id="quizQuestion"></div>
+      <div id="quizFeedback" class="quiz-feedback"></div>
+      <div class="btn-row btn-row-right" style="margin-top: 20px;">
+        <button class="btn btn-primary" id="nextQuizBtn" style="display: none;" onclick="nextQuiz()">下一题 →</button>
+      </div>
+    </div>
+
+    <!-- 测评结果 -->
+    <div id="quizResult" style="display: none;">
+      <div class="result-summary">
+        <div class="result-circle" id="resultCircle">
+          <div class="result-circle-inner">
+            <div class="result-score-num" id="resultScore">0</div>
+            <div class="result-score-label">总得分</div>
+          </div>
+        </div>
+        <h2 style="font-size: 24px; margin-bottom: 8px;" id="resultTitle">🎉 完成测评！</h2>
+        <p style="color: var(--text-secondary); font-size: 14px;" id="resultDesc">以下是你的学习诊断...</p>
+      </div>
+
+      <div class="result-details">
+        <div class="result-detail-item"><div class="label">正确题数</div><div class="value" id="detailCorrect">0</div></div>
+        <div class="result-detail-item"><div class="label">错误题数</div><div class="value" id="detailWrong" style="color: var(--accent-red);">0</div></div>
+        <div class="result-detail-item"><div class="label">正确率</div><div class="value" id="detailRate">0%</div></div>
+        <div class="result-detail-item"><div class="label">卡片总数</div><div class="value" id="detailCards">0</div></div>
+      </div>
+
+      <div class="weak-points" id="weakPoints">
+        <h4>⚠️ 薄弱点分析（后续复习建议重点关注）</h4>
+      </div>
+
+      <div style="margin-top: 24px; padding: 20px; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(168, 85, 247, 0.1)); border: 1px solid var(--border-strong); border-radius: 16px; text-align: center;">
+        <div style="font-size: 28px; margin-bottom: 10px;">🧠✨</div>
+        <h3 style="margin-bottom: 8px;">恭喜完成完整试用！</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">你刚刚体验了 EngramNote 的核心闭环：输入 → 清洗 → 提取 → 问答 → 测评。</p>
+        <button class="btn btn-primary" onclick="restartDemo()">🔄 重新试用一次</button>
+      </div>
+    </div>
+
+    <div class="btn-row" id="quizBackBtn">
+      <button class="btn btn-ghost" onclick="goToStep(4)">← 返回问答</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- 卡片详情模态框 -->
+<div class="modal-overlay" id="cardModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box" style="position: relative;">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div id="cardModalContent"></div>
+  </div>
+</div>
+
+<script>
+/* ========================================================
+   示例文本库
+   ======================================================== */
+const SAMPLES = {
+  ai: `# 人工智能入门教程
+
+## 1. 什么是机器学习
+
+机器学习（Machine Learning，简称 ML）是人工智能的一个分支，它使计算机能够从数据中学习规律并做出预测或决策，而无需进行明确的编程。
+
+机器学习的核心思想是：通过算法分析数据，不断从数据中学习规律（模式），然后利用学到的规律来预测或决策。
+
+## 2. 机器学习的分类
+
+机器学习主要分为三类：
+
+### 监督学习（Supervised Learning）
+监督学习需要标注数据（即有"答案"的数据）。模型通过学习输入与输出之间的映射关系来进行预测。
+常见算法：线性回归、逻辑回归、决策树、支持向量机（SVM）、神经网络。
+
+应用场景：垃圾邮件分类、房价预测、医学诊断。
+
+### 无监督学习（Unsupervised Learning）
+无监督学习使用未标注数据，目标是发现数据中的内在结构或模式。
+常见算法：K-means 聚类、层次聚类、主成分分析（PCA）。
+
+应用场景：客户分群、异常检测、推荐系统。
+
+### 强化学习（Reinforcement Learning）
+强化学习通过与环境交互来学习策略。智能体（Agent）通过执行动作并获得奖励或惩罚来优化决策。
+
+核心概念：状态（State）、动作（Action）、奖励（Reward）、策略（Policy）。
+
+应用场景：AlphaGo 围棋、自动驾驶、机器人控制。
+
+## 3. 神经网络基础
+
+神经网络是一种模拟生物神经元工作方式的计算模型。
+
+### 神经元（Neuron）
+一个神经元接收多个输入，每个输入乘以权重后求和，再通过一个激活函数输出结果。
+
+数学表示：
+y = f(Σ(wi * xi) + b)
+
+其中 wi 是权重，xi 是输入，b 是偏置，f 是激活函数。
+
+### 常见激活函数
+
+1. ReLU（Rectified Linear Unit）：f(x) = max(0, x)
+   优点：计算简单、收敛快、避免梯度消失
+
+2. Sigmoid：f(x) = 1 / (1 + e^(-x))
+   输出范围 (0, 1)，常用于二分类输出层
+
+3. Tanh：f(x) = tanh(x)
+   输出范围 (-1, 1)
+
+### 神经网络的层次结构
+
+- 输入层：接收原始数据
+- 隐藏层：进行特征变换和计算
+- 输出层：产生最终预测
+
+## 4. 深度学习（Deep Learning）
+
+深度学习是使用多层神经网络的机器学习方法。
+
+### 卷积神经网络（CNN）
+CNN 主要用于图像识别。核心组件：
+- 卷积层（Convolution）：提取局部特征
+- 池化层（Pooling）：降维和特征压缩
+- 全连接层（Fully Connected）：分类输出
+
+### 循环神经网络（RNN）
+RNN 用于处理序列数据，如文本、语音。
+LSTM 和 GRU 是 RNN 的改进版本，解决了长序列梯度消失问题。
+
+### Transformer
+2017 年提出的架构，基于自注意力机制，是现代大语言模型（LLM）的基础。
+代表：GPT 系列、BERT、T5、LLaMA 等。
+
+## 5. 模型训练与评估
+
+### 训练过程
+1. 数据准备（清洗、归一化、划分训练/验证/测试集）
+2. 模型初始化
+3. 前向传播计算预测值
+4. 计算损失函数（Loss Function）
+5. 反向传播计算梯度
+6. 优化器更新参数（如 SGD、Adam）
+7. 重复迭代直到收敛
+
+### 评估指标
+- 准确率（Accuracy）：正确预测的比例
+- 精确率（Precision）：TP / (TP + FP)
+- 召回率（Recall）：TP / (TP + FN)
+- F1-Score：2 * Precision * Recall / (Precision + Recall)
+
+### 过拟合与应对方法
+过拟合是指模型在训练集上表现很好，但在测试集上表现较差。
+应对方法：增加训练数据、正则化（L1/L2）、Dropout、早停（Early Stopping）、数据增强。
+
+## 6. 总结
+
+机器学习通过数据驱动的方式解决问题，深度学习则通过多层神经网络实现端到端学习。理解这些基础概念，是应用和研究 AI 的第一步。
+
+---
+*本教程最后更新：2026年6月。仅供学习参考。*
+第 1 页 / 共 3 页`,
+
+  web: `# 现代 Web 开发指南
+
+## 1. Web 开发概述
+
+Web 开发是指创建基于浏览器的应用程序。前端是用户直接交互的部分，后端是服务端逻辑。
+
+### 前端三大核心技术
+
+HTML（HyperText Markup Language）：定义网页的结构和内容。它使用标签（tag）来描述页面元素。
+
+CSS（Cascading Style Sheets）：负责网页的样式和布局。通过选择器选中 HTML 元素，然后设置样式属性。
+
+JavaScript：为网页添加交互能力。它是一种动态、弱类型、基于原型的编程语言。
+
+## 2. HTML 基础知识
+
+HTML 文档由嵌套的元素组成。每个元素有开始标签和结束标签。
+
+常用元素包括：
+- <div>：块级容器，用于布局分组
+- <span>：行内容器
+- <h1> 到 <h6>：标题
+- <p>：段落
+- <a>：超链接
+- <img>：图片
+- <form>：表单
+
+语义化 HTML 是使用有意义的标签来描述内容，如 <header>、<nav>、<main>、<article>、<section>、<footer>。这有助于 SEO 和无障碍访问。
+
+## 3. CSS 样式系统
+
+### CSS 盒模型
+每个元素都是一个矩形盒子，由内容区（content）、内边距（padding）、边框（border）、外边距（margin）组成。
+
+### Flexbox（弹性盒布局）
+Flexbox 是一维布局系统，通过 display: flex 创建弹性容器。
+
+主要属性：
+- justify-content：主轴对齐（flex-start, center, space-between, space-around）
+- align-items：交叉轴对齐（flex-start, center, stretch）
+- flex-direction：方向（row, column）
+- gap：间距
+
+### Grid 布局
+Grid 是二维布局系统，可以同时控制行和列。
+
+grid-template-columns: 定义列
+grid-template-rows: 定义行
+grid-column / grid-row: 指定子项位置
+
+## 4. JavaScript 核心
+
+### 变量声明
+let：块级作用域，可重新赋值
+const：块级作用域，不可重新赋值
+var：函数作用域（不推荐）
+
+### 函数定义
+函数可以通过 function 关键字或箭头函数（=>）定义。箭头函数不绑定自己的 this。
+
+### Promise 与 async/await
+Promise 用于处理异步操作，它有三种状态：pending（进行中）、fulfilled（已完成）、rejected（已失败）。
+
+async/await 是基于 Promise 的语法糖，使异步代码看起来像同步代码。
+
+## 5. 现代前端框架
+
+### React
+React 是 Facebook（现 Meta）开发的 JavaScript 库。
+
+核心概念：
+- 组件化：将 UI 拆分为可复用组件
+- JSX：在 JavaScript 中写 HTML-like 语法
+- 虚拟 DOM：高效更新真实 DOM
+- 状态管理：useState, useReducer, Context API
+- Hooks：在函数组件中使用 state 和其他 React 特性
+
+### Vue.js
+Vue 是一个渐进式 JavaScript 框架，设计理念是自底向上增量开发。
+
+核心特点：
+- 响应式数据绑定
+- 指令系统（v-if, v-for, v-bind, v-on）
+- 组件化
+- Vue 3 的 Composition API
+
+### Angular
+Google 开发的完整前端框架，使用 TypeScript，内置路由、表单、HTTP 客户端等。
+
+## 6. 构建工具与工程化
+
+### npm / yarn / pnpm
+包管理工具，用于安装和管理项目依赖。package.json 定义项目配置和依赖。
+
+### Webpack / Vite
+打包工具将多个源文件打包成优化后的生产版本。Vite 是新一代工具，开发速度极快。
+
+### TypeScript
+TypeScript 是 JavaScript 的超集，添加了静态类型检查。编译后输出纯 JavaScript。
+
+## 7. 性能优化
+
+前端性能优化要点：
+1. 代码分割（Code Splitting）：按需加载
+2. 懒加载（Lazy Loading）：图片、组件延迟加载
+3. 图片优化：使用 WebP、AVIF 格式
+4. Tree Shaking：移除未使用的代码
+5. 缓存策略：设置合理的 HTTP 缓存头
+6. 预加载关键资源：使用 <link rel="preload">
+7. 减少重排重绘：避免频繁修改 DOM 样式
+
+## 8. 总结
+
+现代 Web 开发是一个不断演进的领域。掌握 HTML/CSS/JS 基础后，选择一个框架深入学习，并持续关注社区的新工具和最佳实践。
+
+---
+*参考资料：MDN Web Docs、React 官方文档*
+更新时间：2026 年 6 月`,
+
+  bio: `# 细胞生物学基础
+
+## 1. 细胞概述
+
+细胞是生物体结构和功能的基本单位。所有生物都由细胞构成——从单细胞生物（如细菌）到多细胞生物（如植物、动物和人类）。
+
+### 细胞学说（Cell Theory）
+1. 所有生物都由一个或多个细胞构成
+2. 细胞是生物体结构和功能的基本单位
+3. 所有细胞都来自已存在的细胞
+
+### 原核细胞 vs 真核细胞
+
+原核细胞（Prokaryotic Cells）：
+- 没有以核膜为界限的细胞核
+- 遗传物质（DNA）存在于细胞质中
+- 没有膜包被的细胞器
+- 包括细菌和蓝藻等
+- 一般较小（1-10 微米）
+
+真核细胞（Eukaryotic Cells）：
+- 有真正的细胞核（核膜包被）
+- 有多种膜包被的细胞器
+- 包括动物细胞、植物细胞、真菌细胞等
+- 一般较大（10-100 微米）
+
+## 2. 细胞的基本结构
+
+### 细胞膜（Cell Membrane）
+细胞膜是包围细胞的选择性透过膜，由磷脂双分子层和蛋白质组成。
+
+结构（流动镶嵌模型，Fluid Mosaic Model）：
+- 磷脂双分子层：疏水尾部朝内，亲水头部朝外
+- 膜蛋白：贯穿或嵌入膜中，执行运输、信号接收等功能
+- 胆固醇：调节膜的流动性
+
+功能：
+1. 隔离细胞内外环境
+2. 控制物质进出（选择性透过）
+3. 接收外界信号（受体蛋白）
+4. 细胞间识别和通讯
+
+### 细胞核（Nucleus）
+细胞核是细胞的控制中心，包含遗传物质 DNA。
+
+主要结构：
+- 核膜（Nuclear Envelope）：双层膜，有核孔供物质交换
+- 核仁（Nucleolus）：合成核糖体 RNA 的区域
+- 染色质（Chromatin）：DNA + 蛋白质的复合物
+
+### 细胞器（Organelles）
+
+#### 线粒体（Mitochondria）
+被称为"细胞的动力工厂"，负责进行有氧呼吸，合成 ATP 供能。
+- 有双层膜结构
+- 内部有自己的 DNA（内共生假说）
+- 细胞能量代谢的中心
+
+#### 内质网（Endoplasmic Reticulum, ER）
+分为粗面内质网（RER）和光面内质网（SER）。
+- 粗面 ER：表面有核糖体，参与蛋白质合成与加工
+- 光面 ER：无核糖体，参与脂质合成、解毒
+
+#### 核糖体（Ribosome）
+由 rRNA 和蛋白质组成，是合成蛋白质的场所。由大亚基和小亚基两个亚单位组成。
+
+#### 高尔基体（Golgi Apparatus）
+由扁平囊堆叠而成，负责对来自 ER 的蛋白质进行修饰、分类、包装和运输。
+
+#### 溶酶体（Lysosome）
+含有水解酶，负责消化细胞内的废物、外来病原体和衰老的细胞器。
+pH 值约为 4.5-5.0，酸性环境有利于酶活性。
+
+#### 叶绿体（Chloroplast）
+植物细胞特有，是进行光合作用的场所。含有叶绿素和类胡萝卜素。
+- 双层膜结构
+- 内部有类囊体（thylakoid）堆叠形成的基粒（granum）
+- 光合作用分为光反应和暗反应（卡尔文循环）
+
+#### 中心体（Centrosome）
+动物细胞特有，由两个中心粒组成。在细胞分裂时形成纺锤体。
+
+## 3. 细胞代谢
+
+### 细胞呼吸（Cellular Respiration）
+细胞呼吸是将有机物中的化学能转化为 ATP 中的可利用能量的过程。
+
+有氧呼吸总反应式：
+C6H12O6 + 6O2 → 6CO2 + 6H2O + 能量（约 36-38 ATP）
+
+三个阶段：
+1. 糖酵解（Glycolysis）：在细胞质中，将葡萄糖分解为丙酮酸，净产生 2 ATP 和 NADH
+2. 柠檬酸循环（Krebs Cycle）：在线粒体基质中，进一步氧化产生 NADH、FADH2、CO2
+3. 氧化磷酸化（Oxidative Phosphorylation）：在线粒体内膜上，电子传递链 + 化学渗透，产生约 32-34 ATP
+
+### 光合作用（Photosynthesis）
+光合作用是植物细胞将光能转化为化学能的过程。
+
+总反应式：
+6CO2 + 6H2O + 光能 → C6H12O6 + 6O2
+
+两个阶段：
+1. 光反应（Light Reaction）：在类囊体膜上，光能被吸收，产生 ATP 和 NADPH，释放 O2
+2. 暗反应 / 卡尔文循环（Calvin Cycle）：在叶绿体基质中，利用 ATP 和 NADPH 将 CO2 固定为糖
+
+## 4. 细胞分裂
+
+### 有丝分裂（Mitosis）
+体细胞增殖方式，产生两个遗传物质相同的子细胞。
+
+阶段：
+1. 间期（Interphase）：DNA 复制，细胞生长
+2. 前期（Prophase）：染色体出现，核膜核仁消失，纺锤体形成
+3. 中期（Metaphase）：染色体排列在赤道板上
+4. 后期（Anaphase）：姐妹染色单体分离，向两极移动
+5. 末期（Telophase）：核膜重建，染色体解螺旋
+
+随后细胞质分裂（Cytokinesis）形成两个子细胞。
+
+### 减数分裂（Meiosis）
+产生生殖细胞（配子）的分裂方式，染色体数目减半。
+
+减数分裂分两次分裂（Meiosis I 和 Meiosis II），最终产生 4 个单倍体子细胞。
+- Meiosis I：同源染色体分离（关键事件：交叉互换）
+- Meiosis II：类似有丝分裂，姐妹染色单体分离
+
+## 5. 细胞信号传导
+
+细胞通过信号分子（激素、神经递质、生长因子等）进行通讯。
+
+基本过程：
+1. 信号接收（Reception）：受体蛋白结合信号分子
+2. 信号转导（Transduction）：信号传递到细胞内部
+3. 细胞响应（Response）：产生生物学效应
+
+## 6. 总结
+
+细胞是生命的基本单位。理解细胞的结构、代谢、分裂和信号传导，是理解生命现象的基础。
+
+*建议：本笔记建议配合教材插图和动画视频学习效果更佳。*`
+};
+
+/* ========================================================
+   状态管理
+   ======================================================== */
+let currentStep = 0;
+let noteContent = '';
+let cleanedContent = '';
+let knowledgeCards = [];
+let quizQuestions = [];
+let currentQuizIndex = 0;
+let quizScore = 0;
+let quizAnswers = []; // {question, correct, userAnswer, relatedCard}
+let chatHistory = [];
+
+/* ========================================================
+   示例文本加载
+   ======================================================== */
+function loadSample(key) {
+  document.getElementById('noteInput').value = SAMPLES[key];
+}
+
+/* ========================================================
+   步骤控制
+   ======================================================== */
+function goToStep(step) {
+  // 隐藏所有内容
+  for (let i = 0; i <= 5; i++) {
+    const el = document.getElementById(`content-${i}`);
+    if (el) el.classList.add('hidden');
+  }
+  // 显示当前步骤
+  document.getElementById(`content-${step}`).classList.remove('hidden');
+
+  // 更新步骤条
+  document.querySelectorAll('.step').forEach((sEl, idx) => {
+    sEl.classList.remove('active', 'done');
+    if (idx === step - 1) sEl.classList.add('active');
+    else if (idx < step - 1) sEl.classList.add('done');
+  });
+
+  // 更新进度条
+  const progress = (step / 5) * 100;
+  document.getElementById('stepProgress').style.width = progress + '%';
+  document.getElementById('progressHint').textContent = step === 0 ? '欢迎开始体验 🚀' : `第 ${step} 步 / 共 5 步 · 加油！`;
+
+  // 窗口滚动到顶部
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  currentStep = step;
+
+  // 步骤特定逻辑
+  if (step === 2) runCleaning();
+  if (step === 3) runExtraction();
+  if (step === 4) initChat();
+  if (step === 5) initQuiz();
+}
+
+/* ========================================================
+   提交笔记
+   ======================================================== */
+function submitNote() {
+  const input = document.getElementById('noteInput').value.trim();
+  if (input.length < 50) {
+    alert('⚠️ 请输入至少 50 字的笔记内容，或点击上方示例按钮加载示例。');
+    return;
+  }
+  noteContent = input;
+  goToStep(2);
+}
+
+/* ========================================================
+   步骤 2：AI 清洗（模拟）
+   ======================================================== */
+function runCleaning() {
+  const loader = document.getElementById('cleaningLoader');
+  const result = document.getElementById('cleaningResult');
+  loader.classList.add('show');
+  result.style.display = 'none';
+
+  // 重置 lines
+  ['cleanLine1', 'cleanLine2', 'cleanLine3', 'cleanLine4'].forEach(id => {
+    document.getElementById(id).classList.remove('show', 'done');
+  });
+
+  // 逐步显示处理步骤
+  setTimeout(() => { document.getElementById('cleanLine1').classList.add('show'); }, 200);
+  setTimeout(() => { document.getElementById('cleanLine2').classList.add('show', 'done'); }, 900);
+  setTimeout(() => { document.getElementById('cleanLine3').classList.add('show', 'done'); }, 1700);
+  setTimeout(() => { document.getElementById('cleanLine4').classList.add('show', 'done'); }, 2500);
+
+  // 模拟清洗：去除页脚/水印/重复段
+  setTimeout(() => {
+    const lines = noteContent.split('\n');
+    const origHtml = escapeHtml(noteContent);
+    let cleaned = noteContent;
+
+    // 去除常见噪声：页脚标记、页码、--- 分隔线后的免责声明
+    cleaned = cleaned.replace(/^-{3,}\s*[\s\S]*$/gm, (match) => match.length < 80 ? '' : match);
+    cleaned = cleaned.replace(/^第\s*\d+\s*页.*$/gm, '');
+    cleaned = cleaned.replace(/^\*本教程.*$/gm, '');
+    cleaned = cleaned.replace(/^\*参考资料.*$/gm, '');
+    cleaned = cleaned.replace(/^更新时间.*$/gm, '');
+    cleaned = cleaned.replace(/^\*建议：本笔记.*$/gm, '');
+
+    // 去重：检测重复的短句（相似度 > 0.85 视为重复）
+    const finalLines = [];
+    const seen = new Set();
+    let dupCount = 0;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) { finalLines.push(line); continue; }
+      const norm = trimmed.replace(/\s+/g, '').toLowerCase();
+      if (norm.length > 8 && seen.has(norm)) { dupCount++; continue; } // 完全重复
+      // 简单相似度：检查是否已有类似句子（前 30 字符相同）
+      const key = norm.slice(0, 40);
+      let isSimilar = false;
+      for (const s of seen) {
+        if (s.length > 8 && norm.length > 8 && similarity(s, norm) > 0.85) { isSimilar = true; break; }
+      }
+      if (isSimilar && norm.length > 20) { dupCount++; continue; }
+      seen.add(norm);
+      finalLines.push(line);
+    }
+    cleanedContent = finalLines.join('\n').replace(/\n{3,}/g, '\n\n');
+
+    const origLines = lines.length;
+    const cleanLines = cleanedContent.split('\n').length;
+    const reduce = Math.round((1 - cleanLines / origLines) * 100);
+
+    document.getElementById('statOrig').textContent = origLines;
+    document.getElementById('statClean').textContent = cleanLines;
+    document.getElementById('statReduce').textContent = reduce + '%';
+    document.getElementById('statDup').textContent = dupCount;
+
+    document.getElementById('originalText').innerHTML = formatTextWithNoise(noteContent);
+    document.getElementById('cleanedText').innerHTML = escapeHtml(cleanedContent);
+
+    loader.classList.remove('show');
+    result.style.display = 'block';
+  }, 3000);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function similarity(a, b) {
+  const len = Math.min(a.length, b.length);
+  let matches = 0;
+  for (let i = 0; i < len; i++) if (a[i] === b[i]) matches++;
+  return matches / Math.max(a.length, b.length);
+}
+
+function formatTextWithNoise(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/(第\s*\d+\s*页.*)/g, '<span class="noise-mark">$1</span>');
+  html = html.replace(/^(\*{1,3}.*建议.*)$/gm, '<span class="noise-mark">$1</span>');
+  html = html.replace(/^(-{3,})$/gm, '<span class="noise-mark">$1</span>');
+  return html;
+}
+
+/* ========================================================
+   步骤 3：AI 提取知识卡片
+   ======================================================== */
+function runExtraction() {
+  const loader = document.getElementById('cardsLoader');
+  const result = document.getElementById('cardsResult');
+  loader.classList.add('show');
+  result.style.display = 'none';
+
+  setTimeout(() => { document.getElementById('cardLine1').classList.add('show'); }, 200);
+  setTimeout(() => { document.getElementById('cardLine2').classList.add('show', 'done'); }, 1000);
+  setTimeout(() => { document.getElementById('cardLine3').classList.add('show', 'done'); }, 2000);
+  setTimeout(() => { document.getElementById('cardLine4').classList.add('show', 'done'); }, 3000);
+
+  setTimeout(() => {
+    knowledgeCards = extractCardsFromText(cleanedContent || noteContent);
+    renderCards();
+    loader.classList.remove('show');
+    result.style.display = 'block';
+  }, 3500);
+}
+
+function extractCardsFromText(text) {
+  const cards = [];
+  const lines = text.split('\n');
+  let currentSection = '';
+  let currentSub = '';
+  let buffer = [];
+
+  const flushBuffer = () => {
+    if (buffer.length < 2) { buffer = []; return; }
+    const content = buffer.join(' ').trim();
+    if (content.length < 30) { buffer = []; return; }
+
+    // 从内容中提取问答对
+    const qnaPattern = content.match(/(.{2,30}?)[：:].{20,}/);
+    if (qnaPattern && buffer.length > 1) {
+      cards.push({
+        type: 'qa',
+        title: currentSub || currentSection || '问答',
+        content: content.slice(0, 120) + (content.length > 120 ? '...' : ''),
+        tags: ['问答', currentSection].filter(Boolean),
+        fullContent: content
+      });
+    }
+    buffer = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // 识别标题层级
+    if (line.startsWith('## ')) {
+      flushBuffer();
+      currentSection = line.replace(/^##\s*/, '').replace(/^[\d\.]+\s*/, '');
+      // 定义卡片：概念定义
+      cards.push({
+        type: 'concept',
+        title: currentSection,
+        content: '本节核心概念：' + currentSection,
+        tags: ['概念', currentSection],
+        fullContent: currentSection
+      });
+      currentSub = '';
+    } else if (line.startsWith('### ')) {
+      flushBuffer();
+      currentSub = line.replace(/^###\s*/, '');
+      cards.push({
+        type: 'definition',
+        title: currentSub,
+        content: (lines[i + 1] || '').trim() || currentSub,
+        tags: ['定义', currentSection].filter(Boolean),
+        fullContent: currentSub + ': ' + (lines[i + 1] || '')
+      });
+    } else if (line.match(/^[-\d]+\.\s/)) {
+      // 列表项：提取要点
+      const item = line.replace(/^[-\d]+\.\s*/, '');
+      if (item.length > 10) {
+        cards.push({
+          type: 'qa',
+          title: item.slice(0, 20) + (item.length > 20 ? '...' : ''),
+          content: item,
+          tags: ['要点', currentSection].filter(Boolean),
+          fullContent: item
+        });
+      }
+      buffer.push(item);
+    } else if (line.includes('公式') || line.includes(' = ') || line.includes('→') || line.match(/[a-z]\s*[=+\-*/]\s*[a-z0-9]/i)) {
+      cards.push({
+        type: 'formula',
+        title: '公式/反应式',
+        content: line.slice(0, 80),
+        tags: ['公式', currentSection].filter(Boolean),
+        fullContent: line
+      });
+    } else {
+      buffer.push(line);
+    }
+  }
+  flushBuffer();
+
+  // 去重 & 限制张数
+  const uniq = [];
+  const seenTitles = new Set();
+  for (const c of cards) {
+    const key = c.title + '-' + c.content.slice(0, 20);
+    if (!seenTitles.has(key)) {
+      seenTitles.add(key);
+      uniq.push(c);
+    }
+  }
+  return uniq.slice(0, 16);
+}
+
+function renderCards() {
+  const grid = document.getElementById('cardsGrid');
+  const typeNames = { concept: '概念', formula: '公式', qa: '问答', definition: '定义' };
+  const counts = { concept: 0, formula: 0, qa: 0, definition: 0 };
+  knowledgeCards.forEach(c => counts[c.type] = (counts[c.type] || 0) + 1);
+
+  document.getElementById('cardTotal').textContent = knowledgeCards.length;
+  document.getElementById('cardConcept').textContent = counts.concept;
+  document.getElementById('cardFormula').textContent = counts.formula;
+  document.getElementById('cardQA').textContent = counts.qa;
+  document.getElementById('cardDef').textContent = counts.definition;
+
+  grid.innerHTML = knowledgeCards.map((c, idx) => `
+    <div class="knowledge-card" onclick="showCard(${idx})" style="animation-delay: ${idx * 60}ms">
+      <div class="card-type ${c.type}">${typeNames[c.type] || '卡片'}</div>
+      <div style="font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text-primary);">${escapeHtml(c.title)}</div>
+      <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.7; max-height: 80px; overflow: hidden;">${escapeHtml(c.content)}</div>
+      <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px;">
+        ${c.tags.map(t => `<span style="font-size: 11px; padding: 3px 8px; background: rgba(255,255,255,0.04); border-radius: 6px; color: var(--text-muted);">${escapeHtml(t)}</span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function showCard(idx) {
+  const c = knowledgeCards[idx];
+  const typeNames = { concept: '概念卡', formula: '公式卡', qa: '问答卡', definition: '定义卡' };
+  document.getElementById('cardModalContent').innerHTML = `
+    <div style="display: inline-block; padding: 6px 14px; background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); border-radius: 8px; font-size: 12px; font-weight: 600; margin-bottom: 16px;">${typeNames[c.type] || '知识卡'}</div>
+    <h3 style="font-size: 22px; margin-bottom: 16px;">${escapeHtml(c.title)}</h3>
+    <div style="padding: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; font-size: 14px; line-height: 1.8; color: var(--text-secondary);">${escapeHtml(c.fullContent || c.content)}</div>
+    <div style="font-size: 13px; color: var(--text-muted);">
+      <strong style="color: var(--text-secondary);">标签：</strong>${c.tags.join(' · ')}
+    </div>
+  `;
+  document.getElementById('cardModal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('cardModal').style.display = 'none';
+}
+
+/* ========================================================
+   步骤 4：RAG 智能问答
+   ======================================================== */
+function initChat() {
+  const suggestions = generateSuggestions();
+  const chipsEl = document.getElementById('suggestionChips');
+  chipsEl.innerHTML = suggestions.map(s =>
+    `<div class="chip" onclick="askFromChip('${s.replace(/'/g, "\\'")}')">💡 ${s}</div>`
+  ).join('');
+
+  // 如果消息区只有欢迎语就清空重置
+  const msgArea = document.getElementById('chatMessages');
+  msgArea.innerHTML = `<div class="chat-msg ai"><div class="chat-avatar">🤖</div><div class="chat-bubble">你好！我已经学习了你输入的笔记内容。可以向我提问任何相关问题，我会基于笔记内容回答。</div></div>`;
+}
+
+function generateSuggestions() {
+  const titles = knowledgeCards.slice(0, 5).map(c => c.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\s]/g, '').slice(0, 15));
+  const base = ['什么是' + (titles[0] || '核心概念'), '请总结主要内容', '有哪些关键要点'];
+  if (titles[1]) base.push('' + titles[1] + '是什么');
+  if (titles[2]) base.push('关于 ' + titles[2] + ' 的要点');
+  return base.slice(0, 4);
+}
+
+function askFromChip(text) {
+  document.getElementById('chatInput').value = text;
+  sendChat();
+}
+
+function sendChat() {
+  const input = document.getElementById('chatInput');
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = '';
+
+  const msgArea = document.getElementById('chatMessages');
+  msgArea.insertAdjacentHTML('beforeend', `
+    <div class="chat-msg user"><div class="chat-avatar">👤</div><div class="chat-bubble">${escapeHtml(question)}</div></div>
+  `);
+  msgArea.scrollTop = msgArea.scrollHeight;
+
+  // "AI 思考"
+  const thinkingId = 'think-' + Date.now();
+  msgArea.insertAdjacentHTML('beforeend', `
+    <div class="chat-msg ai" id="${thinkingId}"><div class="chat-avatar">🤖</div><div class="chat-bubble"><span style="opacity: 0.6;">正在检索相关知识卡片...</span></div></div>
+  `);
+  msgArea.scrollTop = msgArea.scrollHeight;
+
+  setTimeout(() => {
+    const { answer, sources } = ragAnswer(question);
+    const sourcesHtml = sources.length ? `<div class="chat-source">📚 引用来源：${sources.map((s, i) => `<span style="background: rgba(6, 182, 212, 0.1); padding: 2px 8px; border-radius: 6px; margin: 0 3px; display: inline-block; color: var(--accent-cyan);">卡片 #${i + 1} ${escapeHtml(s.title)}</span>`).join('')}</div>` : '';
+
+    document.getElementById(thinkingId).innerHTML = `
+      <div class="chat-avatar">🤖</div>
+      <div class="chat-bubble">${escapeHtml(answer)}${sourcesHtml}</div>
+    `;
+    msgArea.scrollTop = msgArea.scrollHeight;
+  }, 1200);
+}
+
+function ragAnswer(question) {
+  const q = question.toLowerCase();
+  const sources = [];
+
+  // 基于关键词简单匹配卡片
+  for (const card of knowledgeCards) {
+    const text = (card.title + ' ' + card.content + ' ' + card.fullContent).toLowerCase();
+    const keywords = q.replace(/[?？。,，!！\s]/g, ' ').split(/\s+/).filter(k => k.length > 1);
+    let score = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) score += kw.length;
+    }
+    if (score > 0) sources.push({ card, score });
+  }
+  sources.sort((a, b) => b.score - a.score);
+  const top = sources.slice(0, 3);
+
+  let answer = '';
+  if (top.length === 0) {
+    answer = '根据笔记内容，我没有找到与 "' + question + '" 直接相关的信息。建议：(1) 检查笔记中是否有相关章节；(2) 换个关键词试试；(3) 查看知识卡片是否有相关内容。';
+  } else {
+    answer = '根据你的笔记，关于 "' + question + '" 的主要内容如下：\n\n';
+    top.forEach((s, i) => {
+      const c = s.card;
+      answer += (i + 1) + '. ' + c.title + '：' + (c.fullContent || c.content).slice(0, 100) + '\n';
+    });
+    if (question.includes('总结') || question.includes('要点') || question.includes('什么')) {
+      answer += '\n以上是从你的笔记中提取的核心要点。';
+    } else {
+      answer += '\n如需更深入了解，建议点击知识卡片查看详细内容。';
+    }
+  }
+  return { answer, sources: top.map(s => s.card) };
+}
+
+/* ========================================================
+   步骤 5：测评练习
+   ======================================================== */
+function initQuiz() {
+  quizQuestions = generateQuestions(knowledgeCards);
+  if (quizQuestions.length === 0) {
+    document.getElementById('quizArea').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">笔记内容不足以生成题目，请返回上一步使用示例文本。</div>';
+    return;
+  }
+  currentQuizIndex = 0;
+  quizScore = 0;
+  quizAnswers = [];
+  document.getElementById('quizResult').style.display = 'none';
+  document.getElementById('quizBackBtn').style.display = '';
+  renderQuestion();
+}
+
+function generateQuestions(cards) {
+  const qs = [];
+  // 从卡片生成选择题
+  for (let i = 0; i < cards.length && qs.length < 6; i++) {
+    const card = cards[i];
+    if (card.type === 'concept' || card.type === 'definition') {
+      // 正确答案是卡片内容
+      const correctAnswer = card.content.slice(0, 80);
+      // 构造干扰项
+      const distractors = cards
+        .filter((_, j) => j !== i && cards[j].type !== 'formula')
+        .slice(0, 3)
+        .map(c => c.content.slice(0, 80));
+
+      if (distractors.length >= 2) {
+        const options = [correctAnswer, ...distractors.slice(0, 3)].sort(() => Math.random() - 0.5);
+        qs.push({
+          type: 'choice',
+          question: `关于「${card.title}」，以下哪个描述最准确？`,
+          options,
+          correct: options.indexOf(correctAnswer),
+          related: card
+        });
+      }
+    } else if (card.type === 'qa') {
+      // 问答类卡片 -> 判断题或选择题
+      qs.push({
+        type: 'choice',
+        question: `关于「${card.title}」，请选择正确的描述：`,
+        options: [card.content, '这是错误的描述', '以上都不对', '笔记中没有提到'].sort(() => Math.random() - 0.5),
+        correct: -1,
+        related: card
+      });
+      // 修正 correct 索引
+      const idx = qs[qs.length - 1].options.indexOf(card.content);
+      qs[qs.length - 1].correct = idx;
+    }
+  }
+  return qs.slice(0, 5);
+}
+
+function renderQuestion() {
+  const q = quizQuestions[currentQuizIndex];
+  document.getElementById('quizCurrent').textContent = currentQuizIndex + 1;
+  document.getElementById('quizTotal').textContent = quizQuestions.length;
+  document.getElementById('quizScore').textContent = quizScore;
+
+  const qEl = document.getElementById('quizQuestion');
+  qEl.innerHTML = `<div style="margin-bottom: 16px;"><span style="font-size: 11px; padding: 3px 10px; background: var(--accent-purple); color: white; border-radius: 6px; font-weight: 500; margin-right: 8px;">选择题</span></div><div style="font-size: 17px; font-weight: 600; margin-bottom: 20px; line-height: 1.7;">${escapeHtml(q.question)}</div>`;
+
+  const optHtml = q.options.map((opt, idx) => `
+    <div class="quiz-option" onclick="selectAnswer(${idx}, this)">
+      <span style="width: 28px; height: 28px; border-radius: 8px; background: var(--bg-card); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0;">${String.fromCharCode(65 + idx)}</span>
+      <span style="flex: 1;">${escapeHtml(opt)}</span>
+    </div>
+  `).join('');
+  qEl.insertAdjacentHTML('beforeend', `<div style="display: flex; flex-direction: column; gap: 10px;">${optHtml}</div>`);
+
+  document.getElementById('quizFeedback').innerHTML = '';
+  document.getElementById('quizFeedback').style.display = 'none';
+  document.getElementById('nextQuizBtn').style.display = 'none';
+}
+
+function selectAnswer(idx, el) {
+  if (el.classList.contains('disabled')) return;
+
+  const q = quizQuestions[currentQuizIndex];
+  const options = el.parentElement.children;
+  let correct = idx === q.correct;
+
+  for (let i = 0; i < options.length; i++) {
+    options[i].classList.add('disabled');
+    if (i === q.correct) options[i].classList.add('correct');
+    if (i === idx && !correct) options[i].classList.add('wrong');
+  }
+
+  if (correct) quizScore++;
+  quizAnswers.push({ question: q.question, correct, userAnswer: idx, related: q.related });
+
+  const fb = document.getElementById('quizFeedback');
+  fb.style.display = 'block';
+  fb.className = 'quiz-feedback ' + (correct ? 'correct' : 'wrong');
+  fb.innerHTML = `
+    <strong style="display: block; margin-bottom: 6px;">${correct ? '✓ 回答正确' : '✗ 回答错误'}</strong>
+    <div style="font-size: 13px;">${correct ? '很好！你掌握了「' + q.related.title + '」的知识。' : '正确答案是 ' + String.fromCharCode(65 + q.correct) + '。复习「' + q.related.title + '」相关内容会有帮助。'}</div>
+    <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">📚 引用卡片：${escapeHtml(q.related.content.slice(0, 100))}</div>
+  `;
+
+  document.getElementById('nextQuizBtn').style.display = 'inline-flex';
+}
+
+function nextQuiz() {
+  currentQuizIndex++;
+  if (currentQuizIndex >= quizQuestions.length) {
+    showResult();
+  } else {
+    renderQuestion();
+  }
+}
+
+function showResult() {
+  document.getElementById('quizArea').style.display = 'none';
+  const result = document.getElementById('quizResult');
+  result.style.display = 'block';
+
+  const total = quizQuestions.length;
+  const correct = quizScore;
+  const wrong = total - correct;
+  const rate = Math.round(correct / total * 100);
+
+  // 进度圆环
+  const circle = document.getElementById('resultCircle');
+  circle.innerHTML = `
+    <div style="width: 160px; height: 160px; border-radius: 50%; background: conic-gradient(var(--accent-cyan) ${rate * 3.6}deg, var(--border) ${rate * 3.6}deg); display: flex; align-items: center; justify-content: center;">
+      <div style="width: 130px; height: 130px; border-radius: 50%; background: var(--bg-secondary); display: flex; flex-direction: column; align-items: center; justify-content: center;">
+        <div style="font-size: 36px; font-weight: 800; color: var(--accent-cyan);">${rate}%</div>
+        <div style="font-size: 12px; color: var(--text-muted);">正确率</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('detailCorrect').textContent = correct;
+  document.getElementById('detailWrong').textContent = wrong;
+  document.getElementById('detailRate').textContent = rate + '%';
+  document.getElementById('detailCards').textContent = knowledgeCards.length;
+
+  // 薄弱点分析
+  const weak = quizAnswers.filter(a => !a.correct);
+  const weakHtml = weak.length
+    ? `<h4 style="font-size: 15px; margin-bottom: 12px; color: var(--accent-yellow);">⚠️ 薄弱点分析（共 ${weak.length} 题答错）</h4>` + weak.map(w =>
+        `<div style="padding: 12px 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-left: 3px solid var(--accent-yellow); border-radius: 10px; margin-bottom: 10px; font-size: 13px; color: var(--text-secondary);">
+          <b style="color: var(--text-primary);">${escapeHtml(w.question)}</b>
+          <div style="margin-top: 6px; font-size: 12px; opacity: 0.8;">建议复习卡片：${escapeHtml(w.related.title)}</div>
+        </div>`
+      ).join('')
+    : '<h4 style="font-size: 15px; margin-bottom: 12px; color: var(--accent-green);">🎉 太棒了！全部答对，没有薄弱点</h4><div style="font-size: 13px; color: var(--text-secondary);">你对笔记中的关键概念掌握得很好，可以进入下一阶段的学习了。</div>';
+
+  document.getElementById('weakPoints').innerHTML = weakHtml;
+
+  const title = rate >= 80 ? '🏆 优秀！' : (rate >= 60 ? '👍 不错！' : '💪 继续加油！');
+  document.getElementById('resultTitle').textContent = title;
+  document.getElementById('resultDesc').textContent = `共 ${total} 题，答对 ${correct} 题，答错 ${wrong} 题。`;
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function restartDemo() {
+  currentStep = 0;
+  noteContent = '';
+  cleanedContent = '';
+  knowledgeCards = [];
+  quizQuestions = [];
+  goToStep(0);
+}
+</script>
+</body>
+</html>

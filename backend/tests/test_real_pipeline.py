@@ -19,7 +19,7 @@ headers = {"Authorization": f"Bearer {token}"}
 print(f"Token: {token[:20]}...")
 
 # 2. 上传 PDF
-with open(r"D:\test\resources1\劳动合同书-田润鑫.pdf", "rb") as f:
+with open(os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf"), "rb") as f:
     upload = requests.post(
         f"{BASE}/upload/",
         headers=headers,

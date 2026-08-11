@@ -31,11 +31,13 @@ import traceback
 import logging
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
 from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
+from ..services import vault_path
+from ..services.vault_meta import write_note_meta
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -96,6 +98,36 @@ async def _update_note_status(note_id: str, status: NoteStatus, error_message: O
             if key in _UPDATABLE_NOTE_FIELDS:
                 setattr(note, key, value)
         await session.commit()
+        await session.refresh(note)
+        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
+        write_note_meta(note)
+
+
+async def _record_clean_task_id(note_id: str, task_id: str) -> None:
+    """
+    记录清洗任务 ID 到笔记元数据
+
+    转换成功后自动触发清洗任务时，将 Celery 任务 ID 写入笔记
+    metadata_["clean_task_id"]，便于用户停止清洗时撤销任务。
+    仅更新 metadata_，不修改笔记状态（_update_note_status 会无条件
+    设置 status，不适合在此场景复用）。
+
+    Args:
+        note_id: 笔记 ID
+        task_id: 清洗任务 ID
+    """
+    session_factory = _get_sync_session()
+    async with session_factory() as session:
+        result = await session.execute(select(Note).where(Note.id == note_id))
+        note = result.scalars().first()
+        if not note:
+            return
+        note.metadata_ = dict(note.metadata_ or {})
+        note.metadata_["clean_task_id"] = task_id
+        await session.commit()
+        await session.refresh(note)
+        # 元数据写穿镜像：同步更新 Vault output/meta/{base}.json
+        write_note_meta(note)
 
 
 async def _convert_document(note_id: str, file_path: str, source_type: str, backend: Optional[str] = None):
@@ -253,8 +285,12 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
 
         # 3. 将 Markdown 存入 MinIO
         if markdown_content:
-            # Markdown 文件路径：与原始文件同目录，文件名为 original.md
-            md_object_name = file_path.rsplit("/", 1)[0] + "/original.md"
+            # Vault 命名关联法则：{user_id}/{project_slug}/output/markdown/{base}.md
+            # 与 source/{base}{ext} 同主干，仅扩展名不同
+            parts = file_path.split("/")
+            prefix = "/".join(parts[:2])
+            base = os.path.splitext(parts[-1])[0]
+            md_object_name = vault_path.markdown_object(prefix, base)
             upload_bytes(
                 settings.minio_bucket_markdown,
                 md_object_name,
@@ -270,7 +306,9 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
             # 转换成功后自动触发清洗任务
             try:
                 from .clean_tasks import clean_document_task
-                clean_document_task.delay(note_id)
+                task = clean_document_task.delay(note_id)
+                # 记录清洗任务 ID，便于用户停止清洗时撤销任务
+                await _record_clean_task_id(note_id, task.id)
             except Exception:
                 # 清洗任务触发失败不影响转换结果
                 pass
