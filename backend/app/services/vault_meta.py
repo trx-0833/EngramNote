@@ -45,6 +45,9 @@ def _build_meta(note: Note) -> Optional[dict]:
         "project_id": note.project_id,
         "project_slug": parts[1] if len(parts) >= 2 else None,
         "filename": parts[-1] if parts else None,
+        "folder_id": note.folder_id,
+        # 文件夹名需在调用前注入 note._folder_name（镜像非权威，缺失时为 None）
+        "folder_name": getattr(note, "_folder_name", None),
         "source_type": note.source_type.value if note.source_type else None,
         "status": note.status.value if note.status else None,
         "file_hash": metadata.get("file_hash"),
@@ -84,3 +87,36 @@ def write_note_meta(note: Note):
         )
     except Exception:
         logger.exception("Vault meta 写穿失败: note_id=%s", note.id)
+
+
+def write_project_meta(project):
+    """
+    将项目元数据写穿到 {P}/output/meta/project.json
+
+    项目创建/更新时同步，供人工浏览 Vault 目录或脱离数据库时
+    快速识别项目（记录 slug 与显示名的映射，弥补 slug 不可变的脱节问题）。
+    删除项目时由 remove_project_dir 清理整个目录树，无需单独删除。
+    写入失败只记录日志，不影响业务主流程（镜像非权威）。
+
+    Args:
+        project: Project 模型实例（需已包含最新信息）
+    """
+    try:
+        prefix = vault_path.project_prefix(project.user_id, project.slug)
+        content = {
+            "project_id": project.id,
+            "slug": project.slug,
+            "name": project.name,
+            "description": project.description,
+            "created_at": _iso(project.created_at),
+            "updated_at": _iso(project.updated_at),
+        }
+        data = json.dumps(content, ensure_ascii=False, indent=2).encode("utf-8")
+        upload_bytes(
+            settings.minio_bucket_markdown,
+            f"{prefix}/{vault_path.META_DIR}/project.json",
+            data,
+            content_type="application/json",
+        )
+    except Exception:
+        logger.exception("Vault 项目清单写穿失败: project_id=%s", project.id)

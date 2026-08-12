@@ -9,6 +9,7 @@ import ForceGraph2D from 'react-force-graph-2d'
 import {
   getGraphData,
   getSuggestions,
+  suggestRelations,
   confirmRelation,
   rejectRelation,
   createRelation,
@@ -208,6 +209,10 @@ export default function KnowledgeGraph() {
   /** 批量选择 */
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set())
   const [batchLoading, setBatchLoading] = useState(false)
+  /** 手动生成相关建议中 */
+  const [suggesting, setSuggesting] = useState(false)
+  /** 全选框引用，用于展示「部分选中」的 indeterminate 状态 */
+  const selectAllRef = useRef<HTMLInputElement>(null)
 
   /** Minimap canvas 引用 */
   const minimapRef = useRef<HTMLCanvasElement>(null)
@@ -255,7 +260,8 @@ export default function KnowledgeGraph() {
         getGraphStats(),
       ])
       setGraphData(data)
-      setSuggestions(sugData.items || [])
+      // 后端 /graph/suggestions 返回纯数组，直接赋值
+      setSuggestions(sugData)
       setStats(statsData)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载图谱失败')
@@ -683,13 +689,8 @@ export default function KnowledgeGraph() {
     setSelectedLink(link)
     setSelectedNode(null)
     setSidebarOpen(true)
-
-    if (link.status === 'suggested') {
-      setActivePanel('suggestions')
-    } else {
-      // 普通边也可以显示详情
-      setActivePanel(null)
-    }
+    // 边详情（关系详情面板）随 selectedLink 渲染，待审/已确认边都无需切换面板
+    setActivePanel(null)
   }
 
   /** 背景点击取消选中 */
@@ -707,6 +708,7 @@ export default function KnowledgeGraph() {
     try {
       await confirmRelation(relationId)
       setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
+      setSelectedLink(null) // 清除选中的待审边，避免详情面板残留旧状态
       const data = await getGraphData()
       setGraphData(data)
       const statsData = await getGraphStats()
@@ -724,6 +726,7 @@ export default function KnowledgeGraph() {
     try {
       await rejectRelation(relationId)
       setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
+      setSelectedLink(null) // 清除选中的待审边，避免详情面板残留旧状态
       const data = await getGraphData()
       setGraphData(data)
       const statsData = await getGraphStats()
@@ -772,6 +775,25 @@ export default function KnowledgeGraph() {
     }
   }
 
+  /** 手动生成相关建议（可能耗时数十秒，需显式触发，避免阻塞页面加载） */
+  async function handleGenerateSuggestions() {
+    setSuggesting(true)
+    try {
+      const result = await suggestRelations()
+      const sug = await getSuggestions()
+      setSuggestions(sug)
+      if (result.new_count > 0) {
+        const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
+        setGraphData(data)
+        setStats(statsData)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '生成建议失败')
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
   /** 切换选择 */
   function toggleSuggestion(id: string) {
     setSelectedSuggestions((prev) => {
@@ -781,6 +803,29 @@ export default function KnowledgeGraph() {
       return next
     })
   }
+
+  /** 当前建议是否已全部选中 */
+  const allSuggestionsSelected =
+    suggestions.length > 0 && selectedSuggestions.size === suggestions.length
+  /** 当前建议是否部分选中（用于全选框 indeterminate 状态） */
+  const someSuggestionsSelected =
+    selectedSuggestions.size > 0 && !allSuggestionsSelected
+
+  /** 全选 / 全不选：已全选则清空，否则选中全部 */
+  function toggleSelectAll() {
+    if (allSuggestionsSelected) {
+      setSelectedSuggestions(new Set())
+    } else {
+      setSelectedSuggestions(new Set(suggestions.map((s) => s.id)))
+    }
+  }
+
+  /** 全选框部分选中时展示 indeterminate（横杠）状态 */
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSuggestionsSelected
+    }
+  }, [someSuggestionsSelected])
 
   /** 删除已确认的关系 */
   async function handleDeleteRelation(relationId: string) {
@@ -1153,10 +1198,19 @@ export default function KnowledgeGraph() {
                     </span>
                   </div>
 
+                  {/* 查看知识点详情按钮：跳转到卡片详情页 */}
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.8rem' }}
+                    onClick={() => navigate(`/cards/${selectedNode.id}`)}
+                  >
+                    查看知识点详情
+                  </button>
+
                   {/* 查看子图按钮 */}
                   <button
                     className="btn"
-                    style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.8rem' }}
+                    style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.8rem' }}
                     onClick={() => loadSubgraph(selectedNode.id)}
                     disabled={loadingSubgraph}
                   >
@@ -1250,6 +1304,32 @@ export default function KnowledgeGraph() {
                     </div>
                   )}
                 </div>
+                {(selectedLink as any).status === 'suggested' && (
+                  <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: '0.8rem', padding: '4px 8px', flex: 1 }}
+                      onClick={() => handleConfirm((selectedLink as any).id)}
+                      disabled={actionLoading === (selectedLink as any).id}
+                    >
+                      确认
+                    </button>
+                    <button
+                      className="btn"
+                      style={{
+                        fontSize: '0.8rem',
+                        padding: '4px 8px',
+                        flex: 1,
+                        color: 'var(--color-error)',
+                        borderColor: 'var(--color-error)',
+                      }}
+                      onClick={() => handleReject((selectedLink as any).id)}
+                      disabled={actionLoading === (selectedLink as any).id}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                )}
                 {(selectedLink as any).status === 'confirmed' && (
                   <button
                     className="btn"
@@ -1271,7 +1351,31 @@ export default function KnowledgeGraph() {
             {/* 建议关系面板（含批量操作） */}
             {activePanel === 'suggestions' && (
               <div className="graph-panel">
-                <div className="graph-panel-title">建议关系 ({suggestions.length})</div>
+                <div className="graph-panel-title">
+                  建议关系 ({suggestions.length})
+                  {suggestions.length > 1 && (
+                    <label
+                      style={{
+                        marginLeft: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        fontSize: '0.75rem',
+                        fontWeight: 'normal',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        ref={selectAllRef}
+                        checked={allSuggestionsSelected}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      全选
+                    </label>
+                  )}
+                </div>
 
                 {suggestions.length > 1 && (
                   <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-sm)' }}>
@@ -1301,9 +1405,19 @@ export default function KnowledgeGraph() {
                 )}
 
                 {suggestions.length === 0 ? (
-                  <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-                    暂无建议关系
-                  </p>
+                  <div>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
+                      暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联
+                    </p>
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', fontSize: '0.8rem' }}
+                      onClick={handleGenerateSuggestions}
+                      disabled={suggesting}
+                    >
+                      {suggesting ? '生成中，卡片较多时可能需要数十秒...' : '生成相关建议'}
+                    </button>
+                  </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
                     {suggestions.map((s) => (
@@ -1317,7 +1431,7 @@ export default function KnowledgeGraph() {
                               style={{ marginTop: 3, cursor: 'pointer' }}
                             />
                           )}
-                          <div style={{ flex: 1 }}>
+                          <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => toggleSuggestion(s.id)}>
                             <div style={{ marginBottom: '4px', fontSize: '0.8rem' }}>
                               <strong>{s.card_1_title}</strong>
                               <span style={{ color: 'var(--color-text-secondary)', margin: '0 4px' }}>↔</span>
@@ -1338,7 +1452,10 @@ export default function KnowledgeGraph() {
                               <button
                                 className="btn btn-primary"
                                 style={{ fontSize: '0.75rem', padding: '2px 8px', flex: 1 }}
-                                onClick={() => handleConfirm(s.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation() // 点击按钮不触发行选择
+                                  handleConfirm(s.id)
+                                }}
                                 disabled={actionLoading === s.id}
                               >
                                 确认
@@ -1352,7 +1469,10 @@ export default function KnowledgeGraph() {
                                   color: 'var(--color-error)',
                                   borderColor: 'var(--color-error)',
                                 }}
-                                onClick={() => handleReject(s.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation() // 点击按钮不触发行选择
+                                  handleReject(s.id)
+                                }}
                                 disabled={actionLoading === s.id}
                               >
                                 拒绝

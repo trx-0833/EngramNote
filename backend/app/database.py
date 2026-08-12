@@ -384,6 +384,23 @@ async def _migrate_sqlite(conn):
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 {table} 中清理了 {result.rowcount} 条 {col} 孤儿记录")
 
+        # ---- 重复关系清理 ----
+        # 同一对卡片（无向，忽略方向）不应存在多条关系（历史版本可能因缺少去重产生重复，
+        # 导致节点关联数被重复计算）。按 (user_id, 小id, 大id) 分组，每组仅保留最小 id 的一条。
+        if 'card_relations' in table_names:
+            result = sync_conn.execute(text(
+                """
+                DELETE FROM card_relations WHERE id NOT IN (
+                    SELECT MIN(id) FROM card_relations
+                    GROUP BY user_id,
+                             CASE WHEN card_id_1 < card_id_2 THEN card_id_1 ELSE card_id_2 END,
+                             CASE WHEN card_id_1 < card_id_2 THEN card_id_2 ELSE card_id_1 END
+                )
+                """
+            ))
+            if result.rowcount > 0:
+                logger.info(f"重复关系清理: 清理了 {result.rowcount} 条重复卡片关系")
+
     await conn.run_sync(_do_migrate)
 
 

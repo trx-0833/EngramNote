@@ -35,7 +35,7 @@ from ..services.vault_path import (
     sanitize_slug,
 )
 from ..services.storage_service import ensure_project_dirs, list_source_files, remove_project_dir
-from ..services.vault_meta import write_note_meta
+from ..services.vault_meta import write_note_meta, write_project_meta
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,9 @@ async def create_project(
         ensure_project_dirs(project_prefix(user_id, slug))
     except Exception as e:
         logger.warning("项目目录树创建失败（不影响项目创建）: %s", e, exc_info=True)
+
+    # 写穿项目级清单 output/meta/project.json，供脱离 DB 浏览时识别项目
+    write_project_meta(project)
 
     logger.info("项目创建成功: user_id=%s, project_id=%s, name=%s, slug=%s", user_id, project.id, name, slug)
     return project
@@ -206,6 +209,9 @@ async def update_project(
         project.description = description
     await db.commit()
     await db.refresh(project)
+
+    # 同步更新项目级清单（显示名变更后，磁盘上 project.json 保持与 DB 一致）
+    write_project_meta(project)
 
     logger.info("项目更新成功: user_id=%s, project_id=%s, name=%s", user_id, project_id, project.name)
     return await build_response(project, db)

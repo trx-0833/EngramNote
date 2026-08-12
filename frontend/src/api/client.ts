@@ -1295,8 +1295,21 @@ export async function getGraphData(): Promise<GraphData> {
  *
  * @returns 建议关系列表
  */
-export async function getSuggestions(): Promise<{ items: SuggestedRelation[] }> {
-  return request<{ items: SuggestedRelation[] }>('/graph/suggestions');
+export async function getSuggestions(): Promise<SuggestedRelation[]> {
+  // 后端返回的是纯数组（response_model=list[SuggestedRelation]），不是 { items } 包装
+  return request<SuggestedRelation[]>('/graph/suggestions');
+}
+
+/**
+ * 手动触发相关关系建议生成
+ * 基于嵌入向量相似度挖掘新的潜在关联（卡片较多时可能耗时数十秒）。
+ *
+ * @returns 新增建议数量
+ */
+export async function suggestRelations(): Promise<{ success: boolean; new_count: number }> {
+  return request<{ success: boolean; new_count: number }>('/graph/suggest', {
+    method: 'POST',
+  });
 }
 
 /**

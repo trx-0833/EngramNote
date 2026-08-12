@@ -80,7 +80,8 @@ def _resolve_path(bucket: str, object_name: str) -> Path:
     # resolve() 会解析所有 ".." 和符号链接，得到真实路径
     path = path.resolve()
     root = root.resolve()
-    if not str(path).startswith(str(root)):
+    # 精确的路径包含判断（startswith 存在前缀绕过：/data/storage_evil 也能通过 /data/storage 检查）
+    if path != root and root not in path.parents:
         raise ValueError(f"非法路径: {object_name}")
     return path
 
@@ -154,7 +155,8 @@ def remove_project_dir(prefix: str):
         path = root / prefix
         path = path.resolve()
         root_resolved = root.resolve()
-        if str(path).startswith(str(root_resolved)) and path.exists():
+        # 精确的路径包含判断，防止误删 Vault 根之外的目录
+        if path != root_resolved and root_resolved in path.parents and path.exists():
             import shutil
             shutil.rmtree(path)
 

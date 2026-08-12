@@ -114,6 +114,8 @@ class Settings(BaseSettings):
     # ---- 文件上传限制 ----
     # 最大上传文件大小（MB）
     max_upload_size_mb: int = 500
+    # 每用户存储配额（MB），超出后拒绝上传，防止磁盘被写满（0 表示不限制）
+    max_storage_per_user_mb: int = 5000
     # 允许的文件扩展名（逗号分隔）
     allowed_extensions: str = ".pdf,.png,.jpg,.jpeg,.docx,.pptx,.xlsx,.mp4,.mp3,.wav,.m4a,.md"
 

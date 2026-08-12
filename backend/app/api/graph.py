@@ -6,14 +6,16 @@
 主要职责：
 - 获取用户知识图谱数据（GET /api/graph）
 - 获取自动建议的关系（GET /api/graph/suggestions）
-- 确认建议关系（POST /api/graph/confirm）
-- 拒绝建议关系（POST /api/graph/reject）
+- 手动触发相关关系建议（POST /api/graph/suggest）
+- 触发语义关系推断（POST /api/graph/suggest-semantic）
+- 确认/拒绝建议关系（POST /api/graph/confirm、/reject）
 - 手动创建关系（POST /api/graph/relation）
 - 删除关系（DELETE /api/graph/relation/{relation_id}）
 
 设计决策：
 - 所有接口需要用户认证，且只能操作自己的数据
-- 获取建议时，若无已有建议则自动触发 auto_suggest_relations
+- 获取建议时不自动触发建议生成，避免嵌入编码等耗时操作阻塞页面加载，
+  由用户通过 POST /suggest 显式触发
 """
 
 from typing import Any, Dict
@@ -126,27 +128,33 @@ async def get_suggestions(
     """
     获取自动建议的关系列表
 
-    若当前无任何建议关系，则自动触发基于嵌入向量的关系建议。
+    仅返回现有的 suggested 关系，不自动触发建议生成，
+    避免嵌入模型编码等耗时操作阻塞页面加载。
+    需要生成新建议时，由前端显式调用 POST /suggest。
     """
-    # 先获取已有建议
-    suggestions = await graph_service.get_suggested_relations(
+    return await graph_service.get_suggested_relations(
         user_id=current_user.id,
         db=db,
     )
 
-    # 若无建议，自动触发建议生成
-    if not suggestions:
-        new_count = await graph_service.auto_suggest_relations(
-            user_id=current_user.id,
-            db=db,
-        )
-        if new_count > 0:
-            suggestions = await graph_service.get_suggested_relations(
-                user_id=current_user.id,
-                db=db,
-            )
 
-    return suggestions
+@router.post("/suggest")
+async def suggest_relations_api(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    手动触发基于嵌入向量相似度的相关关系建议
+
+    基于「标题 + 内容」编码全部卡片并计算两两相似度，
+    卡片较多时可能耗时数十秒（首次还需加载嵌入模型），
+    因此由用户显式触发，不在页面加载时自动执行。
+    """
+    new_count = await graph_service.auto_suggest_relations(
+        user_id=current_user.id,
+        db=db,
+    )
+    return {"success": True, "new_count": new_count}
 
 
 @router.post("/confirm")

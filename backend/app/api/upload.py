@@ -26,7 +26,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import logging
@@ -34,6 +34,7 @@ import logging
 from ..config import get_settings
 from ..database import get_db
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
+from ..models.folder import Folder
 from ..models.project import Project
 from ..models.user import User
 from ..schemas.note import NoteResponse, NoteStatusResponse
@@ -57,6 +58,95 @@ _EXT_TO_SOURCE_TYPE = {
 
 # 允许的扩展名集合，用于上传校验
 ALLOWED_EXTS = vault_path.ALLOWED_EXTS
+
+# 文件扩展名 → 内容签名（魔术字节）校验规则，防止伪装文件（如 .png 内嵌 HTML）上传
+# prefix: 文件头必须以此字节序列开头；contains: 文件头 32 字节内必须包含该字节序列
+# 未配置规则的类型（如 .md 纯文本、mkv、mp3 等）跳过内容校验
+_MAGIC_RULES = {
+    ".pdf": (b"%PDF-", None),
+    ".png": (b"\x89PNG\r\n\x1a\n", None),
+    ".jpg": (b"\xff\xd8\xff", None),
+    ".jpeg": (b"\xff\xd8\xff", None),
+    # Office 文档为 ZIP 容器
+    ".docx": (b"PK\x03\x04", None),
+    ".pptx": (b"PK\x03\x04", None),
+    ".xlsx": (b"PK\x03\x04", None),
+    # MP4/MOV 容器以 ftyp box 开头
+    ".mp4": (None, b"ftyp"),
+    ".mov": (None, b"ftyp"),
+}
+# 需要读取用于签名校验的头部字节数
+_MAGIC_HEAD_SIZE = 32
+
+
+def _validate_magic(ext: str, head: bytes) -> bool:
+    """
+    校验文件内容签名（魔术字节）与扩展名是否匹配
+
+    Args:
+        ext: 文件扩展名（小写，含点）
+        head: 文件头部字节
+
+    Returns:
+        bool: 匹配返回 True；未配置规则的扩展名视为通过
+    """
+    rule = _MAGIC_RULES.get(ext)
+    if rule is None:
+        return True
+    prefix, contains = rule
+    if prefix is not None:
+        return head.startswith(prefix)
+    if contains is not None:
+        return contains in head[: _MAGIC_HEAD_SIZE]
+    return True
+
+
+async def _resolve_unique_base(
+    db: AsyncSession,
+    user_id: str,
+    prefix: str,
+    safe_stem: str,
+    ext: str,
+) -> str:
+    """
+    生成不冲突的文件主干（base），保持磁盘文件名可读
+
+    优先保留原始文件名（与扫描导入命名一致）；同 prefix/source 下已存在同名文件时，
+    追加随机后缀防冲突。存量笔记路径已存数据库，不受影响。
+
+    Args:
+        db: 数据库会话
+        user_id: 用户 ID
+        prefix: 项目前缀 {user_id}/{project_slug}
+        safe_stem: 清洗后的原始文件名主干
+        ext: 文件扩展名（小写，含点）
+
+    Returns:
+        str: 不冲突的 base
+    """
+    # 空或特殊主干（"."、".."）直接使用随机名，避免生成易混淆或边界文件名
+    if not safe_stem or safe_stem in (".", ".."):
+        safe_stem = os.urandom(4).hex()
+
+    async def _exists(candidate: str) -> bool:
+        object_name = vault_path.source_object(prefix, candidate, ext)
+        result = await db.execute(
+            select(Note.id).where(
+                Note.user_id == user_id,
+                Note.original_file_path == object_name,
+            )
+        )
+        return result.scalars().first() is not None
+
+    if not await _exists(safe_stem):
+        return safe_stem
+    # 同名已存在：追加 2 字节（4 位十六进制）随机后缀，最多尝试 5 次
+    for _ in range(5):
+        candidate = f"{safe_stem}_{os.urandom(2).hex()}"
+        if not await _exists(candidate):
+            return candidate
+    # 兜底：追加 4 字节（8 位十六进制）随机后缀
+    return f"{safe_stem}_{os.urandom(4).hex()}"
 
 
 @router.post("", response_model=NoteResponse, status_code=status.HTTP_201_CREATED)
@@ -121,9 +211,10 @@ async def upload_document(
         if not project:
             raise HTTPException(status_code=404, detail="项目不存在")
 
-    # 2. 流式读取文件到临时文件，同时校验大小并计算 SHA-256 哈希
+    # 2. 流式读取文件到临时文件，同时校验大小、累积头部字节并计算 SHA-256 哈希
     max_size = settings.max_upload_size_mb * 1024 * 1024
     sha256 = hashlib.sha256()
+    head = b""
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp_path = tmp.name
         total_size = 0
@@ -138,25 +229,47 @@ async def upload_document(
                     status_code=400,
                     detail=f"文件大小超过限制 ({settings.max_upload_size_mb}MB)",
                 )
+            if len(head) < _MAGIC_HEAD_SIZE:
+                head += chunk[:_MAGIC_HEAD_SIZE - len(head)]
             sha256.update(chunk)
             tmp.write(chunk)
     file_hash = sha256.hexdigest()
+
+    # 2.5 文件内容签名校验（防止伪装文件上传）
+    if not _validate_magic(ext, head):
+        os.unlink(tmp_path)
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+        )
+
+    # 2.6 每用户存储配额校验（防止磁盘被写满）
+    quota = settings.max_storage_per_user_mb * 1024 * 1024
+    if quota > 0:
+        used_result = await db.execute(
+            select(func.coalesce(func.sum(Note.file_size), 0)).where(Note.user_id == current_user.id)
+        )
+        used = used_result.scalar_one()
+        if used + total_size > quota:
+            os.unlink(tmp_path)
+            raise HTTPException(
+                status_code=400,
+                detail=f"存储空间不足：已使用 {used // (1024 * 1024)}MB，配额 {settings.max_storage_per_user_mb}MB",
+            )
 
     # 3. 创建笔记记录
     note_id = str(uuid.uuid4())
 
     # 从上传文件名提取主干（命名关联法则：md 名与 source 名同主干，仅扩展名不同）
-    # 1. 取文件名（不含扩展名）
-    # 2. 清理非法字符，截断到 50 字符
-    # 3. 追加 8 位随机字符防止同名冲突
+    # 1. 取文件名（不含扩展名），清理非法字符并截断到 50 字符
+    # 2. 优先保留原始文件名（可读）；同名已存在时由 _resolve_unique_base 追加随机后缀
     raw_name = os.path.splitext(file.filename)[0]
     safe_stem = "".join(c for c in raw_name if c.isalnum() or c in ('-', '_', ' ', '.')).strip()[:50]
-    random_suffix = os.urandom(4).hex()  # 8 位十六进制
-    base = f"{safe_stem}_{random_suffix}" if safe_stem else random_suffix
+    safe_ext = os.path.splitext(file.filename)[1].lower()
 
     # Vault 对象路径：{user_id}/{project_slug}/source/{base}{ext}；无项目时落到 {user_id}/inbox
     prefix = vault_path.project_prefix(current_user.id, project.slug) if project else vault_path.inbox_prefix(current_user.id)
-    safe_ext = os.path.splitext(file.filename)[1].lower()
+    base = await _resolve_unique_base(db, current_user.id, prefix, safe_stem, safe_ext)
     object_name = vault_path.source_object(prefix, base, safe_ext)
 
     # 校验 note_role 值是否合法
@@ -182,6 +295,14 @@ async def upload_document(
     db.add(note)
     await db.commit()
     await db.refresh(note)
+    # 若设置了文件夹，补充 folder_name 供 meta 旁载镜像记录（磁盘/离线浏览可追溯逻辑归属）
+    if note.folder_id:
+        folder_result = await db.execute(
+            select(Folder.name).where(Folder.id == note.folder_id, Folder.user_id == current_user.id)
+        )
+        folder_name = folder_result.scalar_one_or_none()
+        if folder_name:
+            note._folder_name = folder_name
     write_note_meta(note)
 
     # 如果是个人笔记且传入了关联资料 ID，创建笔记-资料链接
