@@ -685,8 +685,7 @@ h1, h2, h3 {
 
 .duplicate-block {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
@@ -697,6 +696,14 @@ h1, h2, h3 {
 
 .duplicate-block:hover {
   border-color: var(--color-border);
+}
+
+.duplicate-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .duplicate-block-info {
@@ -717,6 +724,45 @@ h1, h2, h3 {
 .duplicate-block-actions {
   display: flex;
   gap: var(--space-xs);
+}
+
+/* 块内容对比区（人工核对重复判断） */
+.duplicate-block-compare {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.duplicate-block-text-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.duplicate-block-text-content {
+  font-size: 0.78rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--color-bg-subtle, #f7f8fa);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  margin: 0;
+  font-family: inherit;
+  color: var(--color-text);
+}
+
+.duplicate-block-text-empty {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  margin: 0;
 }
 
 /* ── 登录/注册页背景装饰 ── */

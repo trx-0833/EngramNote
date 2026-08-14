@@ -250,10 +250,18 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         return 0
 
     # 编码「标题 + 截断内容」（CPU 密集，放入线程池避免阻塞事件循环）
+    # 嵌入模型不可用（如内存不足）时降级：本次不生成建议，避免接口 500
     embedding_service = EmbeddingService()
     texts = [_build_card_embedding_text(card.title, card.content) for card in cards]
     loop = asyncio.get_event_loop()
-    vectors = await loop.run_in_executor(None, embedding_service.encode, texts)
+    try:
+        vectors = await loop.run_in_executor(None, embedding_service.encode, texts)
+    except Exception as e:
+        logger.warning(
+            "卡片嵌入生成失败，跳过本次关系建议: user=%s, err=%s",
+            user_id, e,
+        )
+        return 0
 
     if not vectors:
         return 0

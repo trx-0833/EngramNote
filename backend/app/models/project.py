@@ -44,7 +44,5 @@ class Project(BaseModel):
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
     # 项目显示名称
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    # Vault 目录名（slug），每用户唯一，创建后不可变
-    slug: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     # 项目描述，可选
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -23,10 +23,8 @@ class ProjectResponse(BaseModel):
     id: str
     user_id: str
     name: str
-    slug: str
     description: Optional[str] = None
     note_count: int = 0
-    vault_path: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -74,7 +72,7 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200, description="项目名称（slug 不可变）")
+    name: Optional[str] = Field(None, min_length=1, max_length=200, description="项目名称（标签化后名称可改，不影响物理路径）")
     description: Optional[str] = Field(None, max_length=2000, description="项目描述")
 
 

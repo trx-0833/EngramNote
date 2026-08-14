@@ -19,6 +19,10 @@ interface DuplicateBlock {
   block_index: number
   duplicate_of: number
   similarity: number
+  /** 重复块文本内容（旧版本清洗可能缺失，重新清洗后补齐） */
+  content?: string
+  /** 被重复的保留块文本内容（旧版本清洗可能缺失） */
+  original_content?: string
 }
 
 interface CleaningPanelProps {
@@ -39,6 +43,8 @@ interface CleaningPanelProps {
 export default function CleaningPanel({ note, onStatusChange }: CleaningPanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  /** 当前展开内容对比的重复块索引（null 表示全部收起） */
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
 
   /** 触发清洗 */
   async function handleStartCleaning() {
@@ -203,34 +209,78 @@ export default function CleaningPanel({ note, onStatusChange }: CleaningPanelPro
               <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
                 重复块（{duplicatesDetail.length} 个）
               </h4>
-              {duplicatesDetail.map((dup) => (
-                <div key={dup.block_index} className="duplicate-block">
-                  <div className="duplicate-block-info">
-                    <span className="duplicate-block-index">块 {dup.block_index}</span>
-                    <span className="duplicate-block-similarity">
-                      与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
-                    </span>
+              {duplicatesDetail.map((dup) => {
+                const expanded = expandedIndex === dup.block_index
+                const hasContent = !!dup.content || !!dup.original_content
+                return (
+                  <div key={dup.block_index} className="duplicate-block">
+                    <div className="duplicate-block-header">
+                      <div className="duplicate-block-info">
+                        <span className="duplicate-block-index">块 {dup.block_index}</span>
+                        <span className="duplicate-block-similarity">
+                          与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="duplicate-block-actions">
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                          onClick={() => setExpandedIndex(expanded ? null : dup.block_index)}
+                          disabled={loading}
+                        >
+                          {expanded ? '收起内容' : '查看内容'}
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                          onClick={() => handleRestore(dup.block_index)}
+                          disabled={loading}
+                        >
+                          恢复
+                        </button>
+                        <button
+                          className="btn btn-danger"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                          onClick={() => handleDelete(dup.block_index)}
+                          disabled={loading}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 块内容对比（供人工核对重复判断是否准确） */}
+                    {expanded && (
+                      <div className="duplicate-block-compare">
+                        {hasContent ? (
+                          <>
+                            <div className="duplicate-block-text">
+                              <div className="duplicate-block-text-label">
+                                保留的块 {dup.duplicate_of}（首次出现）
+                              </div>
+                              <pre className="duplicate-block-text-content">
+                                {dup.original_content || '（内容缺失）'}
+                              </pre>
+                            </div>
+                            <div className="duplicate-block-text">
+                              <div className="duplicate-block-text-label">
+                                重复的块 {dup.block_index}
+                              </div>
+                              <pre className="duplicate-block-text-content">
+                                {dup.content || '（内容缺失）'}
+                              </pre>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="duplicate-block-text-empty">
+                            该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="duplicate-block-actions">
-                    <button
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                      onClick={() => handleRestore(dup.block_index)}
-                      disabled={loading}
-                    >
-                      恢复
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                      onClick={() => handleDelete(dup.block_index)}
-                      disabled={loading}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 

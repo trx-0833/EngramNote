@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.note import Note, NoteStatus, NoteRole
 from ..models.user import User
+from ..models.note_project import NoteProject
 from ..models.note_version import NoteVersion
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
@@ -94,9 +95,13 @@ async def get_notes_list(
     if note_role is not None:
         query = query.where(Note.note_role == NoteRole(note_role))
 
-    # 可选：按项目筛选
+    # 可选：按项目标签筛选（多对多关联表 EXISTS 查询）
     if project_id is not None:
-        query = query.where(Note.project_id == project_id)
+        query = query.where(
+            Note.id.in_(
+                select(NoteProject.note_id).where(NoteProject.project_id == project_id)
+            )
+        )
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
     if keyword:
@@ -326,7 +331,7 @@ async def delete_note(db: AsyncSession, note: Note):
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
 
-    # ---- 删除版本历史记录及其存储文件（history/versions/v{N}.md） ----
+    # ---- 删除版本历史记录及其存储文件（history/versions/{note_id}/v{N}.md） ----
     try:
         ver_result = await db.execute(
             select(NoteVersion).where(NoteVersion.note_id == note_id)

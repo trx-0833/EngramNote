@@ -17,13 +17,40 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, TypeDecorator, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 
 from ..database import Base
+
+
+class TZDateTime(TypeDecorator):
+    """
+    带 UTC 语义的 DateTime 类型装饰器
+
+    SQLite 本身不存储时区：CURRENT_TIMESTAMP / func.now() 生成的是无时区的
+    UTC 时间字符串。本装饰器在读取时为无时区值补上 UTC 时区，在写入时把
+    带时区的值统一归一化为无时区 UTC（与 CURRENT_TIMESTAMP 字符串可直接比较）；
+    PostgreSQL 的 timestamptz 自带时区，直接透传。
+
+    应用统一以 UTC 存储、展示时再转换为本地时区（如 GMT+8）。
+    """
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+            if dialect.name == "sqlite":
+                value = value.replace(tzinfo=None)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None and dialect.name == "sqlite":
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class BaseModel(Base):
@@ -47,12 +74,12 @@ class BaseModel(Base):
     )
     # 创建时间，使用数据库服务器时间（server_default=func.now()）确保一致性
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(timezone=True),
         server_default=func.now(),
     )
     # 更新时间，创建时默认为当前时间，记录更新时自动刷新
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
     )

@@ -42,8 +42,10 @@ def _build_meta(note: Note) -> Optional[dict]:
     parts = note.original_file_path.split("/")
     return {
         "note_id": note.id,
-        "project_id": note.project_id,
-        "project_slug": parts[1] if len(parts) >= 2 else None,
+        # 项目标签数组（多对多），需在调用前注入 note._project_ids/_project_names
+        # （镜像非权威，调用方未注入时为空数组）
+        "project_ids": getattr(note, "_project_ids", None) or [],
+        "project_names": getattr(note, "_project_names", None) or [],
         "filename": parts[-1] if parts else None,
         "folder_id": note.folder_id,
         # 文件夹名需在调用前注入 note._folder_name（镜像非权威，缺失时为 None）
@@ -89,34 +91,37 @@ def write_note_meta(note: Note):
         logger.exception("Vault meta 写穿失败: note_id=%s", note.id)
 
 
-def write_project_meta(project):
+def write_project_meta(user_id: str, projects: list) -> None:
     """
-    将项目元数据写穿到 {P}/output/meta/project.json
+    将用户的全部项目（标签）清单写穿到 {user_id}/inbox/output/meta/projects.json
 
-    项目创建/更新时同步，供人工浏览 Vault 目录或脱离数据库时
-    快速识别项目（记录 slug 与显示名的映射，弥补 slug 不可变的脱节问题）。
-    删除项目时由 remove_project_dir 清理整个目录树，无需单独删除。
-    写入失败只记录日志，不影响业务主流程（镜像非权威）。
+    项目为纯标签后不再拥有独立目录，清单写到用户级收件箱下，
+    供人工浏览 Vault 目录或脱离数据库时快速查看 id→name 映射。
+    项目创建/更新/删除后同步，写入失败只记录日志，不影响业务主流程（镜像非权威）。
 
     Args:
-        project: Project 模型实例（需已包含最新信息）
+        user_id: 用户 ID
+        projects: 该用户的全部 Project 模型实例列表
     """
     try:
-        prefix = vault_path.project_prefix(project.user_id, project.slug)
         content = {
-            "project_id": project.id,
-            "slug": project.slug,
-            "name": project.name,
-            "description": project.description,
-            "created_at": _iso(project.created_at),
-            "updated_at": _iso(project.updated_at),
+            "projects": [
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "description": project.description,
+                    "created_at": _iso(project.created_at),
+                    "updated_at": _iso(project.updated_at),
+                }
+                for project in projects
+            ]
         }
         data = json.dumps(content, ensure_ascii=False, indent=2).encode("utf-8")
         upload_bytes(
             settings.minio_bucket_markdown,
-            f"{prefix}/{vault_path.META_DIR}/project.json",
+            f"{vault_path.inbox_prefix(user_id)}/{vault_path.META_DIR}/projects.json",
             data,
             content_type="application/json",
         )
     except Exception:
-        logger.exception("Vault 项目清单写穿失败: project_id=%s", project.id)
+        logger.exception("Vault 项目清单写穿失败: user_id=%s", user_id)

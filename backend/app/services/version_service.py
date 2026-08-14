@@ -14,7 +14,7 @@
 
 设计决策：
 - 版本号 version_number 按 note_id 维度从 1 递增，通过 MAX(version_number) + 1 计算
-- 版本内容存放在对象存储的 markdown bucket，路径形如 {user_id}/{project_slug}/history/versions/v{N}.md（Vault 版本区）
+- 版本内容存放在对象存储的 markdown bucket，路径形如 {user_id}/inbox/history/versions/{note_id}/v{N}.md（Vault 版本区）
 - diff 使用 difflib.ndiff 生成行级差异，过滤掉 "? " 内联提示行
 - 版本上限按来源区分：USER_EDIT 保留 50 个，AUTO_CLEAN 保留 10 个
 - 恢复操作先为当前内容创建快照（USER_EDIT），再用目标版本覆盖当前文件
@@ -69,7 +69,7 @@ class VersionService:
         流程：
         1. 查询该笔记当前最大 version_number，新版本号 = max + 1（首版本为 1）
         2. 计算 content_size（UTF-8 编码字节数）
-        3. 通过 StorageService 将内容写入 Vault 版本区 history/versions/v{N}.md
+        3. 通过 StorageService 将内容写入 Vault 版本区 history/versions/{note_id}/v{N}.md
         4. 插入 NoteVersion 记录
         5. 调用 prune_versions 按来源上限清理最旧版本
 
@@ -97,12 +97,12 @@ class VersionService:
         content_bytes = content.encode("utf-8")
         content_size = len(content_bytes)
 
-        # 存储路径：Vault 版本区 {user_id}/{project_slug}/history/versions/v{N}.md
-        # 通过笔记的原始文件路径推导项目前缀，保证版本文件归属项目隔离
+        # 存储路径：Vault 版本区 {user_id}/inbox/history/versions/{note_id}/v{N}.md
+        # 以 note_id 子目录隔离版本文件，避免不同笔记的同号版本互相覆盖
         note_result = await db.execute(select(Note).where(Note.id == note_id))
         note = note_result.scalars().first()
         prefix = vault_path.derive_prefix(note) if note else f"{user_id}/default"
-        storage_path = vault_path.history_object(prefix, version_number)
+        storage_path = vault_path.history_object(prefix, note_id, version_number)
 
         # 写入对象存储
         upload_bytes(
@@ -192,7 +192,22 @@ class VersionService:
             raise ValueError(
                 f"版本不存在: note_id={note_id}, version_number={version_number}"
             )
-        data = get_object_bytes(settings.minio_bucket_markdown, version.storage_path)
+        try:
+            data = get_object_bytes(
+                settings.minio_bucket_markdown, version.storage_path
+            )
+        except FileNotFoundError:
+            # 版本内容文件已被外部删除（如用户手动清理历史版本），
+            # 该版本已无可恢复内容：清理 DB 记录避免幽灵版本继续报错
+            logger.warning(
+                "版本内容文件缺失，清理版本记录: note_id=%s, v%d, path=%s",
+                note_id[:8], version_number, version.storage_path,
+            )
+            await db.delete(version)
+            await db.commit()
+            raise ValueError(
+                f"版本内容文件已被删除，版本记录已清理: v{version_number}"
+            )
         return data.decode("utf-8")
 
     # --------------------------------------------------------------

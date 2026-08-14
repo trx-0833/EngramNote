@@ -1,12 +1,12 @@
 /**
  * @file 项目页面
- * @description 项目隔离 + 状态旁载 Vault 结构下的项目管理页面。
+ * @description 项目作为纯标签（note_projects 多对多）管理笔记归属的项目页面。
  *
  * 功能：
- * 1. 创建项目 — 后端会同步在磁盘/对象存储中创建 Vault 目录树（source/output/history/cache）
- * 2. 重命名 / 删除项目（仅空项目可删）
+ * 1. 创建项目 — 纯标签，不生成物理目录
+ * 2. 重命名 / 删除项目（删除只移除标签，笔记与文件保留）
  * 3. 查看项目下的笔记列表
- * 4. 扫描导入 — 用户手动把文件拷入项目 source/ 目录后，点击扫描将其识别为笔记
+ * 4. 扫描导入 — 用户手动把文件拷入收件箱 source/ 目录后，点击扫描将其识别为笔记并打上本项目标签
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -172,13 +172,9 @@ export default function Projects() {
     })
   }
 
-  /** 删除项目（仅空项目可删） */
+  /** 删除项目（只删标签，笔记与文件保留） */
   async function handleDelete(p: Project) {
-    if (p.note_count > 0) {
-      setError('项目内还有笔记，请先删除项目内的笔记后再删除项目')
-      return
-    }
-    if (!window.confirm(`确定删除项目「${p.name}」？该项目目录树（${p.vault_path}）将被一并清理。`)) {
+    if (!window.confirm(`确定删除项目「${p.name}」？删除仅移除该项目标签，关联笔记与文件都会保留。`)) {
       return
     }
     try {
@@ -209,7 +205,7 @@ export default function Projects() {
     }
   }
 
-  /** 扫描导入项目 source/ 目录的新文件 */
+  /** 扫描收件箱 source/ 目录并打上当前项目标签 */
   async function handleScan(p: Project) {
     setScanning((prev) => ({ ...prev, [p.id]: true }))
     setScanResults((prev) => ({ ...prev, [p.id]: null }))
@@ -250,9 +246,9 @@ export default function Projects() {
     setAddSearch('')
     setAddError('')
     try {
-      // 拉取全部笔记（分页上限 999），过滤出不属于当前项目的作为候选
+      // 拉取全部笔记（分页上限 999），过滤出尚未打上当前项目标签的作为候选
       const data = await getNotes(1, 999, undefined, undefined)
-      setCandidateNotes(data.items.filter((n) => n.project_id !== p.id))
+      setCandidateNotes(data.items.filter((n) => !n.project_ids?.includes(p.id)))
     } catch (err) {
       console.error('加载候选笔记失败:', err)
       setAddError('加载候选笔记失败，请稍后重试')
@@ -370,11 +366,6 @@ export default function Projects() {
               <span className="badge" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
                 {p.note_count} 篇笔记
               </span>
-              {p.slug !== 'default' && (
-                <span className="badge" style={{ background: 'var(--color-accent-light)', color: 'var(--color-accent)' }}>
-                  {p.slug}
-                </span>
-              )}
             </div>
           </div>
           {/* 操作按钮 */}
@@ -455,8 +446,8 @@ export default function Projects() {
             </div>
             {scanResult.imported === 0 && scanResult.scanned === 0 && (
               <div style={{ marginTop: 6, color: 'var(--color-text-secondary)' }}>
-                未在 <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录发现新文件。可把文件拷贝到{' '}
-                <code style={{ color: 'var(--color-primary)' }}>{p.vault_path}/source/</code> 后再扫描。
+                未在收件箱 <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录发现新文件。可把文件拷贝到{' '}
+                <code style={{ color: 'var(--color-primary)' }}>Vault 根目录的 source/</code> 后再扫描。
               </div>
             )}
           </div>
@@ -545,26 +536,6 @@ export default function Projects() {
           </div>
         )}
 
-        {/* Vault 路径 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: '0.75rem',
-            color: 'var(--color-text-tertiary)',
-            background: 'var(--color-bg)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '6px 10px',
-            fontFamily: 'var(--font-mono)',
-            wordBreak: 'break-all',
-          }}
-        >
-          <span style={{ flexShrink: 0 }}>📁</span>
-          <span style={{ color: 'var(--color-text-secondary)' }}>Vault:</span>
-          {p.vault_path}/source/
-        </div>
-
         {/* 底部操作行 */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--color-border-light)', paddingTop: 10, marginTop: 'auto' }}>
           <button
@@ -598,8 +569,8 @@ export default function Projects() {
           <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 10 }}>
             {notes.length === 0 ? (
               <div style={{ fontSize: '0.85rem', color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '16px 0' }}>
-                项目暂无笔记。可把文件放入{' '}
-                <code style={{ color: 'var(--color-primary)' }}>{p.vault_path}/source/</code>{' '}
+                项目暂无笔记。可把文件放入收件箱{' '}
+                <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
                 后点击「扫描导入」。
               </div>
             ) : (
@@ -662,7 +633,7 @@ export default function Projects() {
       <div className="assessment-header">
         <h1 className="assessment-title">项目</h1>
         <p className="assessment-subtitle">
-          项目隔离 + 状态旁载：每个项目在 Vault 中对应一个独立文件夹，支持手动放盘后扫描导入。
+          项目作为标签归属笔记，一篇笔记可属于多个项目；所有文件统一存放在收件箱（inbox）。
         </p>
       </div>
 
@@ -695,7 +666,7 @@ export default function Projects() {
             <div>
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>创建新项目</h3>
               <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                创建后会在 Vault 目录下生成项目文件夹（source / output / history / cache）
+                项目为纯标签，创建后不生成物理目录；用标签给笔记打归属
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => setShowForm(true)}>
@@ -753,7 +724,7 @@ export default function Projects() {
         <div className="state-container">
           <div className="state-icon" style={{ fontSize: 40 }}>📂</div>
           <p className="state-message">还没有项目</p>
-          <p className="state-description">点击上方「新建项目」创建第一个项目，系统会同步生成对应的 Vault 文件夹。</p>
+          <p className="state-description">点击上方「新建项目」创建第一个项目（纯标签，不生成文件夹）。</p>
         </div>
       ) : (
         <div
@@ -782,10 +753,10 @@ export default function Projects() {
       >
         <strong style={{ color: 'var(--color-text)' }}>📖 使用说明</strong>
         <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
-          <li>创建项目后，在应用数据目录（Vault）下会生成与项目同名的文件夹。</li>
-          <li>把要学习的文件直接拷贝到该项目的 <code style={{ color: 'var(--color-primary)' }}>source/</code> 子目录。</li>
-          <li>回到本页点击项目卡片上的「扫描导入」，新文件会自动识别为笔记并开始转换。</li>
-          <li>也可以在上传页选择该项目，通过网页直接上传文件。</li>
+          <li>项目是纯标签：一篇笔记可打上多个项目标签，创建项目不会生成物理文件夹。</li>
+          <li>所有文件统一存放在收件箱（inbox）的 <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录。</li>
+          <li>把文件直接拷贝到收件箱 <code style={{ color: 'var(--color-primary)' }}>source/</code> 后，点击「扫描导入」即可识别为笔记并打上当前项目标签。</li>
+          <li>也可以在上传页选择多个项目标签，通过网页直接上传文件。</li>
         </ol>
       </div>
     </div>

@@ -6,7 +6,11 @@
  */
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadFile, getUploadStatus, getNotes, getProjects, type Note, type Project } from '../api/client'
+import {
+  prepareUpload, commitUpload,
+  getUploadStatus, getNotes, getProjects,
+  type Note, type Project, type PreparedUpload,
+} from '../api/client'
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -63,12 +67,22 @@ export default function Upload() {
   const [noteRole, setNoteRole] = useState('material')
   /** 项目列表 */
   const [projects, setProjects] = useState<Project[]>([])
-  /** 选中的项目 ID（空表示不归属任何项目） */
-  const [selectedProjectId, setSelectedProjectId] = useState('')
+  /** 选中的项目标签 ID 数组（空表示不归属任何项目） */
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
   /** 可关联的学习资料列表（仅 personal_note 时加载） */
   const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
   /** 已选中的关联资料 ID 列表 */
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+  /** 两阶段上传阶段 1 的暂存结果（prepare 成功后的临时文件信息） */
+  const [prepared, setPrepared] = useState<PreparedUpload | null>(null)
+  /** 重命名后的文件名输入 */
+  const [renameName, setRenameName] = useState('')
+  /** 重命名输入的内联校验提示 */
+  const [renameError, setRenameError] = useState('')
+  /** 裁剪页码范围输入 */
+  const [cropPageRange, setCropPageRange] = useState('')
+  /** 裁剪输入的内联校验提示 */
+  const [cropError, setCropError] = useState('')
 
   // 加载项目列表，默认不选择项目（留空则不归属任何项目）
   useEffect(() => {
@@ -76,7 +90,7 @@ export default function Upload() {
       try {
         const data = await getProjects()
         setProjects(data)
-        setSelectedProjectId('')
+        setSelectedProjectIds([])
       } catch (err) {
         console.error('加载项目列表失败:', err)
       }
@@ -102,8 +116,9 @@ export default function Upload() {
   }, [noteRole])
 
   /**
-   * 处理文件上传
-   * 校验文件格式后调用 API 上传，成功后开始轮询转换状态。
+   * 处理文件选择（两阶段上传阶段 1：prepare）
+   * 校验文件格式后调用 prepareUpload 暂存文件；PDF 返回页数并展示裁剪配置，
+   * 非 PDF 直接进入 commit 提交。
    *
    * @param file - 用户选择的文件对象
    */
@@ -116,13 +131,126 @@ export default function Upload() {
     }
 
     setError('')
+    setRenameError('')
+    setCropError('')
+    setRenameName('')
+    setCropPageRange('')
+    setPrepared(null)
     setUploading(true)
     setStatus('上传中...')
 
     try {
-      // 调用上传 API，后端创建笔记记录并开始异步转换
-      const note = await uploadFile(file, parseBackend || undefined, noteRole, selectedMaterialIds, selectedProjectId || undefined)
+      // 阶段 1：暂存文件，获取页数等信息
+      const result = await prepareUpload(file)
+      // 统一进入上传设置步骤（可重命名文件；PDF 额外支持按页裁剪）
+      setRenameName(result.filename)
+      setPrepared(result)
+      setUploading(false)
+      setStatus(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '上传失败')
+      setUploading(false)
+    }
+  }
+
+  /**
+   * 校验页码范围表达式格式（1-based，支持 a、a-b、逗号组合，不越界）
+   *
+   * @param spec - 页码范围表达式，如 "1-20,25,30-32"
+   * @param pageCount - PDF 总页数
+   * @returns 空字符串表示合法，否则返回错误提示
+   */
+  function validatePageSpec(spec: string, pageCount: number): string {
+    const trimmed = spec.trim()
+    if (!trimmed) return '页码范围不能为空'
+    const items = trimmed.split(',')
+    const pageRangeRe = /^(\d+)(?:-(\d+))?$/
+    const pages: number[] = []
+    for (const item of items) {
+      const match = pageRangeRe.exec(item.trim())
+      if (!match) return `无效的页码范围: ${item.trim()}`
+      const start = parseInt(match[1], 10)
+      const end = match[2] !== undefined ? parseInt(match[2], 10) : start
+      if (start < 1 || end < 1) return `页码必须从 1 开始: ${item.trim()}`
+      if (start > pageCount || end > pageCount) return `页码超出范围（文档共 ${pageCount} 页）: ${item.trim()}`
+      if (start > end) return `区间起始页不能大于结束页: ${item.trim()}`
+      for (let p = start; p <= end; p++) pages.push(p)
+    }
+    if (pages.length === 0) return '页码范围不能为空'
+    return ''
+  }
+
+  /**
+   * 校验并确定最终文件名
+   * 规则：非空、不含路径分隔符；若缺少原文件扩展名则自动补全（扩展名必须保留，
+   * 与后端校验一致）。
+   *
+   * @param name - 用户输入的文件名
+   * @param originalFilename - 原始文件名（用于提取扩展名）
+   * @returns 空字符串表示合法并返回最终文件名；否则返回错误提示
+   */
+  function validateRename(name: string, originalFilename: string): { name: string; error: string } {
+    const trimmed = name.trim()
+    if (!trimmed) return { name: '', error: '文件名不能为空' }
+    if (trimmed.includes('/') || trimmed.includes('\\')) {
+      return { name: '', error: '文件名不能包含路径分隔符' }
+    }
+    const dotIndex = originalFilename.lastIndexOf('.')
+    const ext = dotIndex >= 0 ? originalFilename.slice(dotIndex) : ''
+    const finalName = ext && !trimmed.toLowerCase().endsWith(ext.toLowerCase())
+      ? `${trimmed}${ext}`
+      : trimmed
+    return { name: finalName, error: '' }
+  }
+
+  /**
+   * 校验上传设置并提交
+   * 校验文件名（及 PDF 页码范围）后调用 commitPrepared 正式上传。
+   *
+   * @param cropRange - 页码范围表达式（可选，仅 PDF；undefined 表示不裁剪）
+   */
+  function confirmUpload(cropRange: string | undefined) {
+    if (!prepared) return
+    const { name, error: renameErr } = validateRename(renameName, prepared.filename)
+    if (renameErr) {
+      setRenameError(renameErr)
+      return
+    }
+    if (prepared.source_type === 'pdf' && cropRange !== undefined) {
+      const pageCount = prepared.page_count ?? 0
+      const cropErr = validatePageSpec(cropRange, pageCount)
+      if (cropErr) {
+        setCropError(cropErr)
+        return
+      }
+    }
+    commitPrepared(prepared.temp_id, cropRange, name)
+  }
+
+  /**
+   * 两阶段上传阶段 2：commit
+   * 携带可选重命名与裁剪范围调用 commitUpload 正式上传，成功后开始轮询转换状态。
+   *
+   * @param tempId - prepare 返回的临时上传标识
+   * @param cropRange - 页码范围表达式（可选，仅 PDF）
+   * @param finalName - 最终文件名（重命名后的，含扩展名）
+   */
+  async function commitPrepared(tempId: string, cropRange: string | undefined, finalName: string) {
+    setError('')
+    setUploading(true)
+    setStatus('上传中...')
+
+    try {
+      const note = await commitUpload(tempId, {
+        filename: finalName,
+        backend: parseBackend || undefined,
+        note_role: noteRole,
+        project_ids: selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
+        linked_material_ids: selectedMaterialIds,
+        crop_page_range: cropRange,
+      })
       setNoteId(note.id)
+      setPrepared(null)
       setStatus('文件已上传，正在转换...')
 
       // 开始轮询转换状态
@@ -264,6 +392,92 @@ export default function Upload() {
         </p>
       </div>
 
+      {/* 上传设置（prepare 完成后显示，可重命名文件；PDF 额外支持按页裁剪） */}
+      {prepared && (
+        <div className="card" style={{ marginTop: 'var(--space-md)' }}>
+          <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
+            上传设置{prepared.source_type === 'pdf' && `（共 ${prepared.page_count ?? '?'} 页）`}
+          </p>
+
+          {/* 文件名（可修改） */}
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)' }}>
+            文件名
+          </p>
+          <input
+            type="text"
+            value={renameName}
+            onChange={(e) => { setRenameName(e.target.value); setRenameError('') }}
+            disabled={uploading}
+            style={{
+              width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)',
+              border: `1px solid ${renameError ? 'var(--color-error)' : 'var(--color-border)'}`,
+              marginBottom: 'var(--space-xs)',
+            }}
+            aria-label="文件名"
+          />
+          {renameError && (
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-error)', marginBottom: 'var(--space-xs)' }} role="alert">
+              {renameError}
+            </p>
+          )}
+
+          {/* PDF 按页裁剪配置（仅 PDF 显示） */}
+          {prepared.source_type === 'pdf' && (
+            <>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
+                按页裁剪（可选）：只保留需要的页码范围，其余页面在上传处理前剔除。
+              </p>
+              <input
+                type="text"
+                value={cropPageRange}
+                onChange={(e) => { setCropPageRange(e.target.value); setCropError('') }}
+                placeholder="如 1-20,25,30-32"
+                disabled={uploading}
+                style={{
+                  width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)',
+                  border: `1px solid ${cropError ? 'var(--color-error)' : 'var(--color-border)'}`,
+                }}
+                aria-label="页码范围"
+              />
+              {cropError && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-error)', marginBottom: 'var(--space-xs)' }} role="alert">
+                  {cropError}
+                </p>
+              )}
+            </>
+          )}
+
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
+            {prepared.source_type === 'pdf' ? (
+              <>
+                <button
+                  className="btn"
+                  disabled={uploading}
+                  onClick={() => confirmUpload(undefined)}
+                >
+                  不裁剪，直接上传
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={uploading}
+                  onClick={() => confirmUpload(cropPageRange)}
+                >
+                  裁剪后上传
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-primary"
+                disabled={uploading}
+                onClick={() => confirmUpload(undefined)}
+              >
+                确认上传
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 解析方式选择 */}
       <div className="card" style={{ marginTop: 'var(--space-md)' }}>
         <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>解析方式</p>
@@ -285,23 +499,35 @@ export default function Upload() {
         </p>
       </div>
 
-      {/* 项目选择 */}
+      {/* 项目标签选择（支持多选） */}
       <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>所属项目</p>
-        <select
-          className="filter-select"
-          value={selectedProjectId}
-          onChange={(e) => setSelectedProjectId(e.target.value)}
-          disabled={uploading}
-          style={{ width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}
-        >
-          <option value="">不选择项目</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>{project.name}</option>
-          ))}
-        </select>
+        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>所属项目（标签，可多选）</p>
+        {projects.length > 0 ? (
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+            {projects.map((project) => {
+              const checked = selectedProjectIds.includes(project.id)
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  className={`filter-pill${checked ? ' filter-pill-active' : ''}`}
+                  onClick={() => {
+                    setSelectedProjectIds((prev) =>
+                      checked ? prev.filter((id) => id !== project.id) : [...prev, project.id],
+                    )
+                  }}
+                  disabled={uploading}
+                >
+                  {project.name}
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>暂无项目，可先不选择或稍后创建。</p>
+        )}
         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
-          留空则不归属任何项目，可稍后在「项目」页面将笔记添加进项目。
+          一篇笔记可归属多个项目（标签）；不选择则稍后可在「项目」页面添加。
         </p>
       </div>
 

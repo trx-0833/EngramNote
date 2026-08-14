@@ -112,6 +112,44 @@ async def init_db():
         if _is_sqlite:
             await _migrate_sqlite(conn)
 
+    # 清理两阶段上传遗留的超时临时目录（与 DB 后端无关，启动时兜底执行）
+    cleanup_stale_uploads()
+
+
+def cleanup_stale_uploads(max_age_hours: int = 24) -> None:
+    """
+    清理两阶段上传遗留的超时临时目录
+
+    prepare 阶段暂存的文件若未 commit（如用户放弃上传），会残留在
+    data/tmp/upload/{uuid}/ 下。本函数在应用启动时兜底删除超过
+    max_age_hours 的临时目录；commit 成功后的即时清理仍由 upload API 负责。
+
+    Args:
+        max_age_hours: 临时目录允许存活的时长（小时），默认 24
+    """
+    from datetime import datetime, timedelta
+
+    import shutil
+
+    from .config import TMP_UPLOAD_DIR
+
+    if not TMP_UPLOAD_DIR.is_dir():
+        return
+    cutoff = datetime.now() - timedelta(hours=max_age_hours)
+    cleaned = 0
+    for entry in TMP_UPLOAD_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        try:
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime)
+            if mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+                cleaned += 1
+        except OSError:
+            continue
+    if cleaned > 0:
+        logger.info("临时上传清理: 删除 %d 个超时目录", cleaned)
+
 
 async def _migrate_sqlite(conn):
     """
@@ -139,7 +177,6 @@ async def _migrate_sqlite(conn):
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id),
                     name VARCHAR(200) NOT NULL,
-                    slug VARCHAR(60) NOT NULL,
                     description TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -148,9 +185,6 @@ async def _migrate_sqlite(conn):
             ))
             sync_conn.execute(text(
                 "CREATE INDEX ix_projects_user_id ON projects (user_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_projects_slug ON projects (slug)"
             ))
             logger.info("SQLite 迁移: 已创建 projects 表")
 
@@ -162,16 +196,38 @@ async def _migrate_sqlite(conn):
                     "ALTER TABLE notes ADD COLUMN folder_id VARCHAR REFERENCES folders(id)"
                 ))
                 logger.info("SQLite 迁移: 已为 notes 表添加 folder_id 列")
-            if 'project_id' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE notes ADD COLUMN project_id VARCHAR REFERENCES projects(id)"
-                ))
-                logger.info("SQLite 迁移: 已为 notes 表添加 project_id 列")
             if 'note_role' not in existing_columns:
                 sync_conn.execute(text(
                     "ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"
                 ))
                 logger.info("SQLite 迁移: 已为 notes 表添加 note_role 列")
+
+        # 检查并创建 note_projects 标签关联表（防御性建表，对应项目标签化重构）
+        # 项目从 Vault 第一层目录演化为纯标签后，笔记与项目为多对多关系，承载于此表
+        if 'note_projects' not in table_names:
+            sync_conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS note_projects (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    UNIQUE (note_id, project_id)
+                )
+                """
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_note_projects_note_id ON note_projects (note_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_note_projects_project_id ON note_projects (project_id)"
+            ))
+            sync_conn.execute(text(
+                "CREATE INDEX ix_note_projects_user_id ON note_projects (user_id)"
+            ))
+            logger.info("SQLite 迁移: 已创建 note_projects 表")
 
         # 检查并创建 note_material_links 表（防御性建表，正常情况下 create_all 已创建）
         if 'note_material_links' not in table_names:
@@ -367,7 +423,6 @@ async def _migrate_sqlite(conn):
             ("card_relations", "card_id_1", "knowledge_cards", "id", "delete"),
             ("card_relations", "card_id_2", "knowledge_cards", "id", "delete"),
             ("notes", "folder_id", "folders", "id", "nullify"),
-            ("notes", "project_id", "projects", "id", "nullify"),
         ]
 
         for table, col, parent_table, parent_col, action in orphan_checks:
@@ -383,6 +438,16 @@ async def _migrate_sqlite(conn):
                 ))
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 {table} 中清理了 {result.rowcount} 条 {col} 孤儿记录")
+
+        # note_projects 标签关联表：清理指向不存在笔记或项目的孤儿行
+        # notes.project_id 单值外键已移除，标签关系全部承载于此表
+        if 'note_projects' in table_names:
+            result = sync_conn.execute(text(
+                "DELETE FROM note_projects WHERE note_id NOT IN (SELECT id FROM notes) "
+                "OR project_id NOT IN (SELECT id FROM projects)"
+            ))
+            if result.rowcount > 0:
+                logger.info(f"孤儿数据清理: 从 note_projects 中清理了 {result.rowcount} 条标签孤儿记录")
 
         # ---- 重复关系清理 ----
         # 同一对卡片（无向，忽略方向）不应存在多条关系（历史版本可能因缺少去重产生重复，

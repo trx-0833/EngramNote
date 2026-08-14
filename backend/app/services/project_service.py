@@ -2,19 +2,20 @@
 项目服务模块
 
 本模块提供项目的创建、查询、详情、更新和删除等业务逻辑。
-项目是「项目隔离 + 状态旁载」Vault 结构的项目层，用于按主题/任务组织资料。
+项目为「纯标签归属」，通过 note_projects 多对多关联表标记笔记归属，
+不再作为 Vault 第一层目录（所有笔记统一落在收件箱 {user_id}/inbox）。
 
 主要职责：
-- 创建项目（自动生成每用户唯一的 slug 作为 Vault 目录名）
+- 创建项目（纯标签，不再生成 slug、不创建物理目录）
 - 查询用户的项目列表（含笔记数量）
-- 获取项目详情（包含笔记列表）
-- 更新项目（仅改显示名/描述，slug 不可变避免物理搬移文件）
-- 删除项目（仅允许删除空项目）
-- 向项目批量添加/移出笔记（逻辑移动，物理文件路径不变）
+- 获取项目详情（包含关联笔记列表）
+- 更新项目（名称/描述，不影响物理路径）
+- 删除项目（只删标签关联，不删除笔记与物理文件）
+- 扫描收件箱导入新笔记并打标签 / 批量添加、移出标签
 
 设计决策：
-- slug 创建后不可变，作为存储路径关键段
-- 删除项目前检查是否为空，防止误删含资料的目录
+- 项目为纯标签，一篇笔记可属于多个项目（多对多）
+- 删除项目只移除标签，文件与笔记全部保留
 - 列表按 created_at 降序排列
 """
 
@@ -23,38 +24,46 @@ import os
 import uuid
 from typing import Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
+from ..models.note_project import NoteProject
 from ..models.project import Project
 from ..services.vault_path import (
     ALLOWED_EXTS,
     EXT_TO_SOURCE_TYPE,
-    project_prefix,
-    sanitize_slug,
+    inbox_prefix,
 )
-from ..services.storage_service import ensure_project_dirs, list_source_files, remove_project_dir
+from ..services.storage_service import list_source_files
 from ..services.vault_meta import write_note_meta, write_project_meta
 
 logger = logging.getLogger(__name__)
 
 
+async def _write_all_project_meta(db: AsyncSession, user_id: str) -> None:
+    """将用户全部项目（标签）清单写穿到用户级 projects.json（镜像非权威，失败不影响主流程）"""
+    stmt = select(Project).where(Project.user_id == user_id)
+    result = await db.execute(stmt)
+    write_project_meta(user_id, list(result.scalars().all()))
+
+
 async def build_response(project: Project, db: AsyncSession) -> Dict:
-    """构建项目响应字典（附带 note_count）"""
-    count_stmt = select(func.count(Note.id)).where(Note.project_id == project.id)
+    """构建项目响应字典（附带 note_count，基于标签关联表统计）"""
+    count_stmt = select(func.count(NoteProject.id)).where(
+        NoteProject.project_id == project.id,
+        NoteProject.user_id == project.user_id,
+    )
     count_result = await db.execute(count_stmt)
     note_count = count_result.scalar() or 0
     return {
         "id": project.id,
         "user_id": project.user_id,
         "name": project.name,
-        "slug": project.slug,
         "description": project.description,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
         "note_count": note_count,
-        "vault_path": project_prefix(project.user_id, project.slug),
     }
 
 
@@ -63,54 +72,34 @@ async def create_project(
     user_id: str,
     name: str,
     description: Optional[str] = None,
-    slug: Optional[str] = None,
 ) -> Project:
     """
-    创建项目
+    创建项目（纯标签）
 
-    slug 由项目名清洗生成（可显式指定），冲突时自动追加 -2/-3 后缀保证每用户唯一。
+    项目不再生成 slug、不创建物理目录；笔记通过 note_projects 关联表打标签。
 
     Args:
         db: 异步数据库会话
         user_id: 用户 ID
         name: 项目名称
         description: 项目描述，可选
-        slug: 显式指定 slug（可选），如默认项目固定为 "default"
 
     Returns:
         Project: 新创建的项目对象
     """
-    base_slug = slug if slug else sanitize_slug(name)
-    slug = base_slug
-    counter = 2
-    while True:
-        stmt = select(Project).where(Project.user_id == user_id, Project.slug == slug)
-        result = await db.execute(stmt)
-        if result.scalars().first() is None:
-            break
-        slug = f"{base_slug}-{counter}"
-        counter += 1
-
     project = Project(
         user_id=user_id,
         name=name,
-        slug=slug,
         description=description,
     )
     db.add(project)
     await db.commit()
     await db.refresh(project)
 
-    # 在磁盘/对象存储中预建 Vault 目录树，让用户可直接浏览并放入文件
-    try:
-        ensure_project_dirs(project_prefix(user_id, slug))
-    except Exception as e:
-        logger.warning("项目目录树创建失败（不影响项目创建）: %s", e, exc_info=True)
+    # 写穿用户级项目清单 output/meta/projects.json，供脱离 DB 浏览时识别标签
+    await _write_all_project_meta(db, user_id)
 
-    # 写穿项目级清单 output/meta/project.json，供脱离 DB 浏览时识别项目
-    write_project_meta(project)
-
-    logger.info("项目创建成功: user_id=%s, project_id=%s, name=%s, slug=%s", user_id, project.id, name, slug)
+    logger.info("项目创建成功: user_id=%s, project_id=%s, name=%s", user_id, project.id, name)
     return project
 
 
@@ -153,7 +142,8 @@ async def get_project(db: AsyncSession, project_id: str, user_id: str) -> Option
 
     notes_stmt = (
         select(Note)
-        .where(Note.project_id == project_id)
+        .join(NoteProject, NoteProject.note_id == Note.id)
+        .where(NoteProject.project_id == project_id)
         .order_by(Note.created_at.desc())
     )
     notes_result = await db.execute(notes_stmt)
@@ -182,7 +172,7 @@ async def update_project(
     """
     更新项目信息
 
-    slug 不可变（Vault 目录名），仅更新显示名与描述。
+    项目为纯标签，名称/描述变更不影响物理路径（统一收件箱）。
 
     Args:
         db: 异步数据库会话
@@ -210,8 +200,8 @@ async def update_project(
     await db.commit()
     await db.refresh(project)
 
-    # 同步更新项目级清单（显示名变更后，磁盘上 project.json 保持与 DB 一致）
-    write_project_meta(project)
+    # 同步用户级项目清单（显示名变更后，磁盘上 projects.json 保持与 DB 一致）
+    await _write_all_project_meta(db, user_id)
 
     logger.info("项目更新成功: user_id=%s, project_id=%s, name=%s", user_id, project_id, project.name)
     return await build_response(project, db)
@@ -219,9 +209,10 @@ async def update_project(
 
 async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> Dict:
     """
-    删除项目
+    删除项目（只删标签）
 
-    仅允许删除空项目（不包含任何笔记）。
+    项目为纯标签：删除仅移除该项目本身及其笔记关联（note_projects 行），
+    不删除任何笔记与物理文件；关联笔记保留，只是不再属于该项目。
 
     Args:
         db: 异步数据库会话
@@ -232,7 +223,7 @@ async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> Dic
         Dict: 操作结果，包含 message 字段
 
     Raises:
-        ValueError: 项目不存在、无权访问或项目非空
+        ValueError: 项目不存在或无权访问
     """
     stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
     result = await db.execute(stmt)
@@ -240,20 +231,15 @@ async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> Dic
     if not project:
         raise ValueError("项目不存在或无权访问")
 
-    count_stmt = select(func.count(Note.id)).where(Note.project_id == project_id)
-    count_result = await db.execute(count_stmt)
-    note_count = count_result.scalar() or 0
-    if note_count > 0:
-        raise ValueError(f"项目非空，包含 {note_count} 个笔记，请先移出或删除笔记")
-
+    # 先删标签关联行（外键未开启时需手动保证子→父删除顺序）
+    await db.execute(
+        delete(NoteProject).where(NoteProject.project_id == project_id)
+    )
     await db.delete(project)
     await db.commit()
 
-    # 清理磁盘/对象存储中的项目目录树（删除项目后不再保留物理文件）
-    try:
-        remove_project_dir(project_prefix(user_id, project.slug))
-    except Exception as e:
-        logger.warning("项目目录树清理失败（不影响项目删除）: %s", e, exc_info=True)
+    # 同步用户级项目清单（删除标签后镜像与 DB 保持一致）
+    await _write_all_project_meta(db, user_id)
 
     logger.info("项目删除成功: user_id=%s, project_id=%s", user_id, project_id)
     return {"message": "项目已删除"}
@@ -261,22 +247,24 @@ async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> Dic
 
 async def scan_project_source(db: AsyncSession, project: Project, user_id: str) -> Dict:
     """
-    扫描项目的 source/ 目录，将手动放入的新文件识别为笔记
+    扫描收件箱 source/ 目录，将手动放入的新文件识别为笔记并打上项目标签
 
-    用户将文件直接放入 Vault 目录树的项目 source/ 后，调用本函数：
-    1. 列出 source/ 下所有文件
+    项目为纯标签后不再拥有独立目录，所有文件统一落在 {user_id}/inbox/source/。
+    本函数：
+    1. 列出 inbox/source/ 下所有文件
     2. 跳过不支持扩展名与已导入（original_file_path 相同）的文件
-    3. 为每个新文件创建笔记并触发转换任务
+    3. 为每个新文件创建笔记（不设 project_id），并写入 note_projects 关联标签
+    4. 触发异步转换任务
 
     Args:
         db: 异步数据库会话
-        project: 项目对象
+        project: 项目对象（用于打标签）
         user_id: 用户 ID
 
     Returns:
         Dict: 扫描结果统计
     """
-    prefix = project_prefix(user_id, project.slug)
+    prefix = inbox_prefix(user_id)
     files = list_source_files(prefix)
 
     imported, skipped, unsupported = [], [], []
@@ -306,13 +294,20 @@ async def scan_project_source(db: AsyncSession, project: Project, user_id: str) 
             original_file_path=object_name,
             status=NoteStatus.converting,
             file_size=size,
-            project_id=project.id,
             note_role=NoteRole.material,
             metadata_={"source": "manual_scan"},
         )
         db.add(note)
+        # 打上项目标签（多对多关联表，唯一约束防重复）
+        db.add(NoteProject(
+            note_id=note.id,
+            project_id=project.id,
+            user_id=user_id,
+        ))
         await db.commit()
         await db.refresh(note)
+        note._project_ids = [project.id]
+        note._project_names = [project.name]
         write_note_meta(note)
 
         # 触发异步转换任务（Celery 不可用时标记失败，文件已就位可重试）
@@ -354,14 +349,11 @@ async def add_notes_to_project(
     db: AsyncSession, project_id: str, user_id: str, note_ids: List[str]
 ) -> Dict:
     """
-    将笔记批量添加到项目
+    将笔记批量添加到项目（打标签）
 
-    校验项目归属后，把属于该用户且 id 在 note_ids 中的笔记的 project_id
-    更新为目标项目。
-
-    注意：被添加的笔记若原本属于其他项目，这里直接改 project_id
-    （逻辑移动，物理文件路径不变）——这是有意取舍：笔记文件仍留在原
-    Vault 目录中，仅变更项目归属关系，避免搬移磁盘文件。
+    校验项目归属后，为属于该用户的笔记批量插入 note_projects 关联行。
+    一篇笔记可属于多个项目（多对多标签），已存在的标签自动跳过
+    （唯一约束兜底防重复）。
 
     Args:
         db: 异步数据库会话
@@ -386,9 +378,25 @@ async def add_notes_to_project(
         notes_stmt = select(Note).where(Note.user_id == user_id, Note.id.in_(note_ids))
         notes_result = await db.execute(notes_stmt)
         notes = notes_result.scalars().all()
+
+        # 查询该笔记是否已属于该项目（避免重复标签）
+        exist_stmt = select(NoteProject.note_id).where(
+            NoteProject.project_id == project_id,
+            NoteProject.user_id == user_id,
+            NoteProject.note_id.in_(note_ids),
+        )
+        exist_result = await db.execute(exist_stmt)
+        existing = set(exist_result.scalars().all())
+
         # 统一一次 commit，保证批量操作原子性
         for note in notes:
-            note.project_id = project.id
+            if note.id in existing:
+                continue
+            db.add(NoteProject(
+                note_id=note.id,
+                project_id=project.id,
+                user_id=user_id,
+            ))
             added += 1
         await db.commit()
         logger.info("项目添加笔记: user_id=%s, project_id=%s, added=%s, requested=%s", user_id, project_id, added, len(note_ids))
@@ -404,10 +412,9 @@ async def remove_note_from_project(
     db: AsyncSession, project_id: str, note_id: str, user_id: str
 ) -> Dict:
     """
-    将笔记从项目中移出
+    将笔记从项目中移出（移除标签）
 
-    置 note.project_id = None（逻辑移出，物理文件路径不变，笔记文件
-    仍留在原 Vault 目录中）。
+    删除 note_projects 关联行；笔记与物理文件全部保留。
 
     Args:
         db: 异步数据库会话
@@ -427,19 +434,18 @@ async def remove_note_from_project(
     if not project:
         raise ValueError("项目不存在或无权访问")
 
-    note_stmt = select(Note).where(
-        Note.id == note_id,
-        Note.user_id == user_id,
-        Note.project_id == project_id,
+    link_stmt = select(NoteProject).where(
+        NoteProject.project_id == project_id,
+        NoteProject.note_id == note_id,
+        NoteProject.user_id == user_id,
     )
-    note_result = await db.execute(note_stmt)
-    note = note_result.scalars().first()
-    if not note:
+    link_result = await db.execute(link_stmt)
+    link = link_result.scalars().first()
+    if not link:
         raise ValueError("笔记不在该项目中")
 
-    note.project_id = None
+    await db.delete(link)
     await db.commit()
-    await db.refresh(note)
 
     logger.info("项目移出笔记: user_id=%s, project_id=%s, note_id=%s", user_id, project_id, note_id)
-    return {"message": "笔记已移出项目", "note_id": note.id}
+    return {"message": "笔记已移出项目", "note_id": note_id}

@@ -46,6 +46,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
 import { statusLabels } from '../utils/labels'
+import { formatDateTime } from '../utils/datetime'
 
 /** 视图模式 */
 type ViewMode = 'original' | 'clean' | 'diff'
@@ -85,8 +86,8 @@ export default function NoteDetail() {
   const [linkMaterialIds, setLinkMaterialIds] = useState<string[]>([])
   const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
 
-  /** 编辑模式相关 state */
-  const [editMode, setEditMode] = useState<'view' | 'edit' | 'preview'>('view')
+  /** 编辑模式相关 state（edit 为实时分屏预览：左侧编辑、右侧即时渲染） */
+  const [editMode, setEditMode] = useState<'view' | 'edit'>('view')
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -492,10 +493,14 @@ export default function NoteDetail() {
     }
   }
 
-  /** 进入编辑模式：预填充内容（优先清洗版，无则原始版） */
+  /** 进入编辑模式：预填充内容（仅允许编辑清洗版，原始版只读） */
   function handleEnterEdit() {
     if (!note) return
-    setEditContent(note.clean_md_content || note.original_md_content || '')
+    if (viewMode === 'original') {
+      alert('原始版不可编辑，请切换到清洗版后编辑')
+      return
+    }
+    setEditContent(note.clean_md_content || '')
     setEditMode('edit')
   }
 
@@ -504,7 +509,8 @@ export default function NoteDetail() {
     if (!note) return
     setSaving(true)
     try {
-      const target: NoteContentTarget = note.clean_md_content ? 'clean' : 'original'
+      // 原始版只读，编辑始终写入清洗版
+      const target: NoteContentTarget = 'clean'
       await updateNoteContent(note.id, editContent, target)
       await fetchNote()
       setEditMode('view')
@@ -518,7 +524,7 @@ export default function NoteDetail() {
 
   /** 取消编辑（有未保存修改时确认） */
   function handleCancelEdit() {
-    const original = note?.clean_md_content || note?.original_md_content || ''
+    const original = note?.clean_md_content || ''
     if (editContent !== original && !confirm('放弃当前编辑的修改？')) return
     setEditContent('')
     setEditMode('view')
@@ -568,8 +574,12 @@ export default function NoteDetail() {
               <button
                 className="btn btn-secondary"
                 onClick={handleEnterEdit}
-                disabled={['uploading', 'converting', 'cleaning', 'learning'].includes(note.status)}
-                title={['uploading', 'converting', 'cleaning', 'learning'].includes(note.status) ? '处理中，暂不可编辑' : '编辑笔记内容'}
+                disabled={viewMode === 'original' || ['uploading', 'converting', 'cleaning', 'learning'].includes(note.status)}
+                title={
+                  viewMode === 'original'
+                    ? '原始版不可编辑，请在清洗版中编辑'
+                    : (['uploading', 'converting', 'cleaning', 'learning'].includes(note.status) ? '处理中，暂不可编辑' : '编辑笔记内容')
+                }
               >
                 编辑
               </button>
@@ -607,11 +617,11 @@ export default function NoteDetail() {
         {/* 笔记元信息标签行 */}
         <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
           <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
-          {note.project_name && (
-            <span className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
-              {note.project_name}
+          {note.project_names?.map((name) => (
+            <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
+              {name}
             </span>
-          )}
+          ))}
           <span className={`status-${note.status}`}>{statusLabels[note.status] || note.status}</span>
           <select
             value={note.note_role || 'material'}
@@ -639,7 +649,7 @@ export default function NoteDetail() {
           </select>
           {note.page_count && <span>{note.page_count} 页</span>}
           <span>{(note.file_size / 1024).toFixed(0)} KB</span>
-          <span>创建于 {new Date(note.created_at).toLocaleString('zh-CN')}</span>
+          <span>创建于 {formatDateTime(note.created_at)}</span>
         </div>
 
         {/* 错误信息提示 + 重试按钮 */}
@@ -747,33 +757,26 @@ export default function NoteDetail() {
           </p>
         </div>
       ) : editMode === 'edit' ? (
-        /* 编辑模式 */
+        /* 编辑模式：实时分屏预览（左侧 Markdown 编辑，右侧即时渲染） */
         <div>
           <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-            <button className="btn btn-secondary" onClick={() => setEditMode('preview')} disabled={saving}>预览</button>
             <button className="btn btn-primary" onClick={handleSaveContent} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
             <button className="btn btn-secondary" onClick={handleCancelEdit} disabled={saving}>取消</button>
           </div>
-          <textarea
-            className="markdown-editor card"
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            disabled={saving}
-            style={{ width: '100%', minHeight: '60vh', padding: '1.5rem', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: '1.6', resize: 'vertical', border: '1px solid var(--color-border)', borderRadius: '0.5rem', outline: 'none' }}
-          />
-        </div>
-      ) : editMode === 'preview' ? (
-        /* 预览模式 */
-        <div>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-            <button className="btn btn-secondary" onClick={() => setEditMode('edit')} disabled={saving}>编辑</button>
-            <button className="btn btn-primary" onClick={handleSaveContent} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
-            <button className="btn btn-secondary" onClick={handleCancelEdit} disabled={saving}>取消</button>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-md)' }}>
+            <textarea
+              className="markdown-editor card"
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              disabled={saving}
+              style={{ width: '100%', minHeight: '60vh', padding: '1.5rem', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: '1.6', resize: 'vertical', border: '1px solid var(--color-border)', borderRadius: '0.5rem', outline: 'none' }}
+            />
+            <article
+              className="card markdown-body"
+              dangerouslySetInnerHTML={{ __html: editPreviewHtml }}
+              style={{ minHeight: '60vh' }}
+            />
           </div>
-          <article
-            className="card markdown-body"
-            dangerouslySetInnerHTML={{ __html: editPreviewHtml }}
-          />
         </div>
       ) : viewMode === 'diff' ? (
         /* diff 对比视图 */

@@ -16,10 +16,10 @@
 
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, Float, Boolean, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseModel, TZDateTime
 
 
 class ReviewLog(BaseModel):
@@ -51,4 +51,4 @@ class ReviewLog(BaseModel):
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     quality: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     time_spent_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    review_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    review_at: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)

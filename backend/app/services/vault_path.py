@@ -1,15 +1,17 @@
 """
 Vault 路径约定模块
 
-定义「项目隔离 + 状态旁载」目录结构的 object-name 约定（POSIX 字符串，
-本地文件系统与 MinIO 模式共用）。每条笔记归属于一个项目目录：
+定义「统一收件箱 + 状态旁载」目录结构的 object-name 约定（POSIX 字符串，
+本地文件系统与 MinIO 模式共用）。项目为纯标签归属（note_projects 多对多），
+不参与物理路径；所有笔记统一落在收件箱前缀下：
 
-    {user_id}/{project_slug}/
+    {user_id}/inbox/
     ├── source/{base}{ext}                    # 只读区：原始文件
     ├── output/markdown/{base}.md             # 生成区：原始转换（只读）
     ├── output/markdown/{base}.clean.md       # 生成区：清洗副本（工作副本）
     ├── output/meta/{base}.json               # 状态旁载（写穿镜像）
-    ├── history/versions/v{N}.md              # 版本区：手动编辑大版本归档
+    ├── output/meta/projects.json             # 用户级项目标签清单（镜像）
+    ├── history/versions/{note_id}/v{N}.md  # 版本区：手动编辑大版本归档（按笔记隔离）
     ├── output/assets/                        # 预留（进阶能力，暂不写入）
     └── cache/                                # 预留（OCR/ASR 缓存区）
 
@@ -17,7 +19,6 @@ Vault 路径约定模块
 保证脱离数据库也能通过文件名完成溯源。
 """
 
-import re
 from pathlib import PurePosixPath
 
 # 项目目录结构常量（object-name 片段）
@@ -66,38 +67,13 @@ EXT_TO_SOURCE_TYPE = {
 ALLOWED_EXTS = set(EXT_TO_SOURCE_TYPE.keys())
 
 
-def sanitize_slug(name: str, max_len: int = 60) -> str:
-    """
-    将项目名清洗为安全的目录名（slug）
-
-    保留字母、数字、中文、下划线与连字符，其余字符替换为 "-"。
-    项目创建后 slug 不可变（作为 Vault 目录名，重命名项目不迁移文件）。
-
-    Args:
-        name: 原始项目名
-        max_len: slug 最大长度
-
-    Returns:
-        str: 清洗后的 slug
-    """
-    slug = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", str(name))
-    slug = re.sub(r"-{2,}", "-", slug).strip("-")
-    slug = slug[:max_len]
-    return slug or "project"
-
-
-def project_prefix(user_id: str, slug: str) -> str:
-    """项目前缀：{user_id}/{project_slug}"""
-    return f"{user_id}/{slug}"
-
-
-# 未归属项目笔记的物理兜底前缀，非真实项目行
+# 所有笔记的物理兜底前缀段（标签化后不再有项目 slug 目录）
 INBOX_SLUG = "inbox"
 
 
 def inbox_prefix(user_id: str) -> str:
-    """收件箱前缀：{user_id}/inbox，未归属任何项目的笔记物理存储兜底前缀（非真实项目行）"""
-    return project_prefix(user_id, INBOX_SLUG)
+    """收件箱前缀：{user_id}/inbox，所有笔记（无论是否打项目标签）的物理存储兜底前缀（非真实项目行）"""
+    return f"{user_id}/{INBOX_SLUG}"
 
 
 def source_object(prefix: str, base: str, ext: str) -> str:
@@ -120,23 +96,32 @@ def meta_object(prefix: str, base: str) -> str:
     return f"{prefix}/{META_DIR}/{base}.json"
 
 
-def history_object(prefix: str, version_no: int) -> str:
-    """版本归档对象名：{P}/history/versions/v{N}.md"""
-    return f"{prefix}/{VERSIONS_DIR}/v{version_no}.md"
+def history_object(prefix: str, note_id: str, version_no: int) -> str:
+    """版本归档对象名：{P}/history/versions/{note_id}/v{N}.md
+
+    以 note_id 作为子目录维度，避免不同笔记的同号版本文件互相覆盖。
+    """
+    return f"{prefix}/{VERSIONS_DIR}/{note_id}/v{version_no}.md"
 
 
 def derive_prefix(note) -> str:
     """
-    从笔记的原始文件路径推导项目前缀 {user_id}/{project_slug}
+    推导笔记的物理前缀 {user_id}/inbox
+
+    标签化后所有笔记统一落在收件箱前缀下（不再有项目 slug 目录）；
+    用户 id 优先取 note.user_id，兜底解析 original_file_path 第一段。
 
     Args:
         note: Note 模型实例
 
     Returns:
-        str: 项目前缀；路径异常时返回空串
+        str: {user_id}/inbox；路径异常时返回空串
     """
-    parts = (note.original_file_path or "").split("/")
-    return "/".join(parts[:2]) if len(parts) >= 2 else ""
+    user_id = getattr(note, "user_id", None)
+    if not user_id:
+        parts = (note.original_file_path or "").split("/")
+        user_id = parts[0] if parts else ""
+    return inbox_prefix(user_id) if user_id else ""
 
 
 def derive_base(note) -> str:

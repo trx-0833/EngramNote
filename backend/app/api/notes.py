@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
+from ..models.note_project import NoteProject
 from ..models.project import Project
 from ..models.user import User
 from ..schemas.note import (
@@ -68,39 +69,47 @@ settings = get_settings()
 router = APIRouter()
 
 
-def _fill_project_name(resp: NoteResponse, note: Note, names: dict) -> None:
-    """为响应填充 project_name（来自预查询的项目名映射）"""
-    resp.project_name = names.get(note.project_id)
+def _fill_project_names(resp: NoteResponse, note: Note, mapping: dict) -> None:
+    """为响应填充 project_ids/project_names（来自预查询的标签映射）"""
+    ids, names = mapping.get(note.id, ([], []))
+    resp.project_ids = ids
+    resp.project_names = names
 
 
-async def _load_project_names(db: AsyncSession, notes) -> dict:
-    """批量查询笔记所属项目名，返回 {project_id: name} 映射"""
-    project_ids = {n.project_id for n in notes if n.project_id}
-    if not project_ids:
+async def _load_project_tags(db: AsyncSession, notes) -> dict:
+    """批量查询笔记的项目标签，返回 {note_id: (project_ids, project_names)} 映射"""
+    note_ids = [n.id for n in notes]
+    if not note_ids:
         return {}
     result = await db.execute(
-        select(Project.id, Project.name).where(Project.id.in_(project_ids))
+        select(NoteProject.note_id, Project.id, Project.name)
+        .join(Project, Project.id == NoteProject.project_id)
+        .where(NoteProject.note_id.in_(note_ids))
     )
-    return dict(result.all())
+    mapping = {nid: ([], []) for nid in note_ids}
+    for note_id, pid, pname in result.all():
+        mapping[note_id][0].append(pid)
+        mapping[note_id][1].append(pname)
+    return mapping
 
 
 async def _build_note_response(db: AsyncSession, note: Note) -> NoteResponse:
-    """构建单个 NoteResponse（含项目名），视频类型填充 video_url"""
+    """构建单个 NoteResponse（含项目标签数组），视频类型填充 video_url"""
     resp = NoteResponse.model_validate(note)
-    names = await _load_project_names(db, [note])
-    _fill_project_name(resp, note, names)
+    tags = await _load_project_tags(db, [note])
+    _fill_project_names(resp, note, tags)
     if note.source_type == SourceType.video:
         resp.video_url = f"/api/notes/{note.id}/video"
     return resp
 
 
 async def _build_note_responses(db: AsyncSession, notes) -> list[NoteResponse]:
-    """批量构建 NoteResponse（一次查询所有项目名，避免 N+1）"""
-    names = await _load_project_names(db, notes)
+    """批量构建 NoteResponse（一次查询所有项目标签，避免 N+1）"""
+    tags = await _load_project_tags(db, notes)
     responses = []
     for n in notes:
         resp = NoteResponse.model_validate(n)
-        _fill_project_name(resp, n, names)
+        _fill_project_names(resp, n, tags)
         if n.source_type == SourceType.video:
             resp.video_url = f"/api/notes/{n.id}/video"
         responses.append(resp)
@@ -220,8 +229,8 @@ async def get_note(
     resp = NoteDetailResponse.model_validate(note)
     resp.original_md_content = original_md
     resp.clean_md_content = clean_md
-    names = await _load_project_names(db, [note])
-    _fill_project_name(resp, note, names)
+    tags = await _load_project_tags(db, [note])
+    _fill_project_names(resp, note, tags)
     if note.source_type == SourceType.video:
         resp.video_url = f"/api/notes/{note.id}/video"
     return resp
@@ -286,6 +295,13 @@ async def update_note_content(
         raise HTTPException(
             status_code=400,
             detail=f"笔记正在处理中（{note.status.value}），暂不可编辑",
+        )
+
+    # 2.1 原始版内容不可编辑（只读），仅允许编辑清洗版
+    if req.target == "original":
+        raise HTTPException(
+            status_code=400,
+            detail="原始版内容不可编辑，请切换到清洗版后编辑",
         )
 
     # 3. 校验内容大小（5MB 限制，按字节数计算）

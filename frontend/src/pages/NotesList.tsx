@@ -213,12 +213,12 @@ export default function NotesList() {
                   <span className={`badge badge-${note.source_type}`}>
                     {sourceTypeLabels[note.source_type] || note.source_type}
                   </span>
-                  {/* 所属项目标签 */}
-                  {note.project_name && (
-                    <span className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
-                      {note.project_name}
+                  {/* 所属项目标签（支持多标签） */}
+                  {note.project_names?.map((name) => (
+                    <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
+                      {name}
                     </span>
-                  )}
+                  ))}
                   {/* 处理状态标签 */}
                   <span className={`status-${note.status}`} style={{ fontSize: '0.8rem' }}>
                     {statusLabels[note.status] || note.status}

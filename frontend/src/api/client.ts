@@ -46,10 +46,10 @@ export interface Note {
   source_type: string;
   /** 笔记角色：material（学习资料）或 personal_note（我的笔记） */
   note_role?: string;
-  /** 所属项目 ID（可选） */
-  project_id?: string | null;
-  /** 所属项目名称（可选） */
-  project_name?: string | null;
+  /** 所属项目标签 ID 数组（多对多） */
+  project_ids?: string[];
+  /** 所属项目标签名称数组（多对多） */
+  project_names?: string[];
   /**
    * 笔记处理状态，流转顺序：
    * uploading → converting → converted → cleaning → cleaned → learning → archived
@@ -561,13 +561,13 @@ export async function updateNoteLinks(noteId: string, materialNoteIds: string[])
  *                  不传则使用后端默认配置
  * @returns 新创建的笔记记录（状态为 uploading）
  */
-export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[], projectId?: string): Promise<Note> {
+export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[], projectIds?: string[]): Promise<Note> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   if (backend) formData.append('backend', backend);
   if (noteRole) formData.append('note_role', noteRole);
-  if (projectId) formData.append('project_id', projectId);
+  if (projectIds && projectIds.length > 0) formData.append('project_ids', JSON.stringify(projectIds));
   if (linkedMaterialIds && linkedMaterialIds.length > 0) {
     formData.append('linked_material_ids', JSON.stringify(linkedMaterialIds));
   }
@@ -581,6 +581,109 @@ export async function uploadFile(file: File, backend?: string, noteRole?: string
 
   if (!response.ok) {
     // Token 过期或无效时，通知应用跳转到登录页
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `上传失败: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/** 两阶段上传阶段 1（prepare）的返回结果 */
+export interface PreparedUpload {
+  /** 临时上传标识，commit 时需回传 */
+  temp_id: string;
+  /** 原始文件名 */
+  filename: string;
+  /** 来源类型，如 pdf、docx 等 */
+  source_type: string;
+  /** PDF 页数，非 PDF 为 null */
+  page_count: number | null;
+}
+
+/**
+ * 两阶段上传阶段 1：接收文件并暂存到服务端临时目录
+ *
+ * 仅做基础校验（格式/大小/内容签名），返回 PDF 页数等信息供前端裁剪配置；
+ * 配额校验与正式入库在 commitUpload 阶段完成。
+ *
+ * @param file - 要上传的文件对象
+ * @returns 临时上传信息（temp_id、filename、source_type、page_count）
+ */
+export async function prepareUpload(file: File): Promise<PreparedUpload> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE}/upload/prepare`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || `上传失败: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/** 两阶段上传阶段 2（commit）的可选参数 */
+export interface CommitUploadOptions {
+  /** 重命名后的文件名（可选），扩展名需与原文件一致 */
+  filename?: string;
+  /** 解析后端选择（可选） */
+  backend?: string;
+  /** 笔记角色，默认 material */
+  note_role?: string;
+  /** 所属项目标签 ID 数组（可选，支持多标签） */
+  project_ids?: string[];
+  /** 关联资料 ID 列表（可选，仅个人笔记） */
+  linked_material_ids?: string[];
+  /** 页码范围表达式（如 "1-20,25,30-32"），仅 PDF 支持 */
+  crop_page_range?: string;
+}
+
+/**
+ * 两阶段上传阶段 2：消费临时文件正式上传
+ *
+ * 可对 PDF 按页裁剪后再入库：传 crop_page_range 时后端先裁剪再转换；
+ * 不传则与单次直传等价。返回 NoteResponse，后续可轮询转换状态。
+ *
+ * @param tempId - prepareUpload 返回的临时上传标识
+ * @param opts - 可选上传参数
+ * @returns 新创建的笔记记录（状态为 uploading）
+ */
+export async function commitUpload(tempId: string, opts: CommitUploadOptions = {}): Promise<Note> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('temp_id', tempId);
+  if (opts.filename && opts.filename.trim()) formData.append('filename', opts.filename.trim());
+  if (opts.backend) formData.append('backend', opts.backend);
+  if (opts.note_role) formData.append('note_role', opts.note_role);
+  if (opts.project_ids && opts.project_ids.length > 0) formData.append('project_ids', JSON.stringify(opts.project_ids));
+  if (opts.crop_page_range && opts.crop_page_range.trim()) {
+    formData.append('crop_page_range', opts.crop_page_range.trim());
+  }
+  if (opts.linked_material_ids && opts.linked_material_ids.length > 0) {
+    formData.append('linked_material_ids', JSON.stringify(opts.linked_material_ids));
+  }
+
+  const response = await fetch(`${API_BASE}/upload/commit`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
       throw new Error('登录已过期，请重新登录');
@@ -1554,7 +1657,7 @@ export async function deleteFolder(folderId: string): Promise<{ message: string 
   });
 }
 
-/** 项目信息（项目隔离 + 状态旁载 Vault 结构的项目层） */
+/** 项目信息（纯标签归属，不再作为 Vault 目录） */
 export interface Project {
   /** 项目 ID */
   id: string;
@@ -1562,14 +1665,10 @@ export interface Project {
   user_id: string;
   /** 项目显示名称，如 "Transformer 论文" */
   name: string;
-  /** Vault 目录名（每用户唯一，创建后不可变） */
-  slug: string;
   /** 项目描述 */
   description: string | null;
   /** 项目内笔记数量 */
   note_count: number;
-  /** Vault 相对路径，如 {user_id}/{slug}，对应磁盘目录 */
-  vault_path: string;
   /** 创建时间（ISO 8601 格式） */
   created_at: string;
   /** 更新时间（ISO 8601 格式） */
@@ -1617,7 +1716,7 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
 }
 
 /**
- * 更新项目（仅改显示名/描述，slug 不可变）
+ * 更新项目（标签化后名称/描述可改，不影响物理路径）
  *
  * @param projectId - 项目 ID
  * @param name - 新项目名称
@@ -1636,7 +1735,7 @@ export async function updateProject(
 }
 
 /**
- * 删除项目（仅允许删除空项目）
+ * 删除项目（只删标签，笔记与文件保留）
  *
  * @param projectId - 项目 ID
  * @returns 操作结果
@@ -1725,13 +1824,13 @@ export async function removeNoteFromProject(projectId: string, noteId: string): 
  * @param backend - 解析后端选择（可选）
  * @returns 新创建的笔记记录
  */
-export async function uploadFileToFolder(file: File, folderId: string, backend?: string, projectId?: string): Promise<Note> {
+export async function uploadFileToFolder(file: File, folderId: string, backend?: string, projectIds?: string[]): Promise<Note> {
   const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   formData.append('folder_id', folderId);
   if (backend) formData.append('backend', backend);
-  if (projectId) formData.append('project_id', projectId);
+  if (projectIds && projectIds.length > 0) formData.append('project_ids', JSON.stringify(projectIds));
 
   const response = await fetch(`${API_BASE}/upload`, {
     method: 'POST',

@@ -17,19 +17,71 @@
 - 向量存储按 note_id 组织，便于按笔记查询和删除
 """
 
+import logging
 import math
 import os
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ..config import get_settings, DATA_DIR
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # 模块级单例：缓存已加载的 SentenceTransformer 模型实例
 # 避免每次 EmbeddingService() 调用都从磁盘重新加载 ~2.2GB 模型
 _cached_model = None
 _cached_model_name = None
+# 模型加载锁：防止并发 encode() 触发重复加载（同进程双份模型瞬时占用 2× 内存，
+# 日志实证：run_in_executor 并发调用时出现过两次 "Loading SentenceTransformer model"）
+_load_lock = threading.Lock()
+
+# 内存不足类异常的判定特征（PyTorch CPU 分配器 / Windows 虚拟内存不足）
+_MEMORY_ERROR_MARKERS = (
+    "not enough memory",
+    "defaultcpuallocator",
+    "alloc_cpu",
+    "out of memory",
+    "页面文件太小",
+    "os error 1455",
+    "memoryerror",
+)
+
+
+def get_available_memory_gb() -> float:
+    """获取当前可用物理内存（GB），无法获取时返回 0.0（触发保守降级）"""
+    try:
+        import psutil
+        return psutil.virtual_memory().available / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
+def _is_memory_error(exc: Exception) -> bool:
+    """判断异常是否为内存不足导致（PyTorch/Windows 内存分配失败）"""
+    text = str(exc).lower()
+    return any(marker in text for marker in _MEMORY_ERROR_MARKERS)
+
+
+def _pick_embedding_model_name() -> str:
+    """
+    根据可用内存选择实际加载的模型名
+
+    空闲内存低于 embedding_min_free_memory_gb 时，跳过配置的主模型，
+    直接使用降级模型（避免加载 bge-m3 这类大模型时 OOM 崩溃）。
+    """
+    model_name = settings.embedding_model
+    fallback = settings.embedding_model_fallback
+    if fallback and model_name != fallback:
+        available = get_available_memory_gb()
+        if available < settings.embedding_min_free_memory_gb:
+            logger.warning(
+                "可用内存不足（%.1fGB < %.1fGB），跳过主模型 %s，改用降级模型 %s",
+                available, settings.embedding_min_free_memory_gb, model_name, fallback,
+            )
+            return fallback
+    return model_name
 
 
 class EmbeddingService:
@@ -40,6 +92,11 @@ class EmbeddingService:
     模型通过 ModelScope 下载（国内镜像，无需翻墙），首次调用 encode() 时延迟加载。
     多次创建 EmbeddingService 实例共享同一个模型对象，避免重复加载。
 
+    内存友好设计（低内存机器不因模型加载而崩溃）：
+    - 加载前检查可用内存，低于阈值自动切换降级模型（见 _pick_embedding_model_name）
+    - 主模型加载失败（内存不足等）时自动重试降级模型，全部失败才抛出带指引的错误
+    - 加锁防止并发 encode() 触发重复加载，避免瞬时 2× 内存占用
+
     使用方式：
         service = EmbeddingService()
         vectors = service.encode(["文本1", "文本2"])
@@ -48,12 +105,20 @@ class EmbeddingService:
 
     def __init__(self):
         global _cached_model, _cached_model_name
-        # 复用已加载的模型实例
-        if _cached_model is not None and _cached_model_name == settings.embedding_model:
+        # 复用已加载的模型实例（进程内只加载一次，即使实际加载的是降级模型）
+        if _cached_model is not None:
             self._model = _cached_model
+            # 同步实际加载的模型名（可能是降级模型），保证 loaded_model_name 准确
+            self._model_name = _cached_model_name
         else:
             self._model = None
-        self._model_name = settings.embedding_model
+            # 期望加载的模型名；实际加载成功后更新为真实加载的模型名
+            self._model_name = settings.embedding_model
+
+    @property
+    def loaded_model_name(self) -> Optional[str]:
+        """当前实际加载的模型名（尚未加载时返回 None）"""
+        return self._model_name if self._model is not None else None
 
     def _ensure_model(self):
         """
@@ -63,15 +128,73 @@ class EmbeddingService:
         然后用 sentence-transformers 从本地路径加载。
         ModelScope 是国内镜像，下载速度快且稳定。
         加载后缓存到模块级单例，后续实例直接复用。
+
+        在锁内执行加载，并发调用时只有第一个线程真正加载，
+        其余线程复用已加载的模型实例。
         """
         global _cached_model, _cached_model_name
         if self._model is not None:
             return
 
+        with _load_lock:
+            if self._model is not None:
+                return
+            if _cached_model is not None:
+                # 复用其他实例已加载的模型（含降级模型）
+                self._model = _cached_model
+                self._model_name = _cached_model_name
+                return
+
+            # 根据可用内存选择实际加载的模型
+            model_name = _pick_embedding_model_name()
+            try:
+                self._load_model_with_fallback(model_name)
+            except Exception as e:
+                available = get_available_memory_gb()
+                if _is_memory_error(e):
+                    hint = (
+                        f"当前可用内存约 {available:.1f}GB。"
+                        f"请关闭部分程序释放内存、增大 Windows 页面文件后重试；"
+                        f"或将 EMBEDDING_MODEL 配置为更轻量的模型（如 BAAI/bge-small-zh-v1.5）。"
+                    )
+                else:
+                    hint = f"请检查模型文件是否完整、网络是否可用（当前可用内存约 {available:.1f}GB）。"
+                raise RuntimeError(f"嵌入模型加载失败（{type(e).__name__}: {e}）。{hint}") from e
+
+            # 缓存到模块级单例
+            _cached_model = self._model
+            _cached_model_name = self._model_name
+
+    def _load_model_with_fallback(self, model_name: str):
+        """
+        按降级链尝试加载模型：主模型失败时自动重试降级模型
+
+        Args:
+            model_name: 首选模型名（可能已由内存预检替换为降级模型）
+        """
+        candidates = [model_name]
+        fallback = settings.embedding_model_fallback
+        if fallback and fallback != model_name:
+            candidates.append(fallback)
+
+        last_exc: Optional[Exception] = None
+        for candidate in candidates:
+            try:
+                self._load_model_candidate(candidate)
+                if candidate != settings.embedding_model:
+                    logger.warning("嵌入模型已降级加载: %s（配置主模型为 %s）", candidate, settings.embedding_model)
+                return
+            except Exception as e:
+                last_exc = e
+                logger.warning("嵌入模型 %s 加载失败: %s", candidate, e)
+        raise last_exc  # type: ignore[misc]
+
+    def _load_model_candidate(self, model_name: str):
+        """加载单个候选模型（ModelScope 本地路径优先，回退 HuggingFace）"""
         from sentence_transformers import SentenceTransformer
 
         # 尝试从 ModelScope 下载模型到本地
-        model_path = self._download_from_modelscope(self._model_name)
+        model_path = self._download_from_modelscope(model_name)
         if model_path:
             # 从本地路径加载时，设置 HF_HUB_OFFLINE=1 阻止 SentenceTransformer
             # 尝试连接 HuggingFace 下载 modules.json 等额外文件
@@ -82,11 +205,14 @@ class EmbeddingService:
                 os.environ.pop("HF_HUB_OFFLINE", None)
         else:
             # ModelScope 下载失败，回退到 HuggingFace（需网络）
-            self._model = SentenceTransformer(self._model_name)
+            self._model = SentenceTransformer(model_name)
 
-        # 缓存到模块级单例
-        _cached_model = self._model
-        _cached_model_name = self._model_name
+        self._model_name = model_name
+        logger.info(
+            "嵌入模型加载成功: %s（可用内存 %.1fGB）",
+            model_name,
+            get_available_memory_gb(),
+        )
 
     @staticmethod
     def _download_from_modelscope(model_name: str) -> Optional[str]:
@@ -108,6 +234,7 @@ class EmbeddingService:
         # HuggingFace 模型名 → ModelScope 模型名映射
         modelscope_mapping = {
             "BAAI/bge-m3": "Xorbits/bge-m3",
+            "BAAI/bge-small-zh-v1.5": "BAAI/bge-small-zh-v1.5",
             "paraphrase-multilingual-MiniLM-L12-v2": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         }
 
@@ -122,8 +249,21 @@ class EmbeddingService:
         if os.path.isfile(config_file):
             return local_model_dir
 
+        # modelscope 缓存目录命名：模型名中的 "." 会替换为 "___"。
+        # 无管理员权限时符号链接创建失败，文件实际落在该目录下（如 bge-small-zh-v1___5）
+        ms_cache_dir = os.path.join(
+            cache_dir, ms_model_name.replace("/", os.sep).replace(".", "___")
+        )
+        ms_config_file = os.path.join(ms_cache_dir, "config.json")
+        if os.path.isfile(ms_config_file):
+            return ms_cache_dir
+
         try:
-            from modelscope import snapshot_download
+            # 兼容不同版本的 modelscope 导入路径
+            try:
+                from modelscope import snapshot_download
+            except ImportError:
+                from modelscope.hub.snapshot_download import snapshot_download
             # 下载到项目的 data/models/ 目录，避免占用 C 盘空间
             model_dir = snapshot_download(
                 ms_model_name,
@@ -131,8 +271,7 @@ class EmbeddingService:
             )
             return model_dir
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 f"ModelScope 下载模型失败 ({ms_model_name}): {e}，将回退到 HuggingFace"
             )
             return None
@@ -150,7 +289,11 @@ class EmbeddingService:
         if not texts:
             return []
         self._ensure_model()
-        embeddings = self._model.encode(texts, show_progress_bar=False)
+        embeddings = self._model.encode(
+            texts,
+            batch_size=settings.embedding_batch_size,
+            show_progress_bar=False,
+        )
         # numpy 数组转为 Python 列表，便于 JSON 序列化
         return embeddings.tolist()
 
@@ -230,16 +373,20 @@ class VectorStore:
         note_id: str,
         chunks: List[Dict],
         embeddings: Optional[List[List[float]]] = None,
+        embedding_model: Optional[str] = None,
     ):
         """
         添加文本分块及其嵌入向量到向量存储
 
         如果未提供 embeddings，则自动使用 EmbeddingService 生成。
+        collection 元数据记录生成向量所用的模型名与维度，
+        供检索方识别并跳过模型不匹配的 collection（不同模型向量不可比）。
 
         Args:
             note_id: 笔记 ID
             chunks: 分块列表，每个包含 index、content、start_line、end_line
             embeddings: 嵌入向量列表（可选，不提供则自动生成）
+            embedding_model: 生成向量所用的模型名（可选，不提供则取当前加载模型）
         """
         if not chunks:
             return
@@ -253,16 +400,27 @@ class VectorStore:
         except Exception:
             pass
 
-        collection = self._client.get_or_create_collection(
-            name=collection_name,
-            metadata={"note_id": note_id},
-        )
-
         # 如果没有提供嵌入向量，自动生成
         if embeddings is None:
             service = EmbeddingService()
             texts = [chunk["content"] for chunk in chunks]
             embeddings = service.encode(texts)
+            if embedding_model is None:
+                embedding_model = service.loaded_model_name
+        elif embedding_model is None:
+            embedding_model = EmbeddingService().loaded_model_name
+
+        # 记录生成向量所用的模型（跨模型一致性：不同模型维度不同，不可混查）
+        collection_metadata = {"note_id": note_id}
+        if embedding_model:
+            collection_metadata["embedding_model"] = embedding_model
+        if embeddings:
+            collection_metadata["embedding_dim"] = len(embeddings[0])
+
+        collection = self._client.get_or_create_collection(
+            name=collection_name,
+            metadata=collection_metadata,
+        )
 
         # 准备数据
         ids = [f"chunk_{chunk['index']}" for chunk in chunks]

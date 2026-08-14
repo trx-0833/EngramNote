@@ -23,10 +23,10 @@ import enum
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Enum, String, Text, JSON, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import Enum, String, Text, JSON, Integer, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseModel, TZDateTime
 
 
 class QuestionType(str, enum.Enum):
@@ -103,11 +103,11 @@ class QuizItem(BaseModel):
     easiness_factor: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
     # 下次复习时间，默认为创建时间（新题目立即可复习）
     next_review_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None, index=True
+        TZDateTime(timezone=True), nullable=True, default=None, index=True
     )
     # 上次复习时间
     last_reviewed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
+        TZDateTime(timezone=True), nullable=True, default=None
     )
     # 累计复习次数
     review_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

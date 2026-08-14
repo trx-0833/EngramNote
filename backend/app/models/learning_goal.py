@@ -21,10 +21,10 @@ import enum
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import String, Integer, Float, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import String, Integer, Float, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseModel, TZDateTime
 
 
 class GoalType(str, enum.Enum):
@@ -88,11 +88,11 @@ class LearningGoal(BaseModel):
     # 目标范围包含的文件夹 ID 列表
     scope_folders: Mapped[List[str]] = mapped_column(JSON, default=list)
     target_mastery: Mapped[float] = mapped_column(Float, default=80.0)
-    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    deadline: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=GoalStatus.ACTIVE.value, index=True)
     # 缓存的完成百分比，由 Celery Beat 定时刷新
     progress_cache: Mapped[float] = mapped_column(Float, default=0.0)
-    last_progress_refresh: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_progress_refresh: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
 
 
 class DailyPlan(BaseModel):
@@ -116,7 +116,7 @@ class DailyPlan(BaseModel):
 
     goal_id: Mapped[str] = mapped_column(String(36), ForeignKey("learning_goals.id", ondelete="CASCADE"), index=True, nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    plan_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    plan_date: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)
     # 推荐任务：{"review": [...], "new_materials": [...], "weak_points": [...]}
     recommended_tasks: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
     completed_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -59,6 +59,9 @@ backend/verify_*.py
 backend/reset_*.py
 backend/restore_*.py
 
+# ---- 运维脚本中含真实用户数据的文件（隐私，不提交） ----
+backend/scripts/cleanup_test_data.py
+
 # ---- 测试与缓存 ----
 .pytest_cache/
 .mypy_cache/

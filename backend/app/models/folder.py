@@ -18,10 +18,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseModel, TZDateTime
 
 
 class Folder(BaseModel):
@@ -48,4 +48,4 @@ class Folder(BaseModel):
     # 文件夹描述，可选
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 文件夹日期，建立索引加速按日期查询
-    folder_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    folder_date: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)

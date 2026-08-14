@@ -158,6 +158,34 @@ def encode_text(texts: List[str]) -> List[List[float]]:
     return results
 
 
+def _collection_matches_current_model(collection) -> bool:
+    """
+    判断 collection 的向量是否与当前加载的嵌入模型一致
+
+    跨模型一致性：不同嵌入模型向量维度不同（bge-m3=1024、bge-small-zh-v1.5=512），
+    混查会导致维度不匹配报错或相似度无意义。
+
+    无 embedding_model 元数据（历史数据）或模型尚未加载时视为一致，
+    由查询阶段的维度异常兜底跳过。
+
+    Args:
+        collection: Chroma collection 对象
+
+    Returns:
+        bool: 模型一致（或无记录可比对）返回 True
+    """
+    from ..services.embedding_service import EmbeddingService
+
+    collection_meta = collection.metadata or {}
+    stored_model = collection_meta.get("embedding_model")
+    if not stored_model:
+        return True  # 旧数据无记录：尝试查询，维度错误由下层异常兜底
+    current_model = EmbeddingService().loaded_model_name
+    if not current_model:
+        return True  # 模型未加载：无从比对，交由查询阶段决定
+    return stored_model == current_model
+
+
 async def _search_vectors_async(
     user_id: str,
     question_embedding: List[float],
@@ -208,6 +236,17 @@ async def _search_vectors_async(
                     collection_name = vector_store._get_collection_name(note_id)
                     collection = vector_store._client.get_collection(collection_name)
                 except Exception:
+                    return []
+
+                # 跨模型一致性：collection 记录的生成模型与当前加载模型不一致时跳过。
+                # 旧数据无 embedding_model 元数据时仍尝试查询（维度不匹配由下层异常兜底跳过）。
+                if not _collection_matches_current_model(collection):
+                    collection_meta = collection.metadata or {}
+                    logger.warning(
+                        f"跳过向量集合 {collection_name}: 存储模型 "
+                        f"{collection_meta.get('embedding_model')} 与当前模型 "
+                        f"{EmbeddingService().loaded_model_name} 不一致"
+                    )
                     return []
 
                 count = collection.count()

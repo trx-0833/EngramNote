@@ -49,9 +49,9 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    创建项目
+    创建项目（纯标签）
 
-    自动生成每用户唯一的 slug 作为 Vault 目录名。
+    项目为纯标签，不再生成 slug、不创建物理目录。
 
     Args:
         req: 项目创建请求，包含 name、description
@@ -119,7 +119,7 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    更新项目信息（slug 不可变，仅改显示名/描述）
+    更新项目信息（标签化后名称/描述可改，不影响物理路径）
 
     Args:
         project_id: 项目 ID
@@ -148,7 +148,9 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    删除项目（仅允许删除空项目）
+    删除项目（只删标签）
+
+    删除项目本身及其笔记标签关联；笔记与物理文件全部保留。
 
     Args:
         project_id: 项目 ID
@@ -159,7 +161,7 @@ async def delete_project(
         Dict: 操作结果
 
     Raises:
-        HTTPException: 项目不存在、无权访问或项目非空
+        HTTPException: 项目不存在或无权访问
     """
     try:
         return await project_service.delete_project(db, project_id, current_user.id)
@@ -174,11 +176,11 @@ async def scan_project_source(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    扫描导入：将手动放入项目 source/ 目录的新文件识别为笔记
+    扫描导入：将手动放入收件箱 source/ 目录的新文件识别为笔记并打上项目标签
 
-    用户可把文件直接拷贝到 Vault 目录树中该项目的 source/ 子目录，
-    然后调用本接口批量导入（每个文件创建一条笔记并触发转换任务）。
-    已导入过的文件会被自动跳过。
+    项目为纯标签后不再拥有独立目录，所有文件统一落在 {user_id}/inbox/source/。
+    用户可把文件直接拷贝到该目录后调用本接口批量导入（每个文件创建一条笔记
+    并打上当前项目标签、触发转换任务）。已导入过的文件会被自动跳过。
 
     Args:
         project_id: 项目 ID
@@ -209,10 +211,10 @@ async def add_notes(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    将笔记批量添加到项目
+    将笔记批量添加到项目（打标签）
 
-    把属于当前用户且 id 在 req.note_ids 中的笔记归入该项目
-    （逻辑移动，物理文件路径不变）。
+    为属于当前用户且 id 在 req.note_ids 中的笔记插入 note_projects 关联行；
+    一篇笔记可属于多个项目（多对多标签），已存在的标签自动跳过。
 
     Args:
         project_id: 项目 ID
@@ -242,9 +244,9 @@ async def remove_note(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    将笔记从项目中移出
+    将笔记从项目中移出（移除标签）
 
-    置笔记的 project_id 为空（逻辑移出，物理文件路径不变）。
+    删除 note_projects 关联行；笔记与物理文件全部保留。
 
     Args:
         project_id: 项目 ID

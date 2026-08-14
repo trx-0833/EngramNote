@@ -228,8 +228,13 @@ async def _clean_document(note_id: str):
         clean_rules,
         split_into_chunks,
         generate_clean_copy,
+        find_duplicates_lightweight,
     )
-    from ..services.embedding_service import EmbeddingService, VectorStore
+    from ..services.embedding_service import (
+        EmbeddingService,
+        VectorStore,
+        get_available_memory_gb,
+    )
 
     # 确保存储桶目录存在
     ensure_buckets_exist()
@@ -301,6 +306,7 @@ async def _clean_document(note_id: str):
                 "clean_stats": clean_stats,
                 "duplicate_blocks": 0,
                 "total_chunks": 0,
+                "dedup_mode": "none",
             },
         )
         return
@@ -311,39 +317,66 @@ async def _clean_document(note_id: str):
         return
 
     # 5. 生成嵌入向量
+    # 失败时降级为无模型文本去重（dedup_mode=lightweight），保证清洗不整体失败
+    embeddings = None
+    embedding_model_name = None
+    dedup_mode = "embedding"
     try:
         embedding_service = EmbeddingService()
         texts = [chunk["content"] for chunk in chunks]
         embeddings = embedding_service.encode(texts)
+        embedding_model_name = embedding_service.loaded_model_name
     except Exception as e:
-        await _update_note_status(
-            note_id, NoteStatus.cleaning_failed,
-            error_message=f"嵌入向量生成失败: {str(e)}",
+        dedup_mode = "lightweight"
+        logger.error(
+            "嵌入向量生成失败，降级为无模型文本去重: note_id=%s, err=%s, 可用内存=%.1fGB",
+            note_id, e, get_available_memory_gb(),
         )
-        return
 
     # 检查用户是否已停止清洗（向量存储前）
     if await _is_cleaning_stopped(note_id):
         logger.info(f"用户已停止清洗，跳过向量存储 (note_id={note_id})")
         return
 
-    # 6. 存储向量到 Chroma
-    try:
-        vector_store = VectorStore()
-        vector_store.add_chunks(note_id, chunks, embeddings)
-    except Exception as e:
-        await _update_note_status(
-            note_id, NoteStatus.cleaning_failed,
-            error_message=f"向量存储失败: {str(e)}",
-        )
-        return
+    if embeddings is not None:
+        # 6. 存储向量到 Chroma（失败不影响清洗，降级文本去重）
+        vector_store = None
+        try:
+            vector_store = VectorStore()
+            vector_store.add_chunks(
+                note_id, chunks, embeddings,
+                embedding_model=embedding_model_name,
+            )
+        except Exception as e:
+            logger.error(
+                f"向量存储失败，降级为无模型文本去重: note_id={note_id}, err={e}"
+            )
 
-    # 7. 查找重复块
-    try:
-        duplicates = vector_store.find_duplicates(note_id)
-    except Exception as e:
-        # 去重失败不影响清洗，继续生成副本
-        duplicates = []
+        # 7. 查找重复块
+        if vector_store is not None:
+            try:
+                duplicates = vector_store.find_duplicates(note_id)
+            except Exception as e:
+                # 去重失败不影响清洗，继续生成副本
+                logger.warning(f"向量去重失败，跳过去重: note_id={note_id}, err={e}")
+                duplicates = []
+        else:
+            duplicates = find_duplicates_lightweight(chunks)
+            dedup_mode = "lightweight"
+    else:
+        # 7b. 无模型兜底去重（嵌入模型不可用，如内存不足）
+        try:
+            duplicates = find_duplicates_lightweight(chunks)
+        except Exception as e:
+            await _update_note_status(
+                note_id, NoteStatus.cleaning_failed,
+                error_message=(
+                    f"嵌入向量生成失败且文本去重兜底也失败: {str(e)}。"
+                    f"当前可用内存约 {get_available_memory_gb():.1f}GB，"
+                    f"请关闭部分程序释放内存或增大 Windows 页面文件后重试"
+                ),
+            )
+            return
 
     # 8. 生成清洗副本
     clean_copy, copy_stats = generate_clean_copy(original_text, cleaned_text, duplicates)
@@ -365,20 +398,35 @@ async def _clean_document(note_id: str):
     )
 
     # 10. 更新笔记状态和元数据
+    # 为每个重复对保存两个块的文本内容（content=重复块，original_content=被重复的保留块），
+    # 供前端展示与人工核对（旧版本清洗的笔记无此字段，重新清洗后补齐）
+    chunk_by_index = {chunk["index"]: chunk["content"] for chunk in chunks}
+    duplicates_detail = []
+    for d in duplicates:
+        entry = {
+            "block_index": d["block_index"],
+            "duplicate_of": d["duplicate_of"],
+            "similarity": round(d["similarity"], 4),
+        }
+        content = chunk_by_index.get(d["block_index"])
+        original_content = chunk_by_index.get(d["duplicate_of"])
+        if content is not None:
+            entry["content"] = content
+        if original_content is not None:
+            entry["original_content"] = original_content
+        duplicates_detail.append(entry)
+
     metadata = {
         "clean_stats": clean_stats,
         "copy_stats": copy_stats,
         "duplicate_blocks": len(duplicates),
         "total_chunks": len(chunks),
-        "duplicates_detail": [
-            {
-                "block_index": d["block_index"],
-                "duplicate_of": d["duplicate_of"],
-                "similarity": round(d["similarity"], 4),
-            }
-            for d in duplicates
-        ],
+        "dedup_mode": dedup_mode,
+        "duplicates_detail": duplicates_detail,
     }
+    # 记录实际使用的嵌入模型（降级时为用户识别去重质量提供依据）
+    if embedding_model_name:
+        metadata["embedding_model"] = embedding_model_name
 
     # 检查用户是否已停止清洗（写入最终状态前）
     if await _is_cleaning_stopped(note_id):

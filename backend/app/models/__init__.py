@@ -13,6 +13,7 @@ from .note_material_link import NoteMaterialLink
 from .note_annotation import NoteAnnotation
 from .learning_goal import LearningGoal, DailyPlan, GoalType, GoalStatus
 from .note_version import NoteVersion, VersionSource
+from .note_project import NoteProject
 
 __all__ = [
     "User",
@@ -41,4 +42,5 @@ __all__ = [
     "GoalStatus",
     "NoteVersion",
     "VersionSource",
+    "NoteProject",
 ]

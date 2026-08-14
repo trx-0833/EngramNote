@@ -32,6 +32,9 @@ DATA_DIR = PROJECT_ROOT / "data"
 STORAGE_DIR = DATA_DIR / "storage"
 # SQLite 数据库文件目录
 DB_DIR = DATA_DIR / "db"
+# 两阶段上传的临时文件目录：data/tmp/upload/{uuid}/{原文件名}
+# data/ 已被 .gitignore 忽略；由 commit 后清理逻辑与启动时超时清理兜底
+TMP_UPLOAD_DIR = DATA_DIR / "tmp" / "upload"
 
 
 class Settings(BaseSettings):
@@ -121,8 +124,16 @@ class Settings(BaseSettings):
 
     # ---- AI 清洗管道配置 ----
     # 嵌入模型名称，用于文本向量化（去重检测）
-    # 推荐模型：BAAI/bge-m3（多语言，效果好）或 paraphrase-multilingual-MiniLM-L12-v2（更轻量）
+    # 推荐模型：BAAI/bge-m3（多语言，效果好）或 BAAI/bge-small-zh-v1.5（中文轻量，~95MB）
     embedding_model: str = "BAAI/bge-m3"
+    # 内存不足时的降级模型（更轻量）：BAAI/bge-small-zh-v1.5（中文，512 维，~95MB）
+    # 或 paraphrase-multilingual-MiniLM-L12-v2（多语言，384 维，~470MB，128 token 截断）
+    embedding_model_fallback: str = "BAAI/bge-small-zh-v1.5"
+    # 空闲内存低于此值（GB）时跳过主模型直接加载降级模型，避免 OOM 崩溃
+    # bge-m3 加载峰值约 2×2.3GB，建议阈值 4.0；bge-small-zh-v1.5 仅需约 0.5GB
+    embedding_min_free_memory_gb: float = 4.0
+    # 嵌入编码批大小，控制编码时的激活内存峰值（CPU 上建议 16）
+    embedding_batch_size: int = 16
     # 去重相似度阈值（0-1），高于此值视为重复
     similarity_threshold: float = 0.92
     # 文本分块大小（字符数）

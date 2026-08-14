@@ -16,6 +16,7 @@
 - 所有清洗操作记录统计信息，便于用户审阅
 """
 
+import difflib
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -553,3 +554,106 @@ def delete_block(clean_text: str, block_index: int) -> str:
     )
     result = pattern.sub("", clean_text)
     return result
+
+
+# ============================================================
+# 无模型兜底去重（嵌入模型不可用时的降级方案）
+# ============================================================
+
+def _normalize_for_dedup(text: str) -> str:
+    """归一化文本用于去重比较：压缩连续空白并去除首尾空白、忽略大小写"""
+    return " ".join(text.split()).lower()
+
+
+def _text_similarity(a: str, b: str, threshold: float) -> float:
+    """
+    基于标准库的文本相似度
+
+    精确相等返回 1.0；否则用 difflib.SequenceMatcher 计算相似度。
+    先用 quick_ratio（ratio 的快速上界，O(n) 代价）做预过滤，
+    只有可能达到阈值的块对才执行精确的 ratio 计算，控制最坏情况开销。
+
+    Args:
+        a: 归一化后的文本 A
+        b: 归一化后的文本 B
+        threshold: 相似度阈值
+
+    Returns:
+        float: 相似度，低于阈值直接返回 0.0（避免无谓计算）
+    """
+    if a == b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    # autojunk=False：默认的 autojunk 会把出现频率高的字符（中文高频字如"的/了/。"）
+    # 当作垃圾丢弃，导致中文文本相似度被严重低估（实测 2% 差异的文本 ratio 仅 0.5）
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    # quick_ratio 是 ratio 的快速上界：上界都达不到阈值，真实值必然低于阈值
+    if matcher.quick_ratio() < threshold:
+        return 0.0
+    return matcher.ratio()
+
+
+def find_duplicates_lightweight(
+    chunks: List[Dict],
+    threshold: float = 0.0,
+) -> List[Dict]:
+    """
+    无模型兜底去重：基于归一化文本相似度查找重复块
+
+    嵌入模型不可用（如内存不足导致加载失败）时的降级方案，仅使用标准库，
+    内存占用可忽略。语义与 VectorStore.find_duplicates 保持一致：
+    - 保留首次出现的块，后续相似块标记为重复
+    - 跳过行范围有重叠的块对（重叠是分块策略的正常结果，非真正重复）
+    - 按相似度降序排列
+
+    Args:
+        chunks: 分块列表，每个包含 index、content、start_line、end_line
+        threshold: 相似度阈值，0 表示使用配置默认值
+
+    Returns:
+        List[Dict]: 重复块列表，每个包含：
+            - block_index: 重复块的索引
+            - duplicate_of: 首次出现的块索引
+            - similarity: 相似度分数
+    """
+    threshold = threshold or settings.similarity_threshold
+
+    n = len(chunks)
+    if n < 2:
+        return []
+
+    normalized = [_normalize_for_dedup(chunk["content"]) for chunk in chunks]
+
+    duplicates = []
+    already_duplicate = set()  # 已被标记为重复的块索引
+
+    for i in range(n):
+        if i in already_duplicate:
+            continue  # 已被标记为重复的块不再作为"首次出现"
+
+        for j in range(i + 1, n):
+            if j in already_duplicate:
+                continue  # 已被标记为重复的块跳过
+
+            # 跳过行范围有重叠的块对（重叠是分块策略的正常结果，非真正重复）
+            i_start = chunks[i].get("start_line", 0)
+            i_end = chunks[i].get("end_line", 0)
+            j_start = chunks[j].get("start_line", 0)
+            j_end = chunks[j].get("end_line", 0)
+            if i_start <= j_end and j_start <= i_end:
+                continue
+
+            similarity = _text_similarity(normalized[i], normalized[j], threshold)
+            if similarity >= threshold:
+                # j 是 i 的重复块
+                duplicates.append({
+                    "block_index": chunks[j]["index"],
+                    "duplicate_of": chunks[i]["index"],
+                    "similarity": similarity,
+                })
+                already_duplicate.add(j)
+
+    # 按相似度降序排列
+    duplicates.sort(key=lambda x: x["similarity"], reverse=True)
+    return duplicates
