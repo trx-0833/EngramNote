@@ -153,7 +153,16 @@ class Settings(BaseSettings):
     # LLM 每分钟最大请求数 (0 = 不限流)
     llm_max_rpm: int = 10
     # LLM HTTP 请求超时（秒）（F-05 修复：共享客户端使用）
-    llm_timeout_seconds: float = 120.0
+    # 实测：reasoning 模型生成 8K 输出 token 约需 195s，120s 会在模型返回前就超时，
+    # 比 JSON 截断更早触发失败，故提高默认值（F-33）
+    llm_timeout_seconds: float = 600.0
+    # LLM 结构化输出（JSON 场景）单次生成上限（token）。
+    # 网关按 max_tokens 精确截断（finish_reason=length 实测验证），该值需明显大于
+    # 实际 JSON 体量（实测多数截断发生在 8192，故默认 16384；截断重试时按 2 倍逐级放大）。
+    # 不建议设到 200000：超出模型硬上限的部分无效，且会放大超时/成本风险（F-33）。
+    llm_json_max_tokens: int = 16384
+    # 截断重试时单次 max_tokens 的放大上限（防止极端值拖死请求）
+    llm_json_max_tokens_ceiling: int = 32768
 
     # ---- ASR 语音转写配置 ----
     # ASR 模型路径（空则使用默认 modelscope 缓存路径）

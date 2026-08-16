@@ -26,8 +26,9 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -107,6 +108,147 @@ def _truncate_messages(messages: List[Dict[str, str]], limit: int = 200) -> List
             item["content"] = content[:limit] + f"...(截断,共{len(content)}字)"
         result.append(item)
     return result
+
+
+# ===========================================================================
+# 健壮 JSON 解析（F-33：应对 LLM 输出「截断 / 围栏包裹 / 尾缀杂文」三类问题）
+# ===========================================================================
+
+def strip_json_fences(text: str) -> str:
+    """
+    剥离 LLM 输出中的 markdown 代码围栏（```json ... ``` / ``` ... ```）
+
+    实测（F-33）：模型即使指定 response_format=json_object，也可能把结果包在
+    代码围栏里，此时 json.loads 直接失败。围栏剥离必须在解析前完成。
+    """
+    s = (text or "").strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s)
+    if m:
+        s = m.group(1).strip()
+    return s
+
+
+def _first_json_pos(text: str) -> Optional[int]:
+    """查找首个 JSON 容器起始位置（跳过前导散文）"""
+    for i, c in enumerate(text):
+        if c in "{[":
+            return i
+    return None
+
+
+def _salvage_json_prefix(text: str, start: int) -> Tuple[Optional[Any], int]:
+    """
+    截断抢救：从截断的 JSON 开头向后扫描，找出「已生成完整、只需补闭合括号」的最长前缀。
+
+    原理：LLM 截断（finish_reason=length）后文本通常是：
+      {"chapters": [{...}, {...},        ← 数组未闭合
+      {"questions": [{...}, {...}]       ← 缺最外层 }
+      [ {..}, {..},                      ← 数组未闭合
+    该扫描在字符串感知（忽略引号内 {,}，处理 \\ 转义）的前提下，记录栈深度 ≤ 2 的
+    浅层闭合点，然后依次尝试「原文 + 补齐闭合括号」能否被 json.loads 解析，
+    取最长可解析者。若整体不可解析（在字符串中间截断），返回最后一个可闭合前缀。
+
+    Args:
+        text: 截断的 JSON 文本（可能含围栏/杂文）
+        start: JSON 容器起始下标
+
+    Returns:
+        (解析出的数据, 结束下标)；抢救失败返回 (None, -1)
+    """
+    stack: List[str] = []
+    snapshots: List[Tuple[int, Tuple[str, ...]]] = []  # (下标, 栈快照)
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c in "{[":
+            stack.append(c)
+        elif c in "}]":
+            if not stack:
+                break  # 多余闭合，视为截断边界
+            stack.pop()
+            # 深度 ≤ 2 的浅层闭合点：截断通常发生在这里
+            if len(stack) <= 2:
+                snapshots.append((i, tuple(stack)))
+
+    def try_load(snippet: str) -> Optional[Any]:
+        try:
+            return json.loads(snippet)
+        except json.JSONDecodeError:
+            return None
+
+    tried = set()
+    # 从最长到最短尝试
+    for idx, stack_snap in sorted(snapshots, key=lambda x: -x[0]):
+        snippet = text[start:idx + 1]
+        closers = "".join("]" if o == "[" else "}" for o in reversed(stack_snap))
+        for candidate in (snippet, snippet + closers, snippet + closers * 2):
+            if candidate in tried:
+                continue
+            tried.add(candidate)
+            data = try_load(candidate)
+            if data is not None:
+                return data, idx
+    return None, -1
+
+
+def parse_json_tolerant(text: str) -> Tuple[Optional[Any], Dict[str, Any]]:
+    """
+    健壮 JSON 解析（F-33）
+
+    按层级尝试，逐级提升容错能力，尽量挽回模型输出：
+    1. 直接 json.loads（围栏剥离后）
+    2. raw_decode 首个容器——处理「JSON + 尾缀杂文」（截断/多行注释外的常见情况）
+    3. 截断抢救——补齐闭合括号，取最长可解析前缀（部分数据）
+
+    Args:
+        text: LLM 输出原文
+
+    Returns:
+        (data, info)：
+            data 可能为部分数据（截断抢救）或 None（彻底失败）
+            info: {"status": "ok" | "ok_with_tail" | "partial" | "failed",
+                   "detail": str}
+    """
+    if not text or not text.strip():
+        return None, {"status": "empty", "detail": "empty response"}
+
+    s = strip_json_fences(text)
+
+    # 1) 直接解析
+    try:
+        return json.loads(s), {"status": "ok", "detail": ""}
+    except json.JSONDecodeError:
+        pass
+
+    # 2) JSON + 尾缀杂文 / 前导杂文
+    first = _first_json_pos(s)
+    if first is not None:
+        try:
+            data, _end = json.JSONDecoder().raw_decode(s, first)
+            return data, {"status": "ok_with_tail", "detail": "json with trailing prose"}
+        except json.JSONDecodeError:
+            pass
+
+        # 3) 截断抢救
+        salvaged, end = _salvage_json_prefix(s, first)
+        if salvaged is not None:
+            return salvaged, {
+                "status": "partial",
+                "detail": f"truncated json salvaged up to offset {end}",
+            }
+
+    return None, {"status": "failed", "detail": f"unparseable: {s[:200]}"}
 
 
 class RateLimiter:
@@ -258,13 +400,22 @@ class UnderstandingSession(ConversationSession):
         super().__init__(llm_service, system_prompt, **kwargs)
         self._extracted_titles: List[str] = []
         self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
+        # F-33:记录最近一次调用的截断信号(finish_reason=length)
+        self._last_truncated: bool = False
+        self._last_finish_reason: str = ""
 
-    async def ask(self, user_content: str) -> str:
+    @property
+    def last_truncated(self) -> bool:
+        """最近一次 ask() 是否因 max_tokens 截断(F-33)"""
+        return self._last_truncated
+
+    async def ask(self, user_content: str, max_tokens: Optional[int] = None) -> str:
         """
         知识提取专用 ask:不累积历史原文,只追加已提取标题列表
 
         Args:
             user_content: 当前批次的章节合并内容(由调用方构建)
+            max_tokens: 本次调用的输出上限覆盖值(F-33:截断重试时可提大,默认用会话配置)
 
         Returns:
             str: LLM 响应(JSON 字符串)
@@ -284,13 +435,17 @@ class UnderstandingSession(ConversationSession):
             {"role": "user", "content": user_content + context_hint},
         ]
 
-        response = await self._llm.chat(
+        # F-33:使用 chat_detailed 捕获 finish_reason,便于调用方感知截断并放大重试
+        meta = await self._llm.chat_detailed(
             messages,
             temperature=self._temperature,
-            max_tokens=self._max_tokens,
+            max_tokens=(max_tokens or self._max_tokens),
             response_format=self._response_format,
             scene=self._scene,
         )
+        response = meta["content"]
+        self._last_truncated = meta.get("truncated", False)
+        self._last_finish_reason = meta.get("finish_reason", "")
 
         # 解析响应,提取新标题加入轻量级列表(容错,失败不阻塞主流程)
         self._ask_count += 1
@@ -373,6 +528,14 @@ class CombinedAnalysisSession(ConversationSession):
         super().__init__(llm_service, system_prompt, **kwargs)
         self._extracted_titles: List[str] = []
         self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
+        # F-33:记录最近一次调用的截断信号(finish_reason=length)
+        self._last_truncated: bool = False
+        self._last_finish_reason: str = ""
+
+    @property
+    def last_truncated(self) -> bool:
+        """最近一次 ask() 是否因 max_tokens 截断(F-33)"""
+        return self._last_truncated
 
     async def ask(self, material_chapter_content: str, personal_note_content: str) -> str:
         """
@@ -516,19 +679,49 @@ class LLMService:
         scene: Optional[str] = None,
     ) -> str:
         """
-        通用聊天接口（OpenAI 兼容格式）
+        通用聊天接口（OpenAI 兼容格式，返回 content 字符串）
+
+        与 chat_detailed() 的区别：只返回助手文本内容（兼容旧调用方）；
+        需要判断是否截断（finish_reason=length）时请用 chat_detailed()。
 
         Args:
             messages: 消息列表，格式 [{"role": "user", "content": "..."}]
             temperature: 采样温度，0-2，越高越随机
             max_tokens: 最大生成 token 数
             response_format: 响应格式约束，如 {"type": "json_object"}
+            scene: 场景标识，用于日志
 
         Returns:
-            str: 模型生成的文本内容
+            str: 模型生成的文本内容（JSON 场景已剥离代码围栏）
+        """
+        meta = await self.chat_detailed(
+            messages, temperature=temperature, max_tokens=max_tokens,
+            response_format=response_format, scene=scene,
+        )
+        return meta["content"]
 
-        Raises:
-            Exception: API 调用失败且重试耗尽
+    async def chat_detailed(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        response_format: Optional[Dict] = None,
+        scene: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        通用聊天接口（结构化返回，F-33）
+
+        在 chat() 基础上额外返回：
+        - content: 助手文本（JSON 场景已剥离代码围栏）
+        - finish_reason: LLM 停止原因（"stop"=正常结束；"length"=被 max_tokens 截断）
+        - truncated: finish_reason == "length" 的布尔便捷位
+        - usage: token 用量
+
+        Args:
+            同 chat()
+
+        Returns:
+            dict: {"content", "finish_reason", "truncated", "usage"}
         """
         url = f"{self._base_url}/chat/completions"
         headers = {
@@ -564,13 +757,32 @@ class LLMService:
                     data = resp.json()
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     usage = data.get("usage", {})
-                    content = data["choices"][0]["message"]["content"]
+                    choice: Dict[str, Any] = data["choices"][0]
+                    finish_reason = (choice.get("finish_reason") or "").strip() or "stop"
+                    content_raw = (choice["message"].get("content")) or ""
+                    # F-33：JSON 场景剥离代码围栏，避免 json.loads 直接失败
+                    if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+                        content = strip_json_fences(content_raw)
+                    else:
+                        content = content_raw
+                    truncated = (finish_reason == "length")
                     logger.info(
                         f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
                         f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
-                        f"total_tokens={usage.get('total_tokens')} | elapsed={elapsed_ms:.0f}ms"
+                        f"total_tokens={usage.get('total_tokens')} | finish_reason={finish_reason} | "
+                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms"
                     )
-                    return content
+                    if truncated:
+                        logger.warning(
+                            f"LLM 输出被 max_tokens 截断 | scene={scene} | max_tokens={max_tokens} | "
+                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量"
+                        )
+                    return {
+                        "content": content,
+                        "finish_reason": finish_reason,
+                        "truncated": truncated,
+                        "usage": usage,
+                    }
                 except httpx.HTTPStatusError as e:
                     # F-20 修复：4xx 客户端错误（400/401/403/404）不重试，直接抛出；
                     # 429/5xx 视为可重试
@@ -800,7 +1012,9 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.3,
-            max_tokens=20000,
+            # F-33：不要盲目设 200000——它只是"上限"不是"目标"，超出模型硬上限部分无效，
+            # 且会放大超时/成本；此处使用截断重试放大上限，实测多数场景 16K 内即可完成。
+            max_tokens=settings.llm_json_max_tokens_ceiling,
             response_format={"type": "json_object"},
             scene="extract_knowledge",
         )
@@ -894,7 +1108,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.5,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             scene="generate_questions",
         )
@@ -987,7 +1201,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.5,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             scene="generate_questions",
         )
@@ -1112,7 +1326,7 @@ class LLMService:
             self,
             system_prompt,
             temperature=0.3,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             max_context_pairs=30,
             scene="extract_knowledge",
@@ -1152,7 +1366,7 @@ class LLMService:
             self,
             system_prompt,
             temperature=0.5,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             max_context_pairs=30,
         )
@@ -1200,7 +1414,7 @@ class LLMService:
             self,
             system_prompt,
             temperature=0.3,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             max_context_pairs=30,
             scene="extract_combined",
@@ -1254,7 +1468,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.5,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             scene="generate_extension",
         )
@@ -1321,7 +1535,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.3,
-            max_tokens=8192,
+            max_tokens=settings.llm_json_max_tokens,
             response_format={"type": "json_object"},
             scene="infer_relations",
         )

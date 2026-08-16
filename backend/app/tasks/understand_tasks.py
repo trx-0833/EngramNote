@@ -373,20 +373,18 @@ def _parse_questions_response(response: str) -> list:
         list: 题目列表
     """
     import re as _re
+    from ..services.llm_service import parse_json_tolerant
 
-    try:
-        result = json.loads(response)
-    except json.JSONDecodeError:
-        json_match = _re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            try:
-                result = json.loads(json_match.group())
-            except json.JSONDecodeError:
-                logger.warning(f"题目生成响应 JSON 解析失败: {response[:200]}")
-                return []
-        else:
-            logger.warning(f"题目生成响应中未找到 JSON: {response[:200]}")
-            return []
+    # F-33:健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救）——
+    # 出题批量输出被 max_tokens 截断时，抢救出已生成完整的题目而非整批丢弃。
+    result, info = parse_json_tolerant(response)
+    if info.get("status") == "partial":
+        logger.warning(
+            f"题目生成响应 JSON 被截断，已完成部分数据抢救: {info.get('detail', '')}"
+        )
+    elif result is None:
+        logger.warning(f"题目生成响应 JSON 解析失败: {response[:200]}")
+        return []
 
     if isinstance(result, dict):
         for key in ["questions", "items", "data"]:

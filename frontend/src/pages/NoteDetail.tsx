@@ -13,7 +13,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
-import { marked } from '../utils/markdown'
+import { renderMarkdown } from '../utils/markdown'
 import {
   getNote,
   deleteNote,
@@ -47,6 +47,7 @@ import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
 import { statusLabels, cardTypeColors, cardTypeLabels } from '../utils/labels'
 import { formatDateTime } from '../utils/datetime'
+import { useAdhdReader } from '../hooks/useAdhdReader'
 
 /** 视图模式 */
 type ViewMode = 'original' | 'clean' | 'diff'
@@ -80,6 +81,15 @@ export default function NoteDetail() {
   const [annotationMenuPos, setAnnotationMenuPos] = useState({ x: 0, y: 0 })
   const markdownRef = useRef<HTMLElement>(null)
 
+  /** ADHD Reader 专注阅读模式 */
+  const {
+    enabled: adhdReaderEnabled,
+    gazeSource: adhdGazeSource,
+    calibrating: adhdCalibrating,
+    toggle: toggleAdhdReader,
+    disable: disableAdhdReader,
+  } = useAdhdReader(markdownRef)
+
   /** 链接管理相关 state */
   const [noteLinks, setNoteLinks] = useState<NoteLinksResponse | null>(null)
   const [showLinkManager, setShowLinkManager] = useState(false)
@@ -93,6 +103,13 @@ export default function NoteDetail() {
 
   /** 版本历史面板显示状态 */
   const [showVersionHistory, setShowVersionHistory] = useState(false)
+
+  // 离开纯阅读视图（编辑/对比）时自动关闭 ADHD Reader
+  useEffect(() => {
+    if ((editMode !== 'view' || viewMode === 'diff') && adhdReaderEnabled) {
+      disableAdhdReader()
+    }
+  }, [editMode, viewMode, adhdReaderEnabled, disableAdhdReader])
 
   /** 获取笔记详情 */
   const fetchNote = useCallback(async () => {
@@ -572,10 +589,10 @@ export default function NoteDetail() {
     : note.original_md_content || ''
 
   // 将 Markdown 文本解析为 HTML
-  const htmlContent = marked.parse(mdContent) as string
+  const htmlContent = renderMarkdown(mdContent)
 
   // 编辑预览的 HTML
-  const editPreviewHtml = marked.parse(editContent) as string
+  const editPreviewHtml = renderMarkdown(editContent)
 
   // 是否已学习过（metadata 中记录了学习成功时间，或处于已归档/学习失败状态）
   const hasLearned = note?.metadata_?.learned_at !== undefined || note?.status === 'archived' || note?.status === 'learning_failed'
@@ -613,6 +630,21 @@ export default function NoteDetail() {
             >
               版本历史
             </button>
+            <button
+              className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={toggleAdhdReader}
+              disabled={editMode !== 'view' || viewMode === 'diff'}
+              title={
+                adhdReaderEnabled
+                  ? `ADHD Reader 已开启（${adhdGazeSource === 'camera' ? '摄像头眼动' : adhdGazeSource === 'mouse' ? '鼠标/点击演示' : '准备中'}）`
+                  : '开启 ADHD 专注阅读模式（摄像头眼动跟踪，不可用时自动降级为鼠标演示）'
+              }
+            >
+              {adhdReaderEnabled
+                ? `ADHD Reader${adhdCalibrating ? ' 校准中...' : adhdGazeSource === 'camera' ? ' 摄像头' : adhdGazeSource === 'mouse' ? ' 鼠标演示' : ''}`
+                : 'ADHD Reader'}
+            </button>
+
             {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
               <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>立即复习</button>
             )}

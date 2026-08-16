@@ -144,23 +144,16 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
     chapters = merged
 
     # 拆分长章节（内容 > 8000 字符）
+    # F-34:改用"结构感知分段"——按 Markdown 块（标题/段落/列表/表格/代码块/引用）切分，
+    # 单个块超限时在安全边界内拆（表格按行、列表按项、段落按句），
+    # 未消费尾部自动续接到下一段，避免从句子/表格行/代码块中间截断造成上下文断裂。
+    from ..services.markdown_segmenter import make_segments, split_markdown_blocks
+
     result: List[Dict[str, Any]] = []
     for chapter in chapters:
         if len(chapter["content"]) > 8000:
-            # 按段落边界拆分
-            paragraphs = re.split(r"\n\n+", chapter["content"])
-            sub_parts: List[str] = []
-            current_part = ""
-            for para in paragraphs:
-                if para.strip():
-                    if len(current_part) + len(para) > 8000 and current_part:
-                        sub_parts.append(current_part)
-                        current_part = para + "\n\n"
-                    else:
-                        current_part += para + "\n\n"
-            if current_part.strip():
-                sub_parts.append(current_part)
-
+            blocks = split_markdown_blocks(chapter["content"])
+            sub_parts = make_segments(blocks, 8000)
             for idx, part in enumerate(sub_parts):
                 suffix = f" (续{idx + 1})" if len(sub_parts) > 1 else ""
                 result.append({
@@ -313,34 +306,25 @@ def _parse_understanding_response(response: str) -> Dict[str, Any]:
         logger.warning("理解响应为空")
         return {"summary": "", "points": []}
 
-    # 剥离 markdown 代码块包裹（```json ... ``` / ``` ... ```）
-    cleaned = response.strip()
-    code_block = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned)
-    if code_block:
-        cleaned = code_block.group(1).strip()
-
-    try:
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
-        json_match = re.search(r'\{[\s\S]*\}', cleaned)
-        if json_match:
-            try:
-                result = json.loads(json_match.group())
-            except json.JSONDecodeError:
-                # 检测截断：以 { 开头但未闭合（max_tokens 截断的典型特征）
-                if cleaned.lstrip().startswith("{") and cleaned.rstrip().endswith((",", ":", "[", "{\"", "}")):
-                    logger.warning(
-                        f"理解响应 JSON 疑似被截断（长度 {len(cleaned)}，尾部非完整 JSON）: "
-                        f"{cleaned[:200]}"
-                    )
-                else:
-                    logger.warning(f"理解响应 JSON 解析失败: {cleaned[:200]}")
-                return {"summary": "", "points": []}
-        else:
-            logger.warning(f"理解响应中未找到 JSON: {cleaned[:200]}")
-            return {"summary": "", "points": []}
+    # F-33:解析升级为健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救），
+    # 即使输出被 max_tokens 截断也能抢救出已生成完整的章节/知识点，而非整批丢弃。
+    from ..services.llm_service import parse_json_tolerant
+    result, info = parse_json_tolerant(response)
+    if info.get("status") == "partial":
+        # 截断抢救：记录实际抢救出的内容规模，供排查
+        recovered = info.get("detail", "")
+        logger.warning(
+            f"理解响应 JSON 被截断，已完成部分数据抢救: {recovered} | head={response[:120]!r}"
+        )
+    elif result is None:
+        logger.warning(f"理解响应 JSON 解析失败: {response[:200]!r}")
+        return {"summary": "", "points": []}
 
     if not isinstance(result, dict):
+        # 兼容 LLM 直接返回数组（知识点列表）
+        if isinstance(result, list):
+            return {"summary": "", "points": result}
+        logger.warning("理解响应 JSON 不是对象或数组")
         return {"summary": "", "points": []}
 
     # 新版多章节格式
@@ -420,7 +404,23 @@ async def process_note_understanding(
             chapter_content = chapter["content"]
             max_content = 8000
             if len(chapter_content) > max_content:
-                chapter_content = chapter_content[:max_content] + "\n...(内容过长已截断)"
+                # F-34:防御性截断改为按块边界，不切破段落/表格/代码块。
+                # 正常情况下章节已被结构感知分段控制在 ≤8000；此处仅在单一原子块
+                # 超限（如一个超长句子）时兜底，剩余部分明确提示已顺延（不静默丢弃）。
+                from ..services.markdown_segmenter import truncate_to_complete_blocks
+                _prefix, _rest = truncate_to_complete_blocks(chapter_content, max_content)
+                if not _prefix and _rest:
+                    from ..services.markdown_segmenter import split_oversized_block
+                    _chunks = split_oversized_block(chapter_content, max_content)
+                    _prefix = _chunks[0] if _chunks else chapter_content[:max_content]
+                    _rest = chapter_content[len(_prefix):]
+                chapter_content = _prefix + (
+                    f"\n...(内容过长，已前置 {len(_prefix)} 字，剩余 {len(_rest)} 字按块顺延)" if _rest else ""
+                )
+                logger.warning(
+                    f"章节 '{chapter_title}' 长度 {len(chapter_content)}>8000，"
+                    f"已按块边界截断（剩余 {len(_rest)} 字顺延）"
+                )
             combined_content += (
                 f"--- 章节 {batch_start // batch_size + 1}.{batch.index(chapter) + 1}: {chapter_title} ---\n"
                 f"{chapter_content}\n\n"
@@ -430,14 +430,20 @@ async def process_note_understanding(
             response = await session.ask(combined_content)
             parsed = _parse_understanding_response(response)
 
-            # JSON 截断/解析失败时重试一次（LLM 输出长度波动大，4096 token 截断偶发；
+            # JSON 截断/解析失败时重试一次（F-33：重试时提大 max_tokens——
+            # 网关按 max_tokens 精确截断（finish_reason=length），提大即可拿全；
             # 重试后仍为空则接受该批为空，避免无限重试）
             if not parsed.get("chapters") and not parsed.get("summary"):
+                from ..config import get_settings as _get_settings
+                _sf = _get_settings()
+                _cur = getattr(session, "_max_tokens", 0) or _sf.llm_json_max_tokens
+                escalated = min(max(_cur * 2, _sf.llm_json_max_tokens), _sf.llm_json_max_tokens_ceiling)
                 logger.warning(
                     f"笔记 {note_id} 批次 {batch_start // batch_size + 1} "
-                    f"解析为空（可能被截断），重试一次 (对话轮次={session.turn_count})"
+                    f"解析为空（截断={getattr(session, 'last_truncated', False)}），"
+                    f"重试一次并放大 max_tokens={escalated} (对话轮次={session.turn_count})"
                 )
-                response = await session.ask(combined_content)
+                response = await session.ask(combined_content, max_tokens=escalated)
                 parsed = _parse_understanding_response(response)
 
             # 解析多章节或单章节响应

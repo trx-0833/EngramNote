@@ -85,6 +85,95 @@ marked.use({
 export { marked }
 
 /**
+ * 判断某个文本节点是否应跳过公式二次渲染
+ * 跳过代码块、行内代码、脚本/样式以及已经由 KaTeX 渲染过的内容。
+ */
+function shouldSkipMathRender(node: Node): boolean {
+  let parent = node.parentElement
+  while (parent) {
+    const tag = parent.tagName
+    if (tag === 'CODE' || tag === 'PRE' || tag === 'SCRIPT' || tag === 'STYLE') {
+      return true
+    }
+    if (parent.classList && parent.classList.contains('katex')) {
+      return true
+    }
+    parent = parent.parentElement
+  }
+  return false
+}
+
+/**
+ * 在 Markdown 渲染后的 HTML 上做一次 KaTeX 二次渲染。
+ *
+ * marked 默认会把原始 HTML 块（例如 MinerU 输出的 <table>）原样保留，
+ * 因此其中的 $...$ / $$...$$ 不会被行内扩展处理。
+ * 这里通过 DOM 遍历文本节点，对未被代码块/已有 KaTeX 包裹的公式再次渲染。
+ *
+ * @param html - marked.parse() 之后的 HTML 字符串
+ * @returns 二次渲染后的 HTML 字符串
+ */
+export function renderMathInHtml(html: string): string {
+  if (!html || !html.includes('$')) return html
+  if (typeof document === 'undefined' || typeof NodeFilter === 'undefined') return html
+
+  const container = document.createElement('div')
+  container.innerHTML = html
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let node: Node | null = walker.nextNode()
+  while (node) {
+    textNodes.push(node as Text)
+    node = walker.nextNode()
+  }
+
+  const mathPattern = /\$\$([\s\S]+?)\$\$|\$([^\$\n]+?)\$/g
+
+  for (const textNode of textNodes) {
+    if (!textNode.data.includes('$')) continue
+    if (shouldSkipMathRender(textNode)) continue
+
+    const parent = textNode.parentNode
+    if (!parent) continue
+
+    const fragments: (Text | Node)[] = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    mathPattern.lastIndex = 0
+    while ((match = mathPattern.exec(textNode.data)) !== null) {
+      if (match.index > lastIndex) {
+        fragments.push(document.createTextNode(textNode.data.slice(lastIndex, match.index)))
+      }
+
+      const isDisplay = match[1] !== undefined
+      const tex = (isDisplay ? match[1] : match[2]).trim()
+      const rendered = renderKatex(tex, isDisplay)
+
+      const template = document.createElement('template')
+      template.innerHTML = rendered
+      fragments.push(template.content.cloneNode(true))
+
+      lastIndex = match.index + match[0].length
+    }
+
+    if (fragments.length === 0) continue
+
+    if (lastIndex < textNode.data.length) {
+      fragments.push(document.createTextNode(textNode.data.slice(lastIndex)))
+    }
+
+    for (const fragment of fragments) {
+      parent.insertBefore(fragment, textNode)
+    }
+    parent.removeChild(textNode)
+  }
+
+  return container.innerHTML
+}
+
+/**
  * 将 Markdown 文本渲染为 HTML 字符串
  * 内部使用已配置 KaTeX 扩展和代码高亮的 marked 实例。
  * 空字符串或假值返回空字符串。
@@ -94,5 +183,5 @@ export { marked }
  */
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  return marked.parse(text) as string
+  return renderMathInHtml(marked.parse(text) as string)
 }
