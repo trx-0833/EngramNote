@@ -130,8 +130,11 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
     Raises:
         ValueError: 邮箱或用户名已被占用
     """
+    # F-21b 修复：邮箱归一化（小写 + 去空白），避免大小写撞库
+    email = (req.email or "").strip().lower()
+
     # 检查邮箱是否已存在
-    result = await db.execute(select(User).where(User.email == req.email))
+    result = await db.execute(select(User).where(User.email == email))
     if result.scalars().first():
         raise ValueError("该邮箱已被注册")
 
@@ -142,7 +145,7 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
 
     # 创建用户，密码经过哈希处理
     user = User(
-        email=req.email,
+        email=email,
         username=req.username,
         hashed_password=hash_password(req.password),
     )
@@ -169,6 +172,8 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
     Returns:
         Optional[User]: 认证成功返回用户对象，失败返回 None
     """
+    # F-21b 修复：登录邮箱同样归一化，与注册一致
+    email = (email or "").strip().lower()
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
     if not user:

@@ -296,6 +296,12 @@ def _parse_understanding_response(response: str) -> Dict[str, Any]:
     1. 多章节格式（新版）：{"chapters": [{"chapter_title": "...", "summary": "...", "points": [...]}, ...]}
     2. 单章节格式（兼容旧版）：{"summary": "...", "points": [{...}, ...]}
 
+    容错（JSON 截断修复）：
+    - 剥离 LLM 偶尔添加的 markdown 代码块包裹（```json ... ```）
+    - 正则提取 JSON 对象
+    - 检测"疑似截断"（响应以未闭合的 { 开头且无配对 }），记录明确告警
+      （此前 max_tokens=4096 时响应被硬截断，json.loads 失败导致整批章节 0 知识点）
+
     Args:
         response: LLM 返回的原始文本
 
@@ -303,18 +309,35 @@ def _parse_understanding_response(response: str) -> Dict[str, Any]:
         Dict: 格式一 {"chapters": [{"chapter_title": str, "summary": str, "points": list}]}
               格式二 {"summary": str, "points": list}
     """
+    if not response or not response.strip():
+        logger.warning("理解响应为空")
+        return {"summary": "", "points": []}
+
+    # 剥离 markdown 代码块包裹（```json ... ``` / ``` ... ```）
+    cleaned = response.strip()
+    code_block = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned)
+    if code_block:
+        cleaned = code_block.group(1).strip()
+
     try:
-        result = json.loads(response)
+        result = json.loads(cleaned)
     except json.JSONDecodeError:
-        json_match = re.search(r'\{[\s\S]*\}', response)
+        json_match = re.search(r'\{[\s\S]*\}', cleaned)
         if json_match:
             try:
                 result = json.loads(json_match.group())
             except json.JSONDecodeError:
-                logger.warning(f"理解响应 JSON 解析失败: {response[:200]}")
+                # 检测截断：以 { 开头但未闭合（max_tokens 截断的典型特征）
+                if cleaned.lstrip().startswith("{") and cleaned.rstrip().endswith((",", ":", "[", "{\"", "}")):
+                    logger.warning(
+                        f"理解响应 JSON 疑似被截断（长度 {len(cleaned)}，尾部非完整 JSON）: "
+                        f"{cleaned[:200]}"
+                    )
+                else:
+                    logger.warning(f"理解响应 JSON 解析失败: {cleaned[:200]}")
                 return {"summary": "", "points": []}
         else:
-            logger.warning(f"理解响应中未找到 JSON: {response[:200]}")
+            logger.warning(f"理解响应中未找到 JSON: {cleaned[:200]}")
             return {"summary": "", "points": []}
 
     if not isinstance(result, dict):
@@ -406,6 +429,16 @@ async def process_note_understanding(
         try:
             response = await session.ask(combined_content)
             parsed = _parse_understanding_response(response)
+
+            # JSON 截断/解析失败时重试一次（LLM 输出长度波动大，4096 token 截断偶发；
+            # 重试后仍为空则接受该批为空，避免无限重试）
+            if not parsed.get("chapters") and not parsed.get("summary"):
+                logger.warning(
+                    f"笔记 {note_id} 批次 {batch_start // batch_size + 1} "
+                    f"解析为空（可能被截断），重试一次 (对话轮次={session.turn_count})"
+                )
+                response = await session.ask(combined_content)
+                parsed = _parse_understanding_response(response)
 
             # 解析多章节或单章节响应
             chapters_data = parsed.get("chapters", [])

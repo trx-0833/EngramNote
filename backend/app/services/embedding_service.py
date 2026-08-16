@@ -198,11 +198,16 @@ class EmbeddingService:
         if model_path:
             # 从本地路径加载时，设置 HF_HUB_OFFLINE=1 阻止 SentenceTransformer
             # 尝试连接 HuggingFace 下载 modules.json 等额外文件
+            # F-19 修复：保存并恢复原值，避免误删调用方预设的 HF_HUB_OFFLINE
+            prev_offline = os.environ.get("HF_HUB_OFFLINE")
             os.environ["HF_HUB_OFFLINE"] = "1"
             try:
                 self._model = SentenceTransformer(model_path)
             finally:
-                os.environ.pop("HF_HUB_OFFLINE", None)
+                if prev_offline is None:
+                    os.environ.pop("HF_HUB_OFFLINE", None)
+                else:
+                    os.environ["HF_HUB_OFFLINE"] = prev_offline
         else:
             # ModelScope 下载失败，回退到 HuggingFace（需网络）
             self._model = SentenceTransformer(model_name)

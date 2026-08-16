@@ -13,8 +13,6 @@ import {
   requestNotificationPermission,
   showNotification,
   isInQuietHours,
-  getNotifiedQuizIds,
-  markNotified,
 } from '../utils/notifications'
 
 /** 轮询间隔：10 分钟 */
@@ -45,18 +43,15 @@ export default function ReminderBanner() {
     try {
       const res = await getReminders()
       setReminders(res)
-      // 仅在 due_count 发生变化且大于 0 时考虑通知
+      // F-25 修复：仅按 due_count 值变化去重。
+      // 旧实现依赖 getNotifiedQuizIds().length===0，markNotified 写入后 length 恒非 0，
+      // 导致同一会话内 due_count 从 5→8 等变化不再二次通知（整个会话只弹一次）。
       if (res.due_count > 0 && res.due_count !== lastNotifiedDueRef.current) {
         // 静默时段不弹通知
         if (!isInQuietHours()) {
-          // 简化版去重：检查已通知列表长度作为粗略判断
-          const notified = getNotifiedQuizIds()
-          if (notified.length === 0) {
-            showNotification('复习提醒', `你有 ${res.due_count} 个题目待复习`)
-            // 标记本次已通知，使用时间戳作为占位 ID
-            markNotified([String(Date.now())])
-            lastNotifiedDueRef.current = res.due_count
-          }
+          showNotification('复习提醒', `你有 ${res.due_count} 个题目待复习`)
+          // 记录本次已通知的 due_count，值变化才再次通知
+          lastNotifiedDueRef.current = res.due_count
         }
       } else if (res.due_count === 0) {
         // 待复习清零后重置快照，下次到来时再次通知

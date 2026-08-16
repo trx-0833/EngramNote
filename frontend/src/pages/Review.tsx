@@ -5,6 +5,8 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { getDueQuizzes, submitAnswer, getReviewStats, DueQuiz, SubmitAnswerResponse, ReviewStats } from '../api/client'
+// F-33：共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
+import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
 
 /** 单题答题状态 */
 interface QuizState {
@@ -26,6 +28,8 @@ export default function Review() {
   const [sessionTotal, setSessionTotal] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /** F-23：提交 in-flight 锁（防双击重复提交） */
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     loadData()
@@ -57,10 +61,13 @@ export default function Review() {
   }
 
   async function handleSubmit() {
+    // F-23：in-flight 锁，防止双击/连按回车重复提交（重复 ReviewLog + SM-2 叠加）
+    if (submittingRef.current) return
     const current = quizzes[currentIndex]
     if (!current || current.submitted) return
     if (!current.userAnswer.trim()) return
 
+    submittingRef.current = true
     const timeSpent = Date.now() - current.startTime
 
     try {
@@ -87,6 +94,8 @@ export default function Review() {
       } else {
         setError(msg)
       }
+    } finally {
+      submittingRef.current = false
     }
   }
 
@@ -121,44 +130,14 @@ export default function Review() {
     }
   }
 
-  /** 解析选择题选项 */
-  function parseOptions(optionsStr: string | null): string[] {
-    if (!optionsStr) return []
-    try {
-      const parsed = JSON.parse(optionsStr)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
-
-  /** 难度标签颜色 */
-  function difficultyColor(d: string) {
-    switch (d) {
-      case 'easy': return '#4caf50'
-      case 'medium': return '#ff9800'
-      case 'hard': return '#f44336'
-      default: return '#999'
-    }
-  }
-
-  /** 题目类型中文 */
-  function questionTypeLabel(t: string) {
-    switch (t) {
-      case 'choice': return '选择题'
-      case 'fill_blank': return '填空题'
-      case 'short_answer': return '简答题'
-      default: return t
-    }
-  }
-
   if (loading) {
     return <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>加载复习题目中...</div>
   }
 
   // 完成页面
   if (completed) {
-    const dailyLimit = 50
+    // F-12：每日限额从后端 /review/stats 读取（单一来源），不再硬编码 50
+    const dailyLimit = stats?.daily_limit ?? 10
     const todayDone = stats?.today_done ?? 0
     const reachedDailyLimit = todayDone >= dailyLimit
 
@@ -211,7 +190,6 @@ export default function Review() {
   if (!current) return null
 
   const quiz = current.quiz
-  const options = parseOptions(quiz.options)
 
   return (
     <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
@@ -231,171 +209,28 @@ export default function Review() {
           }} />
         </div>
         <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-          {sessionCorrect}/{sessionTotal} 正确 | 今日 {stats?.today_done ?? 0}/50
+          {sessionCorrect}/{sessionTotal} 正确 | 今日 {stats?.today_done ?? 0}/{stats?.daily_limit ?? 10}
         </span>
       </div>
 
-      {/* 题目卡片 */}
-      <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-        {/* 题目头部 */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-md)',
-        }}>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 4,
-              fontSize: '0.8rem',
-              background: 'var(--color-primary)',
-              color: '#fff',
-            }}>
-              {questionTypeLabel(quiz.question_type)}
-            </span>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 4,
-              fontSize: '0.8rem',
-              background: difficultyColor(quiz.difficulty),
-              color: '#fff',
-            }}>
-              {quiz.difficulty === 'easy' ? '简单' : quiz.difficulty === 'medium' ? '中等' : '困难'}
-            </span>
-          </div>
-          {quiz.review_count > 0 && (
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              已复习 {quiz.review_count} 次 | 间隔 {quiz.interval} 天
-            </span>
-          )}
-        </div>
-
-        {/* 题目内容 */}
-        <p style={{ fontSize: '1.1rem', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>
-          {quiz.question}
-        </p>
-
-        {/* 答题区域 */}
-        {!current.submitted ? (
-          <>
-            {/* 选择题 */}
-            {quiz.question_type === 'choice' && options.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-                {options.map((opt, i) => (
-                  <button
-                    key={i}
-                    className={`quiz-option${current.userAnswer === opt ? ' quiz-option-selected' : ''}`}
-                    onClick={() => {
-                      const newQuizzes = [...quizzes]
-                      newQuizzes[currentIndex] = { ...current, userAnswer: opt }
-                      setQuizzes(newQuizzes)
-                    }}
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* 填空题 */}
-            {quiz.question_type === 'fill_blank' && (
-              <input
-                ref={inputRef}
-                type="text"
-                value={current.userAnswer}
-                onChange={e => {
-                  const newQuizzes = [...quizzes]
-                  newQuizzes[currentIndex] = { ...current, userAnswer: e.target.value }
-                  setQuizzes(newQuizzes)
-                }}
-                placeholder="请输入答案..."
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 6,
-                  fontSize: '1rem',
-                }}
-              />
-            )}
-
-            {/* 简答题 */}
-            {quiz.question_type === 'short_answer' && (
-              <textarea
-                ref={textareaRef}
-                value={current.userAnswer}
-                onChange={e => {
-                  const newQuizzes = [...quizzes]
-                  newQuizzes[currentIndex] = { ...current, userAnswer: e.target.value }
-                  setQuizzes(newQuizzes)
-                }}
-                placeholder="请输入你的回答..."
-                rows={4}
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-sm) var(--space-md)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 6,
-                  fontSize: '1rem',
-                  resize: 'vertical',
-                }}
-              />
-            )}
-
-            {/* 提交按钮 */}
-            <div style={{ marginTop: 'var(--space-md)', textAlign: 'right' }}>
-              <button
-                className="btn btn-primary"
-                onClick={handleSubmit}
-                disabled={!current.userAnswer.trim()}
-              >
-                提交答案
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* 判分结果 */}
-            <div className={current.result?.is_correct ? 'feedback-correct' : 'feedback-incorrect'} style={{ marginBottom: 'var(--space-md)' }}>
-              <p style={{ fontWeight: 600, color: current.result?.is_correct ? '#4caf50' : '#f44336' }}>
-                {current.result?.is_correct ? '回答正确!' : '回答错误'}
-              </p>
-              {!current.result?.is_correct && (
-                <p style={{ marginTop: 'var(--space-xs)' }}>
-                  <strong>正确答案:</strong> {current.result?.correct_answer}
-                </p>
-              )}
-              {current.result?.explanation && (
-                <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}>
-                  <strong>解析:</strong> {current.result.explanation}
-                </p>
-              )}
-            </div>
-
-            {/* SM-2 信息 */}
-            {current.result?.sm2 && (
-              <div style={{
-                fontSize: '0.85rem',
-                color: 'var(--color-text-secondary)',
-                padding: 'var(--space-sm)',
-                background: 'var(--color-bg)',
-                borderRadius: 4,
-                marginBottom: 'var(--space-md)',
-              }}>
-                下次复习: {current.result.sm2.interval} 天后 | EF: {current.result.sm2.easiness_factor} | 评分: {current.result.quality}
-              </div>
-            )}
-
-            {/* 下一题按钮 */}
-            <div style={{ textAlign: 'right' }}>
-              <button className="btn btn-primary" onClick={handleNext}>
-                {currentIndex < quizzes.length - 1 ? '下一题' : '完成复习'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      {/* 题目卡片（F-33：共享 QuizAnswerCard；提交竞态锁由 handleSubmit 的 submittingRef 承担） */}
+      <QuizAnswerCard
+        quiz={quiz}
+        userAnswer={current.userAnswer}
+        submitted={current.submitted}
+        result={current.result}
+        submitting={submittingRef.current}
+        showSm2Info
+        showReviewMeta
+        isLast={currentIndex >= quizzes.length - 1}
+        onSelectAnswer={(answer) => {
+          const newQuizzes = [...quizzes]
+          newQuizzes[currentIndex] = { ...current, userAnswer: answer }
+          setQuizzes(newQuizzes)
+        }}
+        onSubmit={handleSubmit}
+        onNext={handleNext}
+      />
     </div>
   )
 }

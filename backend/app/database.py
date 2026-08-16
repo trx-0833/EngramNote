@@ -58,6 +58,35 @@ if not _is_sqlite:
 # 创建异步数据库引擎
 engine = create_async_engine(database_url, **engine_kwargs)
 
+
+# ---- SQLite 连接级 PRAGMA（F-07 修复） ----
+# SQLite 默认不启用外键约束（PRAGMA foreign_keys 默认 OFF），导致模型上
+# ON DELETE CASCADE 全部失效、删除笔记/卡片遗留孤儿数据。foreign_keys 与
+# busy_timeout 均为连接级设置，须在每个新连接建立时执行（不能在事务内切换）。
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """每个 SQLite 新连接建立时启用外键与写锁超时"""
+    try:
+        cursor = dbapi_connection.cursor()
+        # 启用外键约束，让 ON DELETE CASCADE 真正生效
+        cursor.execute("PRAGMA foreign_keys=ON")
+        # 写锁等待 5 秒，缓解多进程（API + Celery worker/beat）并发写 'database is locked'
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+    except Exception:
+        # 非 SQLite 方言或驱动不支持时忽略
+        pass
+
+
+def register_sqlite_pragmas(target_engine) -> None:
+    """为引擎注册 SQLite 连接级 PRAGMA（供主引擎与测试复用）"""
+    from sqlalchemy import event
+
+    event.listen(target_engine.sync_engine, "connect", _set_sqlite_pragma)
+
+
+if _is_sqlite:
+    register_sqlite_pragmas(engine)
+
 # 创建异步会话工厂
 # expire_on_commit=False: 提交后不自动过期对象属性，避免在异步上下文中出现懒加载问题
 async_session = async_sessionmaker(
@@ -293,6 +322,17 @@ async def _migrate_sqlite(conn):
             ))
             logger.info("SQLite 迁移: 已创建 note_versions 表")
 
+        # F-31 修复：note_versions (note_id, version_number) 唯一索引
+        # （防并发重号；create_version 捕获 IntegrityError 重试）
+        if 'note_versions' in table_names:
+            try:
+                sync_conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_versions_note_version "
+                    "ON note_versions (note_id, version_number)"
+                ))
+            except Exception as e:
+                logger.warning(f"创建 note_versions 唯一索引失败（忽略）: {e}")
+
         # 检查并创建 learning_goals 表（防御性建表，对应 Alembic 004 迁移）
         if 'learning_goals' not in table_names:
             sync_conn.execute(text(
@@ -449,22 +489,31 @@ async def _migrate_sqlite(conn):
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 note_projects 中清理了 {result.rowcount} 条标签孤儿记录")
 
-        # ---- 重复关系清理 ----
-        # 同一对卡片（无向，忽略方向）不应存在多条关系（历史版本可能因缺少去重产生重复，
-        # 导致节点关联数被重复计算）。按 (user_id, 小id, 大id) 分组，每组仅保留最小 id 的一条。
+        # ---- 重复关系清理（C-1 修复：不再无条件破坏性去重） ----
+        # 旧实现按 (user_id, 小id, 大id) 分组保 MIN(id)，会把方向相反或有向/无向
+        # 不同类型（prerequisite/subsequent/related/contrast）的合法关系误删。
+        # 现改为一次性安全去重 + 唯一索引（见 Alembic 007_safe_card_relation_dedup）：
+        # 仅当 (user_id, card_id_1, card_id_2, relation_type) 完全同键（含方向、类型、
+        # 状态）时才视为重复；唯一索引创建用 IF NOT EXISTS 幂等，已存在则跳过。
         if 'card_relations' in table_names:
-            result = sync_conn.execute(text(
+            # 1. 安全去重：仅删除完全同键（同方向、同类型、同状态）的重复行
+            sync_conn.execute(text(
                 """
                 DELETE FROM card_relations WHERE id NOT IN (
                     SELECT MIN(id) FROM card_relations
-                    GROUP BY user_id,
-                             CASE WHEN card_id_1 < card_id_2 THEN card_id_1 ELSE card_id_2 END,
-                             CASE WHEN card_id_1 < card_id_2 THEN card_id_2 ELSE card_id_1 END
+                    GROUP BY user_id, card_id_1, card_id_2, relation_type, status
                 )
                 """
             ))
-            if result.rowcount > 0:
-                logger.info(f"重复关系清理: 清理了 {result.rowcount} 条重复卡片关系")
+            # 2. 幂等建唯一索引（批量模式下 SQLite 方言可用）
+            try:
+                sync_conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_card_relations_pair_type "
+                    "ON card_relations (user_id, card_id_1, card_id_2, relation_type)"
+                ))
+                logger.info("SQLite 迁移: 已创建 card_relations 唯一索引 uq_card_relations_pair_type")
+            except Exception as e:
+                logger.warning(f"创建 card_relations 唯一索引失败（忽略）: {e}")
 
     await conn.run_sync(_do_migrate)
 

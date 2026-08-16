@@ -37,6 +37,78 @@ logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
 
 
+# ---- F-05 修复：模块级共享 LLM 基建 ----
+# 旧实现每次调用 `async with httpx.AsyncClient(...)` 新建客户端（连接池/TLS 全部浪费），
+# 且 RateLimiter/Semaphore 为实例属性，多处 `LLMService()` 新建实例导致限流与并发
+# 闸门完全不生效。以下提升为模块级单例，进程内所有实例共享。
+#
+# 注意（Event loop is closed 修复）：httpx 连接池中的连接绑定创建时的事件循环。
+# Celery worker 中每个任务用 asyncio.run() 创建新事件循环，跨任务复用旧连接会报
+# "Event loop is closed"。因此保存 client 创建时的 loop 对象，检测到 loop 变化时
+# 自动重建 client（API 进程单 loop 不受影响）。
+# 用 loop 对象引用比较（不用 id()：loop 被 GC 后 id 可能被新 loop 复用导致误判）。
+_shared_llm_client: Optional[httpx.AsyncClient] = None
+_shared_llm_client_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _current_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """获取当前运行事件循环（无运行循环时返回 None）"""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def get_llm_client() -> httpx.AsyncClient:
+    """获取（惰性创建）进程级共享 httpx 客户端；事件循环变化时自动重建"""
+    global _shared_llm_client, _shared_llm_client_loop
+    current_loop = _current_loop()
+    if _shared_llm_client is not None and _shared_llm_client_loop is not current_loop:
+        # 事件循环已变化（如 Celery 每个任务新建 loop）：旧连接全部失效，丢弃重建。
+        # 不主动 aclose()：旧 loop 已关闭，调用 aclose 只会产生未 await 的 coroutine；
+        # 连接随旧 loop/GC 释放（文件描述符由 OS 回收）。
+        logger.warning(
+            "检测到 LLM 客户端跨事件循环复用，重建共享客户端 "
+            "(old_loop=%s, new_loop=%s)",
+            _shared_llm_client_loop, current_loop,
+        )
+        _shared_llm_client = None
+        _shared_llm_client_loop = None
+    if _shared_llm_client is None:
+        _shared_llm_client = httpx.AsyncClient(timeout=settings.llm_timeout_seconds)
+        _shared_llm_client_loop = current_loop
+    return _shared_llm_client
+
+
+def close_llm_client() -> None:
+    """关闭共享客户端（应用关闭时调用，见 main.py lifespan）"""
+    global _shared_llm_client, _shared_llm_client_loop
+    if _shared_llm_client is not None:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_shared_llm_client.aclose())
+            else:
+                asyncio.run(_shared_llm_client.aclose())
+        except Exception:
+            pass
+        _shared_llm_client = None
+        _shared_llm_client_loop = None
+
+
+def _truncate_messages(messages: List[Dict[str, str]], limit: int = 200) -> List[Dict[str, str]]:
+    """日志脱敏：每条消息内容截断到 limit 字符（F-20 修复：避免全量内容进日志）"""
+    result = []
+    for m in messages:
+        item = dict(m)
+        content = item.get("content", "")
+        if isinstance(content, str) and len(content) > limit:
+            item["content"] = content[:limit] + f"...(截断,共{len(content)}字)"
+        result.append(item)
+    return result
+
+
 class RateLimiter:
     """令牌桶速率限制器
 
@@ -414,6 +486,11 @@ class LLMService:
         summary = await service.summarize_chapter("第一章", "内容...")
     """
 
+    # 类级共享限流器与并发闸门（F-05 修复：所有实例共享同一令牌桶/信号量）
+    # 注意：_rate_limiter/_semaphore 在类定义后初始化（依赖 settings），见类下方
+    _rate_limiter: Optional["RateLimiter"] = None
+    _semaphore: Optional[asyncio.Semaphore] = None
+
     def __init__(self):
         llm_config = settings.get_llm_config()
         self._api_key = llm_config["api_key"]
@@ -422,8 +499,13 @@ class LLMService:
         self._provider = llm_config["provider"]
         self._max_retries = settings.llm_max_retries
         self._retry_delay = settings.llm_retry_delay
-        self._rate_limiter = RateLimiter(max_rpm=settings.llm_max_rpm)
-        self._semaphore = asyncio.Semaphore(3)
+        # 实例化时确保类级限流/信号量已就绪（线程安全：先创建后赋值，重复创建无害）
+        if LLMService._rate_limiter is None:
+            LLMService._rate_limiter = RateLimiter(max_rpm=settings.llm_max_rpm)
+        if LLMService._semaphore is None:
+            LLMService._semaphore = asyncio.Semaphore(3)
+        self._rate_limiter = LLMService._rate_limiter
+        self._semaphore = LLMService._semaphore
 
     async def chat(
         self,
@@ -465,7 +547,7 @@ class LLMService:
         logger.debug(
             f"LLM 请求 | scene={scene} | provider={self._provider} | model={self._model} | "
             f"temperature={temperature} | max_tokens={max_tokens} | url={url}\n"
-            f"messages={json.dumps(messages, ensure_ascii=False, indent=2)}"
+            f"messages={json.dumps(_truncate_messages(messages), ensure_ascii=False)}"
         )
 
         start_time = time.monotonic()
@@ -476,29 +558,43 @@ class LLMService:
             last_error = None
             for attempt in range(self._max_retries):
                 try:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        resp = await client.post(url, json=payload, headers=headers)
-                        resp.raise_for_status()
-                        data = resp.json()
-                        elapsed_ms = (time.monotonic() - start_time) * 1000
-                        usage = data.get("usage", {})
-                        content = data["choices"][0]["message"]["content"]
-                        logger.info(
-                            f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
-                            f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
-                            f"total_tokens={usage.get('total_tokens')} | elapsed={elapsed_ms:.0f}ms\n"
-                            f"response={content}"
+                    # F-05 修复：复用模块级共享客户端，避免每次新建连接
+                    resp = await get_llm_client().post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
+                    usage = data.get("usage", {})
+                    content = data["choices"][0]["message"]["content"]
+                    logger.info(
+                        f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
+                        f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
+                        f"total_tokens={usage.get('total_tokens')} | elapsed={elapsed_ms:.0f}ms"
+                    )
+                    return content
+                except httpx.HTTPStatusError as e:
+                    # F-20 修复：4xx 客户端错误（400/401/403/404）不重试，直接抛出；
+                    # 429/5xx 视为可重试
+                    last_error = e
+                    if e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                        logger.warning(
+                            f"LLM 客户端错误不重试 | scene={scene} | provider={self._provider} | "
+                            f"status={e.response.status_code} | error={e}"
                         )
-                        return content
+                        raise
+                    if attempt < self._max_retries - 1:
+                        delay = min(30 * (attempt + 1), 120)
+                        delay = delay * (0.5 + random.random() * 0.5)
+                        logger.warning(
+                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
+                            f"provider={self._provider} | model={self._model} | error={e} | "
+                            f"next_delay={delay:.1f}s"
+                        )
+                        await asyncio.sleep(delay)
                 except Exception as e:
                     last_error = e
                     if attempt < self._max_retries - 1:
-                        if "429" in str(e):
-                            delay = min(30 * (attempt + 1), 120)
-                            delay = delay * (0.5 + random.random() * 0.5)
-                        else:
-                            delay = min(self._retry_delay * (2 ** attempt), 60)
-                            delay = delay * (0.5 + random.random() * 0.5)
+                        delay = min(self._retry_delay * (2 ** attempt), 60)
+                        delay = delay * (0.5 + random.random() * 0.5)
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
                             f"provider={self._provider} | model={self._model} | error={e} | "
@@ -560,7 +656,7 @@ class LLMService:
         logger.debug(
             f"LLM 流式请求 | scene={scene} | provider={self._provider} | model={self._model} | "
             f"temperature=0.3 | url={url}\n"
-            f"messages={json.dumps(messages, ensure_ascii=False, indent=2)}"
+            f"messages={json.dumps(_truncate_messages(messages), ensure_ascii=False)}"
         )
 
         start_time = time.monotonic()
@@ -570,37 +666,38 @@ class LLMService:
         async with self._semaphore:
             await self._rate_limiter.acquire()
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    async with client.stream(
-                        "POST", url, json=payload, headers=headers
-                    ) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if not line or not line.startswith("data:"):
-                                continue
-                            data_str = line[len("data:"):].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                            except json.JSONDecodeError:
-                                logger.warning(
-                                    f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
-                                    f"line={data_str[:200]}"
-                                )
-                                continue
-                            # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
-                            chunk_usage = chunk.get("usage")
-                            if isinstance(chunk_usage, dict):
-                                usage = chunk_usage
-                            choices = chunk.get("choices") or []
-                            if not choices:
-                                continue
-                            delta = choices[0].get("delta") or {}
-                            content = delta.get("content")
-                            if content:
-                                total_content.append(content)
-                                yield content
+                # F-05 修复：复用模块级共享客户端
+                client = get_llm_client()
+                async with client.stream(
+                    "POST", url, json=payload, headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
+                                f"line={data_str[:200]}"
+                            )
+                            continue
+                        # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
+                        chunk_usage = chunk.get("usage")
+                        if isinstance(chunk_usage, dict):
+                            usage = chunk_usage
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if content:
+                            total_content.append(content)
+                            yield content
             except httpx.HTTPError as e:
                 logger.warning(
                     f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
@@ -616,8 +713,7 @@ class LLMService:
             f"total_tokens={usage.get('total_tokens')} | "
             f"prompt_cache_hit_tokens={usage.get('prompt_cache_hit_tokens')} | "
             f"prompt_cache_miss_tokens={usage.get('prompt_cache_miss_tokens')} | "
-            f"elapsed={elapsed_ms:.0f}ms\n"
-            f"response={full_response}"
+            f"elapsed={elapsed_ms:.0f}ms | chars={len(full_response)}"
         )
 
     async def summarize_chapter(self, chapter_title: str, chapter_content: str) -> str:
@@ -704,7 +800,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=20000,
             response_format={"type": "json_object"},
             scene="extract_knowledge",
         )
@@ -798,7 +894,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.5,
-            max_tokens=4096,
+            max_tokens=8192,
             response_format={"type": "json_object"},
             scene="generate_questions",
         )
@@ -1016,7 +1112,7 @@ class LLMService:
             self,
             system_prompt,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=8192,
             response_format={"type": "json_object"},
             max_context_pairs=30,
             scene="extract_knowledge",
@@ -1104,7 +1200,7 @@ class LLMService:
             self,
             system_prompt,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=8192,
             response_format={"type": "json_object"},
             max_context_pairs=30,
             scene="extract_combined",
@@ -1158,7 +1254,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.5,
-            max_tokens=4096,
+            max_tokens=8192,
             response_format={"type": "json_object"},
             scene="generate_extension",
         )
@@ -1225,7 +1321,7 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=8192,
             response_format={"type": "json_object"},
             scene="infer_relations",
         )

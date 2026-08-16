@@ -56,6 +56,39 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _apply_block_operation(clean_md: str, block_index: int, dup_of: Optional[int], operation: str) -> Optional[str]:
+    """
+    F-11 修复：恢复/删除重复块的文本操作。
+
+    新清洗数据：注释标记使用重复块自身 block_index（与前端传参一致），直接匹配；
+    旧清洗数据：注释标记使用 duplicate_of（保留块 index），且同一 duplicate_of 下
+    多个重复块注释相同无法区分——按顺序匹配第一个，并仅在无新 key 匹配时回退。
+
+    Returns:
+        操作后的文本；未找到目标块时返回 None（调用方应报错而非静默成功）。
+    """
+    if operation == "restore":
+        # 1) 新 key：block_{block_index}
+        result = restore_block(clean_md, block_index)
+        if result != clean_md:
+            return result
+        # 2) 旧 key 回退：block_{dup_of}
+        if dup_of is not None and dup_of != block_index:
+            result = restore_block(clean_md, dup_of)
+            if result != clean_md:
+                return result
+        return None
+    else:  # delete
+        result = delete_block(clean_md, block_index)
+        if result != clean_md:
+            return result
+        if dup_of is not None and dup_of != block_index:
+            result = delete_block(clean_md, dup_of)
+            if result != clean_md:
+                return result
+        return None
+
+
 # --- API 端点 ---
 
 @router.post("/{note_id}/start", response_model=CleaningStartResponse)
@@ -81,6 +114,13 @@ async def start_cleaning(
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
         raise HTTPException(status_code=404, detail="笔记不存在")
+
+    if note.status == NoteStatus.cleaning:
+        # F-29 修复：进行中禁止重复触发（防连点产生两个 Celery 任务）
+        raise HTTPException(
+            status_code=409,
+            detail="清洗任务正在进行中，请等待完成或先停止",
+        )
 
     if note.status not in (NoteStatus.converted, NoteStatus.cleaned, NoteStatus.cleaning_failed):
         raise HTTPException(
@@ -321,8 +361,21 @@ async def restore_duplicate_block(
     if not clean_md:
         raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
 
-    # 恢复指定块
-    updated_md = restore_block(clean_md, block_index)
+    # F-11 修复：优先用重复块自身 index 匹配（新数据）；旧数据回退 duplicate_of。
+    # 找不到目标块时必须报错，避免"元数据已更新但文件未变"的静默不一致。
+    dup_of = None
+    if note.metadata_ and "duplicates_detail" in note.metadata_:
+        for d in note.metadata_["duplicates_detail"]:
+            if d.get("block_index") == block_index:
+                dup_of = d.get("duplicate_of")
+                break
+
+    updated_md = _apply_block_operation(clean_md, block_index, dup_of, "restore")
+    if updated_md is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+        )
 
     # 上传更新后的清洗副本
     upload_bytes(
@@ -384,8 +437,20 @@ async def delete_duplicate_block(
     if not clean_md:
         raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
 
-    # 删除指定块
-    updated_md = delete_block(clean_md, block_index)
+    # F-11 修复：同上，删除操作同样校验匹配成功才更新元数据
+    dup_of = None
+    if note.metadata_ and "duplicates_detail" in note.metadata_:
+        for d in note.metadata_["duplicates_detail"]:
+            if d.get("block_index") == block_index:
+                dup_of = d.get("duplicate_of")
+                break
+
+    updated_md = _apply_block_operation(clean_md, block_index, dup_of, "delete")
+    if updated_md is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+        )
 
     # 上传更新后的清洗副本
     upload_bytes(

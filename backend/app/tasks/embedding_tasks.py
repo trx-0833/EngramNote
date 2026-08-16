@@ -46,27 +46,8 @@ _embedding_service = None
 # lru_cache 以 text_hash 为键，需要通过注册表回查原文进行编码
 _hash_to_text_registry: Dict[str, str] = {}
 
-# Celery worker 中独立的数据库连接（不在 FastAPI 上下文中）
-_sync_engine = None
-_sync_session_factory = None
-
-
-def _get_sync_session():
-    """
-    获取数据库会话工厂（Celery worker 中使用）
-
-    Celery worker 运行在独立进程中，无法使用 FastAPI 的数据库连接池，
-    因此需要创建独立的异步引擎和会话工厂。
-    使用全局变量缓存，避免重复创建。
-
-    Returns:
-        async_sessionmaker: 异步会话工厂
-    """
-    global _sync_engine, _sync_session_factory
-    if _sync_session_factory is None:
-        _sync_engine = create_async_engine(settings.get_database_url(), echo=False)
-        _sync_session_factory = async_sessionmaker(_sync_engine, expire_on_commit=False)
-    return _sync_session_factory
+# F-27：会话工厂收敛到 tasks/common.py（含 SQLite PRAGMA）
+from .common import get_sync_session as _get_sync_session
 
 
 def _get_embedding_service():

@@ -24,6 +24,8 @@ import os
 import time
 import logging
 
+from celery.exceptions import Retry
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -36,48 +38,12 @@ from ..services.vault_meta import write_note_meta
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# _update_note_status 允许更新的字段白名单
-_UPDATABLE_NOTE_FIELDS = {"title", "page_count", "original_md_path", "clean_md_path", "metadata_"}
-
-# Celery 任务中需要独立的数据库连接
-_clean_engine = None
-_clean_session_factory = None
-
-
-def _get_clean_session():
-    """
-    获取清洗任务专用的数据库会话工厂
-
-    与 convert_tasks.py 中的模式一致，Celery worker 运行在独立进程中，
-    需要创建自己的数据库连接。
-
-    Returns:
-        async_sessionmaker: 异步会话工厂
-    """
-    global _clean_engine, _clean_session_factory
-    if _clean_session_factory is None:
-        _clean_engine = create_async_engine(settings.get_database_url(), echo=False)
-        _clean_session_factory = async_sessionmaker(_clean_engine, expire_on_commit=False)
-    return _clean_session_factory
-
-
-async def _get_note_status(note_id: str) -> Optional[NoteStatus]:
-    """
-    获取笔记当前状态
-
-    用于在 Celery 任务中检查笔记是否已被用户停止清洗。
-
-    Args:
-        note_id: 笔记 ID
-
-    Returns:
-        NoteStatus 或 None（笔记不存在时）
-    """
-    session_factory = _get_clean_session()
-    async with session_factory() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
-        note = result.scalars().first()
-        return note.status if note else None
+# F-27：会话工厂/状态更新/状态查询收敛到 tasks/common.py
+from .common import (
+    get_sync_session as _get_clean_session,
+    update_note_status as _update_note_status,
+    get_note_status as _get_note_status,
+)
 
 
 async def _is_cleaning_stopped(note_id: str) -> bool:
@@ -95,37 +61,6 @@ async def _is_cleaning_stopped(note_id: str) -> bool:
     """
     current_status = await _get_note_status(note_id)
     return current_status == NoteStatus.cleaning_failed
-
-
-async def _update_note_status(note_id: str, status: NoteStatus, error_message: Optional[str] = None, **kwargs):
-    """
-    更新笔记状态
-
-    在 Celery worker 的独立数据库会话中更新笔记的状态和附加字段。
-
-    Args:
-        note_id: 笔记 ID
-        status: 新的状态
-        error_message: 错误信息（可选）
-        **kwargs: 其他需要更新的字段
-    """
-    session_factory = _get_clean_session()
-    async with session_factory() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
-        note = result.scalars().first()
-        if not note:
-            return
-
-        note.status = status
-        if error_message:
-            note.error_message = error_message
-        for key, value in kwargs.items():
-            if key in _UPDATABLE_NOTE_FIELDS:
-                setattr(note, key, value)
-        await session.commit()
-        await session.refresh(note)
-        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
-        write_note_meta(note)
 
 
 def _clean_md_path_from_original(original_md_path: str) -> str:
@@ -400,7 +335,7 @@ async def _clean_document(note_id: str):
     # 10. 更新笔记状态和元数据
     # 为每个重复对保存两个块的文本内容（content=重复块，original_content=被重复的保留块），
     # 供前端展示与人工核对（旧版本清洗的笔记无此字段，重新清洗后补齐）
-    chunk_by_index = {chunk["index"]: chunk["content"] for chunk in chunks}
+    chunk_by_index = {chunk["index"]: chunk for chunk in chunks}
     duplicates_detail = []
     for d in duplicates:
         entry = {
@@ -408,12 +343,15 @@ async def _clean_document(note_id: str):
             "duplicate_of": d["duplicate_of"],
             "similarity": round(d["similarity"], 4),
         }
-        content = chunk_by_index.get(d["block_index"])
-        original_content = chunk_by_index.get(d["duplicate_of"])
-        if content is not None:
-            entry["content"] = content
-        if original_content is not None:
-            entry["original_content"] = original_content
+        chunk = chunk_by_index.get(d["block_index"])
+        if chunk is not None:
+            entry["content"] = chunk["content"]
+            # F-11 修复：记录重复块的精确行区间，供恢复/删除按行定位
+            entry["start_line"] = chunk.get("start_line")
+            entry["end_line"] = chunk.get("end_line")
+        original_chunk = chunk_by_index.get(d["duplicate_of"])
+        if original_chunk is not None:
+            entry["original_content"] = original_chunk["content"]
         duplicates_detail.append(entry)
 
     metadata = {
@@ -492,8 +430,13 @@ def clean_document_task(self, note_id: str):
 
         try:
             self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
-            # 重试次数用尽，标记笔记为失败状态
+        except Retry:
+            # 正常重试调度：交给 Celery 框架，不标记失败
+            raise
+        except Exception:
+            # F-30 修复：Celery retry() 重试耗尽时重新抛出原始异常而非
+            # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
+            # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态。
             try:
                 asyncio.run(_update_note_status(
                     note_id, NoteStatus.cleaning_failed,

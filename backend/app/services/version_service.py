@@ -84,46 +84,61 @@ class VersionService:
         Returns:
             NoteVersion: 新创建的版本记录
         """
-        # 查询当前最大版本号
-        max_result = await db.execute(
-            select(func.max(NoteVersion.version_number)).where(
-                NoteVersion.note_id == note_id
+        # F-31 修复：版本号唯一约束（(note_id, version_number)）已建立，
+        # MAX+1 取号在并发下可能冲突，捕获 IntegrityError 重算重试（最多 3 次）
+        from sqlalchemy.exc import IntegrityError
+
+        for attempt in range(3):
+            # 查询当前最大版本号
+            max_result = await db.execute(
+                select(func.max(NoteVersion.version_number)).where(
+                    NoteVersion.note_id == note_id
+                )
             )
-        )
-        max_version = max_result.scalar() or 0
-        version_number = max_version + 1
+            max_version = max_result.scalar() or 0
+            version_number = max_version + 1
 
-        # 计算内容大小
-        content_bytes = content.encode("utf-8")
-        content_size = len(content_bytes)
+            # 计算内容大小
+            content_bytes = content.encode("utf-8")
+            content_size = len(content_bytes)
 
-        # 存储路径：Vault 版本区 {user_id}/inbox/history/versions/{note_id}/v{N}.md
-        # 以 note_id 子目录隔离版本文件，避免不同笔记的同号版本互相覆盖
-        note_result = await db.execute(select(Note).where(Note.id == note_id))
-        note = note_result.scalars().first()
-        prefix = vault_path.derive_prefix(note) if note else f"{user_id}/default"
-        storage_path = vault_path.history_object(prefix, note_id, version_number)
+            # 存储路径：Vault 版本区 {user_id}/inbox/history/versions/{note_id}/v{N}.md
+            # 以 note_id 子目录隔离版本文件，避免不同笔记的同号版本互相覆盖
+            note_result = await db.execute(select(Note).where(Note.id == note_id))
+            note = note_result.scalars().first()
+            prefix = vault_path.derive_prefix(note) if note else f"{user_id}/default"
+            storage_path = vault_path.history_object(prefix, note_id, version_number)
 
-        # 写入对象存储
-        upload_bytes(
-            settings.minio_bucket_markdown,
-            storage_path,
-            content_bytes,
-            content_type="text/markdown; charset=utf-8",
-        )
+            # 写入对象存储
+            upload_bytes(
+                settings.minio_bucket_markdown,
+                storage_path,
+                content_bytes,
+                content_type="text/markdown; charset=utf-8",
+            )
 
-        # 插入版本记录
-        version = NoteVersion(
-            note_id=note_id,
-            user_id=user_id,
-            version_number=version_number,
-            source=source,
-            content_size=content_size,
-            change_summary=change_summary,
-            storage_path=storage_path,
-        )
-        db.add(version)
-        await db.commit()
+            # 插入版本记录
+            version = NoteVersion(
+                note_id=note_id,
+                user_id=user_id,
+                version_number=version_number,
+                source=source,
+                content_size=content_size,
+                change_summary=change_summary,
+                storage_path=storage_path,
+            )
+            db.add(version)
+            try:
+                await db.commit()
+                break
+            except IntegrityError:
+                # 并发重号：回滚后重算（旧路径文件残留为无害孤儿文件）
+                await db.rollback()
+                logger.warning(
+                    f"版本号冲突，重试 {attempt + 1}/3: note_id={note_id[:8]} v{version_number}"
+                )
+                if attempt == 2:
+                    raise
         await db.refresh(version)
 
         logger.info(
@@ -317,16 +332,23 @@ class VersionService:
         if not target_path:
             raise ValueError(f"笔记无可写入的 Markdown 路径: note_id={note_id}")
 
-        # 读取当前内容
-        current_content = ""
+        # 读取当前内容（F-31 修复：读取失败直接抛错，不建空快照污染历史）
         try:
             data = get_object_bytes(settings.minio_bucket_markdown, target_path)
             current_content = data.decode("utf-8")
         except Exception as e:
-            logger.warning(
-                f"读取笔记当前内容失败，将以空字符串创建版本快照: note_id={note_id[:8]}, err={e}"
+            logger.error(
+                f"读取笔记当前内容失败，中止恢复: note_id={note_id[:8]}, err={e}"
             )
-            current_content = ""
+            raise ValueError(
+                f"读取笔记当前内容失败，无法创建恢复快照: {e}"
+            )
+
+        # F-31 修复：先读取目标版本内容（验证可读），成功后再创建快照。
+        # 旧实现先建快照再读目标，目标缺失时产生多余快照并返回 404。
+        target_content = await self.get_version_content(
+            note_id, version_number, user_id, db
+        )
 
         # 为当前内容创建版本快照（USER_EDIT）
         new_version = await self.create_version(
@@ -336,11 +358,6 @@ class VersionService:
             source=VersionSource.USER_EDIT.value,
             db=db,
             change_summary=f"restore from v{version_number}",
-        )
-
-        # 读取目标版本内容
-        target_content = await self.get_version_content(
-            note_id, version_number, user_id, db
         )
 
         # 用目标版本内容覆盖当前 Markdown 文件

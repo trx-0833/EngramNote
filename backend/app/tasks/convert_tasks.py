@@ -30,6 +30,7 @@ import time
 import traceback
 import logging
 
+from celery.exceptions import Retry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -42,65 +43,11 @@ from ..services.vault_meta import write_note_meta
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# _update_note_status 允许更新的字段白名单（C-3: 防止任意字段写入）
-_UPDATABLE_NOTE_FIELDS = {"title", "page_count", "original_md_path", "clean_md_path", "metadata_"}
-
-# Celery 任务中需要独立的数据库连接（不在 FastAPI 上下文中）
-# 这些全局变量在首次使用时延迟初始化
-_sync_engine = None
-_sync_session_factory = None
-
-
-def _get_sync_session():
-    """
-    获取同步数据库会话工厂（Celery worker 中使用）
-
-    Celery worker 运行在独立进程中，无法使用 FastAPI 的数据库连接池，
-    因此需要创建独立的异步引擎和会话工厂。
-    使用全局变量缓存，避免重复创建。
-
-    Returns:
-        async_sessionmaker: 异步会话工厂
-    """
-    global _sync_engine, _sync_session_factory
-    if _sync_session_factory is None:
-        # Celery 任务运行在独立进程中，需要自己的数据库连接
-        _sync_engine = create_async_engine(settings.get_database_url(), echo=False)
-        _sync_session_factory = async_sessionmaker(_sync_engine, expire_on_commit=False)
-    return _sync_session_factory
-
-
-async def _update_note_status(note_id: str, status: NoteStatus, error_message: Optional[str] = None, **kwargs):
-    """
-    更新笔记状态
-
-    在 Celery worker 的独立数据库会话中更新笔记的状态和附加字段。
-    支持通过 kwargs 动态更新任意笔记字段（如 page_count、metadata_ 等）。
-
-    Args:
-        note_id: 笔记 ID
-        status: 新的状态
-        error_message: 错误信息（可选，失败时使用）
-        **kwargs: 其他需要更新的字段（如 page_count、original_md_path 等）
-    """
-    session_factory = _get_sync_session()
-    async with session_factory() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
-        note = result.scalars().first()
-        if not note:
-            return
-
-        note.status = status
-        if error_message:
-            note.error_message = error_message
-        # 动态更新附加字段（仅允许白名单中的字段）
-        for key, value in kwargs.items():
-            if key in _UPDATABLE_NOTE_FIELDS:
-                setattr(note, key, value)
-        await session.commit()
-        await session.refresh(note)
-        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
-        write_note_meta(note)
+# F-27：会话工厂/状态更新收敛到 tasks/common.py（白名单 + metadata merge 统一维护）
+from .common import (
+    get_sync_session as _get_sync_session,
+    update_note_status as _update_note_status,
+)
 
 
 async def _record_clean_task_id(note_id: str, task_id: str) -> None:
@@ -347,8 +294,14 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
         # 转换失败，尝试重试
         try:
             self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
-            # 重试次数用尽，标记笔记为失败状态
+        except Retry:
+            # 正常重试调度：交给 Celery 框架，不标记失败
+            raise
+        except Exception:
+            # F-30 修复：Celery retry() 重试耗尽时会重新抛出原始异常
+            # （而非 MaxRetriesExceededError），旧代码捕获不到导致笔记
+            # 永久停留在 converting 状态。进入此分支即表示重试次数用尽，
+            # 标记笔记为失败状态。
             asyncio.run(_update_note_status(
                 note_id, NoteStatus.failed,
                 error_message=f"转换任务重试失败: {str(exc)}",

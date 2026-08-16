@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from fastapi import HTTPException
 
 from ..config import get_settings
+from ..models.folder import Folder
 from ..models.learning_goal import LearningGoal, DailyPlan, GoalType, GoalStatus
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note, NoteStatus
@@ -35,8 +36,8 @@ from ..models.review_log import ReviewLog
 
 logger = logging.getLogger(__name__)
 
-# 每日计划任务总数上限
-DAILY_REVIEW_LIMIT = 50
+# 每日计划任务总数上限（F-12：改名为 DAILY_PLAN_LIMIT 与复习答题限额 DAILY_REVIEW_LIMIT=10 区分语义）
+DAILY_PLAN_LIMIT = 50
 
 # 薄弱点掌握度阈值（低于此值视为薄弱点）
 WEAK_POINT_MASTERY_THRESHOLD = 60.0
@@ -48,6 +49,34 @@ NEW_MATERIAL_TASK_LIMIT = 5
 
 # 每用户活跃目标上限
 MAX_ACTIVE_GOALS = 5
+
+
+async def _validate_goal_scopes(
+    db: AsyncSession, user_id: str, scope_notes: List[str], scope_folders: List[str]
+) -> None:
+    """校验目标范围内的笔记/文件夹均属于当前用户（F-09 修复：防止 IDOR）"""
+    note_ids = list(dict.fromkeys(scope_notes or []))
+    folder_ids = list(dict.fromkeys(scope_folders or []))
+
+    if note_ids:
+        count_result = await db.execute(
+            select(func.count(Note.id)).where(
+                Note.user_id == user_id,
+                Note.id.in_(note_ids),
+            )
+        )
+        if (count_result.scalar() or 0) != len(note_ids):
+            raise HTTPException(status_code=400, detail="目标范围包含不存在或无权访问的笔记")
+
+    if folder_ids:
+        count_result = await db.execute(
+            select(func.count(Folder.id)).where(
+                Folder.user_id == user_id,
+                Folder.id.in_(folder_ids),
+            )
+        )
+        if (count_result.scalar() or 0) != len(folder_ids):
+            raise HTTPException(status_code=400, detail="目标范围包含不存在或无权访问的文件夹")
 
 
 class GoalService:
@@ -105,6 +134,14 @@ class GoalService:
         goal_type_value = goal_type.value if hasattr(goal_type, "value") else goal_type
         if goal_type_value is None:
             goal_type_value = GoalType.WEEKLY.value
+
+        # F-09 修复：校验 scope_notes / scope_folders 归属，防止引用他人笔记/文件夹（IDOR）
+        await _validate_goal_scopes(
+            db,
+            user_id,
+            list(getattr(data, "scope_notes", []) or []),
+            list(getattr(data, "scope_folders", []) or []),
+        )
 
         goal = LearningGoal(
             user_id=user_id,
@@ -222,16 +259,19 @@ class GoalService:
         goal = await self.get_goal(goal_id, user_id, db)
 
         now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+        from ..utils.timeutil import today_start_utc
+        today_start = today_start_utc(now)
 
         scope_notes = list(goal.scope_notes or [])
 
-        # 范围内卡片平均掌握度
+        # 范围内卡片平均掌握度（F-09 修复：叠加 user_id 过滤，防止旧数据跨用户渗漏）
         avg_mastery = 0.0
         if scope_notes:
             avg_result = await db.execute(
                 select(func.avg(KnowledgeCard.mastery_level)).where(
                     KnowledgeCard.note_id.in_(scope_notes),
+                    KnowledgeCard.user_id == user_id,
                 )
             )
             avg_value = avg_result.scalar()
@@ -245,22 +285,24 @@ class GoalService:
             avg_value = avg_result.scalar()
             avg_mastery = float(avg_value) if avg_value is not None else 0.0
 
-        # 范围内总题目数
+        # 范围内总题目数（F-09 修复：叠加 user_id 过滤）
         total_count = 0
         if scope_notes:
             total_result = await db.execute(
                 select(func.count()).select_from(QuizItem).where(
                     QuizItem.note_id.in_(scope_notes),
+                    QuizItem.user_id == user_id,
                 )
             )
             total_count = total_result.scalar() or 0
 
-        # 今日已复习题目数（范围内）
+        # 今日已复习题目数（范围内）（F-09 修复：叠加 user_id 过滤）
         reviewed_count = 0
         if scope_notes:
             reviewed_result = await db.execute(
                 select(func.count()).select_from(ReviewLog).where(
                     ReviewLog.note_id.in_(scope_notes),
+                    ReviewLog.user_id == user_id,
                     ReviewLog.review_at >= today_start,
                 )
             )
@@ -310,7 +352,7 @@ class GoalService:
            - 到期复习：next_review_at <= now 或为 None 的 quiz_items（top 20）
            - 新资料：status in (converted, cleaned) 的笔记（top 5）
         4. 按 priority 排序：weak_point (3) > review (2) > new_material (1)
-        5. 总数上限 DAILY_REVIEW_LIMIT=50
+        5. 总数上限 DAILY_PLAN_LIMIT=50
 
         Args:
             user_id: 用户 ID
@@ -323,7 +365,9 @@ class GoalService:
             HTTPException(400): 用户无活跃目标
         """
         now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+        from ..utils.timeutil import today_start_utc
+        today_start = today_start_utc(now)
 
         # 1. 检查今日是否已有计划
         existing_result = await db.execute(
@@ -364,9 +408,11 @@ class GoalService:
 
         if scope_notes:
             # a. 薄弱点：mastery_level < 60 的卡片 → 关联 quiz_items（top 10）
+            #    （F-09 修复：叠加 user_id 过滤）
             weak_cards_result = await db.execute(
                 select(KnowledgeCard.id, KnowledgeCard.title).where(
                     KnowledgeCard.note_id.in_(scope_notes),
+                    KnowledgeCard.user_id == user_id,
                     KnowledgeCard.mastery_level < WEAK_POINT_MASTERY_THRESHOLD,
                 ).limit(WEAK_POINT_TASK_LIMIT)
             )
@@ -378,6 +424,7 @@ class GoalService:
                 weak_quizzes_result = await db.execute(
                     select(QuizItem).where(
                         QuizItem.card_id.in_(weak_card_ids),
+                        QuizItem.user_id == user_id,
                     ).limit(WEAK_POINT_TASK_LIMIT)
                 )
                 for quiz in weak_quizzes_result.scalars().all():
@@ -392,9 +439,11 @@ class GoalService:
                     })
 
             # b. 到期复习：next_review_at <= now 或为 None（top 20）
+            #    （F-09 修复：叠加 user_id 过滤）
             due_quizzes_result = await db.execute(
                 select(QuizItem).where(
                     QuizItem.note_id.in_(scope_notes),
+                    QuizItem.user_id == user_id,
                     (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
                 ).order_by(
                     QuizItem.next_review_at.asc().nullsfirst(),
@@ -412,9 +461,11 @@ class GoalService:
                 })
 
             # c. 新资料：status in (converted, cleaned)（top 5）
+            #    （F-09 修复：叠加 user_id 过滤）
             new_notes_result = await db.execute(
                 select(Note).where(
                     Note.id.in_(scope_notes),
+                    Note.user_id == user_id,
                     Note.status.in_([NoteStatus.converted, NoteStatus.cleaned]),
                 ).order_by(Note.created_at.desc()).limit(NEW_MATERIAL_TASK_LIMIT)
             )
@@ -428,16 +479,16 @@ class GoalService:
                     "title": f"学习新资料: {note.title}",
                 })
 
-        # 计算总数（上限 DAILY_REVIEW_LIMIT）
+        # 计算总数（上限 DAILY_PLAN_LIMIT）
         total_count = (
             len(recommended_tasks["weak_points"])
             + len(recommended_tasks["review"])
             + len(recommended_tasks["new_materials"])
         )
-        if total_count > DAILY_REVIEW_LIMIT:
+        if total_count > DAILY_PLAN_LIMIT:
             # 按优先级裁剪：保留 weak_points → review → new_materials
-            self._trim_tasks(recommended_tasks, DAILY_REVIEW_LIMIT)
-            total_count = DAILY_REVIEW_LIMIT
+            self._trim_tasks(recommended_tasks, DAILY_PLAN_LIMIT)
+            total_count = DAILY_PLAN_LIMIT
 
         # 关联到第一个活跃目标（计划聚合所有目标，但 FK 需要一个 goal_id）
         plan = DailyPlan(
@@ -509,12 +560,13 @@ class GoalService:
                 for goal in active_goals:
                     scope_notes = list(goal.scope_notes or [])
 
-                    # 计算平均掌握度
+                    # 计算平均掌握度（F-09 修复：叠加 user_id 过滤）
                     avg_mastery = 0.0
                     if scope_notes:
                         avg_result = await session.execute(
                             select(func.avg(KnowledgeCard.mastery_level)).where(
                                 KnowledgeCard.note_id.in_(scope_notes),
+                                KnowledgeCard.user_id == goal.user_id,
                             )
                         )
                         avg_value = avg_result.scalar()

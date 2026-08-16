@@ -40,6 +40,8 @@ from ..models.review_log import ReviewLog
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
 from ..schemas.knowledge import (
+    UnderstandingStartRequest,
+    UnderstandingImpact,
     UnderstandingStartResponse,
     UnderstandingStatusResponse,
     ChapterSummary,
@@ -69,23 +71,43 @@ router = APIRouter()
 @router.post("/{note_id}/start", response_model=UnderstandingStartResponse)
 async def start_understanding(
     note_id: str,
+    req: UnderstandingStartRequest = UnderstandingStartRequest(),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
     """
     触发笔记理解管道
 
-    仅对 cleaned 或 learning_failed 状态的笔记有效。
-    理解管道会切分章节、生成摘要、提取知识点。
+    仅对 cleaned / learning_failed / archived 状态的笔记有效。
+    F-02 修复：archived 笔记重新理解会清空全部旧产物（卡片/题目/复习记录/图谱关系），
+    必须先以 confirm=false 调用获取影响数量，用户确认后带 confirm=true 再次调用。
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
         raise HTTPException(status_code=404, detail="笔记不存在")
 
+    if note.status == NoteStatus.learning:
+        # F-29 联动：进行中禁止重复触发
+        raise HTTPException(
+            status_code=409,
+            detail="理解任务正在进行中，请等待完成",
+        )
+
     if note.status not in (NoteStatus.cleaned, NoteStatus.learning_failed, NoteStatus.archived):
         raise HTTPException(
             status_code=400,
             detail=f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
+        )
+
+    # F-02 修复：archived 笔记未确认时，只返回影响数量，不执行任何删除
+    if note.status == NoteStatus.archived and not req.confirm:
+        impact = await _count_understanding_impact(db, note_id)
+        return UnderstandingStartResponse(
+            id=note_id,
+            status=note.status,
+            message="重新理解将删除该笔记现有的全部学习成果（卡片、题目、复习记录、图谱关系），确认后不可恢复",
+            requires_confirm=True,
+            impact=impact,
         )
 
     # 重新学习前清空旧产物（无论当前状态），避免重复卡片
@@ -131,6 +153,53 @@ async def start_understanding(
         id=note_id,
         status=NoteStatus.learning,
         message="理解任务已触发",
+    )
+
+
+async def _count_understanding_impact(
+    db: AsyncSession, note_id: str
+) -> UnderstandingImpact:
+    """统计重新理解将删除的旧产物数量（F-02 修复）"""
+    from sqlalchemy import func as sa_func
+
+    cards = (await db.execute(
+        select(sa_func.count()).select_from(KnowledgeCard).where(
+            KnowledgeCard.note_id == note_id
+        )
+    )).scalar() or 0
+
+    quizzes = (await db.execute(
+        select(sa_func.count()).select_from(QuizItem).where(
+            QuizItem.note_id == note_id
+        )
+    )).scalar() or 0
+
+    review_logs = (await db.execute(
+        select(sa_func.count()).select_from(ReviewLog).where(
+            ReviewLog.note_id == note_id
+        )
+    )).scalar() or 0
+
+    relations = 0
+    card_ids_result = await db.execute(
+        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
+    )
+    card_ids = [row[0] for row in card_ids_result.all()]
+    if card_ids:
+        relations = (await db.execute(
+            select(sa_func.count()).select_from(CardRelation).where(
+                or_(
+                    CardRelation.card_id_1.in_(card_ids),
+                    CardRelation.card_id_2.in_(card_ids),
+                )
+            )
+        )).scalar() or 0
+
+    return UnderstandingImpact(
+        cards=cards,
+        quizzes=quizzes,
+        review_logs=review_logs,
+        relations=relations,
     )
 
 
@@ -254,10 +323,12 @@ async def get_all_cards(
     if note_id:
         conditions.append(KnowledgeCard.note_id == note_id)
     if keyword:
+        # F-32 修复：转义 SQL 通配符
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append(
             or_(
-                KnowledgeCard.title.ilike(f"%{keyword}%"),
-                KnowledgeCard.content.ilike(f"%{keyword}%"),
+                KnowledgeCard.title.ilike(f"%{escaped}%", escape="\\"),
+                KnowledgeCard.content.ilike(f"%{escaped}%", escape="\\"),
             )
         )
 
@@ -448,6 +519,10 @@ async def ask_question(
 
     基于用户所有笔记的内容回答问题。
     """
+    # F-31 修复：拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用
+    if not req.question or not req.question.strip():
+        raise HTTPException(status_code=422, detail="问题不能为空")
+
     rag_service = RAGService()
     result = await rag_service.answer_question(
         question=req.question,
@@ -496,6 +571,11 @@ async def ask_question_stream(
 
     async def event_stream():
         try:
+            # F-31 修复：拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用
+            if not req.question or not req.question.strip():
+                yield f"event: error\ndata: {json.dumps({'message': '问题不能为空', 'error_code': 'EMPTY_QUESTION'}, ensure_ascii=False)}\n\n"
+                return
+
             # 1. 检索阶段（不调用 LLM）
             rag_service = RAGService()
             retrieval = await rag_service.retrieve_context(
@@ -657,7 +737,9 @@ async def get_all_questions(
     if note_id:
         conditions.append(QuizItem.note_id == note_id)
     if keyword:
-        conditions.append(QuizItem.question.ilike(f"%{keyword}%"))
+        # F-32 修复：转义 SQL 通配符
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append(QuizItem.question.ilike(f"%{escaped}%", escape="\\"))
 
     # 计算总数
     count_query = select(func.count()).select_from(QuizItem).where(*conditions)

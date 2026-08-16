@@ -1,0 +1,21 @@
+# ============================================================
+# EngramNote 换行符策略
+# 防止 autocrlf 把 .sh 转成 CRLF（sh 脚本标准是 LF，CRLF 会导致
+# Linux/macOS 上 "bad interpreter" / "$'\r': command not found"）
+# ============================================================
+
+# Shell 脚本：一律 LF（git 存储与检出均为 LF）
+*.sh text eol=lf
+
+# Windows 批处理：一律 CRLF（cmd 对 LF-only 批处理的多行 if 块解析异常）
+*.bat text eol=crlf
+
+# 其余文本文件：跟随 core.autocrlf 默认行为（自动转换）
+*.md text
+*.py text
+*.ts text
+*.tsx text
+*.json text
+*.yml text
+*.yaml text
+*.txt text

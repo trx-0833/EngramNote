@@ -23,13 +23,13 @@ RAG 问答服务模块
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from ..config import get_settings
 from ..models.note import Note
@@ -56,10 +56,10 @@ class RAGService:
         self._session_factory = None
 
     def _get_session_factory(self):
-        """获取数据库会话工厂"""
+        """获取数据库会话工厂（F-06 修复：复用主应用会话工厂，避免私有 engine 泄漏）"""
         if self._session_factory is None:
-            engine = create_async_engine(settings.get_database_url(), echo=False)
-            self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            from ..database import async_session
+            self._session_factory = async_session
         return self._session_factory
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
@@ -81,7 +81,8 @@ class RAGService:
                 "app.tasks.embedding_tasks.encode_text",
                 args=[[text]],
             )
-            result = task.get(timeout=10)
+            # F-06 修复：task.get() 是阻塞调用，放入线程池避免卡死事件循环
+            result = await asyncio.to_thread(task.get, 10)
             if result:
                 return result[0]
             return None
@@ -112,7 +113,8 @@ class RAGService:
                 "app.tasks.embedding_tasks.search_vectors",
                 args=[user_id, question_embedding, top_k],
             )
-            result = task.get(timeout=15)
+            # F-06 修复：阻塞调用移入线程池
+            result = await asyncio.to_thread(task.get, 15)
             return result if result else []
         except Exception as e:
             logger.warning(f"Celery 向量搜索失败: {e}")

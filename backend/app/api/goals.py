@@ -56,6 +56,10 @@ def _build_goal_response(goal: LearningGoal, progress: Optional[Dict[str, Any]] 
     resp = GoalResponse.model_validate(goal)
     if progress is not None:
         resp.progress_percentage = float(progress.get("progress_percentage", 0.0))
+    else:
+        # F-13 修复：列表接口无实时进度时回退 progress_cache（Beat 每日刷新），
+        # 避免列表进度恒为 0
+        resp.progress_percentage = float(getattr(goal, "progress_cache", 0.0) or 0.0)
     return resp
 
 
@@ -197,6 +201,16 @@ async def update_goal(
     """
     # get_goal 内部会在目标不存在时抛出 HTTPException(404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
+
+    # F-09 修复：更新 scope 时校验归属，防止引用他人笔记/文件夹（IDOR）
+    if req.scope_notes is not None or req.scope_folders is not None:
+        from ..services.goal_service import _validate_goal_scopes
+        await _validate_goal_scopes(
+            db,
+            current_user.id,
+            list(req.scope_notes) if req.scope_notes is not None else (goal.scope_notes or []),
+            list(req.scope_folders) if req.scope_folders is not None else (goal.scope_folders or []),
+        )
 
     # 按字段更新：仅更新请求中显式提供的非 None 字段
     # name 字段使用 Pydantic 的 min_length=1 校验，已保证非空

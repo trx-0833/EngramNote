@@ -24,15 +24,17 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..models.quiz_item import QuizItem, QuestionType
 from ..models.review_log import ReviewLog
 from ..models.knowledge_card import KnowledgeCard
 from ..services.sm2_service import calculate_sm2, quality_from_answer
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
-DAILY_REVIEW_LIMIT = 10  # 每日最大答题数
+DAILY_REVIEW_LIMIT = settings.daily_review_limit  # 每日最大答题数（F-12：单一来源 config）
 
 
 async def get_due_quizzes(
@@ -63,7 +65,9 @@ async def get_due_quizzes(
         List[QuizItem]: 到期题目列表
     """
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    from ..utils.timeutil import today_start_utc
+    today_start = today_start_utc(now)
 
     # 计算今日已答题数
     today_done_result = await db.execute(
@@ -117,17 +121,20 @@ async def submit_answer(
     time_spent_ms: int,
     db: AsyncSession,
     skip_daily_limit: bool = False,
+    skip_due_check: bool = False,
 ) -> Dict[str, Any]:
     """
     提交答案并更新 SM-2 调度参数
 
     完整流程：
     1. 查询题目，校验权限
-    2. 判断正误，计算 SM-2 评分
-    3. 调用 SM-2 算法更新调度参数
-    4. 更新 QuizItem 的 SM-2 字段
-    5. 创建 ReviewLog 记录
-    6. 返回判分结果
+    2. 校验题目是否到期（普通复习；快速复习可跳过）
+    3. 同日重复提交幂等：已提交过则返回已记录结果，不重复写日志/叠加 SM-2
+    4. 判断正误，计算 SM-2 评分
+    5. 调用 SM-2 算法更新调度参数
+    6. 更新 QuizItem 的 SM-2 字段
+    7. 创建 ReviewLog 记录
+    8. 返回判分结果
 
     Args:
         quiz_id: 题目 ID
@@ -136,6 +143,8 @@ async def submit_answer(
         time_spent_ms: 答题耗时（毫秒）
         db: 数据库会话
         skip_daily_limit: 是否跳过每日答题限额检查（快速复习场景使用）
+        skip_due_check: 是否跳过到期校验（F-14 修复：快速复习保留免校验，
+                        普通复习必须到期才能提交）
 
     Returns:
         Dict: 判分结果，包含 is_correct, quality, correct_answer, explanation, next_review_at 等
@@ -154,7 +163,9 @@ async def submit_answer(
     # 1.5 检查每日答题限额（快速复习场景跳过此检查）
     now = datetime.now(timezone.utc)
     if not skip_daily_limit:
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # F-32 修复：日界按 Asia/Shanghai（北京时间零点）
+        from ..utils.timeutil import today_start_utc
+        today_start = today_start_utc(now)
         today_done_result = await db.execute(
             select(func.count()).select_from(ReviewLog).where(
                 ReviewLog.user_id == user_id,
@@ -164,6 +175,31 @@ async def submit_answer(
         today_done = today_done_result.scalar() or 0
         if today_done >= DAILY_REVIEW_LIMIT:
             return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {DAILY_REVIEW_LIMIT}"}
+
+    # 1.6 F-14 修复：同日同题幂等——今日已提交过则直接返回已记录结果，
+    #     不重复创建 ReviewLog、不重复叠加 SM-2（防止双击/连点/API 重放）。
+    #     幂等检查必须在到期校验之前：同日已提交后 SM-2 已把 next_review_at
+    #     推到未来，若先查到期会误报"未到期"而非命中幂等。
+    from ..utils.timeutil import today_start_utc
+    today_start = today_start_utc(now)
+    existing_log_result = await db.execute(
+        select(ReviewLog).where(
+            ReviewLog.quiz_id == quiz_id,
+            ReviewLog.user_id == user_id,
+            ReviewLog.review_at >= today_start,
+        ).order_by(ReviewLog.review_at.desc()).limit(1)
+    )
+    existing_log = existing_log_result.scalars().first()
+    if existing_log is not None:
+        logger.info(
+            f"答题提交幂等命中: user={user_id[:8]}, quiz={quiz_id[:8]}, "
+            f"同日已提交，返回历史结果"
+        )
+        return _build_submit_result(quiz, existing_log)
+
+    # 1.7 F-14 修复：普通复习提交校验题目是否到期（未到期拒绝；快速复习跳过）
+    if not skip_due_check and quiz.next_review_at is not None and quiz.next_review_at > now:
+        return {"error": "题目尚未到期，请按复习计划进行"}
 
     # 2. 判断正误，计算 SM-2 评分
     correct_answer = quiz.answer
@@ -218,7 +254,11 @@ async def submit_answer(
             f"刷新卡片掌握度失败 (card_id={quiz.card_id}): {mastery_err}"
         )
 
-    # 6. 返回判分结果
+    return _build_submit_result(quiz, review_log)
+
+
+def _build_submit_result(quiz, review_log) -> Dict[str, Any]:
+    """构造提交结果字典（普通提交与幂等命中共用）"""
     # 解析选项（选择题）
     options = None
     if quiz.options:
@@ -226,20 +266,19 @@ async def submit_answer(
             options = json.loads(quiz.options) if isinstance(quiz.options, str) else quiz.options
         except (json.JSONDecodeError, TypeError):
             options = None
-
     return {
-        "quiz_id": quiz_id,
-        "is_correct": is_correct,
-        "quality": quality,
-        "correct_answer": correct_answer,
+        "quiz_id": quiz.id,
+        "is_correct": review_log.is_correct,
+        "quality": review_log.quality,
+        "correct_answer": quiz.answer,
         "explanation": quiz.explanation,
         "options": options,
-        "question_type": question_type,
+        "question_type": quiz.question_type.value,
         "sm2": {
-            "interval": sm2_result.interval,
-            "repetition": sm2_result.repetition,
-            "easiness_factor": sm2_result.easiness_factor,
-            "next_review_at": sm2_result.next_review_at.isoformat(),
+            "interval": quiz.interval,
+            "repetition": quiz.repetition,
+            "easiness_factor": quiz.easiness_factor,
+            "next_review_at": quiz.next_review_at.isoformat() if quiz.next_review_at else None,
         },
     }
 
@@ -266,7 +305,9 @@ async def get_review_stats(
         Dict: 复习统计数据
     """
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    from ..utils.timeutil import today_start_utc
+    today_start = today_start_utc(now)
 
     # 今日已完成数（先查，后面 due_count 需要用）
     today_done_result = await db.execute(
@@ -342,6 +383,7 @@ async def get_review_stats(
         "total_correct": total_correct,
         "total_accuracy": round(total_correct / total_reviews * 100, 1) if total_reviews > 0 else 0,
         "total_quizzes": total_quizzes,
+        "daily_limit": DAILY_REVIEW_LIMIT,  # F-12：每日答题上限下发给前端
     }
 
 

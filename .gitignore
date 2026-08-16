@@ -62,6 +62,19 @@ backend/restore_*.py
 # ---- 运维脚本中含真实用户数据的文件（隐私，不提交） ----
 backend/scripts/cleanup_test_data.py
 
+# ---- Celery 运行时残留（F-34 清理） ----
+backend/control/
+celerybeat-schedule.*
+
+# ---- E2E 测试产物（可再生成，含测试 token 等，不提交） ----
+backend/tests/results/
+
+# ---- pytest 临时目录（沙箱/权限异常时产生） ----
+pytest-cache-files-*/
+
+# ---- 本地验证临时库（F-35 验证脚本产物） ----
+backend/data/tmp_test/
+
 # ---- 测试与缓存 ----
 .pytest_cache/
 .mypy_cache/

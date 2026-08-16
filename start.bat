@@ -166,6 +166,27 @@ timeout /t 3 /nobreak >nul
 echo [START] Celery Worker...
 start "EngramNote-Celery" cmd /k "cd /d %BACKEND_DIR% && python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --pool=solo"
 
+:: 检测并清理残留的 Beat pidfile（旧进程已不存在时）
+:: Windows 上 Celery 无法可靠检测已死的 pid，需在启动前主动检查
+if exist "%BACKEND_DIR%\data\celery\beat.pid" (
+    set /p OLD_BEAT_PID=<"%BACKEND_DIR%\data\celery\beat.pid"
+    if defined OLD_BEAT_PID (
+        tasklist /FI "PID eq !OLD_BEAT_PID!" 2>nul | findstr /B /C:"!OLD_BEAT_PID!" >nul
+        if errorlevel 1 (
+            echo [INFO] 清理残留 Beat pidfile（旧进程 !OLD_BEAT_PID! 已不存在）
+            del /q "%BACKEND_DIR%\data\celery\beat.pid"
+        ) else (
+            :: 注意：括号块内的 echo 必须转义半角括号，否则 cmd 会提前闭合块
+            echo [WARN] 检测到 Beat 正在运行 ^(PID !OLD_BEAT_PID!^)，跳过 Beat 启动
+            goto :skip_beat
+        )
+    )
+)
+
+echo [START] Celery Beat - daily goal refresh and review email scheduler...
+start "EngramNote-CeleryBeat" cmd /k "cd /d %BACKEND_DIR% && python -m celery -A app.tasks.celery_app:celery_app beat --loglevel=info --pidfile %BACKEND_DIR%\data\celery\beat.pid"
+:skip_beat
+
 echo [START] Frontend dev server (port %FRONTEND_PORT%)...
 start "EngramNote-Frontend" cmd /k "cd /d %FRONTEND_DIR% && npm run dev"
 
@@ -179,7 +200,7 @@ echo   Backend API:  http://localhost:%BACKEND_PORT%
 echo   API Docs:      http://localhost:%BACKEND_PORT%/docs
 echo   Frontend:      http://localhost:%FRONTEND_PORT%
 echo.
-echo   3 windows opened. Close a window to stop its service.
+echo   4 windows opened. Close a window to stop its service.
 echo.
 echo   Note: First file upload may take ~30s (loading embedding model).
 echo.

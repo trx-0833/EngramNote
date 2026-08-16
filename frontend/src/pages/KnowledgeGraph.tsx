@@ -29,22 +29,8 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-
-/** 卡片类型 → 节点颜色（学术主题色板） */
-const CARD_TYPE_COLORS: Record<string, string> = {
-  concept: '#2d8a56',      // 墨绿
-  formula: '#0f3460',      // 深海蓝（主色）
-  qa: '#c9a959',           // 墨金（辅助色）
-  definition: '#6d28d9',   // 紫罗兰
-}
-
-/** 卡片类型 → 中文标签 */
-const CARD_TYPE_LABELS: Record<string, string> = {
-  concept: '概念',
-  formula: '公式',
-  qa: '问答',
-  definition: '定义',
-}
+// F-28：卡片类型颜色/标签统一从 utils/labels.ts 读取（单一数据源）
+import { cardTypeColors as CARD_TYPE_COLORS, cardTypeLabels as CARD_TYPE_LABELS } from '../utils/labels'
 
 /** 关系类型 → 中文标签 */
 const RELATION_TYPE_LABELS: Record<string, string> = {

@@ -98,7 +98,10 @@ echo "[4/7] Checking backend dependencies..."
 cd "$BACKEND_DIR"
 if ! python -c "import fastapi" 2>/dev/null; then
     echo "[INFO] Installing backend dependencies (tsinghua mirror)..."
-    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+    if ! pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn; then
+        echo "[ERROR] Backend dependency install failed"
+        exit 1
+    fi
 fi
 echo "[OK] Backend dependencies ready"
 
@@ -108,7 +111,10 @@ echo "[5/7] Checking frontend dependencies..."
 cd "$FRONTEND_DIR"
 if [ ! -d "node_modules" ]; then
     echo "[INFO] Installing frontend dependencies (taobao mirror)..."
-    npm install --registry=https://registry.npmmirror.com
+    if ! npm install --registry=https://registry.npmmirror.com; then
+        echo "[ERROR] Frontend dependency install failed"
+        exit 1
+    fi
 fi
 echo "[OK] Frontend dependencies ready"
 
@@ -143,6 +149,27 @@ cd "$BACKEND_DIR"
 python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info &
 CELERY_PID=$!
 
+# 检测并清理残留的 Beat pidfile（旧进程已不存在时）
+SKIP_BEAT=0
+BEAT_PID=""
+if [ -f "$BACKEND_DIR/data/celery/beat.pid" ]; then
+    OLD_BEAT_PID=$(cat "$BACKEND_DIR/data/celery/beat.pid" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$OLD_BEAT_PID" ] && kill -0 "$OLD_BEAT_PID" 2>/dev/null; then
+        echo "[WARN] 检测到 Beat 正在运行 (PID $OLD_BEAT_PID)，跳过 Beat 启动"
+        SKIP_BEAT=1
+    else
+        echo "[INFO] 清理残留 Beat pidfile（旧进程已不存在）"
+        rm -f "$BACKEND_DIR/data/celery/beat.pid"
+    fi
+fi
+
+if [ "$SKIP_BEAT" = "0" ]; then
+    echo "[START] Celery Beat (F-10: 定时任务 00:30 目标刷新 / 09:00 复习邮件)..."
+    cd "$BACKEND_DIR"
+    python -m celery -A app.tasks.celery_app:celery_app beat --loglevel=info --pidfile "$BACKEND_DIR/data/celery/beat.pid" &
+    BEAT_PID=$!
+fi
+
 echo "[START] Frontend dev server (port $FRONTEND_PORT)..."
 cd "$FRONTEND_DIR"
 npm run dev &
@@ -163,12 +190,13 @@ echo ""
 echo "  Note: First file upload may take ~30s (loading embedding model)."
 echo ""
 
-# 捕获 Ctrl+C 信号，停止所有进程
+# 捕获 Ctrl+C 信号，停止所有进程（F-10：清理列表包含 Beat）
 cleanup() {
     echo ""
     echo "[STOP] 正在停止所有服务..."
-    kill $BACKEND_PID $CELERY_PID $FRONTEND_PID 2>/dev/null
-    wait $BACKEND_PID $CELERY_PID $FRONTEND_PID 2>/dev/null
+    kill $BACKEND_PID $CELERY_PID $BEAT_PID $FRONTEND_PID 2>/dev/null
+    wait $BACKEND_PID $CELERY_PID $BEAT_PID $FRONTEND_PID 2>/dev/null
+    rm -f "$BACKEND_DIR/data/celery/beat.pid"
     echo "[OK] 所有服务已停止"
     exit 0
 }

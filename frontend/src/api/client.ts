@@ -225,6 +225,15 @@ export function notifyTokenExpired(): void {
  * @returns 解析后的 JSON 响应数据
  * @throws 当响应状态码非 2xx 时抛出 Error，包含后端返回的 detail 信息
  */
+/** F-22：请求超时（毫秒）。登录/注册等凭据接口与普通请求一致；SSE 流式接口不经过此函数 */
+const REQUEST_TIMEOUT_MS = 30000;
+
+/** F-22：仅凭据提交接口的 401 不应触发全局登出（错误密码≠令牌过期）。
+ *  注意：/auth/me 的 401 是令牌失效信号，必须触发登出。 */
+function isAuthCredentialPath(path: string): boolean {
+  return path === '/auth/login' || path === '/auth/register';
+}
+
 export async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -241,17 +250,35 @@ export async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  // F-22 修复：AbortController 超时，避免网络挂起时请求永久 pending
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal ?? controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('请求超时，请检查网络后重试');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   // 响应状态码非 2xx 时，尝试解析后端错误信息
   if (!response.ok) {
-    // Token 过期或无效时，通知应用跳转到登录页
+    // Token 过期或无效时，通知应用跳转到登录页（F-22：仅非凭据接口触发登出）
     if (response.status === 401) {
-      notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
+      if (!isAuthCredentialPath(path)) {
+        notifyTokenExpired();
+      }
+      throw new Error(response.status === 401 && isAuthCredentialPath(path)
+        ? '邮箱或密码错误'
+        : '登录已过期，请重新登录');
     }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     // FastAPI 422 验证错误的 detail 是数组，需提取可读信息
@@ -266,7 +293,69 @@ export async function request<T>(
     return undefined as T;
   }
 
-  return response.json();
+  // F-22 修复：兼容 200 空响应体（部分 DELETE/操作接口返回 200 但无 body）
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
+}
+
+/**
+ * F-22：通用 multipart/form-data 上传请求（合并 4 处重复的 FormData fetch 分支）。
+ * 401 处理与 request() 一致（仅凭据接口豁免，上传接口 401 即登出）。
+ */
+async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('上传超时，请检查网络后重试');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    const detail = Array.isArray(error.detail)
+      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
+      : (error.detail || `请求失败: ${response.status}`);
+    throw new Error(detail);
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
 }
 
 // --- 认证 API ---
@@ -562,7 +651,6 @@ export async function updateNoteLinks(noteId: string, materialNoteIds: string[])
  * @returns 新创建的笔记记录（状态为 uploading）
  */
 export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[], projectIds?: string[]): Promise<Note> {
-  const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   if (backend) formData.append('backend', backend);
@@ -572,24 +660,8 @@ export async function uploadFile(file: File, backend?: string, noteRole?: string
     formData.append('linked_material_ids', JSON.stringify(linkedMaterialIds));
   }
 
-  // 文件上传不设置 Content-Type，让浏览器自动设置 multipart/form-data 边界
-  const response = await fetch(`${API_BASE}/upload`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-
-  if (!response.ok) {
-    // Token 过期或无效时，通知应用跳转到登录页
-    if (response.status === 401) {
-      notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
-    }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `上传失败: ${response.status}`);
-  }
-
-  return response.json();
+  // F-22：统一走 uploadRequest（multipart 不设 Content-Type，由浏览器自动生成边界）
+  return uploadRequest<Note>('/upload', formData);
 }
 
 /** 两阶段上传阶段 1（prepare）的返回结果 */
@@ -614,26 +686,11 @@ export interface PreparedUpload {
  * @returns 临时上传信息（temp_id、filename、source_type、page_count）
  */
 export async function prepareUpload(file: File): Promise<PreparedUpload> {
-  const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/upload/prepare`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
-    }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `上传失败: ${response.status}`);
-  }
-
-  return response.json();
+  // F-22：统一走 uploadRequest
+  return uploadRequest<PreparedUpload>('/upload/prepare', formData);
 }
 
 /** 两阶段上传阶段 2（commit）的可选参数 */
@@ -663,7 +720,6 @@ export interface CommitUploadOptions {
  * @returns 新创建的笔记记录（状态为 uploading）
  */
 export async function commitUpload(tempId: string, opts: CommitUploadOptions = {}): Promise<Note> {
-  const token = getToken();
   const formData = new FormData();
   formData.append('temp_id', tempId);
   if (opts.filename && opts.filename.trim()) formData.append('filename', opts.filename.trim());
@@ -677,22 +733,8 @@ export async function commitUpload(tempId: string, opts: CommitUploadOptions = {
     formData.append('linked_material_ids', JSON.stringify(opts.linked_material_ids));
   }
 
-  const response = await fetch(`${API_BASE}/upload/commit`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
-    }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `上传失败: ${response.status}`);
-  }
-
-  return response.json();
+  // F-22：统一走 uploadRequest
+  return uploadRequest<Note>('/upload/commit', formData);
 }
 
 /**
@@ -855,10 +897,20 @@ export interface QuizItemListResponse {
 }
 
 /** 理解管道触发响应 */
+export interface UnderstandingImpact {
+  cards: number;
+  quizzes: number;
+  review_logs: number;
+  relations: number;
+}
+
 export interface UnderstandingStartResponse {
   id: string;
   status: string;
   message: string;
+  /** F-02：archived 笔记未确认时返回 true，需用户二次确认后带 confirm=true 重调 */
+  requires_confirm?: boolean;
+  impact?: UnderstandingImpact | null;
 }
 
 /** 理解管道状态响应 */
@@ -908,10 +960,14 @@ export interface GenerateQuestionsResponse {
 
 /**
  * 触发笔记理解管道
+ * F-02：archived 笔记重新理解会清空旧产物，需 confirm=true 显式确认；
+ * 先以 confirm=false 调用可获取 requires_confirm 与影响数量。
  */
-export async function startUnderstanding(noteId: string): Promise<UnderstandingStartResponse> {
+export async function startUnderstanding(noteId: string, confirm = false): Promise<UnderstandingStartResponse> {
   return request<UnderstandingStartResponse>(`/understanding/${noteId}/start`, {
     method: 'POST',
+    body: JSON.stringify({ confirm }),
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
@@ -1054,6 +1110,8 @@ export interface ReviewStats {
   total_correct: number;
   total_accuracy: number;
   total_quizzes: number;
+  /** F-12：每日答题上限（后端单一来源，前端据此显示进度） */
+  daily_limit: number;
 }
 
 /** 复习历史条目 */
@@ -1825,29 +1883,14 @@ export async function removeNoteFromProject(projectId: string, noteId: string): 
  * @returns 新创建的笔记记录
  */
 export async function uploadFileToFolder(file: File, folderId: string, backend?: string, projectIds?: string[]): Promise<Note> {
-  const token = getToken();
   const formData = new FormData();
   formData.append('file', file);
   formData.append('folder_id', folderId);
   if (backend) formData.append('backend', backend);
   if (projectIds && projectIds.length > 0) formData.append('project_ids', JSON.stringify(projectIds));
 
-  const response = await fetch(`${API_BASE}/upload`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
-    }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `上传失败: ${response.status}`);
-  }
-
-  return response.json();
+  // F-22：统一走 uploadRequest
+  return uploadRequest<Note>('/upload', formData);
 }
 
 // --- 流式问答 API ---

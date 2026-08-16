@@ -42,15 +42,27 @@ export default function Dashboard() {
   async function fetchRecent() {
     setLoading(true)
     setError('')
+    // F-24：统计类接口失败不再静默吞掉——记录失败集合，非关键失败轻提示，
+    // 关键失败（notes）仍走整页错误
+    // 修复：getDailyPlan 在"无活跃目标"时返回 400（正常业务状态，不是加载失败），
+    // 不计数到 failedCount，避免新用户每次打开都误报"部分数据加载失败"
+    let failedCount = 0
     try {
       const [notesRes, statsRes, reportRes, trendRes, weakRes, goalsRes, planRes] = await Promise.all([
         getNotes(1, 5),
-        getReviewStats().catch(() => null),
-        getDailyReport().catch(() => null),
-        getWeeklyTrend().catch(() => null),
-        getWeakPoints(3).catch(() => null),
-        getGoals('active').catch(() => null),
-        getDailyPlan().catch(() => null),
+        getReviewStats().catch(() => { failedCount++; return null }),
+        getDailyReport().catch(() => { failedCount++; return null }),
+        getWeeklyTrend().catch(() => { failedCount++; return null }),
+        getWeakPoints(3).catch(() => { failedCount++; return null }),
+        getGoals('active').catch(() => { failedCount++; return null }),
+        getDailyPlan().catch((e: unknown) => {
+          // 无活跃目标 → 400 "No active goals..."：正常状态，不算失败
+          const msg = e instanceof Error ? e.message : ''
+          if (!msg.includes('active goals')) {
+            failedCount++
+          }
+          return null
+        }),
       ])
       setRecentNotes(notesRes.items)
       if (statsRes) setReviewStats(statsRes)
@@ -59,6 +71,10 @@ export default function Dashboard() {
       if (weakRes) setWeakPoints(weakRes.items)
       if (goalsRes) setGoals(goalsRes.goals)
       if (planRes) setDailyPlan(planRes)
+      // 非关键失败：显示提示条而不是假装"暂无数据"
+      if (failedCount > 0) {
+        setError(`部分数据加载失败（${failedCount} 项），其余内容正常显示，可刷新重试`)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败，请重试')
     } finally {

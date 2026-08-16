@@ -179,11 +179,18 @@ async def _resolve_unique_base(
         safe_stem = os.urandom(4).hex()
 
     async def _exists(candidate: str) -> bool:
-        object_name = vault_path.source_object(prefix, candidate, ext)
+        # F-16 修复：按 base（主干）检测冲突，而非仅同扩展名。
+        # 旧实现按 `source_object(prefix, candidate, ext)`（含扩展名）查重，
+        # 导致 a.pdf 与 a.md 判定互不冲突，但两者转换输出均为
+        # output/markdown/a.md，后上传者覆盖先上传者的转换结果。
+        # 现改为：同 prefix 下存在任意扩展名的同名 base 即视为冲突。
+        # 注意：candidate 可能含 `_`/`%`，需转义 LIKE 通配符。
+        escaped = candidate.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        prefix_match = f"{prefix}/source/{escaped}."
         result = await db.execute(
             select(Note.id).where(
                 Note.user_id == user_id,
-                Note.original_file_path == object_name,
+                Note.original_file_path.like(f"{prefix_match}%", escape="\\"),
             )
         )
         return result.scalars().first() is not None
@@ -277,6 +284,21 @@ async def _do_upload(
             )
         )
         projects = list(proj_result.scalars().all())
+
+    # 2.5 校验文件夹归属（F-08 修复）：folder_id 必须存在且属于当前用户，
+    # 防止跨用户把笔记挂入他人文件夹（IDOR）
+    if folder_id:
+        folder_result = await db.execute(
+            select(Folder).where(
+                Folder.id == folder_id,
+                Folder.user_id == current_user.id,
+            )
+        )
+        if not folder_result.scalars().first():
+            raise HTTPException(
+                status_code=400,
+                detail="文件夹不存在或无权访问",
+            )
 
     # 3. 创建笔记记录
     note_id = str(uuid.uuid4())

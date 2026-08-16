@@ -26,14 +26,22 @@ Celery 启动说明（独立进程，不嵌入 FastAPI）：
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .api.router import api_router
 from .config import get_settings
+from .core import context
 from .core.logging_config import setup_logging
+from .core.tempfile_compat import apply_tempfile_compat
 from .database import init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
+from .middleware.request_context import RequestContextMiddleware
+
+# 运行环境兼容：替换 tempfile.mkdtemp（详见 core/tempfile_compat.py）
+apply_tempfile_compat()
 
 # 获取全局配置
 settings = get_settings()
@@ -57,6 +65,13 @@ async def lifespan(app: FastAPI):
     # 启动时：初始化数据库，创建所有数据表
     await init_db()
     yield
+    # 关闭时：释放共享 LLM HTTP 客户端（F-05 修复）
+    try:
+        from .services.llm_service import close_llm_client
+        close_llm_client()
+        logger.info("EngramNote 应用关闭：已释放 LLM 共享客户端")
+    except Exception as e:
+        logger.warning(f"关闭 LLM 共享客户端失败: {e}")
 
 
 # 创建 FastAPI 应用实例
@@ -79,7 +94,54 @@ app.add_middleware(
 )
 
 # 注册全局异常处理中间件 — 捕获所有未处理异常，返回统一格式
+# 顺序说明（CORS → ErrorHandler → RequestContext → 路由）：
+# ErrorHandler 在最外层兜底，RequestContext 在内层为请求注入 request_id
+# 并记录访问日志（含耗时/状态码/用户ID）。
 app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RequestContextMiddleware)
+
+# ---- 全局异常处理器：让所有 HTTP 错误响应体都携带 request_id ----
+# 说明：路由层抛出的 HTTPException / RequestValidationError 由 FastAPI
+# 内部的 ExceptionMiddleware 处理，不经过 ErrorHandlerMiddleware，
+# 因此在这里注册处理器，保证 4xx/5xx 响应体统一为
+# {"detail", "error_code", "request_id"} 格式，客户端可凭 request_id 定位日志。
+
+def _error_payload(status_code: int, detail: str, error_code: str) -> dict:
+    return {
+        "detail": detail,
+        "error_code": error_code,
+        "request_id": context.get_request_id() or None,
+    }
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.warning(
+        "HTTP 错误 | %s %s | status=%d | detail=%s",
+        request.method, request.url.path, exc.status_code,
+        exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(
+            exc.status_code,
+            exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            f"HTTP_{exc.status_code}",
+        ),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "参数校验错误 | %s %s | detail=%s",
+        request.method, request.url.path,
+        str(exc).replace("\n", " ")[:500],
+    )
+    return JSONResponse(
+        status_code=422,
+        content=_error_payload(422, str(exc), "VALIDATION_ERROR"),
+    )
 
 # 注册所有 API 路由，统一挂载到 /api 前缀下
 app.include_router(api_router, prefix="/api")

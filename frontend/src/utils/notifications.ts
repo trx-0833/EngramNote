@@ -1,11 +1,10 @@
 /**
  * @file 浏览器通知工具
  * @description 封装浏览器 Notification API，提供桌面通知能力。
- * 包含权限请求、通知发送、免打扰时段判断、已通知题目去重（sessionStorage）。
+ * 包含权限请求、通知发送、免打扰时段判断。
+ * F-25：移除已废弃的 sessionStorage 去重（getNotifiedQuizIds/markNotified），
+ * 去重职责由 ReminderBanner 的 lastNotifiedDueRef（按 due_count 值变化）承担。
  */
-
-/** sessionStorage 中存储已通知题目 ID 的 key */
-const NOTIFIED_KEY = 'notified_quiz_ids';
 
 /**
  * 请求浏览器通知权限
@@ -61,32 +60,4 @@ export function isInQuietHours(startHour = 22, endHour = 8): boolean {
   }
   // 同天，如 13-14
   return hour >= startHour && hour < endHour;
-}
-
-/**
- * 从 sessionStorage 获取已通知的题目 ID 集合
- * @returns 已通知题目 ID 数组
- */
-export function getNotifiedQuizIds(): string[] {
-  try {
-    const data = sessionStorage.getItem(NOTIFIED_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * 标记题目为已通知，写入 sessionStorage
- * 用于避免同一会话内重复通知
- * @param quizIds - 需标记的题目 ID 数组
- */
-export function markNotified(quizIds: string[]): void {
-  try {
-    const existing = getNotifiedQuizIds();
-    const merged = Array.from(new Set([...existing, ...quizIds]));
-    sessionStorage.setItem(NOTIFIED_KEY, JSON.stringify(merged));
-  } catch (err) {
-    console.warn('写入 sessionStorage 失败:', err);
-  }
 }

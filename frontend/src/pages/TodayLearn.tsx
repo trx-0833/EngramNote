@@ -3,7 +3,7 @@
  * @description 整合待复习题目、今日学习报告和薄弱点的入口页面。
  * 用户可以在此查看今日学习任务、开始答题、查看进度。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getDueQuizzes, submitAnswer, getReviewStats, getDailyReport, getWeakPoints, getDailyPlan,
@@ -13,7 +13,9 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-import { cardTypeLabels, questionTypeLabels, difficultyLabels } from '../utils/labels'
+// F-33：共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
+import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+import { cardTypeLabels } from '../utils/labels'
 
 /** 单题答题状态 */
 interface QuizState {
@@ -40,6 +42,8 @@ export default function TodayLearn() {
   const [sessionCorrect, setSessionCorrect] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
   const [completed, setCompleted] = useState(false)
+  /** F-23：提交 in-flight 锁（防双击重复提交） */
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     loadData()
@@ -83,9 +87,12 @@ export default function TodayLearn() {
   }
 
   async function handleSubmit() {
+    // F-23：in-flight 锁，防止双击/连按回车重复提交
+    if (submittingRef.current) return
     const current = quizzes[currentIndex]
     if (!current || current.submitted || !current.userAnswer.trim()) return
 
+    submittingRef.current = true
     const timeSpent = Date.now() - current.startTime
     try {
       const result = await submitAnswer(current.quiz.id, current.userAnswer, timeSpent)
@@ -104,6 +111,8 @@ export default function TodayLearn() {
       } else {
         setError(e.message || '提交失败')
       }
+    } finally {
+      submittingRef.current = false
     }
   }
 
@@ -128,14 +137,6 @@ export default function TodayLearn() {
     }
   }
 
-  function parseOptions(optionsStr: string | null): string[] {
-    if (!optionsStr) return []
-    try {
-      const parsed = JSON.parse(optionsStr)
-      return Array.isArray(parsed) ? parsed : []
-    } catch { return [] }
-  }
-
   function formatTime(ms: number): string {
     if (ms < 60000) return `${Math.round(ms / 1000)}秒`
     if (ms < 3600000) return `${Math.round(ms / 60000)}分钟`
@@ -150,7 +151,8 @@ export default function TodayLearn() {
 
   // --- 答题完成 ---
   if (completed) {
-    const dailyLimit = 50
+    // F-12：每日限额从后端 /review/stats 读取（单一来源）
+    const dailyLimit = stats?.daily_limit ?? 10
     const todayDone = stats?.today_done ?? 0
     return (
       <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
@@ -182,7 +184,6 @@ export default function TodayLearn() {
   if (quizzes.length > 0) {
     const current = quizzes[currentIndex]
     const quiz = current.quiz
-    const options = parseOptions(quiz.options)
 
     return (
       <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
@@ -201,67 +202,24 @@ export default function TodayLearn() {
           </span>
         </div>
 
-        {/* 题目卡片 */}
-        <div className="card">
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem', background: 'var(--color-primary)', color: '#fff' }}>
-              {questionTypeLabels[quiz.question_type] || quiz.question_type}
-            </span>
-            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem', background: difficultyLabels[quiz.difficulty] === '简单' ? '#10b981' : difficultyLabels[quiz.difficulty] === '中等' ? '#ff9800' : '#f44336', color: '#fff' }}>
-              {difficultyLabels[quiz.difficulty] || quiz.difficulty}
-            </span>
-          </div>
-
-          <p style={{ fontSize: '1.1rem', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>{quiz.question}</p>
-
-          {!current.submitted ? (
-            <>
-              {quiz.question_type === 'choice' && options.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-                  {options.map((opt, i) => (
-                    <button key={i} className={`quiz-option${current.userAnswer === opt ? ' quiz-option-selected' : ''}`} onClick={() => {
-                      const newQuizzes = [...quizzes]
-                      newQuizzes[currentIndex] = { ...current, userAnswer: opt }
-                      setQuizzes(newQuizzes)
-                    }}>{opt}</button>
-                  ))}
-                </div>
-              )}
-              {quiz.question_type === 'fill_blank' && (
-                <input type="text" value={current.userAnswer} onChange={e => {
-                  const newQuizzes = [...quizzes]
-                  newQuizzes[currentIndex] = { ...current, userAnswer: e.target.value }
-                  setQuizzes(newQuizzes)
-                }} placeholder="请输入答案..." style={{ width: '100%', padding: 'var(--space-sm) var(--space-md)', border: '1px solid var(--color-border)', borderRadius: 6, fontSize: '1rem' }} autoFocus />
-              )}
-              {quiz.question_type === 'short_answer' && (
-                <textarea value={current.userAnswer} onChange={e => {
-                  const newQuizzes = [...quizzes]
-                  newQuizzes[currentIndex] = { ...current, userAnswer: e.target.value }
-                  setQuizzes(newQuizzes)
-                }} placeholder="请输入你的回答..." rows={4} style={{ width: '100%', padding: 'var(--space-sm) var(--space-md)', border: '1px solid var(--color-border)', borderRadius: 6, fontSize: '1rem', resize: 'vertical' }} />
-              )}
-              <div style={{ marginTop: 'var(--space-md)', textAlign: 'right' }}>
-                <button className="btn btn-primary" onClick={handleSubmit} disabled={!current.userAnswer.trim()}>提交答案</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className={current.result?.is_correct ? 'feedback-correct' : 'feedback-incorrect'} style={{ marginBottom: 'var(--space-md)' }}>
-                <p style={{ fontWeight: 600, color: current.result?.is_correct ? '#4caf50' : '#f44336' }}>
-                  {current.result?.is_correct ? '回答正确!' : '回答错误'}
-                </p>
-                {!current.result?.is_correct && <p style={{ marginTop: 'var(--space-xs)' }}><strong>正确答案:</strong> {current.result?.correct_answer}</p>}
-                {current.result?.explanation && <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}><strong>解析:</strong> {current.result.explanation}</p>}
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <button className="btn btn-primary" onClick={handleNext}>
-                  {currentIndex < quizzes.length - 1 ? '下一题' : '完成复习'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {/* 题目卡片（F-33：共享 QuizAnswerCard） */}
+        <QuizAnswerCard
+          quiz={quiz}
+          userAnswer={current.userAnswer}
+          submitted={current.submitted}
+          result={current.result}
+          submitting={submittingRef.current}
+          showSm2Info={false}
+          fillAutoFocus
+          isLast={currentIndex >= quizzes.length - 1}
+          onSelectAnswer={(answer) => {
+            const newQuizzes = [...quizzes]
+            newQuizzes[currentIndex] = { ...current, userAnswer: answer }
+            setQuizzes(newQuizzes)
+          }}
+          onSubmit={handleSubmit}
+          onNext={handleNext}
+        />
       </div>
     )
   }
@@ -339,11 +297,11 @@ export default function TodayLearn() {
             {/* 进度条 */}
             <div className="progress-bar" style={{ marginTop: 'var(--space-md)' }}>
               <div className="progress-bar-fill" style={{
-                width: `${Math.min((todayDone / 50) * 100, 100)}%`,
+                width: `${Math.min((todayDone / (stats?.daily_limit ?? 10)) * 100, 100)}%`,
               }} />
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
-              每日目标 50 题，已完成 {todayDone} 题
+              每日目标 {stats?.daily_limit ?? 10} 题，已完成 {todayDone} 题
             </p>
           </div>
         ) : (

@@ -360,7 +360,14 @@ async def archive_note_api(
         )
 
     if note.status == NoteStatus.archived:
-        note.status = NoteStatus.cleaned
+        # F-26 修复：取消归档恢复原状态语义——
+        # converted 笔记归档后取消应回到 converted（从未清洗，不能谎称 cleaned）；
+        # 其余（cleaned/learning_failed）回到 cleaned。
+        # 判断依据：clean_md_path 是否存在（该笔记是否产出过清洗副本）。
+        if note.clean_md_path:
+            note.status = NoteStatus.cleaned
+        else:
+            note.status = NoteStatus.converted
     else:
         note.status = NoteStatus.archived
     note.error_message = None

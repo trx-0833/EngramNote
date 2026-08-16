@@ -51,7 +51,9 @@ async def get_daily_report(
         Dict: 今日学习报告数据
     """
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    from ..utils.timeutil import today_start_utc
+    today_start = today_start_utc(now)
     today_str = today_start.strftime("%Y-%m-%d")
 
     # 合并查询：今日复习总数、正确数、总时长
@@ -142,13 +144,15 @@ async def get_weekly_trend(
     """
     now = datetime.now(timezone.utc)
     seven_days_ago = now - timedelta(days=6)
-    week_start = seven_days_ago.replace(hour=0, minute=0, second=0, microsecond=0)
+    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    from ..utils.timeutil import local_day_start_utc
+    week_start = local_day_start_utc(seven_days_ago)
 
-    # 按 UTC 日期边界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题
+    # 按业务日界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题
     daily_map = {}
     for i in range(6, -1, -1):
         day = now - timedelta(days=i)
-        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = local_day_start_utc(day)
         day_end = day_start + timedelta(days=1)
         day_str = day_start.strftime("%Y-%m-%d")
 

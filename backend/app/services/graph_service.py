@@ -576,14 +576,31 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         return {"success": True, "new_count": 0, "skipped_count": 0, "message": "卡片数量不足"}
 
     # 2. 查询用户已有的所有关系（含 confirmed/suggested/rejected），构建已存在卡片对集合
+    #    F-17 修复：去重键区分有向/无向——prerequisite/subsequent 保留方向
+    #    （prerequisite(A,B) 与 prerequisite(B,A) 语义不同，可共存），
+    #    contrast/related 为无向（排序去重）
     existing_result = await db.execute(
         select(CardRelation).where(CardRelation.user_id == user_id)
     )
     existing_relations = list(existing_result.scalars().all())
-    existing_pairs: set = set()
+    # 有向键：保持存储方向（含类型）
+    existing_directed: set = set()
+    # 无向键：排序对（含类型）
+    existing_undirected: set = set()
     for rel in existing_relations:
-        pair_key = tuple(sorted([rel.card_id_1, rel.card_id_2]))
-        existing_pairs.add(pair_key)
+        if rel.relation_type in (RelationType.prerequisite, RelationType.subsequent):
+            existing_directed.add((rel.card_id_1, rel.card_id_2, rel.relation_type.value))
+        else:
+            existing_undirected.add((
+                tuple(sorted([rel.card_id_1, rel.card_id_2])),
+                rel.relation_type.value,
+            ))
+
+    def _pair_exists(card_a: str, card_b: str, rel_type: RelationType) -> bool:
+        """按方向语义检查卡片对是否已有同类型关系"""
+        if rel_type in (RelationType.prerequisite, RelationType.subsequent):
+            return (card_a, card_b, rel_type.value) in existing_directed
+        return (tuple(sorted([card_a, card_b])), rel_type.value) in existing_undirected
 
     # 3. 分批调用 LLM 推断关系
     llm_service = LLMService()
@@ -598,12 +615,19 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         batch_ids = {c.id for c in batch_cards}
 
         # 先过滤候选对：若该批内所有卡片对都已有关系，则跳过该批
+        # （批级检查用无向语义：任一无向对已存在即视为已处理）
         all_pairs_count = len(batch_cards) * (len(batch_cards) - 1) // 2
         existing_in_batch = 0
+        existing_undirected_pairs: set = set()
+        for rel in existing_relations:
+            if rel.relation_type not in (RelationType.prerequisite, RelationType.subsequent):
+                existing_undirected_pairs.add(tuple(sorted([rel.card_id_1, rel.card_id_2])))
+            else:
+                existing_undirected_pairs.add(tuple(sorted([rel.card_id_1, rel.card_id_2])))
         for i in range(len(batch_cards)):
             for j in range(i + 1, len(batch_cards)):
                 pair_key = tuple(sorted([batch_cards[i].id, batch_cards[j].id]))
-                if pair_key in existing_pairs:
+                if pair_key in existing_undirected_pairs:
                     existing_in_batch += 1
         if all_pairs_count > 0 and existing_in_batch == all_pairs_count:
             continue
@@ -643,16 +667,16 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
             if relation_type not in valid_relation_types:
                 continue
 
-            # 再次校验该卡片对不在已有关系集合中（防 LLM 幻觉）
-            pair_key = tuple(sorted([card_id_a, card_id_b]))
-            if pair_key in existing_pairs:
-                skipped_count += 1
-                continue
-
             # 转换关系类型枚举
             try:
                 rel_type = RelationType(relation_type)
             except ValueError:
+                continue
+
+            # F-17 修复：按方向语义检查是否已存在同类型关系
+            # （prerequisite(A,B) 与 prerequisite(B,A) 可共存）
+            if _pair_exists(card_id_a, card_id_b, rel_type):
+                skipped_count += 1
                 continue
 
             # 有向关系（prerequisite/subsequent）保持 LLM 给的顺序；
@@ -671,7 +695,11 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
                 similarity_score=None,
             )
             new_relations.append(new_relation)
-            existing_pairs.add(pair_key)  # 防止同批内重复
+            # F-17：创建后同步更新去重集合，防止同批内重复
+            if rel_type in (RelationType.prerequisite, RelationType.subsequent):
+                existing_directed.add((stored_id_1, stored_id_2, rel_type.value))
+            else:
+                existing_undirected.add((tuple(sorted([stored_id_1, stored_id_2])), rel_type.value))
             new_count += 1
 
     # 4. 批量添加并提交

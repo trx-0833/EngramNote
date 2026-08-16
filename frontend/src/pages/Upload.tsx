@@ -83,6 +83,17 @@ export default function Upload() {
   const [cropPageRange, setCropPageRange] = useState('')
   /** 裁剪输入的内联校验提示 */
   const [cropError, setCropError] = useState('')
+  /** F-15：轮询定时器引用，组件卸载时清理 */
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // F-15：卸载时清理轮询定时器，避免卸载后 setState/导航
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current)
+      }
+    }
+  }, [])
 
   // 加载项目列表，默认不选择项目（留空则不归属任何项目）
   useEffect(() => {
@@ -265,46 +276,58 @@ export default function Upload() {
    * 轮询笔记转换状态
    * 每 5 秒查询一次后端状态，直到转换完成、失败或超时。
    *
-   * 转换完成条件：status 为 converted / cleaned / archived
-   * 失败条件：status 为 failed
-   * 超时限制：最多轮询 120 次（约 10 分钟）
+   * F-15 修复：
+   * - setTimeout 递归替代 setInterval，避免慢网络下请求重叠
+   * - 终态集合补全 cleaning_failed / learning_failed
+   * - timer 存 ref，组件卸载时清理
    *
    * @param id - 笔记 ID
    */
   async function pollStatus(id: string) {
     const maxAttempts = 120 // 最多轮询 120 次（约 10 分钟）
     let attempts = 0
+    let checking = false // 在途请求互斥
 
-    const interval = setInterval(async () => {
+    const check = async () => {
+      if (checking) return
+      checking = true
       attempts++
+      let isTerminal = false
       try {
         const res = await getUploadStatus(id)
         setStatus(`状态: ${res.status}`)
 
-        // 转换完成：状态为已转换/已清洗/已归档时视为成功
+        // 成功终态
         if (res.status === 'converted' || res.status === 'cleaned' || res.status === 'archived') {
-          clearInterval(interval)
+          isTerminal = true
           setUploading(false)
           setStatus('转换完成！')
           // 延迟 1 秒后自动跳转到笔记详情页
           setTimeout(() => navigate(`/notes/${id}`), 1000)
-        } else if (res.status === 'failed') {
-          // 转换失败：停止轮询并显示错误信息
-          clearInterval(interval)
+        } else if (res.status === 'failed' || res.status === 'cleaning_failed' || res.status === 'learning_failed') {
+          // F-15：补全失败终态（旧实现漏掉 cleaning_failed/learning_failed，会空转到超时）
+          isTerminal = true
           setUploading(false)
-          setError(res.error_message || '转换失败')
+          setError(res.error_message || `处理失败（${res.status}）`)
         }
       } catch {
         // 轮询过程中的网络错误，继续尝试
+      } finally {
+        checking = false
       }
 
-      // 超时处理：超过最大尝试次数后停止轮询
+      if (isTerminal) return
       if (attempts >= maxAttempts) {
-        clearInterval(interval)
+        // 超时处理
         setUploading(false)
-        setError('转换超时，请稍后在笔记列表中查看')
+        setError('处理超时，请稍后在笔记列表中查看')
+        return
       }
-    }, 5000) // 每 5 秒轮询一次
+      // 递归调度下一次（等本次完成后再计时，避免重叠）
+      pollTimerRef.current = setTimeout(check, 5000)
+    }
+
+    check()
   }
 
   /**

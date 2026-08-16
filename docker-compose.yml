@@ -37,6 +37,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ---- Celery Worker（F-10：异步任务转换/清洗/理解/嵌入）----
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info
+    volumes:
+      # 与 backend 共享同一数据卷（SQLite/broker/结果/chroma 一致）
+      - backend-data:/app/data
+      - ./backend/.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- Celery Beat（F-10：定时任务 00:30 目标刷新 / 09:00 复习邮件）----
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info --pidfile /app/data/celery/beat.pid
+    volumes:
+      - backend-data:/app/data
+      - ./backend/.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ---- 生产基础设施（可选） ----
   # 取消注释以下服务以使用 PostgreSQL + Redis + MinIO
 

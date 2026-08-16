@@ -91,33 +91,62 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
     if not text or not text.strip():
         return text, stats
 
-    result = text
+    # F-30 修复：逐行清洗并跟踪代码块/数学块状态。
+    # 旧实现直接对全文做正则 sub，页码/数字行/水印规则会误删
+    # 围栏代码块内的纯数字行（编号示例 1/2/3）、公式独立数字行等合法正文。
+    lines = text.split("\n")
+    result_lines = []
+    in_code_block = False
+    in_math_block = False
 
-    # 1. 去除页眉页脚模式
-    for pattern in _HEADER_FOOTER_PATTERNS:
-        matches = pattern.findall(result)
-        if matches:
-            stats["headers_footers_removed"] += len(matches)
-            result = pattern.sub("", result)
-
-    # 2. 去除水印文字（整行包含水印关键词的行）
-    lines = result.split("\n")
-    cleaned_lines = []
     for line in lines:
+        stripped = line.strip()
+
+        # 代码块 fence 切换（```）
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            result_lines.append(line)
+            continue
+
+        # 数学块切换（$$ 独占行；单行 $$...$$ 不切换状态）
+        if stripped.startswith("$$"):
+            if stripped.endswith("$$") and len(stripped) > 2:
+                result_lines.append(line)
+                continue
+            in_math_block = not in_math_block
+            result_lines.append(line)
+            continue
+
+        # 代码块/数学块内的行：不应用页眉页脚与水印规则，原样保留
+        if in_code_block or in_math_block:
+            result_lines.append(line)
+            continue
+
+        # 1. 页眉页脚模式（仅普通文本行）
+        is_header_footer = False
+        for pattern in _HEADER_FOOTER_PATTERNS:
+            if pattern.match(stripped):
+                is_header_footer = True
+                stats["headers_footers_removed"] += 1
+                break
+        if is_header_footer:
+            continue
+
+        # 2. 水印文字（仅普通文本行，且为短行避免误删正文）
         is_watermark = False
         for keyword in _WATERMARK_KEYWORDS:
-            if keyword in line and len(line.strip()) < 30:
-                # 仅对短行（小于30个字符）判定为水印，避免误删正文
+            if keyword in line and len(stripped) < 30:
                 is_watermark = True
+                stats["watermarks_removed"] += 1
                 break
         if is_watermark:
-            stats["watermarks_removed"] += 1
-        else:
-            cleaned_lines.append(line)
-    result = "\n".join(cleaned_lines)
+            continue
+
+        result_lines.append(line)
+
+    result = "\n".join(result_lines)
 
     # 3. 去除多余空行（连续 2+ 空行压缩为 1 个空行）
-    # 先统计有多少处连续空行
     multi_blank_pattern = re.compile(r"\n{3,}")
     multi_blank_matches = multi_blank_pattern.findall(result)
     stats["empty_lines_removed"] = len(multi_blank_matches)
@@ -148,8 +177,6 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
 
     # 6. 去除文件末尾多余空行
     result = result.rstrip("\n") + "\n"
-
-    print("规则化清洗完成！\n")
 
     return result, stats
 
@@ -493,8 +520,11 @@ def generate_clean_copy(
 
         if is_dup and not in_duplicate:
             dup_info = line_to_dup_info[line_idx]
+            # F-11 修复：注释标记使用重复块自身的 block_index（与前端传参、
+            # metadata duplicates_detail 的 block_index 一致），
+            # 旧实现误用 duplicate_of（保留块 index）导致恢复/删除无法匹配
             result_lines.append(
-                f"<!-- duplicate: block_{dup_info['duplicate_of']} "
+                f"<!-- duplicate: block_{dup_info['block_index']} "
                 f"similarity={dup_info['similarity']:.2f} -->"
             )
             in_duplicate = True

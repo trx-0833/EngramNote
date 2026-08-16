@@ -79,6 +79,7 @@ class ReviewStatsResponse(BaseModel):
     total_correct: int = 0
     total_accuracy: float = 0.0
     total_quizzes: int = 0
+    daily_limit: int = 10  # F-12：每日答题上限（前端据此显示进度，单一来源）
 
 
 # --- 复习历史响应模型 ---

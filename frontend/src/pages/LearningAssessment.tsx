@@ -4,17 +4,15 @@
  * 1. 笔记比对：比较学习资料与个人笔记的内容覆盖度、深度和清晰度
  * 2. 开放性问题：基于学习资料生成问题，用户作答后由 AI 评判
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   getNotes,
   compareAssessment,
   generateQuiz,
   submitQuizAnswers,
-  getAssessmentHistory,
   getNoteLinks,
   type AssessmentResult,
-  type AssessmentHistoryItem,
   type Note,
   type NoteLinksResponse,
 } from '../api/client'
@@ -32,6 +30,8 @@ export default function LearningAssessment() {
   const [selectedMaterials, setSelectedMaterials] = useState<string[]>([])
   const [selectedPersonalNotes, setSelectedPersonalNotes] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  /** F-23：提交 in-flight 锁（防双击重复提交） */
+  const submittingRef = useRef(false)
   const [notesLoading, setNotesLoading] = useState(true)
   const [notesError, setNotesError] = useState('')
   const [result, setResult] = useState<AssessmentResult | null>(null)
@@ -213,6 +213,8 @@ export default function LearningAssessment() {
   }
 
   const handleSubmitAnswers = async () => {
+    // F-23：in-flight 锁，防止双击重复提交（重复消费 AI 评判）
+    if (submittingRef.current) return
     if (!quizAssessment) return
     // Check all answers are filled
     const unanswered = Object.values(answers).some(a => !a.trim())
@@ -220,6 +222,7 @@ export default function LearningAssessment() {
       alert('请回答所有问题')
       return
     }
+    submittingRef.current = true
     setLoading(true)
     try {
       const answerList = Object.entries(answers).map(([idx, answer]) => ({
@@ -232,6 +235,7 @@ export default function LearningAssessment() {
       alert('提交答案失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
 

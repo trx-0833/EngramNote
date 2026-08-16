@@ -104,8 +104,10 @@ async def get_notes_list(
         )
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
+    # F-32 修复：转义 SQL 通配符（%/_），避免搜索 "100%" 等字面量被放大匹配
     if keyword:
-        query = query.where(Note.title.ilike(f"%{keyword}%"))
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.where(Note.title.ilike(f"%{escaped}%", escape="\\"))
 
     # 先计算总数，用于分页信息
     count_query = select(func.count()).select_from(query.subquery())
@@ -284,6 +286,14 @@ async def delete_note(db: AsyncSession, note: Note):
     # 删除涉及该笔记的所有链接（正向和反向）
     await delete_note_material_links(db, note_id)
 
+    # ---- 清理项目标签关联（F-07 修复） ----
+    # 即使 SQLite 外键已开启（ON DELETE CASCADE），仍显式删除双保险，
+    # 避免旧数据或非级联后端残留 note_projects 孤儿行。
+    from ..models.note_project import NoteProject
+    await db.execute(
+        sql_delete(NoteProject).where(NoteProject.note_id == note_id)
+    )
+
     # ---- 清理批注 ----
     from ..models.note_annotation import NoteAnnotation
     ann_result = await db.execute(
@@ -300,6 +310,52 @@ async def delete_note(db: AsyncSession, note: Note):
     for ar in ar_result.scalars().all():
         if note_id in (ar.material_note_ids or []) or note_id in (ar.personal_note_ids or []):
             ar.is_stale = True
+
+    # ---- 清理学习目标 scope_notes 中的失效笔记引用 ----
+    # 目标为用户级实体（有自己的生命周期与进度统计），删除笔记不应删除目标，
+    # 但需移除失效的笔记 ID，避免 scope 悬空导致前端展示与统计失真。
+    from ..models.learning_goal import DailyPlan, LearningGoal
+    goal_result = await db.execute(
+        select(LearningGoal).where(LearningGoal.user_id == note.user_id)
+    )
+    for goal in goal_result.scalars().all():
+        scope = list(goal.scope_notes or [])
+        if note_id in scope:
+            goal.scope_notes = [n for n in scope if n != note_id]
+            logger.info(f"已从学习目标 scope_notes 移除失效笔记: goal_id={goal.id[:8]}, note_id={note_id[:8]}")
+
+    # ---- 清理每日计划推荐任务中的失效引用 ----
+    # recommended_tasks 中的任务引用已删除的笔记/题目/卡片，如不清理，
+    # /today 等页面会出现指向不存在题目的"死任务"（点击即报错）。
+    # 按 note_id / quiz_id / card_id 三路过滤，并重算 total_count。
+    plan_result = await db.execute(
+        select(DailyPlan).where(DailyPlan.user_id == note.user_id)
+    )
+    for plan in plan_result.scalars().all():
+        tasks = dict(plan.recommended_tasks or {})
+        new_tasks = {}
+        changed = False
+        for key, items in tasks.items():
+            if isinstance(items, list):
+                kept = [
+                    t for t in items
+                    if t.get("note_id") != note_id
+                    and t.get("quiz_id") not in quiz_ids
+                    and t.get("card_id") not in card_ids
+                ]
+                if len(kept) != len(items):
+                    changed = True
+                new_tasks[key] = kept
+            else:
+                new_tasks[key] = items
+        if changed:
+            plan.recommended_tasks = new_tasks
+            plan.total_count = sum(len(v) for v in new_tasks.values() if isinstance(v, list))
+            # 已完成数不超过清理后的总数，避免进度溢出
+            if plan.completed_count > plan.total_count:
+                plan.completed_count = plan.total_count
+            logger.info(f"已清理每日计划失效任务: plan_id={plan.id[:8]}, note_id={note_id[:8]}")
+
     await db.commit()
 
     # ---- 删除 MinIO 文件 ----
@@ -330,6 +386,16 @@ async def delete_note(db: AsyncSession, note: Note):
                 delete_file(settings.minio_bucket_markdown, vault_path.meta_object(prefix, base))
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
+
+    # ---- 清理 Chroma 向量集合（F-18 修复） ----
+    # 删除笔记后若不清理，note_{id} collection 与向量文件成为孤儿长期占磁盘。
+    # Chroma 客户端操作为同步阻塞调用，放入线程池避免卡住事件循环；失败仅告警不阻断删除。
+    try:
+        from ..services.embedding_service import VectorStore
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, VectorStore().delete_note_chunks, note_id)
+    except Exception as e:
+        logger.warning(f"清理笔记向量数据失败: note_id={note_id}, 错误: {e}")
 
     # ---- 删除版本历史记录及其存储文件（history/versions/{note_id}/v{N}.md） ----
     try:

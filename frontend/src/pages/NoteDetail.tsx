@@ -45,7 +45,7 @@ import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
-import { statusLabels } from '../utils/labels'
+import { statusLabels, cardTypeColors, cardTypeLabels } from '../utils/labels'
 import { formatDateTime } from '../utils/datetime'
 
 /** 视图模式 */
@@ -192,7 +192,8 @@ export default function NoteDetail() {
       const fetchVideo = async () => {
         try {
           const token = getToken()
-          const response = await fetch(note.video_url, {
+          if (!token) throw new Error('未登录')
+          const response = await fetch(note.video_url as string, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
           if (!response.ok) throw new Error('Failed to load video')
@@ -305,9 +306,29 @@ export default function NoteDetail() {
   async function handleStartLearning() {
     if (!note) return
     try {
-      await startUnderstanding(note.id)
+      // F-02：archived 笔记重新理解会清空全部旧产物，先获取影响数量并二次确认
+      const res = await startUnderstanding(note.id, false)
+      if (res.requires_confirm) {
+        const impact = res.impact
+        const parts: string[] = []
+        if (impact) {
+          if (impact.cards > 0) parts.push(`${impact.cards} 张知识卡片`)
+          if (impact.quizzes > 0) parts.push(`${impact.quizzes} 道题目`)
+          if (impact.review_logs > 0) parts.push(`${impact.review_logs} 条复习记录`)
+          if (impact.relations > 0) parts.push(`${impact.relations} 条图谱关系`)
+        }
+        const detail = parts.length > 0 ? `\n\n将删除：${parts.join('、')}` : ''
+        const ok = confirm(
+          `此笔记已归档，重新学习将清空其现有学习成果。${detail}\n\n此操作不可恢复，确定继续？`
+        )
+        if (!ok) return
+        await startUnderstanding(note.id, true)
+        handleStatusChange()
+        return
+      }
       handleStatusChange()
     } catch (err) {
+      // 409（进行中）等状态透传提示
       alert(err instanceof Error ? err.message : '启动学习失败')
     }
   }
@@ -899,10 +920,11 @@ export default function NoteDetail() {
                   <strong style={{ fontSize: '0.9rem' }}>{card.title}</strong>
                   <span style={{
                     fontSize: '0.7rem', padding: '1px 6px', borderRadius: '9999px',
-                    background: { concept: '#3b82f6', formula: '#8b5cf6', qa: '#10b981', definition: '#f59e0b' }[card.card_type] || '#6b7280',
+                    // F-28：卡片类型颜色/标签统一从 utils/labels.ts 读取
+                    background: cardTypeColors[card.card_type] || '#6b7280',
                     color: 'white', whiteSpace: 'nowrap',
                   }}>
-                    {{ concept: '概念', formula: '公式', qa: '问答', definition: '定义' }[card.card_type] || card.card_type}
+                    {cardTypeLabels[card.card_type] || card.card_type}
                   </span>
                 </div>
                 <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>

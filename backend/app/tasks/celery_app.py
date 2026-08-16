@@ -9,6 +9,8 @@ Celery 应用配置模块
 - 配置序列化方式、时区、任务追踪等参数
 - 配置文件系统 broker 的数据目录
 - 自动发现任务模块
+- （可观测性）通过信号为每个任务注入 task_id/task_name 上下文，
+  使任务内全部日志自动携带 tid/task 标签，并输出任务生命周期日志
 
 设计决策：
 - 默认使用文件系统作为 broker 和结果后端，实现零外部依赖启动
@@ -18,12 +20,21 @@ Celery 应用配置模块
 - 时区设为 Asia/Shanghai，但启用 UTC 以确保时间戳一致性
 """
 
+import logging
+
 from celery import Celery
 from pathlib import Path
 
 from ..config import get_settings
+from ..core import context
+from ..core.logging_config import setup_logging
+from ..core.tempfile_compat import apply_tempfile_compat
 
 settings = get_settings()
+
+# 运行环境兼容：替换 tempfile.mkdtemp（详见 core/tempfile_compat.py），
+# 必须在任务模块导入前生效，确保 worker 内所有临时目录行为一致
+apply_tempfile_compat()
 
 # 文件系统 broker 的消息目录，确保启动前已创建
 # 注意：Windows 上 kombu 文件系统传输的 data_folder_in 和 data_folder_out
@@ -88,7 +99,7 @@ celery_app.conf.update(
     beat_schedule={
         # 每日 00:30 刷新学习目标进度（活跃目标的 progress_cache、状态流转）
         "refresh-goal-progress-daily": {
-            "task": "app.tasks.reminder_tasks.refresh_goal_progress_task",
+            "task": "app.tasks.reminder_tasks.refresh_goal_progress",
             "schedule": crontab(hour=0, minute=30),
         },
         # 每日 09:00 发送复习提醒邮件（仅对开启邮件提醒的用户）
@@ -98,3 +109,63 @@ celery_app.conf.update(
         },
     },
 )
+
+
+# ===========================================================================
+# 可观测性：任务生命周期日志 + 任务上下文注入
+# ===========================================================================
+_task_logger = logging.getLogger("engramnote.task")
+
+
+def _worker_init(sender=None, **_kwargs):
+    """
+    Worker 进程启动钩子：初始化统一日志配置
+
+    使 worker 中的业务日志与 FastAPI 进程使用完全一致的格式
+    （上下文感知 + errors.log + JSON 日志）。
+    """
+    setup_logging()
+    _task_logger.info("Celery Worker 日志系统初始化完成")
+
+
+def _task_prerun(task_id, task, *args, **kwargs):
+    """任务开始前：注入任务上下文（tid/task），后续日志自动携带"""
+    context.reset_context()
+    context.set_task_context(task_id=task_id, task_name=task.name)
+    _task_logger.info("任务开始 | task=%s | task_id=%s", task.name, task_id)
+
+
+def _task_postrun(task_id, task, retval, state, *args, **kwargs):
+    """任务结束后：输出任务结果日志并清理上下文"""
+    try:
+        _task_logger.info(
+            "任务结束 | task=%s | task_id=%s | state=%s | result=%s",
+            task.name, task_id, state,
+            str(retval)[:200] if retval is not None else "-",
+        )
+    except Exception:
+        _task_logger.info("任务结束 | task=%s | task_id=%s | state=%s", task.name, task_id, state)
+    finally:
+        context.reset_context()
+
+
+def _task_failure(task_id, task, einfo, *args, **kwargs):
+    """任务失败：输出完整堆栈（含任务上下文标签，落 errors.log）"""
+    exc = einfo.exception if einfo else None
+    _task_logger.error(
+        "任务失败 | task=%s | task_id=%s | type=%s | detail=%s",
+        task.name, task_id, type(exc).__name__ if exc else "Unknown", exc,
+        exc_info=einfo.exc_info if einfo else None,
+    )
+
+
+# 注册信号处理器
+try:
+    from celery.signals import task_postrun, task_prerun, task_failure, worker_process_init
+
+    worker_process_init.connect(_worker_init)
+    task_prerun.connect(_task_prerun)
+    task_postrun.connect(_task_postrun)
+    task_failure.connect(_task_failure)
+except Exception:  # pragma: no cover - 信号注册失败不影响主流程
+    logging.getLogger(__name__).warning("Celery 信号处理器注册失败", exc_info=True)

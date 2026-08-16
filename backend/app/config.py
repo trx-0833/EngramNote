@@ -20,6 +20,7 @@ EngramNote 配置管理模块
 
 import os
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -83,8 +84,9 @@ class Settings(BaseSettings):
     celery_result_backend: str = ""
 
     # ---- JWT 认证配置 ----
-    # JWT 签名密钥，生产环境务必更换为强随机字符串
-    jwt_secret_key: str = "engramnote-dev-secret-change-in-production"
+    # JWT 签名密钥，生产环境务必更换为强随机字符串（生成：python -c "import secrets; print(secrets.token_hex(32))"）
+    # 默认空字符串：开发模式（debug=True）可空跑；生产模式（debug=False）为空时启动即报错（F-21a 修复）
+    jwt_secret_key: str = ""
     # JWT 签名算法
     jwt_algorithm: str = "HS256"
     # Token 过期时间（分钟），默认 1440 分钟 = 24 小时
@@ -150,6 +152,8 @@ class Settings(BaseSettings):
     llm_retry_delay: float = 1.0
     # LLM 每分钟最大请求数 (0 = 不限流)
     llm_max_rpm: int = 10
+    # LLM HTTP 请求超时（秒）（F-05 修复：共享客户端使用）
+    llm_timeout_seconds: float = 120.0
 
     # ---- ASR 语音转写配置 ----
     # ASR 模型路径（空则使用默认 modelscope 缓存路径）
@@ -178,6 +182,10 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     # 是否启用 STARTTLS 加密传输
     smtp_use_tls: bool = True
+
+    # ---- 复习配置 ----
+    # 每日最大答题数（F-12 修复：前后端单一来源，经 /review/stats 下发给前端）
+    daily_review_limit: int = 10
 
     # ---- 复习提醒配置 ----
     # 提醒轮询间隔（秒），Celery 定时任务扫描到期复习的频率
@@ -210,6 +218,22 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        """
+        生产模式安全校验（F-21a 修复）
+
+        生产环境（debug=False）必须显式配置 JWT 签名密钥，
+        防止使用可预测/空密钥导致 Token 可被伪造。
+        开发模式（debug=True）允许空密钥零配置启动。
+        """
+        if not self.debug and not self.jwt_secret_key:
+            raise ValueError(
+                "生产环境必须配置 JWT_SECRET_KEY（生成方法："
+                "python -c \"import secrets; print(secrets.token_hex(32))\"）"
+            )
+        return self
 
     def get_database_url(self) -> str:
         """

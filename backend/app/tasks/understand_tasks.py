@@ -24,7 +24,8 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from celery.exceptions import Retry
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
@@ -35,54 +36,12 @@ from ..services.vault_meta import write_note_meta
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Celery 任务中需要独立的数据库连接
-_understand_engine = None
-_understand_session_factory = None
-
-
-def _get_understand_session():
-    """
-    获取理解任务专用的数据库会话工厂
-
-    与 clean_tasks.py 中的模式一致，Celery worker 运行在独立进程中，
-    需要创建自己的数据库连接。
-
-    Returns:
-        async_sessionmaker: 异步会话工厂
-    """
-    global _understand_engine, _understand_session_factory
-    if _understand_session_factory is None:
-        _understand_engine = create_async_engine(settings.get_database_url(), echo=False)
-        _understand_session_factory = async_sessionmaker(_understand_engine, expire_on_commit=False)
-    return _understand_session_factory
-
-
-async def _update_note_status(note_id: str, status: NoteStatus, error_message: Optional[str] = None, **kwargs):
-    """
-    更新笔记状态
-
-    Args:
-        note_id: 笔记 ID
-        status: 新的状态
-        error_message: 错误信息（可选）
-        **kwargs: 其他需要更新的字段
-    """
-    session_factory = _get_understand_session()
-    async with session_factory() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
-        note = result.scalars().first()
-        if not note:
-            return
-        note.status = status
-        if error_message:
-            note.error_message = error_message
-        for key, value in kwargs.items():
-            if hasattr(note, key):
-                setattr(note, key, value)
-        await session.commit()
-        await session.refresh(note)
-        # 状态写穿镜像：同步更新 Vault output/meta/{base}.json
-        write_note_meta(note)
+# F-27：会话工厂/状态更新收敛到 tasks/common.py（understand 原 hasattr 版
+# 无白名单，统一为白名单版，防任意字段写入）
+from .common import (
+    get_sync_session as _get_understand_session,
+    update_note_status as _update_note_status,
+)
 
 
 async def _understand_document(note_id: str):
@@ -169,9 +128,11 @@ async def _understand_document(note_id: str):
     )
 
     # 7. 更新笔记状态为 archived，并记录学习成功时间（合并到现有 metadata_，避免覆盖 clean_stats 等）
+    # 修复：改用独立变量名 note_result，避免覆盖上方 process_note_understanding 的
+    # dict 返回值（旧代码在下方日志里对 ChunkedIteratorResult 调 .get() 导致 AttributeError）
     async with session_factory() as session:
-        result = await session.execute(select(Note).where(Note.id == note_id))
-        current_note = result.scalars().first()
+        note_result = await session.execute(select(Note).where(Note.id == note_id))
+        current_note = note_result.scalars().first()
         current_meta = current_note.metadata_ if current_note else None
     metadata_ = dict(current_meta or {})
     metadata_["learned_at"] = datetime.now(timezone.utc).isoformat()
@@ -180,7 +141,7 @@ async def _understand_document(note_id: str):
     elapsed = time.monotonic() - start_time
     logger.info(
         "文档理解完成: note_id=%s, card_count=%d, elapsed=%.1fs",
-        note_id, result.get("total_cards", 0), elapsed,
+        note_id, result.get("total_cards", 0) if result else 0, elapsed,
     )
 
     # 8. 自动触发题目生成
@@ -245,6 +206,7 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
     """
     from ..models.knowledge_card import KnowledgeCard
     from ..models.quiz_item import QuizItem, QuestionType, DifficultyLevel
+    from ..models.review_log import ReviewLog
     from ..services.llm_service import LLMService
 
     # 检查笔记是否已被用户删除
@@ -281,10 +243,30 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
             for card in cards
         ]
 
-    # 2. 创建多轮对话会话（所有批次共用同一窗口）
+    # 2. F-29 修复：清理该笔记旧题目（含复习记录），恢复"重新生成"语义，
+    #    防止重复触发 generate-questions 累积重复题目
+    async with session_factory() as session:
+        old_quiz_ids = (
+            await session.execute(
+                select(QuizItem.id).where(QuizItem.note_id == note_id)
+            )
+        ).scalars().all()
+        if old_quiz_ids:
+            await session.execute(
+                delete(ReviewLog).where(ReviewLog.quiz_id.in_(old_quiz_ids))
+            )
+            await session.execute(
+                delete(QuizItem).where(QuizItem.note_id == note_id)
+            )
+            await session.commit()
+            logger.info(
+                f"笔记 {note_id} 重新生成题目：已清理旧题 {len(old_quiz_ids)} 道及其复习记录"
+            )
+
+    # 3. 创建多轮对话会话（所有批次共用同一窗口）
     question_session = llm_service.create_question_session()
 
-    # 3. 分批生成题目（在同一对话窗口中依次追问）
+    # 4. 分批生成题目（在同一对话窗口中依次追问）
     total_questions = 0
     batch_size = 30  # 每批30个卡片，减少 API 调用次数
 
@@ -445,7 +427,13 @@ def understand_document_task(self, note_id: str):
         logger.error(f"理解任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:
             self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
+        except Retry:
+            # 正常重试调度：交给 Celery 框架，不标记失败
+            raise
+        except Exception:
+            # F-30 修复：Celery retry() 重试耗尽时重新抛出原始异常而非
+            # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
+            # learning 状态。进入此分支即表示重试次数用尽，标记失败状态。
             try:
                 asyncio.run(_update_note_status(
                     note_id, NoteStatus.learning_failed,
@@ -474,5 +462,9 @@ def generate_questions_task(self, note_id: str, target_categories: Optional[list
         logger.error(f"题目生成任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:
             self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
-            logger.error(f"题目生成任务重试失败 (note_id={note_id})")
+        except Retry:
+            # 正常重试调度：交给 Celery 框架
+            raise
+        except Exception:
+            # F-30 修复：retry() 重试耗尽时重新抛出原始异常
+            logger.error(f"题目生成任务重试失败 (note_id={note_id}): {exc}")
