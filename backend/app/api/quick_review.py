@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.user import User
+from ..models.note import Note
 from ..models.quiz_item import QuizItem
 from ..api.auth import get_current_user_dependency
 from ..schemas.review import (
@@ -45,11 +46,13 @@ async def get_quick_review(
 
     返回该笔记下当前用户的所有 QuizItem，
     不区分是否到期，方便用户上传后立即复习。
+    回收站笔记不可快速复习（D1 决策：404 语义与资料不存在一致）。
     """
     result = await db.execute(
-        select(QuizItem).where(
+        select(QuizItem).join(Note, Note.id == QuizItem.note_id).where(
             QuizItem.note_id == note_id,
             QuizItem.user_id == current_user.id,
+            Note.trashed_at.is_(None),
         )
     )
     quizzes = list(result.scalars().all())

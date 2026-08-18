@@ -23,7 +23,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -37,6 +37,11 @@ from ..schemas.note import (
     NoteListResponse,
     NoteResponse,
     NoteUpdateRequest,
+    PurgeAllResponse,
+    RestoreResponse,
+    TrashInfoResponse,
+    TrashListResponse,
+    TrashNoteItem,
 )
 from ..schemas.note_material_link import LinkCreateRequest, LinkListResponse
 from ..schemas.note_annotation import (
@@ -55,11 +60,16 @@ from ..api.auth import get_current_user_dependency
 from ..config import get_settings
 from ..services import note_service
 from ..services.note_service import (
-    delete_note,
     get_clean_markdown_content,
     get_note_detail,
     get_note_markdown_content,
     get_notes_list,
+    get_trashed_notes,
+    get_trash_info,
+    purge_all_trashed,
+    purge_note,
+    restore_note,
+    trash_note,
     update_note,
 )
 from ..services.storage_service import _resolve_path, get_presigned_url
@@ -193,6 +203,50 @@ async def list_archived_notes(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/trash", response_model=TrashListResponse)
+async def list_trashed_notes(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取回收站笔记列表（含附属统计）
+
+    每项含卡片数、题目数、批注数、版本数、双向链接数，作为
+    "恢复可还原什么"的展示依据。按移入时间倒序排列。
+
+    注意：本路由为字面量路径，必须注册在 GET /{note_id} 之前，
+    否则 "trash" 会被当作 note_id 匹配。
+    """
+    items_data = await get_trashed_notes(db, current_user.id)
+    items = [
+        TrashNoteItem(
+            note=await _build_note_response(db, item["note"]),
+            card_count=item["card_count"],
+            quiz_count=item["quiz_count"],
+            annotation_count=item["annotation_count"],
+            version_count=item["version_count"],
+            link_count=item["link_count"],
+        )
+        for item in items_data
+    ]
+    return TrashListResponse(items=items, total=len(items))
+
+
+@router.delete("/trash/purge-all", response_model=PurgeAllResponse)
+async def purge_all_trash_api(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    清空回收站：物理删除回收站中的所有笔记（悬挂引用策略）
+
+    关系记录（CardRelation / NoteMaterialLink）被删端置 NULL 悬挂保留，
+    绝不级联删除；不提升核心卡片。
+    """
+    result = await purge_all_trashed(db, current_user.id)
+    return PurgeAllResponse(**result)
 
 
 @router.get("/{note_id}", response_model=NoteDetailResponse)
@@ -392,6 +446,7 @@ async def get_note_links(
 
     linked_materials = []
     linked_personal_notes = []
+    dangling_material_count = 0
 
     if note.note_role == NoteRole.personal_note:
         # 正向查询：获取关联的资料
@@ -404,6 +459,17 @@ async def get_note_links(
             }
             for m in materials
         ]
+        # 悬挂链接数：material_note_id 被物理删除置 NULL 的行数，
+        # 供前端显示"[已删除的笔记]"占位和"清理此链接"入口
+        from ..models.note_material_link import NoteMaterialLink
+        dangling_result = await db.execute(
+            select(func.count()).select_from(NoteMaterialLink).where(
+                NoteMaterialLink.personal_note_id == note_id,
+                NoteMaterialLink.user_id == current_user.id,
+                NoteMaterialLink.material_note_id.is_(None),
+            )
+        )
+        dangling_material_count = dangling_result.scalar() or 0
     elif note.note_role == NoteRole.material:
         # 反向查询：获取引用该资料的笔记
         personal_notes = await note_service.get_linked_personal_notes(db, current_user.id, note_id)
@@ -413,6 +479,7 @@ async def get_note_links(
         "personal_note_id": note_id,
         "linked_materials": linked_materials,
         "linked_personal_notes": linked_personal_notes,
+        "dangling_material_count": dangling_material_count,
     }
 
 
@@ -531,10 +598,12 @@ async def delete_note_api(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    删除笔记
+    移入回收站（软删除）
 
-    删除笔记记录及其在对象存储中的所有关联文件（原始文件、原始 Markdown、清洗后 Markdown）。
-    删除操作不可逆。
+    笔记及其全部子内容（卡片/题目/复习记录/版本/批注/关系/双链）作为
+    原子包整体进回收站：仅标记 trashed_at，所有关系记录原地不动；
+    物理文件搬至 {user_id}/trash/{note_id}/ 隔离目录。
+    可随时通过回收站恢复或彻底删除。
 
     Args:
         note_id: 笔记 ID
@@ -551,8 +620,84 @@ async def delete_note_api(
     if not note:
         raise HTTPException(status_code=404, detail="笔记不存在")
 
-    # 删除笔记记录及关联的存储文件
-    await delete_note(db, note)
+    # 移入回收站（软删除）
+    await trash_note(db, note)
+
+
+@router.get("/{note_id}/trash-info", response_model=TrashInfoResponse)
+async def get_note_trash_info(
+    note_id: str,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取笔记的关联统计（删除确认弹窗文案依据）
+
+    返回卡片数、核心卡片数（is_key_point）、双向链接数。
+    回收站中的笔记也可查询（彻底删除确认弹窗依据）。
+    """
+    note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    info = await get_trash_info(db, note)
+    return TrashInfoResponse(**info)
+
+
+@router.post("/{note_id}/restore", response_model=RestoreResponse)
+async def restore_note_api(
+    note_id: str,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    从回收站恢复笔记
+
+    原子包整体还原：关系/卡片/题目/复习记录自动复原，文件搬回 inbox 原位。
+    若原位置已有同名新文件，自动加序号后缀（base-1、base-2…），
+    响应含 renamed_to 用于前端提示。
+
+    Raises:
+        HTTPException 404: 笔记不存在
+        HTTPException 400: 笔记不在回收站中
+    """
+    note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    if note.trashed_at is None:
+        raise HTTPException(status_code=400, detail="该笔记不在回收站中")
+
+    restored, renamed_to = await restore_note(db, note)
+    return RestoreResponse(
+        note=await _build_note_response(db, restored),
+        renamed_to=renamed_to,
+    )
+
+
+@router.delete("/{note_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_note_api(
+    note_id: str,
+    promote_key_cards: bool = Query(False, description="是否将 is_key_point 核心卡片提升为独立节点"),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    彻底删除笔记（物理删除，悬挂引用策略）
+
+    关系记录（CardRelation / NoteMaterialLink）被删端置 NULL 悬挂保留，
+    绝不级联删除；可选将核心卡片提升为独立节点（保留其关系/题目/复习进度）。
+
+    Args:
+        note_id: 笔记 ID
+        promote_key_cards: 提升核心卡片为独立节点（图谱中保留）
+
+    Raises:
+        HTTPException 404: 笔记不存在
+    """
+    note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+
+    await purge_note(db, note, promote_key_cards=promote_key_cards)
 
 
 @router.patch("/{note_id}/role", response_model=NoteResponse)

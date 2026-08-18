@@ -83,7 +83,10 @@ class QuizItem(BaseModel):
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
     card_id: Mapped[str] = mapped_column(String, ForeignKey("knowledge_cards.id"), index=True, nullable=False)
-    note_id: Mapped[str] = mapped_column(String, ForeignKey("notes.id"), index=True, nullable=False)
+    # 来源笔记 ID；物理删除笔记时置 NULL（题目随卡片存亡，提升卡片时悬挂保留）
+    note_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     question_type: Mapped[QuestionType] = mapped_column(Enum(QuestionType), nullable=False)
     difficulty: Mapped[DifficultyLevel] = mapped_column(
         Enum(DifficultyLevel), default=DifficultyLevel.medium, nullable=False

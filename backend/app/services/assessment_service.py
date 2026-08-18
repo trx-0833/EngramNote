@@ -375,11 +375,12 @@ class AssessmentService:
         ]
 
     async def _fetch_notes(self, note_ids: List[str], user_id: str) -> List[Note]:
-        """Fetch notes by IDs, verifying ownership"""
+        """Fetch notes by IDs, verifying ownership（回收站笔记不可作为评估对象）"""
         result = await self._db.execute(
             select(Note).where(
                 Note.id.in_(note_ids),
                 Note.user_id == user_id,
+                Note.trashed_at.is_(None),
             )
         )
         return result.scalars().all()

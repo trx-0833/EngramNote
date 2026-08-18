@@ -14,6 +14,8 @@
 - 外键设置 ON DELETE CASCADE，笔记删除时自动清理关联记录
 """
 
+from typing import Optional
+
 from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,13 +43,13 @@ class NoteMaterialLink(BaseModel):
 
     # 所属用户，建立索引加速按用户查询
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False, index=True)
-    # 用户笔记 ID，外键关联 notes 表，删除时级联
-    personal_note_id: Mapped[str] = mapped_column(
-        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    # 用户笔记 ID，外键关联 notes 表；物理删除笔记时置 NULL（悬挂引用），双链记录保留
+    personal_note_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # 学习资料 ID，外键关联 notes 表，删除时级联
-    material_note_id: Mapped[str] = mapped_column(
-        String, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    # 学习资料 ID，外键关联 notes 表；物理删除笔记时置 NULL（悬挂引用），双链记录保留
+    material_note_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
 

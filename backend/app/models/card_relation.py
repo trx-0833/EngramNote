@@ -15,6 +15,7 @@
 """
 
 import enum
+from typing import Optional
 
 from sqlalchemy import Enum, String, Float, ForeignKey, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -76,8 +77,14 @@ class CardRelation(BaseModel):
     )
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
-    card_id_1: Mapped[str] = mapped_column(String, ForeignKey("knowledge_cards.id"), index=True, nullable=False)
-    card_id_2: Mapped[str] = mapped_column(String, ForeignKey("knowledge_cards.id"), index=True, nullable=False)
+    # 卡片端可空（悬挂引用策略）：物理删除卡片时数据库自动置 NULL，关系记录永不级联删除，
+    # 前端以"[已删除的笔记]"灰色占位呈现
+    card_id_1: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("knowledge_cards.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    card_id_2: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("knowledge_cards.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     relation_type: Mapped[RelationType] = mapped_column(Enum(RelationType), nullable=False)
     status: Mapped[RelationStatus] = mapped_column(Enum(RelationStatus), nullable=False)
     similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)

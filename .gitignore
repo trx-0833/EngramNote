@@ -51,6 +51,12 @@ UX_AUDIT_REPORT.md
 code_review_report.md
 未完成的内容.md
 
+# ---- E2E 数据备份（含测试账号数据，不提交） ----
+backend/data_backup_e2e/
+
+# ---- 测试文件目录 ----
+testfiles/
+
 # ---- 临时测试脚本（backend 根目录下的零散测试文件） ----
 backend/test.py
 backend/test_api.py

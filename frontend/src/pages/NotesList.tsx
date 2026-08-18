@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client'
+import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
@@ -50,6 +51,8 @@ export default function NotesList() {
   const [loading, setLoading] = useState(true)
   /** 错误信息 */
   const [error, setError] = useState('')
+  /** 待移入回收站的笔记（打开删除确认弹窗） */
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null)
 
   /** 每页显示条数，固定为 20 */
   const pageSize = 20
@@ -77,24 +80,29 @@ export default function NotesList() {
   }, [page, keyword, noteRole, archivedByRole[noteRole]])
 
   /**
-   * 处理删除笔记
-   * 弹出确认对话框，确认后调用 API 删除，成功后从本地状态中移除。
+   * 处理删除笔记（移入回收站）
+   * 打开确认弹窗（含关联统计），确认后调用 API 软删除，成功后从本地状态中移除。
    *
-   * @param noteId - 要删除的笔记 ID
+   * @param note - 要移入回收站的笔记
    * @param e - 鼠标事件，阻止事件冒泡以免触发卡片的点击导航
    */
-  async function handleDelete(noteId: string, e: React.MouseEvent) {
+  function handleDelete(note: Note, e: React.MouseEvent) {
     e.stopPropagation() // 阻止冒泡，避免触发卡片 onClick 导航
-    // 删除操作不可恢复，需要用户二次确认
-    if (!confirm('确定删除此笔记？将同时删除关联的知识卡片、练习题目、复习记录和图谱关系。此操作不可恢复。')) return
+    setNoteToDelete(note)
+  }
 
+  /** 确认移入回收站：调用软删除 API，乐观更新本地列表 */
+  async function confirmDelete() {
+    if (!noteToDelete) return
     try {
-      await deleteNote(noteId)
+      await deleteNote(noteToDelete.id)
       // 乐观更新：从本地状态中移除已删除的笔记，无需重新请求列表
-      setNotes((prev) => prev.filter((n) => n.id !== noteId))
+      setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id))
       setTotal((prev) => prev - 1)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      alert(err instanceof Error ? err.message : '移入回收站失败')
+    } finally {
+      setNoteToDelete(null)
     }
   }
 
@@ -258,11 +266,11 @@ export default function NotesList() {
                     重试
                   </button>
                 )}
-                {/* 删除按钮，需要阻止事件冒泡 */}
+                {/* 删除按钮（移入回收站），需要阻止事件冒泡 */}
                 <button
                   className="btn btn-danger"
                   style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                  onClick={(e) => handleDelete(note.id, e)}
+                  onClick={(e) => handleDelete(note, e)}
                   aria-label={`删除 ${note.title}`}
                 >
                   删除
@@ -295,6 +303,15 @@ export default function NotesList() {
             下一页
           </button>
         </nav>
+      )}
+
+      {/* 移入回收站确认弹窗 */}
+      {noteToDelete && (
+        <DeleteNoteDialog
+          note={noteToDelete}
+          onClose={() => setNoteToDelete(null)}
+          onConfirm={confirmDelete}
+        />
       )}
     </div>
   )

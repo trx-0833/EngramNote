@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.card_relation import CardRelation, RelationType, RelationStatus
 from ..models.knowledge_card import KnowledgeCard
+from ..models.note import Note
 from ..schemas.graph import GraphData, GraphNode, GraphEdge, SuggestedRelation
 from ..services.embedding_service import EmbeddingService
 
@@ -95,13 +96,17 @@ async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
         GraphData: 包含节点列表和边列表的图谱数据
     """
     # 查询用户所有知识卡片，仅取需要的列（避免加载大体积 content 字段）
+    # LEFT JOIN Note 获取所属笔记的回收站状态，供前端渲染时过滤回收站节点
     cards_result = await db.execute(
         select(
             KnowledgeCard.id,
             KnowledgeCard.title,
             KnowledgeCard.card_type,
             KnowledgeCard.note_id,
-        ).where(KnowledgeCard.user_id == user_id)
+            Note.trashed_at.is_not(None).label("note_trashed"),
+        )
+        .join(Note, KnowledgeCard.note_id == Note.id, isouter=True)
+        .where(KnowledgeCard.user_id == user_id)
     )
     cards = list(cards_result.all())
 
@@ -122,9 +127,10 @@ async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
     relations = list(relations_result.all())
 
     # 统计每张卡片的关联数：按「无向卡片对」去重（同一对卡片即使存在多条关系也只计 1）
+    # 悬挂边（卡片被物理删除后 FK 置 NULL）不参与统计
     neighbor_sets: Dict[str, set] = {}
     for rel in relations:
-        if rel.status == RelationStatus.confirmed:
+        if rel.status == RelationStatus.confirmed and rel.card_id_1 and rel.card_id_2:
             neighbor_sets.setdefault(rel.card_id_1, set()).add(rel.card_id_2)
             neighbor_sets.setdefault(rel.card_id_2, set()).add(rel.card_id_1)
 
@@ -136,11 +142,13 @@ async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
             card_type=card.card_type,
             note_id=card.note_id,
             relation_count=len(neighbor_sets.get(card.id, set())),
+            note_trashed=bool(card.note_trashed),
         )
         for card in cards
     ]
 
-    # 构建边
+    # 构建边：悬挂边（source/target 为 NULL，卡片被物理删除）不返回，
+    # 避免 GraphEdge 的 str 校验失败；悬挂记录保留在库中，供"清理链接"使用
     edges = [
         GraphEdge(
             id=rel.id,
@@ -151,6 +159,7 @@ async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
             similarity_score=rel.similarity_score,
         )
         for rel in relations
+        if rel.card_id_1 and rel.card_id_2
     ]
 
     return GraphData(nodes=nodes, edges=edges)
@@ -195,13 +204,20 @@ async def get_suggested_relations(
         card_ids.add(rel.card_id_1)
         card_ids.add(rel.card_id_2)
 
-    # 批量查询卡片标题
+    # 批量查询卡片标题（回收站中的卡片不参与展示）
     cards_result = await db.execute(
         select(KnowledgeCard.id, KnowledgeCard.title).where(
-            KnowledgeCard.id.in_(card_ids)
+            KnowledgeCard.id.in_(card_ids),
+            Note.not_trashed(KnowledgeCard.note_id),
         )
     )
     card_title_map = {row.id: row.title for row in cards_result.all()}
+
+    # 任一端卡片在回收站中的建议关系直接跳过
+    relations = [
+        rel for rel in relations
+        if rel.card_id_1 in card_title_map and rel.card_id_2 in card_title_map
+    ]
 
     # 构建建议关系列表
     suggested = []
@@ -236,13 +252,17 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         int: 新创建的建议关系数量
     """
     # 获取用户所有知识卡片，仅取所需列（含内容用于语义嵌入），限制数量
+    # 回收站中的卡片不参与建议计算
     cards_result = await db.execute(
         select(
             KnowledgeCard.id,
             KnowledgeCard.title,
             KnowledgeCard.content,
             KnowledgeCard.note_id,
-        ).where(KnowledgeCard.user_id == user_id).limit(MAX_CARDS_FOR_SUGGEST)
+        ).where(
+            KnowledgeCard.user_id == user_id,
+            Note.not_trashed(KnowledgeCard.note_id),
+        ).limit(MAX_CARDS_FOR_SUGGEST)
     )
     cards = list(cards_result.all())
 
@@ -566,9 +586,12 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
     # 局部导入避免影响模块加载时的依赖图
     from ..services.llm_service import LLMService
 
-    # 1. 查询用户的知识卡片，限制 100 张
+    # 1. 查询用户的知识卡片，限制 100 张（回收站中的卡片不参与推断）
     cards_result = await db.execute(
-        select(KnowledgeCard).where(KnowledgeCard.user_id == user_id).limit(100)
+        select(KnowledgeCard).where(
+            KnowledgeCard.user_id == user_id,
+            Note.not_trashed(KnowledgeCard.note_id),
+        ).limit(100)
     )
     cards = list(cards_result.scalars().all())
 
@@ -738,19 +761,26 @@ async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
         Dict: 包含 total_nodes, total_edges, confirmed_edges, suggested_edges,
               relation_type_distribution, isolated_nodes
     """
-    # 卡片总数（聚合查询，避免加载全部卡片行）
+    # 卡片总数（聚合查询，避免加载全部卡片行；排除回收站中的卡片）
     total_nodes = (
         await db.execute(
-            select(func.count(KnowledgeCard.id)).where(KnowledgeCard.user_id == user_id)
+            select(func.count(KnowledgeCard.id)).where(
+                KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
         )
     ).scalar_one()
 
-    # 各状态关系数（一次聚合按状态分组）
+    # 各状态关系数（一次聚合按状态分组；悬挂边不计入——卡片被物理删除后 FK 置 NULL）
+    not_dangling = and_(
+        CardRelation.card_id_1.is_not(None),
+        CardRelation.card_id_2.is_not(None),
+    )
     status_counts: Dict[str, int] = {"confirmed": 0, "suggested": 0, "rejected": 0}
     status_rows = (
         await db.execute(
             select(CardRelation.status, func.count(CardRelation.id))
-            .where(CardRelation.user_id == user_id)
+            .where(CardRelation.user_id == user_id, not_dangling)
             .group_by(CardRelation.status)
         )
     ).all()
@@ -767,6 +797,7 @@ async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
             .where(
                 CardRelation.user_id == user_id,
                 CardRelation.status == RelationStatus.confirmed,
+                not_dangling,
             )
             .group_by(CardRelation.relation_type)
         )
@@ -781,6 +812,7 @@ async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
         and_(
             CardRelation.user_id == user_id,
             CardRelation.status.in_([RelationStatus.confirmed, RelationStatus.suggested]),
+            not_dangling,
             or_(CardRelation.card_id_1 == KnowledgeCard.id, CardRelation.card_id_2 == KnowledgeCard.id),
         )
     )
@@ -788,6 +820,7 @@ async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
         await db.execute(
             select(func.count(KnowledgeCard.id)).where(
                 KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
                 ~rel_exists,
             )
         )
@@ -844,6 +877,7 @@ async def search_nodes(
             .outerjoin(CardRelation, count_cond)
             .where(
                 KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
                 or_(
                     KnowledgeCard.title.ilike(f"%{keyword}%"),
                     KnowledgeCard.content.ilike(f"%{keyword}%"),
@@ -885,11 +919,12 @@ async def get_node_subgraph(
     Returns:
         Optional[Dict]: 包含 center_node, neighbor_nodes, edges；节点不存在返回 None
     """
-    # 查询中心节点
+    # 查询中心节点（回收站中的卡片视为不存在）
     card_result = await db.execute(
         select(KnowledgeCard).where(
             KnowledgeCard.id == node_id,
             KnowledgeCard.user_id == user_id,
+            Note.not_trashed(KnowledgeCard.note_id),
         )
     )
     center = card_result.scalars().first()
@@ -906,10 +941,12 @@ async def get_node_subgraph(
     )
     relations = list(relations_result.scalars().all())
 
-    # 收集邻居节点 ID
+    # 收集邻居节点 ID（悬挂边：一端为 NULL 时跳过，卡片已被物理删除）
     neighbor_ids: set = set()
     edges_data = []
     for rel in relations:
+        if not rel.card_id_1 or not rel.card_id_2:
+            continue
         other_id = rel.card_id_2 if rel.card_id_1 == node_id else rel.card_id_1
         neighbor_ids.add(other_id)
         edges_data.append({
@@ -933,6 +970,7 @@ async def get_node_subgraph(
             ).where(
                 KnowledgeCard.id.in_(neighbor_ids),
                 KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
             )
         )
         neighbor_cards = list(neighbors_result.all())

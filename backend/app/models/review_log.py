@@ -15,6 +15,7 @@
 """
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import String, Integer, Float, Boolean, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -46,7 +47,10 @@ class ReviewLog(BaseModel):
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
     quiz_id: Mapped[str] = mapped_column(String, ForeignKey("quiz_items.id"), index=True, nullable=False)
-    note_id: Mapped[str] = mapped_column(String, ForeignKey("notes.id"), index=True, nullable=False)
+    # 来源笔记 ID（冗余）；物理删除笔记时置 NULL（悬挂保留），复习历史不因笔记删除而丢失
+    note_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("notes.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     user_answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     quality: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

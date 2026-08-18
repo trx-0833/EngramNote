@@ -113,12 +113,31 @@ export default function CardDetail() {
         </div>
       </div>
 
-      {/* 来源笔记链接 */}
-      {card.note_id && (
+      {/* 来源笔记链接：独立卡片（提升后的核心卡片）显示徽章，悬挂引用显示灰色占位 */}
+      {card.note_id ? (
         <p style={{ marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
           来源笔记：
-          <span style={{ color: 'var(--color-primary)', cursor: 'pointer' }} onClick={() => navigate(`/notes/${card.note_id}`)}>
-            {card.note_title || '查看笔记'}
+          {card.note_title === '已删除的笔记' ? (
+            <span style={{ color: 'var(--color-text-secondary)' }}>[已删除的笔记]</span>
+          ) : (
+            <span style={{ color: 'var(--color-primary)', cursor: 'pointer' }} onClick={() => navigate(`/notes/${card.note_id}`)}>
+              {card.note_title || '查看笔记'}
+            </span>
+          )}
+        </p>
+      ) : (
+        <p style={{ marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
+          来源：
+          <span
+            style={{
+              padding: '2px 8px',
+              background: 'var(--color-accent-light)',
+              color: 'var(--color-accent)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.75rem',
+            }}
+          >
+            独立卡片
           </span>
         </p>
       )}

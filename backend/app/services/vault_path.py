@@ -70,10 +70,23 @@ ALLOWED_EXTS = set(EXT_TO_SOURCE_TYPE.keys())
 # 所有笔记的物理兜底前缀段（标签化后不再有项目 slug 目录）
 INBOX_SLUG = "inbox"
 
+# 回收站物理隔离目录段（vault 路径不含 note_id，同名文件会互相覆盖，
+# 移入回收站时把文件搬到 {user_id}/trash/{note_id}/ 下隔离，恢复时再搬回）
+TRASH_SLUG = "trash"
+
 
 def inbox_prefix(user_id: str) -> str:
     """收件箱前缀：{user_id}/inbox，所有笔记（无论是否打项目标签）的物理存储兜底前缀（非真实项目行）"""
     return f"{user_id}/{INBOX_SLUG}"
+
+
+def trash_prefix(user_id: str, note_id: str) -> str:
+    """回收站前缀：{user_id}/trash/{note_id}
+
+    移入回收站时把笔记的物理文件搬到此前缀下（source/output 子结构与
+    inbox 一致），恢复时搬回；按 note_id 隔离，天然无同名冲突。
+    """
+    return f"{user_id}/{TRASH_SLUG}/{note_id}"
 
 
 def source_object(prefix: str, base: str, ext: str) -> str:

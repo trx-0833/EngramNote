@@ -13,6 +13,7 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import NotesList from './pages/NotesList'
 import NoteDetail from './pages/NoteDetail'
+import Trash from './pages/Trash'
 import Upload from './pages/Upload'
 import KnowledgeCards from './pages/KnowledgeCards'
 import KnowledgeGraph from './pages/KnowledgeGraph'
@@ -64,6 +65,7 @@ function AppRoutes() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/notes" element={<NotesList />} />
             <Route path="/notes/:noteId" element={<NoteDetail />} />
+            <Route path="/trash" element={<Trash />} />
             <Route path="/cards" element={<KnowledgeCards />} />
             <Route path="/graph" element={<KnowledgeGraph />} />
             <Route path="/cards/:cardId" element={<CardDetail />} />

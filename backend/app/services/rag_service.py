@@ -29,7 +29,7 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from ..config import get_settings
 from ..models.note import Note
@@ -180,7 +180,16 @@ class RAGService:
         session_factory = self._get_session_factory()
         async with session_factory() as session:
             result = await session.execute(
-                select(KnowledgeCard).where(KnowledgeCard.user_id == user_id)
+                select(KnowledgeCard).where(
+                    KnowledgeCard.user_id == user_id,
+                    # 回收站笔记的卡片不进 QA 检索（独立/提升卡片保留）
+                    or_(
+                        KnowledgeCard.note_id.is_(None),
+                        select(Note.id).where(
+                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
+                        ).exists(),
+                    ),
+                )
             )
             cards = result.scalars().all()
 
@@ -347,10 +356,16 @@ class RAGService:
         """
         session_factory = self._get_session_factory()
         async with session_factory() as session:
-            # 关键词匹配搜索（取所有卡片）
+            # 关键词匹配搜索（取所有卡片；回收站笔记的卡片暂不可见）
             result = await session.execute(
                 select(KnowledgeCard).where(
                     KnowledgeCard.user_id == user_id,
+                    or_(
+                        KnowledgeCard.note_id.is_(None),
+                        select(Note.id).where(
+                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
+                        ).exists(),
+                    ),
                 ).order_by(KnowledgeCard.created_at.desc())
             )
             cards = result.scalars().all()

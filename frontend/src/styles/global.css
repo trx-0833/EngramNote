@@ -535,16 +535,18 @@ h1, h2, h3 {
 
 /* ── ADHD Reader 专注阅读模式 ── */
 
+/* 阅读模式激活时，把文章容器变为行级标记的定位上下文 */
+.markdown-body.adhd-reader-active {
+  position: relative;
+}
+
+/* 模糊度与透明度由 JS 按与阅读行的距离以渐变方式写入内联样式 */
 .markdown-body.adhd-reader-active > .adhd-block {
-  filter: blur(5px);
-  opacity: 0.5;
   transition: filter 0.25s ease, opacity 0.25s ease;
 }
 
+/* 当前阅读块：保持清晰（filter/opacity 由内联样式驱动），仅保留轻量描边提示 */
 .markdown-body.adhd-reader-active > .adhd-block.adhd-current-block {
-  filter: none;
-  opacity: 1;
-  background: var(--color-surface);
   border-radius: var(--radius-sm);
   box-shadow: 0 0 0 4px var(--color-accent-light);
 }
@@ -552,6 +554,18 @@ h1, h2, h3 {
 /* 当前块内部仍可保留少量层次：让当前块里的链接/按钮可点 */
 .markdown-body.adhd-reader-active > .adhd-block.adhd-current-block a {
   pointer-events: auto;
+}
+
+/* 行级标记：一条位于行盒下方行距空隙中的下划线，完全不遮挡文字 */
+.markdown-body.adhd-reader-active .adhd-line-marker {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), rgba(37, 99, 235, 0.2));
+  border-radius: 2px;
+  transition: top 0.08s ease, left 0.08s ease, width 0.08s ease;
 }
 
 /* ── Diff 对比视图 ── */

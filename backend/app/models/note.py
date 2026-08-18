@@ -19,9 +19,10 @@
 """
 
 import enum
+from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Enum, Integer, String, Text, JSON
+from sqlalchemy import Enum, Integer, String, Text, JSON, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import ForeignKey
 
@@ -144,3 +145,27 @@ class Note(BaseModel):
     # Python 属性名用 metadata_（带下划线），数据库列名映射为 metadata
     # 避免与 SQLAlchemy 的 metadata 属性冲突
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
+    # 移入回收站的时间戳（回收站软删除标记），NULL 表示未删除
+    trashed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    @classmethod
+    def not_trashed(cls, note_id_col):
+        """
+        通用回收站过滤条件（用于按 note_id 列传递过滤的查询）
+
+        语义：note 端为 NULL（独立/悬挂引用，如提升的核心卡片、悬挂的题目）
+        或所属笔记未进回收站（trashed_at 为 NULL）时可见。
+
+        Args:
+            note_id_col: 任意模型上指向 notes.id 的列（如 KnowledgeCard.note_id）
+
+        Returns:
+            SQLAlchemy 布尔表达式，可直接放入 where 条件
+        """
+        from sqlalchemy import or_, select
+        return or_(
+            note_id_col.is_(None),
+            select(cls.id).where(
+                cls.id == note_id_col, cls.trashed_at.is_(None)
+            ).exists().correlate(None),
+        )

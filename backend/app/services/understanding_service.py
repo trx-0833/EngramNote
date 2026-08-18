@@ -25,7 +25,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from ..models.knowledge_card import KnowledgeCard, CardType
 from ..models.note import Note
@@ -540,6 +540,13 @@ async def detect_card_duplicates(
         select(KnowledgeCard).where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.id != card.id,
+            # 回收站笔记的卡片不参与重复检测（独立/提升卡片保留）
+            or_(
+                KnowledgeCard.note_id.is_(None),
+                select(Note.id).where(
+                    Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
+                ).exists(),
+            ),
         ).limit(500)
     )
     existing_cards = result.scalars().all()

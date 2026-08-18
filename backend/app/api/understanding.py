@@ -28,7 +28,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, delete as sql_delete, or_
+from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -320,6 +320,8 @@ async def get_all_cards(
     """获取当前用户所有知识卡片（分页），支持关键词搜索"""
     # 构建查询条件
     conditions = [KnowledgeCard.user_id == current_user.id]
+    # 回收站笔记的卡片暂不可见（note_id 为 NULL 的独立/提升卡片保留）
+    conditions.append(Note.not_trashed(KnowledgeCard.note_id))
     if note_id:
         conditions.append(KnowledgeCard.note_id == note_id)
     if keyword:
@@ -351,7 +353,8 @@ async def get_all_cards(
     items = []
     for card, note_title in rows:
         item = KnowledgeCardResponse.model_validate(card)
-        item.note_title = note_title or "已删除的笔记"
+        # note_id 为 NULL 的是独立/提升卡片；note_id 指向已物理删除笔记的为悬挂引用
+        item.note_title = note_title or ("独立卡片" if card.note_id is None else "已删除的笔记")
         items.append(item)
 
     return KnowledgeCardListResponse(
@@ -379,12 +382,16 @@ async def get_card_detail(
     if not card:
         raise HTTPException(status_code=404, detail="知识卡片不存在")
 
-    # JOIN Note 表获取笔记标题
-    note_result = await db.execute(
-        select(Note.title).where(Note.id == card.note_id)
-    )
-    note_title_row = note_result.first()
-    note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+    # JOIN Note 表获取笔记标题（note_id 为 NULL 的是独立/提升卡片）
+    note_title = None
+    if card.note_id is not None:
+        note_result = await db.execute(
+            select(Note.title).where(Note.id == card.note_id)
+        )
+        note_title_row = note_result.first()
+        note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+    else:
+        note_title = "独立卡片"
 
     item = KnowledgeCardResponse.model_validate(card)
     item.note_title = note_title
@@ -416,12 +423,16 @@ async def update_card(
     await db.commit()
     await db.refresh(card)
 
-    # JOIN Note 表获取笔记标题
-    note_result = await db.execute(
-        select(Note.title).where(Note.id == card.note_id)
-    )
-    note_title_row = note_result.first()
-    note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+    # JOIN Note 表获取笔记标题（note_id 为 NULL 的是独立/提升卡片）
+    note_title = None
+    if card.note_id is not None:
+        note_result = await db.execute(
+            select(Note.title).where(Note.id == card.note_id)
+        )
+        note_title_row = note_result.first()
+        note_title = note_title_row[0] if note_title_row else "已删除的笔记"
+    else:
+        note_title = "独立卡片"
 
     item = KnowledgeCardResponse.model_validate(card)
     item.note_title = note_title
@@ -455,6 +466,13 @@ async def delete_card(
         )
     )
 
+    # 解除子卡片的父级引用（parent_card_id 自引用外键为 NO ACTION，需先置 NULL）
+    await db.execute(
+        sql_update(KnowledgeCard)
+        .where(KnowledgeCard.parent_card_id == card_id)
+        .values(parent_card_id=None)
+    )
+
     # 删除关联的复习记录
     quiz_ids_result = await db.execute(
         select(QuizItem.id).where(QuizItem.card_id == card_id)
@@ -465,12 +483,11 @@ async def delete_card(
             sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids))
         )
 
-    # 删除关联的题目
-    q_result = await db.execute(
-        select(QuizItem).where(QuizItem.card_id == card_id)
+    # 删除关联的题目（Core 批量删除立即执行，确保先于卡片本身的 DELETE，
+    # 避免 ORM flush 排序不确定导致 quiz_items 外键约束失败）
+    await db.execute(
+        sql_delete(QuizItem).where(QuizItem.card_id == card_id)
     )
-    for q in q_result.scalars().all():
-        await db.delete(q)
     await db.delete(card)
     await db.commit()
 
@@ -734,6 +751,8 @@ async def get_all_questions(
 ):
     """获取当前用户所有题目（分页），支持关键词搜索"""
     conditions = [QuizItem.user_id == current_user.id]
+    # 回收站笔记的题目暂不可见（note_id 为 NULL 的悬挂/提升题目保留）
+    conditions.append(Note.not_trashed(QuizItem.note_id))
     if note_id:
         conditions.append(QuizItem.note_id == note_id)
     if keyword:
@@ -760,7 +779,8 @@ async def get_all_questions(
     items = []
     for quiz, note_title in rows:
         item = QuizItemResponse.model_validate(quiz)
-        item.note_title = note_title or "已删除的笔记"
+        # note_id 为 NULL：独立/提升卡片悬挂的题目；否则为笔记被物理删除
+        item.note_title = note_title or ("独立卡片" if quiz.note_id is None else "已删除的笔记")
         items.append(item)
 
     return QuizItemListResponse(

@@ -196,11 +196,11 @@ async def _search_vectors_async(
 
     vector_store = VectorStore()
 
-    # 获取用户所有笔记
+    # 获取用户所有笔记（回收站笔记不进向量检索）
     session_factory = _get_sync_session()
     async with session_factory() as session:
         result = await session.execute(
-            select(Note).where(Note.user_id == user_id)
+            select(Note).where(Note.user_id == user_id, Note.trashed_at.is_(None))
         )
         notes = result.scalars().all()
 

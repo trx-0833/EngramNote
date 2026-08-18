@@ -302,6 +302,48 @@ def delete_file(bucket: str, object_name: str):
         _delete_file_local(bucket, object_name)
 
 
+def file_exists(bucket: str, object_name: str) -> bool:
+    """
+    检查对象是否存在（回收站恢复时的同名冲突检测）
+
+    Args:
+        bucket: 存储桶名称
+        object_name: 对象名称
+
+    Returns:
+        bool: 对象存在返回 True，不存在或无法访问返回 False
+    """
+    if settings.storage_backend == "minio":
+        from minio.error import S3Error
+        try:
+            client = _get_minio_client()
+            client.stat_object(bucket, object_name)
+            return True
+        except S3Error:
+            return False
+    else:
+        return _resolve_path(bucket, object_name).exists()
+
+
+def move_file(bucket: str, object_name: str, new_object_name: str,
+              content_type: str = "application/octet-stream"):
+    """
+    在存储内移动对象（回收站移入/恢复的物理文件隔离搬家）
+
+    统一实现为 读取字节 → 写入新位置 → 删除旧位置。
+    文档类文件体量小，复制删除方式对本地/MinIO 双后端最简单可靠。
+
+    Args:
+        bucket: 存储桶名称
+        object_name: 原对象名
+        new_object_name: 目标对象名
+        content_type: MIME 类型（MinIO 模式使用）
+    """
+    data = get_object_bytes(bucket, object_name)
+    upload_bytes(bucket, new_object_name, data, content_type=content_type)
+    delete_file(bucket, object_name)
+
+
 # ===== 本地文件系统实现 =====
 
 def _upload_file_local(bucket: str, object_name: str, file_path: str):
@@ -342,10 +384,24 @@ def _get_presigned_url_local(bucket: str, object_name: str) -> str:
 
 
 def _delete_file_local(bucket: str, object_name: str):
-    """本地模式：删除存储目录中的文件"""
+    """本地模式：删除存储目录中的文件
+
+    删除后向上清理空目录（直到 Vault 根），避免 purge/restore 留下
+    空目录壳（如 trash/{note_id}/source 等只剩目录树）。
+    """
     path = _resolve_path(bucket, object_name)
     if path.exists():
         path.unlink()
+    # 向上清理空目录：仅删除真正的空目录，遇到非空目录或到达根即停止
+    root = _get_storage_root()
+    parent = path.parent
+    try:
+        while parent != root and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
+    except OSError:
+        # 并发写入等导致目录非空/无法删除时静默跳过，不影响主流程
+        pass
 
 
 # ===== MinIO 实现（保留，后续可切换） =====

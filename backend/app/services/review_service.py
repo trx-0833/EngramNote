@@ -21,10 +21,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
+from ..models.note import Note
 from ..models.quiz_item import QuizItem, QuestionType
 from ..models.review_log import ReviewLog
 from ..models.knowledge_card import KnowledgeCard
@@ -87,22 +88,37 @@ async def get_due_quizzes(
     actual_limit = min(remaining, limit)
 
     # 子查询：统计每张卡片的错误次数，用于薄弱点优先排序
+    # （与主查询一致地排除回收站笔记的题目，保证排序口径一致）
     error_subq = (
         select(
             QuizItem.card_id,
             func.coalesce(func.sum(case((ReviewLog.is_correct == False, 1), else_=0)), 0).label("error_count"),
         )
         .join(ReviewLog, ReviewLog.quiz_id == QuizItem.id, isouter=True)
-        .where(QuizItem.user_id == user_id)
+        .where(
+            QuizItem.user_id == user_id,
+            or_(
+                QuizItem.note_id.is_(None),
+                select(Note.id).where(
+                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
+                ).exists(),
+            ),
+        )
         .group_by(QuizItem.card_id)
         .subquery()
     )
 
-    # 查询到期题目，关联薄弱点排序
+    # 查询到期题目，关联薄弱点排序（回收站笔记的题目暂不可见）
     result = await db.execute(
         select(QuizItem).where(
             QuizItem.user_id == user_id,
             (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+            or_(
+                QuizItem.note_id.is_(None),
+                select(Note.id).where(
+                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
+                ).exists(),
+            ),
         )
         .outerjoin(error_subq, error_subq.c.card_id == QuizItem.card_id)
         .order_by(
@@ -323,7 +339,7 @@ async def get_review_stats(
     if remaining_quota <= 0:
         due_count = 0
     else:
-        # 使用子查询加 LIMIT，避免扫描全表
+        # 使用子查询加 LIMIT，避免扫描全表（回收站笔记的题目暂不可见）
         due_subq = (
             select(func.count())
             .select_from(
@@ -331,6 +347,12 @@ async def get_review_stats(
                 .where(
                     QuizItem.user_id == user_id,
                     (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+                    or_(
+                        QuizItem.note_id.is_(None),
+                        select(Note.id).where(
+                            Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
+                        ).exists(),
+                    ),
                 )
                 .limit(remaining_quota)
                 .subquery()
@@ -366,10 +388,16 @@ async def get_review_stats(
     )
     total_correct = total_correct_result.scalar() or 0
 
-    # 总题目数
+    # 总题目数（回收站笔记的题目暂不可见，不计入）
     total_quizzes_result = await db.execute(
         select(func.count()).select_from(QuizItem).where(
             QuizItem.user_id == user_id,
+            or_(
+                QuizItem.note_id.is_(None),
+                select(Note.id).where(
+                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
+                ).exists(),
+            ),
         )
     )
     total_quizzes = total_quizzes_result.scalar() or 0

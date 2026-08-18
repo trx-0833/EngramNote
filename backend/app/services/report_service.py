@@ -243,7 +243,11 @@ async def get_weak_points(
         )
         .join(error_counts, error_counts.c.card_id == KnowledgeCard.id)
         .join(Note, Note.id == KnowledgeCard.note_id)
-        .where(KnowledgeCard.user_id == user_id)
+        .where(
+            KnowledgeCard.user_id == user_id,
+            # 回收站笔记的卡片暂不可见（error_counts 子查询保留历史聚合语义）
+            Note.trashed_at.is_(None),
+        )
         .order_by(error_counts.c.error_count.desc())
         .limit(limit)
     )

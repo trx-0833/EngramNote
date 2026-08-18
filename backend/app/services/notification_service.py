@@ -28,6 +28,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
+from ..models.note import Note
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
 
@@ -69,11 +70,12 @@ class NotificationService:
         now = datetime.now(timezone.utc)
         now_plus_1h = now + timedelta(hours=1)
 
-        # 到期题目数（next_review_at <= now 或为 None）
+        # 到期题目数（next_review_at <= now 或为 None；回收站笔记的题目不计入）
         due_count_result = await db.execute(
             select(func.count()).select_from(QuizItem).where(
                 QuizItem.user_id == user_id,
                 (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+                Note.not_trashed(QuizItem.note_id),
             )
         )
         due_count = due_count_result.scalar() or 0
@@ -84,15 +86,17 @@ class NotificationService:
                 QuizItem.user_id == user_id,
                 QuizItem.next_review_at >= now,
                 QuizItem.next_review_at <= now_plus_1h,
+                Note.not_trashed(QuizItem.note_id),
             )
         )
         due_in_1h_count = due_in_1h_count_result.scalar() or 0
 
-        # 薄弱点数（掌握度 < 60 的知识卡片）
+        # 薄弱点数（掌握度 < 60 的知识卡片；回收站笔记的卡片不计入）
         weak_point_count_result = await db.execute(
             select(func.count()).select_from(KnowledgeCard).where(
                 KnowledgeCard.user_id == user_id,
                 KnowledgeCard.mastery_level < 60,
+                Note.not_trashed(KnowledgeCard.note_id),
             )
         )
         weak_point_count = weak_point_count_result.scalar() or 0
@@ -207,6 +211,7 @@ class NotificationService:
             .where(
                 KnowledgeCard.user_id == user_id,
                 KnowledgeCard.mastery_level < 60,
+                Note.not_trashed(KnowledgeCard.note_id),
             )
             .order_by(KnowledgeCard.mastery_level.asc())
             .limit(limit)

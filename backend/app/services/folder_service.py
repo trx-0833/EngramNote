@@ -87,13 +87,19 @@ async def get_folders(
     """
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # 查询文件夹及其笔记数量（F-08 修复：join 条件叠加 user_id，防止他人笔记计入计数）
+    # 查询文件夹及其笔记数量（F-08 修复：join 条件叠加 user_id，防止他人笔记计入计数；
+    # 回收站笔记已"移出"文件夹，不计入计数）
     stmt = (
         select(
             Folder,
             func.count(Note.id).label("note_count"),
         )
-        .outerjoin(Note, (Note.folder_id == Folder.id) & (Note.user_id == user_id))
+        .outerjoin(
+            Note,
+            (Note.folder_id == Folder.id)
+            & (Note.user_id == user_id)
+            & (Note.trashed_at.is_(None)),
+        )
         .where(Folder.user_id == user_id, Folder.folder_date >= cutoff_date)
         .group_by(Folder.id)
         .order_by(Folder.folder_date.desc())
@@ -143,10 +149,15 @@ async def get_folder_detail(
     if not folder:
         return None
 
-    # 查询文件夹内的笔记（F-08 修复：叠加 user_id 过滤，防止跨用户笔记混入）
+    # 查询文件夹内的笔记（F-08 修复：叠加 user_id 过滤，防止跨用户笔记混入；
+    # 回收站笔记不显示）
     notes_stmt = (
         select(Note)
-        .where(Note.folder_id == folder_id, Note.user_id == user_id)
+        .where(
+            Note.folder_id == folder_id,
+            Note.user_id == user_id,
+            Note.trashed_at.is_(None),
+        )
         .order_by(Note.created_at.desc())
     )
     notes_result = await db.execute(notes_stmt)
@@ -208,9 +219,11 @@ async def update_folder(
         await db.refresh(folder)
         logger.info("文件夹重命名成功: user_id=%s, folder_id=%s, name=%s", user_id, folder_id, name)
 
-    # 查询笔记数量以保持响应结构一致（F-08 修复：叠加 user_id 过滤）
+    # 查询笔记数量以保持响应结构一致（F-08 修复：叠加 user_id 过滤；回收站笔记不计入）
     count_stmt = select(func.count(Note.id)).where(
-        Note.folder_id == folder_id, Note.user_id == user_id
+        Note.folder_id == folder_id,
+        Note.user_id == user_id,
+        Note.trashed_at.is_(None),
     )
     count_result = await db.execute(count_stmt)
     note_count = count_result.scalar() or 0
@@ -255,9 +268,12 @@ async def delete_folder(
     if not folder:
         raise ValueError("文件夹不存在或无权访问")
 
-    # 检查文件夹是否为空（F-08 修复：叠加 user_id 过滤）
+    # 检查文件夹是否为空（F-08 修复：叠加 user_id 过滤；
+    # D3 决策：仅含回收站笔记的文件夹视为空、可删除）
     count_stmt = select(func.count(Note.id)).where(
-        Note.folder_id == folder_id, Note.user_id == user_id
+        Note.folder_id == folder_id,
+        Note.user_id == user_id,
+        Note.trashed_at.is_(None),
     )
     count_result = await db.execute(count_stmt)
     note_count = count_result.scalar()

@@ -28,6 +28,7 @@ const NAV_SECTIONS = [
     title: '笔记',
     items: [
       { path: '/notes', label: '笔记列表', icon: '\u2630' },
+      { path: '/trash', label: '回收站', icon: '\u2672' },
     ],
   },
   {

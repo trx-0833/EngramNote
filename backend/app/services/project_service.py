@@ -143,7 +143,7 @@ async def get_project(db: AsyncSession, project_id: str, user_id: str) -> Option
     notes_stmt = (
         select(Note)
         .join(NoteProject, NoteProject.note_id == Note.id)
-        .where(NoteProject.project_id == project_id)
+        .where(NoteProject.project_id == project_id, Note.trashed_at.is_(None))
         .order_by(Note.created_at.desc())
     )
     notes_result = await db.execute(notes_stmt)
@@ -375,7 +375,12 @@ async def add_notes_to_project(
 
     added = 0
     if note_ids:
-        notes_stmt = select(Note).where(Note.user_id == user_id, Note.id.in_(note_ids))
+        # 回收站笔记不可加入项目标签
+        notes_stmt = select(Note).where(
+            Note.user_id == user_id,
+            Note.id.in_(note_ids),
+            Note.trashed_at.is_(None),
+        )
         notes_result = await db.execute(notes_stmt)
         notes = notes_result.scalars().all()
 

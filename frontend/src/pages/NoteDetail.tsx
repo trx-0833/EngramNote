@@ -41,6 +41,7 @@ import {
   type NoteContentTarget,
 } from '../api/client'
 import CleaningPanel from '../components/CleaningPanel'
+import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
 import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
@@ -81,11 +82,10 @@ export default function NoteDetail() {
   const [annotationMenuPos, setAnnotationMenuPos] = useState({ x: 0, y: 0 })
   const markdownRef = useRef<HTMLElement>(null)
 
-  /** ADHD Reader 专注阅读模式 */
+  /** ADHD Reader 专注阅读模式（鼠标遮罩/显示文本） */
   const {
     enabled: adhdReaderEnabled,
-    gazeSource: adhdGazeSource,
-    calibrating: adhdCalibrating,
+    currentLineText: adhdCurrentLineText,
     toggle: toggleAdhdReader,
     disable: disableAdhdReader,
   } = useAdhdReader(markdownRef)
@@ -103,6 +103,8 @@ export default function NoteDetail() {
 
   /** 版本历史面板显示状态 */
   const [showVersionHistory, setShowVersionHistory] = useState(false)
+  /** 移入回收站确认弹窗显示状态 */
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   // 离开纯阅读视图（编辑/对比）时自动关闭 ADHD Reader
   useEffect(() => {
@@ -350,25 +352,21 @@ export default function NoteDetail() {
     }
   }
 
-  /** 处理删除笔记 */
-  async function handleDelete() {
+  /** 处理删除笔记（打开移入回收站确认弹窗） */
+  function handleDelete() {
     if (!note) return
-    const isProcessing = ['converting', 'cleaning', 'learning'].includes(note.status)
-    const hasCards = hasLearned
-    let msg = '确定删除此笔记？'
-    if (isProcessing) {
-      msg += '\n\n⚠️ 此笔记正在处理中，删除将中断处理流程。'
-    }
-    if (hasCards) {
-      msg += '\n\n将同时删除：知识卡片、练习题目、复习记录、知识图谱关系。'
-    }
-    msg += '\n\n此操作不可恢复。'
-    if (!confirm(msg)) return
+    setShowDeleteDialog(true)
+  }
+
+  /** 确认移入回收站：调用软删除 API 后返回列表页 */
+  async function confirmDelete() {
+    if (!note) return
     try {
       await deleteNote(note.id)
       navigate('/notes')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      alert(err instanceof Error ? err.message : '移入回收站失败')
+      setShowDeleteDialog(false)
     }
   }
 
@@ -531,6 +529,18 @@ export default function NoteDetail() {
     }
   }
 
+  /** 清理悬挂链接：以当前有效资料全量覆盖，自动剔除资料端为 NULL 的悬挂行 */
+  async function handleCleanDanglingLinks() {
+    if (!note || !noteLinks) return
+    try {
+      await updateNoteLinks(note.id, noteLinks.linked_materials.map((m) => m.id))
+      const links = await getNoteLinks(note.id)
+      setNoteLinks(links)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '清理链接失败')
+    }
+  }
+
   /** 进入编辑模式：预填充内容（仅允许编辑清洗版，原始版只读） */
   function handleEnterEdit() {
     if (!note) return
@@ -594,8 +604,6 @@ export default function NoteDetail() {
   // 编辑预览的 HTML
   const editPreviewHtml = renderMarkdown(editContent)
 
-  // 是否已学习过（metadata 中记录了学习成功时间，或处于已归档/学习失败状态）
-  const hasLearned = note?.metadata_?.learned_at !== undefined || note?.status === 'archived' || note?.status === 'learning_failed'
   // 是否可以显示清洗版（cleaned/archived/learning_failed 状态都可以查看）
   const canShowClean = (note.status === 'cleaned' || note.status === 'archived' || note.status === 'learning_failed') && !!note.clean_md_content
   // 是否可以显示 diff（cleaned/archived/learning_failed 状态都可以查看）
@@ -630,21 +638,6 @@ export default function NoteDetail() {
             >
               版本历史
             </button>
-            <button
-              className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={toggleAdhdReader}
-              disabled={editMode !== 'view' || viewMode === 'diff'}
-              title={
-                adhdReaderEnabled
-                  ? `ADHD Reader 已开启（${adhdGazeSource === 'camera' ? '摄像头眼动' : adhdGazeSource === 'mouse' ? '鼠标/点击演示' : '准备中'}）`
-                  : '开启 ADHD 专注阅读模式（摄像头眼动跟踪，不可用时自动降级为鼠标演示）'
-              }
-            >
-              {adhdReaderEnabled
-                ? `ADHD Reader${adhdCalibrating ? ' 校准中...' : adhdGazeSource === 'camera' ? ' 摄像头' : adhdGazeSource === 'mouse' ? ' 鼠标演示' : ''}`
-                : 'ADHD Reader'}
-            </button>
-
             {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
               <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>立即复习</button>
             )}
@@ -761,7 +754,7 @@ export default function NoteDetail() {
       )}
 
       {/* 关联的学习资料列表 */}
-      {noteLinks && noteLinks.linked_materials.length > 0 && (
+      {noteLinks && (noteLinks.linked_materials.length > 0 || (noteLinks.dangling_material_count ?? 0) > 0) && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>关联的学习资料</h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
@@ -770,6 +763,30 @@ export default function NoteDetail() {
                 <a href={`/notes/${m.id}`} style={{ color: 'var(--color-primary)' }}>{m.title}</a>
               </li>
             ))}
+            {/* 悬挂链接占位：资料已被彻底删除（悬挂引用策略保留行） */}
+            {(noteLinks.dangling_material_count ?? 0) > 0 && (
+              <li
+                key="__dangling__"
+                style={{
+                  padding: '0.25rem 0',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 'var(--space-sm)',
+                }}
+              >
+                <span style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+                  [已删除的笔记]（{noteLinks.dangling_material_count} 个已彻底删除的资料）
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                  onClick={handleCleanDanglingLinks}
+                >
+                  清理此链接
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       )}
@@ -850,12 +867,37 @@ export default function NoteDetail() {
         )
       ) : mdContent ? (
         /* Markdown 渲染 */
+        <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)', flexWrap: 'wrap' }}>
+          <button
+            className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={toggleAdhdReader}
+            title={adhdReaderEnabled ? '关闭 ADHD 专注阅读模式' : '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）'}
+          >
+            {adhdReaderEnabled ? '关闭 ADHD Reader' : '开启 ADHD Reader'}
+          </button>
+          {adhdReaderEnabled && (
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+              🖱 鼠标跟随 · 移动鼠标高亮所在行
+            </span>
+          )}
+        </div>
+        {/* 行级文本捕捉：实时展示鼠标所在的那一行文字 */}
+        {adhdReaderEnabled && adhdCurrentLineText && (
+          <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.85rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <span style={{ flexShrink: 0, fontWeight: 600 }}>📖 正在阅读</span>
+            <span style={{ color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              “{adhdCurrentLineText}”
+            </span>
+          </div>
+        )}
         <article
           ref={markdownRef}
           className="card markdown-body"
           dangerouslySetInnerHTML={{ __html: htmlContent }}
           onMouseUp={handleMouseUp}
         />
+        </>
       ) : (
         /* 无内容 */
         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
@@ -933,6 +975,15 @@ export default function NoteDetail() {
           noteId={note.id}
           onClose={() => setShowVersionHistory(false)}
           onRestored={fetchNote}
+        />
+      )}
+
+      {/* 移入回收站确认弹窗 */}
+      {showDeleteDialog && (
+        <DeleteNoteDialog
+          note={note}
+          onClose={() => setShowDeleteDialog(false)}
+          onConfirm={confirmDelete}
         />
       )}
 

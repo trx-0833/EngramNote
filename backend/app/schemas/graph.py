@@ -21,6 +21,8 @@ class GraphNode(BaseModel):
     card_type: CardType
     note_id: str
     relation_count: int = 0
+    # 所属笔记是否在回收站中（悬挂引用/独立卡片为 False），前端据此过滤回收站节点
+    note_trashed: bool = False
 
 
 class GraphEdge(BaseModel):

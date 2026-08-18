@@ -141,6 +141,12 @@ async def init_db():
         if _is_sqlite:
             await _migrate_sqlite(conn)
 
+    # 回收站悬挂引用改造：重建 5 张表（卡片/笔记端可空 + ON DELETE SET NULL）。
+    # PRAGMA foreign_keys 不能在事务内切换，必须在 engine.begin() 提交后
+    # 用独立 raw 连接执行（详见 _rebuild_dangling_tables）。
+    if _is_sqlite:
+        await _rebuild_dangling_tables()
+
     # 清理两阶段上传遗留的超时临时目录（与 DB 后端无关，启动时兜底执行）
     cleanup_stale_uploads()
 
@@ -230,6 +236,19 @@ async def _migrate_sqlite(conn):
                     "ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"
                 ))
                 logger.info("SQLite 迁移: 已为 notes 表添加 note_role 列")
+            # 回收站软删除标记（对应 Alembic 009）
+            if 'trashed_at' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE notes ADD COLUMN trashed_at DATETIME"
+                ))
+                logger.info("SQLite 迁移: 已为 notes 表添加 trashed_at 列")
+            try:
+                sync_conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_notes_trashed_at ON notes (trashed_at)"
+                ))
+            except Exception:
+                # 索引已存在时忽略
+                pass
 
         # 检查并创建 note_projects 标签关联表（防御性建表，对应项目标签化重构）
         # 项目从 Vault 第一层目录演化为纯标签后，笔记与项目为多对多关系，承载于此表
@@ -259,14 +278,15 @@ async def _migrate_sqlite(conn):
             logger.info("SQLite 迁移: 已创建 note_projects 表")
 
         # 检查并创建 note_material_links 表（防御性建表，正常情况下 create_all 已创建）
+        # 端点可空 + ON DELETE SET NULL：物理删除笔记时悬挂保留双链记录（回收站策略）
         if 'note_material_links' not in table_names:
             sync_conn.execute(text(
                 """
                 CREATE TABLE IF NOT EXISTS note_material_links (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id),
-                    personal_note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-                    material_note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    personal_note_id VARCHAR REFERENCES notes(id) ON DELETE SET NULL,
+                    material_note_id VARCHAR REFERENCES notes(id) ON DELETE SET NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     UNIQUE (personal_note_id, material_note_id)
@@ -516,6 +536,103 @@ async def _migrate_sqlite(conn):
                 logger.warning(f"创建 card_relations 唯一索引失败（忽略）: {e}")
 
     await conn.run_sync(_do_migrate)
+
+
+async def _rebuild_dangling_tables() -> None:
+    """
+    回收站悬挂引用改造：把 5 张表的外键端改为可空 + ON DELETE SET NULL
+
+    涉及表：card_relations（card_id_1/2）、note_material_links（两端）、
+    knowledge_cards（note_id）、quiz_items（note_id）、review_logs（note_id）。
+
+    SQLite 不支持 ALTER COLUMN / 修改外键，必须"建新表 → 拷数据 → 改名"重建；
+    而 PRAGMA foreign_keys 是连接级开关且不能在事务内切换，故此函数用独立的
+    raw sqlite3 连接执行（须在 init_db 的 engine.begin() 事务提交之后调用）。
+
+    幂等：通过 PRAGMA table_info 检测探测列 notnull，已符合新 schema 则跳过。
+    内存库（测试场景）无法跨连接访问，直接跳过——内存库必为 create_all 新建，天然新 schema。
+    """
+    import sqlite3
+    from urllib.parse import unquote, urlparse
+
+    from sqlalchemy.dialects import sqlite as sqlite_dialect
+    from sqlalchemy.schema import CreateIndex, CreateTable
+
+    # 解析 SQLite 文件路径（sqlite+aiosqlite:///path）
+    db_file = unquote(urlparse(database_url.replace("+aiosqlite", "")).path or "")
+    if not db_file or db_file == ":memory:":
+        return
+    # Windows 下 urlparse 可能把盘符放进 netloc（//d:/x.db 形式）
+    if not db_file.startswith("/"):
+        netloc = urlparse(database_url.replace("+aiosqlite", "")).netloc
+        if netloc:
+            db_file = netloc + urlparse(database_url.replace("+aiosqlite", "")).path
+
+    # (表名, 探测列)：探测列 notnull=1 视为旧 schema 需重建
+    targets = (
+        ("card_relations", "card_id_1"),
+        ("note_material_links", "personal_note_id"),
+        ("knowledge_cards", "note_id"),
+        ("quiz_items", "note_id"),
+        ("review_logs", "note_id"),
+    )
+
+    raw = sqlite3.connect(db_file)
+    try:
+        raw.execute("PRAGMA foreign_keys=OFF")
+
+        def _needs_rebuild(table: str, probe_col: str) -> bool:
+            for row in raw.execute(f"PRAGMA table_info({table})"):
+                if row[1] == probe_col:
+                    return bool(row[3])  # notnull 标志
+            return False
+
+        todo = [t for t, probe in targets if _needs_rebuild(t, probe)]
+        if not todo:
+            return
+
+        logger.info("SQLite 迁移: 检测到旧 schema，开始重建悬挂引用表: %s", todo)
+        raw.execute("BEGIN")
+        try:
+            for table_name in todo:
+                table = Base.metadata.tables[table_name]
+                temp_name = f"{table_name}__trash_rebuild"
+
+                # 用 SQLAlchemy 按 metadata 生成与 create_all 完全一致的 DDL
+                create_ddl = str(
+                    CreateTable(table).compile(dialect=sqlite_dialect.dialect())
+                ).strip()
+                create_ddl = create_ddl.replace(
+                    f"CREATE TABLE {table_name}", f'CREATE TABLE "{temp_name}"', 1
+                )
+
+                col_list = ", ".join(f'"{c.name}"' for c in table.columns)
+                raw.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
+                raw.execute(create_ddl)
+                raw.execute(
+                    f'INSERT INTO "{temp_name}" ({col_list}) '
+                    f'SELECT {col_list} FROM "{table_name}"'
+                )
+                raw.execute(f'DROP TABLE "{table_name}"')
+                raw.execute(f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"')
+                # 旧索引随 DROP TABLE 消失，按 metadata 重建
+                for idx in table.indexes:
+                    raw.execute(str(CreateIndex(idx).compile(dialect=sqlite_dialect.dialect())))
+            raw.execute("COMMIT")
+        except Exception:
+            raw.execute("ROLLBACK")
+            raise
+
+        # 一致性校验：FK 违规仅告警（重建按原数据原样拷贝，理论上不会出现）
+        violations = raw.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            logger.warning("悬挂引用表重建后 FK 校验异常（保留数据，仅告警）: %s", violations[:5])
+        logger.info("SQLite 迁移: 悬挂引用表重建完成")
+    finally:
+        try:
+            raw.execute("PRAGMA foreign_keys=ON")
+        finally:
+            raw.close()
 
 
 if __name__ == "__main__":

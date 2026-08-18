@@ -83,7 +83,8 @@ class KnowledgeCard(BaseModel):
     __tablename__ = "knowledge_cards"
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
-    note_id: Mapped[str] = mapped_column(String, ForeignKey("notes.id"), index=True, nullable=False)
+    # 来源笔记 ID；可空——物理删除笔记时勾选"提升核心卡片"则置 NULL，卡片成为图谱独立节点
+    note_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("notes.id"), index=True, nullable=True)
     card_type: Mapped[CardType] = mapped_column(Enum(CardType), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

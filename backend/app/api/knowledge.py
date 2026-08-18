@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.user import User
+from ..models.note import Note
 from ..models.knowledge_card import KnowledgeCard, CardCategory
 from ..models.note_material_link import NoteMaterialLink
 from ..models.quiz_item import QuizItem
@@ -196,11 +197,12 @@ async def list_blind_spots(
       过滤 source_note_ids 同时含两 ID 的卡片
     - material_id：过滤 source_note_ids 包含该 ID 的卡片
     """
-    # 基础条件：当前用户的盲点卡片
+    # 基础条件：当前用户的盲点卡片（回收站笔记的卡片暂不可见）
     result = await db.execute(
         select(KnowledgeCard).where(
             KnowledgeCard.user_id == current_user.id,
             KnowledgeCard.card_category == CardCategory.blind_spot,
+            Note.not_trashed(KnowledgeCard.note_id),
         )
     )
     cards = list(result.scalars().all())
@@ -264,7 +266,7 @@ async def mastery_overview(
     review_count 通过一次性 group_by 查询每张卡片下的 QuizItem 数量。
     """
     # 构建查询条件
-    conditions = [KnowledgeCard.user_id == current_user.id]
+    conditions = [KnowledgeCard.user_id == current_user.id, Note.not_trashed(KnowledgeCard.note_id)]
     if card_category:
         try:
             cat = CardCategory(card_category)

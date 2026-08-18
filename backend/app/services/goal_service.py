@@ -265,13 +265,15 @@ class GoalService:
 
         scope_notes = list(goal.scope_notes or [])
 
-        # 范围内卡片平均掌握度（F-09 修复：叠加 user_id 过滤，防止旧数据跨用户渗漏）
+        # 范围内卡片平均掌握度（F-09 修复：叠加 user_id 过滤，防止旧数据跨用户渗漏；
+        # 回收站笔记的卡片不计入统计）
         avg_mastery = 0.0
         if scope_notes:
             avg_result = await db.execute(
                 select(func.avg(KnowledgeCard.mastery_level)).where(
                     KnowledgeCard.note_id.in_(scope_notes),
                     KnowledgeCard.user_id == user_id,
+                    Note.not_trashed(KnowledgeCard.note_id),
                 )
             )
             avg_value = avg_result.scalar()
@@ -280,23 +282,25 @@ class GoalService:
             avg_result = await db.execute(
                 select(func.avg(KnowledgeCard.mastery_level)).where(
                     KnowledgeCard.user_id == user_id,
+                    Note.not_trashed(KnowledgeCard.note_id),
                 )
             )
             avg_value = avg_result.scalar()
             avg_mastery = float(avg_value) if avg_value is not None else 0.0
 
-        # 范围内总题目数（F-09 修复：叠加 user_id 过滤）
+        # 范围内总题目数（F-09 修复：叠加 user_id 过滤；回收站笔记的题目不计入）
         total_count = 0
         if scope_notes:
             total_result = await db.execute(
                 select(func.count()).select_from(QuizItem).where(
                     QuizItem.note_id.in_(scope_notes),
                     QuizItem.user_id == user_id,
+                    Note.not_trashed(QuizItem.note_id),
                 )
             )
             total_count = total_result.scalar() or 0
 
-        # 今日已复习题目数（范围内）（F-09 修复：叠加 user_id 过滤）
+        # 今日已复习题目数（范围内）（F-09 修复：叠加 user_id 过滤；回收站笔记不计入）
         reviewed_count = 0
         if scope_notes:
             reviewed_result = await db.execute(
@@ -304,6 +308,7 @@ class GoalService:
                     ReviewLog.note_id.in_(scope_notes),
                     ReviewLog.user_id == user_id,
                     ReviewLog.review_at >= today_start,
+                    Note.not_trashed(ReviewLog.note_id),
                 )
             )
             reviewed_count = reviewed_result.scalar() or 0
@@ -408,12 +413,13 @@ class GoalService:
 
         if scope_notes:
             # a. 薄弱点：mastery_level < 60 的卡片 → 关联 quiz_items（top 10）
-            #    （F-09 修复：叠加 user_id 过滤）
+            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
             weak_cards_result = await db.execute(
                 select(KnowledgeCard.id, KnowledgeCard.title).where(
                     KnowledgeCard.note_id.in_(scope_notes),
                     KnowledgeCard.user_id == user_id,
                     KnowledgeCard.mastery_level < WEAK_POINT_MASTERY_THRESHOLD,
+                    Note.not_trashed(KnowledgeCard.note_id),
                 ).limit(WEAK_POINT_TASK_LIMIT)
             )
             weak_card_rows = weak_cards_result.all()
@@ -439,12 +445,13 @@ class GoalService:
                     })
 
             # b. 到期复习：next_review_at <= now 或为 None（top 20）
-            #    （F-09 修复：叠加 user_id 过滤）
+            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
             due_quizzes_result = await db.execute(
                 select(QuizItem).where(
                     QuizItem.note_id.in_(scope_notes),
                     QuizItem.user_id == user_id,
                     (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+                    Note.not_trashed(QuizItem.note_id),
                 ).order_by(
                     QuizItem.next_review_at.asc().nullsfirst(),
                 ).limit(REVIEW_TASK_LIMIT)
@@ -461,12 +468,13 @@ class GoalService:
                 })
 
             # c. 新资料：status in (converted, cleaned)（top 5）
-            #    （F-09 修复：叠加 user_id 过滤）
+            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
             new_notes_result = await db.execute(
                 select(Note).where(
                     Note.id.in_(scope_notes),
                     Note.user_id == user_id,
                     Note.status.in_([NoteStatus.converted, NoteStatus.cleaned]),
+                    Note.trashed_at.is_(None),
                 ).order_by(Note.created_at.desc()).limit(NEW_MATERIAL_TASK_LIMIT)
             )
             for note in new_notes_result.scalars().all():
@@ -560,13 +568,14 @@ class GoalService:
                 for goal in active_goals:
                     scope_notes = list(goal.scope_notes or [])
 
-                    # 计算平均掌握度（F-09 修复：叠加 user_id 过滤）
+                    # 计算平均掌握度（F-09 修复：叠加 user_id 过滤；回收站笔记不计入）
                     avg_mastery = 0.0
                     if scope_notes:
                         avg_result = await session.execute(
                             select(func.avg(KnowledgeCard.mastery_level)).where(
                                 KnowledgeCard.note_id.in_(scope_notes),
                                 KnowledgeCard.user_id == goal.user_id,
+                                Note.not_trashed(KnowledgeCard.note_id),
                             )
                         )
                         avg_value = avg_result.scalar()

@@ -309,6 +309,12 @@ export default function KnowledgeGraph() {
     let nodes = graphData.nodes
     let edges = graphData.edges
 
+    // 回收站过滤：所属笔记已进回收站的节点不渲染（关系记录后端保留，
+    // 恢复后自动复原）；同时剔除指向回收站节点的边，避免 force-graph 生成幽灵节点
+    const visibleIds = new Set(nodes.filter((n) => !n.note_trashed).map((n) => n.id))
+    nodes = nodes.filter((n) => visibleIds.has(n.id))
+    edges = edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
+
     // 类型过滤
     if (filterCardType) {
       const filteredNodeIds = new Set(
