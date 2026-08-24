@@ -313,6 +313,7 @@ EngramNote/
 ├── docker-compose.yml           # Docker Compose 配置
 ├── .gitignore                   # Git 忽略规则
 ├── .env.example                 # 环境变量模板（根目录引用）
+├── docs/                        # 文档（architecture.md 为活文档，archive/ 为历史归档）
 └── README.md                    # 本文件
 ```
 
@@ -531,11 +532,8 @@ python -c "from modelscope import snapshot_download; snapshot_download('Qwen/Qwe
 
 ## 文档
 
-- [项目架构](项目架构.md) — 架构设计与技术决策
-- [项目图解](项目图解.md) — 图解式全貌梳理（Mermaid 图：架构/流程/数据模型/Vault 目录）
-- [开发时间表](开发时间表.md) — 12 周完整开发记录
-- [新手教学](新手教学.md) — 面向初学者的代码讲解
-- [UX 审计报告](UX_AUDIT_REPORT.md) — 用户体验审计与改进
+- [架构文档](docs/architecture.md) — 系统架构、目录导航、数据流、状态机、数据库概览、技术债索引（**首选入口**，随代码更新）
+- [归档文档](docs/archive/) — 历史设计/教学/开发记录（项目架构、项目图解、新手教学等），仅供追溯，内容可能过时
 
 ---
 
