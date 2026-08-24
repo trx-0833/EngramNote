@@ -11,10 +11,10 @@ Celery 任务公共模块（F-27 修复）
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ..config import get_settings
 from ..models.note import Note, NoteStatus

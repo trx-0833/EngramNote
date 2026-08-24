@@ -19,16 +19,15 @@ SM-2 参数更新和复习统计等功能。
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from sqlalchemy import select, func, and_, case, or_
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models.note import Note
-from ..models.quiz_item import QuizItem, QuestionType
+from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
-from ..models.knowledge_card import KnowledgeCard
 from ..services.sm2_service import calculate_sm2, quality_from_answer
 
 logger = logging.getLogger(__name__)
@@ -92,7 +91,7 @@ async def get_due_quizzes(
     error_subq = (
         select(
             QuizItem.card_id,
-            func.coalesce(func.sum(case((ReviewLog.is_correct == False, 1), else_=0)), 0).label("error_count"),
+            func.coalesce(func.sum(case((ReviewLog.is_correct.is_(False), 1), else_=0)), 0).label("error_count"),
         )
         .join(ReviewLog, ReviewLog.quiz_id == QuizItem.id, isouter=True)
         .where(
@@ -366,7 +365,7 @@ async def get_review_stats(
         select(func.count()).select_from(ReviewLog).where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
-            ReviewLog.is_correct == True,
+            ReviewLog.is_correct.is_(True),
         )
     )
     today_correct = today_correct_result.scalar() or 0
@@ -383,7 +382,7 @@ async def get_review_stats(
     total_correct_result = await db.execute(
         select(func.count()).select_from(ReviewLog).where(
             ReviewLog.user_id == user_id,
-            ReviewLog.is_correct == True,
+            ReviewLog.is_correct.is_(True),
         )
     )
     total_correct = total_correct_result.scalar() or 0

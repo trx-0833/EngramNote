@@ -17,7 +17,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, Float, Boolean, Text, ForeignKey
+from sqlalchemy import String, Integer, Boolean, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel, TZDateTime

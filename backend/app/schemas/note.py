@@ -5,7 +5,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from ..models.note import NoteRole, NoteStatus, SourceType
+from ..models.note import NoteStatus, SourceType
 
 
 # --- 响应模型 ---

@@ -176,4 +176,4 @@ async def get_reminders(
         )
         raise HTTPException(
             status_code=500, detail="获取复习提醒数据失败"
-        )
+        ) from e

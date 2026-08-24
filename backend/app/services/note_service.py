@@ -30,19 +30,17 @@ from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_up
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.note import Note, NoteStatus, NoteRole
-from ..models.user import User
 from ..models.note_project import NoteProject
 from ..models.note_version import NoteVersion
 from ..models.folder import Folder
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
-from ..models.card_relation import CardRelation
+from ..models.note_annotation import NoteAnnotation
 from ..schemas.note import NoteUpdateRequest
 from ..services.storage_service import (
     delete_file,
     get_object_bytes,
-    get_presigned_url,
     upload_bytes,
     file_exists,
     move_file,

@@ -27,7 +27,7 @@ import difflib
 import logging
 from typing import Dict, List, Optional
 
-from sqlalchemy import select, func, delete as sql_delete
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -211,7 +211,7 @@ class VersionService:
             data = get_object_bytes(
                 settings.minio_bucket_markdown, version.storage_path
             )
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             # 版本内容文件已被外部删除（如用户手动清理历史版本），
             # 该版本已无可恢复内容：清理 DB 记录避免幽灵版本继续报错
             logger.warning(
@@ -222,7 +222,7 @@ class VersionService:
             await db.commit()
             raise ValueError(
                 f"版本内容文件已被删除，版本记录已清理: v{version_number}"
-            )
+            ) from e
         return data.decode("utf-8")
 
     # --------------------------------------------------------------
@@ -342,7 +342,7 @@ class VersionService:
             )
             raise ValueError(
                 f"读取笔记当前内容失败，无法创建恢复快照: {e}"
-            )
+            ) from e
 
         # F-31 修复：先读取目标版本内容（验证可读），成功后再创建快照。
         # 旧实现先建快照再读目标，目标缺失时产生多余快照并返回 404。

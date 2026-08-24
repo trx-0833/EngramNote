@@ -42,22 +42,22 @@ def check_dependencies() -> list[str]:
         missing.append("ffmpeg: 未安装或不在 PATH 中，无法处理视频文件")
 
     try:
-        import torch
+        import torch  # noqa: F401 - 依赖可用性探测
     except ImportError:
         missing.append("torch: 未安装，ASR 模型无法运行")
 
     try:
-        from qwen_asr import Qwen3ASRModel
+        from qwen_asr import Qwen3ASRModel  # noqa: F401 - 依赖可用性探测
     except ImportError:
         missing.append("qwen_asr: 未安装，ASR 模型无法加载")
 
     try:
-        import soundfile
+        import soundfile  # noqa: F401 - 依赖可用性探测
     except ImportError:
         missing.append("soundfile: 未安装，音频处理不可用")
 
     try:
-        import numpy
+        import numpy  # noqa: F401 - 依赖可用性探测
     except ImportError:
         missing.append("numpy: 未安装")
 

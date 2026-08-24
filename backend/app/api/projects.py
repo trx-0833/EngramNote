@@ -138,7 +138,7 @@ async def update_project(
             db, project_id, current_user.id, req.name, req.description
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.delete("/{project_id}")
@@ -166,7 +166,7 @@ async def delete_project(
     try:
         return await project_service.delete_project(db, project_id, current_user.id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/{project_id}/scan", response_model=ScanImportResponse)
@@ -233,7 +233,7 @@ async def add_notes(
             db, project_id, current_user.id, req.note_ids
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.delete("/{project_id}/notes/{note_id}")
@@ -265,4 +265,4 @@ async def remove_note(
             db, project_id, note_id, current_user.id
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e

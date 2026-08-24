@@ -21,7 +21,7 @@
 """
 
 from contextvars import ContextVar
-from typing import Dict, Optional
+from typing import Dict
 
 # ---- 上下文变量定义（默认值 None / 空串） ----
 

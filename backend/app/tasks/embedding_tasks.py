@@ -26,12 +26,12 @@ import asyncio
 import functools
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
+from .common import get_sync_session as _get_sync_session
 from ..config import get_settings
 from ..models.note import Note
 
@@ -45,9 +45,6 @@ _embedding_service = None
 # 哈希到原文的注册表，配合 lru_cache 使用
 # lru_cache 以 text_hash 为键，需要通过注册表回查原文进行编码
 _hash_to_text_registry: Dict[str, str] = {}
-
-# F-27：会话工厂收敛到 tasks/common.py（含 SQLite PRAGMA）
-from .common import get_sync_session as _get_sync_session
 
 
 def _get_embedding_service():
@@ -192,7 +189,7 @@ async def _search_vectors_async(
             - block_index: 块索引
     """
     # 延迟导入，避免在 FastAPI 主进程中通过模块加载间接引入模型依赖
-    from ..services.embedding_service import VectorStore
+    from ..services.embedding_service import EmbeddingService, VectorStore
 
     vector_store = VectorStore()
 

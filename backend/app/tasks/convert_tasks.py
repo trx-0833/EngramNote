@@ -32,9 +32,12 @@ import logging
 
 from celery.exceptions import Retry
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
+from .common import (
+    get_sync_session as _get_sync_session,
+    update_note_status as _update_note_status,
+)
 from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
 from ..services import vault_path
@@ -42,12 +45,6 @@ from ..services.vault_meta import write_note_meta
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-# F-27：会话工厂/状态更新收敛到 tasks/common.py（白名单 + metadata merge 统一维护）
-from .common import (
-    get_sync_session as _get_sync_session,
-    update_note_status as _update_note_status,
-)
 
 
 async def _record_clean_task_id(note_id: str, task_id: str) -> None:
@@ -156,7 +153,7 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
                         error_message=f"Mineru 转换失败: {result.error}",
                     )
                     return
-            except Exception as e:
+            except Exception:
                 # mineru 调用异常（如模块未安装、文件损坏等）
                 elapsed = time.monotonic() - start_time
                 logger.error("Mineru 调用异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
@@ -174,7 +171,7 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
                 await _update_note_status(
                     note_id, NoteStatus.converted,
                 )
-            except Exception as e:
+            except Exception:
                 elapsed = time.monotonic() - start_time
                 logger.error("Markdown 读取失败: note_id=%s, elapsed=%.1fs", note_id, elapsed)
                 await _update_note_status(
@@ -221,7 +218,7 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
                         error_message=f"ASR 转写失败: {result.error}",
                     )
                     return
-            except Exception as e:
+            except Exception:
                 elapsed = time.monotonic() - start_time
                 logger.error("ASR 转写异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
                 await _update_note_status(

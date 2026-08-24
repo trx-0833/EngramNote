@@ -26,22 +26,17 @@ from typing import Optional
 
 from celery.exceptions import Retry
 from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
-from ..config import get_settings
-from ..models.note import Note, NoteStatus
-from ..services.vault_meta import write_note_meta
-
-settings = get_settings()
-logger = logging.getLogger(__name__)
-
-# F-27：会话工厂/状态更新收敛到 tasks/common.py（understand 原 hasattr 版
-# 无白名单，统一为白名单版，防任意字段写入）
 from .common import (
     get_sync_session as _get_understand_session,
     update_note_status as _update_note_status,
 )
+from ..config import get_settings
+from ..models.note import Note, NoteStatus
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 async def _understand_document(note_id: str):
@@ -372,7 +367,6 @@ def _parse_questions_response(response: str) -> list:
     Returns:
         list: 题目列表
     """
-    import re as _re
     from ..services.llm_service import parse_json_tolerant
 
     # F-33:健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救）——

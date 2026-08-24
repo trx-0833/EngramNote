@@ -21,13 +21,13 @@
 
 import difflib
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models.note import Note, NoteStatus
+from ..models.note import NoteStatus
 from ..models.user import User
 from ..api.auth import get_current_user_dependency
 from ..schemas.cleaning import (
@@ -45,7 +45,6 @@ from ..services.note_service import (
     get_clean_markdown_content,
 )
 from ..services.storage_service import (
-    get_object_bytes,
     upload_bytes,
 )
 from ..services.cleaning_service import restore_block, delete_block
@@ -281,13 +280,9 @@ async def get_cleaning_diff(
     # 使用 difflib.SequenceMatcher 计算差异
     matcher = difflib.SequenceMatcher(None, original_lines, clean_lines)
     diff_blocks = []
-    orig_line_no = 0
-    clean_line_no = 0
 
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
         if op == "equal":
-            orig_line_no = i2
-            clean_line_no = j2
             continue
 
         block_lines = []
@@ -308,9 +303,6 @@ async def get_cleaning_diff(
 
         if block_lines:
             diff_blocks.append(DiffBlock(lines=block_lines))
-
-        orig_line_no = i2
-        clean_line_no = j2
 
     # 提取清洗统计信息
     clean_stats = None

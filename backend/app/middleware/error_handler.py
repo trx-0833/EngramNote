@@ -24,7 +24,6 @@
 """
 
 import logging
-from typing import Optional
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse

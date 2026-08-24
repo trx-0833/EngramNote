@@ -112,7 +112,7 @@ async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db))
     try:
         user = await register_user(db, req)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     # 注册成功后自动签发 Token，免去用户再次登录
     token = create_access_token(user.id)

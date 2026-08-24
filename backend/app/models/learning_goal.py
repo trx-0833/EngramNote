@@ -21,7 +21,7 @@ import enum
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import String, Integer, Float, Text, ForeignKey, JSON
+from sqlalchemy import String, Integer, Float, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel, TZDateTime

@@ -22,11 +22,11 @@
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models.learning_goal import GoalStatus, GoalType, LearningGoal
+from ..models.learning_goal import LearningGoal
 from ..models.user import User
 from ..api.auth import get_current_user_dependency
 from ..schemas.goal import (

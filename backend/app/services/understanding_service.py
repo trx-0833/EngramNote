@@ -19,7 +19,6 @@ AI 理解管道服务模块
 - 知识点提取结果为结构化 JSON，直接存入 KnowledgeCard 表
 """
 
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple

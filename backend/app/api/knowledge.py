@@ -20,7 +20,7 @@ HTTP 接口，对应 Q4~Q9 中"联合分析→盲点→拓展→出题→标记�
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
@@ -270,11 +270,11 @@ async def mastery_overview(
     if card_category:
         try:
             cat = CardCategory(card_category)
-        except ValueError:
+        except ValueError as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"无效的卡片类别: {card_category}，合法值为 regular/blind_spot/extension",
-            )
+            ) from e
         conditions.append(KnowledgeCard.card_category == cat)
 
     # 计算总数与平均掌握度（基于全部匹配卡片）

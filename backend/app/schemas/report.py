@@ -4,7 +4,7 @@
 定义学习报告相关的响应模型。
 """
 
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 

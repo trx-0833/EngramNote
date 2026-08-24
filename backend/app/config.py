@@ -18,7 +18,6 @@ EngramNote 配置管理模块
 - 通过 get_settings() 配合 lru_cache 实现单例模式，避免重复解析配置
 """
 
-import os
 from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
@@ -349,7 +348,7 @@ class Settings(BaseSettings):
         # 默认使用文件系统 broker，自动创建目录
         broker_dir = DATA_DIR / "celery" / "broker"
         broker_dir.mkdir(parents=True, exist_ok=True)
-        return f"filesystem://"
+        return "filesystem://"
 
     def get_celery_result_backend(self) -> str:
         """

@@ -15,7 +15,6 @@ import shutil
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -169,7 +168,13 @@ def convert(
             _result_holder = [None]
             _error_holder = [None]
 
-            def _target():
+            # B023 修复：线程闭包默认参数绑定，避免超时残留线程在下一迭代
+            # 继续写入（晚绑定会污染下一次迭代的结果容器）
+            def _target(
+                _result_holder=_result_holder,
+                _error_holder=_error_holder,
+                intake_path=intake_path,
+            ):
                 try:
                     _result_holder[0] = _process_with_mineru(
                         intake_path,
@@ -1050,8 +1055,8 @@ def _find_overlap(merged_lines: List[str], chunk_lines: List[str], max_overlap: 
             return i
 
     # 标准化后匹配
-    norm_merged = [_normalize_for_comparison(l) for l in merged_lines]
-    norm_chunk = [_normalize_for_comparison(l) for l in chunk_lines]
+    norm_merged = [_normalize_for_comparison(line) for line in merged_lines]
+    norm_chunk = [_normalize_for_comparison(line) for line in chunk_lines]
 
     for i in range(max_check, 0, -1):
         if norm_merged[-i:] == norm_chunk[:i]:

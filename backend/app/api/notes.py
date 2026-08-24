@@ -520,7 +520,7 @@ async def update_note_links(
             select(AssessmentResult).where(
                 AssessmentResult.user_id == current_user.id,
                 AssessmentResult.mode == "quiz",
-                AssessmentResult.is_stale == False,
+                AssessmentResult.is_stale.is_(False),
             )
         )
         for ar in result.scalars().all():
@@ -931,7 +931,7 @@ async def diff_note_versions(
             note_id, v1, v2, current_user.id, db
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     return NoteVersionDiffResponse(
         v1_number=diff_data["v1_number"],
@@ -976,7 +976,7 @@ async def get_note_version_content(
             note_id, version_number, current_user.id, db
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     return {"content": content, "version_number": version_number}
 
@@ -1025,7 +1025,7 @@ async def restore_note_version(
         # 区分"版本不存在"和"笔记路径缺失"两种错误
         message = str(e)
         if "不存在" in message and "版本" in message:
-            raise HTTPException(status_code=404, detail=message)
-        raise HTTPException(status_code=400, detail=message)
+            raise HTTPException(status_code=404, detail=message) from e
+        raise HTTPException(status_code=400, detail=message) from e
 
     return NoteVersionResponse.model_validate(new_version)

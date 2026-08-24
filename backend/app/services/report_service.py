@@ -17,12 +17,12 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from sqlalchemy import select, func, and_, case, distinct
+from sqlalchemy import select, func, case, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.quiz_item import QuizItem, QuestionType
+from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
@@ -60,7 +60,7 @@ async def get_daily_report(
     today_stats = await db.execute(
         select(
             func.count().label("total"),
-            func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+            func.sum(case((ReviewLog.is_correct.is_(True), 1), else_=0)).label("correct"),
             func.coalesce(func.sum(ReviewLog.time_spent_ms), 0).label("time_spent"),
         ).where(
             ReviewLog.user_id == user_id,
@@ -79,7 +79,7 @@ async def get_daily_report(
         ).where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
-            ReviewLog.is_correct == True,
+            ReviewLog.is_correct.is_(True),
             QuizItem.review_count == 1,
         )
     )
@@ -90,7 +90,7 @@ async def get_daily_report(
         select(
             QuizItem.question_type,
             func.count().label("total"),
-            func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+            func.sum(case((ReviewLog.is_correct.is_(True), 1), else_=0)).label("correct"),
         ).join(ReviewLog, ReviewLog.quiz_id == QuizItem.id).where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
@@ -143,10 +143,8 @@ async def get_weekly_trend(
         Dict: 7天趋势数据
     """
     now = datetime.now(timezone.utc)
-    seven_days_ago = now - timedelta(days=6)
     # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
     from ..utils.timeutil import local_day_start_utc
-    week_start = local_day_start_utc(seven_days_ago)
 
     # 按业务日界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题
     daily_map = {}
@@ -159,7 +157,7 @@ async def get_weekly_trend(
         day_stats = await db.execute(
             select(
                 func.count().label("total"),
-                func.sum(case((ReviewLog.is_correct == True, 1), else_=0)).label("correct"),
+                func.sum(case((ReviewLog.is_correct.is_(True), 1), else_=0)).label("correct"),
             ).where(
                 ReviewLog.user_id == user_id,
                 ReviewLog.review_at >= day_start,
@@ -219,7 +217,7 @@ async def get_weak_points(
         select(
             QuizItem.card_id,
             func.count().label("total_reviews"),
-            func.sum(case((ReviewLog.is_correct == False, 1), else_=0)).label("error_count"),
+            func.sum(case((ReviewLog.is_correct.is_(False), 1), else_=0)).label("error_count"),
         )
         .join(ReviewLog, ReviewLog.quiz_id == QuizItem.id)
         .where(

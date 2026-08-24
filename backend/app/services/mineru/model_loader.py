@@ -124,13 +124,13 @@ def verify_modelscope_models(config: Dict[str, Any]) -> Dict[str, str]:
     vlm_path = _find_model_dir(modelscope_path, MODELSCOPE_VLM_MODEL)
 
     if not pipeline_path:
-        result["status"] = f"Pipeline模型缺失"
+        result["status"] = "Pipeline模型缺失"
         available = [str(p.name) for p in modelscope_path.iterdir() if p.is_dir()]
         result["status"] += f"，可用的: {available}"
         return result
 
     if not vlm_path:
-        result["status"] = f"VLM模型缺失"
+        result["status"] = "VLM模型缺失"
         available = [str(p.name) for p in modelscope_path.iterdir() if p.is_dir()]
         result["status"] += f"，可用的: {available}"
         return result

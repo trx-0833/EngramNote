@@ -130,7 +130,7 @@ class AssessmentService:
                     AssessmentResult.user_id == user_id,
                     AssessmentResult.mode == AssessmentMode.quiz.value,
                     AssessmentResult.link_signature == link_signature,
-                    AssessmentResult.is_stale == False,
+                    AssessmentResult.is_stale.is_(False),
                 ).order_by(AssessmentResult.created_at.desc())
             )
             cached_quizzes = cached.scalars().all()
@@ -214,7 +214,7 @@ class AssessmentService:
                 select(AssessmentResult).where(
                     AssessmentResult.user_id == user_id,
                     AssessmentResult.mode == AssessmentMode.quiz.value,
-                    AssessmentResult.is_stale == False,
+                    AssessmentResult.is_stale.is_(False),
                 )
             )
             for old_quiz in old_quizzes.scalars().all():

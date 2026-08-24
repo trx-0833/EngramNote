@@ -24,7 +24,6 @@ from .models import (
     AsrSourceType,
     ConversionResult,
     SUPPORTED_LANGUAGES,
-    VADSegment,
 )
 
 logger = logging.getLogger(__name__)

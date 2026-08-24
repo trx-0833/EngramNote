@@ -21,9 +21,10 @@ Celery 应用配置模块
 """
 
 import logging
+from pathlib import Path
 
 from celery import Celery
-from pathlib import Path
+from celery.schedules import crontab
 
 from ..config import get_settings
 from ..core import context
@@ -93,8 +94,6 @@ celery_app.conf.update(
 
 # Celery Beat 定时任务调度配置
 # 时区已在上方设置为 Asia/Shanghai，crontab 将使用上海时间
-from celery.schedules import crontab
-
 celery_app.conf.update(
     beat_schedule={
         # 每日 00:30 刷新学习目标进度（活跃目标的 progress_cache、状态流转）

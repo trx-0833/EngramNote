@@ -21,8 +21,7 @@ import logging
 import math
 import os
 import threading
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from ..config import get_settings, DATA_DIR
 
@@ -317,7 +316,7 @@ class EmbeddingService:
         Returns:
             float: 余弦相似度，范围 [-1, 1]
         """
-        dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
+        dot_product = sum(a * b for a, b in zip(vec_a, vec_b, strict=True))
         norm_a = math.sqrt(sum(a * a for a in vec_a))
         norm_b = math.sqrt(sum(b * b for b in vec_b))
 

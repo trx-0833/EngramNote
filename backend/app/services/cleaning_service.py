@@ -18,7 +18,7 @@
 
 import difflib
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from ..config import get_settings
 

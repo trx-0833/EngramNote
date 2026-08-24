@@ -133,10 +133,10 @@ def _validate_pdf(file_path: Path) -> None:
     except pdfium.PdfiumError as e:
         error_msg = str(e)
         if "password" in error_msg.lower() or "encrypt" in error_msg.lower():
-            raise ValueError(f"PDF文件已加密，请解密后再处理: {file_path}")
-        raise ValueError(f"PDF文件无效或损坏: {file_path} - {e}")
+            raise ValueError(f"PDF文件已加密，请解密后再处理: {file_path}") from e
+        raise ValueError(f"PDF文件无效或损坏: {file_path} - {e}") from e
     except Exception as e:
-        raise ValueError(f"PDF文件无效或损坏: {file_path} - {e}")
+        raise ValueError(f"PDF文件无效或损坏: {file_path} - {e}") from e
 
 
 def _validate_image(file_path: Path) -> None:
@@ -145,7 +145,7 @@ def _validate_image(file_path: Path) -> None:
     try:
         Image.open(file_path).verify()
     except Exception as e:
-        raise ValueError(f"图片文件无效或损坏: {file_path} - {e}")
+        raise ValueError(f"图片文件无效或损坏: {file_path} - {e}") from e
 
 
 def _validate_docx(file_path: Path) -> None:
@@ -155,12 +155,12 @@ def _validate_docx(file_path: Path) -> None:
         with zipfile.ZipFile(file_path, "r") as zf:
             if "word/document.xml" not in zf.namelist():
                 raise ValueError("无效的DOCX文件")
-    except zipfile.BadZipFile:
-        raise ValueError(f"DOCX文件无效或损坏: {file_path}")
+    except zipfile.BadZipFile as e:
+        raise ValueError(f"DOCX文件无效或损坏: {file_path}") from e
     except ValueError:
         raise
     except Exception as e:
-        raise ValueError(f"DOCX文件校验失败: {file_path} - {e}")
+        raise ValueError(f"DOCX文件校验失败: {file_path} - {e}") from e
 
 
 def _validate_pptx(file_path: Path) -> None:
@@ -170,12 +170,12 @@ def _validate_pptx(file_path: Path) -> None:
         with zipfile.ZipFile(file_path, "r") as zf:
             if "ppt/presentation.xml" not in zf.namelist():
                 raise ValueError("无效的PPTX文件")
-    except zipfile.BadZipFile:
-        raise ValueError(f"PPTX文件无效或损坏: {file_path}")
+    except zipfile.BadZipFile as e:
+        raise ValueError(f"PPTX文件无效或损坏: {file_path}") from e
     except ValueError:
         raise
     except Exception as e:
-        raise ValueError(f"PPTX文件校验失败: {file_path} - {e}")
+        raise ValueError(f"PPTX文件校验失败: {file_path} - {e}") from e
 
 
 def _validate_xlsx(file_path: Path) -> None:
@@ -185,12 +185,12 @@ def _validate_xlsx(file_path: Path) -> None:
         with zipfile.ZipFile(file_path, "r") as zf:
             if "xl/workbook.xml" not in zf.namelist():
                 raise ValueError("无效的XLSX文件")
-    except zipfile.BadZipFile:
-        raise ValueError(f"XLSX文件无效或损坏: {file_path}")
+    except zipfile.BadZipFile as e:
+        raise ValueError(f"XLSX文件无效或损坏: {file_path}") from e
     except ValueError:
         raise
     except Exception as e:
-        raise ValueError(f"XLSX文件校验失败: {file_path} - {e}")
+        raise ValueError(f"XLSX文件校验失败: {file_path} - {e}") from e
 
 
 def _split_pdf(
@@ -218,7 +218,7 @@ def _split_pdf(
 def _can_use_fitz() -> bool:
     """检查 PyMuPDF 是否可用"""
     try:
-        import fitz
+        import fitz  # noqa: F401 - 依赖可用性探测
         return True
     except ImportError:
         return False

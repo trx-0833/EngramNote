@@ -122,7 +122,7 @@ def load_config(config_path: Optional[str | Path] = None) -> Dict[str, Any]:
         env_val = os.environ.get(env_var)
         if env_val is not None:
             try:
-                if cast_type == int:
+                if cast_type is int:
                     config[config_key] = int(env_val)
                 else:
                     config[config_key] = env_val

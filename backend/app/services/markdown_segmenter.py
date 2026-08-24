@@ -155,8 +155,8 @@ def split_markdown_blocks(text: str) -> List[str]:
 
 
 def _is_table_block(block: str) -> bool:
-    lines = [l for l in block.splitlines() if l.strip()]
-    return bool(lines) and all(TABLE_ROW_RE.match(l.strip()) for l in lines)
+    lines = [line for line in block.splitlines() if line.strip()]
+    return bool(lines) and all(TABLE_ROW_RE.match(line.strip()) for line in lines)
 
 
 def _split_table_block(block: str, limit: int) -> List[str]:
@@ -184,7 +184,7 @@ def _split_table_block(block: str, limit: int) -> List[str]:
 def _split_list_block(block: str, limit: int) -> List[str]:
     """列表超限：按列表项切分（保持每项的原子性）"""
     lines = block.splitlines()
-    item_starts = [idx for idx, l in enumerate(lines) if _LIST_ITEM_RE.match(l)]
+    item_starts = [idx for idx, line in enumerate(lines) if _LIST_ITEM_RE.match(line)]
     if len(item_starts) <= 1:
         return [block]
     chunks: List[str] = []

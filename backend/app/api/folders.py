@@ -75,8 +75,8 @@ async def create_folder(
                 hour=0, minute=0, second=0, microsecond=0,
                 tzinfo=timezone.utc,
             )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="无效的日期格式，请使用 ISO 格式如 2024-01-15")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="无效的日期格式，请使用 ISO 格式如 2024-01-15") from e
 
     folder = await svc_create_folder(
         user_id=current_user.id,
@@ -196,7 +196,7 @@ async def update_folder(
             db=db,
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     return FolderResponse(**updated)
 
@@ -233,5 +233,5 @@ async def delete_folder(
         return result
     except ValueError as e:
         if "不存在" in str(e):
-            raise HTTPException(status_code=404, detail=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        raise HTTPException(status_code=400, detail=str(e)) from e

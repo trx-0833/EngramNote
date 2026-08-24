@@ -18,7 +18,6 @@
 - 清洗统计信息存储在笔记的 metadata_ 字段中
 """
 
-from typing import Optional
 
 import os
 import time
@@ -27,23 +26,19 @@ import logging
 from celery.exceptions import Retry
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .celery_app import celery_app
-from ..config import get_settings
-from ..models.note import Note, NoteStatus
-from ..services import vault_path
-from ..services.vault_meta import write_note_meta
-
-settings = get_settings()
-logger = logging.getLogger(__name__)
-
-# F-27：会话工厂/状态更新/状态查询收敛到 tasks/common.py
 from .common import (
     get_sync_session as _get_clean_session,
     update_note_status as _update_note_status,
     get_note_status as _get_note_status,
 )
+from ..config import get_settings
+from ..models.note import Note, NoteStatus
+from ..services import vault_path
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 async def _is_cleaning_stopped(note_id: str) -> bool:

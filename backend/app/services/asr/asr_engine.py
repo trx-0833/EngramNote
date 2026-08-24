@@ -12,7 +12,7 @@ import torch
 from openai import OpenAI
 from qwen_asr import Qwen3ASRModel
 
-from .models import SAMPLE_RATE, SUPPORTED_LANGUAGES
+from .models import SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ class ASREngine:
         all_texts: List[str] = []
         detected_lang = ""
 
-        for i, (chunk_audio, start_s, end_s) in enumerate(chunks):
+        for chunk_audio, _, _ in chunks:
             if chunk_audio is None or len(chunk_audio) == 0:
                 continue  # 跳过空片段
             text, lang = self.transcribe_array(chunk_audio, language=language)

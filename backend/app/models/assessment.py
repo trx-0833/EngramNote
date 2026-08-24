@@ -1,7 +1,7 @@
 import enum
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, JSON, String, Text, func
+from sqlalchemy import Boolean, Float, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel

@@ -37,7 +37,7 @@ async def compare_assessment(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/generate-quiz", response_model=AssessmentResponse)
@@ -55,7 +55,7 @@ async def generate_quiz(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/submit-answer", response_model=AssessmentResponse)
@@ -73,9 +73,9 @@ async def submit_answer(
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/history/{note_id}", response_model=list[AssessmentHistoryItem])

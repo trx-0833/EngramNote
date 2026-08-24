@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -188,11 +187,11 @@ def _load_onnx_vad_model(onnx_path: Path):
     """使用 ONNX Runtime 加载 VAD 模型"""
     try:
         import onnxruntime as ort
-    except ImportError:
+    except ImportError as e:
         raise FileNotFoundError(
             "onnxruntime 未安装，无法加载 ONNX 格式的 VAD 模型。"
             "请安装: pip install onnxruntime，或手动下载 silero_vad.jit 到 data/models/silero-vad/"
-        )
+        ) from e
 
     class OnnxVadWrapper(torch.nn.Module):
         """包装 ONNX 模型使其兼容 Silero VAD 的 JIT 接口"""
@@ -251,8 +250,8 @@ def _get_speech_timestamps(
     if not torch.is_tensor(audio):
         try:
             audio = torch.Tensor(audio)
-        except Exception:
-            raise TypeError("Audio cannot be casted to tensor")
+        except Exception as e:
+            raise TypeError("Audio cannot be casted to tensor") from e
     if len(audio.shape) > 1:
         for _ in range(len(audio.shape)):
             audio = audio.squeeze(0)

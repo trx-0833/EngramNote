@@ -317,8 +317,8 @@ async def _do_upload(
     # 校验 note_role 值是否合法
     try:
         note_role_enum = NoteRole(note_role)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"无效的 note_role 值: {note_role}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"无效的 note_role 值: {note_role}") from e
 
     note = Note(
         id=note_id,
@@ -399,7 +399,7 @@ async def _do_upload(
         await db.refresh(note)
         write_note_meta(note)
         logger.error("文件上传失败: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试")
+        raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试") from e
 
     # 5. 更新状态为 converting 并触发 Celery 异步任务
     note.status = NoteStatus.converting
@@ -564,7 +564,7 @@ async def prepare_upload(
             page_count = pdf_crop.get_pdf_page_count(str(dest))
         except ValueError as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=f"PDF 解析失败: {e}")
+            raise HTTPException(status_code=400, detail=f"PDF 解析失败: {e}") from e
 
     logger.info(
         "上传暂存成功: user_id=%s, filename=%s, size=%d, source_type=%s, page_count=%s",
@@ -678,7 +678,7 @@ async def commit_upload(
                     current_user.id, display_name, len(pages), page_count,
                 )
             except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"裁剪失败: {e}")
+                raise HTTPException(status_code=400, detail=f"裁剪失败: {e}") from e
 
         # 计算待存储文件的 SHA-256（裁剪版或原文件）
         sha256 = hashlib.sha256()
