@@ -154,6 +154,9 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
   const markerRef = useRef<HTMLDivElement | null>(null)
   const lastLineTextRef = useRef('')
 
+  // latest-ref 模式:事件处理器/effect 需在渲染期同步最新值,
+  // 推迟到 effect 会让首次交互读到旧闭包,故豁免 react-hooks/refs
+  // eslint-disable-next-line react-hooks/refs
   enabledRef.current = enabled
 
   const ensureMarker = useCallback((root: HTMLElement): HTMLDivElement => {
@@ -173,7 +176,7 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
     const blocks = Array.from(root.children).filter(isBlockElement)
     if (blocks.length === 0) return
 
-    let target: HTMLElement | null = null
+    let target: HTMLElement
     if (point) {
       const articleRect = root.getBoundingClientRect()
       const hMargin = Math.max(120, articleRect.width * 0.12)
@@ -248,6 +251,9 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
   }, [containerRef, ensureMarker])
 
   const applyFocusRef = useRef(applyFocus)
+  // latest-ref 模式:事件处理器/effect 需拿到最新函数,推迟到 effect 会读到旧闭包,
+  // 故豁免 react-hooks/refs(官方规则的 StrictMode 例外场景)
+  // eslint-disable-next-line react-hooks/refs
   applyFocusRef.current = applyFocus
 
   // 给所有 Markdown 顶层块打上类名；内容变化时通过 MutationObserver 自动同步

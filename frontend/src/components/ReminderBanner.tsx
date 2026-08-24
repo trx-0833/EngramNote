@@ -79,9 +79,10 @@ export default function ReminderBanner() {
     setPolling(false)
   }
 
-  // 组件挂载时根据权限状态决定是否启动轮询
+  // 组件挂载时根据权限状态决定是否启动轮询（订阅类 effect，同步 setState 豁免）
   useEffect(() => {
     if (permission === 'granted') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       startPolling()
     }
     return () => stopPolling()

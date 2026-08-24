@@ -146,15 +146,18 @@ export default function NoteDetail() {
     }
   }, [noteId])
 
-  // 组件挂载或 noteId 变化时获取笔记详情
+  // 组件挂载或 noteId 变化时获取笔记详情（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     fetchNote()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchNote 依赖仅 noteId,effect 由 noteId 驱动
   }, [noteId])
 
-  // 切换到 diff 模式时加载 diff 数据
+  // 切换到 diff 模式时加载 diff 数据（条件加载型 effect，同步 setState 豁免）
   useEffect(() => {
     if (viewMode === 'diff' && noteId && (note?.status === 'cleaned' || note?.status === 'archived' || note?.status === 'learning_failed') && !diffData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDiffLoading(true)
       getCleaningDiff(noteId)
         .then(setDiffData)
@@ -208,6 +211,8 @@ export default function NoteDetail() {
   // 视频类型笔记：通过 blob URL 加载视频（需携带 JWT 认证头）
   useEffect(() => {
     if (note?.source_type === 'video' && note?.video_url) {
+      // 局部持有 blob URL，cleanup 中释放（避免闭包捕获旧 state 导致泄漏）
+      let localUrl: string | null = null
       const fetchVideo = async () => {
         try {
           const token = getToken()
@@ -218,6 +223,7 @@ export default function NoteDetail() {
           if (!response.ok) throw new Error('Failed to load video')
           const blob = await response.blob()
           const url = URL.createObjectURL(blob)
+          localUrl = url
           setVideoUrl(url)
         } catch (err) {
           console.error('Failed to load video:', err)
@@ -225,7 +231,7 @@ export default function NoteDetail() {
       }
       fetchVideo()
       return () => {
-        if (videoUrl) URL.revokeObjectURL(videoUrl)
+        if (localUrl) URL.revokeObjectURL(localUrl)
       }
     }
   }, [note?.source_type, note?.video_url])
@@ -245,6 +251,8 @@ export default function NoteDetail() {
   }, [note?.id, viewMode])
 
   // 加载链接关系：当 note 加载完成后获取其关联的资料/被引用笔记
+  // note.note_role 决定查询方向,但 role 变化依赖 note 变化,effect 已由 note?.id 驱动,
+  // 补 role 依赖会与业务语义重复触发,故豁免 exhaustive-deps
   useEffect(() => {
     if (!note?.id) return
     const loadLinks = async () => {
@@ -259,9 +267,12 @@ export default function NoteDetail() {
       }
     }
     loadLinks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- role 随 note 变化,effect 由 note?.id 驱动
   }, [note?.id])
 
   // 批注恢复：DOM 渲染后应用批注到对应文本节点
+  // handleDeleteAnnotation 每次渲染重建,加入依赖会让 effect 频繁重跑,
+  // 事件监听器捕获的是 effect 创建时的闭包,删除操作仍可用,故豁免 exhaustive-deps
   useEffect(() => {
     if (editMode !== 'view') return
     if (!markdownRef.current || annotations.length === 0) return
@@ -308,7 +319,7 @@ export default function NoteDetail() {
 
             try {
               range.surroundContents(wrapper)
-            } catch (err) {
+            } catch {
               // surroundContents 可能跨节点失败，跳过
             }
             break  // 每个批注只应用一次
@@ -319,6 +330,7 @@ export default function NoteDetail() {
 
     // 延迟执行，确保 DOM 已渲染
     setTimeout(applyAnnotations, 100)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方注释,handleDeleteAnnotation 不入门
   }, [note?.id, note?.original_md_content, note?.clean_md_content, viewMode, annotations, editMode])
 
   /** 触发理解管道（开始学习） */
@@ -466,7 +478,7 @@ export default function NoteDetail() {
       } catch (err) {
         console.warn('应用批注失败:', err)
       }
-    } catch (err) {
+    } catch {
       alert('保存批注失败')
     }
 
@@ -493,7 +505,7 @@ export default function NoteDetail() {
         parent?.removeChild(elem)
         parent?.normalize()  // 合并相邻文本节点
       }
-    } catch (err) {
+    } catch {
       alert('删除批注失败')
     }
   }
@@ -505,7 +517,7 @@ export default function NoteDetail() {
       const data = await getNotes(1, 100, undefined, 'material')
       setAvailableMaterials(data.items || [])
       setShowLinkManager(true)
-    } catch (err) {
+    } catch {
       alert('加载资料列表失败')
     }
   }
@@ -524,7 +536,7 @@ export default function NoteDetail() {
         alert('关联资料未变化')
       }
       setShowLinkManager(false)
-    } catch (err) {
+    } catch {
       alert('保存关联失败')
     }
   }

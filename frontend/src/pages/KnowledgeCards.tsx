@@ -36,6 +36,27 @@ function getMasteryColor(level: number): string {
   return '#2d8a56'
 }
 
+/** 将卡片按所属笔记分组（纯函数，模块级便于复用与测试） */
+function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
+  const map = new Map<string, KnowledgeCard[]>()
+  for (const card of cards) {
+    const list = map.get(card.note_id) || []
+    list.push(card)
+    map.set(card.note_id, list)
+  }
+  return Array.from(map.entries())
+    .map(([noteId, cards]) => ({
+      note_id: noteId,
+      note_title: cards[0].note_title || '未命名笔记',
+      cards,
+    }))
+    .sort((a, b) => {
+      const aTime = a.cards[0]?.created_at ?? ''
+      const bTime = b.cards[0]?.created_at ?? ''
+      return bTime.localeCompare(aTime)
+    })
+}
+
 export default function KnowledgeCards() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -66,7 +87,9 @@ export default function KnowledgeCards() {
     }
   }, [noteId])
 
+  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCards(searchKeyword || undefined)
   }, [noteId, fetchCards, searchKeyword])
 
@@ -85,26 +108,6 @@ export default function KnowledgeCards() {
     searchTimerRef.current = setTimeout(() => {
       setSearchKeyword(value)
     }, 300)
-  }
-
-  function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
-    const map = new Map<string, KnowledgeCard[]>()
-    for (const card of cards) {
-      const list = map.get(card.note_id) || []
-      list.push(card)
-      map.set(card.note_id, list)
-    }
-    return Array.from(map.entries())
-      .map(([noteId, cards]) => ({
-        note_id: noteId,
-        note_title: cards[0].note_title || '未命名笔记',
-        cards,
-      }))
-      .sort((a, b) => {
-        const aTime = a.cards[0]?.created_at ?? ''
-        const bTime = b.cards[0]?.created_at ?? ''
-        return bTime.localeCompare(aTime)
-      })
   }
 
   function toggleGroup(noteId: string) {

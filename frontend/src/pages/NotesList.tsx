@@ -6,7 +6,7 @@
  * 3. 删除笔记（带确认提示）
  * 4. 点击笔记卡片跳转到详情页
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client'
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
@@ -58,11 +58,11 @@ export default function NotesList() {
   const pageSize = 20
 
   // 当页码或关键词或筛选条件变化时重新获取笔记列表
-  async function fetchNotes() {
+  const showArchived = archivedByRole[noteRole]
+  const fetchNotes = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const showArchived = archivedByRole[noteRole]
       const res = showArchived
         ? await getArchivedNotes(page, pageSize, noteRole)
         : await getNotes(page, pageSize, keyword || undefined, noteRole)
@@ -73,11 +73,13 @@ export default function NotesList() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, keyword, noteRole, showArchived])
 
+  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNotes()
-  }, [page, keyword, noteRole, archivedByRole[noteRole]])
+  }, [page, keyword, noteRole, showArchived, fetchNotes])
 
   /**
    * 处理删除笔记（移入回收站）

@@ -4,7 +4,7 @@
  * 1. 笔记比对：比较学习资料与个人笔记的内容覆盖度、深度和清晰度
  * 2. 开放性问题：基于学习资料生成问题，用户作答后由 AI 评判
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   getNotes,
@@ -13,6 +13,7 @@ import {
   submitQuizAnswers,
   getNoteLinks,
   type AssessmentResult,
+  type QuizAnswerItem,
   type Note,
   type NoteLinksResponse,
 } from '../api/client'
@@ -52,12 +53,32 @@ export default function LearningAssessment() {
   const [compareLinkedPersonalNotes, setCompareLinkedPersonalNotes] = useState<Note[]>([])
   const [compareLinksLoading, setCompareLinksLoading] = useState(false)
 
-  useEffect(() => {
-    loadNotes()
+  const loadNotes = useCallback(async () => {
+    try {
+      // Load all notes across pages
+      const data = await getNotes(1, 100)
+      // Only show notes that have content available for assessment
+      const assessableStatuses = ['converted', 'cleaned', 'archived', 'learning', 'learning_failed']
+      setNotes(data.items.filter(n => assessableStatuses.includes(n.status)))
+      setNotesError('')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '加载笔记失败'
+      console.error('加载笔记失败:', e)
+      setNotesError(msg)
+    } finally {
+      setNotesLoading(false)
+    }
   }, [])
+
+  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadNotes()
+  }, [loadNotes])
 
   useEffect(() => {
     if (preselectedNoteId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedMaterials([preselectedNoteId])
     }
   }, [preselectedNoteId])
@@ -107,30 +128,13 @@ export default function LearningAssessment() {
     loadCompareLinkedNotes()
   }, [mode, compareMode])
 
-  const loadNotes = async () => {
-    try {
-      // Load all notes across pages
-      const data = await getNotes(1, 100)
-      // Only show notes that have content available for assessment
-      const assessableStatuses = ['converted', 'cleaned', 'archived', 'learning', 'learning_failed']
-      setNotes(data.items.filter(n => assessableStatuses.includes(n.status)))
-      setNotesError('')
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载笔记失败'
-      console.error('加载笔记失败:', e)
-      setNotesError(msg)
-    } finally {
-      setNotesLoading(false)
-    }
-  }
-
   const materialNotes = notes.filter(n => n.note_role === 'material' || !n.note_role)
   const personalNotes = notes.filter(n => n.note_role === 'personal_note')
 
   // Compare mode handlers
   const handleCompare = async () => {
     // 已链接对比模式：使用选中的 personal_note 及其关联资料
-    let materialIds = selectedMaterials
+    const materialIds = selectedMaterials
     let personalIds = selectedPersonalNotes
     if (compareMode === 'linked') {
       if (!selectedPersonalNoteId) {
@@ -408,27 +412,27 @@ export default function LearningAssessment() {
               {renderScoreBar('结构清晰度', result.scores?.clarity_score || 0)}
               {renderScoreBar('综合评分', result.overall_score)}
 
-              {(result.scores?.covered_points?.length > 0 || result.scores?.uncovered_points?.length > 0) && (
+              {((result.scores?.covered_points?.length ?? 0) > 0 || (result.scores?.uncovered_points?.length ?? 0) > 0) && (
                 <div className="knowledge-points-grid">
-                  {result.scores?.covered_points?.length > 0 && (
+                  {(result.scores?.covered_points?.length ?? 0) > 0 && (
                     <div className="knowledge-points-section">
                       <h4 style={{ color: 'var(--color-success)' }}>
                         <span>✓</span> 已覆盖知识点
                       </h4>
                       <ul>
-                        {result.scores.covered_points.map((p: string, i: number) => (
+                        {result.scores?.covered_points?.map((p: string, i: number) => (
                           <li key={i}><div dangerouslySetInnerHTML={{ __html: renderMarkdown(p) }} /></li>
                         ))}
                       </ul>
                     </div>
                   )}
-                  {result.scores?.uncovered_points?.length > 0 && (
+                  {(result.scores?.uncovered_points?.length ?? 0) > 0 && (
                     <div className="knowledge-points-section">
                       <h4 style={{ color: 'var(--color-error)' }}>
                         <span>✗</span> 未覆盖知识点
                       </h4>
                       <ul>
-                        {result.scores.uncovered_points.map((p: string, i: number) => (
+                        {result.scores?.uncovered_points?.map((p: string, i: number) => (
                           <li key={i}><div dangerouslySetInnerHTML={{ __html: renderMarkdown(p) }} /></li>
                         ))}
                       </ul>
@@ -538,7 +542,7 @@ export default function LearningAssessment() {
               ) : (
                 <>
                   {/* Quiz judgment results */}
-                  {(quizResult.quiz_answers || []).map((qa: any, idx: number) => (
+                  {(quizResult.quiz_answers || []).map((qa: QuizAnswerItem, idx: number) => (
                     <div key={idx} className="quiz-question-card">
                       {/* 题目 */}
                       <div className="quiz-question-text">

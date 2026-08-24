@@ -4,7 +4,7 @@
  * 可立即复习该笔记关联的所有题目。支持选择题、填空题和简答题，
  * 逐题展示，提交后显示判分结果和解析，最终汇总统计。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   getQuickReview, submitQuickReviewAnswer,
@@ -40,11 +40,7 @@ export default function QuickReview() {
   /** F-23：提交 in-flight 锁（防双击重复提交） */
   const submittingRef = useRef(false)
 
-  useEffect(() => {
-    loadQuizzes()
-  }, [noteId])
-
-  async function loadQuizzes() {
+  const loadQuizzes = useCallback(async () => {
     if (!noteId) return
     setLoading(true)
     setError('')
@@ -62,7 +58,12 @@ export default function QuickReview() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [noteId])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadQuizzes()
+  }, [noteId, loadQuizzes])
 
   async function handleSubmit() {
     // F-23：in-flight 锁，防止双击/连按回车重复提交
@@ -80,8 +81,8 @@ export default function QuickReview() {
       setQuizzes(newQuizzes)
       if (result.is_correct) setSessionCorrect(prev => prev + 1)
       setSessionTotal(prev => prev + 1)
-    } catch (e: any) {
-      setError(e.message || '提交失败')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '提交失败')
     } finally {
       submittingRef.current = false
     }
@@ -203,6 +204,8 @@ export default function QuickReview() {
         userAnswer={current.userAnswer}
         submitted={current.submitted}
         result={current.result}
+        // 渲染期读取 ref 作为按钮禁用锁(提交中标记不触发重渲染,由 submit 的 setState 兜底)
+        // eslint-disable-next-line react-hooks/refs
         submitting={submittingRef.current}
         showSm2Info={false}
         fillAutoFocus

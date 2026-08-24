@@ -146,7 +146,9 @@ export default function DailyMaterials() {
     }
   }
 
+  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchFolders()
   }, [])
 

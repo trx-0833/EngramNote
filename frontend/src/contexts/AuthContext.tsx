@@ -20,10 +20,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken())
 
   useEffect(() => {
-    setIsAuthenticated(!!getToken())
-  }, [])
-
-  useEffect(() => {
     const handleTokenExpired = () => setIsAuthenticated(false)
     window.addEventListener(TOKEN_EXPIRED_EVENT, handleTokenExpired)
     return () => window.removeEventListener(TOKEN_EXPIRED_EVENT, handleTokenExpired)

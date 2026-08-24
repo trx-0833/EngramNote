@@ -8,6 +8,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getQuestions, type QuizItem } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
+import ErrorDisplay from '../components/ErrorDisplay'
+import { questionTypeLabels, questionTypeColors, difficultyLabels, difficultyColors } from '../utils/labels'
 
 function parseOptions(optionsStr: string | null): string[] {
   if (!optionsStr) return []
@@ -18,13 +20,32 @@ function parseOptions(optionsStr: string | null): string[] {
     return []
   }
 }
-import ErrorDisplay from '../components/ErrorDisplay'
-import { questionTypeLabels, questionTypeColors, difficultyLabels, difficultyColors } from '../utils/labels'
 
 interface NoteGroup {
   note_id: string
   note_title: string
   questions: QuizItem[]
+}
+
+/** 将题目按所属笔记分组（纯函数，模块级便于复用与测试） */
+function groupByNote(questions: QuizItem[]): NoteGroup[] {
+  const map = new Map<string, QuizItem[]>()
+  for (const q of questions) {
+    const list = map.get(q.note_id) || []
+    list.push(q)
+    map.set(q.note_id, list)
+  }
+  return Array.from(map.entries())
+    .map(([noteId, questions]) => ({
+      note_id: noteId,
+      note_title: questions[0].note_title || '未命名笔记',
+      questions,
+    }))
+    .sort((a, b) => {
+      const aTime = a.questions[0]?.created_at ?? ''
+      const bTime = b.questions[0]?.created_at ?? ''
+      return bTime.localeCompare(aTime)
+    })
 }
 
 export default function QuestionSets() {
@@ -66,7 +87,9 @@ export default function QuestionSets() {
     }
   }, [noteId])
 
+  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchQuestions(searchKeyword || undefined)
   }, [noteId, fetchQuestions, searchKeyword])
 
@@ -75,26 +98,6 @@ export default function QuestionSets() {
     searchTimerRef.current = setTimeout(() => {
       setSearchKeyword(value)
     }, 300)
-  }
-
-  function groupByNote(questions: QuizItem[]): NoteGroup[] {
-    const map = new Map<string, QuizItem[]>()
-    for (const q of questions) {
-      const list = map.get(q.note_id) || []
-      list.push(q)
-      map.set(q.note_id, list)
-    }
-    return Array.from(map.entries())
-      .map(([nid, qs]) => ({
-        note_id: nid,
-        note_title: qs[0].note_title || '未命名笔记',
-        questions: qs,
-      }))
-      .sort((a, b) => {
-        const aTime = a.questions[0]?.created_at ?? ''
-        const bTime = b.questions[0]?.created_at ?? ''
-        return bTime.localeCompare(aTime)
-      })
   }
 
   function toggleGroup(noteId: string) {

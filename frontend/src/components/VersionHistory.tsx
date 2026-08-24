@@ -83,8 +83,9 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
     }
   }, [noteId])
 
-  // 组件挂载时加载版本列表
+  // 组件挂载时加载版本列表（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadVersions()
   }, [loadVersions])
 
@@ -105,10 +106,11 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
     setDiffResult(null)
   }
 
-  // 两个版本都选中时自动加载 diff
+  // 两个版本都选中时自动加载 diff（条件重置派生状态，同步 setState 豁免）
   useEffect(() => {
     const [v1, v2] = selectedVersions
     if (v1 === null || v2 === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDiffResult(null)
       return
     }

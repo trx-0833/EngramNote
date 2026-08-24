@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ForceGraph2D from 'react-force-graph-2d'
+import ForceGraph2D, { type ForceGraphMethods, type NodeObject, type LinkObject } from 'react-force-graph-2d'
 import {
   getGraphData,
   getSuggestions,
@@ -144,7 +144,7 @@ function drawNodeShapePath(ctx: CanvasRenderingContext2D, shape: NodeShape, x: n
 
 export default function KnowledgeGraph() {
   const navigate = useNavigate()
-  const graphRef = useRef<any>(null)
+  const graphRef = useRef<ForceGraphMethods<NodeObject<ForceGraphNode>, LinkObject<ForceGraphNode, ForceGraphLink>> | undefined>(undefined)
   const graphCanvasRef = useRef<HTMLDivElement>(null)
 
   const [graphData, setGraphData] = useState<GraphData | null>(null)
@@ -211,20 +211,23 @@ export default function KnowledgeGraph() {
     fetchData()
   }, [])
 
-  /** graphData 变化时重绘 minimap */
+  /** graphData 变化时重绘 minimap（drawMinimap 每次渲染重建,加入依赖会频繁重跑,
+   * 其闭包读取的是 effect 调度时刻的最新 graphData,故豁免 exhaustive-deps） */
   useEffect(() => {
     if (graphData && graphData.nodes.length > 0) {
       const timer = setTimeout(() => drawMinimap(), 100)
       return () => clearTimeout(timer)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphData])
 
-  // 搜索防抖
+  // 搜索防抖（关键词清空时同步清空结果列表，派生状态重置豁免）
   useEffect(() => {
     if (searchTimerRef.current) {
       clearTimeout(searchTimerRef.current)
     }
     if (!searchKeyword.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchResults([])
       return
     }
@@ -351,7 +354,7 @@ export default function KnowledgeGraph() {
 
   /** 计算边宽度 */
   function getLinkWidth(link: ForceGraphLink): number {
-    const score = (link as any).similarity_score
+    const score = link.similarity_score
     if (score == null) return 1.5
     return Math.min(3, Math.max(1, score * 3))
   }
@@ -1051,18 +1054,18 @@ export default function KnowledgeGraph() {
             linkDirectionalArrowLength={3}
             linkDirectionalArrowRelPos={1}
             linkColor={(link: ForceGraphLink) => {
-              const color = RELATION_TYPE_COLORS[(link as any).relation_type] || '#9a9ab0'
-              return (link as any).status === 'suggested' ? `${color}88` : color
+              const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0'
+              return link.status === 'suggested' ? `${color}88` : color
             }}
             // 连线流光粒子：能量沿墨线缓慢流动（水墨丹青动效）
             linkDirectionalParticles={(link: ForceGraphLink) =>
-              (link as any).similarity_score != null && (link as any).similarity_score > 0.6 ? 2 : 1
+              link.similarity_score != null && link.similarity_score > 0.6 ? 2 : 1
             }
             linkDirectionalParticleWidth={2.2}
             linkDirectionalParticleSpeed={0.004}
             linkDirectionalParticleColor={(link: ForceGraphLink) => {
-              const color = RELATION_TYPE_COLORS[(link as any).relation_type] || '#9a9ab0'
-              return (link as any).status === 'suggested' ? '#c9a959' : color
+              const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0'
+              return link.status === 'suggested' ? '#c9a959' : color
             }}
             cooldownTicks={100}
             enableNodeDrag={true}
@@ -1275,7 +1278,7 @@ export default function KnowledgeGraph() {
                 <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
                   <div>
                     <span style={{ color: 'var(--color-text-secondary)' }}>类型：</span>
-                    {RELATION_TYPE_LABELS[(selectedLink as any).relation_type] || (selectedLink as any).relation_type}
+                    {RELATION_TYPE_LABELS[selectedLink.relation_type] || selectedLink.relation_type}
                   </div>
                   <div>
                     <span style={{ color: 'var(--color-text-secondary)' }}>状态：</span>
@@ -1283,26 +1286,26 @@ export default function KnowledgeGraph() {
                       fontSize: '0.75rem',
                       padding: '2px 8px',
                       borderRadius: '9999px',
-                      background: (selectedLink as any).status === 'suggested' ? 'var(--color-warning-light)' : 'var(--color-success-light)',
-                      color: (selectedLink as any).status === 'suggested' ? 'var(--color-warning)' : 'var(--color-success)',
+                      background: selectedLink.status === 'suggested' ? 'var(--color-warning-light)' : 'var(--color-success-light)',
+                      color: selectedLink.status === 'suggested' ? 'var(--color-warning)' : 'var(--color-success)',
                     }}>
-                      {(selectedLink as any).status === 'suggested' ? '建议' : '已确认'}
+                      {selectedLink.status === 'suggested' ? '建议' : '已确认'}
                     </span>
                   </div>
-                  {(selectedLink as any).similarity_score != null && (
+                  {selectedLink.similarity_score != null && (
                     <div>
                       <span style={{ color: 'var(--color-text-secondary)' }}>相似度：</span>
-                      <span style={{ fontWeight: 600 }}>{(selectedLink as any).similarity_score.toFixed(2)}</span>
+                      <span style={{ fontWeight: 600 }}>{selectedLink.similarity_score.toFixed(2)}</span>
                     </div>
                   )}
                 </div>
-                {(selectedLink as any).status === 'suggested' && (
+                {selectedLink.status === 'suggested' && (
                   <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
                     <button
                       className="btn btn-primary"
                       style={{ fontSize: '0.8rem', padding: '4px 8px', flex: 1 }}
-                      onClick={() => handleConfirm((selectedLink as any).id)}
-                      disabled={actionLoading === (selectedLink as any).id}
+                      onClick={() => handleConfirm(selectedLink.id)}
+                      disabled={actionLoading === selectedLink.id}
                     >
                       确认
                     </button>
@@ -1315,14 +1318,14 @@ export default function KnowledgeGraph() {
                         color: 'var(--color-error)',
                         borderColor: 'var(--color-error)',
                       }}
-                      onClick={() => handleReject((selectedLink as any).id)}
-                      disabled={actionLoading === (selectedLink as any).id}
+                      onClick={() => handleReject(selectedLink.id)}
+                      disabled={actionLoading === selectedLink.id}
                     >
                       拒绝
                     </button>
                   </div>
                 )}
-                {(selectedLink as any).status === 'confirmed' && (
+                {selectedLink.status === 'confirmed' && (
                   <button
                     className="btn"
                     style={{
@@ -1331,8 +1334,8 @@ export default function KnowledgeGraph() {
                       color: 'var(--color-error)',
                       borderColor: 'var(--color-error)',
                     }}
-                    onClick={() => handleDeleteRelation((selectedLink as any).id)}
-                    disabled={actionLoading === (selectedLink as any).id}
+                    onClick={() => handleDeleteRelation(selectedLink.id)}
+                    disabled={actionLoading === selectedLink.id}
                   >
                     删除关系
                   </button>

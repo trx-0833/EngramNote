@@ -73,7 +73,6 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     getNoteTrashInfo(note.id)
       .then((res) => {
         if (!cancelled) setInfo(res)

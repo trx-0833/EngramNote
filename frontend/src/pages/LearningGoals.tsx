@@ -6,7 +6,7 @@
  * 3. 新建目标（弹窗式表单：名称、类型、目标掌握度、截止日期）
  * 4. 目标归档与删除（带二次确认）
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   getGoals, createGoal, archiveGoal, deleteGoal,
   type LearningGoal,
@@ -72,7 +72,9 @@ export default function LearningGoals() {
     }
   }
 
+  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchGoals()
   }, [])
 
@@ -363,11 +365,13 @@ interface GoalCardProps {
 function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
   // 进度百分比，后端可能不返回，默认为 0
   const progress = goal.progress_percentage ?? 0
-  // 剩余天数
-  const daysRemaining = ((): number | null => {
+  // 剩余天数（依赖 deadline 变化才重算；useMemo 内读时钟属"剩余天数"展示的合理非纯场景，
+  // 每次 deadline 变化时重算即可，不追求渲染纯函数）
+  const daysRemaining = useMemo(() => {
     if (!goal.deadline) return null
+    // eslint-disable-next-line react-hooks/purity -- 剩余天数必须读取当前时钟
     return Math.ceil((new Date(goal.deadline).getTime() - Date.now()) / 86400000)
-  })()
+  }, [goal.deadline])
   // 关联笔记数（scope_notes 可能为 null）
   const noteCount = goal.scope_notes?.length ?? 0
 

@@ -103,13 +103,14 @@ export default function TodayLearn() {
       setSessionTotal(prev => prev + 1)
       const newStats = await getReviewStats()
       setStats(newStats)
-    } catch (e: any) {
-      if (e.message?.includes('每日上限')) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : ''
+      if (message.includes('每日上限')) {
         setCompleted(true)
         const newStats = await getReviewStats()
         setStats(newStats)
       } else {
-        setError(e.message || '提交失败')
+        setError(message || '提交失败')
       }
     } finally {
       submittingRef.current = false

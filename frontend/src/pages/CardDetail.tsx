@@ -2,7 +2,7 @@
  * @file 知识卡片详情页面
  * @description 展示单张知识卡片的完整内容、原始出处和关联题目，支持编辑和删除
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getKnowledgeCard, updateKnowledgeCard, deleteKnowledgeCard, getQuestions, type KnowledgeCard, type QuizItem } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -22,12 +22,7 @@ export default function CardDetail() {
   const [editTitle, setEditTitle] = useState('')
   const [editContent, setEditContent] = useState('')
 
-  useEffect(() => {
-    if (!cardId) return
-    fetchCard()
-  }, [cardId])
-
-  async function fetchCard() {
+  const fetchCard = useCallback(async () => {
     setLoading(true)
     try {
       const data = await getKnowledgeCard(cardId!)
@@ -42,7 +37,13 @@ export default function CardDetail() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [cardId])
+
+  useEffect(() => {
+    if (!cardId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchCard()
+  }, [cardId, fetchCard])
 
   async function handleSave() {
     if (!card) return

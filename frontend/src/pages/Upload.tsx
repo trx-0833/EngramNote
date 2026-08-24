@@ -109,7 +109,7 @@ export default function Upload() {
     loadProjects()
   }, [])
 
-  // 当选择"我的笔记"角色时加载可关联的学习资料
+  // 当选择"我的笔记"角色时加载可关联的学习资料（派生状态重置豁免）
   useEffect(() => {
     if (noteRole === 'personal_note') {
       const loadMaterials = async () => {
@@ -122,6 +122,7 @@ export default function Upload() {
       }
       loadMaterials()
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedMaterialIds([])
     }
   }, [noteRole])

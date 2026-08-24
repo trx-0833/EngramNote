@@ -4,7 +4,7 @@
  * 包含 KaTeX 数学公式扩展（blockMath/inlineMath）和 highlight.js 代码高亮。
  * 渲染失败时通过 try/catch 兜底，返回带 katex-error 样式的 <span>，不抛异常。
  */
-import { marked } from 'marked'
+import { marked, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
 import katex from 'katex'
@@ -47,6 +47,8 @@ export const renderKatex = (tex: string, displayMode: boolean): string => {
 }
 
 // 块级公式 $$...$$ 与行内公式 $...$
+// marked 自定义扩展的 renderer 接收 Token 类型，text 字段为公式内容
+
 marked.use({
   extensions: [
     {
@@ -60,7 +62,7 @@ marked.use({
         }
         return undefined
       },
-      renderer(token: any) {
+      renderer(token: Tokens.Generic) {
         return `<p class="katex-block">${renderKatex(token.text, true)}</p>`
       },
     },
@@ -69,13 +71,13 @@ marked.use({
       level: 'inline',
       start(src: string) { return src.indexOf('$') },
       tokenizer(src: string) {
-        const match = /^\$([^\$\n]+?)\$/.exec(src)
+        const match = /^\$([^$\n]+?)\$/.exec(src)
         if (match) {
           return { type: 'inlineMath', raw: match[0], text: match[1].trim() }
         }
         return undefined
       },
-      renderer(token: any) {
+      renderer(token: Tokens.Generic) {
         return renderKatex(token.text, false)
       },
     },
@@ -128,7 +130,7 @@ export function renderMathInHtml(html: string): string {
     node = walker.nextNode()
   }
 
-  const mathPattern = /\$\$([\s\S]+?)\$\$|\$([^\$\n]+?)\$/g
+  const mathPattern = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g
 
   for (const textNode of textNodes) {
     if (!textNode.data.includes('$')) continue

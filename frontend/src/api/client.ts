@@ -264,7 +264,10 @@ export async function request<T>(
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('请求超时，请检查网络后重试');
+      // ES2020 lib 下 Error 无 cause 属性，用自定义扩展类型附加
+      const timeoutError = new Error('请求超时，请检查网络后重试');
+      (timeoutError as Error & { cause?: unknown }).cause = err;
+      throw timeoutError;
     }
     throw err;
   } finally {
@@ -330,7 +333,9 @@ async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('上传超时，请检查网络后重试');
+      const timeoutError = new Error('上传超时，请检查网络后重试');
+      (timeoutError as Error & { cause?: unknown }).cause = err;
+      throw timeoutError;
     }
     throw err;
   } finally {
@@ -1393,8 +1398,8 @@ export interface AssessmentResult {
   id: string;
   /** 评估模式：compare（笔记比对）或 quiz（开放性问题） */
   mode: 'compare' | 'quiz';
-  /** 评分详情 */
-  scores: Record<string, any>;
+  /** 评分详情（compare: covered_points/uncovered_points；quiz: 各维度分数） */
+  scores: AssessmentScores;
   /** 综合评分 */
   overall_score: number;
   /** 改进建议 */
@@ -1402,9 +1407,30 @@ export interface AssessmentResult {
   /** 问题列表（quiz 模式） */
   quiz_questions?: Array<{ index: number; question: string; key_points: string[] }>;
   /** 答题结果列表（quiz 模式） */
-  quiz_answers?: Array<Record<string, any>>;
+  quiz_answers?: QuizAnswerItem[];
   /** 创建时间（ISO 8601 格式） */
   created_at: string;
+}
+
+/** 评估评分明细（与后端 assessment_service 产出结构一致） */
+export interface AssessmentScores {
+  covered_points?: string[];
+  uncovered_points?: string[];
+  coverage_score?: number;
+  completeness_score?: number;
+  depth_score?: number;
+  clarity_score?: number;
+}
+
+/** 开放性问题作答与评判结果 */
+export interface QuizAnswerItem {
+  answer?: string;
+  judgment?: {
+    accuracy_score?: number;
+    completeness_score?: number;
+    depth_score?: number;
+    feedback?: string;
+  };
 }
 
 /** 评估历史条目 */
@@ -1447,7 +1473,7 @@ export async function compareAssessment(materialNoteIds: string[], personalNoteI
  * @returns 评估结果（含问题列表）
  */
 export async function generateQuiz(materialNoteIds: string[], personalNoteId?: string): Promise<AssessmentResult> {
-  const body: Record<string, any> = { material_note_ids: materialNoteIds };
+  const body: { material_note_ids: string[]; personal_note_id?: string } = { material_note_ids: materialNoteIds };
   if (personalNoteId) body.personal_note_id = personalNoteId;
   return request<AssessmentResult>('/assessment/generate-quiz', {
     method: 'POST',
@@ -1573,14 +1599,22 @@ export async function suggestRelations(): Promise<{ success: boolean; new_count:
   });
 }
 
+/** 图谱操作统一返回结构（success + 可选附加字段） */
+export interface GraphOperationResult {
+  success: boolean;
+  error?: string;
+  new_count?: number;
+  message?: string;
+}
+
 /**
  * 确认建议关系
  * 将 suggested 状态的边转为 confirmed。
  *
  * @param relationId - 建议关系 ID
  */
-export async function confirmRelation(relationId: string): Promise<any> {
-  return request('/graph/confirm', {
+export async function confirmRelation(relationId: string): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>('/graph/confirm', {
     method: 'POST',
     body: JSON.stringify({ relation_id: relationId }),
   });
@@ -1592,8 +1626,8 @@ export async function confirmRelation(relationId: string): Promise<any> {
  *
  * @param relationId - 建议关系 ID
  */
-export async function rejectRelation(relationId: string): Promise<any> {
-  return request('/graph/reject', {
+export async function rejectRelation(relationId: string): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>('/graph/reject', {
     method: 'POST',
     body: JSON.stringify({ relation_id: relationId }),
   });
@@ -1607,8 +1641,8 @@ export async function rejectRelation(relationId: string): Promise<any> {
  * @param cardId2 - 卡片 2 ID
  * @param relationType - 关系类型
  */
-export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<any> {
-  return request('/graph/relation', {
+export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>('/graph/relation', {
     method: 'POST',
     body: JSON.stringify({ card_id_1: cardId1, card_id_2: cardId2, relation_type: relationType }),
   });
@@ -1620,8 +1654,8 @@ export async function createRelation(cardId1: string, cardId2: string, relationT
  *
  * @param relationId - 关系 ID
  */
-export async function deleteRelation(relationId: string): Promise<any> {
-  return request(`/graph/relation/${relationId}`, {
+export async function deleteRelation(relationId: string): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>(`/graph/relation/${relationId}`, {
     method: 'DELETE',
   });
 }
@@ -1690,8 +1724,8 @@ export async function getNodeSubgraph(nodeId: string): Promise<NodeSubgraph> {
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchConfirmRelations(relationIds: string[]): Promise<any> {
-  return request('/graph/batch-confirm', {
+export async function batchConfirmRelations(relationIds: string[]): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>('/graph/batch-confirm', {
     method: 'POST',
     body: JSON.stringify({ relation_ids: relationIds }),
   });
@@ -1702,8 +1736,8 @@ export async function batchConfirmRelations(relationIds: string[]): Promise<any>
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchRejectRelations(relationIds: string[]): Promise<any> {
-  return request('/graph/batch-reject', {
+export async function batchRejectRelations(relationIds: string[]): Promise<GraphOperationResult> {
+  return request<GraphOperationResult>('/graph/batch-reject', {
     method: 'POST',
     body: JSON.stringify({ relation_ids: relationIds }),
   });
