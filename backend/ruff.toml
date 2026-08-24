@@ -1,0 +1,23 @@
+# ruff 配置(最小规则集,遵循项目最小依赖原则)
+# 用法(在 backend/ 目录):
+#   python -m ruff check .        # 检查问题
+#   python -m ruff check . --fix  # 自动修复(仅安全项)
+#   python -m ruff format .       # 统一格式
+line-length = 120
+target-version = "py310"
+
+[lint]
+# E4/E7/E9 + F = ruff 默认核心规则(语法/未使用导入/未定义名等)
+# B = flake8-bugbear 增强(真实 bug 模式,如裸 except、可变默认参数)
+select = ["E4", "E7", "E9", "F", "B"]
+
+# 全项目已知无法避免的例外在此声明(与报告一并评审后再收敛)
+ignore = [
+    # FastAPI 标准惯用法:Depends()/Query() 写在参数默认值中,并非 bug
+    "B008",
+]
+
+[lint.per-file-ignores]
+# 迁移脚本/一次性脚本放行未使用导入等噪音
+"alembic/versions/*.py" = ["E501"]
+"scripts/*.py" = ["E501"]

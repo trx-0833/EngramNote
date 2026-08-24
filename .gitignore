@@ -122,3 +122,11 @@ desktop.ini
 *.pt
 *.pth
 *.onnx
+
+# ---- 前端构建缓存 ----
+frontend/node_modules/
+frontend/.npm-cache/
+
+
+# ---- 工具链检查报告(可再生产物,不提交) ----
+docs/*.txt
