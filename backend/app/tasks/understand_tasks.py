@@ -238,8 +238,8 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
             for card in cards
         ]
 
-    # 2. F-29 修复：清理该笔记旧题目（含复习记录），恢复"重新生成"语义，
-    #    防止重复触发 generate-questions 累积重复题目
+    # 2. 清理该笔记旧题目（含复习记录），恢复"重新生成"语义，
+    #    防止重复触发 generate-questions 累积重复题目，见 docs/decisions.md#F-29
     async with session_factory() as session:
         old_quiz_ids = (
             await session.execute(
@@ -369,8 +369,8 @@ def _parse_questions_response(response: str) -> list:
     """
     from ..services.llm_service import parse_json_tolerant
 
-    # F-33:健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救）——
-    # 出题批量输出被 max_tokens 截断时，抢救出已生成完整的题目而非整批丢弃。
+    # 健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救）——
+    # 出题批量输出被 max_tokens 截断时，抢救出已生成完整的题目而非整批丢弃，见 docs/decisions.md#F-33。
     result, info = parse_json_tolerant(response)
     if info.get("status") == "partial":
         logger.warning(
@@ -423,9 +423,9 @@ def understand_document_task(self, note_id: str):
             # 正常重试调度：交给 Celery 框架，不标记失败
             raise
         except Exception:
-            # F-30 修复：Celery retry() 重试耗尽时重新抛出原始异常而非
+            # Celery retry() 重试耗尽时重新抛出原始异常而非
             # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
-            # learning 状态。进入此分支即表示重试次数用尽，标记失败状态。
+            # learning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
             try:
                 asyncio.run(_update_note_status(
                     note_id, NoteStatus.learning_failed,
@@ -458,5 +458,5 @@ def generate_questions_task(self, note_id: str, target_categories: Optional[list
             # 正常重试调度：交给 Celery 框架
             raise
         except Exception:
-            # F-30 修复：retry() 重试耗尽时重新抛出原始异常
+            # retry() 重试耗尽时重新抛出原始异常（见 docs/decisions.md#F-30）
             logger.error(f"题目生成任务重试失败 (note_id={note_id}): {exc}")

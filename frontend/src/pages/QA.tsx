@@ -3,7 +3,7 @@
  * @description 基于 RAG 的智能问答，支持跨笔记检索和引用来源展示
  * 使用 SSE 流式响应实现实时答案展示，首字到达前显示"AI 正在思考..."
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { askQuestionStream, type AnswerSource } from '../api/client'
 import EmptyState from '../components/EmptyState'
@@ -13,18 +13,58 @@ interface QARecord {
   answer: string;
   sources: AnswerSource[];
   provider: string;
+  retrievalStatus?: string;
 }
 
 export default function QA() {
   const navigate = useNavigate()
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState('')
   const [history, setHistory] = useState<QARecord[]>([])
 
+  // 持有当前流式请求的 AbortController 与 reader，用于新问题中止旧流、停止生成与卸载清理
+  const abortRef = useRef<AbortController | null>(null)
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+
+  // 组件卸载时中止进行中的流式请求并取消读取
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+      const reader = readerRef.current
+      readerRef.current = null
+      abortRef.current = null
+      if (reader) {
+        void reader.cancel().catch(() => {})
+      }
+    }
+  }, [])
+
+  /** 中止当前流式请求（新问题发起前 / 点击停止生成时调用） */
+  function stopActiveStream() {
+    abortRef.current?.abort()
+    const reader = readerRef.current
+    readerRef.current = null
+    abortRef.current = null
+    if (reader) {
+      void reader.cancel().catch(() => {})
+    }
+  }
+
+  function handleStop() {
+    stopActiveStream()
+  }
+
   async function handleAsk() {
     if (!question.trim()) return
+    // 新问题发起前中止上一个未完成的流，避免旧 token 污染新答案
+    stopActiveStream()
+
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
+    setStreaming(true)
     setError('')
     const currentQuestion = question.trim()
 
@@ -35,21 +75,24 @@ export default function QA() {
 
     // 标记是否已收到首个 token，用于切换"思考中"与"流式渲染"状态
     let firstTokenReceived = false
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
 
     try {
-      const stream = await askQuestionStream(currentQuestion)
+      const stream = await askQuestionStream(currentQuestion, controller.signal)
       // askQuestionStream 返回 ReadableStream，直接获取读取器
-      const reader = stream.getReader()
-      if (!reader) {
+      const r = stream.getReader()
+      if (!r) {
         throw new Error('无法读取流式响应')
       }
+      reader = r
+      readerRef.current = reader
 
       const decoder = new TextDecoder()
       // 缓冲区，用于处理跨 chunk 的不完整行
       let buffer = ''
 
       while (true) {
-        const { done, value } = await reader.read()
+        const { done, value } = await r.read()
         if (done) break
         // stream: true 表示可能还有后续 chunk，避免多字节字符被截断
         buffer += decoder.decode(value, { stream: true })
@@ -70,7 +113,15 @@ export default function QA() {
           if (!eventType || !dataStr) continue
           const data = JSON.parse(dataStr)
 
-          if (eventType === 'token') {
+          if (eventType === 'meta') {
+            // 首事件：记录检索降级状态，供渲染降级提示
+            setHistory(prev => {
+              if (prev.length === 0) return prev
+              const updated = [...prev]
+              updated[0] = { ...updated[0], retrievalStatus: data.retrieval_status || '' }
+              return updated
+            })
+          } else if (eventType === 'token') {
             // 首个 token 到达时，切换出"思考中"状态
             if (!firstTokenReceived) {
               firstTokenReceived = true
@@ -100,13 +151,24 @@ export default function QA() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '问答失败')
-      // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
-      if (!firstTokenReceived) {
-        setHistory(prev => (prev.length > 0 ? prev.slice(1) : prev))
+      if (controller.signal.aborted) {
+        // 用户主动停止：保留已生成文本；若尚无任何文本则移除空气泡
+        if (!firstTokenReceived) {
+          setHistory(prev => (prev.length > 0 ? prev.slice(1) : prev))
+        }
+      } else {
+        setError(err instanceof Error ? err.message : '问答失败')
+        // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
+        if (!firstTokenReceived) {
+          setHistory(prev => (prev.length > 0 ? prev.slice(1) : prev))
+        }
       }
     } finally {
+      // 仅当 ref 仍指向当前请求时才清理，避免误清新流
+      if (abortRef.current === controller) abortRef.current = null
+      if (readerRef.current === reader) readerRef.current = null
       setLoading(false)
+      setStreaming(false)
     }
   }
 
@@ -131,12 +193,14 @@ export default function QA() {
             value={question}
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={loading}
+            disabled={streaming}
             style={{ flex: 1 }}
           />
-          <button className="btn btn-primary" onClick={handleAsk} disabled={loading || !question.trim()}>
-            {loading ? '思考中...' : '提问'}
-          </button>
+          {streaming ? (
+            <button className="btn btn-danger" onClick={handleStop}>停止生成</button>
+          ) : (
+            <button className="btn btn-primary" onClick={handleAsk} disabled={!question.trim()}>提问</button>
+          )}
         </div>
         {error && <p style={{ color: 'var(--color-error)', marginTop: 'var(--space-sm)', fontSize: '0.875rem' }}>{error}</p>}
       </div>
@@ -170,6 +234,12 @@ export default function QA() {
                   <div style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic', lineHeight: 1.8 }}>
                     AI 正在思考...
                   </div>
+                )}
+                {/* 检索降级提示：向量服务不可用时走关键词检索 */}
+                {record.retrievalStatus === 'bm25_only' && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-warning)', marginTop: 'var(--space-sm)' }}>
+                    已降级为关键词检索（向量服务不可用）
+                  </p>
                 )}
                 {/* 引用来源 */}
                 {record.sources.length > 0 && (

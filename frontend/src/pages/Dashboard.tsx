@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   getNotes, getReviewStats, getDailyReport, getWeeklyTrend, getWeakPoints,
   getGoals, getDailyPlan,
+  getUserReminderSettings, updateUserReminderSettings,
   type Note, type ReviewStats, type DailyReport, type WeeklyTrendItem, type WeakPoint,
   type LearningGoal, type DailyPlanResponse, type RecommendedTask,
 } from '../api/client'
@@ -42,9 +43,9 @@ export default function Dashboard() {
   async function fetchRecent() {
     setLoading(true)
     setError('')
-    // F-24：统计类接口失败不再静默吞掉——记录失败集合，非关键失败轻提示，
-    // 关键失败（notes）仍走整页错误
-    // 修复：getDailyPlan 在"无活跃目标"时返回 400（正常业务状态，不是加载失败），
+    // 统计类接口失败不再静默吞掉——记录失败集合，非关键失败轻提示，
+    // 关键失败（notes）仍走整页错误，见 docs/decisions.md#F-24。
+    // getDailyPlan 在"无活跃目标"时返回 400（正常业务状态，不是加载失败），
     // 不计数到 failedCount，避免新用户每次打开都误报"部分数据加载失败"
     let failedCount = 0
     try {
@@ -102,6 +103,9 @@ export default function Dashboard() {
     <div className="page-enter">
       {/* 复习提醒横幅（自包含组件，根据权限与待复习数自动展示） */}
       <ReminderBanner />
+
+      {/* 邮件复习提醒开关（用户级设置，独立于浏览器通知权限） */}
+      <EmailReminderToggle />
 
       {/* 欢迎区域 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
@@ -437,6 +441,77 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+/**
+ * 邮件复习提醒开关
+ * 读写当前用户的 email_reminder_enabled 设置；独立于浏览器通知权限，
+ * 初始加载与更新均容错（失败静默，保持原值，不打断页面）。
+ */
+function EmailReminderToggle() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // 挂载时读取当前设置（数据获取型 effect，异步 setState）
+  useEffect(() => {
+    let cancelled = false
+    getUserReminderSettings()
+      .then(res => { if (!cancelled) setEnabled(res.email_reminder_enabled) })
+      .catch(() => { /* 容错：读取失败保持未加载状态，不打断页面 */ })
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleToggle(checked: boolean) {
+    setBusy(true)
+    try {
+      const res = await updateUserReminderSettings(checked)
+      setEnabled(res.email_reminder_enabled)
+    } catch {
+      // 容错：更新失败保持原值（请求层已抛出可读错误，此处静默）
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="card"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 'var(--space-md)',
+        marginBottom: 'var(--space-lg)',
+        padding: 'var(--space-md) var(--space-lg)',
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>邮件复习提醒</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+          每日通过邮件发送到期复习提醒
+        </p>
+      </div>
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          cursor: enabled === null || busy ? 'default' : 'pointer',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={enabled ?? false}
+          onChange={(e) => handleToggle(e.target.checked)}
+          disabled={enabled === null || busy}
+          style={{ accentColor: 'var(--color-primary)' }}
+        />
+        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+          {enabled === null ? '加载中…' : (enabled ? '已开启' : '已关闭')}
+        </span>
+      </label>
     </div>
   )
 }

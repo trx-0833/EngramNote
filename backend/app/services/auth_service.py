@@ -130,7 +130,7 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
     Raises:
         ValueError: 邮箱或用户名已被占用
     """
-    # F-21b 修复：邮箱归一化（小写 + 去空白），避免大小写撞库
+    # 邮箱归一化（小写 + 去空白），避免大小写撞库，见 docs/decisions.md#F-21b
     email = (req.email or "").strip().lower()
 
     # 检查邮箱是否已存在
@@ -172,7 +172,7 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
     Returns:
         Optional[User]: 认证成功返回用户对象，失败返回 None
     """
-    # F-21b 修复：登录邮箱同样归一化，与注册一致
+    # 登录邮箱同样归一化，与注册一致，见 docs/decisions.md#F-21b
     email = (email or "").strip().lower()
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()

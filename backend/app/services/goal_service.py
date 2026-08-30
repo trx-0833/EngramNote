@@ -36,7 +36,7 @@ from ..models.review_log import ReviewLog
 
 logger = logging.getLogger(__name__)
 
-# 每日计划任务总数上限（F-12：改名为 DAILY_PLAN_LIMIT 与复习答题限额 DAILY_REVIEW_LIMIT=10 区分语义）
+# 每日计划任务总数上限（与复习答题限额分开命名以区分语义，见 docs/decisions.md#F-12）
 DAILY_PLAN_LIMIT = 50
 
 # 薄弱点掌握度阈值（低于此值视为薄弱点）
@@ -50,11 +50,20 @@ NEW_MATERIAL_TASK_LIMIT = 5
 # 每用户活跃目标上限
 MAX_ACTIVE_GOALS = 5
 
+# 活跃目标进度缓存过期阈值（秒）：last_progress_refresh 距今超过该值视为过期
+PROGRESS_STALE_SECONDS = 2 * 60 * 60
+
+# 同一用户两次同步刷新进度的最小间隔（秒）：list_goals 按需刷新的模块级防抖
+USER_REFRESH_DEBOUNCE_SECONDS = 10 * 60
+
+# 模块级每用户按需刷新防抖字典：user_id -> 上次同步刷新时间（UTC）
+_user_refresh_debounce: Dict[str, datetime] = {}
+
 
 async def _validate_goal_scopes(
     db: AsyncSession, user_id: str, scope_notes: List[str], scope_folders: List[str]
 ) -> None:
-    """校验目标范围内的笔记/文件夹均属于当前用户（F-09 修复：防止 IDOR）"""
+    """校验目标范围内的笔记/文件夹均属于当前用户（防止 IDOR，见 docs/decisions.md#F-09）"""
     note_ids = list(dict.fromkeys(scope_notes or []))
     folder_ids = list(dict.fromkeys(scope_folders or []))
 
@@ -135,7 +144,7 @@ class GoalService:
         if goal_type_value is None:
             goal_type_value = GoalType.WEEKLY.value
 
-        # F-09 修复：校验 scope_notes / scope_folders 归属，防止引用他人笔记/文件夹（IDOR）
+        # 校验 scope_notes / scope_folders 归属，防止引用他人笔记/文件夹（IDOR），见 docs/decisions.md#F-09
         await _validate_goal_scopes(
             db,
             user_id,
@@ -259,14 +268,14 @@ class GoalService:
         goal = await self.get_goal(goal_id, user_id, db)
 
         now = datetime.now(timezone.utc)
-        # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+        # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
         from ..utils.timeutil import today_start_utc
         today_start = today_start_utc(now)
 
         scope_notes = list(goal.scope_notes or [])
 
-        # 范围内卡片平均掌握度（F-09 修复：叠加 user_id 过滤，防止旧数据跨用户渗漏；
-        # 回收站笔记的卡片不计入统计）
+        # 范围内卡片平均掌握度（叠加 user_id 过滤，防止旧数据跨用户渗漏；
+        # 回收站笔记的卡片不计入统计，见 docs/decisions.md#F-09）
         avg_mastery = 0.0
         if scope_notes:
             avg_result = await db.execute(
@@ -288,7 +297,7 @@ class GoalService:
             avg_value = avg_result.scalar()
             avg_mastery = float(avg_value) if avg_value is not None else 0.0
 
-        # 范围内总题目数（F-09 修复：叠加 user_id 过滤；回收站笔记的题目不计入）
+        # 范围内总题目数（叠加 user_id 过滤；回收站笔记的题目不计入，见 docs/decisions.md#F-09）
         total_count = 0
         if scope_notes:
             total_result = await db.execute(
@@ -300,7 +309,7 @@ class GoalService:
             )
             total_count = total_result.scalar() or 0
 
-        # 今日已复习题目数（范围内）（F-09 修复：叠加 user_id 过滤；回收站笔记不计入）
+        # 今日已复习题目数（范围内）（叠加 user_id 过滤；回收站笔记不计入，见 docs/decisions.md#F-09）
         reviewed_count = 0
         if scope_notes:
             reviewed_result = await db.execute(
@@ -370,7 +379,7 @@ class GoalService:
             HTTPException(400): 用户无活跃目标
         """
         now = datetime.now(timezone.utc)
-        # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+        # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
         from ..utils.timeutil import today_start_utc
         today_start = today_start_utc(now)
 
@@ -413,7 +422,7 @@ class GoalService:
 
         if scope_notes:
             # a. 薄弱点：mastery_level < 60 的卡片 → 关联 quiz_items（top 10）
-            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
+            #    （叠加 user_id 过滤；回收站笔记不进计划，见 docs/decisions.md#F-09）
             weak_cards_result = await db.execute(
                 select(KnowledgeCard.id, KnowledgeCard.title).where(
                     KnowledgeCard.note_id.in_(scope_notes),
@@ -445,7 +454,7 @@ class GoalService:
                     })
 
             # b. 到期复习：next_review_at <= now 或为 None（top 20）
-            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
+            #    （叠加 user_id 过滤；回收站笔记不进计划，见 docs/decisions.md#F-09）
             due_quizzes_result = await db.execute(
                 select(QuizItem).where(
                     QuizItem.note_id.in_(scope_notes),
@@ -468,7 +477,7 @@ class GoalService:
                 })
 
             # c. 新资料：status in (converted, cleaned)（top 5）
-            #    （F-09 修复：叠加 user_id 过滤；回收站笔记不进计划）
+            #    （叠加 user_id 过滤；回收站笔记不进计划，见 docs/decisions.md#F-09）
             new_notes_result = await db.execute(
                 select(Note).where(
                     Note.id.in_(scope_notes),
@@ -568,7 +577,7 @@ class GoalService:
                 for goal in active_goals:
                     scope_notes = list(goal.scope_notes or [])
 
-                    # 计算平均掌握度（F-09 修复：叠加 user_id 过滤；回收站笔记不计入）
+                    # 计算平均掌握度（叠加 user_id 过滤；回收站笔记不计入，见 docs/decisions.md#F-09）
                     avg_mastery = 0.0
                     if scope_notes:
                         avg_result = await session.execute(
@@ -613,6 +622,125 @@ class GoalService:
         except Exception as e:
             logger.error(f"刷新目标进度失败: {e}")
             raise
+        finally:
+            await engine.dispose()
+
+    # ------------------------------------------------------------------
+    # 6.1 学习目标进度按需刷新（list_goals 端点调用）
+    # ------------------------------------------------------------------
+    async def refresh_progress_if_stale(self, user_id: str) -> None:
+        """
+        按需刷新指定用户活跃目标的进度缓存
+
+        list_goals 端点在响应前调用：当该用户任一 active 目标的 last_progress_refresh
+        为 NULL 或距今超过 PROGRESS_STALE_SECONDS，且距该用户上次同步刷新超过
+        USER_REFRESH_DEBOUNCE_SECONDS（模块级防抖字典）时，同步刷新该用户 active
+        目标进度。刷新失败仅记录日志并降级返回缓存值，不阻断列表响应；
+        Celery Beat 每日任务（refresh_goal_progress）保持不变。
+        """
+        now = datetime.now(timezone.utc)
+
+        last_refresh = _user_refresh_debounce.get(user_id)
+        if (
+            last_refresh is not None
+            and (now - last_refresh).total_seconds() < USER_REFRESH_DEBOUNCE_SECONDS
+        ):
+            return
+
+        try:
+            refreshed = await self._refresh_active_goals_if_stale(user_id, now)
+            if refreshed:
+                _user_refresh_debounce[user_id] = now
+        except Exception as e:
+            logger.error(
+                "学习目标进度按需刷新失败，降级返回缓存值: user_id=%s, err=%s",
+                user_id, e,
+            )
+
+    async def _refresh_active_goals_if_stale(
+        self, user_id: str, now: datetime
+    ) -> bool:
+        """
+        检查并按需刷新指定用户活跃目标进度
+
+        自建异步会话独立于请求生命周期，与 refresh_goal_progress 保持一致。
+
+        Returns:
+            bool: 本次是否实际执行了刷新
+        """
+        settings = get_settings()
+        engine = create_async_engine(settings.get_database_url(), echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        try:
+            async with session_factory() as session:
+                result = await session.execute(
+                    select(LearningGoal).where(
+                        LearningGoal.user_id == user_id,
+                        LearningGoal.status == GoalStatus.ACTIVE.value,
+                    )
+                )
+                active_goals = list(result.scalars().all())
+
+                # 无活跃目标，无需刷新
+                if not active_goals:
+                    return False
+
+                # 判定是否过期：任一目标 last_progress_refresh 为 NULL 或距今超过阈值
+                stale = False
+                for goal in active_goals:
+                    if goal.last_progress_refresh is None:
+                        stale = True
+                        break
+                    refreshed_at = goal.last_progress_refresh
+                    if refreshed_at.tzinfo is None:
+                        refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
+                    if (now - refreshed_at).total_seconds() > PROGRESS_STALE_SECONDS:
+                        stale = True
+                        break
+
+                if not stale:
+                    return False
+
+                for goal in active_goals:
+                    scope_notes = list(goal.scope_notes or [])
+
+                    avg_mastery = 0.0
+                    if scope_notes:
+                        avg_result = await session.execute(
+                            select(func.avg(KnowledgeCard.mastery_level)).where(
+                                KnowledgeCard.note_id.in_(scope_notes),
+                                KnowledgeCard.user_id == user_id,
+                                Note.not_trashed(KnowledgeCard.note_id),
+                            )
+                        )
+                        avg_value = avg_result.scalar()
+                        avg_mastery = float(avg_value) if avg_value is not None else 0.0
+
+                    target = float(goal.target_mastery) if goal.target_mastery else 80.0
+                    if target > 0:
+                        progress = min(100.0, avg_mastery / target * 100.0)
+                    else:
+                        progress = 0.0
+
+                    goal.progress_cache = round(progress, 2)
+                    goal.last_progress_refresh = now
+
+                    if progress >= target and target > 0:
+                        goal.status = GoalStatus.COMPLETED.value
+                    elif goal.deadline is not None:
+                        deadline = goal.deadline
+                        if deadline.tzinfo is None:
+                            deadline = deadline.replace(tzinfo=timezone.utc)
+                        if deadline < now:
+                            goal.status = GoalStatus.EXPIRED.value
+
+                await session.commit()
+                logger.info(
+                    "学习目标进度按需刷新完成: user_id=%s, goals=%d",
+                    user_id, len(active_goals),
+                )
+                return True
         finally:
             await engine.dispose()
 

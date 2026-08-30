@@ -1,0 +1,76 @@
+/* ── LaTeX 公式样式 ── */
+
+.markdown-body .katex-block {
+  text-align: center;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+}
+
+.markdown-body .katex {
+  font-size: 1.1em;
+}
+
+.markdown-body .katex-display {
+  margin: 0;
+}
+
+.katex-error {
+  display: inline-block;
+  padding: 0.2em 0.4em;
+  border: 1px solid #cc0000;
+  border-radius: 3px;
+  background-color: #fff0f0;
+  color: #cc0000;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* ── 批注样式 ── */
+
+.markdown-body .annotation-mark {
+  background-color: #fff3a0;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.markdown-body .annotation-mark:hover {
+  background-color: #ffe44d;
+}
+
+.markdown-body .annotation-underline {
+  text-decoration: underline;
+  text-decoration-color: #4a90d9;
+  text-decoration-thickness: 2px;
+  cursor: pointer;
+}
+
+.markdown-body .annotation-underline:hover {
+  background-color: #e8f0fe;
+}
+
+.selection-menu {
+  display: flex;
+  gap: 4px;
+  background: white;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
+  padding: 4px;
+}
+
+.selection-menu button {
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--color-text, #333);
+}
+
+.selection-menu button:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+}

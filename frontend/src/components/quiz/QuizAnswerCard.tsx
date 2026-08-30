@@ -1,10 +1,10 @@
 /**
- * @file 共享答题卡片组件（F-33）
+ * @file 共享答题卡片组件
  * @description 抽取 Review / QuickReview / TodayLearn 三页重复的题目卡片：
  * 类型/难度标签、题目内容、选择题/填空题/简答题作答区、提交按钮、
  * 判分反馈、SM-2 信息（可选）、下一题按钮。
  * 行为差异通过 props 参数化；提交/下一题的竞态锁由页面 handleSubmit 内实现
- * （F-23 submittingRef），本组件仅透传 submitting 禁用状态。
+ * （submittingRef），本组件仅透传 submitting 禁用状态，见 docs/decisions.md#F-23。
  */
 import type { ReactNode } from 'react'
 import type { SubmitAnswerResponse } from '../../api/client'
@@ -26,7 +26,7 @@ interface QuizAnswerCardProps {
   userAnswer: string
   submitted: boolean
   result: SubmitAnswerResponse | null
-  /** 是否正在提交（F-23 锁，禁用按钮） */
+  /** 是否正在提交（提交中禁用按钮，见 docs/decisions.md#F-23） */
   submitting?: boolean
   /** 是否展示 SM-2 调度信息（Review 有，快速复习无） */
   showSm2Info?: boolean
@@ -171,7 +171,7 @@ export default function QuizAnswerCard({
             />
           )}
 
-          {/* 提交按钮（F-23：submitting 时禁用） */}
+          {/* 提交按钮（submitting 时禁用，防连点重复提交，见 docs/decisions.md#F-23） */}
           <div style={{ marginTop: 'var(--space-md)', textAlign: 'right' }}>
             <button
               className="btn btn-primary"

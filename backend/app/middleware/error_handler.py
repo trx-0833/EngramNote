@@ -32,6 +32,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.types import ASGIApp
 
 from ..core import context
+from ..core.app_error import AppError
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +49,18 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
 
     @staticmethod
-    def _error_response(status_code: int, detail: str, error_code: str) -> JSONResponse:
-        """构造统一错误响应（自动附带当前 request_id）"""
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "detail": detail,
-                "error_code": error_code,
-                "request_id": context.get_request_id() or None,
-            },
-        )
+    def _error_response(
+        status_code: int, detail: str, error_code: str, data=None
+    ) -> JSONResponse:
+        """构造统一错误响应（自动附带当前 request_id，可选附带 data）"""
+        content = {
+            "detail": detail,
+            "error_code": error_code,
+            "request_id": context.get_request_id() or None,
+        }
+        if data is not None:
+            content["data"] = data
+        return JSONResponse(status_code=status_code, content=content)
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         try:
@@ -86,6 +89,17 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 status_code=422,
                 detail=str(exc),
                 error_code="VALIDATION_ERROR",
+            )
+        except AppError as exc:
+            logger.warning(
+                "业务错误 | code=%s | status=%d | detail=%s",
+                exc.code, exc.http_status, exc.message,
+            )
+            return self._error_response(
+                status_code=exc.http_status,
+                detail=exc.message,
+                error_code=exc.code,
+                data=exc.data,
             )
         except Exception as exc:  # noqa: BLE001 - 未知异常统一兜底
             # 完整堆栈进日志（含 rid/uid 上下文标签，errors.log 独立落盘）

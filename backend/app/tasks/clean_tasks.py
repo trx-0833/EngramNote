@@ -341,7 +341,7 @@ async def _clean_document(note_id: str):
         chunk = chunk_by_index.get(d["block_index"])
         if chunk is not None:
             entry["content"] = chunk["content"]
-            # F-11 修复：记录重复块的精确行区间，供恢复/删除按行定位
+            # 记录重复块的精确行区间，供恢复/删除按行定位（见 docs/decisions.md#F-11）
             entry["start_line"] = chunk.get("start_line")
             entry["end_line"] = chunk.get("end_line")
         original_chunk = chunk_by_index.get(d["duplicate_of"])
@@ -429,9 +429,9 @@ def clean_document_task(self, note_id: str):
             # 正常重试调度：交给 Celery 框架，不标记失败
             raise
         except Exception:
-            # F-30 修复：Celery retry() 重试耗尽时重新抛出原始异常而非
+            # Celery retry() 重试耗尽时重新抛出原始异常而非
             # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
-            # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态。
+            # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
             try:
                 asyncio.run(_update_note_status(
                     note_id, NoteStatus.cleaning_failed,

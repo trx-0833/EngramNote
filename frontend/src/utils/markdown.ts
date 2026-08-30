@@ -8,6 +8,7 @@ import { marked, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
 import katex from 'katex'
+import { sanitizeHtml } from './sanitize'
 
 // 配置 marked 使用 highlight.js 进行代码块语法高亮
 marked.use(markedHighlight({
@@ -178,6 +179,7 @@ export function renderMathInHtml(html: string): string {
 /**
  * 将 Markdown 文本渲染为 HTML 字符串
  * 内部使用已配置 KaTeX 扩展和代码高亮的 marked 实例。
+ * 管道顺序：marked.parse → sanitizeHtml（DOMPurify 白名单消毒）→ renderMathInHtml（KaTeX 二次渲染）。
  * 空字符串或假值返回空字符串。
  *
  * @param text - Markdown 源文本
@@ -185,5 +187,6 @@ export function renderMathInHtml(html: string): string {
  */
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  return renderMathInHtml(marked.parse(text) as string)
+  const parsed = marked.parse(text) as string
+  return renderMathInHtml(sanitizeHtml(parsed))
 }

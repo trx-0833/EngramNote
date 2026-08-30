@@ -85,6 +85,21 @@ _MAGIC_RULES = {
 # 需要读取用于签名校验的头部字节数
 _MAGIC_HEAD_SIZE = 32
 
+# .md 内容轻量嗅探：仅检查头部 64KB，拦截 <script>/<iframe> 及事件属性（onerror= 等）
+_MD_SNIFF_HEAD_SIZE = 64 * 1024
+# 事件处理属性（onload/onerror/onclick 等常见列表）：HTML 属性名不区分大小写
+# 显式列举避免 \bon\w+= 误伤 "online=" 等普通文本
+_EVENT_ATTR_RE = re.compile(
+    r"\bon("
+    r"load|error|click|dblclick|mouse(over|out|down|up|move|enter|leave)|"
+    r"key(down|up|press)|focus|blur|change|input|submit|reset|select|scroll|"
+    r"abort|beforeunload|unload|contextmenu|wheel|drag(start|end|drop|over)?|"
+    r"touch(start|end|move|cancel)?|pointer(down|up|move|cancel)?|"
+    r"animation(start|end|iteration)?|transition(end|start|run|cancel)?"
+    r")\s*=",
+    re.IGNORECASE,
+)
+
 
 def _validate_magic(ext: str, head: bytes) -> bool:
     """
@@ -106,6 +121,34 @@ def _validate_magic(ext: str, head: bytes) -> bool:
     if contains is not None:
         return contains in head[: _MAGIC_HEAD_SIZE]
     return True
+
+
+def _sniff_md_content(ext: str, head: bytes) -> Optional[str]:
+    """
+    对 .md 上传内容做轻量 XSS 嗅探（输出端 DOMPurify 消毒为纵深防御第二层）
+
+    仅对 .md 生效：头部 64KB 内若包含 <script>、<iframe> 或事件属性
+    （onerror=、onload= 等 on*= 属性）即视为危险载荷，返回命中描述；否则返回 None。
+
+    Args:
+        ext: 文件扩展名（小写，含点）
+        head: 文件头部字节（已累积至多 64KB）
+
+    Returns:
+        Optional[str]: 命中时返回具体载荷描述（用于可操作提示），未命中返回 None
+    """
+    if ext != ".md":
+        return None
+    text = head.decode("utf-8", errors="ignore")
+    lowered = text.lower()
+    if "<script" in lowered:
+        return "<script> 标签"
+    if "<iframe" in lowered:
+        return "<iframe> 标签"
+    match = _EVENT_ATTR_RE.search(text)
+    if match:
+        return f"事件属性 {match.group(0).strip()}"
+    return None
 
 
 async def _stream_upload(
@@ -140,8 +183,8 @@ async def _stream_upload(
                         status_code=400,
                         detail=f"文件大小超过限制 ({max_size // (1024 * 1024)}MB)",
                     )
-                if len(head) < _MAGIC_HEAD_SIZE:
-                    head += chunk[:_MAGIC_HEAD_SIZE - len(head)]
+                if len(head) < _MD_SNIFF_HEAD_SIZE:
+                    head += chunk[:_MD_SNIFF_HEAD_SIZE - len(head)]
                 sha256.update(chunk)
                 out.write(chunk)
     except Exception:
@@ -179,7 +222,7 @@ async def _resolve_unique_base(
         safe_stem = os.urandom(4).hex()
 
     async def _exists(candidate: str) -> bool:
-        # F-16 修复：按 base（主干）检测冲突，而非仅同扩展名。
+        # 按 base（主干）检测冲突，而非仅同扩展名，见 docs/decisions.md#F-16。
         # 旧实现按 `source_object(prefix, candidate, ext)`（含扩展名）查重，
         # 导致 a.pdf 与 a.md 判定互不冲突，但两者转换输出均为
         # output/markdown/a.md，后上传者覆盖先上传者的转换结果。
@@ -285,8 +328,8 @@ async def _do_upload(
         )
         projects = list(proj_result.scalars().all())
 
-    # 2.5 校验文件夹归属（F-08 修复）：folder_id 必须存在且属于当前用户，
-    # 防止跨用户把笔记挂入他人文件夹（IDOR）
+    # 2.5 校验文件夹归属：folder_id 必须存在且属于当前用户，
+    # 防止跨用户把笔记挂入他人文件夹（IDOR），见 docs/decisions.md#F-08
     if folder_id:
         folder_result = await db.execute(
             select(Folder).where(
@@ -488,6 +531,14 @@ async def upload_document(
                 detail=f"文件内容与格式不匹配，不是有效的 {ext} 文件",
             )
 
+        # 2.6 .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
+        violation = _sniff_md_content(ext, head)
+        if violation:
+            raise HTTPException(
+                status_code=400,
+                detail=f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
+            )
+
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
         return await _do_upload(
             db, current_user, tmp_path, file.filename, source_type,
@@ -552,6 +603,13 @@ async def prepare_upload(
             raise HTTPException(
                 status_code=400,
                 detail=f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+            )
+        # .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
+        violation = _sniff_md_content(ext, head)
+        if violation:
+            raise HTTPException(
+                status_code=400,
+                detail=f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
             )
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)

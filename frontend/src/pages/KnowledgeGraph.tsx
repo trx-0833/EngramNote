@@ -5,7 +5,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import ForceGraph2D, { type ForceGraphMethods, type NodeObject, type LinkObject } from 'react-force-graph-2d'
 import {
   getGraphData,
   getSuggestions,
@@ -19,7 +18,6 @@ import {
   getNodeSubgraph,
   batchConfirmRelations,
   batchRejectRelations,
-  type GraphNode,
   type GraphData,
   type SuggestedRelation,
   type GraphStats,
@@ -29,122 +27,27 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-// F-28：卡片类型颜色/标签统一从 utils/labels.ts 读取（单一数据源）
+import GraphCanvas from '../components/graph/GraphCanvas'
+import GraphSidebar from '../components/graph/GraphSidebar'
+// 卡片类型颜色/标签统一从 utils/labels.ts 读取（单一数据源），见 docs/decisions.md#F-28
 import { cardTypeColors as CARD_TYPE_COLORS, cardTypeLabels as CARD_TYPE_LABELS } from '../utils/labels'
-
-/** 关系类型 → 中文标签 */
-const RELATION_TYPE_LABELS: Record<string, string> = {
-  related: '相关',
-  prerequisite: '前置',
-  subsequent: '后续',
-  contrast: '对比',
-}
-
-/** 关系类型 → 边颜色（学术主题色板） */
-const RELATION_TYPE_COLORS: Record<string, string> = {
-  related: '#9a9ab0',       // 暖灰
-  prerequisite: '#0f3460',  // 深海蓝
-  subsequent: '#2d8a56',    // 墨绿
-  contrast: '#c0392b',      // 朱红
-}
-
-/** 节点形状类型 */
-type NodeShape = 'circle' | 'diamond' | 'rounded' | 'hexagon'
-
-/** 卡片类型 → 节点形状 */
-const CARD_TYPE_SHAPES: Record<string, NodeShape> = {
-  concept: 'circle',
-  formula: 'diamond',
-  qa: 'rounded',
-  definition: 'hexagon',
-}
-
-/** 卡片类型 → 节点内显示的首字 */
-const CARD_TYPE_INITIALS: Record<string, string> = {
-  concept: '概',
-  formula: '式',
-  qa: '问',
-  definition: '定',
-}
-
-/** 关系类型选项，用于创建关系表单 */
-const RELATION_TYPE_OPTIONS = [
-  { value: 'related', label: '相关' },
-  { value: 'prerequisite', label: '前置' },
-  { value: 'subsequent', label: '后续' },
-  { value: 'contrast', label: '对比' },
-]
-
-/** 力导向图内部节点类型 */
-interface ForceGraphNode extends GraphNode {
-  x?: number
-  y?: number
-  __bckgDimensions?: [number, number]
-}
-
-/** 力导向图内部边类型 */
-interface ForceGraphLink {
-  id: string
-  source: string | ForceGraphNode
-  target: string | ForceGraphNode
-  relation_type: string
-  status: string
-  similarity_score: number | null
-}
-
-/** 侧边栏面板类型 */
-type SidebarPanel = 'suggestions' | 'nodeDetail' | 'createRelation' | 'viewSubgraph' | null
-
-/**
- * 绘制不同形状的节点路径
- */
-function drawNodeShapePath(ctx: CanvasRenderingContext2D, shape: NodeShape, x: number, y: number, size: number) {
-  ctx.beginPath()
-  switch (shape) {
-    case 'circle':
-      ctx.arc(x, y, size, 0, 2 * Math.PI)
-      break
-    case 'diamond': {
-      const d = size * 1.15
-      ctx.moveTo(x, y - d)
-      ctx.lineTo(x + d, y)
-      ctx.lineTo(x, y + d)
-      ctx.lineTo(x - d, y)
-      ctx.closePath()
-      break
-    }
-    case 'rounded': {
-      const s = size * 0.95
-      const r = size * 0.25
-      ctx.moveTo(x - s + r, y - s)
-      ctx.lineTo(x + s - r, y - s)
-      ctx.quadraticCurveTo(x + s, y - s, x + s, y - s + r)
-      ctx.lineTo(x + s, y + s - r)
-      ctx.quadraticCurveTo(x + s, y + s, x + s - r, y + s)
-      ctx.lineTo(x - s + r, y + s)
-      ctx.quadraticCurveTo(x - s, y + s, x - s, y + s - r)
-      ctx.lineTo(x - s, y - s + r)
-      ctx.quadraticCurveTo(x - s, y - s, x - s + r, y - s)
-      ctx.closePath()
-      break
-    }
-    case 'hexagon': {
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 2
-        const px = x + size * Math.cos(angle)
-        const py = y + size * Math.sin(angle)
-        if (i === 0) ctx.moveTo(px, py)
-        else ctx.lineTo(px, py)
-      }
-      ctx.closePath()
-      break
-    }
-  }
-}
+import {
+  type ForceGraphNode,
+  type ForceGraphLink,
+  type SidebarPanel,
+  type GraphForceRef,
+  RELATION_TYPE_LABELS,
+  RELATION_TYPE_COLORS,
+  CARD_TYPE_SHAPES,
+  CARD_TYPE_INITIALS,
+  drawNodeShapePath,
+  getNodeSize,
+  getLinkWidth,
+} from '../components/graph/types'
 
 export default function KnowledgeGraph() {
   const navigate = useNavigate()
-  const graphRef = useRef<ForceGraphMethods<NodeObject<ForceGraphNode>, LinkObject<ForceGraphNode, ForceGraphLink>> | undefined>(undefined)
+  const graphRef = useRef<GraphForceRef | undefined>(undefined)
   const graphCanvasRef = useRef<HTMLDivElement>(null)
 
   const [graphData, setGraphData] = useState<GraphData | null>(null)
@@ -197,6 +100,8 @@ export default function KnowledgeGraph() {
   const [batchLoading, setBatchLoading] = useState(false)
   /** 手动生成相关建议中 */
   const [suggesting, setSuggesting] = useState(false)
+  /** 手动生成相关建议的错误提示 */
+  const [suggestError, setSuggestError] = useState('')
   /** 全选框引用，用于展示「部分选中」的 indeterminate 状态 */
   const selectAllRef = useRef<HTMLInputElement>(null)
 
@@ -346,18 +251,6 @@ export default function KnowledgeGraph() {
       })),
     }
   }, [graphData, filterCardType])
-
-  /** 计算节点大小 */
-  function getNodeSize(node: ForceGraphNode): number {
-    return Math.min(15, Math.max(5, 5 + (node.relation_count || 0) * 2))
-  }
-
-  /** 计算边宽度 */
-  function getLinkWidth(link: ForceGraphLink): number {
-    const score = link.similarity_score
-    if (score == null) return 1.5
-    return Math.min(3, Math.max(1, score * 3))
-  }
 
   /**
    * 绘制 minimap 缩略图
@@ -773,6 +666,7 @@ export default function KnowledgeGraph() {
   /** 手动生成相关建议（可能耗时数十秒，需显式触发，避免阻塞页面加载） */
   async function handleGenerateSuggestions() {
     setSuggesting(true)
+    setSuggestError('')
     try {
       const result = await suggestRelations()
       const sug = await getSuggestions()
@@ -783,7 +677,7 @@ export default function KnowledgeGraph() {
         setStats(statsData)
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : '生成建议失败')
+      setSuggestError(err instanceof Error ? err.message : '生成建议失败')
     } finally {
       setSuggesting(false)
     }
@@ -1020,529 +914,65 @@ export default function KnowledgeGraph() {
       {/* 主内容区 */}
       <div style={{ display: 'flex', flex: 1, gap: 'var(--space-md)', minHeight: 0 }}>
         {/* 图谱区域 */}
-        <div className="graph-canvas" ref={graphCanvasRef} style={{ flex: 1 }}>
-          <ForceGraph2D
-            ref={graphRef}
-            graphData={forceGraphData}
-            nodeCanvasObject={nodeCanvasObject}
-            nodePointerAreaPaint={(node: ForceGraphNode, color: string, ctx: CanvasRenderingContext2D) => {
-              if (node.x == null || node.y == null || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return
-              const size = getNodeSize(node)
-              ctx.beginPath()
-              ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI)
-              ctx.fillStyle = color
-              ctx.fill()
-            }}
-            linkCanvasObject={linkCanvasObject}
-            linkCanvasObjectMode={() => 'replace'}
-            onNodeClick={handleNodeClick}
-            onNodeHover={(node: ForceGraphNode | null) => setHoverNode(node)}
-            onLinkClick={handleLinkClick}
-            onLinkHover={(link: ForceGraphLink | null) => setHoverLink(link)}
-            onBackgroundClick={handleBackgroundClick}
-            onZoom={({ k, x, y }: { k: number; x: number; y: number }) => {
-              viewportRef.current = { k, x, y }
-              if (minimapTimerRef.current == null) {
-                minimapTimerRef.current = window.setTimeout(() => {
-                  drawMinimap()
-                  minimapTimerRef.current = null
-                }, 100)
-              }
-            }}
-            nodeVal={(node: ForceGraphNode) => node.relation_count}
-            linkWidth={getLinkWidth}
-            linkDirectionalArrowLength={3}
-            linkDirectionalArrowRelPos={1}
-            linkColor={(link: ForceGraphLink) => {
-              const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0'
-              return link.status === 'suggested' ? `${color}88` : color
-            }}
-            // 连线流光粒子：能量沿墨线缓慢流动（水墨丹青动效）
-            linkDirectionalParticles={(link: ForceGraphLink) =>
-              link.similarity_score != null && link.similarity_score > 0.6 ? 2 : 1
-            }
-            linkDirectionalParticleWidth={2.2}
-            linkDirectionalParticleSpeed={0.004}
-            linkDirectionalParticleColor={(link: ForceGraphLink) => {
-              const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0'
-              return link.status === 'suggested' ? '#c9a959' : color
-            }}
-            cooldownTicks={100}
-            enableNodeDrag={true}
-            enableZoomInteraction={true}
-            enablePanInteraction={true}
-          />
-
-          {/* Minimap */}
-          <div className="graph-minimap">
-            <canvas ref={minimapRef} width={140} height={90} />
-          </div>
-
-          {/* 缩放控件 */}
-          <div className="graph-controls">
-            <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k * 1.4, 400) }} aria-label="放大" title="放大">+</button>
-            <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k / 1.4, 400) }} aria-label="缩小" title="缩小">−</button>
-            <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoomToFit(400, 60) }} aria-label="适应屏幕" title="适应屏幕" style={{ fontSize: '0.85rem' }}>⤢</button>
-          </div>
-        </div>
+        <GraphCanvas
+          graphRef={graphRef}
+          graphCanvasRef={graphCanvasRef}
+          minimapRef={minimapRef}
+          viewportRef={viewportRef}
+          minimapTimerRef={minimapTimerRef}
+          drawMinimap={drawMinimap}
+          forceGraphData={forceGraphData}
+          nodeCanvasObject={nodeCanvasObject}
+          linkCanvasObject={linkCanvasObject}
+          onNodeClick={handleNodeClick}
+          onNodeHover={(node: ForceGraphNode | null) => setHoverNode(node)}
+          onLinkClick={handleLinkClick}
+          onLinkHover={(link: ForceGraphLink | null) => setHoverLink(link)}
+          onBackgroundClick={handleBackgroundClick}
+        />
 
         {/* 侧边栏 */}
         {sidebarOpen && (
-          <div
-            style={{
-              width: 320,
-              flexShrink: 0,
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-md)',
-            }}
-          >
-            {/* 图谱统计面板 */}
-            {stats && (
-              <div className="graph-panel">
-                <div className="graph-panel-title">图谱统计</div>
-                <div className="graph-stats-grid">
-                  <div className="graph-stat-item">
-                    <span className="graph-stat-value">{stats.total_nodes}</span>
-                    <span className="graph-stat-label">节点</span>
-                  </div>
-                  <div className="graph-stat-item">
-                    <span className="graph-stat-value">{stats.confirmed_edges}</span>
-                    <span className="graph-stat-label">边</span>
-                  </div>
-                  <div className="graph-stat-item">
-                    <span className="graph-stat-value" style={{ color: 'var(--color-warning)' }}>
-                      {stats.suggested_edges}
-                    </span>
-                    <span className="graph-stat-label">待确认</span>
-                  </div>
-                  <div className="graph-stat-item">
-                    <span className="graph-stat-value" style={{ color: 'var(--color-text-tertiary)' }}>
-                      {stats.isolated_nodes}
-                    </span>
-                    <span className="graph-stat-label">孤立节点</span>
-                  </div>
-                </div>
-                {stats.relation_type_distribution.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-xs)' }}>
-                    {stats.relation_type_distribution.map((d) => (
-                      <div key={d.relation_type} className="graph-stats-bar-row">
-                        <span className="graph-stats-bar-label">
-                          {RELATION_TYPE_LABELS[d.relation_type] || d.relation_type}
-                        </span>
-                        <div className="graph-stats-bar-track">
-                          <div
-                            className="graph-stats-bar-fill"
-                            style={{
-                              width: `${Math.min(100, (d.count / Math.max(...stats.relation_type_distribution.map((x) => x.count))) * 100)}%`,
-                              background: RELATION_TYPE_COLORS[d.relation_type] || '#9a9ab0',
-                            }}
-                          />
-                        </div>
-                        <span className="graph-stats-bar-count">{d.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 节点详情面板 */}
-            {activePanel === 'nodeDetail' && selectedNode && (
-              <div
-                className="graph-panel"
-                style={{
-                  borderTop: `4px solid ${CARD_TYPE_COLORS[selectedNode.card_type] || '#6b7280'}`,
-                }}
-              >
-                <div className="graph-panel-title">节点详情</div>
-                <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>标题</span>
-                    <div style={{ fontWeight: 500, marginTop: 2 }}>{selectedNode.title}</div>
-                  </div>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>类型</span>
-                    <div style={{ marginTop: 4 }}>
-                      <span
-                        style={{
-                          fontSize: '0.75rem',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          background: CARD_TYPE_COLORS[selectedNode.card_type] || '#6b7280',
-                          color: 'white',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {CARD_TYPE_LABELS[selectedNode.card_type] || selectedNode.card_type}
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>关联数</span>
-                    <span style={{ marginLeft: 'var(--space-sm)', fontWeight: 600 }}>{selectedNode.relation_count}</span>
-                  </div>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>来源笔记</span>
-                    <span
-                      style={{ cursor: 'pointer', color: 'var(--color-primary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}
-                      onClick={() => navigate(`/notes/${selectedNode.note_id}`)}
-                    >
-                      {selectedNode.note_id.slice(0, 8)}...
-                    </span>
-                  </div>
-
-                  {/* 查看知识点详情按钮：跳转到卡片详情页 */}
-                  <button
-                    className="btn btn-primary"
-                    style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.8rem' }}
-                    onClick={() => navigate(`/cards/${selectedNode.id}`)}
-                  >
-                    查看知识点详情
-                  </button>
-
-                  {/* 查看子图按钮 */}
-                  <button
-                    className="btn"
-                    style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.8rem' }}
-                    onClick={() => loadSubgraph(selectedNode.id)}
-                    disabled={loadingSubgraph}
-                  >
-                    {loadingSubgraph ? '加载中...' : '查看关联节点'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 子图面板 */}
-            {activePanel === 'viewSubgraph' && subgraphData && (
-              <div className="graph-panel" style={{ borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}` }}>
-                <div className="graph-panel-title">
-                  关联节点
-                  <button
-                    style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-primary)' }}
-                    onClick={() => { setActivePanel(null); setSubgraphData(null) }}
-                  >
-                    关闭
-                  </button>
-                </div>
-                <div style={{ fontSize: '0.8rem', marginBottom: 'var(--space-sm)' }}>
-                  <strong>{subgraphData.center_node.title}</strong>
-                  <span style={{ color: 'var(--color-text-secondary)', marginLeft: 'var(--space-xs)' }}>
-                    → {subgraphData.neighbor_nodes.length} 个关联节点
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {subgraphData.neighbor_nodes.map((n) => {
-                    const edge = subgraphData.edges.find(
-                      (e) => (e.source === n.id && e.target === subgraphData.center_node.id) ||
-                             (e.target === n.id && e.source === subgraphData.center_node.id)
-                    )
-                    return (
-                      <div
-                        key={n.id}
-                        className="graph-neighbor-item"
-                        onClick={() => {
-                          const fn = graphData?.nodes.find((gn) => gn.id === n.id) as ForceGraphNode
-                          if (fn) focusNode(n.id)
-                        }}
-                      >
-                        <span
-                          className="graph-neighbor-dot"
-                          style={{ background: CARD_TYPE_COLORS[n.card_type] || '#6b7280' }}
-                        />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="graph-neighbor-title">{n.title}</div>
-                          {edge && (
-                            <div className="graph-neighbor-rel">
-                              {RELATION_TYPE_LABELS[edge.relation_type] || edge.relation_type}
-                            </div>
-                          )}
-                        </div>
-                        <span className="graph-neighbor-count">{n.relation_count}</span>
-                      </div>
-                    )
-                  })}
-                  {subgraphData.neighbor_nodes.length === 0 && (
-                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该节点暂无关联节点</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 选中的边信息 */}
-            {selectedLink && (
-              <div className="graph-panel">
-                <div className="graph-panel-title">关系详情</div>
-                <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
-                  <div>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>类型：</span>
-                    {RELATION_TYPE_LABELS[selectedLink.relation_type] || selectedLink.relation_type}
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>状态：</span>
-                    <span style={{
-                      fontSize: '0.75rem',
-                      padding: '2px 8px',
-                      borderRadius: '9999px',
-                      background: selectedLink.status === 'suggested' ? 'var(--color-warning-light)' : 'var(--color-success-light)',
-                      color: selectedLink.status === 'suggested' ? 'var(--color-warning)' : 'var(--color-success)',
-                    }}>
-                      {selectedLink.status === 'suggested' ? '建议' : '已确认'}
-                    </span>
-                  </div>
-                  {selectedLink.similarity_score != null && (
-                    <div>
-                      <span style={{ color: 'var(--color-text-secondary)' }}>相似度：</span>
-                      <span style={{ fontWeight: 600 }}>{selectedLink.similarity_score.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-                {selectedLink.status === 'suggested' && (
-                  <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
-                    <button
-                      className="btn btn-primary"
-                      style={{ fontSize: '0.8rem', padding: '4px 8px', flex: 1 }}
-                      onClick={() => handleConfirm(selectedLink.id)}
-                      disabled={actionLoading === selectedLink.id}
-                    >
-                      确认
-                    </button>
-                    <button
-                      className="btn"
-                      style={{
-                        fontSize: '0.8rem',
-                        padding: '4px 8px',
-                        flex: 1,
-                        color: 'var(--color-error)',
-                        borderColor: 'var(--color-error)',
-                      }}
-                      onClick={() => handleReject(selectedLink.id)}
-                      disabled={actionLoading === selectedLink.id}
-                    >
-                      拒绝
-                    </button>
-                  </div>
-                )}
-                {selectedLink.status === 'confirmed' && (
-                  <button
-                    className="btn"
-                    style={{
-                      fontSize: '0.8rem',
-                      marginTop: 'var(--space-sm)',
-                      color: 'var(--color-error)',
-                      borderColor: 'var(--color-error)',
-                    }}
-                    onClick={() => handleDeleteRelation(selectedLink.id)}
-                    disabled={actionLoading === selectedLink.id}
-                  >
-                    删除关系
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* 建议关系面板（含批量操作） */}
-            {activePanel === 'suggestions' && (
-              <div className="graph-panel">
-                <div className="graph-panel-title">
-                  建议关系 ({suggestions.length})
-                  {suggestions.length > 1 && (
-                    <label
-                      style={{
-                        marginLeft: 'auto',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        fontSize: '0.75rem',
-                        fontWeight: 'normal',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        ref={selectAllRef}
-                        checked={allSuggestionsSelected}
-                        onChange={toggleSelectAll}
-                        style={{ cursor: 'pointer' }}
-                      />
-                      全选
-                    </label>
-                  )}
-                </div>
-
-                {suggestions.length > 1 && (
-                  <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-sm)' }}>
-                    <button
-                      className="btn btn-primary"
-                      style={{ fontSize: '0.75rem', padding: '3px 8px', flex: 1 }}
-                      onClick={handleBatchConfirm}
-                      disabled={selectedSuggestions.size === 0 || batchLoading}
-                    >
-                      批量确认 ({selectedSuggestions.size})
-                    </button>
-                    <button
-                      className="btn"
-                      style={{
-                        fontSize: '0.75rem',
-                        padding: '3px 8px',
-                        flex: 1,
-                        color: 'var(--color-error)',
-                        borderColor: 'var(--color-error)',
-                      }}
-                      onClick={handleBatchReject}
-                      disabled={selectedSuggestions.size === 0 || batchLoading}
-                    >
-                      批量拒绝 ({selectedSuggestions.size})
-                    </button>
-                  </div>
-                )}
-
-                {suggestions.length === 0 ? (
-                  <div>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
-                      暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联
-                    </p>
-                    <button
-                      className="btn btn-primary"
-                      style={{ width: '100%', fontSize: '0.8rem' }}
-                      onClick={handleGenerateSuggestions}
-                      disabled={suggesting}
-                    >
-                      {suggesting ? '生成中，卡片较多时可能需要数十秒...' : '生成相关建议'}
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-                    {suggestions.map((s) => (
-                      <div key={s.id} className="graph-suggestion-card">
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-xs)' }}>
-                          {suggestions.length > 1 && (
-                            <input
-                              type="checkbox"
-                              checked={selectedSuggestions.has(s.id)}
-                              onChange={() => toggleSuggestion(s.id)}
-                              style={{ marginTop: 3, cursor: 'pointer' }}
-                            />
-                          )}
-                          <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => toggleSuggestion(s.id)}>
-                            <div style={{ marginBottom: '4px', fontSize: '0.8rem' }}>
-                              <strong>{s.card_1_title}</strong>
-                              <span style={{ color: 'var(--color-text-secondary)', margin: '0 4px' }}>↔</span>
-                              <strong>{s.card_2_title}</strong>
-                            </div>
-                            <div style={{ color: 'var(--color-text-secondary)', marginBottom: '6px', fontSize: '0.75rem' }}>
-                              相似度: {s.similarity_score != null ? s.similarity_score.toFixed(2) : '—'}
-                              {s.similarity_score != null && (
-                                <div className="graph-suggestion-score-bar">
-                                  <div
-                                    className="graph-suggestion-score-bar-fill"
-                                    style={{ width: `${Math.round(s.similarity_score * 100)}%` }}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                            <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
-                              <button
-                                className="btn btn-primary"
-                                style={{ fontSize: '0.75rem', padding: '2px 8px', flex: 1 }}
-                                onClick={(e) => {
-                                  e.stopPropagation() // 点击按钮不触发行选择
-                                  handleConfirm(s.id)
-                                }}
-                                disabled={actionLoading === s.id}
-                              >
-                                确认
-                              </button>
-                              <button
-                                className="btn"
-                                style={{
-                                  fontSize: '0.75rem',
-                                  padding: '2px 8px',
-                                  flex: 1,
-                                  color: 'var(--color-error)',
-                                  borderColor: 'var(--color-error)',
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation() // 点击按钮不触发行选择
-                                  handleReject(s.id)
-                                }}
-                                disabled={actionLoading === s.id}
-                              >
-                                拒绝
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 创建关系面板 */}
-            {activePanel === 'createRelation' && createMode && (
-              <div className="graph-panel">
-                <div className="graph-panel-title">创建关系</div>
-                <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>节点 1：</span>
-                    {createFirstNode?.title || '请在图谱中点击选择'}
-                  </div>
-                  <div style={{ marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>节点 2：</span>
-                    {createSecondNode?.title || '请在图谱中点击选择'}
-                  </div>
-                  <div style={{ marginTop: 'var(--space-sm)' }}>
-                    <label style={{ display: 'block', color: 'var(--color-text-secondary)', marginBottom: '4px', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      关系类型
-                    </label>
-                    <select
-                      value={createRelationType}
-                      onChange={(e) => setCreateRelationType(e.target.value)}
-                      style={{ width: '100%', padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', fontSize: '0.875rem', background: 'var(--color-bg)' }}
-                    >
-                      {RELATION_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {createFirstNode && createSecondNode && (
-                    <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.875rem' }} onClick={handleCreateRelation} disabled={creating}>
-                      {creating ? '创建中...' : '确认创建'}
-                    </button>
-                  )}
-                  <button className="btn" style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.875rem' }} onClick={cancelCreateMode}>
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 关系类型图例 */}
-            <div className="graph-panel">
-              <div className="graph-panel-title">关系类型（点击高亮）</div>
-              <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {Object.entries(RELATION_TYPE_LABELS).map(([type, label]) => (
-                  <span
-                    key={type}
-                    className={`graph-legend-item ${highlightedRelationType === type ? 'graph-legend-item-active' : ''}`}
-                    style={{ justifyContent: 'flex-start', cursor: 'pointer' }}
-                    onClick={() => setHighlightedRelationType((prev) => (prev === type ? null : type))}
-                  >
-                    <span className="graph-relation-line" style={{ background: RELATION_TYPE_COLORS[type] }} />
-                    {label}
-                  </span>
-                ))}
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px' }}>
-                  <span style={{ width: 20, height: 0, borderTop: '2px dashed var(--color-text-tertiary)', display: 'inline-block' }} />
-                  建议关系
-                </span>
-              </div>
-            </div>
-          </div>
+          <GraphSidebar
+            stats={stats}
+            activePanel={activePanel}
+            selectedNode={selectedNode}
+            selectedLink={selectedLink}
+            subgraphData={subgraphData}
+            loadingSubgraph={loadingSubgraph}
+            graphData={graphData}
+            focusNode={focusNode}
+            navigate={navigate}
+            loadSubgraph={loadSubgraph}
+            actionLoading={actionLoading}
+            handleConfirm={handleConfirm}
+            handleReject={handleReject}
+            handleDeleteRelation={handleDeleteRelation}
+            suggestions={suggestions}
+            selectedSuggestions={selectedSuggestions}
+            allSuggestionsSelected={allSuggestionsSelected}
+            selectAllRef={selectAllRef}
+            toggleSelectAll={toggleSelectAll}
+            batchLoading={batchLoading}
+            handleBatchConfirm={handleBatchConfirm}
+            handleBatchReject={handleBatchReject}
+            suggesting={suggesting}
+            suggestError={suggestError}
+            handleGenerateSuggestions={handleGenerateSuggestions}
+            toggleSuggestion={toggleSuggestion}
+            createMode={createMode}
+            createFirstNode={createFirstNode}
+            createSecondNode={createSecondNode}
+            createRelationType={createRelationType}
+            setCreateRelationType={setCreateRelationType}
+            handleCreateRelation={handleCreateRelation}
+            creating={creating}
+            cancelCreateMode={cancelCreateMode}
+            highlightedRelationType={highlightedRelationType}
+            setHighlightedRelationType={setHighlightedRelationType}
+            setActivePanel={setActivePanel}
+            setSubgraphData={setSubgraphData}
+          />
         )}
       </div>
     </div>

@@ -1,5 +1,5 @@
 """
-Celery 任务公共模块（F-27 修复）
+Celery 任务公共模块（收敛重复的连接工厂与状态更新，见 docs/decisions.md#F-27）
 
 收敛 4 个任务模块中重复的：
 - 独立数据库引擎/会话工厂（convert/clean/understand/embedding 各一份 → 此处一份）
@@ -72,8 +72,8 @@ async def update_note_status(
         note_id: 笔记 ID
         status: 新的状态
         error_message: 错误信息（可选）
-        **kwargs: 白名单内的附加字段；metadata_ 做字段级合并（F-27 修复：
-                  整包替换会丢失 clean_task_id 等任务生命周期字段）
+        **kwargs: 白名单内的附加字段；metadata_ 做字段级合并（
+                  整包替换会丢失 clean_task_id 等任务生命周期字段，见 docs/decisions.md#F-27）
     """
     session_factory = get_sync_session()
     async with session_factory() as session:

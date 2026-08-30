@@ -1,5 +1,5 @@
 """
-时区工具（F-32 修复）
+时区工具（业务日界统一为 Asia/Shanghai，见 docs/decisions.md#F-32）
 
 统一"今日"日界计算：业务日界按 Asia/Shanghai（北京时间 00:00），
 存储/比较使用 UTC。旧代码在多个模块各自 `now.replace(hour=0,...)`（UTC 零点），

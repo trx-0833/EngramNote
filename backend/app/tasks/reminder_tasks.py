@@ -35,7 +35,7 @@ def send_daily_review_email():
     """
     每日复习提醒邮件任务（Celery Beat 调度，每日 9:00 执行）
 
-    查询所有 email_reminder_enabled=true 的用户，发送复习到期提醒邮件。
+    查询所有 email_reminder_enabled=true 的用户，发送复习到期提醒邮件（未开启邮件提醒的用户由 SQL 过滤排除）。
     SMTP 未配置或用户无邮箱时跳过。
 
     Returns:
@@ -51,10 +51,14 @@ def send_daily_review_email():
 
     async def _run():
         async with async_session() as db:
-            # 查询所有有邮箱的用户（email 非空）
-            # 注意：User.email 在模型中为 nullable=False，但仍需过滤空字符串
+            # 仅查询开启邮件提醒的用户（email_reminder_enabled=True）
+            # 同时过滤空邮箱：User.email 在模型中为 nullable=False，但仍需排除空字符串
             result = await db.execute(
-                select(User).where(User.email.isnot(None), User.email != "")
+                select(User).where(
+                    User.email.isnot(None),
+                    User.email != "",
+                    User.email_reminder_enabled.is_(True),
+                )
             )
             users = result.scalars().all()
 

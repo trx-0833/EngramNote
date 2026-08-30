@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-DAILY_REVIEW_LIMIT = settings.daily_review_limit  # 每日最大答题数（F-12：单一来源 config）
+DAILY_REVIEW_LIMIT = settings.daily_review_limit  # 每日最大答题数（单一来源 config，见 docs/decisions.md#F-12）
 
 
 async def get_due_quizzes(
@@ -65,7 +65,7 @@ async def get_due_quizzes(
         List[QuizItem]: 到期题目列表
     """
     now = datetime.now(timezone.utc)
-    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
     today_start = today_start_utc(now)
 
@@ -158,8 +158,8 @@ async def submit_answer(
         time_spent_ms: 答题耗时（毫秒）
         db: 数据库会话
         skip_daily_limit: 是否跳过每日答题限额检查（快速复习场景使用）
-        skip_due_check: 是否跳过到期校验（F-14 修复：快速复习保留免校验，
-                        普通复习必须到期才能提交）
+        skip_due_check: 是否跳过到期校验（快速复习保留免校验，
+                        普通复习必须到期才能提交，见 docs/decisions.md#F-14）
 
     Returns:
         Dict: 判分结果，包含 is_correct, quality, correct_answer, explanation, next_review_at 等
@@ -178,7 +178,7 @@ async def submit_answer(
     # 1.5 检查每日答题限额（快速复习场景跳过此检查）
     now = datetime.now(timezone.utc)
     if not skip_daily_limit:
-        # F-32 修复：日界按 Asia/Shanghai（北京时间零点）
+        # 日界按 Asia/Shanghai（北京时间零点）（见 docs/decisions.md#F-32）
         from ..utils.timeutil import today_start_utc
         today_start = today_start_utc(now)
         today_done_result = await db.execute(
@@ -191,10 +191,10 @@ async def submit_answer(
         if today_done >= DAILY_REVIEW_LIMIT:
             return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {DAILY_REVIEW_LIMIT}"}
 
-    # 1.6 F-14 修复：同日同题幂等——今日已提交过则直接返回已记录结果，
+    # 1.6 同日同题幂等——今日已提交过则直接返回已记录结果，
     #     不重复创建 ReviewLog、不重复叠加 SM-2（防止双击/连点/API 重放）。
     #     幂等检查必须在到期校验之前：同日已提交后 SM-2 已把 next_review_at
-    #     推到未来，若先查到期会误报"未到期"而非命中幂等。
+    #     推到未来，若先查到期会误报"未到期"而非命中幂等（见 docs/decisions.md#F-14）。
     from ..utils.timeutil import today_start_utc
     today_start = today_start_utc(now)
     existing_log_result = await db.execute(
@@ -212,7 +212,7 @@ async def submit_answer(
         )
         return _build_submit_result(quiz, existing_log)
 
-    # 1.7 F-14 修复：普通复习提交校验题目是否到期（未到期拒绝；快速复习跳过）
+    # 1.7 普通复习提交校验题目是否到期（未到期拒绝；快速复习跳过），见 docs/decisions.md#F-14
     if not skip_due_check and quiz.next_review_at is not None and quiz.next_review_at > now:
         return {"error": "题目尚未到期，请按复习计划进行"}
 
@@ -320,7 +320,7 @@ async def get_review_stats(
         Dict: 复习统计数据
     """
     now = datetime.now(timezone.utc)
-    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
     today_start = today_start_utc(now)
 
@@ -410,7 +410,7 @@ async def get_review_stats(
         "total_correct": total_correct,
         "total_accuracy": round(total_correct / total_reviews * 100, 1) if total_reviews > 0 else 0,
         "total_quizzes": total_quizzes,
-        "daily_limit": DAILY_REVIEW_LIMIT,  # F-12：每日答题上限下发给前端
+        "daily_limit": DAILY_REVIEW_LIMIT,  # 每日答题上限下发给前端，见 docs/decisions.md#F-12
     }
 
 

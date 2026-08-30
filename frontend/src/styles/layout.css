@@ -1,0 +1,309 @@
+/* ── 导航栏（旧，保留兼容）── */
+
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--navbar-height);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(232, 230, 225, 0.6);
+  display: none; /* 视觉重构：隐藏旧导航栏 */
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-lg);
+  z-index: 100;
+  box-shadow: 0 1px 8px rgba(26, 26, 46, 0.04);
+}
+
+.navbar-logo {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 700;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  border: none;
+  background-color: transparent;
+}
+
+.navbar-logo:hover {
+  opacity: 0.85;
+}
+
+.navbar-links {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.navbar-logout {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  transition: color 0.2s ease;
+}
+
+.navbar-logout:hover {
+  color: var(--color-error);
+}
+
+/* ── 侧边栏（视觉重构）── */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: width 0.25s var(--ease-out-expo);
+  overflow: hidden;
+}
+
+.sidebar-collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-md);
+  height: 56px;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
+}
+
+.sidebar-logo {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 700;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  cursor: pointer;
+  border: none;
+  background-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar-logo:hover {
+  opacity: 0.8;
+}
+
+.sidebar-collapsed .sidebar-logo {
+  font-size: 1.3rem;
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.sidebar-collapsed .sidebar-collapse-btn {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-sm) var(--space-sm);
+}
+
+.sidebar-section {
+  margin-bottom: var(--space-xs);
+}
+
+.sidebar-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sidebar-section-title);
+  padding: var(--space-sm) var(--space-sm) var(--space-xs) var(--space-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-collapsed .sidebar-section-title {
+  text-align: center;
+  padding: var(--space-sm) 0 var(--space-xs) 0;
+  font-size: 0;
+}
+
+.sidebar-collapsed .sidebar-section-title::after {
+  content: '···';
+  font-size: 0.6rem;
+  letter-spacing: 0;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--sidebar-item-radius);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 450;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.sidebar-item:hover {
+  background: var(--sidebar-item-hover);
+  color: var(--color-primary);
+}
+
+.sidebar-item-active {
+  background: var(--sidebar-item-active);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.sidebar-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.sidebar-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-collapsed .sidebar-item {
+  justify-content: center;
+  padding: var(--space-sm) 0;
+}
+
+.sidebar-collapsed .sidebar-item-label {
+  display: none;
+}
+
+.sidebar-item-action {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  color: var(--color-text-tertiary);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sidebar-item-action:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.sidebar-collapsed .sidebar-item-action {
+  display: none;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--sidebar-border);
+  margin: var(--space-sm) var(--space-md);
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--sidebar-border);
+  padding: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── 主内容区（侧边栏布局）── */
+
+.app-layout {
+  margin-left: var(--sidebar-width);
+  min-height: 100vh;
+  transition: margin-left 0.25s var(--ease-out-expo);
+}
+
+.app-layout-collapsed {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+.app-layout .container {
+  max-width: none;
+  padding: var(--space-xl) var(--space-xl);
+}
+
+/* ── 移动端侧边栏遮罩 ── */
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 99;
+  animation: fadeIn 0.2s ease;
+}
+
+.sidebar-mobile-toggle {
+  display: none;
+  position: fixed;
+  top: var(--space-sm);
+  left: var(--space-sm);
+  z-index: 101;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+  font-size: 1.2rem;
+}

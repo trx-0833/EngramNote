@@ -1,0 +1,51 @@
+/* ── 响应式 ── */
+
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    width: var(--sidebar-width);
+  }
+
+  .sidebar-mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-mobile-toggle {
+    display: flex;
+  }
+
+  .app-layout,
+  .app-layout-collapsed {
+    margin-left: 0;
+  }
+
+  .app-layout .container {
+    padding: var(--space-md) var(--space-md);
+  }
+
+  .btn-ghost {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar {
+    width: 85vw;
+    max-width: var(--sidebar-width);
+  }
+
+  .app-layout .container {
+    padding: var(--space-sm) var(--space-sm);
+  }
+
+  .knowledge-points-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+}

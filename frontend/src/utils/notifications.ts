@@ -2,8 +2,7 @@
  * @file 浏览器通知工具
  * @description 封装浏览器 Notification API，提供桌面通知能力。
  * 包含权限请求、通知发送、免打扰时段判断。
- * F-25：移除已废弃的 sessionStorage 去重（getNotifiedQuizIds/markNotified），
- * 去重职责由 ReminderBanner 的 lastNotifiedDueRef（按 due_count 值变化）承担。
+ * 去重只按 due_count 值变化判断，不再依赖已废弃的 sessionStorage 去重，见 docs/decisions.md#F-25。
  */
 
 /**

@@ -30,6 +30,8 @@ interface CleaningPanelProps {
   note: NoteDetail
   /** 清洗状态变化后的回调（刷新笔记数据） */
   onStatusChange: () => void
+  /** 块操作（恢复/删除）进行中回调（true=开始，false=结束），供父组件 suspend 状态轮询 */
+  onMutatingChange?: (mutating: boolean) => void
 }
 
 /**
@@ -40,7 +42,7 @@ interface CleaningPanelProps {
  * - cleaning：显示清洗进度提示
  * - cleaned：显示重复块列表和操作按钮
  */
-export default function CleaningPanel({ note, onStatusChange }: CleaningPanelProps) {
+export default function CleaningPanel({ note, onStatusChange, onMutatingChange }: CleaningPanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   /** 当前展开内容对比的重复块索引（null 表示全部收起） */
@@ -77,6 +79,7 @@ export default function CleaningPanel({ note, onStatusChange }: CleaningPanelPro
 
   /** 恢复重复块 */
   async function handleRestore(blockIndex: number) {
+    onMutatingChange?.(true)
     setLoading(true)
     setError('')
     try {
@@ -86,12 +89,14 @@ export default function CleaningPanel({ note, onStatusChange }: CleaningPanelPro
       setError(err instanceof Error ? err.message : '恢复失败')
     } finally {
       setLoading(false)
+      onMutatingChange?.(false)
     }
   }
 
   /** 删除重复块 */
   async function handleDelete(blockIndex: number) {
     if (!confirm(`确定删除块 ${blockIndex}？此操作不可恢复。`)) return
+    onMutatingChange?.(true)
     setLoading(true)
     setError('')
     try {
@@ -101,6 +106,7 @@ export default function CleaningPanel({ note, onStatusChange }: CleaningPanelPro
       setError(err instanceof Error ? err.message : '删除失败')
     } finally {
       setLoading(false)
+      onMutatingChange?.(false)
     }
   }
 

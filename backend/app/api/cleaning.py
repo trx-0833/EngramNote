@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 def _apply_block_operation(clean_md: str, block_index: int, dup_of: Optional[int], operation: str) -> Optional[str]:
     """
-    F-11 修复：恢复/删除重复块的文本操作。
+    恢复/删除重复块的文本操作，见 docs/decisions.md#F-11。
 
     新清洗数据：注释标记使用重复块自身 block_index（与前端传参一致），直接匹配；
     旧清洗数据：注释标记使用 duplicate_of（保留块 index），且同一 duplicate_of 下
@@ -115,7 +115,7 @@ async def start_cleaning(
         raise HTTPException(status_code=404, detail="笔记不存在")
 
     if note.status == NoteStatus.cleaning:
-        # F-29 修复：进行中禁止重复触发（防连点产生两个 Celery 任务）
+        # 进行中禁止重复触发（防连点产生两个 Celery 任务），见 docs/decisions.md#F-29
         raise HTTPException(
             status_code=409,
             detail="清洗任务正在进行中，请等待完成或先停止",
@@ -353,7 +353,7 @@ async def restore_duplicate_block(
     if not clean_md:
         raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
 
-    # F-11 修复：优先用重复块自身 index 匹配（新数据）；旧数据回退 duplicate_of。
+    # 优先用重复块自身 index 匹配（新数据）；旧数据回退 duplicate_of，见 docs/decisions.md#F-11。
     # 找不到目标块时必须报错，避免"元数据已更新但文件未变"的静默不一致。
     dup_of = None
     if note.metadata_ and "duplicates_detail" in note.metadata_:
@@ -429,7 +429,7 @@ async def delete_duplicate_block(
     if not clean_md:
         raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
 
-    # F-11 修复：同上，删除操作同样校验匹配成功才更新元数据
+    # 同上：删除操作同样校验匹配成功才更新元数据，见 docs/decisions.md#F-11
     dup_of = None
     if note.metadata_ and "duplicates_detail" in note.metadata_:
         for d in note.metadata_["duplicates_detail"]:

@@ -23,14 +23,13 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from sqlalchemy import and_, case, distinct, exists, func, or_, select, update
+from sqlalchemy import and_, case, desc, distinct, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.card_relation import CardRelation, RelationType, RelationStatus
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
 from ..schemas.graph import GraphData, GraphNode, GraphEdge, SuggestedRelation
-from ..services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,15 @@ SIMILARITY_THRESHOLD = 0.75
 MAX_CARDS_FOR_SUGGEST = 200
 # 用于嵌入计算的卡片内容最大长度（字符），避免超长文本稀释相似度
 CONTENT_EMBED_LIMIT = 200
+
+
+class GraphSuggestionError(Exception):
+    """
+    图谱自动建议关系失败异常
+
+    当嵌入服务（Celery worker）不可用、超时或返回空向量时抛出，
+    由 API 层捕获并转为 503 响应，向用户返回可操作提示（替代静默跳过）。
+    """
 
 
 def _build_card_embedding_text(title: str, content: str) -> str:
@@ -239,8 +247,8 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     基于嵌入向量相似度自动建议卡片关系
 
     流程：
-    1. 获取用户所有知识卡片（最多 200 张）
-    2. 使用 EmbeddingService 编码「标题 + 截断内容」
+    1. 获取用户所有知识卡片（最多 200 张，按更新时间倒序）
+    2. 通过 Celery 任务（app.tasks.embedding_tasks.encode_text）编码「标题 + 截断内容」
     3. 计算两两相似度
     4. 相似度超过阈值（0.75）、不同笔记且不存在已有关系的，创建 suggested 状态的关系
 
@@ -262,29 +270,37 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         ).where(
             KnowledgeCard.user_id == user_id,
             Note.not_trashed(KnowledgeCard.note_id),
-        ).limit(MAX_CARDS_FOR_SUGGEST)
+        ).order_by(KnowledgeCard.updated_at.desc()).limit(MAX_CARDS_FOR_SUGGEST)
     )
     cards = list(cards_result.all())
 
     if len(cards) < 2:
         return 0
 
-    # 编码「标题 + 截断内容」（CPU 密集，放入线程池避免阻塞事件循环）
-    # 嵌入模型不可用（如内存不足）时降级：本次不生成建议，避免接口 500
-    embedding_service = EmbeddingService()
+    # 编码「标题 + 截断内容」：嵌入模型在 Celery worker 中执行，
+    # 避免 API 进程加载 BGE-M3 导致内存暴涨；批量编码的阻塞 task.get() 放入线程池
     texts = [_build_card_embedding_text(card.title, card.content) for card in cards]
     loop = asyncio.get_event_loop()
     try:
-        vectors = await loop.run_in_executor(None, embedding_service.encode, texts)
+        from ..tasks.celery_app import celery_app
+        task = celery_app.send_task(
+            "app.tasks.embedding_tasks.encode_text",
+            args=[texts],
+        )
+        vectors = await asyncio.to_thread(task.get, 180)
     except Exception as e:
         logger.warning(
-            "卡片嵌入生成失败，跳过本次关系建议: user=%s, err=%s",
+            "卡片嵌入生成失败（Celery worker 不可用或超时）: user=%s, err=%s",
             user_id, e,
         )
-        return 0
+        raise GraphSuggestionError(
+            "嵌入服务不可用或超时，无法自动建议关系，请稍后重试"
+        ) from e
 
-    if not vectors:
-        return 0
+    if not vectors or any(not v for v in vectors):
+        raise GraphSuggestionError(
+            "嵌入服务返回空向量，无法自动建议关系，请稍后重试"
+        )
 
     # 查询已有的所有关系（含 rejected），避免重复建议
     existing_result = await db.execute(
@@ -599,9 +615,9 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         return {"success": True, "new_count": 0, "skipped_count": 0, "message": "卡片数量不足"}
 
     # 2. 查询用户已有的所有关系（含 confirmed/suggested/rejected），构建已存在卡片对集合
-    #    F-17 修复：去重键区分有向/无向——prerequisite/subsequent 保留方向
+    #    去重键区分有向/无向——prerequisite/subsequent 保留方向
     #    （prerequisite(A,B) 与 prerequisite(B,A) 语义不同，可共存），
-    #    contrast/related 为无向（排序去重）
+    #    contrast/related 为无向（排序去重），见 docs/decisions.md#F-17
     existing_result = await db.execute(
         select(CardRelation).where(CardRelation.user_id == user_id)
     )
@@ -696,8 +712,8 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
             except ValueError:
                 continue
 
-            # F-17 修复：按方向语义检查是否已存在同类型关系
-            # （prerequisite(A,B) 与 prerequisite(B,A) 可共存）
+            # 按方向语义检查是否已存在同类型关系
+            # （prerequisite(A,B) 与 prerequisite(B,A) 可共存），见 docs/decisions.md#F-17
             if _pair_exists(card_id_a, card_id_b, rel_type):
                 skipped_count += 1
                 continue
@@ -718,7 +734,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
                 similarity_score=None,
             )
             new_relations.append(new_relation)
-            # F-17：创建后同步更新去重集合，防止同批内重复
+            # 创建后同步更新去重集合，防止同批内重复，见 docs/decisions.md#F-17
             if rel_type in (RelationType.prerequisite, RelationType.subsequent):
                 existing_directed.add((stored_id_1, stored_id_2, rel_type.value))
             else:

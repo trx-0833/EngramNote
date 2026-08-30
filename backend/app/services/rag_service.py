@@ -27,6 +27,7 @@ import asyncio
 import logging
 import math
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, or_
@@ -38,6 +39,17 @@ from ..services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# 每用户卡片语料缓存 TTL（秒）：BM25/n-gram 检索复用，避免每次问答全量拉卡
+_KB_CACHE_TTL_SECONDS = 60
+
+# 模块级每用户卡片语料缓存：user_id -> (expire_at_monotonic, [KnowledgeCard, ...])
+_kb_cache: Dict[str, tuple[float, List[KnowledgeCard]]] = {}
+
+
+def invalidate_kb_cache(user_id: str) -> None:
+    """清除指定用户的卡片语料缓存（卡片增删 / purge 后调用，避免命中旧语料）"""
+    _kb_cache.pop(user_id, None)
 
 
 class RAGService:
@@ -56,11 +68,45 @@ class RAGService:
         self._session_factory = None
 
     def _get_session_factory(self):
-        """获取数据库会话工厂（F-06 修复：复用主应用会话工厂，避免私有 engine 泄漏）"""
+        """获取数据库会话工厂（复用主应用会话工厂，避免私有 engine 泄漏，见 docs/decisions.md#F-06）"""
         if self._session_factory is None:
             from ..database import async_session
             self._session_factory = async_session
         return self._session_factory
+
+    async def _get_user_cards(self, user_id: str) -> List[KnowledgeCard]:
+        """
+        获取指定用户可见的卡片语料（回收站笔记的卡片除外），带 60s TTL 进程内缓存
+
+        卡片增删或 purge 时由 invalidate_kb_cache 主动失效；未失效时复用缓存，
+        避免每次 BM25/n-gram 检索都对 knowledge_cards 做全量拉取。
+        """
+        now = time.monotonic()
+        cached = _kb_cache.get(user_id)
+        if cached is not None:
+            expire_at, cards = cached
+            if now < expire_at:
+                return cards
+            _kb_cache.pop(user_id, None)
+
+        session_factory = self._get_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(KnowledgeCard).where(
+                    KnowledgeCard.user_id == user_id,
+                    # 回收站笔记的卡片不进 QA 检索（独立/提升卡片保留）
+                    or_(
+                        KnowledgeCard.note_id.is_(None),
+                        select(Note.id).where(
+                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
+                        ).exists(),
+                    ),
+                )
+            )
+            cards = list(result.scalars().all())
+
+        _kb_cache[user_id] = (now + _KB_CACHE_TTL_SECONDS, cards)
+        return cards
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
         """
@@ -81,7 +127,7 @@ class RAGService:
                 "app.tasks.embedding_tasks.encode_text",
                 args=[[text]],
             )
-            # F-06 修复：task.get() 是阻塞调用，放入线程池避免卡死事件循环
+            # task.get() 是阻塞调用，放入线程池避免卡死事件循环（见 docs/decisions.md#F-06）
             result = await asyncio.to_thread(task.get, 10)
             if result:
                 return result[0]
@@ -113,7 +159,7 @@ class RAGService:
                 "app.tasks.embedding_tasks.search_vectors",
                 args=[user_id, question_embedding, top_k],
             )
-            # F-06 修复：阻塞调用移入线程池
+            # 阻塞调用移入线程池（见 docs/decisions.md#F-06）
             result = await asyncio.to_thread(task.get, 15)
             return result if result else []
         except Exception as e:
@@ -177,21 +223,7 @@ class RAGService:
                 - similarity: BM25 分数
                 - block_index: 0
         """
-        session_factory = self._get_session_factory()
-        async with session_factory() as session:
-            result = await session.execute(
-                select(KnowledgeCard).where(
-                    KnowledgeCard.user_id == user_id,
-                    # 回收站笔记的卡片不进 QA 检索（独立/提升卡片保留）
-                    or_(
-                        KnowledgeCard.note_id.is_(None),
-                        select(Note.id).where(
-                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
-                        ).exists(),
-                    ),
-                )
-            )
-            cards = result.scalars().all()
+        cards = await self._get_user_cards(user_id)
 
         if not cards:
             return []
@@ -354,21 +386,7 @@ class RAGService:
             List[Dict]: 相关知识卡片列表，每个包含：
                 - note_id, card_id, title, content, chapter_title, score
         """
-        session_factory = self._get_session_factory()
-        async with session_factory() as session:
-            # 关键词匹配搜索（取所有卡片；回收站笔记的卡片暂不可见）
-            result = await session.execute(
-                select(KnowledgeCard).where(
-                    KnowledgeCard.user_id == user_id,
-                    or_(
-                        KnowledgeCard.note_id.is_(None),
-                        select(Note.id).where(
-                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
-                        ).exists(),
-                    ),
-                ).order_by(KnowledgeCard.created_at.desc())
-            )
-            cards = result.scalars().all()
+        cards = await self._get_user_cards(user_id)
 
         # 简单的关键词匹配评分（支持中文逐字匹配）
         question_lower = question.lower()
@@ -427,10 +445,11 @@ class RAGService:
             user_id: 用户 ID
 
         Returns:
-            Dict: {"context": str, "sources": list, "provider": str}
+            Dict: {"context": str, "sources": list, "provider": str, "retrieval_status": str}
                 - context: 拼接好的上下文字符串（可能为空）
                 - sources: 引用来源列表，每个含 note_id/note_title/chapter_title/relevant_text
                 - provider: LLM 提供商标识（deepseek/glm）
+                - retrieval_status: 检索降级状态（full_vector / hybrid / bm25_only）
         """
         provider = settings.get_llm_config()["provider"]
 
@@ -449,6 +468,15 @@ class RAGService:
                 vector_results = []
         else:
             logger.warning("嵌入编码失败，跳过向量检索，使用 BM25 + n-gram")
+
+        # 检索降级状态：编码失败 -> 仅关键词；编码成功但无向量命中 -> 混合（关键词为主）；
+        # 向量通道完整返回 -> 全向量三路融合
+        if question_embedding is None:
+            retrieval_status = "bm25_only"
+        elif not vector_results:
+            retrieval_status = "hybrid"
+        else:
+            retrieval_status = "full_vector"
 
         # 3. BM25 检索
         bm25_results: List[Dict[str, Any]] = []
@@ -522,6 +550,7 @@ class RAGService:
             "context": context,
             "sources": sources,
             "provider": provider,
+            "retrieval_status": retrieval_status,
         }
 
     async def answer_question(
@@ -548,7 +577,7 @@ class RAGService:
             user_id: 用户 ID
 
         Returns:
-            Dict: {"answer": str, "sources": list, "provider": str}
+            Dict: {"answer": str, "sources": list, "provider": str, "retrieval_status": str}
         """
         llm_service = LLMService()
 
@@ -556,6 +585,7 @@ class RAGService:
         retrieval = await self.retrieve_context(question, user_id)
         context = retrieval["context"]
         sources = retrieval["sources"]
+        retrieval_status = retrieval.get("retrieval_status", "bm25_only")
 
         # 2. 上下文为空时使用 LLM 自身知识回答
         if not context.strip():
@@ -575,6 +605,7 @@ class RAGService:
                 "answer": answer,
                 "sources": [],
                 "provider": llm_service._provider,
+                "retrieval_status": retrieval_status,
             }
 
         # 3. 调用 LLM 基于 context 生成回答
@@ -584,4 +615,5 @@ class RAGService:
             "answer": answer,
             "sources": sources,
             "provider": llm_service._provider,
+            "retrieval_status": retrieval_status,
         }

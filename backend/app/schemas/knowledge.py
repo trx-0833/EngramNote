@@ -88,12 +88,12 @@ class QuizItemListResponse(BaseModel):
 # --- 理解管道响应模型 ---
 
 class UnderstandingStartRequest(BaseModel):
-    """触发理解管道的请求（F-02 修复：archived 笔记破坏性重学需显式确认）"""
+    """触发理解管道的请求（archived 笔记破坏性重学需显式确认，见 docs/decisions.md#F-02）"""
     confirm: bool = False
 
 
 class UnderstandingImpact(BaseModel):
-    """重新理解将删除的旧产物数量（F-02 修复：二次确认展示）"""
+    """重新理解将删除的旧产物数量（二次确认展示，见 docs/decisions.md#F-02）"""
     cards: int = 0
     quizzes: int = 0
     review_logs: int = 0
@@ -105,7 +105,7 @@ class UnderstandingStartResponse(BaseModel):
     id: str
     status: NoteStatus
     message: str
-    # F-02 修复：archived 笔记未确认时返回 requires_confirm=True 与影响数量
+    # archived 笔记未确认时返回 requires_confirm=True 与影响数量（见 docs/decisions.md#F-02）
     requires_confirm: bool = False
     impact: Optional[UnderstandingImpact] = None
 
@@ -156,6 +156,7 @@ class QuestionAnswerResponse(BaseModel):
     answer: str
     sources: List[AnswerSource] = []
     provider: str = ""
+    retrieval_status: str = ""
 
 
 # --- 题目生成响应模型 ---

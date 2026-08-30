@@ -44,6 +44,7 @@ from ..schemas.knowledge import (
     MasteryOverviewResponse,
 )
 from ..services.knowledge_link_service import extract_combined, generate_extension
+from ..services.rag_service import invalidate_kb_cache
 from ..tasks.understand_tasks import generate_questions_task
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,8 @@ async def extract_combined_endpoint(
     result = await extract_combined(link_id, current_user.id, db)
     if isinstance(result, dict) and "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    # 联合分析可能新增卡片，清除该用户的 RAG 卡片缓存
+    invalidate_kb_cache(current_user.id)
     return CombinedExtractResponse(**result)
 
 
@@ -93,6 +96,8 @@ async def generate_extension_endpoint(
     )
     if isinstance(result, dict) and "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    # 拓展生成新增卡片，清除该用户的 RAG 卡片缓存
+    invalidate_kb_cache(current_user.id)
     return ExtensionGenerateResponse(**result)
 
 

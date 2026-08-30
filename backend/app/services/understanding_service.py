@@ -143,9 +143,9 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
     chapters = merged
 
     # 拆分长章节（内容 > 8000 字符）
-    # F-34:改用"结构感知分段"——按 Markdown 块（标题/段落/列表/表格/代码块/引用）切分，
+    # 改用"结构感知分段"——按 Markdown 块（标题/段落/列表/表格/代码块/引用）切分，
     # 单个块超限时在安全边界内拆（表格按行、列表按项、段落按句），
-    # 未消费尾部自动续接到下一段，避免从句子/表格行/代码块中间截断造成上下文断裂。
+    # 未消费尾部自动续接到下一段，避免从句子/表格行/代码块中间截断造成上下文断裂，见 docs/decisions.md#F-34。
     from ..services.markdown_segmenter import make_segments, split_markdown_blocks
 
     result: List[Dict[str, Any]] = []
@@ -305,8 +305,8 @@ def _parse_understanding_response(response: str) -> Dict[str, Any]:
         logger.warning("理解响应为空")
         return {"summary": "", "points": []}
 
-    # F-33:解析升级为健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救），
-    # 即使输出被 max_tokens 截断也能抢救出已生成完整的章节/知识点，而非整批丢弃。
+    # 解析升级为健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救），
+    # 即使输出被 max_tokens 截断也能抢救出已生成完整的章节/知识点，而非整批丢弃，见 docs/decisions.md#F-33。
     from ..services.llm_service import parse_json_tolerant
     result, info = parse_json_tolerant(response)
     if info.get("status") == "partial":
@@ -403,9 +403,9 @@ async def process_note_understanding(
             chapter_content = chapter["content"]
             max_content = 8000
             if len(chapter_content) > max_content:
-                # F-34:防御性截断改为按块边界，不切破段落/表格/代码块。
+                # 防御性截断改为按块边界，不切破段落/表格/代码块。
                 # 正常情况下章节已被结构感知分段控制在 ≤8000；此处仅在单一原子块
-                # 超限（如一个超长句子）时兜底，剩余部分明确提示已顺延（不静默丢弃）。
+                # 超限（如一个超长句子）时兜底，剩余部分明确提示已顺延（不静默丢弃），见 docs/decisions.md#F-34。
                 from ..services.markdown_segmenter import truncate_to_complete_blocks
                 _prefix, _rest = truncate_to_complete_blocks(chapter_content, max_content)
                 if not _prefix and _rest:
@@ -429,9 +429,9 @@ async def process_note_understanding(
             response = await session.ask(combined_content)
             parsed = _parse_understanding_response(response)
 
-            # JSON 截断/解析失败时重试一次（F-33：重试时提大 max_tokens——
+            # JSON 截断/解析失败时重试一次（重试时提大 max_tokens——
             # 网关按 max_tokens 精确截断（finish_reason=length），提大即可拿全；
-            # 重试后仍为空则接受该批为空，避免无限重试）
+            # 重试后仍为空则接受该批为空，避免无限重试），见 docs/decisions.md#F-33。
             if not parsed.get("chapters") and not parsed.get("summary"):
                 from ..config import get_settings as _get_settings
                 _sf = _get_settings()

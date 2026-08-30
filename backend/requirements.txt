@@ -1,32 +1,34 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-sqlalchemy[asyncio]>=2.0.0
-aiosqlite>=0.20.0
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-email-validator>=2.0.0
-python-jose[cryptography]>=3.3.0
-bcrypt>=4.0.0
-celery>=5.4.0
-python-multipart>=0.0.9
-numpy>=1.24.0
-sentence-transformers>=2.2.0
-chromadb>=0.4.0
-httpx>=0.27.0
+# 依赖版本策略：直接依赖用 ~= 锁定主次版本（允许补丁版本浮动）。
+# 精确 == 锁定留待部署环境 `pip freeze` 后再另立批次。
+fastapi~=0.115.0
+uvicorn[standard]~=0.30.0
+sqlalchemy[asyncio]~=2.0.0
+aiosqlite~=0.20.0
+pydantic~=2.0.0
+pydantic-settings~=2.0.0
+email-validator~=2.0.0
+python-jose[cryptography]~=3.3.0
+bcrypt~=4.0.0
+celery~=5.4.0
+python-multipart~=0.0.9
+numpy~=1.24.0
+sentence-transformers~=2.2.0
+chromadb~=0.4.0
+httpx~=0.27.0
+alembic~=1.13.0
 
 # ---- 开发/测试依赖（F-35 补强：单元测试运行环境） ----
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
+pytest~=8.0.0
+pytest-asyncio~=0.23.0
 
 # ASR 语音转写（重量级依赖，仅使用 ASR 功能时需要）
-openai>=1.0.0
-soundfile>=0.12.0
+openai~=1.0.0
+soundfile~=0.12.0
 # torch>=2.0.0          # 需单独安装：pip install torch --index-url https://download.pytorch.org/whl/cpu
 # qwen-asr>=0.1.0       # 需单独安装：pip install qwen-asr
 
 # 可选：PostgreSQL 支持（取消注释以启用）
 # asyncpg>=0.30.0
-# alembic>=1.13.0
 
 # 可选：MinIO 支持（取消注释以启用）
 # minio>=7.2.0

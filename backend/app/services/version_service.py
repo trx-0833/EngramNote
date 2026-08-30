@@ -31,6 +31,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
+from ..core.app_error import AppError, VERSION_NOT_FOUND
 from ..models.note import Note
 from ..models.note_version import NoteVersion, VersionSource
 from .storage_service import upload_bytes, get_object_bytes, delete_file
@@ -84,8 +85,8 @@ class VersionService:
         Returns:
             NoteVersion: 新创建的版本记录
         """
-        # F-31 修复：版本号唯一约束（(note_id, version_number)）已建立，
-        # MAX+1 取号在并发下可能冲突，捕获 IntegrityError 重算重试（最多 3 次）
+        # 版本号唯一约束（(note_id, version_number)）已建立，
+        # MAX+1 取号在并发下可能冲突，捕获 IntegrityError 重算重试（最多 3 次），见 docs/decisions.md#F-31
         from sqlalchemy.exc import IntegrityError
 
         for attempt in range(3):
@@ -200,12 +201,14 @@ class VersionService:
             str: 版本 Markdown 文本内容
 
         Raises:
-            ValueError: 版本记录不存在
+            AppError: 版本记录不存在或版本内容文件缺失（code=VERSION_NOT_FOUND）
         """
         version = await self._get_version(note_id, version_number, user_id, db)
         if version is None:
-            raise ValueError(
-                f"版本不存在: note_id={note_id}, version_number={version_number}"
+            raise AppError(
+                code=VERSION_NOT_FOUND,
+                message=f"版本不存在: note_id={note_id}, version_number={version_number}",
+                http_status=404,
             )
         try:
             data = get_object_bytes(
@@ -220,8 +223,10 @@ class VersionService:
             )
             await db.delete(version)
             await db.commit()
-            raise ValueError(
-                f"版本内容文件已被删除，版本记录已清理: v{version_number}"
+            raise AppError(
+                code=VERSION_NOT_FOUND,
+                message=f"版本内容文件已被删除，版本记录已清理: v{version_number}",
+                http_status=404,
             ) from e
         return data.decode("utf-8")
 
@@ -257,7 +262,7 @@ class VersionService:
             }
 
         Raises:
-            ValueError: 任一版本记录不存在
+            AppError: 任一版本记录不存在（code=VERSION_NOT_FOUND）
         """
         v1_content = await self.get_version_content(note_id, v1, user_id, db)
         v2_content = await self.get_version_content(note_id, v2, user_id, db)
@@ -317,7 +322,8 @@ class VersionService:
             NoteVersion: 为恢复前内容创建的新版本记录
 
         Raises:
-            ValueError: 笔记或目标版本不存在，或笔记无可写入的 Markdown 路径
+            ValueError: 笔记不存在或笔记无可写入的 Markdown 路径
+            AppError: 目标版本不存在（code=VERSION_NOT_FOUND，来自 get_version_content）
         """
         # 获取笔记
         result = await db.execute(
@@ -332,7 +338,7 @@ class VersionService:
         if not target_path:
             raise ValueError(f"笔记无可写入的 Markdown 路径: note_id={note_id}")
 
-        # 读取当前内容（F-31 修复：读取失败直接抛错，不建空快照污染历史）
+        # 读取当前内容（读取失败直接抛错，不建空快照污染历史，见 docs/decisions.md#F-31）
         try:
             data = get_object_bytes(settings.minio_bucket_markdown, target_path)
             current_content = data.decode("utf-8")
@@ -344,7 +350,7 @@ class VersionService:
                 f"读取笔记当前内容失败，无法创建恢复快照: {e}"
             ) from e
 
-        # F-31 修复：先读取目标版本内容（验证可读），成功后再创建快照。
+        # 先读取目标版本内容（验证可读），成功后再创建快照，见 docs/decisions.md#F-31。
         # 旧实现先建快照再读目标，目标缺失时产生多余快照并返回 404。
         target_content = await self.get_version_content(
             note_id, version_number, user_id, db

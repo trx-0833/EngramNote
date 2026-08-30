@@ -87,8 +87,8 @@ async def get_folders(
     """
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # 查询文件夹及其笔记数量（F-08 修复：join 条件叠加 user_id，防止他人笔记计入计数；
-    # 回收站笔记已"移出"文件夹，不计入计数）
+    # 查询文件夹及其笔记数量（join 条件叠加 user_id，防止他人笔记计入计数；
+    # 回收站笔记已"移出"文件夹，不计入计数，见 docs/decisions.md#F-08）
     stmt = (
         select(
             Folder,
@@ -149,8 +149,8 @@ async def get_folder_detail(
     if not folder:
         return None
 
-    # 查询文件夹内的笔记（F-08 修复：叠加 user_id 过滤，防止跨用户笔记混入；
-    # 回收站笔记不显示）
+    # 查询文件夹内的笔记（叠加 user_id 过滤，防止跨用户笔记混入；
+    # 回收站笔记不显示，见 docs/decisions.md#F-08）
     notes_stmt = (
         select(Note)
         .where(
@@ -219,7 +219,7 @@ async def update_folder(
         await db.refresh(folder)
         logger.info("文件夹重命名成功: user_id=%s, folder_id=%s, name=%s", user_id, folder_id, name)
 
-    # 查询笔记数量以保持响应结构一致（F-08 修复：叠加 user_id 过滤；回收站笔记不计入）
+    # 查询笔记数量以保持响应结构一致（叠加 user_id 过滤；回收站笔记不计入，见 docs/decisions.md#F-08）
     count_stmt = select(func.count(Note.id)).where(
         Note.folder_id == folder_id,
         Note.user_id == user_id,
@@ -268,8 +268,8 @@ async def delete_folder(
     if not folder:
         raise ValueError("文件夹不存在或无权访问")
 
-    # 检查文件夹是否为空（F-08 修复：叠加 user_id 过滤；
-    # D3 决策：仅含回收站笔记的文件夹视为空、可删除）
+    # 检查文件夹是否为空（叠加 user_id 过滤；
+    # D3 决策：仅含回收站笔记的文件夹视为空、可删除，见 docs/decisions.md#F-08）
     count_stmt = select(func.count(Note.id)).where(
         Note.folder_id == folder_id,
         Note.user_id == user_id,

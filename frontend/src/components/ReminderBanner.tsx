@@ -43,9 +43,7 @@ export default function ReminderBanner() {
     try {
       const res = await getReminders()
       setReminders(res)
-      // F-25 修复：仅按 due_count 值变化去重。
-      // 旧实现依赖 getNotifiedQuizIds().length===0，markNotified 写入后 length 恒非 0，
-      // 导致同一会话内 due_count 从 5→8 等变化不再二次通知（整个会话只弹一次）。
+      // 仅按 due_count 值变化去重，避免同一会话只弹一次提醒，见 docs/decisions.md#F-25。
       if (res.due_count > 0 && res.due_count !== lastNotifiedDueRef.current) {
         // 静默时段不弹通知
         if (!isInQuietHours()) {

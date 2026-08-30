@@ -27,6 +27,7 @@ from ..schemas.user import (
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
+    UserReminderSettingsResponse,
     UserResponse,
 )
 from ..services.auth_service import (
@@ -169,3 +170,37 @@ async def get_me(current_user: User = Depends(get_current_user_dependency)):
         UserResponse: 当前用户信息
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.get("/reminder-settings", response_model=UserReminderSettingsResponse)
+async def get_reminder_settings(
+    current_user: User = Depends(get_current_user_dependency),
+):
+    """
+    获取当前用户邮件提醒设置
+
+    通过认证依赖获取当前用户，返回其邮件提醒开关状态。
+
+    Returns:
+        UserReminderSettingsResponse: 当前用户的邮件提醒设置
+    """
+    return UserReminderSettingsResponse.model_validate(current_user)
+
+
+@router.put("/reminder-settings", response_model=UserReminderSettingsResponse)
+async def update_reminder_settings(
+    req: UserReminderSettingsResponse,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新当前用户邮件提醒设置
+
+    由认证依赖注入的 current_user 仍挂接在会话上，直接改字段并提交即可持久化。
+
+    Returns:
+        UserReminderSettingsResponse: 更新后的邮件提醒设置
+    """
+    current_user.email_reminder_enabled = req.email_reminder_enabled
+    await db.commit()
+    return UserReminderSettingsResponse.model_validate(current_user)

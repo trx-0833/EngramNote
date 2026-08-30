@@ -40,9 +40,6 @@ from .database import init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
 from .middleware.request_context import RequestContextMiddleware
 
-# 运行环境兼容：替换 tempfile.mkdtemp（详见 core/tempfile_compat.py）
-apply_tempfile_compat()
-
 # 获取全局配置
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -59,13 +56,15 @@ async def lifespan(app: FastAPI):
     Args:
         app: FastAPI 应用实例
     """
+    # 启动时：运行环境兼容（替换 tempfile.mkdtemp，详见 core/tempfile_compat.py）
+    apply_tempfile_compat()
     # 启动时：初始化日志配置
     setup_logging()
     logger.info("EngramNote 应用启动")
     # 启动时：初始化数据库，创建所有数据表
     await init_db()
     yield
-    # 关闭时：释放共享 LLM HTTP 客户端（F-05 修复）
+    # 关闭时：释放共享 LLM HTTP 客户端，见 docs/decisions.md#F-05
     try:
         from .services.llm_service import close_llm_client
         close_llm_client()
@@ -87,7 +86,7 @@ app = FastAPI(
 # 生产环境应将 allow_origins 改为实际前端域名
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite 和 CRA 默认端口
+    allow_origins=settings.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
     allow_credentials=True,    # 允许携带 Cookie
     allow_methods=["*"],       # 允许所有 HTTP 方法
     allow_headers=["*"],       # 允许所有请求头

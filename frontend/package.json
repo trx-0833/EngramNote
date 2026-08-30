@@ -13,6 +13,7 @@
     "format:check": "prettier --check src/"
   },
   "dependencies": {
+    "dompurify": "^3.1.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "marked": "^14.0.0",

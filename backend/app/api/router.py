@@ -38,8 +38,8 @@ api_router = APIRouter()
 
 # 注册认证模块路由，前缀 /auth，OpenAPI 标签为"认证"
 api_router.include_router(auth_router, prefix="/auth", tags=["认证"])
-# 注册笔记模块路由，前缀 /notes，OpenAPI 标签为"笔记"
-api_router.include_router(notes_router, prefix="/notes", tags=["笔记"])
+# 注册笔记模块路由：/notes 前缀已在 api/notes 包的聚合 router 上声明（子路由 register 时不得同时为空）
+api_router.include_router(notes_router)
 # 注册上传模块路由，前缀 /upload，OpenAPI 标签为"上传"
 api_router.include_router(upload_router, prefix="/upload", tags=["上传"])
 # 注册清洗模块路由，前缀 /cleaning，OpenAPI 标签为"清洗"

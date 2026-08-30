@@ -15,10 +15,13 @@
 - 继承 BaseModel 获得 id、created_at、updated_at 公共字段
 """
 
+from datetime import datetime
+from typing import Optional
+
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import BaseModel
+from .base import BaseModel, TZDateTime
 
 
 class User(BaseModel):
@@ -46,3 +49,7 @@ class User(BaseModel):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     # 用户激活状态，设为 False 可禁止用户登录而不删除数据
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 邮件提醒开关（用户级，默认开启，保持"全局开启即发"的向后兼容）
+    email_reminder_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 最近一次提醒发送时间（未发送过为 NULL，用于展示与去重）
+    last_reminded_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)

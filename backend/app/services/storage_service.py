@@ -329,18 +329,20 @@ def move_file(bucket: str, object_name: str, new_object_name: str,
     """
     在存储内移动对象（回收站移入/恢复的物理文件隔离搬家）
 
-    统一实现为 读取字节 → 写入新位置 → 删除旧位置。
-    文档类文件体量小，复制删除方式对本地/MinIO 双后端最简单可靠。
+    本地模式：优先 os.replace（同盘原子移动），跨盘 OSError 时回退 copy+delete。
+    MinIO 模式：copy_object + remove_object 服务端搬移，无需拉取对象到内存。
+    行为契约不变：源不存在时抛错与现状一致。
 
     Args:
         bucket: 存储桶名称
         object_name: 原对象名
         new_object_name: 目标对象名
-        content_type: MIME 类型（MinIO 模式使用）
+        content_type: MIME 类型（MinIO copy_object 自动保留源元数据，参数仅为兼容签名）
     """
-    data = get_object_bytes(bucket, object_name)
-    upload_bytes(bucket, new_object_name, data, content_type=content_type)
-    delete_file(bucket, object_name)
+    if settings.storage_backend == "minio":
+        _move_file_minio(bucket, object_name, new_object_name)
+    else:
+        _move_file_local(bucket, object_name, new_object_name)
 
 
 # ===== 本地文件系统实现 =====
@@ -356,6 +358,20 @@ def _upload_file_local(bucket: str, object_name: str, file_path: str):
     except OSError:
         shutil.copy2(file_path, path)
         os.unlink(file_path)
+
+
+def _move_file_local(bucket: str, object_name: str, new_object_name: str):
+    """本地模式：优先 os.replace 原子移动（同盘），跨盘 OSError 回退 copy2 + 删除"""
+    src = _resolve_path(bucket, object_name)
+    dst = _resolve_path(bucket, new_object_name)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dst)
+    except OSError:
+        # 跨文件系统（src 与 dst 不同盘/挂载点）时 os.replace 抛 EXDEV/OSError，
+        # 回退复制 + 删除原文件；源不存在时本分支同样抛 FileNotFoundError，契约一致
+        shutil.copy2(src, dst)
+        os.unlink(src)
 
 
 def _upload_bytes_local(bucket: str, object_name: str, data: bytes):
@@ -469,4 +485,12 @@ def _get_presigned_url_minio(bucket: str, object_name: str, expires_hours: int) 
 def _delete_file_minio(bucket: str, object_name: str):
     """MinIO 模式：删除对象"""
     client = _get_minio_client()
+    client.remove_object(bucket, object_name)
+
+
+def _move_file_minio(bucket: str, object_name: str, new_object_name: str):
+    """MinIO 模式：copy_object + remove_object 服务端搬移（不拉取对象到内存）"""
+    from minio import CopySource
+    client = _get_minio_client()
+    client.copy_object(bucket, new_object_name, CopySource(bucket, object_name))
     client.remove_object(bucket, object_name)

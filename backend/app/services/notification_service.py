@@ -31,11 +31,14 @@ from ..config import get_settings
 from ..models.note import Note
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
+from ..models.user import User
 
 logger = logging.getLogger(__name__)
 
-# 邮件中引用的应用入口链接（项目暂无独立配置项，使用默认开发地址）
-APP_LINK = "http://localhost:3000"
+
+def _get_app_link() -> str:
+    """获取应用对外访问基础 URL（用于渲染邮件中的跳转链接）"""
+    return get_settings().app_base_url
 
 
 class NotificationService:
@@ -58,7 +61,7 @@ class NotificationService:
         - due_count: 已到期或尚未安排复习的题目数（next_review_at <= now 或为 None）
         - due_in_1h_count: 未来 1 小时内到期的题目数（next_review_at BETWEEN now AND now+1h）
         - weak_point_count: 掌握度低于 60 的知识卡片数
-        - last_reminded_at: 上次提醒时间（暂未持久化，固定返回 None）
+        - last_reminded_at: 上次提醒时间（从当前用户记录读取；未发送过为 None）
 
         Args:
             user_id: 用户 ID
@@ -101,11 +104,16 @@ class NotificationService:
         )
         weak_point_count = weak_point_count_result.scalar() or 0
 
+        # 上次提醒时间从当前用户记录读取真实值（未发送过为 None）
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalars().first()
+        last_reminded_at = user.last_reminded_at if user else None
+
         return {
             "due_count": due_count,
             "due_in_1h_count": due_in_1h_count,
             "weak_point_count": weak_point_count,
-            "last_reminded_at": None,
+            "last_reminded_at": last_reminded_at,
         }
 
     async def send_review_email(
@@ -123,6 +131,7 @@ class NotificationService:
         3. 获取 top 3 薄弱知识点（按掌握度升序，仅取掌握度 < 60 的卡片）
         4. 渲染 HTML 和纯文本邮件内容
         5. 通过 asyncio.to_thread 在独立线程中同步发送 SMTP 邮件
+        6. 发送成功后更新 user.last_reminded_at 为当前时间
 
         任何异常都不向上抛出，仅记录日志并返回 False。
 
@@ -174,6 +183,13 @@ class NotificationService:
                 html_body,
                 text_body,
             )
+
+            # 发送成功后记录提醒时间，供 /reminders 展示与去重
+            user_result = await db.execute(select(User).where(User.id == user_id))
+            user = user_result.scalars().first()
+            if user is not None:
+                user.last_reminded_at = datetime.now(timezone.utc)
+                await db.commit()
 
             logger.info(
                 f"复习提醒邮件发送成功: user={user_id[:8]}, email={user_email}, "
@@ -336,13 +352,13 @@ class NotificationService:
             "</table>"
             "</td></tr>\n"
             '      <tr><td style="padding:16px 32px 28px;">'
-            f'<a href="{APP_LINK}" style="display:inline-block;background:#4a6cf7;color:#ffffff;'
+            f'<a href="{_get_app_link()}" style="display:inline-block;background:#4a6cf7;color:#ffffff;'
             'text-decoration:none;padding:10px 24px;border-radius:5px;font-size:14px;">立即去复习</a>'
             "</td></tr>\n"
             '      <tr><td style="padding:16px 32px;background:#fafbfc;border-top:1px solid #eee;">'
             '<div style="font-size:12px;color:#999;line-height:1.6;">'
             "这是一封来自 EngramNote 的自动提醒邮件。<br>"
-            f'<a href="{APP_LINK}" style="color:#4a6cf7;text-decoration:none;">{APP_LINK}</a>'
+            f'<a href="{_get_app_link()}" style="color:#4a6cf7;text-decoration:none;">{_get_app_link()}</a>'
             "</div></td></tr>\n"
             "    </table>\n"
             "  </td></tr>\n"
@@ -378,7 +394,7 @@ class NotificationService:
         else:
             lines.append("  暂无薄弱知识点，继续保持！")
         lines.append("")
-        lines.append(f"立即去复习：{APP_LINK}")
+        lines.append(f"立即去复习：{_get_app_link()}")
         lines.append("")
         lines.append("这是一封来自 EngramNote 的自动提醒邮件。")
         return "\n".join(lines)

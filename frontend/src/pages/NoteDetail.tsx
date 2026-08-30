@@ -82,6 +82,9 @@ export default function NoteDetail() {
   const [annotationMenuPos, setAnnotationMenuPos] = useState({ x: 0, y: 0 })
   const markdownRef = useRef<HTMLElement>(null)
 
+  /** 块操作（恢复/删除）进行中标记：置 true 时 5s 状态轮询跳过本轮，避免轮询旧数据覆盖块操作结果 */
+  const mutatingRef = useRef<boolean>(false)
+
   /** ADHD Reader 专注阅读模式（鼠标遮罩/显示文本） */
   const {
     enabled: adhdReaderEnabled,
@@ -171,6 +174,7 @@ export default function NoteDetail() {
     if (note?.status !== 'cleaning' || !noteId) return
 
     const interval = setInterval(async () => {
+      if (mutatingRef.current) return
       try {
         const data = await getNote(noteId)
         setNote(data)
@@ -194,6 +198,7 @@ export default function NoteDetail() {
     if (note?.status !== 'learning' || !noteId) return
 
     const interval = setInterval(async () => {
+      if (mutatingRef.current) return
       try {
         const data = await getNote(noteId)
         setNote(data)
@@ -337,7 +342,7 @@ export default function NoteDetail() {
   async function handleStartLearning() {
     if (!note) return
     try {
-      // F-02：archived 笔记重新理解会清空全部旧产物，先获取影响数量并二次确认
+      // archived 笔记重新理解会清空全部旧产物，先获取影响数量并二次确认，见 docs/decisions.md#F-02
       const res = await startUnderstanding(note.id, false)
       if (res.requires_confirm) {
         const impact = res.impact
@@ -762,7 +767,7 @@ export default function NoteDetail() {
 
       {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
       {(note.status === 'converted' || note.status === 'cleaning' || note.status === 'cleaning_failed' || note.status === 'cleaned') && (
-        <CleaningPanel note={note} onStatusChange={handleStatusChange} />
+        <CleaningPanel note={note} onStatusChange={handleStatusChange} onMutatingChange={(mutating) => { mutatingRef.current = mutating }} />
       )}
 
       {/* 关联的学习资料列表 */}
@@ -1015,7 +1020,7 @@ export default function NoteDetail() {
                   <strong style={{ fontSize: '0.9rem' }}>{card.title}</strong>
                   <span style={{
                     fontSize: '0.7rem', padding: '1px 6px', borderRadius: '9999px',
-                    // F-28：卡片类型颜色/标签统一从 utils/labels.ts 读取
+                    // 卡片类型颜色/标签统一从 utils/labels.ts 读取，见 docs/decisions.md#F-28
                     background: cardTypeColors[card.card_type] || '#6b7280',
                     color: 'white', whiteSpace: 'nowrap',
                   }}>

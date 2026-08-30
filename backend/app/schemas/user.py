@@ -1,6 +1,7 @@
 """用户 Pydantic Schema — 请求/响应数据模型"""
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -32,7 +33,16 @@ class UserResponse(BaseModel):
     email: str
     username: str
     is_active: bool
+    email_reminder_enabled: Optional[bool] = None
+    last_reminded_at: Optional[datetime] = None
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# 邮件提醒用户级设置响应
+class UserReminderSettingsResponse(BaseModel):
+    email_reminder_enabled: bool
 
     model_config = {"from_attributes": True}
 

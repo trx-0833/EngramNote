@@ -18,6 +18,8 @@ EngramNote 配置管理模块
 - 通过 get_settings() 配合 lru_cache 实现单例模式，避免重复解析配置
 """
 
+import logging
+import secrets
 from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
@@ -35,6 +37,10 @@ DB_DIR = DATA_DIR / "db"
 # 两阶段上传的临时文件目录：data/tmp/upload/{uuid}/{原文件名}
 # data/ 已被 .gitignore 忽略；由 commit 后清理逻辑与启动时超时清理兜底
 TMP_UPLOAD_DIR = DATA_DIR / "tmp" / "upload"
+# 开发模式自动生成 JWT 密钥的持久化文件（debug=True 且未配置时写入并复用）
+JWT_SECRET_FILE = DATA_DIR / ".jwt-secret"
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -84,7 +90,8 @@ class Settings(BaseSettings):
 
     # ---- JWT 认证配置 ----
     # JWT 签名密钥，生产环境务必更换为强随机字符串（生成：python -c "import secrets; print(secrets.token_hex(32))"）
-    # 默认空字符串：开发模式（debug=True）可空跑；生产模式（debug=False）为空时启动即报错（F-21a 修复）
+    # 默认空字符串：开发模式（debug=True）自动生成并持久化到 data/.jwt-secret；
+    # 生产模式（debug=False）为空时启动即报错，见 docs/decisions.md#F-21a
     jwt_secret_key: str = ""
     # JWT 签名算法
     jwt_algorithm: str = "HS256"
@@ -151,14 +158,14 @@ class Settings(BaseSettings):
     llm_retry_delay: float = 1.0
     # LLM 每分钟最大请求数 (0 = 不限流)
     llm_max_rpm: int = 10
-    # LLM HTTP 请求超时（秒）（F-05 修复：共享客户端使用）
+    # LLM HTTP 请求超时（秒）（共享客户端使用，见 docs/decisions.md#F-05）
     # 实测：reasoning 模型生成 8K 输出 token 约需 195s，120s 会在模型返回前就超时，
-    # 比 JSON 截断更早触发失败，故提高默认值（F-33）
+    # 比 JSON 截断更早触发失败，故提高默认值，见 docs/decisions.md#F-33
     llm_timeout_seconds: float = 600.0
     # LLM 结构化输出（JSON 场景）单次生成上限（token）。
     # 网关按 max_tokens 精确截断（finish_reason=length 实测验证），该值需明显大于
     # 实际 JSON 体量（实测多数截断发生在 8192，故默认 16384；截断重试时按 2 倍逐级放大）。
-    # 不建议设到 200000：超出模型硬上限的部分无效，且会放大超时/成本风险（F-33）。
+    # 不建议设到 200000：超出模型硬上限的部分无效，且会放大超时/成本风险，见 docs/decisions.md#F-33。
     llm_json_max_tokens: int = 16384
     # 截断重试时单次 max_tokens 的放大上限（防止极端值拖死请求）
     llm_json_max_tokens_ceiling: int = 32768
@@ -192,7 +199,7 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
 
     # ---- 复习配置 ----
-    # 每日最大答题数（F-12 修复：前后端单一来源，经 /review/stats 下发给前端）
+    # 每日最大答题数（前后端单一来源，经 /review/stats 下发给前端，见 docs/decisions.md#F-12）
     daily_review_limit: int = 10
 
     # ---- 复习提醒配置 ----
@@ -215,6 +222,10 @@ class Settings(BaseSettings):
 
     # ---- 应用基本配置 ----
     app_name: str = "EngramNote"
+    # 应用对外访问基础 URL（如渲染邮件提醒中的跳转链接），按实际部署域名配置
+    app_base_url: str = "http://localhost:5173"
+    # CORS 允许来源（逗号分隔），默认本地前端开发服务器端口；生产环境改为实际前端域名
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
     # 调试模式，开启后 SQLAlchemy 会输出 SQL 日志
     debug: bool = True
 
@@ -230,18 +241,55 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """
-        生产模式安全校验（F-21a 修复）
+        生产/开发模式 JWT 密钥策略
 
         生产环境（debug=False）必须显式配置 JWT 签名密钥，
         防止使用可预测/空密钥导致 Token 可被伪造。
-        开发模式（debug=True）允许空密钥零配置启动。
+        开发模式（debug=True）允许空密钥零配置启动，但空密钥不再用于签发：
+        此时自动生成随机密钥并持久化到 data/.jwt-secret，重启后复用。
         """
         if not self.debug and not self.jwt_secret_key:
             raise ValueError(
                 "生产环境必须配置 JWT_SECRET_KEY（生成方法："
                 "python -c \"import secrets; print(secrets.token_hex(32))\"）"
             )
+        if self.debug and not self.jwt_secret_key:
+            self.jwt_secret_key = self._load_or_generate_jwt_secret()
         return self
+
+    def _load_or_generate_jwt_secret(self) -> str:
+        """
+        开发模式加载或生成 JWT 密钥
+
+        优先读取 data/.jwt-secret 中已持久化的密钥（重启后复用）；
+        文件不存在或内容为空时生成 secrets.token_hex(32) 并写入该文件。
+
+        Returns:
+            str: JWT 签名密钥
+        """
+        if JWT_SECRET_FILE.exists():
+            existing = JWT_SECRET_FILE.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+        secret = secrets.token_hex(32)
+        JWT_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        JWT_SECRET_FILE.write_text(secret, encoding="utf-8")
+        logger.warning(
+            "开发模式未配置 JWT_SECRET_KEY，已自动生成随机密钥并持久化到 %s",
+            JWT_SECRET_FILE,
+        )
+        return secret
+
+    def get_cors_origins(self) -> list[str]:
+        """
+        解析 CORS 允许来源列表
+
+        配置项 cors_origins 为逗号分隔字符串，此处拆分为列表供 CORSMiddleware 使用。
+
+        Returns:
+            list[str]: 允许的跨域来源列表
+        """
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     def get_database_url(self) -> str:
         """

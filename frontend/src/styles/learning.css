@@ -1,0 +1,228 @@
+/* ── 问答气泡 ── */
+
+.qa-user-bubble {
+  background: var(--gradient-primary);
+  color: white;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 16px 16px 4px 16px;
+  max-width: 70%;
+  display: inline-block;
+  animation: slideUp 0.3s var(--ease-out-expo);
+}
+
+.qa-ai-card {
+  border-left: 3px solid var(--color-accent);
+  animation: slideUp 0.3s var(--ease-out-expo);
+}
+
+/* ── 拖拽上传区 ── */
+
+.upload-zone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s var(--ease-out-expo);
+  background: var(--color-surface);
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-zone:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.upload-zone-active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+  box-shadow: var(--shadow-glow);
+}
+
+.upload-zone-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  animation: glowPulse 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── 选项按钮（答题） ── */
+
+.quiz-option {
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.25s var(--ease-out-expo);
+  font-size: 0.95rem;
+}
+
+.quiz-option:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  transform: translateX(4px);
+}
+
+.quiz-option-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  box-shadow: 0 0 0 3px rgba(15, 52, 96, 0.08);
+}
+
+/* ── 反馈区域 ── */
+
+.feedback-correct {
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-light);
+  border: 1px solid var(--color-success);
+  animation: scaleIn 0.3s var(--ease-out-expo);
+}
+
+.feedback-incorrect {
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--color-error-light);
+  border: 1px solid var(--color-error);
+  animation: shake 0.4s ease;
+}
+
+/* ── 筛选标签 ── */
+
+.filter-pill {
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.25s var(--ease-out-expo);
+}
+
+.filter-pill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.filter-pill-active {
+  background: var(--gradient-primary);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(15, 52, 96, 0.2);
+}
+
+/* ── 分段控件（视图切换） ── */
+
+.segment-control {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  border: 1px solid var(--color-border-light);
+}
+
+.segment-btn {
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all 0.25s var(--ease-out-expo);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.segment-btn:hover {
+  color: var(--color-primary);
+}
+
+.segment-btn-active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+
+/* ── 折叠箭头 ── */
+
+.collapse-arrow {
+  display: inline-block;
+  transition: transform 0.3s var(--ease-out-expo);
+  font-size: 0.75rem;
+  user-select: none;
+}
+
+.collapse-arrow-open {
+  transform: rotate(90deg);
+}
+
+/* ── 搜索框 ── */
+
+.search-input-wrapper {
+  position: relative;
+  max-width: 400px;
+}
+
+.search-input-wrapper input {
+  padding-left: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
+/* ── 空状态/加载/错误组件 ── */
+
+.state-container {
+  text-align: center;
+  padding: var(--space-2xl);
+  animation: fadeIn 0.4s var(--ease-out-expo);
+}
+
+.state-icon {
+  margin-bottom: var(--space-md);
+  opacity: 0.7;
+}
+
+.state-message {
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  margin-bottom: var(--space-sm);
+}
+
+.state-description {
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
+  margin-bottom: var(--space-md);
+}
+
+/* ── 加载动画 ── */
+
+.spinner {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-light);
+  border-top-color: var(--color-primary);
+  border-right-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}

@@ -295,10 +295,10 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
             # 正常重试调度：交给 Celery 框架，不标记失败
             raise
         except Exception:
-            # F-30 修复：Celery retry() 重试耗尽时会重新抛出原始异常
+            # Celery retry() 重试耗尽时会重新抛出原始异常
             # （而非 MaxRetriesExceededError），旧代码捕获不到导致笔记
             # 永久停留在 converting 状态。进入此分支即表示重试次数用尽，
-            # 标记笔记为失败状态。
+            # 标记笔记为失败状态（见 docs/decisions.md#F-30）。
             asyncio.run(_update_note_status(
                 note_id, NoteStatus.failed,
                 error_message=f"转换任务重试失败: {str(exc)}",

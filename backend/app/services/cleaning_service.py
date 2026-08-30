@@ -91,9 +91,9 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
     if not text or not text.strip():
         return text, stats
 
-    # F-30 修复：逐行清洗并跟踪代码块/数学块状态。
+    # 逐行清洗并跟踪代码块/数学块状态。
     # 旧实现直接对全文做正则 sub，页码/数字行/水印规则会误删
-    # 围栏代码块内的纯数字行（编号示例 1/2/3）、公式独立数字行等合法正文。
+    # 围栏代码块内的纯数字行（编号示例 1/2/3）、公式独立数字行等合法正文，见 docs/decisions.md#F-30。
     lines = text.split("\n")
     result_lines = []
     in_code_block = False
@@ -520,9 +520,9 @@ def generate_clean_copy(
 
         if is_dup and not in_duplicate:
             dup_info = line_to_dup_info[line_idx]
-            # F-11 修复：注释标记使用重复块自身的 block_index（与前端传参、
+            # 注释标记使用重复块自身的 block_index（与前端传参、
             # metadata duplicates_detail 的 block_index 一致），
-            # 旧实现误用 duplicate_of（保留块 index）导致恢复/删除无法匹配
+            # 旧实现误用 duplicate_of（保留块 index）导致恢复/删除无法匹配（见 docs/decisions.md#F-11）
             result_lines.append(
                 f"<!-- duplicate: block_{dup_info['block_index']} "
                 f"similarity={dup_info['similarity']:.2f} -->"

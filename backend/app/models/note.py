@@ -15,7 +15,10 @@
 - metadata_ 字段使用 JSON 类型（而非 JSONB），兼容 SQLite 和 PostgreSQL
 - metadata_ 在 Python 中命名为 metadata_（带下划线），映射到数据库列名为 metadata，
   避免与 SQLAlchemy 的 metadata 属性冲突
-- 文件路径格式为 {user_id}/{note_id}/{filename}，确保用户间隔离
+- 对象存储路径采用 Vault 结构（{user_id}/inbox/ 前缀，详见 services/vault_path.py）：
+  source/{base}{ext}（原始文件）、output/markdown/{base}.md（原始转换）、
+  output/markdown/{base}.clean.md（清洗副本）、output/meta/{base}.json（状态旁载）、
+  history/versions/{note_id}/v{N}.md（版本归档），确保用户间隔离
 """
 
 import enum

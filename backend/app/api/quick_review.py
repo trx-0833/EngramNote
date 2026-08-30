@@ -94,7 +94,7 @@ async def submit_quick_review_answer(
         time_spent_ms=req.time_spent_ms,
         db=db,
         skip_daily_limit=True,
-        skip_due_check=True,  # F-14 修复：快速复习保留免到期校验
+        skip_due_check=True,  # 快速复习保留免到期校验，见 docs/decisions.md#F-14
     )
 
     if "error" in result:

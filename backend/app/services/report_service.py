@@ -51,7 +51,7 @@ async def get_daily_report(
         Dict: 今日学习报告数据
     """
     now = datetime.now(timezone.utc)
-    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
     today_start = today_start_utc(now)
     today_str = today_start.strftime("%Y-%m-%d")
@@ -143,7 +143,7 @@ async def get_weekly_trend(
         Dict: 7天趋势数据
     """
     now = datetime.now(timezone.utc)
-    # F-32 修复：日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点
+    # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import local_day_start_utc
 
     # 按业务日界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题

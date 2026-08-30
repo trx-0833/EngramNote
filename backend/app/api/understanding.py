@@ -58,7 +58,7 @@ from ..schemas.knowledge import (
 )
 from ..services.note_service import get_note_detail
 from ..services.understanding_service import detect_card_duplicates
-from ..services.rag_service import RAGService
+from ..services.rag_service import RAGService, invalidate_kb_cache
 from ..services.llm_service import LLMService
 from ..tasks.understand_tasks import understand_document_task, generate_questions_task
 from ..config import get_settings
@@ -79,15 +79,15 @@ async def start_understanding(
     触发笔记理解管道
 
     仅对 cleaned / learning_failed / archived 状态的笔记有效。
-    F-02 修复：archived 笔记重新理解会清空全部旧产物（卡片/题目/复习记录/图谱关系），
-    必须先以 confirm=false 调用获取影响数量，用户确认后带 confirm=true 再次调用。
+    archived 笔记重新理解会清空全部旧产物（卡片/题目/复习记录/图谱关系），
+    必须先以 confirm=false 调用获取影响数量，用户确认后带 confirm=true 再次调用（见 docs/decisions.md#F-02）。
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
         raise HTTPException(status_code=404, detail="笔记不存在")
 
     if note.status == NoteStatus.learning:
-        # F-29 联动：进行中禁止重复触发
+        # 进行中禁止重复触发，见 docs/decisions.md#F-29
         raise HTTPException(
             status_code=409,
             detail="理解任务正在进行中，请等待完成",
@@ -99,7 +99,7 @@ async def start_understanding(
             detail=f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
         )
 
-    # F-02 修复：archived 笔记未确认时，只返回影响数量，不执行任何删除
+    # archived 笔记未确认时，只返回影响数量，不执行任何删除（见 docs/decisions.md#F-02）
     if note.status == NoteStatus.archived and not req.confirm:
         impact = await _count_understanding_impact(db, note_id)
         return UnderstandingStartResponse(
@@ -159,7 +159,7 @@ async def start_understanding(
 async def _count_understanding_impact(
     db: AsyncSession, note_id: str
 ) -> UnderstandingImpact:
-    """统计重新理解将删除的旧产物数量（F-02 修复）"""
+    """统计重新理解将删除的旧产物数量（见 docs/decisions.md#F-02）"""
     from sqlalchemy import func as sa_func
 
     cards = (await db.execute(
@@ -325,7 +325,7 @@ async def get_all_cards(
     if note_id:
         conditions.append(KnowledgeCard.note_id == note_id)
     if keyword:
-        # F-32 修复：转义 SQL 通配符
+        # 转义 SQL 通配符（见 docs/decisions.md#F-32）
         escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append(
             or_(
@@ -491,6 +491,9 @@ async def delete_card(
     await db.delete(card)
     await db.commit()
 
+    # 卡片语料已变更，清除该用户的 RAG 卡片缓存
+    invalidate_kb_cache(current_user.id)
+
 
 @router.get("/{note_id}/duplicates")
 async def get_card_duplicates(
@@ -536,7 +539,7 @@ async def ask_question(
 
     基于用户所有笔记的内容回答问题。
     """
-    # F-31 修复：拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用
+    # 拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用（见 docs/decisions.md#F-31）
     if not req.question or not req.question.strip():
         raise HTTPException(status_code=422, detail="问题不能为空")
 
@@ -559,6 +562,7 @@ async def ask_question(
             for s in result.get("sources", [])
         ],
         provider=result.get("provider", ""),
+        retrieval_status=result.get("retrieval_status", ""),
     )
 
 
@@ -575,11 +579,13 @@ async def ask_question_stream(
 
     流程：
     1. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）
-    2. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）
-    3. 调用 llm_service.chat_stream() 流式生成回答
-    4. 流式结束后发送 sources 与 done 事件
+    2. 首事件下发 retrieval_status（meta 事件，供前端展示降级提示）
+    3. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）
+    4. 调用 llm_service.chat_stream() 流式生成回答
+    5. 流式结束后发送 sources 与 done 事件
 
     SSE 事件格式：
+    - event: meta    data: {"retrieval_status": "...", "provider": "..."}  首事件，检索降级状态
     - event: token   data: {"content": "..."}                每个 token 片段
     - event: sources data: {"sources": [...], "provider": "..."}  流式结束后返回引用来源
     - event: done    data: {}                                结束标记
@@ -588,7 +594,7 @@ async def ask_question_stream(
 
     async def event_stream():
         try:
-            # F-31 修复：拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用
+            # 拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用（见 docs/decisions.md#F-31）
             if not req.question or not req.question.strip():
                 yield f"event: error\ndata: {json.dumps({'message': '问题不能为空', 'error_code': 'EMPTY_QUESTION'}, ensure_ascii=False)}\n\n"
                 return
@@ -602,8 +608,12 @@ async def ask_question_stream(
             context = retrieval["context"]
             sources = retrieval["sources"]
             provider = retrieval["provider"]
+            retrieval_status = retrieval.get("retrieval_status", "")
 
-            # 2. 构建 messages（system prompt 与 LLMService.rag_answer 保持一致以命中缓存）
+            # 2. 首事件下发检索降级状态（sources 前，供前端即时提示）
+            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider}, ensure_ascii=False)}\n\n"
+
+            # 3. 构建 messages（system prompt 与 LLMService.rag_answer 保持一致以命中缓存）
             llm_service = LLMService()
             if not context.strip():
                 # 无检索结果，使用 LLM 自身知识回答
@@ -637,14 +647,14 @@ async def ask_question_stream(
                     },
                 ]
 
-            # 3. 流式输出 token
+            # 4. 流式输出 token
             async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
-            # 4. 发送 sources 事件
+            # 5. 发送 sources 事件
             yield f"event: sources\ndata: {json.dumps({'sources': sources, 'provider': provider}, ensure_ascii=False)}\n\n"
 
-            # 5. 发送 done 事件
+            # 6. 发送 done 事件
             yield "event: done\ndata: {}\n\n"
         except Exception as e:
             logger.warning(f"SSE 流式问答失败: {e}", exc_info=True)
@@ -756,7 +766,7 @@ async def get_all_questions(
     if note_id:
         conditions.append(QuizItem.note_id == note_id)
     if keyword:
-        # F-32 修复：转义 SQL 通配符
+        # 转义 SQL 通配符（见 docs/decisions.md#F-32）
         escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append(QuizItem.question.ilike(f"%{escaped}%", escape="\\"))
 

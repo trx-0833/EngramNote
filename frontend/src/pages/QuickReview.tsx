@@ -13,7 +13,7 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-// F-33：共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
+// 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
 
 /** 单题答题状态 */
@@ -37,7 +37,7 @@ export default function QuickReview() {
   const [sessionCorrect, setSessionCorrect] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
   const [completed, setCompleted] = useState(false)
-  /** F-23：提交 in-flight 锁（防双击重复提交） */
+  /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
 
   const loadQuizzes = useCallback(async () => {
@@ -66,7 +66,7 @@ export default function QuickReview() {
   }, [noteId, loadQuizzes])
 
   async function handleSubmit() {
-    // F-23：in-flight 锁，防止双击/连按回车重复提交
+    // in-flight 锁，防止双击/连按回车重复提交，见 docs/decisions.md#F-23
     if (submittingRef.current) return
     const current = quizzes[currentIndex]
     if (!current || current.submitted || !current.userAnswer.trim()) return
@@ -198,7 +198,7 @@ export default function QuickReview() {
           {sessionCorrect}/{sessionTotal} 正确
         </span>
       </div>
-      {/* 题目卡片（F-33：共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
+      {/* 题目卡片（共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
       <QuizAnswerCard
         quiz={quiz}
         userAnswer={current.userAnswer}

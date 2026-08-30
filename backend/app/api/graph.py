@@ -37,7 +37,7 @@ from ..schemas.graph import (
     GraphSearchResponse,
 )
 from ..services import graph_service
-from ..services.graph_service import suggest_semantic_relations
+from ..services.graph_service import GraphSuggestionError, suggest_semantic_relations
 
 router = APIRouter()
 
@@ -146,14 +146,16 @@ async def suggest_relations_api(
     """
     手动触发基于嵌入向量相似度的相关关系建议
 
-    基于「标题 + 内容」编码全部卡片并计算两两相似度，
-    卡片较多时可能耗时数十秒（首次还需加载嵌入模型），
-    因此由用户显式触发，不在页面加载时自动执行。
+    基于「标题 + 内容」编码全部卡片并计算两两相似度，嵌入编码在 Celery worker
+    中执行，卡片较多时可能耗时数十秒，因此由用户显式触发，不在页面加载时自动执行。
     """
-    new_count = await graph_service.auto_suggest_relations(
-        user_id=current_user.id,
-        db=db,
-    )
+    try:
+        new_count = await graph_service.auto_suggest_relations(
+            user_id=current_user.id,
+            db=db,
+        )
+    except GraphSuggestionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     return {"success": True, "new_count": new_count}
 
 

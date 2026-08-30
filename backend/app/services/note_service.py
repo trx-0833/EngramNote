@@ -23,10 +23,11 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Optional, Tuple, List, Dict, Any
 import asyncio
+import json
 import logging
 import uuid
 
-from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_update
+from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.note import Note, NoteStatus, NoteRole
@@ -106,7 +107,7 @@ async def get_notes_list(
         )
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
-    # F-32 修复：转义 SQL 通配符（%/_），避免搜索 "100%" 等字面量被放大匹配
+    # 转义 SQL 通配符（%/_），避免搜索 "100%" 等字面量被放大匹配（见 docs/decisions.md#F-32）
     if keyword:
         escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query = query.where(Note.title.ilike(f"%{escaped}%", escape="\\"))
@@ -312,6 +313,12 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
     同名冲突处理：恢复时若原位置（inbox）已被同名新文件占用（回收站期间用户
     重新上传了同名文件），自动加序号后缀（base-1、base-2…），四个文件统一
     使用同一新 base（保持 source↔markdown 命名关联法则），笔记标题不动。
+    1~999 序号均被占用时抛出 ValueError（API 层转 409），不再静默使用 base-999
+    覆盖既有文件。
+
+    文件搬家一致性：仅把「实际搬移成功」的路径写回 DB（复用 trash_note 的
+    moved 字典模式）；存在搬移失败时，失败项路径保留 trash 值、日志记 ERROR，
+    并把警告写入 note.metadata_["restore_warnings"] 供详情页展示与重试。
 
     关系/卡片/题目/复习记录在软删除期间原地未动，恢复即整体复原（原子包）。
 
@@ -321,6 +328,9 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
 
     Returns:
         Tuple[Note, Optional[str]]: (恢复后的笔记, 改名后的完整文件名或 None)
+
+    Raises:
+        ValueError: 1~999 改名序号全部冲突，inbox 无可用目标名
     """
     note_id = note.id
     prefix = vault_path.inbox_prefix(note.user_id)
@@ -341,7 +351,7 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
                           vault_path.clean_object(prefix, new_base)))
         return items
 
-    # ---- 同名冲突检测：目标位置（inbox）被占用则递增后缀，上限 1000 次防御死循环 ----
+    # ---- 同名冲突检测：目标位置（inbox）被占用则递增后缀，上限 1000 次 ----
     new_base = base
     renamed_to: Optional[str] = None
     for i in range(1000):
@@ -350,25 +360,38 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
             new_base = candidate
             break
     else:
-        new_base = f"{base}-999"
+        raise ValueError(
+            f"恢复笔记失败：inbox 中 {base} 及 {base}-1~{base}-999 均已被同名文件占用，"
+            f"无法自动改名，请先处理冲突文件后重试"
+        )
     if new_base != base:
         renamed_to = f"{new_base}{ext}"
 
-    # ---- 文件搬回 inbox 目标位 ----
+    # ---- 文件搬回 inbox 目标位（同一新 base，仅记录实际搬移成功的路径） ----
+    moved: Dict[str, str] = {}
+    warnings: List[str] = []
     for bucket, old, new in _targets(new_base):
         try:
             if file_exists(bucket, old):
                 move_file(bucket, old, new)
+                moved[old] = new
         except Exception as e:
-            logger.warning(f"回收站恢复搬家失败（忽略继续）: {old} -> {new}, 错误: {e}")
+            logger.error(f"回收站恢复搬家失败: {old} -> {new}, 错误: {e}")
+            warnings.append(f"{old} 恢复失败: {e}")
 
-    # ---- 更新路径字段为 inbox 目标路径 ----
-    if note.original_file_path:
-        note.original_file_path = vault_path.source_object(prefix, new_base, ext)
-    if note.original_md_path:
-        note.original_md_path = vault_path.markdown_object(prefix, new_base)
-    if note.clean_md_path:
-        note.clean_md_path = vault_path.clean_object(prefix, new_base)
+    # ---- 更新路径字段为 inbox 目标路径（仅覆盖实际搬成功的，失败保留 trash 值） ----
+    if note.original_file_path and note.original_file_path in moved:
+        note.original_file_path = moved[note.original_file_path]
+    if note.original_md_path and note.original_md_path in moved:
+        note.original_md_path = moved[note.original_md_path]
+    if note.clean_md_path and note.clean_md_path in moved:
+        note.clean_md_path = moved[note.clean_md_path]
+
+    # ---- 搬移失败警告写入元数据，供详情页展示与用户重试 ----
+    if warnings:
+        meta = dict(note.metadata_ or {})
+        meta["restore_warnings"] = warnings
+        note.metadata_ = meta
 
     # ---- 恢复可见性 + 防御孤儿文件夹引用 ----
     note.trashed_at = None
@@ -494,6 +517,21 @@ async def get_trash_info(db: AsyncSession, note: Note) -> Dict[str, int]:
     }
 
 
+def _db_dialect_name(db: AsyncSession) -> str:
+    """
+    返回当前会话的数据库方言名（'sqlite' 或 'postgresql'）
+
+    用于 purge 第 5 步 JSON 清理语句的方言分支：SQLite 走 json_each + EXISTS，
+    PostgreSQL 走 jsonb `?` 运算符（JSON 列需先 ::jsonb）。优先取会话绑定的
+    真实方言，取不到时回退按配置 URL 判定。
+    """
+    bind = getattr(db, "bind", None)
+    name = getattr(getattr(bind, "dialect", None), "name", None)
+    if name:
+        return name
+    return "sqlite" if settings.get_database_url().startswith("sqlite") else "postgresql"
+
+
 async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = False):
     """
     物理删除笔记（悬挂引用策略）
@@ -575,55 +613,131 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
         )
 
-    # ---- 5. 跨笔记聚合结果软标记与引用清理 ----
-    # 标记引用该笔记的 AssessmentResult 为 stale（评估结果保留，提示重新评估）
-    from ..models.assessment import AssessmentResult
-    ar_result = await db.execute(
-        select(AssessmentResult).where(AssessmentResult.user_id == note.user_id)
-    )
-    for ar in ar_result.scalars().all():
-        if note_id in (ar.material_note_ids or []) or note_id in (ar.personal_note_ids or []):
-            ar.is_stale = True
+    # 卡片行已删除（含第 2 步提升为独立节点的核心卡片），清除该用户的 RAG 卡片缓存
+    from ..services.rag_service import invalidate_kb_cache
+    invalidate_kb_cache(note.user_id)
 
-    # 清理学习目标 scope_notes 中的失效笔记引用（目标本身保留）
+    # ---- 5. 跨笔记聚合结果软标记与引用清理（SQL 端过滤命中行，避免全表拉取 + Python 过滤） ----
     from ..models.learning_goal import DailyPlan, LearningGoal
-    goal_result = await db.execute(
-        select(LearningGoal).where(LearningGoal.user_id == note.user_id)
-    )
-    for goal in goal_result.scalars().all():
-        scope = list(goal.scope_notes or [])
-        if note_id in scope:
-            goal.scope_notes = [n for n in scope if n != note_id]
+
+    dialect = _db_dialect_name(db)
+
+    # 5.1 标记引用该笔记的 AssessmentResult 为 stale（评估结果保留，提示重新评估）
+    # SQLite 用 json_each + EXISTS；PostgreSQL 用 jsonb `?` 运算符（JSON 列先 ::jsonb）
+    if dialect == "sqlite":
+        ar_sql = text("""
+            UPDATE assessment_results
+            SET is_stale = 1
+            WHERE user_id = :uid AND (
+                EXISTS (SELECT 1 FROM json_each(assessment_results.material_note_ids)
+                        WHERE json_each.value = :nid)
+             OR EXISTS (SELECT 1 FROM json_each(assessment_results.personal_note_ids)
+                        WHERE json_each.value = :nid)
+            )
+        """)
+    else:
+        ar_sql = text("""
+            UPDATE assessment_results
+            SET is_stale = TRUE
+            WHERE user_id = :uid AND (
+                material_note_ids::jsonb ? :nid OR personal_note_ids::jsonb ? :nid
+            )
+        """)
+    ar_result = await db.execute(ar_sql, {"uid": note.user_id, "nid": note_id})
+    if ar_result.rowcount:
+        logger.info(f"已标记失效评估结果: note={note_id[:8]}, 数量={ar_result.rowcount}")
+
+    # 5.2 清理学习目标 scope_notes 中的失效笔记引用（目标本身保留）
+    # 只在 SQL 端命中「scope_notes 含该笔记」的行，再对命中行做数组移除
+    if dialect == "sqlite":
+        goal_hit_sql = text("""
+            SELECT id FROM learning_goals
+            WHERE user_id = :uid
+              AND EXISTS (SELECT 1 FROM json_each(learning_goals.scope_notes)
+                          WHERE json_each.value = :nid)
+        """)
+    else:
+        goal_hit_sql = text("""
+            SELECT id FROM learning_goals
+            WHERE user_id = :uid AND scope_notes::jsonb ? :nid
+        """)
+    hit_goal_ids = (await db.execute(
+        goal_hit_sql, {"uid": note.user_id, "nid": note_id}
+    )).scalars().all()
+    if hit_goal_ids:
+        goals = (await db.execute(
+            select(LearningGoal).where(LearningGoal.id.in_(hit_goal_ids))
+        )).scalars().all()
+        for goal in goals:
+            goal.scope_notes = [n for n in (goal.scope_notes or []) if n != note_id]
             logger.info(f"已从学习目标 scope_notes 移除失效笔记: goal_id={goal.id[:8]}, note_id={note_id[:8]}")
 
-    # 清理每日计划推荐任务中的失效引用（note_id / quiz_id / card_id 三路过滤并重算计数）
-    plan_result = await db.execute(
-        select(DailyPlan).where(DailyPlan.user_id == note.user_id)
-    )
-    for plan in plan_result.scalars().all():
-        tasks = dict(plan.recommended_tasks or {})
-        new_tasks = {}
-        changed = False
-        for key, items in tasks.items():
-            if isinstance(items, list):
-                kept = [
-                    t for t in items
-                    if t.get("note_id") != note_id
-                    and t.get("quiz_id") not in quiz_ids
-                    and t.get("card_id") not in card_ids
-                ]
-                if len(kept) != len(items):
-                    changed = True
-                new_tasks[key] = kept
-            else:
-                new_tasks[key] = items
-        if changed:
-            plan.recommended_tasks = new_tasks
-            plan.total_count = sum(len(v) for v in new_tasks.values() if isinstance(v, list))
-            # 已完成数不超过清理后的总数，避免进度溢出
-            if plan.completed_count > plan.total_count:
-                plan.completed_count = plan.total_count
-            logger.info(f"已清理每日计划失效任务: plan_id={plan.id[:8]}, note_id={note_id[:8]}")
+    # 5.3 清理每日计划推荐任务中的失效引用（note_id / quiz_id / card_id 三路过滤并重算计数）
+    # 命中行判定在 SQL 端完成（nested json_each / jsonb 运算符），仅加载命中行再更新
+    quiz_json = json.dumps(quiz_ids)
+    card_json = json.dumps(card_ids)
+    if dialect == "sqlite":
+        plan_hit_sql = text("""
+            SELECT id FROM daily_plans
+            WHERE user_id = :uid
+              AND EXISTS (
+                    SELECT 1
+                    FROM json_each(daily_plans.recommended_tasks) AS cat,
+                         json_each(cat.value) AS t
+                    WHERE json_extract(t.value, '$.note_id') = :nid
+                       OR (json_extract(t.value, '$.quiz_id') IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM json_each(:quiz_json)
+                                       WHERE json_each.value = json_extract(t.value, '$.quiz_id')))
+                       OR (json_extract(t.value, '$.card_id') IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM json_each(:card_json)
+                                       WHERE json_each.value = json_extract(t.value, '$.card_id')))
+              )
+        """)
+    else:
+        plan_hit_sql = text("""
+            SELECT id FROM daily_plans
+            WHERE user_id = :uid
+              AND EXISTS (
+                    SELECT 1
+                    FROM jsonb_each(daily_plans.recommended_tasks::jsonb) AS cat
+                    CROSS JOIN jsonb_array_elements(cat.value) AS t
+                    WHERE t->>'note_id' = :nid
+                       OR (t->>'quiz_id' IS NOT NULL AND :quiz_json::jsonb ? (t->>'quiz_id'))
+                       OR (t->>'card_id' IS NOT NULL AND :card_json::jsonb ? (t->>'card_id'))
+              )
+        """)
+    hit_plan_ids = (await db.execute(
+        plan_hit_sql,
+        {"uid": note.user_id, "nid": note_id, "quiz_json": quiz_json, "card_json": card_json},
+    )).scalars().all()
+    if hit_plan_ids:
+        plans = (await db.execute(
+            select(DailyPlan).where(DailyPlan.id.in_(hit_plan_ids))
+        )).scalars().all()
+        for plan in plans:
+            tasks = dict(plan.recommended_tasks or {})
+            new_tasks = {}
+            changed = False
+            for key, items in tasks.items():
+                if isinstance(items, list):
+                    kept = [
+                        t for t in items
+                        if t.get("note_id") != note_id
+                        and t.get("quiz_id") not in quiz_ids
+                        and t.get("card_id") not in card_ids
+                    ]
+                    if len(kept) != len(items):
+                        changed = True
+                    new_tasks[key] = kept
+                else:
+                    new_tasks[key] = items
+            if changed:
+                plan.recommended_tasks = new_tasks
+                plan.total_count = sum(len(v) for v in new_tasks.values() if isinstance(v, list))
+                # 已完成数不超过清理后的总数，避免进度溢出
+                if plan.completed_count > plan.total_count:
+                    plan.completed_count = plan.total_count
+                logger.info(f"已清理每日计划失效任务: plan_id={plan.id[:8]}, note_id={note_id[:8]}")
 
     # ---- 清理项目标签关联（显式双保险，即使 CASCADE 已开启） ----
     await db.execute(
@@ -673,7 +787,7 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
 
-    # ---- 清理 Chroma 向量集合（F-18 修复） ----
+    # ---- 清理 Chroma 向量集合（保持向量库与笔记一致，见 docs/decisions.md#F-18） ----
     try:
         from ..services.embedding_service import VectorStore
         loop = asyncio.get_running_loop()

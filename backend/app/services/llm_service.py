@@ -20,619 +20,28 @@ from-scratch, minimal dependencies, 不引入 LangChain。
 - 提示词模板内置在服务中，支持 JSON 结构化输出
 - 重试机制：API 调用失败时重试，指数退避
 - 速率限制：控制 API 调用频率，避免超限
+
+共享 httpx 客户端、JSON 容错解析、速率限制与会话类已拆分至 services/llm/
+子包；本模块仅保留 LLMService 并 re-export 相关公共名称，外部 import 路径不变。
 """
 
 import asyncio
 import json
 import logging
 import random
-import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 
 from ..config import get_settings
+from .llm.client import _truncate_messages, close_llm_client, get_llm_client
+from .llm.json_parse import parse_json_tolerant, strip_json_fences
+from .llm.rate_limit import RateLimiter
+from .llm.sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
 
 logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
-
-
-# ---- F-05 修复：模块级共享 LLM 基建 ----
-# 旧实现每次调用 `async with httpx.AsyncClient(...)` 新建客户端（连接池/TLS 全部浪费），
-# 且 RateLimiter/Semaphore 为实例属性，多处 `LLMService()` 新建实例导致限流与并发
-# 闸门完全不生效。以下提升为模块级单例，进程内所有实例共享。
-#
-# 注意（Event loop is closed 修复）：httpx 连接池中的连接绑定创建时的事件循环。
-# Celery worker 中每个任务用 asyncio.run() 创建新事件循环，跨任务复用旧连接会报
-# "Event loop is closed"。因此保存 client 创建时的 loop 对象，检测到 loop 变化时
-# 自动重建 client（API 进程单 loop 不受影响）。
-# 用 loop 对象引用比较（不用 id()：loop 被 GC 后 id 可能被新 loop 复用导致误判）。
-_shared_llm_client: Optional[httpx.AsyncClient] = None
-_shared_llm_client_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
-def _current_loop() -> Optional[asyncio.AbstractEventLoop]:
-    """获取当前运行事件循环（无运行循环时返回 None）"""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def get_llm_client() -> httpx.AsyncClient:
-    """获取（惰性创建）进程级共享 httpx 客户端；事件循环变化时自动重建"""
-    global _shared_llm_client, _shared_llm_client_loop
-    current_loop = _current_loop()
-    if _shared_llm_client is not None and _shared_llm_client_loop is not current_loop:
-        # 事件循环已变化（如 Celery 每个任务新建 loop）：旧连接全部失效，丢弃重建。
-        # 不主动 aclose()：旧 loop 已关闭，调用 aclose 只会产生未 await 的 coroutine；
-        # 连接随旧 loop/GC 释放（文件描述符由 OS 回收）。
-        logger.warning(
-            "检测到 LLM 客户端跨事件循环复用，重建共享客户端 "
-            "(old_loop=%s, new_loop=%s)",
-            _shared_llm_client_loop, current_loop,
-        )
-        _shared_llm_client = None
-        _shared_llm_client_loop = None
-    if _shared_llm_client is None:
-        _shared_llm_client = httpx.AsyncClient(timeout=settings.llm_timeout_seconds)
-        _shared_llm_client_loop = current_loop
-    return _shared_llm_client
-
-
-def close_llm_client() -> None:
-    """关闭共享客户端（应用关闭时调用，见 main.py lifespan）"""
-    global _shared_llm_client, _shared_llm_client_loop
-    if _shared_llm_client is not None:
-        try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(_shared_llm_client.aclose())
-            else:
-                asyncio.run(_shared_llm_client.aclose())
-        except Exception:
-            pass
-        _shared_llm_client = None
-        _shared_llm_client_loop = None
-
-
-def _truncate_messages(messages: List[Dict[str, str]], limit: int = 200) -> List[Dict[str, str]]:
-    """日志脱敏：每条消息内容截断到 limit 字符（F-20 修复：避免全量内容进日志）"""
-    result = []
-    for m in messages:
-        item = dict(m)
-        content = item.get("content", "")
-        if isinstance(content, str) and len(content) > limit:
-            item["content"] = content[:limit] + f"...(截断,共{len(content)}字)"
-        result.append(item)
-    return result
-
-
-# ===========================================================================
-# 健壮 JSON 解析（F-33：应对 LLM 输出「截断 / 围栏包裹 / 尾缀杂文」三类问题）
-# ===========================================================================
-
-def strip_json_fences(text: str) -> str:
-    """
-    剥离 LLM 输出中的 markdown 代码围栏（```json ... ``` / ``` ... ```）
-
-    实测（F-33）：模型即使指定 response_format=json_object，也可能把结果包在
-    代码围栏里，此时 json.loads 直接失败。围栏剥离必须在解析前完成。
-    """
-    s = (text or "").strip()
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s)
-    if m:
-        s = m.group(1).strip()
-    return s
-
-
-def _first_json_pos(text: str) -> Optional[int]:
-    """查找首个 JSON 容器起始位置（跳过前导散文）"""
-    for i, c in enumerate(text):
-        if c in "{[":
-            return i
-    return None
-
-
-def _salvage_json_prefix(text: str, start: int) -> Tuple[Optional[Any], int]:
-    """
-    截断抢救：从截断的 JSON 开头向后扫描，找出「已生成完整、只需补闭合括号」的最长前缀。
-
-    原理：LLM 截断（finish_reason=length）后文本通常是：
-      {"chapters": [{...}, {...},        ← 数组未闭合
-      {"questions": [{...}, {...}]       ← 缺最外层 }
-      [ {..}, {..},                      ← 数组未闭合
-    该扫描在字符串感知（忽略引号内 {,}，处理 \\ 转义）的前提下，记录栈深度 ≤ 2 的
-    浅层闭合点，然后依次尝试「原文 + 补齐闭合括号」能否被 json.loads 解析，
-    取最长可解析者。若整体不可解析（在字符串中间截断），返回最后一个可闭合前缀。
-
-    Args:
-        text: 截断的 JSON 文本（可能含围栏/杂文）
-        start: JSON 容器起始下标
-
-    Returns:
-        (解析出的数据, 结束下标)；抢救失败返回 (None, -1)
-    """
-    stack: List[str] = []
-    snapshots: List[Tuple[int, Tuple[str, ...]]] = []  # (下标, 栈快照)
-    in_str = False
-    esc = False
-    for i in range(start, len(text)):
-        c = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c in "{[":
-            stack.append(c)
-        elif c in "}]":
-            if not stack:
-                break  # 多余闭合，视为截断边界
-            stack.pop()
-            # 深度 ≤ 2 的浅层闭合点：截断通常发生在这里
-            if len(stack) <= 2:
-                snapshots.append((i, tuple(stack)))
-
-    def try_load(snippet: str) -> Optional[Any]:
-        try:
-            return json.loads(snippet)
-        except json.JSONDecodeError:
-            return None
-
-    tried = set()
-    # 从最长到最短尝试
-    for idx, stack_snap in sorted(snapshots, key=lambda x: -x[0]):
-        snippet = text[start:idx + 1]
-        closers = "".join("]" if o == "[" else "}" for o in reversed(stack_snap))
-        for candidate in (snippet, snippet + closers, snippet + closers * 2):
-            if candidate in tried:
-                continue
-            tried.add(candidate)
-            data = try_load(candidate)
-            if data is not None:
-                return data, idx
-    return None, -1
-
-
-def parse_json_tolerant(text: str) -> Tuple[Optional[Any], Dict[str, Any]]:
-    """
-    健壮 JSON 解析（F-33）
-
-    按层级尝试，逐级提升容错能力，尽量挽回模型输出：
-    1. 直接 json.loads（围栏剥离后）
-    2. raw_decode 首个容器——处理「JSON + 尾缀杂文」（截断/多行注释外的常见情况）
-    3. 截断抢救——补齐闭合括号，取最长可解析前缀（部分数据）
-
-    Args:
-        text: LLM 输出原文
-
-    Returns:
-        (data, info)：
-            data 可能为部分数据（截断抢救）或 None（彻底失败）
-            info: {"status": "ok" | "ok_with_tail" | "partial" | "failed",
-                   "detail": str}
-    """
-    if not text or not text.strip():
-        return None, {"status": "empty", "detail": "empty response"}
-
-    s = strip_json_fences(text)
-
-    # 1) 直接解析
-    try:
-        return json.loads(s), {"status": "ok", "detail": ""}
-    except json.JSONDecodeError:
-        pass
-
-    # 2) JSON + 尾缀杂文 / 前导杂文
-    first = _first_json_pos(s)
-    if first is not None:
-        try:
-            data, _end = json.JSONDecoder().raw_decode(s, first)
-            return data, {"status": "ok_with_tail", "detail": "json with trailing prose"}
-        except json.JSONDecodeError:
-            pass
-
-        # 3) 截断抢救
-        salvaged, end = _salvage_json_prefix(s, first)
-        if salvaged is not None:
-            return salvaged, {
-                "status": "partial",
-                "detail": f"truncated json salvaged up to offset {end}",
-            }
-
-    return None, {"status": "failed", "detail": f"unparseable: {s[:200]}"}
-
-
-class RateLimiter:
-    """令牌桶速率限制器
-
-    控制 API 请求速率，避免触发 429 Too Many Requests。
-    使用令牌桶算法：以恒定速率补充令牌，请求前消耗一个令牌，
-    无可用令牌时等待。
-
-    Attributes:
-        max_rpm: 每分钟最大请求数
-        _tokens: 当前可用令牌数
-        _last_refill: 上次补充令牌的时间戳
-        _lock: 异步锁，保证线程安全
-    """
-
-    def __init__(self, max_rpm: int = 10):
-        self.max_rpm = max_rpm
-        self._tokens = float(max_rpm)
-        self._last_refill = time.monotonic()
-        self._lock = asyncio.Lock()
-
-    async def acquire(self):
-        """获取一个令牌，等待直到有可用令牌"""
-        if self.max_rpm <= 0:
-            return
-        while True:
-            async with self._lock:
-                now = time.monotonic()
-                elapsed = now - self._last_refill
-                self._tokens = min(self.max_rpm, self._tokens + elapsed * (self.max_rpm / 60.0))
-                self._last_refill = now
-                if self._tokens >= 1:
-                    self._tokens -= 1
-                    return
-                wait_time = (1.0 - self._tokens) * (60.0 / self.max_rpm)
-            await asyncio.sleep(wait_time)
-
-
-class ConversationSession:
-    """
-    多轮对话会话，在同一窗口内累积消息
-
-    使用方式：
-        session = llm_service.create_understanding_session()
-        result1 = await session.ask("章节1内容...")
-        result2 = await session.ask("章节2内容...")  # LLM 能看到章节1的结果
-    """
-
-    def __init__(
-        self,
-        llm_service: "LLMService",
-        system_prompt: str,
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
-        response_format: Optional[Dict] = None,
-        max_context_pairs: int = 30,
-        scene: Optional[str] = None,
-    ):
-        """
-        Args:
-            llm_service: LLM 服务实例
-            system_prompt: 系统提示词
-            temperature: 采样温度
-            max_tokens: 最大生成 token 数
-            response_format: 响应格式约束
-            max_context_pairs: 保留的最大对话轮次（1轮=1 user + 1 assistant）
-            scene: 场景标识，用于日志记录
-        """
-        self._llm = llm_service
-        self._messages: List[Dict[str, str]] = [
-            {"role": "system", "content": system_prompt}
-        ]
-        self._temperature = temperature
-        self._max_tokens = max_tokens
-        self._response_format = response_format
-        self._max_context_pairs = max_context_pairs
-        self._scene = scene
-
-    async def ask(self, user_content: str) -> str:
-        """
-        在当前对话窗口中追问，返回助手回复
-
-        将用户消息追加到对话历史，调用 LLM，再将助手回复追加回历史。
-        下次调用 ask() 时，LLM 能看到之前的完整对话上下文。
-
-        Args:
-            user_content: 用户消息内容
-
-        Returns:
-            str: 助手回复内容
-        """
-        self._messages.append({"role": "user", "content": user_content})
-        response = await self._llm.chat(
-            self._messages,
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            response_format=self._response_format,
-            scene=self._scene,
-        )
-        self._messages.append({"role": "assistant", "content": response})
-        self._trim_if_needed()
-        return response
-
-    def _trim_if_needed(self):
-        """如果消息数量超过限制，裁剪中间的对话轮次，保留 system + 最近的对话"""
-        # 每轮 = 1 user + 1 assistant = 2 条消息，加上 1 条 system
-        max_msg_count = self._max_context_pairs * 2 + 1
-        if len(self._messages) > max_msg_count:
-            system_msg = self._messages[0]
-            recent = self._messages[-(self._max_context_pairs * 2):]
-            self._messages = [system_msg] + recent
-            logger.info(
-                f"对话上下文裁剪：保留 system + 最近 {self._max_context_pairs} 轮对话"
-            )
-
-    @property
-    def message_count(self) -> int:
-        """当前消息数量（含 system）"""
-        return len(self._messages)
-
-    @property
-    def turn_count(self) -> int:
-        """当前对话轮次(1轮 = 1次 ask 调用)"""
-        return (len(self._messages) - 1) // 2
-
-
-class UnderstandingSession(ConversationSession):
-    """
-    知识提取专用会话:用轻量级标题列表替代完整历史原文
-
-    与基类 ConversationSession 的区别:
-    - 不在 _messages 中累积历史 user/assistant 消息(避免 Token 浪费)
-    - 维护 _extracted_titles 列表,每次 ask() 后从容错解析响应中提取新标题
-    - 下次 ask() 时,在 user_content 末尾追加"[已提取知识点标题(请勿重复)]"提示
-    - 第N轮请求只包含 system + 当前章节 + 之前所有标题,不包含历史原文
-
-    属性语义:
-    - turn_count: ask() 调用次数(与基类语义一致,用于"对话轮次"日志)
-    - extracted_titles_count: 已提取标题总数(用于业务统计,可能大于 turn_count)
-
-    Token 节省:第N轮请求的 input tokens 从 O(N×章节长度) 降为 O(章节长度 + N×标题长度)
-    实测 17 章文档第6轮:从 ~72000 tokens 降为 ~8100 tokens(节省 89%)
-    """
-
-    MAX_TITLES = 200  # 标题列表上限,防止极端长文档导致列表本身过长
-
-    def __init__(self, llm_service: "LLMService", system_prompt: str, **kwargs):
-        super().__init__(llm_service, system_prompt, **kwargs)
-        self._extracted_titles: List[str] = []
-        self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
-        # F-33:记录最近一次调用的截断信号(finish_reason=length)
-        self._last_truncated: bool = False
-        self._last_finish_reason: str = ""
-
-    @property
-    def last_truncated(self) -> bool:
-        """最近一次 ask() 是否因 max_tokens 截断(F-33)"""
-        return self._last_truncated
-
-    async def ask(self, user_content: str, max_tokens: Optional[int] = None) -> str:
-        """
-        知识提取专用 ask:不累积历史原文,只追加已提取标题列表
-
-        Args:
-            user_content: 当前批次的章节合并内容(由调用方构建)
-            max_tokens: 本次调用的输出上限覆盖值(F-33:截断重试时可提大,默认用会话配置)
-
-        Returns:
-            str: LLM 响应(JSON 字符串)
-        """
-        # 构建去重提示:当前内容 + 已提取标题(如有)
-        context_hint = ""
-        if self._extracted_titles:
-            titles = self._extracted_titles[-self.MAX_TITLES:]
-            context_hint = (
-                "\n\n[已提取知识点标题(请勿重复提取以下知识点)]:\n"
-                + "\n".join(f"- {t}" for t in titles)
-            )
-
-        # 关键优化:每次只用 system + 当前 user 消息,不累积历史
-        messages = [
-            self._messages[0],  # system
-            {"role": "user", "content": user_content + context_hint},
-        ]
-
-        # F-33:使用 chat_detailed 捕获 finish_reason,便于调用方感知截断并放大重试
-        meta = await self._llm.chat_detailed(
-            messages,
-            temperature=self._temperature,
-            max_tokens=(max_tokens or self._max_tokens),
-            response_format=self._response_format,
-            scene=self._scene,
-        )
-        response = meta["content"]
-        self._last_truncated = meta.get("truncated", False)
-        self._last_finish_reason = meta.get("finish_reason", "")
-
-        # 解析响应,提取新标题加入轻量级列表(容错,失败不阻塞主流程)
-        self._ask_count += 1
-        self._extract_new_titles(response)
-
-        return response
-
-    def _extract_new_titles(self, response: str) -> None:
-        """
-        从多章节 JSON 响应中提取知识点标题,追加到 _extracted_titles
-
-        支持的响应格式(与 _parse_understanding_response 对齐):
-        - 多章节: {"chapters": [{"points": [{"title": "..."}, ...]}, ...]}
-        - 单章节(兼容): {"summary": "...", "points": [{"title": "..."}, ...]}
-
-        解析失败时记 warning 日志,不抛异常(降级为本轮无去重提示)。
-        """
-        try:
-            data = json.loads(response)
-        except json.JSONDecodeError:
-            logger.warning(
-                f"UnderstandingSession 标题提取:JSON 解析失败,本轮降级为无去重: {response[:200]}"
-            )
-            return
-
-        if not isinstance(data, dict):
-            return
-
-        # 多章节格式
-        chapters = data.get("chapters")
-        if isinstance(chapters, list):
-            for ch in chapters:
-                if isinstance(ch, dict):
-                    for p in ch.get("points", []) or []:
-                        if isinstance(p, dict) and p.get("title"):
-                            self._extracted_titles.append(str(p["title"]))
-            return
-
-        # 单章节格式(兼容)
-        for key in ["points", "knowledge_points", "items", "data"]:
-            points = data.get(key)
-            if isinstance(points, list):
-                for p in points:
-                    if isinstance(p, dict) and p.get("title"):
-                        self._extracted_titles.append(str(p["title"]))
-                return
-
-    @property
-    def turn_count(self) -> int:
-        """ask() 调用次数(与基类语义一致,基类按 _messages 长度推算,子类不累积消息故单独计数)"""
-        return self._ask_count
-
-    @property
-    def extracted_titles_count(self) -> int:
-        """已提取的标题总数(用于日志)"""
-        return len(self._extracted_titles)
-
-
-class CombinedAnalysisSession(ConversationSession):
-    """
-    联合分析专用会话:用轻量级标题列表替代完整历史原文
-
-    与 UnderstandingSession 类似的轻量级模式:
-    - 不在 _messages 中累积历史 user/assistant 消息(避免 Token 浪费)
-    - 维护 _extracted_titles 列表,每次 ask() 后从容错解析响应中提取新标题
-    - 下次 ask() 时,在 user_content 末尾追加"[已提取知识点标题(请勿重复)]"提示
-    - 第N轮请求只包含 system + 当前章节资料 + 用户笔记 + 之前所有标题
-
-    与 UnderstandingSession 的区别:
-    - ask() 接收双参数:material_chapter_content(章节资料) + personal_note_content(用户笔记全文)
-    - 响应结构包含 regular_points(已掌握) 和 blind_spots(盲点) 两类
-    - _extract_new_titles 同时从两个键提取标题
-
-    Token 节省:与 UnderstandingSession 同思路,从 O(N×章节长度) 降为 O(章节长度 + N×标题长度)
-    """
-
-    MAX_TITLES = 200  # 标题列表上限,防止极端长文档导致列表本身过长
-
-    def __init__(self, llm_service: "LLMService", system_prompt: str, **kwargs):
-        super().__init__(llm_service, system_prompt, **kwargs)
-        self._extracted_titles: List[str] = []
-        self._ask_count: int = 0  # 真实 ask() 调用次数,与基类 turn_count 语义对齐
-        # F-33:记录最近一次调用的截断信号(finish_reason=length)
-        self._last_truncated: bool = False
-        self._last_finish_reason: str = ""
-
-    @property
-    def last_truncated(self) -> bool:
-        """最近一次 ask() 是否因 max_tokens 截断(F-33)"""
-        return self._last_truncated
-
-    async def ask(self, material_chapter_content: str, personal_note_content: str) -> str:
-        """
-        联合分析专用 ask:不累积历史原文,只追加已提取标题列表
-
-        Args:
-            material_chapter_content: 当前章节学习资料
-            personal_note_content: 用户笔记全文
-
-        Returns:
-            str: LLM 响应(JSON 字符串)
-        """
-        # 构建去重提示:已提取标题(如有)
-        context_hint = ""
-        if self._extracted_titles:
-            titles = self._extracted_titles[-self.MAX_TITLES:]
-            context_hint = (
-                "\n\n[已提取知识点标题(请勿重复提取以下知识点)]:\n"
-                + "\n".join(f"- {t}" for t in titles)
-            )
-
-        # 关键优化:每次只用 system + 当前 user 消息,不累积历史
-        user_content = (
-            f"## 本章节学习资料：\n{material_chapter_content}\n\n"
-            f"## 用户笔记（全文）：\n{personal_note_content}\n\n"
-            f"请针对本章节资料与用户笔记做联合分析。"
-            + context_hint
-        )
-        messages = [
-            self._messages[0],  # system
-            {"role": "user", "content": user_content},
-        ]
-
-        response = await self._llm.chat(
-            messages,
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            response_format=self._response_format,
-            scene=self._scene,
-        )
-
-        # 解析响应,提取新标题加入轻量级列表(容错,失败不阻塞主流程)
-        self._ask_count += 1
-        self._extract_new_titles(response)
-
-        return response
-
-    def _extract_new_titles(self, response: str) -> None:
-        """
-        从联合分析 JSON 响应中提取知识点标题,追加到 _extracted_titles
-
-        支持的响应格式:
-        - 联合分析: {"chapter_title": "...", "regular_points": [{"title": "..."}], "blind_spots": [{"title": "..."}]}
-        - 多章节(兼容): {"chapters": [{"points": [{"title": "..."}, ...]}, ...]}
-        - 单章节(兼容): {"points": [{"title": "..."}, ...]}
-
-        解析失败时记 warning 日志,不抛异常(降级为本轮无去重提示)。
-        """
-        try:
-            data = json.loads(response)
-        except json.JSONDecodeError:
-            logger.warning(
-                f"CombinedAnalysisSession 标题提取:JSON 解析失败,本轮降级为无去重: {response[:200]}"
-            )
-            return
-
-        if not isinstance(data, dict):
-            return
-
-        # 多章节格式(兼容 UnderstandingSession)
-        chapters = data.get("chapters")
-        if isinstance(chapters, list):
-            for ch in chapters:
-                if isinstance(ch, dict):
-                    for p in ch.get("points", []) or []:
-                        if isinstance(p, dict) and p.get("title"):
-                            self._extracted_titles.append(str(p["title"]))
-            return
-
-        # 联合分析格式:同时提取 regular_points 和 blind_spots 中的标题
-        # 兼容单章节格式:遍历所有 points-like 键
-        for key in ["regular_points", "blind_spots", "points", "knowledge_points", "items", "data"]:
-            points = data.get(key)
-            if isinstance(points, list):
-                for p in points:
-                    if isinstance(p, dict) and p.get("title"):
-                        self._extracted_titles.append(str(p["title"]))
-
-    @property
-    def turn_count(self) -> int:
-        """ask() 调用次数(与基类语义一致,基类按 _messages 长度推算,子类不累积消息故单独计数)"""
-        return self._ask_count
-
-    @property
-    def extracted_titles_count(self) -> int:
-        """已提取的标题总数(用于日志)"""
-        return len(self._extracted_titles)
 
 
 class LLMService:
@@ -649,7 +58,7 @@ class LLMService:
         summary = await service.summarize_chapter("第一章", "内容...")
     """
 
-    # 类级共享限流器与并发闸门（F-05 修复：所有实例共享同一令牌桶/信号量）
+    # 类级共享限流器与并发闸门（所有实例共享同一令牌桶/信号量，见 docs/decisions.md#F-05）
     # 注意：_rate_limiter/_semaphore 在类定义后初始化（依赖 settings），见类下方
     _rate_limiter: Optional["RateLimiter"] = None
     _semaphore: Optional[asyncio.Semaphore] = None
@@ -709,7 +118,7 @@ class LLMService:
         scene: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        通用聊天接口（结构化返回，F-33）
+        通用聊天接口（结构化返回，见 docs/decisions.md#F-33）
 
         在 chat() 基础上额外返回：
         - content: 助手文本（JSON 场景已剥离代码围栏）
@@ -751,7 +160,7 @@ class LLMService:
             last_error = None
             for attempt in range(self._max_retries):
                 try:
-                    # F-05 修复：复用模块级共享客户端，避免每次新建连接
+                    # 复用模块级共享客户端，避免每次新建连接，见 docs/decisions.md#F-05
                     resp = await get_llm_client().post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
@@ -760,7 +169,7 @@ class LLMService:
                     choice: Dict[str, Any] = data["choices"][0]
                     finish_reason = (choice.get("finish_reason") or "").strip() or "stop"
                     content_raw = (choice["message"].get("content")) or ""
-                    # F-33：JSON 场景剥离代码围栏，避免 json.loads 直接失败
+                    # JSON 场景剥离代码围栏，避免 json.loads 直接失败，见 docs/decisions.md#F-33
                     if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
                         content = strip_json_fences(content_raw)
                     else:
@@ -784,8 +193,8 @@ class LLMService:
                         "usage": usage,
                     }
                 except httpx.HTTPStatusError as e:
-                    # F-20 修复：4xx 客户端错误（400/401/403/404）不重试，直接抛出；
-                    # 429/5xx 视为可重试
+                    # 4xx 客户端错误（400/401/403/404）不重试，直接抛出；
+                    # 429/5xx 视为可重试，见 docs/decisions.md#F-20
                     last_error = e
                     if e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
                         logger.warning(
@@ -878,7 +287,7 @@ class LLMService:
         async with self._semaphore:
             await self._rate_limiter.acquire()
             try:
-                # F-05 修复：复用模块级共享客户端
+                # 复用模块级共享客户端，见 docs/decisions.md#F-05
                 client = get_llm_client()
                 async with client.stream(
                     "POST", url, json=payload, headers=headers
@@ -1012,8 +421,8 @@ class LLMService:
         response = await self.chat(
             messages,
             temperature=0.3,
-            # F-33：不要盲目设 200000——它只是"上限"不是"目标"，超出模型硬上限部分无效，
-            # 且会放大超时/成本；此处使用截断重试放大上限，实测多数场景 16K 内即可完成。
+            # 不要盲目设 200000——它只是"上限"不是"目标"，超出模型硬上限部分无效，
+            # 且会放大超时/成本；此处使用截断重试放大上限，实测多数场景 16K 内即可完成，见 docs/decisions.md#F-33。
             max_tokens=settings.llm_json_max_tokens_ceiling,
             response_format={"type": "json_object"},
             scene="extract_knowledge",

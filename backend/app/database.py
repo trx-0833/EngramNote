@@ -19,6 +19,8 @@
 - 开发模式使用 init_db() 自动建表，生产环境应使用 Alembic 迁移
 """
 
+from functools import lru_cache
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -40,26 +42,59 @@ database_url = settings.get_database_url()
 # 判断是否为 SQLite 数据库（SQLite 需要特殊配置）
 _is_sqlite = database_url.startswith("sqlite")
 
-# SQLite 需要特殊配置：允许跨线程访问（默认 SQLite 只允许创建它的线程访问）
-connect_args = {}
-if _is_sqlite:
-    connect_args = {"check_same_thread": False}
 
-# 引擎配置参数
-engine_kwargs = {
-    "echo": settings.debug,  # 调试模式下输出 SQL 语句
-    "connect_args": connect_args,
-}
-# SQLite 不支持 pool_size / max_overflow 参数，仅 PostgreSQL 需要
-if not _is_sqlite:
-    engine_kwargs["pool_size"] = 5       # 连接池保持的连接数
-    engine_kwargs["max_overflow"] = 10   # 超出 pool_size 后允许的最大额外连接数
+@lru_cache
+def get_engine():
+    """
+    懒加载创建异步数据库引擎
 
-# 创建异步数据库引擎
-engine = create_async_engine(database_url, **engine_kwargs)
+    仅首次调用时构建引擎并注册 SQLite 连接级 PRAGMA；模块 import 时
+    不会创建引擎，也不会触碰数据库目录。lru_cache 即 once-guard：
+    同一进程内引擎只构建一次，PRAGMA 只注册一次。
+
+    Returns:
+        AsyncEngine: SQLAlchemy 异步引擎（单例）
+    """
+    # SQLite 需要特殊配置：允许跨线程访问（默认 SQLite 只允许创建它的线程访问）
+    connect_args = {}
+    if _is_sqlite:
+        connect_args = {"check_same_thread": False}
+
+    # 引擎配置参数
+    engine_kwargs = {
+        "echo": settings.debug,  # 调试模式下输出 SQL 语句
+        "connect_args": connect_args,
+    }
+    # SQLite 不支持 pool_size / max_overflow 参数，仅 PostgreSQL 需要
+    if not _is_sqlite:
+        engine_kwargs["pool_size"] = 5       # 连接池保持的连接数
+        engine_kwargs["max_overflow"] = 10   # 超出 pool_size 后允许的最大额外连接数
+
+    engine = create_async_engine(database_url, **engine_kwargs)
+    if _is_sqlite:
+        register_sqlite_pragmas(engine)
+    return engine
 
 
-# ---- SQLite 连接级 PRAGMA（F-07 修复） ----
+@lru_cache
+def get_session_factory():
+    """
+    懒加载创建异步会话工厂
+
+    仅首次调用时构建，绑定 get_engine() 返回的单例引擎。
+    expire_on_commit=False: 提交后不自动过期对象属性，避免在异步上下文中出现懒加载问题。
+
+    Returns:
+        async_sessionmaker: 异步会话工厂（单例）
+    """
+    return async_sessionmaker(
+        get_engine(),
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
+# ---- SQLite 连接级 PRAGMA：逐连接开启外键与 busy_timeout（见 docs/decisions.md#F-07） ----
 # SQLite 默认不启用外键约束（PRAGMA foreign_keys 默认 OFF），导致模型上
 # ON DELETE CASCADE 全部失效、删除笔记/卡片遗留孤儿数据。foreign_keys 与
 # busy_timeout 均为连接级设置，须在每个新连接建立时执行（不能在事务内切换）。
@@ -84,16 +119,23 @@ def register_sqlite_pragmas(target_engine) -> None:
     event.listen(target_engine.sync_engine, "connect", _set_sqlite_pragma)
 
 
-if _is_sqlite:
-    register_sqlite_pragmas(engine)
+class _LazyProxy:
+    """延迟解析代理：import 时不触发底层对象创建，属性访问/调用时才解析"""
 
-# 创建异步会话工厂
-# expire_on_commit=False: 提交后不自动过期对象属性，避免在异步上下文中出现懒加载问题
-async_session = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+    def __init__(self, resolver):
+        self._resolver = resolver
+
+    def __getattr__(self, name):
+        return getattr(self._resolver(), name)
+
+    def __call__(self, *args, **kwargs):
+        return self._resolver()(*args, **kwargs)
+
+
+# 模块级 engine / async_session 保持 import 兼容：任何 `from ..database import
+# engine / async_session` 的调用点在首次真正使用时才经代理解析为懒加载单例。
+engine = _LazyProxy(get_engine)
+async_session = _LazyProxy(get_session_factory)
 
 
 class Base(DeclarativeBase):
@@ -116,7 +158,8 @@ async def get_db():
     Yields:
         AsyncSession: 异步数据库会话实例
     """
-    async with async_session() as session:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
         try:
             yield session
         finally:
@@ -342,7 +385,7 @@ async def _migrate_sqlite(conn):
             ))
             logger.info("SQLite 迁移: 已创建 note_versions 表")
 
-        # F-31 修复：note_versions (note_id, version_number) 唯一索引
+        # note_versions (note_id, version_number) 唯一索引（见 docs/decisions.md#F-31）
         # （防并发重号；create_version 捕获 IntegrityError 重试）
         if 'note_versions' in table_names:
             try:
@@ -469,33 +512,50 @@ async def _migrate_sqlite(conn):
                     # 索引已存在时忽略
                     pass
 
+        # 邮件提醒用户级开关与去重记录（对应 Alembic 010）
+        if 'users' in table_names:
+            existing_columns = {col['name'] for col in inspector.get_columns('users')}
+            if 'email_reminder_enabled' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN email_reminder_enabled BOOLEAN DEFAULT 1 NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 users 表添加 email_reminder_enabled 列")
+            if 'last_reminded_at' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN last_reminded_at DATETIME"
+                ))
+                logger.info("SQLite 迁移: 已为 users 表添加 last_reminded_at 列")
+
         # ---- 孤儿数据清理 ----
         # 在级联删除修复之前，删除笔记/卡片不会级联删除关联数据，
         # 加上 SQLite 默认不启用外键约束，可能存在指向已删除父记录的孤儿数据。
         # 按外键依赖顺序从叶子到根清理，避免清理顺序导致二次孤儿。
+        # 所有语句的表名/列名均为代码内硬编码白名单，整条 SQL 写死，
+        # 不再用 f-string 拼接任何标识符，从根上消除动态 SQL 注入面。
+        # (执行语句, 目标表, 孤儿字段, 父表名)
         orphan_checks = [
-            # (表名, 孤儿字段, 父表名, 父字段, 操作类型: delete 或 nullify)
-            ("review_logs", "quiz_id", "quiz_items", "id", "delete"),
-            ("review_logs", "note_id", "notes", "id", "delete"),
-            ("quiz_items", "card_id", "knowledge_cards", "id", "delete"),
-            ("quiz_items", "note_id", "notes", "id", "delete"),
-            ("knowledge_cards", "note_id", "notes", "id", "delete"),
-            ("card_relations", "card_id_1", "knowledge_cards", "id", "delete"),
-            ("card_relations", "card_id_2", "knowledge_cards", "id", "delete"),
-            ("notes", "folder_id", "folders", "id", "nullify"),
+            ("DELETE FROM review_logs WHERE quiz_id IS NOT NULL AND quiz_id NOT IN (SELECT id FROM quiz_items)",
+             "review_logs", "quiz_id", "quiz_items"),
+            ("DELETE FROM review_logs WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+             "review_logs", "note_id", "notes"),
+            ("DELETE FROM quiz_items WHERE card_id IS NOT NULL AND card_id NOT IN (SELECT id FROM knowledge_cards)",
+             "quiz_items", "card_id", "knowledge_cards"),
+            ("DELETE FROM quiz_items WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+             "quiz_items", "note_id", "notes"),
+            ("DELETE FROM knowledge_cards WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+             "knowledge_cards", "note_id", "notes"),
+            ("DELETE FROM card_relations WHERE card_id_1 IS NOT NULL AND card_id_1 NOT IN (SELECT id FROM knowledge_cards)",
+             "card_relations", "card_id_1", "knowledge_cards"),
+            ("DELETE FROM card_relations WHERE card_id_2 IS NOT NULL AND card_id_2 NOT IN (SELECT id FROM knowledge_cards)",
+             "card_relations", "card_id_2", "knowledge_cards"),
+            ("UPDATE notes SET folder_id = NULL WHERE folder_id IS NOT NULL AND folder_id NOT IN (SELECT id FROM folders)",
+             "notes", "folder_id", "folders"),
         ]
 
-        for table, col, parent_table, parent_col, action in orphan_checks:
+        for sql, table, col, parent_table in orphan_checks:
             if table not in table_names or parent_table not in table_names:
                 continue
-            if action == "delete":
-                result = sync_conn.execute(text(
-                    f"DELETE FROM {table} WHERE {col} IS NOT NULL AND {col} NOT IN (SELECT {parent_col} FROM {parent_table})"
-                ))
-            elif action == "nullify":
-                result = sync_conn.execute(text(
-                    f"UPDATE {table} SET {col} = NULL WHERE {col} IS NOT NULL AND {col} NOT IN (SELECT {parent_col} FROM {parent_table})"
-                ))
+            result = sync_conn.execute(text(sql))
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 {table} 中清理了 {result.rowcount} 条 {col} 孤儿记录")
 
@@ -538,6 +598,54 @@ async def _migrate_sqlite(conn):
     await conn.run_sync(_do_migrate)
 
 
+def _acquire_schema_lock(lock_handle) -> None:
+    """
+    获取跨平台文件锁（阻塞直到获得）
+
+    POSIX 使用 fcntl.flock(LOCK_EX)，Windows 使用 msvcrt.locking。
+    用于序列化多实例（API + Celery worker/beat）并发触碰 SQLite schema，
+    避免同时重建悬挂引用表导致的崩溃或数据丢失。
+    """
+    import os
+
+    if os.name == "nt":
+        import msvcrt
+        import time
+
+        # msvcrt.locking 要求锁定区域存在，先确保文件至少 1 字节
+        lock_handle.seek(0, os.SEEK_END)
+        if lock_handle.tell() == 0:
+            lock_handle.write(b"\0")
+            lock_handle.flush()
+        # LK_NBLCK 非阻塞尝试 + 短等待，模拟 fcntl 的阻塞语义
+        while True:
+            lock_handle.seek(0)
+            try:
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.1)
+    else:
+        import fcntl
+
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+
+
+def _release_schema_lock(lock_handle) -> None:
+    """释放 _acquire_schema_lock 获取的跨平台文件锁"""
+    import os
+
+    if os.name == "nt":
+        import msvcrt
+
+        lock_handle.seek(0)
+        msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
 async def _rebuild_dangling_tables() -> None:
     """
     回收站悬挂引用改造：把 5 张表的外键端改为可空 + ON DELETE SET NULL
@@ -559,14 +667,17 @@ async def _rebuild_dangling_tables() -> None:
     from sqlalchemy.schema import CreateIndex, CreateTable
 
     # 解析 SQLite 文件路径（sqlite+aiosqlite:///path）
-    db_file = unquote(urlparse(database_url.replace("+aiosqlite", "")).path or "")
+    # 使用 settings.get_database_url() 而非模块级 database_url，以适配
+    # 运行时（如测试）重建 settings 后数据库路径发生变化的场景。
+    db_url = settings.get_database_url()
+    db_file = unquote(urlparse(db_url.replace("+aiosqlite", "")).path or "")
     if not db_file or db_file == ":memory:":
         return
     # Windows 下 urlparse 可能把盘符放进 netloc（//d:/x.db 形式）
     if not db_file.startswith("/"):
-        netloc = urlparse(database_url.replace("+aiosqlite", "")).netloc
+        netloc = urlparse(db_url.replace("+aiosqlite", "")).netloc
         if netloc:
-            db_file = netloc + urlparse(database_url.replace("+aiosqlite", "")).path
+            db_file = netloc + urlparse(db_url.replace("+aiosqlite", "")).path
 
     # (表名, 探测列)：探测列 notnull=1 视为旧 schema 需重建
     targets = (
@@ -577,62 +688,77 @@ async def _rebuild_dangling_tables() -> None:
         ("review_logs", "note_id"),
     )
 
-    raw = sqlite3.connect(db_file)
-    try:
-        raw.execute("PRAGMA foreign_keys=OFF")
+    # 跨进程文件锁：API 与 Celery worker/beat 可能同时启动并各自执行 init_db，
+    # 并发重建悬挂引用表会互相 DROP/ALTER 导致数据丢失或崩溃，故以
+    # data/db/.schema-lock 串行化重建；锁内重放探测（双检）确保等待期间
+    # 他人已完成重建时不再重复重建。
+    from .config import DB_DIR
 
-        def _needs_rebuild(table: str, probe_col: str) -> bool:
-            for row in raw.execute(f"PRAGMA table_info({table})"):
-                if row[1] == probe_col:
-                    return bool(row[3])  # notnull 标志
-            return False
+    lock_path = DB_DIR / ".schema-lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        todo = [t for t, probe in targets if _needs_rebuild(t, probe)]
-        if not todo:
-            return
-
-        logger.info("SQLite 迁移: 检测到旧 schema，开始重建悬挂引用表: %s", todo)
-        raw.execute("BEGIN")
+    with open(lock_path, "a+b") as lock_handle:
+        _acquire_schema_lock(lock_handle)
         try:
-            for table_name in todo:
-                table = Base.metadata.tables[table_name]
-                temp_name = f"{table_name}__trash_rebuild"
+            raw = sqlite3.connect(db_file)
+            try:
+                raw.execute("PRAGMA foreign_keys=OFF")
 
-                # 用 SQLAlchemy 按 metadata 生成与 create_all 完全一致的 DDL
-                create_ddl = str(
-                    CreateTable(table).compile(dialect=sqlite_dialect.dialect())
-                ).strip()
-                create_ddl = create_ddl.replace(
-                    f"CREATE TABLE {table_name}", f'CREATE TABLE "{temp_name}"', 1
-                )
+                def _needs_rebuild(table: str, probe_col: str) -> bool:
+                    for row in raw.execute(f"PRAGMA table_info({table})"):
+                        if row[1] == probe_col:
+                            return bool(row[3])  # notnull 标志
+                    return False
 
-                col_list = ", ".join(f'"{c.name}"' for c in table.columns)
-                raw.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
-                raw.execute(create_ddl)
-                raw.execute(
-                    f'INSERT INTO "{temp_name}" ({col_list}) '
-                    f'SELECT {col_list} FROM "{table_name}"'
-                )
-                raw.execute(f'DROP TABLE "{table_name}"')
-                raw.execute(f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"')
-                # 旧索引随 DROP TABLE 消失，按 metadata 重建
-                for idx in table.indexes:
-                    raw.execute(str(CreateIndex(idx).compile(dialect=sqlite_dialect.dialect())))
-            raw.execute("COMMIT")
-        except Exception:
-            raw.execute("ROLLBACK")
-            raise
+                # 双检：锁内重放探测，避免等待锁期间已被其他实例重建而重复执行
+                todo = [t for t, probe in targets if _needs_rebuild(t, probe)]
+                if not todo:
+                    return
 
-        # 一致性校验：FK 违规仅告警（重建按原数据原样拷贝，理论上不会出现）
-        violations = raw.execute("PRAGMA foreign_key_check").fetchall()
-        if violations:
-            logger.warning("悬挂引用表重建后 FK 校验异常（保留数据，仅告警）: %s", violations[:5])
-        logger.info("SQLite 迁移: 悬挂引用表重建完成")
-    finally:
-        try:
-            raw.execute("PRAGMA foreign_keys=ON")
+                logger.info("SQLite 迁移: 检测到旧 schema，开始重建悬挂引用表: %s", todo)
+                raw.execute("BEGIN")
+                try:
+                    for table_name in todo:
+                        table = Base.metadata.tables[table_name]
+                        temp_name = f"{table_name}__trash_rebuild"
+
+                        # 用 SQLAlchemy 按 metadata 生成与 create_all 完全一致的 DDL
+                        create_ddl = str(
+                            CreateTable(table).compile(dialect=sqlite_dialect.dialect())
+                        ).strip()
+                        create_ddl = create_ddl.replace(
+                            f"CREATE TABLE {table_name}", f'CREATE TABLE "{temp_name}"', 1
+                        )
+
+                        col_list = ", ".join(f'"{c.name}"' for c in table.columns)
+                        raw.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
+                        raw.execute(create_ddl)
+                        raw.execute(
+                            f'INSERT INTO "{temp_name}" ({col_list}) '
+                            f'SELECT {col_list} FROM "{table_name}"'
+                        )
+                        raw.execute(f'DROP TABLE "{table_name}"')
+                        raw.execute(f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"')
+                        # 旧索引随 DROP TABLE 消失，按 metadata 重建
+                        for idx in table.indexes:
+                            raw.execute(str(CreateIndex(idx).compile(dialect=sqlite_dialect.dialect())))
+                    raw.execute("COMMIT")
+                except Exception:
+                    raw.execute("ROLLBACK")
+                    raise
+
+                # 一致性校验：FK 违规仅告警（重建按原数据原样拷贝，理论上不会出现）
+                violations = raw.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    logger.warning("悬挂引用表重建后 FK 校验异常（保留数据，仅告警）: %s", violations[:5])
+                logger.info("SQLite 迁移: 悬挂引用表重建完成")
+            finally:
+                try:
+                    raw.execute("PRAGMA foreign_keys=ON")
+                finally:
+                    raw.close()
         finally:
-            raw.close()
+            _release_schema_lock(lock_handle)
 
 
 if __name__ == "__main__":

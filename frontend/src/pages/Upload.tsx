@@ -83,10 +83,10 @@ export default function Upload() {
   const [cropPageRange, setCropPageRange] = useState('')
   /** 裁剪输入的内联校验提示 */
   const [cropError, setCropError] = useState('')
-  /** F-15：轮询定时器引用，组件卸载时清理 */
+  /** 轮询定时器引用，组件卸载时清理，见 docs/decisions.md#F-15 */
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // F-15：卸载时清理轮询定时器，避免卸载后 setState/导航
+  // 卸载时清理轮询定时器，避免卸载后 setState/导航，见 docs/decisions.md#F-15
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) {
@@ -277,10 +277,9 @@ export default function Upload() {
    * 轮询笔记转换状态
    * 每 5 秒查询一次后端状态，直到转换完成、失败或超时。
    *
-   * F-15 修复：
    * - setTimeout 递归替代 setInterval，避免慢网络下请求重叠
    * - 终态集合补全 cleaning_failed / learning_failed
-   * - timer 存 ref，组件卸载时清理
+   * - timer 存 ref，组件卸载时清理，见 docs/decisions.md#F-15
    *
    * @param id - 笔记 ID
    */
@@ -306,7 +305,7 @@ export default function Upload() {
           // 延迟 1 秒后自动跳转到笔记详情页
           setTimeout(() => navigate(`/notes/${id}`), 1000)
         } else if (res.status === 'failed' || res.status === 'cleaning_failed' || res.status === 'learning_failed') {
-          // F-15：补全失败终态（旧实现漏掉 cleaning_failed/learning_failed，会空转到超时）
+          // 补全失败终态（旧实现漏掉 cleaning_failed/learning_failed，会空转到超时），见 docs/decisions.md#F-15
           isTerminal = true
           setUploading(false)
           setError(res.error_message || `处理失败（${res.status}）`)

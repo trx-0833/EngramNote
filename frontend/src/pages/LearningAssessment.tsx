@@ -31,7 +31,7 @@ export default function LearningAssessment() {
   const [selectedMaterials, setSelectedMaterials] = useState<string[]>([])
   const [selectedPersonalNotes, setSelectedPersonalNotes] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  /** F-23：提交 in-flight 锁（防双击重复提交） */
+  /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
   const [notesLoading, setNotesLoading] = useState(true)
   const [notesError, setNotesError] = useState('')
@@ -217,7 +217,7 @@ export default function LearningAssessment() {
   }
 
   const handleSubmitAnswers = async () => {
-    // F-23：in-flight 锁，防止双击重复提交（重复消费 AI 评判）
+    // in-flight 锁，防止双击重复提交（重复消费 AI 评判），见 docs/decisions.md#F-23
     if (submittingRef.current) return
     if (!quizAssessment) return
     // Check all answers are filled

@@ -178,8 +178,8 @@ def quality_from_answer(
                 if shorter / longer > 0.5:
                     return 3
         # 关键词重叠检查（基于字符级集合）
-        # F-35 附带修复：阈值 >= 0.5（原 > 0.5 会把"机器"vs"机器学习"
-        # 的 2/4=0.5 前缀部分匹配挡在 3 分之外，误判为 1 分）
+        # 阈值 >= 0.5（原 > 0.5 会把"机器"vs"机器学习"
+        # 的 2/4=0.5 前缀部分匹配挡在 3 分之外，误判为 1 分，见 docs/decisions.md#F-35）
         user_words = set(user_lower)
         correct_words = set(correct_lower)
         overlap = len(user_words & correct_words)

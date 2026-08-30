@@ -57,8 +57,8 @@ def _build_goal_response(goal: LearningGoal, progress: Optional[Dict[str, Any]] 
     if progress is not None:
         resp.progress_percentage = float(progress.get("progress_percentage", 0.0))
     else:
-        # F-13 修复：列表接口无实时进度时回退 progress_cache（Beat 每日刷新），
-        # 避免列表进度恒为 0
+        # 列表接口无实时进度时回退 progress_cache（Beat 每日刷新），
+        # 避免列表进度恒为 0，见 docs/decisions.md#F-13
         resp.progress_percentage = float(getattr(goal, "progress_cache", 0.0) or 0.0)
     return resp
 
@@ -110,6 +110,8 @@ async def list_goals(
     Returns:
         GoalListResponse: 包含目标列表和总数的响应
     """
+    # C3：响应前按需刷新活跃目标进度（有防抖，失败降级为缓存值，不阻断响应）
+    await goal_service.refresh_progress_if_stale(current_user.id)
     goals = await goal_service.list_goals(current_user.id, status_filter, db)
     return GoalListResponse(
         goals=[_build_goal_response(g) for g in goals],
@@ -202,7 +204,7 @@ async def update_goal(
     # get_goal 内部会在目标不存在时抛出 HTTPException(404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
 
-    # F-09 修复：更新 scope 时校验归属，防止引用他人笔记/文件夹（IDOR）
+    # 更新 scope 时校验归属，防止引用他人笔记/文件夹（IDOR），见 docs/decisions.md#F-09
     if req.scope_notes is not None or req.scope_folders is not None:
         from ..services.goal_service import _validate_goal_scopes
         await _validate_goal_scopes(
