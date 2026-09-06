@@ -222,6 +222,12 @@
 - **方案**：requirements 补 `pytest`/`pytest-asyncio`（dev 注释段）；新增 `conftest.py` 独立临时库 fixture + 测试用户/token 工厂 + `test_fixes.py` 6 项回归；附带把 SM-2 阈值改为 `>= 0.5`。
 - **为什么**：修复必须有回归护栏；阈值边界用 `>=` 才是「部分匹配返回 3 分」的正确语义。
 
+## F-36 选中文本 AI 提问（仅当前笔记 + 选区局部上下文）
+
+- **问题**：阅读笔记时选中文本无法即时向 AI 提问；全库 RAG 回答范围过大、上下文不聚焦，且 `retrieve_context` 不支持按 note 过滤。
+- **方案**：批注浮层新增「AI 提问」按钮，前端截取选区局部上下文（选中文本 + 前后各 1500 字符）提交至新端点 `POST /api/notes/{note_id}/ask/stream`；后端仅做笔记归属校验（防 IDOR）并引用笔记标题，不起 RAG、不读全文，复用 `LLMService.chat_stream` SSE 流式回答（scene=note_ask_stream），事件格式与 `/understanding/ask/stream` 对齐；前端 `NoteAskPanel` 浮层支持提问编辑、停止生成、重新提问。不落库、不改批注表。
+- **为什么**：局部上下文聚焦、token 消耗小、响应快；归属校验防越权；复用既有 LLM 基建与 SSE 协议，零新依赖、不改 Schema。
+
 ---
 
 ## 本次新决策（2026-08-30 代码审查批次）

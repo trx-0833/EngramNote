@@ -77,7 +77,7 @@ EngramNote 是"AI 驱动的学习笔记管理与知识库工具"：用户上传�
 | `main.tsx` / `App.tsx` | 入口与全部路由（19 个页面，见 App.tsx Routes） | 新增页面/路由时 |
 | `api/client.ts`（2221 行，已知债） | 请求封装（request/uploadRequest/SSE）+ Token 管理 + 全部类型定义 + 90 个 API 函数；`api/knowledge.ts` 是唯一已完成拆分的模块 | 调后端接口时 |
 | `pages/` | 19 个页面：Dashboard / NotesList / NoteDetail / Trash / Upload / KnowledgeCards / KnowledgeGraph / CardDetail / QA / Review / QuestionSets / TodayLearn / QuickReview / DailyMaterials / Projects / LearningAssessment / LearningGoals / Login / Register | 页面级功能 |
-| `components/` | 通用组件：Sidebar / CleaningPanel / DeleteNoteDialog / DiffView / VersionHistory / ReminderBanner / quiz/QuizAnswerCard / EmptyState / ErrorDisplay / LoadingSpinner | 可复用 UI |
+| `components/` | 通用组件：Sidebar / CleaningPanel / DeleteNoteDialog / DiffView / VersionHistory / ReminderBanner / NoteAskPanel（选中文本 AI 提问浮层）/ quiz/QuizAnswerCard / EmptyState / ErrorDisplay / LoadingSpinner | 可复用 UI |
 | `hooks/` | useAdhdReader（专注阅读渐变遮罩） | 跨组件逻辑复用 |
 | `contexts/AuthContext.tsx` | 认证状态（token 持久化 localStorage） | 认证流程 |
 | `utils/` | labels（卡片类型颜色/标签单一数据源）、markdown（渲染）、datetime、notifications | 工具函数 |
@@ -112,6 +112,8 @@ EngramNote 是"AI 驱动的学习笔记管理与知识库工具"：用户上传�
   ├──► 评估       assessment_service（资料↔笔记比对、盲点检测）
   └──► 报告/目标  report_service、goal_service（Beat 每日 00:30 刷新进度）
 ```
+
+**选中文本 AI 提问（仅当前笔记）**：笔记阅读页选中文本后，批注浮层提供「AI 提问」→ 前端截取选区局部上下文（选中文本 + 前后各 1500 字符）→ 新端点 `POST /api/notes/{note_id}/ask/stream`（`api/notes/ask.py`，仅校验笔记归属，不起 RAG、不读全文）→ `LLMService.chat_stream` SSE 逐 token 返回（事件 `meta(provider)` → `token...` → `done` / `error`）→ 前端 `NoteAskPanel.tsx` 浮层流式渲染（可停止 / 重新提问 / 关闭）。（决策见 docs/decisions.md F-36）
 
 **回收站（软删除）**：`DELETE /api/notes/{id}` → `trash_note`（标记 trashed_at + 文件搬至 trash/ 目录）；`purge_note` 物理删除时采用"悬挂引用"策略（关系记录被删端置 NULL，绝不级联删除，核心卡片可提升为独立节点）。
 

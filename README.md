@@ -278,7 +278,7 @@ EngramNote/
 │   │   │   ├── cleaning_service.py    # AI 清洗管道
 │   │   │   ├── embedding_service.py   # BGE-M3 嵌入
 │   │   │   ├── llm_service.py         # DeepSeek/GLM 调用（V2.0 新增 chat_stream）
-│   │   │   ├── rag_service.py         # RAG 问答（V2.0 三路混合检索 + RRF 融合）
+│   │   │   ├── rag_service.py         # 智能问答（V2.0 三路混合检索：向量 + BM25 + n-gram，RRF 融合，SSE 流式）
 │   │   │   ├── version_service.py     # 笔记版本历史（V2.0 新增）
 │   │   │   ├── goal_service.py        # 学习目标管理（V2.0 新增）
 │   │   │   ├── notification_service.py# 复习提醒 + 邮件（V2.0 新增）
@@ -349,7 +349,7 @@ EngramNote/
 
 ### 1. DeepSeek API（必填，二选一）
 
-- **用途**：AI 理解管道（摘要、知识点提取、题目生成、RAG 问答）
+- **用途**：AI 理解管道（摘要、知识点提取、题目生成、RAG 问答）、选中文本 AI 提问
 - **获取地址**：https://platform.deepseek.com/
 - **步骤**：
   1. 注册 DeepSeek 账号

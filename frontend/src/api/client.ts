@@ -6,7 +6,7 @@
  */
 
 /** API 基础路径，所有请求都会在此路径前缀下发起 */
-const API_BASE = '/api';
+export const API_BASE = '/api';
 
 // --- 通用类型定义 ---
 

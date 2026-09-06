@@ -74,3 +74,116 @@
 .selection-menu button:hover {
   background: var(--color-bg-hover, #f0f0f0);
 }
+
+/* ── AI 提问浮层 ── */
+
+.ask-ai-panel {
+  background: white;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
+  padding: 0;
+  text-align: left;
+}
+
+.ask-ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border, #eee);
+}
+
+.ask-ai-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-text, #333);
+}
+
+.ask-ai-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary, #888);
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.ask-ai-close:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+  color: var(--color-text, #333);
+}
+
+.ask-ai-body {
+  padding: 12px 14px;
+}
+
+.ask-ai-input {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.ask-ai-input:focus {
+  border-color: var(--color-primary, #4a6cf7);
+}
+
+.ask-ai-selected-hint {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #888);
+  word-break: break-all;
+}
+
+.ask-ai-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.ask-ai-question {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text, #333);
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--color-bg-hover, #f6f6f6);
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.ask-ai-thinking {
+  color: var(--color-text-secondary, #888);
+  font-style: italic;
+  line-height: 1.8;
+}
+
+.ask-ai-answer {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-size: 0.9rem;
+  color: var(--color-text, #333);
+}
+
+.ask-ai-error {
+  color: var(--color-error, #d9534f);
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.ask-ai-provider {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #888);
+  margin-top: 10px;
+  text-align: right;
+}

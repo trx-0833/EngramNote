@@ -2,7 +2,7 @@
  * @file 笔记 API
  * @description 笔记的列表/详情/内容/归档/角色、回收站、批注、链接与版本历史相关接口。
  */
-import { request, type Note, type NoteDetail, type NoteListResponse } from './client'
+import { request, getToken, notifyTokenExpired, API_BASE, type Note, type NoteDetail, type NoteListResponse } from './client'
 
 /**
  * 获取笔记列表（分页）
@@ -277,6 +277,63 @@ export async function deleteAnnotation(noteId: string, annotationId: string): Pr
   await request<{ success: boolean }>(`/notes/${noteId}/annotations/${annotationId}`, {
     method: 'DELETE',
   });
+}
+
+// --- 选中文本 AI 提问 API ---
+
+/**
+ * 基于当前笔记选区局部上下文，对选中文本流式提问（SSE 流）
+ * 返回一个 ReadableStream，调用方需自行解析 SSE 事件：
+ * - event: meta / data: {"provider":"..."}
+ * - event: token / data: {"content":"..."}
+ * - event: done / data: {}
+ * - event: error / data: {"message":"..."}
+ *
+ * @param noteId - 笔记 ID
+ * @param payload - 提问载荷：question（问题，可编辑）、selected_text（选中文本）、
+ *                  context_before/context_after（选区前后上下文）、view_mode（original/clean）
+ * @param signal - 可选 AbortSignal，用于中止流式请求
+ */
+export async function askNoteQuestionStream(
+  noteId: string,
+  payload: {
+    question: string;
+    selected_text: string;
+    context_before?: string;
+    context_after?: string;
+    view_mode?: string;
+  },
+  signal?: AbortSignal
+): Promise<ReadableStream<Uint8Array>> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const response = await fetch(`${API_BASE}/notes/${noteId}/ask/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new Error('登录已过期，请重新登录');
+    }
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    const detail = Array.isArray(error.detail)
+      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
+      : (error.detail || `请求失败: ${response.status}`);
+    throw new Error(detail);
+  }
+  if (!response.body) {
+    throw new Error('浏览器不支持流式响应');
+  }
+  return response.body;
 }
 
 // --- 笔记-资料链接相关类型 ---

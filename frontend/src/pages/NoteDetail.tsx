@@ -46,6 +46,7 @@ import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
+import NoteAskPanel from '../components/NoteAskPanel'
 import { statusLabels, cardTypeColors, cardTypeLabels } from '../utils/labels'
 import { formatDateTime } from '../utils/datetime'
 import { useAdhdReader } from '../hooks/useAdhdReader'
@@ -81,6 +82,20 @@ export default function NoteDetail() {
   const [showAnnotationMenu, setShowAnnotationMenu] = useState(false)
   const [annotationMenuPos, setAnnotationMenuPos] = useState({ x: 0, y: 0 })
   const markdownRef = useRef<HTMLElement>(null)
+
+  /** AI 提问浮层 state：选中文本 + 选区上下文 + 浮层位置（null 表示关闭） */
+  const [askAIState, setAskAIState] = useState<{
+    text: string
+    contextBefore: string
+    contextAfter: string
+    pos: { x: number; y: number }
+  } | null>(null)
+  /** mouseup 时暂存的选区信息（点击菜单按钮后 live selection 会被清空，需依赖此 ref） */
+  const selectionRef = useRef<{ text: string; contextBefore: string; contextAfter: string }>({
+    text: '',
+    contextBefore: '',
+    contextAfter: '',
+  })
 
   /** 块操作（恢复/删除）进行中标记：置 true 时 5s 状态轮询跳过本轮，避免轮询旧数据覆盖块操作结果 */
   const mutatingRef = useRef<boolean>(false)
@@ -405,6 +420,23 @@ export default function NoteDetail() {
     fetchNote()
   }
 
+  /** 计算选区上下文：选中文本及其前后各 windowChars 字符（用于 AI 提问参考） */
+  function computeSelectionContext(range: Range, windowChars: number) {
+    const container = markdownRef.current
+    if (!container) return { text: '', contextBefore: '', contextAfter: '' }
+    const text = range.toString().trim()
+    // 获取选区前后的文本作为上下文
+    const beforeNode = document.createRange()
+    beforeNode.selectNodeContents(container)
+    beforeNode.setEnd(range.startContainer, range.startOffset)
+    const contextBefore = beforeNode.toString().slice(-windowChars)
+    const afterNode = document.createRange()
+    afterNode.selectNodeContents(container)
+    afterNode.setStart(range.endContainer, range.endOffset)
+    const contextAfter = afterNode.toString().slice(0, windowChars)
+    return { text, contextBefore, contextAfter }
+  }
+
   /** 处理鼠标抬起：选中文本时弹出批注操作浮层 */
   function handleMouseUp() {
     const selection = window.getSelection()
@@ -420,6 +452,9 @@ export default function NoteDetail() {
       return
     }
 
+    // 暂存选区信息（供「AI 提问」使用；点击菜单按钮后 live selection 会被清空）
+    selectionRef.current = computeSelectionContext(range, 1500)
+
     // 计算浮层位置
     const rect = range.getBoundingClientRect()
     setAnnotationMenuPos({
@@ -427,6 +462,20 @@ export default function NoteDetail() {
       y: rect.top - 10,
     })
     setShowAnnotationMenu(true)
+  }
+
+  /** 打开 AI 提问浮层：基于 mouseup 时暂存的选区信息 */
+  function handleOpenAskAI() {
+    const sel = selectionRef.current
+    if (!sel.text.trim()) return
+    setAskAIState({
+      text: sel.text,
+      contextBefore: sel.contextBefore,
+      contextAfter: sel.contextAfter,
+      pos: annotationMenuPos,
+    })
+    setShowAnnotationMenu(false)
+    window.getSelection()?.removeAllRanges()
   }
 
   /** 应用批注：高亮或下划线 */
@@ -922,7 +971,7 @@ export default function NoteDetail() {
         </div>
       )}
 
-      {/* 批注操作浮层：选中文本后显示高亮/下划线按钮 */}
+      {/* 批注操作浮层：选中文本后显示高亮/下划线/ AI 提问按钮 */}
       {showAnnotationMenu && editMode === 'view' && (
         <div
           className="selection-menu"
@@ -936,7 +985,22 @@ export default function NoteDetail() {
         >
           <button onClick={() => handleApplyAnnotation('highlight')} title="高亮">高亮</button>
           <button onClick={() => handleApplyAnnotation('underline')} title="下划线">下划线</button>
+          <button onClick={handleOpenAskAI} title="选中文本调用 AI 提问">AI 提问</button>
         </div>
+      )}
+
+      {/* AI 提问浮层：基于当前笔记选区上下文流式提问 */}
+      {askAIState && editMode === 'view' && (
+        <NoteAskPanel
+          noteId={note.id}
+          noteTitle={note.title}
+          initialText={askAIState.text}
+          contextBefore={askAIState.contextBefore}
+          contextAfter={askAIState.contextAfter}
+          viewMode={viewMode === 'diff' ? 'original' : viewMode}
+          pos={askAIState.pos}
+          onClose={() => setAskAIState(null)}
+        />
       )}
 
       {/* 链接管理弹窗：选择关联的学习资料 */}
