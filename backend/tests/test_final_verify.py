@@ -8,7 +8,7 @@ sys.stdout.reconfigure(line_buffering=True)
 TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNWE5MjY3MS03MTIzLTQ5MWItOTczMy01NGU1OTA2M2U2ZmQiLCJleHAiOjE3ODEyODY0MDh9.swiQ-uYwA492u2i2oXKe8BtPR5mJDTeykrFwliznKrw"
 NOTE_ID = "93b47cff-6f38-4b83-a6f3-ab6d34fcc140"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
-BASE = "http://localhost:8000/api"
+BASE = "http://localhost:8001/api"
 
 # ===== 1. 验证题目API =====
 print("=" * 60)

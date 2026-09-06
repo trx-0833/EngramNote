@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
-BACKEND_PORT=8000
+BACKEND_PORT=8001
 FRONTEND_PORT=5173
 
 # ---- Conda 环境配置（自动检测） ----

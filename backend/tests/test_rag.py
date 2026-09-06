@@ -2,7 +2,7 @@
 import httpx
 
 c = httpx.Client(timeout=120)
-BASE = "http://localhost:8000/api"
+BASE = "http://localhost:8001/api"
 
 r = c.post(BASE + "/auth/login", json={"email": "test_1781194945@example.com", "password": "TestPass123!"})
 t = r.json()["access_token"]

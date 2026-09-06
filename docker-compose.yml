@@ -10,7 +10,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       # 持久化数据目录
       - backend-data:/app/data

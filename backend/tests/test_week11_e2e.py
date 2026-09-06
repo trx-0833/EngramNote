@@ -29,7 +29,7 @@ import time
 
 import httpx
 
-BASE_URL = "http://localhost:8000/api"
+BASE_URL = "http://localhost:8001/api"
 PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
 
 client = httpx.Client(timeout=120.0)

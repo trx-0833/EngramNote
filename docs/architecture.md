@@ -13,7 +13,7 @@ EngramNote 是"AI 驱动的学习笔记管理与知识库工具"：用户上传�
 
 ```
 ┌──────────────────────┐        ┌─────────────────────────────────────┐
-│  React SPA (Vite)    │  HTTP  │  FastAPI 后端 (uvicorn, :8000)        │
+│  React SPA (Vite)    │  HTTP  │  FastAPI 后端 (uvicorn, :8001)        │
 │  frontend/src        │ ─────► │  app/main.py → app/api/*（路由层）    │
 │                      │ ◄───── │         │                             │
 └──────────────────────┘  JSON  │         ▼ 业务逻辑                    │
@@ -217,7 +217,7 @@ uploading ─► converting ─► converted ─► cleaning ─► cleaned ─�
 
 ```bash
 # 后端（backend/ 目录下）
-python -m uvicorn app.main:app --reload --port 8000 --reload-dir app
+python -m uvicorn app.main:app --reload --port 8001 --reload-dir app
 python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --pool=solo   # Windows 需 solo
 python -m celery -A app.tasks.celery_app:celery_app beat --loglevel=info
 

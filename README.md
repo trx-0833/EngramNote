@@ -235,8 +235,8 @@ npm run dev
 | 服务 | 地址 |
 |------|------|
 | 前端 | http://localhost:5173 |
-| 后端 API | http://localhost:8000 |
-| API 文档 | http://localhost:8000/docs |
+| 后端 API | http://localhost:8001 |
+| API 文档 | http://localhost:8001/docs |
 
 > **首次上传文件**：第一次上传 PDF 后，系统会加载嵌入模型（约 30 秒），之后会缓存为模块级单例。
 

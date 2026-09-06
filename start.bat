@@ -13,7 +13,7 @@ set "PROJECT_DIR=%~dp0"
 set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 set "BACKEND_DIR=%PROJECT_DIR%\backend"
 set "FRONTEND_DIR=%PROJECT_DIR%\frontend"
-set "BACKEND_PORT=8000"
+set "BACKEND_PORT=8001"
 set "FRONTEND_PORT=5173"
 
 :: ---- Conda environment config (auto-detect, no manual config needed) ----

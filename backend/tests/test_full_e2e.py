@@ -7,7 +7,7 @@ EngramNote 全链路可靠性测试套件
 → 笔记管理 → 跨用户隔离 → 负面用例，全流程 API 级端到端测试。
 
 前置条件：
-- 后端运行在 http://127.0.0.1:8000（uvicorn）
+- 后端运行在 http://127.0.0.1:8001（uvicorn）
 - Celery worker 已启动（--pool=solo）
 - backend/.env 已配置 DeepSeek(OpenCode GO) 与 MinerU API
 
@@ -28,7 +28,7 @@ import httpx
 # ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
-API_BASE = os.environ.get("E2E_API_BASE", "http://127.0.0.1:8000")
+API_BASE = os.environ.get("E2E_API_BASE", "http://127.0.0.1:8001")
 PDF_FILE = os.environ.get(
     "E2E_PDF_FILE",
     r"D:\engramnote\resource\电气\拉哇变电站主变运行技术标准.pdf",

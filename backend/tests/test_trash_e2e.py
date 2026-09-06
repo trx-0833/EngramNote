@@ -26,7 +26,7 @@ import httpx
 
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
-BASE = "http://localhost:8000/api"
+BASE = "http://localhost:8001/api"
 EMAIL = "e2e0816085528@example.com"
 PASSWORD = "e2e0816085528"
 USERNAME = "e2etester"
