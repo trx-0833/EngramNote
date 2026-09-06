@@ -8,8 +8,9 @@
  * 选中文本 + 选区前后上下文 → POST /api/notes/{noteId}/ask/stream
  * （SSE 事件：meta(provider) → token... → done / error）
  */
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import { askNoteQuestionStream } from '../api/notes'
+import { renderMarkdown } from '../utils/markdown'
 
 interface NoteAskPanelProps {
   noteId: string
@@ -44,6 +45,10 @@ export default function NoteAskPanel({
   const textAreaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+  /** 窗口当前位置（初始为选区旁，拖拽后可自由移动） */
+  const [panelPos, setPanelPos] = useState(pos)
+  /** 窗口相对锚点的方位（上方/下方），拖拽过程中保持恒定避免跳动 */
+  const [panelAbove, setPanelAbove] = useState(pos.y > 180)
 
   // 打开即聚焦输入框并全选选中文本，方便直接覆盖为自定义问题
   useEffect(() => {
@@ -195,12 +200,35 @@ export default function NoteAskPanel({
     onClose()
   }
 
-  // 定位：默认显示在选区上方；选区贴近顶部时改显示在下方
+  /** 标题栏拖拽：自由移动窗口（fixed 定位，滚动页面时窗口保持视口内） */
+  function handleDragStart(e: ReactMouseEvent) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    setPanelAbove(panelPos.y > 180)
+    const startX = e.clientX
+    const startY = e.clientY
+    const origX = panelPos.x
+    const origY = panelPos.y
+
+    function onMove(ev: MouseEvent) {
+      setPanelPos({ x: origX + (ev.clientX - startX), y: origY + (ev.clientY - startY) })
+    }
+    function onUp() {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  // 定位：默认显示在选区上方，贴近顶部时显示在下方；拖拽后按用户摆放位置固定
   const panelStyle: CSSProperties = {
     position: 'fixed',
-    left: Math.min(Math.max(pos.x, PANEL_WIDTH / 2 + 8), window.innerWidth - PANEL_WIDTH / 2 - 8),
-    top: pos.y,
-    transform: pos.y > 180 ? 'translate(-50%, calc(-100% - 10px))' : 'translate(-50%, 12px)',
+    left: Math.min(Math.max(panelPos.x, PANEL_WIDTH / 2 + 8), window.innerWidth - PANEL_WIDTH / 2 - 8),
+    top: panelPos.y,
+    transform: panelAbove ? 'translate(-50%, calc(-100% - 10px))' : 'translate(-50%, 12px)',
     width: PANEL_WIDTH,
     maxWidth: 'calc(100vw - 24px)',
     maxHeight: '60vh',
@@ -212,7 +240,7 @@ export default function NoteAskPanel({
 
   return (
     <div className="ask-ai-panel" style={panelStyle}>
-      <div className="ask-ai-header">
+      <div className="ask-ai-header" onMouseDown={handleDragStart} title="按住拖动窗口">
         <span className="ask-ai-title">AI 提问</span>
         <button className="ask-ai-close" onClick={handleClose} title="关闭">✕</button>
       </div>
@@ -237,7 +265,12 @@ export default function NoteAskPanel({
           <>
             <div className="ask-ai-question">{submittedQuestion}</div>
             {loading && <div className="ask-ai-thinking">AI 正在思考...</div>}
-            {answer && <div className="ask-ai-answer">{answer}</div>}
+            {answer && (
+              <div
+                className="ask-ai-answer markdown-body"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }}
+              />
+            )}
             {error && <p className="ask-ai-error">{error}</p>}
             <div className="ask-ai-actions">
               {streaming ? (

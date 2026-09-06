@@ -169,10 +169,18 @@
 }
 
 .ask-ai-answer {
-  white-space: pre-wrap;
   line-height: 1.8;
   font-size: 0.9rem;
   color: var(--color-text, #333);
+  word-break: break-word;
+}
+
+.ask-ai-answer :first-child {
+  margin-top: 0;
+}
+
+.ask-ai-answer :last-child {
+  margin-bottom: 0;
 }
 
 .ask-ai-error {
