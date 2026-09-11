@@ -6652,6 +6652,7 @@ if tokens_used >= token_limit:   # 不是 >
 | 配置 | `card_min_content_chars` / `card_min_title_chars` / `card_require_source_text` / `card_max_new_per_run` | 四个旋钮 |
 | 测试 | `tests/test_card_intake.py`（**27 用例**） | 指纹 / 质量门 / 幂等 / 上限 |
 | 迁移后真库自检 | — | 1183 行全部回填；抽样 200 张指纹与运行时函数**零不一致** |
+| 顺带修掉 | `test_week5_6_understanding.py` 的**顺序依赖** | 见 AE.8（既存缺陷，与本次改动无关，已用 `git stash` 对比确认） |
 
 后端测试 635 → **662 passed / 3 skipped**；ruff 全绿。
 
@@ -6766,6 +6767,45 @@ await db.commit()
   目前只能通过理解接口触发，而前端没有暴露"重跑"按钮 ——
   也就是说这次修的路径，用户暂时还走不到（与附录 Z/AA 同类，但方向相反：
   这次是"修好了还没人用"）。
+
+### AE.8 顺带发现：一个**依赖执行顺序**的测试（既存缺陷）
+
+改完之后单独校验受影响文件时，`tests/test_week5_6_understanding.py` 报 3 个
+失败。先用 `git stash` 对比确认**与本次改动无关**，再定位到根因：
+
+```
+LLMService._rate_limiter 是**类级单例**，在**首次**实例化时按当时的
+settings.llm_max_rpm 建一次，此后整个进程复用。
+```
+
+而该文件的用例几乎都把 `llm_service.settings` 换成 `MagicMock` ——
+`llm_max_rpm` 因此是自动生成的 MagicMock 属性。若它们恰好是进程里**第一个**
+实例化 `LLMService` 的地方，MagicMock 就被固化进单例，同进程后续每次
+`chat()` 都在 `RateLimiter.acquire` 里抛：
+
+```
+TypeError: '<=' not supported between instances of 'MagicMock' and 'int'
+```
+
+实测：
+
+| 跑法 | 结果 |
+|---|---|
+| `pytest tests/test_week5_6_understanding.py` 单独跑 | **3 failed** |
+| `pytest` 全量 | **全绿** |
+
+全量能过只因为**前面的文件已经把单例建好了**，Mock 永远到不了限流器。
+
+**这是一个"必须和别人一起跑才通过"的测试** —— 它不能用来判断改动有没有破坏
+东西，而它恰恰会在最需要它的时候（只跑这一个文件排查问题）给出假警报。
+修法是在该类上加一个 autouse fixture，在**每个用例之前**用真实的整数 rpm
+把类级单例建好（而不是逐个用例补 `llm_max_rpm`），用例结束后再还原 ——
+这样将来新增用例也不会重蹈覆辙。
+
+⚠️ **产品侧的根因没有动**：类级单例在首次实例化时**冻结配置**，
+与 conftest 里早已记录的"import/首次调用时冻结数据库地址"是同一类缺陷。
+阶段 **4.5**（"限流器/信号量改为每 loop 惰性创建"）正是它的归属，
+本附录只修测试侧，不越界做一半。
 
 ---
 

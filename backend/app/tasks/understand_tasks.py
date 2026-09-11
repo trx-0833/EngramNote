@@ -130,10 +130,17 @@ async def _understand_document(note_id: str):
                 markdown_content=markdown_content,
             )
 
+    # 阶段 4.8/4.9：不能只报"新建了几张卡"。
+    #
+    # 重跑理解时新建数为 0（全部按内容寻址复用），只报 0 会让日志看起来
+    # 像"这次什么都没抽出来"；被质量门拦下的卡片若不出现在这里，
+    # "不入库"就变成了"静默少了几张"。四个计数一起报才说得清。
     logger.info(
-        f"笔记 {note_id} 理解完成: "
-        f"{result['chapter_count']} 个章节, "
-        f"{result['total_cards']} 个知识卡片"
+        "笔记 %s 理解完成: %d 个章节, 新建卡片 %d 张"
+        "（复用 %d 张, 被质量门拦下 %d 张, 超单次上限未入库 %d 张）",
+        note_id, result["chapter_count"], result["total_cards"],
+        result.get("reused_cards", 0), result.get("rejected_cards", 0),
+        result.get("truncated_cards", 0),
     )
 
     # 7. 更新笔记状态为 archived，并记录学习成功时间（合并到现有 metadata_，避免覆盖 clean_stats 等）
