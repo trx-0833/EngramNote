@@ -252,6 +252,29 @@ class Settings(BaseSettings):
     # 是否启用 STARTTLS 加密传输
     smtp_use_tls: bool = True
 
+    # ---- LLM 成本记账（阶段 4.2）----
+    #
+    # ## 为什么价格是配置项而不是内置常量
+    #
+    # 单价随供应商、模型、时期变化，本项目**不内置价格表** ——
+    # 内置的那份数字迟早会变成错误的事实，而错误的价格比"不知道价格"更糟：
+    # 它会被人当真。
+    #
+    # 两项都留空（默认）时，`llm_calls.cost` 记 **NULL**，不是 0。
+    # 这个区别是刻意的：0 会让"没配价格"与"完全免费"在报表上长得一模一样。
+    #
+    # 单位：**每 100 万 token 的价格**（与供应商报价单的口径一致，
+    # 避免"每 1K"这种容易点错三位小数的小单位）。
+    llm_price_input_per_1m: float = 0.0
+    llm_price_output_per_1m: float = 0.0
+    llm_price_currency: str = "CNY"
+
+    # LLM 调用记账的保留期（天）。0 表示永不清理。
+    #
+    # 每次调用一行，量级与调用次数同阶（不是与笔记数同阶），
+    # 单用户一年通常也就几万行 —— 保留期主要是防止长期运行后无限增长。
+    llm_call_retention_days: int = 365
+
     # ---- 复习配置 ----
     # 每日最大答题数（前后端单一来源，经 /review/stats 下发给前端，见 docs/decisions.md#F-12）
     daily_review_limit: int = 10

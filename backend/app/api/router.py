@@ -33,6 +33,7 @@ from .assessment import router as assessment_router
 from .knowledge import router as knowledge_router
 from .goals import router as goals_router
 from .tasks import router as tasks_router
+from .llm import router as llm_router
 
 # 创建总路由器，所有子路由将挂载到此路由器
 api_router = APIRouter()
@@ -67,3 +68,5 @@ api_router.include_router(knowledge_router, prefix="/knowledge", tags=["知识�
 api_router.include_router(goals_router, prefix="/goals", tags=["学习目标"])
 # 注册任务进度路由，前缀 /tasks，OpenAPI 标签为"任务进度"
 api_router.include_router(tasks_router, prefix="/tasks", tags=["任务进度"])
+# 注册 LLM 用量与成本路由，前缀 /llm，OpenAPI 标签为"LLM 成本"（阶段 4.2）
+api_router.include_router(llm_router, prefix="/llm", tags=["LLM 成本"])

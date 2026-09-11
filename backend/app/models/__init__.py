@@ -22,6 +22,7 @@ from .review_state import (
     ITEM_TYPE_QUIZ,
 )
 from .chunk import Chunk, pack_vector, unpack_vector
+from .llm_call import LLMCall
 
 __all__ = [
     "User",
@@ -62,4 +63,5 @@ __all__ = [
     "Chunk",
     "pack_vector",
     "unpack_vector",
+    "LLMCall",
 ]

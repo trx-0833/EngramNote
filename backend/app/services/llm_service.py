@@ -45,6 +45,7 @@ from .llm.client import (
 from .llm.json_parse import parse_json_tolerant, strip_json_fences  # noqa: F401  parse_json_tolerant 为 re-export
 from .llm.rate_limit import RateLimiter
 from .llm.sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
+from .llm_accounting_service import record_call
 
 logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
@@ -191,6 +192,12 @@ class LLMService:
                             f"LLM 输出被 max_tokens 截断 | scene={scene} | max_tokens={max_tokens} | "
                             f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量"
                         )
+                    # 阶段 4.2：记账。**成功也要记** —— 只记失败会得到
+                    # "花了多少钱"这个最重要的数字为零。
+                    await record_call(
+                        scene=scene, provider=self._provider, model=self._model,
+                        usage=usage, latency_ms=elapsed_ms,
+                    )
                     return {
                         "content": content,
                         "finish_reason": finish_reason,
@@ -238,6 +245,18 @@ class LLMService:
                             f"provider={self._provider} | model={self._model} | error={e}"
                         )
 
+        # 阶段 4.2：失败的调用也要记账。
+        #
+        # 最烧钱的形态恰恰是**失败的重试风暴**：`llm_max_retries=5`，
+        # 每次重试都可能已经把 prompt token 发出去并被计费，
+        # 而只记成功等于把最该被看见的那部分成本藏起来。
+        # 这里记的是**整次调用**（含全部重试）的耗时与最终结果。
+        await record_call(
+            scene=scene, provider=self._provider, model=self._model,
+            latency_ms=(time.monotonic() - start_time) * 1000,
+            success=False,
+            error=str(last_error) if last_error else "未知错误",
+        )
         raise Exception(
             f"LLM API 调用失败，重试 {self._max_retries} 次后仍出错 "
             f"(scene={scene}, provider={self._provider}, model={self._model}): {last_error}"
@@ -343,6 +362,12 @@ class LLMService:
             f"prompt_cache_hit_tokens={usage.get('prompt_cache_hit_tokens')} | "
             f"prompt_cache_miss_tokens={usage.get('prompt_cache_miss_tokens')} | "
             f"elapsed={elapsed_ms:.0f}ms | chars={len(full_response)}"
+        )
+        # 阶段 4.2：流式路径同样记账。usage 只在最后一个 chunk 里，
+        # 所以必须在**流读完之后**记，不能在一开始记。
+        await record_call(
+            scene=scene, provider=self._provider, model=self._model,
+            usage=usage, latency_ms=elapsed_ms,
         )
 
     async def summarize_chapter(self, chapter_title: str, chapter_content: str) -> str:

@@ -365,6 +365,9 @@ async def grade_short_answer_semantically(
     question: str,
     expected_answer: str,
     user_answer: str,
+    *,
+    user_id: Optional[str] = None,
+    note_id: Optional[str] = None,
 ) -> Optional[dict]:
     """用 LLM 做简答题语义判分，返回与 ``grade_answer`` 同构的 dict
 
@@ -397,18 +400,22 @@ async def grade_short_answer_semantically(
         }
 
     from .llm_service import LLMService
+    from .llm_accounting_service import llm_context
 
     try:
         # 超时上限**远小于**全局 llm_timeout_seconds：判分在复习提交的同步
         # 路径上，用户就等在原地（见 SEMANTIC_GRADE_TIMEOUT_SECONDS 的说明）。
-        detail = await asyncio.wait_for(
-            LLMService().grade_short_answer(
-                question=question,
-                expected_answer=expected_answer,
-                user_answer=user_answer,
-            ),
-            timeout=SEMANTIC_GRADE_TIMEOUT_SECONDS,
-        )
+        #
+        # 阶段 4.2：带上上下文，让这次判分的花费能归到具体用户/笔记。
+        with llm_context(user_id=user_id, note_id=note_id, task="grade_short_answer"):
+            detail = await asyncio.wait_for(
+                LLMService().grade_short_answer(
+                    question=question,
+                    expected_answer=expected_answer,
+                    user_answer=user_answer,
+                ),
+                timeout=SEMANTIC_GRADE_TIMEOUT_SECONDS,
+            )
     except asyncio.TimeoutError:
         logger.info(
             "语义判分超时（>%.0fs），退回自评占位", SEMANTIC_GRADE_TIMEOUT_SECONDS

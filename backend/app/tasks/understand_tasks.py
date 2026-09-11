@@ -115,13 +115,20 @@ async def _understand_document(note_id: str):
         return
 
     # 3-6. 执行理解流程（切分章节 → 生成摘要 → 提取知识点 → 存入数据库）
-    async with session_factory() as session:
-        result = await process_note_understanding(
-            db=session,
-            note_id=note_id,
-            user_id=user_id,
-            markdown_content=markdown_content,
-        )
+    #
+    # 阶段 4.2：把这次理解产生的所有 LLM 调用归到「谁 + 哪篇笔记」。
+    # 声明在**任务体的最外层**，内层的每一步（摘要/知识点/题目）不必重复；
+    # 没有这层声明的调用照样会被记账，只是 user_id/note_id 为 NULL。
+    from ..services.llm_accounting_service import llm_context
+
+    with llm_context(user_id=user_id, note_id=note_id, task="understand_note"):
+        async with session_factory() as session:
+            result = await process_note_understanding(
+                db=session,
+                note_id=note_id,
+                user_id=user_id,
+                markdown_content=markdown_content,
+            )
 
     logger.info(
         f"笔记 {note_id} 理解完成: "

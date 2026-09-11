@@ -827,7 +827,14 @@ class RAGService:
             }
 
         # 3. 调用 LLM 基于 context 生成回答
-        answer = await llm_service.rag_answer(question, context)
+        #
+        # 阶段 4.2：问答是**最贵的单次调用**（把若干 chunk 全文塞进 prompt），
+        # 因此这里必须带上上下文 —— 否则"这个月的钱花在哪"会得出
+        # "问答不花钱"这种与事实相反的结论。
+        from .llm_accounting_service import llm_context
+
+        with llm_context(user_id=user_id, task="qa_answer"):
+            answer = await llm_service.rag_answer(question, context)
 
         return {
             "answer": answer,

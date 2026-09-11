@@ -335,6 +335,9 @@ async def submit_answer(
             question=quiz.question or "",
             expected_answer=correct_answer or "",
             user_answer=user_answer or "",
+            # 阶段 4.2：判分也是花钱的 LLM 调用，归到具体用户与笔记
+            user_id=user_id,
+            note_id=quiz.note_id,
         )
         if semantic:
             grade = semantic
