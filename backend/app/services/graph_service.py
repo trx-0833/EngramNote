@@ -23,7 +23,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from sqlalchemy import and_, case, desc, distinct, exists, func, or_, select, update
+from sqlalchemy import and_, case, distinct, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.card_relation import CardRelation, RelationType, RelationStatus

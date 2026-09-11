@@ -36,7 +36,16 @@ def _get_openai_client(api_key: str, base_url: str) -> OpenAI:
     if cache_key not in _client_cache:
         with _client_lock:
             if cache_key not in _client_cache:
-                _client_cache[cache_key] = OpenAI(api_key=api_key, base_url=base_url)
+                # 与 services/llm/client.py 同样的网关约束：OpenCode 要求
+                # x-opencode-session 头，缺失即 400 MissingSessionID。
+                # 这里走 openai SDK，用 default_headers 附加（标点恢复 / 标题生成都依赖）。
+                from ..llm.client import build_llm_headers
+
+                _client_cache[cache_key] = OpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                    default_headers=build_llm_headers(api_key, base_url),
+                )
     return _client_cache[cache_key]
 
 

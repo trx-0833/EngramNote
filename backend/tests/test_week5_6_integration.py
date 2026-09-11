@@ -128,7 +128,7 @@ def main():
         print(f"  转换失败: {data.get('error_message', '')}")
         sys.exit(1)
     else:
-        print(f"  转换超时")
+        print("  转换超时")
         sys.exit(1)
 
     # ===== Step 5: 等待清洗完成 =====
@@ -140,7 +140,7 @@ def main():
         print(f"  清洗失败: {data.get('error_message', '')}")
         sys.exit(1)
     else:
-        print(f"  清洗超时")
+        print("  清洗超时")
         sys.exit(1)
 
     # ===== Step 6: 触发理解管道 =====
@@ -161,7 +161,7 @@ def main():
         print(f"  理解失败: {data.get('error_message', '')}")
         sys.exit(1)
     else:
-        print(f"  理解超时")
+        print("  理解超时")
         sys.exit(1)
 
     # ===== Step 8: 查看知识卡片 =====
@@ -248,7 +248,7 @@ def main():
         resp = client.post(f"{BASE_URL}/understanding/ask", headers=headers, json={"question": q})
         if resp.status_code == 200:
             answer_data = resp.json()
-            log_step(f"问答成功", detail=f"Q: {q}")
+            log_step("问答成功", detail=f"Q: {q}")
             print(f"    A: {answer_data['answer'][:100]}...")
             if answer_data.get("sources"):
                 for s in answer_data["sources"][:2]:

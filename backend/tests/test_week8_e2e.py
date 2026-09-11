@@ -367,7 +367,7 @@ def main():
     print("第8周复习功能端到端测试完成")
     print("=" * 60)
     print(f"  测试用户: {test_user['username']}")
-    print(f"  状态: 正常结束")
+    print("  状态: 正常结束")
     print()
 
 

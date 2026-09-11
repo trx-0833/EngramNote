@@ -482,7 +482,7 @@ def main():
     print(f"  知识卡片: {card_count} 张")
     print(f"  题目: {question_count} 道")
     print(f"  答题: {answered} 道")
-    print(f"  状态: 正常结束")
+    print("  状态: 正常结束")
     print()
 
 

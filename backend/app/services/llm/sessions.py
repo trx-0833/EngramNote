@@ -7,7 +7,14 @@
 
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    # 仅供类型标注使用（避免 llm_service ←→ sessions 的循环导入）。
+    # 三个会话类的 __init__ 都把 llm_service 标注为 "LLMService"（前向引用字符串），
+    # 不导入该名字会让静态检查报 F821 undefined name；
+    # 放在 TYPE_CHECKING 下即可让类型检查器看到，又不产生运行期依赖。
+    from ..llm_service import LLMService
 
 logger = logging.getLogger("engramnote.llm")
 

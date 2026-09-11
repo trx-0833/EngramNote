@@ -302,6 +302,37 @@ class EmbeddingService:
         return embeddings.tolist()
 
     @staticmethod
+    def similarity_from_l2_distance(distance: float) -> float:
+        """
+        把 Chroma 返回的 L2 **平方**距离换算为余弦相似度
+
+        背景：collection 创建时未指定 `hnsw:space`，Chroma 默认使用
+        **平方欧氏距离**（L2²）。BGE-M3 与 bge-small-zh-v1.5 的 modules.json
+        都带尾部 Normalize 模块、输出单位向量，因此有恒等关系：
+
+            ||a - b||² = 2 - 2·cos(a, b)      (a、b 为单位向量)
+            => cos(a, b) = 1 - distance / 2
+
+        旧实现用 `1 / (1 + distance)`，那不是余弦：距离 0→1.0 正确，
+        但语义**完全无关**（正交，cos=0，distance=2）只得 0.333，
+        而"完全相反"（cos=-1，distance=4）得 0.2 ——
+        整个 [0.33, 0.2] 区间挤在一起，既不可解释也无法用于阈值过滤。
+
+        Args:
+            distance: Chroma 返回的 L2 平方距离（单位向量下范围 [0, 4]）
+
+        Returns:
+            float: 余弦相似度，裁剪到 [-1, 1]
+        """
+        try:
+            d = float(distance)
+        except (TypeError, ValueError):
+            return 0.0
+        cos = 1.0 - d / 2.0
+        # 数值噪声可能略微越界（d 因浮点误差略小于 0 或略大于 4）
+        return max(-1.0, min(1.0, cos))
+
+    @staticmethod
     def compute_similarity(vec_a: List[float], vec_b: List[float]) -> float:
         """
         计算两个向量的余弦相似度

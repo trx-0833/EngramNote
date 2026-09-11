@@ -61,6 +61,55 @@ def get_llm_client() -> httpx.AsyncClient:
     return _shared_llm_client
 
 
+# ---- OpenCode 网关会话头（x-opencode-session） ----
+# opencode.ai 的网关要求每个 chat/completions 请求携带 x-opencode-session 头，
+# 缺失时直接返回 400 MissingSessionID（实测：加头后同请求立即 200）。
+# 会话标识用于网关路由与计费归集，因此必须**跨请求稳定**，不能在每次调用时新建：
+# LLMService 是"每次业务调用 new 一个"的用法（见 rag_service.answer_question），
+# 把 session 放在实例上等于每请求换一个会话，失去复用意义。
+#
+# 与 httpx client 同理，按事件循环保存：Celery 每个任务用 asyncio.run() 新建 loop，
+# 若跨 loop 复用同一 session 字符串无副作用（它只是字符串），但按 loop 隔离可让
+# 「一次任务内稳定、任务之间不串味」的语义更清晰，也便于将来换成真实会话对象。
+_shared_session_id: Optional[str] = None
+_shared_session_id_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def get_opencode_session_id() -> str:
+    """获取（惰性创建）当前事件循环内的 OpenCode 会话标识；事件循环变化时重建
+
+    仅对 opencode.ai 网关有意义，但无条件返回一个稳定值也无害，
+    因此调用方无需关心 provider 判断（见 is_opencode_gateway）。
+    """
+    global _shared_session_id, _shared_session_id_loop
+    current_loop = _current_loop()
+    if _shared_session_id is not None and _shared_session_id_loop is not current_loop:
+        _shared_session_id = None
+        _shared_session_id_loop = None
+    if _shared_session_id is None:
+        import uuid
+
+        _shared_session_id = str(uuid.uuid4())
+        _shared_session_id_loop = current_loop
+    return _shared_session_id
+
+
+def is_opencode_gateway(base_url: str) -> bool:
+    """判断 base_url 是否指向需要 x-opencode-session 的 OpenCode 网关"""
+    return "opencode.ai" in (base_url or "").lower()
+
+
+def build_llm_headers(api_key: str, base_url: str) -> Dict[str, str]:
+    """构造 LLM 请求头（含 OpenCode 网关所需的会话头）"""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if is_opencode_gateway(base_url):
+        headers["x-opencode-session"] = get_opencode_session_id()
+    return headers
+
+
 def close_llm_client() -> None:
     """关闭共享客户端（应用关闭时调用，见 main.py lifespan）"""
     global _shared_llm_client, _shared_llm_client_loop
@@ -88,3 +137,19 @@ def _truncate_messages(messages: List[Dict[str, str]], limit: int = 200) -> List
             item["content"] = content[:limit] + f"...(截断,共{len(content)}字)"
         result.append(item)
     return result
+
+
+def _response_snippet(response, limit: int = 500) -> str:
+    """提取 HTTP 错误响应体片段用于日志诊断
+
+    网关的错误原因（鉴权、限流、参数、会话缺失）通常只在响应体里，
+    只记录 str(exc) 会丢失这些信息。截断避免超长 HTML 错误页污染日志。
+    """
+    try:
+        text = response.text or ""
+    except Exception:
+        return "<unreadable>"
+    text = text.replace("\n", " ").replace("\r", " ").strip()
+    if not text:
+        return "<empty>"
+    return text[:limit] + ("...(截断)" if len(text) > limit else "")

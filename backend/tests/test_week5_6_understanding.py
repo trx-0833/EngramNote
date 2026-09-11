@@ -17,11 +17,8 @@ Week5-6 AI 理解管道测试
 """
 
 import json
-import os
-import re
 import sys
 from pathlib import Path
-from typing import Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -299,13 +296,19 @@ class TestConfigGLMAndLLMSelection:
         assert hasattr(s, "glm_base_url"), "Settings 缺少 glm_base_url 字段"
 
     def test_glm_model_default_lowercase(self):
-        """glm_model 默认值应为全小写 glm-4.7-flash"""
+        """glm_model 默认值必须全小写（智谱 API 要求模型名小写）
+
+        只断言"小写"这一契约，不再硬编码具体型号 —— 型号会随供应商版本演进
+        （默认值已由 glm-4.7-flash 调整为 glm-4-flash），
+        硬编码型号会让测试变成"配置快照"而不是契约校验。
+        """
         from app.config import Settings
 
         s = Settings()
-        assert s.glm_model == "glm-4.7-flash", (
-            f"glm_model 默认值应为 'glm-4.7-flash'，实际为 '{s.glm_model}'"
+        assert s.glm_model == s.glm_model.lower(), (
+            f"glm_model 必须全小写（智谱 API 要求），实际为 '{s.glm_model}'"
         )
+        assert s.glm_model.strip() == s.glm_model, "glm_model 不应含首尾空白"
 
     def test_glm_base_url_default(self):
         """glm_base_url 默认值应为智谱 API 地址"""
@@ -377,7 +380,7 @@ class TestEnvGLMModelCase:
     """验证 .env 中 GLM_MODEL 为全小写"""
 
     def test_env_glm_model_is_lowercase(self):
-        """.env 中 GLM_MODEL 应为全小写 glm-4.7-flash"""
+        """.env 中 GLM_MODEL 必须全小写（智谱 API 要求），型号不限"""
         env_path = BACKEND_DIR / ".env"
         if not env_path.exists():
             pytest.skip(".env 文件不存在")
@@ -386,12 +389,14 @@ class TestEnvGLMModelCase:
         for line in content.splitlines():
             line = line.strip()
             if line.startswith("GLM_MODEL="):
-                value = line.split("=", 1)[1]
-                assert value == "glm-4.7-flash", (
-                    f".env 中 GLM_MODEL 应为 'glm-4.7-flash'（全小写），"
-                    f"实际为 '{value}'"
+                value = line.split("=", 1)[1].strip()
+                assert value == value.lower(), (
+                    f".env 中 GLM_MODEL 必须全小写（智谱 API 要求），实际为 '{value}'"
                 )
+                assert value, ".env 中 GLM_MODEL 不应为空"
                 return
+
+        pytest.fail(".env 中未找到 GLM_MODEL 配置项")
 
         pytest.fail(".env 中未找到 GLM_MODEL 配置项")
 
@@ -823,70 +828,50 @@ class TestCeleryTaskRegistration:
 
 
 class TestFrontendAPIClient:
-    """验证前端 API 客户端新增的类型和函数"""
+    """验证前端 API 层提供所需类型与函数
+
+    变更说明：原实现只 grep `src/api/client.ts` 单个文件。该文件已按职责拆分为
+    api/{auth,notes,upload,cleaning,qa,review,report,assessment,graph,projects,
+    goals,knowledge}.ts，client.ts 仅保留 core 封装与 barrel 导出（298 行）。
+    因此改为在整个 `src/api` 目录内聚合搜索 —— 断言的契约是"API 层提供了 X"，
+    而不是"X 恰好在某个特定文件里"，后者会把正常拆分误判为功能缺失。
+    """
+
+    @staticmethod
+    def _api_source() -> str:
+        api_dir = FRONTEND_DIR / "src" / "api"
+        if not api_dir.exists():
+            pytest.skip("前端 src/api 不存在")
+        parts = [f.read_text(encoding="utf-8") for f in sorted(api_dir.rglob("*.ts"))]
+        return "\n".join(parts)
 
     def test_knowledge_card_type_defined(self):
-        """client.ts 应定义 KnowledgeCard 类型"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "KnowledgeCard" in source, "client.ts 中未定义 KnowledgeCard 类型"
+        """API 层应定义 KnowledgeCard 类型"""
+        assert "KnowledgeCard" in self._api_source(), "API 层未定义 KnowledgeCard 类型"
 
     def test_quiz_item_type_defined(self):
-        """client.ts 应定义 QuizItem 类型"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "QuizItem" in source, "client.ts 中未定义 QuizItem 类型"
+        """API 层应定义 QuizItem 类型"""
+        assert "QuizItem" in self._api_source(), "API 层未定义 QuizItem 类型"
 
     def test_start_understanding_function_defined(self):
-        """client.ts 应定义 startUnderstanding 函数"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "startUnderstanding" in source, "client.ts 中未定义 startUnderstanding 函数"
+        """API 层应定义 startUnderstanding 函数"""
+        assert "startUnderstanding" in self._api_source(), "API 层未定义 startUnderstanding 函数"
 
     def test_ask_question_function_defined(self):
-        """client.ts 应定义 askQuestion 函数"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "askQuestion" in source, "client.ts 中未定义 askQuestion 函数"
+        """API 层应定义 askQuestion 函数"""
+        assert "askQuestion" in self._api_source(), "API 层未定义 askQuestion 函数"
 
     def test_get_knowledge_cards_function_defined(self):
-        """client.ts 应定义 getKnowledgeCards 函数"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "getKnowledgeCards" in source, "client.ts 中未定义 getKnowledgeCards 函数"
+        """API 层应定义 getKnowledgeCards 函数"""
+        assert "getKnowledgeCards" in self._api_source(), "API 层未定义 getKnowledgeCards 函数"
 
     def test_generate_questions_function_defined(self):
-        """client.ts 应定义 generateQuestions 函数"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "generateQuestions" in source, "client.ts 中未定义 generateQuestions 函数"
+        """API 层应定义 generateQuestions 函数"""
+        assert "generateQuestions" in self._api_source(), "API 层未定义 generateQuestions 函数"
 
     def test_api_paths_use_understanding_prefix(self):
         """API 路径应使用 /understanding/ 前缀"""
-        client_ts_path = FRONTEND_DIR / "src" / "api" / "client.ts"
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 不存在")
-
-        source = client_ts_path.read_text(encoding="utf-8")
-        assert "/understanding/" in source, "API 路径未使用 /understanding/ 前缀"
+        assert "/understanding/" in self._api_source(), "API 路径未使用 /understanding/ 前缀"
 
 
 # ===========================================================================

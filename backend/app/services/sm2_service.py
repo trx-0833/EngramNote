@@ -26,6 +26,7 @@ SM-2 算法核心：
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -112,141 +113,211 @@ def calculate_sm2(
     )
 
 
+
+"""Auto-grading for review answers.
+
+Design notes (see docs/overhaul-plan.md 2.4 L-1):
+
+The previous implementation graded free-text answers by set-overlap of character
+n-grams. Measured behaviour:
+
+  * a logically INVERTED answer scored quality=4 ("correct, with hesitation")
+  * a correct but terse answer ("机器学习" against a 62-char reference) scored
+    quality=1 (failed), because coverage is divided by the reference length
+  * fill-in-the-blank compared SINGLE-CHARACTER sets, so "学器" was accepted
+    as "机器学习"
+
+Root causes: n-gram sets are unordered (negation is invisible) and
+length-asymmetric. Character-level overlap cannot represent meaning.
+
+New policy:
+  * choice            -> deterministic letter/option matching
+  * fill_blank        -> normalized exact match, then bounded edit distance
+  * short_answer      -> NOT auto-graded. Returns quality=1 with
+                         needs_self_assessment=True so the caller/UI can ask
+                         the learner (self-rating is the most reliable signal,
+                         and is what the overhaul plan prescribes as layer 1).
+
+Callers must treat needs_self_assessment as "do not trust this grade".
+"""
+
+# 注意：re / unicodedata 已在文件顶部导入（见 sm2_service 的 import 段），此处不重复导入
+
+# --- Normalization -----------------------------------------------------------
+
+_PUNCT_RE = re.compile(r"[\s，。、；：！？""''（）【】《》,.;:!?\"'()\[\]{}<>~`|/\\_\-—…]+")
+_LATIN_WS_RE = re.compile(r"\s+")
+
+
+def normalize_answer(text: str) -> str:
+    """Normalize an answer for comparison.
+
+    Folds full-width to half-width, lowercases, strips all whitespace and
+    punctuation. Chinese is unaffected apart from punctuation.
+    """
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFKC", text)
+    s = s.lower()
+    s = _PUNCT_RE.sub("", s)
+    return _LATIN_WS_RE.sub("", s)
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Levenshtein edit distance (iterative, O(min(|a|,|b|)) space)."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    if len(a) < len(b):
+        a, b = b, a
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(
+                previous[j] + 1,        # deletion
+                current[j - 1] + 1,     # insertion
+                previous[j - 1] + (ca != cb),  # substitution
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _levenshtein_ratio(a: str, b: str) -> float:
+    """Edit distance normalized to [0, 1]; 1.0 == identical."""
+    longest = max(len(a), len(b))
+    if longest == 0:
+        return 1.0
+    return 1.0 - _levenshtein(a, b) / longest
+
+
+# --- Grading -----------------------------------------------------------------
+
+# Option letters accepted for choice questions.
+_CHOICE_LETTER_RE = re.compile(r"^([a-d])\b")
+
+
+def _grade_choice(user_answer: str, correct_answer: str) -> int:
+    """Deterministic grading for choice questions.
+
+    Accepts the answer as a bare letter, a letter with the option text, or the
+    full option text. Ambiguous submissions are treated as wrong rather than
+    guessed at.
+    """
+    u = normalize_answer(user_answer)
+    c = normalize_answer(correct_answer)
+    if not u:
+        return 0
+    if u == c:
+        return 5
+    # Compare leading option letters when both start with one.
+    ul = _CHOICE_LETTER_RE.match(u)
+    cl = _CHOICE_LETTER_RE.match(c)
+    if ul and cl:
+        return 5 if ul.group(1) == cl.group(1) else 1
+    # One side is a letter, the other starts with that letter followed by text
+    # (normalization may have removed the separating punctuation).
+    if cl and not ul and u.startswith(cl.group(1)):
+        return 5
+    if ul and not cl and c.startswith(ul.group(1)):
+        return 5
+    return 1
+
+
+def _grade_fill_blank(user_answer: str, correct_answer: str) -> int:
+    """Grading for fill-in-the-blank: exact match after normalization,
+    then small typo tolerance via edit distance.
+
+    Explicitly does NOT use character-set overlap: "学器" is not "机器学习".
+    """
+    u = normalize_answer(user_answer)
+    c = normalize_answer(correct_answer)
+    if not u:
+        return 0
+    if u == c:
+        return 5
+    if not c:
+        return 1
+    ratio = _levenshtein_ratio(u, c)
+    # Allow one typo in a short answer, scaling to ~15% for longer ones.
+    typo_budget = max(1, int(len(c) * 0.15))
+    distance = _levenshtein(u, c)
+    if distance <= typo_budget and ratio >= 0.7:
+        return 3
+    # A strict substring match only counts when it covers most of the answer,
+    # so that "学习" does not pass for "机器学习".
+    if len(u) >= 3 and (c in u or u in c):
+        shorter, longer = sorted((len(u), len(c)))
+        if shorter / longer >= 0.8:
+            return 3
+    return 1
+
+
+def grade_answer(
+    question_type: str,
+    user_answer: str,
+    correct_answer: str,
+) -> dict:
+    """Grade an answer and report how much the grade can be trusted.
+
+    Returns:
+        dict with keys:
+            quality (int): SM-2 quality 0-5
+            method (str): "exact" | "choice" | "edit_distance" | "ungraded"
+            needs_self_assessment (bool): True when the automatic grade is a
+                placeholder and the learner should rate themselves instead.
+            reason (str): human-readable explanation (Chinese) shown in the UI.
+    """
+    qtype = (question_type or "").strip().lower()
+
+    if not (user_answer or "").strip():
+        return {
+            "quality": 0,
+            "method": "exact",
+            "needs_self_assessment": False,
+            "reason": "未作答",
+        }
+
+    if qtype == "choice":
+        q = _grade_choice(user_answer, correct_answer)
+        return {
+            "quality": q,
+            "method": "choice",
+            "needs_self_assessment": False,
+            "reason": "选择题按选项字母判定",
+        }
+
+    if qtype == "fill_blank":
+        q = _grade_fill_blank(user_answer, correct_answer)
+        return {
+            "quality": q,
+            "method": "exact" if q == 5 else "edit_distance",
+            "needs_self_assessment": False,
+            "reason": "填空题按归一化后的精确匹配/编辑距离判定",
+        }
+
+    # short_answer (and anything unknown): do not pretend to grade meaning.
+    return {
+        "quality": 1,
+        "method": "ungraded",
+        "needs_self_assessment": True,
+        "reason": (
+            "简答题无法用字符匹配可靠判分（实测：把正确答案的逻辑完全反转，"
+            "旧算法仍判为「正确」）。请自行评估掌握程度。"
+        ),
+    }
+
+
 def quality_from_answer(
     question_type: str,
     user_answer: str,
     correct_answer: str,
 ) -> int:
+    """Backward-compatible wrapper returning only the SM-2 quality.
+
+    Prefer grade_answer() when the caller can act on needs_self_assessment.
     """
-    根据题目类型和用户答案计算 SM-2 评分
-
-    评分策略：
-    - choice（选择题）：完全匹配 → 5，否则 → 1
-    - fill_blank（填空题）：完全匹配 → 5，部分匹配 → 3，不匹配 → 1
-    - short_answer（简答题）：基于关键词匹配评分 → 1-5
-
-    Args:
-        question_type: 题目类型（choice/fill_blank/short_answer）
-        user_answer: 用户提交的答案
-        correct_answer: 正确答案
-
-    Returns:
-        int: SM-2 评分 (0-5)
-    """
-    user_lower = user_answer.strip().lower()
-    correct_lower = correct_answer.strip().lower()
-
-    if not user_lower:
-        return 0  # 空答案
-
-    if question_type == "choice":
-        # 选择题：支持多种答案格式匹配
-        # 数据库 answer 可能是 "A"、"A. 选项文本" 或纯文本
-        # 用户提交的可能是完整选项文本 "A. 选项文本"
-        if user_lower == correct_lower:
-            return 5
-        # 提取选项字母前缀（A/B/C/D）进行匹配
-        user_letter = re.match(r'^([a-d])', user_lower)
-        correct_letter = re.match(r'^([a-d])', correct_lower)
-        if user_letter and correct_letter and user_letter.group(1) == correct_letter.group(1):
-            return 5
-        # 用户提交了完整选项文本，answer 只是字母
-        if correct_letter and not user_letter:
-            # answer="a", user="a. 选项文本" → 检查用户答案是否以该字母开头
-            if user_lower.startswith(correct_letter.group(1)):
-                return 5
-        # 用户提交了字母，answer 是完整选项文本
-        if user_letter and not correct_letter:
-            if correct_lower.startswith(user_letter.group(1)):
-                return 5
-        # 去掉字母前缀后比较纯文本内容
-        user_text = re.sub(r'^[a-d][.、\s]\s*', '', user_lower).strip()
-        correct_text = re.sub(r'^[a-d][.、\s]\s*', '', correct_lower).strip()
-        if user_text and correct_text and user_text == correct_text:
-            return 5
-        return 1
-
-    elif question_type == "fill_blank":
-        # 填空题：完全匹配或部分匹配
-        if user_lower == correct_lower:
-            return 5
-        # 部分匹配：要求至少3个字符，且长度比例 > 0.5
-        if len(correct_lower) >= 3 and len(user_lower) >= 3:
-            if correct_lower in user_lower or user_lower in correct_lower:
-                shorter = min(len(correct_lower), len(user_lower))
-                longer = max(len(correct_lower), len(user_lower))
-                if shorter / longer > 0.5:
-                    return 3
-        # 关键词重叠检查（基于字符级集合）
-        # 阈值 >= 0.5（原 > 0.5 会把"机器"vs"机器学习"
-        # 的 2/4=0.5 前缀部分匹配挡在 3 分之外，误判为 1 分，见 docs/decisions.md#F-35）
-        user_words = set(user_lower)
-        correct_words = set(correct_lower)
-        overlap = len(user_words & correct_words)
-        total = len(correct_words) if correct_words else 1
-        if overlap / total >= 0.5:
-            return 3
-        return 1
-
-    else:
-        # short_answer（简答题）：基于关键词匹配评分
-        return _score_short_answer(user_lower, correct_lower)
-
-
-def _score_short_answer(user_answer: str, correct_answer: str) -> int:
-    """
-    简答题评分：基于关键词匹配
-
-    使用 n-gram 关键词匹配策略（与 RAG 服务一致），
-    计算用户答案与正确答案的重叠度，映射到 1-5 评分。
-
-    Args:
-        user_answer: 用户答案（已转小写）
-        correct_answer: 正确答案（已转小写）
-
-    Returns:
-        int: SM-2 评分 (1-5)
-    """
-    # 提取关键词（2-4字的中文词组 + 英文单词）
-    def extract_keywords(text: str) -> set:
-        keywords = set()
-        # 中文 n-gram (2-4字)
-        for length in range(4, 1, -1):
-            for i in range(len(text) - length + 1):
-                segment = text[i:i + length]
-                # 只保留包含中文的片段
-                if any('\u4e00' <= c <= '\u9fff' for c in segment):
-                    keywords.add(segment)
-        # 英文单词
-        import re
-        english_words = re.findall(r'[a-zA-Z]+', text)
-        for word in english_words:
-            if len(word) >= 2:
-                keywords.add(word.lower())
-        return keywords
-
-    user_keywords = extract_keywords(user_answer)
-    correct_keywords = extract_keywords(correct_answer)
-
-    if not correct_keywords:
-        # 没有可匹配的关键词，做简单的字符串包含检查
-        if user_answer and correct_answer in user_answer:
-            return 4
-        return 2
-
-    # 计算关键词覆盖率
-    matched = len(user_keywords & correct_keywords)
-    total = len(correct_keywords)
-    coverage = matched / total
-
-    # 映射到 1-5 评分
-    if coverage >= 0.8:
-        return 5
-    elif coverage >= 0.6:
-        return 4
-    elif coverage >= 0.4:
-        return 3
-    elif coverage >= 0.2:
-        return 2
-    else:
-        return 1
+    return grade_answer(question_type, user_answer, correct_answer)["quality"]

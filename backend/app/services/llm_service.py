@@ -35,8 +35,14 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from ..config import get_settings
-from .llm.client import _truncate_messages, close_llm_client, get_llm_client
-from .llm.json_parse import parse_json_tolerant, strip_json_fences
+from .llm.client import (
+    _response_snippet,
+    _truncate_messages,
+    build_llm_headers,
+    close_llm_client,  # noqa: F401  re-export：main.py 经 llm_service 导入
+    get_llm_client,
+)
+from .llm.json_parse import parse_json_tolerant, strip_json_fences  # noqa: F401  parse_json_tolerant 为 re-export
 from .llm.rate_limit import RateLimiter
 from .llm.sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
 
@@ -133,10 +139,9 @@ class LLMService:
             dict: {"content", "finish_reason", "truncated", "usage"}
         """
         url = f"{self._base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        # OpenCode 网关要求 x-opencode-session 头，缺失即 400 MissingSessionID，
+        # 见 services/llm/client.py#build_llm_headers
+        headers = build_llm_headers(self._api_key, self._base_url)
         payload: Dict[str, Any] = {
             "model": self._model,
             "messages": messages,
@@ -197,9 +202,14 @@ class LLMService:
                     # 429/5xx 视为可重试，见 docs/decisions.md#F-20
                     last_error = e
                     if e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                        # 必须打印响应体：网关的真实原因只在 body 里
+                        # （如 OpenCode 的 {"error":{"type":"MissingSessionID",...}}），
+                        # 只打 str(e) 会得到无信息量的 "Client error '400 Bad Request'"，
+                        # 曾使一个全链路 400 故障难以定位。
                         logger.warning(
                             f"LLM 客户端错误不重试 | scene={scene} | provider={self._provider} | "
-                            f"status={e.response.status_code} | error={e}"
+                            f"status={e.response.status_code} | error={e} | "
+                            f"body={_response_snippet(e.response)}"
                         )
                         raise
                     if attempt < self._max_retries - 1:
@@ -263,10 +273,8 @@ class LLMService:
             httpx.HTTPError: HTTP 调用失败时抛出，由调用方处理
         """
         url = f"{self._base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        # 流式路径同样需要 OpenCode 网关会话头（否则 400 MissingSessionID）
+        headers = build_llm_headers(self._api_key, self._base_url)
         payload: Dict[str, Any] = {
             "model": self._model,
             "messages": messages,

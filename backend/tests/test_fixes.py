@@ -33,7 +33,7 @@ def _run(coro):
 
 def test_f01_unique_index_and_direction_preserved(test_db):
     """完全同键重复被唯一索引拒绝；方向相反/不同类型关系可共存"""
-    from sqlalchemy import select, text
+    from sqlalchemy import text
 
     async def _run_test():
         from app.models.user import User
@@ -331,7 +331,6 @@ def test_understand_document_no_result_override():
     通过 mock 外部依赖（对象存储/LLM/状态更新），调用完整 _understand_document，
     断言：不抛异常、状态更新为 archived、日志路径使用 dict 返回值。
     """
-    import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
 
     async def _run_test():
@@ -427,22 +426,33 @@ def test_parse_understanding_response_robust():
 
 
 def test_llm_client_loop_rebuild():
-    """共享 LLM 客户端跨事件循环自动重建（修 Event loop is closed）"""
+    """共享 LLM 客户端跨事件循环自动重建（修 Event loop is closed）
+
+    注意这里比较的是**对象本身**而不是 `id()`：
+    原实现取 `id(ls.get_llm_client())` 比较两次 `asyncio.run` 的返回值，
+    但第一次的客户端在断言前已无引用、随时可能被 GC，其内存地址会被
+    下一次分配复用 —— 于是"两个不同对象"得到相等的 id，测试表现为随机
+    失败。本轮实测确认：单独运行也失败，而日志明确显示
+    "检测到 LLM 客户端跨事件循环复用，重建共享客户端"，
+    即**被测行为正确、断言方式错误**。
+    """
     import asyncio
     from app.services import llm_service as ls
 
     async def use_in_loop():
-        return id(ls.get_llm_client())
+        return ls.get_llm_client()
 
-    loop1_id = asyncio.run(use_in_loop())
-    loop2_id = asyncio.run(use_in_loop())
-    assert loop1_id != loop2_id, "跨事件循环未重建客户端"
-    ls.close_llm_client()
+    try:
+        first = asyncio.run(use_in_loop())
+        second = asyncio.run(use_in_loop())
+        assert first is not second, "跨事件循环未重建客户端"
+    finally:
+        # 无论断言是否通过都要清理模块级单例，避免污染后续用例
+        ls.close_llm_client()
 
 
 def test_max_tokens_no_4096():
     """提取/出题场景 max_tokens 已全部提升到 8192（静态断言，防回退）"""
-    import re
     src_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "app", "services", "llm_service.py",

@@ -429,7 +429,7 @@ def main():
     print(f"  测试用户: {test_user['username']}")
     print(f"  测试文件: {PDF_PATH}")
     print(f"  笔记ID: {note_id[:8]}...")
-    print(f"  状态: 正常结束")
+    print("  状态: 正常结束")
     print()
 
 

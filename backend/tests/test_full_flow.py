@@ -307,7 +307,7 @@ def main():
     print("=" * 60)
     print(f"  测试用户: {TEST_USER['username']}")
     print(f"  笔记: {note_id}")
-    print(f"  状态: 正常结束")
+    print("  状态: 正常结束")
     print()
 
 

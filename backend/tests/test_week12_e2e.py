@@ -339,7 +339,7 @@ def main():
     try:
         resp = client.post(f"{BASE_URL}/review/submit", headers={**headers, "Content-Type": "application/json"}, content="invalid json{{{")
         assert resp.status_code == 422
-        log_step("全局异常处理", True, f"422 错误统一格式")
+        log_step("全局异常处理", True, "422 错误统一格式")
 
         no_auth = httpx.Client(timeout=30.0)
         resp = no_auth.get(f"{BASE_URL}/notes")
@@ -358,8 +358,8 @@ def main():
     print(f"  知识卡片: {card_count} 张")
     print(f"  题目: {question_count} 道")
     print(f"  答题: {answered} 道")
-    print(f"  第12周新增验证: Git + .gitignore + Docker + 启动脚本 + README")
-    print(f"  状态: 正常结束")
+    print("  第12周新增验证: Git + .gitignore + Docker + 启动脚本 + README")
+    print("  状态: 正常结束")
     print()
 
 

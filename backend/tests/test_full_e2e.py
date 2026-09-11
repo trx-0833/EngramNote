@@ -775,7 +775,7 @@ def write_report():
     total, passed, warned, failed = REPORT.summary()
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = []
-    lines.append(f"# EngramNote 全链路可靠性测试报告")
+    lines.append("# EngramNote 全链路可靠性测试报告")
     lines.append("")
     lines.append(f"- 运行时间：{now}")
     lines.append(f"- 运行ID：{RUN_ID}")

@@ -17,7 +17,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.services.sm2_service import calculate_sm2, quality_from_answer, SM2Result
+from app.services.sm2_service import calculate_sm2, quality_from_answer
 
 
 def test_sm2_quality_5_increases_interval():
@@ -173,14 +173,30 @@ def test_quality_choice():
 
 
 def test_quality_fill_blank():
-    """填空题评分映射"""
+    """填空题评分映射（精确匹配 + 容错，不做字符集合交集）
+
+    行为变更（见 docs/overhaul-plan.md §2.4 L-1）：
+    旧实现用**单字符集合**交并比（阈值 0.5），导致任意两个正确字的乱序组合
+    都判为正确 —— 实测 `学器`、`机学`、`器学` 对 `机器学习` 全部返回 3（判对）。
+    现改为归一化精确匹配 + 有界编辑距离，且**不再接受部分前缀**：
+    部分匹配不等于语义等价（"机器" ≠ "机器学习"）。
+    """
     # 完全匹配
     q = quality_from_answer("fill_blank", "机器学习", "机器学习")
     assert q == 5, f"填空题完全匹配应为5，实际 {q}"
 
-    # 部分匹配
-    q2 = quality_from_answer("fill_blank", "机器", "机器学习")
-    assert q2 >= 3, f"填空题部分匹配应 >=3，实际 {q2}"
+    # 标点/空白/大小写归一化后仍应满分
+    q_norm = quality_from_answer("fill_blank", " 机器学习。 ", "机器学习")
+    assert q_norm == 5, f"填空题归一化后应满分，实际 {q_norm}"
+
+    # 轻微笔误（编辑距离 1）应通过
+    q_typo = quality_from_answer("fill_blank", "机器学习是", "机器学习")
+    assert q_typo >= 3, f"填空题轻微笔误应 >=3，实际 {q_typo}"
+
+    # 语序错误 / 字符子集**不再**判为正确
+    for wrong in ("机器", "学习", "学器", "机学", "器学"):
+        qw = quality_from_answer("fill_blank", wrong, "机器学习")
+        assert qw < 3, f"填空题 {wrong!r} 不应判为正确，实际 {qw}"
 
     # 不匹配
     q3 = quality_from_answer("fill_blank", "深度学习", "机器学习")
@@ -190,28 +206,31 @@ def test_quality_fill_blank():
 
 
 def test_quality_short_answer():
-    """简答题评分映射"""
-    # 高度匹配
-    q = quality_from_answer(
-        "short_answer",
-        "劳动合同是劳动者与用人单位确立劳动关系、明确双方权利和义务的协议",
-        "劳动合同是劳动者与用人单位确立劳动关系、明确双方权利和义务的协议"
-    )
-    assert q >= 4, f"简答题高度匹配应 >=4，实际 {q}"
+    """简答题**不再自动判分**，改为要求用户自评
 
-    # 部分匹配（关键词较少）
-    q2 = quality_from_answer(
-        "short_answer",
-        "劳动合同是关于劳动关系的协议",
-        "劳动合同是劳动者与用人单位确立劳动关系、明确双方权利和义务的协议"
-    )
-    assert 1 <= q2 <= 4, f"简答题部分匹配应在1-4之间，实际 {q2}"
+    行为变更（见 docs/overhaul-plan.md §2.4 L-1）：
+    旧实现用无序字符 n-gram 集合交并比判分，实测把正确答案的逻辑
+    **完全反转**的答案仍得 quality=4（判为"正确，略有犹豫"），
+    而正确但简短的答案只得 1 分。字符匹配无法表示语义，因此改为显式
+    标记 needs_self_assessment，由用户自评（自评是间隔重复里最可靠的信号）。
+    """
+    from app.services.sm2_service import grade_answer
 
-    # 完全不匹配
-    q3 = quality_from_answer("short_answer", "不知道", "劳动合同是劳动者与用人单位确立劳动关系的协议")
-    assert q3 <= 2, f"简答题不匹配应 <=2，实际 {q3}"
+    for label, user_answer in [
+        ("完全正确", "劳动合同是劳动者与用人单位确立劳动关系、明确双方权利和义务的协议"),
+        ("部分匹配", "劳动合同是关于劳动关系的协议"),
+        ("完全不相关", "不知道"),
+        ("逻辑反转", "劳动合同不是劳动者与用人单位确立劳动关系的协议，也与权利义务无关"),
+    ]:
+        r = grade_answer(
+            "short_answer",
+            user_answer,
+            "劳动合同是劳动者与用人单位确立劳动关系、明确双方权利和义务的协议",
+        )
+        assert r["needs_self_assessment"] is True, f"简答题({label})应要求自评"
+        assert r["method"] == "ungraded", f"简答题({label})不应声称已判分，实际 {r['method']}"
 
-    print("  [OK] 简答题评分映射")
+    print("  [OK] 简答题改为要求用户自评（不再伪造判分）")
 
 
 def test_quality_empty_answer():

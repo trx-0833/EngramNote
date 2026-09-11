@@ -128,11 +128,22 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
             "hierarchical_path": "全文",
         })
 
-    # 合并短章节（内容 < 200 字符）
+    # 合并短章节：**只合并"未命名"的散落文本**，不合并有自己标题的章节。
+    #
+    # 旧规则是"内容 < 200 字符就并入前一个章节"，不看该章节是否带标题。
+    # 后果：文档里两个短小节（例如只有两行的 3.1 与 3.2）会被并成一章，
+    # 于是 3.1 的摘要与知识点全部挂到 3.2 名下 —— 而 summary 会被写进
+    # **该章节的每一张卡片**（见 save_knowledge_cards），错误因此沿
+    # 卡片 → 题目 → 复习记录整条链路传播，且日志上看不出异常。
+    # 标题是作者给出的结构信息，比 200 字符阈值更可信，必须尊重。
     merged: List[Dict[str, Any]] = []
     for chapter in chapters:
-        if merged and len(chapter["content"].strip()) < 200:
-            # 合并到前一个章节
+        is_unnamed = (
+            chapter.get("level") == 0
+            or str(chapter.get("chapter_title", "")).startswith("未命名章节")
+        )
+        if merged and is_unnamed and len(chapter["content"].strip()) < 200:
+            # 无标题的零散文本并入前一章节
             merged[-1]["content"] += "\n\n" + chapter["content"]
         else:
             merged.append(chapter)

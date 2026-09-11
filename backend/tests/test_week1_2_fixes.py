@@ -12,7 +12,6 @@ Week1-2 修改验证测试
 运行方式：cd backend && pytest tests/test_week1_2_fixes.py -v
 """
 
-import inspect
 import json
 import os
 import re
@@ -20,7 +19,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict
 
 import pytest
 
@@ -153,7 +151,6 @@ class TestUsernameValidation:
 
     def test_valid_usernames(self):
         """合法用户名：纯英文、纯数字、英文+数字组合"""
-        from pydantic import ValidationError
 
         from app.schemas.user import UserRegisterRequest
 
@@ -507,6 +504,7 @@ class TestPageMarkerInsertion:
             content_list_path.unlink(missing_ok=True)
 
     @pytest.mark.slow
+    @pytest.mark.integration
     def test_page_markers_with_real_pdf(self):
         """使用真实 PDF 文件通过云端 API 测试页码标签插入
 
@@ -515,6 +513,10 @@ class TestPageMarkerInsertion:
 
         此测试需要 MINERU_API_TOKEN 已配置（从 backend/.env 加载）。
         云端转换可能需要 2-5 分钟，超时设为 600 秒。
+
+        标记为 integration：它会真实调用 MinerU 云端 API（产生费用与网络依赖）。
+        默认跳过；显式运行：
+            ENGRAMNOTE_ALLOW_NETWORK_TESTS=1 python -m pytest tests/test_week1_2_fixes.py -m integration
         """
         if not os.path.exists(REAL_PDF_PATH):
             pytest.skip(f"测试文件不存在: {REAL_PDF_PATH}")
@@ -574,9 +576,9 @@ class TestPageMarkerInsertion:
                 f"最大页码 {page_numbers[-1]} 超过文档总页数 {expected_pages}"
             )
 
-        print(f"  真实 PDF 测试结果：")
-        print(f"  文件: 劳动合同书-田润鑫.pdf")
-        print(f"  后端: vlm-http-client（云端 API）")
+        print("  真实 PDF 测试结果：")
+        print("  文件: 劳动合同书-田润鑫.pdf")
+        print("  后端: vlm-http-client（云端 API）")
         print(f"  页码标签数: {len(page_markers)}")
         print(f"  页码范围: {page_numbers[0]} ~ {page_numbers[-1]}")
         print(f"  元数据页数: {result.metadata.get('page_count', '未知')}")
@@ -601,12 +603,22 @@ class TestMineruBackendConfig:
         assert hasattr(s, "mineru_backend"), "Settings 缺少 mineru_backend 字段"
 
     def test_mineru_backend_default_is_pipeline(self):
-        """mineru_backend 默认值应为 pipeline（本地处理）"""
+        """mineru_backend 默认值应为 vlm-http-client（云端 API）
+
+        行为变更：默认值已由本地 `pipeline` 改为云端 `vlm-http-client`。
+        理由见 README「选择本地模式 vs 云端 API」：本地 pipeline 需额外下载
+        约 7GB 模型，云端模式零下载即可解析 PDF，是推荐默认路径。
+        本地模式仍可通过 MINERU_BACKEND=pipeline 显式启用（见下一个用例）。
+        """
         from app.config import Settings
 
         s = Settings()
-        assert s.mineru_backend == "pipeline", (
-            f"mineru_backend 默认值应为 'pipeline'，实际为 '{s.mineru_backend}'"
+        assert s.mineru_backend in ("vlm-http-client", "pipeline", "hybrid-http-client"), (
+            f"mineru_backend 取值非法: '{s.mineru_backend}'"
+        )
+        assert s.mineru_backend == "vlm-http-client", (
+            f"mineru_backend 默认值应为 'vlm-http-client'（云端，无需下载 7GB 模型），"
+            f"实际为 '{s.mineru_backend}'"
         )
 
     def test_mineru_backend_from_env(self):
@@ -642,19 +654,47 @@ class TestMineruBackendConfig:
         )
 
     def test_convert_document_task_accepts_backend_parameter(self):
-        """convert_document_task 函数签名应接受 backend 参数"""
-        # 使用 inspect 读取源码而非导入，避免数据库初始化
-        convert_tasks_path = BACKEND_DIR / "app" / "tasks" / "convert_tasks.py"
-        source = convert_tasks_path.read_text(encoding="utf-8")
+        """convert_document_task 函数签名应接受 backend 参数，且把它传下去
 
-        # 验证 Celery 任务签名中包含 backend 参数
-        assert "backend: Optional[str] = None" in source, (
-            "convert_document_task 函数签名中未找到 backend 参数"
+        改用 **AST** 而不是源码文本匹配。原实现断言字符串
+        `"_convert_document(note_id, file_path, source_type, backend)"` 必须
+        逐字出现 —— 这种断言在参数列表变化时必然误报（本轮给
+        `_convert_document` 增加 `task_id` 参数就撞上了），而它想验证的
+        其实只是"backend 没有被吞掉"。AST 断言的是语义而非字面量。
+        """
+        import ast
+
+        convert_tasks_path = BACKEND_DIR / "app" / "tasks" / "convert_tasks.py"
+        tree = ast.parse(convert_tasks_path.read_text(encoding="utf-8"))
+
+        # 1. task 函数签名里有 backend 且默认 None
+        task_fn = next(
+            (n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == "convert_document_task"),
+            None,
         )
-        # 验证 backend 被传递给 _convert_document
-        assert "_convert_document(note_id, file_path, source_type, backend)" in source, (
-            "convert_document_task 中未将 backend 传递给 _convert_document"
-        )
+        assert task_fn is not None, "未找到 convert_document_task"
+        task_arg_names = [a.arg for a in task_fn.args.args]
+        assert "backend" in task_arg_names, "convert_document_task 签名缺少 backend 参数"
+
+        # 2. 函数体内确实调用 _convert_document，并把 backend 作为关键字或位置参数传入
+        calls = [
+            n for n in ast.walk(task_fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_convert_document"
+        ]
+        assert calls, "convert_document_task 未调用 _convert_document"
+
+        passed = False
+        for call in calls:
+            if any(kw.arg == "backend" for kw in call.keywords):
+                passed = True
+            # 位置参数：第 4 个（索引 3）是 backend
+            if len(call.args) >= 4 and isinstance(call.args[3], ast.Name) \
+                    and call.args[3].id == "backend":
+                passed = True
+        assert passed, "convert_document_task 未把 backend 传给 _convert_document"
 
     def test_convert_tasks_uses_config_not_hardcoded(self):
         """convert_tasks.py 应从 settings.mineru_backend 读取配置，而非硬编码"""
@@ -703,23 +743,26 @@ class TestUploadBackendParameter:
         )
 
     def test_upload_file_in_client_ts_accepts_backend(self):
-        """验证前端 client.ts 中 uploadFile 函数接受 backend 参数
+        """验证前端上传 API 接受 backend 参数
 
-        通过检查源码确认函数签名包含 backend 可选参数。
+        api/client.ts 已按职责拆分，上传逻辑现在位于 api/upload.ts
+        （client.ts 只保留 core 封装与 barrel 导出）。因此在整个 src/api
+        目录内聚合搜索 —— 断言的是"上传 API 支持 backend 参数"这一契约，
+        而不是"backend 这个词出现在某个特定文件里"。
         """
-        client_ts_path = (
-            BACKEND_DIR.parent / "frontend" / "src" / "api" / "client.ts"
+        api_dir = BACKEND_DIR.parent / "frontend" / "src" / "api"
+        if not api_dir.exists():
+            pytest.skip("前端 src/api 目录不存在")
+
+        source = "\n".join(
+            f.read_text(encoding="utf-8") for f in sorted(api_dir.rglob("*.ts"))
         )
-        if not client_ts_path.exists():
-            pytest.skip("前端 client.ts 文件不存在")
 
-        source = client_ts_path.read_text(encoding="utf-8")
-
-        # 验证 uploadFile 函数签名包含 backend 参数
-        assert "backend" in source, "client.ts 中未找到 backend 参数"
+        # 验证上传接口接受 backend 参数
+        assert "backend" in source, "前端上传 API 中未找到 backend 参数"
         # 验证 FormData 中附加 backend
-        assert "formData.append('backend'" in source, (
-            "client.ts 中未将 backend 附加到 FormData"
+        assert "formData.append('backend'" in source or 'formData.append("backend"' in source, (
+            "前端上传 API 中未将 backend 附加到 FormData"
         )
 
     def test_upload_tsx_has_backend_options(self):
