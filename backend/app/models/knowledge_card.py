@@ -98,3 +98,17 @@ class KnowledgeCard(BaseModel):
     mastery_level: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     source_note_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     parent_card_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("knowledge_cards.id"), nullable=True, index=True)
+    #: 卡片内容的规范化指纹（阶段 4.8：重跑理解的幂等键）
+    #:
+    #: ## 为什么必须是**独立成列**，而不是每次重跑时现算
+    #:
+    #: 重跑理解时要在"这张卡是不是已经有了"上做判定，而判定必须能走索引 ——
+    #: 一篇笔记几百张卡，逐行读出 content 现算哈希是 O(n) 的文本比较。
+    #: 更重要的是：**指纹一旦写死就不会随内容漂移**，将来若调整规范化规则
+    #: （比如是否忽略标点），旧行的指纹仍然记录着"入库当时的身份"，
+    #: 不会因为改了一行代码就让全部历史卡片看起来"从没出现过"。
+    #:
+    #: 允许 NULL：历史行（本列引入前）由迁移回填；回填失败的（理论上不该有）
+    #: 保持 NULL，此时该行**不参与**去重判定 —— 宁可插一张重复的卡，
+    #: 也不能因为算不出指纹就把新卡静默丢掉。
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)

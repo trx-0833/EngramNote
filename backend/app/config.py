@@ -291,6 +291,26 @@ class Settings(BaseSettings):
     llm_daily_token_quota: int = 0
     llm_daily_cost_quota: float = 0.0
 
+    # ---- 卡片入库门（阶段 4.8 / 4.9）----
+    #
+    # 判据与设计理由见 `services/card_intake_service.py` 的模块说明。
+    #
+    # ⚠️ 真库实测（2026-09-11）：这些阈值目前**不会拦下任何存量卡片**
+    # （1183 张里只有 4 张正文 < 10 字、2 张缺 source_text，且跨天重跑
+    # 理解的笔记数为 0）。它们是**预防性**的 —— 价值在于
+    # "谁都可以按那个按钮，而按下去不会把卡片翻一倍、不会灌进脏卡片"。
+    #
+    # 正文最少字数（规范化后）
+    card_min_content_chars: int = 10
+    # 标题最少字数
+    card_min_title_chars: int = 2
+    # 是否要求有原文出处。关闭后"无 source_text 的卡片"也会入库 ——
+    # 代价是引用回跳（阶段 2.7 / 3.13）在那些卡上不可用。
+    card_require_source_text: bool = True
+    # 单次理解最多新建多少张卡（0 = 不限）。
+    # 只约束**新建**：复用已有卡片不计入，所以重跑理解不会被它挡住。
+    card_max_new_per_run: int = 500
+
     # ---- 复习配置 ----
     # 每日最大答题数（前后端单一来源，经 /review/stats 下发给前端，见 docs/decisions.md#F-12）
     daily_review_limit: int = 10

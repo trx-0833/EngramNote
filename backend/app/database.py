@@ -860,6 +860,50 @@ async def _migrate_sqlite(conn):
                 ))
                 logger.info("SQLite 迁移: 已为 review_states 表添加 difficulty 列")
 
+        # ---- knowledge_cards 表迁移（阶段 4.8：重跑理解的内容寻址键）----
+        if 'knowledge_cards' in table_names:
+            card_cols = {c['name'] for c in inspector.get_columns('knowledge_cards')}
+            if 'content_hash' not in card_cols:
+                sync_conn.execute(text(
+                    "ALTER TABLE knowledge_cards ADD COLUMN content_hash VARCHAR(64)"
+                ))
+                try:
+                    sync_conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_content_hash "
+                        "ON knowledge_cards (content_hash)"
+                    ))
+                except Exception:
+                    pass
+                # 回填历史行：**复用 `card_intake_service.card_content_hash`**，
+                # 不在这里另写一套规范化。
+                #
+                # 为什么必须共用：若两边规则有差异（哪怕只差一个 NFKC 归一），
+                # 历史卡片的指纹就会与"同样内容的新卡"算出的指纹不同 ——
+                # 于是重跑理解时每张历史卡都看起来"从没出现过"，全被重新插入，
+                # 恰好造成这次要修的那种重复。**这里图省事抄一份规则，
+                # 等于把幂等性悄悄关掉。**
+                try:
+                    from .services.card_intake_service import card_content_hash
+
+                    rows = sync_conn.execute(text(
+                        "SELECT id, title, content FROM knowledge_cards "
+                        "WHERE content_hash IS NULL"
+                    )).fetchall()
+                    for card_id, title, content in rows:
+                        sync_conn.execute(
+                            text("UPDATE knowledge_cards SET content_hash = :h WHERE id = :i"),
+                            {"h": card_content_hash(title, content), "i": card_id},
+                        )
+                    if rows:
+                        logger.info(
+                            "SQLite 迁移: 已回填 %d 行 knowledge_cards.content_hash", len(rows)
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "回填 knowledge_cards.content_hash 失败（不影响启动；"
+                        "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s", exc,
+                    )
+
         # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
         if 'chunks' in table_names:
             chunk_cols = {c['name'] for c in inspector.get_columns('chunks')}

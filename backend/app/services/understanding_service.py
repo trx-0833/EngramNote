@@ -21,12 +21,15 @@ AI 理解管道服务模块
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:  # pragma: no cover - 仅供类型检查
+    from .card_intake_service import SaveOutcome, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
-from ..models.knowledge_card import KnowledgeCard, CardType
+from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
 from ..services.llm_service import LLMService
 
@@ -133,7 +136,8 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
     # 旧规则是"内容 < 200 字符就并入前一个章节"，不看该章节是否带标题。
     # 后果：文档里两个短小节（例如只有两行的 3.1 与 3.2）会被并成一章，
     # 于是 3.1 的摘要与知识点全部挂到 3.2 名下 —— 而 summary 会被写进
-    # **该章节的每一张卡片**（见 save_knowledge_cards），错误因此沿
+    # **该章节的每一张卡片**（见 card_intake_service.save_cards_idempotent），
+    # 错误因此沿
     # 卡片 → 题目 → 复习记录整条链路传播，且日志上看不出异常。
     # 标题是作者给出的结构信息，比 200 字符阈值更可信，必须尊重。
     merged: List[Dict[str, Any]] = []
@@ -241,54 +245,26 @@ async def save_knowledge_cards(
     chapter: Dict[str, Any],
     summary: str,
     knowledge_points: List[Dict[str, Any]],
-) -> List[KnowledgeCard]:
+    *,
+    already_created: int = 0,
+) -> "SaveOutcome":
     """
-    将知识点存入数据库
+    将知识点存入数据库（阶段 4.8/4.9：质量门 + 内容寻址去重）
 
-    Args:
-        db: 数据库会话
-        user_id: 用户 ID
-        note_id: 笔记 ID
-        chapter: 章节信息
-        summary: 章节摘要
-        knowledge_points: 知识点列表
+    ⚠️ 改造前这里是**无条件插入** —— "重新理解这篇笔记"按一次，卡片就翻一倍
+    （症状 A-10），而重复卡片会进复习队列与知识图谱。
 
-    Returns:
-        List[KnowledgeCard]: 已保存的知识卡片列表
+    现在返回 `SaveOutcome`（新建 / 复用 / 被拒 / 截断四个计数），
+    而不是只返回新建的卡片：重跑一次理解时，正确答案通常是
+    "复用 50、新增 0"，只报新建数会让人以为抽取出错了。
+    判据与设计理由见 `card_intake_service` 的模块说明。
     """
-    cards = []
-    for point in knowledge_points:
-        # 验证 card_type 合法性
-        card_type_str = point.get("card_type", "concept")
-        try:
-            card_type = CardType(card_type_str)
-        except ValueError:
-            card_type = CardType.concept
+    from .card_intake_service import save_cards_idempotent
 
-        # 提取 source_text，限制长度
-        source_text = point.get("source_text", "")
-        if len(source_text) > 5000:
-            source_text = source_text[:5000]
-
-        card = KnowledgeCard(
-            user_id=user_id,
-            note_id=note_id,
-            card_type=card_type,
-            title=point.get("title", "未命名知识点"),
-            content=point.get("content", ""),
-            summary=summary,
-            chapter_title=chapter.get("chapter_title", ""),
-            source_text=source_text,
-        )
-        db.add(card)
-        cards.append(card)
-
-    await db.commit()
-    # 刷新以获取生成的 id 和时间戳
-    for card in cards:
-        await db.refresh(card)
-
-    return cards
+    return await save_cards_idempotent(
+        db, user_id, note_id, chapter, summary, knowledge_points,
+        already_created=already_created,
+    )
 
 
 def _parse_understanding_response(response: str) -> Dict[str, Any]:
@@ -400,6 +376,9 @@ async def process_note_understanding(
     session = llm_service.create_understanding_session()
 
     total_cards = 0
+    reused_cards = 0
+    truncated_cards = 0
+    rejected_cards: List[tuple] = []
     chapter_summaries = []
     batch_size = 3
 
@@ -482,20 +461,29 @@ async def process_note_understanding(
                     f"(对话轮次={session.turn_count})"
                 )
 
-                # 存入数据库
+                # 存入数据库（阶段 4.8/4.9：质量门 + 内容寻址去重）
                 if knowledge_points:
-                    cards = await save_knowledge_cards(
-                        db, user_id, note_id, chapter, summary, knowledge_points
+                    outcome = await save_knowledge_cards(
+                        db, user_id, note_id, chapter, summary, knowledge_points,
+                        already_created=total_cards,
                     )
-                    total_cards += len(cards)
+                    total_cards += len(outcome.created)
+                    reused_cards += len(outcome.reused)
+                    rejected_cards.extend(outcome.rejected)
+                    truncated_cards += outcome.truncated
+                    # 注意：`card_count` 报的是**新入库**的张数。
+                    # 重跑理解时它会是 0，而这不是失败 —— 结果里的
+                    # `reused_cards` 才是"这次没白跑"的证据。
+                    card_count = len(outcome.created)
                 else:
+                    card_count = 0
                     logger.info(f"章节 '{chapter['chapter_title']}' 未提取到知识点")
 
                 chapter_summaries.append({
                     "chapter_index": chapter["chapter_index"],
                     "chapter_title": chapter["chapter_title"],
                     "summary": summary,
-                    "card_count": len(knowledge_points),
+                    "card_count": card_count,
                 })
 
         except Exception as e:
@@ -517,10 +505,33 @@ async def process_note_understanding(
         f"共 {session.turn_count} 轮对话"
     )
 
+    # 阶段 4.8/4.9：复用、拒收、截断都必须**可见**。
+    #
+    # 只报 total_cards 会有两种误导：
+    #   - 重跑理解时 total_cards=0，看起来像"什么都没做"，实际是复用了全部；
+    #   - 脏卡片被质量门拦下时完全不出现，"不入库"就变成了"静默少了几张"。
+    if reused_cards or rejected_cards or truncated_cards:
+        logger.info(
+            "笔记 %s 卡片入库明细: 新建=%d 复用=%d 被拒=%d 超限未入库=%d",
+            note_id[:8], total_cards, reused_cards, len(rejected_cards), truncated_cards,
+        )
+    if rejected_cards:
+        reasons: Dict[str, int] = {}
+        for _title, reason in rejected_cards:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        logger.warning(
+            "笔记 %s 有 %d 张卡片未通过质量门: %s。"
+            "若比例很高，应先检查提示词或分段，而不是放宽质量门",
+            note_id[:8], len(rejected_cards), reasons,
+        )
+
     return {
         "note_id": note_id,
         "chapter_count": len(chapters),
         "total_cards": total_cards,
+        "reused_cards": reused_cards,
+        "rejected_cards": len(rejected_cards),
+        "truncated_cards": truncated_cards,
         "chapters": chapter_summaries,
     }
 
