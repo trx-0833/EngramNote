@@ -86,6 +86,69 @@ class LLMService:
         self._rate_limiter = LLMService._rate_limiter
         self._semaphore = LLMService._semaphore
 
+    async def _lookup_cache(self, key: str) -> Optional[Dict[str, Any]]:
+        """查响应缓存（阶段 4.7）；未命中或缓存不可用时返回 None
+
+        命中时**照样记一行 `llm_calls`**（`cached=True`、`cost=0`、
+        `saved_tokens=N`）—— 记账表要能回答"这个月本可以花多少"，
+        只记真实支出的话，缓存省下的钱在任何报表上都看不见。
+        """
+        from .llm_cache_service import lookup
+
+        try:
+            from ..database import get_session_factory
+
+            factory = get_session_factory()
+            async with factory() as db:
+                hit = await lookup(db, key)
+        except Exception as exc:  # noqa: BLE001 - 缓存是不可靠的旁路
+            logger.debug("查 LLM 缓存失败（当作未命中）: %s", exc)
+            return None
+
+        if hit is None:
+            return None
+
+        logger.info("LLM 缓存命中 | model=%s | saved_tokens=%d", self._model, hit.total_tokens)
+        await record_call(
+            scene="cache_hit", provider=self._provider, model=self._model,
+            latency_ms=0, cached=True, saved_tokens=hit.total_tokens,
+        )
+        return hit.response
+
+    async def _store_cache(
+        self, key: str, response: Dict[str, Any], usage: Optional[Dict[str, Any]],
+    ) -> None:
+        """把成功响应写入缓存（阶段 4.7）
+
+        ⚠️ 写在**调用方校验之前**：这里拿到的是"HTTP 200 + JSON 可解析"，
+        不代表内容合格。把一个恰好不合格的响应缓存下来，之后相同输入会一直
+        拿到它 —— 残余风险与三条缓解见 `llm_cache_service` 的模块说明。
+        """
+        from ..config import get_settings
+        from ..database import get_session_factory
+        from .llm_cache_service import store
+
+        try:
+            cfg = get_settings()
+            # ⚠️ 传的是**已解析出来的** sessionmaker，不是 `get_session_factory`
+            # 这个函数本身：`store` 的契约是 `async with session_factory()`，
+            # 传函数进去会变成 `async with get_session_factory()` ——
+            # 那拿到的是 sessionmaker 而不是会话，缺 `__aenter__`。
+            # 实测症状：写缓存静默失败（日志里只有一句 `__aenter__`），
+            # 于是缓存"看起来开了"但永远不命中。
+            factory = get_session_factory()
+            await store(
+                None,  # 用独立会话（见 store 的 session_factory 说明）
+                key,
+                provider=self._provider, model=self._model,
+                response=response, usage=usage,
+                finish_reason=response.get("finish_reason"),
+                ttl_days=int(getattr(cfg, "llm_cache_ttl_days", 30) or 0),
+                session_factory=factory,
+            )
+        except Exception as exc:  # noqa: BLE001 - 写缓存失败不影响本次调用
+            logger.warning("写 LLM 缓存失败（不影响本次调用）: %s", exc)
+
     async def _enforce_quota(self, scene: Optional[str]) -> None:
         """发起调用前检查配额，超限则抛 `LLMQuotaExceeded`（阶段 4.3）
 
@@ -200,6 +263,25 @@ class LLMService:
 
         start_time = time.monotonic()
 
+        # ---- 阶段 4.7：响应缓存 ----
+        #
+        # 放在配额检查之后、拿信号量之前：
+        #   - 配额检查要留在最前面（超限时连缓存都不该查，那次调用不该发生）；
+        #   - 命中缓存**没有花钱**，所以不该占用并发额度与限流令牌 ——
+        #     把它放在信号量里面会让一批重复请求白白排队。
+        cache_key_value = None
+        if getattr(settings, "llm_cache_enabled", True):
+            from .llm_cache_service import cache_key
+
+            cache_key_value = cache_key(
+                provider=self._provider, base_url=self._base_url, model=self._model,
+                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                response_format=response_format,
+            )
+            hit = await self._lookup_cache(cache_key_value)
+            if hit is not None:
+                return hit
+
         async with self._semaphore:
             await self._rate_limiter.acquire()
 
@@ -238,12 +320,17 @@ class LLMService:
                         scene=scene, provider=self._provider, model=self._model,
                         usage=usage, latency_ms=elapsed_ms,
                     )
-                    return {
+                    result = {
                         "content": content,
                         "finish_reason": finish_reason,
                         "truncated": truncated,
                         "usage": usage,
                     }
+                    # 阶段 4.7：只有**成功**响应才写缓存 ——
+                    # 把失败缓存下来会把一次偶发故障固化成"这个输入永远失败"。
+                    if cache_key_value is not None:
+                        await self._store_cache(cache_key_value, result, usage)
+                    return result
                 except httpx.HTTPStatusError as e:
                     # 4xx 客户端错误（400/401/403/404）不重试，直接抛出；
                     # 429/5xx 视为可重试，见 docs/decisions.md#F-20

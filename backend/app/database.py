@@ -904,6 +904,28 @@ async def _migrate_sqlite(conn):
                         "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s", exc,
                     )
 
+        # ---- llm_calls 表迁移（阶段 4.7：响应缓存的记账字段）----
+        #
+        # ⚠️ `llm_cache` 是**新表**，`create_all` 会建；但 `llm_calls` 在
+        # 阶段 4.2 就已经存在了，`create_all` **不会**给它加列 ——
+        # 这正是本文件反复强调的那个陷阱（"新增一个模型字段时必须同时在这里
+        # 登记，否则真库永远缺这一列，而全新库却有"）。
+        if 'llm_calls' in table_names:
+            call_cols = {c['name'] for c in inspector.get_columns('llm_calls')}
+            if 'cached' not in call_cols:
+                # NOT NULL + DEFAULT 0：历史行都是"没命中缓存"，语义明确，
+                # 且不需要回填（DEFAULT 会填好）。
+                sync_conn.execute(text(
+                    "ALTER TABLE llm_calls ADD COLUMN cached BOOLEAN NOT NULL DEFAULT 0"
+                ))
+                logger.info("SQLite 迁移: 已为 llm_calls 表添加 cached 列")
+            if 'saved_tokens' not in call_cols:
+                # nullable：未命中时是"没有节省量"（NULL），不是 0
+                sync_conn.execute(text(
+                    "ALTER TABLE llm_calls ADD COLUMN saved_tokens INTEGER"
+                ))
+                logger.info("SQLite 迁移: 已为 llm_calls 表添加 saved_tokens 列")
+
         # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
         if 'chunks' in table_names:
             chunk_cols = {c['name'] for c in inspector.get_columns('chunks')}

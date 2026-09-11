@@ -494,8 +494,18 @@ class TestLLMService:
             assert service._model == "deepseek-v4-flash"
 
     @pytest.mark.asyncio
-    async def test_chat_success(self):
-        """chat 方法应正确解析 API 响应"""
+    async def test_chat_success(self, test_db):
+        """chat 方法应正确解析 API 响应
+
+        ⚠️ 必须声明 `test_db`：阶段 4.2/4.7 之后，`chat_detailed` 会
+        **写记账表与响应缓存** —— 也就是这条用例会碰数据库。不声明的话它落进
+        conftest 的**会话级**临时库（所有用例共用），于是本类里三次
+        `chat()` 用着同一份 messages/模型/参数，**上一条用例缓存的响应会
+        被下一条命中**，表现为"重试用例只发了一次请求""该抛异常的用例没抛"。
+
+        这类"用例之间通过数据库互相影响"的失败，根因都是**没做隔离**，
+        而不是被测代码错了。
+        """
         from app.services.llm_service import LLMService
 
         with patch("app.services.llm_service.settings") as mock_settings:
@@ -528,8 +538,8 @@ class TestLLMService:
                 assert result == "测试回复"
 
     @pytest.mark.asyncio
-    async def test_chat_retry_on_failure(self):
-        """chat 方法在 API 失败时应重试"""
+    async def test_chat_retry_on_failure(self, test_db):
+        """chat 方法在 API 失败时应重试（需 `test_db` 隔离，见 test_chat_success）"""
         from app.services.llm_service import LLMService
 
         with patch("app.services.llm_service.settings") as mock_settings:
@@ -571,8 +581,8 @@ class TestLLMService:
                 assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_chat_all_retries_exhausted(self):
-        """chat 方法重试耗尽后应抛出异常"""
+    async def test_chat_all_retries_exhausted(self, test_db):
+        """chat 方法重试耗尽后应抛出异常（需 `test_db` 隔离，见 test_chat_success）"""
         from app.services.llm_service import LLMService
 
         with patch("app.services.llm_service.settings") as mock_settings:

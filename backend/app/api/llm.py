@@ -50,11 +50,22 @@ class UsageGroup(BaseModel):
     cost_known_calls: int = Field(
         description="**有价格**的调用数。它小于 calls 时，cost 是不完整的"
     )
+    cached_calls: int = Field(
+        default=0,
+        description=(
+            "命中响应缓存的次数（阶段 4.7）。这些调用**没有花钱**："
+            "它们的 total_tokens 与 cost 都记 0 —— 若把原始用量记下来，"
+            "配额会把没花的钱算进去，变成「开了缓存反而更快被限流」"
+        ),
+    )
+    saved_tokens: int = Field(
+        default=0, description="命中缓存省下的 token 数 —— 判断缓存值不值得继续开"
+    )
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
     cached_tokens: int = Field(
-        description="命中提示词缓存的 token 数 —— 省钱的主要杠杆"
+        description="命中**供应商侧提示词缓存**的 token 数（与上面的响应缓存是两回事）"
     )
     cost: float = Field(description="折算金额；见 cost_known_calls")
 
@@ -98,6 +109,14 @@ class UsageResponse(BaseModel):
     quota: QuotaInfo = Field(
         default_factory=QuotaInfo,
         description="**今日**配额状态；与上面的 `days` 窗口是两个不同口径",
+    )
+    cache: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "响应缓存自身的情况（阶段 4.7）：`{enabled, entries, hits, "
+            "stored_tokens, entries_ever_hit}`。不按用户分 —— 缓存是全局的"
+            "（key 已含完整输入，同一输入本就该得到同一份回答）"
+        ),
     )
 
 
@@ -143,12 +162,26 @@ async def get_llm_usage(
     # 是拿整个窗口去比当天的额度。
     quota_status = await llm_accounting_service.check_quota(current_user.id, settings=settings)
 
+    # 缓存统计是**全局**的（见字段说明），与上面的用户维度数据并列返回时
+    # 必须带上 `enabled`，否则"命中 0 次"会被读成"缓存没起作用"，
+    # 而真实原因可能是开关是关的。
+    try:
+        from ..services import llm_cache_service
+
+        cache_stats = await llm_cache_service.stats(db)
+        cache_stats["enabled"] = bool(getattr(settings, "llm_cache_enabled", True))
+    except Exception as exc:  # noqa: BLE001 - 统计失败不该让用量接口整个失败
+        logger.warning("读取缓存统计失败（不影响用量报表）: %s", exc)
+        cache_stats = {"enabled": bool(getattr(settings, "llm_cache_enabled", True))}
+
     def _to_group(row: Dict[str, Any]) -> UsageGroup:
         return UsageGroup(
             key=row.get("key"),
             calls=int(row.get("calls") or 0),
             failed_calls=int(row.get("failed_calls") or 0),
             cost_known_calls=int(row.get("cost_known_calls") or 0),
+            cached_calls=int(row.get("cached_calls") or 0),
+            saved_tokens=int(row.get("saved_tokens") or 0),
             prompt_tokens=int(row.get("prompt_tokens") or 0),
             completion_tokens=int(row.get("completion_tokens") or 0),
             total_tokens=int(row.get("total_tokens") or 0),
@@ -173,4 +206,5 @@ async def get_llm_usage(
             reason=quota_status.reason,
             cost_enforceable=quota_status.cost_enforceable,
         ),
+        cache=cache_stats,
     )

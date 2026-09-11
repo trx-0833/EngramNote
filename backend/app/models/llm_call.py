@@ -96,6 +96,19 @@ class LLMCall(BaseModel):
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    #: 本次是否命中响应缓存（阶段 4.7）
+    #:
+    #: 命中时**没有花钱**，所以 `total_tokens` / `cost` 都是 0/NULL ——
+    #: 这是刻意的：配额（4.3）按 `total_tokens` 求和，命中行若记原始用量，
+    #: 会把没花的钱算进配额，于是"开了缓存反而更快被限流"。
+    #: 省下来的量记在 `saved_tokens` 里，两者分工明确。
+    cached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: 命中缓存省下的 token 数（阶段 4.7）；未命中时为 NULL
+    #:
+    #: 没有它，"开缓存省了多少钱"在任何报表上都看不见 ——
+    #: 而看不见的收益等于没有收益，没人能据此决定要不要继续开。
+    saved_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     __table_args__ = (
         # 时间范围查询（报表都带 `created_at >= ?`）
         Index("ix_llm_calls_created_at", "created_at"),

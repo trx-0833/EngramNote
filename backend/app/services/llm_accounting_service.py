@@ -174,6 +174,8 @@ async def record_call(
     context: Optional[LLMContext] = None,
     session_factory=None,
     settings=None,
+    cached: bool = False,
+    saved_tokens: Optional[int] = None,
 ) -> None:
     """记下一次 LLM 调用
 
@@ -188,24 +190,36 @@ async def record_call(
         context: 覆盖上下文；缺省取 `current_context()`
         session_factory: 覆盖会话工厂（测试用）
         settings: 覆盖配置（决定单价；测试用）
+        cached: 本次是否命中响应缓存（阶段 4.7）。命中时**没有花钱**，
+            因此无论 `usage` 传什么，`total_tokens` 与 `cost` 都记 0 / NULL ——
+            否则配额（按 `total_tokens` 求和）会把没花的钱算进去，
+            变成"开了缓存反而更快被限流"
+        saved_tokens: 命中时省下的 token 数（记在单独一列）
     """
     try:
         usage = usage or {}
-        prompt_tokens = _usage_int(usage, "prompt_tokens", "input_tokens")
-        completion_tokens = _usage_int(usage, "completion_tokens", "output_tokens")
-        total_tokens = _usage_int(usage, "total_tokens")
-        if total_tokens is None and (prompt_tokens or completion_tokens):
-            total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
-        # 命中缓存的 token：DeepSeek 用 prompt_cache_hit_tokens，
-        # 其他供应商可能叫 cached_tokens / prompt_cache_miss_tokens 的反面
-        cached_tokens = _usage_int(
-            usage, "prompt_cache_hit_tokens", "cached_tokens",
-        )
-
-        cost, currency = estimate_cost(
-            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
-            settings=settings,
-        )
+        if cached:
+            # 命中缓存 = 没有向供应商发请求 = 没有产生任何用量与费用。
+            # 这里**不看 usage**，因为调用方出于方便很可能把原始用量传进来，
+            # 而记下它会让配额与成本报表双双失真。
+            prompt_tokens = completion_tokens = total_tokens = 0
+            cached_tokens = None
+            cost, currency = None, None
+        else:
+            prompt_tokens = _usage_int(usage, "prompt_tokens", "input_tokens")
+            completion_tokens = _usage_int(usage, "completion_tokens", "output_tokens")
+            total_tokens = _usage_int(usage, "total_tokens")
+            if total_tokens is None and (prompt_tokens or completion_tokens):
+                total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+            # 命中缓存的 token：DeepSeek 用 prompt_cache_hit_tokens，
+            # 其他供应商可能叫 cached_tokens
+            cached_tokens = _usage_int(
+                usage, "prompt_cache_hit_tokens", "cached_tokens",
+            )
+            cost, currency = estimate_cost(
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                settings=settings,
+            )
 
         ctx = context if context is not None else current_context()
 
@@ -229,6 +243,8 @@ async def record_call(
             latency_ms=int(latency_ms) if latency_ms is not None else None,
             success=bool(success),
             error=(str(error)[:ERROR_MAX_LEN] if error else None),
+            cached=bool(cached),
+            saved_tokens=saved_tokens if cached else None,
             created_at=datetime.now(timezone.utc),
         )
         async with session_factory() as db:
@@ -286,6 +302,10 @@ async def summarize_usage(
             func.count().label("calls"),
             func.count(case((LLMCall.success.is_(False), 1))).label("failed_calls"),
             func.count(case((LLMCall.cost.is_not(None), 1))).label("cost_known_calls"),
+            # 缓存命中单独计数：命中次数与"省下的 token"是判断缓存值不值得
+            # 继续开下去的全部依据（阶段 4.7）
+            func.count(case((LLMCall.cached.is_(True), 1))).label("cached_calls"),
+            func.coalesce(func.sum(LLMCall.saved_tokens), 0).label("saved_tokens"),
             func.coalesce(func.sum(LLMCall.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(LLMCall.completion_tokens), 0).label("completion_tokens"),
             func.coalesce(func.sum(LLMCall.total_tokens), 0).label("total_tokens"),

@@ -23,6 +23,7 @@ from .review_state import (
 )
 from .chunk import Chunk, pack_vector, unpack_vector
 from .llm_call import LLMCall
+from .llm_cache import LLMCache
 
 __all__ = [
     "User",
@@ -64,4 +65,5 @@ __all__ = [
     "pack_vector",
     "unpack_vector",
     "LLMCall",
+    "LLMCache",
 ]
