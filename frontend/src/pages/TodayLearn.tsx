@@ -45,6 +45,8 @@ export default function TodayLearn() {
   const [sessionCorrect, setSessionCorrect] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
   const [completed, setCompleted] = useState(false)
+  // 语义判分开关（阶段 3.5）：状态由页面持有，回车提交才能用上它
+  const [semanticGrading, setSemanticGrading] = useState(false)
   /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
 
@@ -118,7 +120,10 @@ export default function TodayLearn() {
     submittingRef.current = true
     const timeSpent = Date.now() - current.startTime
     try {
-      const result = await submitAnswer(current.quiz.id, current.userAnswer, timeSpent)
+      // 语义判分只在首次提交时按用户的勾选请求（带自评的那次后端会直接跳过 LLM）
+      const result = await submitAnswer(
+        current.quiz.id, current.userAnswer, timeSpent, undefined, semanticGrading,
+      )
       const newQuizzes = [...quizzes]
       newQuizzes[currentIndex] = { ...current, submitted: true, result }
       setQuizzes(newQuizzes)
@@ -253,6 +258,8 @@ export default function TodayLearn() {
           result={current.result}
           submitting={submittingRef.current}
           showSm2Info={false}
+          semanticGrading={semanticGrading}
+          onToggleSemanticGrading={setSemanticGrading}
           fillAutoFocus
           isLast={currentIndex >= quizzes.length - 1}
           selfRated={isRated(quiz.id)}

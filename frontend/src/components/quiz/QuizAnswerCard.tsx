@@ -2,18 +2,21 @@
  * @file 共享答题卡片组件
  * @description 抽取 Review / QuickReview / TodayLearn 三页重复的题目卡片：
  * 类型/难度标签、题目内容、选择题/填空题/简答题作答区、提交按钮、
- * 判分反馈、SM-2 信息（可选）、下一题按钮。
+ * 判分反馈、语义判分明细、调度依据、原文语境、下一题按钮。
  * 行为差异通过 props 参数化；提交/下一题的竞态锁由页面 handleSubmit 内实现
  * （submittingRef），本组件仅透传 submitting 禁用状态，见 docs/decisions.md#F-23。
  */
-import type { ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import type { SubmitAnswerResponse } from '../../api/client'
+import SourceContext from './SourceContext'
 import {
   questionTypeLabels,
   difficultyLabels,
   difficultyColors,
   selfRatingOptions,
   gradingMethodLabels,
+  ratingLabels,
+  verdictLabels,
 } from '../../utils/labels'
 
 /** 答题卡片所需的最小题目结构 */
@@ -25,6 +28,9 @@ export interface QuizCardQuestion {
   /** 复习元信息（Review 页展示） */
   review_count?: number
   interval?: number
+  /** 卡片与笔记 ID：用于"原文语境"（阶段 3.13） */
+  card_id?: string
+  note_id?: string
 }
 
 interface QuizAnswerCardProps {
@@ -50,6 +56,15 @@ interface QuizAnswerCardProps {
   selfRated?: boolean
   /** 是否正在提交自评 */
   selfRatingSubmitting?: boolean
+  /**
+   * 语义判分开关的当前值（阶段 3.5，仅简答题有意义）
+   *
+   * ⚠️ 状态**必须由页面持有**，不能藏在本组件里：回车提交的处理函数在页面上
+   * （`onKeyDown` → `handleSubmit`），若开关只在卡片内部，用户勾了框再按回车
+   * 就会静默按"不判分"提交 —— "选了但没生效"是最难被发现的一类不一致。
+   */
+  semanticGrading?: boolean
+  onToggleSemanticGrading?: (enabled: boolean) => void
   onSelectAnswer: (answer: string) => void
   onSubmit: () => void
   /** 用户点击四档自评之一；quality 为 SM-2 分值 0/3/4/5 */
@@ -73,6 +88,8 @@ export default function QuizAnswerCard({
   nextButtonText,
   selfRated = false,
   selfRatingSubmitting = false,
+  semanticGrading = false,
+  onToggleSemanticGrading,
   onSelectAnswer,
   onSubmit,
   onSelfRate,
@@ -98,6 +115,20 @@ export default function QuizAnswerCard({
   // 是否仍需要用户自评：后端明确要求，且本次会话尚未给出自评。
   // 注意不要用 result.is_correct 之类推断——简答题的占位判分恒为"错误"。
   const needsSelfAssessment = !!result?.needs_self_assessment && !selfRated
+
+  // 语义判分明细：null 表示"本次没有判分"，与"判分过但没发现问题"是两回事
+  const detail = result?.grading_detail ?? null
+  const missingPoints = detail?.missing_points ?? []
+  const misconceptions = detail?.misconceptions ?? []
+  const verdictMeta = detail ? verdictLabels[detail.verdict] : undefined
+  const verdictLabel = verdictMeta?.label ?? '已判分'
+  const verdictColor = verdictMeta?.color ?? 'var(--color-primary)'
+
+  const ratingLabel = result?.sm2?.rating ? ratingLabels[result.sm2.rating] : ''
+  // 首次复习的 predicted_retention 恒为 1（"从未复习过，必然想得起来"），
+  // 显示成"预测还能想起 100%"没有信息量，反而像在敷衍。只在 <1 时展示。
+  const rawRetention = result?.sm2?.predicted_retention
+  const showRetention = typeof rawRetention === 'number' && rawRetention < 0.999
 
   return (
     <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
@@ -193,6 +224,40 @@ export default function QuizAnswerCard({
             />
           )}
 
+          {/* 语义判分开关（阶段 3.5 的前端入口；仅简答题有意义）
+              默认关闭的理由见后端 SubmitAnswerRequest.use_semantic_grading：
+              判分在提交的同步路径上调外部 LLM，会给每次提交叠加一次往返延迟，
+              而两阶段流程本来就以用户自评为主评分来源。
+              这里把选择权交给用户，而不是替他决定"慢一点但更准"。 */}
+          {onToggleSemanticGrading && quiz.question_type === 'short_answer' && (
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 'var(--space-xs)',
+                marginTop: 'var(--space-sm)',
+                fontSize: '0.85rem',
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={semanticGrading}
+                onChange={e => onToggleSemanticGrading(e.target.checked)}
+                disabled={submitting}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                让 AI 先判一次，指出遗漏与误解
+                <br />
+                <span style={{ fontSize: '0.8rem' }}>
+                  需要联网调用模型，提交会慢几秒；不勾选则直接由你自评。
+                </span>
+              </span>
+            </label>
+          )}
+
           {/* 提交按钮（submitting 时禁用，防连点重复提交，见 docs/decisions.md#F-23） */}
           <div style={{ marginTop: 'var(--space-md)', textAlign: 'right' }}>
             <button
@@ -255,6 +320,59 @@ export default function QuizAnswerCard({
               )}
             </div>
           )}
+
+          {/* 语义判分明细（阶段 3.5 的落地处）
+              这里展示的是"缺了哪一点 / 误解了哪一点"，而不是一个分数 ——
+              分数无法校准、也没有指导价值。`grading_detail` 为 null 表示
+              本次**没有**判分（未请求/判分失败/已自评），此时整块不渲染；
+              绝不能渲染成"没有发现问题"。 */}
+          {detail && (
+            <div
+              style={{
+                marginBottom: 'var(--space-md)',
+                padding: 'var(--space-sm) var(--space-md)',
+                background: 'var(--color-bg)',
+                borderLeft: `3px solid ${verdictColor}`,
+                borderRadius: 4,
+                fontSize: '0.9rem',
+              }}
+            >
+              <p style={{ fontWeight: 600, color: verdictColor }}>
+                AI 判分：{verdictLabel}
+              </p>
+              {detail.reason && (
+                <p style={{ marginTop: 'var(--space-xs)' }}>{detail.reason}</p>
+              )}
+              {missingPoints.length > 0 && (
+                <p style={{ marginTop: 'var(--space-xs)' }}>
+                  <strong>遗漏：</strong>
+                  <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
+                    {missingPoints.map((point, i) => <li key={i}>{point}</li>)}
+                  </ul>
+                </p>
+              )}
+              {misconceptions.length > 0 && (
+                <p style={{ marginTop: 'var(--space-xs)' }}>
+                  <strong>误解：</strong>
+                  <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
+                    {misconceptions.map((point, i) => <li key={i}>{point}</li>)}
+                  </ul>
+                </p>
+              )}
+              {missingPoints.length === 0 && misconceptions.length === 0 && (
+                <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}>
+                  没有发现遗漏或误解。
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 原文语境（阶段 3.13）
+              答错之后用户最想做的就是回原文看一眼，而改造前这里只有
+              「正确答案」四个字。
+              **不在 `needsSelfAssessment` 时隐藏**：等待自评时用户正在
+              对照参考答案回忆，原文段落恰恰是最有用的对照材料。 */}
+          <SourceContext cardId={quiz.card_id} noteId={quiz.note_id} />
 
           {/* 四档自评：仅在后端明确请求自评且本次尚未自评时展示 */}
           {needsSelfAssessment && (
@@ -335,9 +453,11 @@ export default function QuizAnswerCard({
             </div>
           )}
 
-          {/* SM-2 信息（Review 页展示）
-              等待自评时 next_review_at 为 null、调度未推进，显示"下次复习"是假信息，
-              故此时只在已给出自评后才展示。 */}
+          {/* 调度依据（阶段 3.6 / 3.9）
+              改造前这里写着 `下次复习: 6 天后 | EF: 2.5 | 评分: 4` ——
+              `EF` 是 SM-2 的旋钮，用户看不懂，而且换 FSRS 之后它已经
+              不再参与调度（现在由难度 D 桥接而来）。改为展示真正决定
+              间隔的两个量：**复习前预测的回忆概率**与**评分档位**。 */}
           {showSm2Info && result?.sm2 && !needsSelfAssessment && (
             <div style={{
               fontSize: '0.85rem',
@@ -347,7 +467,14 @@ export default function QuizAnswerCard({
               borderRadius: 4,
               marginBottom: 'var(--space-md)',
             }}>
-              下次复习: {result.sm2.interval} 天后 | EF: {result.sm2.easiness_factor} | 评分: {result.quality}
+              下次复习: {result.sm2.interval} 天后 | 评分: {result.quality}
+              {ratingLabel && <> | 档位: {ratingLabel}</>}
+              {showRetention && (
+                <>
+                  {' | '}
+                  复习前预测还能想起: {Math.round((result.sm2.predicted_retention ?? 0) * 100)}%
+                </>
+              )}
               {result.grading_method && (
                 <> | 判分方式: {gradingMethodLabels[result.grading_method] ?? result.grading_method}</>
               )}

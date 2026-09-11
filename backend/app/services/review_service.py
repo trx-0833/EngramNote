@@ -498,10 +498,6 @@ async def submit_answer(
     result["needs_self_assessment"] = grade["needs_self_assessment"]
     result["grading_method"] = grading_method
     result["grading_reason"] = grade["reason"]
-    # 阶段 3.5：结构化判分明细，UI 据此展示"缺了哪一点 / 误解了哪一点"。
-    # 无明细时**不塞空对象** —— 前端据 "字段缺失" 区分"未判分"与"判分无问题"。
-    if grade.get("detail"):
-        result["grading_detail"] = grade["detail"]
     return result
 
 
@@ -556,7 +552,21 @@ def _build_submit_result(
             "repetition": quiz.repetition,
             "easiness_factor": quiz.easiness_factor,
             "next_review_at": quiz.next_review_at.isoformat() if quiz.next_review_at else None,
+            # 阶段 3.6：解释"为什么给这个间隔"。
+            # 取自 **review_log** 而不是本次调用的内存变量 —— 幂等命中
+            # （重复提交）时根本没有内存变量，而用户刷新后重新拉取结果
+            # 也必须看到同样的解释。
+            "rating": review_log.rating,
+            "predicted_retention": review_log.predicted_retention,
         },
+        # 阶段 3.5：结构化判分明细同样**从落库的那一份读**。
+        #
+        # 这里修掉一个真实缺陷：改造前 service 会在返回前补一句
+        # `result["grading_detail"] = grade["detail"]`，但
+        # `SubmitAnswerResponse` 没有声明该字段，Pydantic 静默丢弃 ——
+        # LLM 判分明细算好了、存库了，前端却永远拿不到。
+        # 现在字段已在响应模型里，且只以"落库的事实"为准。
+        "grading_detail": review_log.grading_detail,
     }
 
 

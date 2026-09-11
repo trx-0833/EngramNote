@@ -271,3 +271,121 @@ class TestShortAnswerStillUngradedByDefault:
         result = grade_answer("short_answer", "一些回答", "标准答案")
         assert result["needs_self_assessment"] is True
         assert result["method"] == "ungraded"
+
+
+@pytest.mark.asyncio
+class TestGradingDetailReachesTheClient:
+    """★ 回归：判分明细必须**真的出现在响应里**
+
+    改造前 service 会在返回前补一句 `result["grading_detail"] = grade["detail"]`，
+    但 `SubmitAnswerResponse` **没有声明这个字段**，Pydantic 静默丢弃 ——
+    LLM 判分明细算好了、落库了，前端却永远拿不到。
+
+    这类缺陷的症状极具误导性："功能看起来做好了，界面毫无反应"。
+    所以这里断言的是**响应对象**上的字段，而不是 service 返回的 dict
+    （dict 一直是有的，正因如此单测此前全绿）。
+    """
+
+    async def test_detail_is_present_and_typed(self, monkeypatch, test_db):
+        from app.models.knowledge_card import CardType, KnowledgeCard
+        from app.models.note import Note, SourceType
+        from app.models.quiz_item import QuestionType, QuizItem
+        from app.models.user import User
+        from app.schemas.review import SubmitAnswerResponse
+        from app.services import llm_service as llm_mod
+        from app.services import review_service
+
+        class Partial:
+            def __init__(self, *a, **k):
+                pass
+
+            async def grade_short_answer(self, **kw):
+                return {
+                    "verdict": "partial",
+                    "missing_points": ["接地刀闸"],
+                    "misconceptions": ["把浮充说成均充"],
+                    "confidence": 0.92,
+                    "reason": "漏了一种刀闸",
+                }
+
+        monkeypatch.setattr(llm_mod, "LLMService", Partial)
+
+        import uuid
+        uid = str(uuid.uuid4())
+        note_id = str(uuid.uuid4())
+        card_id = str(uuid.uuid4())
+        quiz_id = str(uuid.uuid4())
+        async with test_db() as db:
+            db.add(User(id=uid, email=f"{uid[:8]}@e.com", username=f"u{uid[:8]}",
+                        hashed_password="x", is_active=True))
+            await db.commit()
+        async with test_db() as db:
+            db.add(Note(id=note_id, user_id=uid, title="t", source_type=SourceType.pdf))
+            await db.commit()
+        async with test_db() as db:
+            db.add(KnowledgeCard(id=card_id, user_id=uid, note_id=note_id,
+                                 card_type=CardType.concept, title="浮充", content="c"))
+            await db.commit()
+        async with test_db() as db:
+            db.add(QuizItem(
+                id=quiz_id, user_id=uid, note_id=note_id, card_id=card_id,
+                question="操作术语有哪些", answer="断路器/隔离刀闸/接地刀闸",
+                question_type=QuestionType.short_answer,
+            ))
+            await db.commit()
+
+        async with test_db() as db:
+            result = await review_service.submit_answer(
+                quiz_id, uid, "断路器", 0, db, use_semantic_grading=True,
+            )
+
+        assert result.get("grading_detail"), "service 层没有产出判分明细"
+        resp = SubmitAnswerResponse.from_service_result(result)
+        assert resp.grading_detail is not None, (
+            "判分明细没有出现在响应对象上 —— 响应模型漏声明字段，Pydantic 会静默丢弃"
+        )
+        assert resp.grading_detail["verdict"] == "partial"
+        assert resp.grading_detail["missing_points"] == ["接地刀闸"]
+        assert resp.grading_detail["misconceptions"] == ["把浮充说成均充"]
+
+    async def test_placeholder_response_has_null_detail(self, test_db):
+        """未判分时必须是 `null`，不能是空对象
+
+        空对象会渲染成"判分过、但没发现任何问题"，与"根本没判分"是两回事。
+        """
+        from app.models.knowledge_card import CardType, KnowledgeCard
+        from app.models.note import Note, SourceType
+        from app.models.quiz_item import QuestionType, QuizItem
+        from app.models.user import User
+        from app.schemas.review import SubmitAnswerResponse
+        from app.services import review_service
+
+        import uuid
+        uid = str(uuid.uuid4())
+        note_id = str(uuid.uuid4())
+        card_id = str(uuid.uuid4())
+        quiz_id = str(uuid.uuid4())
+        async with test_db() as db:
+            db.add(User(id=uid, email=f"{uid[:8]}@e.com", username=f"u{uid[:8]}",
+                        hashed_password="x", is_active=True))
+            await db.commit()
+        async with test_db() as db:
+            db.add(Note(id=note_id, user_id=uid, title="t", source_type=SourceType.pdf))
+            await db.commit()
+        async with test_db() as db:
+            db.add(KnowledgeCard(id=card_id, user_id=uid, note_id=note_id,
+                                 card_type=CardType.concept, title="t", content="c"))
+            await db.commit()
+        async with test_db() as db:
+            db.add(QuizItem(
+                id=quiz_id, user_id=uid, note_id=note_id, card_id=card_id,
+                question="q", answer="a", question_type=QuestionType.short_answer,
+            ))
+            await db.commit()
+
+        async with test_db() as db:
+            result = await review_service.submit_answer(quiz_id, uid, "随便写", 0, db)
+
+        resp = SubmitAnswerResponse.from_service_result(result)
+        assert resp.grading_detail is None
+        assert resp.needs_self_assessment is True

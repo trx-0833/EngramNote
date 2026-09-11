@@ -56,6 +56,9 @@ export default function Review() {
     onError: onRateError,
   })
 
+  // 语义判分开关（阶段 3.5）：见 handleSubmit 里"为什么放在页面而不是卡片"的说明
+  const [semanticGrading, setSemanticGrading] = useState(false)
+
   useEffect(() => {
     loadData()
   }, [])
@@ -96,7 +99,12 @@ export default function Review() {
     const timeSpent = Date.now() - current.startTime
 
     try {
-      const result = await submitAnswer(current.quiz.id, current.userAnswer, timeSpent)
+      // 语义判分只在首次提交时按用户的勾选请求（带自评的那次后端会直接跳过 LLM）。
+      // 开关状态放在页面上而不是卡片里：回车提交也走这个函数，藏在卡片里
+      // 会让"勾了框再按回车"静默按不判分提交。
+      const result = await submitAnswer(
+        current.quiz.id, current.userAnswer, timeSpent, undefined, semanticGrading,
+      )
       const newQuizzes = [...quizzes]
       newQuizzes[currentIndex] = { ...current, submitted: true, result }
       setQuizzes(newQuizzes)
@@ -268,6 +276,8 @@ export default function Review() {
         isLast={currentIndex >= quizzes.length - 1}
         selfRated={isRated(quiz.id)}
         selfRatingSubmitting={ratingSubmitting}
+        semanticGrading={semanticGrading}
+        onToggleSemanticGrading={setSemanticGrading}
         onSelectAnswer={(answer) => {
           const newQuizzes = [...quizzes]
           newQuizzes[currentIndex] = { ...current, userAnswer: answer }

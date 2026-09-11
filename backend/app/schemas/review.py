@@ -5,7 +5,7 @@
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,6 +79,26 @@ class SM2Info(BaseModel):
     easiness_factor: float
     # 占位提交（自动判分不可信、等待用户自评）时不推进调度，此处为 None
     next_review_at: Optional[str] = None
+    # ---- 阶段 3.6：解释"为什么给这个间隔" ----
+    #
+    # 只给一个天数等于要求用户盲信调度器。这两个字段合起来能回答
+    # 「模型当时认为我有多大概率记得」以及「你是怎么评价这次回忆的」，
+    # 而间隔正是由它们推出来的。
+    rating: Optional[int] = Field(
+        default=None,
+        description=(
+            "FSRS 评分档位 1-4（1=完全忘记 / 2=勉强想起 / 3=想起来了 / 4=轻松想起）。"
+            "`null` 表示这次没有推进调度（占位提交），或走的是 SM-2 回退路径。"
+        ),
+    )
+    predicted_retention: Optional[float] = Field(
+        default=None,
+        description=(
+            "**复习前**模型预测的可回忆概率（0-1）。它解释间隔为什么是这个数："
+            "0.6 表示模型认为你已接近遗忘，因此这次答对后间隔会涨得更多。"
+            "`null` 同 `rating`（SM-2 没有保持率模型，不编造数字）。"
+        ),
+    )
 
 
 class SubmitAnswerResponse(BaseModel):
@@ -108,6 +128,15 @@ class SubmitAnswerResponse(BaseModel):
     grading_reason: Optional[str] = Field(
         default=None, description="判分依据说明，供 UI 展示判分可信度"
     )
+    grading_detail: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "阶段 3.5 的 LLM 语义判分明细："
+            "`{verdict, missing_points, misconceptions, confidence, reason}`。"
+            "`null` = 本次没有语义判分（未请求 / 判分失败 / 已自评），"
+            "**不是**「判分过但没发现问题」——UI 应据此区分两种状态。"
+        ),
+    )
 
     @classmethod
     def from_service_result(cls, result: dict) -> "SubmitAnswerResponse":
@@ -115,6 +144,12 @@ class SubmitAnswerResponse(BaseModel):
 
         两个提交入口（/review/submit 与 /quick/{note_id}/submit）共用此转换，
         避免各自手抄字段——历史上正是手抄导致新增字段漏掉一个入口。
+
+        ⚠️ 阶段 3.5 踩过这个坑的另一面：`grading_detail` 在 service 层已经
+        算好并落库，但**本模型没有声明这个字段**，于是 `from_service_result`
+        静默把它丢掉，前端永远拿不到 —— "计算了、存了、就是没返回"。
+        新增返回字段时必须同时改这里与 `_build_submit_result`，
+        否则症状是"功能看起来做好了但界面毫无反应"。
         """
         return cls(
             quiz_id=result["quiz_id"],
@@ -130,6 +165,7 @@ class SubmitAnswerResponse(BaseModel):
             needs_self_assessment=bool(result.get("needs_self_assessment", False)),
             completing_placeholder=bool(result.get("completing_placeholder", False)),
             grading_reason=result.get("grading_reason"),
+            grading_detail=result.get("grading_detail"),
         )
 
 

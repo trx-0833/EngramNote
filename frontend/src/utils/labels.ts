@@ -122,3 +122,25 @@ export const gradingMethodLabels: Record<string, string> = {
   ungraded: '待你自评（尚未计入复习进度）',
   legacy: '历史记录',
 }
+
+/**
+ * FSRS 评分档位（1-4）到中文标签的映射
+ *
+ * 这四档**恰好**是自评四档按钮的取值（0/3/4/5 → Again/Hard/Good/Easy），
+ * 所以文案与 `selfRatingOptions` 保持一致 —— 用户看到的是同一套说法。
+ * 机器判分不会有 Easy（"选对了"里没有"毫不费力"这层信息，见后端
+ * `scheduler_service.rating_from_quality`）。
+ */
+export const ratingLabels: Record<number, string> = {
+  1: '完全忘记',
+  2: '勉强想起',
+  3: '想起来了',
+  4: '轻松想起',
+}
+
+/** 语义判分的三档结论（用于缺失点/误解点区块的标题与配色） */
+export const verdictLabels: Record<string, { label: string; color: string }> = {
+  correct: { label: '回答正确', color: '#4caf50' },
+  partial: { label: '答对了部分', color: '#c9a959' },
+  incorrect: { label: '回答错误', color: '#f44336' },
+}

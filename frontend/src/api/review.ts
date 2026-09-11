@@ -25,17 +25,39 @@ export interface DueQuizListResponse {
   total: number;
 }
 
-/** SM-2 更新信息 */
+/** 调度结果（字段名 `sm2` 是历史遗留：阶段 3.6 之后默认由 FSRS-5 产生） */
 export interface SM2Info {
   interval: number;
   repetition: number;
   easiness_factor: number;
   /** 占位提交（等待用户自评）时不推进调度，此处为 null */
   next_review_at: string | null;
+  /** FSRS 评分档位 1-4；null = 本次未推进调度，或走的是 SM-2 回退路径 */
+  rating?: number | null;
+  /**
+   * **复习前**模型预测的可回忆概率（0-1）。
+   * 它解释间隔为什么是这个数：0.6 表示模型认为你已接近遗忘，
+   * 因此这次答对后间隔会涨得更多。SM-2 回退路径下为 null。
+   */
+  predicted_retention?: number | null;
 }
 
 /** 判分方式：choice/fill_blank 为可靠的自动判分，self_rating 为用户自评 */
 export type GradingMethod = 'choice' | 'fill_blank' | 'self_rating' | 'ungraded' | 'legacy';
+
+/**
+ * LLM 语义判分明细（阶段 3.5）
+ *
+ * 关键设计：**不是 0-100 分，而是"缺了哪一点、误解了哪一点"** ——
+ * 前者无法校准也没有指导价值，后者可展示、可核对。
+ */
+export interface GradingDetail {
+  verdict: 'correct' | 'partial' | 'incorrect';
+  missing_points?: string[];
+  misconceptions?: string[];
+  confidence?: number;
+  reason?: string;
+}
 
 /** 提交答案响应 */
 export interface SubmitAnswerResponse {
@@ -56,6 +78,13 @@ export interface SubmitAnswerResponse {
   completing_placeholder: boolean;
   /** 判分依据说明，用于向用户解释判分可信度 */
   grading_reason: string | null;
+  /**
+   * 语义判分明细；`null` = 本次**没有**语义判分（未请求 / 判分失败 / 已自评）
+   *
+   * ⚠️ 不要把 null 当成"判分过但没发现问题" —— 那是两回事，
+   * 后者应当显示"没有发现遗漏"，前者应当什么都不显示。
+   */
+  grading_detail?: GradingDetail | null;
 }
 
 /** 复习统计 */
@@ -114,15 +143,21 @@ export async function getDueQuizzes(limit = 50): Promise<DueQuizListResponse> {
  *
  * 两阶段提交：简答题的自动判分不可信，第一次调用不传 selfRating 只会落一条
  * 占位记录、不推进调度（响应 needs_self_assessment=true）；用户四档自评后
- * 再次调用并传入 selfRating，才真正完成判分与 SM-2 调度。
+ * 再次调用并传入 selfRating，才真正完成判分与调度。
  *
  * @param selfRating - 用户自评的 SM-2 质量分（0-5），不传表示本次不自评
+ * @param useSemanticGrading - 是否请求 LLM 语义判分（阶段 3.5，仅简答题有意义）。
+ *   **默认关闭**：判分在提交的同步路径上调用外部 LLM，会给每次提交叠加一次
+ *   往返延迟，而两阶段流程本来就以用户自评为主评分来源（理由见后端
+ *   `SubmitAnswerRequest.use_semantic_grading`）。只有首次提交需要它 ——
+ *   带 `selfRating` 的那次自评优先，后端会直接跳过 LLM。
  */
 export async function submitAnswer(
   quizId: string,
   userAnswer: string,
   timeSpentMs = 0,
   selfRating?: number,
+  useSemanticGrading = false,
 ): Promise<SubmitAnswerResponse> {
   return request<SubmitAnswerResponse>('/review/submit', {
     method: 'POST',
@@ -131,6 +166,7 @@ export async function submitAnswer(
       user_answer: userAnswer,
       time_spent_ms: timeSpentMs,
       ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+      ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
     }),
   });
 }
@@ -171,6 +207,7 @@ export async function getQuickReview(noteId: string): Promise<QuickReviewRespons
  * @param userAnswer - 用户答案
  * @param timeSpentMs - 答题耗时（毫秒）
  * @param selfRating - 用户自评的 SM-2 质量分（0-5），见 submitAnswer 的两阶段说明
+ * @param useSemanticGrading - 是否请求 LLM 语义判分，见 submitAnswer 的说明
  * @returns 提交答案响应
  */
 export async function submitQuickReviewAnswer(
@@ -179,6 +216,7 @@ export async function submitQuickReviewAnswer(
   userAnswer: string,
   timeSpentMs = 0,
   selfRating?: number,
+  useSemanticGrading = false,
 ): Promise<SubmitAnswerResponse> {
   return request<SubmitAnswerResponse>(`/review/quick/${noteId}/submit`, {
     method: 'POST',
@@ -187,6 +225,7 @@ export async function submitQuickReviewAnswer(
       user_answer: userAnswer,
       time_spent_ms: timeSpentMs,
       ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+      ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
     }),
   });
 }
