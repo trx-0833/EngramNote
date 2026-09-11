@@ -41,11 +41,10 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, or_
+from sqlalchemy import select
 
 from ..config import get_settings
 from ..models.note import Note
-from ..models.knowledge_card import KnowledgeCard
 from ..services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -254,65 +253,77 @@ class RAGService:
             self._session_factory = async_session
         return self._session_factory
 
-    async def _get_user_cards(self, user_id: str) -> List[Dict[str, Any]]:
+    async def _get_user_chunks(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        获取指定用户可见的卡片语料（回收站笔记的卡片除外）
+        获取指定用户的 chunk 语料（回收站笔记除外）
+
+        ## 为什么改用 chunk 语料（阶段 2.3）
+
+        此前 BM25 路的语料是**知识卡片**（LLM 抽取的产物），
+        而向量路的语料是**原文 chunk** —— 两路粒度不同，
+        融合去重与引用回跳都无法自洽（A-17）。
+
+        实测（同一套 1058 条评测集，BM25 通道，附录 K）：
+
+            chunk 语料 严格 Recall@5 = 60.30%
+            卡片语料   严格 Recall@5 = 37.52%
+
+        卡片是 LLM 的二次加工（`card.content` 与 `source_text` 的长度比中位数
+        0.93，接近摘录而非概括，但**覆盖范围**窄），而 chunk 就是原文本身。
+        产品承诺是"基于你的资料回答"，那就该检索资料本身。
 
         ## 为什么不再做进程内缓存（阶段 2.10）
 
-        原实现有一个模块级 `_kb_cache: Dict[str, tuple[float, List[KnowledgeCard]]]`，
-        60 秒 TTL、**没有任何容量上界**，且缓存的是**完整 ORM 实例**。三个问题：
+        原 `_kb_cache` 是 `Dict[user_id, ...]`、无容量上界、缓存 ORM 实例，
+        且正确性靠 5 处调用方记得调 `invalidate_kb_cache()`。
+        这类"靠约定维持正确性"的设计在本项目已经出过事
+        （见 conftest 里 `test_db` 隔离曾导致测试写真实库的记录）。
 
-        1. **内存随用户数无界增长**：多用户场景下每个问过的用户都会留下
-           一份完整卡片列表（含 `content`／`source_text` 等 Text 字段）。
-           实测本库单用户 1183 张卡片，多用户即线性叠加且**永不主动回收**。
-        2. **缓存的是 ORM 实例**，与 session 生命周期绑在一起 ——
-           session 关闭后访问未加载属性会抛 `DetachedInstanceError`，
-           这是一类"平时不出现、并发时偶发"的失败。
-        3. **正确性靠调用方记得失效**：`invalidate_kb_cache()` 需要在卡片增删、
-           笔记 purge、理解流程等 5 处被正确调用。漏掉任何一处，
-           用户就会在最长 60 秒内看到**已删除的卡片**参与问答。
-           这种"靠约定维持正确性"的设计在本项目已经出过事（见 conftest 里
-           `test_db` 隔离"靠约定"导致真实库被写的记录）。
+        代价：每次问答查一次 `chunks`（单用户千级行，带索引）。
+        这是有意取舍 —— 本项目定位本地单用户自托管。
+        语料上到十万级时正解是 FTS5（2.5′）让 BM25 下沉到数据库。
 
-        代价说清楚：现在每次问答都会查一次 `knowledge_cards`。
-        这是**有意的取舍** —— 本项目的定位是本地单用户自托管
-        （见 `docs/sqlite-single-writer.md`），卡片量在千级，
-        一次带索引的 SELECT 完全可接受；而"内存无界 + 正确性靠约定"
-        是不可接受的。若将来语料上到十万级，正解是建 FTS5 索引
-        （阶段 2′ 第 6 项）让 BM25 下沉到数据库，而不是在进程里缓存全量。
+        注意：**不过滤 `has_embedding`** —— BM25 是纯词法检索，
+        不需要向量。这样"清洗完成但尚未跑嵌入"的窗口期仍可检索（降级而非不可用）。
         """
+        from .chunk_service import get_user_chunks
+
         session_factory = self._get_session_factory()
         async with session_factory() as session:
-            result = await session.execute(
-                select(
-                    KnowledgeCard.id,
-                    KnowledgeCard.note_id,
-                    KnowledgeCard.title,
-                    KnowledgeCard.content,
-                    KnowledgeCard.chapter_title,
-                ).where(
-                    KnowledgeCard.user_id == user_id,
-                    # 回收站笔记的卡片不进 QA 检索（独立/提升卡片保留）
-                    or_(
-                        KnowledgeCard.note_id.is_(None),
-                        select(Note.id).where(
-                            Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
-                        ).exists(),
-                    ),
+            return await get_user_chunks(session, user_id)
+
+    async def _search_chunk_vectors(
+        self,
+        question_embedding: List[float],
+        user_id: str,
+        top_k: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """在 `chunks` 表上做向量检索（一次 SQL，取代遍历 N 个 collection）
+
+        模型加载仍隔离在 Celery worker（`_encode_via_celery`），
+        但**检索本身不需要模型** —— 向量已存在库里，只需点积。
+        因此这里不再走 Celery：省掉一次 worker 往返与
+        24 个 Chroma collection 的遍历（D-9 / 2.4′）。
+
+        回收站笔记的 chunk 在此排除（`get_user_chunks` 已排除，
+        但向量路直接查表，需要单独处理）。
+        """
+        from sqlalchemy import select as _select
+
+        from ..models.note import Note as _Note
+        from .chunk_search_service import search_chunks
+
+        session_factory = self._get_session_factory()
+        async with session_factory() as session:
+            trashed = list((await session.execute(
+                _select(_Note.id).where(
+                    _Note.user_id == user_id, _Note.trashed_at.is_not(None)
                 )
+            )).scalars().all())
+            return await search_chunks(
+                session, question_embedding, user_id,
+                top_k=top_k, exclude_note_ids=set(trashed) or None,
             )
-            # 只取检索真正需要的 5 列，不缓存 ORM 实例
-            return [
-                {
-                    "card_id": row.id,
-                    "note_id": row.note_id,
-                    "title": row.title,
-                    "content": row.content,
-                    "chapter_title": row.chapter_title,
-                }
-                for row in result.all()
-            ]
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
         """
@@ -341,36 +352,6 @@ class RAGService:
         except Exception as e:
             logger.warning(f"Celery 嵌入编码失败，将降级为仅 BM25 检索: {e}")
             return None
-
-    async def _search_vectors_via_celery(
-        self,
-        question_embedding: List[float],
-        user_id: str,
-        top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """
-        通过 Celery worker 执行向量搜索
-
-        Args:
-            question_embedding: 问题的嵌入向量
-            user_id: 用户 ID
-            top_k: 返回最相关的 top_k 个结果
-
-        Returns:
-            List[Dict]: 相关文本块列表，失败时返回空列表
-        """
-        try:
-            from ..tasks.celery_app import celery_app
-            task = celery_app.send_task(
-                "app.tasks.embedding_tasks.search_vectors",
-                args=[user_id, question_embedding, top_k],
-            )
-            # 阻塞调用移入线程池（见 docs/decisions.md#F-06）
-            result = await asyncio.to_thread(task.get, 15)
-            return result if result else []
-        except Exception as e:
-            logger.warning(f"Celery 向量搜索失败: {e}")
-            return []
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
@@ -563,14 +544,27 @@ class RAGService:
         #: 池=5 时融合只能在那 10 条里排序，答错就出局（实测池=20 更高）。
         pool = getattr(settings, "rag_candidate_pool", 20)
 
-        # 1. 通过 Celery 编码问题
+        # 0. 统一语料：两路都跑 **chunk 语料**（阶段 2.3）
+        #
+        # 在此之前，向量路跑 chunk、BM25 路跑知识卡片 —— 两路语料不同粒度
+        # （A-17「三路混合检索实际是两套不同粒度的语料」）。
+        # 实测（附录 K）：同一套 1058 条评测集、BM25 通道，
+        #   chunk 语料 严格 Recall@5 **60.30%**  ＞  卡片语料 37.52%
+        # 语料统一后两路结果才可比、去重才有意义、定位字段才能贯通。
+        chunks = await self._get_user_chunks(user_id)
+
+        # 1. 通过 Celery 编码问题（模型加载仍隔离在 worker 进程）
         question_embedding = await self._encode_via_celery(question)
 
-        # 2. 向量检索（仅当编码成功时）
+        # 2. 向量检索
+        #
+        # **不再走 Celery**：向量已存在本地 `chunks` 表（阶段 2.2′ B 半），
+        # 检索只需拿 query 向量做点积，不需要模型。旧路径要起一个 worker
+        # 任务、遍历 24 个 Chroma collection（D-9），现在是一次 SQL。
         vector_results: List[Dict[str, Any]] = []
         if question_embedding is not None:
             try:
-                vector_results = await self._search_vectors_via_celery(
+                vector_results = await self._search_chunk_vectors(
                     question_embedding, user_id, top_k=pool
                 )
             except Exception as e:
@@ -588,11 +582,12 @@ class RAGService:
         else:
             retrieval_status = "full_vector"
 
-        # 3. BM25 检索（语料获取在此，打分为纯函数，评测脚本复用同一实现）
+        # 3. BM25 检索（同一份 chunk 语料；打分为纯函数，评测脚本复用同一实现）
         bm25_results: List[Dict[str, Any]] = []
         try:
-            cards = await self._get_user_cards(user_id)
-            bm25_results = self._get_bm25_index(user_id, cards).search(question, top_k=pool)
+            bm25_results = self._get_bm25_index(user_id, chunks).search(
+                question, top_k=pool
+            )
         except Exception as e:
             logger.warning(f"BM25 检索失败: {e}")
 

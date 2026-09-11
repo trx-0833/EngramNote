@@ -382,6 +382,33 @@ async def _clean_document(note_id: str):
         metadata_=metadata,
     )
 
+    # 11. 建 chunk 索引（阶段 2.2′ / 2.3）
+    #
+    # 为什么放在清洗流程里而不是留给手动脚本：`chunks` 是**派生数据**，
+    # 派生数据最常见的失效方式是"原文变了、索引没重建"（A-18 那一类）。
+    # 手动入口意味着新笔记清洗后不会进索引，直到有人记得跑脚本 ——
+    # 用户看到的是"新上传的资料问不出来"且不知原因。
+    #
+    # 失败**不抛异常**：清洗的主产物是 clean.md 与状态；索引缺失时
+    # 检索退化为只用 BM25 通道，属于可用状态，不该让整个清洗任务失败。
+    try:
+        from ..services.chunk_service import index_note_from_storage
+
+        session_factory = _get_clean_session()
+        async with session_factory() as chunk_db:
+            n_chunks = await index_note_from_storage(
+                chunk_db,
+                note_id=note_id,
+                user_id=user_id,
+                clean_md_path=clean_md_path,
+                original_md_path=original_md_path,
+                chunk_size=settings.chunk_size,
+            )
+            await chunk_db.commit()
+        logger.info("chunk 索引已重建: note_id=%s, chunks=%d", note_id, n_chunks)
+    except Exception as exc:
+        logger.warning("chunk 索引重建失败（不影响清洗结果）: note_id=%s, %s", note_id, exc)
+
     elapsed = time.monotonic() - start_time
     logger.info("文档清洗完成: note_id=%s, elapsed=%.1fs", note_id, elapsed)
 

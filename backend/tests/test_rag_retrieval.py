@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-from app.models.knowledge_card import CardType, KnowledgeCard
+from app.models.chunk import Chunk
 from app.models.note import Note, NoteStatus, SourceType
 from app.models.user import User
 from app.services.rag_service import RAGService
@@ -217,38 +217,53 @@ class TestNoUnboundedCache:
 
 
 @pytest.mark.asyncio
-class TestCardCorpus:
-    """`_get_user_cards`：语料查询的正确性（不再有缓存层）"""
+class TestChunkCorpus:
+    """`_get_user_chunks` / `_search_chunk_vectors`：阶段 2.3 的统一语料
 
-    async def test_returns_plain_dicts_not_orm_instances(self, test_db):
-        """必须返回普通 dict，不能是 ORM 实例
+    这两条路径取代了卡片语料：BM25 与向量路现在跑**同一份 chunk 语料**，
+    定位字段因此能贯通到引用回跳（2.7）。
+    """
 
-        原实现缓存 ORM 实例，与 session 生命周期绑定 ——
-        session 关闭后访问未加载属性会抛 `DetachedInstanceError`，
-        属于"平时不出现、并发时偶发"的失败模式。
+    async def test_returns_plain_dicts_with_positional_fields(self, test_db):
+        """必须返回普通 dict，且带全定位字段
+
+        两个要求都有来历：
+        - 普通 dict：原实现缓存 ORM 实例，与 session 绑定，
+          session 关闭后访问未加载属性会抛 `DetachedInstanceError`，
+          属于"平时不出现、并发时偶发"的失败
+        - 定位字段：引用回跳按 `char_start/char_end` 切片、按 `heading_path`
+          显示面包屑。缺了它们，2.7 无处可跳
         """
         uid, note_id = await _make_user_and_note(test_db)
-        await _add_card(test_db, uid, note_id, "卡片标题", "卡片内容")
+        await _add_chunks(test_db, uid, note_id)
 
         service = RAGService()
         service._session_factory = test_db
-        cards = await service._get_user_cards(uid)
+        chunks = await service._get_user_chunks(uid)
 
-        assert len(cards) == 1
-        assert isinstance(cards[0], dict), f"返回了 {type(cards[0])}，应为 dict"
-        assert set(cards[0]) == {"card_id", "note_id", "title", "content", "chapter_title"}
-        assert cards[0]["title"] == "卡片标题"
+        assert len(chunks) == 2
+        assert isinstance(chunks[0], dict), f"返回了 {type(chunks[0])}，应为 dict"
+        required = {
+            "chunk_id", "note_id", "index", "title", "content", "chapter_title",
+            "char_start", "char_end", "heading_path", "line_start", "line_end",
+        }
+        assert required <= set(chunks[0]), (
+            f"缺少字段: {required - set(chunks[0])}"
+        )
+        # 偏移必须自洽：区间长度等于内容长度
+        for c in chunks:
+            assert c["char_end"] - c["char_start"] == len(c["content"])
 
-    async def test_excludes_cards_of_trashed_notes(self, test_db):
-        """回收站笔记的卡片不得进入 QA 语料
+    async def test_excludes_chunks_of_trashed_notes(self, test_db):
+        """回收站笔记的 chunk 不得进入 QA 语料
 
-        否则用户删掉的资料仍然会被问答引用 —— 既违反直觉，
+        否则用户删掉的资料仍会被问答引用 —— 既违反直觉，
         也可能把用户主动清理的内容重新"答"出来。
         """
         from datetime import datetime
 
         uid, note_id = await _make_user_and_note(test_db)
-        await _add_card(test_db, uid, note_id, "回收站的卡片", "不应被检索到")
+        await _add_chunks(test_db, uid, note_id)
 
         async with test_db() as db:
             note = (await db.execute(_select_note(note_id))).scalar_one()
@@ -257,44 +272,86 @@ class TestCardCorpus:
 
         service = RAGService()
         service._session_factory = test_db
-        cards = await service._get_user_cards(uid)
+        chunks = await service._get_user_chunks(uid)
 
-        assert cards == [], f"回收站笔记的卡片仍在语料中: {[c['title'] for c in cards]}"
+        assert chunks == [], (
+            f"回收站笔记的 chunk 仍在语料中: {[c['content'] for c in chunks]}"
+        )
 
-    async def test_keeps_standalone_cards(self, test_db):
-        """独立卡片（`note_id` 为 NULL）必须保留
+    async def test_includes_unembedded_chunks(self, test_db):
+        """未嵌入的 chunk **必须**留在 BM25 语料里
 
-        物理删除笔记时勾选"提升核心卡片"会把 `note_id` 置 NULL，
-        卡片成为图谱独立节点 —— 它们仍是用户的资料，不能一起丢掉。
+        BM25 是纯词法检索，不需要向量。清洗完成后到跑嵌入之间有窗口期，
+        若把未嵌入的行排除，新资料在那个窗口里完全查不到；
+        保留则只是"少一路召回"（降级而非不可用）。
         """
-        uid, _note_id = await _make_user_and_note(test_db)
-        async with test_db() as db:
-            db.add(KnowledgeCard(
-                user_id=uid, note_id=None, card_type=CardType.concept,
-                title="独立卡片", content="提升出来的核心知识点",
-            ))
-            await db.commit()
+        uid, note_id = await _make_user_and_note(test_db)
+        await _add_chunks(test_db, uid, note_id, has_embedding=False)
 
         service = RAGService()
         service._session_factory = test_db
-        cards = await service._get_user_cards(uid)
+        chunks = await service._get_user_chunks(uid)
 
-        assert [c["title"] for c in cards] == ["独立卡片"]
+        assert len(chunks) == 2, "未嵌入的 chunk 被排除在词法语料之外"
 
     async def test_isolated_per_user(self, test_db):
-        """跨用户语料必须隔离（不得把别人的卡片喂进问答）"""
+        """跨用户语料必须隔离（不得把别人的资料喂进问答）"""
         uid_a, note_a = await _make_user_and_note(test_db)
         uid_b, note_b = await _make_user_and_note(test_db)
-        await _add_card(test_db, uid_a, note_a, "A 的卡片", "A 的内容")
-        await _add_card(test_db, uid_b, note_b, "B 的卡片", "B 的内容")
+        await _add_chunks(test_db, uid_a, note_a, content="A 的内容")
+        await _add_chunks(test_db, uid_b, note_b, content="B 的内容")
 
         service = RAGService()
         service._session_factory = test_db
-        cards = await service._get_user_cards(uid_a)
+        chunks = await service._get_user_chunks(uid_a)
 
-        assert [c["title"] for c in cards] == ["A 的卡片"], (
-            "语料未按 user_id 隔离"
+        assert all("A 的内容" in c["content"] for c in chunks), "语料未按 user_id 隔离"
+
+    async def test_vector_search_excludes_trashed_notes(self, test_db):
+        """向量路也必须排除回收站笔记
+
+        向量检索直接查 `chunks` 表（不再经 `get_user_chunks`），
+        所以它需要**单独**做回收站过滤 —— 漏掉就会让已删除的资料
+        继续出现在回答里。这是一条容易被"另一条路已经处理了"掩盖的路径。
+        """
+        uid, note_id = await _make_user_and_note(test_db)
+        await _add_chunks(test_db, uid, note_id, has_embedding=True, dim=4)
+
+        service = RAGService()
+        service._session_factory = test_db
+
+        vec = [1.0, 0.0, 0.0, 0.0]
+        hits = await service._search_chunk_vectors(vec, uid, top_k=5)
+        assert hits, "未回收时应当检索得到"
+
+        from datetime import datetime
+        async with test_db() as db:
+            note = (await db.execute(_select_note(note_id))).scalar_one()
+            note.trashed_at = datetime.utcnow()
+            await db.commit()
+
+        hits_after = await service._search_chunk_vectors(vec, uid, top_k=5)
+        assert hits_after == [], (
+            f"回收站笔记的 chunk 仍被向量检索到: {[h['chunk_id'] for h in hits_after]}"
         )
+
+    async def test_vector_search_returns_positional_fields(self, test_db):
+        """向量结果必须带定位字段 —— 2.7 回跳的数据基础
+
+        旧实现（Chroma 路径）只往上传 `block_index`，
+        `start_line/end_line` 在 `embedding_tasks` 里就被丢掉了（附录 N.4）。
+        """
+        uid, note_id = await _make_user_and_note(test_db)
+        await _add_chunks(test_db, uid, note_id, has_embedding=True, dim=4)
+
+        service = RAGService()
+        service._session_factory = test_db
+        hits = await service._search_chunk_vectors([1.0, 0.0, 0.0, 0.0], uid, top_k=5)
+
+        assert hits
+        for key in ("chunk_id", "char_start", "char_end", "heading_path",
+                    "line_start", "line_end"):
+            assert key in hits[0], f"向量结果缺少定位字段 {key}"
 
 
 class TestBM25Tokenizer:
@@ -639,14 +696,43 @@ async def _make_user_and_note(session_factory) -> tuple[str, str]:
     return uid, nid
 
 
-async def _add_card(
-    session_factory, user_id: str, note_id: str, title: str, content: str,
+async def _add_chunks(
+    session_factory,
+    user_id: str,
+    note_id: str,
+    *,
+    content: str = "拉哇水电站装设多台水轮发电机组。",
+    has_embedding: bool = False,
+    dim: int = 4,
 ) -> None:
+    """写入两个 chunk（可选：带向量）
+
+    偏移刻意做成自洽的（`char_end - char_start == len(content)`），
+    因为测试要断言这一点；真实的偏移由 `segment_with_offsets` 保证。
+    """
     from sqlalchemy import insert
 
+    from app.models.chunk import pack_vector
+
     async with session_factory() as db:
-        await db.execute(insert(KnowledgeCard).values(
-            user_id=user_id, note_id=note_id, card_type=CardType.concept.value,
-            title=title, content=content,
-        ))
+        for i in range(2):
+            vec = [1.0] + [0.0] * (dim - 1) if has_embedding else None
+            await db.execute(insert(Chunk).values(
+                user_id=user_id,
+                note_id=note_id,
+                index=i,
+                content=f"{content}#{i}",
+                char_start=i * 100,
+                char_end=i * 100 + len(f"{content}#{i}"),
+                heading_path=f"第一章 > 1.{i}",
+                line_start=i * 5,
+                line_end=i * 5 + 3,
+                char_count=len(f"{content}#{i}"),
+                source_md_path=f"{note_id}/clean.md",
+                content_hash="testhash",
+                has_embedding=has_embedding,
+                embedding=pack_vector(vec) if vec else None,
+                embedding_model="test-model" if vec else None,
+                embedding_dim=dim if vec else None,
+            ))
         await db.commit()

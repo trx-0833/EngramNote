@@ -2956,8 +2956,8 @@ M-4 与 1.13 仍未做。）
 | 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | ✅ **已落地**（附录 M）：`segment_with_offsets` 成为唯一分块器，`split_into_chunks` 已删除（**-253 行**，实测零调用方）；两个调用点均改走同一函数、同一 `chunk_size` |
 | 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪 / 前端被阻断**（附录 L/M/N.4）：chunk 已带 `char_start/char_end/heading_path/line_start/line_end`，但**位置信息在检索链路上被丢弃**（`_rrf_fusion` 只保留固定字段）、`AnswerSource` 也无定位字段。补齐需要 2.2′ 的 `chunks` 表（见 N.4） |
 | 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 | ⛔ 不执行（无 PG） |
-| 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ⬜ 待做（先要 2.9 的基线） |
-| 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ⬜ 待做 |
+| 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ✅ **已落地**（附录 R）：两路统一跑 chunk 语料。生产路径实测严格 Recall@5 **59.74%**（旧卡片语料 37.52%） |
+| 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ✅ **检索侧已彻底删除**（附录 R）：`_search_vectors_async` + `search_vectors` 任务 + `_collection_matches_current_model`，共 **−169 行**。**Chroma 仍被清洗去重使用**，故依赖与目录保留（见 R.4） |
 | 2.5 | 中文全文检索用 `pg_bigm`（或 `zhparser`），替换纯 Python BM25 | 中文召回质量可测 | ⛔ 不执行（无 PG）。SQLite 等价物是 **FTS5**，见下方 |
 | 2.6 | **删除 n-gram 通道**；RRF 改为加权融合（向量 / BM25 可配权重） | 少一路噪声 | ✅ **已落地**（附录 J + P.4）：通道已删；**加权融合已落地并经实测定参**（k=1 / w=0.65 / 池 20 → 严格 Recall@5 60.87%，原等权 k=60 为 57.37%） |
 | 2.8 | **重写 RAG 提示词**：强制"仅依据给定资料"；无据则明确回答"资料中没有"；要求逐条标注引用编号 | 无据问题不再被编造 | ✅ 已落地（提交 `5da6d8a`） |
@@ -3034,16 +3034,15 @@ M-4 与 1.13 仍未做。）
 | 2.2′ 向量 | ✅ | 608/608 单一模型 `bge-m3`（附录 P） |
 | 2.4′ 一次 SQL 取代 N collection | ✅ | `chunk_search_service`（附录 P） |
 | 2.6 加权 RRF | ✅ | k=1 / w=0.65 / 池 20（附录 P.4，已实测定参并锁测试） |
-| **2.3 语料切换正式接线** | ⬅️ **下一项** | 向量与融合都已就位，差把 chunk 语料接进 `retrieve_context` 的向量路 |
-| 2.7 引用回跳接线 | ⬜ | 定位字段**已穿过融合层**（附录 P.4.2），差贯通到 `AnswerSource` 与前端 |
+| 2.3 语料切换 | ✅ | 两路统一 chunk 语料（附录 R） |
+| 2.4 删除跨 collection 遍历 | ✅ | −169 行（附录 R） |
+| **2.7 引用回跳接线** | ⬅️ **下一项** | 定位字段已贯通「chunk → 融合 → `_search_chunk_vectors`」，差接到 `AnswerSource` 与前端 |
 | 2.5′ FTS5 | ⬜ | 独立，可随时插入 |
 
-**顺序再次修正为**：`2.9 ✅ → 2.1 ✅ → 2.2′ ✅ → 2.4′ ✅ → 2.6 加权 RRF ✅ → 2.3 → 2.7`。
+**顺序**：`2.9 ✅ → 2.1 ✅ → 2.2′ ✅ → 2.4′ ✅ → 2.6 ✅ → 2.3 ✅ → 2.4 ✅ → 2.7 ⬅️ → 2.5′`。
 
-说明：2.6 的"加权融合"原被当作可选尾项（"权重须由评测给出依据"）。
-评测给出依据后已落地；实测收益 +3.5 个百分点（相对原等权实现），
-且融合首次超过任一单通道。现在可以带着一个**已校准的融合层**去做 2.3，
-否则 2.3 的效果会被未调准的融合掩盖。
+至此**阶段 2 的检索层重建基本完成**：单一分块器、单一语料、单一模型向量、
+一次 SQL、已定标的加权融合。剩下 2.7（回跳接线）与可选的 2.5′（FTS5）。
 
 #### 一个尚未解决的方法论问题：向量通道的语料是**碎的**
 
@@ -4829,6 +4828,126 @@ None、`(note_id,index)` 唯一）。缺的是这两个脚本/服务的**行为*
 
 补测优先级：`chunk_search_service` 高于 `embed_chunks`
 （前者在检索热路径上，后者是一次性运维脚本）。
+
+---
+
+## 附录 R · 阶段 2.3 / 2.4：统一语料与删除遍历逻辑（2026-09-11）
+
+### R.1 交付
+
+**2.3 语料切换**：两路（向量 + BM25）现在跑**同一份 chunk 语料**。
+
+在此之前，向量路跑原文 chunk、BM25 路跑知识卡片 —— 两路粒度不同，
+融合去重与引用回跳都无法自洽（A-17「三路混合检索实际是两套不同粒度的语料」）。
+实测依据（附录 K，同一套 1058 条评测集、BM25 通道）：
+
+```
+chunk 语料 严格 Recall@5 = 59.74%（生产路径实测）
+卡片语料   严格 Recall@5 = 37.52%
+```
+
+新增：
+
+| 模块 | 作用 |
+|---|---|
+| `app/services/chunk_service.py` | 分块落库服务：`index_note_chunks` / `index_note_from_storage` / `get_user_chunks` / `chunk_hash` |
+| `RAGService._get_user_chunks` | 取代 `_get_user_cards`，取 chunk 语料（**不过滤 `has_embedding`**） |
+| `RAGService._search_chunk_vectors` | 在 `chunks` 表上做向量检索，**不再走 Celery** |
+
+**2.4 删除跨 collection 遍历**：`embedding_tasks.py` 从 312 行降到 143 行
+（**−169 行**），删掉 `_search_vectors_async`、`search_vectors` 任务、
+`_collection_matches_current_model`。检索不再遍历 24 个 Chroma collection。
+
+### R.2 关键设计决定
+
+**向量检索不再走 Celery。** 旧路径要把 query 向量发给 worker、由 worker
+遍历 24 个 collection。现在向量就存在本地 `chunks` 表里，检索只是点积，
+**不需要模型** —— 省掉一次 worker 往返与 N 次 collection 查询。
+模型加载仍隔离在 Celery（`_encode_via_celery`），那部分隔离是为避免
+主进程段错误，与检索无关。
+
+**`get_user_chunks` 刻意不过滤 `has_embedding`。** BM25 是纯词法检索，
+不需要向量。这样"清洗完成但尚未跑嵌入"的窗口期里，新资料仍可被 BM25
+检索到 —— **降级而非不可用**。若过滤掉，那个窗口里用户会看到
+"新上传的资料完全问不出来"。
+
+**清洗流程自动建索引**（`clean_tasks` 第 11 步）。`chunks` 是**派生数据**，
+派生数据最常见的失效方式是"原文变了、索引没重建"（A-18 那一类）。
+先前只有手动脚本 `index_chunks.py`，意味着**新笔记清洗后不会进索引**，
+直到有人记得跑脚本。现在清洗完成后自动重建；失败**不抛异常**
+（清洗的主产物是 clean.md 与状态，索引缺失时只退化为单通道检索）。
+
+**写入前自证不变量**：`text[char_start:char_end] == content` 校验不过
+**拒绝整篇落库**，不跳过单行 —— L.2 的两次失效都是整篇性系统漂移，
+只丢一行会掩盖问题。
+
+### R.3 端到端验证（真实数据，走生产路径）
+
+```
+1) _get_user_chunks        : 608 个 chunk，定位字段齐全
+2) _search_chunk_vectors   : 5 条；自查询命中自身（相似度 1.0）
+                             相似度 [1.0, 0.7691, 0.6839, 0.6597, 0.6443]
+3) BM25（生产路径）        : 严格 Recall@5 59.74%  MRR 0.5183
+   对照 卡片语料（旧）      : 严格 37.52%  MRR 0.3387
+```
+
+与附录 M.5.1 预测的 60.30% 有 **0.56 个百分点**差异，未查明来源。
+已排除「回收站过滤」（实测 0 个 chunk 属于回收站笔记，两条路径都是 608 条）。
+可能来源：评测脚本读 clean.md 时对 `clean_md_path` 缺失的笔记会回退到
+`original_md_path`，而库里的 chunk 是按当时那份内容生成的。
+差异小且方向一致（都远好于卡片语料），如实记录不做定论。
+
+### R.4 为什么 Chroma 没有一起删掉
+
+2.4 的表述是"删除 Chroma 依赖与 90+ collection 目录"。本轮删掉了
+**检索侧的遍历逻辑**，但 `VectorStore` 仍被**清洗去重**使用
+（`clean_tasks` 用它做 embedding 去重），因此依赖与 `data/chroma` 保留。
+
+要彻底删除 Chroma，需要先把清洗去重也迁走（例如改用 `chunks` 向量算
+块间相似度）。那是一次独立改动，且清洗去重目前工作正常 ——
+不在本轮范围，记录为后续项。
+
+### R.5 环境事故与恢复（必须记录）
+
+本轮执行过程中发现 **`mineru_env` conda 环境被整体删除**
+（`C:\Users\admin\anaconda3\envs\mineru_env` 不复存在，其余 7 个环境正常）。
+`import asyncio` 都会失败，报 `DLL load failed while importing _socket`，
+症状极具误导性 —— 看起来像 Python 装坏了，实际是解释器路径不存在。
+
+损失清点：**项目数据零损失**（`engramnote.db`、4.3GB 嵌入模型、
+`data/chroma`、`_backup` 全部完好），仅测试环境丢失。
+
+恢复方式：以现有 `aiforlearn` 环境为基座建 `--system-site-packages` venv，
+补装 `pytest` / `pytest-asyncio` / `ruff`，落地在 `backend/.venv`
+（该路径已在 `.gitignore` 中）。
+
+**恢复后测试结果 454 passed / 3 skipped，与删除前最后一次运行完全一致** ——
+这既确认了 2.3 改动无回归，也确认了恢复的环境可用于本项目。
+
+> ⚠️ 该 venv 基于 `aiforlearn` 的依赖版本（Python 3.10.20），
+> 与 `requirements.txt` 的 `~=` 约束不保证逐项一致。
+> 它足以跑测试，但**不要**把它当作部署环境。
+> 若需要与项目完全一致的环境，应按 `requirements.txt` 重建。
+
+### R.6 验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| 分块服务 | `app/services/chunk_service.py` | 自动索引接入清洗流程；写入前自证不变量 |
+| 语料统一 | `rag_service.py`（`_get_user_chunks`） | 生产路径 608 chunk；严格 R@5 59.74% |
+| 向量检索换代 | `rag_service.py`（`_search_chunk_vectors`） | 自查询命中自身；定位字段齐全；回收站过滤有测试 |
+| 删除遍历逻辑 | `embedding_tasks.py`（−169 行） | 全仓库无 `search_vectors` 调用方 |
+| 测试 | `tests/test_rag_retrieval.py`（40 用例） | 含未嵌入 chunk 仍入词法语料、向量路回收站过滤、定位字段 |
+
+测试总数 452 → **454 passed / 3 skipped**；ruff app tests scripts 全绿。
+
+### R.7 仍未完成
+
+- **2.7 引用回跳接线**（下一项）：定位字段已贯通到 `_search_chunk_vectors`，
+  差接到 `AnswerSource` 与前端
+- **2.5′** FTS5
+- **Chroma 彻底移除**（R.4）：需先迁移清洗去重
+- `embed_chunks.py` / `chunk_search_service.py` 的行为测试（附录 Q.3）
 
 ---
 
