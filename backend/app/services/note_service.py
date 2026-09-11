@@ -613,6 +613,19 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
         )
 
+    # ---- 4.5 删除该笔记的 chunk（阶段 2.2′ 引入的表） ----
+    #
+    # **必须显式删除**：`chunks.note_id` 的外键是 NO ACTION（不是 CASCADE），
+    # 而 `PRAGMA foreign_keys=ON` 已在每个连接上生效 —— 留下 chunk 会让
+    # 删除笔记直接撞外键约束而失败（与 M-4 同类的问题，但这次是真实存在的）。
+    #
+    # 模型上仍加了 `ondelete="CASCADE"` 作为纵深防御，但**不能依赖它**：
+    # 已有库的旧表不会因为模型改了 ondelete 就重建，而
+    # `CREATE TABLE` 里的 ON DELETE 子句才是实际生效的那个。
+    from ..models.chunk import Chunk
+
+    await db.execute(sql_delete(Chunk).where(Chunk.note_id == note_id))
+
     # ---- 5. 跨笔记聚合结果软标记与引用清理（SQL 端过滤命中行，避免全表拉取 + Python 过滤） ----
     from ..models.learning_goal import DailyPlan, LearningGoal
 
@@ -783,13 +796,12 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
 
-    # ---- 清理 Chroma 向量集合（保持向量库与笔记一致，见 docs/decisions.md#F-18） ----
-    try:
-        from ..services.embedding_service import VectorStore
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, VectorStore().delete_note_chunks, note_id)
-    except Exception as e:
-        logger.warning(f"清理笔记向量数据失败: note_id={note_id}, 错误: {e}")
+    # ---- 向量数据清理 ----
+    #
+    # 阶段 2.4 收尾后**不再需要单独清理向量库**：检索向量与去重都不再用
+    # Chroma（去重改为直接消费已算好的 embeddings，见
+    # `cleaning_service.find_duplicates_by_embedding`）。
+    # 当前向量存在 `chunks` 表里，已在上面第 4.5 步随笔记一并删除。
 
     # ---- 删除版本历史记录及其存储文件（history/versions/{note_id}/v{N}.md） ----
     try:

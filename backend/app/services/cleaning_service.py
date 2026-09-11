@@ -17,11 +17,13 @@
 """
 
 import difflib
+import logging
 import re
 from typing import Dict, List, Tuple
 
 from ..config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -379,6 +381,95 @@ def _text_similarity(a: str, b: str, threshold: float) -> float:
     if matcher.quick_ratio() < threshold:
         return 0.0
     return matcher.ratio()
+
+
+def find_duplicates_by_embedding(
+    chunks: List[Dict],
+    embeddings: List[List[float]],
+    threshold: float = 0.0,
+) -> List[Dict]:
+    """基于嵌入向量的块级去重（阶段 2.4 收尾：取代 Chroma 往返）
+
+    ## 为什么把这段逻辑从 `VectorStore.find_duplicates` 搬出来
+
+    原实现把向量写进 Chroma，随后 `find_duplicates` 再 `collection.get()` 把
+    **全部向量读回来**，然后在 Python 里做两两循环 —— 它**并没有用到向量库的
+    检索能力**（不是 HNSW 近邻查询，就是两个嵌套 for）。也就是说整趟
+    Chroma 往返只是为了把刚算好的向量存起来又取回来。
+
+    改为直接消费 `clean_tasks` 里已经算好的 `embeddings`：**数学完全相同**
+    （同一个 `compute_similarity`、同样的两两循环、同样的 overlap 跳过规则），
+    但省掉一次写库 + 一次读库，也让清洗流程不再依赖 Chroma。
+
+    ## 去重策略（与 `find_duplicates_lightweight` / 旧 VectorStore 一致）
+
+    - 保留首次出现的块（`block_index` 较小者）
+    - 跳过行范围有重叠的块对（重叠是分块策略的正常结果，非真正重复）
+    - 已被标记为重复的块不再作为"首次出现"，也不重复标记
+    - 按相似度降序返回
+
+    ## 阈值口径（一个既有风险，如实标注）
+
+    `compute_similarity` 返回余弦相似度 ∈ [-1,1]，而
+    `settings.similarity_threshold`（默认 0.92）的注释写的是"去重相似度阈值"，
+    同时又被 `find_duplicates_lightweight` 用作**文本**相似度阈值。
+    两个不同量纲共用一个配置值，属于既有设计问题（§2.1 S-3 那一类）。
+    这里保持与旧实现**相同的取值**，不擅自调整 —— 换阈值会改变写入的
+    clean.md 内容，必须单独评估。
+
+    Args:
+        chunks: 分块列表（需含 `index` 与 `start_line`/`end_line`）
+        embeddings: 与 `chunks` **一一对应**的向量列表
+        threshold: 相似度阈值，0 表示用配置默认值
+
+    Returns:
+        List[Dict]: 重复块列表（`block_index` / `duplicate_of` / `similarity`）
+    """
+    if not chunks or not embeddings or len(chunks) != len(embeddings):
+        # 长度不一致说明调用方传错了 —— 宁可不做去重，也不要错配向量与文本
+        if chunks and embeddings and len(chunks) != len(embeddings):
+            logger.warning(
+                "去重跳过：chunks(%d) 与 embeddings(%d) 数量不一致",
+                len(chunks), len(embeddings),
+            )
+        return []
+
+    threshold = threshold or settings.similarity_threshold
+    n = len(chunks)
+    if n < 2:
+        return []
+
+    from .embedding_service import EmbeddingService
+
+    duplicates = []
+    already_duplicate = set()
+
+    for i in range(n):
+        if chunks[i]["index"] in already_duplicate:
+            continue
+        i_start = chunks[i].get("start_line", 0)
+        i_end = chunks[i].get("end_line", 0)
+
+        for j in range(i + 1, n):
+            if chunks[j]["index"] in already_duplicate:
+                continue
+            # 跳过行范围有重叠的块对
+            j_start = chunks[j].get("start_line", 0)
+            j_end = chunks[j].get("end_line", 0)
+            if i_start <= j_end and j_start <= i_end:
+                continue
+
+            similarity = EmbeddingService.compute_similarity(embeddings[i], embeddings[j])
+            if similarity >= threshold:
+                duplicates.append({
+                    "block_index": chunks[j]["index"],
+                    "duplicate_of": chunks[i]["index"],
+                    "similarity": similarity,
+                })
+                already_duplicate.add(chunks[j]["index"])
+
+    duplicates.sort(key=lambda x: x["similarity"], reverse=True)
+    return duplicates
 
 
 def find_duplicates_lightweight(

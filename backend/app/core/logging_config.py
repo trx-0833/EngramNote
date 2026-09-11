@@ -17,7 +17,7 @@
    - JSON 结构化日志 engramnote.json.log：JSON Lines 格式，
      可直接被 logstash / jq / 脚本消费
 
-3. 噪音抑制：uvicorn.access、httpx、chromadb 等第三方日志降噪，
+3. 噪音抑制：uvicorn.access、httpx、sqlalchemy.engine 等第三方日志降噪，
    避免刷屏掩盖业务日志。
 
 用法：
@@ -46,7 +46,6 @@ _NOISY_LOGGERS = [
     "httpcore",
     "sqlalchemy.engine",
     "filelock",
-    "chromadb",
     "watchfiles",
 ]
 

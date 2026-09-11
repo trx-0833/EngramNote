@@ -193,8 +193,17 @@ class Settings(BaseSettings):
     # 池=5 时融合只能在那 10 条里排，答错就出局；池=20 给排序留出余地。
     # 实测：池=5 → 60.18%，池=20 → 60.87%（同参数下）。
     rag_candidate_pool: int = 20
-    # Chroma 向量数据库持久化目录（空则默认 data/chroma/）
-    chroma_dir: str = ""
+
+    # ── 已移除：`chroma_dir`（阶段 2.4 收尾，2026-09-11）──
+    #
+    # 原先指向 Chroma 持久化目录（`data/chroma/`）。检索与去重都已不再使用
+    # Chroma：向量存进 `chunks` 表（2.2′），词法检索改用 FTS5（2.5′），
+    # 清洗去重改为直接消费已算好的 embeddings。
+    #
+    # 若外部 `.env` 里仍写着 `CHROMA_DIR=...`，它现在会被 Settings 忽略
+    # （pydantic 默认忽略未知键）—— 不会报错，但也不再有任何作用。
+    # 磁盘上的 `data/chroma/`（54MB）已是历史数据，可删除；
+    # 删除前建议保留 `_backup/20260911-125750-pre-reembed` 那份副本。
 
     # ---- AI 理解管道配置 ----
     # LLM 最大重试次数

@@ -3038,7 +3038,7 @@ M-4 与 1.13 仍未做。）
 | 2.4 删除跨 collection 遍历 | ✅ | −169 行（附录 R） |
 | 2.7 引用回跳 | ✅ | 四层贯通 + 前端定位高亮（附录 S） |
 | 2.5′ FTS5 全文索引 | ✅ | 附录 T |
-| **Chroma 彻底移除** | ⬅️ **下一项** | 需先迁移清洗去重（R.4） |
+| **Chroma 彻底移除** | ✅ **已完成**（附录 U） | `VectorStore` 删除（−224 行）、`chromadb` 移出依赖；**顺带发现并修掉一个真实回归**：删除笔记会撞 `chunks` 外键 |
 | 行为测试补全（Q.3） | ⬜ | `embed_chunks.py`；`citationJump.ts` 无前端测试 |
 
 **阶段 2（含 2′ 等价项）的检索层重建已完成**：单一分块器、单一语料、
@@ -5165,6 +5165,87 @@ FTS5 外部内容表的**单条同步命令形式全都不可用或不安全**�
   该环境**原本就有依赖冲突**（`datasets` / `mineru` / `qwen-asr` 等），
   与本轮改动无关。若需恢复原版本：
   `pip install sentence-transformers==2.2.2 huggingface_hub==0.16.4`。
+
+---
+
+## 附录 U · 阶段 2.4 收尾：彻底移除 Chroma（2026-09-11）
+
+### U.1 前置：清洗去重不再依赖向量库
+
+原以为"删除 Chroma"卡在"清洗去重需要它"（附录 R.4）。读代码后发现
+**这个依赖是虚的**：`VectorStore.find_duplicates` 把向量写进 Chroma，
+随后 `collection.get()` 把**全部向量读回来**，然后在 Python 里做两两循环 ——
+它**根本没有用到向量库的检索能力**（不是 HNSW 近邻查询，就是两个嵌套 for）。
+
+整趟 Chroma 往返只是为了"把刚算好的向量存起来又取回来"。
+
+改为 `cleaning_service.find_duplicates_by_embedding(chunks, embeddings)`：
+**数学完全相同**（同一个 `compute_similarity`、同样的两两循环、
+同样的 overlap 跳过规则、同样的"保留首次出现"策略），
+但直接消费 `clean_tasks` 里已算好的 `embeddings`，省掉一次写库 + 一次读库。
+
+### U.2 🔴 顺带发现并修掉一个真实回归：删除笔记会撞外键
+
+`chunks.note_id` 的外键是 **NO ACTION**（不是 CASCADE），而
+`PRAGMA foreign_keys=ON` 已在每个连接上生效。引入 `chunks` 表（2.2′）时
+忘记在删除路径里处理它 —— 实测：
+
+```
+删除笔记（未删 chunk）: 失败 -> IntegrityError: FOREIGN KEY constraint failed
+```
+
+也就是说**上一轮上线 `chunks` 表之后，删除任何有 chunk 的笔记都会报错**。
+这是"新功能把老功能弄坏"的典型，且只在真正删笔记时才暴露。
+
+值得与 M-4 对照记下：M-4 经复核**不存在**（那条 UPDATE 没有 `note_id` 限定，
+跨笔记引用已被覆盖）；**这一条是真实存在的**，由本轮引入、由本轮发现。
+
+修法：在 `purge_note` 里与 `KnowledgeCard` 并列显式删除 chunk。
+模型上另加 `ondelete="CASCADE"` 作纵深防御，但**不依赖它** ——
+已有库的旧表不会因模型改了 ondelete 就重建，`CREATE TABLE` 里的
+ON DELETE 子句才是实际生效的那个。
+
+测试（`TestPurgeNoteChunks`）含**对照实验**：先断言 `PRAGMA foreign_keys=1`
+且"不删 chunk 直接删笔记会被拒绝"，再断言 purge 能成功 —— 与 M-4 那组
+用同一个手法：**先证明约束是活的，再证明代码满足了它**。
+并已验证"撤掉修复后测试确实失败"。
+
+### U.3 删除清单
+
+| 项 | 变化 |
+|---|---|
+| `embedding_service.VectorStore` | **删除整个类，−224 行**（文件 582 → 358 行） |
+| `note_service` 的 Chroma 清理块 | 删除（向量已随 `chunks` 表在第 4.5 步一并删除） |
+| `config.chroma_dir` | 删除配置项，就地留注说明为何移除 |
+| `logging_config` 的 chromadb 降噪 | 删除 |
+| `requirements.txt` | `chromadb~=0.4.0` 注释掉并说明 |
+
+**验证**：应用在**未安装 chromadb** 的环境里正常导入运行（118 个路由）——
+这本身就是"依赖确实已可选/无用"的证明；此前 `note_service` 那段清理
+一直在静默失败（日志里的 `No module named 'chromadb'`）。
+
+`data/chroma/`（54MB）已成为历史数据，可删除；删除前建议保留
+`_backup/20260911-125750-pre-reembed` 那份副本。**本轮未删除它** ——
+磁盘操作等确认。
+
+### U.4 验收
+
+| 项 | 验证 |
+|---|---|
+| 去重迁移 | 61 个真实 markdown 端到端跑通（分块→去重→生成副本），0 异常 |
+| 长度不一致防护 | `chunks` 与 `embeddings` 数量不符时**返回空并告警**，不错配向量与文本 |
+| 删除笔记 | `TestPurgeNoteChunks`（3 用例）含 FK 对照实验；已验证撤掉修复即失败 |
+| 依赖可选 | 未装 chromadb 时应用正常导入与运行 |
+
+测试总数 478 → **481 passed / 3 skipped**；ruff app tests scripts 全绿；
+真库 `integrity=ok`，`chunks` 608 行、FTS 索引 608 条、**孤儿 chunk 0**。
+
+### U.5 仍未完成
+
+- **行为测试补全**：`embed_chunks.py`；`citationJump.ts` 无前端测试（Q.3/S.6）
+- **`data/chroma/`（54MB）与 `backend/data_backup_e2e/`（4.67GB）的删除**：
+  等确认
+- **阶段 3**（学习核心）尚未开始
 
 ---
 

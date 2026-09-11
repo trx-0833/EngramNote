@@ -164,13 +164,13 @@ async def _clean_document(note_id: str):
     )
     from ..services.cleaning_service import (
         clean_rules,
-        generate_clean_copy,
+        find_duplicates_by_embedding,
         find_duplicates_lightweight,
+        generate_clean_copy,
     )
     from ..services.markdown_segmenter import segment_with_offsets, to_retrieval_chunks
     from ..services.embedding_service import (
         EmbeddingService,
-        VectorStore,
         get_available_memory_gb,
     )
 
@@ -279,28 +279,23 @@ async def _clean_document(note_id: str):
         return
 
     if embeddings is not None:
-        # 6. 存储向量到 Chroma（失败不影响清洗，降级文本去重）
-        vector_store = None
+        # 6+7. 基于嵌入向量的块级去重
+        #
+        # 阶段 2.4 收尾：原先这里把向量写进 Chroma，再由
+        # `find_duplicates` 把**全部向量读回来**在 Python 里两两比较 ——
+        # 整趟 Chroma 往返只是为了"存起来又取回来"，并没有用到向量库的
+        # 检索能力（不是近邻查询，就是两个嵌套 for）。
+        #
+        # 改为直接消费刚算好的 `embeddings`：数学完全相同
+        # （同一个 compute_similarity、同样的两两循环与 overlap 跳过规则），
+        # 但省掉一次写库 + 一次读库，也让清洗流程不再依赖 Chroma。
         try:
-            vector_store = VectorStore()
-            vector_store.add_chunks(
-                note_id, chunks, embeddings,
-                embedding_model=embedding_model_name,
-            )
+            duplicates = find_duplicates_by_embedding(chunks, embeddings)
         except Exception as e:
-            logger.error(
-                f"向量存储失败，降级为无模型文本去重: note_id={note_id}, err={e}"
+            # 去重失败不影响清洗，降级文本去重后继续生成副本
+            logger.warning(
+                "向量去重失败，降级为文本去重: note_id=%s, err=%s", note_id, e
             )
-
-        # 7. 查找重复块
-        if vector_store is not None:
-            try:
-                duplicates = vector_store.find_duplicates(note_id)
-            except Exception as e:
-                # 去重失败不影响清洗，继续生成副本
-                logger.warning(f"向量去重失败，跳过去重: note_id={note_id}, err={e}")
-                duplicates = []
-        else:
             duplicates = find_duplicates_lightweight(chunks)
             dedup_mode = "lightweight"
     else:
