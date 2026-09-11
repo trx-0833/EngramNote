@@ -276,13 +276,11 @@ class TestMemoryScienceProperties:
         assert values == sorted(values, reverse=True)
         assert values[0] == pytest.approx(1.0)
         assert values[3] == pytest.approx(0.9)      # t == S 是 0.9 的定义点
-        # ⚠️ FSRS 用的是一条**幂律**遗忘曲线（尾部很厚），不是指数衰减：
-        # S=20 的卡放一年（18 倍 S）R 仍有 0.44，而指数模型
-        # （mastery_service.compute_retrievability 的 2^(-t/S)）只给 0.03。
-        # 这不是实现问题，但它意味着阶段 3.9 不能把两个公式混用 ——
-        # 掌握度与"到期预测"若引用不同的曲线，用户会看到互相矛盾的数字。
         assert values[-1] == pytest.approx(0.435, abs=0.01)
         assert values[-1] > 0.4
+        # ⚠️ 这里是纯 FSRS 的曲线。**掌握度自阶段 3.9 起也用它**
+        # （mastery_service.compute_retrievability 直接委托本函数），
+        # 因此两者不会再出现"同一张卡两个 R"的矛盾。
 
     def test_guard_rails_on_degenerate_input(self):
         """数值护栏：0/负数/NaN/极大输入不得产生 NaN 或负数

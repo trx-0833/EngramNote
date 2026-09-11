@@ -529,6 +529,33 @@ def fuzz_interval(
     return int(clamp(interval + offset, 1, max_interval_days))
 
 
+def stability_or_interval(
+    stability: Optional[float], interval_days: float,
+) -> float:
+    """取记忆强度：有 FSRS 的 S 就用它，否则把当前间隔当作 S
+
+    ## 为什么这是"换算"而不是"兜底"
+
+    见 `adopt_legacy_state`：FSRS 对 S 的定义就是"回忆概率降到 90% 所需的天数"，
+    而 SM-2 的 `interval` 隐含目标同为"到那时还记得约 90%"，两者指同一件事，
+    所以 `S := interval_days` 是可逆的语义换算，不是近似替代。
+
+    ## 为什么掌握度也要用它
+
+    阶段 3.9 之后掌握度用 FSRS 的遗忘曲线。若对"尚未被 FSRS 调度过"的行
+    另用一条曲线（旧实现用的是指数 `2^(-t/S)`），同一个界面上的两张卡就会
+    引用两条不同的曲线 —— S=20 的卡放一年，指数给 0.03、幂律给 0.44，
+    相差一个数量级，而用户无从知道哪张卡走的是哪条。
+    用同一条换算规则，**调度器与掌握度从第一天起就是同一个模型**。
+    """
+    if stability is not None and not math.isnan(stability) and stability > 0:
+        return max(float(stability), MIN_STABILITY)
+    interval = float(interval_days or 0)
+    if math.isnan(interval) or interval <= 0:
+        interval = 1.0
+    return max(interval, MIN_STABILITY)
+
+
 def adopt_legacy_state(
     *,
     state: ReviewStateKind,
@@ -671,6 +698,7 @@ __all__ = [
     "schedule",
     "fuzz_interval",
     "adopt_legacy_state",
+    "stability_or_interval",
     "easiness_from_difficulty",
     "difficulty_from_easiness",
 ]

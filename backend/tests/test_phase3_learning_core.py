@@ -16,6 +16,7 @@
 没有鉴别力。
 """
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -44,15 +45,25 @@ INTERVAL_DAYS = 10
 # ---------------------------------------------------------------------------
 
 class TestRetrievability:
-    """回忆概率函数（掌握度的核心新维度）"""
+    """回忆概率函数（掌握度的核心维度）
 
-    def test_at_due_date_is_half(self):
-        """间隔刚到期的时刻，回忆概率恰为 0.5
+    ⚠️ 阶段 3.9（附录 Y）把曲线从**指数** `2^(-t/S)` 换成了 **FSRS 幂律**
+    `(1 + (19/81)·t/S)^(-0.5)`，因此本类的具体数值全部变了。
+    换的理由是"调度器与掌握度必须引用同一条曲线"：调度器按 FSRS 排期
+    （到期那天 R=0.9），若掌握度用指数曲线，同一张卡会同时被判成
+    "90% 能想起来"和"2%"，而 3.14 的校准曲线永远对不上。
 
-        这不是随便定的：它让"到期了就该复习"与数值对齐 ——
-        掌握度在到期日降到一半，用户能直接感知到"该复习了"。
+    这里保留的是**性质**（单调、锚点、边界），而不是某个旧公式的数值。
+    """
+
+    def test_at_due_date_is_the_request_retention(self):
+        """间隔刚到期的时刻，回忆概率恰为 0.9
+
+        这不是随便定的：FSRS 对 S 的定义就是"R 降到 90% 所需的天数"，
+        也正是调度器的目标保持率（`fsrs_request_retention`）。
+        旧实现这里是 0.5（指数曲线的性质），换曲线时一并改掉了。
         """
-        assert compute_retrievability(INTERVAL_DAYS, INTERVAL_DAYS) == pytest.approx(0.5)
+        assert compute_retrievability(INTERVAL_DAYS, INTERVAL_DAYS) == pytest.approx(0.9)
 
     def test_immediately_after_review_is_one(self):
         assert compute_retrievability(0, INTERVAL_DAYS) == 1.0
@@ -68,10 +79,18 @@ class TestRetrievability:
         assert values == sorted(values, reverse=True)
         assert values[0] > values[-1]
 
-    def test_long_absence_approaches_zero(self):
-        """三个月不复习应显著衰减（overhaul-plan 阶段 3.9 的验收点）"""
+    def test_long_absence_decays_but_not_to_zero(self):
+        """三个月不复习必须显著衰减，但**不会归零** —— 这是幂律曲线的形状
+
+        旧实现（指数）在 t=9S 时给 0.002，新实现给 0.567。差距不是误差：
+        幂律尾部厚得多，这正是 FSRS 敢于拉长间隔的依据。
+        掌握度整体因此"变高"了，见 mastery_service 模块说明。
+        """
         r = compute_retrievability(90, INTERVAL_DAYS)
-        assert r < 0.01, f"90 天未复习的回忆概率仍为 {r}，衰减不足"
+        assert r < 0.7, f"90 天未复习的回忆概率仍为 {r}，衰减不足"
+        assert r > 0.4, f"90 天未复习就衰减到 {r}，这是指数曲线的形状，不是 FSRS"
+        # 更久的缺席会继续往下走，不会停在 0.5 附近
+        assert compute_retrievability(10000, INTERVAL_DAYS) < 0.1
 
     def test_longer_interval_decays_slower(self):
         """间隔越长（记忆越牢），同样天数后回忆概率越高"""
@@ -79,10 +98,22 @@ class TestRetrievability:
         long = compute_retrievability(10, 50)
         assert long > short
 
+    def test_explicit_stability_wins_over_interval(self):
+        """给了 FSRS 的 S 就用它，不再拿 interval 当代理
+
+        这是 3.9 的核心：`review_states.stability` 才是记忆强度，
+        `interval_days` 只是"实际排了几天"（还含阶段 3.7 的抖动）。
+        """
+        assert compute_retrievability(90, 10, stability=90) == pytest.approx(0.9)
+        assert compute_retrievability(90, 10, stability=10) == pytest.approx(0.567, abs=0.01)
+
     def test_non_positive_interval_is_guarded(self):
-        """interval<=0 时不得除零或返回 NaN"""
-        assert compute_retrievability(5, 0) == pytest.approx(2 ** -5)
-        assert compute_retrievability(5, -3) == pytest.approx(2 ** -5)
+        """interval<=0 时不得除零或返回 NaN（S 按 1 天处理）"""
+        guarded = compute_retrievability(5, 0)
+        assert guarded == pytest.approx(compute_retrievability(5, 1))
+        assert compute_retrievability(5, -3) == pytest.approx(guarded)
+        assert not math.isnan(compute_retrievability(5, 0))
+        assert not math.isnan(compute_retrievability(5, 10, stability=float("nan")))
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +224,13 @@ class TestMasteryFormula:
         )
 
     async def test_mastery_decays_over_time(self, test_db):
-        """**核心验收**：同样答对，三个月未复习的卡片掌握度必须显著低于刚复习的"""
+        """**核心验收**：同样答对，三个月未复习的卡片掌握度必须显著低于刚复习的
+
+        ⚠️ 衰减**幅度**在阶段 3.9 换曲线后变小了：旧指数曲线给 0.002，
+        FSRS 幂律给 0.567（见 `TestRetrievability` 的说明）。
+        这里断言的是"显著更低"这个性质，不再是旧曲线的尾部数值 ——
+        绑死一个只属于指数曲线的阈值，等于把实现细节写进验收标准。
+        """
         uid = await _make_user(test_db)
         fresh_card, fresh_note = await _make_card(test_db, uid)
         stale_card, stale_note = await _make_card(test_db, uid)
@@ -216,9 +253,114 @@ class TestMasteryFormula:
         assert fresh > stale, (
             f"3 个月未复习的卡片掌握度({stale}) 不低于刚复习的({fresh}) —— 缺少时间衰减"
         )
-        assert stale < fresh * 0.1, (
-            f"衰减幅度不足：fresh={fresh}, stale={stale}（期望 stale < 10% fresh）"
+        assert stale < fresh * 0.7, (
+            f"衰减幅度不足：fresh={fresh}, stale={stale}（期望 stale < 70% fresh）"
         )
+        assert stale > 0, "掌握度不该因为没有复习就归零（那与'从未学过'无法区分）"
+
+    async def test_stability_drives_mastery_not_interval(self, test_db):
+        """★ 3.9 的核心：掌握度用的是 FSRS 的 S，不是 interval
+
+        两张卡的 `interval_days` 相同，但 S 相差一个数量级 ——
+        掌握度必须跟着 S 走。若不跟随，界面上显示的"还记得多少"
+        就与调度器实际依据的记忆强度脱节。
+        """
+        uid = await _make_user(test_db)
+        weak_card, weak_note = await _make_card(test_db, uid)
+        strong_card, strong_note = await _make_card(test_db, uid)
+        weak_quiz = await _make_quiz(test_db, uid, weak_card, weak_note, interval=30)
+        strong_quiz = await _make_quiz(test_db, uid, strong_card, strong_note, interval=30)
+
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        async with test_db() as db:
+            for quiz_id, stability in ((weak_quiz, 30.0), (strong_quiz, 300.0)):
+                db.add(ReviewState(
+                    user_id=uid, item_type=ITEM_TYPE_QUIZ, item_id=quiz_id,
+                    interval_days=30, repetition=2, easiness_factor=2.5,
+                    stability=stability, difficulty=5.0,
+                    last_reviewed_at=thirty_days_ago, review_count=2,
+                    state=ReviewStateKind.review,
+                ))
+            await db.commit()
+
+        async with test_db() as db:
+            weak = await mastery_service.compute_card_mastery(weak_card, db, user_id=uid)
+            strong = await mastery_service.compute_card_mastery(strong_card, db, user_id=uid)
+
+        assert strong > weak, (
+            f"interval 相同但 S 不同，掌握度应当不同：weak={weak}, strong={strong}"
+        )
+
+    async def test_card_level_reviews_count_toward_success_ratio(self, test_db):
+        """★ 卡片级复习必须计入成功率（旧查询永远命中不了它们）
+
+        旧实现只查 `quiz_id IN (卡片下的题)`，而卡片级复习（阶段 3.12）
+        的 `quiz_id` 是 NULL —— 永远不命中。于是"没有题目的卡片"只能靠
+        `total == 0` 的兜底分支拿分，它的真实答题历史被完全忽略：
+        一张卡片级复习全错的卡，与全对的卡得到同样的分数。
+        """
+        uid = await _make_user(test_db)
+        good_card, _ = await _make_card(test_db, uid)
+        bad_card, _ = await _make_card(test_db, uid)
+
+        async with test_db() as db:
+            for card_id, quality in ((good_card, 5), (bad_card, 1)):
+                for _ in range(3):
+                    db.add(ReviewLog(
+                        user_id=uid, quiz_id=None, card_id=card_id,
+                        note_id=None, user_answer="x", is_correct=quality >= 3,
+                        quality=quality, self_rating=quality,
+                        grading_method="self_rating", item_type="card",
+                        time_spent_ms=100, review_at=datetime.now(timezone.utc),
+                    ))
+                # 两张卡的调度状态完全相同 → 差别只能来自成功率
+                db.add(ReviewState(
+                    user_id=uid, item_type=ITEM_TYPE_CARD, item_id=card_id,
+                    interval_days=10, repetition=1, easiness_factor=2.5,
+                    stability=10.0, difficulty=5.0,
+                    last_reviewed_at=datetime.now(timezone.utc),
+                    review_count=3, state=ReviewStateKind.review,
+                ))
+            await db.commit()
+
+        async with test_db() as db:
+            good = await mastery_service.compute_card_mastery(good_card, db, user_id=uid)
+            bad = await mastery_service.compute_card_mastery(bad_card, db, user_id=uid)
+
+        assert good > bad, (
+            f"卡片级复习记录没有计入成功率：全对={good}，全错={bad}"
+        )
+
+    async def test_reviewed_state_without_next_review_still_scored(self, test_db):
+        """★ 复习过但排期被清空的卡片，仍然要有掌握度
+
+        `next_review_at` 是**调度**字段（NULL 的语义是"立即可复习"），
+        它的有无并不表示"复习过没有"。旧实现要求它非空，于是这类卡被算成 0。
+
+        真库实测（2026-09-11）：191 张有复习记录的卡片，`interval_days`
+        全部是 1、最近复习在 80 天前 —— 旧指数曲线给 `2^(-80) ≈ 8e-25`，
+        1183 张卡的掌握度因此**全部为 0.0**，字段依旧不携带信息。
+        这是 3.9 必须换曲线的直接证据。
+        """
+        uid = await _make_user(test_db)
+        card_id, _ = await _make_card(test_db, uid)
+
+        async with test_db() as db:
+            db.add(ReviewState(
+                user_id=uid, item_type=ITEM_TYPE_CARD, item_id=card_id,
+                interval_days=1, repetition=1, easiness_factor=2.5,
+                stability=1.0, difficulty=5.0,
+                last_reviewed_at=datetime.now(timezone.utc) - timedelta(days=80),
+                next_review_at=None, review_count=1,
+                state=ReviewStateKind.learning,
+            ))
+            await db.commit()
+
+        async with test_db() as db:
+            score = await mastery_service.compute_card_mastery(card_id, db, user_id=uid)
+        # R(80, S=1) = 0.225；成功率取兜底（无日志 → 用 R）
+        assert score > 0, "已复习但没有排期的卡片被判成 0 分"
+        assert score < 100
 
     async def test_review_logs_are_scoped_by_user(self, test_db):
         """**跨用户隔离**：别人的复习记录不得影响我的掌握度

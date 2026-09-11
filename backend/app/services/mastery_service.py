@@ -19,40 +19,65 @@
    一旦同一 quiz_id 出现在别的用户记录里（数据修复、合并、导入），
    正确率就会被污染。这类污染静默且无法复现。
 
-## 新公式
+## 当前公式（阶段 3.9 起）
 
-    mastery = 成功次数比例 × 回忆概率(retrievability)
+    mastery = 成功次数比例 × 回忆概率 R × 100
 
-    retrievability = 2 ** (-elapsed_days / interval)
+    R = (1 + (19/81) · t/S) ** (-0.5)        ← FSRS 的幂律遗忘曲线
 
-- `elapsed_days`：距上次复习过了多少天（**这是新增的时间维度**）
-- `interval`：SM-2 给出的当前复习间隔，作为"记忆强度"的代理
-- 该函数来自遗忘曲线的指数近似：间隔刚到期的时刻回忆概率为 0.5，
-  这正好对应"到期了就该复习"的直觉
+- `S`：**FSRS 的记忆强度**（`review_states.stability`）；
+  行还没被 FSRS 调度过时按 `S := interval_days` 换算，
+  这与调度器接管旧行用的是**同一条规则**（`fsrs_service.stability_or_interval`）
+- `t`：距上次复习过了几个**业务日**（与调度器的 elapsed 口径一致）
+- 该曲线满足 `R(S,S) = 0.9` —— 这正是 FSRS 调度器 `request_retention=0.9`
+  的含义：**到期那一刻，模型认为你还有 90% 能想起来**
 
-三个缺陷对应的性质：
-- 时间衰减：`elapsed >> interval` 时 retrievability → 0，掌握度自然回落
-- 无题目卡片：改用**卡片级**复习记录（`item_type='card'`）作为回退，
-  仍无任何记录才为 0（见 `_latest_review_anchor`）
-- 用户过滤：所有查询都带 `user_id`
+## ⚠️ 换成 FSRS 曲线后，掌握度整体**变高**了，这是对的
+
+旧实现用指数曲线 `2^(-t/S)`，3 个月未复习（t = 9S）时 R ≈ 0.002；
+FSRS 的幂律曲线给 **0.567**。差距不是实现误差，而是两条曲线的形状不同：
+幂律的尾部厚得多，这正是 FSRS 敢于把间隔拉长的原因。
+
+**真库实测（2026-09-11）把这件事推到了极端**：191 张有复习记录的卡片
+`interval_days` **全部是 1**（SM-2 时期的间隔长期为 1，见附录 A 的
+1058 行 `interval=1`），而最近一次复习在 80 天前。指数曲线给
+`2^(-80) ≈ 8e-25` —— 于是**每一张卡的掌握度都被算成 0.0**，
+字段仍然不携带任何信息。也就是说附录 G 的方向是对的（补上了时间维度），
+但指数曲线的尾部太陡，在真实数据上退化成了常数 0。
+
+换成幂律后 `R(80, S=1) = 0.225`，重算让 132 张卡拿到了 20-60 之间
+可区分的分数（130 张成功率 1.0 + 2 张 0.5；另有 59 张最近 5 次全错，
+掌握度**正确地**保持 0）。
+
+**这不是放松了标准**，而是换成了与调度器同一条曲线 ——
+否则"到期预测"与"掌握度"会在同一个界面上互相矛盾
+（调度器说"90% 能想起来"，掌握度说"2%"），而 3.14 的校准曲线
+（预测保持率 vs 实际正确率）会永远对不上。
 
 ## 边界
 
 - 从未复习过 → 0（保持与旧行为一致，避免"没学过也有分"）
-- 有记录但其 `next_review_at` 为 None（历史数据）→ 0
-- `interval <= 0` 时按 1 天处理（SM-2 的 interval 最小就是 1）
+- `review_states` 里"复习过"的判据是 `last_reviewed_at IS NOT NULL`，
+  **不再要求 `next_review_at` 非空** —— 后者是调度字段，删了排期不代表
+  没复习过。旧实现要求它非空，会把"已复习但没有下次排期"的卡算成 0
+- 只有旧字段可用的行（尚未补建 `review_states`）仍要求
+  `next_review_at` 非空：那是 SM-2 时期判断"排过期"的唯一痕迹
+- S/interval <= 0 或 NaN 时按 1 天处理（数值护栏在 `fsrs_service` 里）
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
+from ..models.review_state import ITEM_TYPE_CARD, ITEM_TYPE_QUIZ, ReviewState
+from ..utils.timeutil import days_between_business_days
+from . import fsrs_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,27 +88,37 @@ PASS_QUALITY = 3
 RECENT_WINDOW = 5
 
 
-def compute_retrievability(elapsed_days: float, interval_days: float) -> float:
-    """计算当前回忆概率（0-1）
+def compute_retrievability(
+    elapsed_days: float,
+    interval_days: float,
+    stability: Optional[float] = None,
+) -> float:
+    """计算当前回忆概率（0-1）—— FSRS 的幂律遗忘曲线
 
-    用指数遗忘曲线 `R = 2^(-t/S)`，其中以 SM-2 的复习间隔作为记忆强度 S。
-    选择它而不是 FSRS 的幂律曲线，是因为当前 `review_logs` 数据量不足以
-    拟合 FSRS 参数（见 overhaul-plan 附录 E.6）；指数曲线只需要 interval
-    这一个已有字段，且行为可解释。
+        R(t, S) = (1 + (19/81) · t/S) ** (-0.5)
+
+    性质与两个锚点：
+      - `R(0, S) = 1`；`R(S, S) = 0.9`（S 的定义，也是调度器的目标保持率）
+      - 单调递减，且比指数曲线**尾部厚得多**（t=9S 时仍有 0.567，
+        而 `2^(-t/S)` 只给 0.002）—— 见模块说明
 
     Args:
-        elapsed_days: 距上次复习的天数（负数按 0 处理）
-        interval_days: 当前复习间隔（天）；<=0 时按 1 处理
+        elapsed_days: 距上次复习的天数（<=0 按 0 处理，即 R=1）
+        interval_days: 当前复习间隔（天），在 `stability` 缺失时充当 S
+        stability: FSRS 的记忆强度；缺省时按 `S := interval_days` 换算
 
     Returns:
-        float: 回忆概率，落在 [0, 1]
+        float: 回忆概率，落在 (0, 1]
+
+    ## 为什么保留 `interval_days` 参数而不是只收 S
+
+    真库里 2241 行复习状态中，绝大多数还没有被 FSRS 调度过
+    （`stability IS NULL`）。它们仍然必须显示一个掌握度，
+    而换算规则与调度器接管旧行时用的**完全一致** —— 这样
+    "调度器打算怎么排"和"界面显示还记得多少"从第一天起就不矛盾。
     """
-    if interval_days <= 0:
-        interval_days = 1.0
-    if elapsed_days <= 0:
-        return 1.0
-    # 2^(-t/S)；t=S 时恰好 0.5
-    return float(2.0 ** (-elapsed_days / interval_days))
+    s = fsrs_service.stability_or_interval(stability, interval_days)
+    return fsrs_service.retrievability(max(0.0, elapsed_days), s)
 
 
 def _now() -> datetime:
@@ -106,53 +141,73 @@ def _as_aware(value: Optional[datetime]) -> Optional[datetime]:
 
 async def _latest_review_anchor(
     card_id: str, user_id: str, db: AsyncSession,
-) -> Optional[tuple[float, datetime]]:
+) -> Optional[tuple[Optional[float], float, datetime]]:
     """找出该卡片"最近一次复习"的记忆强度与时间
 
     查询合并两个来源，按时间取最新的一条：
-      1. 卡片下所有题目的 SM-2 参数（`quiz_items`）
-      2. 卡片级复习状态（`review_states`，阶段 3.12 引入，允许直接复习卡片）
+      1. `review_states`（**权威**）：卡片自身（`item_type='card'`）
+         与卡片下所有题目（`item_type='quiz'`）。它带着 FSRS 的
+         `stability`，是阶段 3.9 之后掌握度的主输入。
+      2. `quiz_items` 的旧字段（回退）：某些行可能还没被惰性补建出
+         `review_states` 记录，此时至少还有 SM-2 留下的 interval。
 
-    返回 `(interval_days, last_reviewed_at)`；没有任何记录时返回 None。
+    返回 `(stability, interval_days, last_reviewed_at)`；
+    没有任何记录时返回 None。`stability` 为 None 表示那一行
+    还没被 FSRS 调度过（由调用方按 `S := interval_days` 换算）。
 
-    为什么需要第 2 个来源：没有生成过题目的卡片在旧公式下恒为 0。
-    允许直接复习卡片之后，这类卡片也有了自己的记忆强度。
+    为什么需要两个来源：没有生成过题目的卡片在旧公式下恒为 0。
+    允许直接复习卡片（阶段 3.12）之后，这类卡片也有了自己的记忆强度。
     """
-    best: Optional[tuple[float, datetime]] = None
+    best: Optional[tuple[Optional[float], float, datetime]] = None
 
-    # 来源 1：题目维度
+    def _consider(stability, interval_days, last_reviewed_at) -> None:
+        nonlocal best
+        anchor = _as_aware(last_reviewed_at)
+        if anchor is None:
+            return
+        if best is None or anchor > best[2]:
+            best = (stability, float(interval_days or 1), anchor)
+
+    # 来源 1：review_states —— 卡片自身 + 卡片下题目
+    #
+    # `review_states` 一律以 `(user_id, item_type, item_id)` 为键，
+    # 题目维度的行要以本卡片的 quiz_id 集合为条件查（item_id 是 quiz_id）。
+    quiz_id_subq = select(QuizItem.id).where(
+        QuizItem.card_id == card_id, QuizItem.user_id == user_id,
+    )
+    state_rows = await db.execute(
+        select(
+            ReviewState.stability,
+            ReviewState.interval_days,
+            ReviewState.last_reviewed_at,
+        ).where(
+            ReviewState.user_id == user_id,
+            ReviewState.last_reviewed_at.is_not(None),
+            or_(
+                and_(
+                    ReviewState.item_type == ITEM_TYPE_CARD,
+                    ReviewState.item_id == card_id,
+                ),
+                and_(
+                    ReviewState.item_type == ITEM_TYPE_QUIZ,
+                    ReviewState.item_id.in_(quiz_id_subq),
+                ),
+            ),
+        )
+    )
+    for stability, interval_days, last_reviewed_at in state_rows.all():
+        _consider(stability, interval_days, last_reviewed_at)
+
+    # 来源 2：quiz_items 旧字段（尚未补建 review_states 的行）
     quiz_rows = await db.execute(
         select(QuizItem.interval, QuizItem.next_review_at, QuizItem.last_reviewed_at)
         .where(QuizItem.card_id == card_id, QuizItem.user_id == user_id)
     )
     for interval, next_review_at, last_reviewed_at in quiz_rows.all():
-        anchor = _as_aware(last_reviewed_at)
-        if anchor is None or next_review_at is None:
-            # 从未复习过，或历史数据没有下次复习时间 → 不参与
+        if next_review_at is None:
+            # 历史数据没有下次复习时间 → 不参与（与旧行为一致）
             continue
-        if best is None or anchor > best[1]:
-            best = (float(interval or 1), anchor)
-
-    # 来源 2：卡片级复习状态（表可能尚不存在于老库，故容错）
-    try:
-        from ..models.review_state import ReviewState
-
-        state_rows = await db.execute(
-            select(ReviewState.interval_days, ReviewState.last_reviewed_at)
-            .where(
-                ReviewState.user_id == user_id,
-                ReviewState.item_type == "card",
-                ReviewState.item_id == card_id,
-            )
-        )
-        for interval_days, last_reviewed_at in state_rows.all():
-            anchor = _as_aware(last_reviewed_at)
-            if anchor is None:
-                continue
-            if best is None or anchor > best[1]:
-                best = (float(interval_days or 1), anchor)
-    except Exception as exc:  # pragma: no cover - 老库无该表时静默跳过
-        logger.debug("卡片级复习状态不可用（忽略）: %s", exc)
+        _consider(None, interval, last_reviewed_at)
 
     return best
 
@@ -165,8 +220,15 @@ async def _recent_quality_stats(
     Returns:
         (success_count, total_count)；无记录时为 (0, 0)
 
-    这里**必须按 user_id 过滤**：旧实现只按 quiz_id 过滤，一旦同一
-    quiz_id 出现在其他用户的记录里，正确率就被静默污染。
+    两个过滤条件都是必须的：
+
+    - **按 user_id**：旧实现只按 quiz_id 过滤，一旦同一 quiz_id 出现在
+      其他用户的记录里，正确率就被静默污染。
+    - **题目 + 卡片两条来源**：旧实现只查 `quiz_id IN (卡片下的题)`,
+      而卡片级复习（阶段 3.12）的 `quiz_id` 是 NULL，**永远不会命中** ——
+      于是"没有题目的卡片"只能靠 `total == 0` 的兜底分支拿分，
+      它的真实答题历史被完全忽略。`review_logs.card_id` 是阶段 3.2 加的
+      稳定归属列（历史行已回填），用它才覆盖得全。
     """
     card_quiz_ids = select(QuizItem.id).where(
         QuizItem.card_id == card_id, QuizItem.user_id == user_id,
@@ -175,8 +237,10 @@ async def _recent_quality_stats(
         select(ReviewLog.quality)
         .where(
             ReviewLog.user_id == user_id,
-            # 卡片下题目 + 卡片自身的复习记录都算
-            ReviewLog.quiz_id.in_(card_quiz_ids),
+            or_(
+                ReviewLog.card_id == card_id,
+                ReviewLog.quiz_id.in_(card_quiz_ids),
+            ),
         )
         .order_by(ReviewLog.review_at.desc())
         .limit(RECENT_WINDOW)
@@ -217,9 +281,12 @@ async def compute_card_mastery(
         # 从未复习过：保持与旧行为一致，0 分
         return 0.0
 
-    interval_days, last_reviewed_at = anchor
-    elapsed_days = (_now() - last_reviewed_at).total_seconds() / 86400.0
-    retrievability = compute_retrievability(elapsed_days, interval_days)
+    stability, interval_days, last_reviewed_at = anchor
+    # 按**业务日**算经过时间，与调度器的 elapsed 口径一致（阶段 3.7）。
+    # 掌握度是展示量，用连续小时差本可以更"精确"，但那会让它与
+    # 调度器/校准曲线引用不同的经过时间，同一个界面上出现两个 R。
+    elapsed_days = max(0, days_between_business_days(last_reviewed_at, _now()))
+    retrievability = compute_retrievability(elapsed_days, interval_days, stability)
 
     successes, total = await _recent_quality_stats(card_id, user_id, db)
     if total == 0:
