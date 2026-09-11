@@ -284,8 +284,101 @@ async def init_db():
         if _sqlite():
             await _migrate_sqlite(conn)
 
+        # FTS5 全文索引（阶段 2.5′）：虚拟表不在 Base.metadata 里，
+        # 需单独创建。放在这里而不是 `_migrate_sqlite` 内部，是因为它
+        # **不是列迁移**，且要能独立于列迁移被理解与测试。
+        if _sqlite():
+            await _ensure_fts_index(conn)
+
     # 清理两阶段上传遗留的超时临时目录（与 DB 后端无关，启动时兜底执行）
     cleanup_stale_uploads()
+
+
+async def _ensure_fts_index(conn) -> None:
+    """创建 FTS5 全文索引虚拟表（阶段 2.5′，幂等）
+
+    ## 设计要点
+
+    **外部内容表**（`content='chunks'`）：FTS 只存倒排索引，正文按列名
+    从 `chunks` 读。好处是正文不存两份 —— 两份就有不一致的可能，
+    而"索引与正文不一致"是最难发现的一类检索缺陷。
+
+    `content_rowid='chunk_rowid'`：必须指向 `chunks` 的**整数**主键。
+    不能写 `'rowid'` —— `BaseModel` 的 VARCHAR 主键会被 SQLite 当成
+    rowid 的别名，于是两边行号类型不同、JOIN 静默返回 0 条
+    （实测踩到，见 `models/chunk.py`）。
+
+    **索引 `grams` 列而不是 `content`**：SQLite 内置的 `trigram` 分词器
+    实测更差（严格 Recall@5 57.84% vs 60.21%），而 FTS5 没有内置中文
+    bigram 分词器。因此切词在写入侧完成、结果存进 `chunks.grams`，
+    FTS 用内置 `unicode61`（按空白切）索引它。
+
+    **不做触发器**：`content=` 模式下的触发器需要额外的 delete/insert 命令表，
+    且"触发器没配对"会静默地让索引与正文漂移。改为在
+    `chunk_service.index_note_chunks` 写入后显式同步，并提供
+    `fts_search_service.rebuild_all` 兜底 —— 显式同步更容易验证。
+
+    FTS5 是编译期选项，精简的 SQLite 构建可能没有。此时**不报错**，
+    只记一条 warning：词法检索会退化为 Python BM25，而不是整体不可用。
+    """
+    from sqlalchemy import text as _text
+
+    def _create(sync_conn):
+        try:
+            # 旧定义可能指向错误的 content_rowid（本项目早期版本写成 'rowid'，
+            # 对 VARCHAR 主键表无效）。检测到不一致就重建 ——
+            # 否则 'rebuild' 会因找不到该列而失败，且失败被 except 吞掉后
+            # 表现为"索引建好了但查不出东西"。
+            existing = sync_conn.execute(_text(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'"
+            )).fetchone()
+            if existing and "chunk_rowid" not in (existing[0] or ""):
+                sync_conn.execute(_text("DROP TABLE chunks_fts"))
+                existing = None
+            table_existed = existing is not None
+
+            sync_conn.execute(_text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
+                "  grams,"
+                "  content='chunks',"
+                "  content_rowid='chunk_rowid',"
+                "  tokenize='unicode61'"
+                ")"
+            ))
+            # 索引只在**新建时**重建一次。
+            #
+            # 为什么不能每次都 rebuild：`init_db()` 在每个进程启动时都跑，
+            # 而测试套件会创建上百个临时库 —— 每次都全量重建会让整个套件
+            # 从 70 秒膨胀到 190 秒（实测）。稳态下索引由
+            # `chunk_service.index_note_chunks` 增量维护，不需要在这里重建。
+            #
+            # 外部内容表的索引必须用官方 'rebuild' 命令建立。
+            # **不能**用 `INSERT INTO fts(rowid, col) SELECT ...` ——
+            # 那只写倒排索引、不认内容表，查询会返回 0 条（实测踩到）。
+            if not table_existed:
+                sync_conn.execute(_text(
+                    "INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')"
+                ))
+        except Exception as exc:  # pragma: no cover - 取决于 SQLite 构建
+            logger.warning(
+                "FTS5 不可用或索引重建失败，词法检索将退化为 Python BM25: %s", exc
+            )
+
+    await conn.run_sync(_create)
+
+
+def _bigrams_for_migration(text_value: str) -> str:
+    """迁移用的 bigram 切词（与 `fts_search_service.to_bigrams` 同一口径）
+
+    刻意不 import 服务模块：`database.py` 是被所有模块依赖的最底层模块，
+    让它在迁移路径上反向依赖 services 会形成循环导入风险。
+    代价是同一算法有两处实现 —— 因此有测试断言两者结果一致
+    （`test_fts_search.py::test_migration_and_service_bigrams_agree`）。
+    """
+    cleaned = "".join(ch for ch in (text_value or "") if not ch.isspace())
+    if len(cleaned) < 2:
+        return cleaned
+    return " ".join(cleaned[i:i + 2] for i in range(len(cleaned) - 1))
 
 
 def _destructive_migration_allowed() -> bool:
@@ -688,6 +781,54 @@ async def _migrate_sqlite(conn):
                         logger.info("SQLite 迁移: 已回填 %d 条 review_logs.card_id", result.rowcount)
                 except Exception as exc:
                     logger.warning("回填 review_logs.card_id 失败（不影响启动）: %s", exc)
+
+        # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
+        if 'chunks' in table_names:
+            chunk_cols = {c['name'] for c in inspector.get_columns('chunks')}
+            if 'grams' not in chunk_cols:
+                # 同上：新增模型字段必须在此登记，否则真库永远缺这一列
+                sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN grams TEXT"))
+                logger.info("SQLite 迁移: 已为 chunks 表添加 grams 列")
+            if 'chunk_rowid' not in chunk_cols:
+                # 整数 rowid：FTS5 外部内容表的 content_rowid 必须指向它。
+                # VARCHAR 主键会被 SQLite 当成 rowid 的别名，导致 JOIN 对不上
+                # 而静默返回 0 条（见 models/chunk.py 的说明）。
+                sync_conn.execute(text(
+                    "ALTER TABLE chunks ADD COLUMN chunk_rowid INTEGER"
+                ))
+                sync_conn.execute(text(
+                    "UPDATE chunks SET chunk_rowid = ("
+                    "  SELECT COUNT(*) FROM chunks c2 "
+                    "   WHERE c2.note_id < chunks.note_id "
+                    "      OR (c2.note_id = chunks.note_id AND c2.[index] <= chunks.[index])"
+                    ")"
+                ))
+                sync_conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_chunks_chunk_rowid "
+                    "ON chunks (chunk_rowid)"
+                ))
+                logger.info("SQLite 迁移: 已为 chunks 表添加 chunk_rowid 列并回填")
+            # 回填 bigram 切词结果（FTS5 索引读取这一列）
+            #
+            # 幂等：只处理 grams 为空的行。切词在 Python 侧完成 ——
+            # SQL 里做相邻字符滑窗既不可读也易错，而这里是**一次性回填**，
+            # 不在热路径上（chunks 只在清洗完成时重建）。
+            try:
+                pending = sync_conn.execute(text(
+                    "SELECT rowid, content FROM chunks "
+                    "WHERE grams IS NULL OR grams = '' LIMIT 5000"
+                )).fetchall()
+                if pending:
+                    sync_conn.execute(
+                        text("UPDATE chunks SET grams = :g WHERE rowid = :r"),
+                        [
+                            {"g": _bigrams_for_migration(row[1] or ""), "r": row[0]}
+                            for row in pending
+                        ],
+                    )
+                    logger.info("SQLite 迁移: 已回填 %d 条 chunks.grams", len(pending))
+            except Exception as exc:
+                logger.warning("回填 chunks.grams 失败（不影响启动）: %s", exc)
 
         # ---- 孤儿数据检查（只报告，不删除）----
         # 历史上此处会无条件 DELETE 孤儿行。两个问题：

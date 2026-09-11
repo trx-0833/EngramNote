@@ -406,6 +406,43 @@ class RAGService:
                 top_k=top_k, exclude_note_ids=set(trashed) or None,
             )
 
+    async def _lexical_search(
+        self,
+        user_id: str,
+        question: str,
+        chunks: List[Dict[str, Any]],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """词法检索：FTS5 优先，Python BM25 兜底（阶段 2.5′）
+
+        两条路径返回**同构**结果（`note_id`/`content`/`similarity`/
+        `block_index` + 定位字段），因此调用方与融合层无需区分来源。
+
+        兜底不是为了"更稳"而堆代码 —— FTS5 是 SQLite 的编译期选项，
+        精简构建（或某些发行版自带库）可能没有；词法通道整体失效会
+        让检索退化为仅向量路。降级为 Python BM25 至少保持两路可用。
+
+        注意 `chunks` 参数只在兜底路径用得上（FTS5 直接从库里读），
+        但两条路径都执行 `get_user_chunks` 是必要的：兜底时要语料，
+        而且它同时承担"recall站笔记过滤"的一致性来源。
+        """
+        from .fts_search_service import fts5_available, search_chunks_fts
+
+        session_factory = self._get_session_factory()
+        async with session_factory() as session:
+            if await fts5_available(session):
+                hits = await search_chunks_fts(
+                    session, question, user_id, top_k=top_k
+                )
+                if hits:
+                    return hits
+                # FTS5 可用但无命中：**不再回落**到 Python BM25。
+                # 两条通道口径不同，回落会让"没命中"与"命中了别的"混在一起，
+                # 使评测无法解释。空结果就是空结果。
+                return []
+
+        return self._get_bm25_index(user_id, chunks).search(question, top_k=top_k)
+
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
         """
         通过 Celery worker 编码文本，返回嵌入向量
@@ -663,14 +700,20 @@ class RAGService:
         else:
             retrieval_status = "full_vector"
 
-        # 3. BM25 检索（同一份 chunk 语料；打分为纯函数，评测脚本复用同一实现）
+        # 3. 词法检索（FTS5 优先，Python BM25 兜底）
+        #
+        # 阶段 2.5′：改用 SQLite 内置的 FTS5 倒排索引，不再每次查询都在
+        # Python 里全量建索引（A-5）。实测（同一评测集）严格 Recall@5
+        #   FTS5(bigram) 60.21% / MRR 0.5258   ＞ Python BM25 59.74% / 0.5183
+        # 且 FTS5 的无结果比例为 0（Python 版对某些查询会全 0）。
+        #
+        # **保留 Python BM25 作为兜底**：FTS5 是编译期选项，精简的 SQLite
+        # 构建可能没有；词法通道不该因为一个可选扩展缺失就整体不可用。
         bm25_results: List[Dict[str, Any]] = []
         try:
-            bm25_results = self._get_bm25_index(user_id, chunks).search(
-                question, top_k=pool
-            )
+            bm25_results = await self._lexical_search(user_id, question, chunks, pool)
         except Exception as e:
-            logger.warning(f"BM25 检索失败: {e}")
+            logger.warning(f"词法检索失败: {e}")
 
         # 4. 加权 RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
         fused_results = self._rrf_fusion(

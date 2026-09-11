@@ -88,6 +88,38 @@ class Chunk(BaseModel):
     """
     __tablename__ = "chunks"
 
+    #: 覆盖基类的 VARCHAR 主键，改为**普通唯一列**
+    #:
+    #: 为什么必须这么做：`BaseModel` 已把 `id` 声明为主键，若再给
+    #: `chunk_rowid` 加主键，SQLAlchemy 会拼成**复合主键** —— 而 SQLite
+    #: 明确不支持复合主键上的 autoincrement，建表直接失败：
+    #:
+    #:     (in table 'chunks', column 'chunk_rowid'):
+    #:     SQLite does not support autoincrement for composite primary keys
+    #:
+    #: 让 `chunk_rowid` 单独作整数主键后，它才是真正的 rowid；
+    #: `id` 仍保留唯一约束，业务代码照旧按 `id` 引用，不受影响。
+    id: Mapped[str] = mapped_column(
+        String, unique=True, nullable=False, index=True,
+        default=lambda: str(__import__("uuid").uuid4()),
+    )
+
+    #: 显式整数 rowid（阶段 2.5′）
+    #:
+    #: ## 为什么必须有这一列
+    #:
+    #: `BaseModel` 用的是 VARCHAR 主键 `id`，SQLite 会把 `rowid` 当作它的别名
+    #: （STRING 主键即 rowid 的"类型别名"）。于是 FTS5 外部内容表的
+    #: `content_rowid='rowid'` 实际指向**字符串 id**，而倒排索引的 rowid 是整数
+    #: —— JOIN 时两边对不上，查询**静默返回 0 条**。
+    #:
+    #: 实测症状：`MATCH "浮充"` 单独查 FTS 表能返回 30 条，
+    #: 但 `chunks_fts JOIN chunks ON c.rowid = f.rowid` 返回 0 条。
+    #: 这类"索引建好了却查不出东西"最难排查，因此显式提供一个整数主键。
+    chunk_rowid: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
+    )
+
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id"), nullable=False, index=True
     )
@@ -106,6 +138,15 @@ class Chunk(BaseModel):
 
     source_md_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    #: bigram 切词结果（空格分隔），供 FTS5 外部内容表读取（阶段 2.5′）
+    #:
+    #: 为什么把切词结果**存成列**而不是让 FTS 直接索引 `content`：
+    #: SQLite 内置的 `trigram` 分词器实测更差（严格 Recall@5 57.84% vs 60.21%，
+    #: 见 `fts_search_service` 的说明），而 FTS5 没有内置中文 bigram 分词器。
+    #: 外部内容表模式下 FTS 只存倒排索引、正文按列名从本表读取，
+    #: 因此把切好的 bigram 作为一列存下来即可 —— 索引小、查询快、口径可控。
+    grams: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # 向量列：本轮（A 半）留空，B 半填入（见模块 docstring）
     embedding_model: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

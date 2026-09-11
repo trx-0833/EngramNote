@@ -2969,7 +2969,7 @@ M-4 与 1.13 仍未做。）
 | # | 动作 | 目的 | 状态 |
 |---|---|---|---|
 | 2.2′ | `chunks` 表（纯 SQLite，无扩展）承载 chunk 文本 + `char_start/char_end/heading_path` + 向量 BLOB | 支撑 2.7 回跳与 2.3 语料切换 | ✅ **已落地**（附录 O/P）：表已建、608 个 chunk 与**全部向量**落库，单一模型 `bge-m3`、单一维度 1024、**100% 可检索**。三条验收标准全达成 |
-| 2.5′ | **FTS5** 全文索引（SQLite 内置）替换纯 Python BM25 | 免维护索引；这是 A-5 在 SQLite 路线下的正解 | ⬜ 待做（`chunks` 表已就位，文本来源已有）**不依赖嵌入模型，可随时插入** |
+| 2.5′ | **FTS5** 全文索引（SQLite 内置）替换纯 Python BM25 | 免维护索引；这是 A-5 在 SQLite 路线下的正解 | ✅ **已落地**（附录 T）：FTS5 + bigram 预切词，生产路径实测严格 Recall@5 **60.21%**（Python BM25 59.74%），无结果比例 **0.00%** |
 | 2.4′ | 评估 `sqlite-vec` 扩展替代 Chroma 的多 collection | 消除"每篇笔记一个 collection、检索要遍历全部" | 🟡 **B 半已用一次 SQL 取代遍历 N 个 collection**（附录 P）；`sqlite-vec` 本身未引入（当前规模下纯 Python 点积足够，接口已预留） |
 
 > **2.2′ 的验收标准**（按附录 N 扩充）：
@@ -3036,13 +3036,13 @@ M-4 与 1.13 仍未做。）
 | 2.6 加权 RRF | ✅ | k=1 / w=0.65 / 池 20（附录 P.4，已实测定参并锁测试） |
 | 2.3 语料切换 | ✅ | 两路统一 chunk 语料（附录 R） |
 | 2.4 删除跨 collection 遍历 | ✅ | −169 行（附录 R） |
-| **2.7 引用回跳接线** | ⬅️ **下一项** | 定位字段已贯通「chunk → 融合 → `_search_chunk_vectors`」，差接到 `AnswerSource` 与前端 |
-| 2.5′ FTS5 | ⬜ | 独立，可随时插入 |
+| 2.7 引用回跳 | ✅ | 四层贯通 + 前端定位高亮（附录 S） |
+| 2.5′ FTS5 全文索引 | ✅ | 附录 T |
+| **Chroma 彻底移除** | ⬅️ **下一项** | 需先迁移清洗去重（R.4） |
+| 行为测试补全（Q.3） | ⬜ | `embed_chunks.py`；`citationJump.ts` 无前端测试 |
 
-**顺序**：`2.9 ✅ → 2.1 ✅ → 2.2′ ✅ → 2.4′ ✅ → 2.6 ✅ → 2.3 ✅ → 2.4 ✅ → 2.7 ⬅️ → 2.5′`。
-
-至此**阶段 2 的检索层重建基本完成**：单一分块器、单一语料、单一模型向量、
-一次 SQL、已定标的加权融合。剩下 2.7（回跳接线）与可选的 2.5′（FTS5）。
+**阶段 2（含 2′ 等价项）的检索层重建已完成**：单一分块器、单一语料、
+单一模型向量、一次 SQL、已定标加权融合、FTS5 内置词法索引。
 
 #### 一个尚未解决的方法论问题：向量通道的语料是**碎的**
 
@@ -5035,6 +5035,136 @@ chunks 表          char_start/char_end/heading_path/line_*     ✅ 已有
   仅验证了类型、lint、构建与后端字段贯通
 - **2.5′** FTS5（见附录 T）
 - `embed_chunks.py` / `chunk_search_service.py` 的行为测试（附录 Q.3）
+
+---
+
+## 附录 T · 阶段 2.5′：FTS5 全文索引（2026-09-11）
+
+### T.1 交付
+
+把词法检索从"每次查询在 Python 里全量建 BM25 索引"换成 SQLite 内置的
+FTS5 倒排索引（A-5 在 SQLite 路线下的正解；PG 路线的 `pg_bigm` 不执行）。
+
+| 实测（1058 条评测集、608 chunk 语料，生产路径） | Recall@5 | MRR | 无结果比例 |
+|---|---|---|---|
+| **FTS5 + bigram（已落地）** | **60.21%** | **0.5258** | **0.00%** |
+| Python BM25（旧） | 59.74% | 0.5183 | — |
+
+新增 `app/services/fts_search_service.py`；`rag_service._lexical_search`
+FTS5 优先、Python BM25 兜底（FTS5 是编译期选项，精简构建可能没有 ——
+词法通道不该因一个可选扩展缺失而整体不可用）。
+
+### T.2 为什么用 bigram 预切词而不是内置的 `trigram`
+
+SQLite 内置的 `trigram` 是唯一原生支持中文的分词器，但实测**更差**：
+
+| 实现 | Recall@5 | MRR | 无结果比例 |
+|---|---|---|---|
+| FTS5(`trigram`) | 57.84% | 0.5052 | 0.76% |
+| FTS5(bigram 预切词) | **60.21%** | **0.5258** | **0.00%** |
+
+中文三元组重叠严重、区分度弱；而现有实现本来就用 2-gram
+（`rag_service._tokenize`）。因此**保持 2-gram 口径不变**，只把索引与排序
+下沉到 SQLite —— 这样比较的是**实现**，而不是顺带改了分词策略。
+
+FTS5 没有内置中文 bigram 分词器，做法是写入侧切词、结果存进
+`chunks.grams`（空格分隔），FTS 用内置 `unicode61`（按空白切）索引它。
+
+### T.3 查询表达式：踩了两次"0 结果"
+
+失败模式都**不报错**，只是返回 0 条：
+
+1. **整句加引号 → 0 条**：FTS5 里引号表示**短语匹配**，要求整串逐字出现。
+   自然语言问句不会逐字出现在资料里 ——
+   `"截至2013年底，我国并网风电装机容量为多少？"` 返回 0，而 `"截至2013"` 返回 1。
+2. **全部 bigram 用 AND → 0 条**：那等于要求问句的每个字都出现在同一段资料，
+   而问句含"是多少"、"如何处理"这类疑问语气词，资料中不会有。
+
+正解：**OR 组合召回、`bm25()` 排序** —— 词法检索的标准形态（召回与排序分离），
+也正是"索引下沉"想要达到的形态。
+
+### T.4 接线踩到的两个坑（都不报错）
+
+**(1) `content_rowid='rowid'` 指向 VARCHAR 主键的别名 → JOIN 静默返回 0 条**
+
+`BaseModel` 的 `id` 是 VARCHAR 主键，SQLite 会把它当作 `rowid` 的别名，
+于是 `content_rowid='rowid'` 实际指向**字符串 id**，而倒排索引的 rowid 是整数。
+症状极具误导性：`MATCH "浮充"` 单独查 FTS 表返回 30 条，
+但 `chunks_fts JOIN chunks ON c.rowid = f.rowid` 返回 **0 条**。
+
+修法：给 `chunks` 加显式整数主键 `chunk_rowid`，`content_rowid` 指向它。
+注意 `id` 必须降为普通唯一列 —— 否则 `id` + `chunk_rowid` 构成**复合主键**，
+而 SQLite 不支持复合主键上的 autoincrement（建表直接失败）。
+
+**(2) 外部内容表的索引不能用 `INSERT INTO fts(rowid, col) SELECT ...` 建**
+
+那只写倒排索引、不认内容表，查询返回 0 条。必须用官方
+`INSERT INTO fts(fts) VALUES('rebuild')`。
+
+### T.5 同步策略：整表 rebuild（以及为什么不用增量）
+
+FTS5 外部内容表的**单条同步命令形式全都不可用或不安全**，逐条实测过：
+
+| 做法 | 结果 |
+|---|---|
+| `INSERT INTO fts(fts, grams) SELECT 'delete', grams ...` | `SQL logic error` |
+| `INSERT INTO fts(fts, rowid, grams) SELECT 'delete', chunk_rowid, ...` | delete 成功、insert 报 `SQL logic error` |
+| `DELETE FROM fts WHERE rowid IN (...)` + 直接 INSERT | **`database disk image is malformed`** —— 直接改倒排索引破坏索引结构 |
+| `INSERT INTO fts(fts) VALUES('rebuild')` | ✅ 正确：删除与新增都生效 |
+
+因此 `reindex_note` 就是整表 `rebuild`。**代价如实说明**：每篇笔记清洗完成后
+重建全表索引（当前 608 行、毫秒级；清洗本身是秒级以上重任务，相对开销可忽略）。
+语料上到十万级时应重新评估。
+
+这个取舍换的是**语义正确**：整表重建不可能留下指向已删除内容的悬空索引项，
+而"索引与正文漂移"是最难发现的一类检索缺陷。
+
+### T.6 另一个性能坑：不要在 `init_db` 里无脑 rebuild
+
+第一版每次 `init_db()` 都 rebuild，而测试套件会创建上百个临时库 ——
+整个套件从 **70 秒膨胀到 190 秒**。改为**只在首次建表时** rebuild；
+稳态下索引由 `chunk_service.index_note_chunks` 维护。
+
+### T.7 验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| FTS5 服务 | `app/services/fts_search_service.py` | 分词、查询表达式、检索、同步 |
+| 建表与迁移 | `app/database.py`（`_ensure_fts_index`、`_bigrams_for_migration`） | 全新库与真库迁移均验证；真库 608 行已回填并建索引 |
+| 检索接线 | `rag_service._lexical_search` | FTS5 优先 + Python BM25 兜底 |
+| 测试 | `tests/test_fts_search.py`（15 用例） | 含 **rowid JOIN 一致性**、两处 bigram 实现一致、特殊字符查询、索引残留 |
+
+测试总数 463 → **478 passed / 3 skipped**；ruff app tests scripts 全绿；
+真库 `integrity=ok`，`chunks` 608 行、`grams` 全部回填、FTS 索引 608 条。
+
+### T.8 换掉词法通道后重新标定融合权重（附录 Q.1 要求的步骤）
+
+换检索实现后必须重扫融合参数。实测（同一评测集，`k=1` 固定）：
+
+| 配置 | Recall@5 | MRR |
+|---|---|---|
+| 单通道 向量 | 48.39% | 0.3681 |
+| 单通道 词法（FTS5） | 60.21% | 0.5258 |
+| **融合（w=0.65，即当前配置）** | **60.68%** | **0.5210** |
+
+权重扫描（w 0.30→0.90）：严格 Recall@5 在 **w∈[0.55, 0.80] 全部落在
+60.4%~60.7%**，是一个平台；MRR 在 w≥0.65 后趋于平坦（0.521~0.527）。
+
+**结论：当前 `rag_rrf_bm25_weight=0.65` 无需改动。** 融合比最好单通道
+（词法 60.21%）高 **+0.47 个百分点** —— 融合终于产生了正收益
+（附录 P.4 时等权实现是负收益）。
+
+### T.9 仍未完成
+
+- **Chroma 彻底移除**：需先迁移清洗去重（附录 R.4）
+- `embed_chunks.py` 行为测试、`citationJump.ts` 前端测试
+- **环境说明**：本轮在 `aiforlearn` 环境执行（`mineru_env` 被其他任务覆盖、
+  待恢复）。为加载嵌入模型，向该环境装了 `sentence-transformers 5.7.0`
+  并升级 `huggingface_hub` 到 0.36.2（二者版本必须匹配：旧版 ST 需要
+  已被移除的 `huggingface_hub.cached_download`）。
+  该环境**原本就有依赖冲突**（`datasets` / `mineru` / `qwen-asr` 等），
+  与本轮改动无关。若需恢复原版本：
+  `pip install sentence-transformers==2.2.2 huggingface_hub==0.16.4`。
 
 ---
 

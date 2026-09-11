@@ -98,6 +98,7 @@ async def index_note_chunks(
         int: 写入的 chunk 条数；因不变量失败或指纹未变时为 0
     """
     from .markdown_segmenter import segment_with_offsets, to_retrieval_chunks
+    from .fts_search_service import to_bigrams
 
     chunks = to_retrieval_chunks(segment_with_offsets(text, chunk_size))
     fingerprint = chunk_hash(chunks, source_path)
@@ -138,10 +139,18 @@ async def index_note_chunks(
             char_count=c["char_count"],
             source_md_path=source_path,
             content_hash=fingerprint,
+            # bigram 切词（阶段 2.5′）：FTS5 外部内容表按此列建倒排索引
+            grams=to_bigrams(c["content"]),
             has_embedding=False,
         )
         for c in chunks
     ])
+    # flush 让新行的 rowid 可用，才能在同一事务里同步 FTS 索引
+    await db.flush()
+    from .fts_search_service import fts5_available, reindex_note
+
+    if await fts5_available(db):
+        await reindex_note(db, note_id)
     return len(chunks)
 
 
