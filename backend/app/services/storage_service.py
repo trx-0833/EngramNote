@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import List
 
 from ..config import get_settings
 
@@ -198,6 +199,60 @@ def list_source_files(prefix: str):
                 rel = os.path.relpath(full, source_dir).replace("\\", "/")
                 result.append((rel, os.path.getsize(full)))
         return result
+
+
+def list_object_names(bucket: str, prefix: str = "") -> List[str]:
+    """列出某前缀下的全部对象名（递归，跳过占位文件）
+
+    供 Vault 一致性校验（`vault_audit_service`）扫描孤儿文件使用。
+    返回的是**对象名**（posix 分隔的相对路径），与 DB 里存的
+    `original_file_path` / `clean_md_path` 可直接比较。
+
+    Args:
+        bucket: 存储桶名称（**本地模式下被忽略**，见下）
+        prefix: 对象名前缀；空字符串表示全部
+
+    Returns:
+        List[str]: 对象名列表（可能为空）
+
+    ## 本地模式为什么忽略 bucket
+
+    本地模式是"单一可浏览目录树"：`_resolve_path` 对已含
+    `source/output/history/cache` 段的 Vault 结构路径**不加 bucket 前缀**，
+    直接映射到 `storage_root` 之下。因此
+    `data/storage/{user}/inbox/...` 同时是 original 与 markdown 两个
+    "桶"里的对象 —— bucket 在本地模式下没有区分能力。
+
+    第一版实现错误地用 `_resolve_path(bucket, "")` 作为扫描基准，
+    于是去 `storage_root/markdown/` 找文件（该目录根本不存在），
+    孤儿扫描静默返回空列表 —— **漏报**，而漏报正是校验器最危险的失效模式。
+    """
+    if settings.storage_backend == "minio":
+        client = _get_minio_client()
+        return [
+            obj.object_name
+            for obj in client.list_objects(bucket, prefix=prefix, recursive=True)
+            if not obj.object_name.endswith("/")
+            and not obj.object_name.endswith(".gitkeep")
+        ]
+
+    root = _get_storage_root()
+    base = (root / prefix) if prefix else root
+    if not base.exists():
+        return []
+
+    names: List[str] = []
+    for dirpath, _dirnames, filenames in os.walk(base):
+        for fname in filenames:
+            if fname.endswith(".gitkeep"):
+                continue
+            full = Path(dirpath) / fname
+            try:
+                names.append(full.relative_to(root).as_posix())
+            except ValueError:
+                # 不在存储根内（理论不可达，例如符号链接指向外部）：跳过
+                continue
+    return names
 
 
 def upload_file(bucket: str, object_name: str, file_path: str, content_type: str = "application/octet-stream"):
