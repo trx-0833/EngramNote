@@ -21,6 +21,7 @@ from .review_state import (
     ITEM_TYPE_CARD,
     ITEM_TYPE_QUIZ,
 )
+from .chunk import Chunk, pack_vector, unpack_vector
 
 __all__ = [
     "User",
@@ -58,4 +59,7 @@ __all__ = [
     "ReviewStateKind",
     "ITEM_TYPE_CARD",
     "ITEM_TYPE_QUIZ",
+    "Chunk",
+    "pack_vector",
+    "unpack_vector",
 ]
