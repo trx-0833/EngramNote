@@ -455,14 +455,54 @@ def test_llm_client_loop_rebuild():
 
 
 def test_max_tokens_no_4096():
-    """提取/出题场景 max_tokens 已全部提升到 8192（静态断言，防回退）"""
-    src_path = os.path.join(
+    """LLM 场景的单次输出上限不得退回 4096（静态断言，防回退）
+
+    ⚠️ 阶段 4.1 收尾把场景方法搬到了 `services/llm/scenes.py`，
+    这里必须跟着扫描**整个 services 树**：只盯着 `llm_service.py` 会让
+    这个断言在被搬空之后**静默变成空转**（文件里已经没有场景代码了，
+    当然不会出现 `max_tokens=4096`）—— 一个永远通过的守卫比没有守卫更糟。
+
+    两处刻意的范围界定：
+
+    - **跳过 `services/asr/`**：那是语音转写的标点恢复/标题生成，
+      输出是纯文本而不是被 `json.loads` 解析的结构化结果，
+      "截断必然导致解析失败"这个前提不成立。它自己的截断风险是另一件事，
+      已记入附录 AI（不改，因为改动会影响 ASR 输出长度）。
+    - **只查代码，不查文档**：`understanding_service.py` 的注释里有一句
+      "此前 max_tokens=4096 时响应被硬截断……"，那是说明而不是配置。
+      注释与文档字符串在这里被剥掉后再查。
+    """
+    services_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "app", "services", "llm_service.py",
+        "app", "services",
     )
-    with open(src_path, encoding="utf-8") as f:
-        src = f.read()
-    assert "max_tokens=4096" not in src, "存在 max_tokens=4096（截断风险）"
+    offenders = []
+    scanned = []
+    for root, _dirs, files in os.walk(services_dir):
+        if os.path.basename(root) == "asr":
+            continue
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            scanned.append(os.path.relpath(path, services_dir))
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            import ast
+
+            tree = ast.parse(src)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                for kw in node.keywords:
+                    if (kw.arg == "max_tokens"
+                            and isinstance(kw.value, ast.Constant)
+                            and kw.value.value == 4096):
+                        offenders.append(f"{os.path.relpath(path, services_dir)}:{node.lineno}")
+    assert "llm/scenes.py" in [p.replace("\\", "/") for p in scanned], (
+        "扫描范围里没有场景模块 —— 这个守卫可能又被搬空了"
+    )
+    assert not offenders, f"存在 max_tokens=4096（截断风险）: {offenders}"
 
 
 # ---------------------------------------------------------------------------

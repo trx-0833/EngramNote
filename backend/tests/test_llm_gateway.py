@@ -36,6 +36,7 @@ from app.services.llm_accounting_service import LLMQuotaExceeded, QuotaStatus
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVICE_SRC = os.path.join(BACKEND_DIR, "app", "services", "llm_service.py")
+SCENES_SRC = os.path.join(BACKEND_DIR, "app", "services", "llm", "scenes.py")
 GATEWAY_SRC = os.path.join(BACKEND_DIR, "app", "services", "llm", "gateway.py")
 
 MESSAGES = [{"role": "user", "content": "什么是浮充？"}]
@@ -44,6 +45,36 @@ MESSAGES = [{"role": "user", "content": "什么是浮充？"}]
 def _read(path: str) -> str:
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def _code_only(path: str) -> str:
+    """去掉**文档字符串与注释**后的源码（静态断言必须查代码，而不是散文）
+
+    ⚠️ 本轮实测踩到：`scenes.py` 的模块说明里写着"本模块不得出现
+    `httpx`、`get_llm_client`、`record_call` 等符号"，于是**解释这条禁令的
+    文字本身**触发了禁令。直接把文件当纯文本查，会把文档变成绊脚石 ——
+    而正确的反应是让检查对准代码，不是把文档写得含糊。
+    """
+    import ast
+
+    src = _read(path)
+    tree = ast.parse(src)
+    lines = src.splitlines()
+    drop = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", None) or []
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            drop.update(range(body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1))
+
+    kept = []
+    for i, line in enumerate(lines, 1):
+        if i in drop:
+            continue
+        kept.append(line.split("#", 1)[0])
+    return "\n".join(kept)
 
 
 def _real_llm_config() -> Dict[str, Any]:
@@ -230,19 +261,24 @@ class TestSingleEntryPoint:
     """
 
     def test_service_no_longer_touches_transport_or_governance(self):
-        """`llm_service.py` 不得再出现传输/治理的符号"""
-        src = _read(SERVICE_SRC)
-        for marker in (
-            "import httpx",          # 传输
-            "get_llm_client",        # 客户端单例
-            "record_call",           # 记账
-            "asyncio.sleep",         # 重试退避
-            "self._rate_limiter",    # 限流器
-            "self._semaphore",       # 并发闸门
-        ):
-            assert marker not in src, (
-                f"llm_service.py 又出现了 '{marker}' —— 调用策略应当只有网关一份"
-            )
+        """服务层（`llm_service.py` + `llm/scenes.py`）不得再出现传输/治理的符号
+
+        ⚠️ 必须**两个文件一起**查：4.1 收尾把场景方法搬进了 `llm/scenes.py`，
+        只查 `llm_service.py` 会让这个守卫随着代码被搬空而静默失效。
+        """
+        for path in (SERVICE_SRC, SCENES_SRC):
+            src = _code_only(path)
+            for marker in (
+                "import httpx",          # 传输
+                "get_llm_client",        # 客户端单例
+                "record_call",           # 记账
+                "asyncio.sleep",         # 重试退避
+                "self._rate_limiter",    # 限流器
+                "self._semaphore",       # 并发闸门
+            ):
+                assert marker not in src, (
+                    f"{os.path.basename(path)} 又出现了 '{marker}' —— 调用策略应当只有网关一份"
+                )
 
     def test_gateway_owns_transport_and_governance(self):
         src = _read(GATEWAY_SRC)
@@ -260,14 +296,17 @@ class TestSingleEntryPoint:
             assert marker in src, f"gateway.py 缺少 '{marker}'"
 
     def test_service_size_shrank_after_extraction(self):
-        """搬迁确实让服务层变小了（1273 → 985 行）
+        """★ 搬迁确实达成了计划里的验收：`llm_service.py` < 300 行
 
-        ⚠️ 这里**不**断言计划里那个 "<300 行" 的目标：那个数字还要再等
-        一次纯机械的提示词抽取（把提示词模板搬到 `services/llm/prompts.py`）。
-        4.1 只承诺"调用策略搬走"，用一个诚实的上界防止代码重新长回去。
+        1273 → 985（4.1 搬走调用策略）→ **221**（4.1 收尾再搬走提示词与场景方法）。
+        这次拆分之后本文件只剩"接线"：构造网关、转发三个方法、re-export。
+
+        ⚠️ 行数**不是**目的，所以这里同时记下拆分后的总行数（供读者判断
+        "是变小了还是只是被摊开了"）：搬运不减少代码，它只是让每个文件
+        只讲一件事。真正的减少来自 4.11（删调试日志）这类删除。
         """
         lines = len(_read(SERVICE_SRC).splitlines())
-        assert lines < 1000, f"llm_service.py 已 {lines} 行，调用策略可能在回流"
+        assert lines < 300, f"llm_service.py 已 {lines} 行（>300），接线层又在长胖"
 
 
 # ---------------------------------------------------------------------------
