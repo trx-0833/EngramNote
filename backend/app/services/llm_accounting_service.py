@@ -173,6 +173,7 @@ async def record_call(
     error: Optional[str] = None,
     context: Optional[LLMContext] = None,
     session_factory=None,
+    settings=None,
 ) -> None:
     """记下一次 LLM 调用
 
@@ -186,6 +187,7 @@ async def record_call(
         error: 失败原因（会截断）
         context: 覆盖上下文；缺省取 `current_context()`
         session_factory: 覆盖会话工厂（测试用）
+        settings: 覆盖配置（决定单价；测试用）
     """
     try:
         usage = usage or {}
@@ -202,6 +204,7 @@ async def record_call(
 
         cost, currency = estimate_cost(
             prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            settings=settings,
         )
 
         ctx = context if context is not None else current_context()
@@ -325,13 +328,194 @@ def default_since(days: int = 30) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
+# ---------------------------------------------------------------------------
+# 配额（overhaul-plan 阶段 4.3）
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class QuotaStatus:
+    """当前用户在**当前业务日**内的配额状态
+
+    Attributes:
+        token_limit: 每日 token 上限；0 = 不限
+        cost_limit: 每日金额上限；0 = 不限
+        tokens_used / cost_used: 已用量
+        cost_enforceable: 是否**真的**能按金额拦截（价格未配置时为 False）
+        exceeded: 是否已超限
+        reason: 超限原因（中文，可直接展示给用户）
+    """
+    token_limit: int = 0
+    cost_limit: float = 0.0
+    tokens_used: int = 0
+    cost_used: float = 0.0
+    cost_enforceable: bool = True
+    exceeded: bool = False
+    reason: Optional[str] = None
+
+    @property
+    def unlimited(self) -> bool:
+        return self.token_limit <= 0 and self.cost_limit <= 0
+
+    @property
+    def ratio(self) -> float:
+        """用量占配额的比例（取两个维度里更大的那个）；不限时为 0"""
+        ratios = []
+        if self.token_limit > 0:
+            ratios.append(self.tokens_used / self.token_limit)
+        if self.cost_limit > 0 and self.cost_enforceable:
+            ratios.append(self.cost_used / self.cost_limit)
+        return max(ratios) if ratios else 0.0
+
+
+class LLMQuotaExceeded(Exception):
+    """配额耗尽 —— 拒绝发起这次 LLM 调用（阶段 4.3）
+
+    ## 为什么是一个**有类型**的异常，而不是返回 None 或空字符串
+
+    "配额用完了"必须与"模型答不出来"区分开：
+
+    - 前者是**用户的账单状态**，应当提示"今天额度已用完，明天再来"；
+    - 后者是**系统/模型问题**，应当提示"稍后重试"。
+
+    如果这里返回一个空答案，用户看到的是"AI 什么都没说"，
+    而真正的原因是额度用完了 —— 他会一直重试，每次都被拒，
+    却永远得不到解释。这正是原则 P7（失败必须响亮）要防的形态。
+
+    `code` 是**稳定错误码**（不随文案变化），供客户端判断；
+    与 `main.py` 的 `{detail, error_code, request_id}` 契约一致。
+    """
+    code = "LLM_QUOTA_EXCEEDED"
+    status_code = 429
+
+    def __init__(self, status: QuotaStatus):
+        self.status = status
+        super().__init__(status.reason or "LLM 配额已用完")
+
+    @property
+    def detail(self) -> str:
+        return self.status.reason or "LLM 配额已用完"
+
+
+#: 已就"成本配额无法执行"告过警的配置组合（进程内去重，避免每次调用刷屏）
+_COST_QUOTA_WARNED = False
+
+
+def reset_quota_warnings() -> None:
+    """清空告警去重状态（测试用）"""
+    global _COST_QUOTA_WARNED
+    _COST_QUOTA_WARNED = False
+
+
+async def check_quota(
+    user_id: Optional[str],
+    *,
+    settings=None,
+    session_factory=None,
+) -> QuotaStatus:
+    """查当前用户在**当前业务日**的配额状态
+
+    ## 不限配额时**不碰数据库**
+
+    默认配置是两项都为 0（不限），此时函数在第一行就返回 ——
+    热路径上不产生任何查询。只有真的配了配额才会去统计用量，
+    因此"没开这个功能"不会让每次 LLM 调用多一次 DB 往返。
+
+    ## 成本配额在价格未配置时**无法执行**，而且必须说出来
+
+    只配了 `llm_daily_cost_quota` 而没配单价时，金额永远算不出来，
+    这个上限会变成**一个静默失效的保护**：用户以为设了上限，
+    实际毫无作用。这里的选择是：照常统计 token，把
+    `cost_enforceable` 置为 False，并打一次 WARNING
+    —— 而不是假装它在生效。
+
+    ## 没有 user_id 时返回"不限"
+
+    无法归属的调用（见 `record_call` 的说明）**不能**被配额拦住 ——
+    按谁算都不知道。这是已知缺口，`current_context()` 没接线的调用点
+    因此不受配额保护。
+    """
+    if not user_id:
+        return QuotaStatus()
+
+    if settings is None:
+        from ..config import get_settings
+        settings = get_settings()
+
+    token_limit = int(getattr(settings, "llm_daily_token_quota", 0) or 0)
+    cost_limit = float(getattr(settings, "llm_daily_cost_quota", 0) or 0)
+    if token_limit <= 0 and cost_limit <= 0:
+        return QuotaStatus()
+
+    in_price = getattr(settings, "llm_price_input_per_1m", None)
+    out_price = getattr(settings, "llm_price_output_per_1m", None)
+    price_configured = bool(in_price and out_price)
+
+    cost_enforceable = True
+    if cost_limit > 0 and not price_configured:
+        global _COST_QUOTA_WARNED
+        cost_enforceable = False
+        if not _COST_QUOTA_WARNED:
+            _COST_QUOTA_WARNED = True
+            logger.warning(
+                "配置了 llm_daily_cost_quota=%.2f 但未配置单价"
+                "（llm_price_input_per_1m / llm_price_output_per_1m）——"
+                "金额上限**无法执行**，本次只按 token 配额拦截。"
+                "要么补上单价，要么把这个上限设为 0，不要留一个静默失效的保护。",
+                cost_limit,
+            )
+
+    from ..utils.timeutil import today_start_utc
+
+    if session_factory is None:
+        from ..database import get_session_factory
+        session_factory = get_session_factory()
+
+    async with session_factory() as db:
+        usage = await summarize_usage(
+            db, user_id=user_id, since=today_start_utc(), group_by="none",
+        )
+    totals = usage["totals"]
+    tokens_used = int(totals.get("total_tokens") or 0)
+    cost_used = float(totals.get("cost") or 0.0)
+
+    status = QuotaStatus(
+        token_limit=token_limit,
+        cost_limit=cost_limit if cost_enforceable else 0.0,
+        tokens_used=tokens_used,
+        cost_used=cost_used,
+        cost_enforceable=cost_enforceable,
+    )
+
+    reasons = []
+    if token_limit > 0 and tokens_used >= token_limit:
+        reasons.append(f"今日 token 已用 {tokens_used}/{token_limit}")
+    if cost_enforceable and cost_limit > 0 and cost_used >= cost_limit:
+        reasons.append(f"今日花费已用 {cost_used:.4f}/{cost_limit:.2f}")
+    if not reasons:
+        return status
+
+    return QuotaStatus(
+        token_limit=status.token_limit,
+        cost_limit=status.cost_limit,
+        tokens_used=tokens_used,
+        cost_used=cost_used,
+        cost_enforceable=cost_enforceable,
+        exceeded=True,
+        reason="；".join(reasons) + "。配额按北京时间的自然日重置，明天可继续使用。",
+    )
+
+
 __all__ = [
     "ERROR_MAX_LEN",
     "LLMContext",
+    "LLMQuotaExceeded",
+    "QuotaStatus",
+    "check_quota",
     "current_context",
     "default_since",
     "estimate_cost",
     "llm_context",
     "record_call",
+    "reset_quota_warnings",
     "summarize_usage",
 ]

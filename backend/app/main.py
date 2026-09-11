@@ -40,6 +40,7 @@ from .database import init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.request_context import RequestContextMiddleware
+from .services.llm_accounting_service import LLMQuotaExceeded
 
 # 获取全局配置
 settings = get_settings()
@@ -216,6 +217,24 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         content=_error_payload(422, str(exc), "VALIDATION_ERROR"),
     )
+
+
+# LLM 配额耗尽（阶段 4.3）
+#
+# 为什么单独注册处理器，而不是在路由里 try/except：
+# LLM 调用散布在理解任务、问答、语义判分等多条路径上（其中一部分在
+# Celery 任务里），逐个包 try 必然有漏。配额异常从 `llm_service` 统一抛出，
+# 在这里转成稳定错误码，客户端只需认 `error_code`（不随文案变化）。
+@app.exception_handler(LLMQuotaExceeded)
+async def llm_quota_exceeded_handler(request: Request, exc: LLMQuotaExceeded):
+    logger.warning(
+        "LLM 配额耗尽 | %s %s | %s", request.method, request.url.path, exc.detail,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(exc.status_code, exc.detail, exc.code),
+    )
+
 
 # 注册所有 API 路由，统一挂载到 /api 前缀下
 app.include_router(api_router, prefix="/api")

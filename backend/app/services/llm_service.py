@@ -86,6 +86,42 @@ class LLMService:
         self._rate_limiter = LLMService._rate_limiter
         self._semaphore = LLMService._semaphore
 
+    async def _enforce_quota(self, scene: Optional[str]) -> None:
+        """发起调用前检查配额，超限则抛 `LLMQuotaExceeded`（阶段 4.3）
+
+        ## 为什么放在这里（而不是每个调用方自己查）
+
+        这是**唯一**真正花钱的地方。放在这里意味着无论从哪条路径进来
+        （理解任务、问答、语义判分、将来的新场景），配额都自动生效 ——
+        而让每个调用方各自记得查一次，必然会有漏的，且漏掉的那个
+        恰恰是没人想到的昂贵路径。
+
+        ## 为什么在 `user_id` 为空时放行
+
+        无法归属的调用算不到任何人头上（见 `record_call` 的说明），
+        因此拦不住也不该拦。这是**已知缺口**：没接上下文调用点的
+        不受配额保护。宁可漏拦，也不能因为"不知道是谁"就把所有人的
+        调用都拒掉。
+
+        ## 不限配额时零开销
+
+        `check_quota` 在两项配额都为 0（默认）时第一行就返回，
+        不碰数据库。所以"没开这个功能"不会给每次调用加一次查询。
+        """
+        from .llm_accounting_service import LLMQuotaExceeded, check_quota, current_context
+
+        user_id = current_context().user_id
+        if not user_id:
+            return
+        status = await check_quota(user_id)
+        if status.exceeded:
+            logger.warning(
+                f"LLM 配额已用完，拒绝调用 | user={user_id[:8]} | scene={scene} | "
+                f"tokens={status.tokens_used}/{status.token_limit} | "
+                f"cost={status.cost_used:.4f}/{status.cost_limit:.2f}"
+            )
+            raise LLMQuotaExceeded(status)
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -139,6 +175,10 @@ class LLMService:
         Returns:
             dict: {"content", "finish_reason", "truncated", "usage"}
         """
+        # 阶段 4.3：配额检查放在**最前面**（连信号量都还没拿）——
+        # 被配额拒绝的调用不该占用并发额度，也不该产生任何网络请求。
+        await self._enforce_quota(scene)
+
         url = f"{self._base_url}/chat/completions"
         # OpenCode 网关要求 x-opencode-session 头，缺失即 400 MissingSessionID，
         # 见 services/llm/client.py#build_llm_headers
@@ -290,7 +330,12 @@ class LLMService:
 
         Raises:
             httpx.HTTPError: HTTP 调用失败时抛出，由调用方处理
+            LLMQuotaExceeded: 配额已用完时抛出（阶段 4.3）
         """
+        # 阶段 4.3：异步生成器的第一句，在**产出任何 token 之前**检查配额 ——
+        # 否则用户会先看到半截回答再断掉，比一开始就拒绝更糟。
+        await self._enforce_quota(scene)
+
         url = f"{self._base_url}/chat/completions"
         # 流式路径同样需要 OpenCode 网关会话头（否则 400 MissingSessionID）
         headers = build_llm_headers(self._api_key, self._base_url)

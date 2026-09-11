@@ -469,3 +469,256 @@ class TestUsageAPI:
         ).json()
         assert {g["key"] for g in body["groups"]} == {"extract_knowledge_points", "rag_answer"}
         assert body["totals"]["calls"] == 2
+
+    def test_quota_is_reported_as_unlimited_by_default(self, test_db):
+        """默认不限额时必须如实返回"不限"，而不是一个 0 的上限"""
+        headers, _ = self._auth()
+        body = self._client().get("/api/llm/usage", headers=headers).json()
+        assert body["quota"]["token_limit"] == 0
+        assert body["quota"]["exceeded"] is False
+
+
+# ---------------------------------------------------------------------------
+# 配额（阶段 4.3）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestQuotaCheck:
+    """`check_quota` 的判定逻辑
+
+    这一层的难点全在**边界与失效**上：多一次调用就超了没有？
+    "算不出金额"时那个上限到底是生效还是没生效？
+    """
+
+    async def _seed_tokens(self, test_db, uid: str, tokens: int) -> None:
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": tokens, "completion_tokens": 0},
+            session_factory=test_db, context=LLMContext(user_id=uid),
+        )
+
+    async def test_unlimited_by_default_does_not_touch_the_database(self, test_db):
+        """★ 默认不限额时**不查库**
+
+        配额检查在每次 LLM 调用的热路径上。若默认也要查一次，
+        就等于给所有没开这个功能的部署平白加一次 DB 往返。
+        """
+        class ExplodingFactory:
+            def __call__(self):
+                raise AssertionError("不限额时不应访问数据库")
+
+        status = await acc.check_quota(
+            "u1", settings=_Settings(), session_factory=ExplodingFactory(),
+        )
+        assert status.unlimited and not status.exceeded
+
+    async def test_no_user_means_unlimited(self, test_db):
+        """无法归属的调用拦不住，也不该拦（否则会把所有人的调用都拒掉）"""
+        status = await acc.check_quota(None, settings=_Settings())
+        assert not status.exceeded
+
+    async def test_under_limit_passes(self, test_db):
+        uid = await _make_user(test_db)
+        await self._seed_tokens(test_db, uid, 300)
+        quota = _Settings()
+        quota.llm_daily_token_quota = 1000
+        status = await acc.check_quota(uid, settings=quota, session_factory=test_db)
+        assert status.exceeded is False
+        assert status.tokens_used == 300
+        assert status.ratio == pytest.approx(0.3)
+
+    async def test_at_limit_is_exceeded(self, test_db):
+        """★ 边界包含：用满即拦（`>=` 而不是 `>`）
+
+        用 `>` 会让"上限 1000"实际允许 1000 之后的**下一次**调用通过 ——
+        上限就不再是上限了。
+        """
+        uid = await _make_user(test_db)
+        await self._seed_tokens(test_db, uid, 1000)
+        quota = _Settings()
+        quota.llm_daily_token_quota = 1000
+        status = await acc.check_quota(uid, settings=quota, session_factory=test_db)
+        assert status.exceeded is True
+        assert "token" in (status.reason or "")
+
+    async def test_usage_of_other_users_does_not_count(self, test_db):
+        """★ 配额按用户各自计算 —— 别人用超了不该把我拦住"""
+        mine = await _make_user(test_db)
+        other = await _make_user(test_db)
+        await self._seed_tokens(test_db, other, 99999)
+        await self._seed_tokens(test_db, mine, 10)
+        quota = _Settings()
+        quota.llm_daily_token_quota = 1000
+        status = await acc.check_quota(mine, settings=quota, session_factory=test_db)
+        assert status.exceeded is False
+        assert status.tokens_used == 10
+
+    async def test_cost_quota_requires_prices_and_says_so(self, test_db):
+        """★ 配了金额上限但没配单价 → 上限**无法执行**，必须如实标记
+
+        静默失效的保护是最危险的一种：用户以为设了上限，实际毫无作用，
+        而且没有任何迹象表明这一点。
+        """
+        acc.reset_quota_warnings()
+        uid = await _make_user(test_db)
+        await self._seed_tokens(test_db, uid, 100)
+        quota = _Settings()             # 未配单价
+        quota.llm_daily_cost_quota = 1.0
+        status = await acc.check_quota(uid, settings=quota, session_factory=test_db)
+        assert status.cost_enforceable is False
+        assert status.cost_limit == 0.0, "无法执行的金额上限不应被当成生效的上限"
+        assert status.exceeded is False, "算不出金额就不能按金额拦截"
+
+    async def test_cost_quota_enforced_when_prices_configured(self, test_db):
+        uid = await _make_user(test_db)
+        priced = _Settings(in_price=2.0, out_price=8.0)
+        # 100 万 prompt token @ 2.0/百万 = 2.0 元
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": 1_000_000, "completion_tokens": 0},
+            session_factory=test_db, context=LLMContext(user_id=uid),
+            settings=priced,
+        )
+        # 先确认成本真的被算出来并落了库（否则下面拦的是别的东西）
+        async with test_db() as db:
+            usage = await summarize_usage(db, user_id=uid, group_by="none")
+        assert usage["totals"]["cost"] == pytest.approx(2.0)
+
+        priced.llm_daily_cost_quota = 1.0
+        status = await acc.check_quota(uid, settings=priced, session_factory=test_db)
+        assert status.cost_enforceable is True
+        assert status.exceeded is True
+        assert "花费" in (status.reason or "")
+
+    async def test_record_call_prices_end_to_end(self, test_db):
+        """★ 配了单价就必须真的把 cost 算进库
+
+        这条盯的是 `record_call` → `estimate_cost` 的配置传递：
+        中间任何一环忘了把 settings 传下去，落库的 cost 都会静默变成 NULL，
+        而 NULL 在报表里看起来只是"没配价格"，不会有人怀疑是代码问题。
+        """
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": 500_000, "completion_tokens": 250_000},
+            session_factory=test_db,
+            settings=_Settings(in_price=2.0, out_price=8.0),
+        )
+        rows = await _rows(test_db)
+        # 0.5M × 2.0 + 0.25M × 8.0 = 1.0 + 2.0
+        assert rows[0].cost == pytest.approx(3.0)
+        assert rows[0].currency == "CNY"
+
+
+@pytest.mark.asyncio
+class TestQuotaEnforcement:
+    """配额在**真正花钱的地方**生效：`LLMService` 的调用出口"""
+
+    async def test_llm_call_is_rejected_before_any_network_request(
+        self, test_db, monkeypatch,
+    ):
+        """★ 超限时**一个网络请求都不发**
+
+        这与"发了再回滚"有本质区别：token 已经花掉了。
+        """
+        from app.services import llm_service as llm_mod
+        from app.services.llm_accounting_service import LLMQuotaExceeded
+
+        uid = await _make_user(test_db)
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": 5000, "completion_tokens": 0},
+            session_factory=test_db, context=LLMContext(user_id=uid),
+        )
+
+        calls = {"posted": 0}
+
+        class FakeClient:
+            async def post(self, *a, **k):
+                calls["posted"] += 1
+                raise AssertionError("配额已超，却仍然发起了请求")
+
+        monkeypatch.setattr(llm_mod, "get_llm_client", lambda: FakeClient())
+        _patch_quota(monkeypatch, token_quota=1000)
+
+        service = llm_mod.LLMService()
+        with llm_context(user_id=uid):
+            with pytest.raises(LLMQuotaExceeded):
+                await service.chat_detailed(
+                    [{"role": "user", "content": "hi"}], scene="test",
+                )
+        assert calls["posted"] == 0
+
+    async def test_stream_is_rejected_before_yielding_anything(
+        self, test_db, monkeypatch,
+    ):
+        """★ 流式路径要在**产出第一个 token 之前**拦住
+
+        否则用户会先看到半截回答再断掉 —— 比一开始就拒绝更糟，
+        而且前半个回答的 token 已经付过钱了。
+        """
+        from app.services import llm_service as llm_mod
+        from app.services.llm_accounting_service import LLMQuotaExceeded
+
+        uid = await _make_user(test_db)
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": 5000, "completion_tokens": 0},
+            session_factory=test_db, context=LLMContext(user_id=uid),
+        )
+        _patch_quota(monkeypatch, token_quota=1000)
+
+        service = llm_mod.LLMService()
+        with llm_context(user_id=uid):
+            with pytest.raises(LLMQuotaExceeded):
+                async for _ in service.chat_stream(
+                    [{"role": "user", "content": "hi"}], scene="test",
+                ):  # pragma: no cover - 不应产出任何内容
+                    pytest.fail("配额已超却仍然产出了 token")
+
+    async def test_no_user_context_is_not_blocked(self, test_db, monkeypatch):
+        """没有上下文时放行（已知缺口：拦不住算不到人头上的调用）"""
+        from app.services import llm_service as llm_mod
+
+        _patch_quota(monkeypatch, token_quota=1)
+        service = llm_mod.LLMService()
+        # 没有 user_id 时 `_enforce_quota` 在第一行就返回，不查库也不抛错
+        await service._enforce_quota("test")
+
+    async def test_under_quota_passes_through(self, test_db, monkeypatch):
+        """没超限时不得误拦 —— 误拦比漏拦更容易被发现，但同样是故障"""
+        from app.services import llm_service as llm_mod
+
+        uid = await _make_user(test_db)
+        await record_call(
+            scene="s", provider="p", model="m",
+            usage={"prompt_tokens": 10, "completion_tokens": 0},
+            session_factory=test_db, context=LLMContext(user_id=uid),
+        )
+        _patch_quota(monkeypatch, token_quota=1000)
+        service = llm_mod.LLMService()
+        with llm_context(user_id=uid):
+            await service._enforce_quota("test")   # 不抛即通过
+
+
+def _patch_quota(monkeypatch, *, token_quota: int = 0, cost_quota: float = 0.0):
+    """把配额阈值注入 `check_quota`，其余逻辑（查库、判定）走真实实现
+
+    ⚠️ 必须在 `monkeypatch.setattr` **之前**捕获原函数 ——
+    否则包装函数会调用自己被替换后的版本，直接无限递归
+    （本轮实测踩到：`RecursionError: maximum recursion depth exceeded`）。
+    """
+    original = acc.check_quota
+
+    class QuotaSettings(_Settings):
+        llm_daily_token_quota = token_quota
+        llm_daily_cost_quota = cost_quota
+
+    async def _inner(user_id, *, settings=None, session_factory=None):  # noqa: ARG001
+        return await original(
+            user_id, settings=QuotaSettings(), session_factory=session_factory,
+        )
+
+    monkeypatch.setattr(acc, "check_quota", _inner)
+    # `llm_service._enforce_quota` 是 `from ... import check_quota` 之外
+    # 的**函数内 import**，因此直接打模块属性即可生效
+    return QuotaSettings()

@@ -59,6 +59,25 @@ class UsageGroup(BaseModel):
     cost: float = Field(description="折算金额；见 cost_known_calls")
 
 
+class QuotaInfo(BaseModel):
+    """当前业务日的配额状态（阶段 4.3）"""
+    token_limit: int = Field(default=0, description="每日 token 上限；0 = 不限")
+    cost_limit: float = Field(default=0.0, description="每日金额上限；0 = 不限")
+    tokens_used: int = 0
+    cost_used: float = 0.0
+    exceeded: bool = False
+    reason: Optional[str] = Field(
+        default=None, description="超限原因（中文，可直接展示）"
+    )
+    cost_enforceable: bool = Field(
+        default=True,
+        description=(
+            "金额上限是否**真的**在生效。为 false 表示配了金额上限但没配单价 ——"
+            "此时它静默失效，只按 token 配额拦截。界面必须据此提示"
+        ),
+    )
+
+
 class UsageResponse(BaseModel):
     since: datetime
     until: datetime
@@ -75,6 +94,10 @@ class UsageResponse(BaseModel):
             "是否配置了单价。为 false 时 `cost` 一律为 0，"
             "**不代表没花钱** —— 界面必须据此提示，不能直接显示 0 元"
         )
+    )
+    quota: QuotaInfo = Field(
+        default_factory=QuotaInfo,
+        description="**今日**配额状态；与上面的 `days` 窗口是两个不同口径",
     )
 
 
@@ -115,6 +138,11 @@ async def get_llm_usage(
     )
     currency = (getattr(settings, "llm_price_currency", None) or None) if price_configured else None
 
+    # 配额是**当日**口径，与请求里的 `days` 窗口不同 —— 两个数字并列出现时
+    # 必须各自带说明，否则"用了 100 万 token / 上限 50 万"会让人以为
+    # 是拿整个窗口去比当天的额度。
+    quota_status = await llm_accounting_service.check_quota(current_user.id, settings=settings)
+
     def _to_group(row: Dict[str, Any]) -> UsageGroup:
         return UsageGroup(
             key=row.get("key"),
@@ -136,4 +164,13 @@ async def get_llm_usage(
         totals=_to_group(result["totals"]),
         groups=[_to_group(g) for g in result["groups"]],
         price_configured=price_configured,
+        quota=QuotaInfo(
+            token_limit=quota_status.token_limit,
+            cost_limit=quota_status.cost_limit,
+            tokens_used=quota_status.tokens_used,
+            cost_used=quota_status.cost_used,
+            exceeded=quota_status.exceeded,
+            reason=quota_status.reason,
+            cost_enforceable=quota_status.cost_enforceable,
+        ),
     )

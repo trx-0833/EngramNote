@@ -275,6 +275,22 @@ class Settings(BaseSettings):
     # 单用户一年通常也就几万行 —— 保留期主要是防止长期运行后无限增长。
     llm_call_retention_days: int = 365
 
+    # ---- LLM 配额（阶段 4.3）----
+    #
+    # **默认 0 = 不限**。理由：一个默认打开的额度上限会在用户毫无预期时
+    # 中断他正在做的事（导入一篇长文档、批量重跑理解），而"被自己的工具
+    # 拦住"是最难排查的一类故障。要先能算账，才谈得上有意地设限。
+    #
+    # 两项都是**按用户、按业务日**（北京时间自然日，与日界一致）计算：
+    # 每个用户各自有一份额度，而不是全站共享。
+    #
+    # ⚠️ `llm_daily_cost_quota` 需要同时配置单价（见上面的
+    # `llm_price_*`）才能真正生效；只配上限不配单价时，这个上限
+    # **无法执行**，系统会打一次 WARNING 并只按 token 配额拦截 ——
+    # 而不是假装它在生效。
+    llm_daily_token_quota: int = 0
+    llm_daily_cost_quota: float = 0.0
+
     # ---- 复习配置 ----
     # 每日最大答题数（前后端单一来源，经 /review/stats 下发给前端，见 docs/decisions.md#F-12）
     daily_review_limit: int = 10
