@@ -38,17 +38,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 测试与 lint 只需轻量依赖；torch / sentence-transformers / chromadb
-          # 体积巨大（GB 级），且单元测试不加载模型（见 tests/conftest.py 的网络守卫）。
+          # 依赖清单来自 backend/requirements-test.txt（**单一来源**）。
           #
-          # pyyaml 是**必需的测试依赖**（不是可选）：test_session_lifecycle.py
-          # 用它校验 workflow YAML。缺了它那个测试会 fail 而不是静默跳过 ——
-          # 本仓库的 CI 曾因 workflow 里的 YAML 语法错误完全没跑起来，
-          # 而当时没有任何工具能发现它（ruff/eslint/pytest 都不看 YAML）。
-          python -m pip install \
-            fastapi sqlalchemy aiosqlite pydantic pydantic-settings \
-            email-validator "python-jose[cryptography]" bcrypt celery \
-            python-multipart httpx alembic pytest pytest-asyncio ruff pyyaml
+          # 为什么不再手抄在此：最初这里是一份手抄的精简清单，结果漏掉了
+          # requirements.txt 里的 numpy —— 而 graph_service.py / asr_engine.py
+          # 在模块顶层就 import numpy，导致 CI 上 64 failed / 4 errors，
+          # 本机却全绿（本机装的是全套依赖，掩盖了缺失）。手抄必然漂移。
+          #
+          # requirements-test.txt 是 requirements.txt 的**测试子集**：
+          # sentence-transformers / chromadb / openai 等 GB 级依赖被排除，
+          # 因为单元测试不加载模型（见 tests/conftest.py 的网络守卫）。
+          python -m pip install -r requirements-test.txt
 
       - name: "Ruff lint (app: strict)"
         # 生产代码必须完全干净。此前 app/ 有 5 处问题（含 sessions.py 里

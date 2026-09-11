@@ -1,0 +1,77 @@
+# 测试与 lint 依赖（CI 与本机共用的单一来源）
+#
+# ## 为什么单独一个文件
+#
+# 最初 CI 的依赖清单是**手抄**在 `.github/workflows/ci.yml` 里的，结果与
+# 实际依赖漂移：漏掉了 `requirements.txt` 第 14 行的 numpy，而
+# `app/services/graph_service.py`、`asr/asr_engine.py` 等模块在 import 阶段
+# 就会 `import numpy`。后果是 CI 上 **64 failed / 4 errors**，
+# 而本机全绿 —— 因为本机的 conda 环境装了全套依赖，掩盖了缺失。
+#
+# 手抄清单必然漂移。这里改为单一来源，CI 直接 `pip install -r` 本文件。
+#
+# ## 为什么是"子集"而不是直接装 requirements.txt
+#
+# `requirements.txt` 里的 sentence-transformers / chromadb / openai / soundfile
+# 是 GB 级重量依赖（会拉 torch），而单元测试**不加载模型**
+# （见 tests/conftest.py 的网络守卫：默认阻断一切真实外呼）。
+# CI 装它们只会让反馈循环变慢，不会提高覆盖率。
+#
+# 因此本文件的选取标准是：**测试实际会 import 到的运行期依赖**。
+# 新增测试若用到新的运行期模块，请同步在此登记。
+#
+# 用法：
+#     pip install -r requirements-test.txt
+#     python -m pytest -q
+
+# ---- Web / ORM / 配置 ----
+fastapi
+sqlalchemy
+aiosqlite
+pydantic
+pydantic-settings
+email-validator
+python-multipart
+
+# ---- 认证 ----
+python-jose[cryptography]
+bcrypt
+
+# ---- 异步任务 ----
+celery
+
+# ---- HTTP 客户端（测试与 LLM 调用）----
+httpx
+
+# ---- 迁移 ----
+alembic
+
+# ---- 运行期被 import 的数值库 ----
+# app/services/graph_service.py 与 asr/asr_engine.py 在模块顶层 import numpy，
+# 缺少它会让 pytest 在**收集阶段**就报 ModuleNotFoundError。
+numpy
+
+# ---- PDF / 图像处理（mineru 子包的硬依赖）----
+# app/services/mineru/intake.py 在**模块顶层无条件** import：
+#     第 22 行 `import pypdfium2 as pdfium`
+#     第 23 行 `from PIL import Image`
+# 而 mineru/converter.py 又 import intake —— 所以两者都是硬依赖，
+# 不是"fitz 缺失时的可选回退"。缺少任一个都会让所有 import
+# mineru.converter 的测试失败（实测 7 个页码标签用例）。
+#
+# 注意：它们**没有**登记在 requirements.txt 里，那里只有 pypdfium2 的
+# 间接使用者（fitz/PyMuPDF 在部署环境中通常已存在）。本文件按
+# "测试实际 import 到什么"来选取，因此必须显式列出。
+pypdfium2
+Pillow
+
+# ---- 测试与 lint ----
+pytest
+pytest-asyncio
+ruff
+
+# ---- workflow YAML 校验 ----
+# tests/test_session_lifecycle.py::TestWorkflowYaml 会显式断言它可用；
+# 缺了它那个测试会 fail（而不是静默跳过），因为本仓库的 CI 曾因
+# workflow YAML 语法错误完全没跑起来，而当时没有任何工具能发现。
+pyyaml
