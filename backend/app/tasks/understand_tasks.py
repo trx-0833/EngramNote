@@ -17,7 +17,6 @@ AI 理解管道异步任务模块
 - 题目生成在理解完成后自动触发
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -39,6 +38,7 @@ from .common import (
     clear_progress_cache as _clear_progress_cache,
     task_id_of as _task_id_of,
 )
+from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 
@@ -427,43 +427,46 @@ def understand_document_task(self, note_id: str):
     Celery 任务：文档理解
 
     作为 Celery 异步任务执行，由用户手动触发。
-    使用 asyncio.run() 在同步的 Celery 任务中运行异步的理解逻辑。
+
+    阶段 4.5：整个任务体（含任务追踪的读写）共用**一个**事件循环，
+    见 `tasks/loop.py`。改造前这里有 5 次 `asyncio.run()`。
 
     Args:
         self: Celery 任务实例
         note_id: 笔记 ID
     """
     task_id = _task_id_of(self)
-    if not _begin_task_run(self, note_id):
-        return
+    with _task_loop("understand_document"):
+        if not _begin_task_run(self, note_id):
+            return
 
-    try:
-        asyncio.run(_update_note_status(note_id, NoteStatus.learning))
-        asyncio.run(_report_progress(task_id, 0.1, "正在抽取知识点"))
-        asyncio.run(_understand_document(note_id))
-        asyncio.run(_report_progress(task_id, 0.8, "正在建立卡片关联"))
-        _mark_task_succeeded(self)
-    except Exception as exc:
-        logger.error(f"理解任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:
-            self.retry(exc=exc)
-        except Retry:
-            # 正常重试调度：交给 Celery 框架，不标记失败
-            raise
-        except Exception:
-            # Celery retry() 重试耗尽时重新抛出原始异常而非
-            # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
-            # learning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
+            _run_async(_update_note_status(note_id, NoteStatus.learning))
+            _run_async(_report_progress(task_id, 0.1, "正在抽取知识点"))
+            _run_async(_understand_document(note_id))
+            _run_async(_report_progress(task_id, 0.8, "正在建立卡片关联"))
+            _mark_task_succeeded(self)
+        except Exception as exc:
+            logger.error(f"理解任务异常 (note_id={note_id}): {exc}", exc_info=True)
             try:
-                asyncio.run(_update_note_status(
-                    note_id, NoteStatus.learning_failed,
-                    error_message=f"理解任务重试失败: {str(exc)}",
-                ))
-            except Exception as update_err:
-                logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
-            _mark_task_failed(self, f"理解任务重试失败: {exc}")
-    finally:
-        _clear_progress_cache(task_id)
+                self.retry(exc=exc)
+            except Retry:
+                # 正常重试调度：交给 Celery 框架，不标记失败
+                raise
+            except Exception:
+                # Celery retry() 重试耗尽时重新抛出原始异常而非
+                # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
+                # learning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
+                try:
+                    _run_async(_update_note_status(
+                        note_id, NoteStatus.learning_failed,
+                        error_message=f"理解任务重试失败: {str(exc)}",
+                    ))
+                except Exception as update_err:
+                    logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
+                _mark_task_failed(self, f"理解任务重试失败: {exc}")
+        finally:
+            _clear_progress_cache(task_id)
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
@@ -480,7 +483,8 @@ def generate_questions_task(self, note_id: str, target_categories: Optional[list
         target_difficulty: 目标难度倾向（暂不强制使用，仅作为提示）；默认 None
     """
     try:
-        asyncio.run(_generate_questions(note_id, target_categories, target_difficulty))
+        with _task_loop("generate_questions"):
+            _run_async(_generate_questions(note_id, target_categories, target_difficulty))
     except Exception as exc:
         logger.error(f"题目生成任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:

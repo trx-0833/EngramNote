@@ -16,7 +16,8 @@
 设计决策：
 - Celery worker 运行在独立进程中，无法共享 FastAPI 的数据库连接，
   因此需要创建独立的数据库引擎和会话工厂
-- 使用 asyncio.run() 在同步的 Celery 任务中运行异步代码
+- 使用 `task_loop()` + `run_async()` 在同步的 Celery 任务中运行异步代码
+  （一个任务一个事件循环，阶段 4.5，见 tasks/loop.py）
 - 任务失败时自动重试（最多 2 次，间隔 60 秒）
 - 重试次数用尽后标记笔记为 failed，记录错误信息
 - 转换完成后将 Markdown 上传到对象存储，数据库中仅保存路径引用
@@ -45,6 +46,7 @@ from .common import (
     clear_progress_cache as _clear_progress_cache,
     task_id_of as _task_id_of,
 )
+from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
 from ..services import vault_path
@@ -285,7 +287,8 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
     Celery 任务：文档转换
 
     作为 Celery 异步任务执行，由 upload API 触发。
-    使用 asyncio.run() 在同步的 Celery 任务中运行异步的转换逻辑。
+
+    阶段 4.5：整个任务体共用**一个**事件循环（见 `tasks/loop.py`）。
 
     任务配置：
     - bind=True：可访问 self（任务实例），用于重试
@@ -300,34 +303,33 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
         backend: 解析后端选择（可选），如 "pipeline"（本地）或 "vlm-http-client"（云端），
                  为 None 时使用 config.py 中的 mineru_backend 默认值
     """
-    import asyncio
-
     task_id = _task_id_of(self)
-    if not _begin_task_run(self, note_id):
-        return
+    with _task_loop("convert_document"):
+        if not _begin_task_run(self, note_id):
+            return
 
-    try:
-        asyncio.run(_convert_document(note_id, file_path, source_type, backend, task_id=task_id))
-        _mark_task_succeeded(self)
-    except Exception as exc:
-        logger.error("转换任务异常: note_id=%s, source_type=%s, error=%s", note_id, source_type, exc)
-        # 转换失败，尝试重试
         try:
-            self.retry(exc=exc)
-        except Retry:
-            # 正常重试调度：交给 Celery 框架，不标记失败。
-            # 任务记录保持 running，由下一次执行（同一 task_id）递增 attempt；
-            # 若 worker 在此期间崩溃，则由僵尸自愈兜底。
-            raise
-        except Exception:
-            # Celery retry() 重试耗尽时会重新抛出原始异常
-            # （而非 MaxRetriesExceededError），旧代码捕获不到导致笔记
-            # 永久停留在 converting 状态。进入此分支即表示重试次数用尽，
-            # 标记笔记为失败状态（见 docs/decisions.md#F-30）。
-            asyncio.run(_update_note_status(
-                note_id, NoteStatus.failed,
-                error_message=f"转换任务重试失败: {str(exc)}",
-            ))
-            _mark_task_failed(self, f"转换任务重试失败: {exc}")
-    finally:
-        _clear_progress_cache(task_id)
+            _run_async(_convert_document(note_id, file_path, source_type, backend, task_id=task_id))
+            _mark_task_succeeded(self)
+        except Exception as exc:
+            logger.error("转换任务异常: note_id=%s, source_type=%s, error=%s", note_id, source_type, exc)
+            # 转换失败，尝试重试
+            try:
+                self.retry(exc=exc)
+            except Retry:
+                # 正常重试调度：交给 Celery 框架，不标记失败。
+                # 任务记录保持 running，由下一次执行（同一 task_id）递增 attempt；
+                # 若 worker 在此期间崩溃，则由僵尸自愈兜底。
+                raise
+            except Exception:
+                # Celery retry() 重试耗尽时会重新抛出原始异常
+                # （而非 MaxRetriesExceededError），旧代码捕获不到导致笔记
+                # 永久停留在 converting 状态。进入此分支即表示重试次数用尽，
+                # 标记笔记为失败状态（见 docs/decisions.md#F-30）。
+                _run_async(_update_note_status(
+                    note_id, NoteStatus.failed,
+                    error_message=f"转换任务重试失败: {str(exc)}",
+                ))
+                _mark_task_failed(self, f"转换任务重试失败: {exc}")
+        finally:
+            _clear_progress_cache(task_id)

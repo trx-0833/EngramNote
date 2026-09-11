@@ -17,7 +17,8 @@
   缓存键为 sha256(text)[:16]，减少内存占用并避免重复计算
 - 任务使用 acks_late=True + task_reject_on_worker_lost=True 确保可靠性，
   worker 崩溃时任务会被重新投递
-- Celery 任务为同步函数，内部通过 asyncio.run() 调用异步数据库逻辑
+- Celery 任务为同步函数；本模块**不需要**事件循环（只做模型加载与编码，
+  不碰数据库），因此没有 asyncio 调用
 """
 
 from __future__ import annotations

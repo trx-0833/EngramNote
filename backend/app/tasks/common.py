@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..services.vault_meta import write_note_meta
+from .loop import run_async
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -160,8 +161,8 @@ def task_id_of(celery_task) -> Optional[str]:
 def begin_task_run(celery_task, note_id: Optional[str] = None) -> bool:
     """任务入口：建立/复用 task_runs 记录，并检查是否已被取消
 
-    用 `asyncio.run()` 在同步的 Celery 任务体里执行一次异步写入。
-    与既有任务一致（它们本就在任务体里多次 `asyncio.run()`）。
+    用 `run_async()` 执行这一次异步写入：在任务的 `task_loop` 里会**复用**
+    该任务的循环，在任务之外（脚本、测试）则退回 `asyncio.run`（阶段 4.5）。
 
     Returns:
         True  → 继续执行任务
@@ -170,8 +171,6 @@ def begin_task_run(celery_task, note_id: Optional[str] = None) -> bool:
     说明：返回 False 而不抛异常，是为了让任务"干净地结束"而不是以失败
     出现在 Celery 结果里 —— 用户主动取消不是故障。
     """
-    import asyncio
-
     task_id = getattr(getattr(celery_task, "request", None), "id", None)
     if not task_id:
         return True
@@ -192,7 +191,7 @@ def begin_task_run(celery_task, note_id: Optional[str] = None) -> bool:
         return True
 
     try:
-        return asyncio.run(_prepare())
+        return run_async(_prepare())
     except Exception as exc:
         logger.warning("建立任务记录失败（继续执行任务）: task_id=%s, %s", task_id, exc)
         return True
@@ -200,30 +199,26 @@ def begin_task_run(celery_task, note_id: Optional[str] = None) -> bool:
 
 def mark_task_succeeded(celery_task) -> None:
     """任务成功结束：写终态（含失败时的进度缓存清理）"""
-    import asyncio
-
     task_id = task_id_of(celery_task)
     if not task_id:
         return
     try:
         from ..services.task_run_service import mark_succeeded
 
-        asyncio.run(mark_succeeded(task_id))
+        run_async(mark_succeeded(task_id))
     except Exception as exc:
         logger.debug("标记任务成功失败（忽略）: %s", exc)
 
 
 def mark_task_failed(celery_task, error: Optional[str]) -> None:
     """任务失败结束（含重试耗尽）：写终态与截断后的错误摘要"""
-    import asyncio
-
     task_id = task_id_of(celery_task)
     if not task_id:
         return
     try:
         from ..services.task_run_service import mark_failed
 
-        asyncio.run(mark_failed(task_id, error))
+        run_async(mark_failed(task_id, error))
     except Exception as exc:
         logger.debug("标记任务失败失败（忽略）: %s", exc)
 
@@ -234,15 +229,13 @@ def mark_task_cancelled(celery_task, reason: Optional[str] = None) -> None:
     与 failed 区分开：用户主动停止不是故障，UI 不应显示成红色错误，
     也不应计入失败率。
     """
-    import asyncio
-
     task_id = task_id_of(celery_task)
     if not task_id:
         return
     try:
         from ..services.task_run_service import mark_cancelled
 
-        asyncio.run(mark_cancelled(task_id, reason))
+        run_async(mark_cancelled(task_id, reason))
     except Exception as exc:
         logger.debug("标记任务取消失败（忽略）: %s", exc)
 

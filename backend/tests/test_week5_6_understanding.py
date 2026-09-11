@@ -407,58 +407,27 @@ class TestEnvGLMModelCase:
 
 
 class TestLLMService:
-    """验证 LLM 服务的基本功能"""
+    """验证 LLM 服务的基本功能
 
-    @pytest.fixture(autouse=True)
-    def _real_rate_limiter(self):
-        """★ 每个用例开始前，用**真实的整数 rpm** 把类级限流器建好
+    ## 这里曾经有一个 autouse fixture（`_real_rate_limiter`），4.5 之后删掉了
 
-        ## 为什么必须有这个 fixture
+    本类几乎所有用例都把 `app.services.llm_service.settings` 换成 `MagicMock`。
+    改造前限流器是**类级单例**、在首次实例化时按当时的 `settings.llm_max_rpm`
+    建一次 —— 若这些用例恰好是进程里第一个实例化 `LLMService` 的地方，
+    `MagicMock` 的 `llm_max_rpm` 就被冻结进单例，之后每次 `chat()` 都炸：
 
-        `LLMGateway._rate_limiter` 是**类级单例**，在**首次**实例化时按当时的
-        `settings.llm_max_rpm` 建一次，此后整个进程复用。本类几乎所有用例都把
-        `app.services.llm_service.settings` 换成了 `MagicMock` ——
-        于是 `llm_max_rpm` 是一个自动生成的 MagicMock 属性。
+        TypeError: '<=' not supported between instances of 'MagicMock' and 'int'
 
-        （阶段 4.1 之前这两个单例挂在 `LLMService` 上，搬迁后挂在网关类上，
-        保护的内容与理由完全不变。）
+    症状是**依赖执行顺序**：单独跑本文件 3 failed，跑全量却全绿
+    （全量时前面的文件已经把单例建好了，Mock 永远到不了限流器）。
+    当时的修法是加 fixture 在每个用例前主动建好单例 —— 那是测试侧的兜底。
 
-        若这些用例恰好是**进程里第一个**实例化 `LLMService` 的地方，
-        这个 MagicMock 就被固化进类级单例，同进程后续每一次 `chat()` 都会在
-        `RateLimiter.acquire` 里炸：
-
-            TypeError: '<=' not supported between instances of 'MagicMock' and 'int'
-
-        ## 症状是"依赖执行顺序"，这类测试不是门禁
-
-        实测（2026-09-11，改动前）：
-
-            单独跑 tests/test_week5_6_understanding.py  → 3 failed
-            跑全量 pytest                              → 全绿
-
-        全量能过只是因为**前面的文件已经把单例建好了**，Mock 永远到不了限流器。
-        一个"必须和别人一起跑才通过"的测试不能用来判断改动有没有破坏东西 ——
-        而它恰恰会在最需要它的时候（只跑这一个文件排查问题）给出假警报。
-
-        修法是**在每个用例之前**主动建好单例（而不是逐个用例补 `llm_max_rpm`）：
-        这样任何"构造 LLMService 时 settings 被 Mock"的用例都自动安全，
-        将来新增用例也不会重蹈覆辙。
-
-        ⚠️ 产品侧的根因（类级单例在首次实例化时**冻结配置**）留给阶段 4.5 ——
-        那一项的内容正是"限流器/信号量改为每 loop 惰性创建"。
-        这里只修测试侧。
-        """
-        import asyncio
-
-        from app.services.llm.gateway import LLMGateway
-        from app.services.llm_service import LLMService, RateLimiter  # noqa: F401
-
-        LLMGateway._rate_limiter = RateLimiter(max_rpm=10)
-        LLMGateway._semaphore = asyncio.Semaphore(3)
-        yield
-        # 用例结束后还原成"未创建"，避免本类的 Mock 泄漏给后续用例
-        LLMGateway._rate_limiter = None
-        LLMGateway._semaphore = None
+    阶段 4.5 修掉了根因：限流参数只从**全局配置**读（网关自己读
+    `get_settings()`），服务层那份可能被替换的 `settings` 再也到不了令牌桶。
+    于是这个 fixture 连同它的解释一起删除 —— **靠 fixture 兜住的缺陷，
+    修好之后就该把 fixture 也删掉**，否则它会掩盖同类的下一次回归。
+    对应的回归用例见 `tests/test_llm_gateway.py::test_mocked_settings_cannot_poison_the_limiter`。
+    """
 
     def test_llm_service_init_with_debug(self):
         """debug 模式下 LLMService 应使用 GLM 配置"""

@@ -39,40 +39,88 @@ LLM 网关：所有外部模型调用的**唯一出口**（overhaul-plan 阶段 
 把 2 放在 3 之前是有意的：否则一批重复请求会在信号量上白白排队，
 而它们本来可以立刻返回。
 
-## 这里的类级单例：一个已知缺陷，归属阶段 4.5
+## 调用资源按**事件循环**惰性创建（阶段 4.5）
 
-`_rate_limiter` / `_semaphore` 是**类级共享**的（所有实例共用一个令牌桶与闸门，
-见 docs/decisions.md#F-05），且**在首次实例化时按当时的 settings 建一次**。
+`asyncio.Semaphore` / `asyncio.Lock`（令牌桶内部有锁）都绑定创建它们的事件循环。
+阶段 4.5 之前，限流器与信号量是**类级单例、在首次实例化时建一次**，
+于是有两个后果：
 
-于是配置被"冻结"在第一次使用的那一刻 —— 这与 conftest 里早已记录的
-"import/首次调用时冻结数据库地址"是同一类缺陷。它在测试里的表现是
-**依赖执行顺序**（见附录 AE.8）。
+1. **配置被冻结**在第一次使用的那一刻（与 conftest 里记录的
+   "import 时冻结数据库地址"是同一类缺陷），在测试里的表现是
+   **依赖执行顺序**（见附录 AE.8）；
+2. 在 Celery 这类"一个任务一个 loop"的环境里，`asyncio.Semaphore`
+   可能建在 loop A 却在 loop B 里被 await —— 那是 `RuntimeError:
+   ... is bound to a different event loop`，而且只在多任务并发时才偶发。
 
-⚠️ 本次搬迁**只是把这两个单例挪了个位置，没有改语义**。
-完整修法（"改为每 loop 惰性创建"）是计划里的 **4.5**，
-把它和"Celery 任务只用一次 asyncio.run 包裹"放在一起做才对 ——
-只做一半会让"单例到底属于哪个 loop"更难判断。
+现在改为 `_loop_resources()`：以**运行中的事件循环对象**为键
+（`weakref.WeakKeyDictionary`，loop 被回收时资源自动消失），
+在第一次真正调用时按**当时的配置**创建。于是：
+
+    API 进程（单 loop）       → 一份资源，进程内所有实例共享（与改造前意图一致）
+    Celery（每任务一个 loop） → 每个任务一份，任务结束随 loop 释放
+    每个测试（各自新 loop）   → 天然隔离，不再需要"预先建好单例"的 fixture
+
+限流相关的 rpm 由网关**自己从全局配置读**（`get_settings()`），
+不接受服务层传入：限流是网关的策略，而且这样"测试把 settings 换成
+MagicMock"也不会把一个 MagicMock 塞进令牌桶（那正是附录 AE.8 那个
+`TypeError: '<=' not supported between MagicMock and int` 的成因）。
 """
 
 import asyncio
 import json
 import logging
 import random
+import threading
 import time
+import weakref
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
 from ...config import get_settings
-from ..llm_accounting_service import record_call
+from ..llm_accounting_service import current_context, record_call
 from .client import _response_snippet, _truncate_messages, build_llm_headers, get_llm_client
 from .json_parse import strip_json_fences
-from .rate_limit import RateLimiter
+from .rate_limit import KeyedRateLimiter, RateLimiter
 
 logger = logging.getLogger("engramnote.llm")
 
-#: 并发闸门上限（所有实例共享）。见类文档里关于类级单例的说明。
+#: 并发闸门上限（每个事件循环一份）
 MAX_CONCURRENCY = 3
+
+#: 无用户上下文时的桶名。**不是免检**：否则"没接上下文"就成了绕过限流的办法。
+ANONYMOUS_BUCKET = "__anonymous__"
+
+
+@dataclass
+class _LoopResources:
+    """一个事件循环内共享的调用资源（信号量 + 三层令牌桶）
+
+    三层桶的顺序（先问"是谁"，再问"问谁"，最后过总闸门）有意如此：
+    在前两层等待时**不占用**总闸门的令牌 —— 否则一个被个人限额拖住的用户
+    会把全局令牌一起扣住，反而更容易饿死别人。
+    """
+    semaphore: asyncio.Semaphore
+    global_limiter: RateLimiter
+    user_limiters: KeyedRateLimiter
+    provider_limiters: KeyedRateLimiter
+    max_rpm: int
+
+    async def acquire_slots(self, *, user_id: Optional[str], provider: Optional[str]) -> None:
+        cfg = get_settings()
+        # 1) 按用户：谁在问
+        await self.user_limiters.acquire(
+            user_id or ANONYMOUS_BUCKET,
+            int(getattr(cfg, "llm_user_max_rpm", 0) or 0),
+        )
+        # 2) 按供应商：问的是谁
+        await self.provider_limiters.acquire(
+            provider or "__unknown__",
+            int(getattr(cfg, "llm_provider_max_rpm", 0) or 0),
+        )
+        # 3) 总闸门
+        await self.global_limiter.acquire()
 
 
 class LLMGateway:
@@ -84,9 +132,10 @@ class LLMGateway:
         meta = await gateway.chat_detailed(messages, scene="extract")
     """
 
-    # 类级共享限流器与并发闸门（见类文档里"类级单例"的说明）
-    _rate_limiter: Optional[RateLimiter] = None
-    _semaphore: Optional[asyncio.Semaphore] = None
+    #: 每个事件循环一份资源；loop 被回收时自动清理（见模块说明里的 4.5 一节）
+    _loop_resources: "weakref.WeakKeyDictionary[Any, _LoopResources]" = weakref.WeakKeyDictionary()
+    #: 保护 `_loop_resources` 的**线程**锁（不同线程可能各建自己的 loop）
+    _resources_lock = threading.Lock()
 
     def __init__(
         self,
@@ -121,13 +170,37 @@ class LLMGateway:
         self._cache_enabled = cache_enabled
         self._cache_ttl_days = cache_ttl_days
 
-        # 实例化时确保类级限流/信号量已就绪（线程安全：先创建后赋值，重复创建无害）
-        if LLMGateway._rate_limiter is None:
-            LLMGateway._rate_limiter = RateLimiter(max_rpm=get_settings().llm_max_rpm)
-        if LLMGateway._semaphore is None:
-            LLMGateway._semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-        self._rate_limiter = LLMGateway._rate_limiter
-        self._semaphore = LLMGateway._semaphore
+        # 注意：限流器与信号量**不在这里创建**（阶段 4.5）。
+        # `asyncio.Semaphore`/`asyncio.Lock` 绑定创建它们的事件循环，而
+        # 构造函数既可能在无 loop 的上下文里被调用，也可能在一个"用完就关"的
+        # Celery loop 里被调用。因此改为在真正发请求时按当前 loop 惰性创建，
+        # 见 `_resources()`。
+
+    @classmethod
+    def _resources(cls) -> _LoopResources:
+        """取当前事件循环的资源（不存在则按当前配置创建）
+
+        ⚠️ 必须在**运行中的**事件循环里调用（`get_running_loop`）。
+        以 loop 对象本身为键而不是 `id(loop)`：loop 被 GC 后 id 会被复用，
+        用 id 做键会让新 loop 误用旧 loop 的资源（附录 W 里 `id()` 复用的
+        那个坑是同一类）。
+        """
+        loop = asyncio.get_running_loop()
+        max_rpm = int(getattr(get_settings(), "llm_max_rpm", 0) or 0)
+        with cls._resources_lock:
+            resources = cls._loop_resources.get(loop)
+            if resources is None or resources.max_rpm != max_rpm:
+                # rpm 改了就整体重建：旧桶的余量与补充速率都属于旧配置，
+                # 继续用会让"调小限额"在桶耗尽之前不生效。
+                resources = _LoopResources(
+                    semaphore=asyncio.Semaphore(MAX_CONCURRENCY),
+                    global_limiter=RateLimiter(max_rpm=max_rpm),
+                    user_limiters=KeyedRateLimiter(),
+                    provider_limiters=KeyedRateLimiter(),
+                    max_rpm=max_rpm,
+                )
+                cls._loop_resources[loop] = resources
+            return resources
 
     @classmethod
     def from_settings(cls) -> "LLMGateway":
@@ -239,8 +312,13 @@ class LLMGateway:
             if hit is not None:
                 return hit
 
-        async with self._semaphore:
-            await self._rate_limiter.acquire()
+        # 阶段 4.5：资源按**当前事件循环**取（信号量 + 三层令牌桶）
+        resources = self._resources()
+        user_id = current_context().user_id
+
+        async with resources.semaphore:
+            # 阶段 4.4：先按用户、再按供应商、最后过总闸门（顺序理由见 _LoopResources）
+            await resources.acquire_slots(user_id=user_id, provider=self._provider)
 
             last_error = None
             for attempt in range(self._max_retries):
@@ -386,8 +464,12 @@ class LLMGateway:
         total_content: List[str] = []
         usage: Dict[str, Any] = {}
 
-        async with self._semaphore:
-            await self._rate_limiter.acquire()
+        # 阶段 4.5 / 4.4：与 chat_detailed 同一套资源与同一套顺序
+        resources = self._resources()
+        user_id = current_context().user_id
+
+        async with resources.semaphore:
+            await resources.acquire_slots(user_id=user_id, provider=self._provider)
             try:
                 # 复用模块级共享客户端，见 docs/decisions.md#F-05
                 client = get_llm_client()
@@ -520,7 +602,12 @@ class LLMGateway:
         不限配额时零开销：`check_quota` 在两项配额都为 0（默认）时第一行就返回，
         不碰数据库。
         """
-        from ..llm_accounting_service import LLMQuotaExceeded, check_quota, current_context
+        # ⚠️ `check_quota` 是**函数内** import，不是随手写的：这样每次调用都
+        # 重新取 `llm_accounting_service.check_quota`，测试才能用
+        # `monkeypatch.setattr(acc, "check_quota", ...)` 注入阈值
+        # （见 tests/test_llm_accounting.py::_patch_quota）。
+        # 改成模块级 import 会让那个 patch 静默失效。
+        from ..llm_accounting_service import LLMQuotaExceeded, check_quota
 
         user_id = current_context().user_id
         if not user_id:

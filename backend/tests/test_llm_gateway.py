@@ -24,7 +24,6 @@
 "行为未变"证据；本文件只补搬迁特有的那几条（转发、单一入口、顺序）。
 """
 
-import asyncio
 import os
 from typing import Any, AsyncIterator, Dict, List
 from unittest.mock import MagicMock
@@ -247,8 +246,17 @@ class TestSingleEntryPoint:
 
     def test_gateway_owns_transport_and_governance(self):
         src = _read(GATEWAY_SRC)
-        for marker in ("get_llm_client", "record_call", "asyncio.sleep",
-                       "_rate_limiter", "_semaphore", "_enforce_quota", "_lookup_cache"):
+        for marker in (
+            "get_llm_client",        # 传输
+            "record_call",           # 记账
+            "asyncio.sleep",         # 重试退避
+            "semaphore",             # 并发闸门
+            "global_limiter",        # 总闸门（4.5 后按 loop 惰性创建）
+            "user_limiters",         # 4.4 按用户分桶
+            "provider_limiters",     # 4.4 按供应商分桶
+            "_enforce_quota",        # 4.3 配额
+            "_lookup_cache",         # 4.7 缓存
+        ):
             assert marker in src, f"gateway.py 缺少 '{marker}'"
 
     def test_service_size_shrank_after_extraction(self):
@@ -266,29 +274,36 @@ class TestSingleEntryPoint:
 # 调用顺序（顺序本身是设计，见 gateway 模块说明）
 # ---------------------------------------------------------------------------
 
-class _SpyLimiter:
-    """只数次数、不真的限流（真限流器在 RPM=1 时会让测试挂住）"""
+class _SpyRateLimiter:
+    """只数次数、不真的限流（真限流器在低 RPM 时会让测试挂住）
 
-    def __init__(self):
+    阶段 4.5 之后限流器不再是类级单例，而是在**当前事件循环**里按配置惰性创建。
+    因此这里 patch 的是**类**（`gateway_mod.RateLimiter`），
+    网关新建的每一个桶都会是这个假类的实例 —— 计数与"桶属于哪个 loop"无关。
+    """
+
+    instances: List["_SpyRateLimiter"] = []
+
+    def __init__(self, max_rpm: int = 10):
+        self.max_rpm = max_rpm
         self.acquires = 0
+        _SpyRateLimiter.instances.append(self)
 
     async def acquire(self) -> bool:
         self.acquires += 1
         return True
 
+    @classmethod
+    def total_acquires(cls) -> int:
+        return sum(inst.acquires for inst in cls.instances)
+
 
 @pytest.fixture
 def spy_limiter(monkeypatch):
-    """把网关的类级限流器换成计数器，并隔离信号量
-
-    类级单例（4.5 之前的设计）必须先替换掉：否则某个用例里建的
-    `asyncio.Semaphore` 会绑定到该用例的事件循环，被下一个用例复用时
-    报 "bound to a different event loop"。
-    """
-    spy = _SpyLimiter()
-    monkeypatch.setattr(LLMGateway, "_rate_limiter", spy)
-    monkeypatch.setattr(LLMGateway, "_semaphore", asyncio.Semaphore(3))
-    return spy
+    """把网关的令牌桶换成计数器（信号量保持真实实现）"""
+    _SpyRateLimiter.instances = []
+    monkeypatch.setattr(gateway_mod, "RateLimiter", _SpyRateLimiter)
+    return _SpyRateLimiter
 
 
 @pytest.fixture
@@ -329,8 +344,8 @@ class TestCallOrdering:
 
         assert counting_client["posts"] == 1, "第二次相同输入仍然发了 HTTP 请求"
         assert first["content"] == second["content"]
-        assert spy_limiter.acquires == 1, (
-            f"限流令牌被取了 {spy_limiter.acquires} 次，命中缓存的那次不该取"
+        assert spy_limiter.total_acquires() == 1, (
+            f"限流令牌被取了 {spy_limiter.total_acquires()} 次，命中缓存的那次不该取"
         )
 
     async def test_quota_is_checked_before_cache_lookup(
@@ -370,7 +385,7 @@ class TestCallOrdering:
 
         assert lookups["n"] == 0, "配额已超却仍然查了缓存"
         assert counting_client["posts"] == 1, "配额已超却仍然发了请求"
-        assert spy_limiter.acquires == 1, "配额已超却仍然取了限流令牌"
+        assert spy_limiter.total_acquires() == 1, "配额已超却仍然取了限流令牌"
 
     async def test_cache_disabled_calls_every_time(
         self, test_db, spy_limiter, counting_client, monkeypatch,
@@ -404,3 +419,32 @@ class TestCallOrdering:
 
         assert lookups["n"] == 0, "缓存已关闭却仍然查了缓存"
         assert counting_client["posts"] == 2, "缓存已关闭却没有每次都调用模型"
+
+    async def test_mocked_settings_cannot_poison_the_limiter(
+        self, test_db, counting_client, monkeypatch,
+    ):
+        """★ 附录 AE.8 那个"依赖执行顺序"的缺陷，根因已在 4.5 修掉
+
+        改造前：把 `llm_service.settings` 换成 `MagicMock` 的用例若恰好是本进程
+        第一次实例化 `LLMService`，`MagicMock` 的 `llm_max_rpm` 会被冻结进
+        **类级**单例，之后每次 `acquire` 都炸
+        `TypeError: '<=' not supported between instances of 'MagicMock' and 'int'`。
+        症状是"单独跑这个文件失败、全量跑通过"—— 一个必须和别人一起跑才通过的
+        测试，恰恰会在最需要它的时候给出假警报。
+
+        4.5 之后限流参数只从**全局配置**读（网关自己读 `get_settings()`），
+        服务层那份可能被替换的 `settings` 再也到不了令牌桶，因此这里
+        不需要任何 fixture 兜底：这个用例本身就是那条防线。
+        """
+        import app.services.llm_service as llm_mod
+        from app.services.llm_service import LLMService
+
+        fake_settings = MagicMock()
+        fake_settings.get_llm_config.return_value = _real_llm_config()
+        monkeypatch.setattr(llm_mod, "settings", fake_settings)
+
+        service = LLMService()
+        result = await service.chat_detailed(MESSAGES, scene="poison_test")
+        assert result["content"]
+        # 服务层那份 settings 的 llm_max_rpm 是 MagicMock，但它从未被读取
+        assert fake_settings.llm_max_rpm is not None

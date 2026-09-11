@@ -41,6 +41,7 @@ from .common import (
     clear_progress_cache as _clear_progress_cache,
     task_id_of as _task_id_of,
 )
+from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..services import vault_path
@@ -414,7 +415,9 @@ def clean_document_task(self, note_id: str):
     Celery 任务：文档清洗
 
     作为 Celery 异步任务执行，由转换完成或用户手动触发。
-    使用 asyncio.run() 在同步的 Celery 任务中运行异步的清洗逻辑。
+
+    阶段 4.5：整个任务体共用**一个**事件循环（见 `tasks/loop.py`），
+    改造前这里有 7 次 `asyncio.run()`。
 
     任务配置：
     - bind=True：可访问 self（任务实例），用于重试
@@ -425,61 +428,60 @@ def clean_document_task(self, note_id: str):
         self: Celery 任务实例（bind=True 时自动传入）
         note_id: 笔记 ID
     """
-    import asyncio
-
     task_id = _task_id_of(self)
-    if not _begin_task_run(self, note_id):
-        return
-
-    try:
-        # 检查笔记是否已被用户停止清洗
-        current_status = asyncio.run(_get_note_status(note_id))
-        if current_status == NoteStatus.cleaning_failed:
-            logger.info(f"笔记已被用户停止清洗，跳过任务 (note_id={note_id})")
-            _mark_task_cancelled(self, "笔记已被用户停止清洗")
+    with _task_loop("clean_document"):
+        if not _begin_task_run(self, note_id):
             return
 
-        # 将状态更新为 cleaning
-        # 手动触发时 API 层已预更新，此步为冗余但无害；
-        # 自动触发（转换完成后）时 API 层未预更新，此步为必要
         try:
-            asyncio.run(_update_note_status(note_id, NoteStatus.cleaning))
-        except Exception:
-            pass
-
-        asyncio.run(_report_progress(task_id, 0.1, "正在清洗文本"))
-        asyncio.run(_clean_document(note_id))
-        asyncio.run(_report_progress(task_id, 0.95, "清洗完成"))
-        _mark_task_succeeded(self)
-    except Exception as exc:
-        logger.error(f"清洗任务异常 (note_id={note_id}): {exc}", exc_info=True)
-
-        # 重试前检查：如果用户已停止清洗，不再重试
-        try:
-            current_status = asyncio.run(_get_note_status(note_id))
+            # 检查笔记是否已被用户停止清洗
+            current_status = _run_async(_get_note_status(note_id))
             if current_status == NoteStatus.cleaning_failed:
-                logger.info(f"笔记已被用户停止清洗，放弃重试 (note_id={note_id})")
+                logger.info(f"笔记已被用户停止清洗，跳过任务 (note_id={note_id})")
                 _mark_task_cancelled(self, "笔记已被用户停止清洗")
                 return
-        except Exception:
-            pass  # 状态查询失败时仍尝试重试
 
-        try:
-            self.retry(exc=exc)
-        except Retry:
-            # 正常重试调度：交给 Celery 框架，不标记失败
-            raise
-        except Exception:
-            # Celery retry() 重试耗尽时重新抛出原始异常而非
-            # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
-            # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
+            # 将状态更新为 cleaning
+            # 手动触发时 API 层已预更新，此步为冗余但无害；
+            # 自动触发（转换完成后）时 API 层未预更新，此步为必要
             try:
-                asyncio.run(_update_note_status(
-                    note_id, NoteStatus.cleaning_failed,
-                    error_message=f"清洗任务重试失败: {str(exc)}",
-                ))
-            except Exception as update_err:
-                logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
-            _mark_task_failed(self, f"清洗任务重试失败: {exc}")
-    finally:
-        _clear_progress_cache(task_id)
+                _run_async(_update_note_status(note_id, NoteStatus.cleaning))
+            except Exception:
+                pass
+
+            _run_async(_report_progress(task_id, 0.1, "正在清洗文本"))
+            _run_async(_clean_document(note_id))
+            _run_async(_report_progress(task_id, 0.95, "清洗完成"))
+            _mark_task_succeeded(self)
+        except Exception as exc:
+            logger.error(f"清洗任务异常 (note_id={note_id}): {exc}", exc_info=True)
+
+            # 重试前检查：如果用户已停止清洗，不再重试
+            try:
+                current_status = _run_async(_get_note_status(note_id))
+                if current_status == NoteStatus.cleaning_failed:
+                    logger.info(f"笔记已被用户停止清洗，放弃重试 (note_id={note_id})")
+                    _mark_task_cancelled(self, "笔记已被用户停止清洗")
+                    return
+            except Exception:
+                pass  # 状态查询失败时仍尝试重试
+
+            try:
+                self.retry(exc=exc)
+            except Retry:
+                # 正常重试调度：交给 Celery 框架，不标记失败
+                raise
+            except Exception:
+                # Celery retry() 重试耗尽时重新抛出原始异常而非
+                # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
+                # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
+                try:
+                    _run_async(_update_note_status(
+                        note_id, NoteStatus.cleaning_failed,
+                        error_message=f"清洗任务重试失败: {str(exc)}",
+                    ))
+                except Exception as update_err:
+                    logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
+                _mark_task_failed(self, f"清洗任务重试失败: {exc}")
+        finally:
+            _clear_progress_cache(task_id)

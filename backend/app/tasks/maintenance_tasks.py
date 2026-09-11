@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 from .celery_app import celery_app
+from .loop import run_async, task_loop
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ def reap_stale_tasks_task() -> dict:
     """
     from ..services.task_run_service import reap_stale_tasks
 
-    result = asyncio.run(reap_stale_tasks(STALE_AFTER_SECONDS))
+    with task_loop("reap_stale_tasks"):
+        result = run_async(reap_stale_tasks(STALE_AFTER_SECONDS))
     if result["reaped"]:
         logger.warning(
             "僵尸任务自愈完成: 扫描 %d，标记 %d，释放笔记 %d",
@@ -58,7 +60,8 @@ def backup_database_task() -> dict:
     """
     from ..services.backup_service import run_scheduled_backup
 
-    result = asyncio.run(_backup_in_thread(run_scheduled_backup))
+    with task_loop("backup_database"):
+        result = run_async(_backup_in_thread(run_scheduled_backup))
     if not result.get("ok"):
         logger.error("每日备份未成功: %s", result)
     else:

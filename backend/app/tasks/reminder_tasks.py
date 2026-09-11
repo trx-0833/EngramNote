@@ -9,11 +9,10 @@
 
 设计决策：
 - SMTP 未配置时跳过邮件发送，仅记录 info 日志
-- 任务使用 asyncio.run() 包装异步服务调用
+- 任务使用 `task_loop()` + `run_async()` 包装异步服务调用（阶段 4.5）
 - 单用户发送失败不影响其他用户
 """
 
-import asyncio
 import logging
 
 from celery import shared_task
@@ -24,6 +23,7 @@ from ..database import async_session
 from ..models.user import User
 from ..services.notification_service import NotificationService
 from ..services.goal_service import goal_service
+from .loop import run_async, task_loop
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -80,7 +80,8 @@ def send_daily_review_email():
             return sent_count, len(users)
 
     try:
-        sent, total = asyncio.run(_run())
+        with task_loop("send_daily_reminders"):
+            sent, total = run_async(_run())
         return f"sent={sent}, total={total}"
     except Exception as e:
         logger.error(f"每日提醒邮件任务执行失败: {e}", exc_info=True)
@@ -102,7 +103,8 @@ def refresh_goal_progress_task():
         await goal_service.refresh_goal_progress()
 
     try:
-        asyncio.run(_run())
+        with task_loop("refresh_goal_progress"):
+            run_async(_run())
         logger.info("学习目标进度刷新完成")
         return "ok"
     except Exception as e:
