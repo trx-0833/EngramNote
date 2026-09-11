@@ -117,6 +117,18 @@ jobs:
         run: npm run format:check
         continue-on-error: true
 
+      - name: Vitest (unit + component, jsdom)
+        # 这一层是**阻断性**的，与 format:check 不同。
+        #
+        # 为什么必须有：在附录 Z / AA 两轮里前端只有 tsc + eslint + build
+        # 三道**静态**检查，它们发现不了"正文在翻面前就露出来了""勾了语义
+        # 判分但回车提交没带上"这类**运行时**错误 —— 而后者正是那两轮
+        # 真实踩到的坑（后一个 TypeScript 完全通过）。
+        #
+        # 用例保持在纯前端范围内：所有 API 模块都被 vi.mock 掉，
+        # 不发真实请求，因此不需要后端或数据库。
+        run: npm test
+
       - name: TypeScript + build
         run: npm run build
 

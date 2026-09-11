@@ -1,8 +1,31 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // 单元测试（Vitest + Testing Library + jsdom）
+  //
+  // ## 为什么现在才加
+  //
+  // 在附录 Z / AA 那两轮里，前端改动一直只有 tsc + eslint + build 三道
+  // **静态**保证 —— 它们能发现类型错误和语法问题，但发现不了
+  // "正文在翻面前就露出来了""勾了语义判分但回车提交没带上"这类
+  // **运行时**错误，而后者正是那两轮真实踩到的坑。
+  //
+  // ## 为什么测试文件与被测文件同目录
+  //
+  // `vi.mock('../../api/qa')` 这类路径是**相对调用它的文件**解析的。
+  // 放进 `__tests__/` 子目录会让每个 mock 路径多一层 `../`，
+  // 与被测文件里的写法不一致 —— 抄错一层就会得到"mock 没生效、
+  // 测试悄悄打到未 mock 的模块"这种难查的失败。同目录最省事。
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    // 每个用例后复位 mock 调用记录（不清除实现），避免用例间互相污染
+    clearMocks: true,
+  },
   server: {
     port: 5173,
     proxy: {
