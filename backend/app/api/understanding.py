@@ -555,6 +555,15 @@ async def ask_question(
                 note_title=s["note_title"],
                 chapter_title=s.get("chapter_title"),
                 relevant_text=s["relevant_text"],
+                # 定位字段（阶段 2.7）：漏传任何一个，前端就只能"显示来源"
+                # 而不能"跳到原文"，且不会有报错 —— 属于静默降级
+                chunk_id=s.get("chunk_id"),
+                chunk_index=s.get("chunk_index"),
+                char_start=s.get("char_start"),
+                char_end=s.get("char_end"),
+                heading_path=s.get("heading_path"),
+                line_start=s.get("line_start"),
+                line_end=s.get("line_end"),
             )
             for s in result.get("sources", [])
         ],

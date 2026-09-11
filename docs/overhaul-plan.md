@@ -2954,7 +2954,7 @@ M-4 与 1.13 仍未做。）
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
 | 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | ✅ **已落地**（附录 M）：`segment_with_offsets` 成为唯一分块器，`split_into_chunks` 已删除（**-253 行**，实测零调用方）；两个调用点均改走同一函数、同一 `chunk_size` |
-| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪 / 前端被阻断**（附录 L/M/N.4）：chunk 已带 `char_start/char_end/heading_path/line_start/line_end`，但**位置信息在检索链路上被丢弃**（`_rrf_fusion` 只保留固定字段）、`AnswerSource` 也无定位字段。补齐需要 2.2′ 的 `chunks` 表（见 N.4） |
+| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | ✅ **已落地**（附录 S）：后端贯通 `AnswerSource`（含 OpenAPI 契约）；前端 `citationJump.ts` + QA 页跳转 + `NoteDetail` 定位高亮。**含必要的失败退化**（见 S.4） |
 | 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 | ⛔ 不执行（无 PG） |
 | 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ✅ **已落地**（附录 R）：两路统一跑 chunk 语料。生产路径实测严格 Recall@5 **59.74%**（旧卡片语料 37.52%） |
 | 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ✅ **检索侧已彻底删除**（附录 R）：`_search_vectors_async` + `search_vectors` 任务 + `_collection_matches_current_model`，共 **−169 行**。**Chroma 仍被清洗去重使用**，故依赖与目录保留（见 R.4） |
@@ -4947,6 +4947,93 @@ chunk 语料 严格 Recall@5 = 59.74%（生产路径实测）
   差接到 `AnswerSource` 与前端
 - **2.5′** FTS5
 - **Chroma 彻底移除**（R.4）：需先迁移清洗去重
+- `embed_chunks.py` / `chunk_search_service.py` 的行为测试（附录 Q.3）
+
+---
+
+## 附录 S · 阶段 2.7：引用可回跳（2026-09-11）
+
+### S.1 贯通链路（四层里原先丢了三层）
+
+```
+chunks 表          char_start/char_end/heading_path/line_*     ✅ 已有
+  └→ 检索结果        _search_chunk_vectors 原样返回              ✅ 已有
+       └→ RRF 融合    附加字段白名单已扩为定位字段集合            ✅ 附录 P.4.2
+            └→ sources  build_context_and_sources 带上定位字段    ✅ 本次
+                 └→ AnswerSource（Pydantic + OpenAPI）            ✅ 本次
+                      └→ 前端 interface + 跳转 + 高亮             ✅ 本次
+```
+
+`AnswerSource` 新增 7 个可选字段：`chunk_id` / `chunk_index` /
+`char_start` / `char_end` / `heading_path` / `line_start` / `line_end`，
+已验证进入 OpenAPI 契约（前端类型据此更新）。
+
+### S.2 修掉一个会直接误导用户的不一致
+
+引用编号 `[N]` 原先按**融合排名**生成，而 sources 列表若按**原文位置**排序，
+回答里的 `[1]` 就会指向 sources 的另一项 —— 用户点"第 1 条引用"跳到别处。
+这类错位不报错，只会让人以为系统在胡说。
+
+改为**同一次遍历**产出上下文与 sources：编号即 `sources` 下标 + 1。
+该逻辑抽成纯函数 `build_context_and_sources`，因为原先内嵌在
+`retrieve_context` 里、要调用 LLM 才能跑完，**关键一致性无法被任何测试覆盖**。
+
+同时把去重键从 `note_id` 改为 `chunk_id`：按笔记去重会让同一篇笔记只保留
+第一个 chunk，而用户看到的可能是该笔记第 3 段 —— 点过去跳到另一段。
+
+### S.3 前端实现的关键难点：偏移无法直接映射到 DOM
+
+后端给的是**源文**里的字符下标，而正文是 `renderMarkdown()` 产出的 HTML
+（Markdown 标记已被去掉、段落被包进标签）。所以"源文第 1000~1500 字符"
+**不能**直接换算成 DOM 位置 —— 这是本功能真正的难点。
+
+采用的办法（`utils/citationJump.ts`）：
+
+1. 用 `char_start/char_end` 从 Markdown 源文切出 chunk（精确，后端保证一致）
+2. `stripMarkdown()` 把切片规范化成"可在渲染文本里搜索的指纹"
+   （去行内代码/链接/标题号/列表号、压缩空白 —— 渲染后这些标记不存在了）
+3. `TreeWalker` 在容器纯文本里找指纹，用 `Range.surroundContents` 包 `<mark>`
+4. 逐级退化的候选：完整指纹 → 40 字 → 20 字
+
+**`view=clean` 是必需的**：chunk 偏移基于 clean 副本计算，
+若页面显示 original 副本，同一组偏移指向**另一段文字**。
+`NoteDetail` 的跳转 effect 因此强制切到 clean 视图。
+
+### S.4 必要的失败退化（不给错误的高亮）
+
+指纹可能因行内格式差异而搜不到。此时**必须**有明确失败路径：
+
+| 情况 | 行为 |
+|---|---|
+| 找不到指纹 | 滚动到容器开头，并 toast 提示"未能定位到引用段落" |
+| `surroundContents` 跨元素抛错 | 同上（区间跨多个元素时必然抛错） |
+| 引用缺 `char_start/char_end` | **不提供跳转**，显示"（无定位）"并置灰 |
+
+第二、三条是刻意的：**给出错误的高亮比不给更糟** —— 用户会据此以为
+"引用内容就是被高亮的那段"，从而得出错误结论。
+
+### S.5 交付与验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| 引用构建（可测纯函数） | `app/services/rag_service.py`（`build_context_and_sources`） | 编号一致性、按 chunk 去重、定位字段、标题回退 |
+| API 契约 | `app/schemas/knowledge.py`、`api/understanding.py` | 7 字段进 OpenAPI |
+| 高亮工具 | `frontend/src/utils/citationJump.ts` | 指纹构建、Markdown 剥离、失败退化 |
+| QA 页跳转 | `frontend/src/pages/QA.tsx` | 带 `?view=clean&cs=&ce=`；缺定位时才不给跳转 |
+| 详情页定位 | `frontend/src/pages/NoteDetail.tsx` | 强制 clean 视图；高亮后清理 URL 参数 |
+| 面板内跳转 | `frontend/src/components/NoteAskPanel.tsx` | 当前笔记内直接定位（不跳路由） |
+| 高亮样式 | `frontend/src/styles/markdown-extras.css` | `.citation-highlight`，与批注高亮刻意区分 |
+
+测试：后端 **463 passed / 3 skipped**；`ruff app tests scripts` 全绿；
+前端 `tsc --noEmit` / `eslint` / `npm run build` 全部通过。
+
+### S.6 仍未完成
+
+- **前端缺少单元测试**：`citationJump.ts` 的指纹与退化逻辑只有实现、
+  没有测试（前端工程当前无测试框架，属既有缺口，见 §2.8 F-16 一类）
+- **未做真实浏览器验证**：无法在此环境里点开页面确认高亮视觉效果，
+  仅验证了类型、lint、构建与后端字段贯通
+- **2.5′** FTS5（见附录 T）
 - `embed_chunks.py` / `chunk_search_service.py` 的行为测试（附录 Q.3）
 
 ---

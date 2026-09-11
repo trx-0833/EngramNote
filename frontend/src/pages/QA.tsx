@@ -281,16 +281,48 @@ export default function QA() {
                 {record.sources.length > 0 && (
                   <div style={{ marginTop: 'var(--space-md)', paddingTop: 'var(--space-sm)', borderTop: '1px solid var(--color-border)' }}>
                     <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)' }}>引用来源:</p>
-                    {record.sources.map((source, sIdx) => (
-                      <div
-                        key={sIdx}
-                        style={{ fontSize: '0.8rem', color: 'var(--color-primary)', cursor: 'pointer', marginBottom: '2px' }}
-                        onClick={() => navigate(`/notes/${source.note_id}`)}
-                      >
-                        📄 {source.note_title}
-                        {source.chapter_title && ` > ${source.chapter_title}`}
-                      </div>
-                    ))}
+                    {record.sources.map((source, sIdx) => {
+                      // 阶段 2.7：带定位信息才能跳到原文那一段。
+                      // 缺 char_start/char_end 时**不提供跳转** —— 跳到笔记开头
+                      // 会让用户以为"引用就是开头那段"，比不给跳转更容易误导。
+                      const canJump =
+                        typeof source.char_start === 'number' &&
+                        typeof source.char_end === 'number' &&
+                        source.char_end > source.char_start
+                      const params = new URLSearchParams()
+                      if (canJump) {
+                        // view=clean：chunk 偏移是基于 clean 副本算的，
+                        // 若页面显示 original 副本，偏移对不上，会高亮错位置
+                        params.set('view', 'clean')
+                        params.set('cs', String(source.char_start))
+                        params.set('ce', String(source.char_end))
+                      }
+                      const href = params.toString()
+                        ? `/notes/${source.note_id}?${params}`
+                        : `/notes/${source.note_id}`
+                      // 引用编号与回答里的 [N] 对应（后端保证同一次遍历产出）
+                      return (
+                        <div
+                          key={source.chunk_id || sIdx}
+                          style={{
+                            fontSize: '0.8rem',
+                            color: canJump ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                            cursor: 'pointer',
+                            marginBottom: '2px',
+                          }}
+                          title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息，只能打开笔记'}
+                          onClick={() => navigate(href)}
+                        >
+                          [{sIdx + 1}] 📄 {source.note_title}
+                          {source.heading_path
+                            ? ` > ${source.heading_path}`
+                            : source.chapter_title
+                              ? ` > ${source.chapter_title}`
+                              : ''}
+                          {!canJump && <span style={{ fontSize: '0.7rem' }}>（无定位）</span>}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
                 {record.provider && (

@@ -104,6 +104,25 @@ export interface AnswerSource {
   note_title: string;
   chapter_title: string | null;
   relevant_text: string;
+
+  /**
+   * 定位字段（阶段 2.7：引用可回跳）
+   *
+   * 全部可选：检索降级或命中历史数据时可能缺失。缺失时应**退化为
+   * 只显示来源、不提供跳转**，而不是跳到错误位置。
+   */
+  chunk_id?: string | null;
+  chunk_index?: number | null;
+  /**
+   * 在**笔记 Markdown**（clean 副本）里的字符下标，左闭右开。
+   * 满足 `markdown.slice(char_start, char_end)` == 该 chunk 的完整内容。
+   */
+  char_start?: number | null;
+  char_end?: number | null;
+  /** 标题层级路径（如 "第一章 > 1.2 保护配置"） */
+  heading_path?: string | null;
+  line_start?: number | null;
+  line_end?: number | null;
 }
 
 /** 问答响应 */

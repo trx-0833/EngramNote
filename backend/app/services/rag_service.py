@@ -196,6 +196,87 @@ class BM25Index:
         return scored[:top_k]
 
 
+def build_context_and_sources(
+    ordered_items: List[Dict[str, Any]],
+    note_titles: Optional[Dict[str, str]] = None,
+) -> tuple[str, List[Dict[str, Any]]]:
+    """由**已排序**的检索结果产出 (上下文文本, 引用来源列表)
+
+    抽成纯函数是为了可测：这段逻辑原先内嵌在 `retrieve_context` 里，
+    而那条路径要调用 LLM 才能跑完，于是"编号与引用是否对得上"这类
+    关键一致性**无法被任何测试覆盖**。
+
+    ## 两条硬约束
+
+    1. **上下文编号 = sources 列表下标 + 1**
+       提示词（阶段 2.8）要求回答逐条标注 `[编号]`。若上下文按融合排名编号、
+       而 sources 按原文位置排序，回答里的 `[1]` 会指向 sources 的**另一项** ——
+       用户点第一条引用，跳到的是别处的资料。这种错位不会报错，
+       只会让人以为系统在胡说。因此两者必须由同一次遍历产出。
+
+    2. **按 chunk 去重，而不是按 note_id**
+       按 note_id 去重会让同一篇笔记只保留第一个 chunk，
+       而用户看到的可能是该笔记的第 3 段 —— 点过去跳到另一段。
+
+    Args:
+        ordered_items: 已按 `(note_id, char_start)` 排好序的检索结果
+        note_titles: `note_id -> 标题`（补 BM25 结果缺失的标题）
+
+    Returns:
+        (context, sources)。`sources[i]` 对应上下文里的 `[i+1]`。
+    """
+    titles = note_titles or {}
+    sources: List[Dict[str, Any]] = []
+    parts: List[str] = []
+    seen: set = set()
+
+    if ordered_items:
+        parts.append("=== 相关文档片段 ===")
+
+    for item in ordered_items:
+        # 没有 note_id 的结果无法定位到任何笔记，不能进 sources
+        # （`AnswerSource.note_id` 是非可空 str）。这里显式跳过而不是依赖
+        # 调用方先过滤 —— 约束应当由函数自己保证，否则换个调用方就漏。
+        if not item.get("note_id"):
+            continue
+
+        content = item.get("content") or ""
+        # 无 chunk_id 时退化为「(笔记, 首 200 字)」：降级路径下也不出现完全重复
+        dedupe_key = item.get("chunk_id") or (item.get("note_id"), content[:200])
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        note_title = (
+            item.get("note_title") or item.get("title")
+            or titles.get(item.get("note_id")) or "未知笔记"
+        )
+        chapter_title = item.get("chapter_title")
+        chapter_info = f" (章节: {chapter_title})" if chapter_title else ""
+
+        # 编号与 sources 下标严格一致（约束 1）
+        index = len(sources) + 1
+        parts.append(f"[{index}] 来源: {note_title}{chapter_info}\n{content}")
+
+        sources.append({
+            "note_id": item.get("note_id"),
+            "note_title": note_title,
+            "chapter_title": chapter_title,
+            # 展示用摘要；**不是**切片依据（`relevant_text` 比区间短，见 AnswerSource）
+            "relevant_text": content[:200],
+            # 定位字段（阶段 2.7）
+            "chunk_id": item.get("chunk_id"),
+            "chunk_index": item.get("index"),
+            "char_start": item.get("char_start"),
+            "char_end": item.get("char_end"),
+            "heading_path": item.get("heading_path") or chapter_title,
+            "line_start": item.get("line_start"),
+            "line_end": item.get("line_end"),
+        })
+
+    return "\n\n".join(parts), sources
+
+
 class RAGService:
     """
     检索增强生成服务
@@ -596,59 +677,43 @@ class RAGService:
             vector_results, bm25_results, top_k=5
         )
 
-        # 5. 合并上下文
+        # 5+6. 同一次遍历产出「上下文编号」与「引用来源」
         #
-        # 每段前加 **[编号]**：新提示词（阶段 2.8）要求回答逐条标注来源，
-        # 没有编号它就无法引用 —— 而且编号让"哪句话来自哪段资料"在
-        # 排版上就一目了然，便于用户核对。
-        # 编号从 1 开始，与 sources 列表的展示顺序一致。
-        context_parts: List[str] = []
+        # ## 为什么必须同一次遍历（阶段 2.7 踩到的坑）
+        #
+        # 提示词（阶段 2.8）要求回答**逐条标注 [编号]**，编号来自上下文里的
+        # `[N]` 前缀。若上下文按**融合排名**编号、而 sources 按**原文位置**排序，
+        # 回答里的 `[1]` 就会指向 sources 列表的另一项 —— 用户点"第 1 条引用"
+        # 跳到的是别处的资料。这类错位不会报错，只会让人以为系统在胡说。
+        #
+        # 因此两者由同一次遍历产出：上下文顺序即 sources 顺序。
+        # 排序键用 `(note_id, char_start)`：按原文顺序读，用户核对时不必来回跳。
+        #
+        # ## 为什么按 chunk 去重（而不是按 note_id）
+        #
+        # 原先按 `note_id` 去重，于是**同一篇笔记的多个 chunk 只保留一个**。
+        # 在"引用能回跳"的目标下这不成立：用户看到的是"第 3 段来自某笔记"，
+        # 而 sources 里只剩该笔记的第 1 段，点过去跳到**另一段**。
+        # 统一语料（阶段 2.3）后每个结果天然带 `chunk_id`，按 chunk 去重既无重复
+        # 又能逐段对应；同一笔记保留多个引用是**有意的** ——
+        # 一段长资料里不同位置各自回答了问题的不同侧面。
+        ordered = sorted(
+            (it for it in fused_results if it.get("note_id") is not None),
+            key=lambda it: (it["note_id"], it.get("char_start") or 0),
+        )
 
-        if fused_results:
-            context_parts.append("=== 相关文档片段 ===")
-            for index, item in enumerate(fused_results, start=1):
-                note_title = item.get("note_title") or item.get("title") or "未知来源"
-                chapter_info = ""
-                if item.get("chapter_title"):
-                    chapter_info = f" (章节: {item['chapter_title']})"
-                context_parts.append(
-                    f"[{index}] 来源: {note_title}{chapter_info}\n{item['content']}"
+        # 标题缺失时回查（BM25 结果不带 note_title）
+        missing = {it["note_id"] for it in ordered if not (it.get("note_title") or it.get("title"))}
+        titles: Dict[str, str] = {}
+        if missing:
+            session_factory = self._get_session_factory()
+            async with session_factory() as session:
+                rows = await session.execute(
+                    select(Note.id, Note.title).where(Note.id.in_(missing))
                 )
+                titles = {nid: (title or "未知笔记") for nid, title in rows.all()}
 
-        context = "\n\n".join(context_parts)
-
-        # 7. 构建引用来源（回查笔记标题）
-        sources = []
-        seen_notes = set()
-
-        for item in fused_results:
-            note_id = item.get("note_id")
-            if note_id is None:
-                continue
-            if note_id in seen_notes:
-                continue
-
-            note_title = item.get("note_title")
-            chapter_title = item.get("chapter_title")
-            relevant_text = (item.get("content") or "")[:200]
-
-            # note_title 可能为 None（来自 BM25 结果），回查笔记标题
-            if note_title is None:
-                session_factory = self._get_session_factory()
-                async with session_factory() as session:
-                    note_result = await session.execute(
-                        select(Note).where(Note.id == note_id)
-                    )
-                    note = note_result.scalars().first()
-                    note_title = note.title if note else "未知笔记"
-
-            sources.append({
-                "note_id": note_id,
-                "note_title": note_title,
-                "chapter_title": chapter_title,
-                "relevant_text": relevant_text,
-            })
-            seen_notes.add(note_id)
+        context, sources = build_context_and_sources(ordered, titles)
 
         return {
             "context": context,

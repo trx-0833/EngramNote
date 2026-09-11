@@ -10,10 +10,11 @@
  * 7. 处理中状态的等待提示
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
 import { renderMarkdown } from '../utils/markdown'
+import { highlightCitation } from '../utils/citationJump'
 import {
   getNote,
   deleteNote,
@@ -78,6 +79,20 @@ export default function NoteDetail() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const viewModeRef = useRef(viewMode)
   viewModeRef.current = viewMode
+
+  /**
+   * 引用回跳参数（阶段 2.7）
+   *
+   * QA 页点击引用时带 `?view=clean&cs=<char_start>&ce=<char_end>` 过来。
+   * `view=clean` 是必需的：chunk 偏移基于 clean 副本计算，
+   * 若页面显示 original 副本，同一组偏移指向的是**另一段文字**。
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const jumpCharStart = Number(searchParams.get('cs'))
+  const jumpCharEnd = Number(searchParams.get('ce'))
+  const hasJump =
+    Number.isFinite(jumpCharStart) && Number.isFinite(jumpCharEnd) &&
+    jumpCharEnd > jumpCharStart
 
   /** 批注相关 state */
   const [annotations, setAnnotations] = useState<Annotation[]>([])
@@ -185,6 +200,49 @@ export default function NoteDetail() {
         .finally(() => setDiffLoading(false))
     }
   }, [viewMode, noteId, note?.status, diffData])
+
+  /**
+   * 引用回跳（阶段 2.7）：强制切到 clean 视图
+   *
+   * chunk 偏移基于 clean 副本计算，显示的必须是同一份内容。
+   * `clean_md_content` 尚未加载时**不要**强行切换 —— 否则会切到空内容，
+   * 等它到位后本 effect 会重跑。
+   */
+  useEffect(() => {
+    if (!hasJump) return
+    if (!note?.clean_md_content) return
+    if (viewModeRef.current !== 'clean') setViewMode('clean')
+  }, [hasJump, note?.clean_md_content])
+
+  /**
+   * 引用回跳：内容渲染完成后定位并高亮
+   *
+   * 依赖 `viewMode` 与内容：切换视图会重建 DOM，此时旧的高亮节点已不存在。
+   * 跳转完成后把 `cs/ce` 从 URL 清掉 —— 否则用户手动切换视图时会被
+   * 反复拉回同一段，像是页面"卡住了"。
+   */
+  useEffect(() => {
+    if (!hasJump || viewMode !== 'clean' || !note?.clean_md_content) return
+    const timer = window.setTimeout(() => {
+      const result = highlightCitation(
+        markdownRef.current,
+        note.clean_md_content || '',
+        jumpCharStart,
+        jumpCharEnd,
+      )
+      if (!result.highlighted) {
+        // 明说失败，而不是让用户以为"引用就在开头"
+        toast.warning('已打开笔记，但未能定位到引用段落（可能因排版差异）')
+      }
+      // 清掉跳转参数，避免后续视图切换被反复拉回
+      const next = new URLSearchParams(searchParams)
+      next.delete('cs'); next.delete('ce'); next.delete('view')
+      setSearchParams(next, { replace: true })
+    }, 120)
+    return () => window.clearTimeout(timer)
+    // searchParams/setSearchParams 有意不入依赖：会在清理参数后触发无意义重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasJump, viewMode, note?.clean_md_content, jumpCharStart, jumpCharEnd])
 
   // 清洗中状态轮询：每 5 秒刷新笔记数据，直到清洗完成或失败
   useEffect(() => {
@@ -1000,6 +1058,7 @@ export default function NoteDetail() {
           contextBefore={askAIState.contextBefore}
           contextAfter={askAIState.contextAfter}
           viewMode={viewMode === 'diff' ? 'original' : viewMode}
+          markdown={mdContent}
           pos={askAIState.pos}
           onClose={() => setAskAIState(null)}
         />

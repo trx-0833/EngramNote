@@ -143,11 +143,41 @@ class QuestionRequest(BaseModel):
 
 
 class AnswerSource(BaseModel):
-    """回答引用来源"""
+    """回答引用来源
+
+    ## 定位字段（阶段 2.7：引用可回跳）
+
+    `char_start` / `char_end` / `heading_path` 让前端能把用户**送到原文的那一段**
+    并高亮，而不是只显示"这句话来自某篇笔记"。
+
+    它们的含义必须说清楚，否则前端会切错位置：
+
+    - `char_start` / `char_end` 是**在笔记 Markdown 里**的字符下标（左闭右开），
+      满足 `markdown[char_start:char_end] == 完整 chunk 内容`
+    - `relevant_text` 只是**展示用摘要**（前 200 字），**不能**用它去切片 ——
+      它比 `char_end - char_start` 短，拿它算长度会得到错误的区间
+    - `line_start` / `line_end` 是行号（0 基，含两端），供"按行跳转"的旧路径使用
+
+    全部为可选：检索降级（例如向量通道不可用、命中来自历史数据）时可能缺失，
+    前端应退化为"只显示来源、不提供跳转"，而不是报错或跳到错误位置。
+    """
     note_id: str
     note_title: str
     chapter_title: Optional[str] = None
     relevant_text: str
+
+    #: chunk 主键；用于前端 key 与「同一笔记多次引用」的区分
+    chunk_id: Optional[str] = None
+    #: 该 chunk 在笔记中的序号（从 0 开始）
+    chunk_index: Optional[int] = None
+    #: 在笔记 Markdown 中的字符区间（左闭右开）
+    char_start: Optional[int] = None
+    char_end: Optional[int] = None
+    #: 标题层级路径（如 "第一章 > 1.2 保护配置"），用于面包屑与定位
+    heading_path: Optional[str] = None
+    #: 行号区间（0 基，含两端）
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
 
 
 class QuestionAnswerResponse(BaseModel):

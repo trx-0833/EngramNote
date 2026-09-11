@@ -354,6 +354,145 @@ class TestChunkCorpus:
             assert key in hits[0], f"向量结果缺少定位字段 {key}"
 
 
+class TestCitationSources:
+    """阶段 2.7 后端：引用来源的编号一致性与定位字段
+
+    抽成纯函数才能测 —— 这段逻辑原先内嵌在 `retrieve_context` 里，
+    而那条路径要调用 LLM 才能跑完，于是下面两条关键一致性
+    在改造前**没有任何测试覆盖**。
+    """
+
+    @staticmethod
+    def _items():
+        """两条来自同一笔记、一条来自另一笔记（按原文位置已排序）"""
+        return [
+            {"note_id": "n1", "note_title": "笔记甲", "chapter_title": "第一章",
+             "content": "第一段内容", "chunk_id": "c1", "index": 0,
+             "char_start": 0, "char_end": 10, "heading_path": "第一章",
+             "line_start": 0, "line_end": 3},
+            {"note_id": "n1", "note_title": "笔记甲", "chapter_title": "第二章",
+             "content": "第二段内容", "chunk_id": "c2", "index": 1,
+             "char_start": 20, "char_end": 30, "heading_path": "第二章",
+             "line_start": 5, "line_end": 9},
+            {"note_id": "n2", "note_title": "笔记乙", "chapter_title": None,
+             "content": "另一篇内容", "chunk_id": "c3", "index": 0,
+             "char_start": 0, "char_end": 8, "heading_path": None,
+             "line_start": 0, "line_end": 2},
+        ]
+
+    def test_context_numbering_matches_sources_order(self):
+        """**关键一致性**：上下文 `[N]` 必须对应 `sources[N-1]`
+
+        提示词要求回答逐条标注 `[编号]`。若上下文按融合排名编号、
+        而 sources 按原文位置排序，回答里的 `[1]` 会指向 sources 的另一项 ——
+        用户点第一条引用跳到别处。这类错位不报错，只会让人以为系统在胡说。
+        """
+        from app.services.rag_service import build_context_and_sources
+
+        context, sources = build_context_and_sources(self._items())
+
+        for i, src in enumerate(sources, start=1):
+            assert f"[{i}] 来源: {src['note_title']}" in context, (
+                f"上下文里缺少与 sources[{i-1}] 对应的 [{i}] 编号"
+            )
+            # 该编号下的内容必须是这一条的内容，而不是别人的
+            block = context.split(f"[{i}] 来源:", 1)[1]
+            assert src["relevant_text"][:10] in block, (
+                f"[{i}] 指向的内容与 sources[{i-1}] 不一致"
+            )
+
+    def test_keeps_multiple_chunks_from_same_note(self):
+        """同一笔记的多个 chunk 都要保留
+
+        原实现按 `note_id` 去重，同一篇笔记只留第一个 chunk ——
+        用户看到"第 3 段来自某笔记"却只能跳到该笔记的第 1 段。
+        """
+        from app.services.rag_service import build_context_and_sources
+
+        _, sources = build_context_and_sources(self._items())
+
+        assert len(sources) == 3, f"同一笔记的多个 chunk 被去重了: {sources}"
+        assert [s["chunk_id"] for s in sources] == ["c1", "c2", "c3"]
+
+    def test_duplicate_chunk_is_dropped(self):
+        """同一个 chunk 出现两次（两路都命中）时只保留一条"""
+        from app.services.rag_service import build_context_and_sources
+
+        items = self._items()
+        items.append(dict(items[0]))  # 完全重复
+        _, sources = build_context_and_sources(items)
+
+        assert len(sources) == 3
+        assert [s["chunk_id"] for s in sources] == ["c1", "c2", "c3"]
+
+    def test_positional_fields_reach_sources(self):
+        """定位字段必须出现在 sources 里 —— 前端跳转的数据基础"""
+        from app.services.rag_service import build_context_and_sources
+
+        _, sources = build_context_and_sources(self._items())
+
+        s = sources[0]
+        for key, want in (
+            ("chunk_id", "c1"), ("chunk_index", 0),
+            ("char_start", 0), ("char_end", 10),
+            ("heading_path", "第一章"),
+            ("line_start", 0), ("line_end", 3),
+        ):
+            assert s.get(key) == want, f"sources 缺少/错位定位字段 {key}: {s}"
+
+    def test_heading_path_falls_back_to_chapter_title(self):
+        """`heading_path` 缺失时退回 `chapter_title`（两条路径来源不同）"""
+        from app.services.rag_service import build_context_and_sources
+
+        items = [{
+            "note_id": "n1", "note_title": "甲", "chapter_title": "第三章",
+            "content": "内容", "chunk_id": "c1", "index": 0,
+            "char_start": 0, "char_end": 2, "heading_path": None,
+        }]
+        _, sources = build_context_and_sources(items)
+        assert sources[0]["heading_path"] == "第三章"
+
+    def test_title_lookup_fills_missing_titles(self):
+        """BM25 结果不带 note_title → 用回查到的标题补齐"""
+        from app.services.rag_service import build_context_and_sources
+
+        items = [{
+            "note_id": "n9", "note_title": None, "chapter_title": None,
+            "content": "内容", "chunk_id": "c9", "index": 0,
+            "char_start": 0, "char_end": 2,
+        }]
+        context, sources = build_context_and_sources(items, {"n9": "回查标题"})
+        assert sources[0]["note_title"] == "回查标题"
+        assert "回查标题" in context
+
+    def test_missing_title_degrades_gracefully(self):
+        """标题彻底查不到时用占位文案，不得抛异常或产出 None"""
+        from app.services.rag_service import build_context_and_sources
+
+        items = [{
+            "note_id": "n9", "note_title": None, "chapter_title": None,
+            "content": "内容", "chunk_id": "c9", "index": 0,
+            "char_start": 0, "char_end": 2,
+        }]
+        _, sources = build_context_and_sources(items, {})
+        assert sources[0]["note_title"] == "未知笔记"
+
+    def test_items_without_note_id_are_skipped(self):
+        """没有 note_id 的结果不能进 sources（无法定位到任何笔记）"""
+        from app.services.rag_service import build_context_and_sources
+
+        items = self._items() + [{"note_id": None, "content": "孤儿内容"}]
+        _, sources = build_context_and_sources(items)
+        assert all(s["note_id"] for s in sources)
+
+    def test_empty_input(self):
+        from app.services.rag_service import build_context_and_sources
+
+        context, sources = build_context_and_sources([])
+        assert context == ""
+        assert sources == []
+
+
 class TestBM25Tokenizer:
     """`_tokenize`：中文 2-gram + 英文小写切分"""
 

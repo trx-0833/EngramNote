@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEve
 import { askNoteQuestionStream } from '../api/notes'
 import type { AnswerSource } from '../api/client'
 import { renderMarkdown } from '../utils/markdown'
+import { highlightCitation } from '../utils/citationJump'
 import { parseSSEStream } from '../utils/sse'
 import { useThrottledStream } from '../hooks/useStreamAnswer'
 
@@ -22,6 +23,14 @@ interface NoteAskPanelProps {
   contextBefore: string
   contextAfter: string
   viewMode: 'original' | 'clean'
+  /**
+   * 当前显示的 Markdown 源文（阶段 2.7）
+   *
+   * 引用跳转要用它在渲染后的正文里定位段落 —— 只有容器 DOM 是不够的，
+   * 因为后端给的是**源文**里的字符下标，必须用同一份源文切片才能得到
+   * 可搜索的指纹。
+   */
+  markdown: string
   pos: { x: number; y: number }
   onClose: () => void
 }
@@ -34,6 +43,7 @@ export default function NoteAskPanel({
   contextBefore,
   contextAfter,
   viewMode,
+  markdown,
   pos,
   onClose,
 }: NoteAskPanelProps) {
@@ -293,12 +303,44 @@ export default function NoteAskPanel({
             )}
             {sources.length > 0 && (
               <div className="ask-ai-sources">
-                {sources.map((s, i) => (
-                  <span key={`${s.note_id}-${i}`} className="ask-ai-source-item">
-                    📄 {s.note_title}
-                    {s.chapter_title ? ` > ${s.chapter_title}` : ''}
-                  </span>
-                ))}
+                {sources.map((s, i) => {
+                  // 阶段 2.7：面板本来就贴在正文上，所以直接在当前页面里
+                  // 定位并高亮，不必跳转路由。定位信息缺失时不提供跳转 ——
+                  // 滚到笔记开头会让用户以为"引用就是开头那段"。
+                  const canJump =
+                    typeof s.char_start === 'number' &&
+                    typeof s.char_end === 'number' &&
+                    s.char_end > s.char_start
+                  return (
+                    <span
+                      key={s.chunk_id || `${s.note_id}-${i}`}
+                      className="ask-ai-source-item"
+                      style={{ cursor: canJump ? 'pointer' : 'default' }}
+                      title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息'}
+                      onClick={() => {
+                        if (!canJump) return
+                        // 面板浮在正文上，跳到别的笔记没有意义 → 只处理当前笔记
+                        if (s.note_id !== noteId) return
+                        const result = highlightCitation(
+                          document.querySelector('.markdown-body') as HTMLElement | null,
+                          markdown,
+                          s.char_start,
+                          s.char_end,
+                        )
+                        if (!result.highlighted) {
+                          setError('未能定位到引用段落（正文可能尚未加载或排版有差异）')
+                        }
+                      }}
+                    >
+                      [{i + 1}] 📄 {s.note_title}
+                      {s.heading_path
+                        ? ` > ${s.heading_path}`
+                        : s.chapter_title
+                          ? ` > ${s.chapter_title}`
+                          : ''}
+                    </span>
+                  )
+                })}
               </div>
             )}
             {error && <p className="ask-ai-error">{error}</p>}

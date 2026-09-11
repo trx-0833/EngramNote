@@ -29,6 +29,28 @@
 
 /* ── 批注样式 ── */
 
+/*
+ * 引用回跳高亮（阶段 2.7）
+ *
+ * 与批注的 `.annotation-mark`（淡黄、常驻）刻意区分：
+ * 引用高亮是**临时定位**结果，用完即被清除，用更醒目的底色 + 左侧竖线，
+ * 让用户一眼看到"系统把我送到的是这一段"。颜色用琥珀色而非纯黄，
+ * 避免与批注高亮混淆。
+ */
+.markdown-body mark.citation-highlight {
+  background-color: #ffd166;
+  color: inherit;
+  border-left: 3px solid #f59e0b;
+  border-radius: 2px;
+  padding: 0 2px;
+  animation: citation-flash 1.6s ease-out 1;
+}
+
+@keyframes citation-flash {
+  0% { background-color: #fbbf24; }
+  100% { background-color: #ffd166; }
+}
+
 .markdown-body .annotation-mark {
   background-color: #fff3a0;
   cursor: pointer;
