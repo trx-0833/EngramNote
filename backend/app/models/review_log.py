@@ -13,13 +13,16 @@
 - quality 字段存储 SM-2 算法的 0-5 评分，便于后续分析
 - self_rating 单独成列（而非复用 quality），保留自动判分与用户自评的
   双份信号，供后续校准
+- rating / predicted_retention 同样是**单独成列**：它们是 FSRS 口径的量，
+  与 SM-2 的 quality 不可互换；而 predicted_retention 只能在复习那一刻
+  写下，事后无法重建（阶段 3.6）
 - time_spent_ms 记录答题耗时，可用于薄弱点分析
 """
 
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, JSON, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel, TZDateTime
@@ -40,9 +43,12 @@ class ReviewLog(BaseModel):
         note_id: 来源笔记 ID，外键关联 notes 表（冗余，方便查询）
         user_answer: 用户提交的答案
         is_correct: 是否正确
-        quality: 实际进入 SM-2 调度的评分 (0-5)
+        quality: 实际进入调度的评分 (0-5)
         self_rating: 用户自评评分 (0-5)，未自评时为 NULL
         grading_method: 本次判分方式（choice/fill_blank/self_rating/ungraded/legacy）
+        rating: FSRS 档位 (1-4)；SM-2 路径下为 NULL
+        predicted_retention: 复习前模型预测的可回忆概率；SM-2 路径下为 NULL
+        item_type: 学习项类型 (quiz/card)；本列引入前的历史行 NULL
         time_spent_ms: 答题耗时（毫秒）
         review_at: 答题时间
         created_at: 创建时间（继承自 BaseModel）
@@ -121,4 +127,37 @@ class ReviewLog(BaseModel):
         "grading_detail", JSON, nullable=True
     )
     time_spent_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # ---- 阶段 3.2 / 3.6：把复习记录做成**可分析的不可变事件流** ----
+    #
+    # 下面三列是阶段 3.2 要求的"事件流化"字段。它们在 3.6（FSRS）时补上
+    # 而不是更晚，原因是其中 `predicted_retention` **是一扇单向门**：
+    # 它是"调度器在复习发生前预测的可回忆概率"，只能在复习那一刻写下，
+    # 事后无法重建（重建需要当时的 S，而 S 已经被这次复习更新了）。
+    # 校准曲线（3.14：预测 0.9 的那批卡实际答对多少）完全依赖它，
+    # 所以哪怕 3.14 还没做，也必须现在开始积累。
+    #
+    #: FSRS 档位 1-4（Again/Hard/Good/Easy）。
+    #:
+    #: 为什么不复用 `quality`：quality 是 SM-2 的 0-5 尺度，二者是
+    #: **不同的量**（quality=5 在机器判分与自评下含义不同，见
+    #: `scheduler_service.rating_from_quality`）。要在同一列里塞两种尺度，
+    #: 就必须再加一列记"这行是哪个尺度"，反而更贵。
+    #: FSRS 参数拟合（3.14）直接消费这一列，因此它必须是无歧义的 4 档。
+    #:
+    #: NULL = 本行产生于 SM-2 时期或 SM-2 回退路径，没有 FSRS 档位。
+    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    #: 复习**前**调度器预测的可回忆概率 R ∈ (0,1]。
+    #:
+    #: NULL = 没有模型预测可记（SM-2 路径）。这里刻意**不用 SM-2 的
+    #: 近似公式填数**：SM-2 没有保持率模型，任何填进去的数字都是我们的
+    #: 发明而不是那个算法的输出，而校准曲线一旦混入两种来源的数字就失去
+    #: 意义（分母里混着不是"预测"的东西）。
+    predicted_retention: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    #: 本次复习的学习项类型：'quiz'（答题）| 'card'（卡片直接复习）。
+    #:
+    #: 卡片级复习的 quiz_id 为 NULL，理论上可以据此区分，但那个推断
+    #: 依赖"卡片复习永远没有题目"这一实现细节；显式成列后，
+    #: 度量层可以直接 GROUP BY item_type，不必知道调度器的内部约定。
+    #: NULL = 本列引入前的历史行。
+    item_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
     review_at: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)

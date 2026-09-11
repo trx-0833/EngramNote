@@ -790,6 +790,76 @@ async def _migrate_sqlite(conn):
                 except Exception as exc:
                     logger.warning("回填 review_logs.card_id 失败（不影响启动）: %s", exc)
 
+            # ---- 阶段 3.2 / 3.6：复习记录的事件流化字段 ----
+            #
+            # 三列都是纯加列、nullable、不触碰已有行，因此不经过
+            # ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION 闸门。
+            #
+            # ⚠️ `predicted_retention` 是**单向门**：它是"复习前调度器预测的
+            # 可回忆概率"，只能在复习那一刻写下。历史行永远是 NULL ——
+            # 那时没有 FSRS，而用 SM-2 的近似公式补算会往校准曲线的分母里
+            # 混入不是"预测"的数字。宁缺勿滥。
+            if 'rating' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN rating INTEGER"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 rating 列")
+            if 'predicted_retention' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN predicted_retention REAL"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 predicted_retention 列")
+            if 'item_type' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN item_type VARCHAR(16)"
+                ))
+                try:
+                    sync_conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_review_logs_item_type "
+                        "ON review_logs (item_type)"
+                    ))
+                except Exception:
+                    pass
+                # 回填：本列引入前的行，用 quiz_id 是否存在区分卡片级复习与答题。
+                # 这是**如实**的判断（那一列本来就是这么用的），不是猜测；
+                # 判不出来（quiz_id 与 card_id 都为空）的行保持 NULL。
+                try:
+                    result = sync_conn.execute(text(
+                        """
+                        UPDATE review_logs
+                           SET item_type = CASE
+                                   WHEN quiz_id IS NOT NULL THEN 'quiz'
+                                   WHEN card_id IS NOT NULL THEN 'card'
+                                   ELSE NULL
+                               END
+                         WHERE item_type IS NULL
+                        """
+                    ))
+                    if result.rowcount:
+                        logger.info(
+                            "SQLite 迁移: 已回填 %d 条 review_logs.item_type", result.rowcount
+                        )
+                except Exception as exc:
+                    logger.warning("回填 review_logs.item_type 失败（不影响启动）: %s", exc)
+
+        # ---- review_states 表迁移（阶段 3.6：FSRS 记忆状态）----
+        if 'review_states' in table_names:
+            state_cols = {c['name'] for c in inspector.get_columns('review_states')}
+            if 'stability' not in state_cols:
+                # nullable 且**不填默认值**：真库里 2241 行 SM-2 时期的状态
+                # 并不知道自己的 S/D。填 0 或 1 会让"没算过"与"算出来就这么小"
+                # 再也分不开，而两者的处置不同（前者要由 adopt_legacy_state
+                # 从 interval/EF 换算接管，后者直接用）。
+                sync_conn.execute(text(
+                    "ALTER TABLE review_states ADD COLUMN stability REAL"
+                ))
+                logger.info("SQLite 迁移: 已为 review_states 表添加 stability 列")
+            if 'difficulty' not in state_cols:
+                sync_conn.execute(text(
+                    "ALTER TABLE review_states ADD COLUMN difficulty REAL"
+                ))
+                logger.info("SQLite 迁移: 已为 review_states 表添加 difficulty 列")
+
         # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
         if 'chunks' in table_names:
             chunk_cols = {c['name'] for c in inspector.get_columns('chunks')}

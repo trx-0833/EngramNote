@@ -28,11 +28,13 @@ from ..config import get_settings
 from ..models.note import Note
 from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
+from ..services import scheduler_service
 from ..services.sm2_service import (
-    calculate_sm2,
     grade_answer,
     grade_short_answer_semantically,
 )
+from . import review_state_service
+from .review_state_service import ITEM_TYPE_QUIZ
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -367,31 +369,48 @@ async def submit_answer(
     # 本次提交完成的是哪一条记录：补完占位（completing）还是新建（fresh）。
     completing_placeholder = pending_placeholder is not None
 
-    # 3. 调用 SM-2 算法
+    # 3. 跑一次调度（阶段 3.6：默认 FSRS-5，`config.review_scheduler` 可回退 SM-2）
+    #
     # 占位分不参与调度：简答题的自动判分是占位值（quality=1），
-    # 若照此推进 SM-2，会把"未自评"错误地变成"答错并重置间隔"，
+    # 若照此推进调度，会把"未自评"错误地变成"答错并重置间隔"，
     # 销毁已有的复习进度。此时保持调度参数不变，等用户给出自评再更新。
+    #
+    # 调度必须**先读后写**：`advance` 需要 review_states 上的 S/D 与
+    # last_reviewed_at 才能算出"复习前预测的可回忆概率"，而这两个值
+    # 会在 `apply_schedule_result` 里被覆盖。顺序颠倒会让预测值变成
+    # 用复习后的状态算出来的事后数字，校准曲线随即失效。
+    schedule_outcome = None
     if grade["needs_self_assessment"]:
         logger.info(
             f"答题待自评，暂不推进调度: user={user_id[:8]}, quiz={quiz_id[:8]}, type={question_type}"
         )
-        sm2_result = None
     else:
-        sm2_result = calculate_sm2(
-            quality=quality,
-            interval=quiz.interval,
-            repetition=quiz.repetition,
-            easiness_factor=quiz.easiness_factor,
+        state = await review_state_service.get_state(
+            db, user_id, ITEM_TYPE_QUIZ, quiz_id,
+        )
+        if state is None:
+            # 题目明明刚查出来存在，却拿不到复习状态 —— 这是数据不一致。
+            # 不能"当作没调度"继续写一条 ReviewLog：那会让用户看到
+            # "已复习、已判分"，而调度其实没动，且没有任何痕迹表明这一点。
+            # 按原则 P7（失败必须响亮）在这里失败。
+            raise RuntimeError(
+                f"无法读取复习状态，拒绝静默不推进调度: quiz={quiz_id}"
+            )
+        schedule_outcome = scheduler_service.advance(
+            state, quality, method=grade["method"], now=now,
         )
 
-        # 4. 更新 QuizItem 的 SM-2 字段
-        # ⚠️ 这里与第 4.5 步的 review_states 是**双写**关系（阶段 3.1 渐进迁移）：
-        # QuizItem 上的调度字段最终会删除，但现在保留一份，保证任一时刻
-        # 回滚代码都能拿到正确值。
-        quiz.interval = sm2_result.interval
-        quiz.repetition = sm2_result.repetition
-        quiz.easiness_factor = sm2_result.easiness_factor
-        quiz.next_review_at = sm2_result.next_review_at
+        # 4. 更新 QuizItem 的旧调度字段（阶段 3.1 渐进迁移的双写）
+        #
+        # ⚠️ 这些字段**仍在被读取**：到期队列（`_get_due_quizzes`）、
+        # 今日待复习数、复习提醒、目标建议、掌握度都还在查
+        # `quiz_items.next_review_at`。所以它们必须是权威调度的
+        # **镜像**，而不是"SM-2 会怎么说"的平行推演 ——
+        # 两份不同的排期比一份更能骗人。
+        quiz.interval = schedule_outcome.interval_days
+        quiz.repetition = schedule_outcome.repetition
+        quiz.easiness_factor = schedule_outcome.easiness_factor
+        quiz.next_review_at = schedule_outcome.next_review_at
         quiz.last_reviewed_at = now
         quiz.review_count += 1
 
@@ -412,30 +431,31 @@ async def submit_answer(
         # 只有语义判分成功时才有值；自评与选择题等场景保持 NULL —
         # 那时确实没有这份明细，用空对象冒充会让人误以为"判分过但没发现问题"。
         grading_detail=semantic_detail,
+        # 阶段 3.6：FSRS 口径的评分档位与**复习前**的可回忆概率预测。
+        # 占位提交（未推进调度）时两者都是 NULL —— 那一次确实没有调度发生，
+        # 记一个"预测保持率"会让校准曲线的分母混进非预测值。
+        rating=schedule_outcome.rating if schedule_outcome else None,
+        predicted_retention=(
+            schedule_outcome.predicted_retention if schedule_outcome else None
+        ),
+        item_type="quiz",
         time_spent_ms=time_spent_ms,
         review_at=now,
     )
     db.add(review_log)
 
-    # 4.5 同步写入 ReviewState（阶段 3.1 双写）
+    # 5.5 同步写入 ReviewState（阶段 3.1 双写）
     #
     # 为什么在 commit 之前写：两者必须落在**同一个事务**里。分开提交的话，
     # 中间崩溃会留下"QuizItem 说复习过了、ReviewState 说没有"的分叉，
     # 而这类分叉没有任何自愈机制。
     #
-    # 只在真正推进调度时写（sm2_result 非 None）：占位提交不影响调度状态。
-    if sm2_result is not None:
+    # 只在真正推进调度时写（schedule_outcome 非 None）：占位提交不影响调度状态。
+    if schedule_outcome is not None:
         try:
-            from .review_state_service import apply_sm2_result
-
-            await apply_sm2_result(
-                db, user_id, "quiz", quiz_id,
-                quality=quality,
-                interval_days=sm2_result.interval,
-                repetition=sm2_result.repetition,
-                easiness_factor=sm2_result.easiness_factor,
-                next_review_at=sm2_result.next_review_at,
-                now=now,
+            await review_state_service.apply_schedule_result(
+                db, user_id, ITEM_TYPE_QUIZ, quiz_id,
+                outcome=schedule_outcome, quality=quality, now=now,
             )
         except Exception as state_err:
             # 双写失败不应让答题本身失败：题目维度的旧字段仍是权威来源，
@@ -452,7 +472,11 @@ async def submit_answer(
         f"答题提交: user={user_id[:8]}, quiz={quiz_id[:8]}, "
         f"correct={is_correct}, quality={quality}, method={grading_method}, "
         f"self_rating={self_rating}, "
-        f"interval={sm2_result.interval if sm2_result else '未推进(待自评)'}"
+        f"algo={schedule_outcome.algorithm if schedule_outcome else '-'}, "
+        f"rating={schedule_outcome.rating if schedule_outcome else '-'}, "
+        f"R={schedule_outcome.predicted_retention if schedule_outcome else '-'}, "
+        f"S={schedule_outcome.stability if schedule_outcome else '-'}, "
+        f"interval={schedule_outcome.interval_days if schedule_outcome else '未推进(待自评)'}"
     )
 
     # 答题后非阻塞刷新关联卡片掌握度（失败不影响答题响应）

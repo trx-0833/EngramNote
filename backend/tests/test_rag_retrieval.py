@@ -783,11 +783,21 @@ class TestRetrievalEvalHarness:
         import sys as _sys
 
         backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # ⚠️ 必须**同时**固定子进程的输出编码，只给 subprocess 传 encoding 不够：
+        # 子进程被管道捕获时，Windows 上 Python 用 ANSI 代码页（中文系统为 GBK）
+        # 编码 stdout，于是它写出 GBK 字节、我们用 utf-8 解码 → 所有中文变
+        # U+FFFD，断言 "评测问题数    : 5" 永远匹配不上。
+        #
+        # 实测：本测试曾**依赖环境变量**通过 —— 在 PYTHONUTF8/PYTHONIOENCODING
+        # 已设置的 shell 里绿，换一个干净环境（mineru_env）立刻红。这类
+        # "随环境变色"的测试不是门禁，因此这里显式传 env，不再依赖外部设置。
+        child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.run(
             [_sys.executable, os.path.join(backend, "scripts", "eval_retrieval.py"),
              "--limit", "5", "--corpus", "cards", "--show-missed", "0"],
             cwd=backend, capture_output=True, text=True, timeout=600,
-            # 显式 utf-8：脚本输出含中文，Windows 默认用 GBK 解码子进程输出，
+            env=child_env,
+            # 显式 utf-8：若脚本输出含中文而这里用默认编码解码，
             # 会在读取线程里抛 UnicodeDecodeError（而不是让断言失败），
             # 报错形态与真实问题完全无关，极难排查。
             encoding="utf-8", errors="replace",

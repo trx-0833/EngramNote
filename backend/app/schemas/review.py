@@ -67,7 +67,13 @@ class SubmitAnswerRequest(BaseModel):
 
 
 class SM2Info(BaseModel):
-    """SM-2 算法更新信息"""
+    """调度结果（**当前生效算法**的输出）
+
+    ⚠️ 字段名 `sm2` 是历史遗留：阶段 3.6 之后调度默认由 FSRS-5 产生
+    （`config.review_scheduler` 可回退 SM-2），这里报告的是**实际生效的那个
+    算法**算出的间隔/次数/难度系数。改名会破坏前端契约，故保留字段名，
+    但不要再把它理解为"SM-2 的输出" —— 它已经是"调度器的输出"。
+    """
     interval: int
     repetition: int
     easiness_factor: float
@@ -178,6 +184,23 @@ class CardReviewSubmitResponse(BaseModel):
     next_review_at: Optional[datetime] = None
     mastery_level: float = Field(
         description="刷新后的掌握度（0-100，按时间衰减的新公式计算）"
+    )
+    stability: Optional[float] = Field(
+        default=None,
+        description=(
+            "FSRS 的记忆强度 S（天）：回忆概率降到 90% 所需的天数。"
+            "review_scheduler=sm2 回退时为 null（SM-2 没有这个量）。"
+        ),
+    )
+    difficulty: Optional[float] = Field(
+        default=None, description="FSRS 的难度 D（1-10）；SM-2 回退时为 null",
+    )
+    predicted_retention: Optional[float] = Field(
+        default=None,
+        description=(
+            "复习**前**调度器预测的可回忆概率。它解释「为什么这次给这个间隔」："
+            "0.6 表示模型认为你已接近遗忘，所以这次答对后间隔会涨得更多。"
+        ),
     )
 
 

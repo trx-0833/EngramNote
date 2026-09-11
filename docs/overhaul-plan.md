@@ -3081,19 +3081,19 @@ M-4 与 1.13 仍未做。）
 | # | 动作 | 验收 | 状态（2026-09-11 核对） |
 |---|---|---|---|
 | 3.1 | 新增 `review_states` 表；把 `interval/repetition/EF/next_review_at` 从 `quiz_items` 迁出 | 数据无损迁移 | ✅ `review_states` 2241 行；键为 `(user_id, item_type, item_id)` |
-| 3.2 | `review_logs` 重建为不可变事件流（加 `rating`、`predicted_retention`、`item_type`） | 历史日志迁移保留 | 🟡 已有 `self_rating` / `grading_method` / `card_id`（194 行全回填 `card_id`）；**缺 `rating` / `predicted_retention` / `item_type`** |
+| 3.2 | `review_logs` 重建为不可变事件流（加 `rating`、`predicted_retention`、`item_type`） | 历史日志迁移保留 | ✅ **已落地**（随 3.6 一起，见附录 W.8）：三列均为纯加列；194 行历史 `item_type` 全部回填 `quiz`；`rating`/`predicted_retention` 保持 NULL（SM-2 时期没有这两个量，填数就是发明） |
 | 3.3 | **删除字符 n-gram 判分**（`_score_short_answer` 整段移除） | 随机文本不再得高分 | ✅ 已删除；改用 Levenshtein 比率 |
-| 3.4 | **引入用户自评四档**（Again/Hard/Good/Easy）作为主评分来源 | UI 有四个按钮 | 🟡 字段与 API 已就位（`self_rating`），但**194 条历史日志中 0 条有值** —— 无人用过，效果未验证 |
+| 3.4 | **引入用户自评四档**（Again/Hard/Good/Easy）作为主评分来源 | UI 有四个按钮 | 🟡 字段与 API 已就位（`self_rating`），且 3.6 已把四档**原样**用作 FSRS 的 rating（`{0,3,4,5} → {Again,Hard,Good,Easy}`）。但 **194 条历史日志中 0 条有值** —— 无人用过，效果仍未验证 |
 | 3.5 | **简答题 LLM 语义判分**：输出 `verdict + missing_points + misconceptions` | 答错时给出具体缺失点 | ✅ **已落地**（附录 V）：`grade_short_answer` + 三档 verdict + 置信度门槛；`review_logs.grading_detail` 存结构化明细。**默认关闭、显式请求**（含实测理由） |
-| 3.6 | **把 SM-2 换成 FSRS**（含 `stability`/`difficulty` 建模） | 同等保持率下复习量下降 | ⬜ **未做**。`review_states` 里**没有** `stability`/`difficulty` 字段，只有一句"便于将来换算法"的注释 |
-| 3.7 | **修正 `next_review_at` 基准**：以计划到期日为基准（非 now）；加 fuzz | 间隔不被提前复习缩短 | ⬜ 未核对 |
-| 3.8 | **leech 检测**：`lapses >= 8` → 标记并要求重写卡片 | 顽固卡片被识别 | 🟡 有 `lapses` 字段与相关代码；**实际效果未见度量** |
-| 3.9 | **修掉 `mastery` 公式**：基于 FSRS `retrievability` 的"当前可回忆概率" | 3 个月未复习的卡片掌握度下降 | 🟡 已重算（附录 G），但**依赖 3.6** —— 没有 FSRS 就没有真正的 `retrievability` |
-| 3.10 | **新卡与复习卡分开限额**（`new_per_day` / `review_per_day` 可配） | 到期队列收敛 | ⬜ **未做**（无这两个配置项） |
+| 3.6 | **把 SM-2 换成 FSRS**（含 `stability`/`difficulty` 建模） | 同等保持率下复习量下降 | ✅ **已落地**（附录 W）：`fsrs_service`（FSRS-5，19 个公开默认参数）+ `scheduler_service` 门面；`review_states.stability/difficulty` 新列；旧行按 `S := interval` 接管不清零；`review_scheduler` 可回退 SM-2。62 个新测试。**复习量下降这一条尚无实测** —— 真库还没有一行 FSRS 产生的记录 |
+| 3.7 | **修正 `next_review_at` 基准**：以计划到期日为基准（非 now）；加 fuzz | 间隔不被提前复习缩短 | 🟡 **一半被 3.6 结构性解决**：SM-2 的"提前复习缩短间隔"来自 `interval * EF`（间隔是乘出来的）；FSRS 的间隔由 S 解出、S 由实际 elapsed/R 决定，不再系统性压缩。**fuzz 与学习时段对齐仍未做**（见 W.13） |
+| 3.8 | **leech 检测**：`lapses >= 8` → 标记并要求重写卡片 | 顽固卡片被识别 | 🟡 有 `lapses` 字段与相关代码；**实际效果未见度量**。3.6 之后 `lapses` 的口径未变（仍是"任何 quality<3 都 +1"），而 FSRS 的 `state` 已能区分"没学会"与"学过又忘了" |
+| 3.9 | **修掉 `mastery` 公式**：基于 FSRS `retrievability` 的"当前可回忆概率" | 3 个月未复习的卡片掌握度下降 | 🟡 已重算（附录 G），但用的是**指数**曲线 `2^(-t/S)`；FSRS 用**幂律**曲线，两者在长间隔上差一个数量级（S=20 的卡放一年：0.03 vs 0.44）。3.6 已让 `stability` 入库，**换公式是纯粹的一步替换**（见 W.13） |
+| 3.10 | **新卡与复习卡分开限额**（`new_per_day` / `review_per_day` 可配） | 到期队列收敛 | ⬜ **未做**（无这两个配置项）。3.6 之后有了 `R` 与 `state`，两个口径都可直接计数 |
 | 3.11 | **薄弱点排序加时间衰减** + overdue 权重 | 老错误不再霸榜 | ⬜ 未核对 |
-| 3.12 | **卡片可直接复习**（`item_type='card'`），不再依赖是否出过题 | 死卡片消失 | ✅ `ITEM_TYPE_CARD` / `ITEM_TYPE_QUIZ` 均已存在 |
+| 3.12 | **卡片可直接复习**（`item_type='card'`），不再依赖是否出过题 | 死卡片消失 | ✅ `ITEM_TYPE_CARD` / `ITEM_TYPE_QUIZ` 均已存在；3.6 起两条复习路径**共用同一个调度入口**（原先各有一份手抄的 SM-2 调用，见 W.10） |
 | 3.13 | **复习页显示原文上下文**：答错时一键展开 `source_quote` 与原文段落 | 答错能立刻回看原文 | 🟡 有 `source_text` 字段；**前端展开未见** |
-| 3.14 | **度量层**：保持率曲线、校准曲线、lapse 分布、FSRS 参数拟合报表 | 用户能看到"我 30 天保持率 87%" | 🟡 已落地（附录 G），但**返回 `insufficient_data=true`**（0 条保持率配对、0 条自评）—— 诚实但无用，因为 3.4 没人用过 |
+| 3.14 | **度量层**：保持率曲线、校准曲线、lapse 分布、FSRS 参数拟合报表 | 用户能看到"我 30 天保持率 87%" | 🟡 已落地（附录 G），但**返回 `insufficient_data=true`**。3.6 起 `rating` 与 `predicted_retention` 开始积累，但真库当前 FSRS 记录数为 **0** —— 诚实但暂时无用 |
 
 **阶段 3 之后**：L-1 … L-8 全部消除。
 **这是产品从"看起来很酷的 demo"变成"真的能帮助记忆的工具"的分水岭。**
@@ -3107,7 +3107,14 @@ M-4 与 1.13 仍未做。）
                           └──→ 3.14 度量层（需要配对数据才画得出曲线）
 3.6 FSRS ──→ 3.9 mastery（retrievability 依赖 FSRS）
 3.6 FSRS ──→ 3.10 分开限额（需要到期预测）
+3.6 FSRS ──→ 3.14 拟合（需要 `rating` + `predicted_retention` 的原始数据）
 ```
+
+**3.6 已完成**（附录 W），因此 3.9 / 3.10 / 3.14 的**技术前提**都已具备。
+但它们现在都卡在同一个非技术前提上：**真库里还没有任何 FSRS 复习记录**
+（194 条历史日志全是 SM-2 时期，`rating` / `predicted_retention` 全为 NULL）。
+3.9 可以立刻做（换公式不需要数据），3.10 / 3.14 需要真实使用。
+**先做 3.7 的 fuzz**（不需要数据、立刻影响体验），再做 3.9。
 
 **因此最该先做的是 3.5（简答语义判分）+ 3.6（FSRS）**：
 3.5 让判分可信、3.6 让调度可信，两者共同决定 3.4/3.14 能否产出有意义的数据。
@@ -3117,6 +3124,16 @@ M-4 与 1.13 仍未做。）
 且最后复习时间是 2026-06-23（约 14 个月前），**样本不足以拟合 FSRS 参数**。
 因此 3.6 的现实做法是**先接入 FSRS 的默认参数与状态机**（让调度逻辑正确），
 参数拟合作 3.14 的一部分留待数据积累后再做 —— 而不是等数据齐了再动手。
+
+**3.6 完成后的实际状态**（附录 W）：默认参数与状态机已接入
+（`DEFAULT_W` 是预留的拟合插槽），3.2 顺带完成，3.7 的一半被结构性解决。
+但**"同等保持率下复习量下降"这个验收指标无法在此刻验证** ——
+真库还没有一行由 FSRS 产生的复习记录，而复习量下降本来就要跨月观察。
+现在的状态是"调度逻辑正确且可回退"，而不是"已经更省复习量"。
+
+**因此下一步该做的不是 3.9/3.14，而是 3.7（fuzz）**：
+fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在同一天到期），
+而 3.9/3.14 的价值取决于用户真的开始按 FSRS 复习（需要真实使用数据）。
 
 
 ### 阶段 4 · LLM 网关与成本治理（1.5 周）
@@ -3271,7 +3288,7 @@ M-4 与 1.13 仍未做。）
 | 4 | **纯 Python BM25 + n-gram 双路** | `rag_service._tokenize/_search_bm25/_search_relevant_cards`，约 230 行 | PG `tsvector`/`pg_bigm` 更快更准；n-gram 路是噪声 |
 | 5 | **`cleaning_service.split_into_chunks`** | 约 250 行 | 与 `markdown_segmenter` 重复；保留结构感知的那一个 |
 | 6 | **字符 n-gram 判分** | `sm2_service._score_short_answer` + 填空题字符集合匹配 | 可被随机文本骗过；这是产品可信度的最大威胁 |
-| 7 | **SM-2 自实现** | `sm2_service.py` 的调度部分 | 换 FSRS；判分部分保留但重写 |
+| 7 | **SM-2 自实现** | `sm2_service.py` 的调度部分 | 换 FSRS；判分部分保留但重写。✅ **已换**（阶段 3.6，附录 W）：调度走 FSRS-5，SM-2 只作为 `review_scheduler=sm2` 的回退路径保留 |
 | 8 | **`debug` 单一开关** | `config.debug` 同时控 SQL 日志 / FastAPI debug / LLM 供应商 | 拆成三个 |
 | 9 | **`_kb_cache` 模块级无界缓存** | `rag_service.py:47` | 有 DB 索引后不需要；无界字典是内存泄漏 |
 | 10 | **`client.ts` 手写 90 个 API 函数 + 手写类型** | 前端 | 从 OpenAPI 生成 |
@@ -3563,6 +3580,10 @@ card_relations 252` —— 与阶段 0 开始时**完全一致**，全程零数�
 - ~~`ReviewState` 抽取~~ → ✅ 已落地（附录 F）
 - FSRS（**建议在积累足够复习记录后再做**：
   当前 194 条记录且 `interval` 长期为 1，还没有可用于拟合参数的调度数据）⬜ 仍待做
+  → ✅ **算法与状态机已接入**（阶段 3.6，附录 W）：默认参数 + 完整 DSR 模型，
+  旧行按 `S := interval` 接管。**参数拟合**仍待数据积累（3.14）；
+  "复习量下降"这一验收指标也仍无法验证。当时"等数据齐了再动手"的判断
+  被修正为：**先让调度逻辑正确，再等数据**（默认参数本来就是可用的）。
 - ~~备份调度化（挂 Celery Beat + 一键恢复脚本）~~ → ✅ 已落地（附录 F）
 - `backend/data_backup_e2e/`（4.67 GB）删除 **仍待确认**
 
@@ -5357,10 +5378,282 @@ ON DELETE 子句才是实际生效的那个。
 ### V.7 仍未完成
 
 - **3.6 FSRS**：下一步。`review_states` 仍无 `stability`/`difficulty` 字段
+  → ✅ **已完成**（附录 W，2026-09-11）
 - **前端**：`grading_detail` 已随响应返回，但**未接 UI**（复习页尚未展示
   "缺了哪一点 / 误解了哪一点"）
 - **`_finish_*` 的前端开关**：`use_semantic_grading` 默认 false，
   前端尚未提供入口
+
+---
+
+## 附录 W · 阶段 3.6：SM-2 → FSRS-5（2026-09-11）
+
+### W.1 交付
+
+| 部件 | 位置 | 说明 |
+|---|---|---|
+| FSRS-5 算法 | **新增** `services/fsrs_service.py` | 纯函数；19 个公开默认参数；R/S/D 三类公式 + 状态机 |
+| 调度门面 | **新增** `services/scheduler_service.py` | `advance(state, quality, method, now) → ScheduleOutcome`；算法选择与口径转换 |
+| 落库 | `review_state_service.apply_schedule_result` | 统一口径落库 + 旧字段镜像；`apply_sm2_result` 降级为兼容包装 |
+| 接线 | `review_service.submit_answer`、`api/review.py::submit_card_review` | **两条路径合并到一个入口**（原先各有一份手抄的 SM-2 调用） |
+| 模型 | `review_states.stability` / `.difficulty`（新列，nullable） | 记忆状态；NULL = 尚未被 FSRS 调度 |
+| 模型 | `review_logs.rating` / `.predicted_retention` / `.item_type`（新列） | **顺带完成 3.2 的事件流化**（理由见 W.8） |
+| 配置 | `review_scheduler`（`fsrs`/`sm2`）、`fsrs_request_retention`（0.9）、`fsrs_max_interval_days`（3650） | 回退开关 + 两个产品旋钮 |
+| 测试 | `tests/test_fsrs.py`（**62 用例**） | 公式对拍 / 性质 / 状态机 / 接管 / 口径 / 端到端 / 回退 |
+
+真库迁移实测：两个表的新列已就位，`review_logs.item_type` 回填 194 行
+全部为 `quiz`，行数**一行未变**（users 4 / notes 22 / cards 1183 /
+quiz_items 1058 / review_logs 194 / review_states 2241 / chunks 608，
+FTS 608），`integrity=ok`、`journal_mode=wal`；
+`stability` 非空 **0 行** —— 符合设计，历史行在各自下一次复习时自行接管。
+
+### W.2 为什么非换不可：SM-2 的三条缺陷里只有一条能靠打补丁修
+
+改造前的 `calculate_sm2` 里，间隔完全由 `repetition` 与 `EF` 决定：
+
+```python
+if quality >= 3:
+    new_repetition = repetition + 1
+    if new_repetition == 1:   new_interval = 1
+    elif new_repetition == 2: new_interval = 6
+    else:                     new_interval = interval * new_ef
+```
+
+1. **`quality` 的强度不影响本次间隔** —— 补一个系数可以修
+   （SM-2+ / SM-15 就是这么做的）；
+2. **没有时间维度**：模型里不存在"当前能想起的概率"，
+   所以掌握度只能用"答对过几次"近似（见 `mastery_service` 的说明）。
+   这**不是**调参能修的：SM-2 的状态里根本没有这个量；
+3. **不看"隔了多久才复习"**：间隔效应是记忆科学里最稳的结论之一，
+   而 SM-2 的公式里没有它的位置。
+
+FSRS 引入 `S`（记忆强度）与 `R`（当前可回忆概率）后，2 与 3 同时消失：
+`R` 正是 3.9 需要的那个量，而"隔得久还答对 → S 涨得更多"是公式里的一项
+（`exp(w10*(1-R)) - 1`）。三条方向各有独立的单调性测试盯着，因为
+**它们就是换算法的理由本身** —— 如果这些性质不成立，换过来也没有意义。
+
+### W.3 参数从哪来：19 个数字是**拟合结果**，不是旋钮
+
+```python
+DEFAULT_W = (0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604,
+             0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605,
+             2.2698, 0.2315, 2.9898, 0.51655, 0.6621)
+```
+
+取自 open-spaced-repetition 的公开算法说明（FSRS-5，19 参数）。
+模块注释里写死了一条纪律：**不要凭记忆改这些数字** ——
+手改它们等于宣称自己比公开数据集更懂用户的记忆。要个人化就应该走
+参数拟合（3.14），而不是猜一个"看起来更合理"的值。
+
+同理没有引入 `fsrs` 第三方包：公式固定、实现是纯算术，
+项目其余部分（`_levenshtein`、`to_bigrams`、分段器）同样自实现。
+真正需要外部工具的是**拟合器**，那是 3.14 的事，
+且它产出的仍然只是"另一组 19 个浮点数"，`DEFAULT_W` 就是预留的插槽。
+
+### W.4 🔴 口径转换：`quality`(0-5) → `rating`(1-4) 取决于**谁给的分**
+
+这是全篇最容易搞错、后果也最直接的一处。
+
+| quality | SM-2 语义 | rating | 说明 |
+|---|---|---|---|
+| 0,1,2 | 没想起来（`quality < 3`） | Again | SM-2 的及格线就是 3 |
+| 3 | 勉强正确，很费力 | Hard | |
+| 4 | 正确但有些犹豫 | Good | |
+| 5 | 完美、毫不费力 | Easy | **仅当用户自评时** |
+
+⚠️ **机器判分得到的 `quality=5` 不等于 Easy**。`_grade_choice` 只要选对
+就给 5，但"选对了"里没有"毫不费力"这层信息（可能是蒙对的）。
+若照搬成 Easy，`new + Easy` 会直接进长期复习并排到 **16 天后**
+（`S0(Easy) = 15.69`）—— 而用户只见过这张卡一次。
+
+所以机器判分（choice / fill_blank / semantic / ungraded / legacy）
+一律**封顶 Good**。这是 `_MACHINE_QUALITY_TO_RATING` 存在的唯一理由，
+并有专门的测试盯着（`test_machine_grade_never_yields_easy`、
+端到端的 `test_choice_correct_is_good_not_easy`）。
+
+这个取舍与 3.5 里"不给 LLM 判 0-100 分"是同一个原则：
+**只使用信号里真正存在的信息**。
+
+（用答题耗时推断"轻松程度"是可能的改进方向 —— `time_spent_ms` 一直在记 ——
+但那是新的启发式，需要单独验证，不能顺手塞进口径转换里。）
+
+### W.5 旧行**接管**而不是清零（症状 D-3 的同型风险）
+
+真库里有 2241 行 SM-2 时期的状态，它们的 `stability` 都是 NULL。
+把"没有 S"当成"新卡"会让**所有历史进度归零** —— 这正是
+overhaul-plan 症状 D-3（重跑理解丢学习历史）的形态，只是这次由换算法触发。
+
+换算用的是 FSRS 对 S 的**定义本身**，不是近似：
+
+```
+I(0.9, S) == S   ⟹   S := 当前 interval_days
+```
+
+SM-2 的 `interval` 语义是"下次复习间隔"，而它隐含的目标就是
+"到那时还记得的概率约 90%"（EF 的调整规则围绕及格线转），
+两者指的是同一件事。难度由 EF 反解（W.7）。
+两个方向都是可逆映射，所以这次交接**不丢信息**，也不需要一次性数据迁移 ——
+每行在它下一次被复习时自行完成换算。
+
+对应的关键回归测试是 `test_legacy_progress_is_not_reset`：
+一张间隔 15 天的 SM-2 卡，首次 FSRS 复习后间隔**必须 > 15 天**。
+这个 bug 在界面上完全看不出来（卡片照常出现，只是排得比以前早），
+只有这条断言能拦住它。
+
+### W.6 状态机：哪部分是 FSRS，哪部分是本项目的策略
+
+必须分清，否则以后没人知道"新卡答对隔 1 天"到底能不能改：
+
+| 规则 | 归属 |
+|---|---|
+| S/D 的更新公式、R 的定义、间隔反解 | **FSRS 的规定部分**，有公开公式可逐条对拍 |
+| `new + Easy` 直接进长期复习 | 本项目策略 |
+| `new/learning + Again/Hard/Good` → 学习步 **1 天** | 本项目策略 |
+| `learning/relearning + ≥Hard` → 毕业进 review，间隔由 S 解出 | 本项目策略 |
+| `review + Again` → relearning，1 天 | 本项目策略（`stability_after_forget` 保证残余强度不丢） |
+| 间隔 ≥ 1 天、≤ `fsrs_max_interval_days` | 数值护栏 |
+
+学习步取 1 天的理由：与 SM-2 时期"首次答对隔 1 天"保持一致 ——
+新学的东西当天记住、第二天确认一次，比隔三天更符合直觉，
+也让"学完立刻复习"这条最常用的路径不因换算法而突变。
+`fsrs_service._next_state_and_interval` 的注释里逐条写了这些理由，
+它们是被测对象而不是被测前提。
+
+**`schedule()` 里还有一个容易漏的分支**：同日复习（`elapsed < 1`）
+必须走 `stability_short_term`。否则 t=0 → R=1 →
+`exp(w10*(1-R)) - 1 = 0` → 成功复习给出的 S' **恰好等于 S**，
+于是"当天没想起来、当天再看一遍"对记忆状态毫无影响。
+这条有专门的回归测试。
+
+### W.7 EF 桥接：为什么不把 `easiness_factor` 冻住
+
+换算法后 `easiness_factor` 仍在被读取（卡片复习列表、掌握度、
+以及回滚后的 SM-2 路径），但它不再被 SM-2 更新。留着一个停更的字段
+有两种坏结果：它看起来是最新值却其实过期（**无法与"正确"区分**），
+以及回滚后带着一个几年前的 EF 继续跑。
+
+因此按 `EF = clamp(2.5 + (5 - D) * 0.15, 1.3, 2.8)` 做单调桥接，
+保住这一列的**语义**（越大越容易、范围 [1.3, 2.8]）——
+而不是把 FSRS 的难度直接塞进一个叫 `easiness_factor` 的列里让列名说谎。
+D=5 ↔ EF=2.5 取在两者的默认值上，接管时难度因此不会凭空跳变。
+
+⚠️ 这个映射**不是满射**：D < 3 的部分全部落到 EF=2.8，反向只能得到 3.0，
+即有损。这可以接受：真库里的 EF 本来就被 SM-2 夹在 [1.3, 2.8] 内，
+"取回来"不会比原来更糟；而 D < 3 只可能由 FSRS 自己产生，
+那时 `stability/difficulty` 已非 NULL，走直通分支，
+根本不经过这个桥。两条边界都有测试记录。
+
+### W.8 顺带完成 3.2：`predicted_retention` 是一扇**单向门**
+
+阶段 3.2 列的三列本来可以留到以后再补，但 `predicted_retention` 不行：
+它是"调度器**在复习发生之前**预测的可回忆概率"，只能在复习那一刻写下。
+事后重建需要当时的 S，而 S 已被这次复习更新 —— 没写就是永远没有。
+校准曲线（3.14：预测 0.9 的那批卡实际答对多少）完全依赖它，
+所以哪怕 3.14 还没做，也必须现在开始积累。
+
+三个刻意的选择：
+
+1. **SM-2 路径下留 NULL，而不是用 SM-2 的近似公式填数**。
+   SM-2 没有保持率模型，填进去的数字是我们的发明而不是那个算法的输出，
+   而校准曲线一旦混入两种来源的数字，分母里就混着不是"预测"的东西。
+2. **`rating` 不复用 `quality`**：两者是不同尺度（W.4），
+   要在同一列塞两种尺度就必须再加一列记"这行属于哪个尺度"，反而更贵。
+   FSRS 参数拟合直接消费 `rating`，它必须无歧义。
+3. **历史行回填 `item_type`**：判据是"`quiz_id` 是否为空"，
+   这是**如实**的判断（那一列本来就是这么用的），不是猜测；
+   两个 id 都为空的异常行保持 NULL。
+
+配套的回归测试是 `test_predicted_retention_is_pre_review_value`：
+一张 S=10 天的卡隔 10 天复习，预测值必须恰为 0.9。
+若把 R 的计算挪到落库之后，得到的是"用复习后的 S 算出来的事后数字"，
+它总在 1.0 附近 —— 校准曲线随即变成一句永远乐观的空话。
+
+### W.9 回退开关：切回 SM-2 时**清空** S/D
+
+`config.review_scheduler` 默认 `fsrs`，可切 `sm2`。留这个开关的理由：
+换调度算法会改变**每个用户**的复习节奏，而节奏错了要过几天才察觉
+（卡片迟迟不再出现 / 间隔突然暴涨）。一个配置项就能在不回滚版本的前提下
+退回已验证多年的旧行为。
+
+切回 SM-2 时 `stability`/`difficulty` 被**清空**而不是保留。两个理由：
+
+- 保留会让"NULL ⟺ 当前由 FSRS 调度"这条不变量失效，
+  而 `schedule()` 恰好用它选分支（是否要用 interval/EF 接管）；
+- SM-2 改了 `interval` 却不会改 S，留下的 S 与刚写的 interval
+  **互相矛盾**（S 的定义就是 interval 在 R=90% 时的值）。
+
+清空后语义重新干净，切换成本只是"下一次 FSRS 复习时重新接管一次"。
+`test_switch_clears_fsrs_state` 覆盖这条。
+
+另外，SM-2 路径的阶段推导在 `scheduler_service.sm2_kind` 里
+**逐字保留**了改造前的规则（成功 → review，失败 → relearning）——
+回退开关的意义是行为完全不变，而不是"顺便变得更合理"。
+`derive_kind`（另一条规则，用于从旧字段补建状态）因此没有被复用，
+两者的差异在代码注释里写明了。
+
+### W.10 顺带修掉的一处分叉：两条复习路径合并
+
+改造前 `api/review.py::submit_card_review` 里有一份**手抄的 SM-2 调用**，
+与 `review_service.submit_answer` 各算一次。平时它们一致，
+所以问题不会显形；但换算法时只要漏改一处，
+卡片复习会继续按 SM-2 排期 —— 而两条路径写的是**同一批**
+`review_states` 行，同一张卡在两条路径间来回切换就会得到互相矛盾的间隔。
+
+现在两条路径都调 `scheduler_service.advance`，并有
+`TestCardReviewUsesSameScheduler` 盯着（断言卡片复习也写出了 FSRS 状态）。
+
+同类的另一处修正：`review_service` 原先在拿不到复习状态时会**静默不推进调度**
+（`if sm2_result is not None` 包住整段），并只打一条 warning。
+现在改成直接抛错 —— 题目刚查出来存在却拿不到状态是数据不一致，
+"用户看到已复习、调度其实没动"是一种没有任何痕迹的静默失败（原则 P7）。
+
+### W.11 实测拦下的两个错误
+
+| # | 错误 | 怎么发现的 | 修法 |
+|---|---|---|---|
+| 1 | **NaN 会穿透数值护栏** | 性质测试 `test_guard_rails_on_degenerate_input` | Python 的 `max(nan, 0.01)` 返回 **nan**（`0.01 > nan` 恒 False），于是各处写的 `max(stability, MIN_STABILITY)` 根本挡不住 NaN，`S ** -w9` 再把它扩散进库。改为 `safe_stability()`（NaN/None → 下限） |
+| 2 | **SM-2 路径的阶段被算错** | 全量测试 `test_failure_increments_lapses` | 我一度让 SM-2 也复用 `derive_kind`，它在"失败后 repetition=0"时给出 `learning`，而改造前的契约是 `relearning` —— 回退开关就不再是"行为不变"了。抽出 `sm2_kind` 逐字保留旧规则 |
+
+第 1 条尤其值得记：它不是靠"读代码"发现的，而是靠**一条不依赖任何魔数的
+性质断言**（"任何输入都不得产出 NaN"）发现的。
+第 2 条则是全量回归的价值 —— 单跑新测试文件时它是绿的。
+
+### W.12 验收
+
+| 项 | 数字 |
+|---|---|
+| `tests/test_fsrs.py` | **62 passed**：公式对拍 12 / 性质 9 / 状态机 12 / 旧状态接管 6 / 口径转换 6 / 端到端落库 7 / 算法选择 3 / 回退开关 2 / 卡片路径 2 / 契约 3 |
+| 全量测试 | 495 → **557 passed / 3 skipped** |
+| ruff | `app tests scripts` 全绿 |
+| 真库迁移 | 列已加、行数未变、`integrity=ok`、`item_type` 全部回填 |
+| 备份 | `_backup/20260911-3-6-pre-fsrs/engramnote.db`（10.5MB） |
+
+### W.13 仍未完成 / 下一步
+
+- **3.7 fuzz 与复习时段对齐**：FSRS 没有改变"同一批卡片会在同一天到期"
+  这件事（同一次导入的卡片 S 相同 → 间隔相同）。fuzz 仍未做。
+  ⚠️ 但 3.7 的另一半**已被 FSRS 结构性解决**：SM-2 的"提前复习会缩短间隔"
+  来自 `interval * EF`（间隔是乘出来的），而 FSRS 的间隔由 S 解出、
+  S 由实际 elapsed 与 R 决定，所以提前复习不再系统性地压缩间隔。
+  剩下要做的只有 fuzz 与"对齐到用户的学习时段"。
+- **3.9 掌握度**：`mastery_service.compute_retrievability` 用的是
+  **指数**曲线 `2^(-t/S)`，而 FSRS 用的是**幂律**曲线。
+  两者差别很大：S=20 天的卡放一年，指数模型给 0.03，FSRS 给 0.44。
+  现在 `stability` 已经在库里了，3.9 应该直接换成 FSRS 的 `retrievability`，
+  否则"到期预测"与"掌握度"会在界面上互相矛盾。
+  **这也是本轮的一个具体发现**，写进了 `test_retrievability_monotone_and_bounded`。
+- **3.10 新卡/复习卡分开限额**：`S` 与 `R` 现已可用，
+  可以按 `R < 0.9` 与 `state == new` 两个口径分别计数。
+- **3.14 参数拟合**：`review_logs.rating` / `predicted_retention` 已开始积累，
+  但真库现在没有任何一行是 FSRS 产生的（历史 194 行全是 SM-2 时期），
+  **样本量为 0**。校准曲线仍会返回 `insufficient_data=true`，
+  这是如实的。
+- **前端**：卡片复习页仍显示 `interval_days` / `easiness_factor`，
+  没有展示 S/D/R；`3.13`（答错时展开原文）与 3.5 的
+  `grading_detail` 展示也仍未接线。
+- **`review_states.repetition` / `easiness_factor` 的最终去向**：
+  现在是"SM-2 兼容镜像"，等 3.7/3.9/3.10 全部切到 `review_states` 之后，
+  连同 `quiz_items` 上的四个旧字段一起删除（这是阶段 3 的收尾项）。
 
 ---
 
@@ -5399,7 +5692,7 @@ ON DELETE 子句才是实际生效的那个。
 
 ---
 
-**文档版本**：v1.4（M-4/M-10 复核见附录 H）
+**文档版本**：v1.5（阶段 2 与阶段 3 的执行记录见附录 J–W；阶段 3.6 FSRS 见附录 W）
 **撰写依据**：`backend/app`（约 20,000 行）与 `frontend/src`（约 16,000 行）逐行审计；
 `backend/data/db/engramnote.db` 与 `backend/data/models/*` 现场实测；
 22 次提交历史；`docs/architecture.md`、`docs/decisions.md`、`README.md`、`参赛/参赛贴文.md`

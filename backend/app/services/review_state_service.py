@@ -41,11 +41,18 @@ from ..models.review_state import (
     ReviewState,
     ReviewStateKind,
 )
+from .scheduler_service import (
+    ALGORITHM_SM2,
+    PASS_QUALITY,
+    ScheduleOutcome,
+    derive_kind,
+    sm2_kind,
+)
 
 logger = logging.getLogger(__name__)
 
-#: SM-2 的成功阈值（quality >= 3）；与 sm2_service 保持一致
-PASS_QUALITY = 3
+#: 兼容别名：本模块内部（`_bootstrap_state`）与历史测试都按这个私有名引用
+_derive_kind = derive_kind
 
 
 def _now() -> datetime:
@@ -61,13 +68,11 @@ def _as_aware(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone(timezone.utc)
 
 
-def _derive_kind(repetition: int, last_quality: Optional[int]) -> ReviewStateKind:
-    """由 repetition 与最近一次成绩推导学习阶段"""
-    if repetition <= 0:
-        return ReviewStateKind.learning if last_quality is not None else ReviewStateKind.new
-    if last_quality is not None and last_quality < PASS_QUALITY:
-        return ReviewStateKind.relearning
-    return ReviewStateKind.review
+# 注：原本此处有一个本地 `_derive_kind`（由 repetition 与最近成绩推导学习阶段），
+# 已上移到 `scheduler_service.derive_kind` 并在文件顶部以别名引入。
+# 上移的原因：判断"这次复习后处于哪个阶段"是**调度**的职责，
+# 而 SM-2 路径（`scheduler_service._advance_sm2`）也要用它；
+# 留在这里会让 scheduler_service 反向依赖本模块，形成循环导入。
 
 
 async def get_state(
@@ -174,15 +179,102 @@ async def _bootstrap_state(
 def _apply_result_to_state(
     state: ReviewState, quality: int, next_review_at: datetime, now: datetime,
 ) -> None:
-    """把 SM-2 结果写入 ReviewState（纯函数式赋值，便于测试）"""
+    """把调度结果里"与算法无关"的部分写进 ReviewState
+
+    只负责 last_reviewed_at / next_review_at / review_count / lapses；
+    **间隔、难度与学习阶段由调用方写入**（两个算法写的东西不同，
+    阶段的推导规则也不同 —— 见 `scheduler_service._advance_sm2` 的说明）。
+    """
     state.last_reviewed_at = now
     state.next_review_at = next_review_at
     state.review_count = (state.review_count or 0) + 1
-    if quality >= PASS_QUALITY:
-        state.state = ReviewStateKind.review if state.repetition > 0 else ReviewStateKind.learning
-    else:
+    if quality < PASS_QUALITY:
         state.lapses = (state.lapses or 0) + 1
-        state.state = ReviewStateKind.relearning
+
+
+async def apply_schedule_result(
+    db: AsyncSession,
+    user_id: str,
+    item_type: str,
+    item_id: str,
+    *,
+    outcome: ScheduleOutcome,
+    quality: int,
+    now: Optional[datetime] = None,
+) -> Optional[ReviewState]:
+    """把一个 `ScheduleOutcome` 落库（`review_states` + `quiz_items` 旧字段双写）
+
+    ## 为什么落库只认 `ScheduleOutcome`，不认具体算法
+
+    落库要做的事（写哪些列、旧字段怎么镜像、lapses 怎么加）**与算法无关**。
+    把算法判断留在 `scheduler_service.advance` 里、让这里只消费统一口径，
+    换算法时才不会出现"新路径写了 stability、旧路径忘了写"的漏列。
+
+    ## stability / difficulty 在 SM-2 路径下被清空（不是保留旧值）
+
+    这两个字段的语义是"**当前**由 FSRS 维护的记忆状态"。回退到 SM-2 之后，
+    SM-2 改了 `interval` 却不会改 S —— 那么原来的 S 就不再对应这张卡的
+    真实状态了。留着它有两种坏结果：
+
+    - 之后切回 FSRS，`schedule()` 会拿这个**过期**的 S 当输入，
+      而它和 SM-2 刚写下的 interval 互相矛盾（S 的定义就是 interval 在
+      R=90% 时的值）；
+    - NULL 与"有值"在 `schedule()` 里走的是**两条不同分支**
+      （是否要用 interval/EF 接管），留一个过期的值会走错分支。
+
+    清空之后语义重新变得干净：NULL ⟺ 当前不由 FSRS 调度。
+
+    Args:
+        outcome: `scheduler_service.advance` 的结果
+        quality: 本次评分 0-5（决定 lapses 与是否算成功）
+        now: 复习时间
+
+    Returns:
+        更新后的 ReviewState；题目不存在时为 None
+    """
+    now = now or _now()
+    state = await get_state(db, user_id, item_type, item_id)
+    if state is None:
+        return None
+
+    state.interval_days = int(outcome.interval_days)
+    state.repetition = int(outcome.repetition)
+    state.easiness_factor = float(outcome.easiness_factor)
+    if outcome.algorithm == ALGORITHM_SM2:
+        state.stability = None
+        state.difficulty = None
+    else:
+        state.stability = outcome.stability
+        state.difficulty = outcome.difficulty
+
+    _apply_result_to_state(state, quality, _as_aware(outcome.next_review_at) or now, now)
+    # 学习阶段以调度器给的结果为准：两个算法对"这次复习后处于哪个阶段"
+    # 的推导规则不同（FSRS 还有 SM-2 推不出的情况，例如"新卡 + Easy
+    # 直接进长期复习"），在这里统一落库可以避免每个算法各写一遍。
+    state.state = outcome.state
+
+    # 双写旧字段（仅题目维度有旧字段）
+    #
+    # ⚠️ 这里**不递增** `quiz.review_count`：调用方
+    # （`review_service.submit_answer`）已经在同一事务里做过这件事。
+    # 本函数的职责是把"已经算好的结果"同步过来，不是重新计算；
+    # 两边各加一次会让一次作答计成两次（本轮实测：review_count 变成 2）。
+    if item_type == ITEM_TYPE_QUIZ:
+        quiz = (await db.execute(
+            select(QuizItem).where(
+                QuizItem.id == item_id, QuizItem.user_id == user_id,
+            )
+        )).scalars().first()
+        if quiz is not None:
+            quiz.interval = int(outcome.interval_days)
+            quiz.repetition = int(outcome.repetition)
+            quiz.easiness_factor = float(outcome.easiness_factor)
+            quiz.next_review_at = _as_aware(outcome.next_review_at)
+            quiz.last_reviewed_at = now
+            # review_count 与 review_states 对齐（以调用方写入的值为准）
+            state.review_count = int(quiz.review_count or state.review_count or 0)
+
+    return state
 
 
 async def apply_sm2_result(
@@ -198,52 +290,30 @@ async def apply_sm2_result(
     next_review_at: datetime,
     now: Optional[datetime] = None,
 ) -> Optional[ReviewState]:
-    """把 SM-2 计算结果同时写入 `review_states` 与 `quiz_items` 旧字段（双写）
+    """把已算好的 SM-2 结果落库（`apply_schedule_result` 的兼容包装）
 
-    双写的意义是**可回退**：新读取路径（卡片复习、掌握度）走
-    `review_states`，任何时刻回滚代码，`quiz_items` 上仍是正确值。
+    ⚠️ 生产路径已经统一走 `scheduler_service.advance` +
+    `apply_schedule_result`，本函数保留是为了：
+    1. 迁移脚本与既有测试仍按这个签名调用；
+    2. 显式表达"这是一次 SM-2 落库" —— 它会按 `ALGORITHM_SM2` 处理，
+       即**清空** stability/difficulty（见 `apply_schedule_result` 的说明）。
 
-    Args:
-        quality: 本次评分（决定 lapses 与 state）
-        interval_days / repetition / easiness_factor / next_review_at:
-            SM-2 的输出
-
-    Returns:
-        更新后的 ReviewState；题目不存在时为 None
+    新代码不要再用它：它要求调用方自己算 SM-2，而"每个调用点各算一次"
+    正是阶段 3.6 要消除的分叉来源。
     """
-    now = now or _now()
-    state = await get_state(db, user_id, item_type, item_id)
-    if state is None:
-        return None
-
-    state.interval_days = int(interval_days)
-    state.repetition = int(repetition)
-    state.easiness_factor = float(easiness_factor)
-    _apply_result_to_state(state, quality, _as_aware(next_review_at) or now, now)
-
-    # 双写旧字段（仅题目维度有旧字段）
-    #
-    # ⚠️ 注意这里**不再递增** `quiz.review_count`：调用方
-    # （`review_service.submit_answer`）已经在同一事务里做过这件事。
-    # `apply_sm2_result` 的职责是把"已经算好的结果"同步到 review_states，
-    # 不是重新计算；两边各加一次会让一次作答计成两次
-    # （本轮实测：review_count 变成 2）。
-    if item_type == ITEM_TYPE_QUIZ:
-        quiz = (await db.execute(
-            select(QuizItem).where(
-                QuizItem.id == item_id, QuizItem.user_id == user_id,
-            )
-        )).scalars().first()
-        if quiz is not None:
-            quiz.interval = int(interval_days)
-            quiz.repetition = int(repetition)
-            quiz.easiness_factor = float(easiness_factor)
-            quiz.next_review_at = _as_aware(next_review_at)
-            quiz.last_reviewed_at = now
-            # review_count 与 review_states 对齐（以调用方写入的值为准）
-            state.review_count = int(quiz.review_count or state.review_count or 0)
-
-    return state
+    outcome = ScheduleOutcome(
+        interval_days=int(interval_days),
+        repetition=int(repetition),
+        easiness_factor=float(easiness_factor),
+        next_review_at=next_review_at,
+        # 用推导出的阶段而不是调用方传入的，保证与旧行为一致
+        state=sm2_kind(int(repetition), quality >= PASS_QUALITY),
+        algorithm=ALGORITHM_SM2,
+    )
+    return await apply_schedule_result(
+        db, user_id, item_type, item_id,
+        outcome=outcome, quality=quality, now=now,
+    )
 
 
 async def list_due_states(
@@ -298,6 +368,7 @@ async def count_due_cards(db: AsyncSession, user_id: str) -> int:
 
 __all__ = [
     "get_state",
+    "apply_schedule_result",
     "apply_sm2_result",
     "list_due_states",
     "count_states",

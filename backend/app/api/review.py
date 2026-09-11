@@ -48,9 +48,13 @@ from ..schemas.review import (
     ReviewHistoryResponse,
     ReminderResponse,
 )
-from ..services import mastery_service, review_service, review_state_service
+from ..services import (
+    mastery_service,
+    review_service,
+    review_state_service,
+    scheduler_service,
+)
 from ..services.notification_service import NotificationService
-from ..services.sm2_service import calculate_sm2
 
 router = APIRouter()
 
@@ -261,22 +265,21 @@ async def submit_card_review(
         raise HTTPException(status_code=404, detail="卡片复习状态不可用")
 
     quality = max(0, min(5, int(req.self_rating)))
-    sm2_result = calculate_sm2(
-        quality=quality,
-        interval=state.interval_days,
-        repetition=state.repetition,
-        easiness_factor=state.easiness_factor,
-    )
-
     now = datetime.now(timezone.utc)
-    await review_state_service.apply_sm2_result(
+
+    # 与 `/review/submit` 共用同一个调度入口（阶段 3.6）。
+    #
+    # 改造前这里是一份**手抄的 SM-2 调用**：卡片复习与答题复习各算一次，
+    # 于是任何调度改动都要改两遍。换 FSRS 时如果只改了答题那条路径，
+    # 卡片复习会继续按 SM-2 排期，而两者写的是同一批 review_states 行 ——
+    # 同一张卡在两条路径间来回切换会得到互相矛盾的间隔。
+    # 现在两条路径都走 `scheduler_service.advance`。
+    outcome = scheduler_service.advance(
+        state, quality, method="self_rating", now=now,
+    )
+    await review_state_service.apply_schedule_result(
         db, current_user.id, ITEM_TYPE_CARD, card_id,
-        quality=quality,
-        interval_days=sm2_result.interval,
-        repetition=sm2_result.repetition,
-        easiness_factor=sm2_result.easiness_factor,
-        next_review_at=sm2_result.next_review_at,
-        now=now,
+        outcome=outcome, quality=quality, now=now,
     )
 
     # 事件流：quiz_id 为空表示卡片级复习；card_id 让记录能归到具体卡片
@@ -290,6 +293,12 @@ async def submit_card_review(
         quality=quality,
         self_rating=quality,
         grading_method="self_rating",
+        # 阶段 3.6：卡片复习**一定**有调度（没有占位提交这条路），
+        # 所以这两个字段恒有值 —— 它同时也是最干净的校准数据来源：
+        # 自评档位明确、无机器判分噪声。
+        rating=outcome.rating,
+        predicted_retention=outcome.predicted_retention,
+        item_type="card",
         time_spent_ms=req.time_spent_ms,
         review_at=now,
     ))
@@ -301,11 +310,17 @@ async def submit_card_review(
         card_id=card_id,
         quality=quality,
         is_correct=quality >= 3,
-        interval_days=sm2_result.interval,
-        repetition=sm2_result.repetition,
-        easiness_factor=sm2_result.easiness_factor,
-        next_review_at=sm2_result.next_review_at,
+        interval_days=outcome.interval_days,
+        repetition=outcome.repetition,
+        easiness_factor=outcome.easiness_factor,
+        next_review_at=outcome.next_review_at,
         mastery_level=float(card.mastery_level or 0.0),
+        # 阶段 3.6：把"为什么给这个间隔"的依据一并返回。
+        # 用户看到"下次 20 天后"时，唯一的解释就是 S 与 R ——
+        # 只给一个天数等于要求用户盲信调度器。
+        stability=outcome.stability,
+        difficulty=outcome.difficulty,
+        predicted_retention=outcome.predicted_retention,
     )
 
 

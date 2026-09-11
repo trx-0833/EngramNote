@@ -87,6 +87,8 @@ class ReviewState(BaseModel):
         interval_days: 当前复习间隔（天），SM-2 的 interval
         repetition: 连续成功次数，SM-2 的 repetition
         easiness_factor: 难度系数，SM-2 的 EF
+        stability: FSRS 的记忆强度 S（天）；NULL = 尚未被 FSRS 调度过
+        difficulty: FSRS 的难度 D（1-10）；NULL 同义
         next_review_at: 下次到期时间；None 表示立即可复习
         last_reviewed_at: 上次复习时间
         lapses: 累计遗忘次数（quality < 3），用于阶段 3.8 的 leech 检测
@@ -102,6 +104,20 @@ class ReviewState(BaseModel):
     interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     repetition: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     easiness_factor: Mapped[float] = mapped_column(Float, nullable=False, default=2.5)
+
+    #: FSRS 的记忆状态（阶段 3.6）。
+    #:
+    #: ## 为什么允许 NULL，而不是给个默认值
+    #:
+    #: 真库里已有 2241 行 SM-2 时期的状态。它们的 S/D 并不知道，
+    #: 若给个默认值（比如 0 或 1），"没算过"与"算出来就是这么小"
+    #: 就再也分不开了 —— 而这两者的处置完全不同：前者要在下一次复习时
+    #: 由 `fsrs_service.adopt_legacy_state` 从 interval/EF 换算接管，
+    #: 后者应该直接用。NULL 是唯一能表达"未知"的值。
+    #:
+    #: 首次经 FSRS 复习后即被写入，此后不再为 NULL。
+    stability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    difficulty: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     #: 允许 NULL：迁移自 quiz_items 的历史行可能没有 next_review_at，
     #: 语义为"立即可复习"（与旧代码 `next_review_at is None` 的判定一致）
@@ -131,5 +147,6 @@ class ReviewState(BaseModel):
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         return (
             f"<ReviewState {self.item_type}:{self.item_id[:8]} "
-            f"iv={self.interval_days} rep={self.repetition} ef={self.easiness_factor}>"
+            f"iv={self.interval_days} rep={self.repetition} ef={self.easiness_factor} "
+            f"S={self.stability} D={self.difficulty}>"
         )
