@@ -30,6 +30,41 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 # ---------------------------------------------------------------------------
+# 测试环境变量：必须在本文件被 import 后、任何 app 模块被 import 前设置
+#
+# ## 为什么需要在 conftest 里设，而不是靠本机 .env
+#
+# `app/config.py` 的 `Settings` 有一个生产环境校验：
+#     debug=False 且 jwt_secret_key 为空 → 抛 ValidationError
+# 而本机 `backend/.env` 里有 JWT_SECRET_KEY（该文件被 .gitignore 忽略），
+# CI 上**没有**。于是 CI 上任何在模块层 `from app.config import get_settings`
+# 的测试文件都会在 **收集阶段** import 失败：
+#
+#     ERROR tests/test_learning_metrics.py - ValidationError for Settings
+#     Value error, 生产环境必须配置 JWT_SECRET_KEY
+#     !!! Interrupted: 6 errors during collection !!!
+#
+# 症状极具误导性：报错像是"配置不正确"，实际是"测试**隐式依赖了本机 .env**"。
+# 本机永远复现不了 —— 除非把 .env 移走。
+#
+# ## 为什么用 setdefault
+#
+# 用 `setdefault` 而不是直接赋值：本机若已显式配置了密钥（或 CI 通过
+# workflow env 传了），以外部值为准，conftest 只做兜底。
+#
+# ## 这里的值只用于测试
+#
+# UUID + 固定前缀，不是任何真实环境使用的密钥；测试不签发对外有效的令牌
+# （`tests/conftest.py` 的网络守卫同时阻断一切真实外呼）。
+# ---------------------------------------------------------------------------
+
+os.environ.setdefault(
+    "JWT_SECRET_KEY",
+    "test-only-jwt-secret-not-used-outside-tests-0123456789abcdef",
+)
+
+
+# ---------------------------------------------------------------------------
 # 网络安全守卫：默认阻断一切真实外呼
 # ---------------------------------------------------------------------------
 
