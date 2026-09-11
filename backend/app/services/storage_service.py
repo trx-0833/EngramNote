@@ -20,11 +20,14 @@
 - 本地模式下 get_presigned_url 返回文件路径字符串，仅供内部使用
 """
 
+import logging
 import os
 import shutil
 from pathlib import Path
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -287,18 +290,56 @@ def get_presigned_url(bucket: str, object_name: str, expires_hours: int = 1) -> 
         return str(path)
 
 
+#: 删除文件的最大尝试次数（含首次）
+#:
+#: 为什么需要重试：删除是**幂等**的，重试很便宜；而失败的删除会留下
+#: **不可发现、不可恢复**的孤儿文件 —— 调用方（purge_note）随后就删掉了
+#: DB 记录，之后再也没有任何机制知道那个文件存在。
+#:
+#: 实测（tests/test_purge_file_consistency.py）：失败一次即永久孤立。
+#: 典型瞬时原因：Windows 上文件被其他进程占用、杀软扫描、网络盘抖动。
+DELETE_MAX_ATTEMPTS = 3
+
+#: 重试间隔（秒）。总耗时上限约 0.15s，对请求延迟可忽略。
+#: 不用指数退避：删除的瞬时故障通常在毫秒级，等待越久只会拖慢请求。
+DELETE_RETRY_DELAY_SECONDS = 0.05
+
+
 def delete_file(bucket: str, object_name: str):
     """
-    从存储删除文件
+    从存储删除文件（瞬时失败自动重试）
 
     Args:
         bucket: 存储桶名称
         object_name: 对象名称
+
+    Raises:
+        Exception: 重试耗尽后抛出最后一次的异常，由调用方决定是否降级
+
+    设计要点：
+    - **只在失败时重试**。文件本就不存在时 `_delete_file_local` 是空操作，
+      不抛异常，因此"删除不存在的文件"不会白白走 3 次。
+    - **重试耗尽后仍然抛出**，不静默吞掉。调用方（`purge_note`）需要
+      知道删不掉，才能记 ERROR 并继续删 DB 记录（不能让用户永远删不掉笔记）。
+      两者是一对：重试提高成功率，抛出保证可观测。
     """
-    if settings.storage_backend == "minio":
-        _delete_file_minio(bucket, object_name)
-    else:
-        _delete_file_local(bucket, object_name)
+    import time
+
+    for attempt in range(1, DELETE_MAX_ATTEMPTS + 1):
+        try:
+            if settings.storage_backend == "minio":
+                _delete_file_minio(bucket, object_name)
+            else:
+                _delete_file_local(bucket, object_name)
+            return
+        except Exception:
+            if attempt >= DELETE_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "删除文件失败，重试 %d/%d: %s",
+                attempt, DELETE_MAX_ATTEMPTS - 1, object_name,
+            )
+            time.sleep(DELETE_RETRY_DELAY_SECONDS)
 
 
 def file_exists(bucket: str, object_name: str) -> bool:

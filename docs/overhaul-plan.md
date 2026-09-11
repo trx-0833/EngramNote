@@ -1469,37 +1469,36 @@ except Exception as e:
 "重复关系防护"（`docs/decisions.md#F-01`、`F-17`）实际上没有生效。
 且失败只留一行 WARNING。
 
-#### 🔴 M-4 物理删除笔记会因外键违约而**失败**（已用最小用例复现）
+#### ~~🔴 M-4 物理删除笔记会因外键违约而失败~~（**已实测证伪，2026-09-11**）
 
-`backend/app/services/note_service.py:603-614` `purge_note`：
-
-```python
-# ---- 4. 删除剩余卡片行：CardRelation 由 FK SET NULL 自动悬挂，绝不级联删除 ----
-if card_ids:
-    # 先解除待删卡片之间的父子引用（parent_card_id 自引用 FK 为 NO ACTION，
-    # 同批多行 DELETE 在 SQLite 逐行外键检查下可能因删除顺序失败）
-    await db.execute(
-        sql_update(KnowledgeCard)
-        .where(KnowledgeCard.parent_card_id.in_(card_ids))     # ← 只清"待删卡片的孩子"
-        .values(parent_card_id=None)
-    )
-    await db.execute(
-        sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
-    )
-```
-
-**问题**：只处理了"待删卡片 **作为父**"的引用，**没处理"待删卡片作为子"** ——
-即**其他笔记的卡片把 `parent_card_id` 指向本笔记的卡片**（"拓展卡片"功能正是这么用的）。
-`models/knowledge_card.py` 的 `parent_card_id` **没有 `ondelete`**（默认 `NO ACTION`）。
-同理 `quiz_items.card_id`（`models/quiz_item.py:85`）也是 `ForeignKey("knowledge_cards.id")` 无 `ondelete`。
-
-**后果**：
-```
-FOREIGN KEY constraint failed
-```
-**用户永远删不掉该笔记**，且删除前的 `_abort_processing` 已把状态 commit 成 failed，
-**无法恢复**。审计时线上 `parent_card_id` 全为 `NULL`，所以尚未暴露 ——
-**只要用户用过一次"拓展卡片"功能就会触发。**
+> ⚠️ **本条结论不成立。** 保留原文以便对照，但请以本框内结论为准。
+>
+> 原文断言：`purge_note` "只处理了待删卡片**作为父**的引用，没处理作为子"，
+> 因此其他笔记的拓展卡片指向本笔记卡片时，DELETE 会抛
+> `FOREIGN KEY constraint failed`，用户永远删不掉该笔记。
+>
+> **实测推翻了它。** `note_service.py:607-611` 的
+> `UPDATE knowledge_cards SET parent_card_id = NULL WHERE parent_card_id IN (待删卡片)`
+> —— **没有 `note_id` 限定**，所以它匹配的正是"**父**是被删卡片"的全部行，
+> 跨笔记的拓展卡片恰好命中。同理 `quiz_items` 的选取范围
+> （`:585-591`）是 `QuizItem.card_id.in_(card_ids) OR (note_id == :nid AND card_id IS NULL)`，
+> 第一个条件同样不带 note_id 限定，跨笔记题目会被一并删除。
+>
+> 证据：`tests/test_purge_note_integrity.py`（5 用例）。该文件**自己断言
+> 测试前提成立**（跨笔记引用确实建立），并用**真实生效的外键约束**验证
+> （对照实验：绕过 purge 直接 `DELETE` 会正确抛 `FOREIGN KEY constraint failed`，
+> 证明约束不是摆设）。
+>
+> **保留的残余风险**：这个正确行为依赖一个不显眼的事实 ——
+> `WHERE parent_card_id IN (...)` 的作用域是**全表**。若将来有人给它加上
+> `KnowledgeCard.note_id == note_id` 限定（看起来很合理），就会**真的引入 M-4**。
+> 上述测试就是为锁住这一点而写的。
+>
+> **另一处未做的加固**：`parent_card_id` 与 `quiz_items.card_id` 仍然
+> **没有 `ondelete`**。目前靠应用层保证一致性；若将来有代码绕过
+> `purge_note` 直接删卡片，就会撞上约束。补 `ondelete="SET NULL"` 是更稳的
+> 做法，但需要重建表（`quiz_items.card_id` 还是 NOT NULL，只能靠应用层删），
+> 故本轮未做。
 
 #### 🟠 M-5 重新生成题目**先删光学习记录**，再生成；批次异常静默跳过
 
@@ -1571,15 +1570,55 @@ async with session_factory() as session:
 4. `get_version_content` 在文件缺失时**直接删除 DB 记录**
    （拒绝服务式数据销毁：一次磁盘故障会静默清空版本历史）
 
-#### 🟡 M-10 双写顺序全是"先动文件，后 commit DB"，且失败降级为 warning
+#### 🟡 M-10 文件删除失败被降级为 warning，文件被**永久孤立**（结论已修正）
 
-审计枚举出**5 种磁盘/DB 分歧场景**（trash / restore / purge 三处，
-`api/notes/trash.py` + `services/note_service.py`）：
-文件 `move` 失败时仅记 warning，DB 状态照常提交。
+> ⚠️ **原文的两个具体机制都已被实测证伪**，但**同一个后果确实存在，
+> 载体是第三个机制**。原文保留在下方对照。
 
-**后果**：DB 说"已进回收站"，而文件还在原地（或反之）。
-purge 时按 DB 记录去删文件 → 删不到 → 静默跳过 → **用户看到"已彻底删除"，
-但文件仍在磁盘上**（隐私问题）。
+**原文**："双写顺序全是'先动文件，后 commit DB'，且失败降级为 warning"，
+枚举 5 种磁盘/DB 分歧场景（trash / restore / purge）。
+
+**实测结论（2026-09-11）**：
+
+1. **`trash_note` 搬家失败不产生孤儿** —— 代码在失败时**把路径字段保留为旧值**
+   （`note_service.py:293-299`，注释自陈"失败保留原值避免丢信息"）。
+   因此 `purge_note` 按 `note.original_file_path` 删文件时仍指向**原处**，
+   文件照样被删掉。
+2. **meta 旁载不会漏删** —— 一度怀疑 `purge_note` 按 trash 前缀反推
+   `{prefix}/output/meta/{base}.json` 会漏掉 inbox 下的 meta。
+   实测不会：它用 `parts[:-2]` 从**当前实际路径**取前缀，trash 路径取出的
+   是 `{user_id}/trash/{note_id}`，正确指向 trash 下的 meta，而 trash 搬家
+   已把 meta 一并搬走。
+
+**真正的缺陷（已修复）**：`purge_note` 的 7 处 `delete_file` 全部是
+
+```python
+try:
+    delete_file(bucket, path)
+except Exception as e:
+    logger.warning(...)        # ← 失败只记日志
+...
+await db.delete(note)          # ← 笔记记录照删
+await db.commit()
+```
+
+于是任意**瞬时**故障（Windows 文件被占用、杀软扫描、权限抖动、网络盘抖动）
+都会让文件留在磁盘上，而 DB 记录被删除 —— 之后**再没有任何机制知道它存在**，
+清理无从谈起。这不是"分歧"，是**不可发现、不可恢复的泄漏**，
+恰好命中 M-10 描述的后果："用户看到已彻底删除，但文件仍在磁盘上"。
+
+**修复**：`storage_service.delete_file` 增加有界重试
+（3 次、间隔 50ms）。选这一层而不是逐个调用点，是因为所有调用方
+（purge / trash / restore / 版本清理）都受益，且删除本身是**幂等**操作，
+重试代价极低。
+
+**关键约束（两条测试成对锁住）**：
+- 瞬时失败必须重试成功 → 文件不留残留
+- 持续失败时**必须继续删 DB 记录** —— 重试是有界的，耗尽后不能让用户
+  卡在"删不掉笔记"。留下一个孤儿文件比让用户永远删不掉更轻。
+
+证据：`tests/test_purge_file_consistency.py`（8 用例，含"文件不存在时不无谓重试"）。
+
 
 #### 🟡 M-11 未分页端点、N+1 与全表扫描（后端侧）
 
@@ -2890,8 +2929,8 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | 1.9 | **worker 启动时校验 schema** | worker 独立启动也能正常工作或明确报错 | ✅ 已落地（`_ensure_worker_schema()`） |
 | 1.10 | **修正 Celery broker 目录推导** | broker 目录与 `config.py:397` 保持一致 | ✅ 已落地（收敛为 `get_celery_broker_dir()`） |
 | 1.11 | 新增 `vault_files` 表 + 一致性校验任务（比对磁盘与 DB 的 sha256） | 可检测并修复发散 | ⬜ 待做 |
-| 1.12 | **消除双写**：统一"先写文件成功 → 再 commit DB → 失败则补偿回滚"的顺序 | 崩溃注入测试下无分歧 | ⬜ 待做 |
-| 1.13 | **修复物理删除笔记的 FK 违约**（见 §2.6 M-4） | 用过"拓展卡片"后仍能 purge | ⬜ 待做（**"用户永远删不掉笔记"的 blocker**） |
+| 1.12 | ~~**消除双写**：统一"先写文件成功 → 再 commit DB → 失败则补偿回滚"的顺序~~ | ✅ **已排查并修复真实缺陷**（§2.6 M-10 修正框）：删除失败改为有界重试；持续失败仍删 DB 记录（不让用户卡死） |
+| 1.13 | ~~**修复物理删除笔记的 FK 违约**（见 §2.6 M-4）~~ | ✅ **实测证伪：该缺陷不存在**（见 §2.6 M-4 修正框）。已补 `tests/test_purge_note_integrity.py`（5 用例）锁住正确行为，防止将来给 UPDATE 加 `note_id` 限定而真的引入它 |
 | 1.14 | **修复 `card_relations` 唯一索引**（见 §2.6 M-3） | 索引确定存在 | ✅ 已落地（附录 D；去重口径统一为 5 列） |
 
 **1.2′ 补充（SQLite 路线下的"启动零破坏性"）**：
@@ -3553,6 +3592,114 @@ AST 审计"写后 commit 前是否夹慢操作"**命中 0 处**。真实机制�
 
 ---
 
+## 附录 H · 阶段 1′ 收尾（二）：M-4/M-10 复核与修复（2026-09-11）
+
+> 承接附录 G。本轮目标是把阶段 1 表格里剩下的 `1.12` 与 `1.13` 做掉。
+> **结果与预期相反：两条都是文档写错了，但底下藏着一个真实的缺陷。**
+
+### H.1 方法：先证伪，再动手
+
+两条缺陷描述都声称"已用最小用例复现"。逐条实测后发现，
+**按文档描述的机制都不成立**。这轮的教训是：
+**"文档说已复现"不等于"现在仍然存在"** —— 中间可能已被别的改动顺带修掉，
+或者当初的复现本身就理解错了。所以第一步是写测试尝试复现，
+而不是直接照着描述改代码。
+
+### H.2 M-4（物理删除笔记外键违约）—— **不存在**
+
+文档说 `purge_note` "只处理了待删卡片**作为父**的引用，没处理作为子"。
+
+实测：`note_service.py` 的
+
+```sql
+UPDATE knowledge_cards SET parent_card_id = NULL
+ WHERE parent_card_id IN (待删卡片)
+```
+
+**没有 `note_id` 限定**，匹配的正是"**父**是被删卡片"的全部行 ——
+跨笔记的拓展卡片（其 `parent_card_id` 指向待删卡片）恰好命中。
+`quiz_items` 的选取范围同理，第一个条件 `card_id.in_(card_ids)` 也不带 note_id 限定。
+
+**验证方式（关键）**：`tests/test_purge_note_integrity.py` 做了两件事，
+确保这不是"测试根本没触发"：
+
+1. **先断言测试前提成立** —— 跨笔记引用确实建立成功（否则断言失效）；
+2. **对照实验证明外键约束真在生效** —— 绕过 `purge_note` 直接
+   `DELETE FROM knowledge_cards WHERE note_id = ...` 会正确抛
+   `FOREIGN KEY constraint failed`。
+
+若约束是摆设（例如 `PRAGMA foreign_keys=OFF`），这个测试会静默通过而毫无价值。
+
+**保留的残余风险**：正确行为依赖"UPDATE 作用域是全表"这个不显眼的事实。
+将来若有人给它加 `note_id == note_id` 限定（看起来很像"修 bug"），
+就会**真的引入 M-4**。上述测试就是为锁住这一点而写。
+
+**未做的加固**：`parent_card_id` 与 `quiz_items.card_id` 仍无 `ondelete`。
+补它需要重建表，而 `quiz_items.card_id` 是 NOT NULL（只能靠应用层删），
+故留待必要时一并处理。
+
+### H.3 M-10（文件删除失败降级为 warning）—— 机制错，后果对
+
+文档枚举的 5 种"磁盘/DB 分歧场景"实测不成立：
+
+- `trash_note` 搬家失败时**路径字段保留旧值**，purge 仍能找到并删除文件；
+- `purge_note` 的 meta 前缀用 `parts[:-2]` 从**当前实际路径**推导，
+  trash 路径取出的前缀正确指向 trash 下的 meta，而 trash 搬家已把 meta 搬走。
+
+**但同一个后果确实存在，载体是第三个机制**：
+
+```python
+try:
+    delete_file(bucket, path)
+except Exception as e:
+    logger.warning(...)      # ← 失败只记日志
+...
+await db.delete(note)        # ← 笔记记录照删
+await db.commit()
+```
+
+任意**瞬时**故障（Windows 文件被占用、杀软扫描、权限抖动）都会让文件留在
+磁盘上，而 DB 记录被删除 —— 之后**再没有任何机制知道它存在**。
+不是"分歧"，是**不可发现、不可恢复的泄漏**。
+
+**修复**：`storage_service.delete_file` 加有界重试（3 次 / 50ms）。
+放这一层而不是逐个调用点：所有调用方都受益，且删除是**幂等**操作，
+重试代价极低；而失败一次就永久孤立的代价极高。
+
+**两条测试成对锁住边界**：
+- 瞬时失败 → 必须重试成功，不留残留
+- 持续失败 → **必须继续删 DB 记录**（重试有界，不能让用户卡在"删不掉"）
+- 附带：文件本就不存在时**不得**无谓重试（否则每次 purge 白等 150ms）
+
+### H.4 本轮同时修掉的测试污染
+
+新增的落盘测试会真实写入 `backend/data/storage/{user_id}/`。第一版没有清理，
+**一轮就跑出 26 个以随机 user_id 命名的目录**，与用户真实数据混在一起，
+只能靠创建时间人工分辨 —— 而真实用户目录不可再生，误删即数据损失。
+
+已加 autouse fixture：记录用例前**已存在**的顶层目录，结束后只删新增的。
+实测：清理后跑完整套件，`data/storage/` 仍只有原有的 2 个真实用户目录。
+
+### H.5 交付
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| M-4 复核（证伪 + 锁行为） | `tests/test_purge_note_integrity.py`（5 用例） | 含前提校验与 FK 生效对照实验 |
+| M-10 真实缺陷修复 | `app/services/storage_service.py`（`delete_file` 重试） | 重试/不回退/不无谓重试 三条边界 |
+| M-10 复核 + 修复验证 | `tests/test_purge_file_consistency.py`（8 用例） | 含存储目录隔离 fixture |
+| 文档更正 | 本文件 §2.6 M-4 / M-10 + 阶段 1 表格 1.12/1.13 | — |
+
+测试总数：342 → **355 passed / 3 skipped**，`ruff app tests` 全绿，真库零改动。
+
+### H.6 仍未完成
+
+- **1.11** `vault_files` 表 + 磁盘/DB sha256 一致性校验
+- **阶段 2′** FTS5 全文检索、`sqlite-vec` 评估、`chunks` 表统一分块
+- **FSRS**：数据不足（194 条记录、`interval` 长期为 1）
+- `backend/data_backup_e2e/`（4.67GB）删除待确认
+
+---
+
 ## 附录 B · 立即可以做的 10 件事（不改架构，1-2 天）
 
 
@@ -3586,7 +3733,7 @@ AST 审计"写后 commit 前是否夹慢操作"**命中 0 处**。真实机制�
 
 ---
 
-**文档版本**：v1.3（阶段 3 收尾见附录 G）
+**文档版本**：v1.4（M-4/M-10 复核见附录 H）
 **撰写依据**：`backend/app`（约 20,000 行）与 `frontend/src`（约 16,000 行）逐行审计；
 `backend/data/db/engramnote.db` 与 `backend/data/models/*` 现场实测；
 22 次提交历史；`docs/architecture.md`、`docs/decisions.md`、`README.md`、`参赛/参赛贴文.md`
