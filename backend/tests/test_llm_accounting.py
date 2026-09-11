@@ -611,7 +611,11 @@ class TestQuotaCheck:
 
 @pytest.mark.asyncio
 class TestQuotaEnforcement:
-    """配额在**真正花钱的地方**生效：`LLMService` 的调用出口"""
+    """配额在**真正花钱的地方**生效：阶段 4.1 之后那里是 `LLMGateway`
+
+    （改造前是 `LLMService.chat_detailed`；网关就是把它整段搬过去的，
+    所以这些用例的断言一个字都没改，只改了"内部方法挂在哪"。）
+    """
 
     async def test_llm_call_is_rejected_before_any_network_request(
         self, test_db, monkeypatch,
@@ -621,6 +625,7 @@ class TestQuotaEnforcement:
         这与"发了再回滚"有本质区别：token 已经花掉了。
         """
         from app.services import llm_service as llm_mod
+        from app.services.llm import gateway as gateway_mod
         from app.services.llm_accounting_service import LLMQuotaExceeded
 
         uid = await _make_user(test_db)
@@ -637,7 +642,9 @@ class TestQuotaEnforcement:
                 calls["posted"] += 1
                 raise AssertionError("配额已超，却仍然发起了请求")
 
-        monkeypatch.setattr(llm_mod, "get_llm_client", lambda: FakeClient())
+        # 阶段 4.1 起 `get_llm_client` 由网关模块直接持有并调用，
+        # 因此要打网关模块的属性才拦得住（打 llm_service 已经拦不住任何东西）
+        monkeypatch.setattr(gateway_mod, "get_llm_client", lambda: FakeClient())
         _patch_quota(monkeypatch, token_quota=1000)
 
         service = llm_mod.LLMService()
@@ -682,7 +689,8 @@ class TestQuotaEnforcement:
         _patch_quota(monkeypatch, token_quota=1)
         service = llm_mod.LLMService()
         # 没有 user_id 时 `_enforce_quota` 在第一行就返回，不查库也不抛错
-        await service._enforce_quota("test")
+        # （直接验证内部策略：这里是唯一能确定"放行"而非"恰好没抛"的入口）
+        await service.gateway._enforce_quota("test")
 
     async def test_under_quota_passes_through(self, test_db, monkeypatch):
         """没超限时不得误拦 —— 误拦比漏拦更容易被发现，但同样是故障"""
@@ -697,7 +705,7 @@ class TestQuotaEnforcement:
         _patch_quota(monkeypatch, token_quota=1000)
         service = llm_mod.LLMService()
         with llm_context(user_id=uid):
-            await service._enforce_quota("test")   # 不抛即通过
+            await service.gateway._enforce_quota("test")   # 不抛即通过
 
 
 def _patch_quota(monkeypatch, *, token_quota: int = 0, cost_quota: float = 0.0):
@@ -719,6 +727,7 @@ def _patch_quota(monkeypatch, *, token_quota: int = 0, cost_quota: float = 0.0):
         )
 
     monkeypatch.setattr(acc, "check_quota", _inner)
-    # `llm_service._enforce_quota` 是 `from ... import check_quota` 之外
-    # 的**函数内 import**，因此直接打模块属性即可生效
+    # `LLMGateway._enforce_quota`（阶段 4.1 前是 `llm_service` 上的同名方法）
+    # 用的是**函数内 import**，每次调用都重新取 `acc.check_quota`，
+    # 因此直接打这个模块属性即可生效，不需要再打网关模块。
     return QuotaSettings()

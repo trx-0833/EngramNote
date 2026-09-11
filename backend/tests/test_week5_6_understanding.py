@@ -415,10 +415,13 @@ class TestLLMService:
 
         ## 为什么必须有这个 fixture
 
-        `LLMService._rate_limiter` 是**类级单例**，在**首次**实例化时按当时的
+        `LLMGateway._rate_limiter` 是**类级单例**，在**首次**实例化时按当时的
         `settings.llm_max_rpm` 建一次，此后整个进程复用。本类几乎所有用例都把
         `app.services.llm_service.settings` 换成了 `MagicMock` ——
         于是 `llm_max_rpm` 是一个自动生成的 MagicMock 属性。
+
+        （阶段 4.1 之前这两个单例挂在 `LLMService` 上，搬迁后挂在网关类上，
+        保护的内容与理由完全不变。）
 
         若这些用例恰好是**进程里第一个**实例化 `LLMService` 的地方，
         这个 MagicMock 就被固化进类级单例，同进程后续每一次 `chat()` 都会在
@@ -447,14 +450,15 @@ class TestLLMService:
         """
         import asyncio
 
-        from app.services.llm_service import LLMService, RateLimiter
+        from app.services.llm.gateway import LLMGateway
+        from app.services.llm_service import LLMService, RateLimiter  # noqa: F401
 
-        LLMService._rate_limiter = RateLimiter(max_rpm=10)
-        LLMService._semaphore = asyncio.Semaphore(3)
+        LLMGateway._rate_limiter = RateLimiter(max_rpm=10)
+        LLMGateway._semaphore = asyncio.Semaphore(3)
         yield
         # 用例结束后还原成"未创建"，避免本类的 Mock 泄漏给后续用例
-        LLMService._rate_limiter = None
-        LLMService._semaphore = None
+        LLMGateway._rate_limiter = None
+        LLMGateway._semaphore = None
 
     def test_llm_service_init_with_debug(self):
         """debug 模式下 LLMService 应使用 GLM 配置"""

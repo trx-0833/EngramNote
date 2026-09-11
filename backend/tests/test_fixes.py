@@ -437,7 +437,10 @@ def test_llm_client_loop_rebuild():
     即**被测行为正确、断言方式错误**。
     """
     import asyncio
-    from app.services import llm_service as ls
+    # 阶段 4.1 起客户端单例归 `services/llm/client.py` 所有：
+    # `llm_service` 只再 re-export `close_llm_client`（main.py 需要），
+    # 因此这里直接指向真正的属主模块，而不是继续要求上层转发。
+    from app.services.llm import client as ls
 
     async def use_in_loop():
         return ls.get_llm_client()

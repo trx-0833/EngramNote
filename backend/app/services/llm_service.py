@@ -7,45 +7,43 @@ from-scratch, minimal dependencies, 不引入 LangChain。
 直接使用 httpx 调用 OpenAI 兼容 API（DeepSeek 和 GLM 都兼容），
 保持最小依赖，代码清晰可控。
 
-主要职责：
-- 通用聊天接口（OpenAI 兼容格式）
-- 章节摘要生成
-- 知识点提取（结构化 JSON 输出）
-- 题目生成
-- RAG 问答
+## 阶段 4.1：本模块只负责"问什么"
 
-设计决策：
-- 根据 debug 模式自动选择 LLM 提供商（debug=GLM, 非 debug=DeepSeek）
-- 使用 httpx.AsyncClient 直接调用 API，不引入 openai SDK
-- 提示词模板内置在服务中，支持 JSON 结构化输出
-- 重试机制：API 调用失败时重试，指数退避
-- 速率限制：控制 API 调用频率，避免超限
+改造前，本模块同时承担三件事：拼提示词、调模型、以及调用策略
+（重试/限流/并发/配额/缓存/记账）。第三件事与"业务要问什么"无关，
+却挤在同一个类里 —— 后果是 4.2/4.3/4.7 每一轮都要往 `chat_detailed`
+这个 170 行的函数里再插一段。到 4.7 结束时本文件已 1273 行，
+其中 386 行是纯粹的调用策略。
 
-共享 httpx 客户端、JSON 容错解析、速率限制与会话类已拆分至 services/llm/
-子包；本模块仅保留 LLMService 并 re-export 相关公共名称，外部 import 路径不变。
+现在它们分开了：
+
+    LLMGateway   传输 + 治理    services/llm/gateway.py
+    LLMService   提示词 + 场景  本模块（摘要、知识点提取、出题、问答、判分……）
+
+`chat` / `chat_detailed` / `chat_stream` 保留原签名，但已经是转发给网关的
+包装 —— 对外 API 一行未变，全仓 import 本模块的调用方因此都不需要改动。
+这也让这次搬迁可以被既有测试完整覆盖：4.2/4.3/4.7 的 90 个用例
+都是**搬迁之前**写的，正好用来证明搬迁没改行为。
+
+共享 httpx 客户端、JSON 容错解析、速率限制与会话类在此之前已拆分至
+services/llm/ 子包；本模块仅保留 LLMService 并 re-export 相关公共名称，
+外部 import 路径不变。
 """
 
-import asyncio
 import json
 import logging
-import random
-import time
-from typing import Any, Dict, List, Optional
-
-import httpx
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from ..config import get_settings
-from .llm.client import (
-    _response_snippet,
-    _truncate_messages,
-    build_llm_headers,
-    close_llm_client,  # noqa: F401  re-export：main.py 经 llm_service 导入
-    get_llm_client,
+from .llm.client import close_llm_client  # noqa: F401  re-export：main.py 经 llm_service 导入
+from .llm.gateway import LLMGateway
+from .llm.json_parse import parse_json_tolerant  # noqa: F401  re-export
+from .llm.rate_limit import RateLimiter  # noqa: F401  re-export
+from .llm.sessions import (  # noqa: F401  re-export：sessions.py 反向引用 LLMService
+    CombinedAnalysisSession,
+    ConversationSession,
+    UnderstandingSession,
 )
-from .llm.json_parse import parse_json_tolerant, strip_json_fences  # noqa: F401  parse_json_tolerant 为 re-export
-from .llm.rate_limit import RateLimiter
-from .llm.sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
-from .llm_accounting_service import record_call
 
 logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
@@ -63,127 +61,57 @@ class LLMService:
         service = LLMService()
         result = await service.chat([{"role": "user", "content": "你好"}])
         summary = await service.summarize_chapter("第一章", "内容...")
+
+    阶段 4.1 之后本类**不再自己实现**重试/限流/并发/配额/缓存/记账，
+    这些统一由 `self.gateway`（services/llm/gateway.py）负责。
     """
 
-    # 类级共享限流器与并发闸门（所有实例共享同一令牌桶/信号量，见 docs/decisions.md#F-05）
-    # 注意：_rate_limiter/_semaphore 在类定义后初始化（依赖 settings），见类下方
-    _rate_limiter: Optional["RateLimiter"] = None
-    _semaphore: Optional[asyncio.Semaphore] = None
+    def __init__(self, *, gateway: Optional[LLMGateway] = None) -> None:
+        """构造服务
 
-    def __init__(self):
-        llm_config = settings.get_llm_config()
-        self._api_key = llm_config["api_key"]
-        self._model = llm_config["model"]
-        self._base_url = llm_config["base_url"]
-        self._provider = llm_config["provider"]
-        self._max_retries = settings.llm_max_retries
-        self._retry_delay = settings.llm_retry_delay
-        # 实例化时确保类级限流/信号量已就绪（线程安全：先创建后赋值，重复创建无害）
-        if LLMService._rate_limiter is None:
-            LLMService._rate_limiter = RateLimiter(max_rpm=settings.llm_max_rpm)
-        if LLMService._semaphore is None:
-            LLMService._semaphore = asyncio.Semaphore(3)
-        self._rate_limiter = LLMService._rate_limiter
-        self._semaphore = LLMService._semaphore
+        Args:
+            gateway: 可选注入（测试可用它整体替换调用链；默认按当前配置构造）
 
-    async def _lookup_cache(self, key: str) -> Optional[Dict[str, Any]]:
-        """查响应缓存（阶段 4.7）；未命中或缓存不可用时返回 None
-
-        命中时**照样记一行 `llm_calls`**（`cached=True`、`cost=0`、
-        `saved_tokens=N`）—— 记账表要能回答"这个月本可以花多少"，
-        只记真实支出的话，缓存省下的钱在任何报表上都看不见。
+        ⚠️ 配置在**构造时**读取，与改造前一致：provider / model / api_key /
+        缓存开关都取自构造那一刻的 `settings`。"配置被冻结在首次使用"
+        这个已知缺陷归属阶段 4.5，本次搬迁不改变它。
         """
-        from .llm_cache_service import lookup
-
-        try:
-            from ..database import get_session_factory
-
-            factory = get_session_factory()
-            async with factory() as db:
-                hit = await lookup(db, key)
-        except Exception as exc:  # noqa: BLE001 - 缓存是不可靠的旁路
-            logger.debug("查 LLM 缓存失败（当作未命中）: %s", exc)
-            return None
-
-        if hit is None:
-            return None
-
-        logger.info("LLM 缓存命中 | model=%s | saved_tokens=%d", self._model, hit.total_tokens)
-        await record_call(
-            scene="cache_hit", provider=self._provider, model=self._model,
-            latency_ms=0, cached=True, saved_tokens=hit.total_tokens,
-        )
-        return hit.response
-
-    async def _store_cache(
-        self, key: str, response: Dict[str, Any], usage: Optional[Dict[str, Any]],
-    ) -> None:
-        """把成功响应写入缓存（阶段 4.7）
-
-        ⚠️ 写在**调用方校验之前**：这里拿到的是"HTTP 200 + JSON 可解析"，
-        不代表内容合格。把一个恰好不合格的响应缓存下来，之后相同输入会一直
-        拿到它 —— 残余风险与三条缓解见 `llm_cache_service` 的模块说明。
-        """
-        from ..config import get_settings
-        from ..database import get_session_factory
-        from .llm_cache_service import store
-
-        try:
-            cfg = get_settings()
-            # ⚠️ 传的是**已解析出来的** sessionmaker，不是 `get_session_factory`
-            # 这个函数本身：`store` 的契约是 `async with session_factory()`，
-            # 传函数进去会变成 `async with get_session_factory()` ——
-            # 那拿到的是 sessionmaker 而不是会话，缺 `__aenter__`。
-            # 实测症状：写缓存静默失败（日志里只有一句 `__aenter__`），
-            # 于是缓存"看起来开了"但永远不命中。
-            factory = get_session_factory()
-            await store(
-                None,  # 用独立会话（见 store 的 session_factory 说明）
-                key,
-                provider=self._provider, model=self._model,
-                response=response, usage=usage,
-                finish_reason=response.get("finish_reason"),
-                ttl_days=int(getattr(cfg, "llm_cache_ttl_days", 30) or 0),
-                session_factory=factory,
+        if gateway is None:
+            llm_config = settings.get_llm_config()
+            gateway = LLMGateway(
+                api_key=llm_config["api_key"],
+                model=llm_config["model"],
+                base_url=llm_config["base_url"],
+                provider=llm_config["provider"],
+                max_retries=settings.llm_max_retries,
+                retry_delay=settings.llm_retry_delay,
+                # 缓存开关**显式传入**而不是让网关自己去读 `get_settings()`：
+                # 既有测试是通过替换本模块的 `settings` 来关缓存的，
+                # 网关若绕过它去读全局配置，那些测试会静默失效（缓存照开）。
+                cache_enabled=getattr(settings, "llm_cache_enabled", True),
+                cache_ttl_days=int(getattr(settings, "llm_cache_ttl_days", 30) or 0),
             )
-        except Exception as exc:  # noqa: BLE001 - 写缓存失败不影响本次调用
-            logger.warning("写 LLM 缓存失败（不影响本次调用）: %s", exc)
+        self.gateway = gateway
 
-    async def _enforce_quota(self, scene: Optional[str]) -> None:
-        """发起调用前检查配额，超限则抛 `LLMQuotaExceeded`（阶段 4.3）
+        # 向后兼容的只读快照：`rag_service` 会读 `llm_service._provider`，
+        # 既有测试也断言 `_provider/_model/_api_key`。
+        # 它们**只是快照** —— 改它们不会影响真实调用（真实调用读 gateway）。
+        self._api_key = gateway.api_key
+        self._model = gateway.model
+        self._base_url = gateway.base_url
+        self._provider = gateway.provider
+        self._max_retries = gateway.max_retries
+        self._retry_delay = gateway.retry_delay
 
-        ## 为什么放在这里（而不是每个调用方自己查）
-
-        这是**唯一**真正花钱的地方。放在这里意味着无论从哪条路径进来
-        （理解任务、问答、语义判分、将来的新场景），配额都自动生效 ——
-        而让每个调用方各自记得查一次，必然会有漏的，且漏掉的那个
-        恰恰是没人想到的昂贵路径。
-
-        ## 为什么在 `user_id` 为空时放行
-
-        无法归属的调用算不到任何人头上（见 `record_call` 的说明），
-        因此拦不住也不该拦。这是**已知缺口**：没接上下文调用点的
-        不受配额保护。宁可漏拦，也不能因为"不知道是谁"就把所有人的
-        调用都拒掉。
-
-        ## 不限配额时零开销
-
-        `check_quota` 在两项配额都为 0（默认）时第一行就返回，
-        不碰数据库。所以"没开这个功能"不会给每次调用加一次查询。
-        """
-        from .llm_accounting_service import LLMQuotaExceeded, check_quota, current_context
-
-        user_id = current_context().user_id
-        if not user_id:
-            return
-        status = await check_quota(user_id)
-        if status.exceeded:
-            logger.warning(
-                f"LLM 配额已用完，拒绝调用 | user={user_id[:8]} | scene={scene} | "
-                f"tokens={status.tokens_used}/{status.token_limit} | "
-                f"cost={status.cost_used:.4f}/{status.cost_limit:.2f}"
-            )
-            raise LLMQuotaExceeded(status)
+    # ------------------------------------------------------------------
+    # 以下三个方法是**转发**：实现在 services/llm/gateway.py
+    #
+    # 保留它们（而不是让调用方直接用 gateway）的理由：
+    #   1. 全仓 15 个模块 import 的是 LLMService，改调用方是纯粹的噪音；
+    #   2. 提示词与场景方法仍在本类上，调用方 `service.chat(...)` 读起来是一条链；
+    #   3. 将来要加"场景级默认参数"（如某场景强制 max_tokens）时，
+    #      有这一层就不必再改所有调用方。
+    # ------------------------------------------------------------------
 
     async def chat(
         self,
@@ -204,16 +132,18 @@ class LLMService:
             temperature: 采样温度，0-2，越高越随机
             max_tokens: 最大生成 token 数
             response_format: 响应格式约束，如 {"type": "json_object"}
-            scene: 场景标识，用于日志
+            scene: 场景标识，用于日志、记账与缓存
 
         Returns:
             str: 模型生成的文本内容（JSON 场景已剥离代码围栏）
+
+        Raises:
+            LLMQuotaExceeded: 配额已用完时抛出（阶段 4.3）
         """
-        meta = await self.chat_detailed(
+        return await self.gateway.chat(
             messages, temperature=temperature, max_tokens=max_tokens,
             response_format=response_format, scene=scene,
         )
-        return meta["content"]
 
     async def chat_detailed(
         self,
@@ -224,187 +154,45 @@ class LLMService:
         scene: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        通用聊天接口（结构化返回，见 docs/decisions.md#F-33）
+        通用聊天接口（结构化返回）
 
-        在 chat() 基础上额外返回：
-        - content: 助手文本（JSON 场景已剥离代码围栏）
-        - finish_reason: LLM 停止原因（"stop"=正常结束；"length"=被 max_tokens 截断）
-        - truncated: finish_reason == "length" 的布尔便捷位
-        - usage: token 用量
+        与 chat() 的区别：额外返回 finish_reason 与 truncated，
+        供调用方判断"输出是否被 max_tokens 截断"（截断的 JSON 不能当成功用）。
 
         Args:
-            同 chat()
+            messages: 消息列表，格式 [{"role": "user", "content": "..."}]
+            temperature: 采样温度，0-2
+            max_tokens: 最大生成 token 数
+            response_format: 响应格式约束，如 {"type": "json_object"}
+            scene: 场景标识，用于日志、记账与缓存
 
         Returns:
             dict: {"content", "finish_reason", "truncated", "usage"}
+
+        Raises:
+            LLMQuotaExceeded: 配额已用完时抛出（阶段 4.3）
+            Exception: 重试耗尽后抛出（消息含 "LLM API 调用失败"）
         """
-        # 阶段 4.3：配额检查放在**最前面**（连信号量都还没拿）——
-        # 被配额拒绝的调用不该占用并发额度，也不该产生任何网络请求。
-        await self._enforce_quota(scene)
-
-        url = f"{self._base_url}/chat/completions"
-        # OpenCode 网关要求 x-opencode-session 头，缺失即 400 MissingSessionID，
-        # 见 services/llm/client.py#build_llm_headers
-        headers = build_llm_headers(self._api_key, self._base_url)
-        payload: Dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if response_format:
-            payload["response_format"] = response_format
-
-        logger.debug(
-            f"LLM 请求 | scene={scene} | provider={self._provider} | model={self._model} | "
-            f"temperature={temperature} | max_tokens={max_tokens} | url={url}\n"
-            f"messages={json.dumps(_truncate_messages(messages), ensure_ascii=False)}"
-        )
-
-        start_time = time.monotonic()
-
-        # ---- 阶段 4.7：响应缓存 ----
-        #
-        # 放在配额检查之后、拿信号量之前：
-        #   - 配额检查要留在最前面（超限时连缓存都不该查，那次调用不该发生）；
-        #   - 命中缓存**没有花钱**，所以不该占用并发额度与限流令牌 ——
-        #     把它放在信号量里面会让一批重复请求白白排队。
-        cache_key_value = None
-        if getattr(settings, "llm_cache_enabled", True):
-            from .llm_cache_service import cache_key
-
-            cache_key_value = cache_key(
-                provider=self._provider, base_url=self._base_url, model=self._model,
-                messages=messages, temperature=temperature, max_tokens=max_tokens,
-                response_format=response_format,
-            )
-            hit = await self._lookup_cache(cache_key_value)
-            if hit is not None:
-                return hit
-
-        async with self._semaphore:
-            await self._rate_limiter.acquire()
-
-            last_error = None
-            for attempt in range(self._max_retries):
-                try:
-                    # 复用模块级共享客户端，避免每次新建连接，见 docs/decisions.md#F-05
-                    resp = await get_llm_client().post(url, json=payload, headers=headers)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
-                    usage = data.get("usage", {})
-                    choice: Dict[str, Any] = data["choices"][0]
-                    finish_reason = (choice.get("finish_reason") or "").strip() or "stop"
-                    content_raw = (choice["message"].get("content")) or ""
-                    # JSON 场景剥离代码围栏，避免 json.loads 直接失败，见 docs/decisions.md#F-33
-                    if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
-                        content = strip_json_fences(content_raw)
-                    else:
-                        content = content_raw
-                    truncated = (finish_reason == "length")
-                    logger.info(
-                        f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
-                        f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
-                        f"total_tokens={usage.get('total_tokens')} | finish_reason={finish_reason} | "
-                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms"
-                    )
-                    if truncated:
-                        logger.warning(
-                            f"LLM 输出被 max_tokens 截断 | scene={scene} | max_tokens={max_tokens} | "
-                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量"
-                        )
-                    # 阶段 4.2：记账。**成功也要记** —— 只记失败会得到
-                    # "花了多少钱"这个最重要的数字为零。
-                    await record_call(
-                        scene=scene, provider=self._provider, model=self._model,
-                        usage=usage, latency_ms=elapsed_ms,
-                    )
-                    result = {
-                        "content": content,
-                        "finish_reason": finish_reason,
-                        "truncated": truncated,
-                        "usage": usage,
-                    }
-                    # 阶段 4.7：只有**成功**响应才写缓存 ——
-                    # 把失败缓存下来会把一次偶发故障固化成"这个输入永远失败"。
-                    if cache_key_value is not None:
-                        await self._store_cache(cache_key_value, result, usage)
-                    return result
-                except httpx.HTTPStatusError as e:
-                    # 4xx 客户端错误（400/401/403/404）不重试，直接抛出；
-                    # 429/5xx 视为可重试，见 docs/decisions.md#F-20
-                    last_error = e
-                    if e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
-                        # 必须打印响应体：网关的真实原因只在 body 里
-                        # （如 OpenCode 的 {"error":{"type":"MissingSessionID",...}}），
-                        # 只打 str(e) 会得到无信息量的 "Client error '400 Bad Request'"，
-                        # 曾使一个全链路 400 故障难以定位。
-                        logger.warning(
-                            f"LLM 客户端错误不重试 | scene={scene} | provider={self._provider} | "
-                            f"status={e.response.status_code} | error={e} | "
-                            f"body={_response_snippet(e.response)}"
-                        )
-                        raise
-                    if attempt < self._max_retries - 1:
-                        delay = min(30 * (attempt + 1), 120)
-                        delay = delay * (0.5 + random.random() * 0.5)
-                        logger.warning(
-                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
-                            f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
-                        )
-                        await asyncio.sleep(delay)
-                except Exception as e:
-                    last_error = e
-                    if attempt < self._max_retries - 1:
-                        delay = min(self._retry_delay * (2 ** attempt), 60)
-                        delay = delay * (0.5 + random.random() * 0.5)
-                        logger.warning(
-                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
-                            f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        logger.warning(
-                            f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
-                            f"provider={self._provider} | model={self._model} | error={e}"
-                        )
-
-        # 阶段 4.2：失败的调用也要记账。
-        #
-        # 最烧钱的形态恰恰是**失败的重试风暴**：`llm_max_retries=5`，
-        # 每次重试都可能已经把 prompt token 发出去并被计费，
-        # 而只记成功等于把最该被看见的那部分成本藏起来。
-        # 这里记的是**整次调用**（含全部重试）的耗时与最终结果。
-        await record_call(
-            scene=scene, provider=self._provider, model=self._model,
-            latency_ms=(time.monotonic() - start_time) * 1000,
-            success=False,
-            error=str(last_error) if last_error else "未知错误",
-        )
-        raise Exception(
-            f"LLM API 调用失败，重试 {self._max_retries} 次后仍出错 "
-            f"(scene={scene}, provider={self._provider}, model={self._model}): {last_error}"
+        return await self.gateway.chat_detailed(
+            messages, temperature=temperature, max_tokens=max_tokens,
+            response_format=response_format, scene=scene,
         )
 
     async def chat_stream(
         self,
         messages: List[Dict[str, str]],
         scene: str = "rag_answer_stream",
-    ):
+    ) -> AsyncIterator[str]:
         """
         流式聊天接口（OpenAI 兼容 SSE 流式响应）
 
-        通过 SSE 流式接收 LLM 响应，逐 token 返回内容，适合需要实时
-        展示生成过程的前端场景（如 RAG 问答流式回答）。
+        逐 token 产出内容，适合需要实时展示生成过程的前端场景（RAG 问答）。
 
         与 chat() 的区别：
         - 使用 stream=True 接收 SSE 响应
         - 不做重试（流式重试语义复杂，由调用方处理）
         - 不支持 response_format / max_tokens 参数（流式场景一般不需要）
-        - httpx 错误时记录 warning 并原样抛出
+        - **不做响应缓存**（理由见网关模块内 `chat_stream` 的说明）
 
         调用方应使用与 chat() 一致的 system prompt 前缀以命中 DeepSeek 提示词缓存。
 
@@ -419,88 +207,12 @@ class LLMService:
             httpx.HTTPError: HTTP 调用失败时抛出，由调用方处理
             LLMQuotaExceeded: 配额已用完时抛出（阶段 4.3）
         """
-        # 阶段 4.3：异步生成器的第一句，在**产出任何 token 之前**检查配额 ——
-        # 否则用户会先看到半截回答再断掉，比一开始就拒绝更糟。
-        await self._enforce_quota(scene)
-
-        url = f"{self._base_url}/chat/completions"
-        # 流式路径同样需要 OpenCode 网关会话头（否则 400 MissingSessionID）
-        headers = build_llm_headers(self._api_key, self._base_url)
-        payload: Dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "stream": True,
-            "temperature": 0.3,
-        }
-
-        logger.debug(
-            f"LLM 流式请求 | scene={scene} | provider={self._provider} | model={self._model} | "
-            f"temperature=0.3 | url={url}\n"
-            f"messages={json.dumps(_truncate_messages(messages), ensure_ascii=False)}"
-        )
-
-        start_time = time.monotonic()
-        total_content: List[str] = []
-        usage: Dict[str, Any] = {}
-
-        async with self._semaphore:
-            await self._rate_limiter.acquire()
-            try:
-                # 复用模块级共享客户端，见 docs/decisions.md#F-05
-                client = get_llm_client()
-                async with client.stream(
-                    "POST", url, json=payload, headers=headers
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data_str = line[len("data:"):].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            logger.warning(
-                                f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
-                                f"line={data_str[:200]}"
-                            )
-                            continue
-                        # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
-                        chunk_usage = chunk.get("usage")
-                        if isinstance(chunk_usage, dict):
-                            usage = chunk_usage
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        content = delta.get("content")
-                        if content:
-                            total_content.append(content)
-                            yield content
-            except httpx.HTTPError as e:
-                logger.warning(
-                    f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
-                    f"model={self._model} | error={e}"
-                )
-                raise
-
-        elapsed_ms = (time.monotonic() - start_time) * 1000
-        full_response = "".join(total_content)
-        logger.info(
-            f"LLM 流式响应完成 | scene={scene} | provider={self._provider} | model={self._model} | "
-            f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
-            f"total_tokens={usage.get('total_tokens')} | "
-            f"prompt_cache_hit_tokens={usage.get('prompt_cache_hit_tokens')} | "
-            f"prompt_cache_miss_tokens={usage.get('prompt_cache_miss_tokens')} | "
-            f"elapsed={elapsed_ms:.0f}ms | chars={len(full_response)}"
-        )
-        # 阶段 4.2：流式路径同样记账。usage 只在最后一个 chunk 里，
-        # 所以必须在**流读完之后**记，不能在一开始记。
-        await record_call(
-            scene=scene, provider=self._provider, model=self._model,
-            usage=usage, latency_ms=elapsed_ms,
-        )
+        # 本方法保持**异步生成器**形态（而不是 `return self.gateway.chat_stream(...)`）：
+        # 调用方写的是 `async for chunk in service.chat_stream(...)`，
+        # 而且配额检查必须发生在**产出第一个 token 之前** ——
+        # 这一点由网关生成器的第一句话保证，转发不改变时序。
+        async for chunk in self.gateway.chat_stream(messages, scene=scene):
+            yield chunk
 
     async def summarize_chapter(self, chapter_title: str, chapter_content: str) -> str:
         """
