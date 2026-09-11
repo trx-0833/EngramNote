@@ -2953,13 +2953,14 @@ M-4 与 1.13 仍未做。）
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | ⬜ 待做（见下方风险说明） |
+| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | 🟡 **部分落地**（附录 L）：`segment_with_offsets()` 已把两侧强项合一（结构块原子性 + 字符偏移 + 标题路径 + overlap）。**尚未接线**到检索路径，也尚未删除 `split_into_chunks`（它还负责行号映射，见 L.4） |
+| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪**（附录 L）：`Segment.char_start/char_end/heading_path` 产出并验证；前端展示与跳转未做 |
 | 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 | ⛔ 不执行（无 PG） |
 | 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ⬜ 待做（先要 2.9 的基线） |
 | 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ⬜ 待做 |
 | 2.5 | 中文全文检索用 `pg_bigm`（或 `zhparser`），替换纯 Python BM25 | 中文召回质量可测 | ⛔ 不执行（无 PG）。SQLite 等价物是 **FTS5**，见下方 |
 | 2.6 | **删除 n-gram 通道**；RRF 改为加权融合（向量 / BM25 可配权重） | 少一路噪声 | ✅ **已落地**（附录 J）：通道已删；RRF 现只融合两路。加权可配留待 2.9 的基线给出权重依据 |
-| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | ⬜ 待做 |
+| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪**（附录 L）：`Segment.char_start/char_end/heading_path` 产出并验证；前端展示与跳转未做 |
 | 2.8 | **重写 RAG 提示词**：强制"仅依据给定资料"；无据则明确回答"资料中没有"；要求逐条标注引用编号 | 无据问题不再被编造 | ✅ 已落地（提交 `5da6d8a`） |
 | 2.9 | **检索质量评测集**：造 50 条 (问题, 期望命中 chunk) 的离线评测，纳入 CI | Recall@5 / MRR 有基线 | ✅ **已落地**（附录 K）：用真库 **1058 条**真实 (问题, 原文真值) 建集，规模远超计划的 50 条；`scripts/eval_retrieval.py`。**刻意不纳入 CI**（理由见 K.5） |
 | 2.10 | 删除 `_kb_cache` 模块级无界缓存 | 内存不随用户增长 | ✅ **已落地**（附录 J）：缓存与失效入口一并删除，语料改为按需查询 |
@@ -4101,6 +4102,101 @@ chunk 通常**完整包含**真值。**一个会给对照组送分、或对正�
 - **2.4 去掉 Chroma 多 collection**（24 个 collection，检索要遍历全部）
 - **2.7 引用可回跳**（前端 + 后端联动）
 - RRF **加权可配**：K.3 结论二指出方向在重排序，需在 2.3 落地后重新测权重
+
+---
+
+## 附录 L · 阶段 2.1/2.7 后端：带定位信息的分段（2026-09-11）
+
+### L.1 交付
+
+`markdown_segmenter.segment_with_offsets(text, limit, overlap_blocks=0)` →
+`List[Segment]`，`Segment = {content, char_start, char_end, heading_path, block_index}`。
+
+它把此前两套实现各自的强项合到一起（这是 2.1 的目标形态）：
+
+| 能力 | 来自 |
+|---|---|
+| 结构块原子性（不切破表格/代码块/列表） | `markdown_segmenter` |
+| 字符偏移、标题路径、可选 overlap | `cleaning_service.split_into_chunks` |
+
+**尚未接线**：检索路径仍走 `split_into_chunks`（见 L.4），前端也未展示。
+本附录只交付"能产出正确的定位信息"这一层。
+
+### L.2 核心不变量，以及它**两次**被违反
+
+```
+text[char_start:char_end] == content
+```
+
+前端拿偏移去原文切片并高亮，切出来的必须就是检索到的那段。所以这条不变量
+是本功能的全部基础，也必须是**属性测试**而不是几个手写样例。
+
+**第一次违反（10926 段中 1318 段，12%）**：实现用 `text.find(block, cursor)`
+事后搜索块位置。块文本被 `strip("\n")` 过，`find` 可能失败；一旦失败就回退
+找首行，而 `cursor` 仍按**整块长度**推进 —— 此后每块的搜索起点都偏了，
+错误沿文档**累积**。首个分段的 `char_start=0` 却切出了文件后半部分的内容。
+只抽查 1 个文件时恰好没触发。
+
+**第二次违反（1318 段，同样的数量）**：改成切块时记录偏移后，仍然违反。
+根因与第一次完全不同 —— **多块拼接**时用 `"\n\n"` 连接，而块间在原文里
+可能只隔 **1 个换行**（实测 `<!-- page=1 -->\n# 标题`）。于是
+`content` 比原文切片多 1 个字符，`char_end = char_start + len(content)` 偏大。
+
+修法：**从原文直接切片**（`content = text[start_off:end_off]`），
+而不是 join 块文本。不变量由构造保证，不再依赖"join 的分隔符恰好等于原文"。
+代价是分段内容含块间原始换行，与旧实现的 `"\n\n"` 拼接略有差异 ——
+多一个换行不改变语义，换来定位绝对正确。
+
+最终：61 个真实 markdown × 5 种 limit × 2 种 overlap = **11026 个分段，0 违反**。
+
+### L.3 只有不变量测试是不够的：静默丢内容
+
+第一版对超限块先 `split_oversized_block()` 拆成**字符串**、再 `text.find()`
+反查位置，反查失败就 `continue`。实测 **61 个文件中 10 个（16%）内容丢失
+8%~16%**，最严重的一个 41962 字的文件丢了 **3410 字**。
+
+丢掉的内容**不违反不变量** —— 所以 L.2 的属性测试**全绿**，
+缺陷完全静默。
+
+根因是子块文本被**改写**过：段落按句拆分时用 `" "` 重新拼接，
+而中文原文句间**没有空格**（`"第0句。第1句。"` → `"第0句。 第1句。"`），
+`find` 一律返回 -1。
+
+修法：`_split_block_into_spans()` 在原文上**算边界并直接切片**，
+返回字符区间。切出来的东西按定义与原文一致，不存在"找不到"的可能。
+
+新增 `test_no_content_is_silently_dropped`（覆盖率断言）。这条断言是
+唯一能抓住这类缺陷的 —— **只测不变量会漏掉"整段消失"**。
+
+### L.4 为什么还没删 `split_into_chunks`
+
+`cleaning_service.split_into_chunks` 现在有两个用途：
+
+1. `clean_tasks.py:224` → 检索 chunk（→ 嵌入 → Chroma）—— **这个会被本函数替代**
+2. `generate_clean_copy()` 内部 → 取 `start_line/end_line` 做"行 → 所属块"映射，
+   用于标记重复行
+
+第 2 项需要的是**行号**，而 `Segment` 提供的是**字符偏移**。两者可以互换
+（行号 ↔ 偏移可互相换算），但那是一次独立的改动，且它落在清洗流程的
+去重标记上 —— 那是最不该和检索层改动混在一起的地方。
+因此本附录**不删**它，把它留给"接线"那一步一起做，避免半途状态。
+
+### L.5 交付与验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| 定位分段 | `app/services/markdown_segmenter.py`（`Segment`、`segment_with_offsets`、`_split_blocks_with_offsets`、`_split_block_into_spans`、`_heading_path_at`） | 真库 11026 段 0 违反；覆盖率 ≥98% 全部通过 |
+| 测试 | `tests/test_markdown_segmenter.py`（24 用例） | 含真实语料属性测试、覆盖率测试、40 组随机文档、标题路径栈、overlap、既有 API 兼容性 |
+
+测试总数：403 → **427 passed / 3 skipped**；ruff app tests scripts 全绿；真库零改动。
+
+### L.6 仍未完成
+
+- **接线**：检索路径与 `generate_clean_copy` 改用 `segment_with_offsets`，
+  然后删除 `split_into_chunks`
+- **2.3** 语料切换（基线已备好，见附录 K）
+- **2.4** 去掉 Chroma 多 collection
+- **2.7 前端**：引用点击 → 按 `char_start/char_end` 定位并高亮
 
 ---
 
