@@ -95,18 +95,10 @@ async def submit_quick_review_answer(
         db=db,
         skip_daily_limit=True,
         skip_due_check=True,  # 快速复习保留免到期校验，见 docs/decisions.md#F-14
+        self_rating=req.self_rating,
     )
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
 
-    return SubmitAnswerResponse(
-        quiz_id=result["quiz_id"],
-        is_correct=result["is_correct"],
-        quality=result["quality"],
-        correct_answer=result["correct_answer"],
-        explanation=result.get("explanation"),
-        options=result.get("options"),
-        question_type=result.get("question_type", "choice"),
-        sm2=result["sm2"],
-    )
+    return SubmitAnswerResponse.from_service_result(result)

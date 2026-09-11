@@ -57,6 +57,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     验证明文密码与哈希密码是否匹配
 
+    注意 bcrypt 只取前 72 字节且**静默截断**：中文（3 字节/字）在第 25 个字
+    之后的部分实际不参与校验。此处显式截断并记录，避免"以为设了长密码"的误解。
+
     Args:
         plain_password: 用户输入的明文密码
         hashed_password: 数据库中存储的哈希密码
@@ -64,7 +67,19 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         bool: 密码匹配返回 True，否则返回 False
     """
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    try:
+        raw = plain_password.encode("utf-8")[:72]
+        return bcrypt.checkpw(raw, hashed_password.encode("utf-8"))
+    except Exception as e:
+        # 存储的哈希损坏时不应抛 500（会被误读为"服务故障"），按验证失败处理
+        logger.warning("密码校验异常（按失败处理）: %s", type(e).__name__)
+        return False
+
+
+# 用于登录时序对齐的固定哈希（cost 与真实哈希一致）。
+# 目的：邮箱不存在时也执行一次 bcrypt，使两条路径耗时接近，
+# 消除"响应时间可区分邮箱是否注册"的侧信道（见 docs/overhaul-plan.md §2.5 E-2）。
+_DUMMY_HASH = bcrypt.hashpw(b"engramnote-timing-equalizer", bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(user_id: str) -> str:
@@ -120,6 +135,13 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
     2. 检查用户名是否已被使用
     3. 创建用户记录（密码经过 bcrypt 哈希）
 
+    安全说明（见 docs/overhaul-plan.md §2.5 E-2）：
+    旧实现对邮箱占用与用户名占用返回**不同的具体文案**，等于提供一个
+    免费的"该邮箱是否已注册"查询接口（可批量探测用于钓鱼/撞库目标筛选）。
+    现统一为同一句文案，调用方无法区分冲突原因。
+    代价：用户体验略降（不知道是邮箱还是用户名被占）。这是有意的取舍 ——
+    想同时保留体验与隐私，应改为「邮箱验证后才创建账号」的异步流程。
+
     Args:
         db: 异步数据库会话
         req: 注册请求体，包含 email、username、password
@@ -128,20 +150,26 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
         User: 新创建的用户对象
 
     Raises:
-        ValueError: 邮箱或用户名已被占用
+        ValueError: 邮箱或用户名已被占用（不区分哪一个）
     """
     # 邮箱归一化（小写 + 去空白），避免大小写撞库，见 docs/decisions.md#F-21b
     email = (req.email or "").strip().lower()
 
     # 检查邮箱是否已存在
     result = await db.execute(select(User).where(User.email == email))
-    if result.scalars().first():
-        raise ValueError("该邮箱已被注册")
+    email_taken = result.scalars().first() is not None
 
     # 检查用户名是否已存在
     result = await db.execute(select(User).where(User.username == req.username))
-    if result.scalars().first():
-        raise ValueError("该用户名已被使用")
+    username_taken = result.scalars().first() is not None
+
+    # 统一文案：不区分邮箱/用户名冲突，避免用户枚举
+    if email_taken or username_taken:
+        logger.info(
+            "注册被拒（凭据已被占用）: email_taken=%s, username_taken=%s",
+            email_taken, username_taken,
+        )
+        raise ValueError("该邮箱或用户名已被使用，请更换后重试")
 
     # 创建用户，密码经过哈希处理
     user = User(
@@ -177,6 +205,9 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> Opti
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalars().first()
     if not user:
+        # 时序对齐：邮箱不存在时也跑一次 bcrypt，否则"立即返回"与
+        # "跑完 bcrypt 再返回"的耗时差异（~100ms）足以精确枚举已注册邮箱。
+        verify_password(password, _DUMMY_HASH)
         return None
     if not verify_password(password, user.hashed_password):
         return None

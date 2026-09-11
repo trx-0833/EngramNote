@@ -155,7 +155,9 @@ async def suggest_relations_api(
             db=db,
         )
     except GraphSuggestionError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        # 保留原始异常链（raise ... from e）：图谱建议失败通常源于上游
+        # LLM 超时或额度问题，丢掉 cause 会让排障时看不到真正原因。
+        raise HTTPException(status_code=503, detail=str(e)) from e
     return {"success": True, "new_count": new_count}
 
 

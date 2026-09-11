@@ -12,12 +12,14 @@
 
 设计决策：
 - 注册成功后自动签发 Token，用户无需再次登录
-- 认证依赖从请求头 Authorization: Bearer <token> 中提取 Token
+- 认证依赖使用 FastAPI 的 HTTPBearer 安全方案解析
+  `Authorization: Bearer <token>`，而非手写字符串切分
 - Token 验证失败时返回 401 并设置 WWW-Authenticate 头，符合 HTTP 规范
 - 同时检查用户是否存在和是否激活（is_active），禁用用户无法通过认证
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,19 +41,36 @@ from ..services.auth_service import (
 
 router = APIRouter()
 
+# Bearer 认证安全方案
+#
+# 为什么用 HTTPBearer 而不是手写 `request.headers.get("Authorization")[7:]`：
+# 1. 手写解析不会在 OpenAPI 里注册 securitySchemes，于是 /docs 没有
+#    Authorize 按钮，openapi.json 也完全不体现接口需要认证 ——
+#    前端与第三方无法从契约得知哪些接口要 Token；
+# 2. `auto_error=True` 在缺失/格式错误的 Authorization 头时直接抛
+#    401 + WWW-Authenticate: Bearer，与下面 token 无效的分支保持一致的契约；
+# 3. 字符串切分对 "Bearer" 大小写、多余空格等边界情况没有定义行为。
+#
+# 注意：HTTPBearer 抛出的 401 由 main.py 的 http_exception_handler 统一渲染，
+# 该处理器必须转发 exc.headers，否则这个头依然到不了客户端。
+bearer_scheme = HTTPBearer(auto_error=True, description="JWT 访问令牌")
 
-async def get_current_user_dependency(request: Request, db: AsyncSession = Depends(get_db)) -> User:
+
+async def get_current_user_dependency(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
     """
     FastAPI 依赖：从 Authorization 请求头提取并验证当前用户
 
     该依赖被其他需要认证的接口通过 Depends() 注入使用。
     解析流程：
-    1. 从请求头中提取 Bearer Token
+    1. 由 HTTPBearer 安全方案提取 Bearer Token（缺失/格式错时 401）
     2. 解码 JWT 获取 user_id
     3. 从数据库查询用户并验证是否激活
 
     Args:
-        request: FastAPI 请求对象，用于读取请求头
+        credentials: HTTPBearer 解析出的凭证（scheme + credentials）
         db: 异步数据库会话，通过依赖注入获取
 
     Returns:
@@ -60,17 +79,7 @@ async def get_current_user_dependency(request: Request, db: AsyncSession = Depen
     Raises:
         HTTPException 401: 未提供 Token、Token 无效/过期、用户不存在或已禁用
     """
-    # 从请求头中提取 Authorization 字段
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="未提供认证令牌",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # 去掉 "Bearer " 前缀，提取纯 Token 字符串
-    token = auth_header[7:]
+    token = credentials.credentials
     # 解码 JWT，获取 user_id
     user_id = decode_access_token(token)
     if not user_id:
@@ -88,6 +97,7 @@ async def get_current_user_dependency(request: Request, db: AsyncSession = Depen
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在或已禁用",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return user
 

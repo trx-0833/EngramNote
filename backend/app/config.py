@@ -26,7 +26,8 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
-# 项目根目录（backend/ 的上一级，即 EngramNote/backend/）
+# 应用根目录（backend/ 本身；注意**不是**仓库根）
+# 仓库根 = PROJECT_ROOT.parent，备份目录 _backup/ 放在那里
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 数据存储根目录，所有持久化数据（数据库、文件、Celery 结果）均在此目录下
 DATA_DIR = PROJECT_ROOT / "data"
@@ -144,6 +145,14 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 16
     # 去重相似度阈值（0-1），高于此值视为重复
     similarity_threshold: float = 0.92
+    # 向量检索的相似度地板（余弦，0-1）。低于此值的召回块不进入 RAG 上下文。
+    # 作用：阻断"只要召回到就写进 prompt"这一幻觉燃料 —— 三个检索通道原先
+    # 都没有任何下限（BM25/n-gram 是 score > 0，向量通道是全部返回），
+    # 使 top_k 必被填满，模型于是拿着无关内容作答并照样返回引用来源。
+    # 说明：计算方式由 Chroma 的 L2 平方距离换算为余弦（单位向量下 cos = 1 - d/2），
+    # 因此该阈值与模型无关（两个候选模型都输出单位向量），换模型无需重新校准。
+    # 0 表示不过滤（保持旧行为）。
+    vector_similarity_floor: float = 0.35
     # 文本分块大小（字符数）
     chunk_size: int = 500
     # 分块重叠大小（字符数），避免语义在边界断裂
@@ -202,6 +211,11 @@ class Settings(BaseSettings):
     # 每日最大答题数（前后端单一来源，经 /review/stats 下发给前端，见 docs/decisions.md#F-12）
     daily_review_limit: int = 10
 
+    # ---- 备份配置 ----
+    # 定时备份（Celery Beat 每日 03:30）的快照保留份数；0 表示不清理。
+    # 默认 14 份 ≈ 两周，足够覆盖"改坏了过几天才发现"的情况。
+    backup_keep: int = 14
+
     # ---- 复习提醒配置 ----
     # 提醒轮询间隔（秒），Celery 定时任务扫描到期复习的频率
     reminder_poll_interval_seconds: int = 600
@@ -226,8 +240,13 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:5173"
     # CORS 允许来源（逗号分隔），默认本地前端开发服务器端口；生产环境改为实际前端域名
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
-    # 调试模式，开启后 SQLAlchemy 会输出 SQL 日志
-    debug: bool = True
+    # 调试模式。**默认 False**（见 docs/overhaul-plan.md §2.5 E-5）：
+    # 该开关同时控制三件事 —— SQL echo 日志、FastAPI debug 响应、LLM 供应商
+    # （debug=True 走 GLM，False 走 DeepSeek）。原先默认 True 的后果是：
+    # SQLAlchemy 把**含 bcrypt 哈希与全部知识卡片/题目正文的 SQL 明文**
+    # 写进 data/logs/*.log，且任何逃出 ErrorHandlerMiddleware 的异常会回吐 traceback。
+    # 开发环境请在 backend/.env 显式设置 DEBUG=true。
+    debug: bool = False
 
     # pydantic-settings 配置：从 .env 文件加载，忽略多余字段
     # 使用绝对路径确保 Celery worker 等子进程也能正确找到 .env 文件
@@ -381,6 +400,33 @@ class Settings(BaseSettings):
             return Path(self.log_dir)
         return DATA_DIR / "logs"
 
+    def get_celery_broker_dir(self) -> Path:
+        """
+        获取文件系统 broker 的消息目录
+
+        **这是 broker 目录的唯一权威来源**。此前有两处各算各的：
+          - 本文件的 get_celery_broker_url() 用 DATA_DIR / "celery" / "broker"
+          - app/tasks/celery_app.py 用 get_storage_dir().parent / "celery" / "broker"
+
+        两者只在 storage_dir 未配置时才碰巧相等。一旦配置了 storage_dir
+        或 vault_dir（部署时的常规做法），celery_app 那一路会指向
+        **用户主目录**（storage 的父目录），结果是 kombu 往主目录写消息、
+        而 Celery 读 DATA_DIR —— 任务被投递到无人监听的目录。
+
+        Returns:
+            Path: broker 目录（调用方负责创建）
+        """
+        return DATA_DIR / "celery" / "broker"
+
+    def get_celery_result_dir(self) -> Path:
+        """
+        获取文件系统结果后端目录（Get_celery_result_backend 的路径来源）
+
+        Returns:
+            Path: 结果目录（调用方负责创建）
+        """
+        return DATA_DIR / "celery" / "results"
+
     def get_celery_broker_url(self) -> str:
         """
         获取 Celery broker URL
@@ -394,7 +440,7 @@ class Settings(BaseSettings):
         if self.celery_backend == "redis" and self.celery_broker_url:
             return self.celery_broker_url
         # 默认使用文件系统 broker，自动创建目录
-        broker_dir = DATA_DIR / "celery" / "broker"
+        broker_dir = self.get_celery_broker_dir()
         broker_dir.mkdir(parents=True, exist_ok=True)
         return "filesystem://"
 
@@ -410,7 +456,7 @@ class Settings(BaseSettings):
         """
         if self.celery_backend == "redis" and self.celery_result_backend:
             return self.celery_result_backend
-        result_dir = DATA_DIR / "celery" / "results"
+        result_dir = self.get_celery_result_dir()
         result_dir.mkdir(parents=True, exist_ok=True)
         # Windows 路径需要转为 POSIX 格式（正斜杠），并使用 file:/// 三斜杠前缀
         # 否则 kombu 的 URL 解析器会把反斜杠路径误解析为端口号

@@ -45,6 +45,15 @@ class SubmitAnswerRequest(BaseModel):
     quiz_id: str
     user_answer: str
     time_spent_ms: int = 0
+    self_rating: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=5,
+        description=(
+            "用户自评的 SM-2 质量分（0-5）：0 完全忘记 / 3 勉强想起 / 4 想起 / 5 轻松。"
+            "给出时优先于自动判分，并补完此前的占位提交（见 review_service.submit_answer）。"
+        ),
+    )
 
 
 class SM2Info(BaseModel):
@@ -52,7 +61,8 @@ class SM2Info(BaseModel):
     interval: int
     repetition: int
     easiness_factor: float
-    next_review_at: str
+    # 占位提交（自动判分不可信、等待用户自评）时不推进调度，此处为 None
+    next_review_at: Optional[str] = None
 
 
 class SubmitAnswerResponse(BaseModel):
@@ -65,10 +75,103 @@ class SubmitAnswerResponse(BaseModel):
     options: Optional[List[str]] = None
     question_type: str
     sm2: SM2Info
+    self_rating: Optional[int] = Field(
+        default=None, description="本次提交携带的自评分；未自评时为 null"
+    )
+    grading_method: str = Field(
+        default="legacy",
+        description="本次判分方式：choice/fill_blank/self_rating/ungraded/legacy",
+    )
+    needs_self_assessment: bool = Field(
+        default=False,
+        description="是否仍在等待用户自评（自动判分不可信且今日尚未自评）",
+    )
+    completing_placeholder: bool = Field(
+        default=False, description="本次提交是否补完了此前的占位记录"
+    )
+    grading_reason: Optional[str] = Field(
+        default=None, description="判分依据说明，供 UI 展示判分可信度"
+    )
+
+    @classmethod
+    def from_service_result(cls, result: dict) -> "SubmitAnswerResponse":
+        """由 review_service.submit_answer 的返回字典构造响应
+
+        两个提交入口（/review/submit 与 /quick/{note_id}/submit）共用此转换，
+        避免各自手抄字段——历史上正是手抄导致新增字段漏掉一个入口。
+        """
+        return cls(
+            quiz_id=result["quiz_id"],
+            is_correct=result["is_correct"],
+            quality=result["quality"],
+            correct_answer=result["correct_answer"],
+            explanation=result.get("explanation"),
+            options=result.get("options"),
+            question_type=result.get("question_type", "choice"),
+            sm2=result["sm2"],
+            self_rating=result.get("self_rating"),
+            grading_method=result.get("grading_method", "legacy"),
+            needs_self_assessment=bool(result.get("needs_self_assessment", False)),
+            completing_placeholder=bool(result.get("completing_placeholder", False)),
+            grading_reason=result.get("grading_reason"),
+        )
+
+
+# --- 卡片直接复习（阶段 3.12）---
+
+class CardReviewItem(BaseModel):
+    """到期可复习的卡片"""
+    card_id: str
+    title: str
+    content: str
+    summary: Optional[str] = None
+    card_type: str
+    chapter_title: Optional[str] = None
+    note_id: Optional[str] = None
+    mastery_level: float = 0.0
+    interval_days: int = 1
+    repetition: int = 0
+    easiness_factor: float = 2.5
+    next_review_at: Optional[datetime] = None
+    review_count: int = 0
+    lapses: int = 0
+
+
+class CardReviewListResponse(BaseModel):
+    """到期卡片列表响应"""
+    items: List[CardReviewItem]
+    total: int
+
+
+class CardReviewSubmitRequest(BaseModel):
+    """提交卡片复习请求
+
+    卡片复习没有题目，因此**必须**给自评分：没有可自动判分的答案。
+    """
+    self_rating: int = Field(
+        ge=0,
+        le=5,
+        description="四档自评的 SM-2 质量分：0 完全忘记 / 3 勉强想起 / 4 想起 / 5 轻松",
+    )
+    user_answer: str = Field(default="", description="用户回忆内容的备注（可选）")
+    time_spent_ms: int = Field(default=0, ge=0)
+
+
+class CardReviewSubmitResponse(BaseModel):
+    """卡片复习提交响应"""
+    card_id: str
+    quality: int
+    is_correct: bool
+    interval_days: int
+    repetition: int
+    easiness_factor: float
+    next_review_at: Optional[datetime] = None
+    mastery_level: float = Field(
+        description="刷新后的掌握度（0-100，按时间衰减的新公式计算）"
+    )
 
 
 # --- 复习统计响应模型 ---
-
 class ReviewStatsResponse(BaseModel):
     """复习统计响应"""
     due_count: int = 0

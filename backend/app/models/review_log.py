@@ -11,6 +11,8 @@
 设计决策：
 - note_id 冗余存储，方便按笔记维度查询复习记录
 - quality 字段存储 SM-2 算法的 0-5 评分，便于后续分析
+- self_rating 单独成列（而非复用 quality），保留自动判分与用户自评的
+  双份信号，供后续校准
 - time_spent_ms 记录答题耗时，可用于薄弱点分析
 """
 
@@ -33,11 +35,14 @@ class ReviewLog(BaseModel):
     Attributes:
         id: UUID 主键（继承自 BaseModel）
         user_id: 所属用户 ID，外键关联 users 表
-        quiz_id: 关联题目 ID，外键关联 quiz_items 表
+        quiz_id: 关联题目 ID；卡片级复习时为 NULL
+        card_id: 关联知识卡片 ID；题目可能被重新生成替换，卡片 ID 才是稳定的归属
         note_id: 来源笔记 ID，外键关联 notes 表（冗余，方便查询）
         user_answer: 用户提交的答案
         is_correct: 是否正确
-        quality: SM-2 评分 (0-5)
+        quality: 实际进入 SM-2 调度的评分 (0-5)
+        self_rating: 用户自评评分 (0-5)，未自评时为 NULL
+        grading_method: 本次判分方式（choice/fill_blank/self_rating/ungraded/legacy）
         time_spent_ms: 答题耗时（毫秒）
         review_at: 答题时间
         created_at: 创建时间（继承自 BaseModel）
@@ -46,13 +51,56 @@ class ReviewLog(BaseModel):
     __tablename__ = "review_logs"
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
-    quiz_id: Mapped[str] = mapped_column(String, ForeignKey("quiz_items.id"), index=True, nullable=False)
+    # 关联题目；**允许 NULL**（阶段 3.12 卡片直接复习时没有题目）。
+    #
+    # 改 nullable 的理由：卡片可以直接复习之后，"一次复习"不再必然对应
+    # 一道题。用空 quiz_id 表达"这是卡片级复习"比伪造一个假题目诚实得多。
+    # 注意孤儿检查里 `quiz_id IS NOT NULL AND quiz_id NOT IN (...)` 的写法
+    # 已经正确处理了 NULL（NULL 不参与 NOT IN 比较）。
+    quiz_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("quiz_items.id"), index=True, nullable=True
+    )
+    # 关联知识卡片（阶段 3.2 事件流化）
+    #
+    # 为什么必须单独存而不是"从题目反查"：
+    # 1. 卡片级复习（阶段 3.12）没有题目，反查无从下手 ——
+    #    实测这是当前 schema 的硬伤：卡片复习记录无法归到任何卡片。
+    # 2. 题目会被"重新理解"整批替换（`generate_questions`），届时
+    #    `quiz_id` 指向的行消失，历史复习记录就再也找不到它属于哪张卡。
+    #    而 `card_id` 是稳定的 —— 这正是 overhaul-plan 症状 D-3
+    #    「重跑理解丢学习历史」的根因。
+    # 3. 度量层（阶段 3.14）需要按卡片聚合复习事件才能算保持率。
+    card_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("knowledge_cards.id"), index=True, nullable=True
+    )
     # 来源笔记 ID（冗余）；物理删除笔记时置 NULL（悬挂保留），复习历史不因笔记删除而丢失
     note_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("notes.id", ondelete="SET NULL"), index=True, nullable=True
     )
     user_answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # quality 是「进入 SM-2 调度的那个分」：自评提交时等于 self_rating；
+    # 自动判分占位提交时等于 grade_answer 给出的分。
     quality: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 用户自评（0-5，SM-2 quality 语义）；NULL = 本次未自评。
+    #
+    # 为什么必须与 quality 分开存：简答题无法用字符匹配可靠判分
+    # （见 sm2_service.grade_answer），所以流程是「自动判分占位 → 用户自评确认」。
+    # 一次自评会产生两条 ReviewLog：一条自动占位记录（grading_method=ungraded），
+    # 一条带 self_rating 的最终记录。只有两条都在，才能统计
+    # 「自动判分 vs 用户自评」的不一致率 —— 这正是 overhaul-plan.md
+    # 阶段 3.14 校准曲线所需的原始信号。把 self_rating 覆盖到 quality
+    # 会不可逆地丢掉这个信号，故而不复用 quality。
+    self_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # 本次判分方式，取值：
+    #   'choice'      选择题自动判分（可靠）
+    #   'fill_blank'  填空题自动判分（经归一化+编辑距离容错）
+    #   'self_rating' 用户自评（quality == self_rating）
+    #   'ungraded'    自动判分不可信，仅占位、**未推进调度**，等用户自评
+    #   'legacy'      本列引入前的历史行，判分方式不可考
+    #
+    # 这一列的用途不只是展示：幂等守卫必须区分「占位提交」与「已判分提交」，
+    # 否则用户自评那一次会被当成重复提交挡掉，自评永远写不进库。
+    grading_method: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy")
     time_spent_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     review_at: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)
