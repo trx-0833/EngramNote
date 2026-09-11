@@ -30,8 +30,12 @@ export interface SM2Info {
   interval: number;
   repetition: number;
   easiness_factor: number;
-  next_review_at: string;
+  /** 占位提交（等待用户自评）时不推进调度，此处为 null */
+  next_review_at: string | null;
 }
+
+/** 判分方式：choice/fill_blank 为可靠的自动判分，self_rating 为用户自评 */
+export type GradingMethod = 'choice' | 'fill_blank' | 'self_rating' | 'ungraded' | 'legacy';
 
 /** 提交答案响应 */
 export interface SubmitAnswerResponse {
@@ -43,6 +47,15 @@ export interface SubmitAnswerResponse {
   options: string[] | null;
   question_type: string;
   sm2: SM2Info;
+  /** 本次提交携带的自评分；未自评时为 null */
+  self_rating: number | null;
+  grading_method: GradingMethod;
+  /** 仍在等待用户自评：自动判分不可信且今日尚未自评。UI 据此展示四档自评 */
+  needs_self_assessment: boolean;
+  /** 本次提交是否补完了此前的占位记录 */
+  completing_placeholder: boolean;
+  /** 判分依据说明，用于向用户解释判分可信度 */
+  grading_reason: string | null;
 }
 
 /** 复习统计 */
@@ -98,11 +111,27 @@ export async function getDueQuizzes(limit = 50): Promise<DueQuizListResponse> {
 
 /**
  * 提交答案
+ *
+ * 两阶段提交：简答题的自动判分不可信，第一次调用不传 selfRating 只会落一条
+ * 占位记录、不推进调度（响应 needs_self_assessment=true）；用户四档自评后
+ * 再次调用并传入 selfRating，才真正完成判分与 SM-2 调度。
+ *
+ * @param selfRating - 用户自评的 SM-2 质量分（0-5），不传表示本次不自评
  */
-export async function submitAnswer(quizId: string, userAnswer: string, timeSpentMs = 0): Promise<SubmitAnswerResponse> {
+export async function submitAnswer(
+  quizId: string,
+  userAnswer: string,
+  timeSpentMs = 0,
+  selfRating?: number,
+): Promise<SubmitAnswerResponse> {
   return request<SubmitAnswerResponse>('/review/submit', {
     method: 'POST',
-    body: JSON.stringify({ quiz_id: quizId, user_answer: userAnswer, time_spent_ms: timeSpentMs }),
+    body: JSON.stringify({
+      quiz_id: quizId,
+      user_answer: userAnswer,
+      time_spent_ms: timeSpentMs,
+      ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+    }),
   });
 }
 
@@ -141,12 +170,24 @@ export async function getQuickReview(noteId: string): Promise<QuickReviewRespons
  * @param quizId - 题目 ID
  * @param userAnswer - 用户答案
  * @param timeSpentMs - 答题耗时（毫秒）
+ * @param selfRating - 用户自评的 SM-2 质量分（0-5），见 submitAnswer 的两阶段说明
  * @returns 提交答案响应
  */
-export async function submitQuickReviewAnswer(noteId: string, quizId: string, userAnswer: string, timeSpentMs = 0): Promise<SubmitAnswerResponse> {
+export async function submitQuickReviewAnswer(
+  noteId: string,
+  quizId: string,
+  userAnswer: string,
+  timeSpentMs = 0,
+  selfRating?: number,
+): Promise<SubmitAnswerResponse> {
   return request<SubmitAnswerResponse>(`/review/quick/${noteId}/submit`, {
     method: 'POST',
-    body: JSON.stringify({ quiz_id: quizId, user_answer: userAnswer, time_spent_ms: timeSpentMs }),
+    body: JSON.stringify({
+      quiz_id: quizId,
+      user_answer: userAnswer,
+      time_spent_ms: timeSpentMs,
+      ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+    }),
   });
 }
 

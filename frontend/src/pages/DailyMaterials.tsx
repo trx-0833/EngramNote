@@ -24,7 +24,8 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-import { sourceTypeLabels, statusLabels } from '../utils/labels'
+import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels'
+import { useToast } from '../components/Toast'
 
 /** 允许上传的文件扩展名列表 */
 const ALLOWED_EXTENSIONS = [
@@ -96,6 +97,7 @@ function getStatusCategory(status: string): string {
  * - uploading: 是否正在上传
  */
 export default function DailyMaterials() {
+  const toast = useToast()
   const navigate = useNavigate()
   /** 文件夹列表 */
   const [folders, setFolders] = useState<Folder[]>([])
@@ -129,6 +131,36 @@ export default function DailyMaterials() {
   const [renaming, setRenaming] = useState(false)
   /** 重命名输入框引用 */
   const renameInputRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * 上传状态轮询的定时器句柄
+   *
+   * 必须存 ref 并在卸载时清理（见 docs/overhaul-plan.md §2.8 F-5）：
+   * 原实现用裸 `setTimeout(check, 5000)` 递归且**从不清理**，
+   * 后果是用户上传后切走页面，轮询仍会继续跑满 120 次 × 5 秒 = **10 分钟**，
+   * 期间不断对已卸载组件 setState，并刷新与当前页面无关的文件夹详情。
+   * 连续上传两个文件还会产生两条互不感知的轮询链。
+   * （同项目 Upload.tx 已有正确实现：pollTimerRef + 卸载清理，此处属遗漏。）
+   */
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 卸载标志：阻止已在飞行中的请求回来后继续 setState / 续链 */
+  const unmountedRef = useRef(false)
+
+  /** 停止轮询并清空句柄 */
+  function stopPolling() {
+    if (pollTimerRef.current !== null) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    unmountedRef.current = false
+    return () => {
+      unmountedRef.current = true
+      stopPolling()
+    }
+  }, [])
 
   /**
    * 获取文件夹列表
@@ -191,7 +223,7 @@ export default function DailyMaterials() {
       const folder = await createFolder(`${today} 学习资料`)
       setFolders((prev) => [folder, ...prev])
     } catch (err) {
-      alert(err instanceof Error ? err.message : '创建失败')
+      toast.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       setCreating(false)
     }
@@ -214,7 +246,7 @@ export default function DailyMaterials() {
         setFolderDetail(null)
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      toast.error(err instanceof Error ? err.message : '删除失败')
     }
   }
 
@@ -257,7 +289,7 @@ export default function DailyMaterials() {
     e?.stopPropagation()
     const trimmed = editingName.trim()
     if (!trimmed) {
-      alert('文件夹名称不能为空')
+      toast.warning('文件夹名称不能为空')
       return
     }
 
@@ -270,7 +302,7 @@ export default function DailyMaterials() {
       setEditingFolderId(null)
       setEditingName('')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '重命名失败')
+      toast.error(err instanceof Error ? err.message : '重命名失败')
     } finally {
       setRenaming(false)
     }
@@ -301,7 +333,7 @@ export default function DailyMaterials() {
 
     const ext = '.' + file.name.split('.').pop()?.toLowerCase()
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      alert(`不支持的文件格式: ${ext}`)
+      toast.error(`不支持的文件格式: ${ext}`)
       return
     }
 
@@ -315,7 +347,7 @@ export default function DailyMaterials() {
       // 轮询转换状态
       pollUploadStatus(note.id)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '上传失败')
+      toast.error(err instanceof Error ? err.message : '上传失败')
       setUploading(false)
       setUploadStatus(null)
     }
@@ -330,11 +362,17 @@ export default function DailyMaterials() {
     const maxAttempts = 120
     let attempts = 0
 
+    // 重新开始轮询前先终止上一条链，避免并发轮询
+    stopPolling()
+
     /** 所有终态：成功或失败 */
     const successStatuses = ['converted', 'cleaned', 'archived', 'learning']
     const failedStatuses = ['failed', 'cleaning_failed', 'learning_failed']
 
     async function check() {
+      // 组件已卸载则直接终止，不再发请求、不再续链
+      if (unmountedRef.current) return
+
       if (attempts >= maxAttempts) {
         setUploading(false)
         setUploadStatus(null)
@@ -344,6 +382,7 @@ export default function DailyMaterials() {
 
       try {
         const res = await getUploadStatus(noteId)
+        if (unmountedRef.current) return
         setUploadStatus(`状态: ${statusLabels[res.status] || res.status}`)
 
         if (successStatuses.includes(res.status) || failedStatuses.includes(res.status)) {
@@ -352,7 +391,7 @@ export default function DailyMaterials() {
           // 刷新文件夹详情
           if (expandedFolderId) {
             const detail = await getFolderDetail(expandedFolderId)
-            setFolderDetail(detail)
+            if (!unmountedRef.current) setFolderDetail(detail)
           }
           return // 终态，停止轮询
         }
@@ -360,8 +399,9 @@ export default function DailyMaterials() {
         // 出错继续轮询
       }
 
-      // 非终态，5 秒后再检查
-      setTimeout(check, 5000)
+      if (unmountedRef.current) return
+      // 非终态，5 秒后再检查（句柄入 ref，供卸载/重启时清理）
+      pollTimerRef.current = setTimeout(check, 5000)
     }
 
     check()
@@ -626,7 +666,7 @@ export default function DailyMaterials() {
                                     {sourceTypeLabels[note.source_type] || note.source_type}
                                   </span>
                                   {/* 处理状态标签 */}
-                                  <span className={`status-${note.status}`} style={{ fontSize: '0.8rem' }}>
+                                  <span className={statusClass(note.status)} style={{ fontSize: '0.8rem' }}>
                                     {statusLabels[note.status] || note.status}
                                   </span>
                                   {/* 文件大小 */}

@@ -4,30 +4,65 @@
  * 1. 通过 AuthProvider 提供全局认证状态
  * 2. 根据认证状态切换未登录/已登录两套路由
  * 3. 已登录时渲染侧边栏和主内容区域
+ *
+ * 代码分割（见 docs/overhaul-plan.md §2.8 F-7）：
+ * 此前 18 个页面**全部静态 import**，且重量级依赖都在模块顶层进入口 chunk：
+ *   - KnowledgeGraph → react-force-graph-2d（连带 d3 生态）
+ *   - utils/markdown → highlight.js 完整构建（384 种语言）+ katex + 字体 CSS
+ * 后果是"只想看仪表盘"的用户也要先下载并解析整个图谱引擎与高亮引擎。
+ * 现改为按路由 React.lazy 懒加载；首屏只保留登录/仪表盘所需的代码。
  */
-import { useState } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense, useState } from 'react'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import Sidebar from './components/Sidebar'
+import ErrorBoundary from './components/ErrorBoundary'
+import LoadingSpinner from './components/LoadingSpinner'
+
+// ── 登录前页面（首屏必需，保持静态导入以最快呈现登录框） ──
 import Login from './pages/Login'
 import Register from './pages/Register'
-import Dashboard from './pages/Dashboard'
-import NotesList from './pages/NotesList'
-import NoteDetail from './pages/NoteDetail'
-import Trash from './pages/Trash'
-import Upload from './pages/Upload'
-import KnowledgeCards from './pages/KnowledgeCards'
-import KnowledgeGraph from './pages/KnowledgeGraph'
-import CardDetail from './pages/CardDetail'
-import QA from './pages/QA'
-import Review from './pages/Review'
-import QuestionSets from './pages/QuestionSets'
-import TodayLearn from './pages/TodayLearn'
-import QuickReview from './pages/QuickReview'
-import DailyMaterials from './pages/DailyMaterials'
-import Projects from './pages/Projects'
-import LearningAssessment from './pages/LearningAssessment'
-import LearningGoals from './pages/LearningGoals'
-import Sidebar from './components/Sidebar'
+
+// ── 登录后页面：全部懒加载 ──
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const NotesList = lazy(() => import('./pages/NotesList'))
+const NoteDetail = lazy(() => import('./pages/NoteDetail'))
+const Trash = lazy(() => import('./pages/Trash'))
+const Upload = lazy(() => import('./pages/Upload'))
+const KnowledgeCards = lazy(() => import('./pages/KnowledgeCards'))
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
+const CardDetail = lazy(() => import('./pages/CardDetail'))
+const QA = lazy(() => import('./pages/QA'))
+const Review = lazy(() => import('./pages/Review'))
+const QuestionSets = lazy(() => import('./pages/QuestionSets'))
+const TodayLearn = lazy(() => import('./pages/TodayLearn'))
+const QuickReview = lazy(() => import('./pages/QuickReview'))
+const DailyMaterials = lazy(() => import('./pages/DailyMaterials'))
+const Projects = lazy(() => import('./pages/Projects'))
+const LearningAssessment = lazy(() => import('./pages/LearningAssessment'))
+const LearningGoals = lazy(() => import('./pages/LearningGoals'))
+
+/** 路由级加载占位 */
+function RouteFallback() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: '64px 0' }}>
+      <LoadingSpinner />
+    </div>
+  )
+}
+
+/** 未找到页面（原先 `*` 会静默重定向到 "/" 或登录页，链路失效时用户无从判断） */
+function NotFound() {
+  return (
+    <div style={{ textAlign: 'center', padding: '64px 16px' }}>
+      <h1 className="heading-serif" style={{ fontSize: '2rem', marginBottom: 8 }}>404</h1>
+      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
+        页面不存在，可能是链接已失效。
+      </p>
+      <a className="btn btn-primary" href="/">返回首页</a>
+    </div>
+  )
+}
 
 /**
  * 路由组件
@@ -35,6 +70,7 @@ import Sidebar from './components/Sidebar'
  */
 function AppRoutes() {
   const { isAuthenticated } = useAuth()
+  const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -42,6 +78,8 @@ function AppRoutes() {
     return (
       <Routes>
         <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<Login />} />
+        {/* 未登录访问其它路径时才回到登录页 */}
         <Route path="*" element={<Login />} />
       </Routes>
     )
@@ -61,26 +99,33 @@ function AppRoutes() {
       </button>
       <div className={`app-layout${sidebarCollapsed ? ' app-layout-collapsed' : ''}`}>
         <main className="container page-enter">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/notes" element={<NotesList />} />
-            <Route path="/notes/:noteId" element={<NoteDetail />} />
-            <Route path="/trash" element={<Trash />} />
-            <Route path="/cards" element={<KnowledgeCards />} />
-            <Route path="/graph" element={<KnowledgeGraph />} />
-            <Route path="/cards/:cardId" element={<CardDetail />} />
-            <Route path="/questions" element={<QuestionSets />} />
-            <Route path="/qa" element={<QA />} />
-            <Route path="/review" element={<Review />} />
-            <Route path="/today" element={<TodayLearn />} />
-            <Route path="/daily" element={<DailyMaterials />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/review/quick/:noteId" element={<QuickReview />} />
-            <Route path="/assessment" element={<LearningAssessment />} />
-            <Route path="/goals" element={<LearningGoals />} />
-            <Route path="/upload" element={<Upload />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          {/* 按路由重置的错误边界：某条数据触发渲染异常后，
+              切换到别的页面即可自动恢复，不必刷新（§2.8 F-2） */}
+          <ErrorBoundary resetKey={location.pathname}>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/notes" element={<NotesList />} />
+                <Route path="/notes/:noteId" element={<NoteDetail />} />
+                <Route path="/trash" element={<Trash />} />
+                <Route path="/cards" element={<KnowledgeCards />} />
+                <Route path="/graph" element={<KnowledgeGraph />} />
+                <Route path="/cards/:cardId" element={<CardDetail />} />
+                <Route path="/questions" element={<QuestionSets />} />
+                <Route path="/qa" element={<QA />} />
+                <Route path="/review" element={<Review />} />
+                <Route path="/today" element={<TodayLearn />} />
+                <Route path="/daily" element={<DailyMaterials />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/review/quick/:noteId" element={<QuickReview />} />
+                <Route path="/assessment" element={<LearningAssessment />} />
+                <Route path="/goals" element={<LearningGoals />} />
+                <Route path="/upload" element={<Upload />} />
+                {/* 真正的 404，而不是静默重定向 */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
     </>

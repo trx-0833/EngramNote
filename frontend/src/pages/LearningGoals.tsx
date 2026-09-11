@@ -14,6 +14,7 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
+import { useToast } from '../components/Toast'
 
 /** 目标类型：每日 / 每周 */
 type GoalType = 'daily' | 'weekly'
@@ -35,6 +36,7 @@ const INITIAL_FORM: CreateFormState = {
 }
 
 export default function LearningGoals() {
+  const toast = useToast()
   /** 激活中的学习目标列表 */
   const [goals, setGoals] = useState<LearningGoal[]>([])
   /** 已归档的学习目标列表 */
@@ -132,7 +134,7 @@ export default function LearningGoals() {
       await archiveGoal(goalId)
       await fetchGoals()
     } catch (err) {
-      alert(err instanceof Error ? err.message : '归档失败')
+      toast.error(err instanceof Error ? err.message : '归档失败')
     }
   }
 
@@ -148,7 +150,7 @@ export default function LearningGoals() {
       await deleteGoal(goalId)
       await fetchGoals()
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      toast.error(err instanceof Error ? err.message : '删除失败')
     }
   }
 

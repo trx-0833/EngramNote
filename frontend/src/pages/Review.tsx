@@ -3,10 +3,12 @@
  * @description 基于间隔重复算法的复习答题界面，支持选择题、填空题和简答题。
  * 用户逐题作答，提交后即时显示正误判断和解析，SM-2 算法自动更新复习间隔。
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { getDueQuizzes, submitAnswer, getReviewStats, DueQuiz, SubmitAnswerResponse, ReviewStats } from '../api/client'
 // 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+import { useSelfRating } from '../hooks/useSelfRating'
+import { useToast } from '../components/Toast'
 
 /** 单题答题状态 */
 interface QuizState {
@@ -18,6 +20,7 @@ interface QuizState {
 }
 
 export default function Review() {
+  const toast = useToast()
   const [quizzes, setQuizzes] = useState<QuizState[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [stats, setStats] = useState<ReviewStats | null>(null)
@@ -30,6 +33,28 @@ export default function Review() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
+
+  // 四档自评：补完简答题的占位记录并推进 SM-2 调度
+  const onRated = useCallback((result: SubmitAnswerResponse) => {
+    setQuizzes(prev => prev.map(q =>
+      q.quiz.id === result.quiz_id ? { ...q, result } : q,
+    ))
+    if (result.is_correct) setSessionCorrect(prev => prev + 1)
+    setSessionTotal(prev => prev + 1)
+    // 自评会推进调度并写入今日完成数，刷新统计
+    getReviewStats().then(setStats).catch(() => { /* 统计刷新失败不影响答题 */ })
+    toast.success('自评已记录，复习进度已更新')
+  }, [toast])
+
+  const onRateError = useCallback((message: string) => {
+    toast.error(message)
+  }, [toast])
+
+  const { submitRating, submitting: ratingSubmitting, isRated, skipRating } = useSelfRating({
+    submit: submitAnswer,
+    onRated,
+    onError: onRateError,
+  })
 
   useEffect(() => {
     loadData()
@@ -76,10 +101,13 @@ export default function Review() {
       newQuizzes[currentIndex] = { ...current, submitted: true, result }
       setQuizzes(newQuizzes)
 
-      if (result.is_correct) {
-        setSessionCorrect(prev => prev + 1)
+      // 只有真正推进了调度的提交才计入本次会话统计。
+      // grading_method='ungraded' 是简答题的占位提交（尚未自评、未推进 SM-2），
+      // 把它算作一次"已答"会让会话正确率虚高（占位判分恒为错误，反而虚低）。
+      if (result.grading_method !== 'ungraded') {
+        if (result.is_correct) setSessionCorrect(prev => prev + 1)
+        setSessionTotal(prev => prev + 1)
       }
-      setSessionTotal(prev => prev + 1)
 
       // 刷新统计（更新今日已完成数）
       const newStats = await getReviewStats()
@@ -99,7 +127,22 @@ export default function Review() {
     }
   }
 
+  /** 四档自评：把质量分回传后端，补完占位记录并推进 SM-2 调度 */
+  const handleSelfRate = useCallback(
+    async (quality: number) => {
+      const current = quizzes[currentIndex]
+      if (!current || isRated(current.quiz.id)) return
+      const timeSpent = Date.now() - current.startTime
+      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality)
+    },
+    [quizzes, currentIndex, isRated, submitRating],
+  )
+
   function handleNext() {
+    const current = quizzes[currentIndex]
+    // 等待自评时不允许跳到下一题：此刻 SM-2 调度尚未推进，
+    // 放行会让这道题永远停在"答了但结不了账"的状态。
+    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return
     if (currentIndex < quizzes.length - 1) {
       const nextIndex = currentIndex + 1
       setCurrentIndex(nextIndex)
@@ -121,8 +164,8 @@ export default function Review() {
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      const current = quizzes[currentIndex]
-      if (current?.submitted) {
+      const cur = quizzes[currentIndex]
+      if (cur?.submitted) {
         handleNext()
       } else {
         handleSubmit()
@@ -223,12 +266,16 @@ export default function Review() {
         showSm2Info
         showReviewMeta
         isLast={currentIndex >= quizzes.length - 1}
+        selfRated={isRated(quiz.id)}
+        selfRatingSubmitting={ratingSubmitting}
         onSelectAnswer={(answer) => {
           const newQuizzes = [...quizzes]
           newQuizzes[currentIndex] = { ...current, userAnswer: answer }
           setQuizzes(newQuizzes)
         }}
         onSubmit={handleSubmit}
+        onSelfRate={handleSelfRate}
+        onSkipSelfRate={() => skipRating(quiz.id)}
         onNext={handleNext}
       />
     </div>

@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
+import { ToastProvider } from './components/Toast'
 import './styles/base.css'
 import './styles/components.css'
 import './styles/markdown.css'
@@ -19,8 +21,13 @@ import './styles/refinements.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    {/* 最外层错误边界：即使路由层或布局层抛错也不会白屏 */}
+    <ErrorBoundary>
+      <ToastProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ToastProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 )

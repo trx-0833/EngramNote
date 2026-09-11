@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { askQuestionStream, type AnswerSource } from '../api/client'
+import { parseSSEStream } from '../utils/sse'
+import { useThrottledStream } from '../hooks/useStreamAnswer'
 import EmptyState from '../components/EmptyState'
 
 interface QARecord {
@@ -27,6 +29,10 @@ export default function QA() {
   // 持有当前流式请求的 AbortController 与 reader，用于新问题中止旧流、停止生成与卸载清理
   const abortRef = useRef<AbortController | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+
+  // 流式 token 的节流累积器：把每个 token 的 setState 合并为按间隔批量刷新，
+  // 避免长回答时"每个 token 全量重算 Markdown"造成的 O(n²) 卡顿（§2.8 F-10）
+  const { push: pushDelta, flush: flushDelta, reset: resetDelta } = useThrottledStream()
 
   // 组件卸载时中止进行中的流式请求并取消读取
   useEffect(() => {
@@ -60,6 +66,8 @@ export default function QA() {
     if (!question.trim()) return
     // 新问题发起前中止上一个未完成的流，避免旧 token 污染新答案
     stopActiveStream()
+    // 清空上一轮可能残留的节流缓冲
+    resetDelta()
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -87,69 +95,92 @@ export default function QA() {
       reader = r
       readerRef.current = reader
 
-      const decoder = new TextDecoder()
-      // 缓冲区，用于处理跨 chunk 的不完整行
-      let buffer = ''
+      // 用共享的规范 SSE 解析器替换原先内联的手写解析：
+      // 手写版只保留最后一行 data:、不识别 \r\n、且 JSON.parse 无保护
+      // （一个截断分片就会终结整段回答）。见 utils/sse.ts 的说明。
+      await parseSSEStream(
+        stream,
+        {
+          onEvent: (eventType, data) => {
+            const payload = (data ?? {}) as Record<string, unknown>
 
-      while (true) {
-        const { done, value } = await r.read()
-        if (done) break
-        // stream: true 表示可能还有后续 chunk，避免多字节字符被截断
-        buffer += decoder.decode(value, { stream: true })
-
-        // 按双换行分割事件（SSE 协议中空行分隔事件）
-        const events = buffer.split('\n\n')
-        // 最后一个可能不完整，保留到下一次循环处理
-        buffer = events.pop() || ''
-
-        for (const eventBlock of events) {
-          const lines = eventBlock.split('\n')
-          let eventType = ''
-          let dataStr = ''
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7)
-            else if (line.startsWith('data: ')) dataStr = line.slice(6)
-          }
-          if (!eventType || !dataStr) continue
-          const data = JSON.parse(dataStr)
-
-          if (eventType === 'meta') {
-            // 首事件：记录检索降级状态，供渲染降级提示
-            setHistory(prev => {
-              if (prev.length === 0) return prev
-              const updated = [...prev]
-              updated[0] = { ...updated[0], retrievalStatus: data.retrieval_status || '' }
-              return updated
-            })
-          } else if (eventType === 'token') {
-            // 首个 token 到达时，切换出"思考中"状态
-            if (!firstTokenReceived) {
-              firstTokenReceived = true
-              setLoading(false)
+            if (eventType === 'meta') {
+              // 首事件：记录检索降级状态，供渲染降级提示
+              setHistory(prev => {
+                if (prev.length === 0) return prev
+                const updated = [...prev]
+                updated[0] = { ...updated[0], retrievalStatus: String(payload.retrieval_status || '') }
+                return updated
+              })
+              return
             }
-            // 追加 token 到当前答案（最新一条历史记录）
-            setHistory(prev => {
-              if (prev.length === 0) return prev
-              const updated = [...prev]
-              updated[0] = { ...updated[0], answer: updated[0].answer + (data.content || '') }
-              return updated
-            })
-          } else if (eventType === 'sources') {
-            // 保存当前答案的引用来源与提供商
-            setHistory(prev => {
-              if (prev.length === 0) return prev
-              const updated = [...prev]
-              updated[0] = { ...updated[0], sources: data.sources || [], provider: data.provider || '' }
-              return updated
-            })
-          } else if (eventType === 'done') {
-            // 流式响应结束
-            return
-          } else if (eventType === 'error') {
-            throw new Error(data.message || '流式响应错误')
-          }
-        }
-      }
+
+            if (eventType === 'token') {
+              // 首个 token 到达时，切换出"思考中"状态
+              if (!firstTokenReceived) {
+                firstTokenReceived = true
+                setLoading(false)
+              }
+              // 节流提交：把 token 累积到缓冲区，按间隔批量刷新。
+              // 原先每个 token 一次 setState + 一次全文 Markdown 重算，
+              // 长回答时是 O(n²)（见 §2.8 F-10）。
+              pushDelta(String(payload.content || ''), delta => {
+                setHistory(prev => {
+                  if (prev.length === 0) return prev
+                  const updated = [...prev]
+                  updated[0] = { ...updated[0], answer: updated[0].answer + delta }
+                  return updated
+                })
+              })
+              return
+            }
+
+            if (eventType === 'sources') {
+              setHistory(prev => {
+                if (prev.length === 0) return prev
+                const updated = [...prev]
+                updated[0] = {
+                  ...updated[0],
+                  sources: (payload.sources as AnswerSource[]) || [],
+                  provider: String(payload.provider || ''),
+                }
+                return updated
+              })
+              return
+            }
+
+            if (eventType === 'done') {
+              flushDelta(delta => {
+                setHistory(prev => {
+                  if (prev.length === 0) return prev
+                  const updated = [...prev]
+                  updated[0] = { ...updated[0], answer: updated[0].answer + delta }
+                  return updated
+                })
+              })
+              return
+            }
+
+            if (eventType === 'error') {
+              throw new Error(String(payload.message || '流式响应错误'))
+            }
+          },
+          onParseError: (raw, err) => {
+            // 坏事件跳过而非中断整段回答
+            console.warn('[QA] 无法解析的 SSE 事件已跳过:', raw.slice(0, 120), err)
+          },
+        },
+        controller.signal,
+      )
+      // 部分实现不发 done 事件，流自然结束也要提交剩余文本
+      flushDelta(delta => {
+        setHistory(prev => {
+          if (prev.length === 0) return prev
+          const updated = [...prev]
+          updated[0] = { ...updated[0], answer: updated[0].answer + delta }
+          return updated
+        })
+      })
     } catch (err) {
       if (controller.signal.aborted) {
         // 用户主动停止：保留已生成文本；若尚无任何文本则移除空气泡
@@ -213,7 +244,12 @@ export default function QA() {
           // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
           const isThinking = idx === 0 && loading && record.answer === ''
           return (
-            <div key={record.question + idx + record.answer.slice(0, 20)} style={{ marginBottom: 'var(--space-md)' }}>
+            // key 必须**稳定**：原实现把 answer 的前 20 字符拼进 key，
+            // 于是答案每增长约 20 字符 key 就变化一次，React 会把整条记录
+            // （问题气泡 + AI 卡片 + 引用列表）卸载重建 —— 焦点、文本选区、
+            // 滚动位置全部丢失，并成倍放大流式渲染开销（§2.8 F-10）。
+            // question + idx 在本列表内已唯一且不随流式内容变化。
+            <div key={`${record.question}#${idx}`} style={{ marginBottom: 'var(--space-md)' }}>
               {/* 问题 */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-sm)' }}>
                 <div className="qa-user-bubble">

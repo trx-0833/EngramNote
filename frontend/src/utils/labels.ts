@@ -54,3 +54,71 @@ export const cardCategoryLabels: Record<string, string> = {
 export const cardCategoryColors: Record<string, string> = {
   regular: '#6b7280', blind_spot: '#c0392b', extension: '#2d8a56',
 }
+
+/**
+ * 笔记状态到 CSS 类名的映射（单一数据源）
+ *
+ * 背景（见 docs/overhaul-plan.md §2.8 F-13）：
+ * 四个页面此前各自用 `` `status-${note.status}` `` 拼接类名，而 CSS 只定义了
+ * 7 个 `.status-*`；`learning` / `learning_failed` / `archived` **完全没有样式**，
+ * 于是同一状态在「项目页」显示红色失败、在其余四个页面显示无样式裸文本。
+ * `Projects.tsx` 当时是靠自己手写一张映射表绕过的 —— 两套并行机制必然漂移。
+ *
+ * 这里收敛为唯一出口：所有页面调用本函数，未知状态显式落到 `status-unknown`
+ * （有兜底样式），而不是拼出一个不存在的类名静默失效。
+ */
+const STATUS_CLASS_MAP: Record<string, string> = {
+  uploading: 'status-uploading',
+  converting: 'status-converting',
+  converted: 'status-converted',
+  cleaning: 'status-cleaning',
+  cleaned: 'status-cleaned',
+  cleaning_failed: 'status-cleaning-failed',
+  learning: 'status-learning',
+  learning_failed: 'status-learning-failed',
+  archived: 'status-archived',
+  failed: 'status-failed',
+}
+
+export function statusClass(status: string | null | undefined): string {
+  if (!status) return 'status-unknown'
+  return STATUS_CLASS_MAP[status] || 'status-unknown'
+}
+
+/**
+ * SM-2 四档自评分量表（单一数据源）
+ *
+ * 为什么是四档而不是 0-5 六档：用户实际能可靠区分的是「完全没想起来 /
+ * 勉强想起来 / 想起来 / 轻松想起来」四种主观体验，六档会让相邻档位
+ * 无法区分、自评失去信息量。四档映射到 SM-2 的 quality 0/3/4/5
+ * （整数分，SM-2 只用它做 >=3 的成功判定与 EF 增量）。
+ *
+ * `quality` 必须与后端 sm2_service 的语义一致：0=失败、3=勉强通过、
+ * 4=通过、5=轻松，后端据此计算 EF 与下次间隔。
+ */
+export interface SelfRatingOption {
+  /** SM-2 quality 分值（0-5） */
+  quality: number
+  /** 按钮主文案 */
+  label: string
+  /** 补充说明，帮助用户区分档位 */
+  hint: string
+  /** 按钮强调色 */
+  color: string
+}
+
+export const selfRatingOptions: SelfRatingOption[] = [
+  { quality: 0, label: '完全忘记', hint: '想不起来，需要重新学', color: '#c0392b' },
+  { quality: 3, label: '勉强想起', hint: '很吃力，答得不完整', color: '#c9a959' },
+  { quality: 4, label: '想起来了', hint: '稍作回忆就答对了', color: '#2d8a56' },
+  { quality: 5, label: '轻松想起', hint: '脱口而出，毫不费力', color: '#0f3460' },
+]
+
+/** 判分方式到中文标签的映射（用于向用户解释这一次的分数是怎么来的） */
+export const gradingMethodLabels: Record<string, string> = {
+  choice: '选择题自动判分',
+  fill_blank: '填空题自动判分',
+  self_rating: '你的自评',
+  ungraded: '待你自评（尚未计入复习进度）',
+  legacy: '历史记录',
+}

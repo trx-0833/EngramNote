@@ -21,7 +21,8 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import ReminderBanner from '../components/ReminderBanner'
-import { sourceTypeLabels, statusLabels, cardTypeLabels, questionTypeLabels } from '../utils/labels'
+import { useToast } from '../components/Toast'
+import { sourceTypeLabels, statusLabels, statusClass, cardTypeLabels, questionTypeLabels } from '../utils/labels'
 
 /**
  * 仪表盘页面组件
@@ -427,7 +428,7 @@ export default function Dashboard() {
                     <span className={`badge badge-${note.source_type}`}>
                       {sourceTypeLabels[note.source_type] || note.source_type}
                     </span>
-                    <span className={`status-${note.status}`} style={{ fontSize: '0.8rem' }}>
+                    <span className={statusClass(note.status)} style={{ fontSize: '0.8rem' }}>
                       {statusLabels[note.status] || note.status}
                     </span>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
@@ -451,6 +452,7 @@ export default function Dashboard() {
  * 初始加载与更新均容错（失败静默，保持原值，不打断页面）。
  */
 function EmailReminderToggle() {
+  const toast = useToast()
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -468,8 +470,14 @@ function EmailReminderToggle() {
     try {
       const res = await updateUserReminderSettings(checked)
       setEnabled(res.email_reminder_enabled)
-    } catch {
-      // 容错：更新失败保持原值（请求层已抛出可读错误，此处静默）
+    } catch (err) {
+      // 关键修复（§2.8 F-8）：原实现静默吞掉失败 —— 复选框会弹回原位、
+      // 没有任何提示，用户以为开关坏了而反复点击，且无从判断原因。
+      // 开关类控件必须给出明确反馈，否则"没生效"与"没点中"无法区分。
+      toast.error(
+        checked ? '开启邮件提醒失败' : '关闭邮件提醒失败',
+        err instanceof Error ? err.message : undefined,
+      )
     } finally {
       setBusy(false)
     }

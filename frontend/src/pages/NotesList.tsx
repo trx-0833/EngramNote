@@ -13,7 +13,8 @@ import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-import { sourceTypeLabels, statusLabels } from '../utils/labels'
+import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels'
+import { useToast } from '../components/Toast'
 
 /**
  * 笔记列表页面组件
@@ -31,6 +32,7 @@ import { sourceTypeLabels, statusLabels } from '../utils/labels'
  * - loading: 数据加载状态
  */
 export default function NotesList() {
+  const toast = useToast()
   const navigate = useNavigate()
   /** 当前页的笔记列表 */
   const [notes, setNotes] = useState<Note[]>([])
@@ -102,7 +104,7 @@ export default function NotesList() {
       setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id))
       setTotal((prev) => prev - 1)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '移入回收站失败')
+      toast.error(err instanceof Error ? err.message : '移入回收站失败')
     } finally {
       setNoteToDelete(null)
     }
@@ -124,7 +126,7 @@ export default function NotesList() {
         )
       )
     } catch (err) {
-      alert(err instanceof Error ? err.message : '重试失败')
+      toast.error(err instanceof Error ? err.message : '重试失败')
     }
   }
 
@@ -230,7 +232,7 @@ export default function NotesList() {
                     </span>
                   ))}
                   {/* 处理状态标签 */}
-                  <span className={`status-${note.status}`} style={{ fontSize: '0.8rem' }}>
+                  <span className={statusClass(note.status)} style={{ fontSize: '0.8rem' }}>
                     {statusLabels[note.status] || note.status}
                   </span>
                   {/* 页数信息，仅 PDF/Office 文档有值 */}

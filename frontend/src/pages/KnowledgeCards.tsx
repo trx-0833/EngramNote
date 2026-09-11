@@ -11,6 +11,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import { cardTypeLabels, cardTypeColors, cardCategoryLabels, cardCategoryColors } from '../utils/labels'
+import { useToast } from '../components/Toast'
 
 interface NoteGroup {
   note_id: string
@@ -58,6 +59,7 @@ function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
 }
 
 export default function KnowledgeCards() {
+  const toast = useToast()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [groups, setGroups] = useState<NoteGroup[]>([])
@@ -149,7 +151,7 @@ export default function KnowledgeCards() {
         cards: g.cards.map(c => (c.id === card.id ? { ...c, ...updated } : c)),
       })))
     } catch (err) {
-      alert(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败')
     } finally {
       setActionLoadingCardId(null)
     }
@@ -169,12 +171,12 @@ export default function KnowledgeCards() {
           await generateExtensionQuestions(result.parent_card_id)
         } catch (err) {
           // 出题失败不阻断流程，仅提示
-          alert(err instanceof Error ? `出题失败：${err.message}` : '出题失败')
+          toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败')
         }
       }
       await fetchCards(searchKeyword || undefined)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '生成拓展知识点失败')
+      toast.error(err instanceof Error ? err.message : '生成拓展知识点失败')
     } finally {
       setActionLoadingCardId(null)
     }

@@ -65,20 +65,44 @@ export default function QuestionSets() {
   const fetchQuestions = useCallback(async (keyword?: string) => {
     setLoading(true)
     try {
-      // 后端 page_size 上限为 100，需分页加载全部题目
+      // 后端 page_size 上限为 100，需分页加载全部题目。
+      //
+      // 终止条件必须有多重兜底（见 docs/overhaul-plan.md §2.8 F-3）：
+      // 原实现只写 `while (allItems.length < totalCount)`，一旦后端返回的
+      // total 与可返回条数不一致（分页越界、软删过滤口径不同、并发写入等），
+      // 这个循环**永远不会结束**，会持续向后端发请求并把页面卡在 loading。
+      // 现在加上"最大页数"与"空页即停"两道硬兜底。
+      const MAX_PAGES = 100
       const allItems: QuizItem[] = []
       let page = 1
       const pageSize = 100
       let totalCount = 0
-      do {
+      let truncated = false
+
+      while (page <= MAX_PAGES) {
         const data = await getQuestions(page, pageSize, noteId, keyword)
-        allItems.push(...data.items)
-        totalCount = data.total
+        const items = data.items || []
+        allItems.push(...items)
+        totalCount = data.total ?? allItems.length
+
+        // 空页说明已经取完（后端 total 可能不准），立即停止
+        if (items.length === 0) break
+        // 已取够 total 声明的数量
+        if (allItems.length >= totalCount) break
+
         page++
-      } while (allItems.length < totalCount)
+      }
+
+      if (page > MAX_PAGES && allItems.length < totalCount) {
+        truncated = true
+        console.warn(
+          `[QuestionSets] 分页达到上限 ${MAX_PAGES} 页，已加载 ${allItems.length}/${totalCount} 条`,
+        )
+      }
+
       const grouped = groupByNote(allItems)
       setGroups(grouped)
-      setTotal(totalCount)
+      setTotal(truncated ? allItems.length : totalCount)
       setExpandedNotes(new Set(grouped.map(g => g.note_id)))
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')

@@ -20,8 +20,10 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import { renderMarkdown } from '../utils/markdown'
+import { useToast } from '../components/Toast'
 
 export default function LearningAssessment() {
+  const toast = useToast()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const preselectedNoteId = searchParams.get('noteId')
@@ -138,13 +140,13 @@ export default function LearningAssessment() {
     let personalIds = selectedPersonalNotes
     if (compareMode === 'linked') {
       if (!selectedPersonalNoteId) {
-        alert('请选择一个笔记')
+        toast.warning('请选择一个笔记')
         return
       }
       personalIds = [selectedPersonalNoteId]
     }
     if (materialIds.length === 0 || personalIds.length === 0) {
-      alert('请选择学习资料和笔记')
+      toast.warning('请选择学习资料和笔记')
       return
     }
     setLoading(true)
@@ -152,7 +154,7 @@ export default function LearningAssessment() {
       const res = await compareAssessment(materialIds, personalIds)
       setResult(res)
     } catch (e) {
-      alert('评估失败: ' + (e instanceof Error ? e.message : String(e)))
+      toast.error('评估失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setLoading(false)
     }
@@ -171,7 +173,7 @@ export default function LearningAssessment() {
   // Quiz mode handlers
   const handleGenerateQuiz = async () => {
     if (selectedMaterials.length === 0) {
-      alert('请选择学习资料')
+      toast.warning('请选择学习资料')
       return
     }
     setLoading(true)
@@ -186,7 +188,7 @@ export default function LearningAssessment() {
       })
       setAnswers(initialAnswers)
     } catch (e) {
-      alert('生成问题失败: ' + (e instanceof Error ? e.message : String(e)))
+      toast.error('生成问题失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setLoading(false)
     }
@@ -223,7 +225,7 @@ export default function LearningAssessment() {
     // Check all answers are filled
     const unanswered = Object.values(answers).some(a => !a.trim())
     if (unanswered) {
-      alert('请回答所有问题')
+      toast.error('请回答所有问题')
       return
     }
     submittingRef.current = true
@@ -236,7 +238,7 @@ export default function LearningAssessment() {
       const res = await submitQuizAnswers(quizAssessment.id, answerList)
       setQuizResult(res)
     } catch (e) {
-      alert('提交答案失败: ' + (e instanceof Error ? e.message : String(e)))
+      toast.error('提交答案失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setLoading(false)
       submittingRef.current = false

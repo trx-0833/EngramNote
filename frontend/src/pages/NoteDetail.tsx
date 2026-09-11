@@ -47,9 +47,10 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
 import NoteAskPanel from '../components/NoteAskPanel'
-import { statusLabels, cardTypeColors, cardTypeLabels } from '../utils/labels'
+import { statusLabels, statusClass, cardTypeColors, cardTypeLabels } from '../utils/labels'
 import { formatDateTime } from '../utils/datetime'
 import { useAdhdReader } from '../hooks/useAdhdReader'
+import { useToast } from '../components/Toast'
 
 /** 视图模式 */
 type ViewMode = 'original' | 'clean' | 'diff'
@@ -58,6 +59,7 @@ type ViewMode = 'original' | 'clean' | 'diff'
  * 笔记详情页面组件
  */
 export default function NoteDetail() {
+  const toast = useToast()
   const { noteId } = useParams<{ noteId: string }>()
   const navigate = useNavigate()
   const [note, setNote] = useState<NoteDetail | null>(null)
@@ -380,7 +382,7 @@ export default function NoteDetail() {
       handleStatusChange()
     } catch (err) {
       // 409（进行中）等状态透传提示
-      alert(err instanceof Error ? err.message : '启动学习失败')
+      toast.error(err instanceof Error ? err.message : '启动学习失败')
     }
   }
 
@@ -397,7 +399,7 @@ export default function NoteDetail() {
       await deleteNote(note.id)
       navigate('/notes')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '移入回收站失败')
+      toast.error(err instanceof Error ? err.message : '移入回收站失败')
       setShowDeleteDialog(false)
     }
   }
@@ -409,7 +411,7 @@ export default function NoteDetail() {
       await archiveNote(note.id)
       await fetchNote()  // 重新获取完整数据，避免部分数据覆盖
     } catch (err) {
-      alert(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败')
     }
   }
 
@@ -486,7 +488,7 @@ export default function NoteDetail() {
 
     const text = selection.toString().trim()
     if (!text || text.length > 5000) {
-      alert('选中文本过长或为空')
+      toast.warning('选中文本过长或为空')
       return
     }
 
@@ -533,7 +535,7 @@ export default function NoteDetail() {
         console.warn('应用批注失败:', err)
       }
     } catch {
-      alert('保存批注失败')
+      toast.error('保存批注失败')
     }
 
     setShowAnnotationMenu(false)
@@ -560,7 +562,7 @@ export default function NoteDetail() {
         parent?.normalize()  // 合并相邻文本节点
       }
     } catch {
-      alert('删除批注失败')
+      toast.error('删除批注失败')
     }
   }
 
@@ -572,7 +574,7 @@ export default function NoteDetail() {
       setAvailableMaterials(data.items || [])
       setShowLinkManager(true)
     } catch {
-      alert('加载资料列表失败')
+      toast.error('加载资料列表失败')
     }
   }
 
@@ -585,13 +587,13 @@ export default function NoteDetail() {
         // 重新加载链接
         const links = await getNoteLinks(note.id)
         setNoteLinks(links)
-        alert('关联资料已更新')
+        toast.success('关联资料已更新')
       } else {
-        alert('关联资料未变化')
+        toast.error('关联资料未变化')
       }
       setShowLinkManager(false)
     } catch {
-      alert('保存关联失败')
+      toast.error('保存关联失败')
     }
   }
 
@@ -603,7 +605,7 @@ export default function NoteDetail() {
       const links = await getNoteLinks(note.id)
       setNoteLinks(links)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '清理链接失败')
+      toast.error(err instanceof Error ? err.message : '清理链接失败')
     }
   }
 
@@ -611,7 +613,7 @@ export default function NoteDetail() {
   function handleEnterEdit() {
     if (!note) return
     if (viewMode === 'original') {
-      alert('原始版不可编辑，请切换到清洗版后编辑')
+      toast.warning('原始版不可编辑，请切换到清洗版后编辑')
       return
     }
     setEditContent(note.clean_md_content || '')
@@ -630,7 +632,7 @@ export default function NoteDetail() {
       setEditMode('view')
       setEditContent('')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '保存失败')
+      toast.error(err instanceof Error ? err.message : '保存失败')
     } finally {
       setSaving(false)
     }
@@ -734,7 +736,7 @@ export default function NoteDetail() {
               {name}
             </span>
           ))}
-          <span className={`status-${note.status}`}>{statusLabels[note.status] || note.status}</span>
+          <span className={statusClass(note.status)}>{statusLabels[note.status] || note.status}</span>
           <select
             value={note.note_role || 'material'}
             onChange={async (e) => {
@@ -742,7 +744,7 @@ export default function NoteDetail() {
                 const updated = await updateNoteRole(note.id, e.target.value)
                 setNote((prev) => prev ? { ...prev, note_role: updated.note_role } : prev)
               } catch (err) {
-                alert(err instanceof Error ? err.message : '更新角色失败')
+                toast.error(err instanceof Error ? err.message : '更新角色失败')
               }
             }}
             style={{
@@ -779,7 +781,7 @@ export default function NoteDetail() {
                     const result = await retryConvert(noteId!)
                     setNote((prev) => prev ? { ...prev, status: result.status, error_message: result.error_message } : prev)
                   } catch (err) {
-                    alert(err instanceof Error ? err.message : '重试失败')
+                    toast.error(err instanceof Error ? err.message : '重试失败')
                   }
                 }}
               >

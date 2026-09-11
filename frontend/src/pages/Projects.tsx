@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { statusClass } from '../utils/labels'
 import {
   getProjects,
   createProject,
@@ -39,19 +40,11 @@ const TYPE_BADGE: Record<string, string> = {
   markdown: 'badge-markdown',
 }
 
-/** 状态颜色映射（与全局 .status-* 对应） */
-const STATUS_CLASS: Record<string, string> = {
-  uploading: 'status-uploading',
-  converting: 'status-converting',
-  converted: 'status-converted',
-  cleaning: 'status-cleaning',
-  cleaned: 'status-cleaned',
-  learning: 'status-converting',
-  cleaning_failed: 'status-cleaning-failed',
-  learning_failed: 'status-failed', // 全局无 .status-learning-failed，复用失败红
-  archived: 'status-converted', // 全局无 .status-archived，归档视为完成态，复用成功绿
-  failed: 'status-failed',
-}
+// 状态样式统一走 utils/labels.ts 的 statusClass()（单一数据源）。
+// 本文件此前因"全局缺少 .status-learning-failed / .status-archived"
+// 而手写了一张绕过表（把学习失败映射成 failed 红、把归档映射成 converted 绿），
+// 导致同一状态在项目页与其余四个页面显示不一致。缺失的 CSS 类已补齐，
+// 绕过表已删除 —— 见 docs/overhaul-plan.md §2.8 F-13。
 
 /** 格式化文件大小 */
 function formatSize(bytes: number | null | undefined): string {
@@ -515,7 +508,7 @@ export default function Projects() {
                     >
                       {n.title}
                     </span>
-                    <span className={STATUS_CLASS[n.status] ?? ''} style={{ fontSize: '0.7rem', flexShrink: 0 }}>
+                    <span className={statusClass(n.status)} style={{ fontSize: '0.7rem', flexShrink: 0 }}>
                       {n.status}
                     </span>
                   </label>
@@ -602,7 +595,7 @@ export default function Projects() {
                     >
                       {n.title}
                     </span>
-                    <span className={STATUS_CLASS[n.status] ?? ''} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
+                    <span className={statusClass(n.status)} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
                       {n.status}
                     </span>
                     <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}>

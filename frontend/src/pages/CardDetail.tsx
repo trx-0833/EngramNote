@@ -8,8 +8,10 @@ import { getKnowledgeCard, updateKnowledgeCard, deleteKnowledgeCard, getQuestion
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
 import { cardTypeLabels, difficultyLabels, questionTypeLabels } from '../utils/labels'
+import { useToast } from '../components/Toast'
 
 export default function CardDetail() {
+  const toast = useToast()
   const { cardId } = useParams<{ cardId: string }>()
   const navigate = useNavigate()
   const [card, setCard] = useState<KnowledgeCard | null>(null)
@@ -52,7 +54,7 @@ export default function CardDetail() {
       await fetchCard()  // 重新获取完整数据，避免 note_title 丢失
       setEditing(false)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '保存失败')
+      toast.error(err instanceof Error ? err.message : '保存失败')
     }
   }
 
@@ -62,7 +64,7 @@ export default function CardDetail() {
       await deleteKnowledgeCard(card.id)
       navigate('/cards')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      toast.error(err instanceof Error ? err.message : '删除失败')
     }
   }
 

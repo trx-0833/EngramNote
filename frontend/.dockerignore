@@ -1,0 +1,22 @@
+# Docker 构建上下文排除清单
+#
+# 缺少本文件时，`COPY . .` 会把**宿主机的 node_modules** 复制进镜像，
+# 覆盖 Dockerfile 中刚装好的 Linux 依赖。后果分两种：
+#   1) Windows/macOS 开发机上构建必然失败：
+#      "You installed esbuild for another platform"
+#      （node_modules 里是 @esbuild/win32-x64、@rollup/rollup-win32-x64-msvc 等平台专有包）
+#   2) 即使侥幸通过，也会把数百 MB 无用文件打进构建上下文与镜像层
+# 本文件同时让"开发机构建"与"CI 干净克隆构建"行为一致。
+
+node_modules
+dist
+.git
+.gitignore
+*.log
+
+# 本地缓存与编辑器产物
+.npm-cache
+.vite
+.idea
+.vscode
+.DS_Store

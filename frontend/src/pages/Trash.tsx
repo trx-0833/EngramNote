@@ -20,8 +20,10 @@ import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import { sourceTypeLabels } from '../utils/labels'
 import { formatDateTime } from '../utils/datetime'
+import { useToast } from '../components/Toast'
 
 export default function Trash() {
+  const toast = useToast()
   /** 回收站列表 */
   const [items, setItems] = useState<TrashNoteItem[]>([])
   /** 数据加载状态 */
@@ -65,11 +67,11 @@ export default function Trash() {
     try {
       const res = await restoreNote(item.note.id)
       if (res.renamed_to) {
-        alert(`原位置已存在同名文件，恢复后已自动重命名为「${res.renamed_to}」`)
+        toast.info(`原位置已存在同名文件，恢复后已自动重命名为「${res.renamed_to}」`)
       }
       setItems((prev) => prev.filter((it) => it.note.id !== item.note.id))
     } catch (err) {
-      alert(err instanceof Error ? err.message : '恢复失败')
+      toast.error(err instanceof Error ? err.message : '恢复失败')
     } finally {
       setOperatingId(null)
     }
@@ -84,7 +86,7 @@ export default function Trash() {
       setItems((prev) => prev.filter((it) => it.note.id !== noteToPurge.note.id))
       setNoteToPurge(null)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '彻底删除失败')
+      toast.error(err instanceof Error ? err.message : '彻底删除失败')
     } finally {
       setOperatingId(null)
     }
@@ -97,10 +99,10 @@ export default function Trash() {
       setShowPurgeAll(false)
       setItems([])
       if (res.failed > 0) {
-        alert(`已彻底删除 ${res.purged} 条，${res.failed} 条删除失败，请重试`)
+        toast.success(`已彻底删除 ${res.purged} 条，${res.failed} 条删除失败，请重试`)
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : '清空回收站失败')
+      toast.error(err instanceof Error ? err.message : '清空回收站失败')
     }
   }
 

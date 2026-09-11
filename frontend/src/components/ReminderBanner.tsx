@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getReminders, type ReminderResponse } from '../api/client'
+import { useToast } from '../components/Toast'
 import {
   requestNotificationPermission,
   showNotification,
@@ -19,6 +20,7 @@ import {
 const POLL_INTERVAL_MS = 600000
 
 export default function ReminderBanner() {
+  const toast = useToast()
   const navigate = useNavigate()
   /** 当前通知权限状态 */
   const [permission, setPermission] = useState<NotificationPermission>(
@@ -99,7 +101,7 @@ export default function ReminderBanner() {
       showNotification('复习提醒已开启', '将在有待复习题目时提醒你')
     } else {
       setPermission('denied')
-      alert('通知权限已被拒绝，请在浏览器设置中开启')
+      toast.error('通知权限已被拒绝，请在浏览器设置中开启')
     }
   }
 

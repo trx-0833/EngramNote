@@ -15,6 +15,8 @@ import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 // 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+import { useSelfRating } from '../hooks/useSelfRating'
+import { useToast } from '../components/Toast'
 
 /** 单题答题状态 */
 interface QuizState {
@@ -28,6 +30,7 @@ interface QuizState {
 export default function QuickReview() {
   const { noteId } = useParams<{ noteId: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -39,6 +42,27 @@ export default function QuickReview() {
   const [completed, setCompleted] = useState(false)
   /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
+
+  // 四档自评：补完简答题的占位记录并推进 SM-2 调度
+  const onRated = useCallback((result: SubmitAnswerResponse) => {
+    setQuizzes(prev => prev.map(q =>
+      q.quiz.id === result.quiz_id ? { ...q, result } : q,
+    ))
+    if (result.is_correct) setSessionCorrect(prev => prev + 1)
+    setSessionTotal(prev => prev + 1)
+    toast.success('自评已记录，复习进度已更新')
+  }, [toast])
+  const onRateError = useCallback((message: string) => {
+    setError(message)
+    toast.error(message)
+  }, [toast])
+  const { submitRating, submitting: ratingSubmitting, isRated, skipRating } = useSelfRating({
+    // 快速复习走独立入口（不受每日上限约束），自评也必须走同一入口
+    submit: (quizId, userAnswer, timeSpentMs, selfRating) =>
+      submitQuickReviewAnswer(noteId ?? '', quizId, userAnswer, timeSpentMs, selfRating),
+    onRated,
+    onError: onRateError,
+  })
 
   const loadQuizzes = useCallback(async () => {
     if (!noteId) return
@@ -79,8 +103,12 @@ export default function QuickReview() {
       const newQuizzes = [...quizzes]
       newQuizzes[currentIndex] = { ...current, submitted: true, result }
       setQuizzes(newQuizzes)
-      if (result.is_correct) setSessionCorrect(prev => prev + 1)
-      setSessionTotal(prev => prev + 1)
+      // 只有真正推进了调度的提交才计入本次统计；简答题的占位提交
+      // （grading_method='ungraded'，尚未自评）不算一次"已答"。
+      if (result.grading_method !== 'ungraded') {
+        if (result.is_correct) setSessionCorrect(prev => prev + 1)
+        setSessionTotal(prev => prev + 1)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '提交失败')
     } finally {
@@ -88,7 +116,22 @@ export default function QuickReview() {
     }
   }
 
+  /** 四档自评：补完占位记录并推进 SM-2 调度 */
+  const handleSelfRate = useCallback(
+    async (quality: number) => {
+      const current = quizzes[currentIndex]
+      if (!current || !noteId || isRated(current.quiz.id)) return
+      const timeSpent = Date.now() - current.startTime
+      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality)
+    },
+    [quizzes, currentIndex, noteId, isRated, submitRating],
+  )
+
   function handleNext() {
+    const current = quizzes[currentIndex]
+    // 等待自评时不允许跳到下一题：此刻调度尚未推进，
+    // 放行会让这道题永远停在"答了但结不了账"的状态。
+    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return
     if (currentIndex < quizzes.length - 1) {
       const nextIndex = currentIndex + 1
       setCurrentIndex(nextIndex)
@@ -210,12 +253,16 @@ export default function QuickReview() {
         showSm2Info={false}
         fillAutoFocus
         isLast={currentIndex >= quizzes.length - 1}
+        selfRated={isRated(quiz.id)}
+        selfRatingSubmitting={ratingSubmitting}
         onSelectAnswer={(answer) => {
           const newQuizzes = [...quizzes]
           newQuizzes[currentIndex] = { ...current, userAnswer: answer }
           setQuizzes(newQuizzes)
         }}
         onSubmit={handleSubmit}
+        onSelfRate={handleSelfRate}
+        onSkipSelfRate={() => skipRating(quiz.id)}
         onNext={handleNext}
       />
       <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>

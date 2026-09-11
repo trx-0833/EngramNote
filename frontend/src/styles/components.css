@@ -202,15 +202,25 @@ input::placeholder, textarea::placeholder {
 .badge-video { background: #ffe4e6; color: #9f1239; }
 .badge-markdown { background: #e0f2fe; color: #075985; }
 
-/* ── 状态标签 ── */
+/* ── 状态标签 ──
+   类名由 utils/labels.ts 的 statusClass() 统一产出（单一数据源）。
+   补齐此前缺失的 learning / learning_failed / archived —— 缺它们时
+   四个页面会把这三个状态渲染成**无样式裸文本**（见 overhaul-plan §2.8 F-13）。
+   命名统一用下划线形态（与后端枚举值一致），不再混用连字符。 */
 
+.status-uploading { color: var(--color-text-tertiary); }
 .status-converting { color: var(--color-warning); }
 .status-converted { color: var(--color-success); }
 .status-cleaning { color: var(--color-warning); }
 .status-cleaned { color: var(--color-success); }
 .status-cleaning-failed { color: var(--color-error); }
+.status-learning { color: var(--color-primary); }
+.status-learning-failed { color: var(--color-error); }
+.status-archived { color: var(--color-success); font-weight: 500; }
 .status-failed { color: var(--color-error); }
-.status-uploading { color: var(--color-text-tertiary); }
+
+/* 未知/空状态的显式兜底，避免拼不出类名时完全没有样式 */
+.status-unknown { color: var(--color-text-secondary); }
 
 /* ── 工具类 ── */
 

@@ -31,6 +31,7 @@ import GraphCanvas from '../components/graph/GraphCanvas'
 import GraphSidebar from '../components/graph/GraphSidebar'
 // 卡片类型颜色/标签统一从 utils/labels.ts 读取（单一数据源），见 docs/decisions.md#F-28
 import { cardTypeColors as CARD_TYPE_COLORS, cardTypeLabels as CARD_TYPE_LABELS } from '../utils/labels'
+import { useToast } from '../components/Toast'
 import {
   type ForceGraphNode,
   type ForceGraphLink,
@@ -46,6 +47,7 @@ import {
 } from '../components/graph/types'
 
 export default function KnowledgeGraph() {
+  const toast = useToast()
   const navigate = useNavigate()
   const graphRef = useRef<GraphForceRef | undefined>(undefined)
   const graphCanvasRef = useRef<HTMLDivElement>(null)
@@ -79,6 +81,29 @@ export default function KnowledgeGraph() {
   const [hoverNode, setHoverNode] = useState<ForceGraphNode | null>(null)
   /** 悬停边 */
   const [hoverLink, setHoverLink] = useState<ForceGraphLink | null>(null)
+
+  // 最近一次已提交的悬停 id。
+  // react-force-graph 的 onNodeHover 在**指针移动过程中高频触发**，
+  // 即使仍然悬停在同一个节点上也会重复回调。原实现直接 setState，
+  // 于是每次鼠标移动都会让这个近千行的页面整体重渲，并因为
+  // nodeCanvasObject 的 useCallback 依赖含 hoverNode 而**重绘整张画布**。
+  // 这里只在"指向的节点真的变了"时才提交状态（§2.8 F-8）。
+  const lastHoverNodeIdRef = useRef<string | null>(null)
+  const lastHoverLinkIdRef = useRef<string | null>(null)
+
+  const handleNodeHover = useCallback((node: ForceGraphNode | null) => {
+    const id = node?.id ?? null
+    if (lastHoverNodeIdRef.current === id) return
+    lastHoverNodeIdRef.current = id
+    setHoverNode(node)
+  }, [])
+
+  const handleLinkHover = useCallback((link: ForceGraphLink | null) => {
+    const id = link ? `${link.source}-${link.target}` : null
+    if (lastHoverLinkIdRef.current === id) return
+    lastHoverLinkIdRef.current = id
+    setHoverLink(link)
+  }, [])
   /** 高亮的关系类型 */
   const [highlightedRelationType, setHighlightedRelationType] = useState<string | null>(null)
 
@@ -602,7 +627,7 @@ export default function KnowledgeGraph() {
       const statsData = await getGraphStats()
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败')
     } finally {
       setActionLoading(null)
     }
@@ -620,7 +645,7 @@ export default function KnowledgeGraph() {
       const statsData = await getGraphStats()
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败')
     } finally {
       setActionLoading(null)
     }
@@ -638,7 +663,7 @@ export default function KnowledgeGraph() {
       setGraphData(data)
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '批量操作失败')
+      toast.error(err instanceof Error ? err.message : '批量操作失败')
     } finally {
       setBatchLoading(false)
     }
@@ -657,7 +682,7 @@ export default function KnowledgeGraph() {
       setGraphData(data)
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '批量操作失败')
+      toast.error(err instanceof Error ? err.message : '批量操作失败')
     } finally {
       setBatchLoading(false)
     }
@@ -727,7 +752,7 @@ export default function KnowledgeGraph() {
       setGraphData(data)
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      toast.error(err instanceof Error ? err.message : '删除失败')
     } finally {
       setActionLoading(null)
     }
@@ -748,7 +773,7 @@ export default function KnowledgeGraph() {
       setGraphData(data)
       setStats(statsData)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '创建失败')
+      toast.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       setCreating(false)
     }
@@ -925,9 +950,9 @@ export default function KnowledgeGraph() {
           nodeCanvasObject={nodeCanvasObject}
           linkCanvasObject={linkCanvasObject}
           onNodeClick={handleNodeClick}
-          onNodeHover={(node: ForceGraphNode | null) => setHoverNode(node)}
+          onNodeHover={handleNodeHover}
           onLinkClick={handleLinkClick}
-          onLinkHover={(link: ForceGraphLink | null) => setHoverLink(link)}
+          onLinkHover={handleLinkHover}
           onBackgroundClick={handleBackgroundClick}
         />
 

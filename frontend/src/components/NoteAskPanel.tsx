@@ -8,9 +8,12 @@
  * 选中文本 + 选区前后上下文 → POST /api/notes/{noteId}/ask/stream
  * （SSE 事件：meta(provider) → token... → done / error）
  */
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import { askNoteQuestionStream } from '../api/notes'
+import type { AnswerSource } from '../api/client'
 import { renderMarkdown } from '../utils/markdown'
+import { parseSSEStream } from '../utils/sse'
+import { useThrottledStream } from '../hooks/useStreamAnswer'
 
 interface NoteAskPanelProps {
   noteId: string
@@ -38,11 +41,21 @@ export default function NoteAskPanel({
   const [submittedQuestion, setSubmittedQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [provider, setProvider] = useState('')
+  const [sources, setSources] = useState<AnswerSource[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [mode, setMode] = useState<'input' | 'answer'>('input')
   const textAreaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 流式 token 的节流累积器（见 §2.8 F-10：原实现为每 token 一次
+  // setState + 渲染层全文重跑 Markdown，长回答时为 O(n²)）
+  const { push: pushDelta, flush: flushDelta, reset: resetDelta } = useThrottledStream()
+
+  // Markdown 只在 answer 真正变化时重算一次。
+  // 原先 renderMarkdown(answer) 直接写在 JSX 里，任何一次重渲染
+  // （包括滚动、hover、父组件更新）都会重跑完整的 marked + DOMPurify + KaTeX 管道。
+  const answerHtml = useMemo(() => (answer ? renderMarkdown(answer) : ''), [answer])
   const abortRef = useRef<AbortController | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   /** 窗口当前位置（初始为选区旁，拖拽后可自由移动） */
@@ -85,12 +98,15 @@ export default function NoteAskPanel({
     if (!q) return
     // 新请求前中止上一个未完成的流，避免旧 token 污染新答案
     stopActiveStream()
+    // 清空上一轮可能残留的节流缓冲
+    resetDelta()
 
     const controller = new AbortController()
     abortRef.current = controller
     setSubmittedQuestion(q)
     setAnswer('')
     setProvider('')
+    setSources([])
     setError('')
     setLoading(true)
     setStreaming(true)
@@ -119,49 +135,53 @@ export default function NoteAskPanel({
       reader = r
       readerRef.current = reader
 
-      const decoder = new TextDecoder()
-      // 缓冲区，用于处理跨 chunk 的不完整行
-      let buffer = ''
+      // 共享的规范 SSE 解析器（原内联实现只保留最后一行 data:、不识别 \r\n、
+      // JSON.parse 无保护；两份副本还已漂移，见 utils/sse.ts）
+      await parseSSEStream(
+        stream,
+        {
+          onEvent: (eventType, data) => {
+            const payload = (data ?? {}) as Record<string, unknown>
 
-      while (true) {
-        const { done, value } = await r.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        // 按双换行分割事件（SSE 协议中空行分隔事件）
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-
-        for (const eventBlock of events) {
-          const lines = eventBlock.split('\n')
-          let eventType = ''
-          let dataStr = ''
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7)
-            else if (line.startsWith('data: ')) dataStr = line.slice(6)
-          }
-          if (!eventType || !dataStr) continue
-          const data = JSON.parse(dataStr)
-
-          if (eventType === 'meta') {
-            // 首事件：记录 LLM 提供商标识
-            setProvider(data.provider || '')
-          } else if (eventType === 'token') {
-            // 首个 token 到达时，切换出"思考中"状态
-            if (!firstTokenReceived) {
-              firstTokenReceived = true
-              setLoading(false)
+            if (eventType === 'meta') {
+              // 首事件：记录 LLM 提供商标识
+              setProvider(String(payload.provider || ''))
+              return
             }
-            // 追加 token 到当前答案
-            setAnswer(prev => prev + (data.content || ''))
-          } else if (eventType === 'done') {
-            // 流式响应结束
-            return
-          } else if (eventType === 'error') {
-            throw new Error(data.message || '流式响应错误')
-          }
-        }
-      }
+            if (eventType === 'token') {
+              // 首个 token 到达时，切换出"思考中"状态
+              if (!firstTokenReceived) {
+                firstTokenReceived = true
+                setLoading(false)
+              }
+              // 节流提交：原先每个 token 一次 setState，且渲染层对全文重跑
+              // renderMarkdown（含 KaTeX），长回答时为 O(n²)（§2.8 F-10）
+              pushDelta(String(payload.content || ''), delta => {
+                setAnswer(prev => prev + delta)
+              })
+              return
+            }
+            if (eventType === 'sources') {
+              // 与 QA 页保持一致：选段提问同样会返回引用来源
+              setSources((payload.sources as AnswerSource[]) || [])
+              return
+            }
+            if (eventType === 'done') {
+              flushDelta(delta => setAnswer(prev => prev + delta))
+              return
+            }
+            if (eventType === 'error') {
+              throw new Error(String(payload.message || '流式响应错误'))
+            }
+          },
+          onParseError: (raw, err) => {
+            console.warn('[NoteAskPanel] 无法解析的 SSE 事件已跳过:', raw.slice(0, 120), err)
+          },
+        },
+        controller.signal,
+      )
+      // 流自然结束也要提交剩余文本
+      flushDelta(delta => setAnswer(prev => prev + delta))
     } catch (err) {
       if (controller.signal.aborted) {
         // 用户主动停止：保留已生成文本
@@ -268,8 +288,18 @@ export default function NoteAskPanel({
             {answer && (
               <div
                 className="ask-ai-answer markdown-body"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }}
+                dangerouslySetInnerHTML={{ __html: answerHtml }}
               />
+            )}
+            {sources.length > 0 && (
+              <div className="ask-ai-sources">
+                {sources.map((s, i) => (
+                  <span key={`${s.note_id}-${i}`} className="ask-ai-source-item">
+                    📄 {s.note_title}
+                    {s.chapter_title ? ` > ${s.chapter_title}` : ''}
+                  </span>
+                ))}
+              </div>
             )}
             {error && <p className="ask-ai-error">{error}</p>}
             <div className="ask-ai-actions">
