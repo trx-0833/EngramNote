@@ -2,12 +2,13 @@
 学习报告 API 模块
 
 本模块提供学习报告相关的 HTTP 接口，包括今日报告、
-7天趋势和薄弱点分析等。
+7天趋势、薄弱点分析和学习度量等。
 
 主要职责：
 - 获取今日学习报告（GET /api/report/daily）
 - 获取7天趋势数据（GET /api/report/weekly-trend）
 - 获取薄弱点列表（GET /api/report/weak-points）
+- 获取学习度量（GET /api/report/learning-metrics，阶段 3.14）
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -18,10 +19,11 @@ from ..models.user import User
 from ..api.auth import get_current_user_dependency
 from ..schemas.report import (
     DailyReportResponse,
+    LearningMetricsResponse,
     WeeklyTrendResponse,
     WeakPointsResponse,
 )
-from ..services import report_service
+from ..services import learning_metrics_service, report_service
 
 router = APIRouter()
 
@@ -77,3 +79,26 @@ async def get_weak_points(
         limit=limit,
     )
     return WeakPointsResponse(**result)
+
+
+@router.get("/learning-metrics", response_model=LearningMetricsResponse)
+async def get_learning_metrics(
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取学习度量（阶段 3.14）
+
+    返回四类度量与**数据质量说明**：
+
+    - `retention`：保持率曲线（复习后 t 天还能回忆的比例）
+    - `calibration`：校准曲线（自评说"想起来了"时是否真的想起来）
+    - `lapses`：遗忘分布（反复忘的卡片，leech 候选）
+    - `load` / `forecast`：未来到期量
+
+    **每个曲线都带 `insufficient_data` 与 `min_sample`。** 这不是可选装饰：
+    现场实测当前库里「间隔 > 0 的相邻复习对」为 0 条、自评样本为 0 条，
+    若只返回曲线数据，前端会画出空图或由噪声决定的假图。
+    `data_quality.notes` 直接给出面向用户的说明（缺什么、怎么才会有）。
+    """
+    metrics = await learning_metrics_service.get_learning_metrics(db, current_user.id)
+    return LearningMetricsResponse(**metrics)

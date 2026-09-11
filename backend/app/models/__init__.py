@@ -14,6 +14,13 @@ from .note_annotation import NoteAnnotation
 from .learning_goal import LearningGoal, DailyPlan, GoalType, GoalStatus
 from .note_version import NoteVersion, VersionSource
 from .note_project import NoteProject
+from .task_run import TaskRun, TaskStatus, ACTIVE_TASK_STATUSES, TERMINAL_TASK_STATUSES
+from .review_state import (
+    ReviewState,
+    ReviewStateKind,
+    ITEM_TYPE_CARD,
+    ITEM_TYPE_QUIZ,
+)
 
 __all__ = [
     "User",
@@ -43,4 +50,12 @@ __all__ = [
     "NoteVersion",
     "VersionSource",
     "NoteProject",
+    "TaskRun",
+    "TaskStatus",
+    "ACTIVE_TASK_STATUSES",
+    "TERMINAL_TASK_STATUSES",
+    "ReviewState",
+    "ReviewStateKind",
+    "ITEM_TYPE_CARD",
+    "ITEM_TYPE_QUIZ",
 ]

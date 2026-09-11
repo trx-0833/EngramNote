@@ -36,11 +36,28 @@ logger = logging.getLogger(__name__)
 if settings.debug:
     logger.warning("当前处于 DEBUG 模式")
 
-# 获取数据库连接 URL
-database_url = settings.get_database_url()
+# 注意：这里**不缓存** database_url / _is_sqlite 到模块级常量。
+#
+# 原实现是 `database_url = settings.get_database_url()`（import 时求值一次），
+# 而 `get_engine()` 读的是这个冻结字符串。后果是：**运行期改配置无效** ——
+# 即使清空 `get_settings` / `get_engine` 的 lru_cache，重建出的引擎仍然指向
+# import 时那一个路径。测试隔离因此完全失效（详见 tests/test_db_isolation.py
+# 与 docs/overhaul-plan.md §2.5 E-6）：临时库建了表，但所有 API 请求读写的
+# 都是真实生产库。
+#
+# 现在改为在使用处即时求值（`_db_url()` / `_sqlite()`），语义与
+# `_rebuild_dangling_tables` 中既有的做法一致（那里早已显式用
+# settings.get_database_url() 以适配测试重建 settings 的场景）。
 
-# 判断是否为 SQLite 数据库（SQLite 需要特殊配置）
-_is_sqlite = database_url.startswith("sqlite")
+
+def _db_url() -> str:
+    """即时解析数据库连接 URL（尊重运行期配置变更与缓存清理）"""
+    return settings.get_database_url()
+
+
+def _sqlite() -> bool:
+    """即时判断是否为 SQLite 方言"""
+    return _db_url().startswith("sqlite")
 
 
 @lru_cache
@@ -52,12 +69,14 @@ def get_engine():
     不会创建引擎，也不会触碰数据库目录。lru_cache 即 once-guard：
     同一进程内引擎只构建一次，PRAGMA 只注册一次。
 
-    Returns:
-        AsyncEngine: SQLAlchemy 异步引擎（单例）
+    配置热切换：调用方在改变数据库配置后需 `get_engine.cache_clear()`
+    （测试的 test_db fixture 即如此），本函数会在下次调用时按新配置重建。
     """
+    is_sqlite = _sqlite()
+
     # SQLite 需要特殊配置：允许跨线程访问（默认 SQLite 只允许创建它的线程访问）
     connect_args = {}
-    if _is_sqlite:
+    if is_sqlite:
         connect_args = {"check_same_thread": False}
 
     # 引擎配置参数
@@ -66,12 +85,12 @@ def get_engine():
         "connect_args": connect_args,
     }
     # SQLite 不支持 pool_size / max_overflow 参数，仅 PostgreSQL 需要
-    if not _is_sqlite:
+    if not is_sqlite:
         engine_kwargs["pool_size"] = 5       # 连接池保持的连接数
         engine_kwargs["max_overflow"] = 10   # 超出 pool_size 后允许的最大额外连接数
 
-    engine = create_async_engine(database_url, **engine_kwargs)
-    if _is_sqlite:
+    engine = create_async_engine(_db_url(), **engine_kwargs)
+    if is_sqlite:
         register_sqlite_pragmas(engine)
     return engine
 
@@ -94,18 +113,29 @@ def get_session_factory():
     )
 
 
-# ---- SQLite 连接级 PRAGMA：逐连接开启外键与 busy_timeout（见 docs/decisions.md#F-07） ----
+# ---- SQLite 连接级 PRAGMA：逐连接开启外键、WAL 与 busy_timeout（见 docs/decisions.md#F-07） ----
 # SQLite 默认不启用外键约束（PRAGMA foreign_keys 默认 OFF），导致模型上
 # ON DELETE CASCADE 全部失效、删除笔记/卡片遗留孤儿数据。foreign_keys 与
 # busy_timeout 均为连接级设置，须在每个新连接建立时执行（不能在事务内切换）。
 def _set_sqlite_pragma(dbapi_connection, connection_record):
-    """每个 SQLite 新连接建立时启用外键与写锁超时"""
+    """每个 SQLite 新连接建立时启用外键、WAL 日志模式与写锁超时"""
     try:
         cursor = dbapi_connection.cursor()
         # 启用外键约束，让 ON DELETE CASCADE 真正生效
         cursor.execute("PRAGMA foreign_keys=ON")
-        # 写锁等待 5 秒，缓解多进程（API + Celery worker/beat）并发写 'database is locked'
-        cursor.execute("PRAGMA busy_timeout=5000")
+        # WAL 日志模式：默认的 DELETE 模式下写事务会阻塞全部读事务，
+        # 而本项目是「API + Celery worker + Celery beat」三进程共享同一个
+        # SQLite 文件（见 docker-compose.yml），并发写必然触发
+        # 'database is locked'。WAL 允许读写并发，是消除该问题的前提。
+        # journal_mode 是**数据库文件级**的持久设置（不是连接级），写入一次即
+        # 对后续所有连接生效；此处放在 connect 钩子里是为了兼容首次建库的连接。
+        cursor.execute("PRAGMA journal_mode=WAL")
+        # 写锁等待 30 秒：LLM 相关写事务可跨越外部 API 调用（config.llm_timeout_seconds
+        # 默认 600s），5 秒过短会直接抛 'database is locked'。
+        cursor.execute("PRAGMA busy_timeout=30000")
+        # NORMAL 同步级别：WAL 下仍保证崩溃一致性，但避免每次提交都 fsync，
+        # 显著降低长任务链路的写延迟。
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
     except Exception:
         # 非 SQLite 方言或驱动不支持时忽略
@@ -152,46 +182,122 @@ async def get_db():
     """
     FastAPI 依赖注入：获取数据库会话
 
-    使用 async with 确保会话在请求结束后正确关闭。
-    通过 yield 将会话注入到路由处理函数中，请求结束后自动清理。
+    会话作用域是**整个请求**（FastAPI 的 yield 依赖在响应结束后才收尾），
+    请求结束后自动清理。
+
+    ## 事务边界（阶段 1′ 第 2 项）
+
+    SQLAlchemy 是 **autobegin** 语义：session 上第一次执行语句就会开启事务，
+    直到 `commit()` / `rollback()` / `close()`。因此本函数刻意显式
+    `commit()` 与 `rollback()`，而不是依赖 `close()` 的隐式回滚：
+
+    - 路由自行 commit 后，本函数再 commit 一次是**空操作**（没有活动事务），
+      不改变语义；
+    - 路由**忘了** commit 时，本函数补一次提交，避免"HTTP 200 但数据没落库"
+      这种最难排查的静默失败；
+    - 路由抛异常时显式回滚，语义清晰，且不依赖驱动实现细节。
+
+    ## 已知限制：流式响应期间的会话存活
+
+    用 `StreamingResponse`（SSE）的端点在**整个流式输出期间**持有这个
+    session，因为依赖的收尾发生在响应体发送完毕之后。若该端点在此前
+    发生过写操作且未提交，写锁会被持有数十秒。
+
+    实测（`scripts/_audit_long_tx.py` 的 AST 审计）当前代码库**没有**
+    "写后 commit 前夹慢操作"的位置，因此暂不引入更复杂的会话管理；
+    但**新增流式端点时必须遵守**：在 `yield` 第一个事件之前完成所有写操作
+    并 `await db.commit()`。
 
     Yields:
         AsyncSession: 异步数据库会话实例
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
+        # 路由抛出的异常在此被记录，用于 `finally` 中区分"正常收尾"与"异常收尾"
+        route_failed = False
         try:
             yield session
+        except Exception:
+            route_failed = True
+            # 显式回滚（不依赖 close() 的隐式行为）
+            try:
+                if session.in_transaction():
+                    await session.rollback()
+            except Exception:  # pragma: no cover - 回滚失败时不再掩盖原异常
+                logger.warning("请求异常后的回滚失败", exc_info=True)
+            raise
         finally:
+            # 兜底提交：覆盖"路由忘了 commit"的情况（HTTP 200 但数据没落库
+            # 是最难排查的一类静默失败）。无活动事务时是空操作。
+            #
+            # 三点必须注意：
+            # 1. 放在 `finally` 而不是 `try` 之后 —— 生成器被 `aclose()` 收尾时
+            #    触发的是 `GeneratorExit`，它继承自 **BaseException**，
+            #    不会被 `except Exception` 捕获，因此 `try` 之后的代码不会执行
+            #    （本轮实测踩到：兜底提交形同虚设）。
+            # 2. 路由已失败时不再提交 —— 否则会把异常路径的半截数据落库。
+            # 3. 提交自身失败必须回滚并**吞掉异常**，否则会用提交失败
+            #    掩盖路由原本的真实错误，让排查方向完全错位。
+            if not route_failed:
+                try:
+                    if session.in_transaction():
+                        await session.commit()
+                except Exception:
+                    logger.warning("请求收尾时的兜底提交失败，已回滚", exc_info=True)
+                    try:
+                        await session.rollback()
+                    except Exception:  # pragma: no cover
+                        pass
             await session.close()
 
 
 async def init_db():
     """
-    初始化数据库 — 创建所有表
+    初始化数据库 — 创建缺失的表（**绝不修改或删除已有数据**）
 
-    根据所有模型的 metadata 自动创建对应的数据表。
-    此方法适用于开发环境快速启动，生产环境建议使用 Alembic 进行数据库迁移管理。
-    使用 engine.begin() 确保建表操作在事务中执行。
+    启动路径只做两件安全的事：
+    1. create_all() —— 只创建不存在的表，不触碰已有表
+    2. _migrate_sqlite() —— 补加缺失的列 / 防御性建表 / 只读孤儿检查（仅报告）
 
-    注意：create_all() 只创建不存在的表，不会对已有表做 ALTER TABLE。
-    因此在 SQLite 开发模式下，额外执行简易迁移以补充缺失的列。
+    **破坏性 schema 变更（重建悬挂引用表）与破坏性数据清理（全局关系去重）
+    已移出启动路径**，改为需显式设置 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1
+    才执行（见 _destructive_migration_allowed 与 _rebuild_dangling_tables）。
+
+    原因：这两个操作原先在**每个进程启动时**无条件执行，而本项目同时运行
+    API / Celery worker / Celery beat 三个进程。任何一次中断（断电、OOM、Ctrl-C）
+    落在 DROP TABLE 与 RENAME 之间，就会造成用户知识图谱数据丢失。
+    启动路径必须是无损的，这是数据安全底线。
     """
+    # 必须显式导入模型包：`Base.metadata` 只包含**已被导入**的模型的表，
+    # 而本模块从不导入 `app.models`。此前全靠调用方的导入链"碰巧"把模型
+    # 注册进来（main.py 经由路由间接导入）。后果是：任何直接调用
+    # `init_db()` 的场景（独立脚本、Celery worker 首次启动）在
+    # `Base.metadata` 为空的情况下执行 create_all —— 静默地什么都不建，
+    # 直到业务代码查询时才报 no such table。
+    # 本轮实测踩到：新增 task_runs 表后，一次性迁移脚本没能建出该表。
+    from . import models  # noqa: F401 — 副作用导入，注册全部表定义
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # 对 SQLite：检查并补充已有表缺失的列
-        if _is_sqlite:
+        # 对 SQLite：检查并补充已有表缺失的列（只加不删，安全）
+        if _sqlite():
             await _migrate_sqlite(conn)
-
-    # 回收站悬挂引用改造：重建 5 张表（卡片/笔记端可空 + ON DELETE SET NULL）。
-    # PRAGMA foreign_keys 不能在事务内切换，必须在 engine.begin() 提交后
-    # 用独立 raw 连接执行（详见 _rebuild_dangling_tables）。
-    if _is_sqlite:
-        await _rebuild_dangling_tables()
 
     # 清理两阶段上传遗留的超时临时目录（与 DB 后端无关，启动时兜底执行）
     cleanup_stale_uploads()
+
+
+def _destructive_migration_allowed() -> bool:
+    """是否允许执行破坏性 schema 迁移（默认禁止）
+
+    破坏性操作 = DROP/重建业务表 + 全局 DELETE。它们只在**明确的升级场景**下
+    由运维显式触发，绝不能随进程启动自动发生。设置环境变量
+    ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 即可放行。
+    """
+    import os
+
+    return os.environ.get("ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION", "").strip() in ("1", "true", "True")
 
 
 def cleanup_stale_uploads(max_age_hours: int = 24) -> None:
@@ -526,41 +632,101 @@ async def _migrate_sqlite(conn):
                 ))
                 logger.info("SQLite 迁移: 已为 users 表添加 last_reminded_at 列")
 
-        # ---- 孤儿数据清理 ----
-        # 在级联删除修复之前，删除笔记/卡片不会级联删除关联数据，
-        # 加上 SQLite 默认不启用外键约束，可能存在指向已删除父记录的孤儿数据。
-        # 按外键依赖顺序从叶子到根清理，避免清理顺序导致二次孤儿。
-        # 所有语句的表名/列名均为代码内硬编码白名单，整条 SQL 写死，
-        # 不再用 f-string 拼接任何标识符，从根上消除动态 SQL 注入面。
-        # (执行语句, 目标表, 孤儿字段, 父表名)
+        # 复习记录的用户自评列（四档自评闭环）
+        #
+        # 这是一条**纯加列**迁移：nullable、无默认值、不触碰任何已有行，
+        # 因此不经过 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION 闸门。
+        # 语义上它把 review_logs 从「只有一个质量分」升级为
+        # 「自动判分分 + 用户自评分」双信号，是校准曲线的前置条件。
+        if 'review_logs' in table_names:
+            existing_columns = {col['name'] for col in inspector.get_columns('review_logs')}
+            if 'self_rating' not in existing_columns:
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN self_rating INTEGER"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 self_rating 列")
+            if 'grading_method' not in existing_columns:
+                # 历史行回填 'legacy'：它们的判分方式已不可考，
+                # 不能用 'ungraded' 冒充（那会污染「自动 vs 自评」不一致率的分母）。
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN grading_method VARCHAR(16) "
+                    "NOT NULL DEFAULT 'legacy'"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 grading_method 列（历史行回填 legacy）")
+            if 'card_id' not in existing_columns:
+                # 阶段 3.2：把复习记录归到**卡片**上。
+                #
+                # 为什么必须显式列出：`create_all()` 只建缺失的表，
+                # 不会给已有表加列；`_migrate_sqlite` 也只加这里显式写出的列。
+                # 也就是说**新增一个模型字段时，必须同时在这里登记** ——
+                # 否则真库永远缺这一列，而全新库却有（本轮实测踩到，
+                # 表现为 `no such column: card_id`，且只在真库复现）。
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN card_id VARCHAR REFERENCES knowledge_cards(id)"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 card_id 列")
+                try:
+                    sync_conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_review_logs_card_id ON review_logs (card_id)"
+                    ))
+                except Exception:
+                    pass
+                # 回填：从 quiz_id 反查所属卡片，让历史记录也能被归到卡片上
+                # （度量层按 card_id 聚合，不回填的话老数据参与不了保持率配对）
+                try:
+                    result = sync_conn.execute(text(
+                        """
+                        UPDATE review_logs
+                           SET card_id = (
+                               SELECT qi.card_id FROM quiz_items qi
+                                WHERE qi.id = review_logs.quiz_id
+                           )
+                         WHERE card_id IS NULL AND quiz_id IS NOT NULL
+                        """
+                    ))
+                    if result.rowcount:
+                        logger.info("SQLite 迁移: 已回填 %d 条 review_logs.card_id", result.rowcount)
+                except Exception as exc:
+                    logger.warning("回填 review_logs.card_id 失败（不影响启动）: %s", exc)
+
+        # ---- 孤儿数据检查（只报告，不删除）----
+        # 历史上此处会无条件 DELETE 孤儿行。两个问题：
+        # 1) 它在**每个进程启动时**执行，是一条不可回退的数据删除；
+        # 2) review_logs 是用户最不可再生的学习记录（唯一的记忆强度证据），
+        #    把「quiz_id 指向的题目已不存在」的历史记录当作垃圾删除，
+        #    等于在用户重新生成题目后销毁他的复习历史。
+        # 现改为**只统计并告警**。确需清理时由运维显式运行 scripts/ 下的脚本。
+        # 所有语句的表名/列名均为代码内硬编码白名单，整条 SQL 写死。
+        # (查询语句, 目标表, 孤儿字段, 父表名)
         orphan_checks = [
-            ("DELETE FROM review_logs WHERE quiz_id IS NOT NULL AND quiz_id NOT IN (SELECT id FROM quiz_items)",
+            ("SELECT COUNT(*) FROM review_logs WHERE quiz_id IS NOT NULL AND quiz_id NOT IN (SELECT id FROM quiz_items)",
              "review_logs", "quiz_id", "quiz_items"),
-            ("DELETE FROM review_logs WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+            ("SELECT COUNT(*) FROM review_logs WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
              "review_logs", "note_id", "notes"),
-            ("DELETE FROM quiz_items WHERE card_id IS NOT NULL AND card_id NOT IN (SELECT id FROM knowledge_cards)",
+            ("SELECT COUNT(*) FROM quiz_items WHERE card_id IS NOT NULL AND card_id NOT IN (SELECT id FROM knowledge_cards)",
              "quiz_items", "card_id", "knowledge_cards"),
-            ("DELETE FROM quiz_items WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+            ("SELECT COUNT(*) FROM quiz_items WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
              "quiz_items", "note_id", "notes"),
-            ("DELETE FROM knowledge_cards WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+            ("SELECT COUNT(*) FROM knowledge_cards WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
              "knowledge_cards", "note_id", "notes"),
-            ("DELETE FROM card_relations WHERE card_id_1 IS NOT NULL AND card_id_1 NOT IN (SELECT id FROM knowledge_cards)",
+            ("SELECT COUNT(*) FROM card_relations WHERE card_id_1 IS NOT NULL AND card_id_1 NOT IN (SELECT id FROM knowledge_cards)",
              "card_relations", "card_id_1", "knowledge_cards"),
-            ("DELETE FROM card_relations WHERE card_id_2 IS NOT NULL AND card_id_2 NOT IN (SELECT id FROM knowledge_cards)",
+            ("SELECT COUNT(*) FROM card_relations WHERE card_id_2 IS NOT NULL AND card_id_2 NOT IN (SELECT id FROM knowledge_cards)",
              "card_relations", "card_id_2", "knowledge_cards"),
-            ("UPDATE notes SET folder_id = NULL WHERE folder_id IS NOT NULL AND folder_id NOT IN (SELECT id FROM folders)",
-             "notes", "folder_id", "folders"),
         ]
 
         for sql, table, col, parent_table in orphan_checks:
             if table not in table_names or parent_table not in table_names:
                 continue
-            result = sync_conn.execute(text(sql))
-            if result.rowcount > 0:
-                logger.info(f"孤儿数据清理: 从 {table} 中清理了 {result.rowcount} 条 {col} 孤儿记录")
+            count = sync_conn.execute(text(sql)).scalar() or 0
+            if count > 0:
+                logger.warning(
+                    "孤儿数据检查: %s 表有 %d 条 %s 指向不存在的 %s（未删除，仅报告）",
+                    table, count, col, parent_table,
+                )
 
         # note_projects 标签关联表：清理指向不存在笔记或项目的孤儿行
-        # notes.project_id 单值外键已移除，标签关系全部承载于此表
+        # （纯关联表，删除孤儿行无信息损失，且不影响学习记录，保持原行为）
         if 'note_projects' in table_names:
             result = sync_conn.execute(text(
                 "DELETE FROM note_projects WHERE note_id NOT IN (SELECT id FROM notes) "
@@ -569,31 +735,56 @@ async def _migrate_sqlite(conn):
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 note_projects 中清理了 {result.rowcount} 条标签孤儿记录")
 
-        # ---- 重复关系清理（C-1 修复：不再无条件破坏性去重） ----
-        # 旧实现按 (user_id, 小id, 大id) 分组保 MIN(id)，会把方向相反或有向/无向
-        # 不同类型（prerequisite/subsequent/related/contrast）的合法关系误删。
-        # 现改为一次性安全去重 + 唯一索引（见 Alembic 007_safe_card_relation_dedup）：
-        # 仅当 (user_id, card_id_1, card_id_2, relation_type) 完全同键（含方向、类型、
-        # 状态）时才视为重复；唯一索引创建用 IF NOT EXISTS 幂等，已存在则跳过。
+        # ---- card_relations：唯一索引 + 可选去重（见 §2.6 M-3） ----
+        # 键必须与去重口径严格一致，否则会出现「去重认为不同组、建索引时却冲突」
+        # 的经典错配：旧代码 GROUP BY 含 status，而唯一索引只有 4 列（漏 status），
+        # 于是存在同对卡片不同 status 的行时索引创建必然抛 UNIQUE 失败，
+        # 且该异常被下面的 except 吞成一条 warning —— 致使这条唯一约束
+        # 在生产**可能压根不存在**，而所有依赖它的去重防护（F-01/F-17）形同虚设。
+        #
+        # 现统一为 5 列口径：(user_id, card_id_1, card_id_2, relation_type, status)。
+        # 去重是破坏性删除，改为仅在显式放行时执行；索引创建是无损的，始终执行。
         if 'card_relations' in table_names:
-            # 1. 安全去重：仅删除完全同键（同方向、同类型、同状态）的重复行
-            sync_conn.execute(text(
-                """
-                DELETE FROM card_relations WHERE id NOT IN (
-                    SELECT MIN(id) FROM card_relations
-                    GROUP BY user_id, card_id_1, card_id_2, relation_type, status
-                )
-                """
-            ))
-            # 2. 幂等建唯一索引（批量模式下 SQLite 方言可用）
+            if _destructive_migration_allowed():
+                logger.warning("检测到 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION，执行 card_relations 同键去重")
+                result = sync_conn.execute(text(
+                    """
+                    DELETE FROM card_relations WHERE id NOT IN (
+                        SELECT MIN(id) FROM card_relations
+                        GROUP BY user_id, card_id_1, card_id_2, relation_type, status
+                    )
+                    """
+                ))
+                if result.rowcount > 0:
+                    logger.warning("card_relations 同键去重: 删除 %d 行", result.rowcount)
+            else:
+                dup = sync_conn.execute(text(
+                    """
+                    SELECT COUNT(*) FROM (
+                        SELECT 1 FROM card_relations
+                        GROUP BY user_id, card_id_1, card_id_2, relation_type, status
+                        HAVING COUNT(*) > 1
+                    )
+                    """
+                )).scalar() or 0
+                if dup:
+                    logger.warning(
+                        "card_relations 存在 %d 组同键重复（未删除；如需清理请设置 "
+                        "ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 后重启）", dup
+                    )
+
+            # 幂等建唯一索引（5 列，与上面的 GROUP BY 口径一致）
             try:
                 sync_conn.execute(text(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_card_relations_pair_type "
-                    "ON card_relations (user_id, card_id_1, card_id_2, relation_type)"
+                    "ON card_relations (user_id, card_id_1, card_id_2, relation_type, status)"
                 ))
-                logger.info("SQLite 迁移: 已创建 card_relations 唯一索引 uq_card_relations_pair_type")
+                logger.info("SQLite 迁移: 已确保 card_relations 唯一索引 uq_card_relations_pair_type 存在")
             except Exception as e:
-                logger.warning(f"创建 card_relations 唯一索引失败（忽略）: {e}")
+                # 不静默：索引缺失会让重复关系防护失效，必须显式告警
+                logger.error(
+                    "创建 card_relations 唯一索引失败（重复关系防护未生效，请人工处理）: %s", e
+                )
 
     await conn.run_sync(_do_migrate)
 
@@ -655,7 +846,12 @@ async def _rebuild_dangling_tables() -> None:
 
     SQLite 不支持 ALTER COLUMN / 修改外键，必须"建新表 → 拷数据 → 改名"重建；
     而 PRAGMA foreign_keys 是连接级开关且不能在事务内切换，故此函数用独立的
-    raw sqlite3 连接执行（须在 init_db 的 engine.begin() 事务提交之后调用）。
+    raw sqlite3 连接执行。
+
+    ⚠️ **已从启动路径移除**（见 init_db 的说明）：本函数会 DROP 业务表，
+    原先在 API / worker / beat 三个进程启动时都会执行，任意中断都可能丢数据。
+    现在只有在显式设置 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 时才执行，
+    供一次性升级使用；未设置时仅**探测并告警**，不做任何修改。
 
     幂等：通过 PRAGMA table_info 检测探测列 notnull，已符合新 schema 则跳过。
     内存库（测试场景）无法跨连接访问，直接跳过——内存库必为 create_all 新建，天然新 schema。
@@ -665,6 +861,14 @@ async def _rebuild_dangling_tables() -> None:
 
     from sqlalchemy.dialects import sqlite as sqlite_dialect
     from sqlalchemy.schema import CreateIndex, CreateTable
+
+    # `Base.metadata` 只包含**已被导入**的模型的表。本模块从不导入
+    # `app.models`，因此在独立脚本里调用本函数时 metadata 可能是空的，
+    # 表现为 `KeyError: 'review_logs'`（本轮实测踩到，且异常发生在
+    # 事务开始前、DROP 之前，所以没有造成数据损失）。
+    from . import models  # noqa: F401 — 副作用导入，注册全部表定义
+
+    allowed = _destructive_migration_allowed()
 
     # 解析 SQLite 文件路径（sqlite+aiosqlite:///path）
     # 使用 settings.get_database_url() 而非模块级 database_url，以适配
@@ -680,13 +884,45 @@ async def _rebuild_dangling_tables() -> None:
             db_file = netloc + urlparse(db_url.replace("+aiosqlite", "")).path
 
     # (表名, 探测列)：探测列 notnull=1 视为旧 schema 需重建
+    #
+    # `review_logs.quiz_id` 是阶段 3.12（卡片可直接复习）引入的变更：
+    # 卡片级复习没有题目，因此该列必须可空。
+    # SQLite 不能直接 `ALTER COLUMN ... DROP NOT NULL`，只能重建表 ——
+    # 正好复用本函数已有的"按 metadata 生成 DDL → 拷数据 → 换名"机制，
+    # 它天然会让重建后的表带上新的 nullable 约束。
     targets = (
         ("card_relations", "card_id_1"),
         ("note_material_links", "personal_note_id"),
         ("knowledge_cards", "note_id"),
         ("quiz_items", "note_id"),
         ("review_logs", "note_id"),
+        ("review_logs", "quiz_id"),
     )
+
+    # 未放行时：只探测旧 schema 并告警，绝不修改任何数据
+    if not allowed:
+        try:
+            probe = sqlite3.connect(db_file)
+            try:
+                stale = []
+                for table, probe_col in targets:
+                    for row in probe.execute(f"PRAGMA table_info({table})"):
+                        if row[1] == probe_col and bool(row[3]):
+                            stale.append(table)
+                            break
+            finally:
+                probe.close()
+            if stale:
+                logger.error(
+                    "检测到旧 schema 表需要重建（%s），但破坏性迁移未放行 —— 本次启动不做任何修改。"
+                    "如需升级：先备份数据库，再设置 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 重启一次。",
+                    stale,
+                )
+        except Exception as e:
+            logger.warning("旧 schema 探测失败（忽略）: %s", e)
+        return
+
+    logger.warning("检测到 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION，执行破坏性表重建")
 
     # 跨进程文件锁：API 与 Celery worker/beat 可能同时启动并各自执行 init_db，
     # 并发重建悬挂引用表会互相 DROP/ALTER 导致数据丢失或崩溃，故以
@@ -711,11 +947,23 @@ async def _rebuild_dangling_tables() -> None:
                     return False
 
                 # 双检：锁内重放探测，避免等待锁期间已被其他实例重建而重复执行
-                todo = [t for t, probe in targets if _needs_rebuild(t, probe)]
+                #
+                # 必须**去重**：同一张表可能因为多个探测列未达标而出现多次
+                # （例如 review_logs 的 note_id 与 quiz_id 都不满足）。
+                # 不去重会对同一张表连续重建两次，第二次必然在
+                # `CREATE TABLE ...temp` 或 `DROP TABLE` 处报错。
+                todo = list(dict.fromkeys(
+                    t for t, probe in targets if _needs_rebuild(t, probe)
+                ))
                 if not todo:
                     return
 
                 logger.info("SQLite 迁移: 检测到旧 schema，开始重建悬挂引用表: %s", todo)
+                missing = [t for t in todo if t not in Base.metadata.tables]
+                if missing:
+                    raise RuntimeError(
+                        f"metadata 中缺少表定义 {missing} —— 请在导入 app.models 后调用本函数"
+                    )
                 raw.execute("BEGIN")
                 try:
                     for table_name in todo:
