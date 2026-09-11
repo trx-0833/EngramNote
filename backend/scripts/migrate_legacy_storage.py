@@ -178,7 +178,6 @@ async def migrate() -> None:
     is_minio = settings.storage_backend == "minio"
     bucket_original = settings.minio_bucket_original
     bucket_markdown = settings.minio_bucket_markdown
-    vault_root = settings.get_vault_dir()
 
     stats = {"ok": 0, "skipped": 0, "failed": 0, "missing": 0}
     failed_notes: list[str] = []
@@ -251,7 +250,7 @@ async def migrate() -> None:
             logger.info("  源文件: %r -> %s", note.original_file_path or None, src_obj if note.original_file_path else "（无）")
             logger.info("  original.md: %r -> %s", note.original_md_path or None, md_obj if note.original_md_path else "（无）")
             logger.info("  clean.md: %r -> %s", note.clean_md_path or None, clean_obj if note.clean_md_path else "（无）")
-            for v, old_st, _o, new_st, _n, no in version_plan:
+            for v, old_st, _o, new_st, _n, _no in version_plan:
                 logger.info("  版本 v%d: %s -> %s", v.version_number, old_st, new_st)
 
             if args.dry_run:

@@ -56,9 +56,6 @@ def test_max_tokens_bumped():
     with open(os.path.join(os.path.dirname(__file__), "..", "app", "services", "llm_service.py"), encoding="utf-8") as f:
         src = f.read()
     # 关键场景不应再有 4096
-    for scene in ["extract_knowledge", "generate_questions", "extract_combined", "generate_extension", "infer_relations"]:
-        # 找到该 scene 附近的 max_tokens（简化：统计整体）
-        pass
     # 统计整个文件的 4096 出现次数（应为 0——所有提取/出题场景都已提升）
     import re
     n4096 = len(re.findall(r"max_tokens=4096", src))

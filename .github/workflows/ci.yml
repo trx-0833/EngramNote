@@ -60,6 +60,13 @@ jobs:
         # 但新增的未定义名/语法类问题仍会失败。
         run: python -m ruff check tests
 
+      - name: "Ruff lint (scripts)"
+        # scripts/ 此前未纳入 CI，于是静默积累了 4 处问题（1 处死循环、
+        # 1 处无用赋值、1 处未使用的循环变量、1 处多余 f 前缀），
+        # 现已清零。纳入 CI 是为了让"迁移/备份/校验脚本"这类
+        # 直接对真实数据动手的代码保持同等质量门槛。
+        run: python -m ruff check scripts
+
       - name: Ruff format check
         run: python -m ruff format --check app tests
         continue-on-error: true

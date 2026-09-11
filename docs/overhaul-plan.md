@@ -2928,7 +2928,7 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | 1.8 | **僵尸任务自愈**：Beat 定时扫描 `heartbeat_at` 超时的 `task_runs` | worker 崩溃后笔记不再永久卡住 | ✅ 已落地（Beat 每 5 分钟） |
 | 1.9 | **worker 启动时校验 schema** | worker 独立启动也能正常工作或明确报错 | ✅ 已落地（`_ensure_worker_schema()`） |
 | 1.10 | **修正 Celery broker 目录推导** | broker 目录与 `config.py:397` 保持一致 | ✅ 已落地（收敛为 `get_celery_broker_dir()`） |
-| 1.11 | 新增 `vault_files` 表 + 一致性校验任务（比对磁盘与 DB 的 sha256） | 可检测并修复发散 | ⬜ 待做 |
+| 1.11 | 新增 `vault_files` 表 + 一致性校验任务（比对磁盘与 DB 的 sha256） | 可检测并修复发散 | ✅ **已落地**（附录 I）：`vault_audit_service` + `verify_vault.py`（14 用例）。**未建 `vault_files` 表** —— 改为每次扫盘，避免引入第三份需同步的真相源；且**只报告不修改**（自动"修复"会把误判变成不可逆删除） |
 | 1.12 | ~~**消除双写**：统一"先写文件成功 → 再 commit DB → 失败则补偿回滚"的顺序~~ | ✅ **已排查并修复真实缺陷**（§2.6 M-10 修正框）：删除失败改为有界重试；持续失败仍删 DB 记录（不让用户卡死） |
 | 1.13 | ~~**修复物理删除笔记的 FK 违约**（见 §2.6 M-4）~~ | ✅ **实测证伪：该缺陷不存在**（见 §2.6 M-4 修正框）。已补 `tests/test_purge_note_integrity.py`（5 用例）锁住正确行为，防止将来给 UPDATE 加 `note_id` 限定而真的引入它 |
 | 1.14 | **修复 `card_relations` 唯一索引**（见 §2.6 M-3） | 索引确定存在 | ✅ 已落地（附录 D；去重口径统一为 5 列） |
@@ -3697,6 +3697,132 @@ await db.commit()
 - **阶段 2′** FTS5 全文检索、`sqlite-vec` 评估、`chunks` 表统一分块
 - **FSRS**：数据不足（194 条记录、`interval` 长期为 1）
 - `backend/data_backup_e2e/`（4.67GB）删除待确认
+
+---
+
+## 附录 I · 阶段 1.11 交付 + 校验器误报根因（2026-09-11）
+
+### I.1 交付：Vault 一致性校验
+
+补齐 H.6 里挂着的 **1.11**。存储层是"DB 记路径 + 文件系统存内容"的双写结构，
+两侧都可能单独出问题，而**三种失效都是静默的**，只能等用户报障：
+
+| 失效 | 用户感知 | 成因 |
+|---|---|---|
+| DB 有、磁盘无 | 界面看得到笔记，点开是空的 | 外部误删、迁移丢失、上传中断（先 commit DB 再写文件） |
+| 磁盘有、DB 无 | **无感知**：文件永久占空间，看不到也删不掉 | 删除时文件层失败但 DB 记录已删（M-10 的另一面） |
+| 大小/哈希不符 | 内容错乱或无感知 | 磁盘故障、并发写同一路径 |
+
+| 项 | 文件 | 说明 |
+|---|---|---|
+| 校验服务 | `app/services/vault_audit_service.py` | `audit_vault(db, user_id=, deep=, include_orphans=)`；**只报告不修改** |
+| CLI | `scripts/verify_vault.py` | `--user/--deep/--json/--no-orphans`；退出码 0=一致 1=有问题 2=校验本身失败 |
+| 测试 | `tests/test_vault_audit.py`（14 用例） | 重点测判定边界：漏报与误报 |
+
+**设计取舍**：哈希是可选的（`--deep` 才逐文件比对）。全部 markdown 算 sha256
+在大库上很慢，默认只比大小。**只报告不修改**与 `_migrate_sqlite` 的孤儿检查同原则 ——
+校验器一旦自动"修复"，就把一次误判变成不可逆的数据删除。
+
+### I.2 真库实测：第一版校验器报了 41 条孤儿，**其中 0 条是真的**
+
+在真实数据（用户 `7775422b…`，20 篇笔记）上跑第一版，输出 41 条 `orphan_file`。
+逐条核对后：**41 条全部是误报**，分两类。
+
+**类 1：bucket 别名（20 条，最危险）**
+
+本地模式下 bucket **没有区分能力**：`_resolve_path` 对已含
+`source/output/history/cache` 段的 Vault 路径不加 bucket 前缀，
+整棵 `data/storage` 是**一个命名空间**，`data/storage/{user}/inbox/source/x.pdf`
+同时是 `original-files` 与 `markdown` 两个"桶"里的对象（见 `list_object_names` 文档）。
+
+第一版却按 MinIO 语义工作：用 `(bucket, name)` 建"应存在"集合，而孤儿扫描
+**只遍历 markdown 桶**。于是每篇笔记的原文件（在 `original-files` 键下）在枚举
+markdown 桶时都匹配不上，**全部被报成孤儿**。诊断数据：
+
+```
+expected 77 条 = markdown 57 + original-files 20
+磁盘枚举 98 条（全在 markdown 命名空间）
+孤儿 41 = 20（名字在 expected 里，桶不同）+ 21（真正的无引用文件）
+```
+
+这个 bug 的危害不是数字难看，而是 `verify_vault.py` 的输出**会被用来指导清理** ——
+误报的原文件是用户不可再生的原始资料。
+
+**类 2：`output/meta/` 写穿镜像（21 条）**
+
+`vault_meta.write_note_meta()` 在每次状态变更时把笔记全量状态写到
+`{P}/output/meta/{base}.json`，`write_project_meta()` 写用户级 `projects.json`。
+这些镜像**有意不进数据库**（DB 才是状态权威源，镜像只是让 Vault 脱离 DB 也能读懂），
+因此永远不可能被 DB 引用。按"无引用即孤儿"判定，**每一篇笔记都会多报一个孤儿**。
+
+21 条噪声把 0 条真孤儿彻底淹没 —— 校验器的价值全在信噪比，噪声即失效。
+
+**修复后**：真库 22 篇笔记 / 81 条 DB 记录 / 77 个磁盘对象，
+仅剩 **4 条 `missing_file`**（`u1`/`u2` 两个 2026-08 的旧测试夹具），
+**孤儿 0**，`--deep` 哈希模式亦无 `hash_mismatch`。
+
+### I.3 修复：让"应存在"与"磁盘枚举"用同一种 key
+
+新增 `_vault_key()` / `_objects_are_namespaced()`：
+
+- MinIO：桶确有区分能力 → key 为 `(bucket, name)`，两个桶分别枚举
+- 本地：桶无区分能力 → key 为 `("", name)`，只枚举一次（否则每个对象数两遍）
+
+另加 `_is_mirror_only()` 跳过 `output/meta/` 镜像。
+**注意一个自摆乌龙的实现细节**：第一版 `_is_mirror_only` 取路径**末尾两段**比对，
+而 meta 对象是 `…/inbox/output/meta/{base}.json`，末尾两段是 `meta/x.json` ——
+谓词恒为 False，21 条噪声原样漏出。改为判断路径中是否**连续包含** `output/meta` 段。
+
+### I.4 顺带修掉：校验器测试**静默跑在真实 Vault 上**
+
+写回归用例时发现：`tests/test_vault_audit.py` 的落盘**发生在真实
+`data/storage`** 里。根因与 conftest 里记录过的缺陷同源 ——
+`storage_service.settings` 是**模块级冻结引用**（`settings = get_settings()`
+在 import 时求值），而 `conftest._refresh_module_settings()` 的刷新名单里**没有它**。
+
+H.4 加的"只删本次新增目录"fixture 是**事后补救**：它保护了真实数据不被留下垃圾，
+但用例确实在真实 Vault 里创建/删除了文件。
+
+现改为**重定向 Vault 根**：`Settings.vault_dir` 从环境变量 `VAULT_DIR` 读取
+（无 env 前缀），优先级 `vault_dir > storage_dir > 默认`，
+因此清 settings 缓存 → 设 `VAULT_DIR` → 重绑 `storage_service.settings` 即可彻底隔离。
+新增 `test_audit_never_touches_the_real_vault` 自检隔离本身。
+实测：跑完整套件后 `data/storage/` 仍只有原有的 **2 个真实用户目录**。
+
+### I.5 验收方式：先证伪，再确认检出能力
+
+修完不是"测试绿了就算"。**把 bug 重新注入**（临时让 key 带 bucket、
+让镜像判定恒为 False）后重跑，确认有 3 个用例失败，且失败信息里明确多出
+`…/inbox/source/ok.pdf` 这条误报：
+
+```
+FAILED test_consistent_vault_reports_ok
+FAILED test_absent_clean_path_is_not_an_issue
+FAILED test_detects_orphan_file
+  → 未检出孤儿文件: [never-registered.md, …/inbox/source/ok.pdf]
+```
+
+即：**测试确实锁住了这个缺陷**，而不是恰好通过。随后还原修复版并连跑 3 遍确认非 flaky。
+
+### I.6 交付
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| 一致性校验服务 | `app/services/vault_audit_service.py` | 真库 0 误报、0 孤儿 |
+| 校验 CLI | `scripts/verify_vault.py` | 全库 + 单用户 + `--deep` 实跑 |
+| 列表能力 | `app/services/storage_service.py::list_object_names` | 本地模式忽略 bucket（已修过一次"扫错基准目录"的漏报） |
+| 测试 | `tests/test_vault_audit.py`（14 用例） | 含 3 条误报防线 + 1 条隔离自检；bug 重注入验证检出能力 |
+
+测试总数：355 → **369 passed / 3 skipped**，真库零改动。
+
+### I.7 仍未完成
+
+- **阶段 2′**：FTS5 全文检索、`sqlite-vec` 评估、`chunks` 表统一分块
+- **1.11 的 `vault_files` 表**：本次以"每次扫盘"实现校验（无新表）。
+  收益是不引入需要同步的第三份真相源；代价是大库上耗时线性增长。
+  若 Vault 规模上到万级对象，再考虑物化 `vault_files`。
+- `backend/data_backup_e2e/`（4.67GB）删除待确认
+- 旧夹具 `u1`/`u2` 的 4 条 `missing_file` 待处理（历史包袱，非本轮引入）
 
 ---
 

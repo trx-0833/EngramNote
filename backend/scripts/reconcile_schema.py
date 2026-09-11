@@ -135,7 +135,7 @@ def main() -> int:
 
     if args.check:
         print("\n（--check 模式，未做任何改动）")
-        print(f"如需执行: python scripts/reconcile_schema.py")
+        print("如需执行: python scripts/reconcile_schema.py")
         return 0
 
     # 1. 备份（失败则中止 —— 没有回退手段时不做破坏性操作）
