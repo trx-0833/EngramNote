@@ -164,10 +164,10 @@ async def _clean_document(note_id: str):
     )
     from ..services.cleaning_service import (
         clean_rules,
-        split_into_chunks,
         generate_clean_copy,
         find_duplicates_lightweight,
     )
+    from ..services.markdown_segmenter import segment_with_offsets, to_retrieval_chunks
     from ..services.embedding_service import (
         EmbeddingService,
         VectorStore,
@@ -220,8 +220,10 @@ async def _clean_document(note_id: str):
     # 3. 规则化清洗
     cleaned_text, clean_stats = clean_rules(original_text)
 
-    # 4. 文本分块
-    chunks = split_into_chunks(cleaned_text)
+    # 4. 文本分块（阶段 2.1：统一走 markdown_segmenter，它同时产出
+    #    字符偏移与标题路径，供阶段 2.7 的引用回跳使用）
+    segments = segment_with_offsets(cleaned_text, settings.chunk_size)
+    chunks = to_retrieval_chunks(segments)
     if not chunks:
         # 检查用户是否已停止清洗（短文本直接保存前）
         if await _is_cleaning_stopped(note_id):

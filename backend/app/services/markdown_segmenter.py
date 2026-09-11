@@ -63,8 +63,10 @@ class Segment:
     这条不变量是整个回跳功能的基石：前端拿到 `char_start/char_end`
     去原文里 `slice` 并高亮，**切出来的必须就是检索到的那段**。
     偏移错一位，高亮的就不是答案，用户会以为系统在胡说。
-    因此它有专门的属性测试（`test_segment_offsets_are_exact`），
-    对随机生成的 Markdown 断言切片结果逐字相等 —— 而不是只测几个手写样例。
+    因此它有专门的属性测试（`tests/test_markdown_segmenter.py`：
+    `TestOffsetInvariant` / `TestOffsetInvariantOnRealCorpus`），
+    既有手写样例也有**全部真实 markdown** 的穷举断言 —— 这条不变量
+    在开发过程中被违反过两次（各 1318 个分段），两次都是靠穷举才发现的。
 
     Attributes:
         content: 分段文本
@@ -72,12 +74,21 @@ class Segment:
         char_end: 在原始全文中的结束字符下标（不含）
         heading_path: 该分段起始位置的标题层级路径（如 "第一章 > 1.2 保护配置"）
         block_index: 该分段首块在 `split_markdown_blocks` 结果中的下标
+        line_start: 起始行号（0 基，含）
+        line_end: 结束行号（0 基，含）
+
+    行号为什么也要留着：检索 chunk 的历史消费方按**行**定位 ——
+    Chroma 元数据存 `start_line/end_line`，清洗结果里的重复块恢复/删除
+    也按行区间操作（`restore_block` / `delete_block`）。
+    字符偏移是新增能力，行号是既有契约，两者都要给。
     """
     content: str
     char_start: int
     char_end: int
     heading_path: str = ""
     block_index: int = 0
+    line_start: int = 0
+    line_end: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -86,6 +97,8 @@ class Segment:
             "char_end": self.char_end,
             "heading_path": self.heading_path,
             "block_index": self.block_index,
+            "line_start": self.line_start,
+            "line_end": self.line_end,
         }
 
 
@@ -397,6 +410,43 @@ def truncate_to_complete_blocks(text: str, limit: int) -> Tuple[str, str]:
     return prefix, rest
 
 
+def to_retrieval_chunks(segments: List[Segment]) -> List[dict]:
+    """把 `Segment` 转成检索 chunk 的 dict 契约（`clean_tasks` 与 Chroma 元数据用）
+
+    产出结构与已被取代的 `cleaning_service.split_into_chunks` **逐字段兼容**：
+
+        {index, content, start_line, end_line, char_start, char_end,
+         char_count, heading_context}
+
+    保留旧字段名（`start_line`/`heading_context`）而不是改名，是因为它们已经
+    流到了两个下游：Chroma 的向量元数据、以及前端按 `block_index` 恢复重复块
+    的注释标记。改名会让历史数据与新数据对不上。新增的
+    `char_start/char_end` 正是阶段 2.7 回跳所需。
+
+    ## 为什么这里没有 overlap 参数
+
+    第一版加过一个 `overlap` 参数，实现是"把 `char_start` 往前挪 n 个字符
+    但内容不变" —— 那会**直接破坏核心不变量**
+    （`text[char_start:char_end] == content`），前端按偏移高亮就会多选一段。
+
+    重叠必须在**分段时**做（扩展区间、内容随之变长），而不是在转换层假装。
+    正解是 `segment_with_offsets(text, limit, overlap_blocks=n)`。
+    """
+    return [
+        {
+            "index": i,
+            "content": seg.content,
+            "start_line": seg.line_start,
+            "end_line": seg.line_end,
+            "char_start": seg.char_start,
+            "char_end": seg.char_end,
+            "char_count": len(seg.content),
+            "heading_context": seg.heading_path,
+        }
+        for i, seg in enumerate(segments)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 带定位信息的分段（阶段 2.1 / 2.7）
 # ---------------------------------------------------------------------------
@@ -441,6 +491,28 @@ def _heading_path_at(text: str, position: int) -> str:
         cursor += len(line) + 1  # +1 为被 split 掉的 "\n"
 
     return " > ".join(t for _, t in stack)
+
+
+def _line_index(text: str) -> List[int]:
+    """每行首字符在原文中的下标（用于 字符偏移 → 行号 的换算）
+
+    行号与偏移必须能互相换算：检索消费方（Chroma 元数据、重复块恢复）
+    按行定位，而回跳高亮按偏移定位，两者描述的是同一个区间。
+    """
+    starts: List[int] = []
+    off = 0
+    for line in text.split("\n"):
+        starts.append(off)
+        off += len(line) + 1  # +1 为 "\n"
+    return starts
+
+
+def _line_of(line_starts: List[int], offset: int) -> int:
+    """二分求 `offset` 落在第几行（0 基）"""
+    import bisect
+
+    # bisect_right - 1：找到最后一个首字符 ≤ offset 的行
+    return max(0, bisect.bisect_right(line_starts, offset) - 1)
 
 
 def _split_block_into_spans(
@@ -556,6 +628,19 @@ def segment_with_offsets(
     n_blocks = len(blocks)
     #: 每个块在原文中的结束下标（含）。用于把"块区间"翻译成"字符区间"。
     ends = [offsets[i] + len(blocks[i]) for i in range(n_blocks)]
+    line_starts = _line_index(text)
+
+    def make(seg_start: int, seg_end: int, block_idx: int) -> Segment:
+        return Segment(
+            content=text[seg_start:seg_end],
+            char_start=seg_start,
+            char_end=seg_end,
+            heading_path=_heading_path_at(text, seg_start),
+            block_index=block_idx,
+            line_start=_line_of(line_starts, seg_start),
+            # seg_end 是开区间 → 末字符在 seg_end-1
+            line_end=_line_of(line_starts, max(seg_start, seg_end - 1)),
+        )
 
     # 先按块边界打包成 [start_block_idx, end_block_idx) 区间
     ranges: List[Tuple[int, int]] = []
@@ -581,13 +666,7 @@ def segment_with_offsets(
             ranges.append((cur_start, i))
             cur_start, cur_len = None, 0
         for sub_start, sub_end in _split_block_into_spans(text, offsets[i], ends[i], limit):
-            sub_segments.append(Segment(
-                content=text[sub_start:sub_end],
-                char_start=sub_start,
-                char_end=sub_end,
-                heading_path=_heading_path_at(text, sub_start),
-                block_index=i,
-            ))
+            sub_segments.append(make(sub_start, sub_end, i))
     if cur_start is not None:
         ranges.append((cur_start, n_blocks))
 
@@ -613,17 +692,10 @@ def segment_with_offsets(
         # 但换来的是定位绝对正确。
         start_off = offsets[b_start]
         end_off = ends[b_end - 1]
-        content = text[start_off:end_off]
-        if not content.strip():
+        seg = make(start_off, end_off, b_start)
+        if not seg.content.strip():
             continue
-
-        segments.append(Segment(
-            content=content,
-            char_start=start_off,
-            char_end=end_off,
-            heading_path=_heading_path_at(text, start_off),
-            block_index=b_start,
-        ))
+        segments.append(seg)
 
     # 超限块的子段按位置插回，保持文档顺序
     if sub_segments:

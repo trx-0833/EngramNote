@@ -343,9 +343,13 @@ class TestBM25ScoringUnchanged:
         "",
     ])
     def test_scores_match_legacy_implementation(self, question):
-        """逐条比对：新实现与重构前实现的分数、顺序、字段必须完全一致"""
+        """逐条比对：新实现与重构前实现的分数、顺序、字段必须完全一致
+
+        走的是**线上同一条路径**（`build_bm25_index().search()`），
+        而不是某个只为测试存在的包装函数 —— 否则测的可能不是线上跑的东西。
+        """
         legacy = self._legacy_bm25(question, self.CARDS)
-        new = RAGService._search_bm25(question, self.CARDS)
+        new = RAGService.build_bm25_index(self.CARDS).search(question)
 
         assert len(new) == len(legacy), f"结果条数不同: {len(new)} vs {len(legacy)}"
         for got, want in zip(new, legacy, strict=True):
@@ -512,6 +516,10 @@ class TestRetrievalEvalHarness:
             [_sys.executable, os.path.join(backend, "scripts", "eval_retrieval.py"),
              "--limit", "5", "--corpus", "cards", "--show-missed", "0"],
             cwd=backend, capture_output=True, text=True, timeout=600,
+            # 显式 utf-8：脚本输出含中文，Windows 默认用 GBK 解码子进程输出，
+            # 会在读取线程里抛 UnicodeDecodeError（而不是让断言失败），
+            # 报错形态与真实问题完全无关，极难排查。
+            encoding="utf-8", errors="replace",
         )
         assert proc.returncode == 0, f"评测脚本退出码 {proc.returncode}: {proc.stderr[-800:]}"
         assert "Recall@5" in proc.stdout, f"输出缺少指标:\n{proc.stdout[-800:]}"

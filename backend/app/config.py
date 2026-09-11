@@ -146,16 +146,29 @@ class Settings(BaseSettings):
     # 去重相似度阈值（0-1），高于此值视为重复
     similarity_threshold: float = 0.92
     # 向量检索的相似度地板（余弦，0-1）。低于此值的召回块不进入 RAG 上下文。
-    # 作用：阻断"只要召回到就写进 prompt"这一幻觉燃料 —— 三个检索通道原先
-    # 都没有任何下限（BM25/n-gram 是 score > 0，向量通道是全部返回），
+    # 作用：阻断"只要召回到就写进 prompt"这一幻觉燃料 —— 检索通道原先
+    # 都没有任何下限（BM25 是 score > 0，向量通道是全部返回），
     # 使 top_k 必被填满，模型于是拿着无关内容作答并照样返回引用来源。
     # 说明：计算方式由 Chroma 的 L2 平方距离换算为余弦（单位向量下 cos = 1 - d/2），
     # 因此该阈值与模型无关（两个候选模型都输出单位向量），换模型无需重新校准。
     # 0 表示不过滤（保持旧行为）。
+    #
+    # 注：另一路 n-gram 检索通道已删除（阶段 2.6）。
     vector_similarity_floor: float = 0.35
     # 文本分块大小（字符数）
     chunk_size: int = 500
-    # 分块重叠大小（字符数），避免语义在边界断裂
+    # 分块重叠大小（字符数）。
+    #
+    # ⚠️ **当前不生效**（阶段 2.1 接线后）。它原先只被
+    # `cleaning_service.split_into_chunks` 读取，而该函数已被
+    # `markdown_segmenter.segment_with_offsets` 取代 —— 统一后的分块器
+    # 只有**块级**重叠（`overlap_blocks`），没有字符级重叠。
+    #
+    # 保留该配置项而不是删掉，是因为"检索 chunk 之间应该有重叠"这个判断
+    # 仍然成立，只是实现方式待定。**在同一篇文档上重块级 vs 字符级重叠
+    # 哪个更好，必须先有评测依据**（`scripts/eval_retrieval.py`，阶段 2.9），
+    # 否则就是又一次凭直觉调参。在给出依据之前，保持"不重叠"这个可预期行为。
+    # 详见 docs/overhaul-plan.md 附录 M.4。
     chunk_overlap: int = 50
     # Chroma 向量数据库持久化目录（空则默认 data/chroma/）
     chroma_dir: str = ""

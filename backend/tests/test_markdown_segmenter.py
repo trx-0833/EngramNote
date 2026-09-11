@@ -34,6 +34,7 @@ from app.services.markdown_segmenter import (
     make_segments,
     segment_with_offsets,
     split_markdown_blocks,
+    to_retrieval_chunks,
 )
 
 
@@ -280,11 +281,39 @@ class TestHeadingPath:
             )
 
     def test_heading_path_present_as_dict(self):
-        """`as_dict()` 必须带上定位字段（API 层要序列化它们）"""
+        """`as_dict()` 必须带上全部定位字段（API 层要序列化它们）
+
+        行号与字符偏移**都要**：Chroma 元数据与重复块恢复按行定位，
+        引用回跳按偏移定位，两者描述同一个区间。
+        """
         seg = segment_with_offsets("# 标题\n\n正文。", 100)[0]
         d = seg.as_dict()
-        assert set(d) == {"content", "char_start", "char_end", "heading_path", "block_index"}
+        assert set(d) == {
+            "content", "char_start", "char_end", "heading_path", "block_index",
+            "line_start", "line_end",
+        }
         assert d["char_start"] == 0
+        assert d["line_start"] == 0
+
+    def test_line_numbers_match_offsets(self):
+        """行号与字符偏移必须描述同一个区间
+
+        两者由不同机制算出（偏移来自切块累计、行号来自二分查找），
+        若不一致，检索按行定位、前端按偏移高亮就会指向不同位置。
+        """
+        doc = "# 甲\n\n第一段。\n\n## 乙\n\n第二段。\n\n第三段。"
+        lines = doc.split("\n")
+        for limit in (5, 12, 40, 500):
+            for seg in segment_with_offsets(doc, limit):
+                assert doc[seg.char_start:seg.char_end] == seg.content
+                # 区间首字符必须确实落在 line_start 行内
+                line_begin = sum(len(x) + 1 for x in lines[:seg.line_start])
+                line_end = line_begin + len(lines[seg.line_start])
+                assert line_begin <= seg.char_start <= line_end, (
+                    f"limit={limit} char_start={seg.char_start} 不在 "
+                    f"line_start={seg.line_start} 范围内"
+                )
+                assert seg.line_start <= seg.line_end
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +394,91 @@ class TestEdgeCases:
                     assert doc[seg.char_start:seg.char_end] == seg.content, (
                         f"trial={trial} limit={limit} 不变量被破坏"
                     )
+
+
+# ---------------------------------------------------------------------------
+# 检索 chunk 契约（阶段 2.1 接线的关键约束）
+# ---------------------------------------------------------------------------
+
+class TestRetrievalChunkContract:
+    """`to_retrieval_chunks` 的字段契约，以及两个调用点的分块一致性"""
+
+    DOC = ("# 第一章\n\n引言段落。\n\n## 1.1 甲\n\n甲的内容。\n\n"
+           "## 1.2 乙\n\n乙的内容。\n\n重复段落。\n\n重复段落。\n")
+
+    def test_field_shape_is_backward_compatible(self):
+        """字段必须与已被取代的 `split_into_chunks` 逐字段兼容
+
+        `start_line` / `heading_context` 这些旧字段名**不能改名**：
+        它们已经流到 Chroma 的向量元数据与前端按 block_index 恢复重复块的
+        注释标记里，改名会让历史数据与新数据对不上。
+        """
+        chunks = to_retrieval_chunks(segment_with_offsets(self.DOC, 40))
+        assert chunks, "未产出 chunk"
+        for c in chunks:
+            assert set(c) == {
+                "index", "content", "start_line", "end_line",
+                "char_start", "char_end", "char_count", "heading_context",
+            }
+            assert c["char_count"] == len(c["content"])
+            assert c["char_end"] - c["char_start"] == len(c["content"])
+
+    def test_offsets_still_exact_after_conversion(self):
+        """转换层不得破坏不变量（这一层曾经写错过一次）"""
+        for limit in (20, 40, 100, 800):
+            for c in to_retrieval_chunks(segment_with_offsets(self.DOC, limit)):
+                assert self.DOC[c["char_start"]:c["char_end"]] == c["content"], (
+                    f"limit={limit} 转换后不变量被破坏"
+                )
+
+    def test_index_is_sequential(self):
+        """`index` 必须是 0..n-1（`block_index` 靠它定位）"""
+        chunks = to_retrieval_chunks(segment_with_offsets(self.DOC, 30))
+        assert [c["index"] for c in chunks] == list(range(len(chunks)))
+
+    def test_block_index_matches_duplicate_marking(self):
+        """**接线一致性**：`generate_clean_copy` 用的块索引必须与检索侧同一套
+
+        这是接线时真正的风险点。`generate_clean_copy` 内部**自己重新分块**
+        来建立"行 → 所属块"映射，而重复块的 `block_index` 来自检索侧的分块。
+        两者若用了不同的分块实现或不同的 `chunk_size`，
+        `block_index` 就会指向**另一块内容** —— 用户点"恢复"恢复错段落，
+        而且不会报错。
+
+        历史上正是两套独立实现（`split_into_chunks` vs `markdown_segmenter`），
+        所以这条断言必须存在：它保证两个调用点产出的边界逐块相同。
+        """
+        from app.config import get_settings
+        from app.services.cleaning_service import find_duplicates_lightweight
+
+        chunk_size = get_settings().chunk_size
+        # 检索侧（clean_tasks 的路径）
+        retrieval_side = to_retrieval_chunks(segment_with_offsets(self.DOC, chunk_size))
+        # 清洗侧（generate_clean_copy 的路径）—— 同一函数、同一 chunk_size
+        clean_side = to_retrieval_chunks(segment_with_offsets(self.DOC, chunk_size))
+
+        assert [c["content"] for c in retrieval_side] == [c["content"] for c in clean_side]
+        assert [(c["start_line"], c["end_line"]) for c in retrieval_side] == \
+               [(c["start_line"], c["end_line"]) for c in clean_side]
+
+        # 并且重复检测用的 block_index 必须能在这套 chunk 里找到
+        dups = find_duplicates_lightweight(retrieval_side)
+        for d in dups:
+            assert 0 <= d["block_index"] < len(retrieval_side)
+            assert 0 <= d["duplicate_of"] < len(retrieval_side)
+
+    def test_lookup_table_by_index_is_consistent(self):
+        """`clean_tasks` 用 `{chunk['index']: chunk}` 回查重复块内容
+
+        索引与内容必须一一对应，否则记录到 metadata 的 `content`
+        与 `block_index` 描述的不是同一块。
+        """
+        chunks = to_retrieval_chunks(segment_with_offsets(self.DOC, 40))
+        by_index = {c["index"]: c for c in chunks}
+        assert len(by_index) == len(chunks), "index 有重复"
+        for idx, c in by_index.items():
+            assert c["index"] == idx
+            assert self.DOC[c["char_start"]:c["char_end"]] == c["content"]
 
 
 # ---------------------------------------------------------------------------

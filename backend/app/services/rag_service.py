@@ -404,40 +404,17 @@ class RAGService:
     def build_bm25_index(cards: List[Dict[str, Any]]) -> "BM25Index":
         """从卡片语料构建 BM25 索引（分词与 df/IDF 只算一次）
 
-        阶段 2.9 引入。详见 `BM25Index` 的说明。
+        阶段 2.9 引入的**唯一** BM25 入口。详见 `BM25Index` 的说明。
+
+        ## 为什么不再保留 `_search_bm25` 这个薄包装
+
+        它曾是"给一次调用建一次索引"的便捷入口，但线上与评测都已改为
+        `build_bm25_index(...).search(...)`（线上还要靠 `_get_bm25_index`
+        复用索引，见 A-5），于是它只剩测试在用。一个**只为测试存在**的
+        包装函数会掩盖真实调用路径 —— 等价性测试改为直接走
+        `build_bm25_index().search()` 之后，测的就是线上真正跑的那条路径。
         """
         return BM25Index(cards, tokenize=RAGService._tokenize)
-
-    @staticmethod
-    def _search_bm25(
-        question: str,
-        cards: List[Dict[str, Any]],
-        top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """BM25 关键词检索（自建索引的便捷入口）
-
-        每次调用都重新建索引，只适合单次检索或评测脚本的小规模用例。
-        线上路径（`retrieve_context`）应改为 `build_bm25_index()` + `index.search()`，
-        避免每次提问都对全量语料重新分词（A-5）。
-
-        Args:
-            question: 用户问题
-            cards: 卡片语料（`_get_user_cards` 的返回值，或评测脚本自备的语料）
-            top_k: 返回最相关的 top_k 个结果
-
-        Returns:
-            List[Dict]: 相关内容列表，每个含 note_id/note_title/content/similarity/block_index
-
-        ## 为什么做成静态纯函数（阶段 2.9）
-
-        原实现是 `async def _search_bm25(self, question, user_id, top_k)`，
-        内部自己 `await self._get_user_cards(user_id)` 取语料。
-        这样一来**离线评测无法复用它** —— 评测需要"给定语料、只量打分质量"，
-        而把语料获取耦合进来后，评测只能自己抄一份 BM25 公式。
-        抄袭版本的评测结论**不能代表线上行为**（改了一边忘了另一边是必然的），
-        等于白测。拆开后评测脚本与线上走同一套打分代码。
-        """
-        return RAGService.build_bm25_index(cards).search(question, top_k=top_k)
 
     @staticmethod
     def _rrf_fusion(

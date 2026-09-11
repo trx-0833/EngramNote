@@ -2953,8 +2953,8 @@ M-4 与 1.13 仍未做。）
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | 🟡 **部分落地**（附录 L）：`segment_with_offsets()` 已把两侧强项合一（结构块原子性 + 字符偏移 + 标题路径 + overlap）。**尚未接线**到检索路径，也尚未删除 `split_into_chunks`（它还负责行号映射，见 L.4） |
-| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪**（附录 L）：`Segment.char_start/char_end/heading_path` 产出并验证；前端展示与跳转未做 |
+| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | ✅ **已落地**（附录 M）：`segment_with_offsets` 成为唯一分块器，`split_into_chunks` 已删除（**-253 行**，实测零调用方）；两个调用点均改走同一函数、同一 `chunk_size` |
+| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | 🟡 **后端已就绪**（附录 L/M）：`char_start/char_end/heading_path/line_start/line_end` 已随 chunk 落库并验证；**前端展示与跳转未做** |
 | 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 | ⛔ 不执行（无 PG） |
 | 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ⬜ 待做（先要 2.9 的基线） |
 | 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ⬜ 待做 |
@@ -4192,11 +4192,97 @@ text[char_start:char_end] == content
 
 ### L.6 仍未完成
 
-- **接线**：检索路径与 `generate_clean_copy` 改用 `segment_with_offsets`，
-  然后删除 `split_into_chunks`
+- ~~**接线**：检索路径与 `generate_clean_copy` 改用 `segment_with_offsets`，
+  然后删除 `split_into_chunks`~~ → **已在附录 M 完成**
 - **2.3** 语料切换（基线已备好，见附录 K）
 - **2.4** 去掉 Chroma 多 collection
 - **2.7 前端**：引用点击 → 按 `char_start/char_end` 定位并高亮
+
+---
+
+## 附录 M · 阶段 2.1 接线与死代码清理（2026-09-11）
+
+补齐附录 L.6 第一条：把 `segment_with_offsets` 真正接进调用链，
+并删掉被它取代的实现。
+
+### M.1 `split_into_chunks` 已删除（-253 行）
+
+接线后全仓库**零调用方**，`cleaning_service.py` 由 699 行降到 446 行。
+它原先的第二个用途（`generate_clean_copy` 里的"行 → 所属块"映射）
+改由 `Segment.line_start/line_end` 提供。
+
+### M.2 行号与偏移都要（新增 `line_start/line_end`）
+
+`Segment` 原先只有字符偏移，但检索 chunk 的下游按**行**定位：
+
+- Chroma 的向量元数据存 `start_line/end_line`
+- 前端按 `block_index` 恢复/删除重复块，注释标记里的行区间来自这里
+
+所以 `Segment` 补齐了 `line_start/line_end`（二分查找由偏移换算）。
+`to_retrieval_chunks()` 产出的字段与旧实现**逐字段兼容**
+（`index/content/start_line/end_line/char_count/heading_context`），
+另加 `char_start/char_end`。**不改名**旧字段，因为它们已经流进了
+历史 Chroma 元数据与前端协议。
+
+### M.3 接线时踩到并修掉的问题
+
+1. **`to_retrieval_chunks` 的 `overlap` 参数是错的**。第一版实现是
+   "把 `char_start` 往前挪 n 个字符但内容不变" —— 那会**直接破坏核心
+   不变量**（`text[char_start:char_end] == content`），前端按偏移高亮
+   就会多选一段。重叠必须在**分段时**做（区间与内容一起变长），
+   正解是 `segment_with_offsets(..., overlap_blocks=n)`。
+   参数已删除，改为在文档里写明原因。
+2. **`chunk_overlap` 变成死配置**。它原先只被 `split_into_chunks` 读取，
+   删掉那个函数后就没人用了 —— 配置写着 50、实际不生效，属于
+   "配置撒谎"。已在 `config.py` 就地标注 **⚠️ 当前不生效**并说明原因，
+   **没有**擅自把它接成字符级重叠：统一分块器只有块级重叠，
+   而"块级 vs 字符级重叠哪个更好"必须先有评测依据（阶段 2.9），
+   否则又是一次凭直觉调参。详见 M.4。
+3. **CLI 测试在 Windows 上的编码陷阱**。`eval_retrieval.py` 输出含中文，
+   而 `subprocess.run(text=True)` 在 Windows 默认用 GBK 解码子进程输出，
+   在**读取线程**里抛 `UnicodeDecodeError` —— 报错形态与真实问题毫无关系。
+   已显式指定 `encoding="utf-8"`。
+
+### M.4 为什么 `chunk_overlap` 先不接线
+
+接线它有三种做法，都需要先有依据：
+
+| 做法 | 问题 |
+|---|---|
+| 字符级重叠（旧 `split_into_chunks` 的行为） | 与现在的块级分段语义不同，等于回退到旧分块策略 |
+| 块级重叠（`overlap_blocks=n`） | 需要确定 n；且会改变 chunk 数量与检索结果 |
+| 保持不重叠 | 行为可预期，但失去了"避免边界断裂"的原意 |
+
+判断重叠是否有益，正确方式是**在基线（附录 K）上对比**：
+同一套 1058 条评测题，分别用不重叠与块级重叠跑 Recall@5 / MRR。
+在那之前保持不重叠 —— **可预期优于未经验证的调参**。
+
+### M.5 交付与验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| 统一分块器接线 | `app/tasks/clean_tasks.py`、`app/services/cleaning_service.py` | 61 个真实文件端到端跑通（分块→去重→生成副本），0 异常 |
+| 删除被取代的实现 | `app/services/cleaning_service.py`（-253 行） | 全仓库零调用方 |
+| chunk 契约 | `app/services/markdown_segmenter.py::to_retrieval_chunks` | 字段逐一兼容旧实现；1870 个 chunk 不变量 0 违反 |
+| 行号支持 | `markdown_segmenter.py`（`line_start/line_end`） | 行号与偏移一致性测试（多种 limit） |
+| 接线一致性 | `tests/test_markdown_segmenter.py::TestRetrievalChunkContract`（6 用例） | 两个调用点分块边界必须逐块相同 |
+| 死代码清理 | `rag_service.py`（删 `_search_bm25` 薄包装）、`config.py` 注释更正 | — |
+
+测试总数：427 → **433 passed / 3 skipped**；ruff app tests scripts 全绿；真库零改动。
+
+**关于"接线一致性"这条测试为什么必须有**：`generate_clean_copy` 内部
+**自己重新分块**来建立"行 → 所属块"映射，而重复块的 `block_index` 来自
+检索侧的分块。两者若用了不同的分块实现或不同的 `chunk_size`，
+`block_index` 会指向**另一块内容** —— 用户点"恢复"恢复错段落，且不报错。
+历史上正是两套独立实现（`split_into_chunks` vs `markdown_segmenter`），
+所以这条断言把"两处必须同源"固定了下来。
+
+### M.6 仍未完成
+
+- **2.3** 语料切换（需重新嵌入 1190 个 chunk）
+- **2.4** 去掉 Chroma 多 collection
+- **2.7 前端**：引用点击 → 定位并高亮
+- **`chunk_overlap`**：等 2.3 落地后用评测确定是否启用及用哪种重叠
 
 ---
 
