@@ -563,6 +563,7 @@ async def ask_question(
         ],
         provider=result.get("provider", ""),
         retrieval_status=result.get("retrieval_status", ""),
+        no_context=bool(result.get("no_context", False)),
     )
 
 

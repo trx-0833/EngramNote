@@ -498,17 +498,22 @@ class RAGService:
         )
 
         # 6. 合并上下文
+        #
+        # 每段前加 **[编号]**：新提示词（阶段 2.8）要求回答逐条标注来源，
+        # 没有编号它就无法引用 —— 而且编号让"哪句话来自哪段资料"在
+        # 排版上就一目了然，便于用户核对。
+        # 编号从 1 开始，与 sources 列表的展示顺序一致。
         context_parts: List[str] = []
 
         if fused_results:
             context_parts.append("=== 相关文档片段 ===")
-            for item in fused_results:
+            for index, item in enumerate(fused_results, start=1):
                 note_title = item.get("note_title") or item.get("title") or "未知来源"
                 chapter_info = ""
                 if item.get("chapter_title"):
                     chapter_info = f" (章节: {item['chapter_title']})"
                 context_parts.append(
-                    f"[来源: {note_title}{chapter_info}]\n{item['content']}"
+                    f"[{index}] 来源: {note_title}{chapter_info}\n{item['content']}"
                 )
 
         context = "\n\n".join(context_parts)
@@ -587,25 +592,32 @@ class RAGService:
         sources = retrieval["sources"]
         retrieval_status = retrieval.get("retrieval_status", "bm25_only")
 
-        # 2. 上下文为空时使用 LLM 自身知识回答
+        # 2. 检索不到任何资料时：**如实说明，不调用 LLM 兜底**
+        #
+        # 原实现在这里换一套提示词让模型"用你自己的知识来回答"。
+        # 那与阶段 2.8 的目标直接冲突：产品承诺是"基于你的资料回答"，
+        # 而这条分支会让一个**没有任何资料依据**的问题得到一段自信、
+        # 流畅、看起来像来自用户笔记的回答 —— 恰恰是最该避免的形态。
+        #
+        # 改为直接返回固定文案。这是有意的取舍：
+        #   - 好处：用户永远不会把模型知识误当成自己的资料；
+        #     而且省掉一次 LLM 调用（无资料时本来就没有信息可给）
+        #   - 代价：用户想问通用问题时得不到回答
+        # 若将来确实需要"通用知识"模式，应当是**用户显式选择**的另一个入口
+        # （界面上明确标注"以下回答不来自你的资料"），而不是静默降级。
         if not context.strip():
-            answer = await llm_service.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
-                                   "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。",
-                    },
-                    {"role": "user", "content": question},
-                ],
-                temperature=0.5,
-                max_tokens=2048,
-            )
             return {
-                "answer": answer,
+                "answer": (
+                    "在你的资料中没有找到与这个问题相关的内容。\n\n"
+                    "可以尝试：\n"
+                    "- 换一种问法，或使用更接近资料原文的关键词\n"
+                    "- 确认相关资料已经上传并完成「理解」流程\n"
+                    "- 若资料确实未覆盖该主题，先补充资料再提问"
+                ),
                 "sources": [],
                 "provider": llm_service._provider,
                 "retrieval_status": retrieval_status,
+                "no_context": True,
             }
 
         # 3. 调用 LLM 基于 context 生成回答

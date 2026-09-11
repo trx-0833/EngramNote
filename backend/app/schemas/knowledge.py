@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..models.knowledge_card import CardType, CardCategory
 from ..models.quiz_item import QuestionType, DifficultyLevel
@@ -157,6 +157,14 @@ class QuestionAnswerResponse(BaseModel):
     sources: List[AnswerSource] = []
     provider: str = ""
     retrieval_status: str = ""
+    no_context: bool = Field(
+        default=False,
+        description=(
+            "检索不到任何相关资料，answer 是固定的『资料中没有找到』提示文案，"
+            "**不是** LLM 生成的回答。前端据此与众包回答区分展示"
+            "（见 overhaul-plan 阶段 2.8：无据不答）"
+        ),
+    )
 
 
 # --- 题目生成响应模型 ---
