@@ -984,3 +984,133 @@ class LLMService:
         except json.JSONDecodeError:
             logger.warning(f"卡片关系推断结果 JSON 解析失败: {response[:200]}")
             return []
+
+
+    async def grade_short_answer(
+        self,
+        question: str,
+        expected_answer: str,
+        user_answer: str,
+    ) -> Optional[Dict[str, Any]]:
+        """简答题语义判分（overhaul-plan 阶段 3.5）
+
+        ## 为什么需要它（L-1 的根因）
+
+        简答题原先"不判分"：`sm2_service.grade_answer` 对 short_answer 一律返回
+        `ungraded` 占位，靠用户自评兜底。更早的版本则用**字符集合重叠**打分 ——
+        实测"学器"被判为"机器学习"的正确答案（见 §2.4 L-1 与附录 A.4）。
+
+        结果是整个产品**无法验证自己是否有效**（L-3）：没有可信的判分，
+        就没有可信的保持率与校准曲线。
+
+        ## 输出为什么不是 0-100 分
+
+        计划明确要求输出 `verdict + missing_points + misconceptions`。
+        理由：一个 0-100 的数字**没有可校准的语义** ——
+        模型给 62 分和 58 分意味着什么？没人能说清，也无法据它改进；
+        而"缺了哪一点、误解了哪一点"是**可展示给用户、且可核对**的信息。
+
+        ## 三档 verdict 而不是"对/错"
+
+        - `correct`：核心含义一致（允许措辞、语序、详略差异）
+        - `partial`：说对了部分，但有遗漏或不够准确
+        - `incorrect`：与标准答案矛盾，或答的是别的东西
+
+        `partial` 单独存在是必要的：二档会把"说对一半"强行归到某一侧，
+        而它对"该不该缩短间隔"的决策有实质影响。
+
+        ## 要求模型如实自查置信度
+
+        `confidence` 低于阈值时调用方会**退回用户自评占位**，而不是勉强采信。
+        这一点很关键：LLM 判分也有把握不准的时候（例如用户答案在标准答案
+        之外但同样正确）。把不确定的判分当确定用，会引入系统性偏差，
+        而偏差一旦进入调度就**无法事后纠正**（它已经改变了间隔）。
+
+        Args:
+            question: 题目
+            expected_answer: 标准答案
+            user_answer: 用户作答
+
+        Returns:
+            Optional[Dict]: 成功时含 verdict / missing_points / misconceptions
+            / confidence / reason。**调用失败或解析失败时返回 None**，
+            调用方必须把 None 当作"未判分"处理，而**不是**当作答错。
+        """
+        system_prompt = (
+            "你是一个严格的阅卷老师，负责判断学生的**简答题**作答在语义上"
+            "是否与标准答案一致。\n\n"
+            "只做**语义等价判断**：不要引入标准答案之外的知识，"
+            "也不要因为表述风格不同就判错。\n\n"
+            "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
+            '{"verdict": "correct|partial|incorrect",\n'
+            ' "missing_points": ["学生答案漏掉的关键点"],\n'
+            ' "misconceptions": ["学生答案中与标准答案矛盾的说法"],\n'
+            ' "confidence": 0.0,\n'
+            ' "reason": "一句话说明判分理由"}\n\n'
+            "判定标准：\n"
+            "1. correct：核心含义与标准答案一致。**允许**措辞不同、"
+            "语序不同、更简略或更详细\n"
+            "2. partial：说对了部分内容，但有明显遗漏或不够准确\n"
+            "3. incorrect：与标准答案矛盾，或答的是另一件事\n\n"
+            "confidence 必须如实反映你的把握：\n"
+            "- 含义明显一致或不一致时给高分（>=0.8）\n"
+            "- 学生答案在标准答案之外但可能同样正确、或表述含糊难判时给低分\n"
+            "- **不要**为了显得确定而虚报高置信度"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"题目：{question}\n\n"
+                    f"标准答案：{expected_answer}\n\n"
+                    f"学生作答：{user_answer}"
+                ),
+            },
+        ]
+
+        response = None
+        try:
+            response = await self.chat(
+                messages,
+                temperature=0.1,  # 判分要稳定，不要发挥
+                max_tokens=settings.llm_json_max_tokens,
+                response_format={"type": "json_object"},
+                scene="grade_short_answer",
+            )
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            logger.warning("简答判分结果 JSON 解析失败: %s", (response or "")[:200])
+            return None
+        except Exception as exc:
+            logger.warning("简答判分调用失败: %s", exc)
+            return None
+
+        if not isinstance(result, dict):
+            return None
+
+        verdict = str(result.get("verdict") or "").strip().lower()
+        if verdict not in ("correct", "partial", "incorrect"):
+            # 模型没按约定返回三档之一 —— 不猜、也不兜底成某一档
+            logger.warning("简答判分返回了未约定的 verdict: %r", result.get("verdict"))
+            return None
+
+        def _str_list(key: str) -> list:
+            value = result.get(key)
+            if not isinstance(value, list):
+                return []
+            return [str(v).strip() for v in value if str(v).strip()]
+
+        try:
+            confidence = float(result.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))  # 裁剪：模型偶尔给 1.5 或 -0.2
+
+        return {
+            "verdict": verdict,
+            "missing_points": _str_list("missing_points"),
+            "misconceptions": _str_list("misconceptions"),
+            "confidence": confidence,
+            "reason": str(result.get("reason") or "").strip(),
+        }

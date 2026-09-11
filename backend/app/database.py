@@ -745,6 +745,14 @@ async def _migrate_sqlite(conn):
                     "ALTER TABLE review_logs ADD COLUMN grading_method VARCHAR(16) "
                     "NOT NULL DEFAULT 'legacy'"
                 ))
+            if 'grading_detail' not in existing_columns:
+                # 阶段 3.5：LLM 语义判分的结构化明细（verdict/缺失点/误解点/置信度）。
+                # 纯加列、nullable、不触碰已有行。历史行保持 NULL ——
+                # 那时没有语义判分，NULL 是**如实**的表达，不用空对象冒充。
+                sync_conn.execute(text(
+                    "ALTER TABLE review_logs ADD COLUMN grading_detail JSON"
+                ))
+                logger.info("SQLite 迁移: 已为 review_logs 表添加 grading_detail 列")
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 grading_method 列（历史行回填 legacy）")
             if 'card_id' not in existing_columns:
                 # 阶段 3.2：把复习记录归到**卡片**上。

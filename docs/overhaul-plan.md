@@ -3084,7 +3084,7 @@ M-4 与 1.13 仍未做。）
 | 3.2 | `review_logs` 重建为不可变事件流（加 `rating`、`predicted_retention`、`item_type`） | 历史日志迁移保留 | 🟡 已有 `self_rating` / `grading_method` / `card_id`（194 行全回填 `card_id`）；**缺 `rating` / `predicted_retention` / `item_type`** |
 | 3.3 | **删除字符 n-gram 判分**（`_score_short_answer` 整段移除） | 随机文本不再得高分 | ✅ 已删除；改用 Levenshtein 比率 |
 | 3.4 | **引入用户自评四档**（Again/Hard/Good/Easy）作为主评分来源 | UI 有四个按钮 | 🟡 字段与 API 已就位（`self_rating`），但**194 条历史日志中 0 条有值** —— 无人用过，效果未验证 |
-| 3.5 | **简答题 LLM 语义判分**：输出 `verdict + missing_points + misconceptions` | 答错时给出具体缺失点 | ⬜ **未做**（全仓库无 `verdict`/`missing_points`/`misconceptions`） |
+| 3.5 | **简答题 LLM 语义判分**：输出 `verdict + missing_points + misconceptions` | 答错时给出具体缺失点 | ✅ **已落地**（附录 V）：`grade_short_answer` + 三档 verdict + 置信度门槛；`review_logs.grading_detail` 存结构化明细。**默认关闭、显式请求**（含实测理由） |
 | 3.6 | **把 SM-2 换成 FSRS**（含 `stability`/`difficulty` 建模） | 同等保持率下复习量下降 | ⬜ **未做**。`review_states` 里**没有** `stability`/`difficulty` 字段，只有一句"便于将来换算法"的注释 |
 | 3.7 | **修正 `next_review_at` 基准**：以计划到期日为基准（非 now）；加 fuzz | 间隔不被提前复习缩短 | ⬜ 未核对 |
 | 3.8 | **leech 检测**：`lapses >= 8` → 标记并要求重写卡片 | 顽固卡片被识别 | 🟡 有 `lapses` 字段与相关代码；**实际效果未见度量** |
@@ -5272,6 +5272,95 @@ ON DELETE 子句才是实际生效的那个。
 - **`data/chroma/`（54MB）与 `backend/data_backup_e2e/`（4.67GB）的删除**：
   等确认
 - **阶段 3**（学习核心）尚未开始
+
+---
+
+## 附录 V · 阶段 3.5：简答题 LLM 语义判分（2026-09-11）
+
+### V.1 交付
+
+| 部件 | 位置 | 说明 |
+|---|---|---|
+| 语义判分 | `llm_service.grade_short_answer` | 返回 `verdict` / `missing_points` / `misconceptions` / `confidence` / `reason` |
+| 口径转换 | `sm2_service.grade_short_answer_semantically` | 转成与 `grade_answer` **同构**的 dict（`method="semantic"`） |
+| 调度接入 | `review_service.submit_answer` | 简答题 + 未自评 + **显式请求**时启用 |
+| 落库 | `review_logs.grading_detail`（新 JSON 列） | 结构化明细，供 UI 展示与复盘 |
+| API | `SubmitAnswerRequest.use_semantic_grading` | 默认 `false` |
+
+### V.2 输出为什么不是 0-100 分
+
+计划明确要求 `verdict + missing_points + misconceptions`。一个 0-100 的数字
+**没有可校准的语义** —— 模型给 62 分和 58 分意味着什么？没人说得清，
+也无法据它改进。而"缺了哪一点、误解了哪一点"是**可展示、可核对**的。
+
+三档 verdict 而非"对/错"：`partial`（说对部分）单独存在是必要的 ——
+二档会把"说对一半"强行归到某一侧，而它对"该不该缩短间隔"有实质影响。
+
+### V.3 两个关键映射决定
+
+**`partial` → quality 3（不是 2）。** SM-2 里 `quality >= 3` 才算答对。
+把"说对一半"判成 2 会让它算作答错、**重置间隔** —— 用户明明记住了一半
+却被当作完全没记住重新开始。这比"把半分当及格"更伤：过早重置会让
+长期复习永远推进不下去。
+
+**`correct` 分 4/5 两档。** 高置信度（≥0.85）给 5，一般置信度给 4。
+这样"模型很确定"与"判断对但把握一般"不会得到相同的调度后果 ——
+后者增长慢一点，是廉价的纠错余量。
+
+### V.4 降级路径：`None` 不等于"答错"
+
+判分调用失败、JSON 解析失败、`verdict` 不在三档内、置信度 < 0.7 ——
+任一情况都返回 **None**，调用方退回自评占位。
+
+**这一点是本模块最重要的正确性要求**：把 None 当"答错"会让用户答对的题
+被重置间隔，比"没判分"严重得多。置信度门槛的存在同理 ——
+勉强采信会让不确定的判定**进入调度**，而间隔一旦改变**无法事后纠正**。
+
+### V.5 🔴 一个被实测拦下的设计错误：默认调用会让每次提交等 ~10 秒
+
+第一版把语义判分设为**无条件尝试**（简答题 + 未自评即调用）。
+接入后测试套件从 **70 秒涨到 183 秒**，`test_self_rating.py` 每个用例
+10~14 秒。排查发现：
+
+- 这些用例正是「简答题 + 未自评」组合 → 每次都在调 LLM
+- 全局 `llm_timeout_seconds=600`、`llm_max_retries=5`（每次 1s 退避）
+  → 即使网络立刻失败也要 **~10 秒**（5 次退避），生产里若网关慢则更久
+
+而这是**用户提交答案的同步路径** —— 复习是高频操作，
+让它每次都等一次外部 LLM 往返是明显的得不偿失。
+
+修法两步：
+
+1. 给判分加独立超时 `SEMANTIC_GRADE_TIMEOUT_SECONDS = 20`（远小于全局 600），
+   避免"挂死"。但这**只护住极端情况**，挡不住 5 次重试的 ~10s 延迟。
+2. **改为默认关闭、由客户端显式请求**（`use_semantic_grading=true`）。
+
+第 2 步才是正解：两阶段流程本来就以**用户自评为主评分来源**，
+自动判分是增强而非前提。改完后 `test_self_rating.py` 从 135 秒回落到
+**3.7 秒**（29 个用例）。
+
+这个取舍也让 3.5 与 3.4 的关系更清楚：**自评是主、语义判分是辅**。
+若将来实测证明语义判分足够可靠、可以取代自评，再把它改为默认开启 ——
+那需要先有校准数据（正是 3.14 要做的事）。
+
+### V.6 验收
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| LLM 判分 | `llm_service.grade_short_answer` | 三档校验、置信度裁剪、异常返回 None |
+| 口径转换 | `sm2_service.grade_short_answer_semantically` | 与 `grade_answer` 同构；阈值边界 |
+| 落库与 API | `review_logs.grading_detail`、`SubmitAnswerRequest` | 真库迁移成功（194 行不变、`integrity=ok`） |
+| 测试 | `tests/test_semantic_grading.py`（14 用例） | 含"失败必须返回 None 而非答错"、partial 映射、缺失点露出 |
+
+测试总数 481 → **495 passed / 3 skipped**；ruff app tests scripts 全绿。
+
+### V.7 仍未完成
+
+- **3.6 FSRS**：下一步。`review_states` 仍无 `stability`/`difficulty` 字段
+- **前端**：`grading_detail` 已随响应返回，但**未接 UI**（复习页尚未展示
+  "缺了哪一点 / 误解了哪一点"）
+- **`_finish_*` 的前端开关**：`use_semantic_grading` 默认 false，
+  前端尚未提供入口
 
 ---
 

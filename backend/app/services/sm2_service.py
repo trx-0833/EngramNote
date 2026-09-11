@@ -24,11 +24,13 @@ SM-2 算法核心：
 - 首次复习间隔为1天，第二次6天，之后按 EF 递增
 """
 
+import asyncio
 import logging
 import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +310,149 @@ def grade_answer(
             "简答题无法用字符匹配可靠判分（实测：把正确答案的逻辑完全反转，"
             "旧算法仍判为「正确」）。请自行评估掌握程度。"
         ),
+    }
+
+
+#: 语义判分的超时上限（秒）
+#:
+#: ## 为什么必须给判分单独设一个远小于全局的超时
+#:
+#: 全局 `llm_timeout_seconds=600`、`llm_max_retries=5`（每次 1s 退避）。
+#: 语义判分是**在用户提交复习答案的同步路径上**调用的 —— 若沿用全局设置，
+#: 最坏情况用户要等在原地十几分钟，而复习是高频操作。
+#:
+#: 实测证据：接入语义判分后测试套件从 70 秒涨到 **183 秒** ——
+#: `test_self_rating.py` 每个用例 10~14 秒，因为它们正是
+#: 「简答题 + 未自评」这个组合，每次都在等 LLM 重试耗尽。
+#: 测试里网络是被守卫阻断的（立即抛错），生产里则可能真的等下去。
+#:
+#: 超时后返回 None → 调用方退回自评占位。**这个降级路径本来就是两阶段
+#: 流程的常态**（用户自评才是主评分来源），所以超时不会让任何一次复习
+#: 失败或卡住 —— 只是少了一次自动判分。
+SEMANTIC_GRADE_TIMEOUT_SECONDS = 20.0
+
+#: 语义判分可被采信的最低置信度
+#:
+#: 低于它时**退回用户自评占位**，而不是勉强采用。理由见
+#: `grade_short_answer_semantically` 的说明：LLM 判分也有把握不准的时候，
+#: 而偏差一旦进入调度（改变了 interval）就**无法事后纠正**。
+SEMANTIC_CONFIDENCE_THRESHOLD = 0.7
+
+#: verdict → SM-2 quality 的映射（这是**策略**，会随阈值调整而变）
+#:
+#: ## 为什么 partial 映射到 3 而不是 2
+#:
+#: SM-2 里 `quality >= 3` 才算"答对"（`is_correct` 用的就是这个门槛）。
+#: 把"说对一半"判成 2 会让它算作答错，从而**重置间隔** ——
+#: 用户明明记住了一半，却被当作完全没记住重新开始。
+#: 这比"把半分当及格"更伤：过早重置会让长期复习永远推进不下去。
+#:
+#: ## 为什么 correct 有 4 和 5 两档
+#:
+#: 高置信度的完全正确给 5（间隔增长最快）；置信度一般但判定为正确给 4
+#: （增长稍慢）。这样"模型很确定"与"模型判断对但把握一般"不会得到
+#: 相同的调度后果 —— 后者增长慢一点，是廉价的纠错余量。
+VERDICT_TO_QUALITY = {
+    "correct": 4,
+    "partial": 3,
+    "incorrect": 1,
+}
+#: 高置信度时 correct 提升到 5 的阈值
+HIGH_CONFIDENCE = 0.85
+
+
+async def grade_short_answer_semantically(
+    question: str,
+    expected_answer: str,
+    user_answer: str,
+) -> Optional[dict]:
+    """用 LLM 做简答题语义判分，返回与 ``grade_answer`` 同构的 dict
+
+    ## 与 ``grade_answer`` 的关系
+
+    ``grade_answer`` 是**纯函数**（无 IO、无异步），对简答题一律返回
+    ``ungraded`` 占位。本函数是它的**异步补充**：只在调用方明确需要
+    语义判分时才调用，把结果转换成同一套 ``quality`` 口径。
+
+    拆成两个函数而不是把 ``grade_answer`` 改成 async：
+    前者被多处同步调用（`quality_from_answer` 等），改成 async 会波及
+    整个调用链，而其中多数场景并不需要 LLM。
+
+    ## 返回值
+
+    成功且置信度达标时返回 ``grade_answer`` 同构 dict（``method="semantic"``）；
+    任何一步失败、或置信度不足时返回 **None** —— 调用方据此退回自评占位。
+
+    **None 不等于答错**：它是"未判分"。把它当答错会让整个简答题池的间隔
+    被误重置。
+    """
+    if not (user_answer or "").strip():
+        # 未作答不需要调用 LLM，语义上确定是错
+        return {
+            "quality": 0,
+            "method": "semantic",
+            "needs_self_assessment": False,
+            "reason": "未作答",
+            "detail": {"verdict": "incorrect", "confidence": 1.0},
+        }
+
+    from .llm_service import LLMService
+
+    try:
+        # 超时上限**远小于**全局 llm_timeout_seconds：判分在复习提交的同步
+        # 路径上，用户就等在原地（见 SEMANTIC_GRADE_TIMEOUT_SECONDS 的说明）。
+        detail = await asyncio.wait_for(
+            LLMService().grade_short_answer(
+                question=question,
+                expected_answer=expected_answer,
+                user_answer=user_answer,
+            ),
+            timeout=SEMANTIC_GRADE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.info(
+            "语义判分超时（>%.0fs），退回自评占位", SEMANTIC_GRADE_TIMEOUT_SECONDS
+        )
+        return None
+    except Exception as exc:  # 判分服务异常不该让复习提交失败
+        logger.warning("语义判分异常，退回自评占位: %s", exc)
+        return None
+
+    if not detail:
+        return None
+
+    confidence = float(detail.get("confidence") or 0.0)
+    if confidence < SEMANTIC_CONFIDENCE_THRESHOLD:
+        logger.info(
+            "语义判分置信度不足（%.2f < %.2f），退回自评占位: verdict=%s",
+            confidence, SEMANTIC_CONFIDENCE_THRESHOLD, detail.get("verdict"),
+        )
+        return None
+
+    verdict = detail["verdict"]
+    quality = VERDICT_TO_QUALITY[verdict]
+    if verdict == "correct" and confidence >= HIGH_CONFIDENCE:
+        quality = 5
+
+    missing = detail.get("missing_points") or []
+    miscon = detail.get("misconceptions") or []
+    reason = detail.get("reason") or ""
+    # 给用户看的理由要带上具体缺失点 —— 只说"部分正确"没有指导价值
+    if verdict == "partial" and missing:
+        reason = f"{reason}（遗漏：{'；'.join(missing[:3])}）" if reason else (
+            f"遗漏：{'；'.join(missing[:3])}"
+        )
+    elif verdict == "incorrect" and miscon:
+        reason = f"{reason}（误解：{'；'.join(miscon[:3])}）" if reason else (
+            f"误解：{'；'.join(miscon[:3])}"
+        )
+
+    return {
+        "quality": quality,
+        "method": "semantic",
+        "needs_self_assessment": False,
+        "reason": reason or "语义判分",
+        "detail": detail,
     }
 
 

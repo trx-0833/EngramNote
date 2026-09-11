@@ -105,6 +105,7 @@ async def submit_answer(
         time_spent_ms=req.time_spent_ms,
         db=db,
         self_rating=req.self_rating,
+        use_semantic_grading=req.use_semantic_grading,
     )
 
     if "error" in result:

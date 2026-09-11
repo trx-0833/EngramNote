@@ -17,9 +17,9 @@
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from sqlalchemy import String, Integer, Boolean, Text, ForeignKey
+from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel, TZDateTime
@@ -102,5 +102,23 @@ class ReviewLog(BaseModel):
     # 这一列的用途不只是展示：幂等守卫必须区分「占位提交」与「已判分提交」，
     # 否则用户自评那一次会被当成重复提交挡掉，自评永远写不进库。
     grading_method: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy")
+    # 结构化判分明细（阶段 3.5）：LLM 语义判分的结果
+    #
+    # 形如 {"verdict": "partial", "missing_points": [...],
+    #       "misconceptions": [...], "confidence": 0.82, "reason": "..."}
+    #
+    # 为什么单独存 JSON 而不是拆成列：
+    # 1. 这三类信息是**可变的展示内容**，将来还可能加"建议补充"之类的字段，
+    #    拆列会变成每次都要迁移；
+    # 2. 它们只用于展示与复盘，**不参与任何计算** —— 参与调度的只有
+    #    `quality` / `is_correct`。把展示数据与调度数据分开，
+    #    可以避免"为了改展示而动了调度口径"。
+    #
+    # 为什么不能从这里反推 quality：verdict→quality 的映射是**策略**，
+    # 会随阈值调整而变；历史记录必须保留当时的判定结果，
+    # 否则重算会改写历史（校准曲线正是靠"当时的判分"与"后来的表现"对比）。
+    grading_detail: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        "grading_detail", JSON, nullable=True
+    )
     time_spent_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     review_at: Mapped[datetime] = mapped_column(TZDateTime(timezone=True), nullable=False, index=True)

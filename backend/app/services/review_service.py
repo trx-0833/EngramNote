@@ -28,7 +28,11 @@ from ..config import get_settings
 from ..models.note import Note
 from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
-from ..services.sm2_service import calculate_sm2, grade_answer
+from ..services.sm2_service import (
+    calculate_sm2,
+    grade_answer,
+    grade_short_answer_semantically,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -154,6 +158,7 @@ async def submit_answer(
     skip_daily_limit: bool = False,
     skip_due_check: bool = False,
     self_rating: Optional[int] = None,
+    use_semantic_grading: bool = False,
 ) -> Dict[str, Any]:
     """
     提交答案并更新 SM-2 调度参数
@@ -300,9 +305,46 @@ async def submit_answer(
     correct_answer = quiz.answer
 
     # 用户自评优先：记忆是主观现象，"你觉得自己想起来没有"比任何自动判分都准，
-    # 且是唯一能覆盖简答题的信号（简答题无法用字符匹配可靠判分，
-    # 见 sm2_service.grade_answer 的说明与 docs/overhaul-plan.md L-1）。
+    # 且是唯一能覆盖简答题的信号（见 sm2_service.grade_answer 与 §2.4 L-1）。
     grade = grade_answer(question_type, user_answer, correct_answer)
+
+    # 2.1 简答题：**仅在被显式请求时**才试 LLM 语义判分（阶段 3.5）
+    #
+    # 为什么默认关闭而不是默认尝试：
+    # 判分调用外部 LLM，而这是**用户提交答案的同步路径** ——
+    # 全局 `llm_timeout_seconds=600` / `llm_max_retries=5`（每次 1s 退避），
+    # 实测即使网络立刻失败也要 ~10 秒（5 次退避），生产里若网关慢则更久。
+    # 而两阶段流程本来就以用户自评为主评分来源，自动判分是增强而非前提，
+    # 为它让每次提交都等一次往返是明显的得不偿失。
+    #
+    # 实测证据：无条件尝试时，测试套件从 70 秒涨到 183 秒 ——
+    # `test_self_rating.py` 每个用例 10~14 秒，正是这个延迟。
+    #
+    # 触发条件同时限定为「简答题 + 未自评」：自评存在时它优先级最高，
+    # 此时调用 LLM 既浪费额度又可能与用户判断冲突。
+    semantic_detail = None
+    if (
+        use_semantic_grading
+        and grade.get("needs_self_assessment")
+        and self_rating is None
+        and question_type == "short_answer"
+    ):
+        semantic = await grade_short_answer_semantically(
+            question=quiz.question or "",
+            expected_answer=correct_answer or "",
+            user_answer=user_answer or "",
+        )
+        if semantic:
+            grade = semantic
+            semantic_detail = semantic.get("detail")
+            logger.info(
+                "简答语义判分: user=%s quiz=%s verdict=%s conf=%.2f quality=%d",
+                user_id[:8], quiz_id[:8],
+                (semantic_detail or {}).get("verdict"),
+                (semantic_detail or {}).get("confidence", 0),
+                semantic["quality"],
+            )
+
     if self_rating is not None:
         quality = max(0, min(5, int(self_rating)))
         grade = {
@@ -366,6 +408,10 @@ async def submit_answer(
         quality=quality,
         self_rating=self_rating,
         grading_method=grading_method,
+        # 阶段 3.5：结构化判分明细（verdict/缺失点/误解点/置信度）。
+        # 只有语义判分成功时才有值；自评与选择题等场景保持 NULL —
+        # 那时确实没有这份明细，用空对象冒充会让人误以为"判分过但没发现问题"。
+        grading_detail=semantic_detail,
         time_spent_ms=time_spent_ms,
         review_at=now,
     )
@@ -428,6 +474,10 @@ async def submit_answer(
     result["needs_self_assessment"] = grade["needs_self_assessment"]
     result["grading_method"] = grading_method
     result["grading_reason"] = grade["reason"]
+    # 阶段 3.5：结构化判分明细，UI 据此展示"缺了哪一点 / 误解了哪一点"。
+    # 无明细时**不塞空对象** —— 前端据 "字段缺失" 区分"未判分"与"判分无问题"。
+    if grade.get("detail"):
+        result["grading_detail"] = grade["detail"]
     return result
 
 

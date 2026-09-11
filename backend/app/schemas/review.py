@@ -54,6 +54,16 @@ class SubmitAnswerRequest(BaseModel):
             "给出时优先于自动判分，并补完此前的占位提交（见 review_service.submit_answer）。"
         ),
     )
+    use_semantic_grading: bool = Field(
+        default=False,
+        description=(
+            "是否请求 LLM 语义判分（阶段 3.5，仅简答题有效）。"
+            "**默认关闭**：判分在提交的同步路径上调用外部 LLM，"
+            "会给每次提交叠加一次往返延迟（实测最坏约 10 秒），"
+            "而两阶段流程本来就以用户自评为主评分来源。"
+            "想用自动判分替代自评的客户端应显式置 true。"
+        ),
+    )
 
 
 class SM2Info(BaseModel):
