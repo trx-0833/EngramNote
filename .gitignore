@@ -54,6 +54,9 @@ code_review_report.md
 # ---- E2E 数据备份（含测试账号数据，不提交） ----
 backend/data_backup_e2e/
 
+# ---- 重构期冷备份（DB/存储快照，绝不提交） ----
+_backup/
+
 # ---- 测试文件目录 ----
 testfiles/
 

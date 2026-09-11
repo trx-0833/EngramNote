@@ -1,0 +1,129 @@
+name: CI
+
+# 本项目此前**没有任何 CI**（无 .github/），后果是：
+# - 测试在收集阶段就发起真实网络请求并消耗 LLM 额度，无人发现
+# - 前端重构后后端测试仍在断言旧文件结构，无人发现
+# - ruff / eslint / prettier 报告只以文本文件形式提交到 docs/，不阻断合并
+#
+# 这个 workflow 的目标不是"跑得好看"，而是让上面三类问题在 PR 阶段就失败。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + tests, offline)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 测试与 lint 只需轻量依赖；torch / sentence-transformers / chromadb
+          # 体积巨大（GB 级），且单元测试不加载模型（见 tests/conftest.py 的网络守卫）。
+          python -m pip install \
+            fastapi sqlalchemy aiosqlite pydantic pydantic-settings \
+            email-validator "python-jose[cryptography]" bcrypt celery \
+            python-multipart httpx alembic pytest pytest-asyncio ruff
+
+      - name: Ruff lint (app: strict)
+        # 生产代码必须完全干净。此前 app/ 有 5 处问题（含 sessions.py 里
+        # 3 处 F821 未定义名），现已全部修复。
+        run: python -m ruff check app
+
+      - name: Ruff lint (tests: grandfathered)
+        # 历史测试脚本的存量问题在 ruff.toml 的 per-file-ignores 中豁免，
+        # 但新增的未定义名/语法类问题仍会失败。
+        run: python -m ruff check tests
+
+      - name: Ruff format check
+        run: python -m ruff format --check app tests
+        continue-on-error: true
+
+      - name: Pytest (offline; real network is blocked by tests/conftest.py)
+        # 环境变量显式声明"禁止联网测试"，让守卫的意图在 CI 里可见。
+        # integration 用例会被自动跳过（它们需要真实 LLM / MinerU API key）。
+        env:
+          ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (lint + typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # 用 npm ci 而非 npm install：仓库已有 package-lock.json，
+        # ci 保证构建可复现（install 会忽略锁文件并可能升级依赖）。
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+        continue-on-error: true
+
+      - name: TypeScript + build
+        run: npm run build
+
+  docker-nginx-config:
+    name: Docker build context sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: nginx config must set client_max_body_size
+        # 回归守卫：nginx 默认 client_max_body_size 只有 1MB，
+        # 而产品核心是上传 PDF/视频。缺这一行会让生产环境所有 >1MB 上传 413。
+        run: |
+          if ! grep -q "client_max_body_size" frontend/nginx.conf; then
+            echo "::error::frontend/nginx.conf 缺少 client_max_body_size（上传会被 nginx 以 413 拒绝）"
+            exit 1
+          fi
+
+      - name: nginx config must disable proxy_buffering for SSE
+        # 回归守卫：proxy_buffering 默认 on，会把 SSE 流式响应缓冲成一次性返回。
+        run: |
+          if ! grep -q "proxy_buffering off" frontend/nginx.conf; then
+            echo "::error::frontend/nginx.conf 缺少 proxy_buffering off（流式问答在生产会失效）"
+            exit 1
+          fi
+
+      - name: frontend .dockerignore must exclude node_modules
+        # 回归守卫：缺少它会让宿主 node_modules 覆盖镜像内依赖，Linux 构建失败。
+        run: |
+          if [ ! -f frontend/.dockerignore ] || ! grep -q "node_modules" frontend/.dockerignore; then
+            echo "::error::frontend/.dockerignore 缺失或未排除 node_modules"
+            exit 1
+          fi
