@@ -23,6 +23,7 @@ WAL 只保证"读不阻塞写"，所以只读的流式端点不构成写锁风�
 
 import asyncio
 
+import pytest
 from sqlalchemy import text
 
 from app.database import get_db
@@ -227,6 +228,82 @@ class TestLegacySchemaReconciliation:
         columns = asyncio.run(_columns())
         assert "card_id" in columns
         assert "grading_method" in columns
+
+
+class TestWorkflowYaml:
+    """GitHub Actions workflow 必须是合法 YAML
+
+    ## 为什么需要这组测试
+
+    本仓库的 CI 首次启用时**根本没跑起来**：GitHub 报
+    `Invalid workflow file: You have an error in your yaml syntax on line 48`，
+    原因是 `- name: Ruff lint (app: strict)` 里**未加引号的冒号加空格** ——
+    YAML 把 `name: Ruff lint (app` 当成键值对，剩下的 `: strict)` 成了多余的映射符。
+
+    这种错误的表现极具误导性：workflow run 显示 failure，但 `jobs` 数组为空、
+    `runner_name` 为空、没有任何 check-run —— 看起来像"runner 没分配"或
+    "账单限制"，实际是文件根本没被解析。
+
+    而它**不会被 pytest / ruff / eslint 中的任何一个发现**：那些工具只看
+    Python 与 TS，没人校验 YAML。所以这里补上。
+    """
+
+    def _workflow_files(self) -> list:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+        return sorted(root.glob("*.yml")) + sorted(root.glob("*.yaml"))
+
+    def test_at_least_one_workflow_exists(self):
+        assert self._workflow_files(), "找不到任何 workflow 文件"
+
+    def test_pyyaml_is_installed(self):
+        """PyYAML 必须可用（CI 的依赖安装里必须包含它）
+
+        否则下面的解析测试会静默跳过，这道防线形同虚设。
+        """
+        try:
+            import yaml  # noqa: F401
+        except ImportError:  # pragma: no cover
+            pytest.fail(
+                "PyYAML 未安装 —— workflow YAML 校验会被跳过。"
+                "请在 .github/workflows/ci.yml 的依赖安装中加入 pyyaml。"
+            )
+
+    def test_all_workflows_parse(self):
+        """每个 workflow 都必须能被 YAML 解析器接受
+
+        断言消息里带上解析器给出的**具体行号**，否则排查这种错误要花很久
+        （本轮实测：从"runner 没分配"一路追到"YAML 第 48 行"）。
+        """
+        import yaml
+
+        failures: list[str] = []
+        for path in self._workflow_files():
+            try:
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                failures.append(f"{path.name}: {exc}")
+        assert not failures, "workflow YAML 解析失败：\n" + "\n".join(failures)
+
+    def test_workflow_structure_is_sane(self):
+        """解析后结构必须合理：每个 job 有 runs-on，每个 step 有 run 或 uses"""
+        import yaml
+
+        for path in self._workflow_files():
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            # YAML 1.1 把裸 `on` 解析为布尔 True，GitHub 读的是字符串 'on'
+            trigger_key = "on" if "on" in data else True
+            assert trigger_key in data, f"{path.name} 缺少 on 触发器"
+
+            jobs = data.get("jobs") or {}
+            assert jobs, f"{path.name} 没有任何 job"
+            for job_name, job in jobs.items():
+                assert job.get("runs-on"), f"{path.name}:{job_name} 缺少 runs-on"
+                for step in job.get("steps", []):
+                    assert "run" in step or "uses" in step, (
+                        f"{path.name}:{job_name} 的 step 既无 run 也无 uses: {step}"
+                    )
 
 
 class TestStreamingEndpoints:
