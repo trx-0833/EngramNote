@@ -18,6 +18,7 @@ const NAV_SECTIONS = [
     title: '学习',
     items: [
       { path: '/today', label: '今日学习', icon: '\u2618' },
+      { path: '/review/cards', label: '卡片复习', icon: '\u21BB' },
       { path: '/daily', label: '今日资料', icon: '\u25B7' },
       { path: '/projects', label: '项目', icon: '\u25A3' },
       { path: '/assessment', label: '学习评估', icon: '\u2713' },

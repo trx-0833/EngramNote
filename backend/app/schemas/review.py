@@ -192,7 +192,13 @@ class CardReviewItem(BaseModel):
 class CardReviewListResponse(BaseModel):
     """到期卡片列表响应"""
     items: List[CardReviewItem]
-    total: int
+    total: int = Field(
+        description=(
+            "**真正到期的卡片总数**（不只是本页条数）。"
+            "卡片复习不受每日答题限额约束，总数是用户判断"
+            "「还要不要继续」的唯一依据。"
+        )
+    )
 
 
 class CardReviewSubmitRequest(BaseModel):

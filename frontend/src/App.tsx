@@ -37,6 +37,7 @@ const Review = lazy(() => import('./pages/Review'))
 const QuestionSets = lazy(() => import('./pages/QuestionSets'))
 const TodayLearn = lazy(() => import('./pages/TodayLearn'))
 const QuickReview = lazy(() => import('./pages/QuickReview'))
+const CardReview = lazy(() => import('./pages/CardReview'))
 const DailyMaterials = lazy(() => import('./pages/DailyMaterials'))
 const Projects = lazy(() => import('./pages/Projects'))
 const LearningAssessment = lazy(() => import('./pages/LearningAssessment'))
@@ -118,6 +119,8 @@ function AppRoutes() {
                 <Route path="/daily" element={<DailyMaterials />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/review/quick/:noteId" element={<QuickReview />} />
+                {/* 卡片直接复习（阶段 3.12）：与答题复习是并行的两条路径 */}
+                <Route path="/review/cards" element={<CardReview />} />
                 <Route path="/assessment" element={<LearningAssessment />} />
                 <Route path="/goals" element={<LearningGoals />} />
                 <Route path="/upload" element={<Upload />} />

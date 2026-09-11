@@ -180,8 +180,10 @@ async def list_due_cards(
         db, current_user.id, item_type=ITEM_TYPE_CARD, limit=limit,
     )
     if not states:
-        return CardReviewListResponse(items=[], total=0)
-
+        # 即使本页为空也要给出真实总数（可能全被回收站过滤掉了），
+        # 否则前端无法区分"没有到期卡片"与"这一页恰好没有"
+        total = await review_state_service.count_due_cards(db, current_user.id)
+        return CardReviewListResponse(items=[], total=total)
     card_ids = [s.item_id for s in states]
     cards = {
         c.id: c
@@ -224,7 +226,14 @@ async def list_due_cards(
             lapses=state.lapses,
         ))
 
-    return CardReviewListResponse(items=items, total=len(items))
+    # `total` 是**真正到期的卡片总数**，不是本页条数。
+    #
+    # 为什么必须区分：卡片复习**不受每日答题限额约束**（见 submit_card_review
+    # 的说明），真库实测 1183 张卡片全部处于到期状态。若 total 只报本页条数，
+    # 用户复习完 20 张会以为已经清空队列 —— 而实际上还剩 1163 张。
+    # 这个数字是他决定"要不要继续"的唯一依据。
+    total = await review_state_service.count_due_cards(db, current_user.id)
+    return CardReviewListResponse(items=items, total=total)
 
 
 @router.post("/cards/{card_id}/submit", response_model=CardReviewSubmitResponse)

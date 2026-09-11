@@ -246,3 +246,102 @@ export interface ReminderResponse {
 export async function getReminders(): Promise<ReminderResponse> {
   return request<ReminderResponse>('/review/reminders');
 }
+
+// ---------------------------------------------------------------------------
+// 卡片直接复习（阶段 3.12 的前端一半）
+//
+// ## 为什么要有这条独立路径
+//
+// 旧模型下调度参数只挂在 `quiz_items` 上，于是**没有生成过题目的卡片
+// 永远进不了复习队列**（overhaul-plan 症状 L-5）。后端早已提供这两个接口，
+// 但前端一直没有调用方 —— "没有题目的卡片可以直接复习"这件事
+// 用户一次也没法用。这里补上。
+// ---------------------------------------------------------------------------
+
+/** 到期可复习的卡片 */
+export interface DueCard {
+  card_id: string;
+  title: string;
+  /** 卡片正文；复习时先隐藏，点"显示答案"后再展开 */
+  content: string;
+  summary: string | null;
+  card_type: string;
+  chapter_title: string | null;
+  note_id: string | null;
+  /** 0-100 的掌握度（`current 还能回忆起这张卡的概率 × 100`） */
+  mastery_level: number;
+  interval_days: number;
+  repetition: number;
+  easiness_factor: number;
+  next_review_at: string | null;
+  review_count: number;
+  lapses: number;
+}
+
+/** 到期卡片列表响应 */
+export interface CardReviewListResponse {
+  items: DueCard[];
+  total: number;
+}
+
+/** 卡片复习提交响应 */
+export interface CardReviewSubmitResponse {
+  card_id: string;
+  quality: number;
+  is_correct: boolean;
+  interval_days: number;
+  repetition: number;
+  easiness_factor: number;
+  next_review_at: string | null;
+  /** 刷新后的掌握度（0-100） */
+  mastery_level: number;
+  /**
+   * FSRS 的记忆强度 S（天）：回忆概率降到 90% 所需的天数。
+   *
+   * 这是"下次复习 N 天后"的依据 —— `interval_days` 正是由 S 与目标保持率
+   * 解出来的。`review_scheduler=sm2` 回退时为 null。
+   */
+  stability?: number | null;
+  /** FSRS 的难度 D（1-10）；SM-2 回退时为 null */
+  difficulty?: number | null;
+  /**
+   * **复习前**模型预测的可回忆概率（0-1）。
+   *
+   * 它解释间隔为什么是那个数：0.6 表示模型认为你已接近遗忘，
+   * 因此这次答对后间隔会涨得更多。
+   */
+  predicted_retention?: number | null;
+}
+
+/**
+ * 获取当前到期的卡片
+ *
+ * 与"答题复习"是**并行**的两条路径：这里不涉及题目，用户直接对卡片回忆并自评。
+ */
+export async function getDueCards(limit = 20): Promise<CardReviewListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<CardReviewListResponse>(`/review/cards/due?${params}`);
+}
+
+/**
+ * 提交一次卡片级复习
+ *
+ * @param selfRating - 四档自评的 SM-2 质量分：0 完全忘记 / 3 勉强想起 / 4 想起 / 5 轻松
+ *   （**必填**：卡片没有可自动判分的答案，自评是唯一的评分来源）
+ * @param userAnswer - 回忆内容的备注（可选）
+ */
+export async function submitCardReview(
+  cardId: string,
+  selfRating: number,
+  userAnswer = '',
+  timeSpentMs = 0,
+): Promise<CardReviewSubmitResponse> {
+  return request<CardReviewSubmitResponse>(`/review/cards/${cardId}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({
+      self_rating: selfRating,
+      user_answer: userAnswer,
+      time_spent_ms: timeSpentMs,
+    }),
+  });
+}

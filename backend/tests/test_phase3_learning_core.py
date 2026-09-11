@@ -662,6 +662,40 @@ class TestCardReviewAPI:
             "没有题目的卡片未出现在到期队列 —— 阶段 3.12 未生效"
         )
 
+    def test_due_total_is_the_real_backlog_not_the_page_size(self, test_db):
+        """★ `total` 必须是**真正到期的总数**，不是本页条数
+
+        卡片复习不受每日答题限额约束（与答题复习分开计），所以队列可能是
+        上千张。若 `total` 只报本页条数，用户复习完 20 张会以为已经清空 ——
+        而实际上还剩很多。这个数字是他判断"要不要继续"的唯一依据。
+        """
+        import asyncio
+
+        headers, uid = self._auth()
+
+        async def _seed(n: int):
+            for _ in range(n):
+                card_id, _ = await _make_card(test_db, uid)
+                async with test_db() as db:
+                    await review_state_service.get_state(db, uid, ITEM_TYPE_CARD, card_id)
+
+        asyncio.run(_seed(3))
+
+        resp = self._client().get("/api/review/cards/due?limit=2", headers=headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(body["items"]) == 2, "limit 没有被遵守"
+        assert body["total"] >= 3, (
+            f"total={body['total']} 只是本页条数 —— 用户会以为队列已经清空"
+        )
+
+    def test_due_total_is_counted_when_page_is_empty(self, test_db):
+        """本页为空时也要给出真实总数（否则前端分不清"没有到期"与"这页恰好没有"）"""
+        headers, _ = self._auth()
+        body = self._client().get("/api/review/cards/due", headers=headers).json()
+        assert body["items"] == []
+        assert body["total"] == 0
+
     def test_unknown_card_returns_404(self, test_db):
         headers, _ = self._auth()
         resp = self._client().post(
