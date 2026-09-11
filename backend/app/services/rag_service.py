@@ -52,6 +52,151 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+class BM25Index:
+    """可复用的 BM25 索引（分词与 df/IDF 只算一次，然后支持多次查询）
+
+    ## 为什么需要它（阶段 2.9 / A-5）
+
+    原实现把"建索引"和"查询"揉在一个函数里：`_search_bm25(question, cards)`
+    每次调用都对**全量语料重新分词**并重算 df/IDF。两个后果：
+
+    1. **线上开销随语料线性增长且每次提问都付**（A-5）。实测本库
+       1183 张卡片、英文+中文 2-gram 分词，每次提问都要重算一遍 ——
+       而语料在两分钟内根本没变。
+    2. **离线评测事实上不可行**：评测要在 ~1000 条问题上跑指标，
+       逐条重建索引意味着把同一份语料重复分词 1000 次。
+
+    拆开之后线上保留一份索引（按语料 hash 失效），评测也能对同一份索引
+    跑完全部问题。**两边跑的是同一段打分代码** —— 这是评测结论可信的前提。
+
+    ## 索引的失效策略
+
+    索引持有一个 `signature`（语料指纹）。调用方在语料变化后重新构建即可；
+    这里不做 TTL 缓存，避免重蹈 `_kb_cache` 的覆辙（见 `_get_user_cards` 的说明）。
+
+    Args:
+        cards: 卡片语料 dict 列表（需含 title/content/note_id/card_id/chapter_title）
+        tokenize: 分词函数（注入以便与 `RAGService._tokenize` 保持同一实现）
+        k1, b: BM25 参数
+    """
+
+    #: BM25 参数。k1 控制词频饱和速度，b 控制长度归一化强度。
+    K1 = 1.5
+    B = 0.75
+
+    def __init__(
+        self,
+        cards: List[Dict[str, Any]],
+        *,
+        tokenize,
+        k1: float = K1,
+        b: float = B,
+    ) -> None:
+        self._cards = cards
+        self._tokenize = tokenize
+        self._k1 = k1
+        self._b = b
+
+        #: 每篇文档的 token 词频（一次算好）
+        self._tf: List[Dict[str, int]] = []
+        #: 每篇文档的 token 总数
+        self._dl: List[int] = []
+        self._idf: Dict[str, float] = {}
+
+        for card in cards:
+            tokens = tokenize(f"{card.get('title', '')} {card.get('content', '')}")
+            freq: Dict[str, int] = {}
+            for token in tokens:
+                freq[token] = freq.get(token, 0) + 1
+            self._tf.append(freq)
+            self._dl.append(len(tokens))
+
+        n = len(self._tf)
+        self._avgdl = (sum(self._dl) / n) if n else 0.0
+
+        # df → IDF，只算一次
+        df: Dict[str, int] = {}
+        for freq in self._tf:
+            for token in freq:
+                df[token] = df.get(token, 0) + 1
+        for token, freq in df.items():
+            self._idf[token] = math.log((n - freq + 0.5) / (freq + 0.5) + 1)
+
+    def __len__(self) -> int:
+        return len(self._cards)
+
+    @staticmethod
+    def signature_of(cards: List[Dict[str, Any]]) -> str:
+        """语料指纹（卡片 id 的稳定摘要）
+
+        只遍历 id，不做分词 —— 它必须比建索引**便宜得多**，
+        否则"先算指纹再决定要不要建"就没有意义。
+        """
+        import hashlib
+
+        digest = hashlib.sha256()
+        for card in cards:
+            digest.update(str(card.get("card_id") or card.get("note_id") or "").encode())
+            digest.update(b"\x00")
+        return digest.hexdigest()[:16]
+
+    @property
+    def signature(self) -> str:
+        """本索引对应的语料指纹"""
+        return BM25Index.signature_of(self._cards)
+
+    def search(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """检索与问题最相关的 top_k 篇文档（BM25）
+
+        score(D, Q) = sum_t IDF(t) * (f(t,D) * (k1+1)) /
+                      (f(t,D) + k1 * (1 - b + b * |D| / avgdl))
+        IDF(t) = log((N - df(t) + 0.5) / (df(t) + 0.5) + 1)
+
+        Returns:
+            List[Dict]: 与旧实现同构的结果（note_id/note_title/content/similarity/
+            block_index，以及卡片特有的 card_id/title/chapter_title）
+        """
+        query_tokens = self._tokenize(question)
+        if not query_tokens or not self._tf:
+            return []
+
+        k1, b, avgdl = self._k1, self._b, self._avgdl
+        scored: List[Dict[str, Any]] = []
+
+        for idx, freq in enumerate(self._tf):
+            score = 0.0
+            dl = self._dl[idx]
+            for query_token in query_tokens:
+                tf = freq.get(query_token)
+                if not tf:
+                    continue
+                idf_val = self._idf.get(query_token, 0.0)
+                numerator = tf * (k1 + 1)
+                if avgdl > 0:
+                    denominator = tf + k1 * (1 - b + b * dl / avgdl)
+                else:
+                    denominator = tf + k1
+                if denominator > 0:
+                    score += idf_val * numerator / denominator
+
+            if score > 0:
+                card = self._cards[idx]
+                scored.append({
+                    "note_id": card.get("note_id"),
+                    "note_title": None,
+                    "content": card.get("content"),
+                    "similarity": score,
+                    "block_index": 0,
+                    # 保留卡片特有字段，便于后续构建 sources
+                    "card_id": card.get("card_id"),
+                    "title": card.get("title"),
+                    "chapter_title": card.get("chapter_title"),
+                })
+
+        scored.sort(key=lambda x: x["similarity"], reverse=True)
+        return scored[:top_k]
+
+
 class RAGService:
     """
     检索增强生成服务
@@ -66,6 +211,41 @@ class RAGService:
 
     def __init__(self):
         self._session_factory = None
+        #: 上一次构建的 BM25 索引与它对应的 (user_id, 语料指纹)
+        #:
+        #: **只保留一份**，不是 per-user 字典 —— 这是与已删除的 `_kb_cache`
+        #: 的关键区别（见 `_get_user_cards` 的说明）：
+        #:   - `_kb_cache` 是 `Dict[user_id, ...]`，多用户即线性增长、无上界
+        #:   - 这里是单个槽位，换用户即整体替换，内存有硬上界（一份索引）
+        #: 而且槽位里存的是**派生的统计量**（词频/IDF），不是 ORM 实例，
+        #: 因此不存在 `DetachedInstanceError` 一类与 session 生命周期绑定的问题。
+        self._bm25_slot: Optional[tuple[str, str, BM25Index]] = None
+
+    def _get_bm25_index(
+        self, user_id: str, cards: List[Dict[str, Any]],
+    ) -> BM25Index:
+        """取得该用户语料的 BM25 索引，语料未变时复用
+
+        A-5：原实现每次提问都对全量语料重新分词并重算 df/IDF。
+        语料在连续提问之间通常完全没变，这份工作纯属重复。
+
+        失效靠**语料指纹**而不是 TTL：指纹覆盖全部 card_id，
+        卡片新增/删除/替换都会改变它。这比 TTL 更准（TTL 到期前语料变了
+        会用到旧索引；TTL 到期时语料没变又要白重建一次）。
+
+        **注意指纹必须先于索引构建算出**：若先 `BM25Index(cards,...)`
+        再比较指纹，构建（也就是全量分词）已经发生了，优化等于没做。
+        第一版就是这么写的，实测无效。
+        """
+        signature = BM25Index.signature_of(cards)
+
+        slot = self._bm25_slot
+        if slot is not None and slot[0] == user_id and slot[1] == signature:
+            return slot[2]
+
+        index = BM25Index(cards, tokenize=self._tokenize)
+        self._bm25_slot = (user_id, signature, index)
+        return index
 
     def _get_session_factory(self):
         """获取数据库会话工厂（复用主应用会话工厂，避免私有 engine 泄漏，见 docs/decisions.md#F-06）"""
@@ -220,112 +400,44 @@ class RAGService:
         tokens.extend(words)
         return tokens
 
-    async def _search_bm25(
-        self,
+    @staticmethod
+    def build_bm25_index(cards: List[Dict[str, Any]]) -> "BM25Index":
+        """从卡片语料构建 BM25 索引（分词与 df/IDF 只算一次）
+
+        阶段 2.9 引入。详见 `BM25Index` 的说明。
+        """
+        return BM25Index(cards, tokenize=RAGService._tokenize)
+
+    @staticmethod
+    def _search_bm25(
         question: str,
-        user_id: str,
+        cards: List[Dict[str, Any]],
         top_k: int = 5,
     ) -> List[Dict[str, Any]]:
-        """
-        BM25 关键词检索（纯 Python 实现，无外部依赖）
+        """BM25 关键词检索（自建索引的便捷入口）
 
-        从用户的知识卡片中检索与问题相关的内容，使用 Okapi BM25 算法计算相关性。
-
-        BM25 公式：
-            score(D, Q) = sum_t IDF(t) * (f(t, D) * (k1 + 1)) /
-                          (f(t, D) + k1 * (1 - b + b * |D| / avgdl))
-            IDF(t) = log((N - df(t) + 0.5) / (df(t) + 0.5) + 1)
+        每次调用都重新建索引，只适合单次检索或评测脚本的小规模用例。
+        线上路径（`retrieve_context`）应改为 `build_bm25_index()` + `index.search()`，
+        避免每次提问都对全量语料重新分词（A-5）。
 
         Args:
             question: 用户问题
-            user_id: 用户 ID
+            cards: 卡片语料（`_get_user_cards` 的返回值，或评测脚本自备的语料）
             top_k: 返回最相关的 top_k 个结果
 
         Returns:
-            List[Dict]: 相关内容列表，每个包含：
-                - note_id: 笔记 ID
-                - note_title: None（后续在 sources 构建时回填）
-                - content: 卡片内容
-                - similarity: BM25 分数
-                - block_index: 0
+            List[Dict]: 相关内容列表，每个含 note_id/note_title/content/similarity/block_index
+
+        ## 为什么做成静态纯函数（阶段 2.9）
+
+        原实现是 `async def _search_bm25(self, question, user_id, top_k)`，
+        内部自己 `await self._get_user_cards(user_id)` 取语料。
+        这样一来**离线评测无法复用它** —— 评测需要"给定语料、只量打分质量"，
+        而把语料获取耦合进来后，评测只能自己抄一份 BM25 公式。
+        抄袭版本的评测结论**不能代表线上行为**（改了一边忘了另一边是必然的），
+        等于白测。拆开后评测脚本与线上走同一套打分代码。
         """
-        cards = await self._get_user_cards(user_id)
-
-        if not cards:
-            return []
-
-        query_tokens = self._tokenize(question)
-        if not query_tokens:
-            return []
-
-        # 构建文档列表
-        docs: List[Dict[str, Any]] = []
-        for card in cards:
-            doc_text = f"{card['title']} {card['content']}"
-            doc_tokens = self._tokenize(doc_text)
-            docs.append({
-                "card": card,
-                "tokens": doc_tokens,
-                "len": len(doc_tokens),
-            })
-
-        if not docs:
-            return []
-
-        # BM25 参数
-        k1 = 1.5
-        b = 0.75
-        N = len(docs)
-        avgdl = sum(d["len"] for d in docs) / N if N > 0 else 0.0
-
-        # 计算每个 token 的文档频率 df 和 IDF
-        df: Dict[str, int] = {}
-        for doc in docs:
-            unique_tokens = set(doc["tokens"])
-            for token in unique_tokens:
-                df[token] = df.get(token, 0) + 1
-
-        idf: Dict[str, float] = {}
-        for token, freq in df.items():
-            idf[token] = math.log((N - freq + 0.5) / (freq + 0.5) + 1)
-
-        # 计算每个文档的 BM25 分数
-        scored: List[Dict[str, Any]] = []
-        for doc in docs:
-            score = 0.0
-            token_freq: Dict[str, int] = {}
-            for token in doc["tokens"]:
-                token_freq[token] = token_freq.get(token, 0) + 1
-
-            for query_token in query_tokens:
-                if query_token not in token_freq:
-                    continue
-                tf = token_freq[query_token]
-                idf_val = idf.get(query_token, 0.0)
-                numerator = tf * (k1 + 1)
-                if avgdl > 0:
-                    denominator = tf + k1 * (1 - b + b * doc["len"] / avgdl)
-                else:
-                    denominator = tf + k1
-                if denominator > 0:
-                    score += idf_val * numerator / denominator
-
-            if score > 0:
-                card = doc["card"]
-                scored.append({
-                    "note_id": card["note_id"],
-                    "note_title": None,
-                    "content": card["content"],
-                    "similarity": score,
-                    "block_index": 0,
-                    # 保留卡片特有字段，便于后续构建 sources
-                    "card_id": card["card_id"],
-                    "title": card["title"],
-                    "chapter_title": card["chapter_title"],
-                })
-
-        scored.sort(key=lambda x: x["similarity"], reverse=True)
-        return scored[:top_k]
+        return RAGService.build_bm25_index(cards).search(question, top_k=top_k)
 
     @staticmethod
     def _rrf_fusion(
@@ -447,10 +559,11 @@ class RAGService:
         else:
             retrieval_status = "full_vector"
 
-        # 3. BM25 检索
+        # 3. BM25 检索（语料获取在此，打分为纯函数，评测脚本复用同一实现）
         bm25_results: List[Dict[str, Any]] = []
         try:
-            bm25_results = await self._search_bm25(question, user_id, top_k=5)
+            cards = await self._get_user_cards(user_id)
+            bm25_results = self._get_bm25_index(user_id, cards).search(question, top_k=5)
         except Exception as e:
             logger.warning(f"BM25 检索失败: {e}")
 

@@ -78,6 +78,17 @@ jobs:
           ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"
         run: python -m pytest -q
 
+      # 检索质量评测（阶段 2.9）刻意**不**放在 CI 里：
+      #   - CI 上没有真实资料库（`backend/data/` 被 .gitignore 忽略），
+      #     评测集为空、脚本退出码 2，加了 `|| true` 又等于永不失败 ——
+      #     那种步骤只是装饰。
+      #   - 绝对指标取决于真实资料内容，写成阈值门禁会在资料更新时误报，
+      #     结果是这个评测被绕过，比没有更糟。
+      # 它的守护放在 `tests/test_rag_retrieval.py::TestRetrievalEvalHarness`：
+      # 锁判据行为（对无关内容 0 分、对包含内容满分、长度中立），
+      # 并在本机真实库上端到端跑一次 CLI。
+      # 人工基线：`python scripts/eval_retrieval.py --corpus both`
+
   frontend:
     name: Frontend (lint + typecheck + build)
     runs-on: ubuntu-latest

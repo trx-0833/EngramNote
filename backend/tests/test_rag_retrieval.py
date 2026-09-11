@@ -16,6 +16,8 @@ RAG 检索层行为回归测试（overhaul-plan 阶段 2.6 / 2.10）
   正确性靠 5 处调用方记得失效）
 """
 
+import os
+
 import pytest
 
 from app.models.knowledge_card import CardType, KnowledgeCard
@@ -244,6 +246,276 @@ class TestBM25Tokenizer:
         这条测试会失败并提醒"行为确实变了"。
         """
         assert RAGService._tokenize("水") == []
+
+
+class TestBM25ScoringUnchanged:
+    """重构等价性：`BM25Index` 的打分必须与重构前的实现逐条一致
+
+    ## 为什么要有这个测试
+
+    阶段 2.9 把 BM25 从"每次调用重建索引"改成 `BM25Index`（建一次、查多次），
+    并把打分函数从 `async def _search_bm25(self, question, user_id, top_k)`
+    改成静态纯函数。**重构检索打分的风险在于分数悄悄变了** ——
+    排序变了，检索质量就变了，而没有任何测试会发现。
+
+    下面把**重构前的原始算法原样抄写**（`_legacy_bm25`）作为参照，
+    在同一批数据上逐条比对分数。参照实现刻意保留"低效"的写法，
+    因为它要证明的是"行为未变"，不是"写法好看"。
+    """
+
+    #: 与生产同构的测试语料
+    CARDS = [
+        {"card_id": "c1", "note_id": "n1", "title": "水电站",
+         "content": "拉哇水电站装设多台水轮发电机组", "chapter_title": "第一章"},
+        {"card_id": "c2", "note_id": "n2", "title": "变电站",
+         "content": "500kV 配电装置采用户外敞开式布置", "chapter_title": None},
+        {"card_id": "c3", "note_id": "n3", "title": "继电保护",
+         "content": "线路保护应双重化配置", "chapter_title": "第三章"},
+        {"card_id": "c4", "note_id": "n4", "title": "无关内容",
+         "content": "今天天气很好", "chapter_title": None},
+    ]
+
+    @staticmethod
+    def _legacy_bm25(question: str, cards, top_k: int = 5):
+        """重构前的原始实现（逐字抄写，勿"优化"）"""
+        import math
+
+        if not cards:
+            return []
+        query_tokens = RAGService._tokenize(question)
+        if not query_tokens:
+            return []
+
+        docs = []
+        for card in cards:
+            doc_text = f"{card['title']} {card['content']}"
+            doc_tokens = RAGService._tokenize(doc_text)
+            docs.append({"card": card, "tokens": doc_tokens, "len": len(doc_tokens)})
+        if not docs:
+            return []
+
+        k1, b = 1.5, 0.75
+        N = len(docs)
+        avgdl = sum(d["len"] for d in docs) / N if N > 0 else 0.0
+
+        df = {}
+        for doc in docs:
+            for token in set(doc["tokens"]):
+                df[token] = df.get(token, 0) + 1
+        idf = {t: math.log((N - f + 0.5) / (f + 0.5) + 1) for t, f in df.items()}
+
+        scored = []
+        for doc in docs:
+            score = 0.0
+            token_freq = {}
+            for token in doc["tokens"]:
+                token_freq[token] = token_freq.get(token, 0) + 1
+            for query_token in query_tokens:
+                if query_token not in token_freq:
+                    continue
+                tf = token_freq[query_token]
+                idf_val = idf.get(query_token, 0.0)
+                numerator = tf * (k1 + 1)
+                if avgdl > 0:
+                    denominator = tf + k1 * (1 - b + b * doc["len"] / avgdl)
+                else:
+                    denominator = tf + k1
+                if denominator > 0:
+                    score += idf_val * numerator / denominator
+            if score > 0:
+                card = doc["card"]
+                scored.append({
+                    "note_id": card["note_id"], "note_title": None,
+                    "content": card["content"], "similarity": score,
+                    "block_index": 0, "card_id": card["card_id"],
+                    "title": card["title"], "chapter_title": card["chapter_title"],
+                })
+        scored.sort(key=lambda x: x["similarity"], reverse=True)
+        return scored[:top_k]
+
+    @pytest.mark.parametrize("question", [
+        "水电站装设什么",
+        "500kV 配电装置",
+        "继电保护配置要求",
+        "天气",
+        "完全无关的查询词",
+        "a",
+        "",
+    ])
+    def test_scores_match_legacy_implementation(self, question):
+        """逐条比对：新实现与重构前实现的分数、顺序、字段必须完全一致"""
+        legacy = self._legacy_bm25(question, self.CARDS)
+        new = RAGService._search_bm25(question, self.CARDS)
+
+        assert len(new) == len(legacy), f"结果条数不同: {len(new)} vs {len(legacy)}"
+        for got, want in zip(new, legacy, strict=True):
+            assert got["card_id"] == want["card_id"], "排序或命中集合发生变化"
+            assert got["similarity"] == pytest.approx(want["similarity"], rel=1e-12), (
+                f"BM25 分数变化: {got['similarity']} vs {want['similarity']}"
+            )
+            assert got == want, "结果字段发生变化"
+
+    def test_index_reuse_does_not_change_results(self):
+        """复用索引与每次重建索引必须给出相同结果
+
+        索引复用的前提是"语料没变"。若复用时残留了上一次查询的状态
+        （例如误把 query 词频写进了文档词频），结果就会随调用顺序变化 ——
+        这是缓存类重构最典型的一类 bug。
+        """
+        index = RAGService.build_bm25_index(self.CARDS)
+
+        first = index.search("水电站装设什么")
+        # 中间穿插别的查询，再看第一条是否受影响
+        index.search("继电保护")
+        index.search("500kV 配电装置")
+        again = index.search("水电站装设什么")
+
+        assert first == again, "复用索引后同一条查询的结果发生了变化"
+
+    def test_index_signature_detects_corpus_change(self):
+        """语料增删必须改变指纹（否则会一直用旧索引）"""
+        base = RAGService.build_bm25_index(self.CARDS)
+        added = RAGService.build_bm25_index(
+            self.CARDS + [{"card_id": "c9", "note_id": "n9", "title": "新卡片",
+                           "content": "新增内容", "chapter_title": None}]
+        )
+        removed = RAGService.build_bm25_index(self.CARDS[:-1])
+
+        assert base.signature != added.signature, "新增卡片未改变指纹"
+        assert base.signature != removed.signature, "删除卡片未改变指纹"
+        assert base.signature == RAGService.build_bm25_index(self.CARDS).signature
+
+    def test_index_reuse_avoids_rebuild(self):
+        """语料未变时不得重建索引（A-5 的核心诉求）
+
+        通过计数分词调用次数验证：第二次取索引不应再分词。
+        只断言"结果相同"是不够的 —— 每次重建也得到相同结果，
+        那正是重构前的问题（每次提问全量重分词）。
+        """
+        service = RAGService()
+        calls = {"n": 0}
+
+        def counting_tokenize(text):
+            calls["n"] += 1
+            return RAGService._tokenize(text)
+
+        service._tokenize = counting_tokenize  # type: ignore[method-assign]
+
+        service._get_bm25_index("u1", self.CARDS)
+        after_first = calls["n"]
+        assert after_first > 0, "首次构建应当分词"
+
+        service._get_bm25_index("u1", self.CARDS)
+        assert calls["n"] == after_first, (
+            f"语料未变却重新分词了 {calls['n'] - after_first} 次（索引未被复用）"
+        )
+
+    def test_index_slot_does_not_grow_with_users(self):
+        """索引槽位必须有硬上界（不得重蹈 `_kb_cache` 覆辙）
+
+        换用户时整体替换单个槽位，而不是为每个用户各留一份。
+        """
+        service = RAGService()
+        for uid in ("u1", "u2", "u3", "u4"):
+            service._get_bm25_index(uid, self.CARDS)
+
+        # 槽位是单个 tuple，不是字典 —— 结构上就不可能随用户数增长
+        assert isinstance(service._bm25_slot, tuple)
+        assert len(service._bm25_slot) == 3
+        assert service._bm25_slot[0] == "u4", "槽位应只保留最近一个用户"
+
+
+class TestRetrievalEvalHarness:
+    """阶段 2.9 评测脚本自身的守护
+
+    评测脚本如果悄悄坏掉（例如判据失效、返回 0 条），会给出误导性的
+    "质量下降"结论，进而导致错误的整改方向。这类"度量工具自身失准"
+    比被测代码出错更危险，所以它也要有测试。
+
+    注意：这里**不**把绝对指标写死成断言。指标取决于真实资料内容，
+    写死会让测试在资料变化时误报。这里只锁**判据的行为性质**：
+    对无关内容不能送分、对包含内容必须给分、对长度不对称必须中立。
+    """
+
+    @staticmethod
+    def _overlaps(expected, actual):
+        from scripts.eval_retrieval import _overlaps
+
+        return _overlaps(expected, actual)
+
+    @staticmethod
+    def _containment(expected, actual):
+        from scripts.eval_retrieval import _containment
+
+        return _containment(expected, actual)
+
+    def test_unrelated_content_scores_zero(self):
+        """无关内容必须得 0 分（否则指标虚高到没有意义）"""
+        assert self._containment("水电站装机容量与机组", "今天天气很好适合出门散步") == 0.0
+        assert not self._overlaps("水电站装机容量与机组", "今天天气很好适合出门散步")
+
+    def test_containing_content_scores_high(self):
+        """检索内容完整包含真值时必须判为命中（两档都是）"""
+        truth = "3.1.1 线路断路器：合上、断开。3.1.2 隔离刀闸：合上、拉开。"
+        retrieved = "操作术语如下：" + truth + "（以上为全部术语）"
+        assert self._containment(truth, retrieved) >= 0.99
+        assert self._overlaps(truth, retrieved)
+
+    def test_length_asymmetry_is_neutral(self):
+        """**关键性质**：检索单元更大不得受罚
+
+        第一版宽松判据用 Jaccard，实测导致原文 chunk 语料被系统性低估
+        （200 字真值 vs 2000 字 chunk → Jaccard ≈ 0.10）。
+        包含度必须对这种情况给高分。
+        """
+        truth = "拉哇水电站装设多台水轮发电机组，总装机容量为 2000MW。"
+        big = ("无关的前置内容。" * 200) + truth + ("无关的后置内容。" * 200)
+        small = truth
+
+        assert self._containment(truth, big) >= 0.99, (
+            "检索单元比真值大得多时被误判为不相关（Jaccard 的老问题）"
+        )
+        assert self._containment(truth, small) >= 0.99
+        # 大到 100 倍仍应命中：长度不应影响判定
+        assert self._overlaps(truth, big)
+
+    def test_whitespace_and_newlines_are_normalized(self):
+        """换行差异不得造成未命中（实测踩过：编号列表被换行拆开）"""
+        truth = "3.1.1 断路器：合上、断开。\n3.1.2 隔离刀闸：合上、拉开。"
+        retrieved = "3.1.1 断路器：合上、断开。 3.1.2 隔离刀闸：合上、拉开。"
+        assert self._containment(truth, retrieved) >= 0.99
+
+    def test_partial_overlap_below_threshold(self):
+        """只覆盖真值一小部分时不得判为命中（否则指标失去区分度）
+
+        `"拉哇水电站"` 是被检索内容，`MIN_SHORT_SIDE` 之前它会因"互相包含"
+        回退分支命中任何含这个词的长真值 —— 只取回一个实体名不算找到答案。
+        """
+        truth = "拉哇水电站装设多台水轮发电机组，总装机容量为 2000MW，年发电量约 80 亿千瓦时。"
+        tiny = "拉哇水电站"
+        assert self._containment(truth, tiny) < 0.5
+        assert not self._overlaps(truth, tiny), "过短的检索内容不应命中长真值"
+        # 但逐字相等仍应命中（真值本身很短时）
+        assert self._overlaps(tiny, tiny)
+
+    def test_cli_produces_report_on_real_db(self):
+        """CLI 端到端可跑（在真实库上只读跑 5 条）
+
+        防止"脚本语法正确但跑不起来"—— 评测脚本是离线工具，
+        不会在应用启动路径上被 import，因此语法/依赖错误不会被其他测试发现。
+        """
+        import subprocess
+        import sys as _sys
+
+        backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proc = subprocess.run(
+            [_sys.executable, os.path.join(backend, "scripts", "eval_retrieval.py"),
+             "--limit", "5", "--corpus", "cards", "--show-missed", "0"],
+            cwd=backend, capture_output=True, text=True, timeout=600,
+        )
+        assert proc.returncode == 0, f"评测脚本退出码 {proc.returncode}: {proc.stderr[-800:]}"
+        assert "Recall@5" in proc.stdout, f"输出缺少指标:\n{proc.stdout[-800:]}"
+        assert "评测问题数    : 5" in proc.stdout, "未按 --limit 限制评测条数"
 
 
 # ---------------------------------------------------------------------------
