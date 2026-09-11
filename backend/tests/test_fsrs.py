@@ -25,6 +25,7 @@
 import math
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -49,6 +50,30 @@ from app.services.scheduler_service import (
 )
 
 NOW = datetime(2026, 9, 11, 9, 0, tzinfo=timezone.utc)
+
+#: 使抖动偏移**恰好为 0** 的随机数
+#:
+#: `fuzz_interval` 把 [0,1) 均匀映射到 [-delta, +delta]：
+#: `int(u * (2d+1)) - d`。u=0.5 时 `0.5*(2d+1) = d + 0.5` 是精确可表示的
+#: 浮点数，取整得 d，偏移为 0。需要"真实配置 + 无抖动"时用它。
+NO_FUZZ_OFFSET = 0.5
+
+
+def plain_settings(*, fuzz: float = 0.0, due_hour: int = -1) -> SimpleNamespace:
+    """配置桩：**关掉抖动与时段对齐**，用于断言"算法本身"给出的间隔
+
+    阶段 3.7 之后 `advance` 会额外施加这两项调度策略（见
+    `scheduler_service.apply_scheduling_policy`）。它们是**策略**而不是算法，
+    把它们混进算法断言会让测试变成概率性的：同一个 S 算出的间隔可能是
+    5/6/7 天。策略本身在 `tests/test_review_scheduling.py` 里单独测。
+    """
+    return SimpleNamespace(
+        review_scheduler=ALGORITHM_FSRS,
+        review_fuzz_ratio=fuzz,
+        review_due_hour=due_hour,
+        fsrs_request_retention=F.DEFAULT_REQUEST_RETENTION,
+        fsrs_max_interval_days=F.MAX_INTERVAL_DAYS,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -754,7 +779,7 @@ class TestAlgorithmSelection:
         )
         outcome = scheduler_service.advance(
             state, 5, method="self_rating", now=NOW,
-            algorithm=ALGORITHM_SM2, settings=None,
+            algorithm=ALGORITHM_SM2, settings=plain_settings(),
         )
         assert outcome.algorithm == ALGORITHM_SM2
         assert outcome.stability is None
@@ -776,7 +801,12 @@ class TestAlgorithmSelection:
         assert outcome.algorithm == ALGORITHM_FSRS
 
     def test_env_switch_selects_sm2(self, monkeypatch):
-        """配置项真的接上了（而不是写了个没人读的字段）"""
+        """配置项真的接上了（而不是写了个没人读的字段）
+
+        这里**必须**用真实配置（才能验证 env 被读到），所以不能靠
+        `plain_settings()` 关抖动；改用 `rand=0.5` —— 它使抖动偏移恰为 0
+        （`int(0.5*(2d+1)) - d == d - d`），从而只关掉抖动、不动其它路径。
+        """
         from app.config import get_settings
 
         state = ReviewState(
@@ -787,7 +817,9 @@ class TestAlgorithmSelection:
         monkeypatch.setenv("REVIEW_SCHEDULER", "sm2")
         get_settings.cache_clear()
         try:
-            outcome = scheduler_service.advance(state, 5, method="self_rating", now=NOW)
+            outcome = scheduler_service.advance(
+                state, 5, method="self_rating", now=NOW, rand=NO_FUZZ_OFFSET,
+            )
         finally:
             monkeypatch.delenv("REVIEW_SCHEDULER", raising=False)
             get_settings.cache_clear()
@@ -813,7 +845,8 @@ class TestRollbackSwitch:
         async with test_db() as db:
             state = await review_state_service.get_state(db, uid, ITEM_TYPE_CARD, card_id)
             fsrs_outcome = scheduler_service.advance(
-                state, 4, method="self_rating", now=NOW, algorithm=ALGORITHM_FSRS,
+                state, 4, method="self_rating", now=NOW,
+                algorithm=ALGORITHM_FSRS, settings=plain_settings(),
             )
             await review_state_service.apply_schedule_result(
                 db, uid, ITEM_TYPE_CARD, card_id,
@@ -826,7 +859,8 @@ class TestRollbackSwitch:
         async with test_db() as db:
             state = await review_state_service.get_state(db, uid, ITEM_TYPE_CARD, card_id)
             sm2_outcome = scheduler_service.advance(
-                state, 4, method="self_rating", now=NOW, algorithm=ALGORITHM_SM2,
+                state, 4, method="self_rating", now=NOW,
+                algorithm=ALGORITHM_SM2, settings=plain_settings(),
             )
             await review_state_service.apply_schedule_result(
                 db, uid, ITEM_TYPE_CARD, card_id,
@@ -927,13 +961,13 @@ class TestScheduleOutcomeContract:
         ):
             assert hasattr(outcome, name)
 
-    def test_elapsed_days_handles_naive_datetimes(self):
+    def test_elapsed_business_days_handles_naive_datetimes(self):
         """SQLite 不存时区，历史行取出来可能是 naive 的（不得因此抛异常）"""
         naive = datetime(2026, 9, 1, 9, 0)
-        assert scheduler_service.elapsed_days_since(naive, NOW) == pytest.approx(10.0)
+        assert scheduler_service.elapsed_business_days(naive, NOW) == 10
 
-    def test_elapsed_days_never_negative(self):
+    def test_elapsed_business_days_never_negative(self):
         """时钟回拨（或未来时间戳）不得产生负的 elapsed"""
         future = NOW + timedelta(days=5)
-        assert scheduler_service.elapsed_days_since(future, NOW) == 0.0
-        assert scheduler_service.elapsed_days_since(None, NOW) == 0.0
+        assert scheduler_service.elapsed_business_days(future, NOW) == 0
+        assert scheduler_service.elapsed_business_days(None, NOW) == 0

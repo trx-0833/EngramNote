@@ -54,6 +54,7 @@ FSRS-5 默认参数（19 个），取自 open-spaced-repetition 的算法说明�
 """
 
 import math
+import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -118,6 +119,32 @@ MIN_STABILITY = 0.01
 
 #: 学习步（天）。见模块末尾 `_next_state_and_interval` 的说明。
 LEARNING_STEP_DAYS = 1
+
+#: 间隔抖动（fuzz）比例与生效下限 —— 阶段 3.7
+#:
+#: ## 抖动解决的是什么问题
+#:
+#: 同一次导入产生的卡片**初始状态完全相同**（同一批 `S0(rating)`、同一批
+#: `D0(rating)`），于是它们此后永远在同一天到期。一篇笔记 20 张卡，
+#: 用户就会在"0 张"和"20 张"之间反复横跳 —— 这就是复习雪崩。
+#: 抖动把同批卡片摊开到几天里，而**不改变任何一张卡的平均间隔**。
+#:
+#: ## 为什么低于 3 天不抖
+#:
+#: 本项目最小调度粒度是 1 天，所以 3 天间隔上最小可能的抖动也是 ±1 天
+#: （±33%）。在这个量级上抖动不再是"摊开负载"，而是**改写学习节奏**：
+#: 一张 3 天的卡变成 4 天，与"答对后涨到 4 天"在界面上完全无法区分。
+#: 短间隔本来也不会雪崩 —— 它们全都该到期。
+#:
+#: ## 为什么抖动放在调度层而不是 `schedule()` 里
+#:
+#: FSRS 的公开公式不包含抖动（Anki 也是在 FSRS 之外施加的）。把它留在
+#: `schedule()` 里会让"公式对拍"测试失去意义：同输入不再同输出，
+#: 而公式正确性恰恰是这个模块最需要被证明的东西。
+#: 因此 `schedule()` 保持确定，抖动由 `scheduler_service` 施加 ——
+#: 那里本来就是"把间隔变成到期日"的策略层，且 SM-2 回退路径同样需要它。
+FUZZ_RATIO = 0.05
+FUZZ_MIN_INTERVAL_DAYS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +484,51 @@ def schedule(
     )
 
 
+def fuzz_interval(
+    interval_days: int,
+    *,
+    rand: Optional[float] = None,
+    ratio: float = FUZZ_RATIO,
+    min_interval_days: int = FUZZ_MIN_INTERVAL_DAYS,
+    max_interval_days: int = MAX_INTERVAL_DAYS,
+) -> int:
+    """给间隔加一个随机抖动，返回抖动后的天数（纯函数）
+
+    Args:
+        interval_days: 原始间隔
+        rand: [0, 1) 的随机数；None 时取 `random.random()`。
+            **显式传入是为了可测**：抖动的正确性（范围、边界、分布）
+            必须能被断言，而"调 1000 次看统计量"既慢又不稳定。
+        ratio: 抖动比例（相对间隔）；0 表示关闭
+        min_interval_days: 低于这个间隔不抖动（理由见 `FUZZ_RATIO` 的说明）
+        max_interval_days: 结果上限
+
+    Returns:
+        抖动后的间隔，∈ [1, max_interval_days]
+
+    ## 抖动幅度 = max(1, round(interval * ratio))
+
+    两个部分都不能少：
+    - `interval * ratio` 让长间隔摊得更开（100 天 ±5 天，才可能把
+      同批卡片摊到不同周）；
+    - `max(1, ...)` 保证短间隔也真的动起来 —— 只按比例算的话，
+      3 天的 5% 是 0.15，四舍五入成 0，抖动等于没做。
+      而"同批卡片全挤在 3 天后"恰恰是最常见的雪崩形态（新导入的笔记）。
+    """
+    interval = max(1, int(interval_days))
+    if ratio <= 0 or interval < min_interval_days:
+        return min(interval, max_interval_days)
+    delta = max(1, round(interval * ratio))
+    # 把 [0,1) 均匀映射到整数偏移 [-delta, +delta]：
+    # u * (2delta + 1) 取整后落在 0..2delta，减去 delta 即得。
+    u = random.random() if rand is None else float(rand)
+    if math.isnan(u):
+        u = 0.0
+    u = clamp(u, 0.0, 0.999999)
+    offset = int(u * (2 * delta + 1)) - delta
+    return int(clamp(interval + offset, 1, max_interval_days))
+
+
 def adopt_legacy_state(
     *,
     state: ReviewStateKind,
@@ -578,6 +650,8 @@ __all__ = [
     "MAX_INTERVAL_DAYS",
     "MIN_STABILITY",
     "LEARNING_STEP_DAYS",
+    "FUZZ_RATIO",
+    "FUZZ_MIN_INTERVAL_DAYS",
     "RATING_AGAIN",
     "RATING_HARD",
     "RATING_GOOD",
@@ -595,6 +669,7 @@ __all__ = [
     "stability_after_forget",
     "stability_short_term",
     "schedule",
+    "fuzz_interval",
     "adopt_legacy_state",
     "easiness_from_difficulty",
     "difficulty_from_easiness",

@@ -49,10 +49,11 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..models.review_state import ReviewState, ReviewStateKind
+from ..utils.timeutil import align_to_hour_of_day, days_between_business_days
 from . import fsrs_service
 from .fsrs_service import (
     RATING_AGAIN,
@@ -69,6 +70,11 @@ PASS_QUALITY = 3
 #: 调度算法名
 ALGORITHM_FSRS = "fsrs"
 ALGORITHM_SM2 = "sm2"
+
+#: 到期时刻默认锚定的整点（业务时区）。与 Anki 的 rollover hour 同源：
+#: 取在凌晨是为了"今天到期"与用户的日历一致 —— 无论用户几点开始学习，
+#: 当天到期的卡片都已经是到期的。
+DEFAULT_DUE_HOUR = 4
 
 #: 自评分 → FSRS 档位。前端四档按钮的取值恰好是 0/3/4/5，
 #: 与 Again/Hard/Good/Easy 一一对应（见 frontend/src/utils/labels.ts 的
@@ -173,20 +179,84 @@ class ScheduleOutcome:
     elapsed_known: bool = True
 
 
-def elapsed_days_since(last_reviewed_at: Optional[datetime], now: datetime) -> float:
-    """距上次复习过了多少天（不足 1 天按实际小数返回，同日为 0）
+def elapsed_business_days(last_reviewed_at: Optional[datetime], now: datetime) -> int:
+    """距上次复习隔了几个**业务日**（同一业务日为 0）
+
+    ## 为什么是整天数而不是小时差
+
+    见 `timeutil.business_day_index` 的长注释。一句话：
+    FSRS 用 `elapsed < 1` 判断"同日复习"并据此走短时公式，
+    而"同日"是日历概念、不是 24 小时 —— 晚上 23:00 复习、次日早上 08:00
+    再看到它，连续差是 0.375 天（会被误判成"同日"），业务日差是 1（正确）。
 
     时区归一化在这里做而不是相信数据库：SQLite 不存时区，
     历史行取出来可能是 naive 的（见 `review_state_service._as_aware`）。
     """
     if last_reviewed_at is None:
-        return 0.0
-    if last_reviewed_at.tzinfo is None:
-        last_reviewed_at = last_reviewed_at.replace(tzinfo=timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    delta = now - last_reviewed_at
-    return max(0.0, delta.total_seconds() / 86400.0)
+        return 0
+    return max(0, days_between_business_days(last_reviewed_at, now))
+
+
+def apply_scheduling_policy(
+    outcome: ScheduleOutcome,
+    *,
+    now: datetime,
+    settings=None,
+    rand: Optional[float] = None,
+) -> ScheduleOutcome:
+    """把算法给出的间隔变成真正的到期时刻（抖动 + 时段对齐）
+
+    ⚠️ 这一步**与算法无关**：FSRS 与 SM-2 都要做，因为"同批卡片挤在同一天"
+    和"到期时刻漂到凌晨"是 SM-2 时期就存在的老问题（见 overhaul-plan §2.4 L-4
+    的第 4 条），不是换算法带来的。
+
+    顺序不能颠倒：
+      1. 先抖动间隔 —— 抖的是"几天后"；
+      2. 再对齐到期时刻 —— 抖完的那一天要落在哪个整点。
+    反过来先对齐再抖动，抖动会把时刻重新拉回随机钟点，对齐白做。
+
+    Args:
+        outcome: 算法给出的结果（会被就地修改并返回）
+        now: 本次复习时间
+        settings: 配置覆盖
+        rand: 抖动用的 [0,1) 随机数（测试用）
+
+    Returns:
+        更新了 `interval_days` 与 `next_review_at` 的同一个 outcome
+    """
+    if settings is None:
+        from ..config import get_settings
+        settings = get_settings()
+
+    ratio = float(getattr(settings, "review_fuzz_ratio", fsrs_service.FUZZ_RATIO))
+    max_interval = int(
+        getattr(settings, "fsrs_max_interval_days", fsrs_service.MAX_INTERVAL_DAYS)
+    )
+    interval = fsrs_service.fuzz_interval(
+        outcome.interval_days,
+        rand=rand,
+        ratio=ratio,
+        max_interval_days=max_interval,
+    )
+
+    due_hour = int(getattr(settings, "review_due_hour", DEFAULT_DUE_HOUR))
+    if due_hour >= 0:
+        next_review_at = align_to_hour_of_day(
+            now + timedelta(days=interval), due_hour, not_before=now,
+        )
+    else:
+        # 负值 = 关闭对齐（保留"上次复习的钟点"这一旧行为）。
+        # 留这个开关是因为对齐会改变"今天该不该复习"的判断边界，
+        # 万一与用户的作息冲突，要能一键退回。
+        next_review_at = now + timedelta(days=interval)
+
+    if interval != outcome.interval_days:
+        logger.debug(
+            "间隔抖动: %d → %d 天（ratio=%.3f）", outcome.interval_days, interval, ratio,
+        )
+    outcome.interval_days = interval
+    outcome.next_review_at = next_review_at
+    return outcome
 
 
 def advance(
@@ -197,6 +267,7 @@ def advance(
     now: Optional[datetime] = None,
     algorithm: Optional[str] = None,
     settings=None,
+    rand: Optional[float] = None,
 ) -> ScheduleOutcome:
     """跑一次调度，返回统一口径的结果（纯计算，不碰数据库）
 
@@ -209,9 +280,10 @@ def advance(
         now: 本次复习时间；默认当前 UTC
         algorithm: 覆盖配置里的算法（测试用）
         settings: 覆盖配置对象（测试用）
+        rand: 间隔抖动用的 [0,1) 随机数（测试用；None 时取真随机）
 
     Returns:
-        ScheduleOutcome
+        ScheduleOutcome（已施加抖动与到期时刻对齐，见 `apply_scheduling_policy`）
     """
     if settings is None:
         from ..config import get_settings
@@ -223,16 +295,19 @@ def advance(
     passed = quality >= PASS_QUALITY
 
     if algo == ALGORITHM_SM2:
-        return _advance_sm2(state, quality, passed=passed, now=now)
-
-    if algo != ALGORITHM_FSRS:
-        # 配置写错时**响亮地**退回默认并留下日志，而不是静默用某个算法 ——
-        # 静默的默认值会让"我明明配了 sm2，怎么间隔变了"变成无从排查的问题。
-        logger.warning(
-            "未知的 review_scheduler=%r，按 %s 处理", algo, ALGORITHM_FSRS,
+        outcome = _advance_sm2(state, quality, passed=passed, now=now)
+    else:
+        if algo != ALGORITHM_FSRS:
+            # 配置写错时**响亮地**退回默认并留下日志，而不是静默用某个算法 ——
+            # 静默的默认值会让"我明明配了 sm2，怎么间隔变了"变成无从排查的问题。
+            logger.warning(
+                "未知的 review_scheduler=%r，按 %s 处理", algo, ALGORITHM_FSRS,
+            )
+        outcome = _advance_fsrs(
+            state, quality, passed=passed, method=method, now=now, settings=settings,
         )
 
-    return _advance_fsrs(state, quality, passed=passed, method=method, now=now, settings=settings)
+    return apply_scheduling_policy(outcome, now=now, settings=settings, rand=rand)
 
 
 def _advance_sm2(
@@ -265,7 +340,7 @@ def _advance_fsrs(
     now: datetime, settings,
 ) -> ScheduleOutcome:
     rating = rating_from_quality(quality, method)
-    elapsed = elapsed_days_since(state.last_reviewed_at, now)
+    elapsed = elapsed_business_days(state.last_reviewed_at, now)
 
     result = fsrs_service.schedule(
         rating=rating,
@@ -313,8 +388,10 @@ __all__ = [
     "PASS_QUALITY",
     "ScheduleOutcome",
     "advance",
+    "apply_scheduling_policy",
     "derive_kind",
     "sm2_kind",
-    "elapsed_days_since",
+    "elapsed_business_days",
     "rating_from_quality",
+    "DEFAULT_DUE_HOUR",
 ]
