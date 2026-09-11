@@ -46,30 +46,105 @@ class TestNGramChannelRemoved:
     def test_rrf_fusion_takes_exactly_two_result_lists(self):
         """`_rrf_fusion` 只融合两路（向量 + BM25）
 
-        参数个数即契约：多一路就会改变融合语义。
+        参数列表即契约：多一路就会改变融合语义。
+        `k` 与 `bm25_weight` 可省略（取配置值），所以断言只看前两个位置参数。
         """
         import inspect
 
         params = list(inspect.signature(RAGService._rrf_fusion).parameters)
-        # 静态方法签名：vector_results, bm25_results, k, top_k
-        assert params == ["vector_results", "bm25_results", "k", "top_k"], (
+        assert params == ["vector_results", "bm25_results", "k", "bm25_weight", "top_k"], (
             f"RRF 融合的参数列表已变化: {params}。"
             "若新增了检索通道，请先补一份能证明它带来增益的评测（阶段 2.9）。"
         )
+        # 前两个必须仍是两路结果
+        assert params[:2] == ["vector_results", "bm25_results"]
 
-    def test_no_ngram_weight_in_fusion(self):
-        """融合结果不得因 n-gram 产生第三个来源
+    def test_weight_split_does_not_change_total_when_both_hit(self):
+        """两路都命中同一文档时，总分 = 1/(k+1)，**与权重取值无关**
 
-        直接验证行为：同一个文档同时出现在两路里，其融合分数应当等于
-        两路 rank 贡献之和；若存在隐含的第三路，分数会更高。
+        因为 `(1-w)/(k+1) + w/(k+1) = 1/(k+1)`。这条性质说明：
+        加权只影响"两路意见不一致时谁占优"，不影响"两路一致时"的分数 ——
+        这正是我们希望加权起到的作用（校正强弱差异，而非放大共识）。
         """
         doc = {"note_id": "n1", "content": "内容", "note_title": None, "block_index": 0}
-        fused = RAGService._rrf_fusion([doc], [doc], k=60, top_k=5)
-        assert len(fused) == 1
-        # 两路各 rank 0 → 1/61 + 1/61
-        assert fused[0]["similarity"] == pytest.approx(2 / 61), (
-            f"融合分数异常: {fused[0]['similarity']}（预期 2/61 ≈ 0.0328）"
+        single = RAGService._rrf_fusion([doc], [], k=60, bm25_weight=0.0)
+        assert single[0]["similarity"] == pytest.approx(1 / 61)
+
+        for w in (0.0, 0.5, 0.65, 1.0):
+            both = RAGService._rrf_fusion([doc], [doc], k=60, bm25_weight=w)
+            assert both[0]["similarity"] == pytest.approx(1 / 61), (
+                f"w={w} 时两路都命中的总分应恒为 1/61"
+            )
+
+    def test_bm25_weight_actually_shifts_ranking(self):
+        """权重必须真的改变排序（否则配置是装饰）
+
+        构造：两路各有一条**不同**的文档，谁权重高谁排前面。
+        """
+        vec_doc = {"note_id": "v", "content": "向量独有", "note_title": None, "block_index": 0}
+        bm_doc = {"note_id": "b", "content": "BM25独有", "note_title": None, "block_index": 0}
+
+        # 向量权重高 → 向量那条排第一
+        heavy_vec = RAGService._rrf_fusion([vec_doc], [bm_doc], k=60, bm25_weight=0.1)
+        assert heavy_vec[0]["note_id"] == "v"
+        # BM25 权重高 → BM25 那条排第一
+        heavy_bm = RAGService._rrf_fusion([vec_doc], [bm_doc], k=60, bm25_weight=0.9)
+        assert heavy_bm[0]["note_id"] == "b"
+
+    def test_smaller_k_sharpens_rank_difference(self):
+        """k 越小，名次差异越大（k 大是"压平名次"的原因）
+
+        原实现 k=60 时第 1 名（1/61）与第 5 名（1/65）只差 4%，
+        导致分数几乎只反映"是否两路同时出现"。这里锁住这个性质，
+        避免有人"为了方便"把 k 调回大值。
+        """
+        docs = [
+            {"note_id": f"n{i}", "content": f"内容{i}", "note_title": None, "block_index": 0}
+            for i in range(5)
+        ]
+        def spread(k: int) -> float:
+            out = RAGService._rrf_fusion(docs, [], k=k, bm25_weight=0.0)
+            s = {d["note_id"]: d["similarity"] for d in out}
+            return s["n0"] / s["n4"]
+
+        assert spread(1) > spread(60) * 2, (
+            f"k=1 与 k=60 的名次区分度差异不足：{spread(1):.2f} vs {spread(60):.2f}"
         )
+
+    def test_positional_fields_survive_fusion(self):
+        """**阶段 2.7 的前提**：chunk 的定位字段必须穿过融合层
+
+        旧实现用一张白名单（只有 card_id/title/chapter_title）挑字段，
+        chunk 的 `char_start/char_end/heading_path` 在这里被丢掉 ——
+        引用回跳的链路断在第一层（附录 N.4）。
+        """
+        chunk = {
+            "note_id": "n1", "content": "原文段落", "note_title": "笔记", "block_index": 0,
+            "chunk_id": "c1", "index": 3,
+            "char_start": 100, "char_end": 200,
+            "heading_path": "第一章 > 1.2", "line_start": 5, "line_end": 9,
+        }
+        fused = RAGService._rrf_fusion([chunk], [], k=1, bm25_weight=0.5)
+        assert len(fused) == 1
+        got = fused[0]
+        for key, want in (
+            ("chunk_id", "c1"), ("char_start", 100), ("char_end", 200),
+            ("heading_path", "第一章 > 1.2"), ("line_start", 5), ("line_end", 9),
+        ):
+            assert got.get(key) == want, f"融合后丢失定位字段 {key}: {got}"
+
+    def test_content_is_not_truncated_by_dedupe_key(self):
+        """去重键是截断的，但**返回值必须是完整内容**
+
+        这是实测踩过的坑：早期测量脚本把截断到 200 字的去重键当成文档返回，
+        评测判据因此大量误判，得出"融合比单通道差 28 个百分点"的假结论
+        （附录 P.4）。若不锁住，同样的错误会以"检索质量下降"的形式重现。
+        """
+        long_content = "甲" * 500
+        doc = {"note_id": "n1", "content": long_content, "note_title": None, "block_index": 0}
+        fused = RAGService._rrf_fusion([doc], [], k=1, bm25_weight=0.5)
+        assert fused[0]["content"] == long_content
+        assert len(fused[0]["content"]) == 500
 
     def test_dedupe_key_merges_same_doc_across_channels(self):
         """同一个文档出现在两路时必须合并，而不是占两个 top-k 名额

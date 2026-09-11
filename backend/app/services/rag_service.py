@@ -420,55 +420,103 @@ class RAGService:
     def _rrf_fusion(
         vector_results: List[Dict[str, Any]],
         bm25_results: List[Dict[str, Any]],
-        k: int = 60,
+        k: Optional[int] = None,
+        bm25_weight: Optional[float] = None,
         top_k: int = 5,
     ) -> List[Dict[str, Any]]:
         """
-        Reciprocal Rank Fusion（RRF）融合两路检索结果
+        加权 Reciprocal Rank Fusion（RRF）融合两路检索结果
 
-        RRF 公式：score(d) = sum_i 1 / (k + rank_i(d))
-        其中 rank_i(d) 是文档 d 在第 i 路结果列表中的排名（从 1 开始），
-        k 是平滑常数（默认 60），平衡头部和尾部结果的权重。
+        公式：score(d) = (1-w) · 1/(k + rank_vec(d)) + w · 1/(k + rank_bm25(d))
+        其中 w = `bm25_weight`，只对**出现过**的那一路计分。
+
+        ## 为什么必须加权、且必须调小 k（阶段 2.6 遗留项，2026-09-11 实测）
+
+        原实现是照搬来的 `k=60` 等权。在本项目语料上实测（1058 条评测集，
+        608 个 chunk 语料，BM25 与向量在同语料上）：
+
+        | 配置 | 严格 Recall@5 |
+        |---|---|
+        | 单通道 BM25 | 59.74% |
+        | 单通道向量 | 48.39% |
+        | 等权 k=60（原实现） | 57.37% |
+        | **加权 k=1 w=0.65** | **60.87%** |
+
+        等权 k=60 比 BM25 单通道**还低**：`k` 越大名次差异被压得越平
+        （`k=60` 时第 1 名 `1/61` 与第 5 名 `1/65` 只差 4%），
+        于是分数主要由"是否两路同时出现"决定 —— RRF 退化为奖励**共识**。
+        两路强弱悬殊时（59.74% vs 48.39%），共识偏向等于把强通道拉向弱通道。
+
+        `k=1, w=0.65` 是在评测集上扫出来的**稳健区域**
+        （k∈[1,10]、w∈[0.6,0.8] 均在 60% 以上，不是孤立的尖点）。
+        参数由 `rag_rrf_k` / `rag_rrf_bm25_weight` 配置，语料或模型变化后应重扫。
+
+        注意这组权重**绑定当前的相对强弱**：若将来向量质量提升
+        （例如换更好的嵌入模型），`w` 必须重新标定，否则会反过来压制向量。
+        评测脚本：`scripts/eval_retrieval.py`。
 
         融合策略：
-        - 以 (note_id, content 前缀) 为键去重
-        - 累加各路 RRF 分数
+        - 以 (note_id, content 前 200 字符) 为键去重 —— **键只用于识别同一段
+          内容，不作为返回值**（早期测量脚本误把截断后的键当作文档返回，
+          导致"融合比单通道差 28%"的假结论，见附录 P.4）
+        - 累加各路加权 RRF 分数
         - 按融合分数降序排列，取 top_k
 
         Args:
             vector_results: 向量检索结果列表
             bm25_results: BM25 检索结果列表
-            k: RRF 平滑常数，默认 60
+            k: RRF 平滑常数；None 时取配置 `rag_rrf_k`
+            bm25_weight: BM25 路权重 ∈ [0,1]；None 时取配置 `rag_rrf_bm25_weight`
             top_k: 返回的最终结果数，默认 5
 
         Returns:
-            List[Dict]: 融合后的结果列表，每个包含：
-                - note_id, note_title, content, similarity, block_index
-                - 可能包含 card_id, title, chapter_title（来自卡片检索）
+            List[Dict]: 融合后的结果列表。除两路共有的
+                `note_id/note_title/content/similarity/block_index` 外，
+                **原样保留各路的附加字段**（卡片的 `card_id/title/chapter_title`、
+                chunk 的 `char_start/char_end/heading_path/line_*`）。
+
+                保留附加字段是阶段 2.7 回跳的前提：旧实现用一张**白名单**
+                （只有 card_id/title/chapter_title）挑字段，于是 chunk 的
+                定位信息在这里被丢掉，回跳链路断在第一层。
         """
+        if k is None:
+            k = getattr(settings, "rag_rrf_k", 1)
+        if bm25_weight is None:
+            bm25_weight = getattr(settings, "rag_rrf_bm25_weight", 0.65)
+
+        #: 白名单之外的字段也要带过去（定位信息在这里曾经被丢掉）
+        carried_keys = (
+            "card_id", "title", "chapter_title",
+            "chunk_id", "index",
+            "char_start", "char_end", "heading_path", "line_start", "line_end",
+        )
+
         fused: Dict[tuple, Dict[str, Any]] = {}
 
-        for result_list in (vector_results, bm25_results):
+        for weight, result_list in ((1.0 - bm25_weight, vector_results),
+                                    (bm25_weight, bm25_results)):
+            if weight <= 0:
+                continue
             for rank_idx, item in enumerate(result_list):
                 note_id = item.get("note_id")
                 content = item.get("content", "") or ""
                 # 以 (note_id, content 前 200 字符) 为去重键
                 dedupe_key = (note_id, content[:200])
 
-                # rank 从 1 开始
-                rrf_score = 1.0 / (k + rank_idx + 1)
+                # rank 从 1 开始；加权 RRF
+                rrf_score = weight / (k + rank_idx + 1)
 
                 if dedupe_key not in fused:
                     merged_item = {
                         "note_id": note_id,
                         "note_title": item.get("note_title"),
+                        # 存**完整内容**，不是去重键（键是截断过的）
                         "content": content,
                         "similarity": 0.0,
                         "block_index": item.get("block_index", 0),
                     }
-                    # 保留卡片特有字段（来自 BM25 结果）
-                    for extra_key in ("card_id", "title", "chapter_title"):
-                        if extra_key in item:
+                    for extra_key in carried_keys:
+                        if extra_key in item and item[extra_key] is not None:
                             merged_item[extra_key] = item[extra_key]
                     fused[dedupe_key] = merged_item
                 fused[dedupe_key]["similarity"] += rrf_score
@@ -511,6 +559,10 @@ class RAGService:
         """
         provider = settings.get_llm_config()["provider"]
 
+        #: 每路候选池（融合前）。要大于最终 top_k ——
+        #: 池=5 时融合只能在那 10 条里排序，答错就出局（实测池=20 更高）。
+        pool = getattr(settings, "rag_candidate_pool", 20)
+
         # 1. 通过 Celery 编码问题
         question_embedding = await self._encode_via_celery(question)
 
@@ -519,7 +571,7 @@ class RAGService:
         if question_embedding is not None:
             try:
                 vector_results = await self._search_vectors_via_celery(
-                    question_embedding, user_id, top_k=5
+                    question_embedding, user_id, top_k=pool
                 )
             except Exception as e:
                 logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
@@ -540,13 +592,13 @@ class RAGService:
         bm25_results: List[Dict[str, Any]] = []
         try:
             cards = await self._get_user_cards(user_id)
-            bm25_results = self._get_bm25_index(user_id, cards).search(question, top_k=5)
+            bm25_results = self._get_bm25_index(user_id, cards).search(question, top_k=pool)
         except Exception as e:
             logger.warning(f"BM25 检索失败: {e}")
 
-        # 4. RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
+        # 4. 加权 RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
         fused_results = self._rrf_fusion(
-            vector_results, bm25_results, k=60, top_k=5
+            vector_results, bm25_results, top_k=5
         )
 
         # 5. 合并上下文
