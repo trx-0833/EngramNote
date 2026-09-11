@@ -5,25 +5,16 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+from _tmpdb import bootstrap_temp_db, teardown_temp_db
+
+
 async def main():
     from fastapi import HTTPException
     import app.models  # noqa: F401
     from app import database as db_mod
 
-    p = os.path.abspath("backend/data/tmp_test/goal_test.db")
-    if os.path.exists(p):
-        os.remove(p)
-    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{p}"
-    from app.config import get_settings
-    get_settings.cache_clear()
-    db_mod.settings = get_settings()
-    db_mod.database_url = db_mod.settings.get_database_url()
-    db_mod._is_sqlite = db_mod.database_url.startswith("sqlite")
-    db_mod.engine = db_mod.create_async_engine(
-        db_mod.database_url, connect_args={"check_same_thread": False}, echo=False
-    )
-    if db_mod._is_sqlite:
-        db_mod.register_sqlite_pragmas(db_mod.engine)
+    # 临时库引导（见 scripts/_tmpdb.py：直接重绑定 db_mod.engine 是无效的）
+    db_path = await bootstrap_temp_db("goal_test")
     await db_mod.init_db()
 
     from app.models.user import User as U
@@ -32,7 +23,7 @@ async def main():
     from app.models.knowledge_card import KnowledgeCard as KC, CardType
     from app.services.goal_service import goal_service
 
-    async with db_mod.async_session() as s:
+    async with db_mod.get_session_factory()() as s:
         s.add_all([
             U(id="u1", email="a@x.c", username="a", hashed_password="x"),
             U(id="u2", email="b@x.c", username="b", hashed_password="x"),
@@ -105,7 +96,7 @@ async def main():
         assert progress["avg_mastery"] == 50.0, f"进度渗漏: {progress}"
         print("[OK] 进度统计仅含本人卡片:", progress["avg_mastery"])
 
-    await db_mod.engine.dispose()
+    await teardown_temp_db(db_path)
     print("\n=== F-09 全部验证通过 ===")
 
 asyncio.run(main())

@@ -31,6 +31,13 @@ from .celery_app import celery_app
 from .common import (
     get_sync_session as _get_understand_session,
     update_note_status as _update_note_status,
+    # 任务追踪（阶段 1′ 1.7）
+    begin_task_run as _begin_task_run,
+    mark_task_succeeded as _mark_task_succeeded,
+    mark_task_failed as _mark_task_failed,
+    report_task_progress as _report_progress,
+    clear_progress_cache as _clear_progress_cache,
+    task_id_of as _task_id_of,
 )
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
@@ -412,9 +419,16 @@ def understand_document_task(self, note_id: str):
         self: Celery 任务实例
         note_id: 笔记 ID
     """
+    task_id = _task_id_of(self)
+    if not _begin_task_run(self, note_id):
+        return
+
     try:
         asyncio.run(_update_note_status(note_id, NoteStatus.learning))
+        asyncio.run(_report_progress(task_id, 0.1, "正在抽取知识点"))
         asyncio.run(_understand_document(note_id))
+        asyncio.run(_report_progress(task_id, 0.8, "正在建立卡片关联"))
+        _mark_task_succeeded(self)
     except Exception as exc:
         logger.error(f"理解任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:
@@ -433,6 +447,9 @@ def understand_document_task(self, note_id: str):
                 ))
             except Exception as update_err:
                 logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
+            _mark_task_failed(self, f"理解任务重试失败: {exc}")
+    finally:
+        _clear_progress_cache(task_id)
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)

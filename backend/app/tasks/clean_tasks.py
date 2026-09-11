@@ -32,6 +32,14 @@ from .common import (
     get_sync_session as _get_clean_session,
     update_note_status as _update_note_status,
     get_note_status as _get_note_status,
+    # 任务追踪（阶段 1′ 1.7）
+    begin_task_run as _begin_task_run,
+    mark_task_succeeded as _mark_task_succeeded,
+    mark_task_failed as _mark_task_failed,
+    mark_task_cancelled as _mark_task_cancelled,
+    report_task_progress as _report_progress,
+    clear_progress_cache as _clear_progress_cache,
+    task_id_of as _task_id_of,
 )
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
@@ -395,11 +403,16 @@ def clean_document_task(self, note_id: str):
     """
     import asyncio
 
+    task_id = _task_id_of(self)
+    if not _begin_task_run(self, note_id):
+        return
+
     try:
         # 检查笔记是否已被用户停止清洗
         current_status = asyncio.run(_get_note_status(note_id))
         if current_status == NoteStatus.cleaning_failed:
             logger.info(f"笔记已被用户停止清洗，跳过任务 (note_id={note_id})")
+            _mark_task_cancelled(self, "笔记已被用户停止清洗")
             return
 
         # 将状态更新为 cleaning
@@ -410,7 +423,10 @@ def clean_document_task(self, note_id: str):
         except Exception:
             pass
 
+        asyncio.run(_report_progress(task_id, 0.1, "正在清洗文本"))
         asyncio.run(_clean_document(note_id))
+        asyncio.run(_report_progress(task_id, 0.95, "清洗完成"))
+        _mark_task_succeeded(self)
     except Exception as exc:
         logger.error(f"清洗任务异常 (note_id={note_id}): {exc}", exc_info=True)
 
@@ -419,6 +435,7 @@ def clean_document_task(self, note_id: str):
             current_status = asyncio.run(_get_note_status(note_id))
             if current_status == NoteStatus.cleaning_failed:
                 logger.info(f"笔记已被用户停止清洗，放弃重试 (note_id={note_id})")
+                _mark_task_cancelled(self, "笔记已被用户停止清洗")
                 return
         except Exception:
             pass  # 状态查询失败时仍尝试重试
@@ -439,3 +456,6 @@ def clean_document_task(self, note_id: str):
                 ))
             except Exception as update_err:
                 logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
+            _mark_task_failed(self, f"清洗任务重试失败: {exc}")
+    finally:
+        _clear_progress_cache(task_id)

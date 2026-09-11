@@ -37,6 +37,13 @@ from .celery_app import celery_app
 from .common import (
     get_sync_session as _get_sync_session,
     update_note_status as _update_note_status,
+    # 任务追踪（阶段 1′ 1.7）：进度上报 + 生命周期包装
+    begin_task_run as _begin_task_run,
+    mark_task_succeeded as _mark_task_succeeded,
+    mark_task_failed as _mark_task_failed,
+    report_task_progress as _report_progress,
+    clear_progress_cache as _clear_progress_cache,
+    task_id_of as _task_id_of,
 )
 from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
@@ -74,7 +81,13 @@ async def _record_clean_task_id(note_id: str, task_id: str) -> None:
         write_note_meta(note)
 
 
-async def _convert_document(note_id: str, file_path: str, source_type: str, backend: Optional[str] = None):
+async def _convert_document(
+    note_id: str,
+    file_path: str,
+    source_type: str,
+    backend: Optional[str] = None,
+    task_id: Optional[str] = None,
+):
     """
     执行文档转换的核心逻辑
 
@@ -90,9 +103,12 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
         note_id: 笔记 ID
         file_path: 原始文件在对象存储中的路径
         source_type: 文件来源类型（pdf/image/docx/pptx/xlsx/audio/video）
+        backend: 解析后端选择（可选）
+        task_id: Celery 任务 ID，用于上报进度（可选；为空则不上报）
     """
     start_time = time.monotonic()
     logger.info("文档转换开始: note_id=%s, source_type=%s", note_id, source_type)
+    await _report_progress(task_id, 0.05, "正在准备文件")
 
     # 检查笔记是否已被用户删除（状态为 failed 且 error_message 为 "用户手动删除"）
     session_factory = _get_sync_session()
@@ -116,6 +132,7 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
         ext = os.path.splitext(file_path)[1] if "." in file_path else ""
         local_file = os.path.join(tmp_dir, f"input{ext}")
         download_file(settings.minio_bucket_original, file_path, local_file)
+        await _report_progress(task_id, 0.15, "正在解析文档")
 
         source_type_enum = SourceType(source_type)
         markdown_content = ""
@@ -259,6 +276,7 @@ async def _convert_document(note_id: str, file_path: str, source_type: str, back
 
     elapsed = time.monotonic() - start_time
     logger.info("文档转换完成: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+    await _report_progress(task_id, 0.95, "转换完成")
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
@@ -284,15 +302,22 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
     """
     import asyncio
 
+    task_id = _task_id_of(self)
+    if not _begin_task_run(self, note_id):
+        return
+
     try:
-        asyncio.run(_convert_document(note_id, file_path, source_type, backend))
+        asyncio.run(_convert_document(note_id, file_path, source_type, backend, task_id=task_id))
+        _mark_task_succeeded(self)
     except Exception as exc:
         logger.error("转换任务异常: note_id=%s, source_type=%s, error=%s", note_id, source_type, exc)
         # 转换失败，尝试重试
         try:
             self.retry(exc=exc)
         except Retry:
-            # 正常重试调度：交给 Celery 框架，不标记失败
+            # 正常重试调度：交给 Celery 框架，不标记失败。
+            # 任务记录保持 running，由下一次执行（同一 task_id）递增 attempt；
+            # 若 worker 在此期间崩溃，则由僵尸自愈兜底。
             raise
         except Exception:
             # Celery retry() 重试耗尽时会重新抛出原始异常
@@ -303,3 +328,6 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
                 note_id, NoteStatus.failed,
                 error_message=f"转换任务重试失败: {str(exc)}",
             ))
+            _mark_task_failed(self, f"转换任务重试失败: {exc}")
+    finally:
+        _clear_progress_cache(task_id)

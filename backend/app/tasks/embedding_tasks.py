@@ -38,6 +38,12 @@ from ..models.note import Note
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# 每篇笔记在向量检索阶段取的候选块数。
+# 旧值为 min(3, count)：一篇 300 页文档约 600 个 chunk，每篇笔记只捞 3 个，
+# 原文级细节几乎不可能命中。改为按候选集召回后再由相似度地板过滤，
+# 「召回广 + 过滤严」比「召回窄 + 不过滤」更接近正确做法。
+_VECTOR_CANDIDATES_PER_NOTE = 8
+
 # 模块级单例：缓存 EmbeddingService 实例
 # 避免每次任务调用都重新加载 ~2.2GB 的 BGE-M3 模型
 _embedding_service = None
@@ -233,7 +239,7 @@ async def _search_vectors_async(
 
                 query_results = collection.query(
                     query_embeddings=[question_embedding],
-                    n_results=min(3, count),
+                    n_results=min(_VECTOR_CANDIDATES_PER_NOTE, count),
                     include=["documents", "metadatas", "distances"],
                 )
 
@@ -243,7 +249,14 @@ async def _search_vectors_async(
                 results: List[Dict[str, Any]] = []
                 for i, doc in enumerate(query_results["documents"][0]):
                     distance = query_results["distances"][0][i]
-                    similarity = 1.0 / (1.0 + distance)
+                    # Chroma 默认距离为 L2 平方；单位向量下 cos = 1 - d/2。
+                    # 旧实现 1/(1+d) 不是余弦（无关内容得 0.333），见
+                    # EmbeddingService.similarity_from_l2_distance 的说明。
+                    similarity = EmbeddingService.similarity_from_l2_distance(distance)
+                    # 相似度地板：低于阈值视为不相关，不再塞进上下文。
+                    # 这是"检索召回即全部写进 prompt"这一幻觉燃料的阀门。
+                    if similarity < settings.vector_similarity_floor:
+                        continue
                     results.append({
                         "note_id": note_id,
                         "note_title": note_title,

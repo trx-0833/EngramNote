@@ -21,7 +21,6 @@ Celery 应用配置模块
 """
 
 import logging
-from pathlib import Path
 
 from celery import Celery
 from celery.schedules import crontab
@@ -40,8 +39,16 @@ apply_tempfile_compat()
 # 文件系统 broker 的消息目录，确保启动前已创建
 # 注意：Windows 上 kombu 文件系统传输的 data_folder_in 和 data_folder_out
 # 必须指向同一目录，否则跨目录文件移动操作会失败（os.rename 不支持跨盘符）
-_broker_dir = Path(settings.get_storage_dir().parent / "celery" / "broker")
+#
+# 必须走 settings.get_celery_broker_dir()：此前这里写的是
+# `Path(settings.get_storage_dir().parent / "celery" / "broker")`，
+# 而 get_celery_broker_url() 用的是 DATA_DIR —— 两者只在 storage_dir
+# 未配置时才碰巧相等。配置了 storage_dir / vault_dir（部署常规做法）后，
+# 这里会指向**用户主目录**，任务被投递到无人监听的目录。
+_broker_dir = settings.get_celery_broker_dir()
 _broker_dir.mkdir(parents=True, exist_ok=True)
+_result_dir = settings.get_celery_result_dir()
+_result_dir.mkdir(parents=True, exist_ok=True)
 
 # 创建 Celery 应用实例
 # broker: 消息队列，用于分发任务
@@ -65,6 +72,28 @@ celery_app.conf.update(
     # 延迟确认：任务执行完成后才确认（而非接收后确认），
     # 防止 worker 崩溃时任务丢失
     task_acks_late=True,
+    # ---- 任务可靠性（阶段 1′ 1.6）----
+    #
+    # 为什么必须在**全局**设置：文件系统 broker 没有 visibility timeout
+    # （不像 Redis/SQS 有可见性超时），任务一旦被 worker 取走又没有 ack，
+    # 就永久停在"未确认"状态——除非显式声明 reject_on_worker_lost。
+    # 此前只有 embedding_tasks 的两个任务单独设了这个参数，
+    # convert / clean / understand 三个**关键**任务（用户上传后必经的链路）
+    # 都没设：worker 崩在转换中途 = 该笔记永久卡在 converting。
+    task_reject_on_worker_lost=True,
+    # 超时兜底：外部 API（Mineru / LLM / ASR）挂住不返回时，
+    # 任务不能无限占用 worker。
+    # soft 先抛出 SoftTimeLimitExceeded 让任务有机会收尾（写失败状态、清理临时文件），
+    # hard 再强杀。两者差距留出收尾时间。
+    #
+    # 取值依据：实测转换链路的耗时量级 —— LLM 抽取约 7s、
+    # 嵌入模型首次加载约数十秒、大 PDF 转换可达数分钟。
+    # 30 分钟 hard / 28 分钟 soft 对小文件无影响，只兜住真正卡死的任务。
+    task_time_limit=1800,
+    task_soft_time_limit=1680,
+    # 结果后端是文件系统：任务失败时不重试 ack，交由上面的 reject_on_worker_lost
+    # 与僵尸任务自愈（reminder_tasks.reap_stale_tasks）兜底
+    task_acks_on_failure_or_timeout=True,
     # 预取倍数：设为 1 表示每次只预取一个任务，
     # 避免长任务（如大文件转换）阻塞后续短任务
     worker_prefetch_multiplier=1,
@@ -89,6 +118,7 @@ celery_app.conf.update(
         "app.tasks.understand_tasks",
         "app.tasks.embedding_tasks",
         "app.tasks.reminder_tasks",
+        "app.tasks.maintenance_tasks",
     ],
 )
 
@@ -106,6 +136,25 @@ celery_app.conf.update(
             "task": "app.tasks.reminder_tasks.send_daily_review_email",
             "schedule": crontab(hour=9, minute=0),
         },
+        # 每 5 分钟自愈一次僵尸任务（阶段 1′ 1.8）
+        #
+        # 周期取 5 分钟而非心跳超时（15 分钟）本身：心跳超时是"多久算死"，
+        # 扫描周期是"多久检查一次"。扫描更频繁只是多几次廉价查询，
+        # 却能让用户在被卡住后最多等 20 分钟就拿到可重试的失败态，
+        # 而不是等到下一次日级调度。
+        "reap-stale-tasks": {
+            "task": "app.tasks.maintenance_tasks.reap_stale_tasks",
+            "schedule": crontab(minute="*/5"),
+        },
+        # 每日 03:30 数据库快照（阶段 1′ 第 5 项）
+        #
+        # 选在凌晨且避开 00:30 的目标进度刷新：VACUUM INTO 会持有读事务，
+        # 与写任务错开可减少 SQLite 单写者争用。
+        # 保留份数由 settings.backup_keep 控制（默认 14 份 ≈ 两周）。
+        "daily-database-backup": {
+            "task": "app.tasks.maintenance_tasks.backup_database",
+            "schedule": crontab(hour=3, minute=30),
+        },
     },
 )
 
@@ -118,13 +167,41 @@ _task_logger = logging.getLogger("engramnote.task")
 
 def _worker_init(sender=None, **_kwargs):
     """
-    Worker 进程启动钩子：初始化统一日志配置
+    Worker 进程启动钩子：初始化统一日志配置 + 校验数据库 schema
 
     使 worker 中的业务日志与 FastAPI 进程使用完全一致的格式
     （上下文感知 + errors.log + JSON 日志）。
+
+    为什么这里要校验 schema（阶段 1′ 1.9）：
+    `init_db()` 此前**只在 `main.py` 启动时调用**（FastAPI 的 lifespan），
+    worker 从不建表、也不检查。于是"先起 worker、后起 API"或
+    "worker 独立部署"时，任务会在写入第一张表时静默失败，
+    日志里只看到一句 no such table，排查方向完全指错。
+
+    这里在 worker 启动阶段就显式建表/校验，失败则**记录 error 并继续**
+    （不直接退出：worker 可能只是先于 API 启动，强行退出会让
+    进程管理器陷入重启循环）。真正的可观测性由这条 error 日志承担。
     """
     setup_logging()
     _task_logger.info("Celery Worker 日志系统初始化完成")
+    _ensure_worker_schema()
+
+
+def _ensure_worker_schema() -> None:
+    """在 worker 进程内确保数据库 schema 就绪（失败只告警，不中断启动）"""
+    import asyncio
+
+    try:
+        from ..database import init_db
+
+        asyncio.run(init_db())
+        _task_logger.info("Worker 数据库 schema 校验完成")
+    except Exception as exc:  # pragma: no cover - 依赖运行环境
+        _task_logger.error(
+            "Worker 数据库 schema 校验失败（任务可能在写入时报 no such table）: "
+            "%s: %s",
+            type(exc).__name__, exc,
+        )
 
 
 def _task_prerun(task_id, task, *args, **kwargs):

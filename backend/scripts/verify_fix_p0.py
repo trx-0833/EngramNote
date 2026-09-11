@@ -8,37 +8,21 @@
 """
 import asyncio
 import os
-import shutil
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from sqlalchemy import text
 
+from _tmpdb import bootstrap_temp_db, teardown_temp_db
+
 
 async def main():
-    tmpdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tmp_test")
-    os.makedirs(tmpdir, exist_ok=True)
-    db_path = os.path.join(tmpdir, "test.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
-    # 覆盖数据库路径
-    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
-    from app.config import get_settings
-    get_settings.cache_clear()
+    # 临时库引导：清 settings/engine/session 三个 lru_cache 单例后再取，
+    # 否则 init_db 建在临时库、业务读写却仍在真实库（见 scripts/_tmpdb.py）
+    db_path = await bootstrap_temp_db("p0")
     import app.models  # noqa: F401 — 注册全部模型到 Base.metadata
     from app import database as db_mod
-
-    db_mod.settings = get_settings()
-    db_mod.database_url = db_mod.settings.get_database_url()
-    db_mod._is_sqlite = db_mod.database_url.startswith("sqlite")
-    db_mod.engine = db_mod.create_async_engine(db_mod.database_url, **{
-        "echo": False,
-        "connect_args": {"check_same_thread": False},
-    })
-    if db_mod._is_sqlite:
-        db_mod.register_sqlite_pragmas(db_mod.engine)
 
     await db_mod.init_db()
 
@@ -128,8 +112,7 @@ async def main():
         assert np_remaining == 0, f"note_projects 孤儿残留: {np_remaining}"
         print("[OK] delete_note 完整清理：knowledge_cards 与 note_projects 均无残留")
 
-    await db_mod.engine.dispose()
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    await teardown_temp_db(db_path)
     print("\n=== F-01/F-07 全部验证通过 ===")
 
 
