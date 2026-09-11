@@ -613,10 +613,6 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
         )
 
-    # 卡片行已删除（含第 2 步提升为独立节点的核心卡片），清除该用户的 RAG 卡片缓存
-    from ..services.rag_service import invalidate_kb_cache
-    invalidate_kb_cache(note.user_id)
-
     # ---- 5. 跨笔记聚合结果软标记与引用清理（SQL 端过滤命中行，避免全表拉取 + Python 过滤） ----
     from ..models.learning_goal import DailyPlan, LearningGoal
 

@@ -58,7 +58,7 @@ from ..schemas.knowledge import (
 )
 from ..services.note_service import get_note_detail
 from ..services.understanding_service import detect_card_duplicates
-from ..services.rag_service import RAGService, invalidate_kb_cache
+from ..services.rag_service import RAGService
 from ..services.llm_service import LLMService
 from ..tasks.understand_tasks import understand_document_task, generate_questions_task
 from ..config import get_settings
@@ -490,9 +490,6 @@ async def delete_card(
     )
     await db.delete(card)
     await db.commit()
-
-    # 卡片语料已变更，清除该用户的 RAG 卡片缓存
-    invalidate_kb_cache(current_user.id)
 
 
 @router.get("/{note_id}/duplicates")

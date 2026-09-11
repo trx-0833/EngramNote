@@ -7,18 +7,30 @@ RAG 问答服务模块
 - 通过 Celery worker 调用嵌入模型将问题向量化（隔离模型加载，避免主进程段错误）
 - 从 Chroma 向量数据库中检索相关文本块（通过 Celery 任务）
 - 使用 BM25 算法从知识卡片中检索相关内容（纯 Python 实现）
-- 使用 n-gram 关键词匹配检索知识卡片
-- 使用 RRF（Reciprocal Rank Fusion）融合三种检索结果
+- 使用 RRF（Reciprocal Rank Fusion）融合两路检索结果
 - 拼接上下文，调用 LLM 生成回答
 - 返回回答 + 引用来源
 
 设计决策：
 - 嵌入模型加载隔离到 Celery worker 进程，避免在 FastAPI 主进程中
   加载 BGE-M3 导致段错误（0xC0000005）
-- 混合检索策略：向量检索（语义）+ BM25（关键词）+ n-gram（字符匹配）
-- RRF 融合三种检索结果，互补提升召回率
-- 嵌入任务超时或失败时，自动降级为 BM25 + n-gram 检索
+- 混合检索策略：向量检索（语义）+ BM25（关键词）
+- RRF 融合两路检索结果，互补提升召回率
+- 嵌入任务超时或失败时，自动降级为仅 BM25 检索
 - 返回结果包含引用来源（笔记标题、章节、相关段落）
+
+## 为什么只有两路（n-gram 通道已删除，阶段 2.6）
+
+原实现有第三路"字符 n-gram 匹配"（`_search_relevant_cards`）。它与 BM25 的
+语料**完全相同**（都是 `_get_user_cards` 拉到的知识卡片），只是打分方式更粗糙：
+
+- BM25 有 IDF 加权与长度归一化；n-gram 只是"命中子串就累加子串长度"，
+  即一个**未归一化的词频计数**，没有任何区分度校准
+- 而 RRF 给三路**同等权重**（都乘 1/(k+rank)），于是一路明显更弱的检索器
+  与 BM25、向量通道拥有相同的投票权 —— 它主要在做的是**把噪声顶进 top-5**
+
+两路语料相同、其中一路纯噪声，属于"看起来更强、实际更弱"的典型。
+删除后 RRF 只融合向量与 BM25，两者语料不同（原文块 vs 卡片），互补性才是真的。
 """
 
 from __future__ import annotations
@@ -27,7 +39,6 @@ import asyncio
 import logging
 import math
 import re
-import time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, or_
@@ -40,23 +51,12 @@ from ..services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# 每用户卡片语料缓存 TTL（秒）：BM25/n-gram 检索复用，避免每次问答全量拉卡
-_KB_CACHE_TTL_SECONDS = 60
-
-# 模块级每用户卡片语料缓存：user_id -> (expire_at_monotonic, [KnowledgeCard, ...])
-_kb_cache: Dict[str, tuple[float, List[KnowledgeCard]]] = {}
-
-
-def invalidate_kb_cache(user_id: str) -> None:
-    """清除指定用户的卡片语料缓存（卡片增删 / purge 后调用，避免命中旧语料）"""
-    _kb_cache.pop(user_id, None)
-
 
 class RAGService:
     """
     检索增强生成服务
 
-    使用混合检索策略（向量 + BM25 + n-gram）从用户笔记中召回相关内容，
+    使用混合检索策略（向量 + BM25）从用户笔记中召回相关内容，
     通过 RRF 融合后作为上下文调用 LLM 生成回答。
 
     使用方式：
@@ -74,25 +74,44 @@ class RAGService:
             self._session_factory = async_session
         return self._session_factory
 
-    async def _get_user_cards(self, user_id: str) -> List[KnowledgeCard]:
+    async def _get_user_cards(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        获取指定用户可见的卡片语料（回收站笔记的卡片除外），带 60s TTL 进程内缓存
+        获取指定用户可见的卡片语料（回收站笔记的卡片除外）
 
-        卡片增删或 purge 时由 invalidate_kb_cache 主动失效；未失效时复用缓存，
-        避免每次 BM25/n-gram 检索都对 knowledge_cards 做全量拉取。
+        ## 为什么不再做进程内缓存（阶段 2.10）
+
+        原实现有一个模块级 `_kb_cache: Dict[str, tuple[float, List[KnowledgeCard]]]`，
+        60 秒 TTL、**没有任何容量上界**，且缓存的是**完整 ORM 实例**。三个问题：
+
+        1. **内存随用户数无界增长**：多用户场景下每个问过的用户都会留下
+           一份完整卡片列表（含 `content`／`source_text` 等 Text 字段）。
+           实测本库单用户 1183 张卡片，多用户即线性叠加且**永不主动回收**。
+        2. **缓存的是 ORM 实例**，与 session 生命周期绑在一起 ——
+           session 关闭后访问未加载属性会抛 `DetachedInstanceError`，
+           这是一类"平时不出现、并发时偶发"的失败。
+        3. **正确性靠调用方记得失效**：`invalidate_kb_cache()` 需要在卡片增删、
+           笔记 purge、理解流程等 5 处被正确调用。漏掉任何一处，
+           用户就会在最长 60 秒内看到**已删除的卡片**参与问答。
+           这种"靠约定维持正确性"的设计在本项目已经出过事（见 conftest 里
+           `test_db` 隔离"靠约定"导致真实库被写的记录）。
+
+        代价说清楚：现在每次问答都会查一次 `knowledge_cards`。
+        这是**有意的取舍** —— 本项目的定位是本地单用户自托管
+        （见 `docs/sqlite-single-writer.md`），卡片量在千级，
+        一次带索引的 SELECT 完全可接受；而"内存无界 + 正确性靠约定"
+        是不可接受的。若将来语料上到十万级，正解是建 FTS5 索引
+        （阶段 2′ 第 6 项）让 BM25 下沉到数据库，而不是在进程里缓存全量。
         """
-        now = time.monotonic()
-        cached = _kb_cache.get(user_id)
-        if cached is not None:
-            expire_at, cards = cached
-            if now < expire_at:
-                return cards
-            _kb_cache.pop(user_id, None)
-
         session_factory = self._get_session_factory()
         async with session_factory() as session:
             result = await session.execute(
-                select(KnowledgeCard).where(
+                select(
+                    KnowledgeCard.id,
+                    KnowledgeCard.note_id,
+                    KnowledgeCard.title,
+                    KnowledgeCard.content,
+                    KnowledgeCard.chapter_title,
+                ).where(
                     KnowledgeCard.user_id == user_id,
                     # 回收站笔记的卡片不进 QA 检索（独立/提升卡片保留）
                     or_(
@@ -103,10 +122,17 @@ class RAGService:
                     ),
                 )
             )
-            cards = list(result.scalars().all())
-
-        _kb_cache[user_id] = (now + _KB_CACHE_TTL_SECONDS, cards)
-        return cards
+            # 只取检索真正需要的 5 列，不缓存 ORM 实例
+            return [
+                {
+                    "card_id": row.id,
+                    "note_id": row.note_id,
+                    "title": row.title,
+                    "content": row.content,
+                    "chapter_title": row.chapter_title,
+                }
+                for row in result.all()
+            ]
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
         """
@@ -133,7 +159,7 @@ class RAGService:
                 return result[0]
             return None
         except Exception as e:
-            logger.warning(f"Celery 嵌入编码失败，将降级为 BM25 + n-gram 检索: {e}")
+            logger.warning(f"Celery 嵌入编码失败，将降级为仅 BM25 检索: {e}")
             return None
 
     async def _search_vectors_via_celery(
@@ -235,7 +261,7 @@ class RAGService:
         # 构建文档列表
         docs: List[Dict[str, Any]] = []
         for card in cards:
-            doc_text = f"{card.title} {card.content}"
+            doc_text = f"{card['title']} {card['content']}"
             doc_tokens = self._tokenize(doc_text)
             docs.append({
                 "card": card,
@@ -287,15 +313,15 @@ class RAGService:
             if score > 0:
                 card = doc["card"]
                 scored.append({
-                    "note_id": card.note_id,
+                    "note_id": card["note_id"],
                     "note_title": None,
-                    "content": card.content,
+                    "content": card["content"],
                     "similarity": score,
                     "block_index": 0,
                     # 保留卡片特有字段，便于后续构建 sources
-                    "card_id": card.id,
-                    "title": card.title,
-                    "chapter_title": card.chapter_title,
+                    "card_id": card["card_id"],
+                    "title": card["title"],
+                    "chapter_title": card["chapter_title"],
                 })
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
@@ -305,12 +331,11 @@ class RAGService:
     def _rrf_fusion(
         vector_results: List[Dict[str, Any]],
         bm25_results: List[Dict[str, Any]],
-        ngram_results: List[Dict[str, Any]],
         k: int = 60,
         top_k: int = 5,
     ) -> List[Dict[str, Any]]:
         """
-        Reciprocal Rank Fusion（RRF）融合多路检索结果
+        Reciprocal Rank Fusion（RRF）融合两路检索结果
 
         RRF 公式：score(d) = sum_i 1 / (k + rank_i(d))
         其中 rank_i(d) 是文档 d 在第 i 路结果列表中的排名（从 1 开始），
@@ -324,7 +349,6 @@ class RAGService:
         Args:
             vector_results: 向量检索结果列表
             bm25_results: BM25 检索结果列表
-            ngram_results: n-gram 检索结果列表
             k: RRF 平滑常数，默认 60
             top_k: 返回的最终结果数，默认 5
 
@@ -335,7 +359,7 @@ class RAGService:
         """
         fused: Dict[tuple, Dict[str, Any]] = {}
 
-        for result_list in [vector_results, bm25_results, ngram_results]:
+        for result_list in (vector_results, bm25_results):
             for rank_idx, item in enumerate(result_list):
                 note_id = item.get("note_id")
                 content = item.get("content", "") or ""
@@ -353,7 +377,7 @@ class RAGService:
                         "similarity": 0.0,
                         "block_index": item.get("block_index", 0),
                     }
-                    # 保留卡片特有字段（来自 BM25 / n-gram 结果）
+                    # 保留卡片特有字段（来自 BM25 结果）
                     for extra_key in ("card_id", "title", "chapter_title"):
                         if extra_key in item:
                             merged_item[extra_key] = item[extra_key]
@@ -364,59 +388,6 @@ class RAGService:
             fused.values(), key=lambda x: x["similarity"], reverse=True
         )
         return sorted_results[:top_k]
-
-    async def _search_relevant_cards(
-        self,
-        question: str,
-        user_id: str,
-        top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """
-        从知识卡片中检索与问题相关的内容（n-gram 字符匹配）
-
-        作为向量检索和 BM25 的补充，使用字符级 n-gram 匹配，
-        对中文短查询有较好的召回效果。
-
-        Args:
-            question: 用户问题
-            user_id: 用户 ID
-            top_k: 返回最相关的 top_k 个结果
-
-        Returns:
-            List[Dict]: 相关知识卡片列表，每个包含：
-                - note_id, card_id, title, content, chapter_title, score
-        """
-        cards = await self._get_user_cards(user_id)
-
-        # 简单的关键词匹配评分（支持中文逐字匹配）
-        question_lower = question.lower()
-        # 提取问题中的关键词（2-4字的中文词组）
-        question_keywords = set()
-        for length in range(4, 1, -1):  # 4字、3字、2字
-            for i in range(len(question_lower) - length + 1):
-                question_keywords.add(question_lower[i:i+length])
-        # 过滤掉太短或太常见的词
-        question_keywords = {kw for kw in question_keywords if len(kw) >= 2}
-
-        scored_cards = []
-        for card in cards:
-            card_text = f"{card.title} {card.content}".lower()
-            score = 0
-            for kw in question_keywords:
-                if kw in card_text:
-                    score += len(kw)  # 更长的匹配给更高分
-            if score > 0:
-                scored_cards.append({
-                    "note_id": card.note_id,
-                    "card_id": card.id,
-                    "title": card.title,
-                    "content": card.content,
-                    "chapter_title": card.chapter_title,
-                    "score": score,
-                })
-
-        scored_cards.sort(key=lambda x: x["score"], reverse=True)
-        return scored_cards[:top_k]
 
     async def retrieve_context(
         self,
@@ -430,15 +401,13 @@ class RAGService:
         1. 通过 Celery worker 编码问题（隔离嵌入模型加载）
         2. 通过 Celery worker 执行向量检索
         3. 执行 BM25 检索（纯 Python）
-        4. 执行 n-gram 检索（复用 _search_relevant_cards）
-        5. 使用 RRF 融合三路结果，取 top 5 作为上下文
-        6. 拼接上下文字符串
-        7. 构建引用来源（回查笔记标题）
+        4. 使用 RRF 融合两路结果，取 top 5 作为上下文
+        5. 拼接上下文字符串
+        6. 构建引用来源（回查笔记标题）
 
         降级策略：
-        - 向量编码/检索失败：仅使用 BM25 + n-gram
-        - BM25 失败：仅使用 n-gram
-        - 全部失败：返回空上下文与空来源
+        - 向量编码/检索失败：仅使用 BM25
+        - BM25 也失败：返回空上下文与空来源（调用方据此如实回答"没找到"）
 
         Args:
             question: 用户问题
@@ -464,13 +433,13 @@ class RAGService:
                     question_embedding, user_id, top_k=5
                 )
             except Exception as e:
-                logger.warning(f"向量检索失败，降级为 BM25 + n-gram: {e}")
+                logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
                 vector_results = []
         else:
-            logger.warning("嵌入编码失败，跳过向量检索，使用 BM25 + n-gram")
+            logger.warning("嵌入编码失败，跳过向量检索，使用仅 BM25")
 
         # 检索降级状态：编码失败 -> 仅关键词；编码成功但无向量命中 -> 混合（关键词为主）；
-        # 向量通道完整返回 -> 全向量三路融合
+        # 向量通道完整返回 -> 全向量两路融合
         if question_embedding is None:
             retrieval_status = "bm25_only"
         elif not vector_results:
@@ -485,19 +454,12 @@ class RAGService:
         except Exception as e:
             logger.warning(f"BM25 检索失败: {e}")
 
-        # 4. n-gram 检索
-        ngram_results: List[Dict[str, Any]] = []
-        try:
-            ngram_results = await self._search_relevant_cards(question, user_id, top_k=5)
-        except Exception as e:
-            logger.warning(f"n-gram 检索失败: {e}")
-
-        # 5. RRF 融合三路结果
+        # 4. RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
         fused_results = self._rrf_fusion(
-            vector_results, bm25_results, ngram_results, k=60, top_k=5
+            vector_results, bm25_results, k=60, top_k=5
         )
 
-        # 6. 合并上下文
+        # 5. 合并上下文
         #
         # 每段前加 **[编号]**：新提示词（阶段 2.8）要求回答逐条标注来源，
         # 没有编号它就无法引用 —— 而且编号让"哪句话来自哪段资料"在
@@ -567,15 +529,14 @@ class RAGService:
         RAG 问答完整流程（混合检索 + RRF 融合）
 
         在 retrieve_context() 检索结果基础上调用 LLM 生成回答：
-        1. 调用 retrieve_context() 完成检索阶段（向量 + BM25 + n-gram + RRF 融合）
-        2. 上下文为空时使用 LLM 自身知识回答（明确告知用户）
+        1. 调用 retrieve_context() 完成检索阶段（向量 + BM25 + RRF 融合）
+        2. 上下文为空时**如实说明"没找到"，不调用 LLM 兜底**（阶段 2.8）
         3. 上下文非空时调用 llm_service.rag_answer() 基于上下文回答
         4. 返回回答 + 引用来源 + 提供商
 
         降级策略：
-        - 向量编码/检索失败：仅使用 BM25 + n-gram
-        - BM25 失败：仅使用 n-gram
-        - 全部失败：使用 LLM 自身知识回答
+        - 向量编码/检索失败：仅使用 BM25
+        - BM25 也失败：上下文为空 → 如实回答"资料中没有找到"
 
         Args:
             question: 用户问题

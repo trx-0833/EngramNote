@@ -2945,18 +2945,51 @@ M-4 与 1.13 仍未做。）
 
 ### 阶段 2 · 重建检索层（2 周）—— 手术刀 3
 
-| # | 动作 | 验收 |
+> ⚠️ **本表原为 PostgreSQL 路线设计。** 在本项目已定路线
+> （SQLite 单机，见 `docs/sqlite-single-writer.md`）下：
+> **2.2（`chunks` 表 + pgvector）、2.5（`pg_bigm`）不执行** —— 它们依赖 PG 扩展，
+> 在 SQLite 上没有对应物。SQLite 路线的等价物见下方「阶段 2′ 的 SQLite 等价项」。
+> 其余各项与存储无关，已按 SQLite 路线落地，状态逐行标注。
+
+| # | 动作 | 验收 | 状态 |
+|---|---|---|---|
+| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk | ⬜ 待做（见下方风险说明） |
+| 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 | ⛔ 不执行（无 PG） |
+| 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 | ⬜ 待做（先要 2.9 的基线） |
+| 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL | ⬜ 待做 |
+| 2.5 | 中文全文检索用 `pg_bigm`（或 `zhparser`），替换纯 Python BM25 | 中文召回质量可测 | ⛔ 不执行（无 PG）。SQLite 等价物是 **FTS5**，见下方 |
+| 2.6 | **删除 n-gram 通道**；RRF 改为加权融合（向量 / BM25 可配权重） | 少一路噪声 | ✅ **已落地**（附录 J）：通道已删；RRF 现只融合两路。加权可配留待 2.9 的基线给出权重依据 |
+| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 | ⬜ 待做 |
+| 2.8 | **重写 RAG 提示词**：强制"仅依据给定资料"；无据则明确回答"资料中没有"；要求逐条标注引用编号 | 无据问题不再被编造 | ✅ 已落地（提交 `5da6d8a`） |
+| 2.9 | **检索质量评测集**：造 50 条 (问题, 期望命中 chunk) 的离线评测，纳入 CI | Recall@5 / MRR 有基线 | ⬜ 待做（**必须先于 2.3/2.4**） |
+| 2.10 | 删除 `_kb_cache` 模块级无界缓存 | 内存不随用户增长 | ✅ **已落地**（附录 J）：缓存与失效入口一并删除，语料改为按需查询 |
+
+#### 阶段 2′ 的 SQLite 等价项（替代 2.2 / 2.5）
+
+| # | 动作 | 目的 |
 |---|---|---|
-| 2.1 | **统一分块**：`markdown_segmenter` 成为唯一实现；删除 `cleaning_service.split_into_chunks`（-250 行） | 同一文档全链路同一套 chunk |
-| 2.2 | 新增 `chunks` 表 + `pgvector` 列（HNSW, `vector_cosine_ops`） + `tsvector` 列 | 一次迁移建好 |
-| 2.3 | 索引源改为**清洗后的原文 Markdown**（不再索引卡片） | 检索命中原文段落 |
-| 2.4 | 删除 Chroma 依赖与 90+ collection 目录；删除跨 collection 遍历逻辑（`embedding_tasks.py:196-262`） | 查询从 N 次降到 1 次 SQL |
-| 2.5 | 中文全文检索用 `pg_bigm`（或 `zhparser`），替换纯 Python BM25 | 中文召回质量可测 |
-| 2.6 | **删除 n-gram 通道**；RRF 改为加权融合（向量 / BM25 可配权重） | 少一路噪声 |
-| 2.7 | **引用可回跳**：chunk 存 `char_start/char_end/heading_path`；前端点击引用 → 定位并高亮 | 引用能跳到段落 |
-| 2.8 | **重写 RAG 提示词**：强制"仅依据给定资料"；无据则明确回答"资料中没有"；要求逐条标注引用编号 | 无据问题不再被编造 |
-| 2.9 | **检索质量评测集**：造 50 条 (问题, 期望命中 chunk) 的离线评测，纳入 CI | Recall@5 / MRR 有基线 |
-| 2.10 | 删除 `_kb_cache` 模块级无界缓存 | 内存不随用户增长 |
+| 2.2′ | `chunks` 表（纯 SQLite，无扩展）承载 chunk 文本 + `char_start/char_end/heading_path` + 向量 BLOB | 支撑 2.7 回跳与 2.3 语料切换 |
+| 2.5′ | **FTS5** 全文索引（SQLite 内置）替换纯 Python BM25 | 免维护索引；这是 A-5 在 SQLite 路线下的正解 |
+| 2.4′ | 评估 `sqlite-vec` 扩展替代 Chroma 的多 collection | 消除"每篇笔记一个 collection、检索要遍历全部" |
+
+#### 2.1 为什么不是"删掉一个函数"那么简单
+
+原表把它写成一处删除（-250 行），实测发现**两个分块器的职责不同、不能直接砍掉任一个**：
+
+| | `cleaning_service.split_into_chunks` | `markdown_segmenter` |
+|---|---|---|
+| 产出 | `{index, content, start_line, end_line, heading_context}` | 纯文本段列表 |
+| 用途 | **检索 chunk**（`clean_tasks.py:224` → 嵌入 → Chroma） | **LLM 抽取的填充边界**（`understanding_service.py:166`） |
+| 特性 | 段落级、带 overlap、带标题路径与行号 | 结构块原子性（不切破表格/代码块/列表） |
+
+所以真正的目标是**一个同时具备两侧能力的 chunker**：结构块原子性
+（`markdown_segmenter` 的强项）+ 字符偏移 / 标题路径 / 可选 overlap
+（`split_into_chunks` 的强项，也是 2.7 回跳的前提）。
+直接删掉 `split_into_chunks` 会连带丢掉 2.7 所需的定位信息，
+而直接删掉 `markdown_segmenter` 会让抽取重新截断表格与代码块。
+
+**顺序约束**：2.1 必须先做（2.1 → 2.7 → 2.3），而 2.9 的评测集要先于 2.3/2.4 ——
+否则"卡片语料换成原文语料"这件事**无法判断是变好还是变差**。
 
 **阶段 2 之后**：A-1 / A-2 / A-4 / A-5 / A-6 / A-7 / A-9 / A-14 / D-9 / D-10 全部消除。
 **产品核心承诺（"基于你的资料回答，可追溯"）首次成立。**
@@ -3823,6 +3856,109 @@ FAILED test_detects_orphan_file
   若 Vault 规模上到万级对象，再考虑物化 `vault_files`。
 - `backend/data_backup_e2e/`（4.67GB）删除待确认
 - 旧夹具 `u1`/`u2` 的 4 条 `missing_file` 待处理（历史包袱，非本轮引入）
+
+---
+
+## 附录 J · 阶段 2 起步：删除类改动与一处计划修正（2026-09-11）
+
+本仓库的检索层几乎没有行为断言 —— `TestRAGService` 只有三个
+"类存在 / 方法存在 / 是 async"的断言，**在实现完全错误时也会通过**。
+检索层却是产品承诺（"基于你的资料回答，可追溯"）的唯一承载。
+因此本轮先把两处**删除类**改动做完并锁死，再动语料。
+
+删除类改动的回归风险特别高：代码删掉了、没有测试守着，
+"将来某次重构顺手加回来"很容易发生，而加回来之后没人记得当初为什么删。
+
+### J.1 2.6 删除 n-gram 检索通道
+
+原实现有三路检索：向量 + BM25 + n-gram（`_search_relevant_cards`）。
+问题在于 **n-gram 与 BM25 的语料完全相同**（都来自 `_get_user_cards`），
+只是打分方式更粗糙：
+
+| | BM25 | n-gram |
+|---|---|---|
+| 打分 | `IDF × tf×(k1+1) / (tf + k1×(1-b+b×|D|/avgdl))` | `Σ 命中子串长度` |
+| IDF 加权 | 有 | 无 |
+| 长度归一化 | 有 | 无 |
+| 实质 | 有校准的相关性 | **未归一化的词频计数** |
+
+而 RRF 给三路**同等权重**（都乘 `1/(k+rank)`），于是一路明显更弱的检索器
+与 BM25、向量通道拥有相同的投票权 —— 它实际在做的是**把噪声顶进 top-5**。
+
+两路语料相同、其中一路纯噪声，是"看起来更强、实际更弱"的典型。
+删除后 RRF 只融合向量与 BM25，两者语料不同（原文块 vs 卡片），互补性才是真的。
+
+RRF 的**加权可配**没有一起做：权重必须由评测数据给出依据，
+凭空设一组权重只是把一个未调参的默认值换成另一个（见 A-14）。
+
+### J.2 2.10 删除 `_kb_cache` 无界缓存
+
+原实现是 `_kb_cache: Dict[str, tuple[float, List[KnowledgeCard]]]`，
+60 秒 TTL、**没有任何容量上界**、缓存的是**完整 ORM 实例**。三个问题：
+
+1. **内存随用户数无界增长** —— 多用户场景下每个问过的用户都留下一份完整
+   卡片列表（含 `content`/`source_text` 等 Text 字段）。实测本库单用户
+   1183 张卡片，多用户即线性叠加且**永不主动回收**。
+2. **缓存 ORM 实例** —— 与 session 生命周期绑定，session 关闭后访问未加载
+   属性会抛 `DetachedInstanceError`，属于"平时不出现、并发时偶发"的失败。
+3. **正确性靠调用方记得失效** —— `invalidate_kb_cache()` 需要在 5 处被正确
+   调用（卡片增删、笔记 purge、理解流程、联合分析、拓展生成）。
+   漏掉任何一处，用户就会在最长 60 秒内看到**已删除的卡片**参与问答。
+   这类"靠约定维持正确性"的设计在本项目**已经出过事**：
+   `test_db` 隔离曾经也靠约定，结果测试静默写进了真实库（见 conftest 记录）。
+
+改为每次问答按需查询，**只取检索真正需要的 5 列**（不取 `source_text` 等大字段）。
+代价说清楚：每次问答多一次带索引的 SELECT。这是有意的取舍 ——
+本项目定位本地单用户自托管（`docs/sqlite-single-writer.md`），卡片量在千级，
+一次 SELECT 完全可接受；"内存无界 + 正确性靠约定"不可接受。
+若语料上到十万级，正解是 FTS5（2.5′）让 BM25 下沉到数据库，
+而不是在进程里缓存全量。
+
+`invalidate_kb_cache` 及其 4 处调用点一并删除，并加了一条**静态检查**用例：
+任何 `app/` 下的模块再引用这两个名字就失败（`ImportError` 只在那个端点被
+访问时才暴露，静态检查能提前拦住）。
+
+### J.3 新增 `tests/test_rag_retrieval.py`（17 用例）
+
+| 组 | 锁什么 |
+|---|---|
+| `TestNGramChannelRemoved` | 方法不得存在；`_rrf_fusion` 参数恰好是两路；**融合分数必须恰为两路 rank 贡献之和**（若三路回归会算成 `3/61`）；去重与排序 |
+| `TestNoUnboundedCache` | `_kb_cache` / `invalidate_kb_cache` 不得存在；`app/` 全局静态检查无残留引用 |
+| `TestCardCorpus` | 返回**普通 dict 而非 ORM 实例**；回收站笔记的卡片排除；独立卡片（`note_id` 为 NULL）保留；跨用户隔离 |
+| `TestBM25Tokenizer` | 中文 2-gram、英文小写切分、中英混合、单汉字无 bigram（已知局限，记录成断言） |
+
+其中"融合分数 = `2/61`"是**行为级**验证，比"方法不存在"更强：
+它不依赖实现细节，即使将来把 RRF 重写成别的形式，只要偷偷多融一路就会失败。
+
+### J.4 计划修正：2.1 不是"删掉一个函数"
+
+原表把 2.1 写成一处删除（`markdown_segmenter` 成为唯一实现，-250 行）。
+实测两个分块器**职责不同，不能直接砍掉任一个**：
+
+- `cleaning_service.split_into_chunks` → **检索 chunk**（`clean_tasks.py:224`
+  → 嵌入 → Chroma），带 `start_line/end_line/heading_context` 与 overlap
+- `markdown_segmenter` → **LLM 抽取的填充边界**（`understanding_service.py:166`），
+  强在结构块原子性（不切破表格/代码块/列表）
+
+真正的目标是**一个同时具备两侧能力的 chunker**，而
+`char_start/char_end/heading_path` 正是 2.7 回跳的前提。
+已在正文阶段 2 补上顺序约束：**2.1 → 2.7 → 2.3，且 2.9 必须先于 2.3/2.4** ——
+否则"卡片语料换成原文语料"无法判断是变好还是变差。
+
+同时确认 **2.2 / 2.5 在 SQLite 路线上不可执行**（依赖 pgvector / pg_bigm），
+正文已列出 SQLite 等价项 2.2′ / 2.4′ / 2.5′（`chunks` 表 + `sqlite-vec` + FTS5）。
+
+### J.5 交付
+
+| 项 | 文件 | 验证 |
+|---|---|---|
+| n-gram 通道删除 | `app/services/rag_service.py` | RRF 只融合两路 |
+| 无界缓存删除 | `app/services/rag_service.py` | 语料按需查询、只取 5 列 |
+| 调用点清理 | `api/knowledge.py`、`api/understanding.py`、`services/note_service.py` | 静态检查无残留 |
+| 回归测试 | `tests/test_rag_retrieval.py`（17 用例） | 含行为级融合分数断言 |
+| 计划修正 | 本文件阶段 2 表格 + 2.1 风险说明 | — |
+
+测试总数：369 → **386 passed / 3 skipped**；ruff app tests scripts 全绿；真库零改动。
 
 ---
 
