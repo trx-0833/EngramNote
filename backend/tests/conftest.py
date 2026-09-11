@@ -65,6 +65,66 @@ os.environ.setdefault(
 
 
 # ---------------------------------------------------------------------------
+# 会话级数据库隔离：默认 DATABASE_URL 指向临时文件，绝不碰真实库
+#
+# ## 为什么需要（本轮 CI 实测）
+#
+# 只有一个**会话级**的默认值，才能保证"没接 `test_db` fixture 的用例"
+# 也落到一个已建表的库上。此前的行为取决于环境：
+#
+#   本机：真实库 backend/data/db/engramnote.db 存在且已建表 → 用例静默读写真实库
+#   CI  ：该文件不存在（被 .gitignore 忽略）→ SQLite 自动创建空文件
+#         → 任何查询报 `no such table: users` → 500
+#
+# CI 上表现为 `test_rate_limit.py` 连续 10 次登录返回 500
+# （实测日志：`未处理异常 ... no such table: users`），本机却全绿 ——
+# 一个**只在 CI 复现**的失败。
+#
+# 修法：把这个默认值显式设到临时库，并在 pytest 启动时建表。
+#   - 没接 fixture 的用例：落到会话临时库（已建表）→ 行为确定
+#   - 接了 `test_db` 的用例：落到各自的独立临时库 → 互不干扰
+#   - 真实库：任何情况下都不再被测试触碰
+#
+# `setdefault`：CI 或开发者若显式提供了 DATABASE_URL，以外部值为准。
+# ---------------------------------------------------------------------------
+
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+_SESSION_DB_DIR = tempfile.mkdtemp(prefix="engramnote-test-session-")
+_SESSION_DB_PATH = os.path.join(_SESSION_DB_DIR, "session.db")
+os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_SESSION_DB_PATH}")
+
+
+def _cleanup_session_db() -> None:
+    """进程退出时清理会话临时库（含 WAL 兄弟文件）"""
+    shutil.rmtree(_SESSION_DB_DIR, ignore_errors=True)
+
+
+atexit.register(_cleanup_session_db)
+
+
+def _init_session_db() -> None:
+    """在会话临时库上建表（`pytest_configure` 调用一次）
+
+    幂等：表已存在时 `create_all` 是空操作（我们从不删表）。
+
+    失败时**不抛异常**：建表失败只影响"没接 `test_db` fixture 的用例"，
+    而那本该是异常路径；让整个会话起不来反而会掩盖真正的问题。
+    """
+    import asyncio
+
+    try:
+        import app.models  # noqa: F401 — 注册全部表定义
+        from app import database as db_mod
+
+        asyncio.run(db_mod.init_db())
+    except Exception as exc:  # pragma: no cover - 取决于运行环境
+        print(f"[conftest] 会话临时库建表失败（不影响接了 test_db 的用例）: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # 网络安全守卫：默认阻断一切真实外呼
 # ---------------------------------------------------------------------------
 
@@ -100,6 +160,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "slow: 耗时用例")
 
     _install_real_db_write_guard()
+    _init_session_db()
 
     if _network_tests_allowed():
         return

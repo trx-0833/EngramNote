@@ -34,17 +34,37 @@ def _engine_url() -> str:
     return str(db_mod.get_engine().url)
 
 
-def test_outside_fixture_points_at_real_db():
-    """fixture 之外，单例应指向真实生产库"""
-    real = os.path.abspath(
+def _real_db_path() -> str:
+    return os.path.abspath(
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "data", "db", "engramnote.db")
     )
-    url = _engine_url().replace("/", os.sep)
-    assert "tmp_test" not in url, f"fixture 之外不应指向临时库: {url}"
-    assert real.replace(os.sep, "/") in _engine_url().replace("\\", "/"), (
-        f"fixture 之外应指向真实库，实际: {_engine_url()}"
+
+
+def test_outside_fixture_never_points_at_real_db():
+    """**fixture 之外，单例也绝不能指向真实生产库**
+
+    这条断言在会话级隔离引入后**反转了**，值得说明原因。
+
+    旧行为是"fixture 之外指向真实库" —— 那看起来像在描述一个正常状态，
+    实际是个陷阱：任何忘了接 `test_db` 的用例都会静默读写生产库。
+    本机因为真实库文件存在（且已建表），这种用例会"通过"；
+    CI 上该文件不存在（被 .gitignore 忽略），SQLite 自动创建空文件，
+    于是报 `no such table: users` → 500。
+
+    本轮 CI 实测：`test_rate_limit.py` 连续 10 次登录返回 500，
+    本机全绿 —— 一个只在 CI 复现的失败。
+
+    现在 `tests/conftest.py` 在 import 阶段就把 `DATABASE_URL` 默认值
+    设到会话临时库，因此**任何位置**都不该再看到真实库路径。
+    """
+    url = _engine_url().replace("\\", "/")
+    real = _real_db_path().replace("\\", "/")
+
+    assert real not in url, (
+        f"数据库单例指向了真实生产库 —— 测试正在读写用户数据！\n  实际: {url}"
     )
+    assert "tmp_test" not in url, f"fixture 之外不应指向 test_db 的临时库: {url}"
 
 
 def test_engine_and_session_factory_are_consistent(test_db):
