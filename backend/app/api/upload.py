@@ -622,7 +622,16 @@ async def prepare_upload(
             page_count = pdf_crop.get_pdf_page_count(str(dest))
         except ValueError as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=f"PDF 解析失败: {e}") from e
+            # 阶段 6.8：**不把底层异常文本回给客户端**。
+            # `get_pdf_page_count` 抛出的 ValueError 里通常带着**服务器上的绝对路径**
+            # （PyMuPDF/解析库的错误信息形态），把它原样放进 detail 等于把内部
+            # 目录结构送给任何能上传文件的人。详情只进服务端日志，
+            # 客户端拿 request_id 来对（响应体已统一带 request_id）。
+            logger.warning("PDF 页数解析失败（详情只进日志）: file=%s, error=%s", dest.name, e)
+            raise HTTPException(
+                status_code=400,
+                detail="PDF 解析失败：文件可能已损坏或加密，请确认后重试",
+            ) from e
 
     logger.info(
         "上传暂存成功: user_id=%s, filename=%s, size=%d, source_type=%s, page_count=%s",
@@ -736,7 +745,16 @@ async def commit_upload(
                     current_user.id, display_name, len(pages), page_count,
                 )
             except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"裁剪失败: {e}") from e
+                # 阶段 6.8：同上 —— `parse_page_spec` / `crop_pdf` 的 ValueError
+                # 会带上服务器路径与库内部细节，只进日志，不回客户端。
+                logger.warning(
+                    "PDF 裁剪失败（详情只进日志）: file=%s, spec=%s, error=%s",
+                    src_path.name, crop_page_range, e,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDF 裁剪失败：页码范围可能无效，或文件已损坏",
+                ) from e
 
         # 计算待存储文件的 SHA-256（裁剪版或原文件）
         sha256 = hashlib.sha256()

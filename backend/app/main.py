@@ -112,6 +112,50 @@ def _enforce_single_writer() -> None:
 
 
 @asynccontextmanager
+def _log_security_posture() -> None:
+    """启动时打印**生效的**安全姿态（阶段 6.8）
+
+    ## 为什么需要它
+
+    阶段 4.10 把 `debug` 拆成了三个开关之后，"当前跑在什么姿态下"不再是一个
+    布尔值能看出来的。而**部署事故的典型形态正是姿态不对**：
+    生产环境误用 `APP_ENV=dev` → 异常会回吐 traceback（泄露堆栈与路径）、
+    JWT 密钥在缺失时自动生成（多实例之间密钥不一致，且换容器即失效）；
+    或者误开 `LOG_SQL=true` → 日志里出现 bcrypt 哈希与卡片正文。
+
+    这些都不会报错，只会静静地降低安全性。因此在启动日志里**明确写一行**
+    生效姿态，并在危险组合下额外告警 —— 让"配错了"在启动那一刻就可见，
+    而不是等到出事。
+
+    ⚠️ 它只记录，不阻止启动：把"生产环境不能用 dev"硬编码成拒绝启动，
+    会让本地开发与演示环境无法运行（本项目正是本地跑为主）。
+    可观测 + 显式告警是这里更合适的手段。
+    """
+    from .config import get_settings
+
+    cfg = get_settings()
+    logger.info(
+        "安全姿态 | app_env=%s | LLM=%s | SQL 日志=%s | traceback 回吐=%s | "
+        "JWT 密钥=%s",
+        cfg.app_env,
+        cfg.get_llm_config()["provider"],
+        "开" if cfg.log_sql else "关",
+        "开" if cfg.is_dev else "关",
+        "已配置" if cfg.jwt_secret_key else "缺失",
+    )
+    if cfg.is_dev:
+        logger.warning(
+            "当前为开发环境（APP_ENV=dev）：异常会回吐 traceback，"
+            "JWT 密钥在缺失时会自动生成到 data/.jwt-secret。"
+            "**生产部署务必设为 APP_ENV=prod 并显式配置 JWT_SECRET_KEY**"
+        )
+    if cfg.log_sql:
+        logger.warning(
+            "已开启 SQL 日志（LOG_SQL=true）：日志包含 bcrypt 哈希与知识卡片/题目正文，"
+            "请勿用于生产"
+        )
+
+
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理
@@ -128,6 +172,8 @@ async def lifespan(app: FastAPI):
     setup_logging()
     # 启动时：拒绝会破坏 SQLite 单写者假设的部署配置
     _enforce_single_writer()
+    # 启动时：把生效的安全姿态写进日志（阶段 6.8）
+    _log_security_posture()
     logger.info("EngramNote 应用启动")
     # 启动时：初始化数据库，创建所有数据表
     await init_db()
