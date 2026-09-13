@@ -8,6 +8,14 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-blue.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev)
 
+> **文档校准（2026-09-11，overhaul-plan §2.1 S-4）**：本 README 此前的若干描述与
+> 代码实际不符，已按仓库现状逐条核对修正 —— 包括**后端端口（8001 而非 8000）**、
+> **向量存储（`chunks` 表，不再是 Chroma）**、**混合检索路数（两路，n-gram 通道已删除）**、
+> **迁移机制（`init_db()` + `_migrate_sqlite`，不调用 alembic）**、
+> **容器化（历史遗留、未验证）**。
+> 架构层面的完整说明以 `docs/overhaul-plan.md` 为唯一执行依据；
+> `docs/architecture.md` 是重构前快照，`docs/decisions.md` 已转为只读归档。
+
 ---
 
 ## 目录
@@ -37,7 +45,7 @@
 - **AI 清洗**：规则去噪 + BGE-M3 向量相似度去重，生成干净的学习副本（三视图：原始 / 清洗 / 行级 Diff 对比）
 - **AI 理解**：章节摘要、4 类知识卡片提取（概念 / 公式 / 问答 / 定义）、自动出题（选择 / 填空 / 简答）
 - **知识图谱**：嵌入相似度 + LLM 双机制自动推断卡片间关系，力导向图可视化
-- **智能问答**：基于知识库的 RAG 问答，附引用来源；V2.0 升级为三路混合检索（向量 + BM25 + n-gram）+ RRF 融合，支持 SSE 流式输出
+- **智能问答**：基于知识库的 RAG 问答，附引用来源；混合检索为**两路**（向量 + BM25，RRF 融合），支持 SSE 流式输出
 - **间隔重复**：SM-2 算法调度复习，薄弱点优先，掌握度双因子公式（60% 正确率 + 40% SM-2）
 - **学习评估**：笔记比对 + 盲点检测 + 改进建议
 - **笔记版本历史**（V2.0）：手动编辑 / 自动清洗 / 系统快照三类版本，支持 diff 对比与一键恢复
@@ -53,9 +61,13 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
 
 - **RAG 向量检索修复与混合搜索**
   - 将 BGE-M3 嵌入模型加载隔离到 Celery Worker 进程（`backend/app/tasks/embedding_tasks.py`），彻底解决 FastAPI 主进程段错误
-  - `rag_service.py` 重构为三路混合检索：向量召回 + 纯 Python BM25（k1=1.5, b=0.75，零新依赖）+ n-gram
-  - 采用 RRF（Reciprocal Rank Fusion）融合多路结果，公式 `score(d) = Σ 1/(k + rank_i(d))`，k=60
-  - 降级策略：向量失败 → BM25 + n-gram；全部失败 → LLM 自身知识
+  - `rag_service.py` 重构为混合检索：向量召回 + 纯 Python BM25（k1=1.5, b=0.75，零新依赖）
+  - ⚠️ 原文写的是"三路（含字符 n-gram）"：**n-gram 通道已在 overhaul-plan 阶段 2.6 删除**。
+    原因是它与 BM25 高度重叠却明显更弱（BM25 有 IDF 加权与长度归一化，
+    n-gram 只是"命中子串就累加长度"），而 RRF 给三路同等投票权 ——
+    它实际在做的是把噪声顶进 top-5。
+- 采用 RRF（Reciprocal Rank Fusion）融合多路结果，公式 `score(d) = Σ 1/(k + rank_i(d))`，k=60
+- 降级策略：向量失败 → 仅 BM25；全部失败 → LLM 自身知识（并明确告知"资料中未找到"）
 - **流式问答输出（SSE）**
   - `llm_service.py` 新增 `chat_stream()`，基于 httpx `stream=True` 实现 token 级流式推送
   - 新端点 `POST /api/understanding/ask/stream`，SSE 事件：`token` / `sources` / `done` / `error`
@@ -75,9 +87,13 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
   - 可选 SMTP 邮件提醒（配置开启），Celery Beat 每日 09:00 发送
   - 前端 `notifications.ts` 浏览器通知工具（权限请求 / 通知发送 / 免打扰 / sessionStorage 去重）
   - `ReminderBanner.tsx` 提醒横幅；免打扰时段默认 22:00-08:00
-- **数据库迁移 004**
-  - `database.py` 的 `_migrate_sqlite` 新增 3 张表（note_versions / learning_goals / daily_plans）防御性建表
-  - `backend/alembic/versions/004_v2_models.py` Alembic 迁移脚本
+- **数据库迁移**
+  - 运行时迁移由 `database.py` 的 `init_db()` + `_migrate_sqlite()` 负责：
+    `create_all()` 建缺失的表，`_migrate_sqlite()` 用 `ALTER TABLE` 补缺失的列
+    （**只加不减、不删数据**）
+  - `backend/alembic/versions/001–010` 是**历史遗留**的迁移脚本，
+    当前启动路径**不会调用 alembic**；`_migrate_sqlite` 里的注释会标注
+    "对应 Alembic 00X"，仅作为历史对照
 - **项目隔离 + 状态旁载（Vault 目录结构）**
   - 存储改为「项目 + 状态旁载」结构：新增 `projects` 表（迁移 005），每个笔记归属一个项目目录
   - 目录树：`{vault}/{user_id}/{project_slug}/source/`（原始文件）、`output/markdown/`（`{base}.md` 原始转换 + `{base}.clean.md` 清洗副本）、`output/meta/`（`{base}.json` 状态旁载镜像）、`history/versions/`（版本归档）、`output/assets/` 与 `cache/`（预留）
@@ -99,11 +115,11 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
 | AI 理解 | DeepSeek / GLM API | 通过 OpenAI 兼容接口调用；httpx stream=True 实现流式 |
 | 文档解析 | MinerU | PDF → Markdown（保留 LaTeX 公式、表格） |
 | 嵌入模型 | BGE-M3 (BAAI/bge-m3) | 多语言嵌入，ModelScope 优先下载；V2.0 隔离到 Celery Worker 进程 |
-| 向量存储 | Chroma | 嵌入式向量数据库 |
-| 混合检索 | 向量 + BM25（纯 Python）+ n-gram + RRF 融合 | V2.0 RAG 三路混合检索，零新依赖 |
+| 向量存储 | **`chunks` 表**（与 BGE-M3 向量同库同表） | 阶段 2.4 起不再使用 Chroma：向量、定位字段（`char_start/char_end/heading_path`）与词法索引同源，一次 SQL 完成向量检索 |
+| 混合检索 | 向量 + BM25（纯 Python）+ RRF 融合 | 两路（n-gram 通道已按阶段 2.6 删除，理由见上）；chunk 级词法检索用 SQLite **FTS5** |
 | 前端 | React 18 + TypeScript + Vite | 学术优雅视觉设计 |
 | 图谱可视化 | react-force-graph-2d | 力导向图，4 种节点形状 |
-| 容器化 | Docker + Docker Compose + Nginx | 一键部署 |
+| 容器化 | Docker + Docker Compose + Nginx（**历史遗留，未验证**） | 仓库里仍有 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但本项目实际按下文"快速开始"以本地进程方式运行；曾因磁盘空间不足明确放弃容器化与 PG/Redis |
 
 ---
 
@@ -210,16 +226,20 @@ chmod +x start.sh
 ```
 
 启动脚本会自动运行环境检测，然后启动 3 个服务：
-- Backend API（端口 8000）
+- Backend API（端口 **8001**，见 `start.bat` 的 `BACKEND_PORT`）
 - Celery Worker（异步任务）
 - Frontend（端口 5173）
+
+> ⚠️ 后端端口是 **8001 而不是 8000**：`start.bat` 明确设置了 `BACKEND_PORT=8001`。
+> 下面的手动启动命令请与之一致，否则前端代理（`vite.config.ts` 里的 target）
+> 会指向一个没有服务的端口。
 
 **方式二：手动启动（3 个终端）**
 
 ```bash
 # 终端 1：后端 API
 cd backend
-python -m uvicorn app.main:app --reload --port 8000 --reload-dir app
+python -m uvicorn app.main:app --reload --port 8001 --reload-dir app
 
 # 终端 2：Celery Worker（异步任务）
 cd backend
@@ -243,6 +263,17 @@ npm run dev
 ---
 
 ## Docker 部署
+
+> ⚠️ **本节未经本项目验证，且当前部署方式不是 Docker。**
+>
+> 仓库里保留了 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但：
+>
+> - 本项目实际以**本地进程**方式运行（见上面"启动项目"，后端 8001 / 前端 5173）；
+> - 项目曾因**磁盘空间不足**明确放弃容器化与 PostgreSQL/Redis；
+> - 已知问题（未修）：`nginx.conf` 的 `/api/` 未设 `client_max_body_size`
+>   （大文件上传会 413）、`frontend/.dockerignore` 未排除 `node_modules`。
+>
+> 因此下面的命令**不要当作可用的部署路径**；要用请先自行验证并修掉上面两条。
 
 ```bash
 # 构建并启动
@@ -278,7 +309,7 @@ EngramNote/
 │   │   │   ├── cleaning_service.py    # AI 清洗管道
 │   │   │   ├── embedding_service.py   # BGE-M3 嵌入
 │   │   │   ├── llm_service.py         # DeepSeek/GLM 调用（V2.0 新增 chat_stream）
-│   │   │   ├── rag_service.py         # 智能问答（V2.0 三路混合检索：向量 + BM25 + n-gram，RRF 融合，SSE 流式）
+│   │   │   ├── rag_service.py         # 智能问答（混合检索：向量 + BM25，RRF 融合，SSE 流式）
 │   │   │   ├── version_service.py     # 笔记版本历史（V2.0 新增）
 │   │   │   ├── goal_service.py        # 学习目标管理（V2.0 新增）
 │   │   │   ├── notification_service.py# 复习提醒 + 邮件（V2.0 新增）
