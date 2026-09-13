@@ -154,6 +154,98 @@ _WRITE_KEYWORDS = (
 )
 
 
+#: 陈旧临时测试库的判定阈值（秒）。取 6 小时：足够旧到**不可能**属于另一个
+#: 正在并发运行的 pytest 会话，又足以让残骸不会长期堆积。
+_STALE_TMP_DB_AGE = 6 * 3600
+
+#: 临时测试库目录（与 `test_db` fixture 用的是同一个）
+_TMP_TEST_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "tmp_test",
+)
+
+
+def _sweep_stale_test_dbs(tmp_dir: str | None = None) -> int:
+    """清理 `data/tmp_test/` 里的**陈旧**临时库，返回清理个数
+
+    正常路径下 `test_db` fixture 会删掉自己的临时库（含两个引擎的句柄释放，
+    见该 fixture 末尾）。但被强杀/崩溃的会话会留下文件，而它们**不会被再次使用**
+    （文件名是随机 uuid），于是只能堆积。
+
+    这与项目里反复出现的一类问题同源：**看不见的增长**（AF.10 的账本、
+    `_backup/` 的保留策略）。区别是这里的增长发生在测试基础设施里，
+    没有生产者会去调用清理函数，所以在会话启动时扫一次是最合适的落点。
+
+    只删 6 小时以上的 `test_*.db` 及其**孤儿**侧车：
+
+    - 新鲜的主库不删（可能是并发会话正在用的）；
+    - 主库仍在的 `-wal` / `-shm` 不删（可能装着尚未 checkpoint 的数据）；
+    - 主库**本次将被清理**的侧车一并删掉 —— 主库都没了，侧车没有意义。
+
+    判定**不依赖 `os.listdir` 的顺序**：先算出本轮要删的主库集合，再据此判断
+    侧车是否孤儿。否则"先删主库、后看侧车"会让同一份文件因遍历顺序不同而
+    得到不同结果（本轮测试正是这样抓到第一版的顺序依赖）。
+
+    Args:
+        tmp_dir: 目标目录；缺省 `data/tmp_test/`（测试可注入，便于验证判定逻辑）
+    """
+    import time
+
+    target = tmp_dir or _TMP_TEST_DIR
+    if not os.path.isdir(target):
+        return 0
+
+    cutoff = time.time() - _STALE_TMP_DB_AGE
+
+    def _stale(name: str) -> float | None:
+        """返回陈旧文件的字节数；新鲜/读不到属性则返回 None"""
+        try:
+            stat = os.stat(os.path.join(target, name))
+        except OSError:
+            return None
+        return stat.st_size if stat.st_mtime <= cutoff else None
+
+    names = os.listdir(target)
+    # 第一遍：本轮要清理的主库
+    doomed_dbs = {
+        name for name in names
+        if name.startswith("test_") and name.endswith(".db") and _stale(name) is not None
+    }
+
+    # 第二遍：主库 + 孤儿侧车（"主库不在"或"主库本轮将被删"都算孤儿）
+    removed = 0
+    freed = 0
+    for name in names:
+        size = _stale(name)
+        if size is None or not name.startswith("test_"):
+            continue
+        if name.endswith(".db"):
+            pass  # 主库：陈旧即清理
+        else:
+            if not name.endswith((".db-wal", ".db-shm")):
+                continue
+            # ⚠️ 只去掉 "-wal" / "-shm" 四个字符，**不能**连 ".db" 一起去掉
+            #    （`name[:-len(".db-wal")]` 会得到 "test_xxx" 而不是 "test_xxx.db"，
+            #     于是每个侧车都被判成孤儿 —— 会把活库的 WAL 删掉，属于丢数据。
+            #     本轮由 `test_removes_only_stale_test_dbs` 抓到。）
+            base = name[:-4]
+            if base not in doomed_dbs and os.path.exists(os.path.join(target, base)):
+                continue  # 主库会活下来 → 侧车必须留着
+        try:
+            os.remove(os.path.join(target, name))
+        except OSError:
+            # 被占用的文件删不掉（Windows）：留给下一次会话，不报错
+            continue
+        removed += 1
+        freed += size
+
+    if removed:
+        print(
+            f"\n[conftest] 清理陈旧临时测试库: {removed} 个 / {freed / 1024 / 1024:.1f} MB"
+        )
+    return removed
+
+
 def pytest_configure(config):
     """注册自定义 marker，并（默认）安装网络阻断 + 真实库写入守卫"""
     config.addinivalue_line("markers", "integration: 需要真实网络/外部 API 的用例（默认跳过）")
@@ -161,6 +253,7 @@ def pytest_configure(config):
 
     _install_real_db_write_guard()
     _init_session_db()
+    _sweep_stale_test_dbs()
 
     if _network_tests_allowed():
         return
