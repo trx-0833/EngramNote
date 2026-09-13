@@ -36,6 +36,12 @@ from app.services.llm_accounting_service import (
 )
 
 NOW = datetime(2026, 9, 11, 9, 0, tzinfo=timezone.utc)
+"""⚠️ 仅作**参照说明**用，不要拿它构造查询窗口
+
+它曾是 `test_time_window_is_half_open` 的窗口基准，结果把那条用例变成了
+定时炸弹（机器时钟一旦超过 `NOW+1d` 就必然失败，而失败原因与被测性质无关）。
+窗口一律以**行自己的 `created_at`** 为基准构造。
+"""
 
 
 class _Settings:
@@ -356,18 +362,38 @@ class TestSummarizeUsage:
         assert totals["cost"] == pytest.approx(1.5)
 
     async def test_time_window_is_half_open(self, test_db):
-        """时间窗左闭右开：边界行不会被算进两个窗口"""
+        """时间窗左闭右开：边界行不会被算进两个窗口
+
+        ⚠️ 这里刻意**不**用硬编码的时间常量做窗口。原实现写的是
+        `since=NOW-1d, until=NOW+1d`（`NOW` 是写测试那天的时间），
+        于是这条用例是一颗**定时炸弹**：只要机器时钟超过 `NOW+1d`，
+        插入的行就落在窗口之外，用例开始失败 —— 而失败原因与"半开边界"
+        这个被测性质毫无关系。实测（2026-09-13 机器时钟跳到两天后）
+        它就是这样变红的。
+
+        现在改成以**行自己的 `created_at`** 为基准构造窗口：
+        这样无论什么时候跑，测的都还是"左闭右开"这件事。
+        """
         uid = await _make_user(test_db)
         await record_call(
             scene="s", provider="p", model="m", session_factory=test_db,
             context=LLMContext(user_id=uid),
         )
         async with test_db() as db:
+            created = (await db.execute(select(LLMCall))).scalars().one().created_at
             inside = await summarize_usage(
-                db, user_id=uid, since=NOW - timedelta(days=1), until=NOW + timedelta(days=1),
+                db, user_id=uid,
+                since=created - timedelta(seconds=1), until=created + timedelta(seconds=1),
             )
-            after = await summarize_usage(db, user_id=uid, since=NOW + timedelta(days=1))
+            # 右边界**开**：until 恰好等于该行时刻时，不应包含它
+            boundary = await summarize_usage(
+                db, user_id=uid,
+                since=created - timedelta(seconds=1), until=created,
+            )
+            after = await summarize_usage(db, user_id=uid, since=created + timedelta(seconds=1))
+
         assert inside["totals"]["calls"] == 1
+        assert boundary["totals"]["calls"] == 0, "until 应当是开区间（不包含边界行）"
         assert after["totals"]["calls"] == 0
 
     async def test_unknown_group_by_raises(self, test_db):

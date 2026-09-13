@@ -31,6 +31,7 @@ from sqlalchemy import select, or_
 
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
+from ..services.llm.prompts import prompt_version
 from ..services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,7 @@ async def save_knowledge_cards(
     knowledge_points: List[Dict[str, Any]],
     *,
     already_created: int = 0,
+    prompt_version: Optional[str] = None,
 ) -> "SaveOutcome":
     """
     将知识点存入数据库（阶段 4.8/4.9：质量门 + 内容寻址去重）
@@ -258,12 +260,16 @@ async def save_knowledge_cards(
     而不是只返回新建的卡片：重跑一次理解时，正确答案通常是
     "复用 50、新增 0"，只报新建数会让人以为抽取出错了。
     判据与设计理由见 `card_intake_service` 的模块说明。
+
+    `prompt_version`（阶段 4.6）由调用方给出：它知道自己是走
+    "理解会话"还是"联合分析会话"，而这一层只负责写库。
     """
     from .card_intake_service import save_cards_idempotent
 
     return await save_cards_idempotent(
         db, user_id, note_id, chapter, summary, knowledge_points,
         already_created=already_created,
+        prompt_version=prompt_version,
     )
 
 
@@ -466,6 +472,8 @@ async def process_note_understanding(
                     outcome = await save_knowledge_cards(
                         db, user_id, note_id, chapter, summary, knowledge_points,
                         already_created=total_cards,
+                        # 阶段 4.6：这条路走的是理解会话，版本取自它用的提示词
+                        prompt_version=prompt_version("understanding_session"),
                     )
                     total_cards += len(outcome.created)
                     reused_cards += len(outcome.reused)

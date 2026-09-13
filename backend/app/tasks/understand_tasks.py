@@ -41,6 +41,7 @@ from .common import (
 from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
+from ..services.llm.prompts import prompt_version
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -351,6 +352,8 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
                         answer=q.get("answer", ""),
                         options=json.dumps(q.get("options"), ensure_ascii=False) if q.get("options") else None,
                         explanation=q.get("explanation"),
+                        # 阶段 4.6：这道题是哪一版提示词产出的（溯源）
+                        prompt_version=prompt_version("question_session"),
                     )
                     session.add(quiz_item)
                     total_questions += 1

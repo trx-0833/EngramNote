@@ -97,6 +97,13 @@ class QuizItem(BaseModel):
     explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
 
+    #: 产出这道题的**提示词版本**（阶段 4.6：溯源）
+    #:
+    #: 与 `knowledge_cards.prompt_version` 同一套取值（见 prompts.PROMPT_VERSIONS）。
+    #: 允许 NULL：本列引入前的历史行与卡片同理，**不做回填** —— 填一个版本号
+    #: 会让"未知"伪装成"第一版"，而按版本比较题目质量正是这一列的用途。
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
     # ---- SM-2 间隔重复调度参数 ----
     # 复习间隔（天），首次为1天
     interval: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

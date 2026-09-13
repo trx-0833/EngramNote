@@ -19,29 +19,39 @@
 
 import hashlib
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
 MESSAGES = [{"role": "user", "content": "什么是浮充？"}]
 
-#: 每个场景"送给模型的完整输入"的摘要；搬移提示词时**不得变化**
+#: 每个场景"送给模型的完整输入"的摘要 + 当时的**提示词版本**；搬移/改动提示词时
+#: 两者一起动。
 #:
-#: 这些值在**搬移之前**（2026-09-11，提示词还在 llm_service.py 里）
-#: 由本文件自己算出并固化，因此它们证明的是"搬移没改一个字符"，
-#: 而不是"搬移之后看起来一样"。
-GOLDEN: Dict[str, str] = {
-    "summarize_chapter": "1676683d964a95b30d7d0464fac271d3",
-    "extract_knowledge_points": "8a4ce09e0ed4c678526818d985386ba5",
-    "generate_questions": "37d12ca3f8c4325495230a5c339c41c0",
-    "generate_questions_batch": "1a1fff6eeee63720de192767e9d2e8f3",
-    "rag_answer": "6d061482276d7456301fa503ef994bfd",
-    "understanding_session": "9577b01fc4cfff48f742b8c7ee3af999",
-    "question_session": "52bd5b795273d92c2ecbb1c4b7ae5934",
-    "combined_analysis_session": "ec2a3bc20310061950c771c4fc1d0a3d",
-    "generate_extension_knowledge": "8738f8fa2e79dfa82427505b18855efa",
-    "infer_card_relations": "5df70018d23f66731140117942b4c4b9",
-    "grade_short_answer": "cd253a67acaa8b11618001edcabc51b0",
+#: ## 为什么摘要与版本必须成对记录（阶段 4.6 之后）
+#:
+#: - 只改文本 → 本文件的用例失败（摘要对不上）；
+#: - 改了文本、更新了摘要，却忘了升版本 → `test_prompt_version.py` 失败；
+#: - 改文本 + 更新摘要 + 升版本 → 全绿，而这正是"有意识地换了一版"。
+#:
+#: 于是"版本忘了改"不再可能发生 —— 这是手工维护版本号能被接受的前提。
+#:
+#: ## 这些摘要的来历
+#:
+#: 在**搬移之前**（2026-09-11，提示词还在 `llm_service.py` 里）由本文件自己算出，
+#: 因此它们证明的是"搬移没改一个字符"，而不是"搬移之后看起来一样"。
+GOLDEN: Dict[str, Tuple[str, str]] = {
+    "summarize_chapter": ("1", "1676683d964a95b30d7d0464fac271d3"),
+    "extract_knowledge_points": ("1", "8a4ce09e0ed4c678526818d985386ba5"),
+    "generate_questions": ("1", "37d12ca3f8c4325495230a5c339c41c0"),
+    "generate_questions_batch": ("1", "1a1fff6eeee63720de192767e9d2e8f3"),
+    "rag_answer": ("2", "6d061482276d7456301fa503ef994bfd"),
+    "understanding_session": ("1", "9577b01fc4cfff48f742b8c7ee3af999"),
+    "question_session": ("1", "52bd5b795273d92c2ecbb1c4b7ae5934"),
+    "combined_analysis_session": ("1", "ec2a3bc20310061950c771c4fc1d0a3d"),
+    "generate_extension_knowledge": ("1", "8738f8fa2e79dfa82427505b18855efa"),
+    "infer_card_relations": ("1", "5df70018d23f66731140117942b4c4b9"),
+    "grade_short_answer": ("1", "cd253a67acaa8b11618001edcabc51b0"),
 }
 
 
@@ -189,10 +199,12 @@ async def test_prompt_sent_to_model_is_byte_identical(name):
         calls = fake.calls
 
     actual = _digest(calls)
-    expected = GOLDEN[name]
+    expected_version, expected = GOLDEN[name]
     if not expected:  # 首次生成（或新增场景）时把实际值打印出来
-        pytest.fail(f"{name} 的摘要未记录，请填入 GOLDEN：{actual}")
+        pytest.fail(f"{name} 的摘要未记录，请填入 GOLDEN：('1', {actual!r})")
     assert actual == expected, (
-        f"{name} 送给模型的输入变了 —— 缓存键会全部失效。"
+        f"{name} 送给模型的输入变了 —— 缓存键会全部失效，"
+        f"并且这属于**换了一版提示词**（当前版本 {expected_version}）。"
         f"\n  期望 {expected}\n  实际 {actual}"
+        f"\n  有意改动请同时：更新本表摘要 + 升 prompts.PROMPT_VERSIONS 里的版本号"
     )

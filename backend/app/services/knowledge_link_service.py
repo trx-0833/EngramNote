@@ -31,6 +31,7 @@ from ..models.assessment import AssessmentResult, AssessmentMode
 from ..models.knowledge_card import CardCategory, CardType, KnowledgeCard
 from ..models.note_material_link import NoteMaterialLink
 from ..schemas.knowledge import KnowledgeCardResponse
+from ..services.llm.prompts import prompt_version
 from ..services.llm_service import LLMService
 from ..services.note_service import (
     get_clean_markdown_content,
@@ -124,6 +125,8 @@ def _build_combined_card(
         is_key_point=bool(point.get("is_key_point", False)),
         is_difficulty=bool(point.get("is_difficulty", False)),
         source_note_ids=[material_id, personal_note_id],
+        # 阶段 4.6：联合分析卡由 `combined_analysis_session` 那条提示词产出
+        prompt_version=prompt_version("combined_analysis_session"),
     )
 
 
@@ -506,6 +509,8 @@ async def generate_extension(
             card_category=CardCategory.extension,
             parent_card_id=parent_card_id,
             source_note_ids=parent.source_note_ids,
+            # 阶段 4.6：拓展卡由 `generate_extension_knowledge` 那条提示词产出
+            prompt_version=prompt_version("generate_extension_knowledge"),
         )
         db.add(card)
         created_cards.append(card)

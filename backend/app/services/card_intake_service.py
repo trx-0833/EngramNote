@@ -227,6 +227,7 @@ async def save_cards_idempotent(
     *,
     config: Optional[GateConfig] = None,
     already_created: int = 0,
+    prompt_version: Optional[str] = None,
 ) -> SaveOutcome:
     """质量门 + 内容寻址去重之后的入库（阶段 4.8 / 4.9）
 
@@ -235,6 +236,8 @@ async def save_cards_idempotent(
         config: 质量门配置；缺省从 settings 读
         already_created: 本次理解流程**已经**新建了多少张卡（用于跨章节累计
             单次上限；见 `GateConfig.max_new_cards_per_run`）
+        prompt_version: 产出这批卡的提示词版本（阶段 4.6）；
+            缺省 None 表示"未知"，**不要**在这里兜底成某一版
 
     Returns:
         `SaveOutcome`
@@ -286,6 +289,7 @@ async def save_cards_idempotent(
             chapter_title=chapter.get("chapter_title", ""),
             source_text=source_text,
             content_hash=digest,
+            prompt_version=prompt_version,
         )
         db.add(card)
         outcome.created.append(card)

@@ -904,6 +904,25 @@ async def _migrate_sqlite(conn):
                         "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s", exc,
                     )
 
+        # ---- 提示词版本列（阶段 4.6：溯源）----
+        #
+        # 两张表、同一套取值（`prompts.PROMPT_VERSIONS`）。
+        # ⚠️ 这里**刻意不回填历史行**：本列引入之前的卡片与题目，
+        # 当时用的是哪一版提示词**已经无从得知**（文本改过多次且没有记录）。
+        # 填一个 "1" 会让这些行伪装成第一版，从而污染"第一版表现如何"的统计 ——
+        # NULL 的含义是"未知"，与 4.2 里 `cost` 记 NULL 而不是 0 同一条原则。
+        for table in ('knowledge_cards', 'quiz_items'):
+            if table not in table_names:
+                continue
+            cols = {c['name'] for c in inspector.get_columns(table)}
+            if 'prompt_version' not in cols:
+                # 不加索引：这一列的用途是**分组统计**（按版本聚合复习表现），
+                # 不是逐行查找；当前规模（千级行）全表扫描比维护索引更省。
+                sync_conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN prompt_version VARCHAR(32)"
+                ))
+                logger.info("SQLite 迁移: 已为 %s 表添加 prompt_version 列", table)
+
         # ---- llm_calls 表迁移（阶段 4.7：响应缓存的记账字段）----
         #
         # ⚠️ `llm_cache` 是**新表**，`create_all` 会建；但 `llm_calls` 在

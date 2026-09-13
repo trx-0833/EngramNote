@@ -33,7 +33,7 @@
 **拼出来的文本完全相同** —— 由 test_prompt_golden 的摘要证明。
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 
@@ -366,9 +366,64 @@ def grade_short_answer_messages(question: str, expected_answer: str, user_answer
     return messages
 
 
+# ---------------------------------------------------------------------------
+# 提示词版本（阶段 4.6：溯源）
+# ---------------------------------------------------------------------------
+
+#: 提示词名 → 版本。**每改一次提示词文本就必须改这里**（见下）
+#:
+#: ## 版本号解决的是什么问题
+#:
+#: 改了提示词之后，"新版是不是更好"只能靠数据回答：把卡片与题目按
+#: `prompt_version` 分组，再看各组的复习表现。没有版本号时，表里混着
+#: 不同提示词产出的行，任何分组比较都做不了 —— 只剩"感觉新版好一些"。
+#:
+#: ## 为什么是手工维护的字符串，而不是提示词文本的哈希
+#:
+#: 哈希看起来更省事（改文本自动变版本），但它**答不了业务问题**：
+#: "第 3 版比第 2 版好吗"需要人能读懂、能排序、能在文档里引用的编号；
+#: 而 `a3f9c1e2` 既不能排序，也无法在评审时说清"我们说的是哪一版"。
+#:
+#: 手工维护的代价是"可能忘记改"，这一条由测试兜住：
+#: `tests/test_prompt_golden.py` 把每个提示词的**版本 + 输入摘要**一起固化，
+#: 于是"文本变了但版本没变"会当场失败。忘记改不再是可能。
+#:
+#: ## 取值规则
+#:
+#: 从 "1" 开始的正整数（字符串形式）。**不相加字母后缀**：
+#: `"1a"` 这种写法在实践中会分裂成两套排序规则，而版本号唯一的用途就是排序。
+PROMPT_VERSIONS: Dict[str, str] = {
+    "summarize_chapter": "1",
+    "extract_knowledge_points": "1",
+    "understanding_session": "1",
+    "generate_questions": "1",
+    "generate_questions_batch": "1",
+    "question_session": "1",
+    "rag_answer": "2",          # 阶段 2.8 重写为"无据不答"，是第 2 版
+    "combined_analysis_session": "1",
+    "generate_extension_knowledge": "1",
+    "infer_card_relations": "1",
+    "grade_short_answer": "1",  # 阶段 3.5 新增
+}
+
+
+def prompt_version(name: str) -> Optional[str]:
+    """取提示词版本；名字未登记时返回 **None**（而不是猜一个）
+
+    ⚠️ 未登记时返回 None 是有意的：调用方会把它写进 `prompt_version` 列，
+    而 NULL 的含义是"未知"。返回 `"1"` 会让未知行伪装成第一版，
+    从而污染按版本分组的统计 —— 与记账里"没配价格时 cost 记 NULL 而不是 0"
+    是同一条原则。
+
+    新增提示词时忘了登记，`tests/test_prompt_version.py` 会失败并告诉你要登记
+    （而不是在数据里悄悄留下无法解释的行）。
+    """
+    return PROMPT_VERSIONS.get(name)
+
 
 __all__ = [
     "COMBINED_ANALYSIS_SYSTEM_PROMPT",
+    "PROMPT_VERSIONS",
     "QUESTION_SYSTEM_PROMPT",
     "UNDERSTANDING_SYSTEM_PROMPT",
     "generate_extension_knowledge_messages",
@@ -376,6 +431,7 @@ __all__ = [
     "generate_questions_messages",
     "grade_short_answer_messages",
     "infer_card_relations_messages",
+    "prompt_version",
     "rag_answer_messages",
     "summarize_chapter_messages",
 ]
