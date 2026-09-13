@@ -189,7 +189,9 @@ def test_auth_tests_do_not_touch_real_db(test_db):
     before = user_count()
     resp = _client().post("/api/auth/register", json={
         "email": "realcheck@example.com", "username": "realcheck",
-        "password": "RealCheck123!",
+        # ⚠️ 密码**不能包含用户名**（阶段 6.1 的策略）：原值 "RealCheck123!"
+        # 正好包含 "realcheck"，被策略正确拒掉了。这里换一个与用户名无关的强密码。
+        "password": "QuietMeadow987!",
     })
     assert resp.status_code in (200, 201), resp.text
     after = user_count()

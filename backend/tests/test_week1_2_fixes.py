@@ -157,7 +157,7 @@ class TestUsernameValidation:
         valid_usernames = ["ab", "ABC", "abc123", "testuser2024", "01", "aB0"]
         for username in valid_usernames:
             req = UserRegisterRequest(
-                email="test@example.com", username=username, password="123456"
+                email="test@example.com", username=username, password="Str0ngPass!"
             )
             assert req.username == username, f"合法用户名 '{username}' 应通过校验"
 
@@ -179,7 +179,7 @@ class TestUsernameValidation:
         for username in invalid_usernames:
             with pytest.raises(ValidationError, match="string_pattern_mismatch"):
                 UserRegisterRequest(
-                    email="test@example.com", username=username, password="123456"
+                    email="test@example.com", username=username, password="Str0ngPass!"
                 )
 
     def test_min_max_length(self):
@@ -191,26 +191,26 @@ class TestUsernameValidation:
         # 太短：1 个字符
         with pytest.raises(ValidationError):
             UserRegisterRequest(
-                email="test@example.com", username="a", password="123456"
+                email="test@example.com", username="a", password="Str0ngPass!"
             )
 
         # 合法：2 个字符
         req = UserRegisterRequest(
-            email="test@example.com", username="ab", password="123456"
+            email="test@example.com", username="ab", password="Str0ngPass!"
         )
         assert req.username == "ab"
 
         # 合法：50 个字符
         long_username = "a" * 50
         req = UserRegisterRequest(
-            email="test@example.com", username=long_username, password="123456"
+            email="test@example.com", username=long_username, password="Str0ngPass!"
         )
         assert req.username == long_username
 
         # 太长：51 个字符
         with pytest.raises(ValidationError):
             UserRegisterRequest(
-                email="test@example.com", username="a" * 51, password="123456"
+                email="test@example.com", username="a" * 51, password="Str0ngPass!"
             )
 
     def test_frontend_regex_matches_backend(self):

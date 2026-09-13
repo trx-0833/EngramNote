@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..models.user import User
 from ..schemas.user import UserRegisterRequest
+from .password_policy import validate_password
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -42,13 +43,18 @@ def hash_password(password: str) -> str:
     使用 bcrypt 算法生成密码哈希值，自动生成随机盐值。
     直接使用 bcrypt 库而非 passlib，避免 passlib 与 bcrypt 版本兼容性问题。
 
+    ⚠️ cost（轮数）由 `settings.bcrypt_rounds` 决定（阶段 6.1：从库默认值
+    改为**显式配置**）。改这个值**不会让旧哈希失效**：bcrypt 把 cost 写在
+    哈希串里（`$2b$12$...`），校验时按各自记录的 cost 计算。因此提升 cost
+    只影响新密码，存量用户在新设密码时自动升级。
+
     Args:
         password: 明文密码
 
     Returns:
         str: bcrypt 哈希后的密码字符串
     """
-    salt = bcrypt.gensalt()
+    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
     hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
 
@@ -79,7 +85,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # 用于登录时序对齐的固定哈希（cost 与真实哈希一致）。
 # 目的：邮箱不存在时也执行一次 bcrypt，使两条路径耗时接近，
 # 消除"响应时间可区分邮箱是否注册"的侧信道（见 docs/overhaul-plan.md §2.5 E-2）。
-_DUMMY_HASH = bcrypt.hashpw(b"engramnote-timing-equalizer", bcrypt.gensalt()).decode("utf-8")
+#
+# ⚠️ 必须与 `hash_password` 用**同一个 cost**（阶段 6.1 起两者都读
+# `settings.bcrypt_rounds`）：这个哈希存在的唯一意义就是耗时对齐，
+# cost 不一致会让它重新变成一个可测量的侧信道。
+_DUMMY_HASH = bcrypt.hashpw(
+    b"engramnote-timing-equalizer", bcrypt.gensalt(rounds=settings.bcrypt_rounds)
+).decode("utf-8")
 
 
 def create_access_token(user_id: str) -> str:
@@ -154,6 +166,13 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
     """
     # 邮箱归一化（小写 + 去空白），避免大小写撞库，见 docs/decisions.md#F-21b
     email = (req.email or "").strip().lower()
+
+    # 密码策略（阶段 6.1）：schema 层已经判过一次，这里再判一次是**防御**
+    # 绕过 schema 的调用方（脚本、内部工具、将来的改密接口）。
+    # 只约束注册/改密，不追溯既有账号 —— 见 password_policy 的模块说明。
+    reason = validate_password(req.password, username=req.username, email=email)
+    if reason:
+        raise ValueError(reason)
 
     # 检查邮箱是否已存在
     result = await db.execute(select(User).where(User.email == email))
