@@ -41,7 +41,7 @@ def test_login_rate_limited_after_threshold(client):
     """登录接口超过阈值后应返回 429"""
     from app.middleware.rate_limit import _RULES
 
-    login_limit = next(limit for _m, suffix, limit, name in _RULES if name == "login")
+    login_limit = next(limit for _pattern, limit, name in _RULES if name == "login")
 
     body = {"email": "nobody@example.com", "password": "wrong-password"}
     responses = [client.post("/api/auth/login", json=body) for _ in range(login_limit + 2)]
@@ -66,7 +66,7 @@ def test_rate_limited_response_shape(client):
     from app.middleware.rate_limit import _RULES, _window
 
     _window.reset()
-    login_limit = next(limit for _m, suffix, limit, name in _RULES if name == "login")
+    login_limit = next(limit for _pattern, limit, name in _RULES if name == "login")
 
     body = {"email": "nobody@example.com", "password": "wrong-password"}
     last = None
@@ -94,6 +94,6 @@ def test_register_has_tighter_limit_than_login(client):
     """注册接口的限流阈值应不高于登录（注册更易被滥用）"""
     from app.middleware.rate_limit import _RULES
 
-    limits = {name: limit for _m, _suffix, limit, name in _RULES}
+    limits = {name: limit for _pattern, limit, name in _RULES}
     assert "register" in limits and "login" in limits
     assert limits["register"] <= limits["login"]
