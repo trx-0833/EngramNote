@@ -73,6 +73,33 @@ def backup_database_task() -> dict:
     return result
 
 
+@celery_app.task(name="app.tasks.maintenance_tasks.restore_drill")
+def restore_drill_task() -> dict:
+    """每周恢复演练：证明最近一份快照**真的能恢复**（阶段 6.6）
+
+    ## 为什么"每天备份成功"不等于"有可用备份"
+
+    `create_snapshot` 会校验**刚写下**的那一份。但快照在磁盘上放几周之后
+    是否还能用（被截断、扇区损坏、被误改），以及备份是否**还在跑**
+    （最新快照是三天前的还是三个月前的），这两件事只有真去读一次才知道。
+
+    演练**不做恢复动作**（恢复是破坏性的，必须由人执行，
+    见 `scripts/restore_db.py`），它只读地检查快照并报出与线上库的行数差异。
+
+    ## 失败必须是 error 级
+
+    演练失败意味着"当前没有可用的备份"—— 那是需要立刻有人处理的状况，
+    而不是一条可以忽略的 warning。失败不抛异常（不阻塞 Beat），
+    但日志级别与返回体都要能反映严重性。
+    """
+    from ..services.backup_service import run_restore_drill
+
+    result = run_restore_drill()
+    if not result.get("ok"):
+        logger.error("恢复演练未通过: %s", result.get("reason") or result.get("problems"))
+    return result
+
+
 async def _backup_in_thread(func) -> dict:
     """在线程池里跑同步的备份逻辑，避免阻塞 worker 的事件循环
 

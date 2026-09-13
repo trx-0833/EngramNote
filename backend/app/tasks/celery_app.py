@@ -165,6 +165,16 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.cleanup_llm_ledger",
             "schedule": crontab(hour=4, minute=30),
         },
+        # 每周一 05:00 恢复演练（阶段 6.6）
+        #
+        # 每天备份成功 ≠ 有可用备份：快照放置几周后是否还能读、备份是否还在跑，
+        # 只有真去读一次才知道。周期取"每周"而不是"每天"：
+        # 演练要打开并深查一个 10MB 级的库，日频纯属浪费；而"备份坏了三周没人知道"
+        # 与"备份坏了三天没人知道"，在恢复窗口上差别不大（有 14 份日备份兜底）。
+        "restore-drill-weekly": {
+            "task": "app.tasks.maintenance_tasks.restore_drill",
+            "schedule": crontab(day_of_week=1, hour=5, minute=0),
+        },
     },
 )
 

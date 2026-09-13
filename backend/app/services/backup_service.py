@@ -20,7 +20,9 @@ SQLite 开了 WAL：数据库内容分散在 `engramnote.db` + `-wal` + `-shm` �
 
 import json
 import logging
+import shutil
 import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -173,6 +175,7 @@ def list_snapshots() -> list[dict[str, Any]]:
         db_file = directory / "engramnote.db"
         record: dict[str, Any] = {
             "name": directory.name,
+            "path": str(directory),
             "has_db": db_file.exists(),
             "size_bytes": db_file.stat().st_size if db_file.exists() else None,
         }
@@ -237,8 +240,285 @@ def run_scheduled_backup(label: str = "daily") -> dict[str, Any]:
         return result
 
 
+# ---------------------------------------------------------------------------
+# 恢复演练（阶段 6.6：备份存在 ≠ 备份可用）
+# ---------------------------------------------------------------------------
+
+#: 演练时要核对的**深层一致性**（`verify_snapshot` 只做完整性 + 行数，不够）
+#:
+#: 两件事都写成小函数而不是 SQL 字符串，因为它们**不是查询**：
+#: FTS5 的 `integrity-check` 是一条命令，失败时靠抛异常表达。
+def _check_fts_consistency(con: sqlite3.Connection) -> Optional[str]:
+    """FTS 索引的**结构**是否完好（FTS5 `integrity-check`）
+
+    ## ⚠️ 一段被推翻的假设（写下来以免有人再犯）
+
+    最初这里用 `fts5vocab` 数"索引里真正可检索的文档数"，再与 `chunks.grams`
+    非空行数比对。真库上它报出：
+
+        FTS 索引与 chunks.grams 不一致（可检索 171 行，应可检索 608 行）
+
+    —— 看起来像"437 个块检索不到"的重大缺陷。**但这个结论是错的**，本轮实测：
+
+    | 现象 | 实测结果 |
+    |---|---|
+    | `fts5vocab` 报告的文档数 | 171（在一致副本上新建一张同样的 FTS 表灌入同样数据，**也是 171**）|
+    | `MATCH` 查 `chunk_rowid=600` 的词（`柴油`）| **命中 116 条** —— 它明明"不在索引里" |
+    | `chunk_rowid=300/552/600` | `vocab` 说"无"，`MATCH` 全都能命中 |
+    | `chunk_rowid=608`（grams 全是 `##`）| 0 条命中 —— 这一条是真的没有可索引词元 |
+
+    也就是说：**`fts5vocab` 的 `doc` 不是一份完整普查**，据此外推会得到一个
+    假警报。而假警报比没有检查更糟 —— 它会让演练永远红着，然后被所有人忽略。
+
+    另外两条曾试过、同样不可行的判据（都实测过）：
+
+    - `SELECT COUNT(*) FROM chunks_fts`：外部内容表会**直接读内容表**，永远相等；
+    - `INSERT INTO chunks_fts(chunks_fts) VALUES('integrity-check')` 对外部内容表
+      **不比对内容表**，索引少了行也不报错（但能发现索引内部结构损坏）。
+
+    因此这里只做**能站得住**的那一条：FTS5 的 `integrity-check`（结构完整性）。
+    它发现不了"索引落后于内容表"，但也不会误报 —— 而"索引落后"这件事，
+    真实的判据是**检索结果**（见 `scripts/` 里的检索评估脚本），不是元数据统计。
+    """
+    try:
+        con.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('integrity-check')")
+    except sqlite3.Error as exc:
+        if "no such" in str(exc).lower():
+            return None   # 老快照没有 FTS 表 → 跳过
+        return f"FTS 索引结构损坏: {exc}"
+    return None
+
+
+def _check_orphan_review_states(con: sqlite3.Connection) -> Optional[str]:
+    """是否存在指向已删除卡片的复习进度（孤儿行）
+
+    这类行会让复习队列对着空气调度：用户看到"今天要复习 5 张"，
+    实际只有 4 张能打开。
+    """
+    try:
+        orphans = con.execute(
+            "SELECT COUNT(*) FROM review_states rs "
+            "WHERE rs.item_type = 'card' AND NOT EXISTS "
+            "(SELECT 1 FROM knowledge_cards kc WHERE kc.id = rs.item_id)"
+        ).fetchone()[0]
+    except sqlite3.Error:
+        return None   # 表不存在 → 老快照，跳过
+    if orphans:
+        return f"存在 {orphans} 条指向已删除卡片的复习进度（孤儿行）"
+    return None
+
+
+def inspect_snapshot(db_file: Path, *, allow_write: bool = False) -> dict[str, Any]:
+    """对快照做**深层**一致性检查
+
+    比 `verify_snapshot` 多三件事：
+      1. `PRAGMA foreign_key_check`（外键是否被破坏）；
+      2. 深层一致性（复习进度有无孤儿；`allow_write=True` 时还包括 FTS 索引）；
+      3. **真的把它当数据库用一次**（执行一次跨表查询）——
+         结构完好但打不开的备份是存在的，而只有真查一次才知道。
+
+    Args:
+        db_file: 要检查的文件
+        allow_write: 是否允许写这条连接。默认 False（**只读打开，绝不修改快照**）。
+            FTS5 的 `integrity-check` 是一条写命令，因此只有在对
+            **快照的临时副本**上检查时才传 True —— 见 `run_restore_drill`。
+
+    Returns:
+        `{"ok": bool, "problems": [...], "warnings": [...],
+          "integrity": str, "counts": {...}}`
+    """
+    problems: list[str] = []
+    warnings: list[str] = []
+    target = str(db_file) if allow_write else f"file:{db_file}?mode=ro"
+    con = sqlite3.connect(target, uri=not allow_write)
+    try:
+        try:
+            integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+        except sqlite3.DatabaseError as exc:
+            # ⚠️ 严重损坏时 `integrity_check` **自己**会抛
+            # `database disk image is malformed`，而不是返回一个字符串。
+            # 这正是演练最该抓到的情形，因此在这里接住并直接判定失败 ——
+            # 让它抛出去会让演练任务以异常结束，而"备份坏了"应当是一条
+            # 可读的结论，不是一个 traceback。
+            return {
+                "ok": False,
+                "problems": [f"快照无法读取（文件已损坏）: {exc}"],
+                "warnings": warnings,
+                "integrity": "unreadable",
+                "counts": dict.fromkeys(KEY_TABLES),
+            }
+
+        if integrity != "ok":
+            problems.append(f"integrity_check = {integrity}")
+
+        # 1. 外键 —— 记为 **warning** 而不是 failure
+        #
+        # ⚠️ 本项目**有意保留悬挂引用**（见知识链接的"悬挂链接占位"策略与
+        # `database.py::_rebuild_dangling_tables` 的说明）：某一行指向已被
+        # 彻底删除的笔记/资料是设计的一部分。真库实测就有 1 处
+        # （`note_material_links` 指向已删除的用户）。
+        #
+        # 把"任何外键违规"当失败，演练会**永远红着**，而永远红的演练等于没有 ——
+        # 那正是演练最常见的死法。因此这里只报告数量，由人判断；
+        # 硬失败留给"数据库本身不可用/索引与内容脱节"这类客观损坏。
+        try:
+            violations = con.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                warnings.append(
+                    f"外键违规 {len(violations)} 处（悬挂引用策略下可能有意的，需人工确认）"
+                )
+        except sqlite3.Error as exc:
+            warnings.append(f"外键检查失败: {exc}")
+
+        # 2. 深层一致性（表不存在时由各自的检查函数跳过 —— 老快照可能还没这些表）
+        checks = [_check_orphan_review_states]
+        if allow_write:
+            # FTS5 的 integrity-check 是写命令，只在对副本检查时才做
+            checks.append(_check_fts_consistency)
+        for check in checks:
+            problem = check(con)
+            if problem:
+                problems.append(problem)
+
+        # 3. 真的查一次（跨表 JOIN）：验证这份文件不只能过校验，还能被使用
+        try:
+            con.execute(
+                "SELECT kc.id, kc.title FROM knowledge_cards kc "
+                "JOIN users u ON u.id = kc.user_id LIMIT 1"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            problems.append(f"实际查询失败（备份可能不可用）: {exc}")
+
+        counts: dict[str, Optional[int]] = {}
+        for table in KEY_TABLES:
+            try:
+                counts[table] = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            except sqlite3.Error:
+                counts[table] = None
+                problems.append(f"关键表缺失: {table}")
+    finally:
+        con.close()
+
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "warnings": warnings,
+        "integrity": integrity,
+        "counts": counts,
+    }
+
+
+def run_restore_drill(
+    snapshot: Optional[Path] = None,
+    *,
+    live_db: Optional[Path] = None,
+) -> dict[str, Any]:
+    """恢复演练：证明最近一份快照**真的能恢复**，且不动线上库
+
+    ## 为什么需要它
+
+    `create_snapshot` 已经会校验新快照。但那证明的是"**刚写下**的这一份完好"，
+    而不能回答两个更关键的问题：
+
+    1. 快照在**放置一段时间之后**还能用吗（磁盘损坏、被截断、被误改）；
+    2. 快照里的数据与线上库的差距**是合理的吗**（差距过大说明备份停了）。
+
+    因此演练要在最新快照上再跑一次完整检查，并把与线上库的**行数差异**报出来。
+
+    ## 与线上库行数不同是**正常的**，不是失败
+
+    快照是过去某一刻的状态，之后的新笔记、新卡片不会出现在里面。
+    把这当成失败，演练就会天天"失败"，很快没人看它 —— 那是演练最常见的死法。
+    因此这里只把差异作为**信息**返回，失败条件是
+    "快照本身不可用/不一致"（见 `inspect_snapshot`）。
+
+    ## 只读：绝不修改快照，也绝不碰线上库
+
+    演练不做恢复动作本身（恢复是破坏性的，要人来做，见 `scripts/restore_db.py`）。
+    线上库只用**只读**方式打开来数行数。
+
+    Args:
+        snapshot: 指定快照；缺省取 `list_snapshots()` 里最新的一份
+        live_db: 线上库路径；缺省取 `resolve_db_path()`
+
+    Returns:
+        `{"ok": bool, "problems": [...], "reason": str|None, "snapshot": str|None,
+          "counts": {...}, "live_counts": {...}, "deltas": {...}}`
+    """
+    result: dict[str, Any] = {
+        "ok": False, "snapshot": None, "reason": None,
+        "problems": [], "warnings": [], "counts": {}, "live_counts": {}, "deltas": {},
+    }
+
+    if snapshot is None:
+        candidates = [i for i in list_snapshots() if i.get("has_db")]
+        if not candidates:
+            result["reason"] = "没有任何含 db 的快照可供演练"
+            logger.error("恢复演练失败：%s", result["reason"])
+            return result
+        # `list_snapshots` 已按名称倒序（名字前缀是时间戳），取第一个即最新
+        snapshot = Path(candidates[0]["path"]) / "engramnote.db"
+
+    if not snapshot.exists():
+        result["reason"] = f"快照不存在: {snapshot}"
+        logger.error("恢复演练失败：%s", result["reason"])
+        return result
+
+    result["snapshot"] = str(snapshot)
+
+    # ★ 演练 = **真的恢复一次**：复制到临时文件、在那里打开（可写）、查完删掉。
+    #
+    # 为什么不直接在快照上查：
+    #   - 快照必须保持只读（它是唯一的救命备份，演练绝不能碰它）；
+    #   - 而 FTS5 的 `integrity-check` 是写命令，只读连接上会报
+    #     "attempt to write a readonly database"（本轮实测踩到）。
+    # 副本上做检查同时满足两件事，而且"复制 + 打开 + 查询"本身就是恢复的
+    # 最小可验证形态 —— 比只读打开更接近真实恢复。
+    temp_dir = Path(tempfile.mkdtemp(prefix="restore-drill-"))
+    temp_db = temp_dir / "snapshot-copy.db"
+    try:
+        shutil.copy2(snapshot, temp_db)
+        inspection = inspect_snapshot(temp_db, allow_write=True)
+    except OSError as exc:
+        result["reason"] = f"无法复制快照做演练: {exc}"
+        logger.error("恢复演练失败：%s", result["reason"])
+        return result
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    result["problems"] = inspection["problems"]
+    result["warnings"] = inspection.get("warnings", [])
+    result["counts"] = inspection["counts"]
+
+    live = live_db or resolve_db_path()
+    if live.exists():
+        try:
+            live_info = verify_snapshot(live)  # 只读
+            result["live_counts"] = live_info["counts"]
+            result["deltas"] = {
+                table: (inspection["counts"].get(table) or 0) - (live_info["counts"].get(table) or 0)
+                for table in KEY_TABLES
+            }
+        except Exception as exc:  # noqa: BLE001 - 线上库读不到不该让演练"失败"
+            result["problems"].append(f"线上库对比失败（忽略）: {exc}")
+
+    result["ok"] = inspection["ok"]
+    if result["ok"]:
+        logger.info(
+            "恢复演练通过: %s | 行数差异（快照-线上）: %s",
+            snapshot.name,
+            " ".join(f"{k}={v}" for k, v in result["deltas"].items()) or "无线上库可对比",
+        )
+    else:
+        result["reason"] = "; ".join(inspection["problems"])
+        # 演练失败是 **error** 级：它意味着"当前没有可用的备份"
+        logger.error("恢复演练失败: %s | %s", snapshot, result["reason"])
+    return result
+
+
 __all__ = [
     "BACKUP_ROOT", "DEFAULT_DB",
     "create_snapshot", "verify_snapshot", "prune_snapshots",
     "list_snapshots", "resolve_db_path", "run_scheduled_backup",
+    "inspect_snapshot", "run_restore_drill",
 ]
