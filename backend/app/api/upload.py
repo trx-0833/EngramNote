@@ -46,6 +46,12 @@ from ..services import note_service
 from ..services import pdf_crop
 from ..services import vault_path
 from ..services.storage_service import upload_file, ensure_buckets_exist
+from ..services.upload_safety import (
+    ARCHIVE_EXTS,
+    check_archive,
+    check_note_count,
+    check_pdf_pages,
+)
 from ..services.vault_meta import write_note_meta
 from ..tasks.convert_tasks import convert_document_task
 
@@ -308,6 +314,18 @@ async def _do_upload(
                 status_code=400,
                 detail=f"存储空间不足：已使用 {used // (1024 * 1024)}MB，配额 {settings.max_storage_per_user_mb}MB",
             )
+
+    # 1b. 单用户笔记数上限（阶段 6.4）：容量配额挡不住"传一万个小文件"，
+    #     而每个文件都要建笔记、进转换队列、占 inode。
+    if settings.max_notes_per_user > 0:
+        count_result = await db.execute(
+            select(func.count()).select_from(Note).where(Note.user_id == current_user.id)
+        )
+        note_reason = check_note_count(
+            int(count_result.scalar_one() or 0), max_notes=settings.max_notes_per_user,
+        )
+        if note_reason:
+            raise HTTPException(status_code=400, detail=note_reason)
 
     # 2. 解析项目标签数组（JSON 字符串，支持多标签）；未指定时不归属任何项目
     selected_project_ids: list = []
@@ -615,6 +633,21 @@ async def prepare_upload(
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
+    # 阶段 6.4：Office 文档（docx/pptx/xlsx）都是 ZIP 容器，转换阶段会解压它。
+    # 一个 42KB 的压缩包能解出 4GB —— 因此在这里按**中央目录**检查
+    # （不解压，见 services/upload_safety.py 的说明）。
+    if ext in ARCHIVE_EXTS:
+        reason = check_archive(
+            dest,
+            max_uncompressed_mb=settings.max_archive_uncompressed_mb,
+            max_compression_ratio=settings.max_archive_compression_ratio,
+            max_entries=settings.max_archive_entries,
+        )
+        if reason:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.warning("压缩包检查未通过: file=%s, reason=%s", filename, reason)
+            raise HTTPException(status_code=400, detail=reason)
+
     # PDF 返回页数供前端裁剪配置使用；其他格式返回 null（本轮不支持分页）
     page_count = None
     if source_type == SourceType.pdf:
@@ -632,6 +665,14 @@ async def prepare_upload(
                 status_code=400,
                 detail="PDF 解析失败：文件可能已损坏或加密，请确认后重试",
             ) from e
+
+        # 阶段 6.4：页数上限。在这里拦而不是在转换任务里拦 ——
+        # 让 3000 页的书进入队列再失败，代价是一次完整解析浪费的磁盘与时间。
+        page_reason = check_pdf_pages(page_count, max_pages=settings.max_pdf_pages)
+        if page_reason:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.warning("PDF 页数超限: file=%s, pages=%s", filename, page_count)
+            raise HTTPException(status_code=400, detail=page_reason)
 
     logger.info(
         "上传暂存成功: user_id=%s, filename=%s, size=%d, source_type=%s, page_count=%s",
