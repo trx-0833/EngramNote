@@ -3223,7 +3223,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 |
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
-| 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | 🟡 **NoteDetail 已完成**（附录 AX）：1184 → **282 行**，拆出 24 个模块（最大 239 行）。⚠️ 两个已知**反例**（见 AX.5）：`KnowledgeGraph.tsx`(980) 与 `Projects.tsx`(759) **仍未拆且无测试**，属"没有安全网就不能动"的那一类 |
+| 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ✅ **三页全部完成**（附录 AX / AZ / BB）：`NoteDetail` 1184→**282**、`KnowledgeGraph` 1055→**248**、`Projects` 765→**113**；27 个新模块，**最大 248 行，超过 300 行的文件数为 0**。⚠️ 关键前提是"先补安全网再拆"：另两页是先补了 53 条页面级用例（并经变异验证）才动的手 |
 | 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | ⏸ **未做**（选择 CSS Modules 还是 Tailwind 是**产品/团队决策**，需确认） |
 | 5.7 | **修 404**：新增真实 404 页面，不再静默重定向到登录页 | 错链有明确提示 | ✅ **已落地**（阶段 0，本轮核对确认）：`App.tsx` 的 `NotFound` 组件 + `path="*"`；未登录时的 `*` 才回登录页 |
 | 5.8 | **错误/空/加载三态组件化** + 全局 Toast | 无"白屏卡住" | ✅ **已落地**（阶段 0/Z，本轮核对确认）：`EmptyState.tsx` / `ErrorDisplay.tsx` / `LoadingSpinner.tsx` / `Toast.tsx` / `ErrorBoundary.tsx`，全仓 147 处使用 |
@@ -8846,7 +8846,138 @@ DDL 可执行、`jti` 唯一索引真的建出来（重复插入必须报 Integr
 
 ---
 
-**文档版本**：v4.4（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
+## 附录 BB · 阶段 5.5 收尾：`KnowledgeGraph` / `Projects` 拆分（2026-09-14）
+
+### BB.1 前置条件先兑现，再动刀
+
+这两个页面在附录 AZ 之前**没有任何测试**，所以 5.5 对它们的正确顺序是：
+① 补页面级安全网并**用变异测试证明它会咬**（附录 AZ）→ ② 修掉安全网探出的
+9 条白屏路径（AZ.6）→ ③ **才**做纯提取式拆分。本附录是第 ③ 步。
+
+顺序不是形式主义：第 ② 步改动了生产代码，如果与拆分混在一起，
+一旦出问题就无法区分"是拆错了"还是"护栏改错了"。
+
+### BB.2 结果
+
+| 文件 | 拆分前 | 拆分后 |
+|---|---|---|
+| `KnowledgeGraph.tsx` | 1055 | **248** |
+| `Projects.tsx` | 765 | **113** |
+
+- `pages/knowledgegraph/` **13 个模块**：`normalize` 54 / `buildForceGraphData` 56 /
+  `renderMinimap` 103 / `drawNode` 182 / `drawLink` 107 / `useCanvasObjects` 61 /
+  `useGraphData` 66 / `useGraphSearch` 55 / `useSubgraph` 38 / `useGraphInteraction` 157 /
+  `useSuggestionSelection` 61 / `useGraphMutations` 213 / `GraphToolbar` 153
+- `pages/projects/` **12 个模块**：`helpers` 42 / `useProjects` 212 / `useAddNotesPanel` 100 /
+  `NewProjectForm` 105 / `ProjectRenameForm` 48 / `ScanResultPanel` 38 / `AddNotesPanel` 127 /
+  `ProjectNotesList` 80 / `ProjectCard` 215 / `ProjectsHeader` 14 / `ProjectsErrorBanner` 34 /
+  `ProjectsUsageNotes` 27
+- **27 个文件 / 2725 行，最大 248 行，超过 300 行的文件数为 0**
+
+沿用 `pages/notedetail/` 的既有约定；`components/graph/`（`GraphSidebar` /
+`NodeInspector`）**未动**，不另建竞争结构。
+
+### BB.3 行为保持的三重证据（"纯提取"是可验证的，不是自称的）
+
+1. **安全网 53 条用例全绿**，其中包括 AZ.2 那 9 条契约漂移降级路径 —— 它们
+   断言的正是"喂残缺数据时用户看到什么"，拆分若改了渲染分支立刻会红；
+2. **两个测试文件逐字节未改**（`git diff --stat` 为空）：不需要任何 import 路径
+   调整，说明模块边界划在了正确的位置；
+3. **逐字核对**：旧文件的实质行（≥18 字符）都能在新模块中逐字找到，例外仅限
+   必然的改名（import 路径、`graph.`/`interaction.` 前缀、handler 接线、
+   `renderCard` → `<ProjectCard>`）；含中文字面量逐字节比对 —— 旧
+   `KnowledgeGraph.tsx` 的 24 个中 23 个原样存在（唯一差异是模板串的插值前缀
+   变了、**渲染结果不变**），旧 `Projects.tsx` **43/43 原样存在**。
+
+### BB.4 唯一一处非"纯搬"编辑（如实登记）
+
+`pages/knowledgegraph/useGraphSearch.ts`：拆分**之后** eslint（react-hooks v7 的
+编译器诊断）报出 effect 内引用了声明在其后的 `handleSearch` —— 旧文件同样写法，
+但 1055 行的文件被 v7 跳过、拆小后才开始分析。修法是把**函数声明的文本位置**
+提到 effect 之前：函数声明会提升，运行时语义完全相同（搜索防抖用例仍绿）。
+**没有加 `eslint-disable`、没有改逻辑。**
+
+> 这条本身值得记：**拆分会让原本被"文件太大"掩盖的 lint 诊断浮出来**。
+> 那不是拆分引入的缺陷，而是拆分暴露的旧账。
+
+### BB.5 ★ 拆分暴露的一条真实白屏路径：归一化只做了一半
+
+拆分把模块边界划清之后，一处**不对称**变得刺眼：
+
+| 入口 | 是否归一化 |
+|---|---|
+| `useGraphData.fetchData`（加载路径） | ✅ 过 `normalizeSuggestions` |
+| `useGraphMutations.handleGenerateSuggestions`（"生成相关建议"动作） | ❌ 直接 `setSuggestions(原始响应)` |
+
+也就是说：后端若在**生成**这条路径上返回 `{items:[…]}`，建议面板会走 `else`
+分支对非数组 `.map` → 渲染抛错 → **整页被错误边界接走**。而 AZ.2 的漂移用例
+只覆盖了加载路径。
+
+> 这是"护栏加在一个入口、漏了另一个"的典型形态 —— 与 AZ.7 记录的契约漂移
+> 同源：**同一个数据的每一条入口都必须过同一道判据**，否则护栏只提供虚假的安心。
+> 处置见 BB.6。
+
+### BB.6 处置：不是一处，而是三处同类漏口（审计后修复）
+
+顺着"同一个 API 的每一条入口是否过同一道判据"这条线做了一次**穷举审计**
+（列出两个新目录里**所有**会写列表状态的赋值点，逐个判定），结果比报告的多：
+
+| # | 位置 | 情况 |
+|---|---|---|
+| 1 | `useGraphMutations.ts:163` `handleGenerateSuggestions` | 报告的那一处：`setSuggestions(原始值)` → `normalizeSuggestions(...)` |
+| 2 | `useGraphMutations.ts` **7 处** `setStats(原始值)`（`:91/109/127/146/167/185/202`） | **同一个 `getGraphStats()` 响应**：加载路径过了 `normalizeStats`，7 处"写操作后重拉"没过 → 分布字段是对象时渲染抛错、整页白屏 |
+| 3 | `projects/ProjectCard.tsx:82` `detail?.notes ?? []` | `{notes:{items:[…]}}` 或 `{notes:{}}` 时白屏；`?? []` 只覆盖了"字段缺失"这一种 |
+
+**修复原则：复用同一个归一化函数，不写第二个判据。** 判据只能有一处
+（数组原样 / `{items:[…]}` 拆包渲染 / 真正非数组才退化成空），
+否则就是在制造下一次判据漂移 —— 那正是本项目已经付过代价的错。
+修好之后 `suggestions` 对**所有**写入方都恒为数组，这也让另外 4 处
+`setSuggestions(prev => prev.filter(...))` 的函数式更新所依赖的不变量真正成立。
+
+**穷举审计中确认"不属于此类"的（逐个核实，不是想当然）**：
+
+- `useGraphSearch.ts:23` `result.items || []` 没有 `Array.isArray`，但
+  `GraphToolbar.tsx:75-77` 用 `searchResults.length > 0 && … .map(…)` 短路，
+  非数组会降级而非抛错；
+- `useAddNotesPanel.ts:44` 在 `try` 内，漂移落成面板内提示（与 BB.8 那条一致）；
+- `useProjects.ts:144` `setScanResults` —— 面板只渲染标量，三个列表字段**从不渲染**；
+- `setGraphData` 的 8 处原始写入**安全**：消费者读的是
+  `useMemo(() => normalizeGraphData(raw))`，判据在读取侧、不在写入侧（这是另一种
+  正确做法：**判据放在唯一的读取收口处**）。
+
+**每条都用变异验证**（单独回退修复 → 定向跑用例）：回退 `:163` → `2 failed`；
+回退 7 处 `normalizeStats` → `1 failed`；回退 `ProjectCard` → `1 failed`。
+三次失败的 DOM 里都出现了 `这个页面出错了` —— 说明用例咬住的是**真实的白屏**，
+而不只是"没崩"。5 个文件改完 SHA256 前后一致（这些文件尚未提交，故不用 `git checkout`）。
+
+新增 4 条用例（`KnowledgeGraph` +3 / `Projects` +1），前端 **145 → 149 通过**。
+
+### BB.7 验收
+
+| 项 | 结果 |
+|---|---|
+| `npm.cmd test` | 拆分前后均 **10 文件 / 145 通过**（计数不降）；BB.6 的修复再加 4 条 → **149 通过** |
+| `npx.cmd tsc --noEmit` / `npm run lint` / `npm run build` | 全部 exit 0 |
+| 最大文件 | **248 行**，超过 300 行的文件数为 0 |
+| 后端测试是否 grep 这两个页面 | **没有**（已 grep `*.py` 确认，因此不存在 AX.3 那类跨模块契约坑） |
+| 编码 | 27 个文件无 BOM、严格 UTF-8、LF |
+
+### BB.8 只报告、未处理
+
+- **4 段近乎相同的"重新拉取"块**（`handleConfirm`/`handleReject` 顺序 await，
+  批量/删除/新建用 `Promise.all`）：合并会改变 await 顺序，而**调用次数是可观测的**，
+  因此不合并；
+- `useGraphMutations` 用裸 `confirm(...)`，`useProjects` 用 `window.confirm(...)`
+  （浏览器里是同一对象，但写法不一致）；
+- `useAddNotesPanel.openAddPanel` 对 `data.items` 没有 `Array.isArray` 兜底
+  （其它列表接口都有）；好在整段在 `try/catch` 内，漂移会降级成面板内提示而非白屏；
+- `formatSize(0)` → `'—'`（0 字节的笔记显示成"未知大小"）；
+- Projects 的"加载失败"与"重命名校验"共用同一个 `error` 槽位，点一次 ✕ 会把两者
+  一起清掉。
+
+---
+
+**文档版本**：v4.6（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
 阶段 6 的 6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.8 见附录 J–AV 与 BA；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
 卡片复习 UI 见 AA，前端测试框架见 AB，LLM 记账见 AC，配额见 AD，
@@ -8856,7 +8987,7 @@ FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z�
 NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护栏见 AR，
 恢复演练见 AS，密码策略与登录时序见 AT，限流覆盖见 AU，存储审计调度见 AV，
 对象存储快照见 AW，NoteDetail 拆分见 AX，临时库清理见 AY，
-两页安全网见 AZ，刷新令牌与登出撤销见 BA）
+两页安全网见 AZ，刷新令牌与登出撤销见 BA，两页拆分见 BB）
 
 
 

@@ -816,6 +816,30 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expectNoCrash()
   })
 
+  it('安全：确认建议后重拉的统计里分布字段是对象时只少一段条形图，不崩（重拉路径同样过归一化）', async () => {
+    const pending = deferred<GraphStats>()
+    mockedStats.mockResolvedValueOnce(makeStats()) // 首屏统计是正常结构
+    mockedStats.mockImplementation(() => pending.promise)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    // 确认待审边 → 页面会"重新拉取"图谱与统计，漂移发生在这一次重拉上
+    await userEvent.click(screen.getByTestId('fg-link-e-1'))
+    const detailPanel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    await userEvent.click(within(detailPanel).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(mockedStats).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      pending.resolve(makeStats({ relation_type_distribution: { related: 1 } as never }))
+    })
+
+    // 与加载路径同判据：分布归一成空 → 面板保留四个基础数字，只是没有分布条，整页不白屏
+    expect(screen.getByText('图谱统计')).toBeInTheDocument()
+    expect(screen.getByText('待确认')).toBeInTheDocument()
+    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expectNoCrash()
+  })
+
   it('suggestions 不是数组（如 {items:[...]} 包装）时取内层数组渲染，不崩也不丢数据', async () => {
     mockedSuggestions.mockResolvedValue({ items: [makeSuggestion()] } as never)
     renderPage()
@@ -835,6 +859,57 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expect(within(panel).getByRole('button', { name: '拒绝' })).toBeInTheDocument()
     // 顶部「建议」按钮的徽标同样不能显示 undefined
     expect(screen.getByRole('button', { name: /建议/ })).toHaveTextContent('1')
+    expectNoCrash()
+  })
+
+  it('★ 生成相关建议拿到 {items:[...]} 包装时拆包渲染（生成路径与加载路径同一道判据）', async () => {
+    // 加载时确实一条建议都没有（空态里才有「生成相关建议」按钮），漂移发生在"生成"这条路径上
+    const pending = deferred<unknown>()
+    mockedSuggestions.mockResolvedValueOnce([])
+    mockedSuggestions.mockImplementation(() => pending.promise as never)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    await userEvent.click(screen.getByRole('button', { name: /建议/ }))
+    expect(screen.getByText(/暂无建议关系/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '生成相关建议' }))
+    // 第二次请求（生成后重拉建议）已经发出，明确把包装响应用 act 灌进去，断言的是它落地之后的样子
+    await waitFor(() => expect(mockedSuggestions).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      pending.resolve({ items: [makeSuggestion()] })
+    })
+
+    // 与加载路径同判据：拆包后照常渲染出这条建议，而不是崩到错误边界、也不是"暂无建议关系"
+    const panelTitle = await screen.findByText(/建议关系 \(1\)/)
+    const panel = panelTitle.closest('.graph-panel') as HTMLElement
+    expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
+    expect(within(panel).getByText('均充的定义')).toBeInTheDocument()
+    expect(within(panel).getByText(/相似度: 0\.87/)).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '确认' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '拒绝' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /建议/ })).toHaveTextContent('1')
+    expectNoCrash()
+  })
+
+  it('安全：生成相关建议拿到非数组（既不是数组也没有 items）时退化成空态，不崩', async () => {
+    const pending = deferred<unknown>()
+    mockedSuggestions.mockResolvedValueOnce([])
+    mockedSuggestions.mockImplementation(() => pending.promise as never)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    await userEvent.click(screen.getByRole('button', { name: /建议/ }))
+    await userEvent.click(screen.getByRole('button', { name: '生成相关建议' }))
+    await waitFor(() => expect(mockedSuggestions).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      pending.resolve({ total: 0 })
+    })
+
+    // 真正拿不到数组才降级：面板留在空态并保留「生成相关建议」入口，整页没有被错误边界接走
+    expect(screen.getByText(/暂无建议关系/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成相关建议' })).toBeInTheDocument()
     expectNoCrash()
   })
 

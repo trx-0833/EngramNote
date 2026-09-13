@@ -398,6 +398,21 @@ describe('项目下的笔记', () => {
     expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
   })
 
+  it('安全：详情里的 notes 被包成 {items:[...]} 时拆包渲染，不崩也不丢笔记', async () => {
+    mockedDetail.mockResolvedValue({
+      ...makeProject(),
+      notes: { items: [makeNoteInFolder()] },
+    } as never)
+    renderPage()
+    await expandProject()
+
+    // 与 /projects 同一道判据：包装对象只是形状漂移，取内层数组照常列出笔记，
+    // 而不是显示"项目暂无笔记"（数据其实在）或崩到错误边界
+    expect(await screen.findByText('Attention Is All You Need')).toBeInTheDocument()
+    expect(screen.queryByText(/项目暂无笔记/)).not.toBeInTheDocument()
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
+  })
+
   it('安全：笔记行缺 file_size / source_type / status 时照常渲染', async () => {
     mockedDetail.mockResolvedValue({
       ...makeProject(),

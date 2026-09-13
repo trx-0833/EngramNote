@@ -7,713 +7,57 @@
  * 2. 重命名 / 删除项目（删除只移除标签，笔记与文件保留）
  * 3. 查看项目下的笔记列表
  * 4. 扫描导入 — 用户手动把文件拷入收件箱 source/ 目录后，点击扫描将其识别为笔记并打上本项目标签
+ *
+ * overhaul-plan 5.5：本文件已拆到 300 行以下，只保留**编排**——列表/重命名/删除/展开/扫描
+ * 归 `pages/projects/useProjects`，添加笔记面板归 `useAddNotesPanel`，卡片与各子面板
+ * 归 `pages/projects/` 下的组件。拆分是**纯提取**：`renderCard(p, index)` 的 JSX、
+ * 加载/空列表两种状态的文案、以及破坏性操作的确认逻辑都一字未动。
  */
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { statusClass } from '../utils/labels'
-import {
-  getProjects,
-  createProject,
-  updateProject,
-  deleteProject,
-  getProjectDetail,
-  scanProject,
-  getNotes,
-  addNotesToProject,
-  removeNoteFromProject,
-  type Project,
-  type ProjectDetail,
-  type Note,
-  type NoteInFolder,
-  type ScanImportResponse,
-} from '../api/client'
-
-/** 来源类型徽章样式映射（与全局 .badge-* 对应） */
-const TYPE_BADGE: Record<string, string> = {
-  pdf: 'badge-pdf',
-  image: 'badge-image',
-  docx: 'badge-docx',
-  pptx: 'badge-pptx',
-  xlsx: 'badge-xlsx',
-  audio: 'badge-audio',
-  video: 'badge-video',
-  markdown: 'badge-markdown',
-}
-
-// 状态样式统一走 utils/labels.ts 的 statusClass()（单一数据源）。
-// 本文件此前因"全局缺少 .status-learning-failed / .status-archived"
-// 而手写了一张绕过表（把学习失败映射成 failed 红、把归档映射成 converted 绿），
-// 导致同一状态在项目页与其余四个页面显示不一致。缺失的 CSS 类已补齐，
-// 绕过表已删除 —— 见 docs/overhaul-plan.md §2.8 F-13。
-
-/** 格式化文件大小 */
-function formatSize(bytes: number | null | undefined): string {
-  if (!bytes) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
+import NewProjectForm from './projects/NewProjectForm'
+import ProjectCard from './projects/ProjectCard'
+import ProjectsErrorBanner from './projects/ProjectsErrorBanner'
+import ProjectsHeader from './projects/ProjectsHeader'
+import ProjectsUsageNotes from './projects/ProjectsUsageNotes'
+import { useAddNotesPanel } from './projects/useAddNotesPanel'
+import { useProjects } from './projects/useProjects'
 
 export default function Projects() {
-  const navigate = useNavigate()
+  const {
+    projects,
+    loading,
+    error,
+    clearError,
+    renaming,
+    expanded,
+    scanning,
+    scanResults,
+    loadProjects,
+    startRename,
+    updateRenameField,
+    handleRename,
+    cancelRename,
+    handleDelete,
+    toggleExpand,
+    handleScan,
+    refreshExpandedDetail,
+    handleRemoveNote,
+  } = useProjects()
 
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  // 新建项目表单
-  const [showForm, setShowForm] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newDesc, setNewDesc] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [formError, setFormError] = useState('')
-
-  // 重命名（行内编辑）
-  const [renaming, setRenaming] = useState<Record<string, { name: string; description: string }>>({})
-
-  // 展开的笔记列表
-  const [expanded, setExpanded] = useState<Record<string, ProjectDetail | null>>({})
-
-  // 扫描导入
-  const [scanning, setScanning] = useState<Record<string, boolean>>({})
-  const [scanResults, setScanResults] = useState<Record<string, ScanImportResponse | null>>({})
-
-  // 添加笔记面板（同时只打开一个）
-  const [addPanelProject, setAddPanelProject] = useState<Project | null>(null)
-  const [candidateNotes, setCandidateNotes] = useState<Note[]>([])
-  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([])
-  const [addSearch, setAddSearch] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState('')
-
-  /** 加载项目列表 */
-  async function loadProjects() {
-    setLoading(true)
-    setError('')
-    try {
-      const data = await getProjects()
-      // 契约漂移兜底：/projects 可能回 204/空体（undefined）或 {items:[...]} 包装。
-      // 原来直接 setProjects(data)，随后 `projects.length` / `projects.map` 在渲染中抛错
-      // → 整页被错误边界接走。这里在入口归一成数组，退化成"还没有项目"的空状态。
-      const wrapped = (data as { items?: unknown } | null | undefined)?.items
-      setProjects(Array.isArray(data) ? data : Array.isArray(wrapped) ? (wrapped as Project[]) : [])
-    } catch (err) {
-      console.error('加载项目列表失败:', err)
-      setError('加载项目列表失败，请稍后重试')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadProjects()
-  }, [])
-
-  /** 新建项目 */
-  async function handleCreate() {
-    const name = newName.trim()
-    if (!name) {
-      setFormError('请输入项目名称')
-      return
-    }
-    setCreating(true)
-    setFormError('')
-    try {
-      await createProject(name, newDesc.trim() || undefined)
-      setNewName('')
-      setNewDesc('')
-      setShowForm(false)
-      await loadProjects()
-    } catch (err) {
-      console.error('创建项目失败:', err)
-      setFormError('创建项目失败，请稍后重试')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  /** 开始重命名 */
-  function startRename(p: Project) {
-    setRenaming((prev) => ({ ...prev, [p.id]: { name: p.name, description: p.description ?? '' } }))
-  }
-
-  /** 提交重命名 */
-  async function handleRename(p: Project) {
-    const edit = renaming[p.id]
-    if (!edit) return
-    const name = edit.name.trim()
-    if (!name) {
-      setError('项目名称不能为空')
-      return
-    }
-    try {
-      await updateProject(p.id, edit.name.trim(), edit.description.trim() || undefined)
-      setRenaming((prev) => {
-        const next = { ...prev }
-        delete next[p.id]
-        return next
-      })
-      await loadProjects()
-    } catch (err) {
-      console.error('重命名项目失败:', err)
-      setError('重命名项目失败，请稍后重试')
-    }
-  }
-
-  /** 取消重命名 */
-  function cancelRename(p: Project) {
-    setRenaming((prev) => {
-      const next = { ...prev }
-      delete next[p.id]
-      return next
-    })
-  }
-
-  /** 删除项目（只删标签，笔记与文件保留） */
-  async function handleDelete(p: Project) {
-    if (!window.confirm(`确定删除项目「${p.name}」？删除仅移除该项目标签，关联笔记与文件都会保留。`)) {
-      return
-    }
-    try {
-      await deleteProject(p.id)
-      await loadProjects()
-    } catch (err) {
-      console.error('删除项目失败:', err)
-      setError('删除项目失败，请稍后重试')
-    }
-  }
-
-  /** 展开/收起笔记列表 */
-  async function toggleExpand(p: Project) {
-    if (expanded[p.id]) {
-      setExpanded((prev) => {
-        const next = { ...prev }
-        delete next[p.id]
-        return next
-      })
-      return
-    }
-    try {
-      const detail = await getProjectDetail(p.id)
-      setExpanded((prev) => ({ ...prev, [p.id]: detail }))
-    } catch (err) {
-      console.error('加载项目详情失败:', err)
-      setError('加载项目笔记失败，请稍后重试')
-    }
-  }
-
-  /** 扫描收件箱 source/ 目录并打上当前项目标签 */
-  async function handleScan(p: Project) {
-    setScanning((prev) => ({ ...prev, [p.id]: true }))
-    setScanResults((prev) => ({ ...prev, [p.id]: null }))
-    try {
-      const result = await scanProject(p.id)
-      setScanResults((prev) => ({ ...prev, [p.id]: result }))
-      // 有新导入时刷新项目笔记数
-      if (result.imported > 0) {
-        await loadProjects()
-      }
-    } catch (err) {
-      console.error('扫描导入失败:', err)
-      setError('扫描导入失败，请确认后端服务可用后重试')
-    } finally {
-      setScanning((prev) => {
-        const next = { ...prev }
-        delete next[p.id]
-        return next
-      })
-    }
-  }
-
-  /** 若项目处于展开状态，重新拉取详情以同步笔记列表 */
-  async function refreshExpandedDetail(p: Project) {
-    if (!expanded[p.id]) return
-    try {
-      const detail = await getProjectDetail(p.id)
-      setExpanded((prev) => ({ ...prev, [p.id]: detail }))
-    } catch (err) {
-      console.error('刷新项目详情失败:', err)
-    }
-  }
-
-  /** 打开添加笔记面板：加载候选笔记（不属于当前项目的笔记） */
-  async function handleOpenAddPanel(p: Project) {
-    setAddPanelProject(p)
-    setSelectedNoteIds([])
-    setAddSearch('')
-    setAddError('')
-    try {
-      // 拉取全部笔记（分页上限 999），过滤出尚未打上当前项目标签的作为候选
-      const data = await getNotes(1, 999, undefined, undefined)
-      setCandidateNotes(data.items.filter((n) => !n.project_ids?.includes(p.id)))
-    } catch (err) {
-      console.error('加载候选笔记失败:', err)
-      setAddError('加载候选笔记失败，请稍后重试')
-      setCandidateNotes([])
-    }
-  }
-
-  /** 关闭添加笔记面板 */
-  function handleCloseAddPanel() {
-    setAddPanelProject(null)
-    setCandidateNotes([])
-    setSelectedNoteIds([])
-    setAddSearch('')
-    setAddError('')
-  }
-
-  /** 勾选/取消勾选候选笔记 */
-  function toggleSelectNote(id: string) {
-    setSelectedNoteIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
-
-  /** 确认添加选中笔记到项目 */
-  async function handleConfirmAdd(p: Project) {
-    if (selectedNoteIds.length === 0) {
-      setAddError('请先勾选要添加的笔记')
-      return
-    }
-    setAdding(true)
-    setAddError('')
-    try {
-      await addNotesToProject(p.id, selectedNoteIds)
-      handleCloseAddPanel()
-      await loadProjects()
-      await refreshExpandedDetail(p)
-    } catch (err) {
-      console.error('添加笔记失败:', err)
-      setAddError('添加笔记失败，请稍后重试')
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  /** 将笔记移出项目 */
-  async function handleRemoveNote(p: Project, n: NoteInFolder) {
-    if (!window.confirm(`确定将笔记「${n.title}」移出项目「${p.name}」？`)) {
-      return
-    }
-    try {
-      await removeNoteFromProject(p.id, n.id)
-      await loadProjects()
-      await refreshExpandedDetail(p)
-    } catch (err) {
-      console.error('移出笔记失败:', err)
-      setError('移出笔记失败，请稍后重试')
-    }
-  }
-
-  /** 渲染项目卡片 */
-  function renderCard(p: Project, index: number) {
-    const isRenaming = !!renaming[p.id]
-    const isExpanded = !!expanded[p.id]
-    const detail = expanded[p.id]
-    const notes: NoteInFolder[] = detail?.notes ?? []
-    const scanResult = scanResults[p.id]
-    const isScanning = !!scanning[p.id]
-    const panelOpen = addPanelProject?.id === p.id
-    const addKeyword = addSearch.trim().toLowerCase()
-    const filteredCandidates = candidateNotes.filter(
-      // title 可能为 null（后端/历史数据）：原来直接 `null.toLowerCase()` 一输入搜索词就崩，
-      // 缺失标题按空串处理 —— 只在搜索关键词为空时留在候选里，其余情况不参与匹配。
-      (n) => !addKeyword || (n.title ?? '').toLowerCase().includes(addKeyword)
-    )
-
-    return (
-      <div
-        key={p.id}
-        className={`card card-hover fade-in stagger-${(index % 5) + 1}`}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          padding: 20,
-          borderTop: '3px solid var(--color-primary)',
-        }}
-      >
-        {/* 项目头：名称 + 笔记数 */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {isRenaming ? (
-              <input
-                value={renaming[p.id].name}
-                onChange={(e) =>
-                  setRenaming((prev) => ({
-                    ...prev,
-                    [p.id]: { ...prev[p.id], name: e.target.value },
-                  }))
-                }
-                placeholder="项目名称"
-                style={{ width: '100%', fontWeight: 600 }}
-                autoFocus
-              />
-            ) : (
-              <h3
-                style={{
-                  fontSize: '1.05rem',
-                  fontWeight: 700,
-                  margin: 0,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {p.name}
-              </h3>
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-              <span className="badge" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                {p.note_count ?? 0} 篇笔记
-              </span>
-            </div>
-          </div>
-          {/* 操作按钮 */}
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <button
-              className="btn btn-ghost"
-              title="从已有笔记中选择并添加到本项目"
-              onClick={() => handleOpenAddPanel(p)}
-              style={{ fontSize: '0.8rem', padding: '4px 10px' }}
-            >
-              添加笔记
-            </button>
-            <button
-              className="btn btn-ghost"
-              title="扫描导入 source/ 目录中的新文件"
-              onClick={() => handleScan(p)}
-              disabled={isScanning}
-              style={{ fontSize: '0.8rem', padding: '4px 10px' }}
-            >
-              {isScanning ? '扫描中…' : '扫描导入'}
-            </button>
-          </div>
-        </div>
-
-        {/* 描述 */}
-        {!isRenaming && p.description && (
-          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', margin: 0, lineHeight: 1.6 }}>
-            {p.description}
-          </p>
-        )}
-
-        {/* 重命名编辑区 */}
-        {isRenaming && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input
-              value={renaming[p.id].name}
-              onChange={(e) =>
-                setRenaming((prev) => ({ ...prev, [p.id]: { ...prev[p.id], name: e.target.value } }))
-              }
-              placeholder="项目名称"
-            />
-            <textarea
-              value={renaming[p.id].description}
-              onChange={(e) =>
-                setRenaming((prev) => ({ ...prev, [p.id]: { ...prev[p.id], description: e.target.value } }))
-              }
-              placeholder="项目描述（可选）"
-              rows={2}
-              style={{ resize: 'vertical' }}
-            />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '6px 14px' }} onClick={() => handleRename(p)}>
-                保存
-              </button>
-              <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '6px 14px' }} onClick={() => cancelRename(p)}>
-                取消
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 扫描结果 */}
-        {scanResult && (
-          <div
-            style={{
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border-light)',
-              borderRadius: 'var(--radius-sm)',
-              padding: 10,
-              fontSize: '0.8rem',
-            }}
-          >
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>扫描结果</span>
-              <span className="status-converted" style={{ fontWeight: 600 }}>新增 {scanResult.imported}</span>
-              <span style={{ color: 'var(--color-text-tertiary)' }}>跳过 {scanResult.skipped}</span>
-              <span style={{ color: 'var(--color-text-tertiary)' }}>不支持 {scanResult.unsupported}</span>
-            </div>
-            {scanResult.imported === 0 && scanResult.scanned === 0 && (
-              <div style={{ marginTop: 6, color: 'var(--color-text-secondary)' }}>
-                未在收件箱 <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录发现新文件。可把文件拷贝到{' '}
-                <code style={{ color: 'var(--color-primary)' }}>Vault 根目录的 source/</code> 后再扫描。
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 添加笔记面板 */}
-        {panelOpen && (
-          <div
-            style={{
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border-light)',
-              borderRadius: 'var(--radius-sm)',
-              padding: 10,
-              fontSize: '0.8rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>添加笔记</span>
-              <button style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }} onClick={handleCloseAddPanel}>
-                ✕
-              </button>
-            </div>
-            <input
-              value={addSearch}
-              onChange={(e) => setAddSearch(e.target.value)}
-              placeholder="按标题搜索候选笔记…"
-              style={{ width: '100%', marginBottom: 8, fontSize: '0.8rem' }}
-            />
-            {addError && <div style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginBottom: 8 }}>{addError}</div>}
-            <div
-              style={{
-                maxHeight: 220,
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-                marginBottom: 8,
-              }}
-            >
-              {filteredCandidates.length === 0 ? (
-                <div style={{ color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '12px 0' }}>
-                  暂无可添加的笔记
-                </div>
-              ) : (
-                filteredCandidates.map((n) => (
-                  <label key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedNoteIds.includes(n.id)}
-                      onChange={() => toggleSelectNote(n.id)}
-                      // 覆盖全局 input{width:100%}，否则 checkbox 会撑满整行导致标题被挤成 0 宽
-                      style={{ width: 'auto', margin: 0, padding: 0, flexShrink: 0 }}
-                    />
-                    <span
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={n.title}
-                    >
-                      {n.title}
-                    </span>
-                    <span className={statusClass(n.status)} style={{ fontSize: '0.7rem', flexShrink: 0 }}>
-                      {n.status}
-                    </span>
-                  </label>
-                ))
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn-primary"
-                style={{ fontSize: '0.8rem', padding: '4px 12px' }}
-                onClick={() => handleConfirmAdd(p)}
-                disabled={adding || selectedNoteIds.length === 0}
-              >
-                {adding ? '添加中…' : `添加（${selectedNoteIds.length}）`}
-              </button>
-              <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '4px 12px' }} onClick={handleCloseAddPanel}>
-                取消
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 底部操作行 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--color-border-light)', paddingTop: 10, marginTop: 'auto' }}>
-          <button
-            className="btn btn-ghost"
-            style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-            onClick={() => toggleExpand(p)}
-          >
-            <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>▶</span>
-            {isExpanded ? '收起笔记' : `查看笔记（${p.note_count ?? 0}）`}
-          </button>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-              onClick={() => startRename(p)}
-            >
-              重命名
-            </button>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: '0.8rem', padding: '4px 8px', color: 'var(--color-error)' }}
-              onClick={() => handleDelete(p)}
-            >
-              删除
-            </button>
-          </div>
-        </div>
-
-        {/* 笔记列表 */}
-        {isExpanded && (
-          <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 10 }}>
-            {notes.length === 0 ? (
-              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '16px 0' }}>
-                项目暂无笔记。可把文件放入收件箱{' '}
-                <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
-                后点击「扫描导入」。
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {notes.map((n) => (
-                  <div
-                    key={n.id}
-                    className="note-select-card"
-                    style={{ marginBottom: 0, cursor: 'pointer' }}
-                    onClick={() => navigate(`/notes/${n.id}`)}
-                  >
-                    <span
-                      className={`badge ${TYPE_BADGE[n.source_type] ?? 'badge-markdown'}`}
-                      style={{ flexShrink: 0, width: 56, justifyContent: 'center' }}
-                    >
-                      {n.source_type}
-                    </span>
-                    <span
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {n.title}
-                    </span>
-                    <span className={statusClass(n.status)} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
-                      {n.status}
-                    </span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}>
-                      {formatSize(n.file_size)}
-                    </span>
-                    <button
-                      className="btn btn-ghost"
-                      title="将笔记移出该项目"
-                      style={{ fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0 }}
-                      onClick={(e) => {
-                        e.stopPropagation() // 避免触发整行跳转到笔记详情
-                        handleRemoveNote(p, n)
-                      }}
-                    >
-                      移出
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }
+  // 添加笔记面板（候选笔记 / 勾选 / 提交）
+  const addNotes = useAddNotesPanel({
+    loadProjects,
+    refreshExpandedDetail,
+  })
 
   return (
     <div className="page-enter">
       {/* 页面头部 */}
-      <div className="assessment-header">
-        <h1 className="assessment-title">项目</h1>
-        <p className="assessment-subtitle">
-          项目作为标签归属笔记，一篇笔记可属于多个项目；所有文件统一存放在收件箱（inbox）。
-        </p>
-      </div>
+      <ProjectsHeader />
 
-      {error && (
-        <div
-          className="card"
-          style={{
-            background: 'var(--color-error-light)',
-            border: '1px solid var(--color-error)',
-            color: 'var(--color-error)',
-            padding: '12px 16px',
-            marginBottom: 16,
-            fontSize: '0.875rem',
-          }}
-        >
-          {error}
-          <button
-            style={{ float: 'right', color: 'var(--color-error)', fontSize: '0.8rem' }}
-            onClick={() => setError('')}
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {error && <ProjectsErrorBanner error={error} onDismiss={clearError} />}
 
       {/* 新建项目 */}
-      <div className="card" style={{ marginBottom: 24, padding: 20 }}>
-        {!showForm ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>创建新项目</h3>
-              <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                项目为纯标签，创建后不生成物理目录；用标签给笔记打归属
-              </p>
-            </div>
-            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-              ＋ 新建项目
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>新建项目</h3>
-            <div>
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>项目名称</label>
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="如：Transformer 论文精读"
-                autoFocus
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>项目描述（可选）</label>
-              <textarea
-                value={newDesc}
-                onChange={(e) => setNewDesc(e.target.value)}
-                placeholder="这个项目是做什么的？"
-                rows={2}
-                style={{ resize: 'vertical' }}
-              />
-            </div>
-            {formError && <div style={{ color: 'var(--color-error)', fontSize: '0.8rem' }}>{formError}</div>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>
-                {creating ? '创建中…' : '创建项目'}
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  setShowForm(false)
-                  setFormError('')
-                }}
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <NewProjectForm onCreated={loadProjects} />
 
       {/* 项目列表 */}
       {loading ? (
@@ -736,30 +80,42 @@ export default function Projects() {
             alignItems: 'stretch',
           }}
         >
-          {projects.map((p, i) => renderCard(p, i))}
+          {projects.map((p, i) => (
+            <ProjectCard
+              key={p.id}
+              project={p}
+              index={i}
+              rename={renaming[p.id]}
+              detail={expanded[p.id]}
+              isScanning={!!scanning[p.id]}
+              scanResult={scanResults[p.id]}
+              addPanelOpen={addNotes.addPanelProject?.id === p.id}
+              candidateNotes={addNotes.candidateNotes}
+              addSearch={addNotes.addSearch}
+              addError={addNotes.addError}
+              adding={addNotes.adding}
+              selectedNoteIds={addNotes.selectedNoteIds}
+              onStartRename={() => startRename(p)}
+              onChangeRenameName={(value) => updateRenameField(p, 'name', value)}
+              onChangeRenameDescription={(value) => updateRenameField(p, 'description', value)}
+              onSaveRename={() => handleRename(p)}
+              onCancelRename={() => cancelRename(p)}
+              onDelete={() => handleDelete(p)}
+              onScan={() => handleScan(p)}
+              onToggleExpand={() => toggleExpand(p)}
+              onOpenAddPanel={() => addNotes.openAddPanel(p)}
+              onChangeAddSearch={addNotes.setAddSearch}
+              onToggleSelectNote={addNotes.toggleSelectNote}
+              onConfirmAdd={() => addNotes.confirmAdd(p)}
+              onCloseAddPanel={addNotes.closeAddPanel}
+              onRemoveNote={(note) => handleRemoveNote(p, note)}
+            />
+          ))}
         </div>
       )}
 
       {/* 使用说明 */}
-      <div
-        className="card"
-        style={{
-          marginTop: 24,
-          background: 'var(--color-bg)',
-          border: '1px dashed var(--color-border)',
-          fontSize: '0.85rem',
-          color: 'var(--color-text-secondary)',
-          lineHeight: 1.8,
-        }}
-      >
-        <strong style={{ color: 'var(--color-text)' }}>📖 使用说明</strong>
-        <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
-          <li>项目是纯标签：一篇笔记可打上多个项目标签，创建项目不会生成物理文件夹。</li>
-          <li>所有文件统一存放在收件箱（inbox）的 <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录。</li>
-          <li>把文件直接拷贝到收件箱 <code style={{ color: 'var(--color-primary)' }}>source/</code> 后，点击「扫描导入」即可识别为笔记并打上当前项目标签。</li>
-          <li>也可以在上传页选择多个项目标签，通过网页直接上传文件。</li>
-        </ol>
-      </div>
+      <ProjectsUsageNotes />
     </div>
   )
 }
