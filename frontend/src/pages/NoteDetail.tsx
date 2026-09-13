@@ -660,7 +660,7 @@ export default function NoteDetail() {
   async function handleCleanDanglingLinks() {
     if (!note || !noteLinks) return
     try {
-      await updateNoteLinks(note.id, noteLinks.linked_materials.map((m) => m.id))
+      await updateNoteLinks(note.id, (noteLinks.linked_materials ?? []).map((m) => m.id))
       const links = await getNoteLinks(note.id)
       setNoteLinks(links)
     } catch (err) {
@@ -880,12 +880,17 @@ export default function NoteDetail() {
         <CleaningPanel note={note} onStatusChange={handleStatusChange} onMutatingChange={(mutating) => { mutatingRef.current = mutating }} />
       )}
 
-      {/* 关联的学习资料列表 */}
-      {noteLinks && (noteLinks.linked_materials.length > 0 || (noteLinks.dangling_material_count ?? 0) > 0) && (
+      {/* 关联的学习资料列表
+          ⚠️ `?.`/`?? []` 不是多余的防御：接口响应少一个字段时，
+          这里原来是 `noteLinks.linked_materials.length` —— 直接
+          `undefined.length` 抛异常，而异常发生在渲染中，整页变成白屏
+          （本轮写表征测试时就以"mock 少给一个字段"的形式复现过一次）。
+          字段缺失时最坏的结果应该是"这一块不显示"，不是"什么都看不到"。 */}
+      {noteLinks && ((noteLinks.linked_materials?.length ?? 0) > 0 || (noteLinks.dangling_material_count ?? 0) > 0) && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>关联的学习资料</h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
-            {noteLinks.linked_materials.map(m => (
+            {(noteLinks.linked_materials ?? []).map(m => (
               <li key={m.id} style={{ padding: '0.25rem 0' }}>
                 <a href={`/notes/${m.id}`} style={{ color: 'var(--color-primary)' }}>{m.title}</a>
               </li>
@@ -919,11 +924,11 @@ export default function NoteDetail() {
       )}
 
       {/* 被引用笔记列表 */}
-      {noteLinks && noteLinks.linked_personal_notes.length > 0 && (
+      {noteLinks && (noteLinks.linked_personal_notes?.length ?? 0) > 0 && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>被以下笔记引用</h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
-            {noteLinks.linked_personal_notes.map(n => (
+            {(noteLinks.linked_personal_notes ?? []).map(n => (
               <li key={n.id} style={{ padding: '0.25rem 0' }}>
                 <a href={`/notes/${n.id}`} style={{ color: 'var(--color-primary)' }}>{n.title}</a>
               </li>
