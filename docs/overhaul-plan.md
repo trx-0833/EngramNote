@@ -3208,7 +3208,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 4.3 | **配额与告警**：用户级 token/金额配额；超限拒绝并给出明确错误码 | 无法无限烧钱 | ✅ **已落地**（附录 AD）：每日 token/金额配额（默认关）；检查在**发起请求之前**，超限抛 `LLMQuotaExceeded` → 全局处理器转成 `429 / LLM_QUOTA_EXCEEDED`。**配了金额上限但没配单价时，该上限无法执行并会告警**，不假装生效 |
 | 4.4 | **限流重构**：从"进程级 10 RPM"改为"按用户 + 按供应商"的令牌桶 | 单用户不饿死他人 | ✅ **已落地**（附录 AH）：`KeyedRateLimiter` 按 key 分桶，网关串成**三层**（用户 → 供应商 → 总闸门，总闸门最后取以免被个人限额扣住）。⚠️ **改用进程内桶，未引 Redis** —— 单写者已被强制，Redis 的差别只剩"重启清零"；无用户上下文的调用共用一个 `__anonymous__` 桶（不是免检）。⚠️ 后两层**默认关闭**（`LLM_USER_MAX_RPM=0`），理由见附录 AH.4 |
 | 4.5 | **修复事件循环问题**：Celery 任务改为 `asyncio.run()` **一次**包裹整个任务体（而非 6 次）；限流器/信号量改为**每 loop 惰性创建** | 无线程/loop 冲突，无连接泄漏 | ✅ **已落地**（附录 AH）：`tasks/loop.py` 的 `task_loop()` + `run_async()` 让**一个任务一个 loop**（任务体仍是同步函数，见 AH.2 对计划字面要求的偏离）；网关资源改为以 loop 对象为键的 `WeakKeyDictionary` 惰性创建，顺带修掉"配置被冻结在首次实例化"的根因 —— **附录 AE.8 那个测试侧 fixture 因此被删除** |
-| 4.6 | **Prompt 版本化**：每个 prompt 有 `prompt_version`，写入 cards/quiz_items | 可评估 prompt 改动的效果 | ✅ **已落地**（附录 AJ）：`prompts.PROMPT_VERSIONS` + `prompt_version(name)`（**未登记返回 None，不猜**），`knowledge_cards` / `quiz_items` 各加一列并写入。⚠️ 历史行**不回填**（"未知"≠"第一版"）。版本号与提示词摘要**绑在测试里**：改文本必须同时升版本，否则 `test_prompt_version` 失败。⚠️ 可评估性目前只到"能按版本分组"，还没有消费这一列的报表（属阶段 6） |
+| 4.6 | **Prompt 版本化**：每个 prompt 有 `prompt_version`，写入 cards/quiz_items | 可评估 prompt 改动的效果 | ✅ **已落地**（附录 AJ）：`prompts.PROMPT_VERSIONS` + `prompt_version(name)`（**未登记返回 None，不猜**），`knowledge_cards` / `quiz_items` 各加一列并写入。⚠️ 历史行**不回填**（"未知"≠"第一版"）。版本号与提示词摘要**绑在测试里**：改文本必须同时升版本，否则 `test_prompt_version` 失败。⚠️ 可评估性目前只到"能按版本分组"，还没有消费这一列的报表（属阶段 6）。**写入侧已核实接通**：全仓只有一处生产调用点（`understanding_service.save_knowledge_cards` ← `understanding_service.py:472` 传入 `prompt_version("understanding_session")`，题目侧见 `understand_tasks.py:366`），其余出现处都是测试。**真库现状**：`knowledge_cards` 1183 行、`quiz_items` 1058 行**全部为 `NULL`** —— 与"历史行不回填"一致（这批内容都产生于 4.6 之前），**不是缺陷**。⚠️ 由此推出一条对被报表的影响：**在 4.6 之后没有新的理解/出题运行之前，按 `prompt_version` 分组的报表只会显示一列"版本未知"** —— 报表本身可以做，但它的价值要等新内容产生才兑现 |
 | 4.7 | **LLM 响应缓存**：相同 (prompt_version, input_hash) 命中缓存，不重复付费 | 重跑理解成本大降 | ✅ **已落地**（附录 AF）：`llm_cache` 表 + `chat_detailed` 出口缓存，键 = 完整输入（provider/base_url/model/messages/采样参数）的 sha256。命中时**照样记一行 `llm_calls`**（`cached=True`、`cost=0`、`saved_tokens=N`），因此节省**可见**。默认开，TTL 30 天 |
 | 4.8 | **抽取幂等**：重跑理解时按 `content_hash` 复用已存在的卡片，只补差集 | 重跑不再产生重复卡片 | ✅ **已落地**（附录 AE）：`knowledge_cards.content_hash` + `card_intake_service`。**只补差集、永不删除**（删卡会把 `review_states` 变成孤儿行）。真库实测：跨天重跑过的笔记数为 **0**，所以这是**预防性**修复 |
 | 4.9 | **卡片质量门**：空内容/过短/无 `source_quote` 的卡片不入库；单次抽取数量上限 | 脏卡片无法入库 | ✅ **已落地**（附录 AE）：正文 <10 字 / 标题 <2 字 / 无 `source_text` 一律拒收，**被拒的数量与原因全部上报**（不静默丢弃）；单次新建上限 500。真库实测只会拦下 4 + 2 张存量卡 |
@@ -7798,7 +7798,7 @@ sha256（messages 的每一个字符都在内）。少一个空格、多一个�
 | 5.7 真 404 | ✅ 已做：`NotFound` 组件 + `path="*"`（未登录时的 `*` 才回登录页） |
 | 5.8 三态 + Toast | ✅ 已做：`EmptyState` / `ErrorDisplay` / `LoadingSpinner` / `Toast` / `ErrorBoundary`，全仓 147 处使用 |
 | 5.10 响应式 | ⏸ 未做：`responsive.css` 实测 **51 行**（计划写 41 行，仍远不足以覆盖移动端） |
-| 5.5 拆分巨型页面 | ⏸ 未做：`NoteDetail.tsx` 实测 **1178 行**（计划写 1030 行，还在长） |
+| 5.5 拆分巨型页面 | ✅ **`NoteDetail.tsx` 已完成**：1178 → **282 行**，拆出 24 个模块（最大 239 行），附录 AX。⚠️ `KnowledgeGraph.tsx`(980) 与 `Projects.tsx`(759) **仍未拆** —— 它们没有页面级测试，按 5.5 验证过的顺序须**先补安全网再拆** |
 
 **这一节本身是这次核对最大的产出**：计划表把它写成"待办"的三项其实已经完成，
 而"下一阶段该做什么"如果照抄表格，就会去做已经做完的事。
