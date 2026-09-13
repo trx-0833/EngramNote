@@ -14,6 +14,7 @@ import {
   deleteBlock,
   type NoteDetail,
 } from '../api/client'
+import TaskProgress from './TaskProgress'
 
 interface DuplicateBlock {
   block_index: number
@@ -142,23 +143,29 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
         </div>
       )}
 
-      {/* cleaning 状态：显示进度提示 + 停止按钮 */}
+      {/* cleaning 状态：显示**真实**进度提示 + 停止按钮（阶段 5.11）
+          ⚠️ 这里刻意不显示 TaskProgress 自带的"取消任务"按钮：
+          下面的"停止清洗"是**产品级**动作（把笔记标记为 cleaning_failed，
+          让任务在阶段边界自行退出），与"取消 Celery 任务"并不相同。
+          两个功能不同、外观一样的按钮放在一起，用户无法判断该点哪个。 */}
       {note.status === 'cleaning' && (
-        <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-          <div className="cleaning-progress">
-            <div className="cleaning-progress-bar" />
+        <div style={{ padding: 'var(--space-md)' }}>
+          <TaskProgress
+            noteId={note.id}
+            fallbackText="正在进行 AI 清洗，请稍候..."
+            allowCancel={false}
+            onCancelled={onStatusChange}
+          />
+          <div style={{ textAlign: 'center', marginTop: 'var(--space-sm)' }}>
+            <button
+              className="btn btn-danger"
+              style={{ fontSize: '0.8rem' }}
+              onClick={handleStopCleaning}
+              disabled={loading}
+            >
+              {loading ? '正在停止...' : '停止清洗'}
+            </button>
           </div>
-          <p style={{ color: 'var(--color-warning)', marginTop: 'var(--space-sm)', fontSize: '0.875rem' }}>
-            正在进行 AI 清洗，请稍候...
-          </p>
-          <button
-            className="btn btn-danger"
-            style={{ marginTop: 'var(--space-sm)', fontSize: '0.8rem' }}
-            onClick={handleStopCleaning}
-            disabled={loading}
-          >
-            {loading ? '正在停止...' : '停止清洗'}
-          </button>
         </div>
       )}
 

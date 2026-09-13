@@ -45,6 +45,7 @@ import CleaningPanel from '../components/CleaningPanel'
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
 import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
+import TaskProgress from '../components/TaskProgress'
 import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
 import NoteAskPanel from '../components/NoteAskPanel'
@@ -946,11 +947,15 @@ export default function NoteDetail() {
 
       {/* 内容区域 */}
       {note.status === 'converting' || note.status === 'uploading' ? (
-        /* 处理中状态 */
-        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-          <p style={{ color: 'var(--color-warning)' }}>
-            {note.status === 'uploading' ? '正在上传...' : '正在转换中，请稍候...'}
-          </p>
+        /* 处理中状态（阶段 5.11）：展示**真实**进度与阶段名，并可取消。
+           改造前这里只有一句"正在转换中，请稍候..."，而任务侧其实一直在
+           上报 progress/stage（后端从阶段 1′ 起就有这个契约）。 */
+        <div className="card" style={{ padding: 'var(--space-xl)' }}>
+          <TaskProgress
+            noteId={noteId!}
+            fallbackText={note.status === 'uploading' ? '正在上传...' : '正在转换中，请稍候...'}
+            onCancelled={fetchNote}
+          />
         </div>
       ) : editMode === 'edit' ? (
         /* 编辑模式：实时分屏预览（左侧 Markdown 编辑，右侧即时渲染） */
