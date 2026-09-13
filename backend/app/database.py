@@ -33,8 +33,12 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 # 提示当前模式
-if settings.debug:
-    logger.warning("当前处于 DEBUG 模式")
+if settings.is_dev:
+    logger.warning("当前处于开发环境（APP_ENV=dev）")
+if settings.log_sql:
+    # 阶段 4.10：SQL 日志单独开关 —— 它包含 bcrypt 哈希与卡片/题目正文，
+    # 因此打开时明确告警，而不是静默当作"开发环境的正常现象"。
+    logger.warning("已开启 SQL 日志（LOG_SQL=true）：日志会包含业务数据明文，请勿用于生产")
 
 # 注意：这里**不缓存** database_url / _is_sqlite 到模块级常量。
 #
@@ -81,7 +85,9 @@ def get_engine():
 
     # 引擎配置参数
     engine_kwargs = {
-        "echo": settings.debug,  # 调试模式下输出 SQL 语句
+        # 阶段 4.10：SQL echo 由**独立开关** `log_sql` 决定，
+        # 不再跟随 app_env/debug（理由见 config.py 里 log_sql 的说明）
+        "echo": settings.log_sql,
         "connect_args": connect_args,
     }
     # SQLite 不支持 pool_size / max_overflow 参数，仅 PostgreSQL 需要

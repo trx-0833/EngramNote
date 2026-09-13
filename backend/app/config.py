@@ -431,13 +431,50 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:5173"
     # CORS 允许来源（逗号分隔），默认本地前端开发服务器端口；生产环境改为实际前端域名
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
-    # 调试模式。**默认 False**（见 docs/overhaul-plan.md §2.5 E-5）：
-    # 该开关同时控制三件事 —— SQL echo 日志、FastAPI debug 响应、LLM 供应商
-    # （debug=True 走 GLM，False 走 DeepSeek）。原先默认 True 的后果是：
-    # SQLAlchemy 把**含 bcrypt 哈希与全部知识卡片/题目正文的 SQL 明文**
-    # 写进 data/logs/*.log，且任何逃出 ErrorHandlerMiddleware 的异常会回吐 traceback。
-    # 开发环境请在 backend/.env 显式设置 DEBUG=true。
+    # ---- 环境与开关（阶段 4.10：把 debug 拆成三个互不相干的开关）----
+    #
+    # 改造前只有一个 `debug`，它同时决定四件事：SQL echo、FastAPI 的 debug
+    # 响应（traceback 回吐）、JWT 密钥策略、以及 LLM 供应商。
+    # 后果是**想单独做其中一件就必须接受其余三件**：要在生产用 DeepSeek
+    # 就得同时失去开发期的 SQL 日志；要 SQL 日志就得连带把 traceback 暴露出去。
+    # 这正是 §2.5 E-5 那个"bcrypt 哈希与全部卡片正文进日志"缺陷的另一面。
+    #
+    # 现在拆成三个独立开关，各自只回答一个问题：
+    app_env: str = "prod"
+    """`dev` / `prod`：只决定"是不是开发环境"（JWT 零配置启动、traceback 是否回吐）"""
+
+    log_sql: bool = False
+    """是否把 SQLAlchemy 的 SQL 语句打进日志
+
+    ⚠️ 默认 **False**，且**不再跟随 `app_env`**：这些日志包含 bcrypt 哈希与
+    知识卡片/题目的正文。开发时想要就显式打开（`LOG_SQL=true`），
+    让它是一个有意识的动作，而不是"顺手开了 dev"的副作用。
+    """
+
+    llm_provider: str = "auto"
+    """LLM 供应商：`auto` / `deepseek` / `glm`
+
+    `auto`（默认）：开发环境用 GLM（免费）、否则用 DeepSeek —— 与改造前一致。
+    显式指定后**与环境解耦**：在 dev 里用 DeepSeek、在 prod 里用 GLM 都合法。
+    """
+
     debug: bool = False
+    """⚠️ **遗留开关**（阶段 4.10 起等价于 `app_env="dev"`）
+
+    保留它是为了让既有 `.env`（写着 `DEBUG=true`）继续可用：
+    它现在只影响 `app_env`，**不再**打开 SQL 日志、也不再决定 LLM 供应商。
+
+    这是有意的行为变化：以前 `DEBUG=true` 会把含 bcrypt 哈希的 SQL 明文
+    写进 `data/logs/*.log`，而"只是想本地跑起来"的人不会预期这件事。
+    需要 SQL 日志请显式设置 `LOG_SQL=true`。
+
+    新部署请直接用 `APP_ENV` / `LOG_SQL` / `LLM_PROVIDER`。
+    """
+
+    @property
+    def is_dev(self) -> bool:
+        """是否开发环境（`debug` 遗留开关会被折叠进来）"""
+        return self.app_env == "dev" or self.debug
 
     # pydantic-settings 配置：从 .env 文件加载，忽略多余字段
     # 使用绝对路径确保 Celery worker 等子进程也能正确找到 .env 文件
@@ -449,21 +486,39 @@ class Settings(BaseSettings):
     }
 
     @model_validator(mode="after")
+    def _validate_env_switches(self) -> "Settings":
+        """校验三个新开关的取值，并把遗留 `debug` 折叠进 `app_env`
+
+        为什么把 `debug` 折叠进来而不是直接忽略：既有 `.env` 里写着
+        `DEBUG=true` 的人，升级后仍应拿到"开发环境"的行为（JWT 可零配置、
+        traceback 可见），否则他们会遇到"本地起不来"这种与本次改动无关的故障。
+        """
+        if self.app_env not in ("dev", "prod"):
+            raise ValueError(f"APP_ENV 只能是 dev 或 prod，收到 {self.app_env!r}")
+        if self.llm_provider not in ("auto", "deepseek", "glm"):
+            raise ValueError(
+                f"LLM_PROVIDER 只能是 auto / deepseek / glm，收到 {self.llm_provider!r}"
+            )
+        if self.debug and self.app_env == "prod":
+            self.app_env = "dev"
+        return self
+
+    @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """
         生产/开发模式 JWT 密钥策略
 
-        生产环境（debug=False）必须显式配置 JWT 签名密钥，
+        生产环境（`is_dev` 为假）必须显式配置 JWT 签名密钥，
         防止使用可预测/空密钥导致 Token 可被伪造。
-        开发模式（debug=True）允许空密钥零配置启动，但空密钥不再用于签发：
+        开发模式允许空密钥零配置启动，但空密钥不再用于签发：
         此时自动生成随机密钥并持久化到 data/.jwt-secret，重启后复用。
         """
-        if not self.debug and not self.jwt_secret_key:
+        if not self.is_dev and not self.jwt_secret_key:
             raise ValueError(
                 "生产环境必须配置 JWT_SECRET_KEY（生成方法："
                 "python -c \"import secrets; print(secrets.token_hex(32))\"）"
             )
-        if self.debug and not self.jwt_secret_key:
+        if self.is_dev and not self.jwt_secret_key:
             self.jwt_secret_key = self._load_or_generate_jwt_secret()
         return self
 
@@ -521,15 +576,22 @@ class Settings(BaseSettings):
 
     def get_llm_config(self) -> dict:
         """
-        获取当前应使用的 LLM 配置
+        获取当前应使用的 LLM 配置（阶段 4.10：供应商与运行环境解耦）
 
-        debug 模式（settings.debug=True）使用 GLM-4.7-flash（免费，适合开发调试）
-        非 debug 模式使用 DeepSeek v4-flash（生产环境，效果更稳定）
+        取值由 `llm_provider` 单独决定：
+
+        - `deepseek` / `glm`：显式指定，与环境无关（dev 里也能用 DeepSeek）；
+        - `auto`（默认）：保持改造前的行为 —— 开发环境用 GLM（免费，适合调试），
+          否则用 DeepSeek v4-flash（生产更稳定）。
 
         Returns:
             dict: {"api_key": str, "model": str, "base_url": str, "provider": str}
         """
-        if self.debug:
+        provider = (self.llm_provider or "auto").lower()
+        if provider == "auto":
+            provider = "glm" if self.is_dev else "deepseek"
+
+        if provider == "glm":
             return {
                 "api_key": self.glm_api_key,
                 "model": self.glm_model,

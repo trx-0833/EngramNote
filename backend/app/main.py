@@ -142,11 +142,13 @@ async def lifespan(app: FastAPI):
 
 
 # 创建 FastAPI 应用实例
+# `debug=` 决定异常时是否把 traceback 回吐给客户端（阶段 4.10 起只看 app_env，
+# 与 SQL 日志、LLM 供应商无关）
 app = FastAPI(
     title=settings.app_name,
     description="AI 驱动的学习笔记管理与知识库工具",
     version="0.1.0",
-    debug=settings.debug,
+    debug=settings.is_dev,
     lifespan=lifespan,
 )
 
