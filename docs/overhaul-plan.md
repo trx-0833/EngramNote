@@ -8584,6 +8584,78 @@ Markdown）**没有快照、也没有演练** —— 数据库里的路径指向
 
 ---
 
+## 附录 AZ · 阶段 5.5 前置：`KnowledgeGraph` / `Projects` 页面级安全网（2026-09-12）
+
+### AZ.1 为什么先补测试、而不是先拆
+
+`NoteDetail.tsx` 的拆分（附录 AX）之所以能安全完成，是因为拆分**之前**已经有
+10 条页面级测试。剩下两个巨型页面（`KnowledgeGraph.tsx` 980 行、
+`Projects.tsx` 759 行）此前**一条测试都没有**，所以 5.5 对它们的正确第一步
+不是"拆"，而是"先让它们可被验证"。
+
+本轮**只加测试、不改任何生产代码**（`git status` 可证）。这条纪律的意义在于：
+如果一边补测试一边顺手修 bug，那么"测试发现的到底是原有缺陷还是新引入的缺陷"
+就永远说不清了。
+
+### AZ.2 ★ 安全网当场兑现：9 条会白屏的契约漂移路径
+
+喂入**残缺/漂移的接口数据**（后端少一个字段、返回包装对象、返回空体），
+页面会直接崩到错误边界 —— 用户看到的是"这个页面出错了"，不是内容。
+**全部 9 条都实测崩溃**（用 App 里真实的 `ErrorBoundary` 捕获，不是猜测）：
+
+| # | 位置 | 触发条件 |
+|---|---|---|
+| 1 | `KnowledgeGraph.tsx:247` | `graphData.nodes` 缺失/null → `nodes.filter` 抛错（`useMemo` 在组件早退**之前**执行，所以早退救不了） |
+| 2 | `KnowledgeGraph.tsx:249`（及 `:808`） | `graphData.edges` 缺失/null |
+| 3 | `GraphSidebar.tsx:87` | `stats.relation_type_distribution` 缺失（只要统计面板渲染就崩） |
+| 4 | `GraphSidebar.tsx:378` | `suggestions` 返回包装对象 `{items:[…]}` → 点开"建议"面板即崩 |
+| 5 | `NodeInspector.tsx:53` | 节点缺 `note_id` 时点击 → `note_id.slice(0,8)` |
+| 6 | `GraphSidebar.tsx:127` / `:140` | 子图缺 `center_node` / `neighbor_nodes` |
+| 7 | `Projects.tsx:718` / `:733` | `/projects` 返回 `undefined`（204/空体）或非数组 → `length` / `.map is not a function` |
+| 8 | `Projects.tsx:315` | 候选笔记 `title: null` **且**用户在搜索框输入 → `.toLowerCase()` |
+
+另有 2 处**不崩但会误导**的瑕疵：KnowledgeGraph 顶部节点数用的是**未过滤**的
+`graphData.nodes.length`（画布已滤掉回收站节点）→ "标题 3 节点、画布 2 个"；
+Projects 在 `note_count` 缺失时把字面量 `undefined` 显示进文案。
+
+> 这与 `NoteDetail` 的 `noteLinks` 白屏（附录 AP）是**同一类**问题：
+> 前端把"后端一定给全字段"当成前提。区别是这次是在**补测试**时主动找出来的，
+> 而不是等用户撞上。
+
+### AZ.3 ★ 用变异测试证明安全网真的会咬
+
+新增的 51 条用例如果只是"能跑绿"，它就没有价值 —— 常见的失败形态是用例
+**恒真**（断言的东西无论如何都成立）。因此逐条做了变异验证：
+
+| 变异（临时改生产文件） | 结果 |
+|---|---|
+| 删掉回收站过滤 | 只有"回收站节点不进画布"变红 ✔ |
+| 删掉坐标守卫 | 只有"绘制回调对无坐标节点不抛错"变红 ✔（替身 canvas 对非有限数值抛错，所以守卫确实被压住） |
+| 删掉删除项目的 `confirm` | 只有"删除必须先确认"变红 ✔ |
+| 候选过滤改成恒真 | 只有"只列尚未归属本项目的笔记"变红 ✔ |
+
+改完**逐字节还原**（`git checkout` + `git status`/`git diff` 核对无 M）。
+
+### AZ.4 覆盖边界（写清楚"测不到什么"）
+
+- 真实 `react-force-graph-2d` 的**布局与绘制**测不到：jsdom 没有 canvas
+  （`getContext('2d')` 返回 null）。替身渲染节点/边的可点击元素并驱动页面回调，
+  因此页面的数据装配与回调被覆盖，**库内部不被覆盖**；
+- 因此未覆盖：悬停去重、拖拽、真实缩放/平移手势、`onZoom` → minimap 节流、
+  画布上的 +/-/适应屏幕按钮；
+- 网络层按既有约定整体 mock（`request()` 的错误映射 / 401 刷新 / SSE 不在本轮）。
+
+### AZ.5 验收
+
+| 项 | 结果 |
+|---|---|
+| 新增用例 | `KnowledgeGraph.test.tsx` **29** + `Projects.test.tsx` **22** = 51 |
+| 全仓前端 | **10 文件 / 143 通过**（基线 71 + 本轮 51 + 并行任务 21） |
+| `npx.cmd tsc --noEmit` / `npm run build` | exit 0 |
+| 生产代码改动 | **零**（`KnowledgeGraph.tsx` / `Projects.tsx` 未出现在 `git status` 中） |
+
+---
+
 **文档版本**：v4.2（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
 阶段 6 的 6.1 / 6.2 / 6.4 / 6.5 / 6.6 / 6.8 见附录 J–AV；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
@@ -8593,7 +8665,8 @@ FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z�
 账本清理见 AL，文档一致性见 AM，结构化输出校验见 AN，任务进度 UI 见 AO，
 NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护栏见 AR，
 恢复演练见 AS，密码策略与登录时序见 AT，限流覆盖见 AU，存储审计调度见 AV，
-对象存储快照见 AW，NoteDetail 拆分见 AX，临时库清理见 AY）
+对象存储快照见 AW，NoteDetail 拆分见 AX，临时库清理见 AY，
+两页安全网见 AZ）
 
 
 
