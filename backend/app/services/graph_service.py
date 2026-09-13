@@ -600,6 +600,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         Dict: 操作结果，包含 success/new_count/skipped_count/message
     """
     # 局部导入避免影响模块加载时的依赖图
+    from ..services.llm.structured import CardRelationPoint, validate_items
     from ..services.llm_service import LLMService
 
     # 1. 查询用户的知识卡片，限制 100 张（回收站中的卡片不参与推断）
@@ -644,7 +645,6 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
     # 3. 分批调用 LLM 推断关系
     llm_service = LLMService()
     BATCH_SIZE = 20
-    valid_relation_types = {"prerequisite", "subsequent", "contrast"}
     new_count = 0
     skipped_count = 0
     new_relations: List[CardRelation] = []
@@ -692,18 +692,26 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
             )
             continue
 
-        # 校验并创建关系
-        for rel in relations:
-            card_id_a = rel.get("card_id_a")
-            card_id_b = rel.get("card_id_b")
-            relation_type = rel.get("relation_type")
+        # 校验并创建关系（阶段 4.1 收尾：结构化校验 + **未通过的要报告**）
+        #
+        # 改造前这里对不合法的条目一律 `continue` —— 判定是对的（关系类型
+        # 认不出来、ID 不在本批内，都不该建边），但它**完全静默**：
+        # 模型开始返回垃圾时，用户只会看到"关系变少了"，日志里什么都没有。
+        validation = validate_items(relations, CardRelationPoint, source="infer_relations")
+        if validation.issues:
+            logger.warning(
+                "卡片关系校验（批次 %d）: %s", start // BATCH_SIZE + 1, validation.summary()
+            )
 
-            # 校验 ID 都在本批卡片集合中
+        for item in validation.valid:
+            rel = item.model_dump()
+            card_id_a = rel["card_id_a"]
+            card_id_b = rel["card_id_b"]
+            relation_type = rel["relation_type"]
+
+            # 校验 ID 都在本批卡片集合中（这是**领域**约束，不属于字段形状）
             if card_id_a not in batch_ids or card_id_b not in batch_ids:
-                continue
-
-            # 校验关系类型合法
-            if relation_type not in valid_relation_types:
+                skipped_count += 1
                 continue
 
             # 转换关系类型枚举

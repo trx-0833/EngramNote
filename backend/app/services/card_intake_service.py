@@ -60,6 +60,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.knowledge_card import CardType, KnowledgeCard
+from .llm.structured import CardPoint, validate_items
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +169,17 @@ class SaveOutcome:
     而重跑一次理解时正确答案通常是"复用 50、新增 0"。
     被拒的卡片必须出现在这里（而不是只进日志），否则"脏卡片不入库"
     会变成"静默少了几张卡"。
+
+    `coerced`（阶段 4.1 收尾：结构化校验）是第五类，与 `rejected` **必须分开**：
+    被拒的是"这条不能用"，被修正的是"这条能用，但模型写的枚举值不认识，
+    已按默认值处理"。混在一起就看不出"模型开始在 card_type 上胡说"这个信号 ——
+    而那正是提示词需要调整的前兆。
     """
     created: List[KnowledgeCard] = field(default_factory=list)
     reused: List[KnowledgeCard] = field(default_factory=list)
     rejected: List[Tuple[str, str]] = field(default_factory=list)   # (标题, 原因)
     truncated: int = 0
+    coerced: List[Tuple[str, str]] = field(default_factory=list)    # (标题, 说明)
 
     @property
     def rejected_reasons(self) -> Dict[str, int]:
@@ -248,7 +255,22 @@ async def save_cards_idempotent(
     # 同一批里也要去重：LLM 偶尔会在一个批次里把同一个知识点写两遍
     seen_in_batch: Dict[str, Dict[str, Any]] = {}
 
-    for point in knowledge_points:
+    # 阶段 4.1 收尾：**先过结构化校验**（Pydantic），再进质量门。
+    #
+    # 顺序有意义：校验管的是"字段形状/枚举取值"，质量门管的是"内容够不够格"
+    # （正文过短、无 source_text）。一条缺 title 的条目本来就过不了门，
+    # 但让校验先拒它，日志里给出的原因是"缺 title"而不是"标题过短"——
+    # 后者会把排查方向指错。
+    validation = validate_items(knowledge_points, CardPoint, source="card_intake")
+    for issue in validation.issues:
+        if issue.action == "rejected":
+            outcome.rejected.append(("<无标题>" if issue.index < 0 else "<校验未通过>",
+                                     f"schema:{issue.field} {issue.reason}"))
+        else:
+            outcome.coerced.append(("<校验修正>", f"{issue.field} {issue.reason}"))
+
+    for item in validation.valid:
+        point = item.model_dump()
         reason = reject_reason(point, config)
         if reason:
             outcome.rejected.append((str(point.get("title") or "")[:60], reason))
@@ -303,6 +325,14 @@ async def save_cards_idempotent(
             "卡片质量门拦下 %d 张（笔记 %s，章节 %r）: %s",
             len(outcome.rejected), note_id[:8], chapter.get("chapter_title"),
             outcome.rejected_reasons,
+        )
+    if outcome.coerced:
+        # 被修正的条目**仍然入库**，但必须可见：枚举值开始被模型写错
+        # 是提示词需要调整的前兆（配合 4.6 的 prompt_version 可按版本量化）
+        logger.warning(
+            "卡片字段被校验修正 %d 处（笔记 %s，章节 %r）: %s",
+            len(outcome.coerced), note_id[:8], chapter.get("chapter_title"),
+            outcome.coerced[:3],
         )
     if outcome.truncated:
         logger.warning(

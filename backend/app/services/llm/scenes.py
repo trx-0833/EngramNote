@@ -44,6 +44,7 @@ from .prompts import (
     summarize_chapter_messages,
 )
 from .sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
+from .structured import GradeResult, validate_items
 
 logger = logging.getLogger("engramnote.llm")
 settings = get_settings()
@@ -529,28 +530,19 @@ class SceneMethods:
         if not isinstance(result, dict):
             return None
 
-        verdict = str(result.get("verdict") or "").strip().lower()
-        if verdict not in ("correct", "partial", "incorrect"):
-            # 模型没按约定返回三档之一 —— 不猜、也不兜底成某一档
-            logger.warning("简答判分返回了未约定的 verdict: %r", result.get("verdict"))
+        # 阶段 4.1 收尾：字段判定交给 `GradeResult`（verdict 白名单、confidence
+        # 裁剪、两个列表字段的规范化），**单一真相** ——
+        # 以前这三件事写在两个地方（这里与 `structured.VERDICTS`），
+        # 迟早会漂移成两套判定。
+        #
+        # ⚠️ 与原实现的行为差异只有一处，而且是刻意的：`missing_points` /
+        # `misconceptions` 形状不对时**置空**而不是丢掉整条判分 ——
+        # 它们是展示用的补充信息，为它们让用户回去做自评不值得。
+        # verdict 仍然"认不出来就返回 None"（不猜），这是不能妥协的一条。
+        outcome = validate_items([result], GradeResult, source="grade_short_answer")
+        if not outcome.valid:
+            logger.warning(
+                "简答判分结果不可用（按未判分处理）: %s", outcome.summary()
+            )
             return None
-
-        def _str_list(key: str) -> list:
-            value = result.get(key)
-            if not isinstance(value, list):
-                return []
-            return [str(v).strip() for v in value if str(v).strip()]
-
-        try:
-            confidence = float(result.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
-        confidence = max(0.0, min(1.0, confidence))  # 裁剪：模型偶尔给 1.5 或 -0.2
-
-        return {
-            "verdict": verdict,
-            "missing_points": _str_list("missing_points"),
-            "misconceptions": _str_list("misconceptions"),
-            "confidence": confidence,
-            "reason": str(result.get("reason") or "").strip(),
-        }
+        return outcome.valid[0].model_dump()

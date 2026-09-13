@@ -32,6 +32,7 @@ from ..models.knowledge_card import CardCategory, CardType, KnowledgeCard
 from ..models.note_material_link import NoteMaterialLink
 from ..schemas.knowledge import KnowledgeCardResponse
 from ..services.llm.prompts import prompt_version
+from ..services.llm.structured import CardPoint, ExtensionPoint, validate_items
 from ..services.llm_service import LLMService
 from ..services.note_service import (
     get_clean_markdown_content,
@@ -334,42 +335,34 @@ async def extract_combined(
 
         parsed_chapter_count += 1
         resp_chapter_title = data.get("chapter_title", chapter_title) or chapter_title
-        regular_points = data.get("regular_points", []) or []
-        blind_spots = data.get("blind_spots", []) or []
-        if not isinstance(regular_points, list):
-            regular_points = []
-        if not isinstance(blind_spots, list):
-            blind_spots = []
 
-        for point in regular_points:
-            if not isinstance(point, dict):
-                continue
-            cards_to_add.append(
-                _build_combined_card(
-                    user_id=user_id,
-                    personal_note_id=personal_id,
-                    material_id=material_id,
-                    point=point,
-                    chapter_title=resp_chapter_title,
-                    category=CardCategory.regular,
+        # 阶段 4.1 收尾：结构化校验（Pydantic）。
+        # 这条路以前**没有任何校验**：`isinstance(point, dict)` 就算通过，
+        # 缺 title 的条目会带着空标题入库（4.9 的入库门只管理解管道那条路）。
+        for category, key in ((CardCategory.regular, "regular_points"),
+                              (CardCategory.blind_spot, "blind_spots")):
+            raw_points = data.get(key, []) or []
+            validation = validate_items(raw_points, CardPoint, source=f"combined:{key}")
+            if validation.issues:
+                logger.warning(
+                    "联合分析章节 %r 的 %s 校验: %s",
+                    resp_chapter_title, key, validation.summary(),
                 )
-            )
-            regular_count += 1
-
-        for point in blind_spots:
-            if not isinstance(point, dict):
-                continue
-            cards_to_add.append(
-                _build_combined_card(
-                    user_id=user_id,
-                    personal_note_id=personal_id,
-                    material_id=material_id,
-                    point=point,
-                    chapter_title=resp_chapter_title,
-                    category=CardCategory.blind_spot,
+            for item in validation.valid:
+                cards_to_add.append(
+                    _build_combined_card(
+                        user_id=user_id,
+                        personal_note_id=personal_id,
+                        material_id=material_id,
+                        point=item.model_dump(),
+                        chapter_title=resp_chapter_title,
+                        category=category,
+                    )
                 )
-            )
-            blind_spot_count += 1
+                if category is CardCategory.regular:
+                    regular_count += 1
+                else:
+                    blind_spot_count += 1
 
     # 所有章节均解析失败视为整体失败
     if parsed_chapter_count == 0:
@@ -490,21 +483,25 @@ async def generate_extension(
         )
         return {"error": f"生成拓展知识点失败: {e}"}
 
-    if not isinstance(extensions, list):
-        extensions = []
-
-    # 5. 创建拓展卡片
+    # 5. 创建拓展卡片（阶段 4.1 收尾：先过结构化校验）
+    #
+    # ⚠️ 这里原来有一处会**掩盖模型异常**的兜底：`title` 缺失时写成
+    # "未命名拓展知识点"。于是库里会出现一堆同名卡片，而"模型没按格式返回"
+    # 这件事完全不可见。现在缺标题的条目不入库，并出现在校验日志里。
     created_cards: List[KnowledgeCard] = []
-    for ext in extensions:
-        if not isinstance(ext, dict):
-            continue
-        card_type = _parse_card_type(ext.get("card_type", "concept"))
+    validation = validate_items(extensions, ExtensionPoint, source="generate_extension")
+    if validation.issues:
+        logger.warning(
+            "拓展知识点校验 (parent_card_id=%s): %s", parent_card_id, validation.summary()
+        )
+    for item in validation.valid:
+        ext = item.model_dump()
         card = KnowledgeCard(
             user_id=user_id,
             note_id=parent.note_id,
-            card_type=card_type,
-            title=ext.get("title", "未命名拓展知识点") or "未命名拓展知识点",
-            content=ext.get("content", "") or "",
+            card_type=_parse_card_type(ext["card_type"]),
+            title=ext["title"],
+            content=ext["content"],
             source_text=_truncate_source_text(ext.get("source_text", "") or ""),
             card_category=CardCategory.extension,
             parent_card_id=parent_card_id,

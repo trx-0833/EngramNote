@@ -300,6 +300,17 @@ class TestGateInIntake:
 
         只进日志的话，"脏卡片不入库"就变成了"静默少了几张卡" ——
         而用户只会看到卡片比预期少，不知道是被门拦了还是模型没抽出来。
+
+        ## 两层拒绝，两类原因（阶段 4.1 收尾加入结构化校验后）
+
+        | 输入 | 谁拒的 | 报告的原因 |
+        |---|---|---|
+        | 字段**缺失/空白**（无正文、无标题） | 结构化校验（Pydantic） | `缺少必填文本字段: content` |
+        | 字段**存在但过短** | 质量门（4.9） | `正文过短` / `标题过短` |
+
+        分层是有意的：校验回答"这条数据形状对不对"，门回答"内容够不够格"。
+        以前两者都由门回答（空正文报"正文过短"），排查时会被引向"内容太短"
+        而不是"模型压根没给这个字段"。
         """
         uid, nid = await _make_note(test_db)
         async with test_db() as db:
@@ -309,13 +320,18 @@ class TestGateInIntake:
                     point(),
                     point(title="空正文", content=""),
                     point(title="", content="标题缺失的卡片内容内容内容"),
+                    # 字段都不缺，只是太短 → 这一条应当由质量门拦下
+                    point(title="短", content="也短"),
                 ],
             )
         assert len(outcome.created) == 1
-        assert len(outcome.rejected) == 2
-        reasons = outcome.rejected_reasons
-        assert any("正文过短" in r for r in reasons)
-        assert any("标题" in r for r in reasons)
+        assert len(outcome.rejected) == 3
+        reasons = " | ".join(outcome.rejected_reasons)
+        assert "content" in reasons, f"缺少正文的条目没有被报告: {reasons}"
+        assert "title" in reasons, f"缺少标题的条目没有被报告: {reasons}"
+        assert "正文过短" in reasons or "标题过短" in reasons, (
+            f"字段齐全但过短的条目没有走到质量门: {reasons}"
+        )
 
     async def test_rejected_cards_do_not_take_a_hash_slot(self, test_db):
         """被拒的卡不留任何痕迹：修好之后再抽出来应当能正常入库"""

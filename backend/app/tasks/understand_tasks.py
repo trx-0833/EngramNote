@@ -42,6 +42,7 @@ from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..services.llm.prompts import prompt_version
+from ..services.llm.structured import QuizQuestion, validate_items
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -312,9 +313,23 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
             # 解析 JSON 响应
             questions = _parse_questions_response(response)
 
+            # 阶段 4.1 收尾：结构化校验（Pydantic）。
+            #
+            # 这一步取代了原来那两段 `try: QuestionType(...) except ValueError:
+            # 默认值` —— 静默强制转换的后果是"模型在乱返回"永远不可见。
+            # 现在枚举不认识会被**修正并记录**（coerced），缺 question/answer
+            # 的条目会被**拒掉并记录**（rejected），而不是写进题库。
+            validation = validate_items(questions, QuizQuestion, source="generate_questions")
+            if validation.issues:
+                logger.warning(
+                    "笔记 %s 批次 %d 题目校验: %s",
+                    note_id, batch_start // batch_size + 1, validation.summary(),
+                )
+
             # 存入数据库（使用新会话）
             async with session_factory() as session:
-                for q in questions:
+                for item in validation.valid:
+                    q = item.model_dump()
                     # 获取 card_index 对应的卡片
                     card_index = q.get("card_index", 1)
                     if isinstance(card_index, int) and 1 <= card_index <= len(batch):
@@ -322,14 +337,12 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
                     else:
                         card = batch[0]
 
-                    # 验证 question_type
-                    q_type_str = q.get("question_type", "choice")
-                    try:
-                        question_type = QuestionType(q_type_str)
-                    except ValueError:
-                        question_type = QuestionType.choice
+                    # 枚举取值已由 `QuizQuestion` 校验并修正（不合法的会被
+                    # 记进 coercion_notes），这里只做模型层转换
+                    question_type = QuestionType(q["question_type"])
 
-                    # 验证 difficulty（优先使用 LLM 返回值，若为空则用定向出题建议）
+                    # 难度：模型给了就用模型的；空值时用定向出题建议兜底
+                    # （兜底只针对"没给"，不针对"给错"—— 给错会被校验修正）
                     diff_str = q.get("difficulty")
                     if not diff_str:
                         if target_categories:
@@ -337,10 +350,7 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
                             diff_str = reqs[0]["difficulty"] if reqs and reqs[0]["difficulty"] else "medium"
                         else:
                             diff_str = "medium"
-                    try:
-                        difficulty = DifficultyLevel(diff_str)
-                    except ValueError:
-                        difficulty = DifficultyLevel.medium
+                    difficulty = DifficultyLevel(diff_str)
 
                     quiz_item = QuizItem(
                         user_id=card["user_id"],
@@ -361,7 +371,7 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
                 await session.commit()
                 logger.info(
                     f"笔记 {note_id} 批次 {batch_start//batch_size + 1} "
-                    f"题目生成: {len(questions)} 道 (累计 {total_questions}) "
+                    f"题目生成: {len(validation.valid)} 道 (累计 {total_questions}) "
                     f"(对话轮次={question_session.turn_count})"
                 )
 
