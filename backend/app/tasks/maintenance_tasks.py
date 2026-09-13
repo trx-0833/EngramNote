@@ -100,6 +100,68 @@ def restore_drill_task() -> dict:
     return result
 
 
+@celery_app.task(name="app.tasks.maintenance_tasks.vault_audit")
+def vault_audit_task() -> dict:
+    """每周存储审计：库里的路径与磁盘文件是否一致（阶段 6.6 的另一半）
+
+    ## 为什么需要它（与恢复演练互补，不是重复）
+
+    恢复演练回答的是"**备份**可用吗"，它只看数据库。
+    而数据实际分布在两处：
+
+        data/db/engramnote.db    元数据（笔记、卡片、题目、复习进度）
+        data/storage/…           原始文件与 Markdown（库里的路径指向它们）
+
+    只恢复数据库、丢掉了文件，用户看到的是"笔记都在，但每一篇都打不开" ——
+    与丢了数据没有区别。这个审计补的就是"库 ↔ 磁盘"这一维。
+
+    ## 为什么之前没跑过
+
+    `audit_vault` 早就实现了（含缺失文件、孤儿文件、大小/哈希比对），
+    测试也有 14 条 —— 但**只有 `scripts/verify_vault.py` 手工调用过**，
+    没有任何调度。于是它在运行期等于不存在：真出问题时不会有人知道，
+    除非恰好有人记得去跑那个脚本。
+
+    （本轮已经是第三次遇到同一模式：AF.10 的账本清理、AU.1 的限流规则、
+    这里。共同点是"工具写好了、没人调用"，而它不会报错、只会静默地不生效。）
+
+    ## 只报"库→磁盘"方向 + 孤儿，不做哈希深比
+
+    `deep=False`：哈希深比要读全部文件，在日频/周频任务里是浪费
+    （磁盘静默损坏的概率远低于"文件被人手工删了"）。
+    需要深比时用 `scripts/verify_vault.py --deep` 手工跑。
+    """
+    from ..database import get_session_factory
+    from ..services.vault_audit_service import audit_vault
+
+    async def _run() -> dict:
+        factory = get_session_factory()
+        async with factory() as db:
+            result = await audit_vault(db, deep=False, include_orphans=True)
+        return result.to_dict()
+
+    try:
+        with task_loop("vault_audit"):
+            result = run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - 审计失败不阻塞 Beat
+        logger.error("存储审计失败: %s", exc, exc_info=True)
+        return {"ok": False, "error": str(exc)}
+
+    if result.get("ok"):
+        logger.info(
+            "存储审计通过: 扫描 %d 篇笔记，%d 个对象全部存在",
+            result.get("notes_scanned", 0), result.get("db_objects", 0),
+        )
+    else:
+        # 不一致意味着"用户界面上能看到、但打不开"的内容已经存在 —— error 级
+        logger.error(
+            "存储审计发现不一致: %s | 扫描 %d 篇，DB 对象 %d，磁盘对象 %d",
+            result.get("counts"), result.get("notes_scanned", 0),
+            result.get("db_objects", 0), result.get("disk_objects", 0),
+        )
+    return result
+
+
 async def _backup_in_thread(func) -> dict:
     """在线程池里跑同步的备份逻辑，避免阻塞 worker 的事件循环
 

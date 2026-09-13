@@ -175,6 +175,17 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.restore_drill",
             "schedule": crontab(day_of_week=1, hour=5, minute=0),
         },
+        # 每周一 05:30 存储审计：库里的路径 ↔ 磁盘文件（阶段 6.6 的另一半）
+        #
+        # 与恢复演练互补：演练只看数据库，而数据分布在 db + storage 两处。
+        # 只恢复库、丢了文件，用户看到的是"笔记都在但每一篇都打不开"。
+        # 排在演练之后：先确认备份可用，再核对线上的一致使性。
+        # `audit_vault` 与它的 14 条测试早已存在，但此前**只有手工脚本调用**
+        # （与 AF.10 的账本清理、AU.1 的限流规则同一种"写好了没人调用"）。
+        "vault-audit-weekly": {
+            "task": "app.tasks.maintenance_tasks.vault_audit",
+            "schedule": crontab(day_of_week=1, hour=5, minute=30),
+        },
     },
 )
 
