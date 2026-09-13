@@ -909,6 +909,34 @@ class TestFrontendAPIClient:
 # ===========================================================================
 
 
+def _note_detail_sources() -> dict[str, str]:
+    """NoteDetail 页面**及其拆分出来的模块**的源码（文件名 → 内容）
+
+    阶段 5.5 把 1178 行的 `NoteDetail.tsx` 拆成了若干子模块。这类结构性测试
+    此前直接读单文件，拆分之后就误报了 —— 但误报的原因不是功能没了，
+    而是断言跟着"某个文件名"走，而不是跟着"这个页面"走。
+
+    因此这里按**页面**收集源码：`NoteDetail.tsx` 加上 `pages/notedetail/`
+    目录下的全部文件。每次重构都去改测试，正是这类测试失去意义的方式。
+    """
+    sources: dict[str, str] = {}
+    page = FRONTEND_DIR / "src" / "pages" / "NoteDetail.tsx"
+    if page.exists():
+        sources["NoteDetail.tsx"] = page.read_text(encoding="utf-8")
+    for extra_dir in (
+        FRONTEND_DIR / "src" / "pages" / "notedetail",
+        FRONTEND_DIR / "src" / "components" / "notedetail",
+    ):
+        if not extra_dir.is_dir():
+            continue
+        for path in sorted(extra_dir.rglob("*")):
+            if path.is_file() and path.suffix in {".ts", ".tsx"}:
+                sources[path.relative_to(FRONTEND_DIR / "src").as_posix()] = (
+                    path.read_text(encoding="utf-8")
+                )
+    return sources
+
+
 class TestFrontendRoutesAndNav:
     """验证前端路由和导航栏更新"""
 
@@ -978,23 +1006,41 @@ class TestFrontendRoutesAndNav:
         assert "/qa" in source, "Navbar.tsx 中未包含 /qa 路径"
 
     def test_note_detail_has_start_learning(self):
-        """NoteDetail.tsx 应包含开始学习功能"""
-        note_detail_path = FRONTEND_DIR / "src" / "pages" / "NoteDetail.tsx"
-        if not note_detail_path.exists():
-            pytest.skip("前端 NoteDetail.tsx 不存在")
+        """NoteDetail 页面应包含开始学习功能（页面级，不绑定具体文件名）"""
+        sources = _note_detail_sources()
+        if not sources:
+            pytest.skip("前端 NoteDetail 页面不存在")
 
-        source = note_detail_path.read_text(encoding="utf-8")
-        assert "startUnderstanding" in source, "NoteDetail.tsx 中未导入 startUnderstanding"
-        assert "开始学习" in source, "NoteDetail.tsx 中未包含开始学习按钮"
+        joined = "\n".join(sources.values())
+        assert "startUnderstanding" in joined, (
+            f"NoteDetail 页面未导入 startUnderstanding（已查 {sorted(sources)}）"
+        )
+        assert "开始学习" in joined, (
+            f"NoteDetail 页面未包含开始学习按钮（已查 {sorted(sources)}）"
+        )
 
     def test_note_detail_has_learning_failed_status(self):
-        """NoteDetail.tsx 应包含 learning_failed 状态标签"""
-        note_detail_path = FRONTEND_DIR / "src" / "pages" / "NoteDetail.tsx"
-        if not note_detail_path.exists():
-            pytest.skip("前端 NoteDetail.tsx 不存在")
+        """NoteDetail 页面应包含 learning_failed 状态标签"""
+        sources = _note_detail_sources()
+        if not sources:
+            pytest.skip("前端 NoteDetail 页面不存在")
 
-        source = note_detail_path.read_text(encoding="utf-8")
-        assert "learning_failed" in source, "NoteDetail.tsx 中未包含 learning_failed 状态"
+        joined = "\n".join(sources.values())
+        assert "learning_failed" in joined, (
+            f"NoteDetail 页面未包含 learning_failed 状态（已查 {sorted(sources)}）"
+        )
+
+    def test_note_detail_source_collection_is_not_vacuous(self):
+        """★ 防"静默失效"：页面源码必须真的被收集到
+
+        上面两个断言只有在 `_note_detail_sources()` 真收到内容时才有意义。
+        目录改名 / 移动之后若收集为空，用例会 `skip` —— 看起来是"通过"，
+        实际什么都没查。这里把"收集到东西"本身变成一条断言。
+        """
+        sources = _note_detail_sources()
+        assert "NoteDetail.tsx" in sources, "页面主文件必须存在"
+        assert len(sources) >= 2, "5.5 之后页面由多个模块组成，只收到主文件说明收集逻辑失效"
+        assert all(text.strip() for text in sources.values()), "不应收到空文件"
 
     def test_knowledge_cards_page_exists(self):
         """KnowledgeCards.tsx 页面文件应存在"""

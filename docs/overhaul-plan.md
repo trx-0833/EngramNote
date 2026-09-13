@@ -3223,7 +3223,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 |
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
-| 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ⏸ **未做**（现状：`NoteDetail.tsx` 1178 行、`KnowledgeGraph.tsx` 更大）。这是纯前端结构重构，量大但不需要新依赖 |
+| 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | 🟡 **NoteDetail 已完成**（附录 AX）：1184 → **282 行**，拆出 24 个模块（最大 239 行）。⚠️ 两个已知**反例**（见 AX.5）：`KnowledgeGraph.tsx`(980) 与 `Projects.tsx`(759) **仍未拆且无测试**，属"没有安全网就不能动"的那一类 |
 | 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | ⏸ **未做**（选择 CSS Modules 还是 Tailwind 是**产品/团队决策**，需确认） |
 | 5.7 | **修 404**：新增真实 404 页面，不再静默重定向到登录页 | 错链有明确提示 | ✅ **已落地**（阶段 0，本轮核对确认）：`App.tsx` 的 `NotFound` 组件 + `path="*"`；未登录时的 `*` 才回登录页 |
 | 5.8 | **错误/空/加载三态组件化** + 全局 Toast | 无"白屏卡住" | ✅ **已落地**（阶段 0/Z，本轮核对确认）：`EmptyState.tsx` / `ErrorDisplay.tsx` / `LoadingSpinner.tsx` / `Toast.tsx` / `ErrorBoundary.tsx`，全仓 147 处使用 |
@@ -8442,6 +8442,88 @@ Markdown）**没有快照、也没有演练** —— 数据库里的路径指向
 
 ---
 
+## 附录 AX · 阶段 5.5：`NoteDetail.tsx` 拆分（2026-09-12）
+
+### AX.1 先有安全网，再动手
+
+5.5 一直没有做，不是因为难，而是因为**没有安全网**：1184 行的页面里混着
+数据加载、轮询、DOM 标注包装、视频 blob、编辑态、AI 提问浮层，
+改错一处就是白屏，而当时前端测试只有 0 条页面级用例。
+
+所以顺序是：先补 `NoteDetail.test.tsx`（10 条，附录 AP），**再**拆。
+本轮开工时这套测试已经在，且它守护的正是最危险的那条路径
+（`noteLinks` 缺失时的 `?.` / `?? []` 兜底 —— 之前真的白屏过）。
+
+### AX.2 结果
+
+    1184 行  →  282 行（编排层）
+    + 24 个模块，最大 239 行（useNoteDetailData.ts）
+    = 25 个文件，合计 2166 行
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 编排 | `NoteDetail.tsx` 282 | 路由参数、ADHD 联动、刷新、组合 |
+| 数据 | `useNoteDetailData` 239 / `useNoteAnnotations` 202 / `useNoteActions` 160 / `useNoteLinks` 108 | 加载、轮询、标注、动作 |
+| 视图 | `NoteDetailHeader` 183 / `ContentArea` 118 / `MarkdownReader` 64 / `DiffPanel` 40 … | 纯展示 |
+| 纯函数 | `viewMode` 64 / `selection` 51 / `annotations` 115 / `types` 27 | 可单测的判定逻辑 |
+
+**纯提取，不改行为。** 这条纪律是硬要求：拆分与修 bug 混在一起做，
+出问题时无法判断是哪一边引起的。子代理报告了 6 处**既存**缺陷
+（陈旧闭包、`videoUrl` 未清空、不可达分支等），**一律未改**，只登记 ——
+见 AX.4。
+
+### AX.3 ★ 拆分撞出一条跨模块契约（这就是安全网的价值）
+
+拆完全量后端测试**红了一条**：
+
+    tests/test_week5_6_understanding.py::TestFrontendRoutesAndNav
+        ::test_note_detail_has_start_learning
+
+这条后端测试**直接 grep 前端单文件**，断言 `startUnderstanding` 与"开始学习"
+出现在 `NoteDetail.tsx` 里。拆分后 `startUnderstanding` 搬去了
+`notedetail/useNoteActions.ts` —— 功能完好，断言却失败了。
+
+> 这是"结构测试绑定文件名"的典型脆弱性：它真正想验证的是
+> **"这个页面提供开始学习的入口"**，而不是"这个词出现在某个文件里"。
+
+修法不是把断言删掉（那就等于放弃验证），而是让断言跟着**页面**走：
+新增 `_note_detail_sources()` 收集 `NoteDetail.tsx` + `pages/notedetail/`
+下的全部源码，在合并后的文本上断言。同时补一条
+`test_note_detail_source_collection_is_not_vacuous`：
+**"收集到东西"本身也是断言** —— 目录被改名后收集为空会让用例 `skip`，
+看起来是通过、实际什么都没查，这正是本项目反复出现的**静默失效**。
+
+### AX.4 登记但未修的 6 处既存缺陷（拆分不夹带修复）
+
+| # | 位置 | 现象 |
+|---|---|---|
+| 1 | `useNoteLinks` | 加载 effect 只依赖 `[noteId]` 却读 `noteRole`：首次加载时 `note_role` 仍为 `undefined`，"个人笔记预填资料"分支会被跳过一次 |
+| 2 | `useNoteAnnotations` | 删除标注的监听器捕获的是 effect 时期的闭包，紧接着切换笔记可能删到上一篇的标注（原注释称有意为之） |
+| 3 | `NoteDetailHeader` | 审阅按钮的 `status === 'archived'` 分支不可达（与 AI 预处理按钮的渲染条件重叠） |
+| 4 | `NoteDetail` | 退出编辑态时 `showAnnotationMenu` 只被渲染条件隐藏、未重置 |
+| 5 | `useNoteDetailData` | 切换笔记时 `videoUrl` 未清空：视频笔记之间跳转可能短暂显示上一条的视频 |
+| 6 | 多处 | `useToast()` 从 1 处调用变成 5 处（纯提取的副产物，无行为差异） |
+
+这些是**重构过程中发现、但不应在重构中顺手改掉**的东西：
+改动需要各自的理由与验证。1/2/5 值得后续单独处理。
+
+### AX.5 验收与仍未做
+
+| 项 | 结果 |
+|---|---|
+| `npx.cmd tsc --noEmit` | exit 0 |
+| `npm.cmd test` | **6 文件 / 71 通过**（基线 71，`NoteDetail.test.tsx` 10/10 未改动） |
+| `npm run lint` | exit 0 |
+| `npm run build` | 成功，`NoteDetail` chunk 52.45 kB |
+| 最大文件 | **282 行**（全部 < 300） |
+| 后端全量 | 915 passed / 3 skipped |
+
+**仍未拆**：`KnowledgeGraph.tsx`（980 行）与 `Projects.tsx`（759 行）
+—— 它们**没有页面级测试**。5.5 的教训已经写明顺序：先补安全网，再拆。
+在没有测试的情况下动这两个文件，是拿白屏换行数。
+
+---
+
 **文档版本**：v4.1（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
 阶段 6 的 6.1 / 6.2 / 6.4 / 6.5 / 6.6 / 6.8 见附录 J–AV；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
@@ -8451,7 +8533,7 @@ FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z�
 账本清理见 AL，文档一致性见 AM，结构化输出校验见 AN，任务进度 UI 见 AO，
 NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护栏见 AR，
 恢复演练见 AS，密码策略与登录时序见 AT，限流覆盖见 AU，存储审计调度见 AV，
-对象存储快照见 AW）
+对象存储快照见 AW，NoteDetail 拆分见 AX）
 
 
 

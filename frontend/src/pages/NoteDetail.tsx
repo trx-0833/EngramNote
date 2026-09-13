@@ -1,5 +1,5 @@
 /**
- * @file 笔记详情页面
+ * @file 笔记详情页面（编排层）
  * @description 展示单条笔记的完整内容，包括：
  * 1. 笔记元信息（标题、来源类型、状态、页数、大小、创建时间）
  * 2. Markdown 内容渲染（支持代码高亮）
@@ -8,115 +8,78 @@
  * 5. Diff 对比视图
  * 6. 删除笔记功能
  * 7. 处理中状态的等待提示
+ *
+ * overhaul-plan 5.5 把本文件从 ~1180 行拆到 300 行以下：
+ * - 视图层拆到 `pages/notedetail/` 下的子组件
+ * - 批注/选区、链接关系、数据加载与轮询、页面级动作拆成同目录的 hook
+ * - 纯判定拆到 `viewMode.ts`，DOM helper 拆到 `selection.ts` / `annotations.ts`
+ *
+ * 本文件只保留：路由参数、ADHD Reader 接线、状态变化后的整体刷新、
+ * 各子模块之间的组装。拆分只做搬运，未改变任何行为。
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
 import { renderMarkdown } from '../utils/markdown'
-import { highlightCitation } from '../utils/citationJump'
-import {
-  getNote,
-  deleteNote,
-  getCleaningDiff,
-  startUnderstanding,
-  archiveNote,
-  getKnowledgeCards,
-  getQuestions,
-  retryConvert,
-  updateNoteRole,
-  getToken,
-  getAnnotations,
-  createAnnotation,
-  deleteAnnotation,
-  getNotes,
-  getNoteLinks,
-  updateNoteLinks,
-  updateNoteContent,
-  type NoteDetail,
-  type Note,
-  type CleaningDiffResponse,
-  type KnowledgeCard,
-  type Annotation,
-  type NoteLinksResponse,
-  type NoteContentTarget,
-} from '../api/client'
 import CleaningPanel from '../components/CleaningPanel'
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
-import DiffView from '../components/DiffView'
 import LoadingSpinner from '../components/LoadingSpinner'
-import TaskProgress from '../components/TaskProgress'
-import ErrorDisplay from '../components/ErrorDisplay'
 import VersionHistory from '../components/VersionHistory'
-import NoteAskPanel from '../components/NoteAskPanel'
-import { statusLabels, statusClass, cardTypeColors, cardTypeLabels } from '../utils/labels'
-import { formatDateTime } from '../utils/datetime'
 import { useAdhdReader } from '../hooks/useAdhdReader'
-import { useToast } from '../components/Toast'
-
-/** 视图模式 */
-type ViewMode = 'original' | 'clean' | 'diff'
+import NoteDetailHeader from './notedetail/NoteDetailHeader'
+import RelatedLinksSection, { shouldShowRelatedLinks } from './notedetail/RelatedLinksSection'
+import CitingNotesSection, { shouldShowCitingNotes } from './notedetail/CitingNotesSection'
+import LinkManagerModal from './notedetail/LinkManagerModal'
+import VideoPlayer from './notedetail/VideoPlayer'
+import ContentArea from './notedetail/ContentArea'
+import SelectionMenu from './notedetail/SelectionMenu'
+import AnnotationAskPanel from './notedetail/AnnotationAskPanel'
+import RelatedCardsSection from './notedetail/RelatedCardsSection'
+import LoadErrorView from './notedetail/LoadErrorView'
+import { useNoteAnnotations } from './notedetail/useNoteAnnotations'
+import { useNoteLinks } from './notedetail/useNoteLinks'
+import { useNoteActions } from './notedetail/useNoteActions'
+import { useNoteDetailData } from './notedetail/useNoteDetailData'
+import { canShowClean, canShowDiff, computeMdContent, parseCitationJump } from './notedetail/viewMode'
+import type { EditMode } from './notedetail/types'
 
 /**
  * 笔记详情页面组件
  */
 export default function NoteDetail() {
-  const toast = useToast()
   const { noteId } = useParams<{ noteId: string }>()
   const navigate = useNavigate()
-  const [note, setNote] = useState<NoteDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  /** 当前视图模式 */
-  const [viewMode, setViewMode] = useState<ViewMode>('original')
-  /** diff 数据 */
-  const [diffData, setDiffData] = useState<CleaningDiffResponse | null>(null)
-  const [diffLoading, setDiffLoading] = useState(false)
-  /** 关联知识卡片 */
-  const [relatedCards, setRelatedCards] = useState<KnowledgeCard[]>([])
-  /** 是否有关联题目（用于显示"立即复习"按钮） */
-  const [hasQuizItems, setHasQuizItems] = useState(false)
-  /** 视频播放的 blob URL */
-  const [videoUrl, setVideoUrl] = useState<string | null>(null)
-  const viewModeRef = useRef(viewMode)
-  viewModeRef.current = viewMode
 
-  /**
-   * 引用回跳参数（阶段 2.7）
-   *
-   * QA 页点击引用时带 `?view=clean&cs=<char_start>&ce=<char_end>` 过来。
-   * `view=clean` 是必需的：chunk 偏移基于 clean 副本计算，
-   * 若页面显示 original 副本，同一组偏移指向的是**另一段文字**。
-   */
+  /** 引用回跳参数（阶段 2.7）：`?view=clean&cs=<char_start>&ce=<char_end>` */
   const [searchParams, setSearchParams] = useSearchParams()
-  const jumpCharStart = Number(searchParams.get('cs'))
-  const jumpCharEnd = Number(searchParams.get('ce'))
-  const hasJump =
-    Number.isFinite(jumpCharStart) && Number.isFinite(jumpCharEnd) &&
-    jumpCharEnd > jumpCharStart
+  const jump = parseCitationJump(searchParams)
 
-  /** 批注相关 state */
-  const [annotations, setAnnotations] = useState<Annotation[]>([])
-  const [showAnnotationMenu, setShowAnnotationMenu] = useState(false)
-  const [annotationMenuPos, setAnnotationMenuPos] = useState({ x: 0, y: 0 })
   const markdownRef = useRef<HTMLElement>(null)
 
-  /** AI 提问浮层 state：选中文本 + 选区上下文 + 浮层位置（null 表示关闭） */
-  const [askAIState, setAskAIState] = useState<{
-    text: string
-    contextBefore: string
-    contextAfter: string
-    pos: { x: number; y: number }
-  } | null>(null)
-  /** mouseup 时暂存的选区信息（点击菜单按钮后 live selection 会被清空，需依赖此 ref） */
-  const selectionRef = useRef<{ text: string; contextBefore: string; contextAfter: string }>({
-    text: '',
-    contextBefore: '',
-    contextAfter: '',
-  })
+  /** 笔记数据：加载、清洗/学习轮询、引用回跳、视频 blob */
+  const {
+    note,
+    setNote,
+    loading,
+    setLoading,
+    error,
+    viewMode,
+    setViewMode,
+    diffData,
+    setDiffData,
+    diffLoading,
+    relatedCards,
+    hasQuizItems,
+    videoUrl,
+    mutatingRef,
+    fetchNote,
+  } = useNoteDetailData({ noteId, markdownRef, jump, searchParams, setSearchParams })
 
-  /** 块操作（恢复/删除）进行中标记：置 true 时 5s 状态轮询跳过本轮，避免轮询旧数据覆盖块操作结果 */
-  const mutatingRef = useRef<boolean>(false)
+  /** 编辑模式相关 state（edit 为实时分屏预览：左侧编辑、右侧即时渲染） */
+  const [editMode, setEditMode] = useState<EditMode>('view')
+  /** 版本历史面板显示状态 */
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
 
   /** ADHD Reader 专注阅读模式（鼠标遮罩/显示文本） */
   const {
@@ -126,21 +89,52 @@ export default function NoteDetail() {
     disable: disableAdhdReader,
   } = useAdhdReader(markdownRef)
 
-  /** 链接管理相关 state */
-  const [noteLinks, setNoteLinks] = useState<NoteLinksResponse | null>(null)
-  const [showLinkManager, setShowLinkManager] = useState(false)
-  const [linkMaterialIds, setLinkMaterialIds] = useState<string[]>([])
-  const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
+  /** 清洗/学习状态变化后刷新笔记数据 */
+  function handleStatusChange() {
+    setLoading(true)
+    setDiffData(null) // 清除 diff 缓存
+    fetchNote()
+  }
 
-  /** 编辑模式相关 state（edit 为实时分屏预览：左侧编辑、右侧即时渲染） */
-  const [editMode, setEditMode] = useState<'view' | 'edit'>('view')
-  const [editContent, setEditContent] = useState('')
-  const [saving, setSaving] = useState(false)
+  /** 链接关系（关联资料 / 被引用） */
+  const {
+    noteLinks,
+    showLinkManager,
+    setShowLinkManager,
+    linkMaterialIds,
+    setLinkMaterialIds,
+    availableMaterials,
+    handleManageLinks,
+    handleSaveLinks,
+    handleCleanDanglingLinks,
+  } = useNoteLinks({ noteId, noteRole: note?.note_role })
 
-  /** 版本历史面板显示状态 */
-  const [showVersionHistory, setShowVersionHistory] = useState(false)
-  /** 移入回收站确认弹窗显示状态 */
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  /** 批注 + 选区浮层（高亮/下划线、AI 提问） */
+  const {
+    showAnnotationMenu,
+    annotationMenuPos,
+    askAIState,
+    setAskAIState,
+    handleMouseUp,
+    handleOpenAskAI,
+    handleApplyAnnotation,
+  } = useNoteAnnotations({ note, viewMode, editMode, markdownRef })
+
+  /** 页面级动作：AI 预处理 / 删除 / 审阅 / 编辑保存 */
+  const {
+    editContent,
+    setEditContent,
+    saving,
+    showDeleteDialog,
+    setShowDeleteDialog,
+    handleStartLearning,
+    handleDelete,
+    confirmDelete,
+    handleArchive,
+    handleEnterEdit,
+    handleSaveContent,
+    handleCancelEdit,
+  } = useNoteActions({ note, viewMode, setEditMode, fetchNote, onStatusChange: handleStatusChange, navigate })
 
   // 离开纯阅读视图（编辑/对比）时自动关闭 ADHD Reader
   useEffect(() => {
@@ -149,562 +143,6 @@ export default function NoteDetail() {
     }
   }, [editMode, viewMode, adhdReaderEnabled, disableAdhdReader])
 
-  /** 获取笔记详情 */
-  const fetchNote = useCallback(async () => {
-    if (!noteId) return
-    try {
-      const data = await getNote(noteId)
-      setNote(data)
-      // 如果笔记已清洗/已归档且当前显示原始版，自动切换到清洗版
-      if ((data.status === 'cleaned' || data.status === 'archived' || data.status === 'learning_failed') && data.clean_md_content && viewModeRef.current === 'original') {
-        setViewMode('clean')
-      }
-      // 获取关联知识卡片（已学习过的笔记取消审阅后状态为 cleaned，也需加载旧卡片）
-      if (data.status === 'archived' || data.status === 'learning' || data.status === 'learning_failed' || data.metadata_?.learned_at !== undefined) {
-        try {
-          const cardData = await getKnowledgeCards(1, 999, noteId)
-          setRelatedCards(cardData.items)
-        } catch {
-          setRelatedCards([])
-        }
-        // 检查是否有关联题目
-        try {
-          const quizData = await getQuestions(1, 1, noteId)
-          setHasQuizItems(quizData.total > 0)
-        } catch {
-          setHasQuizItems(false)
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [noteId])
-
-  // 组件挂载或 noteId 变化时获取笔记详情（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true)
-    fetchNote()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchNote 依赖仅 noteId,effect 由 noteId 驱动
-  }, [noteId])
-
-  // 切换到 diff 模式时加载 diff 数据（条件加载型 effect，同步 setState 豁免）
-  useEffect(() => {
-    if (viewMode === 'diff' && noteId && (note?.status === 'cleaned' || note?.status === 'archived' || note?.status === 'learning_failed') && !diffData) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDiffLoading(true)
-      getCleaningDiff(noteId)
-        .then(setDiffData)
-        .catch(() => setDiffData(null))
-        .finally(() => setDiffLoading(false))
-    }
-  }, [viewMode, noteId, note?.status, diffData])
-
-  /**
-   * 引用回跳（阶段 2.7）：强制切到 clean 视图
-   *
-   * chunk 偏移基于 clean 副本计算，显示的必须是同一份内容。
-   * `clean_md_content` 尚未加载时**不要**强行切换 —— 否则会切到空内容，
-   * 等它到位后本 effect 会重跑。
-   */
-  useEffect(() => {
-    if (!hasJump) return
-    if (!note?.clean_md_content) return
-    if (viewModeRef.current !== 'clean') setViewMode('clean')
-  }, [hasJump, note?.clean_md_content])
-
-  /**
-   * 引用回跳：内容渲染完成后定位并高亮
-   *
-   * 依赖 `viewMode` 与内容：切换视图会重建 DOM，此时旧的高亮节点已不存在。
-   * 跳转完成后把 `cs/ce` 从 URL 清掉 —— 否则用户手动切换视图时会被
-   * 反复拉回同一段，像是页面"卡住了"。
-   */
-  useEffect(() => {
-    if (!hasJump || viewMode !== 'clean' || !note?.clean_md_content) return
-    const timer = window.setTimeout(() => {
-      const result = highlightCitation(
-        markdownRef.current,
-        note.clean_md_content || '',
-        jumpCharStart,
-        jumpCharEnd,
-      )
-      if (!result.highlighted) {
-        // 明说失败，而不是让用户以为"引用就在开头"
-        toast.warning('已打开笔记，但未能定位到引用段落（可能因排版差异）')
-      }
-      // 清掉跳转参数，避免后续视图切换被反复拉回
-      const next = new URLSearchParams(searchParams)
-      next.delete('cs'); next.delete('ce'); next.delete('view')
-      setSearchParams(next, { replace: true })
-    }, 120)
-    return () => window.clearTimeout(timer)
-    // searchParams/setSearchParams 有意不入依赖：会在清理参数后触发无意义重跑
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasJump, viewMode, note?.clean_md_content, jumpCharStart, jumpCharEnd])
-
-  // 清洗中状态轮询：每 5 秒刷新笔记数据，直到清洗完成或失败
-  useEffect(() => {
-    if (note?.status !== 'cleaning' || !noteId) return
-
-    const interval = setInterval(async () => {
-      if (mutatingRef.current) return
-      try {
-        const data = await getNote(noteId)
-        setNote(data)
-        if (data.status !== 'cleaning') {
-          clearInterval(interval)
-          // 清洗完成后自动切换到清洗版
-          if (data.status === 'cleaned' && data.clean_md_content) {
-            setViewMode('clean')
-          }
-        }
-      } catch {
-        // 轮询过程中的网络错误，继续尝试
-      }
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [note?.status, noteId])
-
-  // 学习中状态轮询：每 5 秒刷新笔记数据，直到学习完成或失败
-  useEffect(() => {
-    if (note?.status !== 'learning' || !noteId) return
-
-    const interval = setInterval(async () => {
-      if (mutatingRef.current) return
-      try {
-        const data = await getNote(noteId)
-        setNote(data)
-        if (data.status !== 'learning') {
-          clearInterval(interval)
-        }
-      } catch {
-        // 轮询过程中的网络错误，继续尝试
-      }
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [note?.status, noteId])
-
-  // 视频类型笔记：通过 blob URL 加载视频（需携带 JWT 认证头）
-  useEffect(() => {
-    if (note?.source_type === 'video' && note?.video_url) {
-      // 局部持有 blob URL，cleanup 中释放（避免闭包捕获旧 state 导致泄漏）
-      let localUrl: string | null = null
-      const fetchVideo = async () => {
-        try {
-          const token = getToken()
-          if (!token) throw new Error('未登录')
-          const response = await fetch(note.video_url as string, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-          if (!response.ok) throw new Error('Failed to load video')
-          const blob = await response.blob()
-          const url = URL.createObjectURL(blob)
-          localUrl = url
-          setVideoUrl(url)
-        } catch (err) {
-          console.error('Failed to load video:', err)
-        }
-      }
-      fetchVideo()
-      return () => {
-        if (localUrl) URL.revokeObjectURL(localUrl)
-      }
-    }
-  }, [note?.source_type, note?.video_url])
-
-  // 加载批注：当 note 加载完成且 viewMode 确定后加载批注
-  useEffect(() => {
-    if (!note?.id) return
-    const loadAnnotations = async () => {
-      try {
-        const data = await getAnnotations(note.id, viewMode)
-        setAnnotations(data.annotations || [])
-      } catch (err) {
-        console.error('加载批注失败:', err)
-      }
-    }
-    loadAnnotations()
-  }, [note?.id, viewMode])
-
-  // 加载链接关系：当 note 加载完成后获取其关联的资料/被引用笔记
-  // note.note_role 决定查询方向,但 role 变化依赖 note 变化,effect 已由 note?.id 驱动,
-  // 补 role 依赖会与业务语义重复触发,故豁免 exhaustive-deps
-  useEffect(() => {
-    if (!note?.id) return
-    const loadLinks = async () => {
-      try {
-        const links = await getNoteLinks(note.id)
-        setNoteLinks(links)
-        if (note.note_role === 'personal_note') {
-          setLinkMaterialIds(links.linked_materials.map(m => m.id))
-        }
-      } catch (err) {
-        console.error('加载链接关系失败:', err)
-      }
-    }
-    loadLinks()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- role 随 note 变化,effect 由 note?.id 驱动
-  }, [note?.id])
-
-  // 批注恢复：DOM 渲染后应用批注到对应文本节点
-  // handleDeleteAnnotation 每次渲染重建,加入依赖会让 effect 频繁重跑,
-  // 事件监听器捕获的是 effect 创建时的闭包,删除操作仍可用,故豁免 exhaustive-deps
-  useEffect(() => {
-    if (editMode !== 'view') return
-    if (!markdownRef.current || annotations.length === 0) return
-
-    // 遍历所有文本节点，匹配批注
-    const applyAnnotations = () => {
-      annotations.forEach(ann => {
-        if (ann.view_mode !== viewMode) return
-        if (!markdownRef.current) return
-
-        // 跳过已应用的批注，避免重复包裹 DOM
-        if (markdownRef.current.querySelector(`[data-annotation-id="${ann.id}"]`)) return
-
-        // 在 DOM 中查找匹配的文本
-        const walker = document.createTreeWalker(
-          markdownRef.current,
-          NodeFilter.SHOW_TEXT,
-          null
-        )
-
-        while (walker.nextNode()) {
-          const node = walker.currentNode as Text
-          const text = node.textContent || ''
-          const idx = text.indexOf(ann.text_content)
-          if (idx >= 0) {
-            // 验证上下文（可选，简单验证）
-            const before = text.substring(Math.max(0, idx - 50), idx)
-            const after = text.substring(idx + ann.text_content.length, idx + ann.text_content.length + 50)
-            if (ann.context_before && !before.endsWith(ann.context_before)) continue
-            if (ann.context_after && !after.startsWith(ann.context_after)) continue
-
-            // 创建包裹元素
-            const range = document.createRange()
-            range.setStart(node, idx)
-            range.setEnd(node, idx + ann.text_content.length)
-
-            const wrapper = document.createElement(ann.type === 'highlight' ? 'mark' : 'u')
-            wrapper.className = ann.type === 'highlight' ? 'annotation-mark' : 'annotation-underline'
-            wrapper.dataset.annotationId = ann.id
-            wrapper.addEventListener('click', (e) => {
-              e.stopPropagation()
-              handleDeleteAnnotation(ann.id)
-            })
-
-            try {
-              range.surroundContents(wrapper)
-            } catch {
-              // surroundContents 可能跨节点失败，跳过
-            }
-            break  // 每个批注只应用一次
-          }
-        }
-      })
-    }
-
-    // 延迟执行，确保 DOM 已渲染
-    setTimeout(applyAnnotations, 100)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方注释,handleDeleteAnnotation 不入门
-  }, [note?.id, note?.original_md_content, note?.clean_md_content, viewMode, annotations, editMode])
-
-  /** 触发理解管道（开始学习） */
-  async function handleStartLearning() {
-    if (!note) return
-    try {
-      // archived 笔记重新理解会清空全部旧产物，先获取影响数量并二次确认，见 docs/decisions.md#F-02
-      const res = await startUnderstanding(note.id, false)
-      if (res.requires_confirm) {
-        const impact = res.impact
-        const parts: string[] = []
-        if (impact) {
-          if (impact.cards > 0) parts.push(`${impact.cards} 张知识卡片`)
-          if (impact.quizzes > 0) parts.push(`${impact.quizzes} 道题目`)
-          if (impact.review_logs > 0) parts.push(`${impact.review_logs} 条复习记录`)
-          if (impact.relations > 0) parts.push(`${impact.relations} 条图谱关系`)
-        }
-        const detail = parts.length > 0 ? `\n\n将删除：${parts.join('、')}` : ''
-        const ok = confirm(
-          `此笔记已归档，重新学习将清空其现有学习成果。${detail}\n\n此操作不可恢复，确定继续？`
-        )
-        if (!ok) return
-        await startUnderstanding(note.id, true)
-        handleStatusChange()
-        return
-      }
-      handleStatusChange()
-    } catch (err) {
-      // 409（进行中）等状态透传提示
-      toast.error(err instanceof Error ? err.message : '启动学习失败')
-    }
-  }
-
-  /** 处理删除笔记（打开移入回收站确认弹窗） */
-  function handleDelete() {
-    if (!note) return
-    setShowDeleteDialog(true)
-  }
-
-  /** 确认移入回收站：调用软删除 API 后返回列表页 */
-  async function confirmDelete() {
-    if (!note) return
-    try {
-      await deleteNote(note.id)
-      navigate('/notes')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '移入回收站失败')
-      setShowDeleteDialog(false)
-    }
-  }
-
-  /** 处理归档/取消归档 */
-  async function handleArchive() {
-    if (!note) return
-    try {
-      await archiveNote(note.id)
-      await fetchNote()  // 重新获取完整数据，避免部分数据覆盖
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败')
-    }
-  }
-
-  /** 清洗状态变化后刷新笔记数据 */
-  function handleStatusChange() {
-    setLoading(true)
-    setDiffData(null) // 清除 diff 缓存
-    fetchNote()
-  }
-
-  /** 计算选区上下文：选中文本及其前后各 windowChars 字符（用于 AI 提问参考） */
-  function computeSelectionContext(range: Range, windowChars: number) {
-    const container = markdownRef.current
-    if (!container) return { text: '', contextBefore: '', contextAfter: '' }
-    const text = range.toString().trim()
-    // 获取选区前后的文本作为上下文
-    const beforeNode = document.createRange()
-    beforeNode.selectNodeContents(container)
-    beforeNode.setEnd(range.startContainer, range.startOffset)
-    const contextBefore = beforeNode.toString().slice(-windowChars)
-    const afterNode = document.createRange()
-    afterNode.selectNodeContents(container)
-    afterNode.setStart(range.endContainer, range.endOffset)
-    const contextAfter = afterNode.toString().slice(0, windowChars)
-    return { text, contextBefore, contextAfter }
-  }
-
-  /** 处理鼠标抬起：选中文本时弹出批注操作浮层 */
-  function handleMouseUp() {
-    const selection = window.getSelection()
-    if (!selection || selection.isCollapsed || selection.toString().trim().length === 0) {
-      setShowAnnotationMenu(false)
-      return
-    }
-
-    // 确保选区在 markdown 内容区域内
-    const range = selection.getRangeAt(0)
-    if (!markdownRef.current?.contains(range.commonAncestorContainer)) {
-      setShowAnnotationMenu(false)
-      return
-    }
-
-    // 暂存选区信息（供「AI 提问」使用；点击菜单按钮后 live selection 会被清空）
-    selectionRef.current = computeSelectionContext(range, 1500)
-
-    // 计算浮层位置
-    const rect = range.getBoundingClientRect()
-    setAnnotationMenuPos({
-      x: rect.left + rect.width / 2,
-      y: rect.top - 10,
-    })
-    setShowAnnotationMenu(true)
-  }
-
-  /** 打开 AI 提问浮层：基于 mouseup 时暂存的选区信息 */
-  function handleOpenAskAI() {
-    const sel = selectionRef.current
-    if (!sel.text.trim()) return
-    setAskAIState({
-      text: sel.text,
-      contextBefore: sel.contextBefore,
-      contextAfter: sel.contextAfter,
-      pos: annotationMenuPos,
-    })
-    setShowAnnotationMenu(false)
-    window.getSelection()?.removeAllRanges()
-  }
-
-  /** 应用批注：高亮或下划线 */
-  async function handleApplyAnnotation(type: 'highlight' | 'underline') {
-    if (!note) return
-    const selection = window.getSelection()
-    if (!selection || selection.isCollapsed) return
-
-    const text = selection.toString().trim()
-    if (!text || text.length > 5000) {
-      toast.warning('选中文本过长或为空')
-      return
-    }
-
-    const range = selection.getRangeAt(0)
-
-    // 获取上下文
-    const container = markdownRef.current
-    if (!container) return
-
-    // 获取选区前后的文本作为上下文
-    const beforeNode = document.createRange()
-    beforeNode.selectNodeContents(container)
-    beforeNode.setEnd(range.startContainer, range.startOffset)
-    const contextBefore = beforeNode.toString().slice(-50)
-
-    const afterNode = document.createRange()
-    afterNode.selectNodeContents(container)
-    afterNode.setStart(range.endContainer, range.endOffset)
-    const contextAfter = afterNode.toString().slice(0, 50)
-
-    try {
-      const newAnn = await createAnnotation(note.id, {
-        view_mode: viewMode,
-        type,
-        text_content: text,
-        context_before: contextBefore,
-        context_after: contextAfter,
-      })
-
-      setAnnotations(prev => [...prev, newAnn])
-
-      // 立即应用到 DOM
-      const wrapper = document.createElement(type === 'highlight' ? 'mark' : 'u')
-      wrapper.className = type === 'highlight' ? 'annotation-mark' : 'annotation-underline'
-      wrapper.dataset.annotationId = newAnn.id
-      wrapper.addEventListener('click', (e) => {
-        e.stopPropagation()
-        handleDeleteAnnotation(newAnn.id)
-      })
-
-      try {
-        range.surroundContents(wrapper)
-      } catch (err) {
-        console.warn('应用批注失败:', err)
-      }
-    } catch {
-      toast.error('保存批注失败')
-    }
-
-    setShowAnnotationMenu(false)
-    selection.removeAllRanges()
-  }
-
-  /** 删除批注 */
-  async function handleDeleteAnnotation(annotationId: string) {
-    if (!note) return
-    if (!confirm('确定删除此批注？')) return
-
-    try {
-      await deleteAnnotation(note.id, annotationId)
-      setAnnotations(prev => prev.filter(a => a.id !== annotationId))
-
-      // 从 DOM 移除样式
-      const elem = markdownRef.current?.querySelector(`[data-annotation-id="${annotationId}"]`)
-      if (elem) {
-        const parent = elem.parentNode
-        while (elem.firstChild) {
-          parent?.insertBefore(elem.firstChild, elem)
-        }
-        parent?.removeChild(elem)
-        parent?.normalize()  // 合并相邻文本节点
-      }
-    } catch {
-      toast.error('删除批注失败')
-    }
-  }
-
-  /** 打开"管理关联资料"弹窗，加载可关联的学习资料列表 */
-  async function handleManageLinks() {
-    if (!note) return
-    try {
-      const data = await getNotes(1, 100, undefined, 'material')
-      setAvailableMaterials(data.items || [])
-      setShowLinkManager(true)
-    } catch {
-      toast.error('加载资料列表失败')
-    }
-  }
-
-  /** 保存关联资料修改 */
-  async function handleSaveLinks() {
-    if (!note) return
-    try {
-      const result = await updateNoteLinks(note.id, linkMaterialIds)
-      if (result.changed) {
-        // 重新加载链接
-        const links = await getNoteLinks(note.id)
-        setNoteLinks(links)
-        toast.success('关联资料已更新')
-      } else {
-        toast.error('关联资料未变化')
-      }
-      setShowLinkManager(false)
-    } catch {
-      toast.error('保存关联失败')
-    }
-  }
-
-  /** 清理悬挂链接：以当前有效资料全量覆盖，自动剔除资料端为 NULL 的悬挂行 */
-  async function handleCleanDanglingLinks() {
-    if (!note || !noteLinks) return
-    try {
-      await updateNoteLinks(note.id, (noteLinks.linked_materials ?? []).map((m) => m.id))
-      const links = await getNoteLinks(note.id)
-      setNoteLinks(links)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '清理链接失败')
-    }
-  }
-
-  /** 进入编辑模式：预填充内容（仅允许编辑清洗版，原始版只读） */
-  function handleEnterEdit() {
-    if (!note) return
-    if (viewMode === 'original') {
-      toast.warning('原始版不可编辑，请切换到清洗版后编辑')
-      return
-    }
-    setEditContent(note.clean_md_content || '')
-    setEditMode('edit')
-  }
-
-  /** 保存编辑内容 */
-  async function handleSaveContent() {
-    if (!note) return
-    setSaving(true)
-    try {
-      // 原始版只读，编辑始终写入清洗版
-      const target: NoteContentTarget = 'clean'
-      await updateNoteContent(note.id, editContent, target)
-      await fetchNote()
-      setEditMode('view')
-      setEditContent('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '保存失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  /** 取消编辑（有未保存修改时确认） */
-  function handleCancelEdit() {
-    const original = note?.clean_md_content || ''
-    if (editContent !== original && !confirm('放弃当前编辑的修改？')) return
-    setEditContent('')
-    setEditMode('view')
-  }
-
   // 加载中状态
   if (loading) {
     return <LoadingSpinner />
@@ -712,18 +150,11 @@ export default function NoteDetail() {
 
   // 错误或笔记不存在状态
   if (error || !note) {
-    return (
-      <div style={{ padding: 'var(--space-lg)' }}>
-        <ErrorDisplay message={error || '笔记不存在'} />
-        <button className="btn btn-secondary" onClick={() => navigate('/notes')}>返回列表</button>
-      </div>
-    )
+    return <LoadErrorView error={error} onBack={() => navigate('/notes')} />
   }
 
   /** 选择要显示的 Markdown 内容 */
-  const mdContent = viewMode === 'clean' && note.clean_md_content
-    ? note.clean_md_content
-    : note.original_md_content || ''
+  const mdContent = computeMdContent(note, viewMode)
 
   // 将 Markdown 文本解析为 HTML
   const htmlContent = renderMarkdown(mdContent)
@@ -731,394 +162,105 @@ export default function NoteDetail() {
   // 编辑预览的 HTML
   const editPreviewHtml = renderMarkdown(editContent)
 
-  // 是否可以显示清洗版（cleaned/archived/learning_failed 状态都可以查看）
-  const canShowClean = (note.status === 'cleaned' || note.status === 'archived' || note.status === 'learning_failed') && !!note.clean_md_content
-  // 是否可以显示 diff（cleaned/archived/learning_failed 状态都可以查看）
-  const canShowDiff = (note.status === 'cleaned' || note.status === 'archived' || note.status === 'learning_failed')
+  // 是否可以显示清洗版 / diff（cleaned/archived/learning_failed 状态都可以查看）
+  const showClean = canShowClean(note)
+  const showDiff = canShowDiff(note)
 
   return (
     <div className="page-enter">
       {/* 头部信息区域 */}
-      <header style={{ marginBottom: 'var(--space-lg)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-md)' }}>
-          <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>{note.title}</h1>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            {editMode === 'view' && (
-              <button
-                className="btn btn-secondary"
-                onClick={handleEnterEdit}
-                disabled={viewMode === 'original' || ['uploading', 'converting', 'cleaning', 'learning'].includes(note.status)}
-                title={
-                  viewMode === 'original'
-                    ? '原始版不可编辑，请在清洗版中编辑'
-                    : (['uploading', 'converting', 'cleaning', 'learning'].includes(note.status) ? '处理中，暂不可编辑' : '编辑笔记内容')
-                }
-              >
-                编辑
-              </button>
-            )}
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowVersionHistory(true)}
-              disabled={['uploading', 'converting'].includes(note.status)}
-              title="查看版本历史"
-            >
-              版本历史
-            </button>
-            {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
-              <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>立即复习</button>
-            )}
-            {(note.note_role === 'material' || !note.note_role) && (
-              <button className="btn btn-secondary" onClick={() => navigate(`/assessment?noteId=${note.id}`)}>学习评估</button>
-            )}
-            {note.note_role === 'personal_note' && (
-              <button className="btn btn-secondary" onClick={handleManageLinks}>管理关联资料</button>
-            )}
-            {(note.status === 'cleaned' || note.status === 'learning_failed' || note.status === 'archived') && (
-              <button className="btn btn-primary" onClick={handleStartLearning}>AI预处理</button>
-            )}
-            {(note.status === 'cleaned' || note.status === 'learning_failed' || note.status === 'converted' || note.status === 'archived') && (
-              <button className="btn btn-secondary" onClick={handleArchive}>
-                {note.status === 'archived' ? '取消审阅' : '审阅'}
-              </button>
-            )}
-            <button className="btn btn-danger" onClick={handleDelete}>删除</button>
-            <button className="btn btn-secondary" onClick={() => navigate('/notes')}>返回</button>
-          </div>
-        </div>
-
-        {/* 笔记元信息标签行 */}
-        <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-          <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
-          {note.project_names?.map((name) => (
-            <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
-              {name}
-            </span>
-          ))}
-          <span className={statusClass(note.status)}>{statusLabels[note.status] || note.status}</span>
-          <select
-            value={note.note_role || 'material'}
-            onChange={async (e) => {
-              try {
-                const updated = await updateNoteRole(note.id, e.target.value)
-                setNote((prev) => prev ? { ...prev, note_role: updated.note_role } : prev)
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : '更新角色失败')
-              }
-            }}
-            style={{
-              fontSize: '0.75rem',
-              padding: '2px 8px',
-              borderRadius: '9999px',
-              border: '1px solid var(--color-border)',
-              background: note.note_role === 'personal_note' ? '#8b5cf6' : '#3b82f6',
-              color: 'white',
-              cursor: 'pointer',
-              outline: 'none',
-            }}
-          >
-            <option value="material">学习资料</option>
-            <option value="personal_note">我的笔记</option>
-          </select>
-          {note.page_count && <span>{note.page_count} 页</span>}
-          <span>{(note.file_size / 1024).toFixed(0)} KB</span>
-          <span>创建于 {formatDateTime(note.created_at)}</span>
-        </div>
-
-        {/* 错误信息提示 + 重试按钮 */}
-        {note.error_message && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
-            <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', margin: 0 }}>
-              错误: {note.error_message}
-            </p>
-            {note.status === 'failed' && (
-              <button
-                className="btn btn-primary"
-                style={{ fontSize: '0.75rem', padding: '4px 12px' }}
-                onClick={async () => {
-                  try {
-                    const result = await retryConvert(noteId!)
-                    setNote((prev) => prev ? { ...prev, status: result.status, error_message: result.error_message } : prev)
-                  } catch (err) {
-                    toast.error(err instanceof Error ? err.message : '重试失败')
-                  }
-                }}
-              >
-                重试转换
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 视图模式切换按钮 */}
-        <div className="segment-control" style={{ marginTop: 'var(--space-sm)' }}>
-          <button
-            className={`segment-btn ${viewMode === 'original' ? 'segment-btn-active' : ''}`}
-            onClick={() => setViewMode('original')}
-          >
-            原始版
-          </button>
-          <button
-            className={`segment-btn ${viewMode === 'clean' ? 'segment-btn-active' : ''}`}
-            onClick={() => setViewMode('clean')}
-            disabled={!canShowClean}
-          >
-            清洗版
-          </button>
-          <button
-            className={`segment-btn ${viewMode === 'diff' ? 'segment-btn-active' : ''}`}
-            onClick={() => setViewMode('diff')}
-            disabled={!canShowDiff}
-          >
-            对比视图
-          </button>
-        </div>
-      </header>
+      <NoteDetailHeader
+        note={note}
+        noteId={noteId}
+        viewMode={viewMode}
+        editMode={editMode}
+        hasQuizItems={hasQuizItems}
+        canShowClean={showClean}
+        canShowDiff={showDiff}
+        onViewModeChange={setViewMode}
+        onEnterEdit={handleEnterEdit}
+        onStartLearning={handleStartLearning}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        onOpenVersionHistory={() => setShowVersionHistory(true)}
+        onManageLinks={handleManageLinks}
+        onRoleUpdated={(noteRole) => setNote((prev) => prev ? { ...prev, note_role: noteRole } : prev)}
+        onRetryConverted={(result) => setNote((prev) => prev ? { ...prev, status: result.status, error_message: result.error_message } : prev)}
+        navigate={navigate}
+      />
 
       {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
       {(note.status === 'converted' || note.status === 'cleaning' || note.status === 'cleaning_failed' || note.status === 'cleaned') && (
         <CleaningPanel note={note} onStatusChange={handleStatusChange} onMutatingChange={(mutating) => { mutatingRef.current = mutating }} />
       )}
 
-      {/* 关联的学习资料列表
-          ⚠️ `?.`/`?? []` 不是多余的防御：接口响应少一个字段时，
-          这里原来是 `noteLinks.linked_materials.length` —— 直接
-          `undefined.length` 抛异常，而异常发生在渲染中，整页变成白屏
-          （本轮写表征测试时就以"mock 少给一个字段"的形式复现过一次）。
-          字段缺失时最坏的结果应该是"这一块不显示"，不是"什么都看不到"。 */}
-      {noteLinks && ((noteLinks.linked_materials?.length ?? 0) > 0 || (noteLinks.dangling_material_count ?? 0) > 0) && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>关联的学习资料</h3>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {(noteLinks.linked_materials ?? []).map(m => (
-              <li key={m.id} style={{ padding: '0.25rem 0' }}>
-                <a href={`/notes/${m.id}`} style={{ color: 'var(--color-primary)' }}>{m.title}</a>
-              </li>
-            ))}
-            {/* 悬挂链接占位：资料已被彻底删除（悬挂引用策略保留行） */}
-            {(noteLinks.dangling_material_count ?? 0) > 0 && (
-              <li
-                key="__dangling__"
-                style={{
-                  padding: '0.25rem 0',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 'var(--space-sm)',
-                }}
-              >
-                <span style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
-                  [已删除的笔记]（{noteLinks.dangling_material_count} 个已彻底删除的资料）
-                </span>
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                  onClick={handleCleanDanglingLinks}
-                >
-                  清理此链接
-                </button>
-              </li>
-            )}
-          </ul>
-        </div>
+      {/* 关联的学习资料列表（字段缺失时整块不显示，而不是整页崩掉） */}
+      {shouldShowRelatedLinks(noteLinks) && (
+        <RelatedLinksSection noteLinks={noteLinks} onCleanDanglingLinks={handleCleanDanglingLinks} />
       )}
 
       {/* 被引用笔记列表 */}
-      {noteLinks && (noteLinks.linked_personal_notes?.length ?? 0) > 0 && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>被以下笔记引用</h3>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {(noteLinks.linked_personal_notes ?? []).map(n => (
-              <li key={n.id} style={{ padding: '0.25rem 0' }}>
-                <a href={`/notes/${n.id}`} style={{ color: 'var(--color-primary)' }}>{n.title}</a>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {shouldShowCitingNotes(noteLinks) && (
+        <CitingNotesSection noteLinks={noteLinks} />
       )}
 
       {/* 视频播放器（仅视频类型笔记显示） */}
-      {note.source_type === 'video' && videoUrl && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <video
-            controls
-            style={{ width: '100%', borderRadius: '0.5rem' }}
-            src={videoUrl}
-          >
-            您的浏览器不支持视频播放
-          </video>
-        </div>
-      )}
+      {note.source_type === 'video' && videoUrl && <VideoPlayer videoUrl={videoUrl} />}
 
       {/* 内容区域 */}
-      {note.status === 'converting' || note.status === 'uploading' ? (
-        /* 处理中状态（阶段 5.11）：展示**真实**进度与阶段名，并可取消。
-           改造前这里只有一句"正在转换中，请稍候..."，而任务侧其实一直在
-           上报 progress/stage（后端从阶段 1′ 起就有这个契约）。 */
-        <div className="card" style={{ padding: 'var(--space-xl)' }}>
-          <TaskProgress
-            noteId={noteId!}
-            fallbackText={note.status === 'uploading' ? '正在上传...' : '正在转换中，请稍候...'}
-            onCancelled={fetchNote}
-          />
-        </div>
-      ) : editMode === 'edit' ? (
-        /* 编辑模式：实时分屏预览（左侧 Markdown 编辑，右侧即时渲染） */
-        <div>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-            <button className="btn btn-primary" onClick={handleSaveContent} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
-            <button className="btn btn-secondary" onClick={handleCancelEdit} disabled={saving}>取消</button>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-md)' }}>
-            <textarea
-              className="markdown-editor card"
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              disabled={saving}
-              style={{ width: '100%', minHeight: '60vh', padding: '1.5rem', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: '1.6', resize: 'vertical', border: '1px solid var(--color-border)', borderRadius: '0.5rem', outline: 'none' }}
-            />
-            <article
-              className="card markdown-body"
-              dangerouslySetInnerHTML={{ __html: editPreviewHtml }}
-              style={{ minHeight: '60vh' }}
-            />
-          </div>
-        </div>
-      ) : viewMode === 'diff' ? (
-        /* diff 对比视图 */
-        diffLoading ? (
-          <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>加载对比数据...</p>
-          </div>
-        ) : diffData ? (
-          <DiffView
-            blocks={diffData.blocks}
-            originalLines={diffData.original_lines}
-            cleanLines={diffData.clean_lines}
-          />
-        ) : (
-          <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>无法加载对比数据</p>
-          </div>
-        )
-      ) : mdContent ? (
-        /* Markdown 渲染 */
-        <>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)', flexWrap: 'wrap' }}>
-          <button
-            className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={toggleAdhdReader}
-            title={adhdReaderEnabled ? '关闭 ADHD 专注阅读模式' : '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）'}
-          >
-            {adhdReaderEnabled ? '关闭 ADHD Reader' : '开启 ADHD Reader'}
-          </button>
-          {adhdReaderEnabled && (
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              🖱 鼠标跟随 · 移动鼠标高亮所在行
-            </span>
-          )}
-        </div>
-        {/* 行级文本捕捉：实时展示鼠标所在的那一行文字 */}
-        {adhdReaderEnabled && adhdCurrentLineText && (
-          <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.85rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-            <span style={{ flexShrink: 0, fontWeight: 600 }}>📖 正在阅读</span>
-            <span style={{ color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              “{adhdCurrentLineText}”
-            </span>
-          </div>
-        )}
-        <article
-          ref={markdownRef}
-          className="card markdown-body"
-          dangerouslySetInnerHTML={{ __html: htmlContent }}
-          onMouseUp={handleMouseUp}
-        />
-        </>
-      ) : (
-        /* 无内容 */
-        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-          <p style={{ color: 'var(--color-text-secondary)' }}>暂无内容</p>
-        </div>
-      )}
+      <ContentArea
+        noteId={noteId}
+        status={note.status}
+        viewMode={viewMode}
+        editMode={editMode}
+        mdContent={mdContent}
+        htmlContent={htmlContent}
+        editPreviewHtml={editPreviewHtml}
+        diffData={diffData}
+        diffLoading={diffLoading}
+        markdownRef={markdownRef}
+        onMouseUp={handleMouseUp}
+        onRefresh={fetchNote}
+        adhdReaderEnabled={adhdReaderEnabled}
+        adhdCurrentLineText={adhdCurrentLineText}
+        onToggleAdhdReader={toggleAdhdReader}
+        editContent={editContent}
+        onEditContentChange={setEditContent}
+        saving={saving}
+        onSave={handleSaveContent}
+        onCancelEdit={handleCancelEdit}
+      />
 
       {/* 批注操作浮层：选中文本后显示高亮/下划线/ AI 提问按钮 */}
       {showAnnotationMenu && editMode === 'view' && (
-        <div
-          className="selection-menu"
-          style={{
-            position: 'fixed',
-            left: annotationMenuPos.x,
-            top: annotationMenuPos.y,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 1000,
-          }}
-        >
-          <button onClick={() => handleApplyAnnotation('highlight')} title="高亮">高亮</button>
-          <button onClick={() => handleApplyAnnotation('underline')} title="下划线">下划线</button>
-          <button onClick={handleOpenAskAI} title="选中文本调用 AI 提问">AI 提问</button>
-        </div>
+        <SelectionMenu
+          pos={annotationMenuPos}
+          onApplyAnnotation={handleApplyAnnotation}
+          onOpenAskAI={handleOpenAskAI}
+        />
       )}
 
       {/* AI 提问浮层：基于当前笔记选区上下文流式提问 */}
       {askAIState && editMode === 'view' && (
-        <NoteAskPanel
+        <AnnotationAskPanel
           noteId={note.id}
           noteTitle={note.title}
-          initialText={askAIState.text}
-          contextBefore={askAIState.contextBefore}
-          contextAfter={askAIState.contextAfter}
-          viewMode={viewMode === 'diff' ? 'original' : viewMode}
+          askAIState={askAIState}
+          viewMode={viewMode}
           markdown={mdContent}
-          pos={askAIState.pos}
           onClose={() => setAskAIState(null)}
         />
       )}
 
       {/* 链接管理弹窗：选择关联的学习资料 */}
       {showLinkManager && (
-        <div
-          style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-          onClick={() => setShowLinkManager(false)}
-        >
-          <div
-            className="card"
-            style={{
-              maxWidth: '500px', width: '90%', maxHeight: '70vh', overflowY: 'auto',
-              padding: '1.5rem',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 style={{ marginBottom: '1rem' }}>管理关联资料</h3>
-            {availableMaterials.length === 0 ? (
-              <p style={{ color: 'var(--color-text-secondary)' }}>暂无可关联的资料</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
-                {availableMaterials.map(m => (
-                  <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={linkMaterialIds.includes(m.id)}
-                      onChange={(e) => {
-                        setLinkMaterialIds(prev =>
-                          e.target.checked ? [...prev, m.id] : prev.filter(id => id !== m.id)
-                        )
-                      }}
-                    />
-                    <span>{m.title}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={() => setShowLinkManager(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleSaveLinks}>保存</button>
-            </div>
-          </div>
-        </div>
+        <LinkManagerModal
+          availableMaterials={availableMaterials}
+          linkMaterialIds={linkMaterialIds}
+          onLinkMaterialIdsChange={setLinkMaterialIds}
+          onClose={() => setShowLinkManager(false)}
+          onSave={handleSaveLinks}
+        />
       )}
 
       {/* 版本历史面板：模态浮层形式 */}
@@ -1140,44 +282,8 @@ export default function NoteDetail() {
       )}
 
       {/* 关联知识卡片区域 */}
-      {relatedCards.length > 0 && (
-        <div style={{ marginTop: 'var(--space-lg)' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>关联知识卡片 ({relatedCards.length})</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-md)' }}>
-            {relatedCards.slice(0, 6).map(card => (
-              <div
-                key={card.id}
-                className="card card-hover"
-                style={{ cursor: 'pointer' }}
-                onClick={() => navigate(`/cards/${card.id}`)}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
-                  <strong style={{ fontSize: '0.9rem' }}>{card.title}</strong>
-                  <span style={{
-                    fontSize: '0.7rem', padding: '1px 6px', borderRadius: '9999px',
-                    // 卡片类型颜色/标签统一从 utils/labels.ts 读取，见 docs/decisions.md#F-28
-                    background: cardTypeColors[card.card_type] || '#6b7280',
-                    color: 'white', whiteSpace: 'nowrap',
-                  }}>
-                    {cardTypeLabels[card.card_type] || card.card_type}
-                  </span>
-                </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {card.content}
-                </p>
-              </div>
-            ))}
-          </div>
-          {relatedCards.length > 6 && (
-            <button
-              className="btn btn-secondary"
-              style={{ marginTop: 'var(--space-sm)', fontSize: '0.85rem' }}
-              onClick={() => navigate(`/cards?note_id=${noteId}`)}
-            >
-              查看全部 {relatedCards.length} 张卡片
-            </button>
-          )}
-        </div>
+      {noteId && relatedCards.length > 0 && (
+        <RelatedCardsSection relatedCards={relatedCards} noteId={noteId} navigate={navigate} />
       )}
     </div>
   )
