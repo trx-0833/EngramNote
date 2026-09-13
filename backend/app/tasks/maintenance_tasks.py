@@ -57,11 +57,19 @@ def backup_database_task() -> dict:
 
     刻意不抛异常：备份失败必须留下可观测的记录（返回体里的 error 字段
     与 error 级日志），但不应该让 Beat 任务堆积失败状态。
+
+    ⚠️ 这个"不抛异常"此前**只写在注释里**：`run_scheduled_backup` 抛错
+    （例如备份盘不可写、目标目录被占用）时会直接穿透任务。同一模式的
+    `storage_snapshot_task` 被新增测试抓到后，这里一并补上。
     """
     from ..services.backup_service import run_scheduled_backup
 
-    with task_loop("backup_database"):
-        result = run_async(_backup_in_thread(run_scheduled_backup))
+    try:
+        with task_loop("backup_database"):
+            result = run_async(_backup_in_thread(run_scheduled_backup))
+    except Exception as exc:  # noqa: BLE001 - 备份失败不阻塞 Beat，但必须留痕
+        logger.error("每日备份失败: %s", exc, exc_info=True)
+        return {"ok": False, "error": str(exc)}
     if not result.get("ok"):
         logger.error("每日备份未成功: %s", result)
     else:
@@ -158,6 +166,58 @@ def vault_audit_task() -> dict:
             "存储审计发现不一致: %s | 扫描 %d 篇，DB 对象 %d，磁盘对象 %d",
             result.get("counts"), result.get("notes_scanned", 0),
             result.get("db_objects", 0), result.get("disk_objects", 0),
+        )
+    return result
+
+
+@celery_app.task(name="app.tasks.maintenance_tasks.storage_snapshot")
+def storage_snapshot_task() -> dict:
+    """每周对象存储快照：把 `data/storage/` 复制进备份目录（阶段 6.6 的第三半）
+
+    ## 补的是"数据库能恢复、文件不能"这个缺口
+
+    数据库快照用 `VACUUM INTO` 做成单文件原子副本，随时可以回到过去某一刻。
+    而用户上传的 pdf/mp4 与派生的 md/json 只存在于 `data/storage/` ——
+    它们**没有**任何备份。也就是说：文件被误删时，数据库能恢复到昨天，
+    文件不能，"笔记都在但每一篇都打不开"。
+
+    ## 与存储审计（`vault_audit`）的分工
+
+    | 任务 | 回答的问题 |
+    |---|---|
+    | `vault_audit` | **线上**库与磁盘一致吗（现在有没有坏掉） |
+    | `storage_snapshot` | 文件**坏了之后**还能拿回来吗（有没有第二份） |
+
+    审计只发现问题，不提供恢复能力；两者都需要，不是重复。
+
+    ## 非原子：必须如实报告
+
+    逐文件复制做不到原子，复制期间的上传不会进这份快照。逐文件做 sha256
+    复制前后比对，不一致的**不进清单**并计入 `unstable`/`failed`，
+    此时任务返回 `ok=False`（不抛异常，不阻塞 Beat）。
+
+    刻意不抛异常：快照失败必须留下可观测记录，但不该让 Beat 堆积失败状态。
+    """
+    from ..services.storage_snapshot import create_storage_snapshot
+
+    try:
+        with task_loop("storage_snapshot"):
+            result = run_async(asyncio.to_thread(create_storage_snapshot))
+    except Exception as exc:  # noqa: BLE001 - 快照失败不阻塞 Beat，但必须留痕
+        logger.error("存储快照失败: %s", exc, exc_info=True)
+        return {"ok": False, "error": str(exc)}
+
+    if not result.get("ok"):
+        logger.error(
+            "存储快照不完整: 不稳定 %d / 失败 %d | %s",
+            len(result.get("unstable") or []), len(result.get("failed") or []),
+            result.get("reason") or result.get("failed"),
+        )
+    else:
+        logger.info(
+            "存储快照完成: %s | %d 个文件 / %.1f MB | 清理旧快照 %d 份",
+            result.get("snapshot"), result.get("files", 0),
+            (result.get("bytes") or 0) / 1024 / 1024, len(result.get("pruned") or []),
         )
     return result
 

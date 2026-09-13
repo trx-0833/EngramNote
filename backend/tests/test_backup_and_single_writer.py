@@ -366,6 +366,26 @@ class TestCeleryWiring:
         entry = schedule["daily-database-backup"]
         assert entry["task"] == "app.tasks.maintenance_tasks.backup_database"
 
+    def test_backup_failure_does_not_raise(self, monkeypatch):
+        """★ "备份失败不抛异常"不能只写在注释里
+
+        `backup_database_task` 的注释一直声称"刻意不抛异常…不应该让 Beat 任务
+        堆积失败状态"，但实现里 `run_scheduled_backup` 抛错会直接穿透。
+        这是本轮给 `storage_snapshot_task` 写测试时**顺带抓到的同一类缺陷**：
+        注释承诺了行为，代码没有兑现，而没有测试盯着这句承诺。
+        """
+        from app.services import backup_service
+        from app.tasks import maintenance_tasks as mt
+
+        def boom(*args, **kwargs):
+            raise OSError("备份盘不可写")
+
+        monkeypatch.setattr(backup_service, "run_scheduled_backup", boom)
+        result = mt.backup_database_task()
+
+        assert result["ok"] is False
+        assert "备份盘不可写" in result["error"]
+
     def test_reap_task_is_scheduled_more_often_than_backup(self):
         """自愈要跑得比备份勤：它决定用户被卡住后等多久"""
         from app.tasks.celery_app import celery_app

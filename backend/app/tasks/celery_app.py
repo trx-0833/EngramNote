@@ -165,6 +165,19 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.cleanup_llm_ledger",
             "schedule": crontab(hour=4, minute=30),
         },
+        # 每周一 04:45 对象存储快照：把 data/storage/ 复制进 _backup（阶段 6.6）
+        #
+        # 数据库有 `VACUUM INTO` 原子快照，文件**没有第二份** —— 文件被误删时
+        # 数据库能回到昨天，文件不能，结果是"笔记都在、每一篇都打不开"。
+        # 排在周一早上这一串的最前面：
+        #   04:45 快照文件 → 05:00 演练备份 → 05:30 审计线上一致性
+        # 周期取"每周"而不是"每天"：保留 3 份的前提下，周频给出**三周**历史，
+        # 而"文件被误删、过几天才发现"正是要覆盖的场景（每份约 82 MB，
+        # 三份把 _backup 的占用压在 ~250 MB 量级）。
+        "storage-snapshot-weekly": {
+            "task": "app.tasks.maintenance_tasks.storage_snapshot",
+            "schedule": crontab(day_of_week=1, hour=4, minute=45),
+        },
         # 每周一 05:00 恢复演练（阶段 6.6）
         #
         # 每天备份成功 ≠ 有可用备份：快照放置几周后是否还能读、备份是否还在跑，
@@ -175,7 +188,7 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.restore_drill",
             "schedule": crontab(day_of_week=1, hour=5, minute=0),
         },
-        # 每周一 05:30 存储审计：库里的路径 ↔ 磁盘文件（阶段 6.6 的另一半）
+        # 每周一 05:30 存储审计：库里的路径 ↔ 磁盘文件（阶段 6.6 的第三项）
         #
         # 与恢复演练互补：演练只看数据库，而数据分布在 db + storage 两处。
         # 只恢复库、丢了文件，用户看到的是"笔记都在但每一篇都打不开"。
