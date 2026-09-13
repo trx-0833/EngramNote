@@ -27,6 +27,14 @@ logger = logging.getLogger(__name__)
 #: 放在这里是为了让 Beat 的调度周期可以独立于服务层默认值调整。
 STALE_AFTER_SECONDS = 900
 
+#: 刷新令牌清理单次调度最多跑几个批次（阶段 6.3）。
+#:
+#: 每批删 `DEFAULT_PURGE_LIMIT`（5000）行，因此单次上限 10 万行 —— 足够排干
+#: 任何现实积压，同时保证最坏情况下的写锁占用时间是有限的。批次上限而不是
+#: "一次删光"：后者在首次运行时可能删几十万行，把 SQLite 的写锁占住，
+#: 表现为整站请求 `database is locked`。
+_REFRESH_TOKEN_PURGE_BATCHES = 20
+
 
 @celery_app.task(name="app.tasks.maintenance_tasks.reap_stale_tasks")
 def reap_stale_tasks_task() -> dict:
@@ -282,5 +290,61 @@ def cleanup_llm_ledger_task() -> dict:
     logger.info(
         "LLM 账本清理完成: 过期缓存 %d 行，超保留期记账 %d 行（保留 %d 天）",
         result["expired_cache_rows"], result["old_call_rows"], result["retention_days"],
+    )
+    return result
+
+
+@celery_app.task(name="app.tasks.maintenance_tasks.cleanup_refresh_tokens")
+def cleanup_refresh_tokens_task() -> dict:
+    """清理已过期的刷新令牌行（阶段 6.3：jti 黑名单不能只增不减）
+
+    ## 为什么必须有调用方
+
+    `refresh_tokens` **每次登录一行、每次刷新一行**（默认 30 天有效期），
+    只增不减。而这个项目已经栽过三次同一类跟头（AF.10 的账本清理、
+    AU.1 的限流规则、AV 的存储审计）：**函数写好了、没人调用**，
+    于是它在运行期等于不存在，且不会报错 —— 只会在磁盘上静默增长
+    （本项目曾因空间不足放弃 PG/Redis）。所以这里直接挂到 Beat 上。
+
+    ## 只删过期的，保留"已撤销但未过期"的行
+
+    后者是重放检测唯一的证据。删掉它，重放只会得到"查无此 jti"的普通 401，
+    "撤销整条链"这条处置就静默失效了 —— 详见
+    `services/refresh_token_service.purge_expired`。
+
+    ## 为什么分批
+
+    见 `_REFRESH_TOKEN_PURGE_BATCHES`：单批有上限，循环到排干或到批次上限为止。
+    返回体里的 `removed` 是本次真实删除行数，`drained` 表示是否已排干 ——
+    运维据此判断"下一轮要不要关注"。
+
+    刻意不抛异常：清理失败不该让 Beat 堆积失败状态，但必须留下 error 级日志。
+    """
+    from ..database import get_session_factory
+    from ..services.refresh_token_service import DEFAULT_PURGE_LIMIT, purge_expired
+
+    async def _run() -> dict:
+        factory = get_session_factory()
+        removed = 0
+        drained = False
+        for _ in range(_REFRESH_TOKEN_PURGE_BATCHES):
+            async with factory() as db:
+                batch = await purge_expired(db, limit=DEFAULT_PURGE_LIMIT)
+            removed += batch
+            if batch < DEFAULT_PURGE_LIMIT:
+                drained = True
+                break
+        return {"removed": removed, "drained": drained}
+
+    try:
+        with task_loop("cleanup_refresh_tokens"):
+            result = run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - 清理失败不阻塞 Beat
+        logger.error("刷新令牌清理失败: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+    logger.info(
+        "刷新令牌清理完成: 删除 %d 行过期记录（%s）",
+        result["removed"], "已排干" if result["drained"] else "仍有积压，下轮继续",
     )
     return result

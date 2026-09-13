@@ -60,6 +60,12 @@ _RULES: Tuple[Tuple[str, int, str], ...] = (
     # 认证：登录/注册必然未认证，按 IP 计数（爆破防护）
     (r"^/api/auth/login$", 10, "login"),
     (r"^/api/auth/register$", 5, "register"),
+    # 刷新/登出（阶段 6.3）：凭证在**请求体**里（刷新令牌），因此同样未认证、按 IP 计数。
+    # 正常使用下刷新极低频（前端只在访问令牌过期时刷一次），60/分钟已经非常宽松；
+    # 它挡的是"拿着泄露的刷新令牌脚本狂刷"这种形态（每次刷新都会写库）。
+    # 登出更简单（一次更新），阈值给一半。
+    (r"^/api/auth/refresh$", 60, "refresh"),
+    (r"^/api/auth/logout$", 30, "logout"),
 
     # LLM 端点：每次调用都产生真实费用
     (r"^/api/understanding/[^/]+/start$", 10, "llm"),

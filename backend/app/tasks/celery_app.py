@@ -165,6 +165,17 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.cleanup_llm_ledger",
             "schedule": crontab(hour=4, minute=30),
         },
+        # 每日 04:15 清理已过期的刷新令牌行（阶段 6.3）
+        #
+        # `refresh_tokens` 每次登录一行、每次刷新一行（30 天有效期），只增不减。
+        # 排在 04:30 的 LLM 账本清理**之前**、备份（03:30）之后：同样是"先留快照再删数据"，
+        # 且与另一个清理任务错开分钟，避免两个写任务同时抢 SQLite 的写锁。
+        # 删除口径只看 `expires_at`（已撤销但未过期的行必须保留 ——
+        # 它们是重放检测的证据，见 services/refresh_token_service.purge_expired）。
+        "cleanup-refresh-tokens-daily": {
+            "task": "app.tasks.maintenance_tasks.cleanup_refresh_tokens",
+            "schedule": crontab(hour=4, minute=15),
+        },
         # 每周一 04:45 对象存储快照：把 data/storage/ 复制进 _backup（阶段 6.6）
         #
         # 数据库有 `VACUUM INTO` 原子快照，文件**没有第二份** —— 文件被误删时

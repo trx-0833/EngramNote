@@ -68,6 +68,46 @@ class UserReminderSettingsResponse(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """登录/注册/刷新成功后的令牌对
+
+    `refresh_token` 是阶段 6.3 新增的：访问令牌仍然无状态，会话的
+    **可撤销性**由这枚刷新令牌承担（服务端有对应记录，可被轮换与撤销）。
+    两个字段一起下发，客户端必须两个都存 —— 只存访问令牌等于放弃了撤销能力。
+    """
+
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    """刷新令牌换新令牌对的请求体"""
+
+    refresh_token: str = Field(min_length=1, description="登录/上次刷新时下发的刷新令牌")
+
+
+class LogoutRequest(BaseModel):
+    """登出请求体（阶段 6.3）
+
+    两个字段都**可选**：登出必须在"客户端状态不完整"时也能调用
+    （见 `refresh_token_service.revoke_refresh_token` 的说明）。
+
+    - `refresh_token` 为空时服务端没有可撤销的目标，直接返回 `revoked=0`；
+    - `all_devices=True` 时撤销该用户全部刷新令牌（各设备都需要重新登录）。
+    """
+
+    refresh_token: Optional[str] = None
+    #: 是否撤销该用户的**全部**刷新令牌（默认只撤销当前这一枚）
+    all_devices: bool = False
+
+
+class LogoutResponse(BaseModel):
+    """登出结果
+
+    返回实际撤销的行数而不是空响应：这样"登出到底有没有清掉服务端状态"
+    是可观测的（0 表示这枚令牌此前已经无效/已撤销），
+    而不是一个永远成功、什么也不说明的 204。
+    """
+
+    revoked: int

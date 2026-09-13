@@ -24,10 +24,15 @@ export interface User {
   created_at: string;
 }
 
-/** 认证令牌响应，登录/注册成功后返回 */
+/** 认证令牌响应，登录/注册/刷新成功后返回 */
 export interface TokenResponse {
   /** JWT 访问令牌，后续请求需携带此令牌 */
   access_token: string;
+  /**
+   * 刷新令牌（阶段 6.3）：访问令牌过期时用它换新的一对令牌。
+   * 必须与访问令牌一起保存，否则会话无法续期、也无法被撤销。
+   */
+  refresh_token: string;
   /** 令牌类型，固定为 "bearer" */
   token_type: string;
   /** 当前登录用户信息 */
@@ -96,14 +101,23 @@ export interface NoteListResponse {
 
 // --- Token 管理 ---
 
-/** localStorage 中存储 JWT 令牌的键名 */
+/** localStorage 中存储访问令牌的键名 */
 const TOKEN_KEY = 'engramnote_token';
+
+/**
+ * localStorage 中存储**刷新令牌**的键名（阶段 6.3）
+ *
+ * 为什么必须单独持久化：访问令牌是无状态的、无法吊销，会话的"可撤销性"
+ * 完全落在刷新令牌上（服务端有对应记录，可轮换、可撤销）。只存访问令牌
+ * 等于把撤销能力丢掉 —— 刷新失败时也就无从"干净地结束会话"。
+ */
+const REFRESH_TOKEN_KEY = 'engramnote_refresh_token';
 
 /** Token 过期事件名称，用于通知 App 组件跳转到登录页 */
 export const TOKEN_EXPIRED_EVENT = 'token-expired';
 
 /**
- * 获取本地存储的 JWT 令牌
+ * 获取本地存储的访问令牌
  * @returns 令牌字符串，若未登录则返回 null
  */
 export function getToken(): string | null {
@@ -111,47 +125,62 @@ export function getToken(): string | null {
 }
 
 /**
- * 将 JWT 令牌保存到 localStorage
- * @param token - 登录/注册成功后获取的访问令牌
+ * 获取本地存储的刷新令牌（阶段 6.3）
+ * @returns 刷新令牌字符串；未登录或旧版本会话（只存了访问令牌）时为 null
  */
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 /**
- * 移除本地存储的 JWT 令牌，用于退出登录
+ * 保存一对令牌（阶段 6.3）
+ *
+ * `refreshToken` 为空时**清掉**已存的刷新令牌，而不是保留旧的：
+ * 保留会让"这一对"与"上一次会话的残留"混在一起，随后的刷新会用一枚
+ * 属于旧会话（可能已被撤销）的令牌去换新令牌，直接触发服务端的重放检测。
+ *
+ * @param accessToken - 访问令牌
+ * @param refreshToken - 刷新令牌；缺省/空表示本次响应没有下发
  */
-export function removeToken(): void {
+export function setTokens(accessToken: string, refreshToken?: string | null): void {
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  if (refreshToken) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+}
+
+/**
+ * 清除本地存储的全部令牌（登出、刷新失败时调用）
+ *
+ * 两个键必须一起清：只清访问令牌会留下一个"看起来还有会话"的刷新令牌，
+ * 下一次 401 又拿它去刷新，用户会看到一个语义不明的中间态。
+ */
+export function clearTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 /**
  * 通知应用 Token 已过期
- * 清除本地 Token 并派发全局事件，App 组件监听后跳转到登录页
+ * 清除本地令牌（访问 + 刷新）并派发全局事件，App 组件监听后跳转到登录页
  */
 export function notifyTokenExpired(): void {
-  removeToken();
+  clearTokens();
   window.dispatchEvent(new CustomEvent(TOKEN_EXPIRED_EVENT));
 }
 
 // --- 请求封装 ---
 
-/**
- * 通用请求封装函数
- * 自动附加 Content-Type 和 Authorization 头，统一处理错误响应。
- * 已导出，供 api/ 目录下的模块化 API 文件复用。
- *
- * @typeParam T - 响应数据的类型
- * @param path - API 路径（不含基础路径前缀，如 /auth/login）
- * @param options - fetch 请求选项
- * @returns 解析后的 JSON 响应数据
- * @throws 当响应状态码非 2xx 时抛出 Error，包含后端返回的 detail 信息
- */
 /** 请求超时（毫秒）。普通请求限时，避免网络挂起时永久 pending，见 docs/decisions.md#F-22 */
 const REQUEST_TIMEOUT_MS = 30000;
 
 /** 上传类请求专用超时（毫秒）。文件上传/两阶段上传耗时远超普通接口，独立于 REQUEST_TIMEOUT_MS */
 const UPLOAD_TIMEOUT_MS = 600000;
+
+/** 刷新令牌换新令牌对的端点 */
+const REFRESH_PATH = '/auth/refresh';
 
 /** 仅凭据提交接口的 401 不应触发全局登出（错误密码≠令牌过期）。
  *  注意：/auth/me 的 401 是令牌失效信号，必须触发登出，见 docs/decisions.md#F-22。 */
@@ -159,43 +188,179 @@ function isAuthCredentialPath(path: string): boolean {
   return path === '/auth/login' || path === '/auth/register';
 }
 
-export async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const token = getToken();
-  // 默认设置 Content-Type 为 JSON，并合并调用方传入的 headers
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
+/**
+ * 该路径在收到 401 时是否应"先刷新再重试"
+ *
+ * 排除两类：
+ * - 登录/注册：它们的 401 是"邮箱或密码错误"，与令牌无关；
+ * - `/auth/refresh` 自身：刷新失败就是失败，不能再触发一次刷新（递归）。
+ *   即便 `refreshSession` 走的是裸 fetch，这条判据仍要留着 ——
+ *   否则将来有人把刷新改回走 `request()` 时会出现嵌套刷新。
+ */
+function canAttemptRefresh(path: string): boolean {
+  return !isAuthCredentialPath(path) && path !== REFRESH_PATH;
+}
 
-  // 若本地存在令牌，自动附加到 Authorization 头
+/**
+ * 发起一次带认证头的 fetch（**不含**刷新逻辑，供重试复用）
+ *
+ * @param path - 相对 API_BASE 的路径
+ * @param init - fetch 参数（headers 会与 Authorization 合并）
+ * @param timeoutMs - 超时毫秒数；undefined 表示不设超时（流式响应由调用方的 signal 控制）
+ * @param timeoutMessage - 超时文案（上传与普通请求的措辞不同）
+ */
+async function doFetch(
+  path: string,
+  init: RequestInit,
+  timeoutMs?: number,
+  timeoutMessage = '请求超时，请检查网络后重试',
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    ...((init.headers as Record<string, string> | undefined) ?? {}),
+  };
+  const token = getToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // AbortController 超时，避免网络挂起时请求永久 pending，见 docs/decisions.md#F-22
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response: Response;
+  // 调用方自带 signal 时不再叠加超时计时器：请求生命周期由调用方决定
+  // （原实现在这种情况下也会建一个 AbortController，但它的 signal 从未被使用，
+  //  等于留了一个到点就空转的定时器）
+  const controller = timeoutMs !== undefined && !init.signal ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
-      ...options,
+    return await fetch(`${API_BASE}${path}`, {
+      ...init,
       headers,
-      signal: options.signal ?? controller.signal,
+      signal: init.signal ?? controller?.signal,
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       // ES2020 lib 下 Error 无 cause 属性，用自定义扩展类型附加
-      const timeoutError = new Error('请求超时，请检查网络后重试');
+      const timeoutError = new Error(timeoutMessage);
       (timeoutError as Error & { cause?: unknown }).cause = err;
       throw timeoutError;
     }
     throw err;
   } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/** 正在进行中的刷新请求（单飞，见 refreshSession 的说明） */
+let refreshInFlight: Promise<boolean> | null = null;
+
+/**
+ * 用本地刷新令牌换一对新令牌（阶段 6.3）
+ *
+ * ## 两个必须遵守的约束
+ *
+ * 1. **永不抛出**：返回 true/false。刷新失败的处理是"清本地状态回登录页"
+ *    （由调用方 `notifyTokenExpired` 完成），而不是把一个新的异常类型
+ *    抛给每个调用点去分辨"这是网络错误还是令牌失效"。
+ * 2. **单飞（同一时刻只有一个刷新在飞）**：这是**轮换**带来的硬约束 ——
+ *    服务端每次刷新都会把提交的那枚令牌标记为已撤销，若两个并发请求各刷一次，
+ *    后一次提交的就是刚被撤销的令牌，服务端会判定为**重放（令牌被盗）**
+ *    并撤销整条链，用户直接被登出。因此并发 401 必须共享同一次刷新请求。
+ *
+ * 刻意不走 `request()`：`request()` 在 401 时会尝试刷新，形成递归。
+ */
+export function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+/** 真正执行一次刷新（调用方应通过 refreshSession 保证单飞） */
+async function performRefresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    // 没有刷新令牌（未登录，或改造前留下的旧会话）：不发起无意义的请求
+    return false;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}${REFRESH_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const data = (await response.json()) as Partial<TokenResponse>;
+    if (!data?.access_token || !data?.refresh_token) {
+      // 响应缺字段时按失败处理：半个令牌对比"没刷新"更危险
+      // （访问令牌换了、刷新令牌没换 → 下一次刷新必然用已撤销的令牌）
+      return false;
+    }
+    setTokens(data.access_token, data.refresh_token);
+    return true;
+  } catch {
+    // 网络错误/超时同样按刷新失败处理
+    return false;
+  } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 带认证的 fetch：401 时**刷新一次并重放原请求一次**（阶段 6.3）
+ *
+ * 重试严格只有一次：刷新成功后的第二次响应无论是什么（包括再次 401）都
+ * 直接交给调用方 —— 那条路径会走 `notifyTokenExpired()`，绝不会形成循环。
+ */
+export async function authorizedFetch(
+  path: string,
+  init: RequestInit,
+  timeoutMs?: number,
+  timeoutMessage?: string,
+): Promise<Response> {
+  let response = await doFetch(path, init, timeoutMs, timeoutMessage);
+  if (response.status === 401 && canAttemptRefresh(path)) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      response = await doFetch(path, init, timeoutMs, timeoutMessage);
+    }
+  }
+  return response;
+}
+
+/**
+ * 通用请求封装函数
+ * 自动附加 Content-Type 和 Authorization 头，统一处理错误响应。
+ * 已导出，供 api/ 目录下的模块化 API 文件复用。
+ *
+ * 访问令牌过期（401）时先尝试刷新一次并重放原请求一次；刷新失败则清除
+ * 全部本地令牌并派发 token 过期事件（App 会回到登录页）。
+ *
+ * @typeParam T - 响应数据的类型
+ * @param path - API 路径（不含基础路径前缀，如 /auth/login）
+ * @param options - fetch 请求选项
+ * @returns 解析后的 JSON 响应数据
+ * @throws 当响应状态码非 2xx 时抛出 Error，包含后端返回的 detail 信息
+ */
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  // 默认设置 Content-Type 为 JSON，并合并调用方传入的 headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+  const response = await authorizedFetch(
+    path,
+    { ...options, headers },
+    REQUEST_TIMEOUT_MS,
+  );
 
   // 响应状态码非 2xx 时，尝试解析后端错误信息
   if (!response.ok) {
@@ -238,35 +403,15 @@ export async function request<T>(
 
 /**
  * 通用 multipart/form-data 上传请求（合并多处重复的 FormData fetch 分支），
- * 401 处理与 request() 一致，见 docs/decisions.md#F-22。
+ * 401 处理与 request() 一致（含"刷新一次 + 重放一次"），见 docs/decisions.md#F-22。
  */
 export async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers,
-      body: formData,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      const timeoutError = new Error('上传超时，请检查网络后重试');
-      (timeoutError as Error & { cause?: unknown }).cause = err;
-      throw timeoutError;
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+  const response = await authorizedFetch(
+    path,
+    { method: 'POST', body: formData },
+    UPLOAD_TIMEOUT_MS,
+    '上传超时，请检查网络后重试',
+  );
 
   if (!response.ok) {
     if (response.status === 401) {
@@ -303,17 +448,13 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
  * - event: error / data: {"message":"..."}
  */
 export async function askQuestionStream(question: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'text/event-stream',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const response = await fetch(`${API_BASE}/understanding/ask/stream`, {
+  // 不设超时：流式响应可能持续很久，生命周期由调用方的 signal 控制
+  const response = await authorizedFetch('/understanding/ask/stream', {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+    },
     body: JSON.stringify({ question }),
     signal,
   });

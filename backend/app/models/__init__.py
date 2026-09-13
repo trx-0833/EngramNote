@@ -24,6 +24,7 @@ from .review_state import (
 from .chunk import Chunk, pack_vector, unpack_vector
 from .llm_call import LLMCall
 from .llm_cache import LLMCache
+from .refresh_token import RefreshToken
 
 __all__ = [
     "User",
@@ -66,4 +67,5 @@ __all__ = [
     "unpack_vector",
     "LLMCall",
     "LLMCache",
+    "RefreshToken",
 ]

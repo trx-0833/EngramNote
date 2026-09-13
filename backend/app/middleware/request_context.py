@@ -49,6 +49,12 @@ def _extract_user_id(request: Request) -> str:
     从 Authorization: Bearer <jwt> 中解析 user_id（仅用于日志关联）
 
     使用 jose 解码并校验签名/过期，解析失败返回空串（不影响请求）。
+
+    阶段 6.3 起还要求令牌**是访问令牌**：刷新令牌（`typ=refresh`，有效期 30 天）
+    放在这个头里同样能被解出 sub，于是日志会把一个"未通过认证的请求"
+    记在某用户名下，限流键也会按该用户计数。判据复用
+    `auth_service.is_access_token_payload`（含"旧令牌无 typ 视为访问令牌"的
+    兼容规则），避免同一个判断在两处各写一遍而慢慢分叉。
     """
     auth = request.headers.get("Authorization", "")
     if not auth.lower().startswith("bearer "):
@@ -58,9 +64,14 @@ def _extract_user_id(request: Request) -> str:
         return ""
     try:
         from jose import jwt as jose_jwt
+
+        from ..services.auth_service import is_access_token_payload
+
         payload = jose_jwt.decode(
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
+        if not is_access_token_payload(payload):
+            return ""
         return str(payload.get("sub") or "")
     except Exception:
         return ""

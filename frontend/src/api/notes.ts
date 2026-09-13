@@ -2,7 +2,7 @@
  * @file 笔记 API
  * @description 笔记的列表/详情/内容/归档/角色、回收站、批注、链接与版本历史相关接口。
  */
-import { request, getToken, notifyTokenExpired, API_BASE, type Note, type NoteDetail, type NoteListResponse } from './client'
+import { request, authorizedFetch, notifyTokenExpired, type Note, type NoteDetail, type NoteListResponse } from './client'
 
 /**
  * 获取笔记列表（分页）
@@ -305,17 +305,15 @@ export async function askNoteQuestionStream(
   },
   signal?: AbortSignal
 ): Promise<ReadableStream<Uint8Array>> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Accept': 'text/event-stream',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const response = await fetch(`${API_BASE}/notes/${noteId}/ask/stream`, {
+  // 走统一的认证 fetch（阶段 6.3）：访问令牌过期时先刷新一次再重放一次，
+  // 而不是直接把用户登出。手写 Authorization 头的那份代码已删除 ——
+  // 两份实现必然会在"过期后怎么办"上分叉。
+  const response = await authorizedFetch(`/notes/${noteId}/ask/stream`, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+    },
     body: JSON.stringify(payload),
     signal,
   });
