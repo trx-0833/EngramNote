@@ -155,6 +155,16 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.backup_database",
             "schedule": crontab(hour=3, minute=30),
         },
+        # 每日 04:30 清理 LLM 账本与过期响应缓存
+        #
+        # 阶段 4.2/4.7 的两张表都只增不减，而清理函数此前**没有任何调用方**
+        # （附录 AF.10）。排在备份之后：先留下快照，再删数据 ——
+        # 顺序反了的话，"昨天备份里还有的账本"会在发现异常时已经无从对照。
+        # 保留期由 settings.llm_call_retention_days 控制（默认 365 天，0 = 永久保留）。
+        "cleanup-llm-ledger-daily": {
+            "task": "app.tasks.maintenance_tasks.cleanup_llm_ledger",
+            "schedule": crontab(hour=4, minute=30),
+        },
     },
 )
 

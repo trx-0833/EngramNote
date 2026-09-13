@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.llm_call import LLMCall
@@ -255,6 +255,45 @@ async def record_call(
             "LLM 记账写入失败（不影响调用本身）: scene=%s model=%s error=%s",
             scene, model, exc,
         )
+
+
+async def purge_old_calls(
+    db: AsyncSession,
+    *,
+    retention_days: int,
+    now: Optional[datetime] = None,
+) -> int:
+    """删除超过保留期的记账行，返回删除行数（附录 AF.10 那个"没人调用"的清理）
+
+    ## 为什么需要它
+
+    `llm_calls` 只增不减：每次调用写一行，一天几百行就是一年十几万行。
+    表本身不会让程序出错，但它会让"按时间聚合花费"越来越慢，
+    而且磁盘是有限的（本项目曾因空间不足放弃 PG/Redis）。
+
+    ## `retention_days <= 0` 表示**永久保留**
+
+    这是默认以外的显式选择：账本是"花了多少钱"的唯一记录，
+    删掉就再也算不出来。想无限保留就配 0 —— 但要知道代价是表会一直长。
+
+    ## ⚠️ 删的是**历史成本数据**，不是缓存
+
+    与 `llm_cache_service.purge_expired`（删的是可再生的派生数据）不同，
+    这里删掉的每一行都不可恢复。因此：
+
+    - 默认保留 365 天（`llm_call_retention_days`），够回答"去年同期花了多少"；
+    - 调用方（定时任务）必须把删除行数打进日志 ——
+      "某天突然少了一年的账"是必须能从日志里看出来的事。
+    """
+    if retention_days <= 0:
+        return 0
+
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=retention_days)
+    result = await db.execute(
+        delete(LLMCall).where(LLMCall.created_at < cutoff)
+    )
+    await db.commit()
+    return int(result.rowcount or 0)
 
 
 async def summarize_usage(
@@ -535,6 +574,7 @@ __all__ = [
     "default_since",
     "estimate_cost",
     "llm_context",
+    "purge_old_calls",
     "record_call",
     "reset_quota_warnings",
     "summarize_usage",

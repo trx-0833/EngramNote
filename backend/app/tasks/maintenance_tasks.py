@@ -80,3 +80,58 @@ async def _backup_in_thread(func) -> dict:
     直接在事件循环里跑会卡住同一 worker 上排队的其他协程。
     """
     return await asyncio.to_thread(func, "daily")
+
+
+@celery_app.task(name="app.tasks.maintenance_tasks.cleanup_llm_ledger")
+def cleanup_llm_ledger_task() -> dict:
+    """清理 LLM 账本与响应缓存（附录 AF.10 那个"没人调用"的清理）
+
+    ## 为什么必须有这个任务
+
+    阶段 4.2 的 `llm_calls` 与 4.7 的 `llm_cache` 都只增不减：
+    前者每次调用一行，后者每个不同的输入一行。清理函数
+    （`purge_old_calls` / `purge_expired`）早就写好了，
+    但**没有任何东西调用它们** —— 于是"写好了清理逻辑"这件事
+    在运行期等于不存在，磁盘会一直涨（本项目曾因空间不足放弃 PG/Redis）。
+
+    ## 两张表被删的东西性质完全不同，因此口径也不同
+
+    | 表 | 内容 | 删除口径 |
+    |---|---|---|
+    | `llm_cache` | **可再生的派生数据**（同一个输入再问一次就有） | 过期即删（TTL 到期） |
+    | `llm_calls` | **不可再生的账本**（花了多少钱的唯一记录） | 按保留期删，默认 365 天，配 0 则永久保留 |
+
+    因此这里把两者的删除行数**分别**打日志：把"删掉了一年的账本"
+    和"清掉了一堆过期缓存"混成一个数字，会让人无法判断该不该紧张。
+
+    刻意不抛异常：清理失败不该让 Beat 堆积失败状态，
+    但必须留下 error 级日志（否则"清理没生效"这件事又会静默）。
+    """
+    from ..config import get_settings
+    from ..database import get_session_factory
+    from ..services.llm_accounting_service import purge_old_calls
+    from ..services.llm_cache_service import purge_expired
+
+    settings = get_settings()
+    retention_days = int(getattr(settings, "llm_call_retention_days", 365) or 0)
+
+    async def _run() -> dict:
+        factory = get_session_factory()
+        async with factory() as db:
+            expired_cache = await purge_expired(db)
+            old_calls = await purge_old_calls(db, retention_days=retention_days)
+        return {"expired_cache_rows": expired_cache, "old_call_rows": old_calls,
+                "retention_days": retention_days}
+
+    try:
+        with task_loop("cleanup_llm_ledger"):
+            result = run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - 清理失败不阻塞 Beat
+        logger.error("LLM 账本/缓存清理失败: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+    logger.info(
+        "LLM 账本清理完成: 过期缓存 %d 行，超保留期记账 %d 行（保留 %d 天）",
+        result["expired_cache_rows"], result["old_call_rows"], result["retention_days"],
+    )
+    return result
