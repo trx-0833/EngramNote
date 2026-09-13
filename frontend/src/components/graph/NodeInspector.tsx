@@ -10,6 +10,9 @@ interface NodeInspectorProps {
 
 /** 节点详情面板 */
 export default function NodeInspector({ node, navigate, onViewSubgraph, loadingSubgraph }: NodeInspectorProps) {
+  // 契约漂移：`note_id` 缺失时原来直接 `undefined.slice(0, 8)`，点击节点即整页崩。
+  // 缺失时给出可读占位并去掉跳转（没有目标可去），其余详情照常显示。
+  const noteId = node.note_id
   return (
     <div
       className="graph-panel"
@@ -46,12 +49,18 @@ export default function NodeInspector({ node, navigate, onViewSubgraph, loadingS
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>来源笔记</span>
-          <span
-            style={{ cursor: 'pointer', color: 'var(--color-primary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}
-            onClick={() => navigate(`/notes/${node.note_id}`)}
-          >
-            {node.note_id.slice(0, 8)}...
-          </span>
+          {noteId ? (
+            <span
+              style={{ cursor: 'pointer', color: 'var(--color-primary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}
+              onClick={() => navigate(`/notes/${noteId}`)}
+            >
+              {noteId.slice(0, 8)}...
+            </span>
+          ) : (
+            <span style={{ color: 'var(--color-text-tertiary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}>
+              未知来源
+            </span>
+          )}
         </div>
 
         {/* 查看知识点详情按钮：跳转到卡片详情页 */}

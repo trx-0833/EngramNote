@@ -92,7 +92,11 @@ export default function Projects() {
     setError('')
     try {
       const data = await getProjects()
-      setProjects(data)
+      // 契约漂移兜底：/projects 可能回 204/空体（undefined）或 {items:[...]} 包装。
+      // 原来直接 setProjects(data)，随后 `projects.length` / `projects.map` 在渲染中抛错
+      // → 整页被错误边界接走。这里在入口归一成数组，退化成"还没有项目"的空状态。
+      const wrapped = (data as { items?: unknown } | null | undefined)?.items
+      setProjects(Array.isArray(data) ? data : Array.isArray(wrapped) ? (wrapped as Project[]) : [])
     } catch (err) {
       console.error('加载项目列表失败:', err)
       setError('加载项目列表失败，请稍后重试')
@@ -312,7 +316,9 @@ export default function Projects() {
     const panelOpen = addPanelProject?.id === p.id
     const addKeyword = addSearch.trim().toLowerCase()
     const filteredCandidates = candidateNotes.filter(
-      (n) => !addKeyword || n.title.toLowerCase().includes(addKeyword)
+      // title 可能为 null（后端/历史数据）：原来直接 `null.toLowerCase()` 一输入搜索词就崩，
+      // 缺失标题按空串处理 —— 只在搜索关键词为空时留在候选里，其余情况不参与匹配。
+      (n) => !addKeyword || (n.title ?? '').toLowerCase().includes(addKeyword)
     )
 
     return (
@@ -359,7 +365,7 @@ export default function Projects() {
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
               <span className="badge" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                {p.note_count} 篇笔记
+                {p.note_count ?? 0} 篇笔记
               </span>
             </div>
           </div>
@@ -539,7 +545,7 @@ export default function Projects() {
             onClick={() => toggleExpand(p)}
           >
             <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>▶</span>
-            {isExpanded ? '收起笔记' : `查看笔记（${p.note_count}）`}
+            {isExpanded ? '收起笔记' : `查看笔记（${p.note_count ?? 0}）`}
           </button>
           <div style={{ display: 'flex', gap: 6 }}>
             <button

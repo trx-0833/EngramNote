@@ -59,6 +59,11 @@ interface GraphSidebarProps {
 
 /** 图谱统计面板 */
 function StatsPanel({ stats }: { stats: GraphStats }) {
+  // `relation_type_distribution` 是接口的可选尾巴：缺失时只少一段条形图。
+  // 这里原来直接读 `.length`，字段一缺就抛在渲染中 → 整个图谱页被错误边界接走。
+  const distribution = stats.relation_type_distribution ?? []
+  const maxCount = Math.max(1, ...distribution.map((x) => x.count))
+
   return (
     <div className="graph-panel">
       <div className="graph-panel-title">图谱统计</div>
@@ -84,9 +89,9 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
           <span className="graph-stat-label">孤立节点</span>
         </div>
       </div>
-      {stats.relation_type_distribution.length > 0 && (
+      {distribution.length > 0 && (
         <div style={{ marginTop: 'var(--space-xs)' }}>
-          {stats.relation_type_distribution.map((d) => (
+          {distribution.map((d) => (
             <div key={d.relation_type} className="graph-stats-bar-row">
               <span className="graph-stats-bar-label">
                 {RELATION_TYPE_LABELS[d.relation_type] || d.relation_type}
@@ -95,7 +100,7 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
                 <div
                   className="graph-stats-bar-fill"
                   style={{
-                    width: `${Math.min(100, (d.count / Math.max(...stats.relation_type_distribution.map((x) => x.count))) * 100)}%`,
+                    width: `${Math.min(100, (d.count / maxCount) * 100)}%`,
                     background: RELATION_TYPE_COLORS[d.relation_type] || '#9a9ab0',
                   }}
                 />
@@ -117,12 +122,16 @@ function SubgraphPanel({
   setActivePanel,
   setSubgraphData,
 }: {
+  /** 调用方已归一化：`center_node` 必定存在（缺失时整块不渲染），邻居/边必定是数组 */
   subgraphData: NodeSubgraph
   graphData: GraphData | null
   focusNode: (nodeId: string) => void
   setActivePanel: Dispatch<SetStateAction<SidebarPanel>>
   setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>
 }) {
+  const neighbors = subgraphData.neighbor_nodes ?? []
+  const subgraphEdges = subgraphData.edges ?? []
+
   return (
     <div className="graph-panel" style={{ borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}` }}>
       <div className="graph-panel-title">
@@ -137,12 +146,12 @@ function SubgraphPanel({
       <div style={{ fontSize: '0.8rem', marginBottom: 'var(--space-sm)' }}>
         <strong>{subgraphData.center_node.title}</strong>
         <span style={{ color: 'var(--color-text-secondary)', marginLeft: 'var(--space-xs)' }}>
-          → {subgraphData.neighbor_nodes.length} 个关联节点
+          → {neighbors.length} 个关联节点
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        {subgraphData.neighbor_nodes.map((n) => {
-          const edge = subgraphData.edges.find(
+        {neighbors.map((n) => {
+          const edge = subgraphEdges.find(
             (e) => (e.source === n.id && e.target === subgraphData.center_node.id) ||
                    (e.target === n.id && e.source === subgraphData.center_node.id)
           )
@@ -171,7 +180,7 @@ function SubgraphPanel({
             </div>
           )
         })}
-        {subgraphData.neighbor_nodes.length === 0 && (
+        {neighbors.length === 0 && (
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该节点暂无关联节点</p>
         )}
       </div>

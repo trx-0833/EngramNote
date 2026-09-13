@@ -20,11 +20,13 @@
  * | 扫描导入后刷新列表（有新导入时） | 数字与内容对不上 |
  * | 点笔记行才跳转，点「移出」不跳转 | 想移出却被弹到别的页面 |
  *
- * ## 关于「★ 已知缺陷」用例
+ * ## 关于「★ 契约漂移」用例
  *
- * 本文件用真实 `ErrorBoundary`（与 App.tsx 一致）包住页面。带「已知缺陷」字样的用例
- * **故意断言页面崩到错误边界** —— 记录的是当前真实行为，不是期望行为。哪天它们失败并
- * 提示找不到「这个页面出错了」，说明缺陷被修好了，那时改成正向断言即可。
+ * 本文件用真实 `ErrorBoundary`（与 App.tsx 一致）包住页面。文件末尾那一组**曾经**
+ * 故意断言页面崩到错误边界（记录当时的真实行为，见附录 AZ）。缺陷修好后它们已全部
+ * 翻成**正向断言**：喂残缺数据时页面必须给出明确的降级界面（空状态 / 空列表 /
+ * 可读占位），而不是白屏。断言里的「没有崩到错误边界」只是必要条件 ——
+ * 每条用例都另外钉死了用户实际看到的东西，删掉守卫就会变红（附录 BA 记录变异验证）。
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -563,36 +565,48 @@ describe('扫描导入', () => {
 /**
  * 崩溃高发路径：本项目已经因为「一个可选数组字段是 undefined 却直接迭代」白屏过一次
  * （NoteDetail 的 noteLinks，见 NoteDetail.test.tsx）。这里把 Projects 侧同类的
- * 字段缺失/结构漂移逐条喂进去。
+ * 字段缺失/结构漂移逐条喂进去，钉死**降级行为**而不是"不抛异常就行"。
  */
-describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，均未修复）', () => {
-  it('★ 已知缺陷：/projects 返回 {items:[...]} 包装对象时整页崩到错误边界', async () => {
+describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错误边界）', () => {
+  it('/projects 返回 {items:[...]} 包装对象时取内层数组渲染，不崩也不丢数据', async () => {
     mockedProjects.mockResolvedValue({ items: [makeProject()] } as never)
     renderPage()
 
-    expect(await screen.findByText('这个页面出错了')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(/projects\.map is not a function/)
+    // 包装对象只是形状漂移：取内层数组照常渲染（用户的项目还在，不是"一个都没有"）
+    expect(await screen.findByText('Transformer 论文精读')).toBeInTheDocument()
+    expect(screen.getByText('2 篇笔记')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /查看笔记（2）/ })).toBeInTheDocument()
+    expect(screen.queryByText('还没有项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
+    // 关键：不能再把 undefined 丢给渲染层
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
   })
 
-  it('★ 已知缺陷：/projects 返回空响应（undefined）时整页崩到错误边界', async () => {
+  it('/projects 返回空响应（undefined）时按空列表降级为空状态，不崩', async () => {
     mockedProjects.mockResolvedValue(undefined as never)
     renderPage()
 
-    expect(await screen.findByText('这个页面出错了')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(/reading 'length'/)
+    expect(await screen.findByText('还没有项目')).toBeInTheDocument()
+    // 页面骨架仍在：头部、创建入口、说明都在，不是白屏
+    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument()
+    expect(screen.getByText(/项目作为标签归属笔记/)).toBeInTheDocument()
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
   })
 
-  it('安全：项目缺 description / note_count 时照常渲染（只是计数位置空着）', async () => {
+  it('安全：项目缺 description / note_count 时照常渲染，计数显示 0 而不是字面量 undefined', async () => {
     mockedProjects.mockResolvedValue([
       { id: 'p-1', user_id: 'u-1', name: '没有描述的项目' } as never,
     ])
     renderPage()
 
     expect(await screen.findByText('没有描述的项目')).toBeInTheDocument()
+    expect(screen.getByText('0 篇笔记')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /查看笔记（0）/ })).toBeInTheDocument()
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
     expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
   })
 
-  it('★ 已知缺陷：候选笔记 title 为 null 时，在添加面板里按标题搜索即崩', async () => {
+  it('候选笔记 title 为 null 时按标题搜索照常工作（null 视为空串），不崩', async () => {
     mockedNotes.mockResolvedValue({
       items: [
         makeNote({ id: 'n-1', title: null as never }),
@@ -608,10 +622,14 @@ describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，
     await userEvent.click(screen.getByRole('button', { name: '添加笔记' }))
     await screen.findByText('BERT 预训练')
 
-    // 不搜索时是安全的（title 只是渲染成空），一旦按标题过滤就会调用 title.toLowerCase()
+    // 不搜索时两条都在（title 缺失只渲染成空标签，不影响其它条目）
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+
     await userEvent.type(screen.getByPlaceholderText(/按标题搜索候选笔记/), 'B')
 
-    expect(await screen.findByText('这个页面出错了')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent(/reading 'toLowerCase'/)
+    // 输入搜索词后仍然是安全的：命中标题含 "B" 的那条，缺标题的那条不参与匹配
+    expect(screen.getByText('BERT 预训练')).toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1)
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
   })
 })

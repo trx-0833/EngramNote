@@ -46,15 +46,61 @@ import {
   getLinkWidth,
 } from '../components/graph/types'
 
+/**
+ * 契约漂移兜底：接口响应少了 `nodes` / `edges`（或给的不是数组）时**在入口处**归一成空数组。
+ * `nodes` 缺失曾经直接崩在 `graphData.nodes.filter`（渲染期异常 → 整页被错误边界接走），
+ * 与 NoteDetail 的 `noteLinks` 是同一类缺陷。缺数组应当退化成"暂无图谱数据"，
+ * 而不是白屏；下游一律读归一化后的值，无需每个使用点再补 `?.`。
+ * 用 `Array.isArray` 而不是 `?? []`：字段在但类型不对（如 `{nodes: {}}`）同样要兜住。
+ */
+function normalizeGraphData(data: GraphData | null | undefined): GraphData | null {
+  if (!data) return null
+  return {
+    ...data,
+    nodes: Array.isArray(data.nodes) ? data.nodes : [],
+    edges: Array.isArray(data.edges) ? data.edges : [],
+  }
+}
+
+/** `/graph/suggestions` 契约漂移：后端若回 `{items:[...]}` 包装而不是纯数组，取内层数组 */
+function normalizeSuggestions(data: unknown): SuggestedRelation[] {
+  if (Array.isArray(data)) return data as SuggestedRelation[]
+  const items = (data as { items?: unknown } | null | undefined)?.items
+  return Array.isArray(items) ? (items as SuggestedRelation[]) : []
+}
+
+/** `relation_type_distribution` 缺失/类型不对时退化成空分布：统计面板只少一段条形图，不整页崩 */
+function normalizeStats(data: GraphStats | null | undefined): GraphStats | null {
+  if (!data) return null
+  return {
+    ...data,
+    relation_type_distribution: Array.isArray(data.relation_type_distribution)
+      ? data.relation_type_distribution
+      : [],
+  }
+}
+
+/** 子图响应契约漂移：缺 `center_node` 视为无子图（面板不出现），缺邻居数组退化成空列表 */
+function normalizeSubgraph(data: NodeSubgraph | null | undefined): NodeSubgraph | null {
+  if (!data || !data.center_node) return null
+  return {
+    ...data,
+    neighbor_nodes: Array.isArray(data.neighbor_nodes) ? data.neighbor_nodes : [],
+    edges: Array.isArray(data.edges) ? data.edges : [],
+  }
+}
+
 export default function KnowledgeGraph() {
   const toast = useToast()
   const navigate = useNavigate()
   const graphRef = useRef<GraphForceRef | undefined>(undefined)
   const graphCanvasRef = useRef<HTMLDivElement>(null)
 
-  const [graphData, setGraphData] = useState<GraphData | null>(null)
+  const [rawGraphData, setGraphData] = useState<GraphData | null>(null)
   const [suggestions, setSuggestions] = useState<SuggestedRelation[]>([])
   const [stats, setStats] = useState<GraphStats | null>(null)
+  /** 归一化后的图谱数据：`nodes` / `edges` 保证是数组（见 normalizeGraphData） */
+  const graphData = useMemo(() => normalizeGraphData(rawGraphData), [rawGraphData])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -179,9 +225,9 @@ export default function KnowledgeGraph() {
         getGraphStats(),
       ])
       setGraphData(data)
-      // 后端 /graph/suggestions 返回纯数组，直接赋值
-      setSuggestions(sugData)
-      setStats(statsData)
+      // 后端 /graph/suggestions 返回纯数组，直接赋值；包装对象/缺失时归一成空列表
+      setSuggestions(normalizeSuggestions(sugData))
+      setStats(normalizeStats(statsData))
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载图谱失败')
     } finally {
@@ -227,7 +273,7 @@ export default function KnowledgeGraph() {
     setSidebarOpen(true)
     try {
       const data = await getNodeSubgraph(nodeId)
-      setSubgraphData(data)
+      setSubgraphData(normalizeSubgraph(data))
     } catch {
       setSubgraphData(null)
     } finally {
@@ -239,8 +285,10 @@ export default function KnowledgeGraph() {
   const forceGraphData = useMemo(() => {
     if (!graphData) return { nodes: [], links: [] }
 
-    let nodes = graphData.nodes
-    let edges = graphData.edges
+    // 本 memo 在组件早退之前执行：即便 graphData 缺 nodes/edges（后端只回一半、
+    // 或命中旧结构缓存）也必须自身安全，所以两处都归一成数组再用。
+    let nodes = graphData.nodes ?? []
+    let edges = graphData.edges ?? []
 
     // 回收站过滤：所属笔记已进回收站的节点不渲染（关系记录后端保留，
     // 恢复后自动复原）；同时剔除指向回收站节点的边，避免 force-graph 生成幽灵节点
@@ -796,7 +844,7 @@ export default function KnowledgeGraph() {
     return <ErrorDisplay message={error} onRetry={fetchData} />
   }
 
-  if (!graphData || graphData.nodes.length === 0) {
+  if (!graphData || (graphData.nodes ?? []).length === 0) {
     return (
       <div className="page-enter">
         <EmptyState message="暂无图谱数据" description="请先上传笔记并触发理解管道，生成知识卡片后即可查看图谱" />
@@ -804,9 +852,11 @@ export default function KnowledgeGraph() {
     )
   }
 
-  const nodeCount = graphData.nodes.length
-  const edgeCount = graphData.edges.length
-  const suggestedCount = graphData.edges.filter((e) => e.status === 'suggested').length
+  // 顶部计数与画布口径一致：画布会过滤掉回收站节点（及类型过滤后的节点），
+  // 原来这里用未过滤的 graphData.nodes.length，回收站里有卡片时两个数字会对不上。
+  const nodeCount = forceGraphData.nodes.length
+  const edgeCount = forceGraphData.links.length
+  const suggestedCount = forceGraphData.links.filter((e) => e.status === 'suggested').length
 
   return (
     <div

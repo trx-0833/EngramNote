@@ -27,11 +27,13 @@
  * 而且**真实的 canvas 绘制回调**（nodeCanvasObject / linkCanvasObject）仍然被调用，
  * 崩溃高发路径照样覆盖。只有图表内部布局本身没被测（那属于库的职责）。
  *
- * ## 关于「★ 已知缺陷」用例
+ * ## 关于「★ 契约漂移」用例
  *
- * 本文件用真实 `ErrorBoundary`（与 App.tsx 一致）包住页面。下列用例**故意断言页面
- * 崩到错误边界**：它们记录的是当前真实行为，不是期望行为。哪天这些用例失败并提示
- * 找不到「这个页面出错了」，说明那条缺陷被修好了 —— 那时把它们改成正向断言即可。
+ * 本文件用真实 `ErrorBoundary`（与 App.tsx 一致）包住页面。文件末尾那一组**曾经**
+ * 故意断言页面崩到错误边界（记录当时的真实行为，见附录 AZ）。缺陷修好后它们已全部
+ * 翻成**正向断言**：喂残缺数据时页面必须给出明确的降级界面（空状态 / 空列表 /
+ * 可读占位），而不是白屏。断言里的「没有崩到错误边界」只是必要条件 ——
+ * 每条用例都另外钉死了用户实际看到的东西，删掉守卫就会变红（附录 BA 记录变异验证）。
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -323,10 +325,12 @@ function renderPage() {
   )
 }
 
-/** 断言「整页崩到错误边界」——只给已知缺陷用例使用，见文件头说明 */
-async function expectCrash(reason: RegExp) {
-  expect(await screen.findByText('这个页面出错了')).toBeInTheDocument()
-  expect(screen.getByRole('alert')).toHaveTextContent(reason)
+/**
+ * 断言「整页没有崩到错误边界」。单靠它是不够的（页面可能是空白）——
+ * 契约漂移用例必须同时断言**降级后用户实际看到的东西**。
+ */
+function expectNoCrash() {
+  expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
 }
 
 function canvasProps(): ForceGraphMockProps {
@@ -682,9 +686,10 @@ describe('图谱交互', () => {
 /**
  * 崩溃高发路径：契约漂移 / 缓存旧结构 / 后端少返回一个字段。
  * 本项目已经因为「noteLinks.* 是 undefined 却直接迭代」白屏过一次，
- * 所以这里逐条喂残缺数据，把"安全"和"会崩"都钉下来。
+ * 所以这里逐条喂残缺数据，钉死**降级行为**（空状态 / 空列表 / 可读占位），
+ * 而不是"不抛异常就行"。
  */
-describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，均未修复）', () => {
+describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错误边界）', () => {
   let consoleError: MockInstance
 
   beforeEach(() => {
@@ -771,38 +776,69 @@ describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，
     ).not.toThrow()
   })
 
-  it('★ 已知缺陷：nodes 字段缺失（后端只回 edges / 旧缓存结构）时整页崩到错误边界', async () => {
+  it('nodes 字段缺失（后端只回 edges / 旧缓存结构）时按"暂无图谱数据"降级，不崩', async () => {
     mockedGraphData.mockResolvedValue({ edges: [] } as never)
     renderPage()
 
-    await expectCrash(/reading 'filter'/)
+    // nodes 归一成空数组 → 走页面既有的空状态；画布不该拿到任何节点
+    expect(await screen.findByText('暂无图谱数据')).toBeInTheDocument()
+    expect(
+      screen.getByText(/请先上传笔记并触发理解管道，生成知识卡片后即可查看图谱/),
+    ).toBeInTheDocument()
+    expectNoCrash()
+    expect(fg.props).toBeNull() // 空图谱不渲染画布，而不是渲染一张空画布
   })
 
-  it('★ 已知缺陷：edges 字段缺失时整页崩到错误边界', async () => {
+  it('edges 字段缺失时画布与顶部计数都按 0 条边处理，不崩', async () => {
     mockedGraphData.mockResolvedValue({ nodes: [makeNode()] } as never)
     renderPage()
 
-    await expectCrash(/reading 'filter'/)
+    expect(await screen.findByText('知识图谱')).toBeInTheDocument()
+    // 节点照常进画布，边退化成空集（而不是 undefined.filter 抛错）
+    expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1')
+    expect(screen.getByTestId('fg-link-ids')).toBeEmptyDOMElement()
+    const meta = screen.getByText(/1 节点/)
+    expect(meta.textContent).toContain('1 节点')
+    expect(meta.textContent).toContain('0 边')
+    expectNoCrash()
   })
 
-  it('★ 已知缺陷：stats.relation_type_distribution 缺失时整页崩到错误边界', async () => {
+  it('stats.relation_type_distribution 缺失时统计面板仍渲染，只是没有分布条', async () => {
     mockedStats.mockResolvedValue(makeStats({ relation_type_distribution: undefined as never }))
     renderPage()
 
-    await expectCrash(/reading 'length'/)
+    expect(await screen.findByText('知识图谱')).toBeInTheDocument()
+    // 四个基础数字照常显示（缺的是分布条，不是整个面板）
+    expect(screen.getByText('图谱统计')).toBeInTheDocument()
+    expect(screen.getByText('待确认')).toBeInTheDocument()
+    expect(screen.getByText('孤立节点')).toBeInTheDocument()
+    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expectNoCrash()
   })
 
-  it('★ 已知缺陷：suggestions 不是数组（如 {items:[...]} 包装）时，打开建议面板即崩', async () => {
+  it('suggestions 不是数组（如 {items:[...]} 包装）时取内层数组渲染，不崩也不丢数据', async () => {
     mockedSuggestions.mockResolvedValue({ items: [makeSuggestion()] } as never)
     renderPage()
     await screen.findByText('知识图谱')
 
     await userEvent.click(screen.getByRole('button', { name: /建议/ }))
 
-    await expectCrash(/suggestions\.map is not a function/)
+    // 包装对象只是形状漂移：取内层数组照常渲染（用户还能看到并处理这条建议），
+    // 而不是把建议整批丢掉只显示"暂无建议关系"
+    const panelTitle = screen.getByText(/建议关系 \(1\)/)
+    expect(panelTitle).toBeInTheDocument()
+    const panel = panelTitle.closest('.graph-panel') as HTMLElement
+    expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
+    expect(within(panel).getByText('均充的定义')).toBeInTheDocument()
+    expect(within(panel).getByText(/相似度: 0\.87/)).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '确认' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '拒绝' })).toBeInTheDocument()
+    // 顶部「建议」按钮的徽标同样不能显示 undefined
+    expect(screen.getByRole('button', { name: /建议/ })).toHaveTextContent('1')
+    expectNoCrash()
   })
 
-  it('★ 已知缺陷：节点缺 note_id 时点它即崩（详情面板直接 slice）', async () => {
+  it('节点缺 note_id 时详情面板显示"未知来源"占位，不再在 slice 上崩', async () => {
     mockedGraphData.mockResolvedValue({
       nodes: [makeNode({ note_id: undefined as never })],
       edges: [],
@@ -812,10 +848,15 @@ describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，
 
     await userEvent.click(screen.getByTestId('fg-node-c-1'))
 
-    await expectCrash(/reading 'slice'/)
+    const panel = screen.getByText('节点详情').closest('.graph-panel') as HTMLElement
+    expect(within(panel).getByText('未知来源')).toBeInTheDocument()
+    // 详情其余字段照常可用：标题、关联数与两个入口按钮都在
+    expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '查看关联节点' })).toBeInTheDocument()
+    expectNoCrash()
   })
 
-  it('★ 已知缺陷：子图响应缺 neighbor_nodes 时点「查看关联节点」即崩', async () => {
+  it('子图响应缺 neighbor_nodes 时仍展示中心节点并说明"暂无关联节点"，不崩', async () => {
     mockedSubgraph.mockResolvedValue({
       center_node: makeNode({ id: 'c-1' }),
       edges: [],
@@ -826,6 +867,42 @@ describe('契约漂移时的健壮性（★ 为已确认会崩的已知缺陷，
     await userEvent.click(screen.getByTestId('fg-node-c-1'))
     await userEvent.click(await screen.findByRole('button', { name: '查看关联节点' }))
 
-    await expectCrash(/reading 'length'/)
+    // 邻居数组归一成空 → 面板出现并给出明确的空说明（而不是"加载失败"或白屏）
+    expect(await screen.findByText('关联节点')).toBeInTheDocument()
+    expect(screen.getByText('浮充的定义')).toBeInTheDocument()
+    expect(screen.getByText(/0 个关联节点/)).toBeInTheDocument()
+    expect(screen.getByText('该节点暂无关联节点')).toBeInTheDocument()
+    expectNoCrash()
+  })
+
+  it('子图响应连 center_node 都缺时不渲染子图面板，图谱本体照常可用', async () => {
+    mockedSubgraph.mockResolvedValue({ edges: [] } as never)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    await userEvent.click(screen.getByTestId('fg-node-c-1'))
+    await userEvent.click(await screen.findByRole('button', { name: '查看关联节点' }))
+
+    // 没有中心节点就没有可展示的内容：面板整体不出现，页面其余部分不受影响
+    await waitFor(() => expect(screen.queryByText('关联节点')).not.toBeInTheDocument())
+    expect(screen.getByTestId('fg-node-c-1')).toBeInTheDocument()
+    expectNoCrash()
+  })
+
+  it('回收站节点不进画布时，顶部节点数与画布口径一致（不再"标题 3 节点、画布 2 个"）', async () => {
+    mockedGraphData.mockResolvedValue({
+      nodes: [
+        makeNode({ id: 'c-1' }),
+        makeNode({ id: 'c-2', title: '均充的定义' }),
+        makeNode({ id: 'c-9', title: '已进回收站的卡片', note_trashed: true }),
+      ],
+      edges: [],
+    })
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2')
+    expect(screen.getByText(/2 节点/).textContent).toContain('2 节点')
+    expectNoCrash()
   })
 })
