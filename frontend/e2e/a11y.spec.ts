@@ -65,9 +65,9 @@
  * 那件事由 `docs/a11y-audit.md` 的表格（人工过一遍）负责。
  */
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
-import { installA11yStubs, loginAs, type A11yStubLog } from './a11y-fixtures'
+import { installA11yStubs, loginAs, notesList, DAILY_PLAN, PROCESSING_NOTES, WEAK_POINTS, type A11yStubLog } from './a11y-fixtures'
 import { isApiUrl } from './support'
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']
@@ -156,6 +156,32 @@ interface RegisteredRule {
  * `SHELL_STATUS_NODES` 两个常量随本轮一起删除：那一整类 `color-contrast`
  * （侧边栏分组标题 / 状态徽章 / 图谱面板标题 / 自评四档 / 笔记项目标签 /
  * 笔记角色下拉框）在 9 个场景里**一个节点都不剩**。历史计数见文档 §2。
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ## 覆盖轮（本轮）之后：4 条（4 个节点）→ **12 条（15 个节点）**
+ *
+ * ⚠️ **这个数字变大不是回归，是覆盖面变大**：新增的 8 条全部挂在**新场景**上
+ * （`notes-status-processing` / `daily-materials` / `today-learn` / `review`），
+ * 扫描场景从 10 个变成 15 个。旧场景的违规数**一个都没变**：
+ * `login` 0、`login-error` 0、`notes-list` 0、`card-review-front/back` 0、
+ * `knowledge-graph` 0、`dashboard` 1（F-07）、`dashboard-mobile` 1（F-22）、
+ * `note-detail` 1（F-08）、`projects` 1（F-20）—— 也就是"旧场景仍是零容忍，
+ * 新场景先把信号登记下来"。
+ *
+ * | 新增 id | 规则 | 场景 | 节点 | 一句话 |
+ * |---|---|---|---|---|
+ * | F-28 | `color-contrast` | notes-status-processing | 2 | `--color-warning` 白底 3.1:1（与已修的 F-06 同类） |
+ * | F-29 | `color-contrast` | daily-materials | 2 | 同一个缺陷的第二条渲染路径 |
+ * | F-30 | `nested-interactive` | daily-materials | 1 | 文件夹头 `role="button"` 里嵌真按钮（与已修的 F-09/F-17 同形） |
+ * | F-31 | `heading-order` | daily-materials | 1 | h1 → h3（与 F-07/F-20 同类的 (b)） |
+ * | F-32 | `page-has-heading-one` | review | 1 | 整页没有 h1（与已修的 F-14/F-15/F-18 同类） |
+ * | F-33 | `color-contrast` | review | 1 | 白字压 `#c9a959` 2.25:1（F-19 只修了同一张表里的一处） |
+ * | F-34 | `nested-interactive` | today-learn | 1 | 「待复习」卡片与 F-09 逐字相同 |
+ * | F-35 | `color-contrast` | today-learn | 2 | `#f44336` 压 12.5% 同色底 3.13:1 |
+ *
+ * **每一条都是"下一轮要清掉的债"**（登记是例外，删条目、回到零容忍才是目标）：
+ * 本轮不改应用代码的理由是并行的 CSS 迁移（见 docs/a11y-audit.md §9 开头）。
+ * 归属与修法逐条写在下面每条的 `reason` 里。
  */
 
 const REGISTRY: RegisteredRule[] = [
@@ -216,6 +242,156 @@ const REGISTRY: RegisteredRule[] = [
       '项目页 h1「项目」之后，卡片区里的 h3 之前没有 h2（与仪表盘的 F-07 同一类、同一个待决定的问题：' +
       '卡片标题的级别是视觉层次的一部分，而卡片区没有区块标题）。' +
       '归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // 覆盖轮新增的 8 条登记项（场景见 docs/a11y-audit.md §9）
+  //
+  // ## 这些是**债**，不是"可以接受的现状"
+  //
+  // 项目口径（文件头 + docs §9）：**登记是例外，删掉登记项、回到零容忍才是目标**。
+  // 本轮之所以只登记不修：`frontend/src/**` 正在被并行的 CSS 迁移改动，
+  // 这一轮改应用代码**无法被验证**（改了可能修好也可能改坏，且与迁移冲突）。
+  // 所以本轮的任务是**先把信号拿到**：让这些页面/状态第一次真的被渲染出来、
+  // 被 axe 判过、被登记下来 —— 下一轮照 §9 的清单逐条修掉并**删除这些条目**
+  // （删掉即回到零容忍：该规则只要出现 1 个节点就红）。
+  //
+  // ## 上限一律 = 实测值（最紧写法）
+  //
+  // 每条的 `nodes` 都是本轮实测的节点数，没有留余量：多一个节点就失败。
+  // ## 没有放宽任何一条既有登记项
+  //
+  // F-07 / F-22 / F-08 / F-20 的上限仍然全是 1，一个字都没动；
+  // 已归零的规则（`color-contrast` 在 9 个旧场景里）**没有**因为本轮新增
+  // 场景而被重新登记 —— 新条目只挂在新场景上，旧场景仍是零容忍。
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── F-28 / F-29：`--color-warning` 的两个状态徽章（新场景）──────────
+  {
+    id: 'F-28',
+    rule: 'color-contrast',
+    scene: 'notes-status-processing',
+    impact: 'serious',
+    nodes: 2,
+    reason:
+      '笔记列表上的 `.status-converting` / `.status-cleaning` 两个徽章：' +
+      '实测 foreground #c4860a（= `--color-warning`，base.css:40）压在 #ffffff 上 = **3.1:1**，' +
+      '12.8px 常规字重要求 4.5:1。axe 原文即 "insufficient color contrast of 3.1"。' +
+      '与已修的 F-06（`--color-success`）**同一类、同一个修法**：压深令牌本身。' +
+      '本场景是这两个状态第一次被渲染出来（类名由 utils/labels.ts 的 statusClass() 产出，' +
+      '而默认桩里只有 cleaned/converted）。实测色值与比值见 a11y-notes-status-contrast.json 附件。' +
+      '**这是一笔债：下一轮把 `--color-warning` 压深一档（连同 daily-materials 的 F-29 一起消掉），' +
+      '然后删掉本条目。**归属：5.9 下一轮（设计令牌取值属 5.6，但可见后果落在 5.9）。',
+  },
+  {
+    id: 'F-29',
+    rule: 'color-contrast',
+    scene: 'daily-materials',
+    impact: 'serious',
+    nodes: 2,
+    reason:
+      '**同一个缺陷的第二条渲染路径**：今日资料页展开文件夹后，文件夹内的笔记行也用 ' +
+      '`statusClass()` 渲染状态徽章，于是同样两个类名（`.status-converting` / `.status-cleaning`）' +
+      '在这里再报 2 个节点，色值/比值与 F-28 逐字相同（#c4860a on #ffffff，3.1:1）。' +
+      '两条分开登记而不是合并：登记表的粒度是（场景，规则），合并会让某个场景的上限失去约束。' +
+      '修法是一处（令牌），消掉的是两条登记项。' +
+      '**这是一笔债：随 F-28 一起修，然后删掉本条目。**归属：5.9 下一轮。',
+  },
+
+  // ── F-30 / F-31：今日资料页的结构问题 ────────────────────────────────
+  {
+    id: 'F-30',
+    rule: 'nested-interactive',
+    scene: 'daily-materials',
+    impact: 'serious',
+    nodes: 1,
+    reason:
+      '文件夹头是 `div[role="button"][tabindex="0"]`（DailyMaterials.tsx:467-480，`aria-expanded`），' +
+      '里面**嵌了真按钮**「重命名文件夹」/「删除文件夹」→ axe: Element has focusable descendants。' +
+      '**与已修的 F-09（仪表盘「今日待复习」卡片）/ F-17（笔记列表卡片）是同一个洞的不同入口**，' +
+      '连写法都逐字相同（外层 `role="button"` + 手写 Enter 处理，内层是真 `<button>`）。' +
+      'F-09/F-17 的修法已经跑通：**控件之间是兄弟** —— 外层去掉 role/tabIndex/onClick，' +
+      '折叠/展开交给一个真有名字的按钮（或把 `aria-expanded` 挪到那个按钮上）。' +
+      '**这是一笔债：照 F-09/F-17 的形状改，然后删掉本条目。**归属：5.9 下一轮（与 F-34 同一处修法）。',
+  },
+  {
+    id: 'F-31',
+    rule: 'heading-order',
+    scene: 'daily-materials',
+    impact: 'moderate',
+    nodes: 1,
+    reason:
+      'h1「今日资料」之后，文件夹卡片里的文件夹名是 h3（DailyMaterials.tsx:517），中间没有 h2 —— ' +
+      '与 F-07 / F-20 **同一类待人工决定的问题**（卡片标题的级别是视觉层次的一部分，' +
+      '而这一页的区块没有区块级标题）。' +
+      '不修的理由与 F-07 完全相同：**降级/升级只能消掉报警，真正的结构问题原样留着**，' +
+      '要么给列表区加一个区块标题（起名是产品/设计决定），要么接受当前层级。' +
+      '上限维持 1：多一个节点就失败。归属：需要设计决定（5.6/产品），不是 5.9 修复轮 —— ' +
+      '**但仍登记在案，属于待人工决定那笔债，不由 5.9 单方面清掉。**',
+  },
+
+  // ── F-32 / F-33：答题复习页（新场景）────────────────────────────────
+  {
+    id: 'F-32',
+    rule: 'page-has-heading-one',
+    scene: 'review',
+    impact: 'moderate',
+    nodes: 1,
+    reason:
+      '答题复习页（`Review`）**整页没有任何 h1**（`<h1>`~`<h6>` 数量为 0）：' +
+      '`ReviewProgress` 在它这里走"一行式"排版（不传 `title`），所以连那个 h1 都没有。' +
+      '这与已修的 F-14/F-15（卡片复习缺 h1）、F-18（笔记列表缺 h1）**是同一类、同一个判据**，' +
+      '而且上一轮已经知道这件事（§8.3 第 1 条是**人工探针**得出的结论）—— ' +
+      '本轮把它变成场景之后，它才第一次是一条**门禁**。' +
+      '修法明确（给这一页一个 h1；`ReviewProgress` 的 `title` 就是为此存在的），' +
+      '但要先决定这一页的标题叫什么。' +
+      '**这是一笔债：补 h1（同时注意 h1→h3 跳级，见 §8.4 的坑），然后删掉本条目。**归属：5.9 下一轮 + 文案确认。',
+  },
+  {
+    id: 'F-33',
+    rule: 'color-contrast',
+    scene: 'review',
+    impact: 'serious',
+    nodes: 1,
+    reason:
+      '题目头部右侧的**难度徽章**：白字压在 `difficultyColors.medium` = `#c9a959` 上，' +
+      '实测 axe "insufficient color contrast of 2.25 (foreground #ffffff, background #c9a959, ' +
+      '12.8px normal)"。**与已修的 F-19 是同一类、甚至同一个色值**：' +
+      '上一轮只把 `selfRatingOptions` 里的金 `#c9a959` 压深成 `#8f7020`（4.66:1），' +
+      '而 `utils/labels.ts` 里**其它几张颜色表没动**（`difficultyColors` / `cardTypeColors` / ' +
+      '`questionTypeColors` / `categoryColors` / `verdictLabels`）—— 本条目就是其中一张表的可见后果。' +
+      '**这是一笔债：把 labels.ts 里所有"白字压色块"的取值一次过一遍（见 §9.3 的清单），' +
+      '然后删掉本条目。**归属：5.9 下一轮（色值属 5.6 令牌，与 F-06/F-19 同例）。',
+  },
+
+  // ── F-34 / F-35：今日学习页（新场景）────────────────────────────────
+  {
+    id: 'F-34',
+    rule: 'nested-interactive',
+    scene: 'today-learn',
+    impact: 'serious',
+    nodes: 1,
+    reason:
+      '「待复习任务」卡片是 `div[role="button"][tabIndex=0]`（TodayLearn.tsx:329-335）' +
+      '里面嵌了一个真 `<button>开始复习</button>`（第 344 行）→ Element has focusable descendants。' +
+      '**与已修的 F-09 逐字相同**（仪表盘那张卡片），连"外层只监听 Enter、没监听 Space"的毛病都一样 —— ' +
+      'F-09 的修法可以直接照搬：外层回到"盒子"，行为落在真按钮上。' +
+      '**这是一笔债：照 F-09 的形状改，然后删掉本条目。**归属：5.9 下一轮（与 F-30 同一处修法）。',
+  },
+  {
+    id: 'F-35',
+    rule: 'color-contrast',
+    scene: 'today-learn',
+    impact: 'serious',
+    nodes: 2,
+    reason:
+      '薄弱点列表里的**卡片类型徽章**：`#f44336` 压在 `#f4433620`（12.5% 透明度叠白底 = #fee8e6）上，' +
+      '实测 axe "insufficient color contrast of 3.13"，12px 常规字重要求 4.5:1。' +
+      '⚠️ **同一处代码在仪表盘上也有**（Dashboard.tsx:311-318，字面相同），' +
+      '但那里**扫不出来**：默认桩的 `/api/report/weak-points` 字段名与 `WeakPoint` 契约不一致，' +
+      '渲染出来是 `undefined` 文本、徽章是空的 —— 空文本没有对比度可判。' +
+      '也就是说本条目背后是"两页同一个缺陷，其中一页被桩的形状藏住了"（见 §9.2）。' +
+      '**这是一笔债：修那个字面量并顺手把默认桩的字段名改对，然后删掉本条目。**归属：5.9 下一轮。',
   },
 ]
 
@@ -390,6 +566,149 @@ function printAudit(result: AuditResult): void {
     }
   }
   console.log(lines.join('\n'))
+}
+
+/**
+ * 一处"量出来的"对比度事实（真 Chromium 里的 computed style）。
+ *
+ * 这是**证据**，不是新的门禁 —— 门禁仍然只有 axe 的违规 + `REGISTRY` 上限。
+ */
+interface ContrastMeasurement {
+  /** 命中的元素（tag + id + class） */
+  target: string
+  /** 元素文本（用于人核对量的是哪一个徽章） */
+  text: string
+  /** 计算后的前景色 */
+  color: string
+  /** 逐层合成后的**有效**背景色 */
+  background: string
+  /** 那个背景来自哪一层（谁真正决定了对比度） */
+  backgroundFrom: string
+  fontSize: string
+  fontWeight: string
+  /** 该字号/字重下 WCAG AA 的门槛（大文本 3，正文 4.5） */
+  required: number
+  /** 实测对比度 */
+  ratio: number
+  passesAA: boolean
+}
+
+/**
+ * 量出选择器命中元素的**实际**前景色、有效背景色与对比度比值。
+ *
+ * ## 为什么 axe 之外还要量一遍
+ *
+ * axe 的 `color-contrast` 已经把不达标的元素判成违规 —— 那条进登记表、是门禁。
+ * 这里量的是**给下一轮修的人看的数字**：哪个色值、压在哪层背景上、差多少。
+ * （`docs/a11y-audit.md` §3 里 F-06 / F-19 的"修前 / 修后"就是靠这种一次
+ * `getComputedStyle` 得出的结论，而不是靠猜色值算的。）
+ *
+ * 背景是**逐层往上合成**的：徽章自己通常是 `transparent`，真正决定对比度的是
+ * 祖先卡片的底色。只读元素自己的 `backgroundColor` 会得到 `rgba(0, 0, 0, 0)`,
+ * 那正是 axe 把节点丢进 `incomplete`（"算不出背景"）的原因 ——
+ * 而这件事花一次 `getComputedStyle` 就有答案（同 §4.3 的结论）。
+ *
+ * ## 还有一种 axe **结构上**判不了的情况：单个字符的文本
+ *
+ * axe-core 的 `colorContrastEvaluate` 里有一条：
+ * `shortTextContent = visibleText.length === 1`，此时只要对比度不足，
+ * 它**不下结论**（节点进 `incomplete`，messageKey `shortTextContent`），
+ * 于是"高 / 中 / 低"这种一个字的状态徽章**永远不会变成违规**。
+ * 那一类只有这里的实测能给出信号 —— 这就是 `today-learn` 场景要量它的原因。
+ *
+ * ⚠️ 这里**只断言"量到了"**（元素数、有限数），不断言"量到的值合格/不合格"：
+ * 把"现在是 3.11:1"写成断言，等于给下一轮修好它的人埋一个必红的测试
+ * （修好一条不该让测试变红 —— 见文件头的判定尺度）。
+ */
+async function measureContrast(locator: Locator): Promise<ContrastMeasurement[]> {
+  return locator.evaluateAll((elements) => {
+    interface Rgba {
+      r: number
+      g: number
+      b: number
+      a: number
+    }
+
+    const parse = (value: string): Rgba | null => {
+      const match = value.match(/rgba?\(([^)]+)\)/)
+      if (!match) return null
+      const parts = match[1].split(',').map((part) => Number.parseFloat(part.trim()))
+      if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return null
+      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 }
+    }
+
+    const channel = (value: number): number => {
+      const c = value / 255
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+    }
+    const luminance = (c: Rgba): number =>
+      0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+    const ratio = (a: Rgba, b: Rgba): number => {
+      const la = luminance(a)
+      const lb = luminance(b)
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+    }
+
+    /** 元素的可读描述（够人找到它就行，不追求唯一） */
+    const describe = (el: Element): string => {
+      const id = el.id ? `#${el.id}` : ''
+      const cls =
+        typeof el.className === 'string' && el.className.trim()
+          ? `.${el.className.trim().split(/\s+/).join('.')}`
+          : ''
+      return `${el.tagName.toLowerCase()}${id}${cls}`
+    }
+    const format = (c: Rgba): string => `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`
+
+    return elements.map((el) => {
+      const style = getComputedStyle(el)
+      const fg = parse(style.color) ?? { r: 0, g: 0, b: 0, a: 1 }
+
+      // 从元素自己往上收集有颜色的背景层，遇到第一个不透明层为止
+      const layers: { color: Rgba; from: string }[] = []
+      let node: Element | null = el
+      while (node) {
+        const bg = parse(getComputedStyle(node).backgroundColor)
+        if (bg && bg.a > 0) {
+          layers.push({ color: bg, from: describe(node) })
+          if (bg.a >= 1) break
+        }
+        node = node.parentElement
+      }
+
+      // 从最底层往上合成（半透明层压在祖先色上，不是压在白底上）
+      let composed: Rgba = { r: 255, g: 255, b: 255, a: 1 }
+      for (const layer of layers.reverse()) {
+        const a = layer.color.a
+        composed = {
+          r: layer.color.r * a + composed.r * (1 - a),
+          g: layer.color.g * a + composed.g * (1 - a),
+          b: layer.color.b * a + composed.b * (1 - a),
+          a: 1,
+        }
+      }
+
+      const size = Number.parseFloat(style.fontSize)
+      const weight = Number.parseInt(style.fontWeight, 10) || 400
+      // WCAG 1.4.3 的"大文本"豁免：≥24px，或 ≥18.66px 且粗体
+      const large = size >= 24 || (size >= 18.66 && weight >= 700)
+      const required = large ? 3 : 4.5
+      const value = ratio(fg, composed)
+
+      return {
+        target: describe(el),
+        text: (el.textContent ?? '').trim(),
+        color: format(fg),
+        background: format(composed),
+        backgroundFrom: layers.length > 0 ? layers[layers.length - 1].from : '（没有找到任何背景层，按白底算）',
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        required,
+        ratio: Math.round(value * 100) / 100,
+        passesAA: value >= required,
+      }
+    })
+  })
 }
 
 /** 场景参数 */
@@ -605,6 +924,227 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     })
   })
 
+  // ────────────────────────────────────────────────────────────────────────
+  // 覆盖轮（见 docs/a11y-audit.md §9）：把"从没被渲染过"的状态与页面补进来
+  //
+  // 这些场景不是"再扫一遍已知页面"，而是**让之前没有信号的东西出现**：
+  //   - `converting` / `cleaning` 两个状态用的 `--color-warning`（#c4860a）
+  //     在默认桩里一次都不会被渲染（§8.3 第 2 条）；
+  //   - `DailyMaterials` / `TodayLearn` / `Upload` 上有与 F-09/F-17 逐字相同的
+  //     `role="button"` 容器写法，但三页都不在审计范围里（§5 第 2 条 / §8.3 第 4 条）；
+  //   - `Review` 有一次人工探针发现"整页没有 h1"（§8.3 第 1 条），但那是探针结论、
+  //     不是门禁。
+  // 上一条与下面每一条的 `minNodes` 都取自**实测值**（留 ~30% 余量），
+  // 实测数字写在同行的注释里。
+  // ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * 今日资料（`DailyMaterials`）：文件夹列表 + **展开后**的资料列表。
+   *
+   * 为什么必须点开文件夹：这一页的笔记行、上传按钮、状态筛选标签全部在
+   * `expandedFolderId === folder.id` 分支里 —— 只扫折叠态等于只扫了文件夹头。
+   */
+  test('今日资料：文件夹列表与展开后的资料', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'daily-materials',
+      ready: async () => {
+        await loginAs(page, '/daily')
+        await expect(page.getByRole('heading', { name: '今日资料' })).toBeVisible()
+        // 文件夹头是 `div[role="button"]`（它里面还有真按钮 —— 见登记表）
+        await page.getByRole('button', { name: /2026-01-05 学习资料/ }).click()
+        // 展开后才会请求 /api/folders/folder-1：这三个标记都来自那一份数据
+        await expect(page.getByText('浮充与均充的讲义.pdf')).toBeVisible()
+        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible()
+        await expect(page.getByRole('button', { name: '上传文件' })).toBeVisible()
+      },
+      // 实测 157
+      minNodes: 110,
+    })
+  })
+
+  /**
+   * 今日学习（`TodayLearn`）入口页。
+   *
+   * 两个覆盖（都写在 fixtures 里、只作用于本场景）：
+   *   - `/api/goals/daily-plan` 从 400 换成有内容的计划 —— 「每日推荐任务」
+   *     整块只在 `total_count > 0` 时渲染；
+   *   - `/api/report/weak-points` 换成**契约形状**的那份 —— 默认桩的字段名
+   *     与 `WeakPoint` 不一致，渲染出来全是 `undefined`（fixtures 里有说明）。
+   */
+  test('今日学习：推荐任务 / 今日报告 / 待复习 / 薄弱点', async ({ page }) => {
+    const log = await installA11yStubs(page, {
+      '/api/goals/daily-plan': DAILY_PLAN,
+      '/api/report/weak-points': WEAK_POINTS,
+    })
+    await auditScene(page, log, {
+      scene: 'today-learn',
+      ready: async () => {
+        await loginAs(page, '/today')
+        await expect(page.getByRole('heading', { name: '今日学习' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible()
+        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible()
+        await expect(page.getByRole('heading', { name: '今日报告 (2026-01-06)' })).toBeVisible()
+        // 待复习卡片的计数来自 /api/review/stats（12）：0 的话整块换成空状态
+        await expect(page.getByText('今日待复习: 12 题')).toBeVisible()
+        // `exact: true`：推荐任务的类别卡片里也有一个叫「薄弱点」的 h3
+        // （"薄弱点共 1 项"），不写 exact 会被 Playwright 判成 strict 冲突
+        await expect(page.getByRole('heading', { name: '薄弱点', exact: true })).toBeVisible()
+        await expect(page.getByText('错3次 | 0.4%')).toBeVisible()
+      },
+      // 实测 171
+      minNodes: 120,
+    })
+
+    // ── 量出三个优先级徽章（高/中/低）的真实色值与比值 ──
+    //
+    // 为什么这三条**必须**单独量：axe 的 `color-contrast` 对
+    // "只有一个字符"的文本不下结论（`shortTextContent`，见 measureContrast 的说明），
+    // 于是它们永远进 `incomplete`、永远不会变成违规 —— 这一条门禁守不住，
+    // 只有实测能给出信号。
+    const priorityBadges = await measureContrast(
+      page.locator('.card').getByText(/^[高中低]$/),
+    )
+    expect(
+      priorityBadges.map((m) => m.text),
+      '三个优先级徽章没量全，本场景的证据不成立',
+    ).toEqual(['高', '中', '低'])
+    for (const m of priorityBadges) {
+      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true)
+    }
+
+    console.log(
+      [
+        '',
+        '── 实测对比度（今日学习页的徽章，axe 判不了"单字符"那一类）──────────',
+        ...priorityBadges.map(
+          (m) =>
+            `   ${m.text}（优先级徽章）  ${m.color} on ${m.background}（背景来自 ${m.backgroundFrom}）` +
+            ` = ${m.ratio}:1，${m.fontSize}/${m.fontWeight} 要求 ${m.required}:1 → ${m.passesAA ? '达标' : '不足'}`,
+        ),
+        '   来源：TodayLearn.tsx 的 priorityMeta（#f44336 / #ff9800 / #10b981）+ 白字',
+      ].join('\n'),
+    )
+
+    await test.info().attach('a11y-today-learn-badges.json', {
+      body: JSON.stringify(
+        {
+          note: '量出来的事实，不是断言：axe 对单字符文本的对比度不下结论（shortTextContent）',
+          priorityBadges,
+        },
+        null,
+        2,
+      ),
+      contentType: 'application/json',
+    })
+  })
+
+  /** 上传页（`Upload`）：拖拽区（`role="button"` + `aria-label`）、解析方式、项目标签、笔记类型 */
+  test('上传页：拖拽上传区与三个设置卡片', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'upload',
+      ready: async () => {
+        await loginAs(page, '/upload')
+        await expect(page.getByRole('heading', { name: '上传学习资料' })).toBeVisible()
+        // 这一页的主控件就是那个 role="button" 的拖拽区
+        await expect(page.getByRole('button', { name: '点击或拖拽文件上传' })).toBeVisible()
+        // 项目标签来自 /api/projects：桩回空数组时这里只剩一句"暂无项目"
+        await expect(page.getByRole('button', { name: '蓄电池基础' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '云端解析' })).toBeVisible()
+      },
+      // 实测 128
+      minNodes: 90,
+    })
+  })
+
+  /**
+   * 答题复习（`Review`）：选择题 + 难度徽章。
+   *
+   * 这一页此前**从未被扫过**（`/api/review/due` 没有桩，打开就是错误分支）：
+   * 一次人工探针发现它整页没有 h1（docs/a11y-audit.md §8.3 第 1 条）。
+   * 本轮把它变成场景 —— 探针结论与门禁结论的区别就在这里。
+   */
+  test('答题复习：选择题（含难度徽章）', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'review',
+      ready: async () => {
+        await loginAs(page, '/review')
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
+        await expect(page.getByRole('button', { name: '浮充长期恒压补偿自放电，均充短时升压校正' })).toBeVisible()
+        // 复习元信息（已复习次数 / 间隔）来自 /api/review/due 的字段
+        await expect(page.getByText('已复习 3 次 | 间隔 6 天')).toBeVisible()
+      },
+      // 实测 126
+      minNodes: 85,
+    })
+  })
+
+  /**
+   * 笔记状态：`converting` / `cleaning`（= `.status-converting` / `.status-cleaning`）。
+   *
+   * 这两个类名都取 `--color-warning`（#c4860a，白底 3.11:1），而默认桩里
+   * 只有 `cleaned` / `converted` —— 也就是说这条颜色**从来没被渲染过**。
+   * 本场景用覆盖把带这两个状态的笔记喂进列表页，并且当场把
+   * **实际的前景色 / 有效背景色 / 对比度比值**量出来（`measureContrast`），
+   * 让下一轮修它的人有一个可以对照的数字，而不是一句"大概不够"。
+   */
+  test('笔记状态：转换中 / 清洗中（.status-converting / .status-cleaning）', async ({ page }) => {
+    const log = await installA11yStubs(page, { '/api/notes': notesList(PROCESSING_NOTES) })
+    await auditScene(page, log, {
+      scene: 'notes-status-processing',
+      ready: async () => {
+        await loginAs(page, '/notes')
+        await expect(page.getByText('共 2 条')).toBeVisible()
+        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible()
+        await expect(page.getByText('待清洗：浮充与均充对照表.pdf')).toBeVisible()
+        // 这两个类名是**本场景存在的全部理由**：等到它们真的挂上 DOM
+        await expect(page.locator('.status-converting')).toHaveCount(1)
+        await expect(page.locator('.status-cleaning')).toHaveCount(1)
+      },
+      // 实测 145
+      minNodes: 100,
+    })
+
+    // ── 把色值与比值量出来（真 Chromium 的 computed style）──
+    // 断言只覆盖"量到了"：两个徽章都在、比值是有限数；值本身进附件与终端输出。
+    const measurements = await measureContrast(page.locator('.status-converting, .status-cleaning'))
+    expect(measurements.map((m) => m.text), '两个状态徽章都没量到，本场景的证据不成立').toEqual([
+      '转换中',
+      '清洗中',
+    ])
+    for (const m of measurements) {
+      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true)
+    }
+
+    console.log(
+      [
+        '',
+        '── 实测对比度（.status-converting / .status-cleaning）──────────',
+        ...measurements.map(
+          (m) =>
+            `   ${m.text}  ${m.color} on ${m.background}（背景来自 ${m.backgroundFrom}）` +
+            ` = ${m.ratio}:1，${m.fontSize}/${m.fontWeight} 要求 ${m.required}:1 → ${m.passesAA ? '达标' : '不足'}`,
+        ),
+      ].join('\n'),
+    )
+
+    await test.info().attach('a11y-notes-status-contrast.json', {
+      body: JSON.stringify(
+        {
+          note: '这是量出来的事实，不是断言：门禁仍是 axe 的 color-contrast + REGISTRY 上限',
+          cssVariable: '--color-warning: #c4860a（src/styles/base.css:40）',
+          usedBy: ['.status-converting（converting）', '.status-cleaning（cleaning）'],
+          measurements,
+        },
+        null,
+        2,
+      ),
+      contentType: 'application/json',
+    })
+  })
+
   /**
    * 移动端视口（375×667）下的仪表盘 —— **不是**为了再扫一遍违规，
    * 而是为了把"axe 看不见触控目标尺寸"这件事变成一条可复核的记录：
@@ -709,6 +1249,12 @@ test.describe('审计自检', () => {
       'card-review-back',
       'knowledge-graph',
       'projects',
+      // ── 覆盖轮加进来的 5 个场景（见 docs/a11y-audit.md §9）──
+      'notes-status-processing',
+      'daily-materials',
+      'today-learn',
+      'upload',
+      'review',
     ])
 
     const unknown = ACTIVE_REGISTRY.filter((entry) => !knownScenes.has(entry.scene))

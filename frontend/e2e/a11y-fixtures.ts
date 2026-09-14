@@ -80,6 +80,52 @@ function noteDetail() {
   }
 }
 
+/**
+ * 覆盖某场景的 `/api/notes` 列表（形状与默认桩一致）。
+ *
+ * 存在的理由：**逐场景喂不同的笔记**。默认那份列表是 `notes-list` / `dashboard`
+ * 两个已存在场景的渲染输入，往里面加一条会连带改变它们的 DOM 与违规计数；
+ * 而"把 status=converting/cleaning 的笔记渲染出来"必须在**某一个**场景里做。
+ * 用覆盖而不是改默认值，等于把"新状态的可见性"与"已扫场景的基线"解耦。
+ */
+export function notesList(items: Record<string, unknown>[]): Record<string, unknown> {
+  return { items, total: items.length, page: 1, page_size: 20 }
+}
+
+/**
+ * 两条**处理中**状态的笔记（`converting` / `cleaning`）—— 专供
+ * `notes-status-processing` 场景（见 a11y.spec.ts）。
+ *
+ * ## 为什么这两个状态值得单独一个场景
+ *
+ * 类名由 `utils/labels.ts` 的 `statusClass()` 从 `note.status` 映射而来
+ * （`converting → .status-converting`、`cleaning → .status-cleaning`，
+ * 单一数据源），而这两个类**都用 `--color-warning`（#c4860a）**。
+ * 默认桩里只有 `cleaned` / `converted`，所以这条规则的颜色在审计里
+ * **一次都没有被渲染过** —— 不是"通过了"，是"没扫到"
+ * （见 docs/a11y-audit.md §8.3 第 2 条）。
+ *
+ * 标题刻意写成"只有本场景才有"的字符串：`ready` 标记靠它判断
+ * "这一份列表真的渲染出来了"，而不是"某个通用文案出现过"。
+ */
+export const PROCESSING_NOTES = [
+  note({
+    id: 'note-converting',
+    title: '待转换：蓄电池巡检记录.docx',
+    source_type: 'docx',
+    status: 'converting',
+    project_names: [],
+    page_count: null,
+  }),
+  note({
+    id: 'note-cleaning',
+    title: '待清洗：浮充与均充对照表.pdf',
+    source_type: 'pdf',
+    status: 'cleaning',
+    project_names: [],
+  }),
+]
+
 /** 到期卡片（`GET /review/cards/due`） */
 const DUE_CARDS = [
   {
@@ -115,6 +161,120 @@ const DUE_CARDS = [
     lapses: 0,
   },
 ]
+
+/**
+ * 到期**题目**（`GET /review/due`）—— 答题复习页（`Review`）的输入。
+ *
+ * 与 `DUE_CARDS` 是两份不同的数据：卡片复习读 `/review/cards/due`，
+ * 答题复习读 `/review/due`。审计到本轮为止**只桩了前者**，所以打开 `/review`
+ * 时 `getDueQuizzes` 拿到 501 → 页面停在 `error && quizzes.length === 0`
+ * 的**错误分支**（一行报错 + 一个「重试」按钮）。那不是"覆盖率低"，
+ * 是"扫的根本不是这一页"。
+ *
+ * 两道题的字段都刻意带上会渲染到界面上的东西：
+ *   - 第一题 `choice` + `difficulty: 'medium'` → 难度徽章（白字压
+ *     `difficultyColors.medium`）；
+ *   - 第二题 `fill_blank` + `difficulty: 'easy'` → 另一种作答控件与另一个色值。
+ */
+const DUE_QUIZZES = [
+  {
+    id: 'quiz-1',
+    card_id: 'c-1',
+    note_id: 'note-1',
+    question_type: 'choice',
+    difficulty: 'medium',
+    question: '浮充与均充的主要区别是什么？',
+    options: JSON.stringify([
+      '浮充电压高于均充电压',
+      '浮充长期恒压补偿自放电，均充短时升压校正',
+      '两者只是叫法不同',
+      '均充用于长期补偿自放电',
+    ]),
+    next_review_at: null,
+    review_count: 3,
+    interval: 6,
+    easiness_factor: 2.5,
+  },
+  {
+    id: 'quiz-2',
+    card_id: 'c-2',
+    note_id: 'note-1',
+    question_type: 'fill_blank',
+    difficulty: 'easy',
+    question: '消除蓄电池硫化采用的是____充电。',
+    options: null,
+    next_review_at: null,
+    review_count: 1,
+    interval: 2,
+    easiness_factor: 2.36,
+  },
+]
+
+/**
+ * 每日推荐任务（`GET /goals/daily-plan`）—— 今日学习页与仪表盘共用这个接口。
+ *
+ * ⚠️ 默认桩给的是 **400**（无活跃目标，后端真实行为），
+ * 那是为了 `dashboard` 场景保持它登记时的渲染结果。这一份**只作为
+ * `today-learn` 场景的覆盖**传入：`dailyPlan.total_count > 0` 才会渲染
+ * 「每日推荐任务」整块（三个类别卡片 + 优先级徽章），而那正是这一页
+ * 除了统计之外的主要 DOM。
+ *
+ * 三个优先级（1/2/3）各给一条：它们对应三个不同的徽章底色，
+ * 少给一个就等于少量一个色值。
+ */
+export const DAILY_PLAN: Record<string, unknown> = {
+  id: 'plan-1',
+  goal_id: 'goal-1',
+  plan_date: '2026-01-06',
+  recommended_tasks: [
+    { task_type: 'weak_point', quiz_id: 'quiz-2', card_id: 'c-2', note_id: null, priority: 1, title: '复习「均充的适用场景」' },
+    { task_type: 'review', quiz_id: 'quiz-1', card_id: 'c-1', note_id: null, priority: 2, title: '复习「浮充的定义」' },
+    { task_type: 'new_material', quiz_id: null, card_id: null, note_id: 'note-2', priority: 3, title: '阅读新资料「铅酸电池的硫化机理」' },
+  ],
+  completed_count: 1,
+  total_count: 3,
+}
+
+/**
+ * 薄弱点（`GET /report/weak-points`）—— **契约形状**（`WeakPoint` 的字段名）。
+ *
+ * ⚠️ 默认桩里那份写的是 `title` / `review_count`，而 `api/report.ts` 的
+ * `WeakPoint` 要的是 `card_title` / `error_count`。后果不是"渲染失败"，
+ * 而是**页面照常渲染、文字是 `undefined`、徽章是空的** —— 空文本没有
+ * 对比度可判，于是 axe 对那一块**无话可说**。也就是说：默认桩让
+ * `dashboard` / `dashboard-mobile` 两个场景里的「薄弱点」卡片
+ * **看起来被扫过了，实际没有被判过**（见 docs/a11y-audit.md §9.2）。
+ *
+ * 本轮**不改默认桩**：改了会连带改变那两个已存在场景的渲染与计数，
+ * 而本轮的任务是"先拿到信号"，不是"顺手挪动已扫场景的基线"。
+ * 这一份只给 `today-learn` 场景用，让同一个卡片**在至少一个场景里
+ * 渲染出真实内容**。
+ */
+export const WEAK_POINTS: Record<string, unknown> = {
+  items: [
+    {
+      card_id: 'c-2',
+      card_title: '均充的适用场景',
+      card_type: 'qa',
+      note_id: 'note-1',
+      note_title: '锂离子电池的浮充与均充',
+      error_count: 3,
+      total_reviews: 5,
+      accuracy: 0.4,
+    },
+    {
+      card_id: 'c-3',
+      card_title: '浮充电压公式',
+      card_type: 'formula',
+      note_id: 'note-1',
+      note_title: '锂离子电池的浮充与均充',
+      error_count: 2,
+      total_reviews: 4,
+      accuracy: 0.5,
+    },
+  ],
+  total: 2,
+}
 
 /** 图谱节点（`GET /graph`）—— 有节点才画得出 SVG/canvas，也才有工具栏与统计 */
 const GRAPH_NODES = [
@@ -155,6 +315,68 @@ const PROJECTS = [
     updated_at: T1,
   },
 ]
+
+/**
+ * 文件夹（`GET /folders`）—— 今日资料页（`DailyMaterials`）的列表。
+ *
+ * 后端这个接口回的是**裸数组**（同 `/projects`，见 api/projects.ts）。
+ * 默认给**一个非空文件夹**：空数组会让这一页渲染 `EmptyState`
+ * （"还没有文件夹" + 一个按钮），整页只剩标题与空状态 ——
+ * 那种页面扫出来必然 0 违规，而它证明的是"没东西可扫"。
+ *
+ * 只给一个（而不是两个）：文件夹头部是 `div[role="button"]`，
+ * 里面还有真按钮，多一个文件夹就多一个同类节点 ——
+ * 违规计数应当由"这类问题存在"决定，而不是由"我塞了几个文件夹"决定。
+ */
+const FOLDERS = [
+  {
+    id: 'folder-1',
+    user_id: 'e2e-user',
+    name: '2026-01-05 学习资料',
+    description: '浮充与均充的原始资料',
+    folder_date: '2026-01-05',
+    created_at: T0,
+    note_count: 3,
+  },
+]
+
+/**
+ * 文件夹详情（`GET /folders/{id}`）—— 展开文件夹后渲染的那份笔记列表。
+ *
+ * 三条笔记刻意覆盖三种状态：`cleaned`（已完成）、`converting` / `cleaning`
+ * （处理中，即 `--color-warning` 的那两个类）。第二条路径上的同一对类名
+ * 与 `notes-status-processing` 场景互为交叉验证：如果两处都报、
+ * 修令牌后两处一起消，那就证明它是**共享类名**的问题，而不是某一页的写法。
+ */
+const FOLDER_DETAIL = {
+  ...FOLDERS[0],
+  notes: [
+    {
+      id: 'note-1',
+      title: '浮充与均充的讲义.pdf',
+      source_type: 'pdf',
+      status: 'cleaned',
+      file_size: 524_288,
+      created_at: T0,
+    },
+    {
+      id: 'note-converting',
+      title: '待转换：蓄电池巡检记录.docx',
+      source_type: 'docx',
+      status: 'converting',
+      file_size: 131_072,
+      created_at: T1,
+    },
+    {
+      id: 'note-cleaning',
+      title: '待清洗：浮充与均充对照表.pdf',
+      source_type: 'pdf',
+      status: 'cleaning',
+      file_size: 262_144,
+      created_at: T1,
+    },
+  ],
+}
 
 /**
  * 审计用到的 `/api` 桩：按**路径**匹配，忽略查询串
@@ -246,6 +468,10 @@ function apiFixtures(): Record<string, unknown> {
 
     // ── 卡片复习 ──
     '/api/review/cards/due': { items: DUE_CARDS, total: DUE_CARDS.length },
+    // ── 答题复习（`Review`）──
+    // 与上面那条是**两个不同的接口**：只桩 `/review/cards/due` 时，
+    // 打开 `/review` 会停在错误分支（页面照常渲染，且"0 违规"）。
+    '/api/review/due': { items: DUE_QUIZZES, total: DUE_QUIZZES.length },
     '/api/review/cards/card-1/submit': {
       card_id: 'card-1',
       quality: 4,
@@ -278,7 +504,12 @@ function apiFixtures(): Record<string, unknown> {
     // ── 项目 ──
     '/api/projects': PROJECTS,
     '/api/projects/proj-1': { ...PROJECTS[0], notes: [] },
-    '/api/folders': [],
+
+    // ── 今日资料（文件夹）──
+    // 原来是 `[]`（当时没有场景扫这一页）。本轮 `daily-materials` 场景进来了，
+    // 空数组会让它渲染空状态 —— 非空是本文件的核心约定（见文件头）。
+    '/api/folders': FOLDERS,
+    '/api/folders/folder-1': FOLDER_DETAIL,
   }
 }
 
