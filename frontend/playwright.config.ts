@@ -35,10 +35,39 @@ import { defineConfig, devices } from '@playwright/test'
 const E2E_PORT = 4319
 const E2E_BASE_URL = `http://127.0.0.1:${E2E_PORT}`
 
+/**
+ * 可访问性审计的 spec（5.9）——**单独跑**，见文件末尾 `A11Y_SPEC` 的说明。
+ *
+ * 这里用 `testMatch` 而不是 `testIgnore`：项目的语义是
+ * "`npm run e2e` 跑什么"，把要跑的东西**明确列出来**比"列一堆要忽略的"更难漂移
+ * （新加的 spec 若忘了加进来会**不跑**，而"忘加忽略"会让它混进来 —— 前者更吵、
+ * 更容易被发现）。
+ */
+const FUNCTIONAL_SPEC = '**/!(*a11y).spec.ts'
+
+/**
+ * 可访问性审计自己的匹配式。单一来源：`playwright.config.ts` 里那个 `a11y`
+ * project 用它，`docs/a11y-audit.md` 与 `npm run a11y` 也都指向同一处。
+ *
+ * ## 为什么审计与功能层分成两个 project
+ *
+ * 1. **并发不同**：功能层 `fullyParallel` 按 CPU 核数开 worker（本机 8）；
+ *    审计跑 8 个 worker 时，Vite 的**按需转换**（页面都是 `React.lazy`）
+ *    把首屏拖到 10 秒以上，8 条用例一起超时 —— 失败信息指向"页面没渲染"，
+ *    真实原因是开发服务器被同时敲。审计只跑 4 个 worker，实测 ~20 秒。
+ * 2. **判定尺度不同**：功能层断言"行为对不对"，审计断言"违规有没有超出登记表"。
+ *    混在一起会让"这次红的到底是功能坏了还是多了一条对比度问题"变得含糊。
+ * 3. **`testMatch` 是交集**：靠命令行传文件名来跑审计，会与顶层 `testMatch`
+ *    取交集 → `No tests found`（第一次接线时真踩到了）。用 project 表达
+ *    "这一组用例有自己的匹配式与参数"才是配置该说的话。
+ */
+const A11Y_SPEC = '**/a11y.spec.ts'
+
 export default defineConfig({
   testDir: './e2e',
-  // 只认 *.spec.ts：Vitest 的用例是 src/**/*.test.tsx，两边目录和命名都不重叠
-  testMatch: '**/*.spec.ts',
+  // 只认 *.spec.ts：Vitest 的用例是 src/**/*.test.tsx，两边目录和命名都不重叠。
+  // 审计（a11y.spec.ts）被**刻意排除**在默认运行之外，见 A11Y_SPEC 的说明。
+  testMatch: FUNCTIONAL_SPEC,
 
   // 全部用例都通过 page.route 桩掉了后端，彼此不共享状态，可以并行
   fullyParallel: true,
@@ -61,7 +90,25 @@ export default defineConfig({
 
   projects: [
     {
+      // 功能层：`npm run e2e` 跑这个 project（10 条用例）
       name: 'chromium',
+      testMatch: FUNCTIONAL_SPEC,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      /**
+       * 可访问性审计（5.9）：`npm run a11y` → `--project=a11y`。
+       *
+       * 单独建一个 project 而不是"让 a11y.spec.ts 落进上面那个 project、
+       * 靠命令行传文件名"：命令行传文件名会与顶层 `testMatch` **取交集**，
+       * 结果是 `No tests found`（这正是第一次接线时踩到的坑）。
+       * 用 project 表达"这一组用例有自己的匹配式与并发参数"才是配置本身该说的话。
+       */
+      name: 'a11y',
+      testMatch: A11Y_SPEC,
+      // 审计的并发刻意压到 4：8 个 worker 同时打 Vite dev server 时，
+      // 懒加载路由的**按需转换**会把首屏拖到 10 秒以上（详见 A11Y_SPEC 的说明）
+      workers: 4,
       use: { ...devices['Desktop Chrome'] },
     },
   ],
@@ -79,4 +126,4 @@ export default defineConfig({
   },
 })
 
-export { E2E_BASE_URL, E2E_PORT }
+export { A11Y_SPEC, E2E_BASE_URL, E2E_PORT, FUNCTIONAL_SPEC }

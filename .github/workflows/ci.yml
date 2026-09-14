@@ -172,6 +172,35 @@ jobs:
         timeout-minutes: 10
         run: npm run e2e
 
+      - name: Playwright a11y audit (axe-core, advisory)
+        # ── 为什么这一层是**建议性**的、而不是阻断性的 ────────────────────
+        #
+        # 它已经是一道**真的会失败**的门禁（不是 `|| true` 那种装饰）：
+        # `e2e/a11y.spec.ts` 把当前已知的每条违规逐条登记在 REGISTRY 里
+        # （规则 + 场景 + 影响等级 + 节点数 + 归属），任何**未登记**的违规、
+        # 或已登记违规的影响面/严重度上升，都会让它红。
+        #
+        # 之所以仍然不阻断合并，是**本轮的现实**决定的：
+        #   1. 审计当场发现了一批真实违规（对比度、缺可访问名的 <select>、
+        #      卡片里嵌按钮等），修复属于后续的 5.9 修复轮 —— 现在设成阻断，
+        #      CI 会长期常红，而常红的门禁只有一个结局：被人加 `|| true`。
+        #   2. `frontend/src/**` 正在被并行的 CSS 迁移改动。审计对**对比度**
+        #      与**类名**敏感，迁移期间它更容易因无关改动变红 —— 那种红的
+        #      指向不是"这次提交引入了缺陷"。
+        #
+        # 升级成阻断的**前置条件**（写在这里，避免"以后再说"）：
+        #   - 5.9 修复轮把 REGISTRY 里的条目清空或降到可接受集合；
+        #   - `frontend/src/**` 的 CSS 迁移结束。
+        # 两条都满足后，把下面的 `continue-on-error` 改成 false 即可，
+        # 门槛本身已经在测试里了，不需要另写脚本。
+        #
+        # 成本：复用同一个 job 里已经装好的 Chromium 与同一套 webServer 机制
+        # （`playwright.config.ts` 的 `a11y` project，端口 4319 自动拉起/关闭），
+        # 本机实测约 21~24 秒。
+        continue-on-error: true
+        timeout-minutes: 10
+        run: npm run a11y
+
   security-scan:
     name: Security scan (advisory)
     runs-on: ubuntu-latest
