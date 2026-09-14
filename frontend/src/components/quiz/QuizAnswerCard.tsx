@@ -9,11 +9,12 @@
 import { type ReactNode } from 'react'
 import type { SubmitAnswerResponse } from '../../api/client'
 import SourceContext from './SourceContext'
+// 四档自评控件与卡片复习页共用（5.12：两条复习流程的统一件）
+import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons'
 import {
   questionTypeLabels,
   difficultyLabels,
   difficultyColors,
-  selfRatingOptions,
   gradingMethodLabels,
   ratingLabels,
   verdictLabels,
@@ -374,65 +375,16 @@ export default function QuizAnswerCard({
               对照参考答案回忆，原文段落恰恰是最有用的对照材料。 */}
           <SourceContext cardId={quiz.card_id} noteId={quiz.note_id} />
 
-          {/* 四档自评：仅在后端明确请求自评且本次尚未自评时展示 */}
+          {/* 四档自评：仅在后端明确请求自评且本次尚未自评时展示。
+              控件本身与卡片复习页共用（SelfRatingButtons），差异只有
+              "跳过自评"这个逃生口：答题复习有（这里是两阶段提交的第二阶段，
+              库中已有占位记录），卡片复习没有（那里的自评就是提交本身）。 */}
           {needsSelfAssessment && (
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                  gap: 'var(--space-sm)',
-                }}
-              >
-                {selfRatingOptions.map(opt => (
-                  <button
-                    key={opt.quality}
-                    className="btn self-rating-btn"
-                    onClick={() => onSelfRate?.(opt.quality)}
-                    disabled={selfRatingSubmitting}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start',
-                      gap: 2,
-                      padding: 'var(--space-sm) var(--space-md)',
-                      border: `1px solid ${opt.color}`,
-                      borderLeft: `4px solid ${opt.color}`,
-                      borderRadius: 6,
-                      background: 'transparent',
-                      color: 'inherit',
-                      cursor: selfRatingSubmitting ? 'wait' : 'pointer',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, color: opt.color }}>{opt.label}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                      {opt.hint}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {selfRatingSubmitting && (
-                <p style={{ marginTop: 'var(--space-xs)', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                  正在记录自评...
-                </p>
-              )}
-              {onSkipSelfRate && !selfRatingSubmitting && (
-                <p style={{ marginTop: 'var(--space-xs)', textAlign: 'right' }}>
-                  <button
-                    className="btn btn-link"
-                    onClick={onSkipSelfRate}
-                    style={{
-                      background: 'none', border: 'none', padding: 0,
-                      color: 'var(--color-text-secondary)', cursor: 'pointer',
-                      fontSize: '0.85rem', textDecoration: 'underline',
-                    }}
-                  >
-                    跳过自评，先做下一题
-                  </button>
-                </p>
-              )}
-            </div>
+            <SelfRatingButtons
+              onRate={quality => onSelfRate?.(quality)}
+              submitting={selfRatingSubmitting}
+              onSkip={onSkipSelfRate}
+            />
           )}
 
           {/* 自评结果确认：让用户看到自己的打分确实生效了 */}
@@ -446,10 +398,7 @@ export default function QuizAnswerCard({
                 marginBottom: 'var(--space-md)',
               }}
             >
-              已按自评「
-              {selfRatingOptions.find(o => o.quality === result.self_rating)?.label
-                ?? `quality=${result.self_rating}`}
-              」记录，复习进度已更新。
+              已按自评「{selfRatingLabel(result.self_rating)}」记录，复习进度已更新。
             </div>
           )}
 

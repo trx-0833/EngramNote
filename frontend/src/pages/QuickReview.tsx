@@ -15,6 +15,9 @@ import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 // 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+// 与卡片复习页共用的进度条与回车键约定（5.12）
+import ReviewProgress from '../components/quiz/ReviewProgress'
+import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
 import { useSelfRating } from '../hooks/useSelfRating'
 import { useToast } from '../components/Toast'
 
@@ -148,14 +151,15 @@ export default function QuickReview() {
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      const current = quizzes[currentIndex]
-      if (current?.submitted) handleNext()
-      else handleSubmit()
-    }
+  /** 回车 = 推进当前这一步：已提交则下一题，否则提交答案（与卡片复习页同一约定） */
+  function handleEnter() {
+    const current = quizzes[currentIndex]
+    if (current?.submitted) handleNext()
+    else void handleSubmit()
   }
+
+  // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
+  const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter })
 
   // --- 加载中 ---
   if (loading) return <LoadingSpinner text="加载复习题目..." />
@@ -231,21 +235,20 @@ export default function QuickReview() {
   const quiz = current.quiz
 
   return (
-    <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
-      {/* 进度条 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)' }}>
-        <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-          {currentIndex + 1} / {quizzes.length}
-        </span>
-        <div className="progress-bar" style={{ flex: 1 }}>
-          <div className="progress-bar-fill" style={{
-            width: `${((currentIndex + (current.submitted ? 1 : 0)) / quizzes.length) * 100}%`,
-          }} />
-        </div>
-        <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-          {sessionCorrect}/{sessionTotal} 正确
-        </span>
-      </div>
+    <div
+      className="page-enter"
+      ref={containerRef}
+      onKeyDown={handleKeyDown}
+      style={{ maxWidth: 700, margin: '0 auto' }}
+    >
+      {/* 进度条（与卡片复习页共用） */}
+      <ReviewProgress
+        index={currentIndex}
+        total={quizzes.length}
+        done={current.submitted}
+        label={<>{currentIndex + 1} / {quizzes.length}</>}
+        trailing={<>{sessionCorrect}/{sessionTotal} 正确</>}
+      />
       {/* 题目卡片（共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
       <QuizAnswerCard
         quiz={quiz}

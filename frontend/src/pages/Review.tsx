@@ -7,6 +7,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { getDueQuizzes, submitAnswer, getReviewStats, DueQuiz, SubmitAnswerResponse, ReviewStats } from '../api/client'
 // 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+// 与卡片复习页共用的进度条与回车键约定（5.12）
+import ReviewProgress from '../components/quiz/ReviewProgress'
+import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
 import { useSelfRating } from '../hooks/useSelfRating'
 import { useToast } from '../components/Toast'
 
@@ -29,8 +32,6 @@ export default function Review() {
   const [completed, setCompleted] = useState(false)
   const [sessionCorrect, setSessionCorrect] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
   const submittingRef = useRef(false)
 
@@ -158,28 +159,30 @@ export default function Review() {
       const newQuizzes = [...quizzes]
       newQuizzes[nextIndex] = { ...newQuizzes[nextIndex], startTime: Date.now() }
       setQuizzes(newQuizzes)
-      // 聚焦输入框
-      setTimeout(() => {
-        const quiz = quizzes[nextIndex]?.quiz
-        if (quiz?.question_type === 'fill_blank') inputRef.current?.focus()
-        else if (quiz?.question_type === 'short_answer') textareaRef.current?.focus()
-      }, 100)
     } else {
       setCompleted(true)
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      const cur = quizzes[currentIndex]
-      if (cur?.submitted) {
-        handleNext()
-      } else {
-        handleSubmit()
-      }
+  /**
+   * 回车 = 推进当前这一步：已提交则下一题，否则提交答案
+   *
+   * ⚠️ 这里曾经有一段"聚焦下一题的输入框"的 setTimeout，但 `inputRef` /
+   * `textareaRef` 从未接到 `QuizAnswerCard` 上（组件不接受 ref），
+   * 所以它一直在对 null 调 focus —— 看着像功能，实际是死代码，本轮删除。
+   * 真正的聚焦由卡片的 `fillAutoFocus` 承担。
+   */
+  function handleEnter() {
+    const cur = quizzes[currentIndex]
+    if (cur?.submitted) {
+      handleNext()
+    } else {
+      void handleSubmit()
     }
   }
+
+  // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
+  const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter })
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>加载复习题目中...</div>
@@ -243,26 +246,24 @@ export default function Review() {
   const quiz = current.quiz
 
   return (
-    <div className="page-enter" style={{ maxWidth: 700, margin: '0 auto' }} onKeyDown={handleKeyDown}>
-      {/* 进度条 */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-sm)',
-        marginBottom: 'var(--space-lg)',
-      }}>
-        <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-          {currentIndex + 1} / {quizzes.length}
-        </span>
-        <div className="progress-bar" style={{ flex: 1 }}>
-          <div className="progress-bar-fill" style={{
-            width: `${((currentIndex + (current.submitted ? 1 : 0)) / quizzes.length) * 100}%`,
-          }} />
-        </div>
-        <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-          {sessionCorrect}/{sessionTotal} 正确 | 今日 {stats?.today_done ?? 0}/{stats?.daily_limit ?? 10}
-        </span>
-      </div>
+    <div
+      className="page-enter"
+      ref={containerRef}
+      onKeyDown={handleKeyDown}
+      style={{ maxWidth: 700, margin: '0 auto' }}
+    >
+      {/* 进度条（与卡片复习页共用） */}
+      <ReviewProgress
+        index={currentIndex}
+        total={quizzes.length}
+        done={current.submitted}
+        label={<>{currentIndex + 1} / {quizzes.length}</>}
+        trailing={
+          <>
+            {sessionCorrect}/{sessionTotal} 正确 | 今日 {stats?.today_done ?? 0}/{stats?.daily_limit ?? 10}
+          </>
+        }
+      />
 
       {/* 题目卡片（共享 QuizAnswerCard；提交竞态锁由 handleSubmit 的 submittingRef 承担，见 docs/decisions.md#F-23） */}
       <QuizAnswerCard

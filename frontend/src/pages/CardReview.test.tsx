@@ -14,6 +14,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDueCards, submitCardReview, type DueCard } from '../api/review'
+import { selfRatingOptions } from '../utils/labels'
 import CardReview from './CardReview'
 
 vi.mock('../api/review', () => ({
@@ -215,5 +216,118 @@ describe('CardReview 的自评与调度反馈', () => {
     expect(await screen.findByText('本轮卡片复习完成')).toBeInTheDocument()
     expect(screen.getByText('复习卡片: 1 张')).toBeInTheDocument()
     expect(screen.getByText('想起来了: 1 张')).toBeInTheDocument()
+  })
+})
+
+/**
+ * 5.12：回车约定、四档自评控件与进度条都与答题复习页共用同一份实现
+ * （`useReviewKeyboard` / `SelfRatingButtons` / `ReviewProgress`）。
+ * 这一组用例盯的是"共用"这件事在**这一页**上真的成立。
+ */
+describe('CardReview 与答题复习共用的交互件（5.12）', () => {
+  beforeEach(() => {
+    mockedDue.mockReset()
+    mockedSubmit.mockReset()
+    mockedDue.mockResolvedValue({ items: [makeCard()], total: 1 })
+  })
+
+  it('★ 四档自评取自 utils/labels 的单一数据源（标签与说明都不是本页字面量）', async () => {
+    renderPage()
+    await screen.findByText('浮充的定义')
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+
+    for (const opt of selfRatingOptions) {
+      expect(screen.getByText(opt.label)).toBeInTheDocument()
+      expect(screen.getByText(opt.hint)).toBeInTheDocument()
+    }
+  })
+
+  it('★ 已自评后回车进入下一张/完成本轮（依赖"焦点被收回容器"这件事成立）', async () => {
+    mockedSubmit.mockResolvedValue({
+      card_id: 'card-1', quality: 4, is_correct: true,
+      interval_days: 6, repetition: 3, easiness_factor: 2.5,
+      next_review_at: null, mastery_level: 60,
+      stability: 6, difficulty: 5, predicted_retention: 0.9,
+    })
+    const { container } = renderPage()
+    await screen.findByText('浮充的定义')
+    const page = container.firstElementChild as HTMLElement
+
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+    await userEvent.click(screen.getByText('想起来了'))
+    await screen.findByText(/已按自评「想起来了」记录/)
+    // 自评阶段结束后焦点必须回到容器，回车才有落点
+    expect(page).toHaveFocus()
+
+    await userEvent.keyboard('{Enter}')
+
+    expect(await screen.findByText('本轮卡片复习完成')).toBeInTheDocument()
+  })
+
+  it('★ 每次翻面后焦点回到容器（否则回车键"时灵时不灵"，附录 AA.7）', async () => {
+    const { container } = renderPage()
+    await screen.findByText('浮充的定义')
+    const page = container.firstElementChild as HTMLElement
+
+    // 点按钮后焦点会随被卸载的按钮落回 body，容器必须把它接回来
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+
+    expect(page).toHaveFocus()
+  })
+
+  it('★ 焦点在四档自评按钮上时，回车提交自评而不是被容器接管', async () => {
+    mockedSubmit.mockResolvedValue({
+      card_id: 'card-1', quality: 5, is_correct: true,
+      interval_days: 30, repetition: 3, easiness_factor: 2.6,
+      next_review_at: null, mastery_level: 70,
+      stability: 30, difficulty: 5, predicted_retention: 0.9,
+    })
+    renderPage()
+    await screen.findByText('浮充的定义')
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+
+    screen.getByText('轻松想起').closest('button')?.focus()
+    await userEvent.keyboard('{Enter}')
+
+    await waitFor(() => expect(mockedSubmit).toHaveBeenCalledTimes(1))
+    expect(mockedSubmit).toHaveBeenCalledWith('card-1', 5, '', expect.any(Number))
+  })
+
+  it('★ 自评生效的措辞与答题复习一致（同一个事件不该有两种说法）', async () => {
+    mockedSubmit.mockResolvedValue({
+      card_id: 'card-1', quality: 4, is_correct: true,
+      interval_days: 6, repetition: 3, easiness_factor: 2.5,
+      next_review_at: null, mastery_level: 60,
+      stability: 6, difficulty: 5, predicted_retention: 0.9,
+    })
+    renderPage()
+    await screen.findByText('浮充的定义')
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+    await userEvent.click(screen.getByText('想起来了'))
+
+    expect(await screen.findByText(/已按自评「想起来了」记录/)).toBeInTheDocument()
+  })
+
+  it('★ "再复习一轮"重新拉取到期队列并复位本次统计', async () => {
+    mockedSubmit.mockResolvedValue({
+      card_id: 'card-1', quality: 4, is_correct: true,
+      interval_days: 6, repetition: 3, easiness_factor: 2.5,
+      next_review_at: null, mastery_level: 60,
+      stability: 6, difficulty: 5, predicted_retention: 0.9,
+    })
+    mockedDue.mockResolvedValue({ items: [makeCard()], total: 1183 })
+    renderPage()
+    await screen.findByText('浮充的定义')
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }))
+    await userEvent.click(screen.getByText('想起来了'))
+    await userEvent.click(await screen.findByRole('button', { name: '完成本轮' }))
+    await screen.findByText('本轮卡片复习完成')
+    expect(mockedDue).toHaveBeenCalledTimes(1)
+
+    await userEvent.click(screen.getByRole('button', { name: '再复习一轮' }))
+
+    // 必须真的回到复习界面并重新拉队列，而不是停在一个空壳汇总页上
+    await screen.findByText('浮充的定义')
+    expect(mockedDue).toHaveBeenCalledTimes(2)
   })
 })

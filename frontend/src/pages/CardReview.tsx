@@ -17,188 +17,63 @@
  * —— 那样产生的自评数据是假的，而它**会真的改变调度**（间隔一经写入就
  * 无法事后纠正）。
  *
- * ## 为什么要展示 S / D / R
+ * ## 与答题复习统一到什么程度（5.12）
  *
- * 这是全套改造里第一次把"调度器凭什么这么排"直接摆给用户看：
+ * 两条流程共用同一套**交互件**，而不是各写一份长得像的东西：
  *
- * - `predicted_retention`：复习**前**模型认为你还能想起的概率
- * - `stability`：记忆强度（天）—— "下次复习 N 天后"正是由它解出来的
- * - `difficulty`：这张卡对你的难度（1-10）
+ * | 交互件 | 位置 | 两条流程的关系 |
+ * |---|---|---|
+ * | 四档自评控件 | `components/quiz/SelfRatingButtons` | 完全相同（含"提交中禁用"反馈） |
+ * | 会话进度条 | `components/quiz/ReviewProgress` | 同一个公式与标记，排版差异用 `title` 表达 |
+ * | 回车键约定 | `components/quiz/useReviewKeyboard` | 相同（含"按钮目标放行"守卫），焦点策略可配 |
+ * | 原文语境 | `components/quiz/SourceContext` | 相同（懒加载 + 失败可见 + 跳回原文） |
  *
- * 只给一个"6 天后"等于要求用户盲信调度器。这三个数也是 3.14 校准曲线
- * 将来要给用户看的东西，现在先把原始量露出来。
+ * 刻意**不**统一的部分，以及各自的理由：
+ *
+ * - **评分来源**：答题复习可能由后端自动判分（选择/填空），自评只补简答题的
+ *   占位记录；卡片没有可判分的答案，自评是唯一评分来源。所以这里没有
+ *   "跳过自评"逃生口（`SelfRatingButtons` 的 `onSkip`）：跳过等于什么都没提交。
+ * - **提交路径**：答题走 `useSelfRating`（两阶段：占位 → 带自评补完），
+ *   卡片走单阶段的 `submitCardReview`（quality 必填）。两者的入参与响应类型
+ *   都不同，强行合并只会把"两阶段"这层语义藏进类型体操里。
+ * - **调度依据面板**：这里展示 S / D 与掌握度变化，答题侧展示间隔 / 档位 /
+ *   判分方式 —— 字段集合不同，见 `cardreview/ScheduleFeedback.tsx` 的说明。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import {
-  getDueCards,
-  submitCardReview,
-  type CardReviewListResponse,
-  type CardReviewSubmitResponse,
-  type DueCard,
-} from '../api/review'
 import SourceContext from '../components/quiz/SourceContext'
+import SelfRatingButtons from '../components/quiz/SelfRatingButtons'
+import ReviewProgress from '../components/quiz/ReviewProgress'
+import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
-import { useToast } from '../components/Toast'
-import { selfRatingOptions, cardTypeLabels } from '../utils/labels'
-
-/** 一张卡片的会话状态 */
-interface CardState {
-  card: DueCard
-  /** 是否已翻面（显示正文） */
-  revealed: boolean
-  /** 自评结果；null = 尚未自评 */
-  result: CardReviewSubmitResponse | null
-  startTime: number
-}
-
-const PAGE_SIZE = 20
-
-/** 格式化时间到"日期 时:分"（本地时区），空值返回占位 */
-function formatDue(value: string | null | undefined): string {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
+import ScheduleFeedback from './cardreview/ScheduleFeedback'
+import CardReviewSummary from './cardreview/CardReviewSummary'
+import CardFace from './cardreview/CardFace'
+import { useCardReviewSession } from './cardreview/useCardReviewSession'
 
 export default function CardReview() {
   const navigate = useNavigate()
-  const toast = useToast()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [cards, setCards] = useState<CardState[]>([])
-  const [totalDue, setTotalDue] = useState(0)
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [submitting, setSubmitting] = useState(false)
-  const [completed, setCompleted] = useState(false)
-  const [sessionCount, setSessionCount] = useState(0)
-  // 本次会话里"答对"（自评 >= 3）的张数，用于结束时的汇总
-  const [sessionPassed, setSessionPassed] = useState(0)
-  // in-flight 锁：防双击/连按回车重复提交（重复 ReviewLog + 重复推进调度）
-  const submittingRef = useRef(false)
+  const {
+    loading, error, cards, totalDue, currentIndex, submitting, completed,
+    sessionCount, sessionPassed, current, phase,
+    reload, restart, handleReveal, handleRate, handleNext,
+  } = useCardReviewSession()
 
-  /** 把一次成功的加载结果落到状态里（初始加载与"再复习一轮"共用） */
-  const applyLoaded = useCallback((data: CardReviewListResponse) => {
-    setCards(data.items.map(card => ({
-      card,
-      revealed: false,
-      result: null,
-      startTime: Date.now(),
-    })))
-    setTotalDue(data.total)
-    setCurrentIndex(0)
-    setCompleted(data.items.length === 0)
-    setError('')
-  }, [])
-
-  /**
-   * 拉取到期卡片并落地；失败时只置错误，不抛（调用方不必各自 try/catch）
-   *
-   * ⚠️ 这里刻意用 `.then()/.catch()` 而不是 `async/await`：
-   * react-hooks 的 `set-state-in-effect` 规则不允许 effect 体内触发 setState，
-   * 而它对 `await` **之后的** setState 也一并报错（实测：把 setState 全部
-   * 放在 await 之后仍然报）。把落地放进回调里，语义完全一样，
-   * 静态分析也能看出 setState 不在同步路径上。
-   */
-  const fetchCards = useCallback(
-    () => getDueCards(PAGE_SIZE).then(applyLoaded).catch(() => setError('加载到期卡片失败')),
-    [applyLoaded],
-  )
-
-  useEffect(() => {
-    void fetchCards().finally(() => setLoading(false))
-  }, [fetchCards])
-
-  /** 重新加载（首次之外的入口：错误重试、"再复习一轮"） */
-  const reload = useCallback(() => {
-    setLoading(true)
-    setError('')
-    void fetchCards().finally(() => setLoading(false))
-  }, [fetchCards])
-
-  const current = cards[currentIndex]
-
-  // 让"回车翻面 / 回车下一张"真的可用。
-  //
-  // ⚠️ 只把 onKeyDown 挂在 div 上是不够的：键盘事件从**获得焦点的元素**
-  // 冒泡上来，而点击按钮之后焦点留在被卸载的按钮上、最终回到 body，
-  // 事件根本到不了这个 div —— 快捷键会变成"时灵时不灵"。
-  // 每次换卡或换阶段时把焦点收回容器（tabIndex={-1} 只允许程序聚焦，
-  // 不会插进 Tab 顺序里打扰键盘用户）。
-  const containerRef = useRef<HTMLDivElement>(null)
-  const phase = current?.result ? 'rated' : current?.revealed ? 'revealed' : 'front'
-  useEffect(() => {
-    containerRef.current?.focus()
-  }, [currentIndex, phase])
-
-  const handleReveal = useCallback(() => {
-    setCards(prev => {
-      const next = [...prev]
-      if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], revealed: true }
-      return next
-    })
-  }, [currentIndex])
-
-  const handleRate = useCallback(async (quality: number) => {
-    if (submittingRef.current) return
-    const target = cards[currentIndex]
-    if (!target || target.result) return
-
-    submittingRef.current = true
-    setSubmitting(true)
-    try {
-      const result = await submitCardReview(
-        target.card.card_id,
-        quality,
-        '',
-        Date.now() - target.startTime,
-      )
-      setCards(prev => {
-        const next = [...prev]
-        if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], result }
-        return next
-      })
-      setSessionCount(prev => prev + 1)
-      if (result.is_correct) setSessionPassed(prev => prev + 1)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '提交失败')
-    } finally {
-      submittingRef.current = false
-      setSubmitting(false)
-    }
-  }, [cards, currentIndex, toast])
-
-  const handleNext = useCallback(() => {
-    const target = cards[currentIndex]
-    // 未自评不许跳过：此刻调度尚未推进，放行会让这张卡停在
-    // "看了但没结账"的状态，而界面上看不出来。
-    if (target && !target.result) return
-    if (currentIndex < cards.length - 1) {
-      const nextIndex = currentIndex + 1
-      setCurrentIndex(nextIndex)
-      setCards(prev => {
-        const next = [...prev]
-        next[nextIndex] = { ...next[nextIndex], startTime: Date.now() }
-        return next
-      })
-    } else {
-      setCompleted(true)
-    }
-  }, [cards, currentIndex])
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key !== 'Enter' || e.shiftKey) return
-    // 自评按钮本身会处理回车（button 的原生行为），这里只兜住
-    // "翻面"与"下一张"两个阶段
-    if (e.target instanceof HTMLButtonElement) return
-    e.preventDefault()
+  /** 回车 = 推进当前这一步：未翻面则翻面，已自评则下一张（与答题复习同一约定） */
+  const handleEnter = useCallback(() => {
     if (!current) return
     if (current.result) handleNext()
     else if (!current.revealed) handleReveal()
-  }
+  }, [current, handleNext, handleReveal])
+
+  // 这一页没有任何输入控件，焦点必须由容器自己接住：点完按钮焦点落到 body 后，
+  // 键盘事件再也冒泡不到容器，回车键会"时灵时不灵"（附录 AA.7）。见 hook 的说明。
+  const { containerRef, handleKeyDown } = useReviewKeyboard({
+    onEnter: handleEnter,
+    refocusKey: `${currentIndex}:${phase}`,
+  })
 
   // --- 加载中 ---
   if (loading) return <LoadingSpinner text="加载到期卡片..." />
@@ -230,42 +105,20 @@ export default function CardReview() {
   // --- 本次完成汇总 ---
   if (completed) {
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
-        <h2 style={{ marginBottom: 'var(--space-lg)' }}>本轮卡片复习完成</h2>
-        <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3 style={{ marginBottom: 'var(--space-sm)' }}>本次统计</h3>
-          <p>复习卡片: {sessionCount} 张</p>
-          <p>想起来了: {sessionPassed} 张</p>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginTop: 'var(--space-sm)' }}>
-            {totalDue > cards.length
-              ? `本次加载了 ${cards.length} 张，全部到期共 ${totalDue} 张 —— 可以再来一轮。`
-              : '到期队列已经清空。'}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setSessionCount(0)
-              setSessionPassed(0)
-              setCompleted(false)
-              reload()
-            }}
-          >
-            再复习一轮
-          </button>
-          <button className="btn btn-secondary" onClick={() => navigate('/today')}>
-            回到今日学习
-          </button>
-        </div>
-      </div>
+      <CardReviewSummary
+        sessionCount={sessionCount}
+        sessionPassed={sessionPassed}
+        loadedCount={cards.length}
+        totalDue={totalDue}
+        onRestart={restart}
+        onBack={() => navigate('/today')}
+      />
     )
   }
 
   if (!current) return null
 
   const { card, revealed, result } = current
-  const typeLabel = cardTypeLabels[card.card_type] || card.card_type
 
   return (
     <div
@@ -276,182 +129,38 @@ export default function CardReview() {
       style={{ maxWidth: 760, margin: '0 auto', outline: 'none' }}
     >
       {/* 进度与到期总量 */}
-      <div style={{ marginBottom: 'var(--space-md)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          <h2 style={{ fontSize: '1.2rem' }}>卡片复习</h2>
-          <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+      <ReviewProgress
+        index={currentIndex}
+        total={cards.length}
+        done={!!result}
+        title="卡片复习"
+        label={
+          <>
             第 {currentIndex + 1} / {cards.length} 张
             {totalDue > cards.length && <> · 到期共 {totalDue} 张</>}
-          </span>
-        </div>
-        <div className="progress-bar">
-          <div
-            className="progress-bar-fill"
-            style={{ width: `${((currentIndex + (result ? 1 : 0)) / cards.length) * 100}%` }}
-          />
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-        {/* 卡片头部：类型 / 章节 / 复习元信息 */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-md)',
-          gap: 'var(--space-sm)',
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
-            <span style={{
-              padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem',
-              background: 'var(--color-primary)', color: '#fff',
-            }}>
-              {typeLabel}
-            </span>
-            {card.chapter_title && (
-              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                {card.chapter_title}
-              </span>
-            )}
-          </div>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-            已复习 {card.review_count} 次
-            {card.review_count > 0 && <> · 间隔 {card.interval_days} 天</>}
-            {card.lapses > 0 && <> · 遗忘 {card.lapses} 次</>}
-          </span>
-        </div>
+        {/* 正面 = 标题（提示）；背面 = 正文 + 摘要。先回忆再翻面是这一页的全部意义 */}
+        <CardFace card={card} revealed={revealed} onReveal={handleReveal} />
 
-        {/* 正面：标题（提示） */}
-        <h3 style={{ fontSize: '1.15rem', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>
-          {card.title}
-        </h3>
-
-        {!revealed ? (
+        {revealed && (
           <>
-            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: 'var(--space-md)' }}>
-              先在心里把这张卡的内容讲一遍，再看答案 —— 直接翻面等于看答案，
-              这次自评就不准了。
-            </p>
-            <div style={{ textAlign: 'right' }}>
-              <button className="btn btn-primary" onClick={handleReveal}>
-                显示答案
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* 背面：正文 + 摘要 */}
-            <div
-              style={{
-                padding: 'var(--space-md)',
-                background: 'var(--color-bg)',
-                borderRadius: 6,
-                lineHeight: 1.8,
-                whiteSpace: 'pre-wrap',
-                marginBottom: 'var(--space-md)',
-              }}
-            >
-              {card.content}
-            </div>
-            {card.summary && (
-              <p style={{
-                fontSize: '0.9rem',
-                color: 'var(--color-text-secondary)',
-                marginBottom: 'var(--space-md)',
-              }}>
-                <strong>摘要:</strong> {card.summary}
-              </p>
-            )}
-
-            {/* 四档自评：**唯一**的评分来源（卡片没有可自动判分的答案） */}
+            {/* 四档自评：**唯一**的评分来源（卡片没有可自动判分的答案）。
+                控件与答题复习页共用；这里不传 onSkip —— 卡片复习是单阶段提交，
+                自评就是提交本身，"跳过"等于什么都没提交（见组件文件头）。 */}
             {!result && (
-              <>
-                <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-                  刚才想得起来吗？
-                </p>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                  gap: 'var(--space-sm)',
-                  marginBottom: 'var(--space-md)',
-                }}>
-                  {selfRatingOptions.map(opt => (
-                    <button
-                      key={opt.quality}
-                      className="btn self-rating-btn"
-                      onClick={() => void handleRate(opt.quality)}
-                      disabled={submitting}
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        gap: 2,
-                        padding: 'var(--space-sm) var(--space-md)',
-                        border: `1px solid ${opt.color}`,
-                        borderLeft: `4px solid ${opt.color}`,
-                        borderRadius: 6,
-                        background: 'transparent',
-                        color: 'inherit',
-                        cursor: submitting ? 'wait' : 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <span style={{ fontWeight: 600, color: opt.color }}>{opt.label}</span>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {opt.hint}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {submitting && (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                    正在记录自评...
-                  </p>
-                )}
-              </>
+              <SelfRatingButtons
+                prompt="刚才想得起来吗？"
+                submitting={submitting}
+                onRate={quality => void handleRate(quality)}
+              />
             )}
 
             {/* 调度依据（阶段 3.6 / 3.9）：把"凭什么排到 N 天后"摆出来 */}
-            {result && (
-              <div
-                style={{
-                  padding: 'var(--space-md)',
-                  background: 'var(--color-bg)',
-                  borderLeft: `3px solid ${result.is_correct ? '#2d8a56' : '#c0392b'}`,
-                  borderRadius: 4,
-                  marginBottom: 'var(--space-md)',
-                  fontSize: '0.9rem',
-                }}
-              >
-                <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-                  已记录：
-                  {selfRatingOptions.find(o => o.quality === result.quality)?.label
-                    ?? `quality=${result.quality}`}
-                </p>
-                <p>
-                  下次复习: <strong>{result.interval_days} 天后</strong>
-                  {result.next_review_at && <> （{formatDue(result.next_review_at)}）</>}
-                </p>
-                {typeof result.predicted_retention === 'number'
-                  && result.predicted_retention < 0.999 && (
-                  <p>
-                    复习前模型认为你还能想起:
-                    {' '}<strong>{Math.round(result.predicted_retention * 100)}%</strong>
-                    {' '}—— 越接近遗忘，这次答对后间隔涨得越多
-                  </p>
-                )}
-                {(result.stability != null || result.difficulty != null) && (
-                  <p style={{ color: 'var(--color-text-secondary)' }}>
-                    记忆强度 {result.stability != null ? `${result.stability.toFixed(1)} 天` : '—'}
-                    {' · '}
-                    难度 {result.difficulty != null ? result.difficulty.toFixed(1) : '—'}
-                    {' · '}
-                    掌握度 {card.mastery_level.toFixed(0)} → {result.mastery_level.toFixed(0)}
-                  </p>
-                )}
-              </div>
-            )}
+            {result && <ScheduleFeedback result={result} previousMastery={card.mastery_level} />}
 
             {/* 原文语境（阶段 3.13）：想不起来时最该做的事就是回原文 */}
             {result && <SourceContext cardId={card.card_id} noteId={card.note_id} />}
