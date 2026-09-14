@@ -67,7 +67,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-import { installA11yStubs, loginAs, notesList, DAILY_PLAN, PROCESSING_NOTES, WEAK_POINTS, type A11yStubLog } from './a11y-fixtures'
+import { installA11yStubs, loginAs, notesList, ASSESSMENT_NOTES, DAILY_PLAN, GOAL_STUBS, PROCESSING_NOTES, WEAK_POINTS, type A11yStubLog } from './a11y-fixtures'
 import { isApiUrl } from './support'
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']
@@ -182,6 +182,22 @@ interface RegisteredRule {
  * **每一条都是"下一轮要清掉的债"**（登记是例外，删条目、回到零容忍才是目标）：
  * 本轮不改应用代码的理由是并行的 CSS 迁移（见 docs/a11y-audit.md §9 开头）。
  * 归属与修法逐条写在下面每条的 `reason` 里。
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ## 清债 + 覆盖第二轮（当前状态）：**12 条（15 个节点）→ 5 条（5 个节点）**，
+ * ## 扫描场景 **15 → 25**
+ *
+ * 上面那 8 条债里 **7 条已修、登记项已删除**（F-28/F-29/F-30/F-32/F-33/F-34/F-35），
+ * 只剩 F-31 —— 它与 F-07/F-22/F-08/F-20 是同一笔债：
+ * **待人工决定的标题层级**（见文件末尾的开放问题）。
+ * 同时把最后 10 个页面接成场景（`qa` / `knowledge-cards` / `card-detail` /
+ * `learning-assessment` / `learning-goals` / `trash` / `quick-review` /
+ * `question-sets` / `register` / `not-found`），
+ * **新场景一条登记项都没加**（10 个全是 0 违规 —— 带出来的 4 处问题当场改掉了：
+ * 注册页缺 `<main>`、回收站/卡片详情/学习评估/知识卡片 的标题层级）。
+ *
+ * **新增的一类门禁**：`today-learn` 里那条基于 `measureContrast` 的
+ * **阈值断言**（axe 对单字符文本按设计不下结论，F-36 只能这样守，见 §10.7）。
  */
 
 const REGISTRY: RegisteredRule[] = [
@@ -266,54 +282,26 @@ const REGISTRY: RegisteredRule[] = [
   // 场景而被重新登记 —— 新条目只挂在新场景上，旧场景仍是零容忍。
   // ══════════════════════════════════════════════════════════════════════
 
-  // ── F-28 / F-29：`--color-warning` 的两个状态徽章（新场景）──────────
-  {
-    id: 'F-28',
-    rule: 'color-contrast',
-    scene: 'notes-status-processing',
-    impact: 'serious',
-    nodes: 2,
-    reason:
-      '笔记列表上的 `.status-converting` / `.status-cleaning` 两个徽章：' +
-      '实测 foreground #c4860a（= `--color-warning`，base.css:40）压在 #ffffff 上 = **3.1:1**，' +
-      '12.8px 常规字重要求 4.5:1。axe 原文即 "insufficient color contrast of 3.1"。' +
-      '与已修的 F-06（`--color-success`）**同一类、同一个修法**：压深令牌本身。' +
-      '本场景是这两个状态第一次被渲染出来（类名由 utils/labels.ts 的 statusClass() 产出，' +
-      '而默认桩里只有 cleaned/converted）。实测色值与比值见 a11y-notes-status-contrast.json 附件。' +
-      '**这是一笔债：下一轮把 `--color-warning` 压深一档（连同 daily-materials 的 F-29 一起消掉），' +
-      '然后删掉本条目。**归属：5.9 下一轮（设计令牌取值属 5.6，但可见后果落在 5.9）。',
-  },
-  {
-    id: 'F-29',
-    rule: 'color-contrast',
-    scene: 'daily-materials',
-    impact: 'serious',
-    nodes: 2,
-    reason:
-      '**同一个缺陷的第二条渲染路径**：今日资料页展开文件夹后，文件夹内的笔记行也用 ' +
-      '`statusClass()` 渲染状态徽章，于是同样两个类名（`.status-converting` / `.status-cleaning`）' +
-      '在这里再报 2 个节点，色值/比值与 F-28 逐字相同（#c4860a on #ffffff，3.1:1）。' +
-      '两条分开登记而不是合并：登记表的粒度是（场景，规则），合并会让某个场景的上限失去约束。' +
-      '修法是一处（令牌），消掉的是两条登记项。' +
-      '**这是一笔债：随 F-28 一起修，然后删掉本条目。**归属：5.9 下一轮。',
-  },
-
-  // ── F-30 / F-31：今日资料页的结构问题 ────────────────────────────────
-  {
-    id: 'F-30',
-    rule: 'nested-interactive',
-    scene: 'daily-materials',
-    impact: 'serious',
-    nodes: 1,
-    reason:
-      '文件夹头是 `div[role="button"][tabindex="0"]`（DailyMaterials.tsx:467-480，`aria-expanded`），' +
-      '里面**嵌了真按钮**「重命名文件夹」/「删除文件夹」→ axe: Element has focusable descendants。' +
-      '**与已修的 F-09（仪表盘「今日待复习」卡片）/ F-17（笔记列表卡片）是同一个洞的不同入口**，' +
-      '连写法都逐字相同（外层 `role="button"` + 手写 Enter 处理，内层是真 `<button>`）。' +
-      'F-09/F-17 的修法已经跑通：**控件之间是兄弟** —— 外层去掉 role/tabIndex/onClick，' +
-      '折叠/展开交给一个真有名字的按钮（或把 `aria-expanded` 挪到那个按钮上）。' +
-      '**这是一笔债：照 F-09/F-17 的形状改，然后删掉本条目。**归属：5.9 下一轮（与 F-34 同一处修法）。',
-  },
+  // ══════════════════════════════════════════════════════════════════════
+  // 清债轮（本轮）：覆盖轮登记的 8 条里，**7 条的登记项已删除**
+  //
+  // | 已删除 | 怎么修的 |
+  // |---|---|
+  // | F-28 / F-29 | `--color-warning` `#c4860a` → `#936408`（白底 3.11 → 5.16:1，一处令牌两条一起消） |
+  // | F-30 | 今日资料文件夹头：外层去 role/tabIndex，折叠落在 `<h3>` 里那个真按钮上 |
+  // | F-32 | 答题复习页补 h1「答题复习」（无 h1 → 有，且没有引出 h1→h3 跳级） |
+  // | F-33 | `utils/labels.ts` 里**五张**颜色表一次过一遍（只修一张表就是上一轮的教训） |
+  // | F-34 | 今日学习「待复习」卡片：照 F-09 的形状，行为落在真按钮上 |
+  // | F-35 | 薄弱点徽章字/底一起改（`#c0392b` 压 `#c0392b1a`，3.13 → 4.68:1）+ 默认桩字段名改对 |
+  //
+  // **删除 = 收紧到最紧**：`reconcile()` 对没登记的规则判 `unregistered` → 失败，
+  // 也就是说这些规则从"有上限的豁免"回到了"零容忍"（1 个节点就红）。
+  // 留下的 F-31 与上面四条（F-07/F-22/F-08/F-20）是同一笔债：
+  // **待人工决定的标题层级**，不由 5.9 单方面清掉（见文件末尾的开放问题）。
+  //
+  // ⚠️ 本轮**一条件都没放宽**：F-07 / F-22 / F-08 / F-20 / F-31 的上限仍然全是 1。
+  // 新增场景带来的新违规另见文件末尾「覆盖轮（第二轮）」那一段。
+  // ── F-31：今日资料页的标题层级（**保留**：需要人工设计决定）──────────
   {
     id: 'F-31',
     rule: 'heading-order',
@@ -328,70 +316,6 @@ const REGISTRY: RegisteredRule[] = [
       '要么给列表区加一个区块标题（起名是产品/设计决定），要么接受当前层级。' +
       '上限维持 1：多一个节点就失败。归属：需要设计决定（5.6/产品），不是 5.9 修复轮 —— ' +
       '**但仍登记在案，属于待人工决定那笔债，不由 5.9 单方面清掉。**',
-  },
-
-  // ── F-32 / F-33：答题复习页（新场景）────────────────────────────────
-  {
-    id: 'F-32',
-    rule: 'page-has-heading-one',
-    scene: 'review',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      '答题复习页（`Review`）**整页没有任何 h1**（`<h1>`~`<h6>` 数量为 0）：' +
-      '`ReviewProgress` 在它这里走"一行式"排版（不传 `title`），所以连那个 h1 都没有。' +
-      '这与已修的 F-14/F-15（卡片复习缺 h1）、F-18（笔记列表缺 h1）**是同一类、同一个判据**，' +
-      '而且上一轮已经知道这件事（§8.3 第 1 条是**人工探针**得出的结论）—— ' +
-      '本轮把它变成场景之后，它才第一次是一条**门禁**。' +
-      '修法明确（给这一页一个 h1；`ReviewProgress` 的 `title` 就是为此存在的），' +
-      '但要先决定这一页的标题叫什么。' +
-      '**这是一笔债：补 h1（同时注意 h1→h3 跳级，见 §8.4 的坑），然后删掉本条目。**归属：5.9 下一轮 + 文案确认。',
-  },
-  {
-    id: 'F-33',
-    rule: 'color-contrast',
-    scene: 'review',
-    impact: 'serious',
-    nodes: 1,
-    reason:
-      '题目头部右侧的**难度徽章**：白字压在 `difficultyColors.medium` = `#c9a959` 上，' +
-      '实测 axe "insufficient color contrast of 2.25 (foreground #ffffff, background #c9a959, ' +
-      '12.8px normal)"。**与已修的 F-19 是同一类、甚至同一个色值**：' +
-      '上一轮只把 `selfRatingOptions` 里的金 `#c9a959` 压深成 `#8f7020`（4.66:1），' +
-      '而 `utils/labels.ts` 里**其它几张颜色表没动**（`difficultyColors` / `cardTypeColors` / ' +
-      '`questionTypeColors` / `categoryColors` / `verdictLabels`）—— 本条目就是其中一张表的可见后果。' +
-      '**这是一笔债：把 labels.ts 里所有"白字压色块"的取值一次过一遍（见 §9.3 的清单），' +
-      '然后删掉本条目。**归属：5.9 下一轮（色值属 5.6 令牌，与 F-06/F-19 同例）。',
-  },
-
-  // ── F-34 / F-35：今日学习页（新场景）────────────────────────────────
-  {
-    id: 'F-34',
-    rule: 'nested-interactive',
-    scene: 'today-learn',
-    impact: 'serious',
-    nodes: 1,
-    reason:
-      '「待复习任务」卡片是 `div[role="button"][tabIndex=0]`（TodayLearn.tsx:329-335）' +
-      '里面嵌了一个真 `<button>开始复习</button>`（第 344 行）→ Element has focusable descendants。' +
-      '**与已修的 F-09 逐字相同**（仪表盘那张卡片），连"外层只监听 Enter、没监听 Space"的毛病都一样 —— ' +
-      'F-09 的修法可以直接照搬：外层回到"盒子"，行为落在真按钮上。' +
-      '**这是一笔债：照 F-09 的形状改，然后删掉本条目。**归属：5.9 下一轮（与 F-30 同一处修法）。',
-  },
-  {
-    id: 'F-35',
-    rule: 'color-contrast',
-    scene: 'today-learn',
-    impact: 'serious',
-    nodes: 2,
-    reason:
-      '薄弱点列表里的**卡片类型徽章**：`#f44336` 压在 `#f4433620`（12.5% 透明度叠白底 = #fee8e6）上，' +
-      '实测 axe "insufficient color contrast of 3.13"，12px 常规字重要求 4.5:1。' +
-      '⚠️ **同一处代码在仪表盘上也有**（Dashboard.tsx:311-318，字面相同），' +
-      '但那里**扫不出来**：默认桩的 `/api/report/weak-points` 字段名与 `WeakPoint` 契约不一致，' +
-      '渲染出来是 `undefined` 文本、徽章是空的 —— 空文本没有对比度可判。' +
-      '也就是说本条目背后是"两页同一个缺陷，其中一页被桩的形状藏住了"（见 §9.2）。' +
-      '**这是一笔债：修那个字面量并顺手把默认桩的字段名改对，然后删掉本条目。**归属：5.9 下一轮。',
   },
 ]
 
@@ -616,9 +540,12 @@ interface ContrastMeasurement {
  * 于是"高 / 中 / 低"这种一个字的状态徽章**永远不会变成违规**。
  * 那一类只有这里的实测能给出信号 —— 这就是 `today-learn` 场景要量它的原因。
  *
- * ⚠️ 这里**只断言"量到了"**（元素数、有限数），不断言"量到的值合格/不合格"：
- * 把"现在是 3.11:1"写成断言，等于给下一轮修好它的人埋一个必红的测试
- * （修好一条不该让测试变红 —— 见文件头的判定尺度）。
+ * ⚠️ **这里只负责"量"，断言在调用方**（函数本身不做通过/不通过判定）：
+ * 多数调用方只断言"量到了"（元素数、有限数），因为把"现在是 3.11:1"写成断言，
+ * 等于给下一轮修好它的人埋一个必红的测试（修好一条不该让测试变红 —— 见文件头）。
+ * 唯一的例外是今日学习页的优先级徽章：axe **结构上**判不了它们
+ * （见上一条），所以那里断言的是**阈值**（`ratio >= required`，即 ≥4.5:1），
+ * 不是当前值 —— 修好即通过、退化即失败。
  */
 async function measureContrast(locator: Locator): Promise<ContrastMeasurement[]> {
   return locator.evaluateAll((elements) => {
@@ -996,12 +923,14 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       minNodes: 120,
     })
 
-    // ── 量出三个优先级徽章（高/中/低）的真实色值与比值 ──
+    // ── 量出三个优先级徽章（高/中/低）的真实色值与比值，并**把阈值钉成门禁** ──
     //
     // 为什么这三条**必须**单独量：axe 的 `color-contrast` 对
     // "只有一个字符"的文本不下结论（`shortTextContent`，见 measureContrast 的说明），
-    // 于是它们永远进 `incomplete`、永远不会变成违规 —— 这一条门禁守不住，
-    // 只有实测能给出信号。
+    // 于是它们永远进 `incomplete`、永远不会变成违规 —— `REGISTRY` 对它无能为力
+    // （没有 violation 就没有可登记的条目，连"上限"都写不出来）。
+    // 这一条**只有实测守得住**，所以修色值与加断言必须同时交付：
+    // 否则"3.68 → 5.44"这件事没有任何一层能验证，修好与没修在报告上长得一样。
     const priorityBadges = await measureContrast(
       page.locator('.card').getByText(/^[高中低]$/),
     )
@@ -1011,6 +940,16 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     ).toEqual(['高', '中', '低'])
     for (const m of priorityBadges) {
       expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true)
+      // ★ 断言的是**阈值**（`measureContrast` 按字号/字重算出的 WCAG AA 门槛，
+      //   这里是 4.5:1），不是"当前值等于多少"。
+      //   写成"现在是 3.68"会给下一轮修好它的人埋一个必红的测试；
+      //   写成"≥ 阈值"则修好即通过、退化即失败 —— 与 REGISTRY 只卡上限同一个道理。
+      expect(
+        m.ratio,
+        `${m.text}（优先级徽章）：实测 ${m.ratio}:1 < 要求 ${m.required}:1。` +
+          `色值来自 TodayLearn.tsx 的 priorityMeta（白字压色块），` +
+          `axe **结构上**判不了单字符文本，所以只有这条断言守着它。`,
+      ).toBeGreaterThanOrEqual(m.required)
     }
 
     console.log(
@@ -1029,7 +968,10 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     await test.info().attach('a11y-today-learn-badges.json', {
       body: JSON.stringify(
         {
-          note: '量出来的事实，不是断言：axe 对单字符文本的对比度不下结论（shortTextContent）',
+          note:
+            '量出来的事实 + 一条阈值门禁：axe 对单字符文本的对比度不下结论（shortTextContent），' +
+            '所以这三条只有本文件的断言守着（ratio >= required，不是"等于某个值"）',
+          gateLevel: 'ratio >= required（WCAG AA 4.5:1）',
           priorityBadges,
         },
         null,
@@ -1197,6 +1139,307 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       contentType: 'application/json',
     })
   })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // 覆盖轮（第二轮）：把最后 10 个页面接进来
+  //
+  // 这一批与上一批的**不同点**：上一批是"把已经从没渲染过的状态渲染出来"，
+  // 这一批是"把从没有过桩的页面接上" —— 每个页面都要先有**契约形状**的桩，
+  // 否则扫到的是加载失败页（那正是 `CardDetail` 一直没被接进来的原因，
+  // 而真实原因不是文档当时猜的"桩是列表形状"，是**路径写错了**：
+  // 应用请求 `/api/understanding/cards/{id}`，桩里写的却是 `/api/cards`）。
+  //
+  // 每个场景都遵守同一套防线（见文件头与 auditScene）：
+  //   ① ready 等的是"该页**独有**的标记 **+ 真实内容**"（不是通用标题）；
+  //   ② DOM 元素数 ≥ minNodes（取实测值留约 30% 余量，实测值写在注释里）；
+  //   ③ `passes > 0` 且评估规则数 > 20（证明 axe 真的跑了）；
+  //   ④ `log.unmatched === []`（没有靠"未定义的接口静默 501"混过去）；
+  //   ⑤ `log.pageErrors === []`（页面没有未捕获异常）。
+  //
+  // ⚠️ 凡是"主内容要靠交互才出现"的页面，都**必须真的走那一步交互**：
+  // `KnowledgeCards` 的分组默认折叠、`QA` 不问就是空状态、
+  // `QuestionSets` 的答案默认折叠、`LearningAssessment` 的关联资料要选中笔记
+  // —— 只扫初始态等于扫了个空壳（空白页面的 axe 结果恒为 0 违规）。
+  // ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * 智能问答（`QA`）：一次**真实的流式提问**之后的回答 + 引用来源。
+   *
+   * 为什么必须问一次：这一页挂载时**一个请求都不发**（只有一个输入框 +
+   * 空状态 `输入问题开始问答`），主内容只有提问之后才存在。
+   * 桩要按 `text/event-stream` 回（见 `rawBody` / `QA_ANSWER_SSE`），
+   * 因为按 JSON 回的话页面会永远停在 `AI 正在思考...` —— 而那一句
+   * **既是加载态、也是"答案为空"的终态**（QA.tsx:248/267），拿它当
+   * "已经渲染出来了"的判据是假的。
+   */
+  test('智能问答：一次真实提问后的回答与引用来源', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'qa',
+      ready: async () => {
+        await loginAs(page, '/qa')
+        await expect(page.getByRole('heading', { name: '智能问答' })).toBeVisible()
+        await page
+          .getByPlaceholder('输入你的问题，AI 将基于你的笔记内容回答...')
+          .fill('浮充和均充有什么区别？')
+        await page.getByRole('button', { name: '提问' }).click()
+        // **流结束**的标记是引用来源与页脚，不是"AI 正在思考..."（见上）
+        await expect(page.getByText('引用来源:')).toBeVisible()
+        await expect(page.getByText('浮充是长期恒压运行，用于补偿自放电；均充是短时升压校正。')).toBeVisible()
+        await expect(page.getByText('由 DeepSeek 提供支持')).toBeVisible()
+      },
+      // 实测 121
+      minNodes: 90,
+    })
+  })
+
+  /**
+   * 知识卡片（`KnowledgeCards`）：按来源笔记分组 + 卡片单元。
+   *
+   * ⚠️ 分组**加载完成后默认是展开的**（`fetchCards` 里
+   * `setExpandedNotes(new Set(grouped.map(...)))` —— 全部展开），
+   * 所以这里刻意**不点**那个分组头：点一下反而会把它收起来。
+   * （分组头是 `div[onClick]`，没有 role/tabIndex，键盘到不了 ——
+   * 那一类 axe 判不了，记在文档 §4.1 的人工清单里。）
+   */
+  test('知识卡片：按笔记分组与卡片单元', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'knowledge-cards',
+      ready: async () => {
+        await loginAs(page, '/cards')
+        await expect(page.getByRole('heading', { name: '知识卡片' })).toBeVisible()
+        await expect(page.getByText('(4 张卡片)')).toBeVisible()
+        // 四张卡片真实渲染：标题、掌握度、以及 ≥80 分那张多出来的金色提示
+        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '硫化的定义' })).toBeVisible()
+        await expect(page.getByText('掌握度').first()).toBeVisible()
+        // 两张卡片都写了同一个章节名 → 用 first()（严格模式会报 2 个元素）
+        await expect(page.getByText('章节: 第一章 蓄电池').first()).toBeVisible()
+        await expect(page.getByText('✨ 建议生成拓展知识点')).toBeVisible()
+      },
+      // 实测 191
+      minNodes: 135,
+    })
+  })
+
+  /**
+   * 卡片详情（`CardDetail`）：标题 + 来源笔记 + 章节摘要 + 原始出处 + 关联题目。
+   *
+   * 这一页此前**被明确判定为"不能扫"**（审计文档 §5 第 3 条），理由是
+   * "桩里 `/api/cards/{id}` 返回的是列表形状，加进去只会得到加载失败页"。
+   * 本轮查清了真实原因：**应用请求的路径是 `/api/understanding/cards/{id}`**
+   * （api/qa.ts:186），桩里那条 `/api/cards` 是一条**永远匹配不到的死键**，
+   * 请求落到 501 上才渲染成加载失败页。补上正确路径的桩之后这一页就能扫了。
+   *
+   * 「显示答案」也要真的点开：关联题目的答案与解析默认不渲染，
+   * 而答案那行的颜色（`var(--color-success)`）是**只有点开才存在**的 DOM。
+   */
+  test('卡片详情：章节摘要 / 原始出处 / 关联题目', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'card-detail',
+      ready: async () => {
+        await loginAs(page, '/cards/card-1')
+        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible()
+        await expect(page.getByText('来源笔记：')).toBeVisible()
+        await expect(page.getByRole('heading', { name: '章节摘要' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '原始出处' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '关联题目 (1)' })).toBeVisible()
+        await page.getByRole('button', { name: '显示答案' }).click()
+        await expect(page.getByText('答案: 浮充长期恒压补偿自放电，均充短时升压校正')).toBeVisible()
+      },
+      // 实测 139
+      minNodes: 100,
+    })
+  })
+
+  /**
+   * 学习评估（`LearningAssessment`）：默认的"已链接对比"模式。
+   *
+   * 两处必须喂对：
+   *   - `/api/notes` 要**同时**含 material 与 personal_note（页面在客户端
+   *     按 `note_role` 再分一次），且 `status` 必须在可评估状态里；
+   *   - `/api/notes/note-personal/links` 的 `linked_materials` 必须非空 ——
+   *     它是**运行时必需**字段，缺了这条笔记会被静默丢掉、页面显示
+   *     "暂无已链接的笔记"（空状态，不是被审过的页面）。
+   *
+   * 选中一张笔记之后才会渲染"将比对以下资料与该笔记"，所以那一步要真的点。
+   */
+  test('学习评估：已链接对比模式（选中笔记与关联资料）', async ({ page }) => {
+    const log = await installA11yStubs(page, { '/api/notes': ASSESSMENT_NOTES })
+    await auditScene(page, log, {
+      scene: 'learning-assessment',
+      ready: async () => {
+        await loginAs(page, '/assessment')
+        await expect(page.getByRole('heading', { name: '学习评估' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '选择笔记' })).toBeVisible()
+        // 「关联资料: — 篇」是**有数据才有**的标记（空状态时整块不渲染）
+        await expect(page.getByText('关联资料: — 篇')).toBeVisible()
+        await page.getByRole('heading', { name: '复盘：浮充的三个月' }).click()
+        await expect(page.getByText('将比对以下资料与该笔记：')).toBeVisible()
+        await expect(page.getByText('• 锂离子电池的浮充与均充')).toBeVisible()
+        await expect(page.getByRole('button', { name: '开始评估' })).toBeVisible()
+      },
+      // 实测 126
+      minNodes: 90,
+    })
+  })
+
+  /**
+   * 学习目标（`LearningGoals`）：进行中的目标 + 展开后的已归档目标。
+   *
+   * ⚠️ 这里的桩是**带查询串**的两份（`GOAL_STUBS`）：页面用同一个路径
+   * `/api/goals?status=active` 与 `?status=archived` 取两份数据。
+   * 只按路径名匹配时"已归档目标 (1)"里显示的其实是**进行中**的那个目标 ——
+   * 页面照常渲染、断言照常绿，而那一块从未被真正判过（见 fixtures 的说明）。
+   */
+  test('学习目标：进行中的目标与展开后的已归档目标', async ({ page }) => {
+    const log = await installA11yStubs(page, GOAL_STUBS)
+    await auditScene(page, log, {
+      scene: 'learning-goals',
+      ready: async () => {
+        await loginAs(page, '/goals')
+        await expect(page.getByRole('heading', { name: '学习目标' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '进行中的目标' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '掌握蓄电池基础概念' })).toBeVisible()
+        await expect(page.getByText('目标 80%')).toBeVisible()
+        await page.getByRole('button', { name: '展开已归档目标 (1)' }).click()
+        await expect(page.getByText('读完《蓄电池维护手册》')).toBeVisible()
+        await expect(page.getByText('每周 · 目标 60%')).toBeVisible()
+      },
+      // 实测 138
+      minNodes: 100,
+    })
+  })
+
+  /** 回收站（`Trash`）：非空的已删除笔记（标题 + 删除时间 + 五项附属统计 + 恢复/彻底删除） */
+  test('回收站：一条已删除的笔记', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'trash',
+      ready: async () => {
+        await loginAs(page, '/trash')
+        await expect(page.getByRole('heading', { name: '回收站' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' })).toBeVisible()
+        await expect(page.getByText('删除于')).toBeVisible()
+        await expect(page.getByText('4 张卡片')).toBeVisible()
+        // 「清空回收站」只在 items 非空时渲染 —— 它同时是"列表真的有内容"的标记
+        await expect(page.getByRole('button', { name: '清空回收站' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '恢复' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '彻底删除' })).toBeVisible()
+      },
+      // 实测 126
+      minNodes: 90,
+    })
+  })
+
+  /**
+   * 快速复习（`QuickReview`）：`/review/quick/:noteId` 的答题态。
+   *
+   * ★ 这一页是审计文档里那条**推断**的验证：「`QuickReview` 与 `QA` 共用
+   * `QuizAnswerCard`，所以 F-33（难度徽章 `#c9a959` 2.25:1）大概率也在那里」。
+   * 实测结论是**一半对**：`QuickReview` 确实共用 `QuizAnswerCard`
+   * （难度徽章就在这里，本场景直接判它）；而 `QA` 是 SSE 聊天页，
+   * 根本不渲染那个组件。桩里的 `difficulty` 刻意用 `medium`
+   * —— 就是 F-33 报出来的那一个取值。
+   */
+  test('快速复习：共用答题卡片的答题态', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'quick-review',
+      ready: async () => {
+        await loginAs(page, '/review/quick/note-1')
+        await expect(page.getByRole('heading', { name: '快速复习' })).toBeVisible()
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
+        // 难度徽章（白字压 difficultyColors.medium）与题型徽章
+        await expect(page.getByText('中等')).toBeVisible()
+        await expect(page.getByText('选择题')).toBeVisible()
+        await expect(
+          page.getByRole('button', { name: '浮充长期恒压补偿自放电，均充短时升压校正' }),
+        ).toBeVisible()
+        await expect(page.getByRole('button', { name: '返回笔记' })).toBeVisible()
+      },
+      // 实测 129
+      minNodes: 95,
+    })
+  })
+
+  /**
+   * 考试/问题集（`QuestionSets`）：按笔记分组的题目 + 展开后的答案。
+   *
+   * ⚠️ 桩的 `total` 必须等于 `items.length`：这一页是**翻页循环**
+   * （`QuestionSets.tsx:82-94`，直到 `items.length === 0` 或收满 `total`），
+   * `total` 写大了它会一直请求到 100 页的硬上限，审计会慢得莫名其妙。
+   *
+   * 「显示答案」要真的点开：答案那一行的绿色文字（原值 `#10b981`，白底 2.54:1）
+   * **只有点开才渲染** —— 不点开就等于没判过它。
+   */
+  test('问题集：按笔记分组的题目与展开后的答案', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'question-sets',
+      ready: async () => {
+        await loginAs(page, '/questions')
+        await expect(page.getByRole('heading', { name: '问题集' })).toBeVisible()
+        await expect(page.getByText('(2 道题)')).toBeVisible()
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
+        await expect(page.getByRole('button', { name: '查看笔记' })).toBeVisible()
+        await page.getByRole('button', { name: '显示答案' }).first().click()
+        await expect(page.getByText('答案：浮充长期恒压补偿自放电，均充短时升压校正')).toBeVisible()
+      },
+      // 实测 158
+      minNodes: 115,
+    })
+  })
+
+  /**
+   * 注册页（`Register`）：**未登录**分支的第二个入口（登录页之外的唯一未认证页面）。
+   *
+   * 这一页**不能**先登录：`App.tsx` 在已登录分支把 `/register` 重定向到 `/`，
+   * 于是"注册页场景"会静默变成"仪表盘场景"—— 那种绿是假绿。
+   * 所以这里不走 `loginAs`，直接 `goto`（页面挂载时也不发任何请求）。
+   */
+  test('注册页：未登录入口', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'register',
+      ready: async () => {
+        await page.goto('/register', { waitUntil: 'domcontentloaded' })
+        await expect(page.getByRole('heading', { name: '注册 EngramNote' })).toBeVisible()
+        await expect(page.getByLabel('邮箱')).toBeVisible()
+        await expect(page.getByLabel('用户名')).toBeVisible()
+        await expect(page.getByLabel('密码')).toBeVisible()
+        await expect(page.getByRole('button', { name: '注册' })).toBeVisible()
+        // 反向自检：**没有**登录（侧边栏不在），否则扫的就不是这一页
+        await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0)
+      },
+      // 实测 56（未登录，没有侧边栏 —— 这一页本来就小）
+      minNodes: 40,
+    })
+  })
+
+  /**
+   * 404 页（`App.tsx` 的 `path="*"`）。
+   *
+   * ⚠️ 它**只在已登录时**才渲染：未登录时 `path="*"` 落到 `<Login />`
+   * （那是产品行为，不是缺陷）。所以这一条必须先登录，再走一个不存在的路径；
+   * 否则扫到的是登录页，而"0 违规"会显得像 404 页没问题。
+   */
+  test('404 页：已登录时的未知路径', async ({ page }) => {
+    const log = await installA11yStubs(page)
+    await auditScene(page, log, {
+      scene: 'not-found',
+      ready: async () => {
+        await loginAs(page, '/no-such-page')
+        await expect(page.getByRole('heading', { name: '404' })).toBeVisible()
+        await expect(page.getByText('页面不存在，可能是链接已失效。')).toBeVisible()
+        await expect(page.getByRole('link', { name: '返回首页' })).toBeVisible()
+      },
+      // 实测 109
+      minNodes: 85,
+    })
+  })
 })
 
 /**
@@ -1255,6 +1498,18 @@ test.describe('审计自检', () => {
       'today-learn',
       'upload',
       'review',
+      // ── 覆盖轮（第二轮）加进来的 10 个场景 ──
+      // 场景名写错的后果见上：豁免永远匹配不到，而违规照旧出现。
+      'qa',
+      'knowledge-cards',
+      'card-detail',
+      'learning-assessment',
+      'learning-goals',
+      'trash',
+      'quick-review',
+      'question-sets',
+      'register',
+      'not-found',
     ])
 
     const unknown = ACTIVE_REGISTRY.filter((entry) => !knownScenes.has(entry.scene))

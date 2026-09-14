@@ -37,8 +37,20 @@
      压深到 #25714a：白底 5.93:1、--color-bg 上 5.64:1，绿色语义不变。 */
   --color-success: #25714a;
   --color-success-light: rgba(45, 138, 86, 0.1);
-  --color-warning: #c4860a;
-  --color-warning-light: rgba(196, 134, 10, 0.1);
+  /* 警告色。原值 #c4860a 在白底只有 3.11:1（--color-bg 上 2.95:1），
+     而它是 12.8px 状态徽章文字的**前景色**（.status-converting / .status-cleaning，
+     a11y-audit F-28/F-29），小字要求 4.5:1。压深到 #936408：
+     白底 5.16:1、--color-bg 上 4.91:1。
+     挑值沿用 --color-success 的先例（**同色相、深一档**）：
+     #936408 是 #c4860a 按 RGB 等比压到 0.75，色相 40.0° → 39.7°
+     （HSL 色相基本不动，只是明度降下来），不是换一个色系。
+     该令牌的引用点（逐处复核过）：components.css 的 5 条 .status-* 文字、
+     graph.css 面板统计值与状态标签（文字压在浅底上）、TaskProgress / QA 的提示文字、
+     GraphSidebar 的 suggested 标签（warning-light 底 + warning 字）、
+     LearningAssessment 的进度条（装饰性渐变）——**都是文字或文字底**，
+     所以是"一处改、全部受益"，没有把它当纯装饰用的地方。 */
+  --color-warning: #936408;
+  --color-warning-light: rgba(147, 100, 8, 0.1);
   --color-error: #c0392b;
   --color-error-light: rgba(192, 57, 43, 0.1);
 

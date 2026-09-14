@@ -24,16 +24,37 @@ export interface SSEHandlers {
 /**
  * 解析一个 SSE 响应体，逐事件回调
  *
- * @param body - fetch 返回的可读流
+ * ## 参数为什么接受"流或读取器"两种
+ *
+ * 调用方通常需要**持有读取器**才能主动停流（`reader.cancel()`，
+ * 见 QA.tsx / NoteAskPanel.tsx 的 `stopActiveStream`），于是它们会先
+ * `stream.getReader()` 再把流交给本函数。而 `getReader()` 是**独占**的：
+ * 同一个流第二次调用会抛
+ * `ReadableStreamDefaultReader constructor can only accept readable streams
+ * that are not yet locked to a reader` —— 这正是本函数第二个 `getReader()`
+ * 撞上的错误：`QA` 页的问答**每次都会失败**，报的却是这句底层报错
+ * （2026 覆盖轮把 `qa` 加进审计场景时实测到的，见 docs/a11y-audit.md §10）。
+ *
+ * 所以这里显式接受两种入参：给**流**就自己取读取器（调用方不需要停流时，
+ * 例如 `useStreamAnswer`），给**读取器**就直接用（调用方需要停流时）。
+ * 这不是"两种写法都行"的宽容，而是把"谁拥有读取器"这件事写成契约：
+ * 谁取的谁负责 `cancel`/`releaseLock`，本函数只做读取。
+ *
+ * @param body - fetch 返回的可读流，**或**调用方已经取好的读取器
  * @param handlers - 事件回调
  * @param signal - 可选的中止信号（abort 时抛 AbortError，由调用方处理）
  */
 export async function parseSSEStream(
-  body: ReadableStream<Uint8Array>,
+  body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array>,
   handlers: SSEHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const reader = body.getReader()
+  // `read` 只在读取器上有：据此区分"传进来的是流"还是"已经取好的读取器"，
+  // 后者**不能**再取一次（会抛上面那个 locked 错误）。
+  const ownsReader = !('read' in body)
+  const reader = ownsReader
+    ? (body as ReadableStream<Uint8Array>).getReader()
+    : (body as ReadableStreamDefaultReader<Uint8Array>)
   const decoder = new TextDecoder()
   let buffer = ''
 
@@ -68,10 +89,15 @@ export async function parseSSEStream(
       dispatchEventBlock(buffer, handlers)
     }
   } finally {
-    try {
-      reader.releaseLock()
-    } catch {
-      /* 忽略：锁可能已被释放 */
+    // 只释放**自己取的**那把锁：调用方传进来的读取器由调用方负责
+    // （它在 `stopActiveStream` 里还要用 `reader.cancel()` 停流，
+    //  而 `releaseLock()` 会把读取器与流解绑，之后的 cancel 只会抛 TypeError）。
+    if (ownsReader) {
+      try {
+        reader.releaseLock()
+      } catch {
+        /* 忽略：锁可能已被释放 */
+      }
     }
   }
 }

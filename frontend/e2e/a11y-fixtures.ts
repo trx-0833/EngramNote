@@ -303,8 +303,288 @@ const GRAPH_EDGES = [
   },
 ]
 
-/** 项目（`GET /projects`）—— 后端这个接口回的是**裸数组**（见 api/projects.ts） */
-const PROJECTS = [
+/**
+ * 知识卡片（`KnowledgeCard` 契约，见 api/qa.ts:8-36）。
+ *
+ * ## `id` 与 `title` 的关系是有意的：`card-1` 就是 `/cards/card-1` 那一张
+ * 卡片详情页（`CardDetail`）取的那一张 —— 两页共用同一份数据，
+ * 所以"列表里看到的就是详情里看到的"，不会出现两份互相矛盾的知识卡片。
+ *
+ * ## 四张卡片刻意覆盖四张颜色表的取值
+ *
+ * `card_type` 取遍 `concept` / `formula` / `qa` / `definition`（= `cardTypeColors`
+ * 的四个键），`card_category` 取遍 `regular` / `blind_spot` / `extension`
+ * （= `cardCategoryColors` 的三个键）。这些徽章是**白字压色块**，
+ * 也就是 a11y-audit 的 F-33 那一类（上一次只修了一张表），
+ * 少喂一个取值就少判一个色值。`mastery_level` 也刻意分档：
+ * 一张 ≥80（会多渲染一行金色的「✨ 建议生成拓展知识点」——那一行的颜色
+ * 与 F-19/F-33 同源，也是本轮修的），其余低于 80。
+ */
+function knowledgeCard(over: Record<string, unknown> = {}) {
+  return {
+    id: 'card-1',
+    user_id: 'e2e-user',
+    note_id: 'note-1',
+    note_title: '锂离子电池的浮充与均充',
+    card_type: 'concept',
+    title: '浮充的定义',
+    content: '浮充是蓄电池的一种长期恒压运行方式，用于补偿自放电，端电压保持恒定。',
+    summary: '浮充 = 恒压运行',
+    chapter_title: '第一章 蓄电池',
+    source_text: '浮充电压一般保持在 2.23~2.27 V/单体，均充则升到 2.30~2.35 V/单体。',
+    metadata_: null,
+    card_category: 'regular',
+    is_key_point: true,
+    is_difficulty: false,
+    mastery_level: 57.4,
+    source_note_ids: null,
+    parent_card_id: null,
+    created_at: T0,
+    updated_at: T1,
+    ...over,
+  }
+}
+
+const KNOWLEDGE_CARDS = [
+  knowledgeCard(),
+  knowledgeCard({
+    id: 'card-2',
+    card_type: 'qa',
+    card_category: 'blind_spot',
+    title: '均充的适用场景',
+    content: '长期浮充后单体电压偏差变大时，需要短时均充校正。',
+    summary: null,
+    is_key_point: false,
+    is_difficulty: true,
+    // ≥80：多渲染一行「✨ 建议生成拓展知识点」（金色 0.7rem 文字，本轮修过色）
+    mastery_level: 85.2,
+  }),
+  knowledgeCard({
+    id: 'card-3',
+    card_type: 'formula',
+    card_category: 'extension',
+    title: '浮充电压公式',
+    content: 'U = 2.25 + 0.05 × (25 - T) V/单体。',
+    summary: null,
+    chapter_title: null,
+    source_text: null,
+    is_key_point: false,
+    mastery_level: 31.8,
+  }),
+  knowledgeCard({
+    id: 'card-4',
+    card_type: 'definition',
+    card_category: 'regular',
+    title: '硫化的定义',
+    content: '极板上生成不可逆硫酸铅，导致容量下降。',
+    summary: null,
+    chapter_title: null,
+    source_text: null,
+    is_key_point: false,
+    mastery_level: 12.5,
+  }),
+]
+
+/**
+ * 题目（`QuizItem` 契约，见 api/qa.ts:39-62）—— `QuestionSets`（整个列表）
+ * 与 `CardDetail`（按 `card_id` 过滤出「关联题目」）**共用同一个接口**。
+ *
+ * `total` 必须等于 `items.length`：`QuestionSets.fetchQuestions` 是**翻页循环**
+ * （`QuestionSets.tsx:82-94`，直到 `items.length === 0` 或收满 `total`），
+ * `total` 写大了它会一直翻到 100 页的硬上限。
+ *
+ * 两道的 `question_type` / `difficulty` 刻意错开，覆盖四张颜色表里更多的键：
+ * `choice`+`medium`（金）、`fill_blank`+`easy`（绿）—— 这两个色值正是
+ * F-33（`#c9a959` 2.25:1）与 F-19（`#2d8a56` 4.30:1）报出来的那两个。
+ */
+const QUIZ_ITEMS = [
+  {
+    id: 'qi-1',
+    user_id: 'e2e-user',
+    card_id: 'card-1',
+    note_id: 'note-1',
+    note_title: '锂离子电池的浮充与均充',
+    question_type: 'choice',
+    difficulty: 'medium',
+    question: '浮充与均充的主要区别是什么？',
+    answer: '浮充长期恒压补偿自放电，均充短时升压校正',
+    options: JSON.stringify([
+      '浮充电压高于均充电压',
+      '浮充长期恒压补偿自放电，均充短时升压校正',
+      '两者只是叫法不同',
+    ]),
+    explanation: '浮充是长期恒压运行，均充是短时提高电压的补充充电。',
+    metadata_: null,
+    created_at: T0,
+    updated_at: T1,
+  },
+  {
+    id: 'qi-2',
+    user_id: 'e2e-user',
+    card_id: 'card-2',
+    note_id: 'note-1',
+    note_title: '锂离子电池的浮充与均充',
+    question_type: 'fill_blank',
+    difficulty: 'easy',
+    question: '消除蓄电池硫化采用的是____充电。',
+    answer: '均充',
+    options: null,
+    explanation: '均充用于消除硫化，浮充只补偿自放电。',
+    metadata_: null,
+    created_at: T1,
+    updated_at: T1,
+  },
+]
+
+/** 回收站里的一条（`TrashNoteItem` 契约，见 api/notes.ts:118-137） */
+const TRASH_ITEMS = [
+  {
+    note: {
+      ...note({
+        id: 'note-trashed',
+        title: '已删除：蓄电池寿命与温度的关系',
+        source_type: 'docx',
+        status: 'archived',
+        trashed_at: '2026-01-02T03:04:05+00:00',
+        project_names: [],
+        page_count: null,
+      }),
+    },
+    card_count: 4,
+    quiz_count: 3,
+    annotation_count: 2,
+    version_count: 5,
+    link_count: 1,
+  },
+]
+
+/**
+ * 快速复习的一道题（`QuickReviewResponse` = `{ items: QuickQuiz[]; total }`，
+ * `QuickQuiz = DueQuiz`，见 api/review.ts:8-20/125-131）。
+ *
+ * `difficulty: 'medium'` 是有意的：`QuickReview` 渲染的是共用的
+ * `QuizAnswerCard`，而那块难度徽章用的就是 `difficultyColors.medium`
+ * —— 也就是 F-33 报出来的 `#c9a959`。审计文档里"**QuickReview 与 QA 共用
+ * `QuizAnswerCard`，所以 F-33 大概率也在那里**"当时只是**推断**；
+ * 这个场景把它变成**实测**（顺带纠正一半：`QA` 是 SSE 聊天页，不共用它）。
+ */
+const QUICK_QUIZZES = [
+  {
+    id: 'qq-1',
+    card_id: 'card-1',
+    note_id: 'note-1',
+    question_type: 'choice',
+    difficulty: 'medium',
+    question: '浮充与均充的主要区别是什么？',
+    options: JSON.stringify([
+      '浮充电压高于均充电压',
+      '浮充长期恒压补偿自放电，均充短时升压校正',
+      '两者只是叫法不同',
+    ]),
+    next_review_at: null,
+    review_count: 2,
+    interval: 4,
+    easiness_factor: 2.5,
+  },
+]
+
+/**
+ * 学习目标（`GoalListResponse` 契约，见 api/goals.ts:7-29）。
+ *
+ * 两份分开给：`LearningGoals` 用**同一个路径 + 不同查询串**取"进行中"与
+ * "已归档"两份（`/api/goals?status=active` / `?status=archived`）。
+ * 只按路径名匹配时两份请求会拿到同一份响应，"已归档目标 (N)" 里显示的
+ * 其实是进行中的目标 —— 页面照常渲染、断言照常绿，而那一块**没有被真正判过**。
+ * 所以这里用**带查询串的桩键**（见 `queryKey` 的说明）。
+ *
+ * 每个字段都要填对：`goal.progress_percentage` 渲染成 `{n}%` 与进度条宽度，
+ * `deadline` 决定有没有「剩余 N 天」那一行，`type` 决定徽章文案与底色。
+ */
+const ACTIVE_GOALS = [
+  {
+    id: 'goal-1',
+    user_id: 'e2e-user',
+    name: '掌握蓄电池基础概念',
+    type: 'daily',
+    scope_notes: ['note-1'],
+    scope_folders: [],
+    target_mastery: 80,
+    deadline: '2026-02-01T00:00:00+00:00',
+    status: 'active',
+    progress_cache: 0.42,
+    last_progress_refresh: T1,
+    progress_percentage: 42,
+    created_at: T0,
+    updated_at: T1,
+  },
+]
+
+const ARCHIVED_GOALS = [
+  {
+    ...ACTIVE_GOALS[0],
+    id: 'goal-2',
+    name: '读完《蓄电池维护手册》',
+    type: 'weekly',
+    target_mastery: 60,
+    deadline: null,
+    status: 'archived',
+    progress_percentage: 100,
+  },
+]
+
+/**
+ * 问答流的一次回答（`POST /understanding/ask/stream` 的 SSE 响应体）。
+ *
+ * ## 为什么这个桩必须是**流**而不是 JSON
+ *
+ * `QA` 页在挂载时**一个请求都不发**（它只有一个输入框 + 空状态），
+ * 主页面的内容**只有真的问过一次之后才存在**。所以 `qa` 场景必须先
+ * 完成一次真实的"输入 → 提问"，并且桩要按 `text/event-stream` 回一段
+ * 事件流（见 `rawBody`）—— 否则页面永远停在 `AI 正在思考...`，
+ * 而那一句**既是加载态也是空答案态**（`QA.tsx:248/267`），
+ * 拿它当"已经渲染出来了"的判据是假的。
+ *
+ * 事件形状取自 `api/client.ts:441-449`。`retrieval_status` 用 `hybrid`
+ * （不是 `bm25_only`，那是"向量服务不可用"的降级横幅，是另一个渲染分支），
+ * `provider` 用 `deepseek` —— 页脚会渲染成「由 DeepSeek 提供支持」。
+ */
+export const QA_ANSWER_SSE = [
+  'event: meta',
+  `data: ${JSON.stringify({ retrieval_status: 'hybrid', provider: 'deepseek' })}`,
+  '',
+  'event: token',
+  `data: ${JSON.stringify({ content: '浮充是长期恒压运行，' })}`,
+  '',
+  'event: token',
+  `data: ${JSON.stringify({ content: '用于补偿自放电；均充是短时升压校正。' })}`,
+  '',
+  'event: sources',
+  `data: ${JSON.stringify({
+    provider: 'deepseek',
+    sources: [
+      {
+        note_id: 'note-1',
+        note_title: '锂离子电池的浮充与均充',
+        chapter_title: '第一章 蓄电池',
+        relevant_text: '浮充是蓄电池的一种长期恒压运行方式……',
+        chunk_id: 'chunk-1',
+        chunk_index: 0,
+        char_start: 0,
+        char_end: 24,
+        heading_path: '两者的区别',
+        line_start: 1,
+        line_end: 4,
+      },
+    ],
+  })}`,
+  '',
+  'event: done',
+  'data: {}',
+  '',
+  '',
+].join('\n')
+
+/** 项目（`GET /projects`）—— 后端这个接口回的是**裸数组**（见 api/projects.ts） */const PROJECTS = [
   {
     id: 'proj-1',
     user_id: 'e2e-user',
@@ -427,10 +707,37 @@ function apiFixtures(): Record<string, unknown> {
       total_reviews: 39,
       avg_accuracy: 0.79,
     },
+    // ⚠️ 字段名必须与 `WeakPoint` 契约（api/report.ts）一致：`card_title` / `error_count`。
+    // 这里原来写的是 `title` / `review_count` —— 页面**不会崩**，只是把 `undefined`
+    // 渲染成文本、徽章渲染成空；而**空文本没有对比度可判**，于是 axe 对整块
+    // 无话可说：`dashboard` / `dashboard-mobile` 里的「薄弱点」卡看起来被扫过了，
+    // 实际一次都没被判定过（这也是 F-35 在仪表盘上完全不可见的原因）。
+    // 本轮把它改对 —— 代价是这两个已扫场景的渲染结果会变（多出真实文本与徽章），
+    // 这是**应该变**：原来的"稳定"是建立在"没判过"之上的。
+    // 注意 `WeakPoint` 的字段名在 `/api/report/weak-points` 与今日学习页的
+    // `WEAK_POINTS` 覆盖里是同一套（那份本来就是契约形状，可以互相对照）。
     '/api/report/weak-points': {
       items: [
-        { card_id: 'c-2', title: '均充的适用场景', accuracy: 0.4, review_count: 5 },
-        { card_id: 'c-3', title: '浮充电压公式', accuracy: 0.5, review_count: 4 },
+        {
+          card_id: 'c-2',
+          card_title: '均充的适用场景',
+          card_type: 'qa',
+          note_id: 'note-1',
+          note_title: '锂离子电池的浮充与均充',
+          error_count: 3,
+          total_reviews: 5,
+          accuracy: 0.4,
+        },
+        {
+          card_id: 'c-3',
+          card_title: '浮充电压公式',
+          card_type: 'formula',
+          note_id: 'note-1',
+          note_title: '锂离子电池的浮充与均充',
+          error_count: 2,
+          total_reviews: 4,
+          accuracy: 0.5,
+        },
       ],
       total: 2,
     },
@@ -462,7 +769,11 @@ function apiFixtures(): Record<string, unknown> {
     '/api/notes/note-1/versions': { items: [], total: 0 },
     // 空列表形状要给对：给错形状会让页面渲染成**错误态**，
     // 而审计要的是正常态（错误态是另一件事，见 docs/a11y-audit.md §5）。
-    '/api/cards': { items: [], total: 0, page: 1, page_size: 20 },
+    // ⚠️ 这里原来还有一条 `'/api/cards'` —— 那是**死键**：应用从不请求它
+    // （知识卡片走的是 `/api/understanding/cards`，见 api/qa.ts:179/186）。
+    // 它已经被删掉，取而代之的是下面「覆盖轮（第二轮）」那段里的正确路径。
+    // 卡片详情页此前扫不了的**真实原因**就是这个路径写错（请求落到 501 →
+    // 页面渲染加载失败页），不是审计文档 §5 第 3 条当时猜的"桩是列表形状"。
     '/api/questions': { items: [], total: 0, page: 1, page_size: 20 },
     '/api/tasks': { items: [], total: 0 },
 
@@ -510,8 +821,121 @@ function apiFixtures(): Record<string, unknown> {
     // 空数组会让它渲染空状态 —— 非空是本文件的核心约定（见文件头）。
     '/api/folders': FOLDERS,
     '/api/folders/folder-1': FOLDER_DETAIL,
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 覆盖轮（第二轮）：把剩下 10 个页面接进来时新增的桩
+    //
+    // ⚠️ 这些键**没有一个**会移动上面任何一个已扫场景的基线：
+    // 下面这些路径只有新场景（或它们的页面）会请求，逐条在注释里写明。
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── 知识卡片列表（`KnowledgeCards`，路由 /cards）──
+    // ⚠️ 这里曾经有一条 `/api/cards` 的死键：应用**从不**请求那个路径
+    // （`api/qa.ts:179` 用的是 `/understanding/cards`），
+    // 它只是"看起来有个桩"。审计文档 §5 第 3 条把 `/cards/:cardId` 一直列为
+    // "不能扫，因为桩是列表形状" —— 真实原因其实是**路径写错了**，
+    // 于是请求落到 501 上、页面渲染成加载失败页。正确路径的桩补上之后，
+    // 卡片详情页（`card-detail`）才第一次有真实内容。
+    '/api/understanding/cards': { items: KNOWLEDGE_CARDS, total: KNOWLEDGE_CARDS.length, page: 1, page_size: 999 },
+    // ── 卡片详情（`CardDetail`，路由 /cards/:cardId）──
+    // 响应体是**单个对象**（不是列表形状）：`CardDetail.tsx:30` 直接 setCard(res)。
+    '/api/understanding/cards/card-1': KNOWLEDGE_CARDS[0],
+    // ── 题目列表：`QuestionSets`（/questions）与 `CardDetail` 的「关联题目」共用 ──
+    '/api/understanding/questions': {
+      items: QUIZ_ITEMS,
+      total: QUIZ_ITEMS.length,
+      page: 1,
+      page_size: 20,
+    },
+
+    // ── 回收站（`Trash`，路由 /trash）──
+    '/api/notes/trash': { items: TRASH_ITEMS, total: TRASH_ITEMS.length },
+
+    // ── 快速复习（`QuickReview`，路由 /review/quick/:noteId）──
+    // 路径参数是 noteId；本文件的匹配是**精确路径**（不含通配），
+    // 所以场景用的 noteId 必须与这里的键一致（`/review/quick/note-1`）。
+    '/api/review/quick/note-1': { items: QUICK_QUIZZES, total: QUICK_QUIZZES.length },
+
+    // ── 学习目标（`LearningGoals`，路由 /goals）──
+    // ⚠️ 这两份**刻意不放在默认桩里**：`Dashboard` 也在请求
+    // `/api/goals?status=active`（Dashboard.tsx:66），把"有活跃目标"写进默认桩
+    // 会同时改变**仪表盘**（已扫场景）的渲染结果 —— 那是移动基线。
+    // 所以它们以场景级覆盖传入（见导出的 GOAL_STUBS）。
+
+    // ── 「我的笔记」的关联资料（`LearningAssessment` 的已链接对比模式）──
+    // `linked_materials` 是**运行时必需**的：`LearningAssessment.tsx:135`
+    // 直接读 `.linked_materials.length`，缺了它这条笔记会被静默丢掉，
+    // 页面于是显示"暂无已链接的笔记" —— 又一个"不报错、只是没被判过"的形状。
+    '/api/notes/note-personal/links': {
+      personal_note_id: 'note-personal',
+      linked_materials: [{ id: 'note-1', title: '锂离子电池的浮充与均充', source_type: 'pdf' }],
+      linked_personal_notes: [],
+      dangling_material_count: 0,
+    },
+
+    // ── 智能问答的流式回答（`QA`，路由 /qa）──
+    // 页面挂载时不发任何请求，只有真的提问才有内容 —— 见 rawBody 与 QA_ANSWER_SSE。
+    '/api/understanding/ask/stream': rawBody(QA_ANSWER_SSE),
   }
 }
+
+/**
+ * 原样回一段**非 JSON** 文本（目前只有 SSE 用得上）。
+ *
+ * 为什么需要它：审计的其余接口都是"回一份 JSON、页面渲染出 DOM"，
+ * 而 `/api/understanding/ask/stream` 是 `text/event-stream` ——
+ * 桩若按 JSON 回，页面会停在"AI 正在思考..."（那一句**既是加载态也是
+ * 空答案态**，见 QA.tsx 的注释），扫出来的就是一堆加载骨架。
+ * 于是 `qa` 场景要先真的收到一次流式回答才谈得上"有内容可审"。
+ *
+ * 事件名与数据形状取自 `api/client.ts:441-449` 的契约注释，
+ * 解析器是 `utils/sse.ts`（`event:` + `data:`，事件间空行分隔）。
+ */
+export function rawBody(body: string, contentType = 'text/event-stream') {
+  return { __raw: { body, contentType } }
+}
+
+/**
+ * 学习目标的**场景级覆盖**（`learning-goals` 场景用）。
+ *
+ * 为什么不是默认桩：`Dashboard` 也请求 `/api/goals?status=active`
+ * （Dashboard.tsx:66），把"有活跃目标"放进默认桩会连带改变**已扫的仪表盘场景**的
+ * 渲染结果 —— 覆盖只作用于本次 `installA11yStubs` 调用，基线不动。
+ *
+ * 两个键**都带查询串**（见 `queryKey`）：`LearningGoals` 用同一路径取两份数据，
+ * 只按路径名匹配会让"已归档目标"里显示进行中的目标 —— 页面照常渲染、
+ * 断言照常绿，但那一块从未被真正判过。
+ */
+export const GOAL_STUBS: Record<string, unknown> = {
+  '/api/goals?status=active': { goals: ACTIVE_GOALS, total: ACTIVE_GOALS.length },
+  '/api/goals?status=archived': { goals: ARCHIVED_GOALS, total: ARCHIVED_GOALS.length },
+}
+
+/**
+ * 学习评估页（`learning-assessment` 场景）用的 `/api/notes` 覆盖。
+ *
+ * `LearningAssessment` 请求**同一个路径两次**：一次全量、一次 `?note_role=personal_note`
+ * （服务端过滤）。本文件的桩忽略查询串（见文件头），所以两次会拿到同一份 ——
+ * 而页面在**客户端**还会再按 `note_role` 分一次（`LearningAssessment.tsx:152-153`），
+ * 所以只要这份列表里同时有 material 与 personal_note，两条渲染路径都能拿到数据：
+ *   - `compareLinkedPersonalNotes` 只保留**有 material 链接**的 personal_note，
+ *     它的链接来自 `/api/notes/note-personal/links`（默认桩里已有）。
+ *
+ * 两条的 `status` 必须是可评估状态之一（converted / cleaned / archived /
+ * learning / learning_failed），否则会被 `LearningAssessment.tsx:82-83` 过滤掉，
+ * 页面渲染成"暂无已链接的笔记"，而那是**空状态**、不是被审过的页面。
+ */
+export const ASSESSMENT_NOTES = notesList([
+  note(),
+  note({
+    id: 'note-personal',
+    title: '复盘：浮充的三个月',
+    source_type: 'markdown',
+    note_role: 'personal_note',
+    project_names: [],
+    page_count: null,
+  }),
+])
 
 /** 审计期间观察到的网络事实（按引用读取，随页面活动增长） */
 export interface A11yStubLog {
@@ -544,6 +968,23 @@ export interface A11yStubLog {
  * `npm run build`（= `tsc`）报 TS2580。为一行排查代码去加一个类型依赖不划算。
  */
 const TRACE = false
+
+/**
+ * 把查询串规范化成"可作 key"的形式：参数按名字排序，值原样保留。
+ *
+ * 用来支持**带查询串的桩键**（`'/api/goals?status=active'`）。为什么需要：
+ * 有几个页面用**同一个路径 + 不同查询串**取两份不同的数据 ——
+ * `LearningGoals` 的 `/api/goals?status=active` 与 `?status=archived`、
+ * `LearningAssessment` 的 `/api/notes` 与 `/api/notes?note_role=personal_note`。
+ * 只按路径名匹配时两份请求会拿到同一份响应，页面照常渲染、断言照常绿，
+ * 但"已归档目标"里显示的是进行中的目标 —— 那正是本文件反复强调的那类
+ * **看起来扫过了、其实扫的不是那一块**。排序是为了让键与参数书写顺序无关。
+ */
+function queryKey(search: string): string {
+  if (!search || search === '?') return ''
+  const params = [...new URLSearchParams(search).entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return `?${params.map(([k, v]) => `${k}=${v}`).join('&')}`
+}
 
 /**
  * 装好审计需要的全部桩：第三方外链 abort + `/api` 覆写。
@@ -580,21 +1021,35 @@ export async function installA11yStubs(
   await page.route(
     (url) => isApiUrl(url),
     async (route) => {
-      const { pathname } = new URL(route.request().url())
-      const body = fixtures[pathname]
+      const { pathname, search } = new URL(route.request().url())
+      // 先试"路径 + 规范化查询串"，再退回"只按路径"（见 queryKey 的说明）：
+      // 既有的桩键全部只有路径，行为与以前逐字相同。
+      const body = fixtures[`${pathname}${queryKey(search)}`] ?? fixtures[pathname]
 
       if (body === undefined) {
-        // 见文件头：未知路径显式失败，不静默兜空
-        log.unmatched.push(pathname)
-        log.served.push(`501 ${pathname}`)
-        if (TRACE) console.log(`   [stub] 501 ${pathname}（未定义）`)
+        // 见文件头：未知路径显式失败，不静默兜空。
+        // 记的是**带查询串**的完整路径：同一个 pathname 配不同查询串时，
+        // 只记 pathname 反而看不出少的是哪一份（例如 /goals?status=archived）。
+        const missing = `${pathname}${search}`
+        log.unmatched.push(missing)
+        log.served.push(`501 ${missing}`)
+        if (TRACE) console.log(`   [stub] 501 ${missing}（未定义）`)
         await route.fulfill({
           status: 501,
           contentType: 'application/json',
           body: JSON.stringify({
-            detail: `e2e a11y 桩没有为 ${pathname} 定义响应（请补进 e2e/a11y-fixtures.ts）`,
+            detail: `e2e a11y 桩没有为 ${missing} 定义响应（请补进 e2e/a11y-fixtures.ts）`,
           }),
         })
+        return
+      }
+
+      // 原样回文本（SSE）：见 rawBody 的说明
+      if (typeof body === 'object' && body !== null && '__raw' in body) {
+        const raw = (body as { __raw: { body: string; contentType: string } }).__raw
+        log.served.push(`200 ${pathname}`)
+        if (TRACE) console.log(`   [stub] 200 ${pathname}（原样 ${raw.contentType}）`)
+        await route.fulfill({ status: 200, contentType: raw.contentType, body: raw.body })
         return
       }
 

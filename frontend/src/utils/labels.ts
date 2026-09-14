@@ -20,9 +20,40 @@ export const cardTypeLabels: Record<string, string> = {
   concept: '概念', formula: '公式', qa: '问答', definition: '定义',
 }
 
-/** 知识卡片类型到颜色的映射 */
+/**
+ * ── 颜色表的取值口径（a11y 修复轮：见 docs/a11y-audit.md 的 F-33）──
+ *
+ * 下面几张表**全部是"白字压色块"**（`background: <表里的值>; color: #fff`），
+ * 所以判据是**该色与白色的对比度 ≥ 4.5:1**（徽章文字 11.2~12.8px 常规字重，
+ * 不吃"大文本 3:1"的豁免）。唯一的例外是 `verdictLabels`：它是**色字压浅底**
+ * （`QuizAnswerCard` 的语义判分块，底色 `--color-bg` #faf9f7），
+ * 判据是"该色与 #faf9f7 的对比度 ≥ 4.5:1"。
+ *
+ * ⚠️ **上一轮的教训**：F-19 只压深了 `selfRatingOptions` 里的金与绿，
+ * "修法对、验证也真"，但只覆盖了**一张表**；其余 5 张表仍写着同一批旧值，
+ * 于是同一类缺陷从答题复习页（`difficultyColors.medium` = `#c9a959` = 2.25:1）
+ * 又冒了出来。**一处的局部修复会遮蔽一个系统性缺陷** —— 所以这一轮把
+ * 每一张表、每一个值都过了一遍，并把判据写在上面的那句话里，
+ * 下次新增颜色表时照同一句话挑值即可（新增值必须 ≥4.5:1）。
+ *
+ * | 表 | 用途 | 判据 |
+ * |---|---|---|
+ * | `cardTypeColors` | 卡片类型徽章（KnowledgeCards / RelatedCardsSection / 图谱图例） | 白色 ≥4.5:1 |
+ * | `questionTypeColors` | 题型徽章（QuestionSets） | 白色 ≥4.5:1 |
+ * | `difficultyColors` | 难度徽章（QuizAnswerCard / QuestionSets） | 白色 ≥4.5:1 |
+ * | `cardCategoryColors` | 分类徽章（KnowledgeCards） | 白色 ≥4.5:1 |
+ * | `verdictLabels` | 语义判分的结论文字与左侧竖条 | #faf9f7 ≥4.5:1 |
+ *
+ * 这一轮只压深**不达标的那些档**（红 #c0392b 5.44:1、墨 #0f3460 12.50:1、
+ * 紫 #6d28d9 7.10:1、灰 #6b7280 4.83:1 本来就够，**未改**）——
+ * 改它们只会白白挪动视觉基准。金色在金/绿两档里各有两个值：
+ * **色块底**用 `#8f7020`（白字 4.66:1），**压在 #faf9f7 上的文字**用 `#896c1f`
+ * （对 #faf9f7 是 4.72:1；`#8f7020` 在该底色上只有 4.43:1，不够）。
+ */
+
+/** 知识卡片类型到颜色的映射（白字压色块，见上面的取值口径） */
 export const cardTypeColors: Record<string, string> = {
-  concept: '#0f3460', formula: '#6d28d9', qa: '#2d8a56', definition: '#c9a959',
+  concept: '#0f3460', formula: '#6d28d9', qa: '#25714a', definition: '#8f7020',
 }
 
 /** 题目类型到中文标签的映射 */
@@ -30,9 +61,9 @@ export const questionTypeLabels: Record<string, string> = {
   choice: '选择题', fill_blank: '填空题', short_answer: '简答题',
 }
 
-/** 题目类型到颜色的映射 */
+/** 题目类型到颜色的映射（白字压色块，见上面的取值口径） */
 export const questionTypeColors: Record<string, string> = {
-  choice: '#0f3460', fill_blank: '#6d28d9', short_answer: '#2d8a56',
+  choice: '#0f3460', fill_blank: '#6d28d9', short_answer: '#25714a',
 }
 
 /** 难度到中文标签的映射 */
@@ -40,9 +71,14 @@ export const difficultyLabels: Record<string, string> = {
   easy: '简单', medium: '中等', hard: '困难',
 }
 
-/** 难度到颜色的映射 */
+/**
+ * 难度到颜色的映射（白字压色块，见上面的取值口径）
+ *
+ * F-33 就是这张表：`medium` 的 `#c9a959` 白字只有 2.25:1，
+ * 上一轮修 `selfRatingOptions` 时漏掉了它，直到答题复习页被扫才报出来。
+ */
 export const difficultyColors: Record<string, string> = {
-  easy: '#2d8a56', medium: '#c9a959', hard: '#c0392b',
+  easy: '#25714a', medium: '#8f7020', hard: '#c0392b',
 }
 
 /** 知识卡片分类到中文标签的映射 */
@@ -50,9 +86,9 @@ export const cardCategoryLabels: Record<string, string> = {
   regular: '常规', blind_spot: '盲点', extension: '拓展',
 }
 
-/** 知识卡片分类到颜色的映射 */
+/** 知识卡片分类到颜色的映射（白字压色块，见上面的取值口径） */
 export const cardCategoryColors: Record<string, string> = {
-  regular: '#6b7280', blind_spot: '#c0392b', extension: '#2d8a56',
+  regular: '#6b7280', blind_spot: '#c0392b', extension: '#25714a',
 }
 
 /**
@@ -160,9 +196,62 @@ export const ratingLabels: Record<number, string> = {
   4: '轻松想起',
 }
 
-/** 语义判分的三档结论（用于缺失点/误解点区块的标题与配色） */
+/**
+ * 语义判分的三档结论（用于缺失点/误解点区块的标题与配色）
+ *
+ * ⚠️ **这一张表与上面四张方向相反**：它是**色字压浅底**
+ * （`QuizAnswerCard` 的语义判分块，容器 `background: var(--color-bg)` = #faf9f7），
+ * 所以判据是"该色对 #faf9f7 ≥ 4.5:1"，不是"对白色"。
+ * 三档原值（`#4caf50` 2.64:1 / `#c9a959` 2.15:1 / `#f44336` 3.50:1，
+ * 均对 #faf9f7）**三档全部不达标**，本轮一起压深：
+ *
+ * | 档位 | 原值 | 对 #faf9f7 | 新值 | 对 #faf9f7 |
+ * |---|---|---|---|---|
+ * | 回答正确 | `#4caf50` | 2.64:1 | `#25714a` | 5.64:1 |
+ * | 答对了部分 | `#c9a959` | 2.15:1 | `#7d6417` | 5.38:1 |
+ * | 回答错误 | `#f44336` | 3.50:1 | `#c0392b` | 5.17:1 |
+ *
+ * （`partial` 用 `#7d6417` 而不是色块底那支 `#8f7020`：后者对 #faf9f7 只有
+ * 4.43:1，压在浅底上不够 —— 同一个语义在两种背景下各有一个值，见上面的口径表。
+ * 同一个"压在浅底上的金"也用在 `CardDetail` 的「独立卡片」徽章上，
+ * 那里底色是 `--color-accent-light`（rgba(201,169,89,.12) 叠白 = #f9f5eb），
+ * `#c9a959` 只有 2.07:1，`#7d6417` 是 5.19:1。）
+ */
 export const verdictLabels: Record<string, { label: string; color: string }> = {
-  correct: { label: '回答正确', color: '#4caf50' },
-  partial: { label: '答对了部分', color: '#c9a959' },
-  incorrect: { label: '回答错误', color: '#f44336' },
+  correct: { label: '回答正确', color: '#25714a' },
+  partial: { label: '答对了部分', color: '#7d6417' },
+  incorrect: { label: '回答错误', color: '#c0392b' },
 }
+
+/**
+ * 「薄弱点」列表里那块**卡片类型徽章**的配色（今日学习页与仪表盘共用一份）
+ *
+ * ## 为什么抽成常量而不是继续写两遍字面量
+ *
+ * 同一段徽章 JSX 在 `TodayLearn.tsx` 与 `Dashboard.tsx` 里**一字不差**地写了两遍
+ * （同一处代码的两个渲染路径），而 a11y 审计的 **F-35** 正是在这两处之一
+ * （今日学习页）报出来的：`#f44336` 压在 `#f4433620`（12.5% 叠白底 = `#fee8e6`）
+ * 上只有 **3.13:1**，要求 4.5:1。
+ *
+ * ⚠️ 更值得记住的是**另一处为什么没报**：仪表盘那份在那个场景里渲染的是
+ * `undefined`（默认桩的字段名与 `WeakPoint` 契约不一致，见 e2e/a11y-fixtures.ts），
+ * **空文本没有对比度可判**，于是 axe 对整块无话可说。
+ * 一份字面量写两遍，改了其中一处根本不会被发现 —— 所以这里收敛成**唯一出口**，
+ * 两页 import 同一个对象。
+ *
+ * ## 取值（都是实测/算出来的，不是挑好看的）
+ *
+ * | 项 | 原值 | 对比度 | 新值 | 对比度 |
+ * |---|---|---|---|---|
+ * | 文字 | `#f44336` | 3.13:1（压 `#fee8e6`） | `#c0392b` | **4.68:1** |
+ * | 底 | `#f4433620` | —— | `#c0392b1a` | —— |
+ *
+ * 底与字现在取自同一个基色（红 `#c0392b` = `--color-error`，白底 5.17:1），
+ * 原来的写法是"底用 `#f44336` 的 12.5%、字也是 `#f44336`"——
+ * 字改了底没改会留下两种红。透明度由 12.5% 降到 10%：淡底更浅，
+ * 与深一档的文字拉开差距（12.5% 时是 4.51:1，贴着门槛；10% 是 4.68:1）。
+ */
+export const weakPointBadge = {
+  background: '#c0392b1a',
+  color: '#c0392b',
+} as const
