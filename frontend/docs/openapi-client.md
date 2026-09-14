@@ -115,12 +115,20 @@
 | 本轮的判定对象：**发起请求的导出函数** | **111** | `openapi-drift.mjs` 用 AST 找出所有 `export function` 且函数体里调了 `request<T>(字面量路径)` / `uploadRequest` / `authorizedFetch` 的函数 |
 | 其中不同的 `方法 + 路径` | 110 | `uploadFile` 与 `uploadFileToFolder` 都打 `POST /api/upload` |
 | `frontend/src/api/*.ts` 里**全部**导出函数 | 121 | 121 − 111 = 10 个被排除：`client.ts` 的 9 个非端点导出（`getToken`/`setTokens`/`clearTokens`/`notifyTokenExpired`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`/`getRefreshToken`）+ `tasks.ts` 的 `isTerminal` |
-| 当前 `client.ts` 自己有几个端点函数 | **1**（`askQuestionStream`） | 其余 110 个早已按域拆到 11 个模块文件中；`client.ts` 现在只做 token/401/超时 + `export *` 转发 |
+| 当前 `client.ts` 自己有几个端点函数 | **1**（`askQuestionStream`） | 其余 110 个早已按域拆走：`client.ts` 末尾是 **11 行 `export *`**（那 11 个模块），另有 `knowledge.ts` / `tasks.ts` 由页面**直接按域引入** —— 所以 **"11" 是转发行的条数**，110 个函数实际落在 **13 个文件**里，别读成"11 个文件装 110 个函数"（**2026-09-14 补注**）；`client.ts` 现在只做 token/401/超时 + `export *` 转发 |
 
 也就是说：**"90 个函数混在 client.ts 里"这个描述在拆分之后就不成立了** ——
 `client.ts` 现在是 490 行的基础设施文件，只剩 1 个端点函数。
 `tasks.ts` 的注释（"那里已经 330 行、90 个函数混在一起"）沿用了旧数字，
 `docs/overhaul-plan.md` 的四处同理。**建议在做 5.1 的正式计划时把 90 改成 111。**
+
+—— ✅ **2026-09-14 补注（这条建议已经做完一半）**：计划那四处**已就地改成 111 并标注日期**
+（改动后是 `docs/overhaul-plan.md:2773` / `:3234` / `:3369`，以及附录 AO 的 `:7774`；
+逐条依据见 `overhaul-plan.md` **附录 BH**）—— 本节开头引用的
+`2762` / `3222` / `3357` / `7762` 是**改动前的行号**。
+⚠️ **没做的是代码侧**：`frontend/src/api/tasks.ts:8` 的注释至今仍写着"330 行、90 个函数"
+（属 `frontend/src/**`，本轮不动）—— 也就是说这条建议**只剩那一行注释**没改，
+而它正是"计划改了、代码里的注释没跟着改"的下一个化石（见 BH.3 的同一条判据）。
 
 ---
 
@@ -363,7 +371,11 @@ knowledge.ts suggestSemanticRelations
 
 - **`graph.ts` 9 个**（除 `getGraphData` / `getSuggestions` / `searchGraphNodes` 外全部）
 - **`projects.ts` 4 个**（`deleteFolder` / `deleteProject` / `addNotesToProject` / `removeNoteFromProject`）
-- **`notes.ts` 4 个**（`deleteAnnotation` / `updateNoteLinks` / `getVersion` / 两条 SSE）
+- **`notes.ts` 4 个**（`deleteAnnotation` / `updateNoteLinks` / `getVersion` / `askNoteQuestionStream`（SSE））
+  —— ⚠️ **2026-09-14 勘误**：原文写"两条 SSE"，但 `notes.ts` 里只有一条
+  （`askNoteQuestionStream`）；另一条是 `client.ts` 的 `askQuestionStream`，
+  同一份清单在下面**已经单独列过它一次**。把它算进 `notes.ts` 会让这里的四条变五条，
+  而总数 **22 不变**（分类计数必须能对上总数，对不上就是"这一条被数了两遍"）。
 - **`upload.ts` 1 个**（`prepareUpload`）
 - `qa.ts getCardDuplicates`、`knowledge.ts generateExtensionQuestions`、`client.ts askQuestionStream`（SSE 本来就没有 JSON 模型）
 
@@ -593,7 +605,7 @@ generateQuestions schema 有可选参数但前端没传 [target_categories, targ
 |---|---|---|
 | **生成客户端替换不了横切逻辑** | 401 刷新 + 单飞（`refreshSession`）、请求超时（30 s / 上传 600 s）、`Content-Type` 合并、204/空响应体处理，全部在 `request()` 里，schema 里没有 | S4 明确保留这一层；**不要**引入 `openapi-fetch` 之类的运行时（本轮已定"不加运行时依赖"） |
 | **multipart 上传无法机械替换** | `uploadFile` / `commitUpload` / `uploadFileToFolder` / `prepareUpload` 把 `project_ids`、`linked_material_ids` 塞成 **JSON 字符串**放进 FormData。OpenAPI 只能表达"这是 string"，表达不了"它是 JSON 编码的数组" | 这 4 个函数**保持手写**，只把返回类型换成生成类型 |
-| **测试 mock 的形状** | 8 个测试文件、13 处 `vi.mock('../api/xxx')`。只要**保留"同名导出函数"这一层**（只换函数体），mock 不用改；一旦改成 `client.GET('/api/notes')` 这种调用形态，13 处全部要重写 | 明确采用"保留同名函数 + 换内部实现"的迁移形态 |
+| **测试 mock 的形状** | **10 个测试文件、13 处 `vi.mock('…/api/…')`**（8 个文件用 `'../api/…'`、2 个用 `'../../api/…'`）—— ⚠️ **2026-09-14 勘误**：原文写"8 个测试文件、13 处"，两个数字取自**不同的口径**（"8"只数了单层 `'../api/…'` 的那一半，"13"是全部 api mock 点）；按 mock 点算应是 **10 个文件 / 13 处**。只要**保留"同名导出函数"这一层**（只换函数体），mock 不用改；一旦改成 `client.GET('/api/notes')` 这种调用形态，13 处全部要重写 | 明确采用"保留同名函数 + 换内部实现"的迁移形态 |
 | **调用方面积** | **74 个源文件、79 处 import** 从 `src/api/*` 拿东西（其中 68 处走 `api/client` 的 `export *` 转发，11 个是测试文件） | S2 的"只换类型名"策略保证这一步零调用方改动；S3 按域替换时逐个域跑测试 |
 | **枚举收窄的连锁反应** | `NoteStatus` 有 10 个值，前端有若干处用字符串比较/拼类名（`utils/labels.ts` 是单一出口，已在 5.9/5.10 收敛过一轮） | 这正是收益：编译器会把所有"拼字符串当状态"的地方一次列出来 |
 | **optional 翻转导致判空逻辑失效** | 带 `default` 的字段在生成类型里变必填（构造侧炸）；不带 default 的可空字段变 `?: T \| null`（读取侧 `x !== null` 放行 `undefined`） | 构造侧：改测试工厂；读取侧：统一改 `x != null`。按域逐个改 |
