@@ -3275,7 +3275,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **第一期完成（生成 + 分歧对比），切换被后端阻塞（22 个端点缺 `response_model`，见附录 BH）**：`backend/openapi.json`（102 路径 / 118 操作 / 156 schema，sha256 逐字节可复现）与 `src/api/generated/schema.ts`（261 KB / 10 000 行，`tsc` / `build` / `lint` / `prettier` 全过）已落盘；漂移检查器（**TypeScript 编译器 API，不是正则**）判定 **111/111 个端点全部命中**（0 缺失、0 方法错），类型分布 **IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21 / SCHEMA_LOOSE 1 / NO_JSON_RESPONSE 4**。⚠️ **没改一行调用方、没接入应用、没加运行时依赖** —— 切换的前置 P1–P4 与步骤 S1–S5 见附录 BH，逐函数对照表见 `frontend/docs/openapi-client.md` |
+| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **S1 / S2 / S3a / S4 已完成，S3b 与 S5 未做**（**2026-09-14 续记**，见附录 BL）。历史：第一期只生成与对比 —— `backend/openapi.json`（现已 103 路径 / 119 操作 / 184 schema）与 `src/api/generated/schema.ts` 落盘，漂移检查器（**TypeScript 编译器 API，不是正则**）判定 111/111 端点全部命中，当时分布 IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21。**续记**：P1–P3 补完（`schemaUntyped 21 → 0`）→ **S2 换响应类型**（`identical 19 → 104`）→ **S3a 换请求侧**（新增按端点索引的 `BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`，**34 个 JSON 请求体全部接入契约**；`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、`compilerDiagnostics 2 → 0`、`identical 104 → 105`，而**分母一个没动**：判定对象 111、被比过的请求体 34）→ **S4 收敛 `client.ts`**（三个请求入口里逐字重复的错误解析收成一处；§9.1 所谓"删除重复类型"经清点**在 S2 就已完成**）。**未做**：**S3b**（19 个函数的 query 参数仍是手拼查询串；接契约需要一个 `buildQuery` 运行时 helper **并且同步升级漂移脚本的 query 扫描器**，否则会从"3 条未用参数"变成"扫不到参数"的假象）、**S5**（5.2 / 5.3）、**P4**（`--check` 接 CI）。逐函数记录与守卫设计见 `frontend/docs/openapi-client.md` §14 |
 | 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 的 dependencies / devDependencies 里**没有** `@tanstack/react-query`（`swr` / `jotai` / `redux` 同样没有），`frontend/src/**` 里 `@tanstack` **零命中**；手写 `fetch` + 定时轮询仍是现状（`setInterval` 的活调用见 `components/ReminderBanner.tsx:70`、`pages/notedetail/useNoteDetailData.ts:177/201`） |
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 里**没有** `zustand`，`frontend/src/**` 里 `from 'zustand'` **零命中**；UI 状态仍靠 React Context（`contexts/AuthContext.tsx`、`components/Toast.tsx`）与 props 传递 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
@@ -10868,7 +10868,149 @@ redis 后端（`redis_broker_not_probed`）与目录不可读（`broker_dir_unre
 
 ---
 
-**文档版本**：v5.6（**2026-09-14 状态审计收口**：阶段 0 的 **0.2 / 0.10 / 0.11 三条落地**并就地更正状态
+## 附录 BL · 阶段 5.1 的 S3a / S4，以及 P4 终于接进 CI（2026-09-14）
+
+> 本附录写的是**这一轮实际发生的事**，不是计划。逐函数记录、守卫设计与"没做的事"
+> 在 `frontend/docs/openapi-client.md` §14；这里记的是**结论、证据、以及新欠下的账**。
+
+### BL.0 一句话
+
+**S3 的前半真的换掉了**：111 个手写 API 函数里的 **34 个 JSON 请求体**全部改为由契约
+派生（新增按端点索引的 `BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`），
+`bodyFindings` **25 → 0**、`hwDiscardsBody` **1 → 0**、`compilerDiagnostics` **2 → 0**，
+而**分母一个没动**（判定对象 111、被比过的请求体 34）；**S4** 把三个请求入口里
+逐字重复的错误解析收成一处；**P4 接进 CI** —— `.github/` 现在存在了，上一轮
+"要改 `.github/**` 所以做不了"的前提已经消失。
+
+### BL.1 漂移对照（`scripts/drift-delta.mjs`，两份 `--json` 快照逐项对照）
+
+| 指标 | 前 | 后 | 说明 |
+|---|---:|---:|---|
+| `bodyFindings` | 25 | **0** | 请求体接入契约后，这类比对**结构性**无事可报 —— 所以下面三行才是重点 |
+| `hwDiscardsBody` | 1 | **0** | `deleteAnnotation`：唯一一个"把响应体 await 掉"的函数（§13.5 那笔账） |
+| `compilerDiagnostics` | 2 | **0** | 就是上一条产生的两条 `void` 双向不兼容 |
+| `identical` | 104 | **105** | 只涨 1 —— S3 改的是**请求**，`identical` 判的是**响应**；`105 + 0 + 6 = 111` 本身即"判定对象一个没少" |
+| `handWrittenFunctions` / `pathMatched` | 111 / 111 | 111 / 111 | 分母不变 |
+| **`bodyChecked`（真的比过请求体的函数数）** | **34** | **34** | **归零不是"没比"的证据**（新加的守卫，见 BL.3） |
+| `schemaPaths` / `schemaOperations` | 103 / 119 | 103 / 119 | 契约本身没动（本轮不改后端） |
+| `unusedSchemaQuery`（信息项） | 3 | 3 | 那三条是"契约给了、前端从没传"的能力，见 BL.6 |
+
+### BL.2 两条生成器事实（本轮实测撞出来的，不是读文档读来的）
+
+1. **可选的 `requestBody` 会把最自然的条件类型骗成 `never`**：`openapi-typescript`
+   在 `requestBody?: {…}` 上显式写着 `| undefined`，于是
+   `Op extends { requestBody: { content: … } }` 永远不成立。第一版 `BodyOf` 因此让
+   **34 个端点里的 3 个**（`logout` / `restoreVersion` / `startUnderstanding` ——
+   恰好都是"body 可选"）静默退化成 `never`，而 `never` 与"这个端点确实没有请求体"
+   **长得一模一样**。发现它的不是类型系统，是**把 34 个端点逐个用编译器 API 打印出来对照**。
+2. **pydantic 的 `default` 让请求字段在生成类型里变必填**，比真实契约更严：
+   对**响应**这是对的（S2 就是靠它），对**请求**则会让"我省略字段、让后端用默认值"
+   变成编译错误 —— 而"照编译器要求把默认值抄一份发过去"更糟：后端改默认值时前端会
+   **静默覆盖**。所以新增 `BodyWithDefaults<P, M, K>`：把列出来的键放回可选，
+   `K` 受 `keyof` 约束（拼错编译失败），漏列则会立刻被编译器指出来。
+
+### BL.3 一个被 S3 逼出来的守卫缺陷：**"没有信号"被当成了"信号是坏的"**
+
+漂移脚本原来的空转守卫是"**有探针却 0 条诊断 ⇒ 探针没被真正检查**"。
+它的来历是真的（第一版脚本就是"0 诊断 + 106 个 IDENTICAL"），但**判据本身是错的**：
+0 条诊断恰恰是**目标状态**。S3 修好 `deleteAnnotation` 之后，守卫立刻误报并拒绝出报告：
+
+```
+[空转守卫] 生成了 105 个探针但编译器一条诊断都没有 —— 探针文件很可能没被真正检查
+```
+
+修法不是放宽守卫（那等于删掉它），而是让"探针真的被检查"**自带证据**：
+往探针文件里塞一条**故意写错的金丝雀**（`const __canaryMustFail: never = <某个 schema 响应类型>`），
+守卫改成"**金丝雀必须报错**"，且金丝雀那条诊断**不计入** `compilerDiagnostics`。
+实测 `# 探针数 105 / 诊断数 1（其中金丝雀 1，真实 0）`。
+
+> 这条与 BE.2 / BF.3 / BG.3 / BK.6 是同一条判据的第五次出现：
+> **守卫必须用一个"已知为坏"的输入来证明检测链路活着**，否则"全绿"与"没检查"
+> 在报告里长得完全一样。
+
+### BL.4 P4：两个半条接进 CI（**CI runner 本身没跑过**，如实说）
+
+`.github/workflows/ci.yml` 已经存在（上一轮的"接 CI"轮次建的），所以 P4 的阻塞消失了。
+本轮加了两条**配对**的步骤 —— 只加一条会留下缺口：
+
+| 位置 | 步骤 | 防的是什么 |
+|---|---|---|
+| backend job（Ruff 之后、pytest 之前） | `python scripts/dump_openapi.py --check` | **代码 → `openapi.json`**：改了后端（`response_model=` / 路由 / 字段）却忘了重新生成 schema |
+| frontend job（ESLint 之后） | `npm run gen:api` + `git diff --exit-code -- src/api/generated/schema.ts` | **`openapi.json` → `schema.ts`**：生成了 schema 却忘了生成类型 |
+
+**本机实测（两条命令的行为）**：`dump_openapi.py --check` 退出 0，打印
+`paths=103 operations=119 schemas=184 sha256=9a633977af6e`；`gen:api` 后
+`git diff --exit-code` 退出 0（幂等）。**没验证到的是 GitHub runner 上那一次真实执行**
+（本轮不推送远程）。可依赖的间接证据：同一个 job 里的 pytest 本来就 `import app.main`，
+而这个脚本只多做了 `app.openapi()`（纯内存，不连库、不起服务、不触发 lifespan）。
+若它在 CI 上失败，先分清两类：写着"与当前代码不一致"= 真的忘了生成；
+import/配置类报错 = 环境问题 —— **两者不许用 `|| true` 一起掩盖**。
+
+### BL.5 用户决策（本轮口径）：**不影响单机用户体验的遗留项暂不修改**
+
+按此口径，三条**挂起**（不是"做完了"，是"明确不做并记下理由"）：
+
+| # | 事项 | 为什么可以挂起 |
+|---|---|---|
+| 1 | **限流按 IP 计数、而不是按用户**（`RateLimitMiddleware` 在最外层，`RequestContext` 还没跑，`get_user_id()` 那条分支永远拿不到值；它的 429 响应也没有 `request_id`） | 单机部署就是"一个人 + 一个 IP"，按 IP 与按用户是同一件事；多用户/反向代理部署下才会失真 |
+| 2 | `requirements.txt` 的 `~=` 约束策略与依赖升级（**19 条里 17 条与已装版本不在范围内**） | 纯工程卫生，与用户可见行为无关；且改约束要连带重跑全套验证 |
+| 3 | a11y / 安全扫描是否升级为**阻断**门禁 | 两者今天都是**建议性**且已在 CI 里真的会失败（`continue-on-error` + REGISTRY）；升级的前置条件 CI 注释里已写明 |
+
+### BL.6 顺带发现（改的是请求侧，照出来的是别的东西）
+
+1. ★ **"清空字段"这件事，前后端各有一道闸，合起来做不到**（本轮只登记、未修改）。
+   前端：`pages/projects/useProjects.ts:102` 提交 `edit.description.trim() || undefined`
+   → `JSON.stringify` 把 `undefined` 的键丢掉。后端（更根本）：
+   `services/project_service.py:196-199`、`api/understanding.py:465-468`、
+   `api/knowledge.py:180-183` 三处都是 `if x is not None:` ——
+   **显式 `null` 与"不传"在服务层完全等价**。于是契约里那些 `| null` 字面上像
+   "可以清空"，运行时却表示"不要改这个字段"。UI 上确实有编辑项目描述的输入框
+   （`pages/projects/ProjectRenameForm.tsx:31-37`），所以这是"**用户做得到操作、
+   系统做不到结果**"的缺陷。修法要动服务层（区分"显式给了 null"与"没给"），
+   属行为变更，留给决策。
+2. `updateGoal` 在前端**零调用方**（全仓 `grep` 只有定义），而契约里它有 6 个可更新字段
+   （含前端从未暴露过的 `status`）。
+3. `unusedSchemaQuery = 3` 的三条是"契约提供、前端从没传"的**能力**，不是缺陷：
+   `GET /notes` 的 `project_id`、`POST /understanding/{note_id}/generate-questions` 的
+   `target_categories` / `target_difficulty`。
+4. **`src/api` 本来就不在 prettier 规范内**（实测 HEAD 内容上 `report.ts` /
+   `cleaning.ts` / `upload.ts` / `client.test.ts` 都失败，`tasks.ts` 通过）——
+   与 `format:check` 的既有失败列表一致。本轮触碰的文件统一跑了 `prettier --write`，
+   所以 diff 里含**纯格式改动**；语义层面的可核对口径是"AST 判定对象与分母一个没动"
+   加上"运行时改写只有'内联字面量提成 `const body`'"。
+
+### BL.7 这一轮的账（全部真跑过）
+
+| 命令 | 结果 |
+|---|---|
+| `npx tsc --noEmit` | 退出 0（实测 11.5 s） |
+| `npm test` | **22 files / 280 tests 全通过**，退出 0（基线 21/278，+1 文件 +2 用例 = 新的 `types.test.ts`） |
+| `npm run lint` | 退出 0 |
+| `npm run build` | 退出 0（✓ built in 5.22 s） |
+| `npm run e2e` | **10 passed**（真 Chromium，13.9 s） |
+| `npm run e2e:full`（`ENGRAMNOTE_E2E_FULL=1`） | **6 passed**（真实后端 + 真实 LLM 全链路，1.6 min） |
+| `npm run gen:api:drift` + `drift-delta` | 退出 0，数字见 BL.1 |
+| `doc-table-scan.mjs`（本轮新入库的表格扫描器） | **本附录之前**：`docs/overhaul-plan.md` **237 张表 / 1156 行 / 0 处缺陷**（与 BK.6 的人工扫描一致）；**加上本附录之后**：**242 张 / 1184 行 / 0 处缺陷** |
+
+### BL.8 悬着的小事（下一轮逐条核对，不重找）
+
+| # | 事项 | 现状 / 下一步要什么 |
+|---|---|---|
+| 1 | **S3b：query 参数接入契约** | 19 个函数仍手拼查询串（三种形态）。接契约需要 `buildQuery(QueryOf<P,M>)` **并且同步升级漂移脚本的 query 扫描器**，否则会出现"扫不到参数名"的假象（`unusedSchemaQuery` 从 3 跳到 ~25、看着像变坏其实是没比）。必须带"参数名检出数不下降"的分母守卫 |
+| 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | 未做。两者都会动到 74 个调用方文件的取数方式，属独立大轮次（5.2 与 5.3 的现状见 5.1 表格所在节的 5.2 / 5.3 行） |
+| 3 | P3：`POST /api/auth/logout` 的 body 是否真的可选 | 契约写 `requestBody?`，前端总是发；本轮只做到"前端与契约一致" |
+| 4 | `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 是否统一（今天 `request()` 前置错误码、另两处不前置） | 行为变更（提示文案），要单独决策 |
+| 5 | 清空字段的服务层语义（BL.6 第 1 条） | 要动 `x is not None` 那三处 |
+| 6 | RAG 向量通道：`retrieval_status=hybrid` 的成因**未定论** | 领先假设是**索引时滞**（提问时新 chunk 还没有 embedding）；判定方法是"提问前先断言全部 chunk 都 `has_embedding=1`"。⚠️ 另有一条待测：`rag_service._encode_via_celery` 的 `task.get(10)` **10 秒硬超时**在冷启动下会走 BM25，但**超时不取消任务**，所以是窗口而不是永久降级 |
+| 7 | 表格扫描已成为常驻工具 | `frontend/scripts/doc-table-scan.mjs`（默认扫 4 份文档；有缺陷退出码 1，判据与 BK.6 同：**两个方向都数**、转义竖线 `\|` 不算分隔、代码围栏里的 `\|` 不算表）。它是 BK.6 那条判据的**机器化复现**：本附录之前独立跑出 **237 张表 / 0 缺陷**（与人工扫描一致），加本附录后 **242 张 / 0 缺陷**。★ **它上线后第一次运行就抓到本人刚写的一行**：BL.8 这一格里原本写着一个裸 `\|`（正文里想引用"竖线"本身），GFM 会把它当分隔符 → 该行 4 格 vs 表头 3 格，多出的内容不会渲染 |
+**文档版本**：v5.7（**2026-09-14 阶段 5.1 的 S3a / S4 落地，P4 接进 CI**：
+34 个 JSON 请求体改为按端点从契约派生（`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、
+`compilerDiagnostics 2 → 0`、`identical 104 → 105`，而**分母 111 / 34 一个没动**）；
+`client.ts` 三处重复的错误解析收成一处；`dump_openapi.py --check` 与 `gen:api`
+幂等性两条**配对**步骤进 CI；漂移脚本的空转守卫从"0 诊断"改成"金丝雀必须报错"；
+表格缺陷扫描成为常驻脚本（独立复现 BK.6 的 237 张表 / 0 缺陷）；两条产品发现
+（清空字段前后端各一道闸、`updateGoal` 零调用方）与三条挂起决策，见**附录 BL**）；
+v5.6 —— **2026-09-14 状态审计收口**：阶段 0 的 **0.2 / 0.10 / 0.11 三条落地**并就地更正状态
 （✅14 / 🟡1 / ⏸0 / ⛔2）、`AppError` 响应**缺 CORS 头**这条可复现事实的登记、
 表格扫描判据补成**两个方向**、评测脚本"空语料 = 退出码 2"，见**附录 BK**；
 **2026-09-14 状态缺口回填**：阶段 0 全 17 条补齐 `状态` 列并逐条给依据、
@@ -10892,7 +11034,9 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 5.9 / 5.13 收尾与两条产品发现见 BI，
 状态缺口回填（阶段 0 全 17 条 / 1.1–1.5 / 3.10–3.11 / `llm_calls.prompt_version`）见 BJ，
 状态审计的收口（阶段 0 的 0.2 / 0.10 / 0.11 三条、`AppError` 响应的 CORS 头缺失、
-表格扫描判据的两个方向、评测脚本空语料 = 退出码 2）见 BK）
+表格扫描判据的两个方向、评测脚本空语料 = 退出码 2）见 BK，
+阶段 5.1 的 S3a / S4 落地与 P4 接进 CI（34 个请求体接入契约、`client.ts` 收敛、
+空转守卫改成金丝雀、表格扫描成常驻脚本）见 BL）
 
 
 

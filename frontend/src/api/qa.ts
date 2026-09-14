@@ -2,8 +2,8 @@
  * @file 理解管道与问答 API
  * @description 触发理解、状态查询、章节摘要、知识卡片、题目生成与 RAG 问答。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { BodyOf, Schema } from './generated/types';
 
 // --- 理解管道与问答相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -81,14 +81,33 @@ export type QuestionAnswerResponse = Schema<'QuestionAnswerResponse'>;
 export type GenerateQuestionsResponse = Schema<'GenerateQuestionsResponse'>;
 
 /**
+ * 更新知识卡片的请求体（阶段 5.1 / S3：`PUT /understanding/cards/{card_id}`）
+ *
+ * 契约 `CardUpdateRequest` 的两个字段都可选且**可为 null**
+ * （后端 `title: Optional[str] = None` / `content: Optional[str] = None`）。
+ *
+ * 注意：后端 `update_card` 的写法是 `if req.title is not None: card.title = …`，
+ * 所以传 `null` 与**不传**在运行时是同一件事 —— 都是"不改这个字段"，
+ * `null` 并不能清空标题/正文。类型放宽只意味着调用方多了一个可写的取值。
+ */
+export type UpdateKnowledgeCardPayload = BodyOf<'/understanding/cards/{card_id}', 'put'>;
+
+/**
  * 触发笔记理解管道
  * archived 笔记重新理解会清空旧产物，需 confirm=true 显式确认；
  * 先以 confirm=false 调用可获取 requires_confirm 与影响数量，见 docs/decisions.md#F-02。
  */
-export async function startUnderstanding(noteId: string, confirm = false): Promise<UnderstandingStartResponse> {
+export async function startUnderstanding(
+  noteId: string,
+  confirm = false,
+): Promise<UnderstandingStartResponse> {
+  // `POST /understanding/{note_id}/start` 的请求体：契约 `UnderstandingStartRequest`
+  // 只有 `confirm` 一个字段（后端默认 false）；前端**总是**显式传它（形参默认 false），
+  // 没有任何"省略字段"的行为要表达，所以不经过 BodyWithDefaults
+  const body: BodyOf<'/understanding/{note_id}/start', 'post'> = { confirm };
   return request<UnderstandingStartResponse>(`/understanding/${noteId}/start`, {
     method: 'POST',
-    body: JSON.stringify({ confirm }),
+    body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' },
   });
 }
@@ -110,7 +129,12 @@ export async function getChapterSummaries(noteId: string): Promise<ChapterSummar
 /**
  * 获取知识卡片列表
  */
-export async function getKnowledgeCards(page = 1, pageSize = 20, noteId?: string, keyword?: string): Promise<KnowledgeCardListResponse> {
+export async function getKnowledgeCards(
+  page = 1,
+  pageSize = 20,
+  noteId?: string,
+  keyword?: string,
+): Promise<KnowledgeCardListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (noteId) params.set('note_id', noteId);
   if (keyword) params.set('keyword', keyword);
@@ -128,9 +152,11 @@ export async function getKnowledgeCard(cardId: string): Promise<KnowledgeCard> {
  * RAG 问答
  */
 export async function askQuestion(question: string): Promise<QuestionAnswerResponse> {
+  // `POST /understanding/ask` 的请求体：契约 `QuestionRequest` = `{ question: string }`
+  const body: BodyOf<'/understanding/ask', 'post'> = { question };
   return request<QuestionAnswerResponse>('/understanding/ask', {
     method: 'POST',
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -146,7 +172,12 @@ export async function generateQuestions(noteId: string): Promise<GenerateQuestio
 /**
  * 获取题目列表
  */
-export async function getQuestions(page = 1, pageSize = 20, noteId?: string, keyword?: string): Promise<QuizItemListResponse> {
+export async function getQuestions(
+  page = 1,
+  pageSize = 20,
+  noteId?: string,
+  keyword?: string,
+): Promise<QuizItemListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (noteId) params.set('note_id', noteId);
   if (keyword) params.set('keyword', keyword);
@@ -162,8 +193,14 @@ export async function getCardDuplicates(noteId: string): Promise<CardDuplicateLi
 
 /**
  * 更新知识卡片
+ *
+ * `data` 的类型由契约派生（见 `UpdateKnowledgeCardPayload`）：两个字段都可省略，
+ * 也可以显式传 `null` —— 但 `null` 在后端等同于"不传"（不改该字段）。
  */
-export async function updateKnowledgeCard(cardId: string, data: { title?: string; content?: string }): Promise<KnowledgeCard> {
+export async function updateKnowledgeCard(
+  cardId: string,
+  data: UpdateKnowledgeCardPayload,
+): Promise<KnowledgeCard> {
   return request<KnowledgeCard>(`/understanding/cards/${cardId}`, {
     method: 'PUT',
     body: JSON.stringify(data),

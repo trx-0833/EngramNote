@@ -1,4 +1,14 @@
-# 阶段 5.1 第一步：从 OpenAPI 生成类型与客户端（**只生成与对比，未切换**）
+# 阶段 5.1：从 OpenAPI 生成类型与客户端（S1 生成 → S2 换类型 → S3a 换请求体）
+
+> **本文件是 5.1 的连续记录，按轮次往下追加，早先的结论不要当成现状读**：
+>
+> | 轮次 | 内容 | 在哪 |
+> |---|---|---|
+> | S1 | 把 schema 落盘（`backend/openapi.json`）+ 漂移检查器 + 分歧报告（基线 19/111 一致） | §0–§10 |
+> | 前置 P1/P2/P3 | 后端补 20 处 `response_model=` 与 5 处内层空壳（`schemaUntyped` 21 → 0） | §11 |
+> | S2 | **只换类型不换请求**：`Schema<'XResponse'>`，`identical` 26 → 104 | §12–§13 |
+> | **S3a** | **按端点索引的请求侧**（`BodyOf`/`QueryOf`/`BodyWithDefaults`）+ `deleteAnnotation` + S4 的 `client.ts` 收敛 | **§14** |
+> | S3b / S5 | query 参数接入与 5.2 / 5.3 **未做** | §14.9 |
 
 > 本轮目标来自 `docs/overhaul-plan.md` §2.8 / 阶段 5.1：
 > "从 OpenAPI 生成类型与客户端，删除手写 `client.ts` 的 90 个函数与重复类型"。
@@ -1403,4 +1413,285 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
    是 `Record<string, …>` 索引，收窄后的联合仍然可以索引它。
    这是**好消息，但不是"没有收益"**：收益在于"后端新增一个状态值、前端没有对应文案"
    这件事从此会在 `Record<NoteStatus, …>` 的完整性检查里被要求（属 S3 范围）。
+
+---
+
+## 14. S3a（请求体按契约派生）与 S4（`client.ts` 收敛）（2026-09-14）
+
+> 本节是**落地记录**，数字全部来自实跑命令。§9.1 的 S1 / S2 见 §10–§13，
+> **S3 的 query 一半（S3b）与 S5（5.2 / 5.3）没做**，见 §14.9。
+
+### 14.0 一句话结论
+
+| 问题 | 答案 |
+|---|---|
+| S3 做了什么 | 给生成类型加了一层**按端点索引**的入口（`BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`），把 **34 个 JSON 请求体**从"手写形状"换成"契约形状"；`deleteAnnotation` 的返回值改成契约类型 |
+| 为什么按端点索引，而不是按组件名 | 组件名回答不了"这个请求体属于哪个端点的哪个方法"：端点换了模型而这里没换，编译器不会响。按路径 + 方法索引之后，**抄错端点会立刻报错** |
+| 请求体的发现数 | `bodyFindings` **25 → 0**；但见 §14.6 —— **这是结构性的**（类型即契约），所以另加了两条守卫防止"归零是因为没比" |
+| `deleteAnnotation` | `hwDiscardsBody` **1 → 0**，`compilerDiagnostics` **2 → 0**（这是 §13.5 刻意留下的那两条） |
+| S4 做了什么 | 三个请求入口里**逐字重复**的错误响应解析收成一处（`readErrorBody`）；§9.1 说的"删除重复的类型定义"**在 S2 就已经完成**，见 §14.7 的证据 |
+| 调用方改动 | **0**（导出名、参数表、运行时路径与方法一字未改）；只**新增**了 4 个导出类型别名 |
+| 生成器撞出来的两条事实 | ① `requestBody` 可选时生成类型写的是 `… \| undefined`，最自然的条件类型**永远不匹配**（`BodyOf` 会一律退化成 `never`）；② pydantic 带 `default` 的字段被 `openapi-typescript` 标回**必填**，比真实契约更严 —— 两条都见 §14.2 |
+
+### 14.1 新的入口：按端点索引
+
+`src/api/generated/types.ts` 现在有两节：S2 的 `Schema<'XResponse'>`（按组件名取响应）
+与 S3 的端点索引（取请求）。后者的用法是：
+
+```ts
+// 路径键 = schema 路径去掉 /api 前缀 —— 与 request() 收到的那串字面量同形
+export type UpdateNotePayload = BodyOf<'/notes/{note_id}', 'put'>;          // { title?: string | null }
+export type MarkCardPayload = BodyOf<'/knowledge/cards/{card_id}/mark', 'patch'>;
+export type NotesQuery = QueryOf<'/notes', 'get'>;                          // 含 project_id
+// 契约里带 default 的字段：生成类型比真实契约严，按真实契约放宽，K 受 keyof 约束
+export type CreateGoalPayload = BodyWithDefaults<'/goals', 'post', 'type' | 'target_mastery'>;
+```
+
+四个 helper 的语义边界（每一条都有编译期断言守着）：
+
+| helper | 没有这个东西时 | 守卫 |
+|---|---|---|
+| `ApiPath` | 路径键写错就只能靠人眼 | `Extract<ApiPath, \`/api${string}\`>` 必须是 `never`（带前缀的键不存在） |
+| `ApiMethod<P>` | 给只有 GET 的端点标 `post` 不会报错 | 路径项里 `post?: never` 的方法被滤掉；实测 `ApiMethod<'/notes'>` = `'get'` |
+| `BodyOf<P, M>` | 无请求体的端点会退化成 `unknown`（什么都能传） | 无 body 必须是 `never`；**全 119 个操作扫描一遍，不许有 `unknown`** |
+| `QueryOf<P, M>` | 没有 query 参数时会退化成 `never`（与"写错了"长得一样） | 无 query 参数时是 `Record<string, never>` |
+
+断言写在 `src/api/generated/types.test.ts` 的 `TypeAssertions` 元组里（**编译期**，
+`tsc` 失败即失败，不需要 `vitest --typecheck`），同一个文件还有两条运行期断言：
+`schema.ts` / `types.ts` 的**运行期导出必须是空集**（类型导入漏写成值导入会破掉
+"生成物在构建时被完全擦除"这条纪律）。
+
+> 为什么断言非要不可：这几个 helper 全是条件类型套索引，写错一个 `infer` 位置就会
+> **静默退化**。而 `never` 在参数位置上与"这个端点确实没有请求体"长得一模一样 ——
+> 没有断言的话，S3 之后**所有 body 标注会看起来都对**。
+
+### 14.2 两条生成器事实（本轮实测撞出来的）
+
+**事实一：可选的 `requestBody` 会把条件类型骗成 `never`。**
+
+```ts
+// openapi-typescript 实际生成的形状（注意 `| undefined`）
+requestBody?: { content: { 'application/json': LogoutRequest } } | undefined;
+// 于是这个"最自然"的写法永远不成立：
+type Bad<Op> = Op extends { requestBody: { content: { 'application/json': infer B } } } ? B : never;
+```
+
+第一版 `BodyOf` 就是这么写的，结果是：**31 个端点正常，3 个退化成 `never`**
+（`logout` / `restoreVersion` / `startUnderstanding` —— 恰好是三个"body 可选"的端点）。
+诊断它的不是类型系统（`never` 不报错），而是**把 34 个端点逐个用编译器 API 打印出来对照**。
+修法是先 `Exclude<T, undefined>` 再比对。
+
+**事实二：`default` 让请求体字段在生成类型里变必填，而真实契约是可缺省。**
+
+pydantic 把带默认值的字段**排除出** `required`：
+
+| 请求模型 | `required`（真实契约） | `default` | 生成类型 |
+|---|---|---|---|
+| `GoalCreateRequest` | `name` | `type="weekly"`、`target_mastery=80` | 四个都必填 |
+| `SubmitAnswerRequest` | `quiz_id`、`user_answer` | `time_spent_ms=0`、`use_semantic_grading=false` | 五个都必填 |
+| `NoteAskRequest` | `question`、`selected_text` | `context_after=""`、`context_before=""`、`view_mode="original"` | 五个都必填 |
+| `UnderstandingStartRequest` | —— | `confirm=false` | 必填 |
+
+对**响应**这是对的（带默认值的字段一定会被序列化出来，S2 就是靠这一点），
+对**请求**则更严：前端"省略字段、让后端用默认值"是合法用法，标注成契约类型就会编译失败。
+而"照编译器要求把默认值抄一份发过去"更糟 —— 后端哪天改了默认值，前端会**静默覆盖**它。
+所以新增 `BodyWithDefaults<P, M, K>`：把**列出来的**那几个键放回可选。
+`K` 必须手写（生成的 TS 类型里没有"哪些字段带 default"这个信息），但两个方向都不会静默：
+
+- `K` 拼错 → `K extends keyof BodyOf<P, M>` 约束失败，**编译错误**；
+- 漏列一个 → 那个字段仍然必填，**编译器会立刻指出来**。
+
+`types.test.ts` 里对这条也有非空转断言：放宽**前** `type` 是必填、放宽**后**可选、
+而没列出的 `name` 仍然必填。
+
+### 14.3 按域改动清单（34 个 JSON 请求体，无一遗漏）
+
+| 域 | 请求体数 | 处理方式 |
+|---|---:|---|
+| `notes.ts` | 6 | `updateNote` 的**参数类型**换成 `BodyOf<'/notes/{note_id}','put'>`；`NoteContentTarget` 改成 `BodyOf<…>['target']`（导出名保留）；`updateNoteContent` / `updateNoteLinks` / `restoreVersion` 标注**内部** body；`askNoteQuestionStream`（SSE）用 `BodyWithDefaults<…, 'context_before' \| 'context_after' \| 'view_mode'>` |
+| `projects.ts` | 5 | 五处全部标注内部 body（对外签名一字未动） |
+| `goals.ts` | 2 | 新增 `CreateGoalPayload = BodyWithDefaults<'/goals','post','type' \| 'target_mastery'>`、`UpdateGoalPayload = BodyOf<'/goals/{goal_id}','patch'>`，用作 `data` 的参数类型 |
+| `assessment.ts` | 3 | 两处标注内部 body；`generateQuiz` 那行**手写标注**换成 `BodyOf`；`submitQuizAnswers` 见 §14.4 |
+| `review.ts` | 3 | 新增 `SubmitAnswerPayload`（**两个端点共用**，后端是同一个 `SubmitAnswerRequest`）与 `submitCardReview` 的内部标注 |
+| `qa.ts` | 3 | 两处内部标注 + `UpdateKnowledgeCardPayload` 作参数类型 |
+| `knowledge.ts` | 2 | `generateExtension` 内部标注 + `MarkCardPayload` 作参数类型 |
+| `graph.ts` | 5 | 五处内部标注（`createRelation` 的 `relation_type` 保持 `string`，契约也是 `string`，**没有**自作主张收窄） |
+| `auth.ts` | 4 | 四处内部标注（含 `logout` —— 它的 `requestBody` 在 schema 里可选，正是 §14.2 那个坑的样本） |
+| `client.ts` | 1 | `askQuestionStream` 的 body 标注（**响应**侧 SSE 解析刻意保持手写，见 §13.8 第 6 条） |
+
+**"对外签名变宽"只发生在两处，都是有意为之**：`updateNote` 的 `title` 与
+`updateKnowledgeCard` 的 `title`/`content` 现在可以传 `null`（契约允许）。
+其余 32 处要么对外签名一字未动，要么只把内部 body 标成契约类型。
+
+**刻意保留的"前端比契约窄"**（这是收益不是缺陷）：
+
+| 位置 | 前端 | 契约 | 为什么保留 |
+|---|---|---|---|
+| `createAnnotation` 的 `type` | `'highlight' \| 'underline'` | `string` | 手写联合能挡住拼错的取值；放宽成 `string` 是**降级** |
+| `createAnnotation` 的 `color` | `string` | `string \| null` | 目前没有"清空颜色"的用法 |
+| `createRelation` 的 `relation_type` | `string` | `string` | 两边一致，无话可说 |
+
+### 14.4 只有一处"契约比手写更宽"，用 `satisfies` 而不是标注
+
+`submitQuizAnswers` 的 `answers` 在后端是**塞进 JSON 列**的结构化数据，
+schema 里内层是 `{ [key: string]: unknown }[]`，而前端手写的是
+`{ question_index: number; answer: string }[]`（**更严也更有用**）。
+把它标注成 `BodyOf<…>` 会让 `answers` 退化成 `unknown[]` —— 那是**降级**。
+所以这里用：
+
+```ts
+// satisfies 只做"与契约相容"的检查，不改变 body 的推断类型
+const body = { assessment_id: assessmentId, answers } satisfies BodyOf<'/assessment/submit-answer', 'post'>;
+```
+
+于是"字段名/必填项对得上契约"仍由编译器保证，而内层保留手写窄类型。
+（实测：窄 `answers` 对契约类型可赋值 = `true`，反向 = `false`。）
+
+### 14.5 `deleteAnnotation`：§13.5 那笔账结清了
+
+`DELETE /api/notes/{note_id}/annotations/{annotation_id}` 的 2xx 是
+`AnnotationDeleteResponse`（`{ success: boolean }`），此前前端声明 `Promise<void>`
+并把响应体 `await` 掉 —— 它是 111 个函数里唯一一个 `HW_DISCARDS_BODY`，
+也是最后 2 条编译器诊断的来源。现在返回类型改成契约类型、函数体改成 `return`。
+
+调用方核对（全仓 `grep -rn deleteAnnotation`）：真实调用只有 2 处 ——
+`pages/notedetail/useNoteAnnotations.ts:86`（在 `try/catch` 里、不使用返回值）
+与 `pages/NoteDetail.test.tsx:46`（`vi.mock` 工厂里的 `vi.fn()`）。
+**没有调用方依赖 `void`**，所以是零调用方改动。
+
+### 14.6 漂移对照：`bodyFindings` 25 → 0，但**必须连着分母一起看**
+
+新增 `frontend/scripts/drift-delta.mjs`（`npm run gen:api:drift:delta -- before.json after.json`）
+把两份 `--json` 快照逐项对照，方向写在表里，**任何反向都退出码 1**：
+
+| 指标 | 前 | 后 | 方向 |
+|---|---:|---:|---|
+| `hwDiscardsBody` | 1 | **0** | 越小越好 ✅ |
+| `compilerDiagnostics` | 2 | **0** | 越小越好 ✅ |
+| `bodyFindings` | 25 | **0** | 越小越好 ✅ |
+| `identical` | 104 | **105** | 越大越好 ✅ |
+| `handWrittenFunctions` / `pathMatched` | 111 / 111 | 111 / 111 | 必须不变 |
+| **`bodyChecked`（真的被比过请求体的函数数）** | **34** | **34** | 必须不变 |
+| `schemaPaths` / `schemaOperations` | 103 / 119 | 103 / 119 | 必须不变 |
+| `unusedSchemaQuery`（信息） | 3 | 3 | 涨跌都正常 |
+
+`identical` 只涨 1：因为 S3 改的是**请求**，而 `identical` 判的是**响应** ——
+唯一变化的就是 `deleteAnnotation`（`HW_DISCARDS_BODY → IDENTICAL`）。
+**`105 + 0 + 6 = 111` 这条算术本身就是"判定对象一个没少"的证据。**
+
+**归零是结构性的，不要读成"25 个缺陷被修好了"**：这 25 条里有 24 条是
+`SCHEMA_NULLABLE_HW_NOT`（"schema 允许 null、前端类型不接受"）—— 对**请求体**而言
+"前端更窄"本来就不危险，它真正的含义是**前端无法表达 null**（见 §14.10 第 1 条）。
+类型换成契约之后，这类比对自然无事可报。所以本条另加了两道守卫：
+
+1. `bodyChecked` 必须恒为 34（分母不变）——它防的是"比得少了所以发现少了"；
+2. 漂移脚本的**空转守卫改成金丝雀**（见 §14.6.1）。
+
+#### 14.6.1 一个被 S3 逼出来的守卫缺陷（值得单独记）
+
+漂移脚本原来的空转守卫是：**"有探针却 0 条诊断 ⇒ 探针没被真正检查"**。
+它的来历是真的（第一版脚本就是"0 诊断 + 106 个 IDENTICAL"），
+但**判据本身是错的**：0 条诊断恰恰是**目标状态**。
+S3 把 `deleteAnnotation` 修好之后，守卫立刻误报：
+
+```
+[空转守卫] 生成了 105 个探针但编译器一条诊断都没有 —— 探针文件很可能没被真正检查
+```
+
+两条路：放宽守卫（等于把守卫删掉），或者**让"探针被检查"自带证据**。
+选了后者：往探针文件里塞一条**故意写错的金丝雀** ——
+
+```ts
+declare const __canarySrc: __SC_0;          // 某个端点的 schema 响应类型
+const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
+```
+
+守卫改成"**金丝雀必须报错**"，并且金丝雀那条诊断**不计入** `compilerDiagnostics`
+（按 `role: 'canary'` 过滤）。实测输出：
+
+```
+# 探针行数 753 / 探针数 105 / 诊断数 1（其中金丝雀 1，真实 0）
+```
+
+这条修正的一般形式：**"没有信号"不能当作"信号是坏的"的证据** ——
+守卫需要一个**已知为坏**的输入来证明检测链路活着（与 BE.2 / BF.3 / BG.3 同一条判据）。
+
+### 14.7 S4：`client.ts` 收敛
+
+§9.1 给 S4 写的是两件事，实际情况**一件早已完成、一件才是真的**：
+
+| §9.1 S4 的要求 | 现状 | 证据 |
+|---|---|---|
+| 保留 `getToken` / `setTokens` / `refreshSession` / `authorizedFetch` / `request` / `uploadRequest` | ✅ 全部保留 | 另有 `clearTokens` / `getRefreshToken` / `notifyTokenExpired` / `ApiError` / `askQuestionStream` / `API_BASE` / `TOKEN_EXPIRED_EVENT` 也是横切层，同样保留 |
+| "删除重复的类型定义" | **S2 就已经删干净了** | `src/api` 下 17 个文件的 `export type/interface` 清点：除 4 个**契约里根本没有**的手写类型（`CommitUploadOptions`、`RecommendedTask`、`GradingMethod`，以及本轮改成派生的 `NoteContentTarget`）之外，全部是 `Schema<'X'>` 别名；**没有任何两个文件定义同名类型**（`client.ts` 的 `User`/`TokenResponse`/`Note`/`NoteDetail`/`NoteListResponse` 是唯一一份）。把这些别名搬去各域只会动 68 处 import，收益为零 |
+
+**真正剩下的重复**是三个请求入口里**逐字相同**的错误响应解析
+（`request` / `uploadRequest` / `askQuestionStream` 各抄一份"detail 是数组就 join、
+`error_code` 缺失就回退文案"）。S4 把它收成一处的 `readErrorBody(response)`。
+
+**没有统一的部分，以及为什么**：三处 `ApiError.message` 的拼法**仍然不同** ——
+`request()` 会把错误码前置成 `"CODE: detail"`，另两处只给 `detail`
+（阶段 0.11 刻意保留的兼容口径：上传/流式问答的提示文案已固化）。
+统一它是**行为变更**，不属于 S4。
+
+顺带收掉一个不可能路径上的不一致：`uploadRequest` 此前把**空字符串** `error_code`
+原样当 code 传出（`''`），而 `request()` 会归一成 `null`。统一后三处都是 `null`。
+后端不会下发空 `error_code`（`middleware/error_handler.py` 的四个来源分别是
+`HTTP_{status}` / `VALIDATION_ERROR` / `exc.code` / `INTERNAL_ERROR`，都是非空字面量），
+所以这条差异只在"后端违约"时才可见。
+
+### 14.8 验证（全部真跑过，命令在 `frontend/` 下）
+
+| 命令 | 结果 |
+|---|---|
+| `npx.cmd tsc --noEmit` | **退出 0**（实测耗时 11.5 s） |
+| `npm.cmd test` | **22 files / 280 tests 全通过**，退出 0（基线 21/278，新增的 1 文件 2 用例就是 `types.test.ts`） |
+| `npm.cmd run lint` | 退出 0（`eslint src/`；新文件 `types.test.ts`、改过的 `openapi-drift.mjs` 都干净） |
+| `npx.cmd prettier --check <本轮 12 个改动文件>` | 全部通过 |
+| `npm.cmd run build` | 退出 0（`tsc && vite build`，✓ built in 5.22s） |
+| `npm.cmd run e2e` | **10 passed**（真 Chromium，13.9 s），退出 0 |
+| `npm.cmd run gen:api:drift` | 退出 0，数字见 §14.6 |
+| `node scripts/drift-delta.mjs before after` | 退出 0（没有任何反向指标） |
+
+### 14.9 明确**没做**的事
+
+| # | 没做 | 为什么 / 下一步要什么 |
+|---|---|---|
+| 1 | **S3b：query 参数按契约派生** | 现状是 19 个函数各自手拼查询串（`URLSearchParams` 字面量、`.set`、`?a=${x}&b=${y}` 三种形态）。要接契约得先有一个 `buildQuery(QueryOf<P,M>)` 运行时helper，**并且同步升级漂移脚本的 query 扫描器**（它现在只认上面三种老形态，换成 helper 后会扫不到任何参数名 → `unusedSchemaQuery` 从 3 跳到 ~25，看起来像变坏其实是"没比"）。这是一次"换实现形态 + 换仪器"的改动，必须单独一轮，且要有"参数名检出数不下降"的分母守卫 |
+| 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | 不属于 S3；两者都会动到 74 个调用方文件的取数方式，属独立大轮次 |
+| 3 | **P4：`dump_openapi.py --check` 接 CI** | 要改 `.github/**`（不属本轮文件清单）。**这条风险仍然存在** |
+| 4 | **P3：`POST /api/auth/logout` 的 body 是否真的可选** | 契约里是 `requestBody?`，前端总是发。本轮只做到"前端与契约一致"，没去动后端声明 |
+| 5 | 把 `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 统一 | 行为变更（提示文案），要单独决策（§14.7） |
+
+### 14.10 顺带发现（改的是请求侧，照出来的是别的东西）
+
+1. ★ **"清空字段"在几个更新端点上做不到，前后端各有一道**（本轮**只登记、未修改**）。
+   前端这一道：`useProjects.ts:102` 提交 `edit.description.trim() || undefined`，
+   `JSON.stringify` 会把 `undefined` 的键丢掉。后端这一道更根本：
+   `project_service.py:196-199`、`understanding.py:465-468`、`knowledge.py:180-183`
+   都是 `if x is not None:` —— **显式 `null` 与"不传"在服务层完全等价**。
+   于是契约里那些 `| null` 字面上像"可以清空"，运行时却表示"不要改这个字段"。
+   UI 上确实有编辑项目描述的输入框（`projects/ProjectRenameForm.tsx:31-37`），
+   所以"清空描述"是**用户做得到操作、系统做不到结果**的那种缺陷。
+   修法要动服务层（区分 `model_fields_set` 里的"显式给了 null"与"没给"），
+   属于行为变更，留给决策。
+2. `updateGoal` 在前端**零调用方**（`grep` 全仓只有定义本身），
+   而契约里它有 6 个可更新字段（含前端从未暴露过的 `status`）。
+3. `unusedSchemaQuery = 3` 的三条是"契约提供、前端从没传"的能力：
+   `GET /notes` 的 `project_id`（UI 从不按项目过滤笔记列表）、
+   `POST /understanding/{note_id}/generate-questions` 的
+   `target_categories` / `target_difficulty`。**不是缺陷**，是没接的产品能力。
+4. **`src/api` 本来就不在 prettier 规范内**（实测 `prettier --check src/api/report.ts`
+   在 HEAD 内容上即失败，`tasks.ts` 通过）——与 `format:check` 的既有失败列表一致。
+   本轮触碰的文件统一跑了 `prettier --write`，所以 diff 里含**纯格式改动**
+   （补分号、超长签名折行、`'Accept'` → `Accept`、补文件末尾换行）。
+   可核对口径：AST 层面的判定对象与分母一个没动（§14.6），
+   语义等价的三处运行时改写只有"内联字面量提成 `const body`"。
+
+### 14.11 这一轮的方法论（一句话）
+
+**"指标变好"必须先与"没比"分开**：`bodyFindings` 25 → 0 是结构性的，
+所以证据不是那个 0，而是 **分母仍为 34** + **金丝雀仍会报错** +
+**`identical` 只涨了 `deleteAnnotation` 那一个**。三件事同时成立，
+"请求侧真的被契约接管了"才是一句有内容的话。
 

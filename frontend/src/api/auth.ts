@@ -6,8 +6,8 @@
  * （`refreshSession` / `authorizedFetch`），必须绕开 `request()` 的重试包装，
  * 否则刷新失败会递归触发刷新。本文件只放"正常的"API 调用。
  */
-import { request, type User, type TokenResponse } from './client'
-import type { Schema } from './generated/types'
+import { request, type User, type TokenResponse } from './client';
+import type { BodyOf, Schema } from './generated/types';
 
 /**
  * 用户注册
@@ -18,10 +18,16 @@ import type { Schema } from './generated/types'
  * @param password - 密码（至少6位）
  * @returns 包含访问令牌、刷新令牌和用户信息的响应
  */
-export async function register(email: string, username: string, password: string): Promise<TokenResponse> {
+export async function register(
+  email: string,
+  username: string,
+  password: string,
+): Promise<TokenResponse> {
+  // `POST /auth/register` 的请求体：契约 `UserRegisterRequest`，三个字段全必填
+  const body: BodyOf<'/auth/register', 'post'> = { email, username, password };
   return request<TokenResponse>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, username, password }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -34,9 +40,11 @@ export async function register(email: string, username: string, password: string
  * @returns 包含访问令牌、刷新令牌和用户信息的响应
  */
 export async function login(email: string, password: string): Promise<TokenResponse> {
+  // `POST /auth/login` 的请求体：契约 `UserLoginRequest`，两个字段全必填
+  const body: BodyOf<'/auth/login', 'post'> = { email, password };
   return request<TokenResponse>('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -62,10 +70,22 @@ export type LogoutResult = Schema<'LogoutResponse'>;
  * @param allDevices - 是否撤销该用户的全部刷新令牌（"退出所有设备"）
  * @returns 服务端实际撤销的行数
  */
-export async function logout(refreshToken: string | null, allDevices = false): Promise<LogoutResult> {
+export async function logout(
+  refreshToken: string | null,
+  allDevices = false,
+): Promise<LogoutResult> {
+  // `POST /auth/logout` 的请求体：契约 `LogoutRequest`
+  // （`all_devices: boolean` 带默认值 false，`refresh_token?: string | null`）。
+  // 这个端点的 requestBody 在 schema 里本身是可选的（后端 `req: LogoutRequest = None`），
+  // helper 已把 `requestBody?: {...} | undefined` 归一化，所以这里能标成非 never 的类型；
+  // 前端仍然**总是**发这两个字段（refreshToken 为 null 时后端按"没有可撤销目标"处理）
+  const body: BodyOf<'/auth/logout', 'post'> = {
+    refresh_token: refreshToken,
+    all_devices: allDevices,
+  };
   return request<LogoutResult>('/auth/logout', {
     method: 'POST',
-    body: JSON.stringify({ refresh_token: refreshToken, all_devices: allDevices }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -100,8 +120,11 @@ export async function getUserReminderSettings(): Promise<UserReminderSettings> {
  * @returns 更新后的邮件复习提醒设置
  */
 export async function updateUserReminderSettings(enabled: boolean): Promise<UserReminderSettings> {
+  // `PUT /auth/reminder-settings` 的请求体：契约复用响应模型
+  // `UserReminderSettingsResponse`（唯一字段 `email_reminder_enabled: boolean`，必填）
+  const body: BodyOf<'/auth/reminder-settings', 'put'> = { email_reminder_enabled: enabled };
   return request<UserReminderSettings>('/auth/reminder-settings', {
     method: 'PUT',
-    body: JSON.stringify({ email_reminder_enabled: enabled }),
+    body: JSON.stringify(body),
   });
 }

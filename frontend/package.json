@@ -22,7 +22,9 @@
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/generated/schema.ts && prettier --write src/api/generated/schema.ts",
-    "gen:api:drift": "node src/api/generated/openapi-drift.mjs"
+    "gen:api:drift": "node src/api/generated/openapi-drift.mjs",
+    "gen:api:drift:delta": "node scripts/drift-delta.mjs",
+    "docs:tables": "node scripts/doc-table-scan.mjs"
   },
   "dependencies": {
     "dompurify": "^3.1.0",

@@ -2,8 +2,15 @@
  * @file 笔记 API
  * @description 笔记的列表/详情/内容/归档/角色、回收站、批注、链接与版本历史相关接口。
  */
-import { request, authorizedFetch, notifyTokenExpired, type Note, type NoteDetail, type NoteListResponse } from './client'
-import type { Schema } from './generated/types'
+import {
+  request,
+  authorizedFetch,
+  notifyTokenExpired,
+  type Note,
+  type NoteDetail,
+  type NoteListResponse,
+} from './client';
+import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
 
 /**
  * 获取笔记列表（分页）
@@ -14,7 +21,12 @@ import type { Schema } from './generated/types'
  * @param keyword - 搜索关键词，可选，用于按标题模糊匹配
  * @returns 分页笔记列表响应
  */
-export async function getNotes(page = 1, pageSize = 20, keyword?: string, noteRole?: string): Promise<NoteListResponse> {
+export async function getNotes(
+  page = 1,
+  pageSize = 20,
+  keyword?: string,
+  noteRole?: string,
+): Promise<NoteListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   // 仅在提供了关键词时才附加 keyword 参数
   if (keyword) params.set('keyword', keyword);
@@ -35,21 +47,30 @@ export async function getNote(noteId: string): Promise<NoteDetail> {
 }
 
 /**
+ * 更新笔记请求体（契约派生：`PUT /api/notes/{note_id}`）
+ *
+ * 契约里 `title` 是可空的 `string | null`，手写时写的 `{ title?: string }`
+ * 比契约窄 —— 换过来之后调用方可以传 `title: null`（后端接受）。
+ */
+export type UpdateNotePayload = BodyOf<'/notes/{note_id}', 'put'>;
+
+/**
  * 更新笔记信息
  * 目前仅支持修改笔记标题。
  *
  * @param noteId - 笔记 ID
- * @param data - 更新数据，目前仅包含 title 字段
+ * @param data - 更新数据（契约派生：`PUT /api/notes/{note_id}`，目前仅含可空的 title）
  * @returns 更新后的笔记信息
  */
-export async function updateNote(noteId: string, data: { title?: string }): Promise<Note> {
+export async function updateNote(noteId: string, data: UpdateNotePayload): Promise<Note> {
   return request<Note>(`/notes/${noteId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
-export type NoteContentTarget = 'clean' | 'original'
+/** 内容写入目标：取自契约 `PUT /api/notes/{note_id}/content` 请求体的 `target`（clean / original） */
+export type NoteContentTarget = BodyOf<'/notes/{note_id}/content', 'put'>['target'];
 
 /**
  * 更新笔记的 Markdown 内容
@@ -62,11 +83,13 @@ export type NoteContentTarget = 'clean' | 'original'
 export async function updateNoteContent(
   noteId: string,
   content: string,
-  target: NoteContentTarget = 'clean'
+  target: NoteContentTarget = 'clean',
 ): Promise<Note> {
+  // 请求体按契约派生：`PUT /api/notes/{note_id}/content`（字段与取值同切换前）
+  const body: BodyOf<'/notes/{note_id}/content', 'put'> = { content, target };
   return request<Note>(`/notes/${noteId}/content`, {
     method: 'PUT',
-    body: JSON.stringify({ content, target }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -96,7 +119,11 @@ export async function updateNoteRole(noteId: string, noteRole: string): Promise<
 /**
  * 获取已归档笔记列表
  */
-export async function getArchivedNotes(page = 1, pageSize = 20, noteRole?: string): Promise<NoteListResponse> {
+export async function getArchivedNotes(
+  page = 1,
+  pageSize = 20,
+  noteRole?: string,
+): Promise<NoteListResponse> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   // 仅在提供了笔记角色时才附加 note_role 参数
   if (noteRole) params.set('note_role', noteRole);
@@ -191,6 +218,9 @@ export type Annotation = Schema<'AnnotationResponse'>;
 /** 批注列表响应（生成自 `AnnotationListResponse`） */
 export type AnnotationListResponse = Schema<'AnnotationListResponse'>;
 
+/** 删除批注的结果（生成自 `AnnotationDeleteResponse`：`{ success: boolean }`，后端恒为 true） */
+export type AnnotationDeleteResponse = Schema<'AnnotationDeleteResponse'>;
+
 // --- 批注 API ---
 
 /**
@@ -200,7 +230,10 @@ export type AnnotationListResponse = Schema<'AnnotationListResponse'>;
  * @param viewMode - 视图模式：original 或 clean
  * @returns 批注列表响应
  */
-export async function getAnnotations(noteId: string, viewMode: string): Promise<AnnotationListResponse> {
+export async function getAnnotations(
+  noteId: string,
+  viewMode: string,
+): Promise<AnnotationListResponse> {
   return request<AnnotationListResponse>(`/notes/${noteId}/annotations?view_mode=${viewMode}`);
 }
 
@@ -220,11 +253,16 @@ export async function createAnnotation(
     context_before: string;
     context_after: string;
     color?: string;
-  }
+  },
 ): Promise<Annotation> {
+  // 请求体按契约派生：`POST /api/notes/{note_id}/annotations`。
+  // 对外签名有意保持比契约窄：契约里 `type` 只是 `string`，这里仍只收
+  // 前端的 `'highlight' | 'underline'`；`color` 仍不收 null。
+  // 发出去的 body 用契约类型约束 —— 字段名或取值拼错都会在这里编译失败。
+  const body: BodyOf<'/notes/{note_id}/annotations', 'post'> = { ...data };
   return request<Annotation>(`/notes/${noteId}/annotations`, {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(body),
   });
 }
 
@@ -233,9 +271,14 @@ export async function createAnnotation(
  *
  * @param noteId - 笔记 ID
  * @param annotationId - 批注 ID
+ * @returns 删除结果（契约 `DELETE /api/notes/{note_id}/annotations/{annotation_id}`：
+ *          后端返回 `{ success: true }`，此前这里把它 await 掉、声明成 `Promise<void>`）
  */
-export async function deleteAnnotation(noteId: string, annotationId: string): Promise<void> {
-  await request<{ success: boolean }>(`/notes/${noteId}/annotations/${annotationId}`, {
+export async function deleteAnnotation(
+  noteId: string,
+  annotationId: string,
+): Promise<AnnotationDeleteResponse> {
+  return request<AnnotationDeleteResponse>(`/notes/${noteId}/annotations/${annotationId}`, {
     method: 'DELETE',
   });
 }
@@ -251,20 +294,20 @@ export async function deleteAnnotation(noteId: string, annotationId: string): Pr
  * - event: error / data: {"message":"..."}
  *
  * @param noteId - 笔记 ID
- * @param payload - 提问载荷：question（问题，可编辑）、selected_text（选中文本）、
- *                  context_before/context_after（选区前后上下文）、view_mode（original/clean）
+ * @param payload - 提问载荷（请求体契约派生：`POST /api/notes/{note_id}/ask/stream`）：
+ *                  question（问题，可编辑）、selected_text（选中文本）必填；
+ *                  context_before / context_after / view_mode 可缺省 —— 后端
+ *                  `NoteAskRequest` 里这三个字段带默认值，分别是 "" / "" / "original"
  * @param signal - 可选 AbortSignal，用于中止流式请求
  */
 export async function askNoteQuestionStream(
   noteId: string,
-  payload: {
-    question: string;
-    selected_text: string;
-    context_before?: string;
-    context_after?: string;
-    view_mode?: string;
-  },
-  signal?: AbortSignal
+  payload: BodyWithDefaults<
+    '/notes/{note_id}/ask/stream',
+    'post',
+    'context_before' | 'context_after' | 'view_mode'
+  >,
+  signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   // 走统一的认证 fetch（阶段 6.3）：访问令牌过期时先刷新一次再重放一次，
   // 而不是直接把用户登出。手写 Authorization 头的那份代码已删除 ——
@@ -273,8 +316,9 @@ export async function askNoteQuestionStream(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
+      Accept: 'text/event-stream',
     },
+    // 请求体按契约派生：`POST /api/notes/{note_id}/ask/stream`（SSE 响应解析仍手写）
     body: JSON.stringify(payload),
     signal,
   });
@@ -285,8 +329,10 @@ export async function askNoteQuestionStream(
     }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     const detail = Array.isArray(error.detail)
-      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
-      : (error.detail || `请求失败: ${response.status}`);
+      ? error.detail
+          .map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e))
+          .join('; ')
+      : error.detail || `请求失败: ${response.status}`;
     throw new Error(detail);
   }
   if (!response.body) {
@@ -339,10 +385,15 @@ export async function getNoteLinks(noteId: string): Promise<NoteLinksResponse> {
  * @param materialNoteIds - 学习资料笔记 ID 列表
  * @returns 更新结果，包含是否发生变化
  */
-export async function updateNoteLinks(noteId: string, materialNoteIds: string[]): Promise<UpdateLinksResponse> {
+export async function updateNoteLinks(
+  noteId: string,
+  materialNoteIds: string[],
+): Promise<UpdateLinksResponse> {
+  // 请求体按契约派生：`PUT /api/notes/{note_id}/links`（字段与取值同切换前）
+  const body: BodyOf<'/notes/{note_id}/links', 'put'> = { material_note_ids: materialNoteIds };
   return request<UpdateLinksResponse>(`/notes/${noteId}/links`, {
     method: 'PUT',
-    body: JSON.stringify({ material_note_ids: materialNoteIds }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -371,19 +422,31 @@ export async function listVersions(noteId: string): Promise<NoteVersionListRespo
 }
 
 /** 预览指定版本的内容 */
-export async function getVersion(noteId: string, versionNumber: number): Promise<NoteVersionContentResponse> {
+export async function getVersion(
+  noteId: string,
+  versionNumber: number,
+): Promise<NoteVersionContentResponse> {
   return request(`/notes/${noteId}/versions/${versionNumber}`);
 }
 
 /** 对比两个版本的差异 */
-export async function diffVersions(noteId: string, v1: number, v2: number): Promise<NoteVersionDiffResponse> {
+export async function diffVersions(
+  noteId: string,
+  v1: number,
+  v2: number,
+): Promise<NoteVersionDiffResponse> {
   return request<NoteVersionDiffResponse>(`/notes/${noteId}/versions/diff?v1=${v1}&v2=${v2}`);
 }
 
 /** 恢复指定历史版本 */
 export async function restoreVersion(noteId: string, versionNumber: number): Promise<NoteVersion> {
+  // 请求体按契约派生：`POST /api/notes/{note_id}/versions/{version_number}/restore`
+  // （该端点的 requestBody 在 schema 里本身可选，生成类型是 `confirm?: boolean | null`）
+  const body: BodyOf<'/notes/{note_id}/versions/{version_number}/restore', 'post'> = {
+    confirm: true,
+  };
   return request<NoteVersion>(`/notes/${noteId}/versions/${versionNumber}/restore`, {
     method: 'POST',
-    body: JSON.stringify({ confirm: true }),
+    body: JSON.stringify(body),
   });
 }

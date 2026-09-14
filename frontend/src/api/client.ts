@@ -5,7 +5,7 @@
  * 所有 API 请求均以 /api 为基础路径，通过 Bearer Token 进行身份认证。
  */
 
-import type { Schema } from './generated/types';
+import type { BodyOf, Schema } from './generated/types';
 
 /** API 基础路径，所有请求都会在此路径前缀下发起 */
 export const API_BASE = '/api';
@@ -313,13 +313,39 @@ export async function authorizedFetch(
  */
 export class ApiError extends Error {
   /** 后端 error_code；响应里没有该字段时为 null（如客户端本地生成的 401 文案） */
-  readonly code: string | null
+  readonly code: string | null;
 
   constructor(message: string, code: string | null = null) {
-    super(message)
-    this.name = 'ApiError'
-    this.code = code
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
   }
+}
+
+/**
+ * 解析后端的错误响应体（阶段 0.11 的统一契约：`{detail, error_code, request_id}`）
+ *
+ * 三个请求入口（`request` / `uploadRequest` / `askQuestionStream`）此前各自抄了
+ * 一份**逐字相同**的解析逻辑（FastAPI 422 的 `detail` 是数组、`error_code` 可能缺失），
+ * 阶段 5.1 / S4 收敛成这一处 —— 少一份抄写，就少一处"改了一个忘了另一个"。
+ *
+ * ⚠️ 三处 `ApiError.message` 的拼法**仍然不同**（`request()` 会把 error_code 前置成
+ * `"CODE: detail"`，另两处只给 detail）—— 那是阶段 0.11 刻意保留的兼容口径
+ * （上传/流式问答的提示文案已固化），本次收敛**没有**动它：统一文案是行为变更，
+ * 要单独决策，不属于 S4。
+ */
+async function readErrorBody(response: Response): Promise<{ detail: string; code: string | null }> {
+  const error = await response.json().catch(() => ({ detail: response.statusText }));
+  // FastAPI 422 验证错误的 detail 是数组，需提取可读信息
+  const detail = Array.isArray(error.detail)
+    ? error.detail
+        .map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e))
+        .join('; ')
+    : error.detail || `请求失败: ${response.status}`;
+  // 错误响应统一为 {detail, error_code, request_id}：优先识别稳定的 error_code
+  // （存在时前置，供上层按错误码分流/定位），缺失时回退中文 detail 文案兜底。
+  const code = typeof error.error_code === 'string' && error.error_code ? error.error_code : null;
+  return { detail, code };
 }
 
 /**
@@ -337,20 +363,13 @@ export class ApiError extends Error {
  * @throws {ApiError} 当响应状态码非 2xx 时抛出，message 含后端 detail，
  *   `code` 为后端 error_code（调用方应按 code 分流，不要匹配文案）
  */
-export async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // 默认设置 Content-Type 为 JSON，并合并调用方传入的 headers
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  const response = await authorizedFetch(
-    path,
-    { ...options, headers },
-    REQUEST_TIMEOUT_MS,
-  );
+  const response = await authorizedFetch(path, { ...options, headers }, REQUEST_TIMEOUT_MS);
 
   // 响应状态码非 2xx 时，尝试解析后端错误信息
   if (!response.ok) {
@@ -359,19 +378,14 @@ export async function request<T>(
       if (!isAuthCredentialPath(path)) {
         notifyTokenExpired();
       }
-      throw new Error(response.status === 401 && isAuthCredentialPath(path)
-        ? '邮箱或密码错误'
-        : '登录已过期，请重新登录');
+      throw new Error(
+        response.status === 401 && isAuthCredentialPath(path)
+          ? '邮箱或密码错误'
+          : '登录已过期，请重新登录',
+      );
     }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    // FastAPI 422 验证错误的 detail 是数组，需提取可读信息
-    const detail = Array.isArray(error.detail)
-      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
-      : (error.detail || `请求失败: ${response.status}`);
-    // 错误响应统一为 {detail, error_code, request_id}：优先识别稳定的 error_code
-    // （存在时前置，供上层按错误码分流/定位），缺失时回退中文 detail 文案兜底。
-    const errorCode = typeof error.error_code === 'string' && error.error_code ? error.error_code : null;
-    throw new ApiError(errorCode ? `${errorCode}: ${detail}` : detail, errorCode);
+    const { detail, code } = await readErrorBody(response);
+    throw new ApiError(code ? `${code}: ${detail}` : detail, code);
   }
 
   // 204 No Content 无响应体，返回 undefined
@@ -408,12 +422,9 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
       notifyTokenExpired();
       throw new ApiError('登录已过期，请重新登录');
     }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    const detail = Array.isArray(error.detail)
-      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
-      : (error.detail || `请求失败: ${response.status}`);
     // message 仍是 detail（与改造前逐字一致），只是额外带上结构化的 code
-    throw new ApiError(detail, typeof error.error_code === 'string' ? error.error_code : null);
+    const { detail, code } = await readErrorBody(response);
+    throw new ApiError(detail, code);
   }
 
   const text = await response.text();
@@ -438,15 +449,21 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
  * - event: done / data: {}
  * - event: error / data: {"message":"..."}
  */
-export async function askQuestionStream(question: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+export async function askQuestionStream(
+  question: string,
+  signal?: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  // 请求体按契约派生（`POST /api/understanding/ask/stream`，契约里就是 `{question: string}`）。
+  // 响应侧刻意保持手写：SSE 的事件模型（meta/token/sources/done/error）不在 schema 里。
+  const body: BodyOf<'/understanding/ask/stream', 'post'> = { question };
   // 不设超时：流式响应可能持续很久，生命周期由调用方的 signal 控制
   const response = await authorizedFetch('/understanding/ask/stream', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
+      Accept: 'text/event-stream',
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!response.ok) {
@@ -454,11 +471,8 @@ export async function askQuestionStream(question: string, signal?: AbortSignal):
       notifyTokenExpired();
       throw new ApiError('登录已过期，请重新登录');
     }
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    const detail = Array.isArray(error.detail)
-      ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
-      : (error.detail || `请求失败: ${response.status}`);
-    throw new ApiError(detail, typeof error.error_code === 'string' ? error.error_code : null);
+    const { detail, code } = await readErrorBody(response);
+    throw new ApiError(detail, code);
   }
   if (!response.body) {
     throw new Error('浏览器不支持流式响应');
@@ -468,14 +482,14 @@ export async function askQuestionStream(question: string, signal?: AbortSignal):
 
 // --- 模块化 API re-export（按域拆分，各页面 import 路径保持不变） ---
 
-export * from './auth'
-export * from './notes'
-export * from './upload'
-export * from './cleaning'
-export * from './qa'
-export * from './review'
-export * from './report'
-export * from './assessment'
-export * from './graph'
-export * from './projects'
-export * from './goals'
+export * from './auth';
+export * from './notes';
+export * from './upload';
+export * from './cleaning';
+export * from './qa';
+export * from './review';
+export * from './report';
+export * from './assessment';
+export * from './graph';
+export * from './projects';
+export * from './goals';

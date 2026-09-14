@@ -2,8 +2,8 @@
  * @file 学习目标 API
  * @description 学习目标的创建、列表、详情、归档、删除与每日计划。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
 
 // --- 学习目标相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -34,15 +34,20 @@ export interface RecommendedTask {
 /** 每日计划响应（生成自 `DailyPlanResponse`） */
 export type DailyPlanResponse = Schema<'DailyPlanResponse'>;
 
+/**
+ * 创建学习目标的请求体（阶段 5.1 / S3：派生自 `POST /api/goals`）
+ *
+ * 契约 `GoalCreateRequest.required` 只有 `name`：`type` 的后端默认值是 `"weekly"`、
+ * `target_mastery` 的后端默认值是 `80` —— 省略这两个字段让后端填默认值**是合法用法**
+ * （页面现状就是这么调的）。生成类型因为 schema 里的 `default` 把它们标成了必填，
+ * 比真实契约更严，故用 `BodyWithDefaults` 放宽。
+ *
+ * ⚠️ **不要**在前端补发这两个默认值：后端哪天改了默认值，前端会静默覆盖它。
+ */
+export type CreateGoalPayload = BodyWithDefaults<'/goals', 'post', 'type' | 'target_mastery'>;
+
 /** 创建学习目标 */
-export async function createGoal(data: {
-  name: string;
-  type?: 'daily' | 'weekly';
-  scope_notes?: string[];
-  scope_folders?: string[];
-  target_mastery?: number;
-  deadline?: string;
-}): Promise<LearningGoal> {
+export async function createGoal(data: CreateGoalPayload): Promise<LearningGoal> {
   return request<LearningGoal>('/goals', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -60,15 +65,19 @@ export async function getGoal(goalId: string): Promise<LearningGoal> {
   return request<LearningGoal>(`/goals/${goalId}`);
 }
 
+/**
+ * 更新学习目标的请求体（阶段 5.1 / S3：派生自 `PATCH /api/goals/{goal_id}`）
+ *
+ * 契约 `GoalUpdateRequest.required` 为空（全部字段可选且可空）。比旧的手写签名多了两项：
+ *
+ * - `status`：后端 `GoalStatus` 枚举是 `"active" | "completed" | "expired" |
+ *   "archived" | "deleted"`，前端此前**完全没暴露**这个字段（本次只把能力接出来，不接 UI）；
+ * - 各字段的 `| null`：旧签名只接受 `string` / `number`，传不了 `null`。
+ */
+export type UpdateGoalPayload = BodyOf<'/goals/{goal_id}', 'patch'>;
+
 /** 更新学习目标 */
-export async function updateGoal(goalId: string, data: {
-  name?: string;
-  type?: 'daily' | 'weekly';
-  scope_notes?: string[];
-  scope_folders?: string[];
-  target_mastery?: number;
-  deadline?: string;
-}): Promise<LearningGoal> {
+export async function updateGoal(goalId: string, data: UpdateGoalPayload): Promise<LearningGoal> {
   return request<LearningGoal>(`/goals/${goalId}`, {
     method: 'PATCH',
     body: JSON.stringify(data),

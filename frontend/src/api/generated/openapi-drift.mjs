@@ -435,6 +435,32 @@ for (const c of callsA) {
   push('', null);
   c.probe = { id: c.id, hwLine, scLine };
 }
+
+/* ------------------------------------------------------------------ *
+ * 空转金丝雀（阶段 5.1 / S3 加）
+ *
+ * 原来的守卫是"有探针但**一条诊断都没有** ⇒ 探针没被真正检查"。
+ * S3 把 `deleteAnnotation` 修好之后，`compilerDiagnostics` 正好归零 ——
+ * 于是守卫开始**误报**：它把"目标状态"当成了"故障症状"。
+ *
+ * 正确的做法不是放宽守卫（那等于把空转守卫删掉），而是让"探针真的被检查"
+ * 这件事**自带证据**：塞一个**故意写错**的探针（把某个 schema 响应类型赋给
+ * `never`，这永远不成立），并要求它必须报错。
+ * 它不参与任何指标（`role: 'canary'` 的诊断在 summary 里被排除），
+ * 只回答一个问题：**这个虚拟文件到底有没有被编译器看**。
+ * ------------------------------------------------------------------ */
+const canaryCall = callsA.find((c) => c.probe);
+let canaryLine = null;
+if (canaryCall) {
+  push(`declare const __canarySrc: __SC_${canaryCall.id};`, null);
+  canaryLine = push(`const __canaryMustFail: never = __canarySrc;`, {
+    id: -1,
+    fn: '(canary)',
+    module: '(canary)',
+    role: 'canary',
+  });
+}
+
 virtualText = lines.join('\n') + '\n';
 
 // --- 第二段：真正的程序（含探针） ---
@@ -496,11 +522,23 @@ const diagAtProbe = (id, role) => {
 };
 
 const probedCount = calls.filter((c) => c.probe).length;
+
+/** 诊断按"属于谁"分开：金丝雀的报错不算指标，真实探针的报错才算 */
+const diagLineOf = (d) => virtualSource.getLineAndCharacterOfPosition(d.start ?? 0).line + 1;
+const canaryDiagnostics = diagnostics.filter((d) => probes.get(diagLineOf(d))?.role === 'canary');
+/** 真实缺陷诊断（不含金丝雀）——`compilerDiagnostics` 用的是这个 */
+const realDiagnostics = diagnostics.filter((d) => probes.get(diagLineOf(d))?.role !== 'canary');
+
 /**
  * 空转守卫：探针文件若为空 / 没被真正检查，"全部一致"就是个**假结论**。
- * 这个守卫是拿真实教训换来的 —— 本脚本第一版就是 0 诊断 + 106 个 IDENTICAL。
+ *
+ * ⚠️ **2026-09-14（S3）改判据**：原来判的是"有探针却 0 诊断"，而 S3 把最后两条
+ * 真实诊断（`deleteAnnotation` 的 void 双向不兼容）修掉之后，0 诊断成了**目标状态**
+ * —— 旧判据把目标状态误报成故障。现在判的是**金丝雀必须报错**：
+ * 它是一条故意写错的探针（`… : never = <某个 schema 响应类型>`），
+ * 只要编译器真的在看这个文件，它必然报错。
  */
-const spinGuardTripped = probedCount > 0 && diagnostics.length === 0;
+const spinGuardTripped = probedCount > 0 && canaryDiagnostics.length === 0;
 
 /* ================================================================== *
  * 四、结构化 diff（只用于解释，不参与判定）
@@ -889,7 +927,7 @@ const summary = {
   schemaUntyped: count('SCHEMA_UNTYPED'),
   hwDiscardsBody: count('HW_DISCARDS_BODY'),
   noJsonResponse: count('NO_JSON_RESPONSE'),
-  compilerDiagnostics: diagnostics.length,
+  compilerDiagnostics: realDiagnostics.length,
   bodyFindings: rows.reduce((n, r) => n + (r.bodyFindings?.length ?? 0), 0),
   arrayVsEnvelope: rows.reduce(
     (n, r) => n + (r.findings ?? []).filter((f) => f.kind === 'ARRAY_VS_ENVELOPE').length,
@@ -975,8 +1013,9 @@ if (probesTarget) {
 
 if (spinGuardTripped) {
   console.error(
-    `[空转守卫] 生成了 ${probedCount} 个探针但编译器一条诊断都没有 —— ` +
-      `探针文件很可能没被真正检查；此时"全部一致"是假结论。`,
+    `[空转守卫] 生成了 ${probedCount} 个探针，但**故意写错的金丝雀探针一条错都没报**` +
+      `（金丝雀行号 ${canaryLine ?? '未生成'}）—— 探针文件没被编译器真正检查；` +
+      `此时"全部一致"是假结论。`,
   );
   if (!process.argv.includes('--debug') && !probesTarget) {
     throw new Error('空转守卫触发：拒绝输出可能全为 IDENTICAL 的结论');
@@ -985,7 +1024,10 @@ if (spinGuardTripped) {
 
 if (process.argv.includes('--debug')) {
   console.log(`# 探针文件 ${VIRTUAL_FILE}`);
-  console.log(`# 探针行数 ${lines.length} / 探针数 ${probedCount} / 诊断数 ${diagnostics.length}`);
+  console.log(
+    `# 探针行数 ${lines.length} / 探针数 ${probedCount} / 诊断数 ${diagnostics.length}` +
+      `（其中金丝雀 ${canaryDiagnostics.length}，真实 ${realDiagnostics.length}）`,
+  );
   console.log(
     `# virtualText=${virtualText.length} 字节 | program 里的该文件语句数=${
       virtualSource?.statements.length ?? -1

@@ -2,8 +2,8 @@
  * @file 知识点管理 API
  * @description 联合分析、拓展知识点、卡片标记、盲点与掌握度查询
  */
-import { request, type KnowledgeCard } from './client'
-import type { Schema } from './generated/types'
+import { request, type KnowledgeCard } from './client';
+import type { BodyOf, Schema } from './generated/types';
 
 // --- 知识点相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -32,49 +32,76 @@ export type ExtensionQuestionsTriggeredResponse = Schema<'ExtensionQuestionsTrig
 /** 语义关系推断结果（生成自 `SemanticRelationsResponse`） */
 export type SemanticRelationsResponse = Schema<'SemanticRelationsResponse'>;
 
+/**
+ * 标记/取消标记重点、难点的请求体（阶段 5.1 / S3：`PATCH /knowledge/cards/{card_id}/mark`）
+ *
+ * 契约 `CardMarkRequest` 的两个字段都可选且**没有 `default`**（`Optional[bool] = None`），
+ * 所以不需要 `BodyWithDefaults`：省略字段 = 后端不改这个字段
+ * （后端 `mark_card`：`if req.is_key_point is not None: …`）。
+ * 传 `null` 与不传在运行时同样等价。
+ */
+export type MarkCardPayload = BodyOf<'/knowledge/cards/{card_id}/mark', 'patch'>;
+
 /** 触发联合分析 */
 export async function extractCombined(linkId: string): Promise<CombinedExtractResponse> {
-  return request<CombinedExtractResponse>(`/knowledge/links/${linkId}/extract-combined`, { method: 'POST' })
+  return request<CombinedExtractResponse>(`/knowledge/links/${linkId}/extract-combined`, {
+    method: 'POST',
+  });
 }
 
 /** 生成拓展知识点 */
-export async function generateExtension(cardId: string, materialNoteId?: string): Promise<ExtensionGenerateResponse> {
+export async function generateExtension(
+  cardId: string,
+  materialNoteId?: string,
+): Promise<ExtensionGenerateResponse> {
+  // `POST /knowledge/cards/{card_id}/generate-extension` 的请求体：契约只有
+  // `material_note_id?: string | null`；`materialNoteId` 为 undefined 时
+  // JSON.stringify 会省略该字段（保持原有行为）
+  const body: BodyOf<'/knowledge/cards/{card_id}/generate-extension', 'post'> = {
+    material_note_id: materialNoteId,
+  };
   return request<ExtensionGenerateResponse>(`/knowledge/cards/${cardId}/generate-extension`, {
     method: 'POST',
-    body: JSON.stringify({ material_note_id: materialNoteId }),
-  })
+    body: JSON.stringify(body),
+  });
 }
 
 /** 为拓展卡片立即出题（生成自 `ExtensionQuestionsTriggeredResponse`，含 `target_categories`） */
-export async function generateExtensionQuestions(cardId: string): Promise<ExtensionQuestionsTriggeredResponse> {
-  return request(`/knowledge/cards/${cardId}/generate-questions`, { method: 'POST' })
+export async function generateExtensionQuestions(
+  cardId: string,
+): Promise<ExtensionQuestionsTriggeredResponse> {
+  return request(`/knowledge/cards/${cardId}/generate-questions`, { method: 'POST' });
 }
 
-/** 标记/取消标记重点、难点 */
-export async function markCard(cardId: string, data: { is_key_point?: boolean; is_difficulty?: boolean }): Promise<KnowledgeCard> {
+/** 标记/取消标记重点、难点（`data` 的类型由契约派生，见 `MarkCardPayload`） */
+export async function markCard(cardId: string, data: MarkCardPayload): Promise<KnowledgeCard> {
   return request<KnowledgeCard>(`/knowledge/cards/${cardId}/mark`, {
     method: 'PATCH',
     body: JSON.stringify(data),
-  })
+  });
 }
 
 /** 获取盲点列表 */
-export async function getBlindSpots(params: { link_id?: string; material_id?: string; page?: number; page_size?: number } = {}): Promise<BlindSpotListResponse> {
-  const query = new URLSearchParams()
-  if (params.link_id) query.set('link_id', params.link_id)
-  if (params.material_id) query.set('material_id', params.material_id)
-  if (params.page) query.set('page', String(params.page))
-  if (params.page_size) query.set('page_size', String(params.page_size))
-  return request<BlindSpotListResponse>(`/knowledge/blind-spots?${query}`)
+export async function getBlindSpots(
+  params: { link_id?: string; material_id?: string; page?: number; page_size?: number } = {},
+): Promise<BlindSpotListResponse> {
+  const query = new URLSearchParams();
+  if (params.link_id) query.set('link_id', params.link_id);
+  if (params.material_id) query.set('material_id', params.material_id);
+  if (params.page) query.set('page', String(params.page));
+  if (params.page_size) query.set('page_size', String(params.page_size));
+  return request<BlindSpotListResponse>(`/knowledge/blind-spots?${query}`);
 }
 
 /** 获取掌握度概览 */
-export async function getMasteryOverview(params: { page?: number; page_size?: number; card_category?: string } = {}): Promise<MasteryOverviewResponse> {
-  const query = new URLSearchParams()
-  if (params.page) query.set('page', String(params.page))
-  if (params.page_size) query.set('page_size', String(params.page_size))
-  if (params.card_category) query.set('card_category', params.card_category)
-  return request<MasteryOverviewResponse>(`/knowledge/mastery?${query}`)
+export async function getMasteryOverview(
+  params: { page?: number; page_size?: number; card_category?: string } = {},
+): Promise<MasteryOverviewResponse> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.page_size) query.set('page_size', String(params.page_size));
+  if (params.card_category) query.set('card_category', params.card_category);
+  return request<MasteryOverviewResponse>(`/knowledge/mastery?${query}`);
 }
 
 /**
@@ -84,5 +111,5 @@ export async function getMasteryOverview(params: { page?: number; page_size?: nu
  * P1 把后端的 `Dict[str, Any]` 换成了真实模型，切换后它不再靠手写维护。
  */
 export async function suggestSemanticRelations(): Promise<SemanticRelationsResponse> {
-  return request('/graph/suggest-semantic', { method: 'POST' })
+  return request('/graph/suggest-semantic', { method: 'POST' });
 }

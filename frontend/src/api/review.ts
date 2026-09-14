@@ -2,8 +2,8 @@
  * @file 复习调度 API
  * @description 到期题目、提交答案、复习统计与历史、快速复习、复习提醒。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
 
 // --- 复习相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -48,6 +48,24 @@ export type GradingDetail = Schema<'GradingDetail'>;
 /** 提交答案响应（生成自 `SubmitAnswerResponse`） */
 export type SubmitAnswerResponse = Schema<'SubmitAnswerResponse'>;
 
+/**
+ * 提交答案的请求体（阶段 5.1 / S3：由契约派生，**两个端点共用**）
+ *
+ * `POST /review/submit` 与 `POST /review/quick/{note_id}/submit` 在后端收的
+ * 是同一个模型 `SubmitAnswerRequest`，所以这里共用一份类型。
+ *
+ * 只有 `quiz_id` / `user_answer` 在契约里是 required；`time_spent_ms`（后端默认 0）与
+ * `use_semantic_grading`（后端默认 false）带 `default`，`BodyWithDefaults` 把它们放回可选。
+ * 于是"省略"在类型上合法 —— 运行时由调用点决定发不发：`time_spent_ms` 总是按形参
+ * 取值发送，`use_semantic_grading` 只在为 true 时展开，绝不由前端抄一份默认值过去
+ * （后端改默认值时前端不会静默覆盖它）。
+ */
+export type SubmitAnswerPayload = BodyWithDefaults<
+  '/review/submit',
+  'post',
+  'time_spent_ms' | 'use_semantic_grading'
+>;
+
 /** 复习统计（生成自 `ReviewStatsResponse`） */
 export type ReviewStats = Schema<'ReviewStatsResponse'>;
 
@@ -58,7 +76,7 @@ export type ReviewHistoryItem = Schema<'ReviewHistoryItem'>;
 export type ReviewHistoryResponse = Schema<'ReviewHistoryResponse'>;
 
 /** 快速复习题目（复用 DueQuiz 类型） */
-export type QuickQuiz = DueQuiz
+export type QuickQuiz = DueQuiz;
 
 /**
  * 快速复习响应
@@ -98,15 +116,19 @@ export async function submitAnswer(
   selfRating?: number,
   useSemanticGrading = false,
 ): Promise<SubmitAnswerResponse> {
+  // `POST /review/submit` 的请求体：形状由契约派生（见 SubmitAnswerPayload）。
+  // 运行时取值逻辑一字未改：`time_spent_ms` 总是发送（缺省时是形参默认值 0），
+  // `self_rating` / `use_semantic_grading` 仍然靠条件展开省略
+  const body: SubmitAnswerPayload = {
+    quiz_id: quizId,
+    user_answer: userAnswer,
+    time_spent_ms: timeSpentMs,
+    ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+    ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
+  };
   return request<SubmitAnswerResponse>('/review/submit', {
     method: 'POST',
-    body: JSON.stringify({
-      quiz_id: quizId,
-      user_answer: userAnswer,
-      time_spent_ms: timeSpentMs,
-      ...(selfRating === undefined ? {} : { self_rating: selfRating }),
-      ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -157,15 +179,18 @@ export async function submitQuickReviewAnswer(
   selfRating?: number,
   useSemanticGrading = false,
 ): Promise<SubmitAnswerResponse> {
+  // `POST /review/quick/{note_id}/submit` 的请求体：与 submitAnswer 同一个后端模型
+  // （SubmitAnswerRequest），所以共用 SubmitAnswerPayload
+  const body: SubmitAnswerPayload = {
+    quiz_id: quizId,
+    user_answer: userAnswer,
+    time_spent_ms: timeSpentMs,
+    ...(selfRating === undefined ? {} : { self_rating: selfRating }),
+    ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
+  };
   return request<SubmitAnswerResponse>(`/review/quick/${noteId}/submit`, {
     method: 'POST',
-    body: JSON.stringify({
-      quiz_id: quizId,
-      user_answer: userAnswer,
-      time_spent_ms: timeSpentMs,
-      ...(selfRating === undefined ? {} : { self_rating: selfRating }),
-      ...(useSemanticGrading ? { use_semantic_grading: true } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -234,12 +259,16 @@ export async function submitCardReview(
   userAnswer = '',
   timeSpentMs = 0,
 ): Promise<CardReviewSubmitResponse> {
+  // `POST /review/cards/{card_id}/submit` 的请求体：三个字段前端**总是**发送
+  // （`user_answer` / `time_spent_ms` 虽有默认值，但这里显式给出取值），
+  // 所以直接用契约类型，不经过 BodyWithDefaults
+  const body: BodyOf<'/review/cards/{card_id}/submit', 'post'> = {
+    self_rating: selfRating,
+    user_answer: userAnswer,
+    time_spent_ms: timeSpentMs,
+  };
   return request<CardReviewSubmitResponse>(`/review/cards/${cardId}/submit`, {
     method: 'POST',
-    body: JSON.stringify({
-      self_rating: selfRating,
-      user_answer: userAnswer,
-      time_spent_ms: timeSpentMs,
-    }),
+    body: JSON.stringify(body),
   });
 }

@@ -2,8 +2,8 @@
  * @file 知识图谱 API
  * @description 图谱节点/边、建议关系、关系确认/拒绝与子图查询。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { BodyOf, Schema } from './generated/types';
 
 // --- 图谱相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -88,9 +88,11 @@ export type GraphBatchOperationResponse = Schema<'GraphBatchOperationResponse'>;
  * @param relationId - 建议关系 ID
  */
 export async function confirmRelation(relationId: string): Promise<GraphRelationOperationResponse> {
+  // `POST /graph/confirm` 的请求体：契约 `{ relation_id: string }`
+  const body: BodyOf<'/graph/confirm', 'post'> = { relation_id: relationId };
   return request<GraphRelationOperationResponse>('/graph/confirm', {
     method: 'POST',
-    body: JSON.stringify({ relation_id: relationId }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -101,9 +103,11 @@ export async function confirmRelation(relationId: string): Promise<GraphRelation
  * @param relationId - 建议关系 ID
  */
 export async function rejectRelation(relationId: string): Promise<GraphRelationOperationResponse> {
+  // `POST /graph/reject` 的请求体：契约 `{ relation_id: string }`
+  const body: BodyOf<'/graph/reject', 'post'> = { relation_id: relationId };
   return request<GraphRelationOperationResponse>('/graph/reject', {
     method: 'POST',
-    body: JSON.stringify({ relation_id: relationId }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -115,10 +119,21 @@ export async function rejectRelation(relationId: string): Promise<GraphRelationO
  * @param cardId2 - 卡片 2 ID
  * @param relationType - 关系类型
  */
-export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<GraphRelationOperationResponse> {
+export async function createRelation(
+  cardId1: string,
+  cardId2: string,
+  relationType: string,
+): Promise<GraphRelationOperationResponse> {
+  // `POST /graph/relation` 的请求体：契约三个字段全必填，且 `relation_type` 在契约里
+  // 就是 `string`（后端模型没写成枚举），这里不额外收窄
+  const body: BodyOf<'/graph/relation', 'post'> = {
+    card_id_1: cardId1,
+    card_id_2: cardId2,
+    relation_type: relationType,
+  };
   return request<GraphRelationOperationResponse>('/graph/relation', {
     method: 'POST',
-    body: JSON.stringify({ card_id_1: cardId1, card_id_2: cardId2, relation_type: relationType }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -185,10 +200,14 @@ export async function getNodeSubgraph(nodeId: string): Promise<NodeSubgraph> {
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchConfirmRelations(relationIds: string[]): Promise<GraphBatchOperationResponse> {
+export async function batchConfirmRelations(
+  relationIds: string[],
+): Promise<GraphBatchOperationResponse> {
+  // `POST /graph/batch-confirm` 的请求体：契约 `{ relation_ids: string[] }`
+  const body: BodyOf<'/graph/batch-confirm', 'post'> = { relation_ids: relationIds };
   return request<GraphBatchOperationResponse>('/graph/batch-confirm', {
     method: 'POST',
-    body: JSON.stringify({ relation_ids: relationIds }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -197,9 +216,13 @@ export async function batchConfirmRelations(relationIds: string[]): Promise<Grap
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchRejectRelations(relationIds: string[]): Promise<GraphBatchOperationResponse> {
+export async function batchRejectRelations(
+  relationIds: string[],
+): Promise<GraphBatchOperationResponse> {
+  // `POST /graph/batch-reject` 的请求体：契约 `{ relation_ids: string[] }`
+  const body: BodyOf<'/graph/batch-reject', 'post'> = { relation_ids: relationIds };
   return request<GraphBatchOperationResponse>('/graph/batch-reject', {
     method: 'POST',
-    body: JSON.stringify({ relation_ids: relationIds }),
+    body: JSON.stringify(body),
   });
 }

@@ -67,6 +67,30 @@ jobs:
         # 直接对真实数据动手的代码保持同等质量门槛。
         run: python -m ruff check scripts
 
+      - name: "OpenAPI schema 与代码一致（阶段 5.1 的 P4）"
+        # ── 这一条防的是什么 ────────────────────────────────────────────────
+        # 前端类型（`frontend/src/api/generated/schema.ts`）是从
+        # `backend/openapi.json` 生成的，而那份 JSON 又是从**当前代码**生成的。
+        # 少了这一步，后端改了 `response_model=` / 路由 / 字段却忘了重新生成时，
+        # 前端会继续按**过期契约**编译并全绿 —— 阶段 5.1 报告里把这种状态叫
+        # "在'后端已改、schema 未更新'的窗口里继续绿"。
+        #
+        # 为什么放在这里（而不是一个独立 job）：它只需要 Python + 已装的依赖，
+        # 与 pytest 同一个环境；放在 lint 之后、pytest 之前，是为了**快速失败** ——
+        # 契约过期比测试失败更早、更便宜地被发现。
+        #
+        # 为什么它一定能跑起来：脚本只做 `from app.main import app` 再调
+        # `app.openapi()`（纯内存，不连库、不起服务、不触发 lifespan），
+        # 而同一个环境里的 pytest 本来就导入 `app.main`。
+        # 脚本自带 `--check`：一致打印摘要（含 sha256 前 12 位）退出 0，
+        # 不一致则打印"哪一侧是当前代码"并退出 1。
+        #
+        # ⚠️ 若这一条在 CI 上失败，先看报错类型：写着"与当前代码不一致"=
+        # 真的忘了重新生成（在 backend/ 下跑 `python scripts/dump_openapi.py`）；
+        # 若是 import/配置类报错，那是**环境**问题，不是契约漂移 —— 不要用
+        # `|| true` 掩盖，两者必须能分开（见 5.1 报告 §14.11）。
+        run: python scripts/dump_openapi.py --check
+
       - name: Ruff format check
         run: python -m ruff format --check app tests
         continue-on-error: true
@@ -112,6 +136,22 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      - name: "生成类型与 openapi.json 同步（阶段 5.1 的 P4，前端一半）"
+        # 与后端 job 里那条 `dump_openapi.py --check` 配对，两条合起来才闭环：
+        #   - 后端那条：代码 → openapi.json（防"改了后端忘了生成 schema"）；
+        #   - 这一条：openapi.json → schema.ts（防"生成了 schema 忘了生成类型"）。
+        # 只做后端那一半的话，`schema.ts` 可以在 `openapi.json` 已经变的情况下
+        # 继续是旧的，而前端照样编译通过。
+        #
+        # 判据是**幂等**：重跑 `gen:api`（脚本内已含 prettier --write）之后，
+        # `schema.ts` 必须一个字节都不变。不写"比 hash 白名单"那种东西 ——
+        # 幂等是生成器自己的性质，直接测它即可。
+        #
+        # 本机实测：`npm run gen:api` 后 `git diff --exit-code` 退出 0。
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/generated/schema.ts
 
       - name: Prettier check
         run: npm run format:check

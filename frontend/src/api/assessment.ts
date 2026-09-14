@@ -2,8 +2,8 @@
  * @file 学习评估 API
  * @description 笔记比对评估、开放性问题生成、作答评判与评估历史。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { BodyOf, Schema } from './generated/types';
 
 // --- 评估相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -48,13 +48,18 @@ export type AssessmentHistoryItem = Schema<'AssessmentHistoryItem'>;
  * @param personalNoteIds - 个人笔记 ID 列表
  * @returns 评估结果
  */
-export async function compareAssessment(materialNoteIds: string[], personalNoteIds: string[]): Promise<AssessmentResult> {
+export async function compareAssessment(
+  materialNoteIds: string[],
+  personalNoteIds: string[],
+): Promise<AssessmentResult> {
+  // 请求体由契约派生：`POST /api/assessment/compare`（`CompareRequest`：两个 ID 列表都必填）
+  const body: BodyOf<'/assessment/compare', 'post'> = {
+    material_note_ids: materialNoteIds,
+    personal_note_ids: personalNoteIds,
+  };
   return request<AssessmentResult>('/assessment/compare', {
     method: 'POST',
-    body: JSON.stringify({
-      material_note_ids: materialNoteIds,
-      personal_note_ids: personalNoteIds,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -65,8 +70,12 @@ export async function compareAssessment(materialNoteIds: string[], personalNoteI
  * @param materialNoteIds - 学习资料笔记 ID 列表
  * @returns 评估结果（含问题列表）
  */
-export async function generateQuiz(materialNoteIds: string[], personalNoteId?: string): Promise<AssessmentResult> {
-  const body: { material_note_ids: string[]; personal_note_id?: string } = { material_note_ids: materialNoteIds };
+export async function generateQuiz(
+  materialNoteIds: string[],
+  personalNoteId?: string,
+): Promise<AssessmentResult> {
+  // 请求体由契约派生：`POST /api/assessment/generate-quiz`（`QuizGenerateRequest`：`material_note_ids` 必填，`personal_note_id` 可空）
+  const body: BodyOf<'/assessment/generate-quiz', 'post'> = { material_note_ids: materialNoteIds };
   if (personalNoteId) body.personal_note_id = personalNoteId;
   return request<AssessmentResult>('/assessment/generate-quiz', {
     method: 'POST',
@@ -81,13 +90,21 @@ export async function generateQuiz(materialNoteIds: string[], personalNoteId?: s
  * @param answers - 答案列表
  * @returns 评估结果（含评判结果）
  */
-export async function submitQuizAnswers(assessmentId: string, answers: Array<{ question_index: number; answer: string }>): Promise<AssessmentResult> {
+export async function submitQuizAnswers(
+  assessmentId: string,
+  answers: Array<{ question_index: number; answer: string }>,
+): Promise<AssessmentResult> {
+  // 请求体对应 `POST /api/assessment/submit-answer`（`AnswerSubmitRequest`）：
+  // 内层 `answers` 在契约里是 `{ [key: string]: unknown }[]`（后端把结构化答案塞进 JSON 列），
+  // 前端**刻意保留更窄的手写类型** `{ question_index: number; answer: string }[]`（它更有用）。
+  // `satisfies` 只做"与契约相容"的检查，不改变 `body` 的推断类型 —— 不是把类型放宽成契约的宽类型。
+  const body = { assessment_id: assessmentId, answers } satisfies BodyOf<
+    '/assessment/submit-answer',
+    'post'
+  >;
   return request<AssessmentResult>('/assessment/submit-answer', {
     method: 'POST',
-    body: JSON.stringify({
-      assessment_id: assessmentId,
-      answers,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
