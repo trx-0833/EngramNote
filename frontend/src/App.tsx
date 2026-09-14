@@ -60,7 +60,10 @@ function NotFound() {
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
         页面不存在，可能是链接已失效。
       </p>
-      <a className="btn btn-primary" href="/">返回首页</a>
+      {/* 按钮造型的链接：`base.css` 现在给所有 <a> 加了默认下划线
+          （正文链接必须能与正文区分，见 a11y-audit F-13/F-26），
+          这里显式关掉 —— 它长得是按钮，不是正文里的链接。 */}
+      <a className="btn btn-primary" href="/" style={{ textDecoration: 'none' }}>返回首页</a>
     </div>
   )
 }

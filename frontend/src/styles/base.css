@@ -20,12 +20,22 @@
 
   --color-text: #1a1a2e;
   --color-text-secondary: #5a5a7a;
-  --color-text-tertiary: #9a9ab0;
+  /* 三级文字（说明性小字）。原值 #9a9ab0 在白底上只有 2.75:1，
+     而它被用在 11.2px 的侧边栏分组标题、图谱面板标题、徽章等处
+     （小字要求 4.5:1）—— axe 在 9 个扫描场景里 8 个都报了它
+     （a11y-audit F-04/F-05）。压深到 #6f6f8a：白底 4.86:1、--color-bg 上 4.62:1，
+     色相与"二级/三级"的层次关系都不变，只是深了一档。
+     该令牌共 16 处引用（含 .sidebar-collapse-btn 28×28 图标按钮）——
+     改动覆盖面正是它被选中的理由，回归风险由 npm run a11y 的 9 个场景守。 */
+  --color-text-tertiary: #6f6f8a;
 
   --color-border: #e8e6e1;
   --color-border-light: #f0eee9;
 
-  --color-success: #2d8a56;
+  /* 成功色。原值 #2d8a56 在白底 4.3:1、--color-bg (#faf9f7) 上 4.08:1，
+     而它标的是 12.8~14px 的状态徽章文字（要求 4.5:1，a11y-audit F-06）。
+     压深到 #25714a：白底 5.93:1、--color-bg 上 5.64:1，绿色语义不变。 */
+  --color-success: #25714a;
   --color-success-light: rgba(45, 138, 86, 0.1);
   --color-warning: #c4860a;
   --color-warning-light: rgba(196, 134, 10, 0.1);
@@ -117,9 +127,28 @@ body {
   min-height: 100vh;
 }
 
+/**
+ * 链接：颜色之外还必须**有下划线**。
+ *
+ * 原先是 `text-decoration: none` —— 结果正文里的链接与正文几乎同色
+ * （#0f3460 vs #1a1a2e，只有 1.36:1；灰字旁 1.89:1），不靠颜色根本看不出
+ * 哪里可以点，色觉障碍用户则完全看不出（WCAG 1.4.1"不只靠颜色传达信息"）。
+ * axe 的 `link-in-text-block` 在笔记详情与卡片复习两页报了它
+ * （a11y-audit F-13/F-26，要求链接与周围文字 ≥ 3:1 **或**有下划线一类区分手段）。
+ *
+ * 为什么选下划线而不是把链接色改成与正文 ≥3:1 的另一种深色：
+ * 应用的主色 #0f3460 与正文 #1a1a2e 是**刻意的同族墨色**（"墨韵书香"），
+ * 要在保持这个观感的前提下凑出 3:1 就得把链接推到另一个色系，
+ * 那是重新设计配色（5.6 的活），而不是修一处可访问性。下划线不改变任何色值。
+ *
+ * 之所以写在全局：本项目**一共只有 11 处 `<a>` / `<Link>`**（含导航与按钮造型的），
+ * 逐个容器去补既是重复劳动、也必然漏掉将来新增的那一处。
+ * 按钮造型与整块可点的链接在外观上并不需要下划线，逐个在 tsx 里
+ * `style={{ textDecoration: 'none' }}` 关掉 —— 例外写在看得见的地方，而不是靠猜。
+ */
 a {
   color: var(--color-primary);
-  text-decoration: none;
+  text-decoration: underline;
   transition: color 0.2s ease;
 }
 

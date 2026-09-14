@@ -96,9 +96,14 @@ export default function GraphToolbar({
       </div>
 
       <div className="graph-toolbar-right">
-        {/* 卡片类型过滤器 */}
+        {/* 卡片类型过滤器。
+            可访问名：这里刻意用 `aria-label` 而不是可见的 `<label>` ——
+            工具栏是横向排布的一行控件，插入一个可见标签会把搜索框、过滤器、
+            图例挤到第二行（布局改动，超出本轮范围）。axe 的 `select-name`
+            接受 aria-label；名字是否"念出来清楚"属于人工复核（a11y-audit §4.2）。 */}
         <select
           className="graph-filter-select"
+          aria-label="按卡片类型筛选"
           value={filterCardType || ''}
           onChange={(e) => onFilterCardTypeChange(e.target.value || null)}
         >

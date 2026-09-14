@@ -137,152 +137,59 @@ interface RegisteredRule {
 }
 
 /**
- * 侧边栏在每个已登录页面上都渲染，但 axe **按规则聚合**返回 ——
- * 所以「侧边栏标题对比度」和「状态徽章对比度」在同一个页面上会**合并成
- * 一条 `color-contrast` 结果**。登记表必须与实测粒度一致：
- * 一个（场景，规则）一条，`reason` 里把该页命中的**每一种成因**都写清。
- * 下面这份常量只用来记录"各页侧边栏与徽章各有多少个节点"，供 reason 复用。
+ * ## 5.9 修复轮之后：登记表从 30 条（68 个节点）降到 4 条（4 个节点）
+ *
+ * 修掉的每一类都对应文档 §3 的一条发现，逐条证据见该文件；
+ * 这里只记"还剩什么、为什么还留着"：
+ *
+ * | 剩余 id | 规则 | 场景 | 为什么还在 |
+ * |---|---|---|---|
+ * | F-07 / F-22 | `heading-order` | dashboard（桌面 + 移动） | 两栏区块没有区块级标题，**需要人决定它们叫什么** |
+ * | F-08 | `heading-order` | note-detail | 标题层级来自**用户自己的 Markdown 内容** |
+ * | F-20 | `heading-order` | projects | 同 F-07 的一类 |
+ *
+ * 也就是说：**剩下 4 个节点全是同一个待人工决定的问题**（P3 的 (b) 类），
+ * 不是"还没修"。它们全部维持 1 个节点的上限 —— 那是最紧的写法：
+ * 任何一个节点数增加都会当场失败。
+ *
+ * 曾经用来说明"侧边栏与状态徽章各有多少节点"的 `SHELL_SIDEBAR_NODES` /
+ * `SHELL_STATUS_NODES` 两个常量随本轮一起删除：那一整类 `color-contrast`
+ * （侧边栏分组标题 / 状态徽章 / 图谱面板标题 / 自评四档 / 笔记项目标签 /
+ * 笔记角色下拉框）在 9 个场景里**一个节点都不剩**。历史计数见文档 §2。
  */
-const SHELL_SIDEBAR_NODES = 3
-const SHELL_STATUS_NODES = 2
 
 const REGISTRY: RegisteredRule[] = [
-  // ── 登录页（未认证入口）──────────────────────────────────────────────
-  {
-    id: 'F-01',
-    rule: 'landmark-one-main',
-    scene: 'login',
-    impact: 'moderate',
-    nodes: 1,
-    reason: '登录页没有 <main> 地标（最外层是 div，见 src/pages/Auth.module.css）。屏幕阅读器无法一跳直达主内容。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-02',
-    rule: 'region',
-    scene: 'login',
-    impact: 'moderate',
-    nodes: 6,
-    reason: '登录页所有内容（h1、两个 label、两个 input、页脚 p）都不在任何 landmark 里 —— 与 F-01 同源。归属：5.9 修复轮。',
-  },
-  {
-    // 与 login 是**同一页面的另一个状态**（提交了错误凭据），问题同源，
-    // 但必须单独登记：登记表按（场景，规则）匹配，不做任何继承。
-    id: 'F-01b',
-    rule: 'landmark-one-main',
-    scene: 'login-error',
-    impact: 'moderate',
-    nodes: 1,
-    reason: '同 F-01：登录失败态仍没有 <main> 地标。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-02b',
-    rule: 'region',
-    scene: 'login-error',
-    impact: 'moderate',
-    nodes: 6,
-    reason: '同 F-02：登录失败态的所有内容（含错误提示所在的表单区）依旧不在任何 landmark 里。归属：5.9 修复轮。',
-  },
-
   // ── 仪表盘 ──────────────────────────────────────────────────────────
-  {
-    id: 'F-03',
-    rule: 'aria-allowed-role',
-    scene: 'dashboard',
-    impact: 'minor',
-    nodes: 2,
-    reason: '<article role="button"> —— ARIA 不允许 article 使用 button 角色（「最近笔记」两张卡片）。归属：5.9 修复轮（Dashboard.tsx）。',
-  },
   {
     id: 'F-07',
     rule: 'heading-order',
     scene: 'dashboard',
     impact: 'moderate',
     nodes: 1,
-    reason: 'h1「欢迎使用 EngramNote」之后直接出现卡片里的 h3（中间没有 h2）：「今日学习目标」「每日推荐任务」「今日待复习」「薄弱点」。归属：5.9 修复轮（Dashboard.tsx 的卡片标题改用 h2）。',
-  },
-  {
-    id: 'F-09',
-    rule: 'nested-interactive',
-    scene: 'dashboard',
-    impact: 'serious',
-    nodes: 1,
-    reason: '「今日待复习」卡片是 div[role=button]，内部又有一个 <button>开始复习</button> —— 按钮里嵌按钮，屏幕阅读器与键盘都会异常。归属：5.9 修复轮（Dashboard.tsx:289-304）。',
-  },
-  {
-    id: 'F-04',
-    rule: 'color-contrast',
-    scene: 'dashboard',
-    impact: 'serious',
-    nodes: 3 + SHELL_STATUS_NODES,
-    reason: `两种成因合并成一条 axe 结果：侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题（--color-text-tertiary #9a9ab0，白底 2.75:1）+ ${SHELL_STATUS_NODES} 个状态徽章（--color-success #2d8a56，白底 4.3:1）。均为 11.2~12.8px 小字，要求 4.5:1。归属：5.6 设计令牌 / 5.9 修复轮。`,
+    reason:
+      'h1「欢迎使用 EngramNote」之后直接出现卡片里的 h3，axe 报**第一个**跳级节点（「今日学习目标」）。' +
+      '同页的卡片标题还有「每日推荐任务」「今日待复习」「薄弱点」。' +
+      '判定为 **(b) 需要人工决定**（docs/a11y-audit.md §3 的 P3）。' +
+      '为什么本修轮没有顺手改成 h2：这一页的卡片是**两栏区块**（`Dashboard.module.css` 的 `.dashboardTwoCol`：' +
+      '今日学习目标 + 每日推荐任务 / 今日待复习 + 薄弱点），而这两组区块**没有区块级标题**，' +
+      '所以 h1 → 卡片标题之间本来就缺一级；把卡片标题降级成 h2 只能消掉报警，' +
+      '真正的结构问题（四个卡片在这一页上没有归属哪个区块）原样留着。' +
+      '要么给两组各加一个区块标题（"今日进度""需要关注"之类 —— 起名是产品/设计决定，' +
+      '而且会让仪表盘多出两行标题），要么接受当前层级。' +
+      '上限维持 1：多一个节点就失败。归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
   },
 
-  // ── 移动端视口下的仪表盘（同一份 DOM，另加移动端汉堡按钮）─────────────
-  {
-    id: 'F-21',
-    rule: 'aria-allowed-role',
-    scene: 'dashboard-mobile',
-    impact: 'minor',
-    nodes: 2,
-    reason: '移动端视口下与桌面是同一份 DOM（<article role="button">），即 F-03 在窄屏上的复现。归属：5.9 修复轮（Dashboard.tsx）。',
-  },
+  // ── 移动端视口下的仪表盘（同一份 DOM，与 F-07 同源）───────────────
   {
     id: 'F-22',
     rule: 'heading-order',
     scene: 'dashboard-mobile',
     impact: 'moderate',
     nodes: 1,
-    reason: '同 F-07 在窄屏上的复现（h1 → h3 跳级）。归属：5.9 修复轮（Dashboard.tsx）。',
-  },
-  {
-    id: 'F-23',
-    rule: 'nested-interactive',
-    scene: 'dashboard-mobile',
-    impact: 'serious',
-    nodes: 1,
-    reason: '同 F-09 在窄屏上的复现（div[role=button] 里嵌 <button>）。归属：5.9 修复轮（Dashboard.tsx:289-304）。',
-  },
-  {
-    id: 'F-24',
-    rule: 'color-contrast',
-    scene: 'dashboard-mobile',
-    impact: 'serious',
-    nodes: SHELL_STATUS_NODES,
-    reason: `窄屏下侧边栏被收进抽屉（分组标题不在可见 DOM 里），可见的只剩 ${SHELL_STATUS_NODES} 个状态徽章（--color-success，白底 4.3:1）。归属：5.6 / 5.9。`,
-  },
-
-  // ── 笔记列表 ────────────────────────────────────────────────────────
-  {
-    id: 'F-16',
-    rule: 'aria-allowed-role',
-    scene: 'notes-list',
-    impact: 'minor',
-    nodes: 2,
-    reason: '笔记卡片同样写作 <article role="button">（NotesList.tsx:212-219），与 F-03 同一类写法。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-17',
-    rule: 'nested-interactive',
-    scene: 'notes-list',
-    impact: 'serious',
-    nodes: 2,
-    reason: '笔记卡片本身是 role=button，卡片里又有可聚焦的按钮（删除/重试），共 2 张卡片各命中一次。归属：5.9 修复轮 —— 与 F-09 同源，修法应当统一（卡片不用 role=button，改为内部真链接 + 独立操作按钮）。',
-  },
-  {
-    id: 'F-18',
-    rule: 'page-has-heading-one',
-    scene: 'notes-list',
-    impact: 'moderate',
-    nodes: 1,
-    reason: '笔记列表页没有 h1（页面上最高级标题是卡片里的 h3）。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-25',
-    rule: 'color-contrast',
-    scene: 'notes-list',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES + 3,
-    reason: `三种成因合并成一条 axe 结果：侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题 + 3 个状态徽章（--color-success）+ 笔记卡片上的项目标签（内联样式 background: var(--color-primary-soft,#eef2ff) / color: var(--color-primary,#2563eb)，NotesList.tsx:229）。归属：5.6 / 5.9。`,
+    reason:
+      '同 F-07 在窄屏（375×667）上的复现，同样是 1 个节点 —— 窄屏把两栏收成一列，' +
+      '标题层级与桌面完全一致，所以修法也必须是同一个决定。' +
+      '归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
   },
 
   // ── 笔记详情 ────────────────────────────────────────────────────────
@@ -292,100 +199,10 @@ const REGISTRY: RegisteredRule[] = [
     scene: 'note-detail',
     impact: 'moderate',
     nodes: 1,
-    reason: 'Markdown 正文里的 h4 出现在页面 h1/h2 之后但没有 h3 —— 层级来自**用户内容本身**，属于"内容决定的结构"。仍记录：修法要先决定是否在渲染时归一化标题级别（见文档 §4 的取舍）。归属：5.9 修复轮评估。',
-  },
-  {
-    id: 'F-11',
-    rule: 'select-name',
-    scene: 'note-detail',
-    impact: 'critical',
-    nodes: 1,
-    reason: '笔记详情的「笔记角色」<select> 没有 label/aria-label（NoteDetailHeader.tsx:137）。归属：5.9 修复轮 —— 一行 aria-label 可修。',
-  },
-  {
-    id: 'F-12',
-    rule: 'color-contrast',
-    scene: 'note-detail',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES + 1 + 1,
-    reason: `三种成因合并成一条 axe 结果：侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题 + .status-cleaned（--color-success 在 --color-bg 上 4.08:1）+ 「笔记角色」下拉框（白字 #fff 配 #3b82f6 底 = 3.67:1，NoteDetailHeader.tsx:147-156 的内联样式）。归属：5.6 / 5.9。`,
-  },
-  {
-    id: 'F-13',
-    rule: 'link-in-text-block',
-    scene: 'note-detail',
-    impact: 'serious',
-    nodes: 1,
-    reason: 'Markdown 正文里的链接既没有下划线（base.css:120-124 的 a{text-decoration:none}），与周围文字的对比也只有 1.36:1（要求 3:1）—— 不靠颜色分辨不出这是链接。归属：5.9 修复轮（markdown 正文链接样式）。',
-  },
-
-  // ── 卡片复习 ────────────────────────────────────────────────────────
-  {
-    id: 'F-14',
-    rule: 'page-has-heading-one',
-    scene: 'card-review-front',
-    impact: 'moderate',
-    nodes: 1,
-    reason: '卡片复习页没有任何 h1（ReviewProgress 用 div + 文本，"卡片复习"只是普通文本）。归属：5.9 修复轮。',
-  },
-  {
-    // 正反两面都有：它来自「原文语境」组件的入口链接，未展开时也在
-    id: 'F-26',
-    rule: 'link-in-text-block',
-    scene: 'card-review-front',
-    impact: 'serious',
-    nodes: 1,
-    reason: '链接既无下划线、与周围文字对比也只有 1.89:1（SourceContext.tsx:120 的「在笔记中查看完整原文 →」）。归属：5.9 修复轮（链接样式）。',
-  },
-  {
-    id: 'F-19b',
-    rule: 'color-contrast',
-    scene: 'card-review-front',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES,
-    reason: `翻面前页面上只有侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题命中（自评按钮尚未渲染），成因同 F-04。归属：5.6 / 5.9。`,
-  },
-  {
-    id: 'F-15',
-    rule: 'page-has-heading-one',
-    scene: 'card-review-back',
-    impact: 'moderate',
-    nodes: 1,
-    reason: '同 F-14，翻面后状态同样没有 h1。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-19',
-    rule: 'color-contrast',
-    scene: 'card-review-back',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES + 2,
-    reason: `两种成因合并成一条 axe 结果：侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题（F-04）+ 自评四档的强调色（来自 utils/labels.ts 的 selfRatingOptions：「勉强想起」#c9a959 白底 2.25:1、「想起来了」#2d8a56 白底 4.3:1）。**同一组件也用在答题复习页（Review）**，那里本轮未扫（见文档 §5）。归属：5.9 修复轮（改 labels.ts 两个色值）。`,
-  },
-  {
-    id: 'F-26b',
-    rule: 'link-in-text-block',
-    scene: 'card-review-back',
-    impact: 'serious',
-    nodes: 1,
-    reason: '同 F-26（同一链接在翻面后的状态）。归属：5.9 修复轮。',
-  },
-
-  // ── 知识图谱 ────────────────────────────────────────────────────────
-  {
-    id: 'F-10',
-    rule: 'select-name',
-    scene: 'knowledge-graph',
-    impact: 'critical',
-    nodes: 1,
-    reason: '图谱的卡片类型过滤器 <select> 没有 label/aria-label（GraphToolbar.tsx:100）。归属：5.9 修复轮 —— 一行 aria-label 可修。',
-  },
-  {
-    id: 'F-05',
-    rule: 'color-contrast',
-    scene: 'knowledge-graph',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES + 1,
-    reason: `两种成因合并成一条 axe 结果：侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题 + 图谱侧栏面板标题 .graph-panel-title（同一令牌 --color-text-tertiary，graph.css:186-195，白底 2.75:1）。归属：5.6 / 5.9。`,
+    reason:
+      'Markdown 正文里的 h4（清洗统计区）出现在页面 h1/h2 之后但没有 h3 —— 层级来自**用户内容本身**，属于"内容决定的结构"。' +
+      '判定为 **(b) 需要人工决定**（docs/a11y-audit.md §3 的 P3）：可选做法是渲染时归一化标题级别（h1→h2 整体下沉）或接受它；' +
+      '**不要**为了消警告去改用户内容。归属：需要设计决定，不是 5.9 修复轮。',
   },
 
   // ── 项目页 ──────────────────────────────────────────────────────────
@@ -395,15 +212,10 @@ const REGISTRY: RegisteredRule[] = [
     scene: 'projects',
     impact: 'moderate',
     nodes: 1,
-    reason: '项目页 h1「项目」之后，卡片区里的 h3 之前没有 h2（与仪表盘同一类）。归属：5.9 修复轮。',
-  },
-  {
-    id: 'F-27',
-    rule: 'color-contrast',
-    scene: 'projects',
-    impact: 'serious',
-    nodes: SHELL_SIDEBAR_NODES,
-    reason: `仅侧边栏 ${SHELL_SIDEBAR_NODES} 个分组标题（--color-text-tertiary，白底 2.75:1）。归属：5.6 / 5.9。`,
+    reason:
+      '项目页 h1「项目」之后，卡片区里的 h3 之前没有 h2（与仪表盘的 F-07 同一类、同一个待决定的问题：' +
+      '卡片标题的级别是视觉层次的一部分，而卡片区没有区块标题）。' +
+      '归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
   },
 ]
 

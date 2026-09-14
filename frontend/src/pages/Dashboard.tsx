@@ -9,7 +9,7 @@
  * 5. 最近笔记列表
  */
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   getNotes, getReviewStats, getDailyReport, getWeeklyTrend, getWeakPoints,
   getGoals, getDailyPlan,
@@ -268,14 +268,15 @@ export default function Dashboard() {
 
       {/* 复习提醒 + 薄弱点 */}
       <div className={styles.dashboardTwoCol}>
-        {/* 待复习卡片 */}
+        {/* 待复习卡片。
+            ⚠️ 这里**没有** role="button"，容器也不再可聚焦 —— 这不是漏写：
+            原来外层是 `div[role="button"][tabindex="0"]` 而里面又有一个真
+            `<button>开始复习</button>`，axe 判 nested-interactive（F-09），
+            且外层只监听 Enter、不监听 Space，与 role="button" 的约定不符。
+            改法与已修掉的「Sidebar 按钮里嵌按钮」同形：**一张卡片一个控件**，
+            卡片本身只是盒子，可访问名与行为都长在按钮上。 */}
         {reviewStats && reviewStats.due_count > 0 && (
-          <div
-            className={`card card-accent-left ${styles.dashboardReviewCard}`}
-            onClick={() => navigate('/review')}
-            role="button"
-            tabIndex={0}
-          >
+          <div className={`card card-accent-left ${styles.dashboardReviewCard}`}>
             <div>
               <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
                 今日待复习: {reviewStats.due_count} 题
@@ -284,7 +285,7 @@ export default function Dashboard() {
                 今日已完成 {reviewStats.today_done} 题 | 正确率 {reviewStats.today_accuracy}%
               </p>
             </div>
-            <button className="btn btn-primary">开始复习</button>
+            <button className="btn btn-primary" onClick={() => navigate('/review')}>开始复习</button>
           </div>
         )}
 
@@ -395,17 +396,32 @@ export default function Dashboard() {
         ) : (
           <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
             {recentNotes.map((note) => (
+              /* 卡片本身**不是**控件：原来写的是 `article[role="button"]`
+                 （ARIA 不允许 article 用 button 角色，F-03/F-21）＋ 手写的
+                 Enter 处理。现在卡片里**只有一个**控件：标题那个真链接
+                 （可右键、可新标签页、可被读屏当作"链接"列出，Tab 一次即达）。
+                 点击面确实比"整张卡片"小了，但那是这类修法必然的取舍：
+                 一个可点区域必须有名字，而"整张卡片"作为可点区域时，
+                 它的名字只能是卡片里所有文字拼成的一长串。
+                 右侧的箭头**刻意不是第二个链接**（两个链接指向同一处，
+                 读屏的链接列表里就会多出一条没有信息量的重复项）——
+                 它只是装饰，`aria-hidden` 后由标题链接承担全部语义。
+                 与 NotesList 的笔记卡片同形。 */
               <article
                 key={note.id}
                 className="card card-hover"
-                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                onClick={() => navigate(`/notes/${note.id}`)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/notes/${note.id}`) }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
                 <div>
-                  <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>{note.title}</h3>
+                  <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
+                    {/* 下划线显式关掉，理由与 NotesList 的笔记卡片标题相同 */}
+                    <Link
+                      to={`/notes/${note.id}`}
+                      style={{ color: 'inherit', textDecoration: 'none' }}
+                    >
+                      {note.title}
+                    </Link>
+                  </h3>
                   <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
                     <span className={`badge badge-${note.source_type}`}>
                       {sourceTypeLabels[note.source_type] || note.source_type}

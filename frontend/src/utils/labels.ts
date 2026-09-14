@@ -95,6 +95,28 @@ export function statusClass(status: string | null | undefined): string {
  *
  * `quality` 必须与后端 sm2_service 的语义一致：0=失败、3=勉强通过、
  * 4=通过、5=轻松，后端据此计算 EF 与下次间隔。
+ *
+ * ── 关于 `color`（本轮 a11y 修复，见 docs/a11y-audit.md 的 F-19）──
+ *
+ * 这四个色**本身就是区分手段**（按钮的文字与左侧 4px 竖条都用它），
+ * 所以它们必须对低视力与色觉障碍用户也成立 —— 也就是小字要 ≥ 4.5:1。
+ * 审计实测：金 #c9a959 白底只有 2.26:1、绿 #2d8a56 是 4.30:1，
+ * 于是「勉强想起」与「想起来了」两档几乎看不出区别（红 #c0392b 5.44:1、
+ * 墨 #0f3460 12.50:1 本来就够，未改）。修法是**只压深这两档**，
+ * 色相与四档之间的相对关系（红→金→绿→墨）都不变：
+ *
+ * | 档位 | 原值 | 白底 | 新值 | 白底 |
+ * |---|---|---|---|---|
+ * | 完全忘记 | `#c0392b` | 5.44:1 | 未改 | — |
+ * | 勉强想起 | `#c9a959` | 2.26:1 | `#8f7020` | 4.66:1 |
+ * | 想起来了 | `#2d8a56` | 4.30:1 | `#25714a` | 5.93:1 |
+ * | 轻松想起 | `#0f3460` | 12.50:1 | 未改 | — |
+ *
+ * ⚠️ 本文件里的颜色是**字面量**，不读 CSS 变量（`--color-success` 等）——
+ * 这些值要作为内联样式与 canvas 参数使用，拿不到 `var()` 的解析结果。
+ * 后果是"同一语义两处取值"：本文件是**唯一数据源**，
+ * `base.css` 的 `--color-success` 必须**手工**与这里的绿保持一致。
+ * 这次修复就是这么做的（两处都改成了 `#25714a`），但它没有门禁守着。
  */
 export interface SelfRatingOption {
   /** SM-2 quality 分值（0-5） */
@@ -109,8 +131,8 @@ export interface SelfRatingOption {
 
 export const selfRatingOptions: SelfRatingOption[] = [
   { quality: 0, label: '完全忘记', hint: '想不起来，需要重新学', color: '#c0392b' },
-  { quality: 3, label: '勉强想起', hint: '很吃力，答得不完整', color: '#c9a959' },
-  { quality: 4, label: '想起来了', hint: '稍作回忆就答对了', color: '#2d8a56' },
+  { quality: 3, label: '勉强想起', hint: '很吃力，答得不完整', color: '#8f7020' },
+  { quality: 4, label: '想起来了', hint: '稍作回忆就答对了', color: '#25714a' },
   { quality: 5, label: '轻松想起', hint: '脱口而出，毫不费力', color: '#0f3460' },
 ]
 

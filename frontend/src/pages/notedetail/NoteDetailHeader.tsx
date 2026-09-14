@@ -4,12 +4,15 @@
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 标签顺序、禁用/显示条件、`title` 提示文案、inline 样式均与拆分前一致。
  */
+import type { CSSProperties } from 'react'
 import { updateNoteRole, type NoteDetail } from '../../api/client'
 import { useToast } from '../../components/Toast'
 import { formatDateTime } from '../../utils/datetime'
 import { statusClass, statusLabels } from '../../utils/labels'
 import RetryConvertButton from './RetryConvertButton'
 import ViewModeTabs from './ViewModeTabs'
+// 「笔记角色」下拉框的样式（含 axe 看不见的焦点环）—— 见模块文件头
+import styles from './NoteDetailHeader.module.css'
 import type { EditMode, ViewMode } from './types'
 
 /** 处理中（不可编辑）的笔记状态 */
@@ -128,13 +131,27 @@ export default function NoteDetailHeader({
       {/* 笔记元信息标签行 */}
       <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
         <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
+        {/* 所属项目标签：色值与 NotesList 的同一枚标签保持一致
+            （`--color-primary-soft` 在本项目未定义，实际落到兜底 #eef2ff；
+            而兜底前景 #2563eb 与它只有 4.62:1，12px 小字压在门槛线上 ——
+            改用同色系的 #1b4fbf，5.49:1。两处必须一起改，否则同一枚标签
+            在两个页面上是两个颜色）。 */}
         {note.project_names?.map((name) => (
-          <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
+          <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: '#1b4fbf' }}>
             {name}
           </span>
         ))}
         <span className={statusClass(note.status)}>{statusLabels[note.status] || note.status}</span>
+        {/* 笔记角色：本页唯一会写数据的原生控件。
+            - 可访问名用 `aria-label`（这一行是 flex 排布的元信息标签，
+              插一个可见 <label> 会改变排版）；
+            - 外观搬进 NoteDetailHeader.module.css：内联样式的权重高于任何
+              选择器，`outline: 'none'` 留在 tsx 里的话，样式表中的
+              `:focus-visible` 焦点环**永远不会生效**（文件头有完整说明）；
+            - 底色随角色变，通过 `--note-role-bg` 传进去，两个色值仍在 tsx 里可见。 */}
         <select
+          className={styles.roleSelect}
+          aria-label="笔记角色"
           value={note.note_role || 'material'}
           onChange={async (e) => {
             try {
@@ -145,15 +162,9 @@ export default function NoteDetailHeader({
             }
           }}
           style={{
-            fontSize: '0.75rem',
-            padding: '2px 8px',
-            borderRadius: '9999px',
-            border: '1px solid var(--color-border)',
-            background: note.note_role === 'personal_note' ? '#8b5cf6' : '#3b82f6',
-            color: 'white',
-            cursor: 'pointer',
-            outline: 'none',
-          }}
+            // #316fd8 白底白字 4.78:1、#6d28d9 为 7.10:1（原先 #3b82f6 只有 3.68:1）
+            '--note-role-bg': note.note_role === 'personal_note' ? '#6d28d9' : '#316fd8',
+          } as CSSProperties}
         >
           <option value="material">学习资料</option>
           <option value="personal_note">我的笔记</option>

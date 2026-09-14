@@ -57,10 +57,14 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
         </span>
       </div>
 
-      {/* 正面：标题（提示） */}
-      <h3 style={{ fontSize: '1.15rem', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>
+      {/* 正面：标题（提示）。
+          `h2` 而不是 `h3`：这一页的页面标题是 `ReviewProgress` 渲染的 h1
+          （"卡片复习"），中间不存在任何层级 —— h1 → h3 是跳级，
+          axe 判 `heading-order`。字号写在下面（1.15rem），
+          标题级别与视觉大小本来就是两件事，改级别**一个像素都不动**。 */}
+      <h2 style={{ fontSize: '1.15rem', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>
         {card.title}
-      </h3>
+      </h2>
 
       {!revealed ? (
         <>

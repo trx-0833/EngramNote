@@ -7,7 +7,7 @@
  * 4. 点击笔记卡片跳转到详情页
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client'
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -91,11 +91,13 @@ export default function NotesList() {
    * 处理删除笔记（移入回收站）
    * 打开确认弹窗（含关联统计），确认后调用 API 软删除，成功后从本地状态中移除。
    *
+   * 这里**不再需要** `e.stopPropagation()`：卡片本身已经不是控件了
+   * （见下方笔记卡片处的说明），按钮的点击不会再冒泡到"整卡导航"上。
+   * 依赖 stopPropagation 的日子一长，谁也不敢挪动这些按钮 —— 现在没有这层耦合。
+   *
    * @param note - 要移入回收站的笔记
-   * @param e - 鼠标事件，阻止事件冒泡以免触发卡片的点击导航
    */
-  function handleDelete(note: Note, e: React.MouseEvent) {
-    e.stopPropagation() // 阻止冒泡，避免触发卡片 onClick 导航
+  function handleDelete(note: Note) {
     setNoteToDelete(note)
   }
 
@@ -117,9 +119,10 @@ export default function NotesList() {
   /**
    * 处理重试转换失败的笔记
    * 调用 retryConvert API，成功后更新本地状态
+   *
+   * 与 `handleDelete` 同理：不再需要阻止冒泡（卡片已不是控件）。
    */
-  async function handleRetry(noteId: string, e: React.MouseEvent) {
-    e.stopPropagation()
+  async function handleRetry(noteId: string) {
     try {
       const result = await retryConvert(noteId)
       setNotes((prev) =>
@@ -139,6 +142,19 @@ export default function NotesList() {
 
   return (
     <div className="page-enter">
+      {/* 页面一级标题。
+          为什么此前没有：这一页只有卡片标题（h3），整页没有 h1 ——
+          axe 判 `page-has-heading-one`（F-18），屏幕阅读器也就没有
+          "这是什么页"的答案。占位与搜索框同一行：这一页两行之间的空间
+          本来就不宽裕，新起一行会把列表往下推，而标题与"共 N 条"是同一件事
+          （页面身份 + 结果计数），视觉上本来就在一起。 */}
+      <h1
+        className="heading-serif"
+        style={{ fontSize: '1.25rem', marginBottom: 'var(--space-sm)' }}
+      >
+        笔记
+      </h1>
+
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
       <div className={styles.listToolbar} style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
         <div className={styles.searchInputWrapper}>
@@ -213,24 +229,44 @@ export default function NotesList() {
         /* 笔记卡片列表 */
         <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
           {notes.map((note) => (
-            <article
-              key={note.id}
-              className="card card-hover note-list-item"
-              onClick={() => navigate(`/notes/${note.id}`)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/notes/${note.id}`) }} // 支持键盘 Enter 键触发导航
-            >
+            /* 卡片本身**不是**控件：原来写的是 `article[role="button"][tabindex="0"]`
+               ＋ 手写的 Enter 处理，而卡片里还有「重试」「删除」两个真按钮
+               —— axe 判 nested-interactive（F-17），ARIA 也不允许 article 用
+               button 角色（F-16）。改法与已修掉的 Sidebar 同形：**控件之间是兄弟**。
+               标题现在就是真链接（可右键、可新标签页、Tab 一次即达），
+               删除/重试是各自独立的按钮，靠 flex + `.note-list-actions` 仍排在右侧。 */
+            <article key={note.id} className="card card-hover note-list-item">
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>{note.title}</h3>
+                {/* `h2` 而不是 `h3`：这一页的顶层标题是上面的 h1「笔记」，
+                    中间没有任何层级 —— h1 → h3 是跳级，axe 判 `heading-order`
+                    （这正是补上 h1 之后必须一起做的事：F-18 修好、不能反手
+                    多出一条层级违规）。字号本来就是显式写的，
+                    改级别**不改外观**。 */}
+                <h2 style={{ fontSize: '1.17rem', fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
+                  {/* 下划线显式关掉：`base.css` 现在给所有 <a> 默认下划线
+                      （正文链接必须与正文可区分，F-13/F-26），而这里链接的
+                      文本就是整张卡片的标题 —— 标题带下划线不是这个页面的观感，
+                      而且它并不"嵌在正文里"，不落在那条规则的适用场景内。 */}
+                  <Link
+                    to={`/notes/${note.id}`}
+                    style={{ color: 'inherit', textDecoration: 'none' }}
+                  >
+                    {note.title}
+                  </Link>
+                </h2>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
                   {/* 来源类型标签 */}
                   <span className={`badge badge-${note.source_type}`}>
                     {sourceTypeLabels[note.source_type] || note.source_type}
                   </span>
-                  {/* 所属项目标签（支持多标签） */}
+                  {/* 所属项目标签（支持多标签）。
+                      色值说明：底色是 --color-primary-soft 的兜底 #eef2ff，
+                      而 --color-primary 在本项目**未定义**（base.css 里是 #0f3460），
+                      于是这里落到兜底 #2563eb —— 与 #eef2ff 只有 4.62:1，
+                      12px 小字压在 4.5 的门槛线上（a11y-audit F-25 的第三种成因）。
+                      改用同色系的 #1b4fbf（5.49:1），色相不变、余量足够。 */}
                   {note.project_names?.map((name) => (
-                    <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: 'var(--color-primary, #2563eb)' }}>
+                    <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: '#1b4fbf' }}>
                       {name}
                     </span>
                   ))}
@@ -267,7 +303,7 @@ export default function NotesList() {
                   <button
                     className="btn btn-primary"
                     style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                    onClick={(e) => handleRetry(note.id, e)}
+                    onClick={() => handleRetry(note.id)}
                     aria-label={`重试 ${note.title}`}
                   >
                     重试
@@ -277,7 +313,7 @@ export default function NotesList() {
                 <button
                   className="btn btn-danger"
                   style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                  onClick={(e) => handleDelete(note, e)}
+                  onClick={() => handleDelete(note)}
                   aria-label={`删除 ${note.title}`}
                 >
                   删除

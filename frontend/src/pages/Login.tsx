@@ -44,60 +44,69 @@ export default function Login() {
   return (
     <div className={styles.authBg}>
       <div className={styles.authCard}>
-        <h1 className={styles.authTitle}>登录 EngramNote</h1>
+        {/* 地标：登录页此前**整页**没有 <main>，h1、两个 label/input 与页脚
+            都不在任何 landmark 里 —— axe 报 `landmark-one-main` + `region`
+            共 7 个节点（F-01/F-02），屏幕阅读器的"跳到主内容"在这一页不可用。
+            把 `<main>` 放在卡片**内部**而不是替掉卡片：`.authCard` 的
+            max-width/padding/毛玻璃/入场动画都挂在那个 div 上，换掉它就得把
+            这些值复制一遍（那正是会漂移的写法）；这一层被包住的元素
+            正好就是这一页的全部内容，所以地标边界等于页面边界。 */}
+        <main>
+          <h1 className={styles.authTitle}>登录 EngramNote</h1>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-          <div className={styles.authInputGroup}>
-            <label htmlFor="email">邮箱</label>
-            <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="4" width="20" height="16" rx="2" />
-              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-            </svg>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              placeholder="your@email.com"
-            />
-          </div>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+            <div className={styles.authInputGroup}>
+              <label htmlFor="email">邮箱</label>
+              <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                placeholder="your@email.com"
+              />
+            </div>
 
-          <div className={styles.authInputGroup}>
-            <label htmlFor="password">密码</label>
-            <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              placeholder="至少6位"
-            />
-          </div>
+            <div className={styles.authInputGroup}>
+              <label htmlFor="password">密码</label>
+              <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                placeholder="至少6位"
+              />
+            </div>
 
-          {error && (
-            <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}>
-              {error}
-            </p>
-          )}
+            {error && (
+              <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}>
+                {error}
+              </p>
+            )}
 
-          <button type="submit" className={`btn ${styles.authSubmit}`} disabled={loading}>
-            {loading ? '登录中...' : '登录'}
-          </button>
-        </form>
+            <button type="submit" className={`btn ${styles.authSubmit}`} disabled={loading}>
+              {loading ? '登录中...' : '登录'}
+            </button>
+          </form>
 
-        <p className={styles.authFooter}>
-          没有账号？{' '}
-          <a href="/register" onClick={(e) => { e.preventDefault(); navigate('/register') }}>
-            注册
-          </a>
-        </p>
+          <p className={styles.authFooter}>
+            没有账号？{' '}
+            <a href="/register" onClick={(e) => { e.preventDefault(); navigate('/register') }}>
+              注册
+            </a>
+          </p>
+        </main>
       </div>
     </div>
   )

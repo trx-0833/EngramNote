@@ -56,8 +56,37 @@ test.describe('应用外壳（真浏览器）', () => {
     // 拼类名等于把构建工具的命名规则钉进测试；而 `min-height: 100vh`
     // 算出来必须等于视口高度 —— 这是只有真浏览器（有布局引擎）才给得出的答案，
     // jsdom 的 getComputedStyle 会原样返回 `100vh` 字符串。
-    const bg = page.getByRole('heading', { name: '登录 EngramNote' }).locator('xpath=../..')
-    const minHeight = await bg.evaluate((el) => getComputedStyle(el).minHeight)
+    //
+    // ## 为什么由"从 h1 往上数两层"改成"从 h1 往上找第一个撑满视口高的祖先"
+    //
+    // 断言的对象是 `Auth.module.css` 里那条 `min-height: 100vh`
+    // —— 它写在 `.authBg` 上（该文件 61-62 行，`720px` 这个期望值就是它算出来的），
+    // 不是写在 `.authCard` 上（卡片自己没有 min-height）。
+    // 原来靠 `xpath=../..` 去够它：登录页当时正好是
+    // `div.authBg > div.authCard > h1` 三层，数两层就到。
+    //
+    // 5.9 修复轮给登录页补了 `<main>` 地标（axe 的 `landmark-one-main` + `region`，
+    // 见 docs/a11y-audit.md 的 F-01/F-02），层级变成
+    // `div.authBg > div.authCard > main > h1` —— 同样数两层，够到的是 `.authCard`，
+    // 而它的 `min-height` 是 `auto`。**卡片一个像素都没动**：
+    // 失败的唯一原因是这条断言用"层级深度"指代对象，深度一变它就指错了东西。
+    //
+    // 现在按**判据本身**去找：从 h1 往上走，第一个 min-height 撑满视口的祖先
+    // 就是承载那条规则的元素。它不再依赖中间隔几层，也不依赖类名哈希 ——
+    // 而如果哪天那条 `min-height: 100vh` 被删掉，它会明确报"没找到"，
+    // 而不是像"数两层"那样悄悄指到另一个元素上、再由一个巧合的值把它盖过去。
+    const minHeight = await page
+      .getByRole('heading', { name: '登录 EngramNote' })
+      .evaluate((h1) => {
+        const viewportHeight = `${window.innerHeight}px`
+        let cur: Element | null = h1.parentElement
+        while (cur && cur !== document.body && cur !== document.documentElement) {
+          const value = getComputedStyle(cur).minHeight
+          if (value === viewportHeight) return value
+          cur = cur.parentElement
+        }
+        return `（没有任何祖先的 min-height 等于视口高 ${viewportHeight} —— Auth.module.css 的 min-height:100vh 不生效了）`
+      })
     expect(minHeight).toBe('720px') // 视口高度，见 playwright.config.ts 的 viewport
 
     // 样式表确实被解析了（不是"文件在但没生效"）

@@ -65,7 +65,12 @@ export default function ReviewProgress({
     return (
       <div style={{ marginBottom: 'var(--space-md)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          <h2 style={{ fontSize: '1.2rem' }}>{title}</h2>
+          {/* `h1` 而不是 `h2`：`title` 存在就代表"这一块自带页面标题"
+              （本组件文件头里的两种排版），而当前唯一的调用方是卡片复习页
+              —— 那一页除此之外没有任何标题，axe 判 `page-has-heading-one`
+              （F-14/F-15）。改成 h1 之后它也成了页面上唯一的 h1，
+              顺带消掉"h2 出现在 h1 之前"的层级隐患。 */}
+          <h1 style={{ fontSize: '1.2rem' }}>{title}</h1>
           <span style={counterStyle}>{label}</span>
         </div>
         {bar}

@@ -484,8 +484,15 @@
   cursor: pointer;
 }
 
+/* 焦点可见（axe 不检查这一条，见 a11y-audit §4.1）：
+   原来只有 `border-color` 变化，1px 边框从 #e8e6e1 变到 #0f3460 在
+   深色纸纹背景上不够显眼；补一圈 2px 白色内环 + 2px 墨色外环
+   （`box-shadow` 不参与布局，工具栏不会因为聚焦而位移）。 */
 .graph-filter-select:focus {
   border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--color-primary);
 }
 
 /* 邻居节点列表 */
