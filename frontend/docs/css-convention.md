@@ -485,3 +485,26 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 4. 探针要落盘 JSON 时**别用 `node:fs`**：本项目没有 `@types/node`，而 `e2e/`
    在 `tsconfig.json` 的 `include` 里 ⇒ `tsc`（= `npm run build` 的第一步）直接红；
    `download.saveAs(path)` 由 Playwright 落盘，绕开这个坑。
+
+> ⚠️ **第 3 条那个 `node_modules` junction 有一个会损坏工作区的坑 —— 用之前先读
+> 计划 §5 雷区 21。** `git worktree remove --force` 把 junction 当普通目录递归删除，
+> 删掉的是 junction **指向的目标**：实测把 `frontend/node_modules` 清空了
+> （0 个条目）。删除**没有任何警告**，`git status` 也不会有异常，
+> 故障要等到下一次构建才现形，而且**长得像工具链坏了**：
+> `'tsc' is not recognized as an internal or external command`
+> —— 读起来像 PATH 出问题，不像依赖被删了。同样的规矩适用于**任何**含 junction 的临时目录
+> （`Remove-Item -Recurse` 一样会穿过去）。
+>
+> **推荐改为不需要 junction 的做法**（已实测，见雷区 21）：
+> 改动**之前** `Copy-Item -Recurse frontend\dist <临时目录>` 拍一张产物快照，
+> 之后两个产物各起一个 `vite preview --outDir <目录>`（`--outDir` 是真实选项；
+> `GET /` 与深链都返回 200，SPA fallback 与主产物一致）。
+> 这样既不用 worktree、也不用 junction，还顺手绕开"共用 `node_modules/.vite`
+> 会让图谱页崩到错误边界"那个坑（计划 §5 雷区 18 第三条）。
+>
+> 已经改完才想起来要基线、只能走 worktree 时，**拆除顺序不能反**：
+> 先 `Remove-Item <worktree>\frontend\node_modules`（**不加** `-Recurse`）
+> 或 `cmd /c rmdir <worktree>\frontend\node_modules`，**再**
+> `git worktree remove --force <worktree>`，最后断言工作区 `node_modules`
+> 的条目数 ≫ 0。**不要**改用 `git stash` 回退工作区 ——
+> 多个 agent 共享同一个工作区，stash 会把别人未提交的改动一起搅进来。

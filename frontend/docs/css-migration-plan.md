@@ -533,6 +533,11 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 
 ## 5. 雷区（按危险程度，★ = 第一批新发现）
 
+> ⚠️ **唯一一条会损坏工作区、而且当场不报错的是第 21 条**
+> （`git worktree remove --force` 顺着 `node_modules` junction 删掉工作区的依赖）。
+> 按危险程度它其实该排第一，只是本表按"新发现往后追加"的规矩落在最后 ——
+> **凡是准备用探针配方（第 3 条第 4 步 / 第 18 条）的人，先读第 21 条。**
+
 1. **动画名会被一起哈希（试点实测，最阴）。**
    任何把含 `animation` 的规则搬进模块的地方都要处理：要么把 `@keyframes`
    定义搬进模块，要么别搬这条规则。受影响：
@@ -580,6 +585,19 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
       （探针要落盘 JSON 时**不要**用 `node:fs`：本项目没有 `@types/node`，
       而 `e2e/` 在 `tsconfig.json` 的 `include` 里 ⇒ `tsc` 直接红；
       `playwright test` 的 `download.saveAs(path)` 由 Playwright 落盘，绕开这个坑。）
+
+      > ⚠️ **建那个 junction 之前先读雷区 21。** 这一步配方的收尾动作
+      > （`git worktree remove --force`）会**顺着 junction 把工作区的
+      > `frontend/node_modules` 删空** —— 实测踩过，删除过程没有任何警告，
+      > 要等到下一次构建才以 `'tsc' is not recognized` 的形式现形。
+      > **推荐改用雷区 21 里那条不需要 worktree / junction 的做法**：
+      > 改动前 `Copy-Item -Recurse dist <临时目录>` 拍一张产物快照，
+      > 之后两个产物各起一个 `vite preview --outDir <目录>`
+      > （已实测：`GET /` 与深链都返回 200，SPA fallback 一致）。
+      > 非要用 worktree 的话，拆除顺序必须是
+      > "**先** `Remove-Item <wt>\frontend\node_modules`（不加 `-Recurse`）/ `cmd /c rmdir`，
+      > **再** `git worktree remove --force`"，并在最后断言
+      > `frontend\node_modules` 的条目数 ≫ 0。
 
    **实测结论**：16 条全部是后加载的 `refinements.css` 赢；胜者的值随规则进模块，
    输的声明删除。`.card-hover` 因为被 8 个页面使用（规范 §4 第 2 条）**没有**进模块，
@@ -733,6 +751,9 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
     - 给 worktree 起 dev server 时**必须给独立的 vite `cacheDir`**：与工作区共用
       `node_modules/.vite` 会互相覆盖预打包产物，症状是图谱页崩到错误边界
       （`Cannot read properties of null (reading 'useRef')`）。
+      ⚠️ worktree 里那个 `node_modules` junction 还有一个**更严重的坑**：
+      `git worktree remove --force` 会顺着它把**工作区**的 `node_modules` 删空 ——
+      **见雷区 21**（那一条里还给了不需要 junction 的推荐做法）。
 
 19. **★ 压缩器还会压掉组合器两侧的空白（序 6 收尾轮实测，已进差集归一化）。**
     源码 `.markdown-body.adhd-reader-active > .adhd-block` 在产物里是
@@ -753,6 +774,56 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
     **教训**：改了某条已迁移规则的声明时，除了改代码，还要想一想
     "这条声明在差集的哪一批里"。
 
+21. **★★★ `git worktree remove --force` 会顺着 `node_modules` junction 把工作区的
+    `node_modules` 删空（序 6 收尾轮实测踩到）。**
+    这是本文件里**唯一一条会损坏工作区、而且当场不报错**的雷区，所以写全。
+
+    - **触发条件**：探针配方（雷区 3 第 4 步、雷区 18）要求给 worktree 建一个
+      `node_modules` junction 指回工作区。收尾时执行
+      `git worktree remove --force <worktree>` —— git 把 junction 当**普通目录**递归删除，
+      删掉的是 junction **指向的目标内容**。实测结果：`D:\engramnote\frontend\node_modules`
+      变成空目录（0 个条目，连 `.bin` 都没有）；源码、`package-lock.json`、
+      git 跟踪的文件**都没受影响**，所以 `git status` 一切正常。
+    - **为什么极易做错**：junction 在资源管理器、`git status`、`Test-Path` 眼里都长得像普通目录；
+      删除时**没有任何警告**（加不加 `--force` 都一样），git 的输出是正常的
+      "worktree removed"。故障要等到下一次构建才现形，而且**长得像工具链坏了**：
+      `'tsc' is not recognized as an internal or external command`
+      —— 读起来像"PATH / npm 环境出问题"，不像"依赖被删了"。
+      而且**同样的规矩适用于任何含 junction 的临时目录**：`Remove-Item -Recurse` 一样会穿过去。
+    - **正确拆除顺序（不能反）**：先拆链接，再删目录。
+      ```powershell
+      # ① 只删 junction 本身：**不要**加 -Recurse（更不要 -Force 配 -Recurse）
+      Remove-Item <worktree>\frontend\node_modules
+      #    等价、更直白的写法：cmd /c rmdir <worktree>\frontend\node_modules
+      # ② 此时 worktree 里已经没有链接，可以安全递归删除
+      git worktree remove --force <worktree>
+      # ③ 断言（5 秒，能当场抓住这条雷；不写这条断言就等于把风险留给下一次构建）
+      (Get-ChildItem D:\engramnote\frontend\node_modules | Measure-Object).Count   # ≫ 0
+      ```
+    - **✅ 推荐做法：压根不要建 junction —— 改成给产物拍快照。**
+      "渲染没变"要比的是**两个产物**，而"之前"那一份可以在改动**之前**就留下（已实测）：
+      ```powershell
+      # ① 改代码之前：把当前产物复制成一份真实副本（是副本，不是链接）
+      Copy-Item -Recurse frontend\dist $env:TEMP\engramnote-dist-before
+      # ② 改代码 → npm run build
+      # ③ 两个产物各起一个 preview（`vite preview --outDir` 是真实存在的选项）
+      npx vite preview --outDir $env:TEMP\engramnote-dist-before --port 4325 --strictPort --host 127.0.0.1
+      npx vite preview --outDir frontend\dist                       --port 4326 --strictPort --host 127.0.0.1
+      ```
+      这条路一次解决四个问题：① 不需要 worktree、**不需要 junction**
+      （雷区 21 的触发条件直接消失）；② 不共用 `node_modules/.vite`
+      （雷区 18 第三条那个"图谱页崩到错误边界"也一起消失）；③ 少一次 `vite build`；
+      ④ 拆的时候删的是一个**只装产物的普通目录**，怎么删都不会伤到工作区。
+      实测：`--outDir` 指向临时副本时 `GET /` 与深链 `GET /notes/note-1` 都是 **200**
+      （SPA fallback 与主产物一致），与主产物逐字节同源（`Copy-Item` 产物，未重新打包）。
+      **唯一前提**：改动之前要记得拍这张快照。已经改完（或已提交）才想起来时，
+      仍然只能走 worktree —— 那就**必须**按上面第三条的顺序拆。
+    - **另一条常见建议要拒绝**：`git stash` 回退工作区。本仓库**不要**这么做 ——
+      多个 agent 共享同一个工作区，stash 会把别人未提交的改动一起搅进来，
+      这正是当初选 worktree 而不是 stash 的理由（雷区 3 第 4 步已写明）。
+      同理，**不要**为了探针在 worktree 里重跑一次 `npm ci`：慢、要网络，
+      而且对"两个产物比一比"这件事毫无必要。
+
 ## 6. 证据（四轮 / 全部批次）
 
 | 证据 | 文件 | 结论 |
@@ -765,7 +836,7 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | 序 6 收尾：最后一处"停"被收掉 | `migration-evidence/5.6-14-adhd-moved-to-module.md` | 5 条 `.adhd-*` 规则 → `src/hooks/useAdhdReader.module.css`；4 个类名的**全部写入点**（8 处）逐处枚举 + 改法；三条理由的现状；差集 **5/0/0**；产物标记 5/3/2/1、kebab 退休类名 0；真 Chromium **4 328 条 computed 属性差异 0 条** |
 | 第四批：迁移前清单 | `migration-evidence/5.6-08-before-batch4.md` | `assessment.css` 20 条 + `refinements.css` 14 条（= 冲突胜者）+ `responsive.css` 1 条 |
 | 第四批：冲突裁决 | `migration-evidence/5.6-09-conflict-resolution.md` | 16 条属性的**实测胜者**逐条表 + "渲染没变"的 16 802 条属性对账 |
-| 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**；第三批 **21/0/0**；第四批 **35/0/0 + 19 条已裁决删除**；第五批 **13/0/0**；第六批 **53/0/0**；第七批 **71/0/0**；第八批 **7/0/0 + 13 条实测从未生效的规则删除**；第九批 **补丁层清空**（逐条搬家 28 条声明）。全部批次**丢失 0**；动画绑定全部自洽；动画体 6 条全部一致 |
+| 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**；第三批 **21/0/0**；第四批 **35/0/0 + 19 条已裁决删除**；第五批 **13/0/0**；第六批 **53/0/0**；第七批 **71/0/0**；第八批 **7/0/0 + 13 条实测从未生效的规则删除**；第九批 **补丁层清空**（逐条搬家 28 条声明）；**序 6 收尾 5/0/0**。全部批次**丢失 0**；动画绑定全部自洽；动画体 6 条全部一致。<br>⚠️ 另有 **3 条"已声明删除"**（第一批 / 第五批 / 第七批各一条）：它们是 **5.9 无障碍收尾轮主动删掉的** `cursor: pointer`（`.dashboard-review-card` / `.note-list-item` / `.graph-legend-item`），**不是冲突输家，也不是丢失** —— 卡片从 `div[role="button"]` 改成"盒子 + 真控件"之后，卡片上的手型光标成了"看起来能点、点了没反应"的假信号。删除发生在迁移**之后**、当时没有登记，于是差集从那时起一直报"丢失 1"（**这是"迁移之后的删除必须补登记"的实例，见雷区 20**）。**责任人与依据**：commit **`0986102`**（5.9 收尾），问题编号 **F-09**（Dashboard 复习卡）/ **F-37**（笔记列表项、图谱图例），原地注释与完整记录见 `frontend/docs/a11y-audit.md` §11 与 §4.11.4。**不要把它当成一次未解释的丢失重新立案。** |
 | 产物 CSS 校验 | `migration-evidence/5.6-03-built-css.md` | 悬空动画 **0**；改动范围内冲突 **0**（迁移前既有的 16 条也已在第四批清成 0）；级联得主正确（`CASCADE_PAIRS` + 新增的 `ORDER_PAIRS`）；**167 个退休类名在产物中 0 次**；切片标记全部命中。**收尾轮又加了三项**：跨媒体查询覆盖战（68 对候选 / 1 条已登记 / 0 条未登记）、简写 vs 长写（同选择器 24 条 + 跨选择器 11 条，全部已登记）、收尾轮死代码清理的三向自检（**21/21**）与"产物里没有死动画"（13 个 `@keyframes` = 12 个有引用 + 1 个登记的"仅行内使用"、死动画 **0**） |
 | 收尾轮：死代码清理 | `migration-evidence/5.6-13-dead-css-cleanup.md` | 21 个登记条目 = **14 条零引用规则 + 9 个没有用户的 `@keyframes` + 1 个零读者令牌**；每一条都有"TSX/TS grep 0 处 + 运行时拼类名 0 处 + 产物 0 次"三类证据，以及"迁移前那个文件里确实有它（按内容定位修订）"的机器自检 |
 | 序 8/9/10 的迁移前清单 | `migration-evidence/5.6-10-before-batches-8-9-10.md` | components 挂点 / 侧边栏+App 骨架 / 图谱，每一组都同时列出"全局样式表那半"与"`responsive.css` 那半" |
