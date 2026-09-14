@@ -16,13 +16,56 @@ npm run e2e:headed     # 带界面，调试用
 开发服务器**由 Playwright 自己拉起和关闭**（`playwright.config.ts` 的 `webServer`）。
 使用者不需要先开 `npm run dev`，也不需要在跑完后再关掉它。
 
-- **端口：4319**（刻意避开人类手上 DSH Web GUI 的 3080，也避开 Vite 默认的 5173）。
+- **端口：默认 4319**（刻意避开人类手上 DSH Web GUI 的 3080，也避开 Vite 默认的 5173），
+  **可用 `E2E_PORT` 换掉**（见 §1.1）。
   配了 `--strictPort`：端口被占时**直接失败**，不会悄悄换端口 ——
   悄悄换端口会让 `webServer.url` 的健康检查去探一个空地址，
   表现为"超时 120 秒后报一句看不懂的错"。
 - `reuseExistingServer: false`：不复用已存在的服务。
   复用会让"测的到底是哪份代码"不可知 —— 上个会话留下的 dev server
   可能跑的是改动前的模块图。
+
+### 1.1 并发运行：`E2E_PORT`（默认 4319，行为不变）
+
+```bash
+E2E_PORT=4320 npm run e2e                    # bash / CI
+```
+
+```powershell
+$env:E2E_PORT = 4320; npm run e2e             # PowerShell
+```
+
+**为什么需要它。** 默认端口固定 + `--strictPort` + `reuseExistingServer: false`
+三条叠在一起，**第二个并发运行必然失败**，而且失败的样子极容易读错。
+实测过一次：两个 agent 同时跑 `npm run e2e`，第二个的输出只有一行
+
+```
+Error: http://127.0.0.1:4319 is already used, make sure that nothing is running on
+the port/url or set reuseExistingServer:true in config.webServer.
+```
+
+—— **连测试汇总行都没有**（Playwright 在起 `webServer` 那一步就退出了），
+看起来像"这次跑挂了 / 我改的代码有问题"，真实原因却是"端口被另一个
+Playwright 占着"，两份代码可能都没问题。这种**假阴性**比真缺陷更费时间：
+它会把排查引向产品代码。
+
+换端口只影响 dev server 与 `baseURL` 的端口，**用例一行都不用改**
+（用例里的地址全部是相对路径，走 `baseURL`；实测 `E2E_PORT=4321`
+在 4319 被别的进程占着的情况下仍然 10 passed）。
+
+**3080 被写死在禁止列表里**（`playwright.config.ts` 的 `FORBIDDEN_E2E_PORTS`）：
+`E2E_PORT=3080` 不会去占那个端口，而是**在配置加载阶段直接抛错、一行测试都不跑**：
+
+```
+Error: E2E_PORT=3080 是人类正在使用的 DSH Web GUI 端口，E2E 绝不能占用它。
+换一个高位端口（默认 4319，例如 4320）。
+```
+
+非数字与越界的值同样在加载阶段报错（`E2E_PORT="abc"`、`E2E_PORT=70000`）。
+理由和上面两条是同一条：**这一层的每一种配置错误都必须响亮** ——
+占错端口的后果（把人类正在用的界面顶掉）比这次测试失败严重得多。
+
+**CI 不需要设置它**：每个 job 一台机器、独占一个 runner，默认 4319 就是对的。
 
 ### 浏览器：只装了 Chromium
 
@@ -104,7 +147,12 @@ npx playwright install chromium
 3. **响应式与真机**：本层固定 `1280×720`。5.10 的移动端布局（≤768px 抽屉、
    触控尺寸、安全区）没有被 E2E 覆盖 —— `App.test.tsx` 只钉了"点了之后状态怎么变"，
    **没有任何一层验证过手机上看起来是对的**。
-4. **可访问性**（5.9）：没有 axe 扫描，键盘可达性、对比度、focus trap 全部未验证。
+4. **可访问性**（5.9）：本层（`npm run e2e`）**不含** axe 扫描 —— 审计是另一个
+   project（`npm run a11y`，`@axe-core/playwright` + 真 Chromium），
+   计数与边界见 [`a11y-audit.md`](./a11y-audit.md)。它已经报出 30 组
+   "规则 × 场景"违规，所以"没报出来"不等于"没问题"；而**键盘焦点顺序、
+   屏幕阅读器语义、动态区域、渐变背景上的对比度、触控目标尺寸**
+   连 axe 也判不了，那几项仍然没有任何一层在守。
 5. **视觉回归**：没有截图基线，CSS 改动导致的视觉变形（如 5.6 的级联反转）仍无自动守护。
 6. **跨浏览器**：只装/只跑 Chromium。Safari/Firefox 的差异未验证。
 7. **性能**：没有预算、没有 Lighthouse、没有 chunk 体积门禁（`chunkSizeWarningLimit` 只是警告）。
@@ -185,7 +233,8 @@ http://127.0.0.1:4319/src/api/goals.ts
   `npx playwright install --with-deps chromium`（**只装 Chromium**）、
   `npm run e2e`（`timeout-minutes: 10`）。
 - **不需要**在 CI 里另外起服务：dev server 仍由 `playwright.config.ts` 的
-  `webServer` 自动拉起/关闭，端口 4319、`reuseExistingServer: false`。
+  `webServer` 自动拉起/关闭，端口 4319（默认值；runner 独占机器，不需要设
+  `E2E_PORT`）、`reuseExistingServer: false`。
 - 缓存键绑定锁文件是有意的：Playwright 的浏览器 revision 跟着
   `@playwright/test` 版本走，键不随版本变会出现"缓存里是旧 revision"。
 

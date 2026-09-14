@@ -11,13 +11,29 @@ import { defineConfig, devices } from '@playwright/test'
  * "按钮到底在不在视口里""原生 `type=email` 有没有拦住提交"
  * "全局样式表和 CSS Module 有没有真的进产物并生效"。
  *
- * ## 为什么端口是 4319
+ * ## 端口：默认 4319，可用 `E2E_PORT` 换一个
  *
  * 人类手上的 DSH Web GUI 占着 **3080**，绝不能碰；Vite 默认的 5173
  * 也可能被别的会话占用。4319 是随手挑的一个当前未被监听的高位端口。
  * 配合 `--strictPort`：端口被占时**直接失败**，而不是悄悄换一个端口 ——
  * 悄悄换端口会让 `webServer.url` 的健康检查去探一个空地址，
  * 表现为"超时 120 秒后报一句看不懂的错"。
+ *
+ * 但"固定端口 + `--strictPort`"还有第二种失败：**两个并发运行**。
+ * 实测过一次 —— 两个 agent 同时跑 `npm run e2e`，第二个拿到
+ * `http://127.0.0.1:4319 is already used`，而**汇总那行根本没打印出来**
+ * （Playwright 起 `webServer` 就失败了），看起来像"这次跑挂了"，
+ * 与真实原因（端口被另一个 Playwright 占着）毫无关系。
+ *
+ * 所以端口改成可配，默认值一字不变：
+ *
+ * ```
+ * E2E_PORT=4320 npm run e2e        # bash / CI
+ * $env:E2E_PORT = 4320; npm run e2e  # PowerShell
+ * ```
+ *
+ * **3080 被显式禁止**：写错时直接抛错并拒绝启动，而不是去占人类正在用的
+ * 那个界面。这一层的每一种失败都必须是响亮的 —— 包括"你把端口配错了"。
  *
  * ## 为什么 webServer 由 Playwright 自己拉起
  *
@@ -32,7 +48,36 @@ import { defineConfig, devices } from '@playwright/test'
  * 上一个会话留下的 dev server 可能跑的是改动前的模块图。
  * 这里宁可因为端口被占而明确失败。
  */
-const E2E_PORT = 4319
+const DEFAULT_E2E_PORT = 4319
+
+/**
+ * 这些端口不属于这一层：**3080 是人类手上的 DSH Web GUI**。
+ * 单独列出来而不是"只在注释里说一句"，是因为注释拦不住一个写错的 E2E_PORT，
+ * 而占错端口的后果（把正在用的界面顶掉）比这次测试失败严重得多。
+ */
+const FORBIDDEN_E2E_PORTS = [3080]
+
+function resolveE2ePort(): number {
+  const raw = process.env.E2E_PORT
+  if (raw === undefined || raw.trim() === '') return DEFAULT_E2E_PORT
+  const value = raw.trim()
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`E2E_PORT="${raw}" 不是合法端口：需要 1–65535 的整数。`)
+  }
+  const port = Number(value)
+  if (port < 1 || port > 65535) {
+    throw new Error(`E2E_PORT=${port} 越界：需要 1–65535 的整数。`)
+  }
+  if (FORBIDDEN_E2E_PORTS.includes(port)) {
+    throw new Error(
+      `E2E_PORT=${port} 是人类正在使用的 DSH Web GUI 端口，E2E 绝不能占用它。` +
+        `换一个高位端口（默认 ${DEFAULT_E2E_PORT}，例如 ${DEFAULT_E2E_PORT + 1}）。`,
+    )
+  }
+  return port
+}
+
+const E2E_PORT = resolveE2ePort()
 const E2E_BASE_URL = `http://127.0.0.1:${E2E_PORT}`
 
 /**
