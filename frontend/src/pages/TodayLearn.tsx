@@ -34,6 +34,19 @@ interface QuizState {
   startTime: number
 }
 
+/**
+ * 读取异常对象上的后端 error_code（阶段 0.11）
+ *
+ * 用**结构化读字段**而不是 `instanceof ApiError`：本页依赖的 `../api/client`
+ * 在测试里被整体 mock，从被 mock 的模块 import 进来的类会是 undefined，
+ * 那时 `e instanceof undefined` 直接抛 TypeError。字段读取对模块替换免疫。
+ */
+function errorCodeOf(e: unknown): string | null {
+  if (typeof e !== 'object' || e === null) return null
+  const code = (e as { code?: unknown }).code
+  return typeof code === 'string' && code ? code : null
+}
+
 export default function TodayLearn() {
   const navigate = useNavigate()
   const toast = useToast()
@@ -143,7 +156,15 @@ export default function TodayLearn() {
       setStats(newStats)
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : ''
-      if (message.includes('每日上限')) {
+      // 每日上限：按后端**错误码**分流，不再匹配中文文案（阶段 0.11 / F-19）。
+      //
+      // 后端 `POST /api/review/submit` 在额度用尽时返回
+      // `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案里的数字会变，码不会）。
+      // 这里刻意**不** import client.ts 的 ApiError 做 instanceof：本模块的
+      // API 客户端在测试里被整体 mock（`vi.mock('../api/client')`），
+      // instanceof 拿到的是 undefined，会直接抛 TypeError。结构化读字段
+      // 对这种替换是免疫的。
+      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
         setCompleted(true)
         const newStats = await getReviewStats()
         setStats(newStats)

@@ -22,6 +22,20 @@ interface QuizState {
   startTime: number
 }
 
+/**
+ * 读取异常对象上的后端 error_code（阶段 0.11）
+ *
+ * 用**结构化读字段**而不是 `instanceof ApiError`：本页依赖的 `../api/client`
+ * 在测试里被整体 mock（`vi.mock('../api/client', ...)`），从被 mock 的模块
+ * import 进来的类会是 undefined，那时 `e instanceof undefined` 直接抛
+ * TypeError。字段读取对模块替换免疫。
+ */
+function errorCodeOf(e: unknown): string | null {
+  if (typeof e !== 'object' || e === null) return null
+  const code = (e as { code?: unknown }).code
+  return typeof code === 'string' && code ? code : null
+}
+
 export default function Review() {
   const toast = useToast()
   const [quizzes, setQuizzes] = useState<QuizState[]>([])
@@ -123,7 +137,10 @@ export default function Review() {
       setStats(newStats)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '提交失败'
-      if (msg.includes('每日上限')) {
+      // 达到每日限额：按后端**错误码**分流，不再匹配中文文案（阶段 0.11 / F-19）。
+      // 后端 `POST /api/review/submit` 在额度用尽时返回
+      // `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案中的数字会变，码不会）。
+      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
         // 达到每日限额，跳到完成页面
         setCompleted(true)
         const newStats = await getReviewStats()
