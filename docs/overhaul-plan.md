@@ -9129,7 +9129,152 @@ feature 目录 —— 它必须被两个目录共用，否则就是跨目录 imp
 
 ---
 
-**文档版本**：v4.8（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
+## 附录 BE · 真实库垃圾清理 + 6.7 依赖扫描 + 5.13 端到端测试（2026-09-14）
+
+### BE.1 真实库清理：删 6 行 + 改 1 个 JSON 数组，存储审计终于转绿
+
+`audit_vault` 长期报 `ok=False {'missing_file': 4}`，指向 2 篇**测试夹具写进生产库**时代
+留下的垃圾笔记（`n1`/`u1`、`n2`/`u2`，路径是测试字面量）。**后果不是 4 条报错，而是
+存储审计这条红灯失去信号价值** —— 一直红着的告警等于没有告警。
+
+流程（不可逆操作，顺序不允许临场发挥）：**先快照**（`create_snapshot`，
+`_backup/20260914-122243-pre-junk-note-cleanup`，含 `_verify.json`）→ **先 dry-run**
+（逐表列出将删行数，且**每条语句的 rowcount 必须先等于预测值才允许删**）→
+单事务 `BEGIN IMMEDIATE` + 应用同款 pragma → 复查。
+
+| | 前 | 后 |
+|---|---|---|
+| notes / knowledge_cards / review_states | 22 / 1183 / 2241 | **20 / 1181 / 2239** |
+| **存储审计** | `ok=False`，`{'missing_file': 4}` | **`ok=True`，`counts={}`** |
+
+**6 行分布在 3 张表**（notes 2 / knowledge_cards 2 / **review_states 2**），其余 22 张表
+逐表枚举后零命中。快照事后复验仍含 n1/n2/c1/c2 → **可回滚**。那条既有的 FK 违规
+（指向早已删除的用户，文档记为有意保留）**前后逐字节相同** —— 本次零新增违规。
+
+它刻意**没有调用 `init_db()`**：`database.py::_migrate_sqlite()` 含三条**无条件写路径**
+（`DELETE FROM note_projects WHERE orphan`、建唯一索引、`chunks.grams` 回填）——
+"按应用的方式打开它"本身就会写生产库。
+
+#### ⚠️ 一条被**实证推翻**的推断（先记教训）
+
+我原先判断"清掉 `scope_notes` 里那个失效 id 会把目标范围**放大成全部笔记**"，
+并据此收回了批准。逐**消费方**核实后，结论比我说的窄：
+
+| 消费方 | 空 scope 的含义 |
+|---|---|
+| `get_goal_progress` 的 `total_count`/`reviewed_count` | 0（无兜底） |
+| `get_goal_progress` 的 **`avg_mastery`** | ⚠️ **有 `else` 分支且不加笔记过滤 → 跨该用户全部卡片** |
+| `generate_daily_plan` | **空计划**，不是"推荐全部" |
+| `refresh_goal_progress`（Beat） | 无 `else`，保持 0 |
+| 前端 `LearningGoals.tsx:378` | 渲染"0 notes" |
+
+真实结果是"**范围为空**"这个诚实状态。**我错在只看 `if scope_notes:` 这个模式就下结论** ——
+正是我一路要求代理们防的"前提没验到底"。隐患本身是真的，只是被**实证钉死为惰性**：
+直接调用应用自己的 `get_goal_progress(…, "u1")` 跑真库，两个分支都得 `avg_mastery: 0.0`
+（u1 名下 0 张卡片）。清理用的是**应用自己的**移除规则（`note_service.py::purge_note` 5.2），
+没有自造语义。
+
+**由此登记一个既有 bug（未修）**：`avg_mastery` 的 `else` 分支是真实的空范围语义漏洞 ——
+目标范围清空后会退化成"该用户全部卡片"。今天惰性，**u1 再有卡片就会显形**。
+
+**过程教训**：这些依赖本该由**应用自己的删除路径**处理（`note_service` 里确有 5.1–5.3 三段
+清理逻辑）。我为精确控制范围走了裸 SQL，代价是漏掉了那个 JSON 引用。**下次碰真实库，
+优先走应用的删除路径。**
+
+#### schema 陷阱（已写入 `backend/data/db/cleanup-notes-n1-n2.log` §9）
+
+- `knowledge_cards.note_id` / `chunks.note_id` / `quiz_items.card_id` / `review_logs.card_id`
+  都是 **ON DELETE NO ACTION** —— 删笔记**不会**带走卡片/分块/题目/日志，
+  **那 4 条悬空引用就是这么活下来的**；而 `SET NULL` 的 `note_id` 列是**第二种陷阱**
+  （悄悄把卡片"提升"为独立卡片）
+- `review_states` **完全没有 FK**（多态 `item_type`+`item_id`）—— `foreign_key_check`
+  看不见它，**6 行里有 2 行就藏在这里**（2241 = 1183 卡片 + 1058 题目，一卡一态）
+- `chunks_fts` 是无触发器 external-content FTS5 表 —— 删 chunks 要补发 `'delete'`
+  （需**删除前**捕获旧 `chunk_rowid` **与** `grams`）；且 `integrity-check`
+  **只验结构、抓不到索引漂移**
+- JSON 列必须 `json_each(<值>)`；写成 `json_each("t"."col")` **静默返回 0 行**
+- id 不都是 UUID（`n1`/`c1`）—— 假设 UUID 的清理逻辑会**跳过并报成功**
+- `PRAGMA foreign_keys` **默认 OFF 且按连接生效**；`init_db()` **不是只读的**
+- 它**纠正了 `purge_note` 自己的注释**：注释称 `chunks.note_id` 会让 DELETE 失败，
+  **实际不会**（显式删 chunks 仍对，但理由是 vault 一致性）
+
+### BE.2 6.7 依赖扫描：34 条发现，但**头条不是 CVE 而是清单漂移**
+
+装 `pip-audit` 2.10.1 / Trivy 0.74.0；审计对象是**项目声明的依赖**
+（`requirements.txt` 与 CI 实际安装的 `requirements-test.txt`），**没有**退化成审计
+整个 224 包的 conda 环境。
+
+| 来源 | 原始输出 |
+|---|---|
+| `pip-audit -r requirements.txt` | 34 条 / 7 包（去重后 **19 条公告**） |
+| `npm audit --json` | **1 critical / 4 high / 6 moderate = 11** |
+| `trivy fs` | misconfig 4（high 2）、secret **0**；**vuln 未执行** |
+
+**逐条定性**：可修未修（starlette ×7 需先升 fastapi；npm 11 条；Dockerfile 加固 4 条）、
+**无修复**（ecdsa Minerva 上游明确不修、nltk、python-jose、transformers）、
+**本仓打不到**（25 条逐条 grep 核实：全仓无 `jose.jwe`、HS256 钉死、无 `import transformers`/
+`nltk`、只用 `vitest run` 从未 `--ui`、构建链发现不进 dist）、**误报 0**、
+**待验证 2**（pydantic ReDoS 路径存在未构造利用；react-router 开放重定向是**唯一落在生产依赖上**的发现）。
+→ 文档里**没有**出现"无高危 CVE"这类断言。
+
+**★ 最重要的一条**：`requirements.txt` 用 `~=` 锁次版本，今天全新安装解析到
+`starlette 0.46.2 / pydantic 2.0.3 / python-jose 3.3.0 / pytest 8.0.2 / fastapi 0.115.14`，
+而**本机与 CI 实际跑的是** `1.6.0 / 2.13.5 / 3.5.0 / 9.1.1 / 0.141.1` —— **一条都不沾**。
+也就是说这 19 条**几乎只在"真的按 requirements.txt 部署"时存在**。与
+`requirements-test.txt` 文件头记录的漂移同类，只是方向相反（**声明比现实旧**）。**未修**
+（版本策略是需要决策的取舍）。
+
+**Trivy 的诚实说明**：`vuln` 子扫描器**没能执行** —— trivy-db 是 OCI 制品，
+`mirror.gcr.io` 与 `ghcr.io` 都**在连接层失败**（错误原文已记录）。脚本降级为
+`misconfig,secret` 并**显式打印"vuln 扫描未执行"**，避免那 4 条被读成"依赖没问题"。
+镜像扫描在本项目目前无对象（本机直接跑 uvicorn+vite）。
+
+**可重跑**：`python backend/scripts/security_scan.py`（`--json-out` / `--fail-on`）。
+退出码 **2 = 必需扫描器没跑起来** —— 专治本仓"配置了但从未执行"。
+默认 `--fail-on none` 的理由写进文档：现在开 `high` 会长期常红 → 必然被 `|| true` 掉 →
+**比没有门禁更糟**。脚本内固化三个环境坑（Windows+GBK 下 pip-audit 解码中文
+requirements 会 `UnicodeDecodeError`；GBK 控制台打印会吞掉整份报告；
+**registry.npmmirror.com 未实现 audit 端点返回 404** → 自动回退官方源并写进报告，
+**绝不把 404 当 0 条发现**）。
+⚠️ **本轮我独立复跑时退出码为 2**（pip-audit 未能运行）—— 这正是该退出码存在的意义：
+它**没有**报成"0 条发现"。
+
+### BE.3 5.13 端到端测试：Playwright 真的跑起来了
+
+- 只装 **Chromium** rev 1243：下载 310.2 MiB / **磁盘净增 702.0 MB**
+- ⚠️ `cdn.playwright.dev` **本机完全下不动**（10 分钟 0 字节）→ 改用 npmmirror CDN，
+  103 秒完成。该环境变量**没有写进任何配置**（只在装浏览器时需要）
+- 端口 **4319**（`--strictPort`，端口被占直接失败而不是悄悄换端口；**3080 全程未被触碰**）
+- 4 个 spec / **8 通过 + 1 `fixme`**，`npm.cmd run e2e` exit 0（9.4s），
+  开发服务器由 `webServer` 自启自杀，跑完无残留监听
+- 用例里有一条**只有真浏览器才能验**的检查：**CSS 令牌层与模块层真的作用于元素**
+  （用布局值判定，而不是拼哈希类名 —— jsdom 给不出布局）
+
+**★ 它用 e2e 抓到一个真实产品缺陷（按硬规则未改产品代码）**：
+`/` → 注册 → `/register` → 点登录 → `/login` → 输入**正确**凭据 → 登录成功、令牌落盘、
+已登录外壳出现，**但 main 里是 404 页面**。原因：`App.tsx` 的已登录路由表**没有 `/login`**
+（只在未登录分支注册），且登录成功后**没有任何 `navigate('/')`** → pathname 仍是 `/login`
+→ 落到 `path="*"` 的 NotFound，用户必须手改地址。
+保留为 **`test.fixme`（断言期望行为）**，修好后把 `fixme` 改回 `test` 即可 ——
+在汇总里以 **skipped 出现，不是静默通过**。
+
+两个实现坑也一并记下：**不能拿 `/api/` 子串判断后端请求**（Vite 从源码路径提供模块，
+`/src/api/client.ts` 也含 `/api/`，会把应用自己的 ES 模块用 JSON 桩顶掉，
+现象是"登录框一直不出现"）；`**` 紧跟 `/` 是块注释结束符，通配 glob 写进 JSDoc
+会提前终止注释。
+
+**明确不覆盖**：真实后端契约、响应式/真机、可访问性、视觉回归、跨浏览器、性能、
+SSE 流式渲染（`frontend/docs/e2e.md` 已写明）。
+
+### BE.4 仍然没做的两件事（都需要决策）
+
+1. **6.7 / 5.13 未接进 `ci.yml`**：接进去就必须同时定阈值与时长，而"**先看清家底再定阈值**"
+   是本轮的顺序（文档已给出可直接粘贴的片段）。
+2. **不升级任何依赖、不改版本策略、不加固 Dockerfile** —— 都是刻意的独立批次。
+
+---
+
+**文档版本**：v4.9（阶段 2、3、阶段 4 全部，阶段 5 的 5.11 与 5.5 前置，
 阶段 6 的 6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.8 见附录 J–AV 与 BA；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
 卡片复习 UI 见 AA，前端测试框架见 AB，LLM 记账见 AC，配额见 AD，
@@ -9140,7 +9285,7 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 恢复演练见 AS，密码策略与登录时序见 AT，限流覆盖见 AU，存储审计调度见 AV，
 对象存储快照见 AW，NoteDetail 拆分见 AX，临时库清理见 AY，
 两页安全网见 AZ，刷新令牌与登出撤销见 BA，两页拆分见 BB，移动端见 BC，
-契约漂移可见化见 BD）
+契约漂移可见化见 BD，真实库清理与依赖扫描/端到端见 BE）
 
 
 

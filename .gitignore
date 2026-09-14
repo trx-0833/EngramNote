@@ -96,6 +96,12 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# ---- Playwright E2E 产物（可再生成：失败 trace、截图、HTML 报告）----
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+
 # ---- IDE ----
 .vscode/
 .idea/
