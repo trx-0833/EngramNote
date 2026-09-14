@@ -3275,9 +3275,9 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **S1 / S2 / S3a / S4 已完成，S3b 与 S5 未做**（**2026-09-14 续记**，见附录 BL）。历史：第一期只生成与对比 —— `backend/openapi.json`（现已 103 路径 / 119 操作 / 184 schema）与 `src/api/generated/schema.ts` 落盘，漂移检查器（**TypeScript 编译器 API，不是正则**）判定 111/111 端点全部命中，当时分布 IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21。**续记**：P1–P3 补完（`schemaUntyped 21 → 0`）→ **S2 换响应类型**（`identical 19 → 104`）→ **S3a 换请求侧**（新增按端点索引的 `BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`，**34 个 JSON 请求体全部接入契约**；`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、`compilerDiagnostics 2 → 0`、`identical 104 → 105`，而**分母一个没动**：判定对象 111、被比过的请求体 34）→ **S4 收敛 `client.ts`**（三个请求入口里逐字重复的错误解析收成一处；§9.1 所谓"删除重复类型"经清点**在 S2 就已完成**）。**未做**：**S3b**（19 个函数的 query 参数仍是手拼查询串；接契约需要一个 `buildQuery` 运行时 helper **并且同步升级漂移脚本的 query 扫描器**，否则会从"3 条未用参数"变成"扫不到参数"的假象）、**S5**（5.2 / 5.3）、**P4**（`--check` 接 CI）。逐函数记录与守卫设计见 `frontend/docs/openapi-client.md` §14 |
-| 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 的 dependencies / devDependencies 里**没有** `@tanstack/react-query`（`swr` / `jotai` / `redux` 同样没有），`frontend/src/**` 里 `@tanstack` **零命中**；手写 `fetch` + 定时轮询仍是现状（`setInterval` 的活调用见 `components/ReminderBanner.tsx:70`、`pages/notedetail/useNoteDetailData.ts:177/201`） |
-| 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 里**没有** `zustand`，`frontend/src/**` 里 `from 'zustand'` **零命中**；UI 状态仍靠 React Context（`contexts/AuthContext.tsx`、`components/Toast.tsx`）与 props 传递 |
+| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **S1 / S2 / S3a / S3b / S4 已完成，S5 与 P3 未做**（**2026-09-14 续记**，见附录 BL / BM）。历史：第一期只生成与对比 —— `backend/openapi.json`（现已 103 路径 / 119 操作 / 184 schema）与 `src/api/generated/schema.ts` 落盘，漂移检查器（**TypeScript 编译器 API，不是正则**）判定 111/111 端点全部命中，当时分布 IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21。**续记**：P1–P3 补完（`schemaUntyped 21 → 0`）→ **S2 换响应类型**（`identical 19 → 104`）→ **S3a 换请求体**（34 个 JSON 请求体接入契约；`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、`compilerDiagnostics 2 → 0`、`identical 104 → 105`）→ **S3b 换查询串**（18 个调用点；参数名改为编译期检查，仪器三处升级 + 两个新分母，两次变异验证）→ **S4 收敛 `client.ts`**（三处重复错误解析合一；"删除重复类型"经清点在 S2 已完成）→ **P4 接进 CI**（`dump_openapi.py --check` + `gen:api` 幂等性两条配对步骤）。全程**分母未动**：判定对象 111、被比过的请求体 34、参数名检出 54。**未做**：**S5**（5.2 / 5.3，计划已出，见附录 BM.6）、**P3**（logout body 是否可选）。逐点记录见 `frontend/docs/openapi-client.md` §14 / §15 |
+| 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 | ⏸ **未做（计划已出，待批）**：`frontend/package.json` 里没有 `@tanstack/react-query`（`swr` / `jotai` / `redux` 同样没有），`src/**` 零命中；**28 个文件在 `useEffect` 里取数、3 处 `setInterval` 轮询**（实测）。迁移计划（4 个批次、5 条不变量、行为变化清单、四个待决策项）见 `frontend/docs/query-and-state-plan.md` 与附录 BM.6 |
+| 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做（计划已出，待批）**：`frontend/package.json` 里没有 `zustand`，`from 'zustand'` 零命中；今天是 2 个 context（`AuthContext` / `Toast`）+ props 传递。⚠️ 验收口径需改：最大的页面是 `DailyMaterials.tsx` **682** 行 / `GraphSidebar.tsx` **679** / `Dashboard.tsx` **676**，"全部减半"在不重写 UI 的前提下做不到 —— 计划里换成三条可测口径（详见计划文档 §3.3） |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
 | 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ✅ **三页全部完成**（附录 AX / AZ / BB）：`NoteDetail` 1184→**282**、`KnowledgeGraph` 1055→**248**、`Projects` 765→**113**；本轮复核三页为 **290 / 249 / 135** 行（拆分时记的是 282 / 248 / 113 —— 之后各页又陆续长了几行，前提"单文件 <300 行"仍成立），三个拆分目录共 **51 个模块、最大 263 行、超过 300 行的 0 个**。⚠️ 关键前提是"先补安全网再拆"：另两页是先补了 53 条页面级用例（并经变异验证）才动的手 |
 | 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | 🟡 **部分落地（已迁 9 个样式表，剩 6 个）**：**机制 + 试点 + 三批迁移**已落地（附录 BB 与 `frontend/docs/css-migration-plan.md`）。**9 个样式表动过**（`auth` / `cleaning` / `diff` / `dashboard` / `markdown` / `learning` / `markdown-extras` / `responsive` / `base` 令牌层；其中 `markdown` 是核实后的**停**、`base` 只加令牌），**108 条规则逐条核对、丢失 0**（试点 7 + 第一/二/三批 60 / 20 / 21，每批三份证据），`main.tsx` 的导入顺序重排根治了"模块 CSS 排在全局样式表之前"的级联反转。⚠️ 一条**有记录的停**：`markdown.css` 的 5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 4 个类名的写入点在 `src/hooks/useAdhdReader.ts`（当时不在可改范围），硬搬只能写成 `:global(...)`。**剩 6 个**（序 5 / 8 / 9 / 10 / 12 / 13：`assessment` / `components` / `layout` / `graph` / `refinements` / `responsive`）互相咬合、必须**成批**处理 —— **每一批的剩余顺序与前置条件写在 `frontend/docs/css-migration-plan.md` §7**（不读那份文件不要动这几张表） |
@@ -10996,14 +10996,124 @@ import/配置类报错 = 环境问题 —— **两者不许用 `|| true` 一起�
 
 | # | 事项 | 现状 / 下一步要什么 |
 |---|---|---|
-| 1 | **S3b：query 参数接入契约** | 19 个函数仍手拼查询串（三种形态）。接契约需要 `buildQuery(QueryOf<P,M>)` **并且同步升级漂移脚本的 query 扫描器**，否则会出现"扫不到参数名"的假象（`unusedSchemaQuery` 从 3 跳到 ~25、看着像变坏其实是没比）。必须带"参数名检出数不下降"的分母守卫 |
-| 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | 未做。两者都会动到 74 个调用方文件的取数方式，属独立大轮次（5.2 与 5.3 的现状见 5.1 表格所在节的 5.2 / 5.3 行） |
+| 1 | ~~**S3b：query 参数接入契约**~~ | **已完成（2026-09-14，附录 BM）**：18 个调用点接入契约、仪器三处升级 + 两个新分母、两次变异验证。剩下的是那 3 条"契约有、UI 没传"的能力（属产品功能） |
+| 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | **计划已出、未动手**（`frontend/docs/query-and-state-plan.md`，见附录 BM.6）：28 个文件在 `useEffect` 里取数、3 处轮询、2 个 context、4 个批次、5 条不变量；**四件事待你决定**（依赖批准 / `QueryClient` 默认值 / `AuthContext` 是否迁移 / "行数减半"的口径改写） |
 | 3 | P3：`POST /api/auth/logout` 的 body 是否真的可选 | 契约写 `requestBody?`，前端总是发；本轮只做到"前端与契约一致" |
 | 4 | `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 是否统一（今天 `request()` 前置错误码、另两处不前置） | 行为变更（提示文案），要单独决策 |
 | 5 | 清空字段的服务层语义（BL.6 第 1 条） | 要动 `x is not None` 那三处 |
 | 6 | RAG 向量通道：`retrieval_status=hybrid` 的成因**未定论** | 领先假设是**索引时滞**（提问时新 chunk 还没有 embedding）；判定方法是"提问前先断言全部 chunk 都 `has_embedding=1`"。⚠️ 另有一条待测：`rag_service._encode_via_celery` 的 `task.get(10)` **10 秒硬超时**在冷启动下会走 BM25，但**超时不取消任务**，所以是窗口而不是永久降级 |
 | 7 | 表格扫描已成为常驻工具 | `frontend/scripts/doc-table-scan.mjs`（默认扫 4 份文档；有缺陷退出码 1，判据与 BK.6 同：**两个方向都数**、转义竖线 `\|` 不算分隔、代码围栏里的 `\|` 不算表）。它是 BK.6 那条判据的**机器化复现**：本附录之前独立跑出 **237 张表 / 0 缺陷**（与人工扫描一致），加本附录后 **242 张 / 0 缺陷**。★ **它上线后第一次运行就抓到本人刚写的一行**：BL.8 这一格里原本写着一个裸 `\|`（正文里想引用"竖线"本身），GFM 会把它当分隔符 → 该行 4 格 vs 表头 3 格，多出的内容不会渲染 |
-**文档版本**：v5.7（**2026-09-14 阶段 5.1 的 S3a / S4 落地，P4 接进 CI**：
+---
+
+## 附录 BM · 阶段 5.1 的 S3b：查询串接入契约（外加 5.2 / 5.3 计划）（2026-09-14）
+
+> 逐点记录、仪器改动与变异验证的完整版在 `frontend/docs/openapi-client.md` §15；
+> 5.2 / 5.3 的迁移计划在 `frontend/docs/query-and-state-plan.md`。这里记结论与账。
+
+### BM.0 一句话
+
+**请求侧的另一半也接上了**：18 个函数的查询串从"手拼字符串"改成
+"`QueryOf<P,M>` 类型标注 + 一个共享序列化器 `buildQuery`"，
+参数名从此**在编译期被检查**（此前只有漂移脚本事后扫字符串）。
+难点不在那 18 处（编译器与 e2e 都会拦），而在**仪器**：
+换写法之后漂移脚本的"路径渲染"与"参数名扫描"**同时失明**，
+而失明的表现是"报错项一直是 0"。
+
+### BM.1 改了什么
+
+| 项 | 内容 |
+|---|---|
+| 新增 | `frontend/src/api/query.ts`（运行时）+ `query.test.ts`（8 例锁语义） |
+| 语义 7 条 | 键序=书写顺序；`undefined/null/''` 跳过；`false` **照发**（"不发 false"由调用点显式表达）；数组→重复键；编码交给 `URLSearchParams`；无参数返回 `''`；不支持的取值类型**抛错**（不静默发 `[object Object]`） |
+| 转换 | **18 处 / 9 个模块**：report 1、tasks 1、goals 1、graph 1、knowledge 2、notes 6、projects 1、qa 2、review 3 |
+| 签名 | 导出名、参数表、运行时路径字面量**一律未变**；`getBlindSpots` / `getMasteryOverview` 的对象入参改成契约类型（对外变宽，调用方零改动） |
+| 类型检查在哪 | **调用点**（`QueryOf` 对象字面量写错键 → TS2561）；`buildQuery` 刻意宽松，且**不做运行时校验**（schema 只在类型层） |
+
+### BM.2 ★ 仪器必须同批升级（三处 + 两个新分母）
+
+| # | 位置 | 换写法后为什么失效 | 改法 |
+|---|---|---|---|
+| 1 | `renderPath()` | `${buildQuery(q)}` 是 **CallExpression**，旧的"标识符型查询后缀"判据不认 → 模板被渲染成 `/notes{}` | 查询 helper 调用与标识符后缀同样处理（`hadQuery = true` 并 `break`） |
+| 2 | `isQuerySuffix()` | 同上（`const q = buildQuery(…)` 再插值） | 初始化来自 helper 调用也算 |
+| 3 | `collectQueryNames()` | 参数名搬进 helper 的**实参**，且实参常常是**标识符** | 新增 `objectLiteralKeys()`：字面量直接收键，**标识符则回函数体解析初始化式**；三条老通道全保留（`upload.ts` 的 17 个 FormData 字段靠它） |
+| 分母 | `queryNameDetections`（54）/ `functionsWithQueryNames`（22） | 只看 `unknownQueryParams` 时，"扫不到"与"没写错"长得一样 | 进 `drift-delta.mjs` 的 `MUST_NOT_CHANGE` |
+
+### BM.3 两次变异验证（守卫真的会咬）
+
+**M1 是真实踩到的，不是设计的**：仪器第一版只认"实参就是对象字面量"，
+而迁移后的真实写法是"先存变量再传"。跑漂移立刻触发：
+
+| 指标 | 正常 | M1（不认标识符实参） | M2（人为清空 helper 集合） |
+|---|---:|---:|---:|
+| `pathMatched` / `pathMissing` | 111 / 0 | 111 / 0 | **93 / 18** |
+| `identical` | 105 | 105 | **88** |
+| `verdictRegressions` | 0 | 0 | **18** |
+| `queryNameDetections` / `functionsWithQueryNames` | 54 / 22 | **17 / 4** | **17 / 4** |
+| `missingRequiredQuery` | 0 | **3** | —— |
+| `unusedSchemaQuery`（信息项） | 3 | **40** | —— |
+| `drift-delta` 退出码 | 0 | **1** | **1**（6 项被点名） |
+
+M1 那行里最值得记的是：**报错项（`unknownQueryParams`）始终是 0**，
+只有信息项变多 —— 没有分母的话，这一轮会被读成"参数没写错"。
+还原后复跑：`pathMatched 111 / pathMissing 0 / identical 105 / 54 / 22`，退出码 0。
+
+### BM.4 透传变量的代价（为什么两个函数把键名逐个写出来）
+
+`getBlindSpots` / `getMasteryOverview` 的入参本身就是契约类型，
+最自然是 `buildQuery(params)` 透传 —— 但扫描器只能看语法、拿不到类型：
+
+| 指标 | 键名逐个写出（采用） | 透传变量 |
+|---|---:|---:|
+| `queryNameDetections` | 54 | **47** |
+| `functionsWithQueryNames` | 22 | **20** |
+| `unusedSchemaQuery` | 3 | **10** |
+
+所以这两个函数在体内把 4 个 / 3 个键逐字写出来（仍带 `QueryOf` 标注）。
+这条取舍写进了代码注释，避免后人"顺手简化成透传"。
+
+### BM.5 这一轮的账（全部真跑）
+
+| 命令 | 结果 |
+|---|---|
+| `npx tsc --noEmit` | 退出 0 |
+| `npm test` | **23 files / 288 tests**（+8 例即 `query.test.ts`） |
+| `npm run lint` | 退出 0（中途被 `no-constant-binary-expression` 拦了一次，已改成经函数参数传入） |
+| `npm run build` | 退出 0（✓ built in 5.40 s） |
+| `npm run e2e` | **10 passed** |
+| `npm run e2e:full`（真实后端 + 真实 LLM） | **6 passed**（1.8 min）——改的是 URL，这一层是唯一真证据 |
+| 漂移 + `drift-delta` | 退出 0；`111 / 105 / 54 / 22 / unused 3 / unknown 0 / missingReq 0 / bodyChecked 34` **与迁移前逐项相同** |
+| 变异 M1 / M2 | 见 BM.3，跑完即还原并复跑确认回到基线 |
+
+### BM.6 5.2 / 5.3 的计划已出（**未动代码、未装依赖**）
+
+`frontend/docs/query-and-state-plan.md`：现状盘点（**28 个文件在 `useEffect` 里取数**、
+3 处轮询、2 个 context、23 个测试文件、无共享 render 助手）、4 个批次与每批验收、
+必须保持不变的 5 条不变量（401 单飞 / 错误码分流 / 请求顺序断言 / 文案与 `aria-*` / 卸载取消）、
+行为变化清单，以及 5.3 的三块范围。
+**四件事等你定**：① 批准两个运行时依赖吗；② `QueryClient` 默认值；
+③ `AuthContext` 迁不迁；④ 计划原文的"页面行数减半"改成三条可测口径。
+
+### BM.7 悬着的小事（下一轮逐条核对）
+
+| # | 事项 | 现状 / 下一步 |
+|---|---|---|
+| 1 | **S5（5.2 / 5.3）** | 计划已出、**未动手**；等 BM.6 的四个决定 |
+| 2 | P3：`POST /api/auth/logout` 的 body 是否真的可选 | 未动（前端与契约一致） |
+| 3 | `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 是否统一 | 未动（行为变更，需单独决策） |
+| 4 | 清空字段的服务层语义 | 未动（`project_service.py:196-199` / `understanding.py:465-468` / `knowledge.py:180-183` 三处 `if x is not None`） |
+| 5 | RAG 向量通道 `hybrid` 的成因 | 未定论；判定方法见 BL.8 第 6 条 |
+| 6 | 限流按 IP 计数、`requirements.txt` 约束策略、扫描是否阻断 | 按你的口径挂起（BL.5） |
+| 7 | 3 条"契约有、UI 没传"的查询参数 | 仍未接（`project_id` / `target_categories` / `target_difficulty`）——属产品功能 |
+
+---
+
+**文档版本**：v5.8（**2026-09-14 阶段 5.1 的 S3b**：18 个函数的查询串接入契约
+（参数名改为**编译期**检查），`buildQuery` 语义 8 例锁住，漂移脚本的**三处仪器**
+同批升级并新增两个分母（54 / 22）进 `MUST_NOT_CHANGE`，两次变异验证证明守卫会咬
+（人手清空 helper 集合：`pathMatched 111 → 93`、`identical 105 → 88`、退出码 1）；
+`e2e` 10 + `e2e:full` 6（真实后端 + 真实 LLM）通过；**5.2 / 5.3 的计划已出、代码未动**，
+见**附录 BM** 与 `frontend/docs/query-and-state-plan.md`）；
+v5.7 —— **2026-09-14 阶段 5.1 的 S3a / S4 落地，P4 接进 CI**：
 34 个 JSON 请求体改为按端点从契约派生（`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、
 `compilerDiagnostics 2 → 0`、`identical 104 → 105`，而**分母 111 / 34 一个没动**）；
 `client.ts` 三处重复的错误解析收成一处；`dump_openapi.py --check` 与 `gen:api`
@@ -11036,7 +11146,9 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 状态审计的收口（阶段 0 的 0.2 / 0.10 / 0.11 三条、`AppError` 响应的 CORS 头缺失、
 表格扫描判据的两个方向、评测脚本空语料 = 退出码 2）见 BK，
 阶段 5.1 的 S3a / S4 落地与 P4 接进 CI（34 个请求体接入契约、`client.ts` 收敛、
-空转守卫改成金丝雀、表格扫描成常驻脚本）见 BL）
+空转守卫改成金丝雀、表格扫描成常驻脚本）见 BL，
+阶段 5.1 的 S3b（18 个查询串接入契约、仪器三处升级与两次变异验证）与
+5.2 / 5.3 计划的产出见 BM）
 
 
 
