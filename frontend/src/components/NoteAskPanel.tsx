@@ -150,8 +150,12 @@ export default function NoteAskPanel({
 
       // 共享的规范 SSE 解析器（原内联实现只保留最后一行 data:、不识别 \r\n、
       // JSON.parse 无保护；两份副本还已漂移，见 utils/sse.ts）
+      //
+      // ⚠️ 传**读取器**而不是 `stream`：读取器独占，把已 `getReader()` 的流再交出去
+      // 会被第二次 `getReader()` 拒绝（与 QA.tsx 同一处缺陷，同一个修法；
+      // 那边是 2026 覆盖轮真的问了一次才暴露的 —— 这条路径此前也一样会失败）。
       await parseSSEStream(
-        stream,
+        reader,
         {
           onEvent: (eventType, data) => {
             const payload = (data ?? {}) as Record<string, unknown>

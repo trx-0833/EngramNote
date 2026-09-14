@@ -101,8 +101,16 @@ export default function QA() {
       // 用共享的规范 SSE 解析器替换原先内联的手写解析：
       // 手写版只保留最后一行 data:、不识别 \r\n、且 JSON.parse 无保护
       // （一个截断分片就会终结整段回答）。见 utils/sse.ts 的说明。
+      //
+      // ⚠️ 传的是**上面取好的读取器**，不是 `stream` 本身：
+      // 读取器是独占的，把已经 `getReader()` 过的流再交给解析器会被第二次
+      // `getReader()` 拒绝（`... only accept readable streams that are not yet
+      // locked to a reader`）—— 这里此前传的就是 `stream`，于是**每一次提问都
+      // 直接失败**（2026 覆盖轮把 `qa` 接进审计场景时第一次真的问了一次才暴露，
+      // 见 docs/a11y-audit.md §10）。传读取器同时也保住了 `stopActiveStream`
+      // 手里的 `readerRef`。
       await parseSSEStream(
-        stream,
+        reader,
         {
           onEvent: (eventType, data) => {
             const payload = (data ?? {}) as Record<string, unknown>
