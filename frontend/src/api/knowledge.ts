@@ -3,7 +3,8 @@
  * @description 联合分析、拓展知识点、卡片标记、盲点与掌握度查询
  */
 import { request, type KnowledgeCard } from './client';
-import type { BodyOf, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, QueryOf, Schema } from './generated/types';
 
 // --- 知识点相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -81,27 +82,34 @@ export async function markCard(cardId: string, data: MarkCardPayload): Promise<K
   });
 }
 
-/** 获取盲点列表 */
+/** 获取盲点列表（参数对象由契约派生：键名/取值域以 `GET /api/knowledge/blind-spots` 为准） */
 export async function getBlindSpots(
-  params: { link_id?: string; material_id?: string; page?: number; page_size?: number } = {},
+  params: QueryOf<'/knowledge/blind-spots', 'get'> = {},
 ): Promise<BlindSpotListResponse> {
-  const query = new URLSearchParams();
-  if (params.link_id) query.set('link_id', params.link_id);
-  if (params.material_id) query.set('material_id', params.material_id);
-  if (params.page) query.set('page', String(params.page));
-  if (params.page_size) query.set('page_size', String(params.page_size));
-  return request<BlindSpotListResponse>(`/knowledge/blind-spots?${query}`);
+  // ⚠️ 键名**逐个写出来**，而不是 `buildQuery(params)` 透传：
+  // 漂移脚本靠这些字面量核对"前端传的参数名在契约里存在"，
+  // 透传一个变量会让它一个名字都扫不到 —— 实测透传时
+  // `queryNameDetections` 54 → 47、`unusedSchemaQuery` 3 → 10（看着像变坏，其实是没比）。
+  const query: QueryOf<'/knowledge/blind-spots', 'get'> = {
+    link_id: params.link_id,
+    material_id: params.material_id,
+    page: params.page,
+    page_size: params.page_size,
+  };
+  return request<BlindSpotListResponse>(`/knowledge/blind-spots${buildQuery(query)}`);
 }
 
-/** 获取掌握度概览 */
+/** 获取掌握度概览（参数对象由契约派生：`GET /api/knowledge/mastery`） */
 export async function getMasteryOverview(
-  params: { page?: number; page_size?: number; card_category?: string } = {},
+  params: QueryOf<'/knowledge/mastery', 'get'> = {},
 ): Promise<MasteryOverviewResponse> {
-  const query = new URLSearchParams();
-  if (params.page) query.set('page', String(params.page));
-  if (params.page_size) query.set('page_size', String(params.page_size));
-  if (params.card_category) query.set('card_category', params.card_category);
-  return request<MasteryOverviewResponse>(`/knowledge/mastery?${query}`);
+  // 同 getBlindSpots：键名逐个写出来，别透传（理由见上）
+  const query: QueryOf<'/knowledge/mastery', 'get'> = {
+    page: params.page,
+    page_size: params.page_size,
+    card_category: params.card_category,
+  };
+  return request<MasteryOverviewResponse>(`/knowledge/mastery${buildQuery(query)}`);
 }
 
 /**

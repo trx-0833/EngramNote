@@ -3,7 +3,8 @@
  * @description 到期题目、提交答案、复习统计与历史、快速复习、复习提醒。
  */
 import { request } from './client';
-import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, BodyWithDefaults, QueryOf, Schema } from './generated/types';
 
 // --- 复习相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -91,8 +92,9 @@ export type QuickReviewResponse = Schema<'DueQuizListResponse'>;
  * 获取今日到期复习题目
  */
 export async function getDueQuizzes(limit = 50): Promise<DueQuizListResponse> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return request<DueQuizListResponse>(`/review/due?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/review/due` 只有 `limit`
+  const query: QueryOf<'/review/due', 'get'> = { limit };
+  return request<DueQuizListResponse>(`/review/due${buildQuery(query)}`);
 }
 
 /**
@@ -143,8 +145,9 @@ export async function getReviewStats(): Promise<ReviewStats> {
  * 获取复习历史
  */
 export async function getReviewHistory(page = 1, pageSize = 20): Promise<ReviewHistoryResponse> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  return request<ReviewHistoryResponse>(`/review/history?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）
+  const query: QueryOf<'/review/history', 'get'> = { page, page_size: pageSize };
+  return request<ReviewHistoryResponse>(`/review/history${buildQuery(query)}`);
 }
 
 /**
@@ -242,8 +245,9 @@ export type CardReviewSubmitResponse = Schema<'CardReviewSubmitResponse'>;
  * 与"答题复习"是**并行**的两条路径：这里不涉及题目，用户直接对卡片回忆并自评。
  */
 export async function getDueCards(limit = 20): Promise<CardReviewListResponse> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return request<CardReviewListResponse>(`/review/cards/due?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/review/cards/due` 只有 `limit`
+  const query: QueryOf<'/review/cards/due', 'get'> = { limit };
+  return request<CardReviewListResponse>(`/review/cards/due${buildQuery(query)}`);
 }
 
 /**

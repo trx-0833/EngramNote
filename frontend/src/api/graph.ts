@@ -3,7 +3,8 @@
  * @description 图谱节点/边、建议关系、关系确认/拒绝与子图查询。
  */
 import { request } from './client';
-import type { BodyOf, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, QueryOf, Schema } from './generated/types';
 
 // --- 图谱相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -179,8 +180,9 @@ export type GraphSearchResult = Schema<'GraphSearchResponse'>;
  * @param limit - 最大返回数量
  */
 export async function searchGraphNodes(keyword: string, limit = 20): Promise<GraphSearchResult> {
-  const params = new URLSearchParams({ q: keyword, limit: String(limit) });
-  return request<GraphSearchResult>(`/graph/search?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/graph/search` 是 `q` + `limit`
+  const query: QueryOf<'/graph/search', 'get'> = { q: keyword, limit };
+  return request<GraphSearchResult>(`/graph/search${buildQuery(query)}`);
 }
 
 /** 节点子图响应（生成自 `NodeSubgraph`） */

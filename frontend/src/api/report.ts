@@ -2,8 +2,9 @@
  * @file 学习报告 API
  * @description 今日报告、7 天趋势与薄弱点列表。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import { buildQuery } from './query';
+import type { QueryOf, Schema } from './generated/types';
 
 // --- 报告相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 //
@@ -44,8 +45,11 @@ export async function getWeeklyTrend(): Promise<WeeklyTrendResponse> {
 
 /**
  * 获取薄弱点列表
+ *
+ * 查询参数由契约派生（阶段 5.1 / S3b）：`QueryOf<'/report/weak-points','get'>` 里
+ * 只有 `limit` 一个键，写错会在这一行编译失败（迁移前是手拼的 `?limit=`）。
  */
 export async function getWeakPoints(limit = 5): Promise<WeakPointsResponse> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return request<WeakPointsResponse>(`/report/weak-points?${params}`);
+  const query: QueryOf<'/report/weak-points', 'get'> = { limit };
+  return request<WeakPointsResponse>(`/report/weak-points${buildQuery(query)}`);
 }

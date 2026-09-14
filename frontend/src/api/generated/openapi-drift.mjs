@@ -87,6 +87,30 @@ const VIRTUAL_FILE = path.join(HERE, '__openapi_drift__.ts');
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'];
 const REQUEST_HELPERS = new Set(['request', 'uploadRequest', 'authorizedFetch']);
 
+/**
+ * 查询串构造 helper（阶段 5.1 / S3b）
+ *
+ * ⚠️ 这个集合是本脚本"认得请求路径与 query 参数名"的**前提之一**：
+ * S3b 把 18 个手拼查询串换成 `buildQuery({…})` 之后，
+ *
+ * - `renderPath()`：`${buildQuery(q)}` 是 CallExpression，若不当成查询后缀，
+ *   模板会被渲染成 `/notes{}` → **111 个 pathMatched 会大面积变成 PATH_MISSING**；
+ * - `collectQueryNames()`：参数名藏在 helper 的**对象字面量实参**里，
+ *   不认它就一个名字都扫不到（那会让 `unusedSchemaQuery` 虚高、看着像变坏）。
+ *
+ * 于是三处（这两处 + `isQuerySuffix`）共用本集合：将来加第二个 helper 只改一行。
+ */
+const QUERY_HELPERS = new Set(['buildQuery']);
+
+/** 这个表达式是不是"查询串 helper 调用"（`buildQuery({…})`） */
+function isQueryHelperCall(node) {
+  return (
+    node !== undefined &&
+    ts.isCallExpression(node) &&
+    QUERY_HELPERS.has(calleeName(node.expression))
+  );
+}
+
 /* ================================================================== *
  * 一、schema 索引
  * ================================================================== */
@@ -129,9 +153,7 @@ function jsonResponseSchema(op) {
           schema: resolveRef(raw),
           // openapi-typescript 对 inline 的 FastAPI 响应会自己起一个标题，
           // 有 $ref 的则直接用组件名 —— 两者都记下来供报告展示
-          refName: raw?.$ref
-            ? raw.$ref.replace('#/components/schemas/', '')
-            : (raw?.title ?? null),
+          refName: raw?.$ref ? raw.$ref.replace('#/components/schemas/', '') : (raw?.title ?? null),
         };
       }
     }
@@ -151,6 +173,8 @@ function calleeName(expr) {
 
 /** `${query}` 这种插值是不是"查询串后缀"（`const query = status ? '?status=…' : ''`） */
 function isQuerySuffix(expr, fnBody) {
+  // 阶段 5.1 / S3b：`const query = buildQuery({…})` 也是查询串后缀
+  if (isQueryHelperCall(expr)) return true;
   if (!ts.isIdentifier(expr)) return false;
   const name = expr.text;
   let found = false;
@@ -158,6 +182,8 @@ function isQuerySuffix(expr, fnBody) {
     if (found) return;
     if (ts.isStringLiteralLike(n) && n.text.startsWith('?')) found = true;
     if (ts.isTemplateExpression(n) && n.head.text.startsWith('?')) found = true;
+    // 初始化来自查询 helper 的调用同样算（`const query = buildQuery({…})`）
+    if (isQueryHelperCall(n)) found = true;
     ts.forEachChild(n, scanInit);
   };
   const scan = (node) => {
@@ -180,7 +206,8 @@ function isQuerySuffix(expr, fnBody) {
  * 路径表达式 → 模板串（插值统一记成 `{}`）
  *
  * 查询串会被截掉：既处理 `` `/x?a=${b}` ``（模板头里带 `?`），
- * 也处理 `` `/goals${query}` ``（查询串整个来自一个变量）。
+ * 也处理 `` `/goals${query}` ``（查询串整个来自一个变量），
+ * 也处理 `` `/notes${buildQuery(q)}` ``（阶段 5.1 / S3b 的形态）。
  */
 function renderPath(expr, fnBody) {
   if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
@@ -190,6 +217,8 @@ function renderPath(expr, fnBody) {
     let out = expr.head.text;
     let hadQuery = expr.head.text.includes('?');
     for (const span of expr.templateSpans) {
+      // 查询 helper 的调用**不上模板**：它产出的是 `?a=1` 或 `''`，
+      // 与"标识符型查询后缀"同性质（`isQuerySuffix` 亦作同样处理）
       if (!hadQuery && isQuerySuffix(span.expression, fnBody)) {
         hadQuery = true;
         break;
@@ -217,18 +246,62 @@ function readMethod(node) {
   return 'GET';
 }
 
+/**
+ * 取"对象字面量的键名"，允许实参是**标识符**（阶段 5.1 / S3b 的踩坑点）
+ *
+ * ⚠️ 第一版只处理"实参就是对象字面量"（`buildQuery({ page, … })`），
+ * 而迁移后的真实写法是**先存变量再传**：
+ *
+ * ```ts
+ * const query: QueryOf<'/notes', 'get'> = { page, page_size: pageSize, keyword }
+ * return request<NoteListResponse>(`/notes${buildQuery(query)}`)
+ * ```
+ *
+ * 于是参数名一个都扫不到 —— 实测 `queryNameDetections` 54 → 17、
+ * `functionsWithQueryNames` 22 → 4，`drift-delta` 直接退出码 1（守卫起作用了）。
+ * 这里按 `isQuerySuffix` 同样的方式回函数体里解析标识符的初始化式。
+ */
+function objectLiteralKeys(expr, fnBody) {
+  const keys = [];
+  const collect = (obj) => {
+    for (const prop of obj.properties) {
+      if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) keys.push(prop.name.text);
+      if (ts.isShorthandPropertyAssignment(prop)) keys.push(prop.name.text);
+    }
+  };
+  if (expr && ts.isObjectLiteralExpression(expr)) {
+    collect(expr);
+    return keys;
+  }
+  if (expr && ts.isIdentifier(expr) && fnBody) {
+    const wanted = expr.text;
+    const scan = (node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === wanted &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer)
+      ) {
+        collect(node.initializer);
+      }
+      ts.forEachChild(node, scan);
+    };
+    scan(fnBody);
+  }
+  return keys;
+}
+
 /** 扫函数体，收集 query 参数名（best-effort，见文件头"局限"） */
 function collectQueryNames(body) {
   const names = new Set();
   const visit = (node) => {
     if (ts.isNewExpression(node) && calleeName(node.expression) === 'URLSearchParams') {
-      const arg = node.arguments?.[0];
-      if (arg && ts.isObjectLiteralExpression(arg)) {
-        for (const prop of arg.properties) {
-          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) names.add(prop.name.text);
-          if (ts.isShorthandPropertyAssignment(prop)) names.add(prop.name.text);
-        }
-      }
+      for (const k of objectLiteralKeys(node.arguments?.[0], body)) names.add(k);
+    }
+    // 阶段 5.1 / S3b：参数名写在查询 helper 的实参里（字面量或先存变量都算）
+    if (isQueryHelperCall(node)) {
+      for (const k of objectLiteralKeys(node.arguments?.[0], body)) names.add(k);
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const fn = node.expression.name.text;
@@ -498,7 +571,8 @@ const virtualSource = program.getSourceFile(VIRTUAL_FILE);
 // ⚠️ 路径比对必须归一化：TS 内部把路径统一成 `/` 分隔，
 // 而 VIRTUAL_FILE 是 Windows 的 `\` —— 直接用 `===` 比会让所有诊断被过滤掉，
 // 表现就是"0 诊断、全部 IDENTICAL"（第一版踩的第二个坑）。
-const samePath = (a, b) => String(a).replace(/\\/g, '/').toLowerCase() === String(b).replace(/\\/g, '/').toLowerCase();
+const samePath = (a, b) =>
+  String(a).replace(/\\/g, '/').toLowerCase() === String(b).replace(/\\/g, '/').toLowerCase();
 
 const diagnostics = ts
   .getPreEmitDiagnostics(program, virtualSource)
@@ -629,11 +703,17 @@ function descFromTsType(type, depth = 0, seen = new Set()) {
   if (type.flags & ts.TypeFlags.Boolean) return { kind: 'boolean' };
   if (checker.isArrayType(type) || checker.isTupleType(type)) {
     const el = checker.getTypeArguments(type)[0];
-    return { kind: 'array', element: el ? descFromTsType(el, depth + 1, seen) : { kind: 'unknown' } };
+    return {
+      kind: 'array',
+      element: el ? descFromTsType(el, depth + 1, seen) : { kind: 'unknown' },
+    };
   }
   if (checker.isArrayLikeType(type)) {
     const el = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    return { kind: 'array', element: el ? descFromTsType(el, depth + 1, seen) : { kind: 'unknown' } };
+    return {
+      kind: 'array',
+      element: el ? descFromTsType(el, depth + 1, seen) : { kind: 'unknown' },
+    };
   }
   const name = type.getSymbol()?.getName?.();
   if (type.id != null && seen.has(type.id)) return { kind: 'object', props: {}, cyclic: true };
@@ -676,7 +756,11 @@ function diffDesc(hw, schema, where, out, depth = 0) {
   if (hw.kind === 'any' || hw.kind === 'unknown') return;
 
   if (schema.nullable && !hw.nullable) {
-    out.push({ kind: 'SCHEMA_NULLABLE_HW_NOT', where, detail: 'schema 允许 null，前端类型不接受 null' });
+    out.push({
+      kind: 'SCHEMA_NULLABLE_HW_NOT',
+      where,
+      detail: 'schema 允许 null，前端类型不接受 null',
+    });
   }
   if (schema.kind === 'literals' && (hw.kind === 'string' || hw.kind === 'number')) {
     out.push({
@@ -796,9 +880,7 @@ for (const c of calls) {
       const awaited = ret ? (checker.getAwaitedType(ret) ?? ret) : null;
       if (awaited) {
         row.hwType = checker.typeToString(awaited);
-        row.schemaType = resp.refName
-          ? resp.refName
-          : `(inline ${resp.code}, 无 $ref)`;
+        row.schemaType = resp.refName ? resp.refName : `(inline ${resp.code}, 无 $ref)`;
         // schema 侧根本没声明结构时，编译器的"不可赋值"不是前端的错 —— 单独归类
         if (schemaDesc.kind === 'untyped') row.verdict = 'SCHEMA_UNTYPED';
         else if (schemaDesc.kind === 'loose') row.verdict = 'SCHEMA_LOOSE';
@@ -857,7 +939,9 @@ for (const c of calls) {
  * 六、反向覆盖：schema 里没有任何前端调用方的端点
  * ================================================================== */
 
-const consumed = new Set(rows.filter((r) => r.pathExists).map((r) => `${r.method} ${r.schemaPath}`));
+const consumed = new Set(
+  rows.filter((r) => r.pathExists).map((r) => `${r.method} ${r.schemaPath}`),
+);
 const unconsumed = [];
 for (const entry of schemaPaths.values()) {
   for (const m of entry.methods) {
@@ -887,7 +971,8 @@ for (const entry of schemaPaths.values()) {
     const propNames = Object.keys(desc.props ?? {});
     const arrayProps = propNames.filter((k) => desc.props[k]?.kind === 'array');
     // "列表被包了一层"的两种形态：{items,total,...} 或 {<单个数组字段>}
-    const isEnvelope = arrayProps.length >= 1 && (propNames.includes('total') || propNames.length === 1);
+    const isEnvelope =
+      arrayProps.length >= 1 && (propNames.includes('total') || propNames.length === 1);
     if (isEnvelope) {
       const row = rows.find((r) => r.schemaPath === entry.raw && r.method === m.toUpperCase());
       envelopeEndpoints.push({
@@ -946,6 +1031,18 @@ const summary = {
   unknownQueryParams: rows.reduce((n, r) => n + (r.unknownQuery?.length ?? 0), 0),
   missingRequiredQuery: rows.reduce((n, r) => n + (r.missingRequiredQuery?.length ?? 0), 0),
   unusedSchemaQuery: rows.reduce((n, r) => n + (r.unusedSchemaQuery?.length ?? 0), 0),
+  /**
+   * 分母（阶段 5.1 / S3b 加）：**扫到多少个 query 参数名**，以及有多少个函数被扫出参数名。
+   *
+   * 为什么必须有：S3b 把参数名从"字符串字面量"搬进了 `buildQuery({…})` 的对象字面量里，
+   * 于是**扫描器一旦不认新形态，这些名字会集体消失**——而消失之后
+   * `unknownQueryParams`（本该报错的项）依然是 0、`unusedSchemaQuery` 反而虚高。
+   * 只看那两个指标的话，"扫不到"与"没写错"长得一模一样。
+   * 这两个数就是"到底比了多少"的证据：它们**只应随函数数量变化**，
+   * 不该因为换了写法而下降（`drift-delta.mjs` 把它们列为 MUST_NOT_CHANGE）。
+   */
+  queryNameDetections: rows.reduce((n, r) => n + (r.queryNames?.length ?? 0), 0),
+  functionsWithQueryNames: rows.filter((r) => (r.queryNames?.length ?? 0) > 0).length,
   unconsumedOperations: unconsumed.length,
 };
 
@@ -987,7 +1084,9 @@ function markdown() {
       `| \`${e.endpoint}\` | ${e.keys.join(', ')} | ${e.fn ? `\`${e.fn}\`` : '（无调用方）'} | \`${e.hwType ?? '—'}\` | ${e.fn ? (e.frontendIsArray ? '**是（错）**' : '否') : '—'} |`,
     );
   }
-  out.push(`\n结论：${envelopeEndpoints.length} 个信封端点，前端按数组解析的有 ${envelopeMismatches} 个。`);
+  out.push(
+    `\n结论：${envelopeEndpoints.length} 个信封端点，前端按数组解析的有 ${envelopeMismatches} 个。`,
+  );
   out.push('\n## schema 中无前端调用方的端点\n');
   for (const u of unconsumed) out.push(`- ${u}`);
   return out.join('\n') + '\n';

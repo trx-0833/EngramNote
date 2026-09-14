@@ -10,7 +10,8 @@ import {
   type NoteDetail,
   type NoteListResponse,
 } from './client';
-import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
+import type { BodyOf, BodyWithDefaults, QueryOf, Schema } from './generated/types';
+import { buildQuery } from './query';
 
 /**
  * 获取笔记列表（分页）
@@ -27,12 +28,15 @@ export async function getNotes(
   keyword?: string,
   noteRole?: string,
 ): Promise<NoteListResponse> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  // 仅在提供了关键词时才附加 keyword 参数
-  if (keyword) params.set('keyword', keyword);
-  // 仅在提供了笔记角色时才附加 note_role 参数
-  if (noteRole) params.set('note_role', noteRole);
-  return request<NoteListResponse>(`/notes?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：键序与迁移前逐字一致；
+  // `keyword` / `note_role` 为空值时不产生参数（`buildQuery` 跳过 undefined/'' ）
+  const query: QueryOf<'/notes', 'get'> = {
+    page,
+    page_size: pageSize,
+    keyword,
+    note_role: noteRole,
+  };
+  return request<NoteListResponse>(`/notes${buildQuery(query)}`);
 }
 
 /**
@@ -111,7 +115,10 @@ export async function archiveNote(noteId: string): Promise<Note> {
  * @returns 更新后的笔记信息
  */
 export async function updateNoteRole(noteId: string, noteRole: string): Promise<Note> {
-  return request<Note>(`/notes/${noteId}/role?note_role=${encodeURIComponent(noteRole)}`, {
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`note_role` 的取值域是固定枚举，
+  // URLSearchParams 的编码与迁移前的 encodeURIComponent 逐字相同
+  const query: QueryOf<'/notes/{note_id}/role', 'patch'> = { note_role: noteRole };
+  return request<Note>(`/notes/${noteId}/role${buildQuery(query)}`, {
     method: 'PATCH',
   });
 }
@@ -124,10 +131,13 @@ export async function getArchivedNotes(
   pageSize = 20,
   noteRole?: string,
 ): Promise<NoteListResponse> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  // 仅在提供了笔记角色时才附加 note_role 参数
-  if (noteRole) params.set('note_role', noteRole);
-  return request<NoteListResponse>(`/notes/archive?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/notes/archive`
+  const query: QueryOf<'/notes/archive', 'get'> = {
+    page,
+    page_size: pageSize,
+    note_role: noteRole,
+  };
+  return request<NoteListResponse>(`/notes/archive${buildQuery(query)}`);
 }
 
 /**
@@ -194,8 +204,14 @@ export async function restoreNote(noteId: string): Promise<RestoreResponse> {
  * @param promoteKeyCards - 是否将核心卡片提升为独立节点（图谱中保留）
  */
 export async function purgeNote(noteId: string, promoteKeyCards = false): Promise<void> {
-  const query = promoteKeyCards ? '?promote_key_cards=true' : '';
-  return request<void>(`/notes/${noteId}/purge${query}`, { method: 'DELETE' });
+  // 查询参数由契约派生（阶段 5.1 / S3b）。
+  // ⚠️ `|| undefined` 是**刻意**的：迁移前写的是 `promoteKeyCards ? '?…=true' : ''`，
+  // 即"false 时不发这个参数"；而 `buildQuery` 会把 `false` 照发（那是有意的通用语义），
+  // 所以"不想要 false"必须在这里显式表达。
+  const query: QueryOf<'/notes/{note_id}/purge', 'delete'> = {
+    promote_key_cards: promoteKeyCards || undefined,
+  };
+  return request<void>(`/notes/${noteId}/purge${buildQuery(query)}`, { method: 'DELETE' });
 }
 
 /**
@@ -234,7 +250,9 @@ export async function getAnnotations(
   noteId: string,
   viewMode: string,
 ): Promise<AnnotationListResponse> {
-  return request<AnnotationListResponse>(`/notes/${noteId}/annotations?view_mode=${viewMode}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/notes/{note_id}/annotations`
+  const query: QueryOf<'/notes/{note_id}/annotations', 'get'> = { view_mode: viewMode };
+  return request<AnnotationListResponse>(`/notes/${noteId}/annotations${buildQuery(query)}`);
 }
 
 /**
@@ -435,7 +453,9 @@ export async function diffVersions(
   v1: number,
   v2: number,
 ): Promise<NoteVersionDiffResponse> {
-  return request<NoteVersionDiffResponse>(`/notes/${noteId}/versions/diff?v1=${v1}&v2=${v2}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`v1` / `v2` 都是数字
+  const query: QueryOf<'/notes/{note_id}/versions/diff', 'get'> = { v1, v2 };
+  return request<NoteVersionDiffResponse>(`/notes/${noteId}/versions/diff${buildQuery(query)}`);
 }
 
 /** 恢复指定历史版本 */

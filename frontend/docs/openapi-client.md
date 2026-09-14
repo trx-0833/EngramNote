@@ -8,7 +8,8 @@
 > | 前置 P1/P2/P3 | 后端补 20 处 `response_model=` 与 5 处内层空壳（`schemaUntyped` 21 → 0） | §11 |
 > | S2 | **只换类型不换请求**：`Schema<'XResponse'>`，`identical` 26 → 104 | §12–§13 |
 > | **S3a** | **按端点索引的请求侧**（`BodyOf`/`QueryOf`/`BodyWithDefaults`）+ `deleteAnnotation` + S4 的 `client.ts` 收敛 | **§14** |
-> | S3b / S5 | query 参数接入与 5.2 / 5.3 **未做** | §14.9 |
+> | **S3b** | **查询串接入契约**（`buildQuery` + 18 个调用点 + 仪器升级与两次变异验证） | **§15** |
+> | S5 | 5.2 TanStack Query / 5.3 Zustand：**计划已出**，未动代码 | 计划文档 `query-and-state-plan.md` |
 
 > 本轮目标来自 `docs/overhaul-plan.md` §2.8 / 阶段 5.1：
 > "从 OpenAPI 生成类型与客户端，删除手写 `client.ts` 的 90 个函数与重复类型"。
@@ -1657,7 +1658,7 @@ const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 
 | # | 没做 | 为什么 / 下一步要什么 |
 |---|---|---|
-| 1 | **S3b：query 参数按契约派生** | 现状是 19 个函数各自手拼查询串（`URLSearchParams` 字面量、`.set`、`?a=${x}&b=${y}` 三种形态）。要接契约得先有一个 `buildQuery(QueryOf<P,M>)` 运行时helper，**并且同步升级漂移脚本的 query 扫描器**（它现在只认上面三种老形态，换成 helper 后会扫不到任何参数名 → `unusedSchemaQuery` 从 3 跳到 ~25，看起来像变坏其实是"没比"）。这是一次"换实现形态 + 换仪器"的改动，必须单独一轮，且要有"参数名检出数不下降"的分母守卫 |
+| 1 | ~~**S3b：query 参数按契约派生**~~ | **已在 §15 完成**（2026-09-14 同一轮的后半段）：18 个调用点接入契约，仪器同批升级并做了两次变异验证 |
 | 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | 不属于 S3；两者都会动到 74 个调用方文件的取数方式，属独立大轮次 |
 | 3 | **P4：`dump_openapi.py --check` 接 CI** | 要改 `.github/**`（不属本轮文件清单）。**这条风险仍然存在** |
 | 4 | **P3：`POST /api/auth/logout` 的 body 是否真的可选** | 契约里是 `requestBody?`，前端总是发。本轮只做到"前端与契约一致"，没去动后端声明 |
@@ -1694,4 +1695,152 @@ const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 所以证据不是那个 0，而是 **分母仍为 34** + **金丝雀仍会报错** +
 **`identical` 只涨了 `deleteAnnotation` 那一个**。三件事同时成立，
 "请求侧真的被契约接管了"才是一句有内容的话。
+
+---
+
+## 15. S3b：query 参数接入契约（2026-09-14）
+
+> S3a 管**请求体**，S3b 管**查询串**。这一轮的难点不在类型，而在**仪器**：
+> 把参数名从字符串搬进对象字面量之后，漂移脚本会**一个名字都扫不到**，
+> 而它的表现不是报错，是"看起来全都没问题"。
+
+### 15.0 一句话结论
+
+| 问题 | 答案 |
+|---|---|
+| 改了什么 | 18 个函数的查询串从手拼改成"契约类型标注 + 一个共享序列化器"：`const query: QueryOf<'/notes','get'> = { … }` → `` `/notes${buildQuery(query)}` `` |
+| 参数名现在什么时候被检查 | **编译期**（`QueryOf` 的对象字面量多做/写错一个键就报 TS2561）—— 此前只有漂移脚本**事后**扫字符串 |
+| 运行时行为变了吗 | **没有**：键序逐点保留、空值仍跳过、`promote_key_cards=false` 仍不发、两处 `encodeURIComponent` 的取值域是固定枚举 |
+| 真实链路的证据 | `e2e` 10 passed + `e2e:full` 6 passed（真实后端 + 真实 LLM）——这一轮改的就是**发出去的 URL**，只有这两层能证明它还对 |
+| 仪器怎么保证没坏 | 两个新分母（`queryNameDetections` 54 / `functionsWithQueryNames` 22）进 `MUST_NOT_CHANGE`，外加**两次变异验证**（§15.4） |
+
+### 15.1 新的运行时 helper：`src/api/query.ts`
+
+```ts
+const query: QueryOf<'/notes', 'get'> = { page, page_size: pageSize, keyword, note_role: noteRole }
+return request<NoteListResponse>(`/notes${buildQuery(query)}`)
+```
+
+`buildQuery(params: object): string` 的语义（逐条有单测，共 8 例）：
+
+| # | 语义 | 为什么是这条 |
+|---|---|---|
+| 1 | 键序 = 书写顺序 | 迁移前的输出要逐字一致，顺序是契约的一部分 |
+| 2 | `undefined` / `null` / `''` 跳过 | 迁移前普遍写作 `if (keyword) query.set(…)`，跳过空串就是那个行为 |
+| 3 | `number` / `boolean` → `String(v)`，**`false` 照发** | "false 不发"是调用点该显式表达的事（`promoteKeyCards \|\| undefined`）；在这里跳过 `false` 会变成一条谁也想不起来的隐式规则 |
+| 4 | 数组 → 重复键 | 契约里 `target_categories: string[] \| null` 是数组（今天无调用点用它，类型允许） |
+| 5 | 编码交给 `URLSearchParams` | 空格 → `+`、字面 `+` → `%2B`、中文按 UTF-8；与后端 FastAPI 的 form 解码规则一致 |
+| 6 | 没有参数时返回 `''`（不是 `'?'`） | 于是调用点写成 `` `${path}${buildQuery(q)}` `` 就与迁移前的 `x ? '?a=1' : ''` 形态完全一致 |
+| 7 | 不支持的取值类型**抛 `TypeError`** | 静默 `String(v)` 会发出 `[object Object]`：看起来发了请求，其实发的是垃圾 |
+
+**类型检查发生在调用点，不在这里**：`buildQuery` 的参数是宽松的 `object`，
+它只负责序列化；名字与取值域由 `QueryOf<P, M>` 标注保证。文件头明写了这一点，
+**也明写了"这里不做运行时校验"**（schema 只存在于类型层，假装能校验只会给虚假的安全感）。
+
+### 15.2 18 个调用点
+
+| 模块 | 函数（原形态 → 现形态） |
+|---|---|
+| `report` | `getWeakPoints`：`URLSearchParams({limit})` → `buildQuery({ limit })` |
+| `tasks` | `listNoteTasks`：`` ?limit=${limit} `` → `buildQuery({ limit })` |
+| `goals` | `getGoals`：`status ? '?status='+encodeURIComponent(status) : ''` → `buildQuery({ status })` |
+| `graph` | `searchGraphNodes`：`URLSearchParams({q, limit})` → `buildQuery({ q: keyword, limit })` |
+| `knowledge` | `getBlindSpots` / `getMasteryOverview`：`.set` ×4 / ×3 → `buildQuery` + **参数类型改成 `QueryOf<…>`**（对外是变宽，调用方零改动） |
+| `notes` | `getNotes` / `getArchivedNotes` / `updateNoteRole` / `purgeNote` / `getAnnotations` / `diffVersions` 六处 |
+| `projects` | `getFolders`：`URLSearchParams({days})` → `buildQuery({ days })` |
+| `qa` | `getKnowledgeCards` / `getQuestions` |
+| `review` | `getDueQuizzes` / `getReviewHistory` / `getDueCards` |
+
+**导出名、函数签名、运行时路径字面量一律未变**；只新增了一个运行时模块
+（`query.ts`）与一个测试文件（`query.test.ts`）。
+
+### 15.3 ★ 仪器必须同批升级：`openapi-drift.mjs` 的三处修改
+
+查询串换了写法之后，判定"路径对不对"和"参数名对不对"的两条通道**同时失效**：
+
+| # | 位置 | 迁移前的判据 | 为什么失效 | 改法 |
+|---|---|---|---|---|
+| 1 | `renderPath()` | 模板头含 `?`，或插值是**标识符**且初始化以 `?` 开头（`isQuerySuffix`） | `${buildQuery(query)}` 是 **CallExpression** → 判不出来 → 模板被渲染成 `/notes{}` → **111 个 pathMatched 会大面积变成 PATH_MISSING** | 查询 helper 的调用与标识符型后缀同样处理（识别到就 `hadQuery = true` 并 `break`） |
+| 2 | `isQuerySuffix()` | 同上 | 同上（`const query = buildQuery(…)` + `` `${query}` `` 的写法） | 标识符的初始化若来自 helper 调用，也算查询后缀 |
+| 3 | `collectQueryNames()` | `URLSearchParams` 字面量 / `.set`·`.append` / 字符串里的 `?k=` | 参数名搬进了 helper 的**实参**里，而且实参是**标识符**（`buildQuery(query)`），不是对象字面量 | 新增 `objectLiteralKeys(expr, fnBody)`：字面量直接收键，**标识符则回函数体解析它的初始化式**（与 `isQuerySuffix` 同一手法）；三条老通道**全部保留**（`upload.ts` 的 17 个 FormData 字段还靠它） |
+
+三处共用一个 `QUERY_HELPERS = new Set(['buildQuery'])`，将来加第二个 helper 只改一行。
+
+**新增两个分母指标**（并进 `drift-delta.mjs` 的 `MUST_NOT_CHANGE`）：
+`queryNameDetections`（Σ 参数名个数 = **54**）与 `functionsWithQueryNames`（= **22**）。
+它们是"到底比了多少"的证据 —— 只看 `unknownQueryParams` 的话，
+"扫不到"与"没写错"长得一模一样。
+
+### 15.4 两次变异验证（守卫真的会咬）
+
+**M1 是真实踩到的，不是设计的**：仪器第一版只处理"实参就是对象字面量"的形态，
+而迁移后的真实写法是**先存变量再传**。跑漂移立刻触发：
+
+| 指标 | 正常 | M1（扫描器不认标识符实参） |
+|---|---:|---:|
+| `queryNameDetections` | 54 | **17** |
+| `functionsWithQueryNames` | 22 | **4** |
+| `missingRequiredQuery` | 0 | **3** |
+| `unusedSchemaQuery` | 3 | **40** |
+| `drift-delta` 退出码 | 0 | **1** |
+
+注意 `unusedSchemaQuery` 是"信息项"（涨跌都正常）—— 如果没有两个分母，
+这一轮的表现会是"**报错项没变、信息项变多**"，很容易被读成"参数没写错"。
+
+**M2 是人为的对照**：把 `QUERY_HELPERS` 清空（等价于"三处识别全丢"）：
+
+| 指标 | 正常 | M2 |
+|---|---:|---:|
+| `pathMatched` / `pathMissing` | 111 / 0 | **93 / 18** |
+| `identical` | 105 | **88** |
+| `verdictRegressions` | 0 | **18** |
+| `queryNameDetections` / `functionsWithQueryNames` | 54 / 22 | **17 / 4** |
+| `drift-delta` 退出码 | 0 | **1**（6 项被点名） |
+
+还原后复跑：`pathMatched 111 / pathMissing 0 / identical 105 / 54 / 22`，退出码 0。
+
+### 15.5 两个函数为什么把键名"逐个写出来"
+
+`getBlindSpots` / `getMasteryOverview` 的入参本身就是契约类型（`QueryOf<…>`），
+最自然的写法是 `buildQuery(params)` **透传**。透传会让扫描器**看不到任何键名**
+（它拿不到类型信息，只能看语法）。实测中间态：
+
+| 指标 | 逐个写出（采用的写法） | 透传变量 |
+|---|---:|---:|
+| `queryNameDetections` | 54 | **47** |
+| `functionsWithQueryNames` | 22 | **20** |
+| `unusedSchemaQuery` | 3 | **10** |
+
+所以这两个函数（也只有这两个：入参是对象、且要原样转发）在函数体内**把 4 个 / 3 个键
+逐字写出来**，仍然带 `QueryOf<…>` 标注 —— 既保住编译期检查，也让仪器能核对。
+这条取舍写进了代码注释，避免后人"顺手简化成透传"。
+
+### 15.6 验证
+
+| 命令 | 结果 |
+|---|---|
+| `npx.cmd tsc --noEmit` | 退出 0 |
+| `npm.cmd test` | **23 files / 288 tests 全通过**（基线 22/280；新增的 8 例就是 `query.test.ts`） |
+| `npm.cmd run lint` | 退出 0（中途被 `no-constant-binary-expression` 拦了一次 —— 测试里用 `true \|\| undefined` 演示写法，已改成经函数参数传入） |
+| `npm.cmd run build` | 退出 0（✓ built in 5.40s） |
+| `npm.cmd run e2e` | **10 passed** |
+| `npm.cmd run e2e:full` | **6 passed**（真实后端 + 真实 LLM；改的是 URL，这一层是唯一真证据） |
+| `npm.cmd run gen:api:drift` + `drift-delta` | 退出 0；`pathMatched 111 / identical 105 / 54 / 22 / unused 3 / unknown 0 / missingReq 0 / bodyChecked 34` **与迁移前逐项相同** |
+| 变异 M1 / M2 | 见 §15.4（跑完即还原，还原后复跑确认回到基线） |
+
+### 15.7 明确**没做**的事
+
+| # | 没做 | 为什么 |
+|---|---|---|
+| 1 | 接上那 3 条"契约有、UI 从没传"的查询参数（`/notes` 的 `project_id`、`generate-questions` 的 `target_categories` / `target_difficulty`） | 属**产品功能**（要给 UI 加入口），不是 5.1 的契约贴合工作。`unusedSchemaQuery` 仍是 3，作为"未接能力"继续登记 |
+| 2 | `buildQuery` 的运行时校验 | schema 只在类型层；运行期没有可比对的东西 |
+| 3 | `upload.ts` 的 4 个 multipart 字段 | 它们是 FormData 字段、不是 query 参数（脚本按 `helper !== 'uploadRequest'` 已跳过比对），§9.2 早就定了"保持手写" |
+| 4 | 把 `QueryOf` 用到响应侧/路径参数上 | 响应已由 S2 的 `Schema<…>` 覆盖；路径参数在函数签名里是 `string`，接契约不产生新约束 |
+
+### 15.8 这一轮的方法论（一句话）
+
+**换实现形态时必须同时换仪器，并且先证明仪器还活着**：
+这一轮真正的风险不是 18 个调用点写错（编译器与 e2e 都会拦），
+而是**扫描器悄悄失明**——它的表现是"报错项一直是 0"。两个分母 + 两次变异验证，
+就是把"没比"从"没问题"里分出来的那一步。
 

@@ -9,7 +9,8 @@
  * 是这个项目正在被逐步拆掉的形态；新增的接口不该继续往那里堆。
  */
 import { request } from './client';
-import type { Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { QueryOf, Schema } from './generated/types';
 
 // --- 任务进度相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -37,7 +38,9 @@ export function isTerminal(status: string): boolean {
 
 /** 列出某笔记的近期任务（最新在前） */
 export function listNoteTasks(noteId: string, limit = 20): Promise<TaskRunList> {
-  return request<TaskRunList>(`/tasks/note/${noteId}?limit=${limit}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：键名写错会在这一行编译失败
+  const query: QueryOf<'/tasks/note/{note_id}', 'get'> = { limit };
+  return request<TaskRunList>(`/tasks/note/${noteId}${buildQuery(query)}`);
 }
 
 /** 查询单个任务 */

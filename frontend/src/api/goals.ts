@@ -3,7 +3,8 @@
  * @description 学习目标的创建、列表、详情、归档、删除与每日计划。
  */
 import { request } from './client';
-import type { BodyOf, BodyWithDefaults, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, BodyWithDefaults, QueryOf, Schema } from './generated/types';
 
 // --- 学习目标相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -54,10 +55,10 @@ export async function createGoal(data: CreateGoalPayload): Promise<LearningGoal>
   });
 }
 
-/** 获取学习目标列表 */
+/** 获取学习目标列表（查询参数由契约派生：`GET /api/goals` 的 `status`） */
 export async function getGoals(status?: string): Promise<GoalListResponse> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : '';
-  return request<GoalListResponse>(`/goals${query}`);
+  const query: QueryOf<'/goals', 'get'> = { status };
+  return request<GoalListResponse>(`/goals${buildQuery(query)}`);
 }
 
 /** 获取单个学习目标详情 */

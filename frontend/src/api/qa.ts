@@ -3,7 +3,8 @@
  * @description 触发理解、状态查询、章节摘要、知识卡片、题目生成与 RAG 问答。
  */
 import { request } from './client';
-import type { BodyOf, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, QueryOf, Schema } from './generated/types';
 
 // --- 理解管道与问答相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -135,10 +136,14 @@ export async function getKnowledgeCards(
   noteId?: string,
   keyword?: string,
 ): Promise<KnowledgeCardListResponse> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  if (noteId) params.set('note_id', noteId);
-  if (keyword) params.set('keyword', keyword);
-  return request<KnowledgeCardListResponse>(`/understanding/cards?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：键序与迁移前一致，空值不产生参数
+  const query: QueryOf<'/understanding/cards', 'get'> = {
+    page,
+    page_size: pageSize,
+    note_id: noteId,
+    keyword,
+  };
+  return request<KnowledgeCardListResponse>(`/understanding/cards${buildQuery(query)}`);
 }
 
 /**
@@ -178,10 +183,14 @@ export async function getQuestions(
   noteId?: string,
   keyword?: string,
 ): Promise<QuizItemListResponse> {
-  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  if (noteId) params.set('note_id', noteId);
-  if (keyword) params.set('keyword', keyword);
-  return request<QuizItemListResponse>(`/understanding/questions?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）
+  const query: QueryOf<'/understanding/questions', 'get'> = {
+    page,
+    page_size: pageSize,
+    note_id: noteId,
+    keyword,
+  };
+  return request<QuizItemListResponse>(`/understanding/questions${buildQuery(query)}`);
 }
 
 /**

@@ -3,7 +3,8 @@
  * @description 文件夹（按日期组织资料）、项目标签与 source/ 目录扫描导入。
  */
 import { request } from './client';
-import type { BodyOf, Schema } from './generated/types';
+import { buildQuery } from './query';
+import type { BodyOf, QueryOf, Schema } from './generated/types';
 
 // --- 文件夹/项目相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -69,8 +70,9 @@ export async function createFolder(
  * @returns 文件夹列表
  */
 export async function getFolders(days = 7): Promise<Folder[]> {
-  const params = new URLSearchParams({ days: String(days) });
-  return request<Folder[]>(`/folders?${params}`);
+  // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/folders` 只有 `days`
+  const query: QueryOf<'/folders', 'get'> = { days };
+  return request<Folder[]>(`/folders${buildQuery(query)}`);
 }
 
 /**

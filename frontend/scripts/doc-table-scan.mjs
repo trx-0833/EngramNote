@@ -39,6 +39,7 @@ const DEFAULT_FILES = [
   'frontend/docs/openapi-client.md',
   'frontend/docs/css-migration-plan.md',
   'frontend/docs/css-convention.md',
+  'frontend/docs/query-and-state-plan.md',
 ];
 
 const files = process.argv.slice(2).length
@@ -127,9 +128,7 @@ for (const file of files) {
   console.log(`· ${path.relative(REPO_ROOT, file)}`);
 }
 
-console.log(
-  `\n扫描完成：${totalTables} 张表 / ${totalRows} 行数据 / **${defects.length} 处缺陷**`,
-);
+console.log(`\n扫描完成：${totalTables} 张表 / ${totalRows} 行数据 / **${defects.length} 处缺陷**`);
 for (const d of defects) {
   console.log(
     `\n[缺陷] ${d.file}:${d.rowAt}（表头在第 ${d.tableAt} 行，表头 ${d.headerCells} 列，本行 ${d.cells} 列 —— ${d.how}）`,

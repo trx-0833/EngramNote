@@ -62,6 +62,11 @@ const MUST_NOT_CHANGE = [
   'schemaPaths',
   'schemaOperations',
   'bodyChecked',
+  // 阶段 5.1 / S3b 加：这两个是"query 参数名真的被扫了"的分母。
+  // 换了查询串写法之后，扫描器若不认新形态，名字会集体消失，
+  // 而 unknownQueryParams 依旧是 0 —— 只看它会把"没比"读成"没问题"。
+  'queryNameDetections',
+  'functionsWithQueryNames',
 ];
 
 /** 只是信息（涨跌都正常，不给对错） */
@@ -85,7 +90,9 @@ const DIRECTION = new Map([
 
 const [beforePath, afterPath] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (!beforePath || !afterPath) {
-  console.error('用法：node scripts/drift-delta.mjs <before.json> <after.json> [--allow-regression]');
+  console.error(
+    '用法：node scripts/drift-delta.mjs <before.json> <after.json> [--allow-regression]',
+  );
   process.exit(2);
 }
 const allowRegression = process.argv.includes('--allow-regression');
@@ -109,19 +116,15 @@ const after = load(afterPath);
 /** 请求体被真正比过的函数数（`bodyType` 只在扫到 `body:` 时才有） */
 const bodyChecked = (j) => j.rows.filter((r) => r.bodyType !== undefined).length;
 
-const metricOf = (j, key) =>
-  key === 'bodyChecked' ? bodyChecked(j) : (j.summary[key] ?? 0);
+const metricOf = (j, key) => (key === 'bodyChecked' ? bodyChecked(j) : (j.summary[key] ?? 0));
 
 /* ------------------------------------------------------------------ *
  * 三、指标表
  * ------------------------------------------------------------------ */
 
-const keys = [
-  ...LOWER_IS_BETTER,
-  ...HIGHER_IS_BETTER,
-  ...MUST_NOT_CHANGE,
-  ...INFORMATIONAL,
-].filter((k) => k in before.summary || k === 'bodyChecked');
+const keys = [...LOWER_IS_BETTER, ...HIGHER_IS_BETTER, ...MUST_NOT_CHANGE, ...INFORMATIONAL].filter(
+  (k) => k in before.summary || k === 'bodyChecked',
+);
 
 const problems = [];
 const rows = [];
@@ -149,7 +152,9 @@ console.log('| 指标 | 前 | 后 | 差 | 方向 | |');
 console.log('|---|---:|---:|---:|---|---|');
 for (const r of rows) {
   const label = { lower: '越小越好', higher: '越大越好', fixed: '必须不变', info: '信息' }[r.dir];
-  console.log(`| \`${r.key}\` | ${r.a} | ${r.b} | ${r.delta > 0 ? '+' : ''}${r.delta} | ${label} | ${r.mark} |`);
+  console.log(
+    `| \`${r.key}\` | ${r.a} | ${r.b} | ${r.delta > 0 ? '+' : ''}${r.delta} | ${label} | ${r.mark} |`,
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -215,12 +220,16 @@ for (const [k, r0] of beforeByFn) {
   const had1 = r1.bodyType !== undefined;
   if (n0 !== n1 || had0 !== had1) bodyRows.push({ k, n0, n1, had0, had1 });
 }
-console.log(`\n## 请求体逐函数对照（被比过的函数：${bodyChecked(before)} → ${bodyChecked(after)}）\n`);
+console.log(
+  `\n## 请求体逐函数对照（被比过的函数：${bodyChecked(before)} → ${bodyChecked(after)}）\n`,
+);
 if (!bodyRows.length) {
   console.log('- 没有任何函数的请求体发现数发生变化');
 } else {
   for (const { k, n0, n1, had0, had1 } of bodyRows) {
-    console.log(`- ${k}: 发现 ${n0} → ${n1}${had0 !== had1 ? `；body 是否可比 ${had0} → ${had1}` : ''}`);
+    console.log(
+      `- ${k}: 发现 ${n0} → ${n1}${had0 !== had1 ? `；body 是否可比 ${had0} → ${had1}` : ''}`,
+    );
   }
 }
 
@@ -235,7 +244,9 @@ if (!problems.length) {
 }
 for (const p of problems) {
   const label = { lower: '本应下降', higher: '本应上升', fixed: '本应不变' }[p.dir] ?? '';
-  console.log(`- ❌ \`${p.key}\`：${p.a} → ${p.b}（${label}，却 ${p.b > p.a ? '上升' : '下降'}了）`);
+  console.log(
+    `- ❌ \`${p.key}\`：${p.a} → ${p.b}（${label}，却 ${p.b > p.a ? '上升' : '下降'}了）`,
+  );
 }
 if (allowRegression) {
   console.log('\n（`--allow-regression`：只报告不失败。报告里必须写明为什么允许）');
