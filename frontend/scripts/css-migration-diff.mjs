@@ -50,7 +50,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseRules, classesOf } from './lib/css-parse.mjs'
+import { parseRules, classesOf, findRecentRev, readFromGit } from './lib/css-parse.mjs'
 
 const root = process.cwd()
 
@@ -63,13 +63,21 @@ const root = process.cwd()
  *   所以它的"迁移前"是 `HEAD~1`；第一批尚未提交，用默认的 `HEAD`。
  *   读错修订的表现是"迁移前 0 条"，脚本会直接报错退出，不会静默放过；
  * - `groups`：老类名 → 新家的模块文件（新类名由 kebab→camel 推导后回文件核对）；
- * - `hardened`：为压过全局类而**显式加进选择器**的全局类前缀（老类名 → 前缀）；
+ * - `hardened`：为压过全局类而**显式加进选择器**的全局类前缀（老类名 → 前缀）。
+ *   第一批曾用过一次（`:global(.btn).authSubmit`），后来改成修正 `main.tsx`
+ *   的导入顺序、把选择器还原成单类，所以现在是空的。机制留着：哪天再出现
+ *   "必须靠提权才能赢"的正当场景，在这里登记即可 —— 不登记的话差集会把它
+ *   误报成"丢失 1 条 + 新增 1 条"；
  * - `keyframes`：搬进模块并改名的 `@keyframes`（动画体必须与全局原版一致）。
+ *
+ * ⚠️ `rev` 一般**不用写**：留空时脚本按内容自动定位"迁移前"（从 HEAD 往回找
+ * 第一个还含有本批老类名的修订）。写死 `HEAD~N` 会被并行的无关提交打乱 ——
+ * 第二批期间另一个 agent 提交了一个后端改动，所有相对计数就集体错位了。
+ * 这个字段留着只是为了在自动定位不适用时手工兜底。
  */
 const BATCHES = [
   {
     id: '试点：quiz 答题切片',
-    rev: 'HEAD~1',
     beforeSheets: ['src/styles/learning.css', 'src/styles/responsive.css'],
     groups: [
       {
@@ -162,10 +170,11 @@ const BATCHES = [
         classes: ['dashboard-two-col', 'dashboard-review-card', 'trend-bar', 'trend-bar-warning'],
       },
     ],
-    // `.auth-submit` 在模块里写成 `:global(.btn).authSubmit`（产物：`.btn._authSubmit_hash`）。
-    // 理由见 src/pages/Auth.module.css 文件头"坑二"：模块 CSS 排在全局之前，
-    // 不提高权重就会被 `.btn` 反盖。
-    hardened: { 'auth-submit': '.btn' },
+    // 曾经是 `{ 'auth-submit': '.btn' }`（`:global(.btn).authSubmit`）。
+    // 已改为修正 `main.tsx` 的导入顺序 + 还原单类选择器，
+    // 所以这里刻意留空：留空意味着"这一批没有任何选择器文本变化"，
+    // 任何新的提权都必须显式登记，否则差集会报"丢失 + 新增"。
+    hardened: {},
     keyframes: [
       {
         fromSheet: 'src/styles/base.css',
@@ -180,6 +189,42 @@ const BATCHES = [
         renamed: 'cleaningPulse',
       },
     ],
+  },
+  {
+    id: '第二批：markdown-extras（ask-ai + selection-menu）',
+    // 本批尚未提交 → 迁移前就读 HEAD（= 第一批提交后的状态）
+    beforeSheets: ['src/styles/markdown-extras.css'],
+    groups: [
+      {
+        module: 'src/components/NoteAskPanel.module.css',
+        classes: [
+          'ask-ai-panel',
+          'ask-ai-header',
+          'ask-ai-title',
+          'ask-ai-close',
+          'ask-ai-body',
+          'ask-ai-input',
+          'ask-ai-selected-hint',
+          'ask-ai-actions',
+          'ask-ai-question',
+          'ask-ai-thinking',
+          'ask-ai-answer',
+          'ask-ai-error',
+          'ask-ai-provider',
+        ],
+      },
+      {
+        module: 'src/pages/notedetail/SelectionMenu.module.css',
+        classes: ['selection-menu'],
+      },
+    ],
+    // 本批没有需要提权的规则：`.ask-ai-input` / `.selection-menu` 都是单类选择器，
+    // 相对全局层只有元素选择器（`input, textarea` / `button`）能碰上，
+    // 权重 (0,1,0) > (0,0,1)，与先后无关。
+    hardened: {},
+    // 本批不搬 `@keyframes`：同表的 `citation-flash` 属于留在全局的
+    // `.markdown-body mark.citation-highlight`，引用与定义仍在同一层。
+    keyframes: [],
   },
 ]
 
@@ -280,6 +325,23 @@ const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '')
 
 /** `auth-input-group` → `authInputGroup`（本项目模块类名的唯一推导规则） */
 const kebabToCamel = (name) => name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())
+
+/**
+ * 定位"迁移前"的修订：从 HEAD 往回找第一个**还含有本批老类名**的修订。
+ *
+ * 不再用 `HEAD~N` 数格子：并行 agent 提交无关改动会让所有相对计数集体错位
+ * （第二批真的遇到了）。按内容定位与提交顺序无关，见
+ * `lib/css-parse.mjs` 的 `findRecentRev`。
+ */
+function resolveBeforeRev(batch, oldNames) {
+  return findRecentRev((rev) =>
+    batch.beforeSheets.some((rel) => {
+      const abs = path.join(root, rel)
+      const css = readFromGit(abs, rev)
+      return parseRules(css).some((r) => classesOf(r.selector).some((c) => oldNames.has(c)))
+    }),
+  )
+}
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -387,7 +449,14 @@ for (const batch of BATCHES) {
 
   // ── 侧别 A：迁移前（git 修订里的源码） ──
   const beforeRules = []
-  const rev = batch.rev || 'HEAD'
+  const rev = batch.rev || resolveBeforeRev(batch, oldNames)
+  if (!rev) {
+    console.error(
+      `✗ ${batch.id}：从 HEAD 往回 40 个提交里找不到"还含有本批类名"的修订。` +
+        `要么类名写错了，要么这个批次其实没迁移过 —— 两种情况都不该继续编差集。`,
+    )
+    process.exit(3)
+  }
   for (const rel of batch.beforeSheets) {
     const abs = path.join(root, rel)
     // 侧别 A 用 git 读，这样"迁移前"是那个修订的真实内容，

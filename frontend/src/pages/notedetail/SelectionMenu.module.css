@@ -1,0 +1,38 @@
+/**
+ * 批注操作浮层的样式（overhaul-plan 5.6：第二批，序 11）
+ *
+ * `.selection-menu` 的 3 条规则原来住在全局 `markdown-extras.css` 里，
+ * 而全项目只有 `SelectionMenu.tsx` 在用（grep 前缀 `selection-menu` 只命中
+ * 这个组件 + 那张表），`responsive.css` / `refinements.css` 里 0 命中 ——
+ * 与同一批的 `.ask-ai-*` 同属"单一归属、可整组搬"。
+ *
+ * 浮层的位置/尺寸由 tsx 的内联样式给（fixed + `translate(-50%, -100%)`），
+ * 这里只管外观；这么分是有意的：定位要跟着选区坐标走，属于行为。
+ */
+
+.selectionMenu {
+  display: flex;
+  gap: 4px;
+  background: white;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
+  padding: 4px;
+}
+
+/* 按钮是裸 `<button>`（没有走全局 `.btn`），所以这里必须自带
+   `border: none` / `background: transparent` —— 全局只有
+   `button { cursor; font-family; font-size: inherit; border: none; background: none }`。 */
+.selectionMenu button {
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--color-text, #333);
+}
+
+.selectionMenu button:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+}

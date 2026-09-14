@@ -218,3 +218,36 @@ export function readFromGit(absFile, rev = 'HEAD') {
     maxBuffer: 32 * 1024 * 1024,
   })
 }
+
+/**
+ * 从 HEAD 往回找**最近一个**满足 `matches(rev)` 的修订。
+ *
+ * ## 为什么需要它（第二批实测踩到）
+ *
+ * "迁移前"的修订原来写成 `HEAD~1` / `HEAD~2` 这种相对计数，理由是
+ * "试点提交在 HEAD~1、第一批提交在 HEAD~2"。**这个前提会被无关提交打破**：
+ * 本项目是多个 agent 并行改同一个仓库，第二批期间另一个 agent 提交了一个
+ * 后端改动，HEAD 因此往前挪了一位，所有 `HEAD~N` 全部指错 ——
+ * 表现是"迁移前 0 条"。脚本会报错退出（不会静默给出错误结论），
+ * 但每来一个无关提交都要人工重算一遍，这不是能长期维持的做法。
+ *
+ * 改成**按内容定位**：从 HEAD 往回走，第一个"还含有这批老类名"的修订
+ * 就是迁移前。它与提交顺序、与期间有多少无关提交都无关。
+ *
+ * 代价是每个候选修订多一次 `git show`；`maxDepth` 40 对本地仓库是毫秒级。
+ * 真超出深度会返回 null，让调用方报错 —— 绝不静默取一个错的修订。
+ */
+export function findRecentRev(matches, { maxDepth = 40 } = {}) {
+  for (let i = 0; i < maxDepth; i += 1) {
+    const rev = i === 0 ? 'HEAD' : `HEAD~${i}`
+    let ok = false
+    try {
+      ok = matches(rev)
+    } catch {
+      // 该修订里文件还不存在（新增文件）→ 不满足条件，继续往前找
+      ok = false
+    }
+    if (ok) return rev
+  }
+  return null
+}

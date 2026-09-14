@@ -1,4 +1,40 @@
-/* ── LaTeX 公式样式 ── */
+/**
+ * Markdown 扩展样式（overhaul-plan 5.6 第二批后：**只剩必须留全局的部分**）
+ *
+ * ## 本文件现在装什么、为什么这些必须留在这里
+ *
+ * 留下的 9 条规则 + 1 个 `@keyframes` 全部作用在**没有 React 组件可以挂类名**
+ * 的 HTML 上（规范 §4 第 3、4 条）：
+ *
+ * | 规则 | 谁生成这些 DOM | 为什么不能进模块 |
+ * |---|---|---|
+ * | `.markdown-body .katex-block` / `.katex` / `.katex-display` | KaTeX（第三方） | 类名由 KaTeX 自己拼，我们控制不了 |
+ * | `.katex-error` | `utils/markdown.ts:117` 返回的 HTML **字符串** | 字符串里的类名，没有组件 |
+ * | `.markdown-body mark.citation-highlight` + `@keyframes citation-flash` | `utils/citationJump.ts`（`HIGHLIGHT_CLASS`） | 同上；`highlightCitation()` 直接往正文 DOM 里插 `<mark>` |
+ * | `.markdown-body .annotation-mark` / `.annotation-underline`（含 `:hover`） | `pages/notedetail/annotations.ts` 拼进 HTML | 同上 |
+ *
+ * ⚠️ 这些规则都写成 `.markdown-body <后代>`，是因为正文是
+ * `dangerouslySetInnerHTML` 注入的（`renderMarkdown()` 的产物）——
+ * **`.markdown-body` 本身是全局类**，哈希它就会让整组选择器失效。
+ *
+ * ## 已经搬走的部分
+ *
+ * - `.ask-ai-*`（17 条）→ `src/components/NoteAskPanel.module.css`
+ * - `.selection-menu`（3 条）→ `src/pages/notedetail/SelectionMenu.module.css`
+ *
+ * ## ⚠️ 导入顺序仍然有意义（别动 `main.tsx` 里它的位置）
+ *
+ * 本文件必须排在 `responsive.css` **之后**（`main.tsx` 里确实是这个顺序）：
+ * `responsive.css` 的 768px 档给 `.markdown-body .katex-block` 写了窄屏兜底，
+ * 两者权重相同（都是 0,2,0），先后决定谁生效。
+ * `src/styles/mobile-input-font-size.test.ts` 把这个顺序当作前提断言了下来。
+ *
+ * 另注：iOS 聚焦缩放那个坑（`.ask-ai-input` 的 `font-size` 必须 ≥1rem）
+ * 随着该规则搬进模块换了 owner，护栏也同步改了 —— 见
+ * `components/NoteAskPanel.module.css` 文件头。
+ */
+
+/* ── LaTeX 公式样式（KaTeX 生成的 DOM） ── */
 
 .markdown-body .katex-block {
   text-align: center;
@@ -27,7 +63,7 @@
   font-size: 0.9em;
 }
 
-/* ── 批注样式 ── */
+/* ── 批注样式（注入的 HTML 字符串） ── */
 
 /*
  * 引用回跳高亮（阶段 2.7）
@@ -46,6 +82,7 @@
   animation: citation-flash 1.6s ease-out 1;
 }
 
+/* 定义与引用同在本文件（全局层）：不像模块那样会被哈希，所以不需要搬 */
 @keyframes citation-flash {
   0% { background-color: #fbbf24; }
   100% { background-color: #ffd166; }
@@ -71,154 +108,4 @@
 
 .markdown-body .annotation-underline:hover {
   background-color: #e8f0fe;
-}
-
-.selection-menu {
-  display: flex;
-  gap: 4px;
-  background: white;
-  border: 1px solid var(--color-border, #ddd);
-  border-radius: 6px;
-  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
-  padding: 4px;
-}
-
-.selection-menu button {
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  color: var(--color-text, #333);
-}
-
-.selection-menu button:hover {
-  background: var(--color-bg-hover, #f0f0f0);
-}
-
-/* ── AI 提问浮层 ── */
-
-.ask-ai-panel {
-  background: white;
-  border: 1px solid var(--color-border, #ddd);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
-  padding: 0;
-  text-align: left;
-}
-
-.ask-ai-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--color-border, #eee);
-}
-
-.ask-ai-title {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--color-text, #333);
-}
-
-.ask-ai-close {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.9rem;
-  color: var(--color-text-secondary, #888);
-  padding: 2px 6px;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.ask-ai-close:hover {
-  background: var(--color-bg-hover, #f0f0f0);
-  color: var(--color-text, #333);
-}
-
-.ask-ai-body {
-  padding: 12px 14px;
-}
-
-/* iOS Safari 在聚焦 font-size **小于 16px** 的输入框时会把整页放大
-   （focus zoom），textarea 同样中招 —— 所以这里必须 ≥1rem，不能写 0.9rem。
-   注意这个值**只能在本文件里改**：main.tsx 里的导入顺序是
-   responsive.css(12) → markdown-extras.css(13)，同权重的窄屏兜底规则
-   写进 responsive.css 会输给这一行，看着像生效其实没生效。 */
-.ask-ai-input {
-  width: 100%;
-  resize: vertical;
-  font-family: inherit;
-  font-size: 1rem;
-  line-height: 1.6;
-  padding: 8px 10px;
-  border: 1px solid var(--color-border, #ddd);
-  border-radius: 6px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.ask-ai-input:focus {
-  border-color: var(--color-primary, #4a6cf7);
-}
-
-.ask-ai-selected-hint {
-  margin-top: 8px;
-  font-size: 0.78rem;
-  color: var(--color-text-secondary, #888);
-  word-break: break-all;
-}
-
-.ask-ai-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 10px;
-}
-
-.ask-ai-question {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text, #333);
-  margin-bottom: 8px;
-  padding: 6px 10px;
-  background: var(--color-bg-hover, #f6f6f6);
-  border-radius: 6px;
-  word-break: break-all;
-}
-
-.ask-ai-thinking {
-  color: var(--color-text-secondary, #888);
-  font-style: italic;
-  line-height: 1.8;
-}
-
-.ask-ai-answer {
-  line-height: 1.8;
-  font-size: 0.9rem;
-  color: var(--color-text, #333);
-  word-break: break-word;
-}
-
-.ask-ai-answer :first-child {
-  margin-top: 0;
-}
-
-.ask-ai-answer :last-child {
-  margin-bottom: 0;
-}
-
-.ask-ai-error {
-  color: var(--color-error, #d9534f);
-  margin-top: 8px;
-  font-size: 0.85rem;
-}
-
-.ask-ai-provider {
-  font-size: 0.7rem;
-  color: var(--color-text-secondary, #888);
-  margin-top: 10px;
-  text-align: right;
 }

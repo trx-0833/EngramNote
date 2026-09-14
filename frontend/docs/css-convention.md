@@ -96,40 +96,36 @@
    transition / position / overflow` —— 一次纯搬家就变成了视觉改动，
    而本轮要证明的恰恰是"没变"。要统一按钮基线请单开一轮，带截图对比。
 
-5. **⚠️ 模块的 CSS 在产物里排在全局样式表**之前**（第一批实测，最容易被忽略）。**
-   Vite 按**模块图顺序**产出 CSS，而 `main.tsx` 第 4 行就 `import App`、
-   样式表第 7 行之后才引入 —— 于是**静态引入的组件，其模块 CSS 排在
-   全部全局样式表之前**。实测产物 `index.css` 的字节位置：
-   `Auth.module.css` = 1、`base.css` 的 `:root` = 2551、`.btn` = 6555
-   （具体数字随构建略有浮动，量级不变）。
+5. **⚠️ 模块层与全局层的先后（第一批实测 → 第二批已根治）。**
+   Vite 按**模块图顺序**产出 CSS。第一批时 `main.tsx` 第 4 行就 `import App`、
+   样式表第 7 行之后才引入，于是**静态引入的组件，其模块 CSS 排在全部全局
+   样式表之前**。实测（重排前）产物 `index.css` 的字节位置：
+   `Auth.module.css` = 1、`base.css` 的 `:root` = 2551、`.btn` = 6555。
 
    后果：`.auth-submit` 这种"在全局 `.btn` 之上覆盖几个属性"的规则，
    两者权重相同（都是单类），搬进模块后**先后关系反转**，`.btn` 反而盖住了
    它的 `padding / font-size / font-weight / transition`（按钮肉眼可见地
    变小变细）。文本差集看不出这种损失 —— 两条规则都还在、值也没改。
 
-   **修法：模块里把全局类写进选择器，显式提高权重。**
+   **根治（已落地）**：`main.tsx` 里把全部 `./styles/*.css` 提到应用组件之前，
+   产物顺序于是变成 **①令牌 → ②全局 → ③模块**，与 §1 的分层图一致。
+   第一轮曾用 `:global(.btn).authSubmit` 提权顶住，重排后**特意还原成单类**：
+   留着提权会把"模块排在全局之前"这个事实继续藏在代码里。
+   （重排后实测：`:root` @0、`.btn` @4004、`_authBg` @48306 —— 模块层确实最后。）
 
-   ```css
-   /* :global() 在**选择器**里合法（在声明值里才会构建失败，见雷区 1） */
-   :global(.btn).authSubmit { padding: var(--space-md); font-size: 1rem; }
-   /* 产物：`.btn._authSubmit_1hcab_41`，权重 (0,2,0) > (0,1,0)，与先后无关 */
-   ```
-
-   `verify-built-css.mjs` 的 `CASCADE_PAIRS` 会逐属性算"谁最终生效"，
-   得主与迁移前不一致就红。**新增一条与全局类打架的模块规则时，
-   必须往 `CASCADE_PAIRS` 里加一行**，否则这项检查覆盖不到它。
+   **两道护栏**（都不靠人记）：
+   - `scripts/verify-built-css.mjs` 的 `CASCADE_PAIRS`：逐属性算"谁最终生效"，
+     得主必须是模块。**新增一条与全局类打架的模块规则时必须往这里登记。**
+     它同时支持两种取胜方式（权重更高 / 权重相同靠源序），同权重又跨文件时
+     直接报"判不了"（那种情况必须提权消除歧义）。反向验证过：把 `main.tsx`
+     的顺序改回去，这项立刻报 4 个属性得主是 global，并指出先查 `main.tsx`。
+   - `src/styles/mobile-input-font-size.test.ts` 新增"模块层必须排在全局层之后"
+     用例：单测层快速反馈，不需要构建。
 
    > 反面提醒：**懒加载**的页面/组件，其模块 CSS 会打成独立 chunk，
-   > 在 `index.css` **之后**才注入，那一侧不存在反转
-   > （`Dashboard.module.css`、`NoteDetail-*.css` 就是这种）。
-   > 所以不要无脑给所有模块规则加 `:global()`：只在"同元素上真有同权重
-   > 竞争 **且** 该组件是静态引入"时才需要。
-   >
-   > **结构性根治方案**（第一批不允许改 `main.tsx`，故未做）：把 `main.tsx` 的
-   > `import App` 挪到全局样式表之后，让产物顺序变成 ①令牌 → ②全局 → ③模块，
-   > 与 §1 的分层图一致，雷区 5 整体消失。已记入
-   > `docs/css-migration-plan.md` 的下一轮建议。
+   > 本来就在 `index.css` 之后注入（`Dashboard.module.css`、
+   > `NoteDetail-*.css` 就是这种）。所以不要无脑给模块规则加 `:global()`：
+   > 只有当同一个元素上真有同权重竞争时才需要考虑。
 
 ## 4. 什么时候类名**必须**留在全局
 
@@ -224,8 +220,8 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头） |
-| `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git [--rev R]` 读某个修订的版本 |
+| `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头）+ `findRecentRev`（按内容定位"迁移前"） |
+| `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git` 读 git 版本（修订**自动定位**，可 `--rev` 覆盖） |
 | `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明 |
 | `scripts/verify-built-css.mjs` | 产物校验：**逐文件**悬空动画、冲突归因到源文件、级联次序、切片标记、退休类名、产物新鲜度 |
 | `scripts/gen-migration-evidence.mjs` | 把上面三者的输出写成 `docs/migration-evidence/*.md` |
@@ -248,3 +244,26 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    把真变化淹掉，归一化时若不写明依据，又会变成"把差异抹平"。
    另有 `-webkit-user-select` 这类**构建器注入**的声明：它是加法不是丢失，
    单独一节列出、不当作失败。
+
+**第二批踩到一次"环境"问题，改变了工具设计：**
+
+3. **不要用 `HEAD~N` 记"迁移前"。** 本项目是多个 agent 并行改同一个仓库：
+   第二批期间另一个 agent 提交了一个**后端**改动，HEAD 往前挪一位，
+   于是写死的 `HEAD~1` / `HEAD~2` 集体指错 —— 三个批次的"迁移前"全指向
+   迁移**之后**的版本。自检把这件事报成了"解析出 0 条规则"（响亮地失败，
+   没有静默给出错结论），但每来一个无关提交就要人工重算一遍，不可持续。
+   现在两个脚本都从 HEAD 往回**按内容**找"第一个还含有这批老类名的提交"
+   （`lib/css-parse.mjs` 的 `findRecentRev`），与提交顺序完全解耦。
+
+**已知的检查盲区**（第二批发现，尚未补）：
+
+4. **"窄屏规则被同权重的桌面规则压掉"这类事故，现有工具看不见。**
+   实例：`responsive.css` 的 `@media (max-width:768px) { .markdown-body .katex
+   { font-size: 1em } }` 与 `markdown-extras.css` 的顶层
+   `.markdown-body .katex { font-size: 1.1em }` 权重相同（都是 0,2,0），
+   媒体查询**不增加权重**，而后者在产物里更靠后（实测字节 36081 vs 37916）
+   —— 于是那条窄屏字号**从未生效过**（迁移前就如此，与 5.6 无关）。
+   差集脚本按 `(上下文 + 选择器 + 属性)` 建键，`@media` 里的规则与顶层规则
+   落在不同键上，所以这种"跨上下文覆盖战"不会被报出来。
+   要补的话应当是在产物上做一次**权重+顺序的真实求解**（像 `CASCADE_PAIRS`
+   那样，但自动枚举同选择器对），代价是要引入 DOM 知识以判断元素是否真同时命中。

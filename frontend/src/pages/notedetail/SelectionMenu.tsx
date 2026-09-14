@@ -5,6 +5,10 @@
  * 定位方式（fixed + translate(-50%, -100%)）、按钮文案与 title 均与拆分前一致。
  * 显示条件（`showAnnotationMenu && editMode === 'view'`）由页面侧判断。
  */
+// 浮层样式（overhaul-plan 5.6）：原 src/styles/markdown-extras.css 的
+// `.selection-menu` 3 条搬到这里
+import styles from './SelectionMenu.module.css'
+
 interface SelectionMenuProps {
   /** 浮层锚点（选区中心的视口坐标） */
   pos: { x: number; y: number }
@@ -18,7 +22,7 @@ interface SelectionMenuProps {
 export default function SelectionMenu({ pos, onApplyAnnotation, onOpenAskAI }: SelectionMenuProps) {
   return (
     <div
-      className="selection-menu"
+      className={styles.selectionMenu}
       style={{
         position: 'fixed',
         left: pos.x,

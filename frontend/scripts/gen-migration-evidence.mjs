@@ -10,16 +10,17 @@
  *
  * ## 生成什么
  *
- *   docs/migration-evidence/5.6-01-before-learning-css.md   试点：迁移前规则清单
- *   docs/migration-evidence/5.6-01-before-responsive-css.md 试点：迁移前响应式规则清单
+ *   docs/migration-evidence/5.6-01-before-*.md              试点：迁移前规则清单
  *   docs/migration-evidence/5.6-02-rule-diff.md             迁移前后差集（**含所有批次**）
  *   docs/migration-evidence/5.6-03-built-css.md             产物 CSS 校验（**含所有批次**）
  *   docs/migration-evidence/5.6-04-before-batch1.md         第一批：迁移前规则清单
+ *   docs/migration-evidence/5.6-05-before-batch2.md         第二批：迁移前规则清单
  *
- * ⚠️ 修订（rev）要按批次给对：
- *   - 试点（quiz 切片）**已经提交**在 `6acb21c`，它的"迁移前"是 `HEAD~1`；
- *   - 第一批尚未提交，"迁移前"就是 `HEAD`。
- * 给错的直接表现是"清单 0 条"，脚本会报错退出而不是写出一份空证据。
+ * ⚠️ 修订（rev）**不用手写**：两个脚本都从 HEAD 往回按内容找"还含有这批老类名"
+ * 的第一个提交。原来写死 `HEAD~1` / `HEAD~2`，被并行的无关提交打乱过 ——
+ * 第二批期间另一个 agent 提交了一个后端改动，相对计数就集体错位，
+ * 三个批次的"迁移前"全指错。给错的表现是"清单 0 条"，脚本会报错退出
+ * 而不是写出一份空证据。
  *
  * 用法：node scripts/gen-migration-evidence.mjs
  *   前置：已跑过 npm run build（差集与产物校验都取自 dist 产物）
@@ -61,33 +62,25 @@ function write(name, title, body) {
   files.push({ name, bytes: buf.length })
 }
 
-/** 跑一次清单并把结果写成一个证据文件 */
-function inventoryEvidence({ name, title, sheet, classes, rev }) {
-  const r = run('css-rule-inventory.mjs', [
-    sheet,
-    '--class',
-    classes.join(','),
-    '--from-git',
-    ...(rev ? ['--rev', rev] : []),
-  ])
+/** 跑一次清单并把结果写成一个证据文件（修订按内容自动定位，不写死） */
+function inventoryEvidence({ name, title, sheet, classes }) {
+  const r = run('css-rule-inventory.mjs', [sheet, '--class', classes.join(','), '--from-git'])
   if (r.code !== 0) throw new Error(`清单生成失败（${sheet}）：${r.out}`)
-  write(name, title, `取自 \`git show ${rev || 'HEAD'}:frontend/${sheet}\`。\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  write(name, title, `取自 \`git show <rev>:frontend/${sheet}\`，修订按内容自动定位。\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
 }
 
-// ── 1. 试点（quiz 切片）迁移前清单：已提交，故从 HEAD~1 取 ──
+// ── 1. 试点（quiz 切片）迁移前清单 ──
 inventoryEvidence({
   name: '5.6-01-before-learning-css.md',
   title: '5.6 迁移前：learning.css 中属于答题卡片切片的规则',
   sheet: 'src/styles/learning.css',
   classes: ['quiz-option', 'quiz-option-selected', 'feedback-correct', 'feedback-incorrect'],
-  rev: 'HEAD~1',
 })
 inventoryEvidence({
   name: '5.6-01-before-responsive-css.md',
   title: '5.6 迁移前：responsive.css 中 .self-rating-btn 的规则',
   sheet: 'src/styles/responsive.css',
   classes: ['self-rating-btn'],
-  rev: 'HEAD~1',
 })
 
 // ── 2. 第一批（auth → cleaning → diff → dashboard）迁移前清单：尚未提交，故从 HEAD 取 ──
@@ -128,45 +121,76 @@ const batch1Sheets = [
 ]
 const parts = []
 for (const s of batch1Sheets) {
-  const r = run('css-rule-inventory.mjs', [
-    s.sheet,
-    '--class',
-    s.classes.join(','),
-    '--from-git',
-  ])
+  // 不给 --rev：清单脚本会**按内容**自动定位"迁移前"（从 HEAD 往回找第一个
+  // 还含有这些类名的修订）。写死 HEAD~N 会被并行的无关提交打乱 —— 第二批
+  // 期间另一个 agent 提交了一个后端改动，相对计数就集体错位了。
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
   if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts.push(`## ${s.sheet} @HEAD\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  parts.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
 }
 write(
   '5.6-04-before-batch1.md',
   '5.6 迁移前：第一批（auth / cleaning / diff / dashboard 私有部分）的规则清单',
   '五个样式表各自只列出**本批搬走的那些类名**对应的规则（留在全局的\n' +
     '`.stat-card*` / `.stat-label` / `.progress-bar*` 不在清单里，它们没有搬）。\n' +
-    '取自 `git show HEAD:frontend/...`（第一批尚未提交）。\n\n' +
+    '修订由 `css-rule-inventory.mjs` **按内容自动定位**（第一个还含有这些类名的\n' +
+    '提交），所以清单头部的 `@HEAD~N` 会随提交数变化，规则内容不会。\n\n' +
     parts.join('\n\n'),
 )
 
-// ── 3. 差集（核心证据，含所有批次） ──
+// ── 3. 第二批（markdown-extras）迁移前清单 ──
+const batch2Sheets = [
+  {
+    sheet: 'src/styles/markdown-extras.css',
+    classes: [
+      'ask-ai-panel', 'ask-ai-header', 'ask-ai-title', 'ask-ai-close', 'ask-ai-body',
+      'ask-ai-input', 'ask-ai-selected-hint', 'ask-ai-actions', 'ask-ai-question',
+      'ask-ai-thinking', 'ask-ai-answer', 'ask-ai-error', 'ask-ai-provider',
+      'selection-menu',
+    ],
+  },
+]
+const parts2 = []
+for (const s of batch2Sheets) {
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
+  parts2.push(`## ${s.sheet} @HEAD\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+}
+write(
+  '5.6-05-before-batch2.md',
+  '5.6 迁移前：第二批（markdown-extras 的 `.ask-ai-*` 与 `.selection-menu`）的规则清单',
+  '只列出**本批搬走**的类名。同表里留在全局的 KaTeX（`.markdown-body .katex*`、\n' +
+    '`.katex-error`）与批注高亮（`.markdown-body .annotation-*`、\n' +
+    '`.markdown-body mark.citation-highlight` + `@keyframes citation-flash`）\n' +
+    '不在清单里：它们作用在 `marked` / KaTeX 生成的 HTML 字符串上，没有组件可挂类名。\n' +
+    '取自 `git show HEAD:frontend/...`（第二批尚未提交）。\n\n' +
+    parts2.join('\n\n'),
+)
+
+// ── 4. 差集（核心证据，含所有批次） ──
 const diff = run('css-migration-diff.mjs')
 write(
   '5.6-02-rule-diff.md',
   '5.6 规则清单差集：迁移前(git 源码) vs 迁移后(dist 产物)',
   '两侧都解析成「上下文 + 选择器 + 声明」，类名归一为 `.C0`… 占位符后逐条比。\n' +
     '`animation` 的值单独由「动画绑定」与「动画体比对」两项负责（哈希化的动画名无法逐字比）。\n' +
-    '另有「声明过的选择器强化」一节：模块 CSS 在产物里排在全局样式表**之前**，\n' +
-    '`.authSubmit` 必须显式提高权重（`:global(.btn).authSubmit`）才不会被 `.btn` 反盖，\n' +
-    '这一处差异是声明过的、且不改变任何属性值。\n\n' +
+    '「声明过的选择器强化」一节现在是空的：第一批曾用 `:global(.btn).authSubmit` 顶住\n' +
+    '级联反转，后来改成**修正 `main.tsx` 的导入顺序**（全局样式表在组件之前，\n' +
+    '产物顺序 = ①令牌 → ②全局 → ③模块）并把选择器还原成单类，\n' +
+    '所以不再有任何选择器文本变化。\n\n' +
     `运行退出码：${diff.code}（0 = 没有丢失、动画绑定自洽、动画体一致）\n\n\`\`\`\n${diff.out.trim()}\n\`\`\``,
 )
 
-// ── 4. 产物校验（含所有批次） ──
+// ── 5. 产物校验（含所有批次） ──
 const verify = run('verify-built-css.mjs')
 write(
   '5.6-03-built-css.md',
   '5.6 产物 CSS 校验：动画绑定 / 冲突归因 / 级联次序 / 切片与退休类名',
   '检查 dist 产物而不是源码：CSS Modules 会把类名**和 @keyframes 动画名**一起哈希，\n' +
     '源码里"规则还在"不等于浏览器里还生效（试点轮就是这么抓到动画悬空的）。\n' +
-    '第一批新增「级联次序」一项：模块 CSS 与全局样式表同权重竞争时，得主必须没变。\n\n' +
+    '「级联次序」一项在第一批加入、第二批靠它验证了 `main.tsx` 重排的效果：\n' +
+    '`.authSubmit` 现在**靠源序**取胜（权重相同、同文件后者胜），不再依赖提权。\n' +
+    '反向验证过：把 `main.tsx` 的顺序改回去，这项立刻报 4 个属性得主是 global。\n\n' +
     `运行退出码：${verify.code}（0 = 无悬空动画、改动范围内无冲突、级联得主正确、退休类名已消失）\n\n\`\`\`\n${verify.out.trim()}\n\`\`\``,
 )
 

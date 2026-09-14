@@ -28,25 +28,26 @@
  * ## ⚠️ 坑二：搬家会改变规则在级联里的位置（本轮实测，最容易被忽略的一条）
  *
  * 全局样式表的先后由 `main.tsx` 的 import 顺序决定，而模块的 CSS 跟着
- * **组件在模块图里的位置**进入产物 —— `main.tsx` 第 4 行就 `import App`，
- * 样式表在第 7 行之后才被引入，于是**静态引入的组件，其模块 CSS 排在
- * 全部全局样式表之前**。实测产物 `index.css` 里的字节位置：
- * `Auth.module.css` = 1、`base.css` 的 `:root` = 2551、`.btn` = 6555
- * （具体数字随构建略有浮动，量级不变）。
+ * **组件在模块图里的位置**进入产物。第一批当时是 `main.tsx` 第 4 行就
+ * `import App`、样式表在第 7 行之后才引入，于是**静态引入的组件，
+ * 其模块 CSS 排在全部全局样式表之前**。实测（重排前）产物 `index.css`
+ * 里的字节位置：`Auth.module.css` = 1、`base.css` 的 `:root` = 2551、
+ * `.btn` = 6555。
  *
  * `.auth-submit` 与全局 `.btn`（`components.css`）作用在同一个 `<button>` 上，
- * 两者权重相同（都是单类），所以"谁生效"完全取决于先后：搬进模块后
- * `.btn` 会反过来盖住 `.auth-submit` 的 `padding / font-size / font-weight /
- * transition`（按钮肉眼可见地变小变细）。
- * 修法不是"记得把模块放在后面"（做不到），而是**显式提高权重**：
- * 这条规则写成 `:global(.btn).authSubmit`（见下方注释）。
- * `scripts/verify-built-css.mjs` 的"级联次序"检查会逐属性核对
- * "该赢的仍然赢"，所以下次谁再搬一条与全局类打架的规则会立刻红。
+ * 两者权重相同（都是单类），于是先后关系一反转，`.btn` 就反过来盖住了
+ * `.auth-submit` 的 `padding / font-size / font-weight / transition`
+ * （按钮肉眼可见地变小变细）。
  *
- * 结构性根治方案（**本轮不允许改 `main.tsx`，故未做**）：
- * 把 `main.tsx` 的 `import App` 挪到全局样式表之后，让产物顺序变成
- * ①令牌 → ②全局 → ③模块，与 `css-convention.md` §1 的分层一致。
- * 这条已记入 `docs/css-migration-plan.md` 的下一轮建议。
+ * **根治方式是把 `main.tsx` 的导入顺序改正**（全局样式表提到组件之前，
+ * 产物顺序 = ①令牌 → ②全局 → ③模块），已落地。所以下面这条规则
+ * **用普通单类选择器靠源序取胜**，没有靠 `:global(.btn)` 提权：
+ * 提权只是治标 —— 它会让"模块排在全局之前"这个事实继续藏在代码里，
+ * 下一条与全局类打架的规则还得再想一遍。
+ *
+ * 这条依赖**有护栏**，不靠人记：`scripts/verify-built-css.mjs` 的
+ * `CASCADE_PAIRS` 会逐属性算出"谁最终生效"，并要求得主是模块。
+ * 把 `main.tsx` 的顺序改回去，这道检查立刻红（做过反向验证，见迁移证据）。
  *
  * ## 反向说明：本模块没有任何响应式规则
  *
@@ -161,18 +162,18 @@
 
 /* ── 提交按钮 ──
    tsx 上是 `className={`btn ${styles.authSubmit}`}`：`.btn` 提供按钮基线，
-   这里只覆盖认证页需要更大的那一档。这条规则与 `.btn` 权重相同，
-   **必须靠级联顺序取胜**（见文件头坑二，由 verify-built-css.mjs 检查）。 */
+   这里只覆盖认证页需要更大的那一档（`padding / font-size / font-weight /
+   transition / border-radius` 五项与 `.btn` 同名）。
 
-/* `:global(.btn)` 不是装饰：tsx 上这个按钮同时挂着全局 `.btn`，
-   而**模块的 CSS 在产物里排在全局样式表之前**（实测：Auth.module.css 是
-   index.css 的第 1 个字节，base.css 的 `:root` 在 2550，`.btn` 在 6554）。
-   两者权重相同时后者胜 —— 于是 `.btn` 会反过来盖住这里的
-   `padding / font-size / font-weight / transition`，按钮肉眼变小变细。
-   把全局类写进选择器（权重 0,2,0）让"谁覆盖谁"不再依赖文件先后。
-   `:global()` 在**选择器**里是标准写法（在声明值里才会构建失败，
-   见 css-convention.md §3 雷区 1）。 */
-:global(.btn).authSubmit {
+   这条规则与 `.btn` **权重相同**，靠 `main.tsx` 的导入顺序取胜
+   （全局样式表在组件之前 ⇒ 产物里 `②全局` 在 `③模块` 之前）。
+   曾经这里是 `:global(.btn).authSubmit`（权重 0,2,0）—— 那是 `main.tsx`
+   顺序还错着时的权宜之计。顺序改正后**特意还原成单类**：
+   留着提权会让"模块排在全局之前"这个事实继续藏在代码里，
+   下一条与全局类打架的规则还得再想一遍。详见文件头坑二与
+   css-convention.md §3 雷区 5。 */
+
+.authSubmit {
   width: 100%;
   padding: var(--space-md);
   font-size: 1rem;

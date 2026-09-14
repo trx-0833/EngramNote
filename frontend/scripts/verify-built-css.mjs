@@ -214,6 +214,10 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   'components/CleaningPanel.module.css',
   'components/DiffView.module.css',
   'pages/Dashboard.module.css',
+  // 第二批：markdown-extras（ask-ai + selection-menu）
+  'styles/markdown-extras.css',
+  'components/NoteAskPanel.module.css',
+  'pages/notedetail/SelectionMenu.module.css',
 ])
 
 const annotated = clashes.map((c) => {
@@ -293,28 +297,38 @@ if (preExisting.length) {
 //
 // ## 为什么需要这一项（第一批实测，试点轮没暴露）
 //
-// Vite 按**模块图顺序**产出 CSS：`main.tsx` 第 4 行就 `import App`，样式表在
-// 第 7 行之后才引入，所以**静态引入的组件，其模块 CSS 排在全部全局样式表之前**。
-// 实测产物 index.css 的字节位置：`Auth.module.css` = 1、`:root`(base.css) = 2550、
-// `.btn`(components.css) = 6554。于是"模块规则覆盖全局规则"这种写法
-// **在源码里看着对、在产物里是反的** —— `.auth-submit` 的
-// `padding / font-size / font-weight / transition` 会被 `.btn` 盖掉。
-// 这类反转在文本差集里完全看不出来（两条规则都还在，值也没改），
-// 只有算一遍"谁最终生效"才发现，所以在这里逐属性算。
+// Vite 按**模块图顺序**产出 CSS。第一批当时 `main.tsx` 第 4 行就 `import App`、
+// 样式表在第 7 行之后才引入，于是**静态引入的组件，其模块 CSS 排在全部全局
+// 样式表之前**（实测产物 index.css 字节位置：`Auth.module.css` = 1、
+// `:root`(base.css) = 2551、`.btn`(components.css) = 6555）。
+// 结果 `.auth-submit` 的 `padding / font-size / font-weight / transition`
+// 被全局 `.btn` 反盖 —— 而这类反转在文本差集里**完全看不出来**
+// （两条规则都还在，值也没改），只有算一遍"谁最终生效"才发现。
 //
-// 修法：模块里把全局类写进选择器（`:global(.btn).authSubmit`），
-// 权重 (0,2,0) > (0,1,0)，与文件先后无关。
+// 已落地两层防护：
+//   1. **根治**：`main.tsx` 里全局样式表放到组件之前 ⇒ 产物顺序
+//      ①令牌 → ②全局 → ③模块，模块规则按源序正常取胜；
+//   2. **护栏**：就是下面这段。它不关心你用哪种写法 ——
+//      先比权重（`:global(.btn).authSubmit` 那种提权写法靠这一条赢），
+//      权重相同时同文件比先后（现在的单类写法靠这一条赢），
+//      同权重又跨文件则直接报"判不了"（那时胜负取决于 chunk 加载顺序，
+//      必须用提权写法消除歧义）。
 //
 // 声明格式：
 //   moduleClass —— 模块里的类名（产物里是 `._<name>_<hash>_<line>`）
 //   globalClass —— 全局类名（产物里原样，形如 `.btn`）
-//   expect      —— 期望的得主（'module' 表示迁移前后都是模块这条规则赢）
+//   expect      —— 期望的得主（'module' 表示模块这条规则必须赢）
+//   why         —— 为什么这条竞争值得钉住（写给下一个人看）
 const CASCADE_PAIRS = [
   {
     label: 'Login/Register 提交按钮 className={`btn ${styles.authSubmit}`}',
     moduleClass: 'authSubmit',
     globalClass: '.btn',
     expect: 'module',
+    why:
+      '两处都有 padding / font-size / font-weight / transition，' +
+      '谁赢决定按钮是高是矮。踩过一次反转（模块排在全局之前），' +
+      '改 main.tsx 顺序才修好 —— 这条一旦红，先看 main.tsx 的导入顺序',
   },
 ]
 
@@ -393,12 +407,20 @@ for (const pair of CASCADE_PAIRS) {
         `      - ${c.prop}: 得主 ${c.winner}（模块 ${c.moduleVal} / 全局 ${c.globalVal}，选择器 ${c.moduleSel}）`,
       )
     }
+    if (pair.why) console.log(`      为什么钉这条：${pair.why}`)
   } else if (compared.length === 0) {
-    console.log(`   ⚠ ${pair.label}：两侧没有同属性竞争，这一项没起到检查作用（是不是选择器改名了？）`)
+    failed = true
+    console.log(
+      `   ✗ ${pair.label}：两侧没有同属性竞争 —— 这项检查**没起到作用**。` +
+        `多半是选择器改名了或那条规则被删了；确认后请更新/删除 CASCADE_PAIRS 里这一项，` +
+        `不要留一条永远绿灯的空检查。`,
+    )
   } else {
+    const bySpec = compared.some((c) => specificity(c.moduleSel)[1] !== specificity(pair.globalClass)[1])
     console.log(
       `   ✓ ${pair.label}：${compared.length} 个同名属性全部由 ${pair.expect} 生效` +
-        `（${compared.map((c) => c.prop).join(', ')}）`,
+        `（${compared.map((c) => c.prop).join(', ')}；` +
+        `取胜依据=${bySpec ? '权重更高' : '权重相同、同文件靠源序'}）`,
     )
   }
 }
@@ -460,6 +482,22 @@ const SLICE_MARKERS = [
   'dashboardReviewCard',
   'trendBar',
   'trendBarWarning',
+  // 第二批：markdown-extras —— AI 提问浮层
+  'askAiPanel',
+  'askAiHeader',
+  'askAiTitle',
+  'askAiClose',
+  'askAiBody',
+  'askAiInput',
+  'askAiSelectedHint',
+  'askAiActions',
+  'askAiQuestion',
+  'askAiThinking',
+  'askAiAnswer',
+  'askAiError',
+  'askAiProvider',
+  // 第二批：批注操作浮层
+  'selectionMenu',
 ]
 console.log('\n迁移切片类名/动画在产物中的出现次数：')
 for (const marker of SLICE_MARKERS) {
@@ -519,6 +557,23 @@ const RETIRED = [
   'dashboard-review-card',
   'trend-bar',
   'trend-bar-warning',
+  // 第二批：markdown-extras（搬走 20 条，留下的是 KaTeX / 批注那些
+  // "没有组件可挂类名"的规则 —— 它们**必须**继续以 kebab 形态出现在产物里，
+  // 所以不列进这份退休名单）
+  'ask-ai-panel',
+  'ask-ai-header',
+  'ask-ai-title',
+  'ask-ai-close',
+  'ask-ai-body',
+  'ask-ai-input',
+  'ask-ai-selected-hint',
+  'ask-ai-actions',
+  'ask-ai-question',
+  'ask-ai-thinking',
+  'ask-ai-answer',
+  'ask-ai-error',
+  'ask-ai-provider',
+  'selection-menu',
 ]
 console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
 let retiredHits = 0

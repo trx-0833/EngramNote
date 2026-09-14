@@ -1,0 +1,159 @@
+/**
+ * AI 提问浮层的样式（overhaul-plan 5.6：第二批，序 11）
+ *
+ * ## 为什么这些规则从 markdown-extras.css 搬到这里
+ *
+ * `.ask-ai-*` 共 17 条规则，全项目只有 `NoteAskPanel.tsx` 在用
+ * （grep 前缀 `ask-ai-` 只命中这个组件 + 那个全局样式表），
+ * 且 **`responsive.css` / `refinements.css` 里对这些类名 0 命中** ——
+ * 属于"整组搬"的一档。
+ *
+ * 同一张表里的 KaTeX（`.katex*`）与批注高亮（`.annotation-*` /
+ * `mark.citation-highlight`）**刻意留在全局**：它们作用在 `marked` / KaTeX
+ * 生成的 HTML 字符串上（见 `utils/markdown.ts`、`utils/citationJump.ts`），
+ * 没有 React 组件可以挂类名 —— 规范 §4 第 3、4 条。
+ *
+ * ## ⚠️ 本模块是 `mobile-input-font-size.test.ts` 直接盯着的东西
+ *
+ * `.ask-ai-input` 是 iOS 聚焦缩放护栏的两个目标之一（`font-size` 必须 ≥1rem，
+ * 否则 Safari 聚焦时把整页放大）。那条护栏原来写死"值必须写在
+ * `markdown-extras.css` 里"，本模块接管所有权后同步改成
+ * "值必须写在**拥有它的模块**里"，并且护栏的扫描范围也从
+ * `src/styles/*.css` 扩到 `src/**\/*.module.css` —— 否则输入框一进模块，
+ * 护栏就再也看不见它了（静默失效，比测试红更糟）。
+ *
+ * ## 没有 `@keyframes` 要搬
+ *
+ * 本组规则不含任何 `animation`。同表的 `citation-flash` 属于留在全局的
+ * `mark.citation-highlight`，引用与定义仍在同一层，不受影响。
+ */
+
+/* ── 浮层外壳 ──
+   位置/尺寸由 tsx 的内联 `panelStyle` 给（要按视口夹取），这里只管外观。 */
+
+.askAiPanel {
+  background: white;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.15));
+  padding: 0;
+  text-align: left;
+}
+
+/* 拖拽把手：鼠标按下开始拖动，所以 cursor 由 tsx 的 onMouseDown 配合 */
+.askAiHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border, #eee);
+}
+
+.askAiTitle {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-text, #333);
+}
+
+.askAiClose {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary, #888);
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.askAiClose:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+  color: var(--color-text, #333);
+}
+
+.askAiBody {
+  padding: 12px 14px;
+}
+
+/* iOS Safari 在聚焦 font-size **小于 16px** 的输入框时会把整页放大
+   （focus zoom），textarea 同样中招 —— 所以这里必须 ≥1rem，不能写 0.9rem。
+   ⚠️ 这条值受 `styles/mobile-input-font-size.test.ts` 保护：它按
+   "拥有它的样式表"核对生效值，本模块就是新的 owner（见文件头）。 */
+.askAiInput {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.askAiInput:focus {
+  border-color: var(--color-primary, #4a6cf7);
+}
+
+.askAiSelectedHint {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #888);
+  word-break: break-all;
+}
+
+.askAiActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.askAiQuestion {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text, #333);
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--color-bg-hover, #f6f6f6);
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.askAiThinking {
+  color: var(--color-text-secondary, #888);
+  font-style: italic;
+  line-height: 1.8;
+}
+
+/* 答案本身是 markdown 渲染的 HTML，DOM 上同时挂着 `markdown-body`
+   （见 tsx），所以正文排版来自全局 `markdown.css`；这里只管字号与断词。 */
+.askAiAnswer {
+  line-height: 1.8;
+  font-size: 0.9rem;
+  color: var(--color-text, #333);
+  word-break: break-word;
+}
+
+/* 卡片内首/末元素去掉外边距，避免上下多出一条空白 */
+.askAiAnswer :first-child {
+  margin-top: 0;
+}
+
+.askAiAnswer :last-child {
+  margin-bottom: 0;
+}
+
+.askAiError {
+  color: var(--color-error, #d9534f);
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.askAiProvider {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #888);
+  margin-top: 10px;
+  text-align: right;
+}

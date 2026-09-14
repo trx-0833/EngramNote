@@ -15,6 +15,9 @@ import { renderMarkdown } from '../utils/markdown'
 import { highlightCitation } from '../utils/citationJump'
 import { parseSSEStream } from '../utils/sse'
 import { useThrottledStream } from '../hooks/useStreamAnswer'
+// AI 提问浮层样式（overhaul-plan 5.6）：原 src/styles/markdown-extras.css 的
+// `.ask-ai-*` 17 条搬到这里；同表的 KaTeX / 批注规则留在全局（见模块文件头）
+import styles from './NoteAskPanel.module.css'
 
 interface NoteAskPanelProps {
   noteId: string
@@ -283,40 +286,44 @@ export default function NoteAskPanel({
   const selectedTextPreview = initialText.length > 60 ? `${initialText.slice(0, 60)}...` : initialText
 
   return (
-    <div className="ask-ai-panel" style={panelStyle}>
-      <div className="ask-ai-header" onMouseDown={handleDragStart} title="按住拖动窗口">
-        <span className="ask-ai-title">AI 提问</span>
-        <button className="ask-ai-close" onClick={handleClose} title="关闭">✕</button>
+    <div className={styles.askAiPanel} style={panelStyle}>
+      <div className={styles.askAiHeader} onMouseDown={handleDragStart} title="按住拖动窗口">
+        <span className={styles.askAiTitle}>AI 提问</span>
+        <button className={styles.askAiClose} onClick={handleClose} title="关闭">✕</button>
       </div>
-      <div className="ask-ai-body">
+      <div className={styles.askAiBody}>
         {mode === 'input' ? (
           <>
             <textarea
               ref={textAreaRef}
-              className="ask-ai-input"
+              className={styles.askAiInput}
               value={question}
               onChange={e => setQuestion(e.target.value)}
               placeholder="输入你的问题..."
               rows={3}
             />
-            <p className="ask-ai-selected-hint">基于当前笔记选中文本：「{selectedTextPreview}」</p>
-            <div className="ask-ai-actions">
+            <p className={styles.askAiSelectedHint}>基于当前笔记选中文本：「{selectedTextPreview}」</p>
+            <div className={styles.askAiActions}>
               <button className="btn btn-secondary" onClick={handleClose}>取消</button>
               <button className="btn btn-primary" onClick={handleAsk} disabled={!question.trim()}>提问</button>
             </div>
           </>
         ) : (
           <>
-            <div className="ask-ai-question">{submittedQuestion}</div>
-            {loading && <div className="ask-ai-thinking">AI 正在思考...</div>}
+            <div className={styles.askAiQuestion}>{submittedQuestion}</div>
+            {loading && <div className={styles.askAiThinking}>AI 正在思考...</div>}
             {answer && (
               <div
-                className="ask-ai-answer markdown-body"
+                className={`${styles.askAiAnswer} markdown-body`}
                 dangerouslySetInnerHTML={{ __html: answerHtml }}
               />
             )}
             {sources.length > 0 && (
-              <div className="ask-ai-sources">
+              // 原来这一层挂着 `ask-ai-sources`、每个引用挂着 `ask-ai-source-item`，
+              // 但**全项目没有任何样式表定义它们**（grep 全库只有这两处 tsx）——
+              // 死类名，随本次迁移一并删除（与试点删 `.feedback-pending` 同一处理）。
+              // 外层 div 保留：删掉会改 DOM 层级，超出"纯搬家"。
+              <div>
                 {sources.map((s, i) => {
                   // 阶段 2.7：面板本来就贴在正文上，所以直接在当前页面里
                   // 定位并高亮，不必跳转路由。定位信息缺失时不提供跳转 ——
@@ -328,7 +335,6 @@ export default function NoteAskPanel({
                   return (
                     <span
                       key={s.chunk_id || `${s.note_id}-${i}`}
-                      className="ask-ai-source-item"
                       style={{ cursor: canJump ? 'pointer' : 'default' }}
                       title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息'}
                       onClick={() => {
@@ -357,8 +363,8 @@ export default function NoteAskPanel({
                 })}
               </div>
             )}
-            {error && <p className="ask-ai-error">{error}</p>}
-            <div className="ask-ai-actions">
+            {error && <p className={styles.askAiError}>{error}</p>}
+            <div className={styles.askAiActions}>
               {streaming ? (
                 <button className="btn btn-danger" onClick={stopActiveStream}>停止生成</button>
               ) : (
@@ -369,7 +375,7 @@ export default function NoteAskPanel({
               )}
             </div>
             {provider && (
-              <p className="ask-ai-provider">由 {provider === 'glm' ? 'GLM' : 'DeepSeek'} 提供支持</p>
+              <p className={styles.askAiProvider}>由 {provider === 'glm' ? 'GLM' : 'DeepSeek'} 提供支持</p>
             )}
           </>
         )}
