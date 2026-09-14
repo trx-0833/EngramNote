@@ -1809,6 +1809,31 @@
         "title": "DataQuality",
         "type": "object"
       },
+      "DatabaseCheck": {
+        "description": "`/ready` 的数据库检查结果\n\n`reason` 是**稳定原因码**而不是异常文本：`/ready` 与 `/health` 一样不能\n要求认证（探针不会带 Token），而异常文本里会有库路径、SQL 片段等内部信息\n（见 `tests/test_error_leakage.py` 的判据）。细节进服务端日志。",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DatabaseCheck",
+        "type": "object"
+      },
       "DiffBlock": {
         "description": "diff 块数据（连续的变更行）",
         "properties": {
@@ -4832,6 +4857,53 @@
         "title": "QuestionTypeAccuracy",
         "type": "object"
       },
+      "QueueDepth": {
+        "description": "`/ready` 的队列深度快照\n\n三个数字的**各自含义**（不要相加，它们来自两个不同的存储）：\n\n- `depth`：broker 里**等待 worker 接手**的消息数 —— 这才是\"还有多少在排队\"；\n- `running`：`task_runs` 里正在执行的任务数；\n- `pending`：`task_runs` 里已建记录但尚未开始的任务数。\n\n`depth` 为 `None` 表示**当前后端测不到**（原因见 `source`），\n而不是\"零\"。用 `None` 而不是 0 是刻意的：0 会让\"没测\"与\"真的没人排队\"\n在监控面板上长得一模一样（与 `llm_calls.cost` 记 NULL 而非 0 同一条原则）。",
+        "properties": {
+          "depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "QueueDepth",
+        "type": "object"
+      },
       "QuizAnswer": {
         "description": "一条作答及其评判（`AssessmentResult.quiz_answers` 的元素）\n\n出处：`services/assessment_service.py` 第 338-342 行：\n\n    judged_answers.append({\"question_index\": q_idx,\n                           \"answer\": user_answer,\n                           \"judgment\": judgment})\n\n`question_index` 取自**请求体**里用户提交的 `question_index`\n（`answer.get(\"question_index\", 0)`），因此它可能与\n`quiz_questions` 里的 `index` 不一致（例如用户改过题序）。\n前端 `QuizAnswerItem` 只声明了 `answer` / `judgment`，**没有**\n`question_index` —— 于是\"这份答案对应哪道题\"在前端类型里是缺失信息。",
         "properties": {
@@ -5272,6 +5344,33 @@
           }
         },
         "title": "QuotaInfo",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "description": "`GET /ready` 的响应（200 与 503 **共用同一形状**）\n\n失败时保持同样的字段结构，探针与看板才能用一套解析逻辑同时处理两种情况\n（需要分支的只有 `status` 与状态码本身）。",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseCheck"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueDepth"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "app",
+          "database",
+          "queue"
+        ],
+        "title": "ReadinessResponse",
         "type": "object"
       },
       "RefreshRequest": {
@@ -12871,7 +12970,7 @@
     },
     "/health": {
       "get": {
-        "description": "健康检查端点\n\n用于监控和负载均衡器检测服务是否正常运行。\n不需要认证，返回应用名称和状态。\n\nReturns:\n    dict: 包含 status 和 app 名称的字典",
+        "description": "健康检查端点（**存活**探针，不检查任何依赖）\n\n用于监控和负载均衡器检测服务是否正常运行。\n不需要认证，返回应用名称和状态。\n\n⚠️ 刻意**不**在这里检查数据库/broker：本端点会被用来决定\"要不要重启\n进程\"，任何依赖抖动都会被翻译成重启（见 `/ready` 上方的说明）。\n\"能不能干活\"是 `/ready` 的问题。\n\nReturns:\n    dict: 包含 status 和 app 名称的字典",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
@@ -12886,6 +12985,35 @@
           }
         },
         "summary": "Health Check"
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "就绪检查端点（**readiness** 探针，含义见本模块 `/ready` 上方说明）\n\n判据只有一条：**数据库连得上且 schema 就绪**（用一次真实业务查询验证，\n而不是 `SELECT 1`）。就绪时 200，否则 **503**，两种情况的响应体形状相同。\n\n队列深度是**报告项**，不参与状态码：忙 ≠ 坏，详见上面\n\"队列深度为什么只报告、不决定就绪\"。\n\n不需要认证（探针不会带 Token），因此响应里只有稳定的状态与原因码，\n不含异常文本、库路径等内部信息。",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "未就绪：数据库不可达或 schema 未就绪（响应体形状与 200 相同）"
+          }
+        },
+        "summary": "Readiness Check"
       }
     }
   }

@@ -52,6 +52,17 @@
 
 结论：**这些数字不适合当作产品对外指标，适合当作改动前后的对比基线。**
 
+## 语料来源（两套，都在真库里）
+
+- **卡片语料**：`knowledge_cards`（当前线上 BM25 的语料）
+- **原文 chunk 语料**：`chunks` 表（阶段 2.3 的目标语料）——
+  ⚠️ 2026-09-14 之前这里读的是 `backend/data/chroma/`，
+  而 Chroma 已在阶段 2.4 被删除，于是那一路**静默为空**（见
+  `load_chunk_corpus()` 的说明与附录 BJ.4.3）。
+
+**语料为空是错误（退出码 2），不是"跳过"** —— 一份 0 条语料的报告
+与"跑完了"在纸面上无法区分。
+
 用法：
     python scripts/eval_retrieval.py                     # 两套语料都测
     python scripts/eval_retrieval.py --limit 200         # 快速抽样
@@ -77,9 +88,8 @@ FINGERPRINT_LEN = 30
 DEFAULT_DB = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "data", "db", "engramnote.db"
 )
-DEFAULT_CHROMA = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "data", "chroma"
-)
+#: 曾经还有一个 `DEFAULT_CHROMA`（`data/chroma/`）。Chroma 已按阶段 2.4 删除，
+#: 语料改从 `chunks` 表读（同一个 `--db`），因此这里不再有第二个路径常量。
 
 
 # ---------------------------------------------------------------------------
@@ -246,11 +256,30 @@ def _overlaps_loose(expected: str, actual: str) -> bool:
 # 语料
 # ---------------------------------------------------------------------------
 
-def load_card_corpus(db_path: str) -> List[Dict[str, Any]]:
-    """卡片语料（= 线上 `_get_user_cards` 的等价查询，只取 5 列）"""
+def _fetch_all(db_path: str, sql: str) -> List[tuple]:
+    """只读执行一条查询
+
+    表不存在（老库 / 还没建索引的空库）→ 返回空列表，由调用方**响亮地**
+    按"语料为空"失败（见 `_fail_empty_corpus`）。这是刻意的：把
+    `no such table` 当成"没有数据"继续跑，得到的正是一份"看起来完整、
+    实际什么都没测"的报告 —— 本函数存在的理由就是不让它悄悄发生。
+    ⚠️ 其它 `OperationalError`（磁盘 / 权限 / 库损坏）**原样抛出**：
+    那是"读不到"，不是"没有"，把两者混为一谈会掩盖真故障。
+    """
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        rows = con.execute("""
+        return con.execute(sql).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+        return []
+    finally:
+        con.close()
+
+
+def load_card_corpus(db_path: str) -> List[Dict[str, Any]]:
+    """卡片语料（= 线上 `_get_user_cards` 的等价查询，只取 5 列）"""
+    rows = _fetch_all(db_path, """
             SELECT kc.id, kc.note_id, kc.title, kc.content, kc.chapter_title
               FROM knowledge_cards kc
              WHERE kc.note_id IS NULL
@@ -258,9 +287,7 @@ def load_card_corpus(db_path: str) -> List[Dict[str, Any]]:
                      SELECT 1 FROM notes n
                       WHERE n.id = kc.note_id AND n.trashed_at IS NOT NULL
                    )
-        """).fetchall()
-    finally:
-        con.close()
+        """)
     return [
         {"card_id": cid, "note_id": nid, "title": t or "",
          "content": c or "", "chapter_title": ch}
@@ -268,41 +295,54 @@ def load_card_corpus(db_path: str) -> List[Dict[str, Any]]:
     ]
 
 
-def load_chunk_corpus(chroma_dir: str) -> List[Dict[str, Any]]:
-    """原文 chunk 语料（Chroma 里实际索引的内容）
+def load_chunk_corpus(db_path: str) -> List[Dict[str, Any]]:
+    """原文 chunk 语料 —— 来自 `chunks` 表（检索层**真正**索引的内容）
 
     这正是 **2.3 想要的语料** —— 它不是卡片摘要，而是清洗后原文的分块。
     所以本评测能直接给出"卡片 vs 原文"的对比，不必等到改动之后。
 
-    注意：Chroma 的 chunk 没有 `note_id`（元数据里只有行号），
-    所以该语料的 `note_id` 为 None；这不影响本评测 ——
-    判相关用的是内容重叠，不是 id 匹配。
+    ## 为什么不再读 Chroma（2026-09-14 修复）
+
+    本函数原来 `import chromadb` 后打开 `data/chroma/`。但 Chroma 已在阶段
+    2.4/2.4′ 被整体替换：`chromadb` 移出 `requirements.txt`、`VectorStore`
+    删除、向量改存 `chunks.embedding`（`schema.ts` 之外全仓零调用方）。
+    于是那条读取路径**永久**走到 `except ImportError: return []` ——
+    评测会安静地少测一半语料，而输出看上去仍是一份完整报告。
+    这正是本仓库反复抓到的同一类病："配置了却从未真正执行"。
+    改为直接读 `chunks` 表（附录 BJ.4.3 登记的那处残留）。
+    `backend/data/chroma/` 目录即便还留在磁盘上，也已经没有任何运行期读取方。
+
+    ## 过滤口径
+
+    与线上 `chunk_service.get_user_chunks()`（BM25 语料的唯一来源）一致：
+    回收站笔记的 chunk 不参与检索、空内容不参与。区别只有一处 ——
+    这里**不**按 `user_id` 过滤，因为评测集 `load_eval_set()` 本身也不分用户。
+
+    `card_id` 为 None（chunk 不是卡片）；`title` / `chapter_title` 取
+    `heading_path`，与线上 chunk 语料的映射相同（`chunk_service.py:220-222`）。
     """
-    try:
-        import chromadb
-    except ImportError:
-        return []
-
-    if not os.path.isdir(chroma_dir):
-        return []
-
-    client = chromadb.PersistentClient(path=chroma_dir)
-    corpus: List[Dict[str, Any]] = []
-    for col in client.list_collections():
-        if col.count() == 0:
-            continue
-        got = col.get(include=["documents", "metadatas"])
-        for doc, meta in zip(got["documents"], got["metadatas"], strict=False):
-            if not doc:
-                continue
-            corpus.append({
-                "card_id": None,
-                "note_id": None,
-                "title": col.name,
-                "content": doc,
-                "chapter_title": (meta or {}).get("heading_context"),
-            })
-    return corpus
+    rows = _fetch_all(db_path, """
+            SELECT c.id, c.note_id, c.content, c.heading_path
+              FROM chunks c
+             WHERE c.content IS NOT NULL
+               AND c.content != ''
+               AND EXISTS (
+                     SELECT 1 FROM notes n
+                      WHERE n.id = c.note_id AND n.trashed_at IS NULL
+                   )
+             ORDER BY c.note_id, c."index"
+        """)
+    return [
+        {
+            "card_id": None,
+            "chunk_id": cid,
+            "note_id": nid,
+            "title": heading or "",
+            "content": content or "",
+            "chapter_title": heading,
+        }
+        for cid, nid, content, heading in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -405,10 +445,26 @@ def _print_report(name: str, report: Dict[str, Any], top_k: int, show_missed: in
             print()
 
 
+def _fail_empty_corpus(label: str, hint: str) -> int:
+    """语料为空时**响**，而不是安静地继续 —— 退出码 2
+
+    为什么必须是错误：一份"语料 0 条"的评测报告在纸面上与"跑完了"无法区分
+    （它照样打印 Recall@5 / MRR，只是那些数字描述的是**空集合**），
+    而它实际证明的东西是零。本仓库对此已有统一口径：检查自身空转 = 退出码 2
+    （见 `scripts/check_dependency_drift.py` 的文件头与 `main()` 里"评测集为空"那条）。
+    """
+    print()
+    print("!" * 72)
+    print(f"[ERROR] {label}语料为空 —— 本次评测**什么都没测到**，不是「质量差」")
+    print(f"        可能原因：{hint}")
+    print("        退出码 2 = 检查自身空转（0 才代表「跑完了」）。")
+    print("!" * 72)
+    return 2
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="检索质量离线评测（阶段 2.9）")
     ap.add_argument("--db", default=DEFAULT_DB, help="数据库路径（只读打开）")
-    ap.add_argument("--chroma", default=DEFAULT_CHROMA, help="Chroma 持久化目录")
     ap.add_argument("--limit", type=int, default=0, help="只评测前 N 条问题（0=全部）")
     ap.add_argument("--top-k", type=int, default=5, help="Recall@k 的 k")
     ap.add_argument("--corpus", choices=["cards", "chunks", "both"], default="both")
@@ -437,20 +493,26 @@ def main() -> int:
 
     if args.corpus in ("cards", "both"):
         cards = load_card_corpus(args.db)
+        if not cards:
+            return _fail_empty_corpus(
+                "卡片", "knowledge_cards 表为空，或 --db 指向的库不对"
+            )
         index = RAGService.build_bm25_index(cards)
         report = evaluate(eval_set, cards, index, top_k=args.top_k)
         _print_report("卡片语料（当前线上）", report, args.top_k, args.show_missed)
         out["reports"]["cards"] = {k: v for k, v in report.items() if k != "missed"}
 
     if args.corpus in ("chunks", "both"):
-        chunks = load_chunk_corpus(args.chroma)
+        chunks = load_chunk_corpus(args.db)
         if not chunks:
-            print("\n[跳过] 原文 chunk 语料为空（Chroma 目录不存在或无数据）")
-        else:
-            index = RAGService.build_bm25_index(chunks)
-            report = evaluate(eval_set, chunks, index, top_k=args.top_k)
-            _print_report("原文 chunk 语料（2.3 的目标）", report, args.top_k, args.show_missed)
-            out["reports"]["chunks"] = {k: v for k, v in report.items() if k != "missed"}
+            return _fail_empty_corpus(
+                "原文 chunk",
+                "chunks 表为空（先跑 scripts/index_chunks.py 建索引），或 --db 指向的库不对",
+            )
+        index = RAGService.build_bm25_index(chunks)
+        report = evaluate(eval_set, chunks, index, top_k=args.top_k)
+        _print_report("原文 chunk 语料（2.3 的目标）", report, args.top_k, args.show_missed)
+        out["reports"]["chunks"] = {k: v for k, v in report.items() if k != "missed"}
 
     if "cards" in out["reports"] and "chunks" in out["reports"]:
         c = out["reports"]["cards"]

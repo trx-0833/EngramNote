@@ -35,6 +35,11 @@
 # [ OK ] 已写入 ...\backend\openapi.json (356080 字节) | paths=102 operations=118 schemas=156 sha256=e21c85952c30
 ```
 
+> ⚠️ **2026-09-14 补注**：这一段是**首次生成**时的原始输出，保留作对照。
+> 仓库里**当前**的产物已经不是它了：§11.6 那轮补响应模型后变成
+> 392 545 字节 / 102 / 118 / 181 / `c3adfe8be0a8`，阶段 0.10 之后又变成
+> **397 598 字节 / 103 / 119 / 184 / `9a633977af6e`** —— 完整记录见 **§12**。
+
 **为什么是 `app.openapi()` 而不是 `app.routes`**：本项目的子路由挂在一个自定义的
 `_IncludedRouter` 上，`app.routes` 只有 **6 项、一条业务路由都没有**（实测）。
 项目自己的覆盖测试 `backend/tests/test_rate_limit_coverage.py::TestRouteEnumerationWorks`
@@ -882,6 +887,11 @@ FastAPI 于是生成 `anyOf: [LogoutRequest, null]` 且 `required: false`。
 > `paths` / `operations` 不变是关键佐证：本轮**没有增删任何路由**，
 > 只补了响应声明。
 
+> ⚠️ **2026-09-14 补注（阶段 0.10 之后）**：上表是**这一轮**的对照，别当成现状。
+> 0.10 新增了 `GET /ready`（并就 `/health` 的 description 写了"存活 vs 就绪"），
+> 产物随之变为 **397 598 字节 / paths=103 / operations=119 / schemas=184 /
+> sha256 `9a633977af6e`**；逐项核对与命令输出见 **§12**。
+
 漂移报告（`npm run gen:api:drift`，同一份脚本同一份判定口径）：
 
 | 指标 | 修前 | 修后 | 说明 |
@@ -1072,7 +1082,7 @@ backend/app/schemas/note_material_link.py      LinkedMaterial* / LinkUpdateRespo
 backend/app/schemas/note_version.py            NoteVersionContentResponse
 backend/app/schemas/project.py                 ProjectNotesAdded* / ProjectNoteRemoved*
 backend/app/schemas/review.py                  GradingDetail
-backend/openapi.json                           重新生成（392 545 字节）
+backend/openapi.json                           重新生成（392 545 字节；**2026-09-14 补注：0.10 之后又生成过一次，现为 397 598 字节 / 103 路径，见 §12**）
 backend/tests/test_semantic_grading.py         1 处读法（下标 → 属性）+ 1 条形状断言
 backend/tests/test_openapi_response_contract.py 【新】14 条守卫
 ```
@@ -1096,3 +1106,68 @@ backend/tests/test_openapi_response_contract.py 【新】14 条守卫
 3. **`schemaEnumNotModelled` 从 49 涨到 55**：同理，新声明的 4 个枚举
    （`CardType` / `RelationType` / `RelationStatus` / `SourceType`）
    让"前端写 `string`"的字段处变多了。§9.2 的"枚举收窄连锁反应"要按 55 处估。
+
+---
+
+## 12. 产物现状（**2026-09-14 补注：阶段 0.10 落地之后**）
+
+§1.1 / §11.6 / §11.11 里记的字节数与 sha256 都是**那几轮当时的**输出，
+保留作对照；**当前**仓库里的产物是这些命令跑出来的（都真跑过）：
+
+```powershell
+& C:\Users\admin\anaconda3\envs\mineru_env\python.exe backend\scripts\dump_openapi.py
+# [ OK ] 已写入 D:\engramnote\backend\openapi.json (397598 字节) | paths=103 operations=119 schemas=184 sha256=9a633977af6e
+& C:\Users\admin\anaconda3\envs\mineru_env\python.exe backend\scripts\dump_openapi.py --check
+# [ OK ] D:\engramnote\backend\openapi.json 与当前代码一致 | paths=103 operations=119 schemas=184 sha256=9a633977af6e
+npm.cmd --prefix frontend run gen:api
+# ✨ openapi-typescript 7.13.0 → src/api/generated/schema.ts（+117 行，prettier 已格式化）
+```
+
+| | §11.6 那轮 | **现在（0.10 之后）** |
+|---|---|---|
+| 文件字节 | 392 545 | **397 598**（+5 053） |
+| `paths` | 102 | **103**（+1） |
+| `operations` | 118 | **119**（+1） |
+| `schemas` | 181 | **184**（+3） |
+| `sha256` 前 12 位 | `c3adfe8be0a8` | **`9a633977af6e`** |
+
+变化**全部**来自阶段 0.10（生产姿态关闭 `/docs`｜`/openapi.json`｜`/redoc`、
+新增 `/ready`）。为了确认"没有夹带别的半成品"，这次把**进程内** schema 与
+落盘文件做了全量比对（路径集合、schema 集合、同名 schema 内容、逐操作）：
+
+- **新增 `GET /ready`**：+1 路径、+1 操作，并带来 3 个新组件 schema
+  （`DatabaseCheck` / `QueueDepth` / `ReadinessResponse`）。
+- **`GET /health` 只改了 `description`**（写清"存活探针不检查任何依赖"与
+  `/ready` 的分工）：结构、`responses`、`$ref` **都没变**。
+- 其余 102 条路径、181 个既有 schema、既有操作**一处都没变**
+  （同名 schema 内容变化数 = **0**，路径差集 = **{`/ready`}**）。
+
+⚠️ **两点容易误读的地方**：
+
+1. **生产姿态关掉 `openapi_url` 不影响这份产物**：`dump_openapi.py` 走的是
+   **进程内** `app.openapi()`，不经过 HTTP 路由（理由写在
+   `app/main.py::_schema_endpoint_kwargs`，并由
+   `tests/test_env_switches.py::TestSchemaEndpointGating` 钉住）。
+   所以 103 条路径照旧生成，前端生成链路不受影响 ——
+   **"生产不可访问"与"生成不出来"是两件事**。
+2. **`/ready` 出现在 schema 里 ≠ 前端可以调它**：
+   `tests/test_ready_endpoint.py` 有一条守卫禁止前端引用 `/ready`；
+   漂移报告把它归入"schema 中无前端调用方的端点"（该组现在 **9** 条，
+   多出来的那一条就是它）。
+
+漂移复跑（`npm.cmd --prefix frontend run gen:api:drift`，**退出码 0**）：
+
+```
+schemaPaths 103   schemaOperations 119   pathMatched 111
+pathMissing 0     methodMissing 0        schemaUntyped 0     schemaLoose 0
+unconsumedOperations 9（原 8：新增的是 /ready）
+```
+
+也就是说 P1 的"响应模型全覆盖"（`schemaUntyped 21 → 0`）**没有因为 0.10 退化**。
+
+⚠️ **本次刻意没有重写 §11.11 的逐项漂移表**（`identical` / `hwWider` /
+`conflict` / `schemaEnumNotModelled` …）：那些数字同时取决于
+`frontend/src/**` 里的**手写类型**，而那一层当时正被别的批次改动。
+拿一天的快照去覆盖它，会让"哪个数字是哪一轮的"变得不可考 ——
+要更新那几张表，应当在手写类型稳定后单独做一轮。
+

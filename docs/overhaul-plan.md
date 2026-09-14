@@ -1281,6 +1281,11 @@ app.add_middleware(
   `test_clean_quick.py`, `test_convert_direct.py`, `test_e2e.py`, `test_pdf_pipeline.py`,
   `verify_clean.py`, `e2e_cleanup.py`, `reset_cleaning.py`, `restore_note.py`
 
+> **2026-09-14 更正（计划 0.2 的搬迁已执行）**：上面这 15 个文件**已不在
+> `backend/` 根目录**，现在都在 `backend/scripts/dev/`；根目录已无任何 `.py`。
+> 引用同步情况与遗留项见 `backend/scripts/dev/README.md`。
+> 本段其余内容（E-6 的问题描述）保留作历史对照。
+
 `architecture.md:208` 自述："tests/ 混入调试脚本（**pytest 收集即烧真实 API/改生产库**）"。
 
 **后果**：任何人跑 `pytest` 都可能**花真钱、改生产数据**。这比没有测试更危险。
@@ -2905,7 +2910,7 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | # | 动作 | 解决 | 验收 | 状态（2026-09-14 核对） |
 |---|---|---|---|---|
 | 0.1 | **加 CI**：GitHub Actions 跑 `ruff` + `eslint` + `pytest -m "not integration"` | E-6 | 每个 PR 必过 | ✅ **已落地**（`.github/workflows/ci.yml`）：后端 ruff（app/tests/scripts 三段）+ 离线 pytest、前端 lint + tsc/build + Vitest + Playwright（阻断）、依赖安全扫描（建议性）、nginx/`.dockerignore` 配置守卫。**不只是存在** —— 它当场抓到过真缺陷（登录成功落 404、CI 依赖清单漂移 64 failed） |
-| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 | 🟡 **守卫已落地，脚本搬迁未做**。守卫：`tests/conftest.py:128-142` 网络阻断（`ENGRAMNOTE_ALLOW_NETWORK_TESTS=1` 才放行）、`:313-370` **真实生产库写入守卫**（`before_cursor_execute` 层拦截）、`pytest.ini` 的 `norecursedirs = tests/integration`（8 个联网脚本已归位，`src` 收集期 8 errors → 0）。**缺的是后半段**：`backend/` 根目录**仍有 15 个一次性脚本**（`test*.py` × 11 / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py`），**`backend/scripts/dev/` 这个目录不存在** —— 计划字面的那次搬迁从未执行 |
+| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 | ✅ **已落地（搬迁已于 2026-09-14 执行，本条由此收口）**。守卫：`tests/conftest.py:128-142` 网络阻断（`ENGRAMNOTE_ALLOW_NETWORK_TESTS=1` 才放行）、`:313-370` **真实生产库写入守卫**（`before_cursor_execute` 层拦截）、`pytest.ini` 的 `norecursedirs = tests/integration`（8 个联网脚本已归位，`src` 收集期 8 errors → 0）。**搬迁**：15 个一次性脚本（`test*.py` × 11 / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py`）已全部移入 `backend/scripts/dev/`，`backend/` 根目录**已无任何 `.py`**；`test_clean_failed_api` 三个脚本里硬编码的库路径、`test_e2e.py` / `test_pdf_pipeline.py` / `test_convert_direct.py` 里按 `__file__` 推项目根的写法都已同步（否则搬迁会当场崩）。⚠️ **仍未做的一半**：`backend/tests/` 根下**仍有 9 个脚本式文件**（`test_full_e2e.py` / `test_full_flow.py` / `test_week5_6_integration.py` / `test_week8_e2e.py` / `test_week8_review.py` / `test_week8_review_existing.py` / `test_week9_10_e2e.py` / `test_week11_e2e.py` / `test_week12_e2e.py` —— 实测每个都是 0 条 `def test_`、只有 `main()` / `log_step()` 这类脚本结构，"`backend/tests/` 只留正式测试"这半未达成），且 14 个原被 `.gitignore` 忽略的文件移到新位置后**不再被忽略**（`.gitignore:63-69` 的收口没做，需人工决定是提交还是继续忽略）—— 两件都登记在 `backend/scripts/dev/README.md` |
 | 0.3 | **关掉启动时的破坏性迁移**：`init_db()` 中 `_rebuild_dangling_tables()` 与 `database.py:580-587` 的全局去重改为**显式脚本 + 先备份**，不再随进程启动执行 | D-2 | 启动不再 DROP 表、不再删数据 | ✅ **已落地**：`database.py:260-301` 的 `init_db()` 只做 `create_all()` + `_migrate_sqlite()`（只加不删）+ FTS5 建表；`_rebuild_dangling_tables()`（`:1150`）与 `card_relations` 同键去重（`:1057-1059`）都在 `_destructive_migration_allowed()`（`:390-399`，需显式 `ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1`）之后；孤儿检查（`:1002-1036`）已改为**只报告不删除**，针对 `review_logs` 的两条 `DELETE` 不复存在 |
 | 0.4 | **SQLite 开 WAL**：`_set_sqlite_pragma` 加 `PRAGMA journal_mode=WAL`（实测当前为 `delete`）；`busy_timeout` 从 5000 提到 30000 | D-1 | 并发读写不再报 locked | ✅ **已落地**：`database.py:138` `PRAGMA journal_mode=WAL`、`:141` `busy_timeout=30000`、`:144` `synchronous=NORMAL`（另 `:131` `foreign_keys=ON`） |
 | 0.5 | **修正向量相似度公式**：`embedding_tasks.py:246` 的 `1/(1+distance)` 在归一化向量上等价于错误的度量（无关内容得 0.333，见 A-1）。collection 建时指定 `hnsw:space=cosine` 并改 `1.0 - distance`；**写一个重建全部 collection 的迁移脚本**（当前 `backend/data/chroma/` 有 90+ 个） | A-1 | 相似度落在 [0,1] 且可区分 | ✅ **已落地，但该路径此后已被整体替换**（⚠️ 读者勿误记为"待做"）：公式已在 `embedding_service.py:304-333` 改为 `cos = 1 - d/2`（并附"旧实现得 0.333 错在哪"的推导），单测曾逐行对齐理论余弦。**但它依赖的 Chroma 已在 2.4/2.4′ 被删除**：`chromadb` 移出 `requirements.txt`、`VectorStore` 删除、运行期改为 `chunks` 表 + 纯 Python 单位向量点积（`chunk_search_service.py:100-127`，含模型一致性检查），因此 `similarity_from_l2_distance()` 现在是**全仓零调用方的死代码**（`grep` 命中仅定义处）。"重建全部 collection 的迁移脚本"**从未写**，因为集合被**迁移到 `chunks` 表**（608 行、单一 `bge-m3`/1024 维、100% 可检索，附录 O/P）而不是被重建；`backend/data/chroma/` 目录仍在磁盘上（**实测 114 个子目录**），但已无任何运行期读取方 |
@@ -2951,8 +2956,8 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | 1.9 | **worker 启动时校验 schema** | worker 独立启动也能正常工作或明确报错 | ✅ 已落地（`_ensure_worker_schema()`） |
 | 1.10 | **修正 Celery broker 目录推导** | broker 目录与 `config.py:397` 保持一致 | ✅ 已落地（收敛为 `get_celery_broker_dir()`） |
 | 1.11 | 新增 `vault_files` 表 + 一致性校验任务（比对磁盘与 DB 的 sha256） | 可检测并修复发散 | ✅ **已落地**（附录 I）：`vault_audit_service` + `verify_vault.py`（14 用例）。**未建 `vault_files` 表** —— 改为每次扫盘，避免引入第三份需同步的真相源；且**只报告不修改**（自动"修复"会把误判变成不可逆删除） |
-| 1.12 | ~~**消除双写**：统一"先写文件成功 → 再 commit DB → 失败则补偿回滚"的顺序~~ | ✅ **已排查并修复真实缺陷**（§2.6 M-10 修正框）：删除失败改为有界重试；持续失败仍删 DB 记录（不让用户卡死） |
-| 1.13 | ~~**修复物理删除笔记的 FK 违约**（见 §2.6 M-4）~~ | ✅ **实测证伪：该缺陷不存在**（见 §2.6 M-4 修正框）。已补 `tests/test_purge_note_integrity.py`（5 用例）锁住正确行为，防止将来给 UPDATE 加 `note_id` 限定而真的引入它 |
+| 1.12 | ~~**消除双写**：统一"先写文件成功 → 再 commit DB → 失败则补偿回滚"的顺序~~ | 崩溃注入测试下无分歧 | ⛔ **不适用（原表述的两个具体机制已实测证伪，条目随之撤回）** —— 见 §2.6 M-10 修正框与附录 H.3。**同一后果的真实载体已修**：`purge_note` 的删除失败此前只记 warning、DB 记录照删，现已改为 `storage_service.delete_file` 有界重试（3 次 / 50ms），持续失败仍删 DB 记录（不让用户卡死）。⚠️ 这一格**不是**「按原文做完」—— 原文要消除的那个"双写顺序"经复核并不存在 |
+| 1.13 | ~~**修复物理删除笔记的 FK 违约**（见 §2.6 M-4）~~ | 用过"拓展卡片"后仍能 purge | ⛔ **不适用（实测证伪：该缺陷不存在）** —— 见 §2.6 M-4 修正框（该节标题亦已划掉）与附录 H。已补 `tests/test_purge_note_integrity.py`（5 用例）锁住正确行为，防止将来给 UPDATE 加 `note_id` 限定而真的引入它。⚠️ 这一格**不是**「已完成修复」（本就没有缺陷可修） |
 | 1.14 | **修复 `card_relations` 唯一索引**（见 §2.6 M-3） | 索引确定存在 | ✅ 已落地（附录 D；去重口径统一为 5 列） |
 
 **1.2′ 补充（SQLite 路线下的"启动零破坏性"）**：
@@ -2963,7 +2968,7 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 
 **阶段 1 之后**：D-1 / D-2 / D-7 / D-8 / D-11 / M-1 / M-4 / M-6 / M-12 消除。
 （在 SQLite 路线下：D-1/D-2/D-7/D-11/M-6 已消除；M-1 已定性；
-M-4 与 1.13 仍未做。）
+M-4 与 1.13 的复核结论见附录 H（M-4 实测证伪、1.13 随之撤回）—— 原句写的"仍未做"**已过期**（2026-09-14 更正）。）
 
 ### 阶段 2 · 重建检索层（2 周）—— 手术刀 3
 
@@ -3252,8 +3257,8 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
 | 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **第一期完成（生成 + 分歧对比），切换被后端阻塞（22 个端点缺 `response_model`，见附录 BH）**：`backend/openapi.json`（102 路径 / 118 操作 / 156 schema，sha256 逐字节可复现）与 `src/api/generated/schema.ts`（261 KB / 10 000 行，`tsc` / `build` / `lint` / `prettier` 全过）已落盘；漂移检查器（**TypeScript 编译器 API，不是正则**）判定 **111/111 个端点全部命中**（0 缺失、0 方法错），类型分布 **IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21 / SCHEMA_LOOSE 1 / NO_JSON_RESPONSE 4**。⚠️ **没改一行调用方、没接入应用、没加运行时依赖** —— 切换的前置 P1–P4 与步骤 S1–S5 见附录 BH，逐函数对照表见 `frontend/docs/openapi-client.md` |
-| 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 |
-| 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 |
+| 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 的 dependencies / devDependencies 里**没有** `@tanstack/react-query`（`swr` / `jotai` / `redux` 同样没有），`frontend/src/**` 里 `@tanstack` **零命中**；手写 `fetch` + 定时轮询仍是现状（`setInterval` 的活调用见 `components/ReminderBanner.tsx:70`、`pages/notedetail/useNoteDetailData.ts:177/201`） |
+| 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做**（2026-09-14 对着代码复核）：`frontend/package.json` 里**没有** `zustand`，`frontend/src/**` 里 `from 'zustand'` **零命中**；UI 状态仍靠 React Context（`contexts/AuthContext.tsx`、`components/Toast.tsx`）与 props 传递 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
 | 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ✅ **三页全部完成**（附录 AX / AZ / BB）：`NoteDetail` 1184→**282**、`KnowledgeGraph` 1055→**248**、`Projects` 765→**113**；本轮复核三页为 **290 / 249 / 135** 行（拆分时记的是 282 / 248 / 113 —— 之后各页又陆续长了几行，前提"单文件 <300 行"仍成立），三个拆分目录共 **51 个模块、最大 263 行、超过 300 行的 0 个**。⚠️ 关键前提是"先补安全网再拆"：另两页是先补了 53 条页面级用例（并经变异验证）才动的手 |
 | 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | 🟡 **部分落地（已迁 9 个样式表，剩 6 个）**：**机制 + 试点 + 三批迁移**已落地（附录 BB 与 `frontend/docs/css-migration-plan.md`）。**9 个样式表动过**（`auth` / `cleaning` / `diff` / `dashboard` / `markdown` / `learning` / `markdown-extras` / `responsive` / `base` 令牌层；其中 `markdown` 是核实后的**停**、`base` 只加令牌），**108 条规则逐条核对、丢失 0**（试点 7 + 第一/二/三批 60 / 20 / 21，每批三份证据），`main.tsx` 的导入顺序重排根治了"模块 CSS 排在全局样式表之前"的级联反转。⚠️ 一条**有记录的停**：`markdown.css` 的 5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 4 个类名的写入点在 `src/hooks/useAdhdReader.ts`（当时不在可改范围），硬搬只能写成 `:global(...)`。**剩 6 个**（序 5 / 8 / 9 / 10 / 12 / 13：`assessment` / `components` / `layout` / `graph` / `refinements` / `responsive`）互相咬合、必须**成批**处理 —— **每一批的剩余顺序与前置条件写在 `frontend/docs/css-migration-plan.md` §7**（不读那份文件不要动这几张表） |
@@ -10574,6 +10579,10 @@ prompt_version ∈ 列? False      llm_calls 行数 = 0
    `node_modules`。**两条都已经修了**（`nginx.conf:11`、`.dockerignore` 22 行，
    CI 还有守卫）。横幅里"当前部署方式不是 Docker"这半仍然正确，
    过期的只是"未修"那半 —— 属于 §2.1 S-4 那一类"文档成为负债"。
+   → **2026-09-14 已修**：`README.md` 那两条已改为"**已修复**"（附
+   `nginx.conf` / `.dockerignore` / CI 守卫三处证据），并且**保留**了
+   "本节未经本项目验证、容器部署从未走通"的横幅结论 —— 修的是"未修"那半，
+   不是"部署可用"那半。
 2. **真库行数与正文快照不一致**：附录 A.1/E.5 记的是
    `knowledge_cards 1183 / quiz_items 1058 / review_logs 194`；
    2026-09-14 只读实测为 **1181 / 1058 / 195**（`notes 20`、`users 4`、
@@ -10587,6 +10596,11 @@ prompt_version ∈ 列? False      llm_calls 行数 = 0
    评测按"没有这个语料"继续跑。它属于 2.4 收尾的残留（不是新缺陷），
    ⚠️ 但**读这份评测输出时要知道**：`--corpus both` 里的 chunk 那一路
    在当前环境下走的是**另一条**读取路径，别把它当成 Chroma 语料。
+   → **2026-09-14 已修**：`load_chunk_corpus()` 改为只读 `chunks` 表
+   （口径与线上 `chunk_service.get_user_chunks()` 一致：回收站笔记的 chunk
+   不参与检索），删掉了 `--chroma` 参数与死常量 `DEFAULT_CHROMA`；
+   "语料 0 条"不再是打印 `[跳过]` 后继续，而是**退出码 2 的错误**
+   （与 `check_dependency_drift.py` 的"检查自身空转"同一口径）。
 
 ### BJ.5 验收方式（先证伪，再确认）
 

@@ -3011,15 +3011,48 @@ export interface paths {
     };
     /**
      * Health Check
-     * @description 健康检查端点
+     * @description 健康检查端点（**存活**探针，不检查任何依赖）
      *
      *     用于监控和负载均衡器检测服务是否正常运行。
      *     不需要认证，返回应用名称和状态。
+     *
+     *     ⚠️ 刻意**不**在这里检查数据库/broker：本端点会被用来决定"要不要重启
+     *     进程"，任何依赖抖动都会被翻译成重启（见 `/ready` 上方的说明）。
+     *     "能不能干活"是 `/ready` 的问题。
      *
      *     Returns:
      *         dict: 包含 status 和 app 名称的字典
      */
     get: operations['health_check_health_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/ready': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Readiness Check
+     * @description 就绪检查端点（**readiness** 探针，含义见本模块 `/ready` 上方说明）
+     *
+     *     判据只有一条：**数据库连得上且 schema 就绪**（用一次真实业务查询验证，
+     *     而不是 `SELECT 1`）。就绪时 200，否则 **503**，两种情况的响应体形状相同。
+     *
+     *     队列深度是**报告项**，不参与状态码：忙 ≠ 坏，详见上面
+     *     "队列深度为什么只报告、不决定就绪"。
+     *
+     *     不需要认证（探针不会带 Token），因此响应里只有稳定的状态与原因码，
+     *     不含异常文本、库路径等内部信息。
+     */
+    get: operations['readiness_check_ready_get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -3995,6 +4028,20 @@ export interface components {
        * @default 0
        */
       tracked_items: number;
+    };
+    /**
+     * DatabaseCheck
+     * @description `/ready` 的数据库检查结果
+     *
+     *     `reason` 是**稳定原因码**而不是异常文本：`/ready` 与 `/health` 一样不能
+     *     要求认证（探针不会带 Token），而异常文本里会有库路径、SQL 片段等内部信息
+     *     （见 `tests/test_error_leakage.py` 的判据）。细节进服务端日志。
+     */
+    DatabaseCheck: {
+      /** Reason */
+      reason?: string | null;
+      /** Status */
+      status: string;
     };
     /**
      * DiffBlock
@@ -5683,6 +5730,30 @@ export interface components {
       total: number;
     };
     /**
+     * QueueDepth
+     * @description `/ready` 的队列深度快照
+     *
+     *     三个数字的**各自含义**（不要相加，它们来自两个不同的存储）：
+     *
+     *     - `depth`：broker 里**等待 worker 接手**的消息数 —— 这才是"还有多少在排队"；
+     *     - `running`：`task_runs` 里正在执行的任务数；
+     *     - `pending`：`task_runs` 里已建记录但尚未开始的任务数。
+     *
+     *     `depth` 为 `None` 表示**当前后端测不到**（原因见 `source`），
+     *     而不是"零"。用 `None` 而不是 0 是刻意的：0 会让"没测"与"真的没人排队"
+     *     在监控面板上长得一模一样（与 `llm_calls.cost` 记 NULL 而非 0 同一条原则）。
+     */
+    QueueDepth: {
+      /** Depth */
+      depth?: number | null;
+      /** Pending */
+      pending?: number | null;
+      /** Running */
+      running?: number | null;
+      /** Source */
+      source: string;
+    };
+    /**
      * QuizAnswer
      * @description 一条作答及其评判（`AssessmentResult.quiz_answers` 的元素）
      *
@@ -5936,6 +6007,21 @@ export interface components {
        * @default 0
        */
       tokens_used: number;
+    };
+    /**
+     * ReadinessResponse
+     * @description `GET /ready` 的响应（200 与 503 **共用同一形状**）
+     *
+     *     失败时保持同样的字段结构，探针与看板才能用一套解析逻辑同时处理两种情况
+     *     （需要分支的只有 `status` 与状态码本身）。
+     */
+    ReadinessResponse: {
+      /** App */
+      app: string;
+      database: components['schemas']['DatabaseCheck'];
+      queue: components['schemas']['QueueDepth'];
+      /** Status */
+      status: string;
     };
     /**
      * RefreshRequest
@@ -10589,6 +10675,35 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+    };
+  };
+  readiness_check_ready_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReadinessResponse'];
+        };
+      };
+      /** @description 未就绪：数据库不可达或 schema 未就绪（响应体形状与 200 相同） */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReadinessResponse'];
         };
       };
     };

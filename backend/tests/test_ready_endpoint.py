@@ -371,8 +371,25 @@ class TestReadyContract:
         if not frontend.is_dir():  # pragma: no cover - 前端目录不在时跳过
             pytest.skip("前端目录不存在")
         offenders = []
+        scanned = 0
         for path in frontend.rglob("*.ts*"):
+            # 排除**机械生成物** `src/api/generated/**`（`npm run gen:api` 的产物）：
+            # 它由后端 OpenAPI 契约生成，契约里有的每个路径都会出现在它里面 ——
+            # 包括 `/ready`。它**描述**端点，不代表前端**调用**端点。
+            # 不排除它，本守卫会在每次重新生成契约后误报；而同一测试类里的
+            # `test_ready_in_openapi_contract` 恰恰要求 `/ready` **必须**在契约里，
+            # 两条断言只有排除生成物之后才相容（2026-09-14 由重新生成契约暴露）。
+            # ⚠️ 排除面刻意只写 `api/generated` 这一个**具体**目录，不用
+            # "看起来像生成物"这类宽判据 —— 宽判据会在有人新增另一个生成目录时
+            # 把守卫悄悄放空，而放空的守卫比没有守卫更糟。
+            if "api/generated" in path.as_posix():
+                continue
             text = path.read_text(encoding="utf-8", errors="ignore")
+            scanned += 1
             if re.search(r"['\"`]/ready['\"`]", text):
                 offenders.append(str(path.relative_to(frontend)))
+        # 反空转：这类"扫描型"守卫最危险的失效形态是**扫了 0 个文件却永远通过**
+        # （源根改名、目录搬家、`rglob` 模式写错都会造成它），
+        # 与 `test_rate_limit_coverage` 里那条"防检查空转"的守卫同一口径。
+        assert scanned > 0, "扫描到 0 个前端源文件 —— 守卫已空转，先检查扫描路径"
         assert not offenders, f"前端调用了 /ready（运维端点）: {offenders}"

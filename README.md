@@ -270,10 +270,18 @@ npm run dev
 >
 > - 本项目实际以**本地进程**方式运行（见上面"启动项目"，后端 8001 / 前端 5173）；
 > - 项目曾因**磁盘空间不足**明确放弃容器化与 PostgreSQL/Redis；
-> - 已知问题（未修）：`nginx.conf` 的 `/api/` 未设 `client_max_body_size`
->   （大文件上传会 413）、`frontend/.dockerignore` 未排除 `node_modules`。
+> - ~~已知问题（未修）：`nginx.conf` 的 `/api/` 未设 `client_max_body_size`
+>   （大文件上传会 413）、`frontend/.dockerignore` 未排除 `node_modules`。~~
+>   **2026-09-14 更正：这两条都已修复** —— `frontend/nginx.conf` 已设
+>   `client_max_body_size 500m`（并补齐 `proxy_buffering off` / `gzip_vary on` /
+>   静态资源缓存头 / 安全响应头），`frontend/.dockerignore` 已存在且排除
+>   `node_modules`；`.github/workflows/ci.yml` 里另有三道回归守卫锁住它们。
+>   ⚠️ **但"配置已就绪"不等于"容器部署可用"**：上面的 `Dockerfile` /
+>   `docker-compose.yml` 从未在本项目里构建或运行过（本机也没有 Docker），
+>   实际路线仍是本地进程 —— 所以**本节开头的结论没有变**。
 >
-> 因此下面的命令**不要当作可用的部署路径**；要用请先自行验证并修掉上面两条。
+> 因此下面的命令**不要当作可用的部署路径**；要用请先自行验证 ——
+> 今天的问题已经不是"先修掉上面那两条配置"，而是**这条路从未被走通过**。
 
 ```bash
 # 构建并启动
