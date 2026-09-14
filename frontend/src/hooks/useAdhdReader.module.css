@@ -1,0 +1,91 @@
+/**
+ * ADHD Reader 专注阅读模式（overhaul-plan 5.6 序 6 —— **最后一处"有记录的停"的收尾**）
+ *
+ * ## 这个模块是什么
+ *
+ * 原来住在 `src/styles/markdown.css` 末尾的 5 条 `.adhd-*` 规则，现在归这里所有。
+ * 规则的值、顺序、选择器**逐字未改**，只有类名从 kebab（`.adhd-block`）变成了
+ * 本模块导出的 camelCase（`.adhdBlock`，产物里哈希成 `._adhdBlock_<hash>`）。
+ *
+ * ## 为什么它现在可以进模块（第三批判"不能搬"的两条理由都已消失）
+ *
+ * 第三批的结论是"停"（证据 `docs/migration-evidence/5.6-07`、计划 §4.8.1），
+ * 理由是两条：① `.markdown-body` 按判据必须留全局；② 4 个类名的写入点全在
+ * `src/hooks/useAdhdReader.ts`，而**当时那一批不允许改 `src/hooks/**`**。
+ * 第二条是"范围"问题而不是"设计"问题 —— 人类批准把 hook 纳入范围之后，
+ * 按规范 §4 末尾的判据，正确做法就是**让类名与规则同住一个模块**：
+ * 写入点 `import styles from './useAdhdReader.module.css'`，用 `styles.adhdBlock`
+ * 这类常量写类名。这样"写类名"与"定义类名"是同一份真相，
+ * 哈希后不可能对不上（字面量写法必然对不上，而且构建期看不出来）。
+ *
+ * ## `.markdown-body` 仍然是全局类，这里的 `:global()` 不是"半搬"
+ *
+ * 规范 §4 第 2 / 4 条判的**从来不是这 5 条规则**，而是 `.markdown-body`
+ * 这个类名本身：它被 3 个**不相邻**功能使用（`pages/notedetail/MarkdownReader.tsx`、
+ * `pages/notedetail/EditSplitView.tsx`、`components/NoteAskPanel.tsx` ——
+ * 最后一个还 `document.querySelector('.markdown-body')`），而且正文 HTML 是
+ * `marked` 渲染出来的字符串，"没有组件可以挂类名"。所以 `.markdown-body`
+ * 留在 `src/styles/markdown.css`（那是拥有它的样式表），本模块只是**引用**它。
+ *
+ * ⚠️ 与规范 §4 末尾点名的"半搬"（`:global(.adhd-block)`）的区别要看清：
+ * 那种写法把**本模块自己的 4 个类名**写成全局 —— 一个字符都没被作用域化。
+ * 这里 4 个类名**全部是模块自己的本地类**（产物里都是 `._xxx_hash`），
+ * 只有 `.markdown-body` 这一个**本来就该全局**的类名写成 `:global(...)`。
+ * 同理见 `App.module.css` 的 `.appLayout :global(.container)`、
+ * `NoteDetailHeader.module.css` 的 `.noteDetailActions :global(.btn)`。
+ *
+ * ## 权重与产物位置（都逐字未变，这是"渲染没变"的前提）
+ *
+ * 选择器文本变了、**权重没变**：`:global(.markdown-body).adhdReaderActive`
+ * 与 `.markdown-body.adhd-reader-active` 同为 (0,2,0)，其余三条 (0,2,0) / (0,3,0) /
+ * (0,3,1) 同理。`css-migration-diff.mjs` 会按 `.C0`… 占位符逐条核对，
+ * 选择器（含组合器）是行为的一部分，不是排版。
+ *
+ * 产物位置：本模块由 `src/hooks/useAdhdReader.ts` import，而它只被
+ * `pages/NoteDetail.tsx`（懒加载页面）使用 ⇒ 本文件进 `NoteDetail-*.css`，
+ * 由 `__vitePreload` 在 `index.css` 之后注入，仍然排在全局层之后。
+ * 这 5 条规则**没有任何同属性、同权重的竞争对手**（`.markdown-body` 那两条写的是
+ * `line-height` / `font-size`，本模块写的是 `position` / `transition` /
+ * `border-radius` / `box-shadow` / `pointer-events` / 行级标记那几条），
+ * 所以这个位置变化不影响任何一条声明的胜负 —— 真机对账的结论见
+ * `docs/migration-evidence/5.6-14`（真 Chromium，迁移前后 computed 属性逐个比）。
+ *
+ * ## 别在这里写 `.markdown-body` 的正文样式
+ *
+ * `h1` / `p` / `pre` / `table` / `blockquote` 那一整组（含 768px 档）留在
+ * `src/styles/markdown.css` —— 它们服务的是 `marked` 生成的 DOM，
+ * 与"谁在写类名"无关。本模块只负责 JS 会挂上去的那 4 个类名。
+ */
+
+/* 阅读模式激活时，把文章容器变为行级标记的定位上下文 */
+:global(.markdown-body).adhdReaderActive {
+  position: relative;
+}
+
+/* 模糊度与透明度由 JS 按与阅读行的距离以渐变方式写入内联样式 */
+:global(.markdown-body).adhdReaderActive > .adhdBlock {
+  transition: filter 0.25s ease, opacity 0.25s ease;
+}
+
+/* 当前阅读块：保持清晰（filter/opacity 由内联样式驱动），仅保留轻量描边提示 */
+:global(.markdown-body).adhdReaderActive > .adhdBlock.adhdCurrentBlock {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--color-accent-light);
+}
+
+/* 当前块内部仍可保留少量层次：让当前块里的链接/按钮可点 */
+:global(.markdown-body).adhdReaderActive > .adhdBlock.adhdCurrentBlock a {
+  pointer-events: auto;
+}
+
+/* 行级标记：一条位于行盒下方行距空隙中的下划线，完全不遮挡文字 */
+:global(.markdown-body).adhdReaderActive .adhdLineMarker {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), rgba(37, 99, 235, 0.2));
+  border-radius: 2px;
+  transition: top 0.08s ease, left 0.08s ease, width 0.08s ease;
+}

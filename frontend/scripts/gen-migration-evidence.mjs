@@ -428,7 +428,12 @@ if (adhd.code !== 0) throw new Error(`清单生成失败（markdown.css）：${a
 write(
   '5.6-07-markdown-adhd-stayed-global.md',
   '5.6 第三批：markdown.css 的 `.adhd-*` 规则 —— 逐处核对写入点后**留全局**',
-  '**本批没有搬 `markdown.css` 的任何一条规则**（计划 §7.1 事先标了"可能是个停"）。\n' +
+  '> ⚠️ **本文件是第三批当时的历史结论**（"停"）。序 6 收尾轮已经把这条"停"收掉了：\n' +
+    '> 那 5 条规则进了 `src/hooks/useAdhdReader.module.css`，类名改由模块导出。\n' +
+    '> 收尾后的证据在 `5.6-14-adhd-moved-to-module.md`；本文下面的理由**逐条都还成立**，\n' +
+    '> 变的只有一条：第三条理由里"写入点所在的 `src/hooks/**` 不在本批可改范围"\n' +
+    '> —— 那是**范围**问题，人类批准把 hook 纳入范围之后它就不成立了。\n\n' +
+    '**本批没有搬 `markdown.css` 的任何一条规则**（计划 §7.1 事先标了"可能是个停"）。\n' +
     '下面这份清单是"决定不动"的那 5 条规则原文，留作核对。\n\n' +
     '## 为什么不动\n\n' +
     '1. 5 条规则**全部**是 `.markdown-body.adhd-reader-active …` 的后代选择器，\n' +
@@ -448,6 +453,74 @@ write(
     '⚠️ 硬塞进模块只能写成 `:global(.adhd-block)` 之类，那等于一个字符都没被\n' +
     '作用域化，却把"这些类名是全项目约定"藏进一个页面模块里（规范 §4 末尾的"半搬"）。\n\n' +
     `\`\`\`\n${adhd.out.trim()}\n\`\`\``,
+)
+
+// ── 11. 序 6 收尾：第三批那个"停"被收掉了 —— `.adhd-*` 进 hook 模块 ──
+// 迁移**前**的清单仍然从 git 读（提交之后 `findRecentRev` 会按内容自动往回收一格）。
+const adhdMoved = run('css-rule-inventory.mjs', [
+  'src/styles/markdown.css',
+  '--class',
+  'adhd-reader-active,adhd-block,adhd-current-block,adhd-line-marker',
+  '--from-git',
+])
+if (adhdMoved.code !== 0) throw new Error(`清单生成失败（markdown.css，序 6）：${adhdMoved.out}`)
+write(
+  '5.6-14-adhd-moved-to-module.md',
+  '5.6 序 6 收尾：markdown.css 的 5 条 `.adhd-*` 规则进 `src/hooks/useAdhdReader.module.css`',
+  '这是 5.6 的**最后一处"有记录的停"**（第三批判的，见 `5.6-07`）被收掉的记录。\n\n' +
+    '## 1. 四个类名的**全部**写入点（改之前逐处枚举过，改之后逐处核对）\n\n' +
+    '`grep -rn "adhd-" frontend/src`（含模板串与 `utils/markdown.ts`）只有**一个**文件命中：\n' +
+    '`src/hooks/useAdhdReader.ts`。逐处清单与改法：\n\n' +
+    '| 改前（行号是改之前的） | 操作 | 改后 |\n' +
+    '|---|---|---|\n' +
+    '| `:36` `classList.contains(\'adhd-line-marker\')` | 读（判断该元素是不是标记条） | `styles.adhdLineMarker` |\n' +
+    '| `:165` `marker.className = \'adhd-line-marker\'` | 整体赋值 | `styles.adhdLineMarker` |\n' +
+    '| `:216` / `:274` `classList.remove(\'adhd-current-block\')` | 移除当前块 | `styles.adhdCurrentBlock` |\n' +
+    '| `:217` `classList.add(\'adhd-current-block\')` | 换行时切换当前块 | `styles.adhdCurrentBlock` |\n' +
+    '| `:266` `classList.add(\'adhd-block\')` | 给每个 `marked` 顶层块加 | `styles.adhdBlock` |\n' +
+    '| `:269` / `:272` `classList.add/remove(\'adhd-reader-active\')` | 开关阅读模式 | `styles.adhdReaderActive` |\n\n' +
+    '改后这 8 处的行号是 `:47` / `:176` / `:227` / `:228` / `:277` / `:280` / `:283` / `:285`；\n' +
+    '`src/` 下这四个类名的**字面量命中 0 处**（`markdown.css` 里只剩墓碑注释，注释不算声明）。\n' +
+    '`utils/markdown.ts` **再次核实 0 命中**（计划里那个"可能"两次都被排除）；\n' +
+    '`responsive.css` / `refinements.css` 对 `.adhd-*` 也是 0 命中，不存在"补丁层还在命中它"。\n\n' +
+    '## 2. 为什么现在能搬（第三批那三条理由的现状）\n\n' +
+    '| 第三批的理由 | 现状 |\n' +
+    '|---|---|\n' +
+    '| ①"改成语义查询"不行 | **仍然不行**（这些类名是给 `marked` 生成的块打标记的唯一手段），但这条不是唯一出路 |\n' +
+    '| ②"从模块导出常量"不行 —— 写入点 `src/hooks/**` 不在本批可改范围 | **不成立了**：那是范围问题，hook 已纳入范围；且模块就放在 hook 自己的目录里，没有"通用 hook import 页面模块"的归属颠倒 |\n' +
+    '| ③"留全局"成立 | 这条判的是 **`.markdown-body`**，而它**仍然留全局**（规范 §4 第 2、4 条），进模块的只有本 hook 自己的 4 个类名 |\n\n' +
+    '⚠️ 与规范 §4 末尾点名的"半搬"（`:global(.adhd-block)`：本模块自己的类名写成全局，\n' +
+    '一个字符都没被作用域化）的区别：模块里 4 个类名**全是本地类**（产物 `._adhdBlock_hash`），\n' +
+    '只有 `.markdown-body` 写成 `:global(...)` —— 那是**引用**一个本来就该全局的类名，\n' +
+    '与 `App.module.css` 的 `.appLayout :global(.container)`、`NoteDetailHeader.module.css` 的\n' +
+    '`.noteDetailActions :global(.btn)` 是同一种写法。\n\n' +
+    '**权重逐字未变**：`:global(.markdown-body).adhdReaderActive` 与\n' +
+    '`.markdown-body.adhd-reader-active` 同为 (0,2,0)，另三条 (0,2,0) / (0,3,0) / (0,3,1) 同理。\n' +
+    '产物位置从 `index.css`（全局样式表第 3 个）变成懒加载的 `NoteDetail-*.css`\n' +
+    '（`__vitePreload` 仍在 `index.css` 之后注入），而这 5 条没有任何同属性同权重的竞争对手 ⇒\n' +
+    '一条声明的胜负都不会翻转。\n\n' +
+    '## 3. 三条机器证据\n\n' +
+    '1. **规则清单差集**（`5.6-02-rule-diff.md`）：本批 **逐字保留 5 / 值有变化 0 / 丢失 0**。\n' +
+    '   ⚠️ 工具这一轮补了一条归一化：压缩器会**压掉组合器两侧的空白**\n' +
+    '   （源码 `.a > .b` → 产物 `._a_h>._b_h`），不归一化会把 4 条带 `>` 的规则整条报成"丢失"\n' +
+    '   —— 这是本仓库第一次迁移带子组合器的规则（`neutralSelector`，规范 §7 第 11 条）。\n' +
+    '2. **产物校验**（`5.6-03-built-css.md`）：切片标记 `adhdReaderActive` / `adhdBlock` /\n' +
+    '   `adhdCurrentBlock` / `adhdLineMarker` 在产物里各命中 5 / 3 / 2 / 1 次；\n' +
+    '   四个 kebab 类名进 `RETIRED` 后命中 **0**；悬空动画 0；改动范围内冲突 0；\n' +
+    '   级联得主与媒体查询覆盖战、简写 vs 长写全部照旧。\n' +
+    '3. **真 Chromium 渲染对账**（一次性探针，用完已删；配方见计划 §5 雷区 3）：\n' +
+    '   两侧都用**产物**（`vite preview`）：迁移前 = `git worktree add --detach <tmp> HEAD`\n' +
+    '   + `npx vite build`（只读 HEAD，不碰工作区）；迁移后 = 当前工作区的 `dist`。\n' +
+    '   探针按 **DOM 结构**取样（不按类名 —— 类名哈希后按类名取样会让两侧取到不同元素）：\n' +
+    '   容器 `.markdown-body` + 它的 6 个子元素（5 个正文块 + 行级标记条）+ 1 个链接，\n' +
+    '   共 **8 个样本 × 全部 computed 属性 = 4 328 条值**（不是只挑那几条）。\n' +
+    '   实测：**未声明的差异 0 条**；class 属性按预期 **7 个变哈希 / 1 个一字不变**\n' +
+    '   （那个链接本来就没有类名），行内 `style`（渐变模糊与标记条定位由 JS 写入）**逐字相同**。\n' +
+    '   探针自身的三个坑都处理了：块切换有 3 帧滞回（一次 `mousemove` 不够）、\n' +
+    '   必须等过渡结束（≥600ms）、落盘不能用 `node:fs`（`e2e/` 在 `tsconfig` 的 include 里，\n' +
+    '   而本项目没有 `@types/node`）—— 这条与计划 §5 雷区 18 记的是同一批坑。\n\n' +
+    '## 4. 迁移前的那 5 条规则原文\n\n' +
+    `\`\`\`\n${adhdMoved.out.trim()}\n\`\`\``,
 )
 
 // ── 7. 序 8 / 9 / 10 的迁移前清单（第五、六、七批） ──

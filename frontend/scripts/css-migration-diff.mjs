@@ -237,6 +237,27 @@ const BATCHES = [
         winner: '不适用 —— 同上',
         evidence: '同上',
       },
+      /**
+       * ⚠️ 下面这一条**不是**冲突裁决，而是 **5.9 无障碍收尾轮主动删掉的声明**
+       * （commit `0986102`）。登记在这里的唯一原因是：差集按"迁移前有、迁移后没有"
+       * 判定丢失，而这条删除发生在迁移**之后**，机制上长得和"丢失"一模一样 ——
+       * 不登记的话本批会永远报 `丢失 1`，把真信号淹掉（本轮就是这么发现的：
+       * 三批各报 1 条 `cursor` 丢失，全是 5.9 那次修复的副作用）。
+       * 语义差别写进 `winner` / `evidence`，不假装它是"输掉的那套值"。
+       */
+      {
+        sheet: 'src/styles/dashboard.css',
+        selector: '.dashboard-review-card',
+        prop: 'cursor',
+        value: 'pointer',
+        note:
+          '5.9 收尾轮（F-09）删除：这张卡片从 `div[role="button"]` 改成"盒子 + 真按钮"之后，' +
+          '可点的只有那个按钮 —— 卡片上的手型光标会让鼠标用户以为整张卡能点（"看起来能点、点了没反应"）。',
+        winner: '不适用 —— 不是冲突输赢，是无障碍修复主动删掉的"假可点信号"（真按钮自带 cursor: pointer）',
+        evidence:
+          'commit 0986102 的 diff（`pages/Dashboard.module.css`：`-  cursor: pointer;`）' +
+          '与原地留下的注释（"⚠️ 这里**刻意没有** `cursor: pointer`：F-09 …"）；',
+      },
     ],
   },
   {
@@ -589,6 +610,31 @@ const BATCHES = [
     hardened: {},
     // 本批不搬 `@keyframes`：这批规则里一条 `animation` 都没有。
     keyframes: [],
+    /**
+     * ⚠️ **不是冲突裁决**：`cursor: pointer` 是 **5.9 无障碍收尾轮主动删的**
+     * （commit `0986102`，F-37）。`.noteListItem` 那半：F-17 把卡片从
+     * `article[role="button"]` 改成"盒子 + 标题链接 + 操作按钮"之后，可点的只有里面的
+     * 链接与按钮，卡片上的手型光标是上一次修复留下的残迹。
+     *
+     * 登记在这里的理由与第一批那条相同：删除发生在迁移之后，差集看不出区别，
+     * 不登记就会永远报 `丢失 1`。逐条证据见 `evidence`。
+     */
+    resolvedConflicts: [
+      {
+        sheet: 'src/styles/components.css',
+        selector: '.note-list-item',
+        prop: 'cursor',
+        value: 'pointer',
+        note:
+          '5.9 收尾轮（F-37）删除。顺带说明它为什么是被"键盘可达性扫描"报出来的：' +
+          '`cursor` 是**继承属性**，卡片上的 pointer 会把它里面每个 `span`（徽章/状态/大小）' +
+          '的计算值都变成 pointer，于是扫描报出"整个手型区域里没有可 Tab 的控件"。',
+        winner: '不适用 —— 不是冲突输赢，是无障碍修复主动删掉的"假可点信号"',
+        evidence:
+          'commit 0986102 的 diff（`pages/NotesList.module.css`：`-  cursor: pointer;`）' +
+          '与原地留下的注释（"⚠️ `.noteListItem` 原本还有一条 `cursor: pointer`，**本轮删除**（F-37）"）',
+      },
+    ],
   },
   {
     id: '第六批（序 9）：layout.css 按归属拆分（Sidebar / App 骨架）+ responsive.css 同批规则',
@@ -767,6 +813,31 @@ const BATCHES = [
         orig: 'graph-spin',
         module: 'src/components/graph/Graph.module.css',
         renamed: 'graphSpin',
+      },
+    ],
+    /**
+     * ⚠️ **不是冲突裁决**：`cursor: pointer` 是 **5.9 无障碍收尾轮主动删的**
+     * （commit `0986102`，F-37）。工具栏那张卡片类型图例（`GraphToolbar.tsx:121`）
+     * 用的是同一个类名，而它只是说明、不可点 —— 手型光标会让鼠标用户以为能点；
+     * 真正可点的那一处（`GraphSidebar` 的关系类型图例）现在是**真 `<button>`**，
+     * 光标由全局的 `button { cursor: pointer }` 提供，不依赖这个类。
+     *
+     * 与第一批 / 第五批那两条同一处理：删除发生在迁移之后，
+     * 差集看不出区别，不登记就会永远报 `丢失 1`。
+     */
+    resolvedConflicts: [
+      {
+        sheet: 'src/styles/graph.css',
+        selector: '.graph-legend-item',
+        prop: 'cursor',
+        value: 'pointer',
+        note:
+          '5.9 收尾轮（F-37）删除：同一个类名被"可点的真按钮"与"不可点的说明图例"共用，' +
+          '留着 pointer 会让后者看起来能点。',
+        winner: '不适用 —— 不是冲突输赢，是无障碍修复主动删掉的"假可点信号"',
+        evidence:
+          'commit 0986102 的 diff（`components/graph/Graph.module.css`：`-  cursor: pointer;`）' +
+          '与原地留下的注释（"⚠️ 这里**刻意不写** `cursor: pointer`：工具栏那张卡片类型图例 …"）',
       },
     ],
     /**
@@ -1476,6 +1547,37 @@ const BATCHES = [
       },
     ],
   },
+  {
+    id: '序 6 收尾：markdown.css 的 5 条 `.adhd-*` 规则进 hook 模块（第三批那个"停"的收尾）',
+    /**
+     * 第三批把 `markdown.css` 判成"有记录的停"（证据 `5.6-07`、计划 §4.8.1），
+     * 两条理由：① `.markdown-body` 按判据留全局；② 4 个类名的写入点全在
+     * `src/hooks/useAdhdReader.ts`，而**那一批不允许改 `src/hooks/**`**。
+     * 第②条是范围问题：hook 纳入允许范围之后，四个类名与 5 条规则一起进
+     * `src/hooks/useAdhdReader.module.css`，写入点改成模块导出常量。
+     *
+     * ⚠️ `.markdown-body` **仍然留全局**（规范 §4 第 2、4 条：3 个不相邻功能在用 +
+     * 正文 HTML 由 `marked` 生成）。模块里写的是
+     * `:global(.markdown-body).adhdReaderActive > .adhdBlock` ——
+     * `:global()` 在这里是**引用**一个本来就该全局的类名（同 `App.module.css` 的
+     * `.appLayout :global(.container)`），**不是**规范 §4 末尾点名的"半搬"
+     * （那种写法是 `:global(.adhd-block)`：本模块自己的类名写成全局，一个字符都没被作用域化）。
+     * 所以它既不是 `hardened`（权重没升没降，`:global(.markdown-body).adhdReaderActive`
+     * 与 `.markdown-body.adhd-reader-active` 同为 (0,2,0)），也不需要登记删除。
+     *
+     * `rev` 留空：本批尚未提交，`findRecentRev` 会定位到 HEAD（那里
+     * `markdown.css` 还含这四个老类名）。提交之后它会自动往回收一格，不需要手改。
+     */
+    beforeSheets: ['src/styles/markdown.css'],
+    groups: [
+      {
+        module: 'src/hooks/useAdhdReader.module.css',
+        classes: ['adhd-reader-active', 'adhd-block', 'adhd-current-block', 'adhd-line-marker'],
+      },
+    ],
+    hardened: {},
+    keyframes: [],
+  },
 ]
 
 // ── 归一化 ──
@@ -1875,6 +1977,14 @@ function neutralSelector(sel, remap) {
   return s
     .replace(/::/g, ':')
     .replace(/\s*,\s*/g, ',')
+    // 压缩器还会**压掉组合器两侧的空白**：源码
+    // `.markdown-body.adhd-reader-active > .adhd-block`
+    // 在产物里是 `.markdown-body._adhdReaderActive_h>._adhdBlock_h`
+    // （序 6 收尾轮第一次出现带子组合器的迁移规则）。组合器两侧的空白在 CSS 里
+    // 没有语义，不归一化就会把这类规则整条报成"丢失" —— 而它逐字（含组合器）都在产物里。
+    // ⚠️ `~` 要避开属性选择器的 `~=`（"包含"运算符）：用 `(?!=)` 把它排除。
+    .replace(/\s*([>+])\s*/g, '$1')
+    .replace(/\s*~\s*(?!=)/g, '~')
     .replace(/\s+/g, ' ')
     .trim()
 }

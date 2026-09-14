@@ -275,6 +275,12 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   // `responsive.css` 里命中同一批类名的 16 条窄屏规则。
   'styles/graph.css',
   'components/graph/Graph.module.css',
+  // 序 6 收尾：`markdown.css` 里最后 5 条 `.adhd-*` 规则进 hook 模块
+  // （第三批那个"有记录的停"的收尾）。`markdown.css` 只**删**了这一组，
+  // `.markdown-body` 与它的正文规则按判据继续留全局 ——
+  // 登记进来 = "本文件里剩下的冲突都必须在本轮解决"。
+  'styles/markdown.css',
+  'hooks/useAdhdReader.module.css',
 ])
 
 const annotated = clashes.map((c) => {
@@ -1143,6 +1149,14 @@ const SLICE_MARKERS = [
   'graphNeighborRel',
   'graphNeighborCount',
   'graphSpin',
+  // 序 6 收尾：`markdown.css` 最后 5 条 `.adhd-*` 规则进 `hooks/useAdhdReader.module.css`。
+  // 四个类名由该模块导出、由 hook 用 `styles.*` 写入（字面量已 0 处）。
+  // 留在全局的 `.markdown-body` / `.markdown-body …` 那一整组**不列** ——
+  // 它们必须继续以 kebab 形态出现在产物里（三个不相邻功能在用 + `marked` 生成的 DOM）。
+  'adhdReaderActive',
+  'adhdBlock',
+  'adhdCurrentBlock',
+  'adhdLineMarker',
 ]
 console.log('\n迁移切片类名/动画在产物中的出现次数：')
 for (const marker of SLICE_MARKERS) {
@@ -1344,6 +1358,14 @@ const RETIRED = [
   'graph-neighbor-title',
   'graph-neighbor-rel',
   'graph-neighbor-count',
+  // 序 6 收尾：`markdown.css` 最后 5 条 `.adhd-*` 规则搬进 hook 模块，
+  // 四个 kebab 类名退休（产物里只应有 `._adhdBlock_hash` 这类 camelCase 形态）。
+  // ⚠️ `.markdown-body` 与 `.markdown-body …` 那一整组**不列** ——
+  // 它们按判据继续留全局，必须继续以 kebab 形态出现在产物里。
+  'adhd-reader-active',
+  'adhd-block',
+  'adhd-current-block',
+  'adhd-line-marker',
 ]
 console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
 let retiredHits = 0

@@ -5,9 +5,20 @@
  * 1. 鼠标所指的行保持清晰，其余块按与阅读位置的距离渐变模糊（越近越清晰、越远越模糊）；
  * 2. 行级标记是位于行盒下方的下划线，完全不遮挡文字；
  * 3. 实时读取并显示鼠标所在行的文本内容。
+ *
+ * ⚠️ 四个 `.adhd-*` 类名（`adhdBlock` / `adhdCurrentBlock` / `adhdReaderActive` /
+ * `adhdLineMarker`）是**本 hook 独有的写入物**，规则与类名一起住在
+ * `./useAdhdReader.module.css`（5.6 序 6）。本文件里**不允许**再出现这四个
+ * 类名的字面量：CSS Modules 会把它们哈希成 `._adhdBlock_<hash>`，
+ * 字面量写出来既不报错也不生效，只会在真机上悄悄失灵。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+// 5.6 序 6：四个 `.adhd-*` 类名的**规则**住在模块里，类名也从模块取 ——
+// 字面量写法在哈希后必然对不上（构建期看不出来），导出常量才是同一份真相。
+// 选择器里的 `:global(.markdown-body)` 是**引用**一个按判据必须留全局的类名
+// （三个不相邻功能在用 + `marked` 生成的 DOM），不是"把类名留全局"。
+import styles from './useAdhdReader.module.css'
 
 interface Point2D {
   x: number
@@ -33,7 +44,7 @@ const MIN_OPACITY = 0.45
 
 /** 排除行级标记等内部元素后的顶层 Markdown 块 */
 function isBlockElement(el: Element): el is HTMLElement {
-  return el instanceof HTMLElement && !el.classList.contains('adhd-line-marker')
+  return el instanceof HTMLElement && !el.classList.contains(styles.adhdLineMarker)
 }
 
 /** 计算一个块内的所有视觉行（Range.getClientRects 按行盒返回） */
@@ -162,7 +173,7 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
   const ensureMarker = useCallback((root: HTMLElement): HTMLDivElement => {
     if (!markerRef.current || !root.contains(markerRef.current)) {
       const marker = document.createElement('div')
-      marker.className = 'adhd-line-marker'
+      marker.className = styles.adhdLineMarker
       root.appendChild(marker)
       markerRef.current = marker
     }
@@ -213,8 +224,8 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
     }
 
     if (currentBlockRef.current !== target) {
-      currentBlockRef.current?.classList.remove('adhd-current-block')
-      target.classList.add('adhd-current-block')
+      currentBlockRef.current?.classList.remove(styles.adhdCurrentBlock)
+      target.classList.add(styles.adhdCurrentBlock)
       currentBlockRef.current = target
       pendingBlockRef.current = null
       pendingSwitchCountRef.current = 0
@@ -263,15 +274,15 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
 
     const sync = () => {
       const blocks = Array.from(root.children).filter(isBlockElement)
-      blocks.forEach(el => el.classList.add('adhd-block'))
+      blocks.forEach(el => el.classList.add(styles.adhdBlock))
 
       if (enabledRef.current) {
-        root.classList.add('adhd-reader-active')
+        root.classList.add(styles.adhdReaderActive)
         applyFocusRef.current?.(lastPointRef.current)
       } else {
-        root.classList.remove('adhd-reader-active')
+        root.classList.remove(styles.adhdReaderActive)
         blocks.forEach(el => {
-          el.classList.remove('adhd-current-block')
+          el.classList.remove(styles.adhdCurrentBlock)
           el.style.filter = ''
           el.style.opacity = ''
         })

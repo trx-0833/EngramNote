@@ -439,6 +439,102 @@ CI 长期常红 → 有人加 `|| true` → 门禁等于不存在。
 
 ---
 
+## 9. 边界声明：本机扫描器的能力边界与"为什么门禁是建议性的"（2026-09-14）
+
+本节不产生任何新的扫描结果，只把 §4.4 / §6 / §8 里已经摆出来的边界收拢成可以直接核对的话。
+写它的理由很实际：**一份说不清自己边界的报告，比没有报告更容易被误读** —— 它让人以为已经看过了。
+
+### 9.1 Trivy 的依赖漏洞扫描在这台机器上**不可能**产出结论
+
+- Trivy 的 `vuln` 子扫描器需要 `trivy-db`，而 `trivy-db` 是一个 **OCI 制品**。
+  本机上 `mirror.gcr.io` 与 `ghcr.io` **都在连接层失败**（原始输出见 §4.4）：
+
+  ```
+  mirror.gcr.io  → dial tcp [2607:f8b0:400e:c00::52]:443: connectex: A connection attempt failed
+  ghcr.io        → stream error: stream ID 1; PROTOCOL_ERROR; received from peer
+  ```
+
+  这是**数据库根本下载不到**，不是"没找到漏洞"。这两句话不是程度的差别，是性质的差别。
+- 因此 `security_scan.py` 在本机**降级**为 `--scanners misconfig,secret --skip-db-update`，
+  并在报告里**显式打印"vuln 扫描未执行"**。
+- 直接推论，不许绕过去：**一次只显示 4 条配置类发现的运行，没有得出任何关于依赖漏洞的结论。**
+  那 4 条是 misconfig 发现（`DS-0002` × 2、`DS-0026` × 2，见 §5.2b），与依赖版本无关；
+  `secret` 是 0 条命中。
+  **不要把"绿"读成"依赖是干净的"。** 依赖漏洞的结论只以 pip-audit / npm audit 为准
+  （§4.1 / §4.2 / §4.3）。
+
+### 9.2 今天的扫描实际覆盖了什么（以及它描述的不是真实部署）
+
+实际覆盖的就是三条，一条不多：
+
+1. `pip-audit` 针对**声明的** requirements —— `backend/requirements.txt`（§4.1）
+   与 `backend/requirements-test.txt`（§4.2）；
+2. `npm audit` 针对前端 npm 依赖 —— `frontend/package-lock.json`（§4.3）；
+3. Trivy 的 `misconfig` + `secret` 两类（§4.4 / §5.2b）。
+
+但**声明集不等于实际安装集**。§2.1 已经写明 `-r` 模式是在临时虚拟环境里真解析一遍
+（`pip install --dry-run --report`）；把固定条目与实际安装环境逐条比对过
+（只读检查脚本 `backend/scripts/check_dependency_drift.py`，逐条记录见
+`docs/overhaul-plan.md` 附录 BF.3）：
+**19 条固定（pin）条目里有 17 条落在声明范围之外（out of range）。**
+§4.1 那张表只是把最显眼的 5 条列了出来（starlette 1.6.0 vs 0.46.2、pydantic 2.13.5 vs 2.0.3、
+python-jose 3.5.0 vs 3.3.0、pytest 9.1.1 vs 8.0.2、fastapi 0.141.1 vs 0.115.14）。
+
+于是结论只能是：**"扫声明的 requirements"描述的是一个不存在的部署。**
+它既不能证明实际运行的依赖是安全的，也不能证明它们不安全 —— 两个方向都不成立。
+
+这一条是**扫描的结论边界**，不是"扫描错了"：工具没有撒谎，
+是"声明集"这个输入本身不等于部署，§8 第 4 条说的也是同一件事。
+
+### 9.3 为什么门禁是**建议性**的，而不是阻断的
+
+- 今天如果把 `high` 当阻断条件（`--fail-on high`），结果会是**永远红**：
+  Node 侧 4 条 high + 1 条 critical，Python 侧 8 条 high + 1 条 critical（§6）。
+- 永远红的门禁有一个必然结局：**被 `|| true` 消音**。那比没有门禁**更糟** ——
+  没有门禁时人人都知道"没人看"；被消音的门禁把"我们在看"变成了一个假象。
+- 这个仓库已经付过一次这种代价：`.github/workflows/ci.yml` 里 `ruff format --check`
+  与 `prettier --check` 都挂着 `continue-on-error: true`（§6）。
+- 所以本轮的取舍是：**保持扫描为建议性（非阻断），但把这个边界写下来** —— 就是这一节。
+  `--fail-on` 默认仍是 `none`；"扫描器根本没跑起来"（退出码 2）仍**无条件**是红灯，
+  因为它不是"发现了问题"，而是"我们没有在做这件事"。
+
+本轮相关的命令与原文输出，逐字抄自 §1 / §4.4 / §5.4：
+
+```bash
+python backend/scripts/security_scan.py
+python backend/scripts/security_scan.py --json-out scan.json
+python backend/scripts/security_scan.py --fail-on high
+
+# 检测到 trivy 时脚本要跑的形态（§5.4）
+trivy fs --scanners vuln,misconfig,secret
+
+# 本机实际降级后的形态（§4.4）
+trivy fs --scanners misconfig,secret --skip-db-update
+```
+
+降级时报告里那一行的原文是 **`vuln 扫描未执行`**；trivy 未安装时打印的是
+**`未安装 —— 本项跳过（不是通过）`**。两句都不能删 ——
+删掉就等于把"没跑"变成"通过"。
+
+### 9.4 提升为阻断门禁的条件（promotion conditions）
+
+不是"以后有空再说"，是三条可核对的判据。三条**同时**成立，
+`--fail-on high` 才从装饰变成门禁：
+
+| # | 判据 | 怎么核对 | 今天的状态 |
+|---|---|---|---|
+| 1 | Trivy 的 `vuln` 数据库在本机可用 —— 要么 `mirror.gcr.io` / `ghcr.io` 通，要么有一个可达的镜像或离线 DB | 跑 `trivy fs --scanners vuln,misconfig,secret`，报告里不再出现"vuln 扫描未执行" | **不成立**（两个源都在连接层失败，§4.4） |
+| 2 | `pip-audit` 扫的是**实际安装环境**，或用锁文件让声明集与安装集一致（漂移为 0） | 跑 `python backend/scripts/check_dependency_drift.py` 得到 0 条 out of range；清单解析出的版本 = 本机与 CI 实际装着的版本 | **不成立**（19 条 pin 里 17 条 out of range，见 `docs/overhaul-plan.md` 附录 BF.3） |
+| 3 | 当前 `high` / `critical` 发现清零，或有逐条书面豁免 | 报告里 high/critical 为 0，或存在"已评审、暂不修"的抑制清单（§8 第 6 条） | **不成立**（Python 8 high + 1 critical、Node 4 high + 1 critical） |
+
+三条里任何一条不成立，`--fail-on high` 就仍然是**装饰**（§6），
+把它接进 CI 只是把一个必然变红的步骤交给下一个人去加 `|| true`。
+
+本节与 §8 是同一件事的两半：§8 说"哪些东西扫不到"，
+本节说"扫到的东西能支撑什么结论、以及什么时候才允许它阻断"。
+
+---
+
 ## 附：本次运行的环境事实
 
 | 项 | 值 |

@@ -7,9 +7,15 @@
 > 规范见 [`css-convention.md`](./css-convention.md)；实测证据见
 > [`migration-evidence/`](./migration-evidence/)。
 >
-> 进度：序 **1 / 2 / 3 / 4 / 5 / 8 / 9 / 10 / 12 / 13 已完成**，序 **6 是"有记录的停"**
-> （`.adhd-*` 留全局，见 §4.8 与证据 `5.6-07`），序 **7 / 11 按归属部分完成**
+> 进度：序 **1 / 2 / 3 / 4 / 5 / 6 / 8 / 9 / 10 / 12 / 13 已完成**（**序 6 的"停"已收掉** ——
+> 5 条 `.adhd-*` 规则进 `src/hooks/useAdhdReader.module.css`，类名改由模块导出：
+> §4.11 与证据 `5.6-14`），序 **7 / 11 按归属部分完成**
 > （剩下的都是跨功能共用件或第三方 DOM）。
+>
+> **5.6 至此完成**：14 个样式表全部有过判定 —— 进模块的进模块、
+> 按判据留全局的写在文件头、两个补丁层清空、死代码清理完毕。
+> 剩下"没进模块"的类名都有**写在原处的判据**（跨功能共用件 / 第三方 DOM / 裸元素重置），
+> 按规范 §4 它们本来就该留全局。
 >
 > **`responsive.css` 与 `refinements.css` 都已只剩注释**（`auth.css` / `cleaning.css` /
 > `diff.css` 之后又两个）—— 文件**没有删**：`mobile-input-font-size.test.ts` 断言
@@ -53,7 +59,7 @@
 | 3 | `diff.css` | 13 | 版本对比 | 低 | ✅ **已完成** → `components/DiffView.module.css` |
 | 4 | `dashboard.css` | 13 | 仪表盘卡片、统计数字 | 中：`.progress-bar*` 被 **5 处**共用；`.stat-card*` 被 **2 个页面**共用 | ✅ **已完成**（第一批搬走仪表盘私有的 5 条；第三批抽出 `components/StatCard.tsx` 后把 `.stat-card*`(9) + `.stat-number` 的 480px 档搬进 `components/StatCard.module.css`；`.progress-bar*`(3) 按判据留全局，见 §4.3） |
 | 5 | `assessment.css` | 22 | 学习评估页 | **高**：`.quiz-question-*` 与 `refinements.css` 打架（14 条属性冲突）；`.knowledge-points-grid` 被 `responsive.css` 命中 | ✅ **已完成**（第四批：**先用真实 Chromium 测出哪一套生效**，再按胜者拆；20 条进 `pages/LearningAssessment.module.css`，另有 `refinements.css` 的 14 条与 `responsive.css` 的 1 条随行；留全局的 3 组见 §4.9） |
-| 6 | `markdown.css` | 5 | `.markdown-body` + ADHD 阅读器 | **高**：内容来自 `marked`，没有组件可挂类名 | ⛔ **有记录的停**（第三批核实）：5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 `.markdown-body` 被 3 个不相邻功能共用（判据 2、4）；4 个类名的**全部写入点**在 `src/hooks/useAdhdReader.ts`（classList 字面量），该目录不在本批可改范围。逐处表 + 判据对照见 §4.8 与证据 `5.6-07` |
+| 6 | `markdown.css` | 5 | `.markdown-body` + ADHD 阅读器 | **高**：内容来自 `marked`，没有组件可挂类名 | ✅ **已完成**（序 6 收尾）：`.markdown-body` 与它的正文规则（含 768px 档）按判据 **1 / 2 / 4 留全局**；5 条 `.adhd-*` 规则**进 `src/hooks/useAdhdReader.module.css`**，四个类名改由模块导出、hook 用 `styles.*` 写入。第三批判"停"的两条理由里，"写入点不在可改范围"是**范围**问题（已解决），"`.markdown-body` 留全局"仍然成立且**没有被动过**。逐条见 §4.11 与证据 `5.6-14`；第三批当时的结论 `5.6-07` 保留为历史记录 |
 | 7 | `learning.css` | **18**（迁移前 22） | 问答气泡/上传区/选项/反馈/筛选/分段/搜索/空态/加载 | 中：试点已搬走 4 条；第三批又搬走 6 条（三个单消费者组）；剩 12 条被多个不相邻功能共用 | ⚠️ **按归属部分完成**：`.qa-*`→`pages/QA.module.css`、`.upload-zone*`→`pages/Upload.module.css`、`.search-input-*`→`pages/NotesList.module.css`；`.filter-pill*` / `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner` 留全局（§4.8 有逐组的文件数） |
 | 8 | `components.css` | 52 | `.btn` `.card` `.badge` `.container` 等公共件 | **最高**：`.btn` 45 处、`.card` 35 处引用；`.container` 被测试查 | ✅ **已完成**（第五批：只搬明确单一归属的 `.note-detail-*` / `.note-list-*` / `.edit-split`，连 `responsive.css` 的 8 条窄屏规则一起；`.btn` / `.card` / `.container` / `.badge` / `.status-*` 等公共件按判据留全局，见 §4.10） |
 | 9 | `layout.css` | 27 | 侧边栏 / 顶栏 / 布局骨架 | **最高**：`responsive.css` 命中 12 个类名、测试命中 5 个 | ✅ **已完成**（第六批：侧边栏一整节 + `App` 骨架 + `responsive.css` 同批 12 条 → `Sidebar.module.css` / `App.module.css`；`App.test.tsx` / `Sidebar.test.tsx` 的类名查询改成语义查询或模块导出） |
@@ -219,6 +225,15 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
 ## 4.8 第三批：`markdown.css`（停）+ `learning.css` 按归属拆分 + `dashboard.css` 收尾
 
 ### 4.8.1 一个"停"：`markdown.css` 一条没搬
+
+> ⚠️ **2026-09-14 补记（序 6 收尾轮）**：这一节记的是第三批当时的判断。
+> 其中"5 条 `.adhd-*` 规则留全局"**已被收尾轮推翻** —— 它们现在住在
+> `src/hooks/useAdhdReader.module.css`（见 §4.11）。下面三条理由里
+> **第 1 条仍然成立**（没有可替代的语义查询，所以走的是"从模块导出常量"那条路）、
+> **第 2 条是范围问题**（"`src/hooks/**` 不在本批允许改动范围内" —— 人类把 hook
+> 纳入范围之后它就不成立了）、**第 3 条判的是 `.markdown-body`**，
+> 而 `.markdown-body` 现在仍然留全局，这一条**没有被推翻**。
+> 本文以下内容按原样保留（历史记录不静默改写）。
 
 计划 §7.1 事先把它标成"可能是个停"，核实后**确实是**。5 条 `.adhd-*` 规则
 **全部**是 `.markdown-body.adhd-reader-active …` 的后代选择器，两半没法分开：
@@ -436,6 +451,86 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 （否则 `.a, .b .c` 会把容器自己匹配走，26 条差异全是假的）；
 `page.waitForEvent('download')` 必须在触发之前注册。
 
+## 4.11 序 6 收尾：`markdown.css` 最后 5 条 `.adhd-*` 规则进 hook 模块（5.6 的最后一处"停"）
+
+### 4.11.1 搬了什么、为什么现在能搬
+
+第三批判"停"时把话说得很清楚：**除非把 `src/hooks/useAdhdReader.ts` 纳入某一批的
+改动范围**（§4.8.1）。人类批准之后，这一批就只做这一件事：
+
+| 项 | 内容 |
+|---|---|
+| 来源 | `src/styles/markdown.css` 的 5 条 `.adhd-*` 规则（第三批"停"的那一组） |
+| 去向 | `src/hooks/useAdhdReader.module.css`（**hook 自己的目录**，不是某个页面的模块） |
+| 类名 | `adhd-reader-active` → `styles.adhdReaderActive`、`adhd-block` → `styles.adhdBlock`、`adhd-current-block` → `styles.adhdCurrentBlock`、`adhd-line-marker` → `styles.adhdLineMarker` |
+| 写入点 | `useAdhdReader.ts` 共 **8 处**（`:47` / `:176` / `:227` / `:228` / `:277` / `:280` / `:283` / `:285`），改完全部走模块导出 |
+| 差集 | **逐字保留 5 / 值有变化 0 / 丢失 0** |
+
+第三批那三条理由的现状：**①**"改成语义查询"仍然不行（这些类名是给 `marked`
+生成的块打标记的唯一手段）—— 所以走的是第 ② 条；**②**"从模块导出常量"当年被判不行，
+理由是"写入点所在的 `src/hooks/**` 不在本批允许改动的文件范围内"，
+那是**范围**问题而不是设计问题，范围一放开它就不成立了
+（当年另一半顾虑"为 4 个类名让通用 hook import 页面模块"也不成立：
+模块就放在 hook 自己的目录里）；**③**"留全局"判的是 **`.markdown-body`**，
+而 `.markdown-body` **仍然留全局**，这一条没有被动过。
+
+### 4.11.2 `:global(.markdown-body)` 不是"半搬"（这一条要看清）
+
+模块里写的是 `:global(.markdown-body).adhdReaderActive > .adhdBlock`：
+
+- **4 个 `.adhd-*` 类名全是模块的本地类**，产物里是 `._adhdBlock_p2zzd_8`
+  这类哈希名 —— 它们**真的被作用域化了**（写入点也从模块取常量，不是字面量）；
+- **只有 `.markdown-body` 写成 `:global(...)`** —— 那是**引用**一个按规范 §4
+  第 2 / 4 条**本来就该留全局**的类名（3 个不相邻功能在用 + 正文 HTML 由 `marked` 生成）。
+  同一种写法在仓库里已有两处：`App.module.css` 的 `.appLayout :global(.container)`、
+  `NoteDetailHeader.module.css` 的 `.noteDetailActions :global(.btn)`。
+
+规范 §4 末尾点名的"半搬"是**另一种**写法：`:global(.adhd-block)` —— 把本模块自己的
+类名写成全局，那才是"一个字符都没被作用域化"。
+
+**权重逐字未变**：`:global(.markdown-body).adhdReaderActive` 与
+`.markdown-body.adhd-reader-active` 同为 (0,2,0)，另三条 (0,2,0) / (0,3,0) / (0,3,1) 同理。
+**产物位置**从 `index.css`（全局样式表第 3 个）变成懒加载的 `NoteDetail-*.css`
+（`__vitePreload` 仍在 `index.css` 之后注入）—— 这 5 条没有任何同属性、同权重的
+竞争对手，所以一条声明的胜负都不会翻转（真机对账见 4.11.4）。
+
+### 4.11.3 工具这一轮补的一条归一化（本仓库第一次迁移带子组合器的规则）
+
+压缩器会**压掉组合器两侧的空白**：源码 `.markdown-body.adhd-reader-active > .adhd-block`
+在产物里是 `._adhdReaderActive_h>._adhdBlock_h`。`neutralSelector` 原来只归一了
+逗号两侧的空格（第五~九批补的），于是这 4 条带 `>` 的规则**整条报成"丢失"** ——
+而它们逐字（含组合器）都在产物里。
+现在 `neutralSelector` 把 `>` / `+` / `~` 两侧的空白也归一
+（`~` 用 `(?!=)` 避开属性选择器的 `~=`）；与逗号那条同理：组合器两侧的空白在 CSS 里
+没有语义，归一化不抹平任何真实差异。**选择器文本（含组合器）仍然是行为的一部分** ——
+第三批那条真错（把后代选择器写成单类，权重 (0,2,0)→(0,1,0)，报"1 丢失 + 1 新增"）
+照样会被抓到。
+
+### 4.11.4 三条机器证据 + 一处**顺手发现的既有红灯**
+
+1. **差集**（`5.6-02`）：本批 **5 逐字保留 / 0 值有变化 / 0 丢失**。
+2. **产物校验**（`5.6-03`）：切片标记 `adhdReaderActive` / `adhdBlock` /
+   `adhdCurrentBlock` / `adhdLineMarker` 命中 5 / 3 / 2 / 1；四个 kebab 类名进 `RETIRED`
+   后命中 **0**；悬空动画 0 / 改动范围内冲突 0 / 跨媒体查询覆盖战与简写-长写
+   全部照旧（候选数不变：68 / 24 / 11）。
+3. **真 Chromium 对账**（一次性探针，用完已删）：两侧都用**产物**（`vite preview`），
+   迁移前那份来自 `git worktree add --detach <tmp> HEAD` + `npx vite build`（只读 HEAD）。
+   探针按 **DOM 结构**取样（类名哈希后按类名取样会让两侧取到不同元素 —— 雷区 18）：
+   容器 + 6 个子元素 + 1 个链接 = **8 个样本 × 全部 computed 属性 = 4 328 条值**。
+   实测 **未声明差异 0 条**；class 属性按预期 **7 个变哈希 / 1 个一字不变**，
+   行内 `style`（渐变模糊与标记条定位）逐字相同。
+
+> ⚠️ **顺手发现的既有红灯（不是本批引入的）**：跑基线时差集退出 **1**，
+   三批各报 1 条 `cursor` "丢失" —— 查下去是 **5.9 无障碍收尾轮**
+   （commit `0986102`，F-09 / F-37）**主动删掉**的三条 `cursor: pointer`
+   （`.dashboard-review-card` / `.note-list-item` / `.graph-legend-item`：
+   卡片改成"盒子 + 真按钮"之后，卡片上的手型光标是"看起来能点、点了没反应"的假信号）。
+   删除发生在迁移**之后**，机制上长得和"丢失"一模一样，而当初没人登记它。
+   已按本工具的既有机制在三批的 `resolvedConflicts` 里逐条登记
+   （`winner` / `evidence` 写明了"不是冲突输赢，是无障碍修复主动删的"），
+   差集回到 **丢失 0**。**这类"迁移之后的删除"以后要记得登记**：
+   不登记不会静默通过，但会让整份证据一直红着。
+
 ## 5. 雷区（按危险程度，★ = 第一批新发现）
 
 1. **动画名会被一起哈希（试点实测，最阴）。**
@@ -639,6 +734,25 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
       `node_modules/.vite` 会互相覆盖预打包产物，症状是图谱页崩到错误边界
       （`Cannot read properties of null (reading 'useRef')`）。
 
+19. **★ 压缩器还会压掉组合器两侧的空白（序 6 收尾轮实测，已进差集归一化）。**
+    源码 `.markdown-body.adhd-reader-active > .adhd-block` 在产物里是
+    `._adhdReaderActive_h>._adhdBlock_h`。`neutralSelector` 原来只归一了逗号两侧的
+    空格（雷区 14 第二条），于是**本仓库第一次迁移带子组合器的规则**时，
+    4 条带 `>` 的规则被整条报成"丢失" —— 而它们逐字都在产物里。
+    现在 `>` / `+` / `~` 两侧的空白一并归一（`~` 用 `(?!=)` 避开属性选择器的 `~=`）。
+    ⚠️ 归一化**不会**把选择器写错这件事一起抹平：第三批那条真错
+    （后代选择器被写成单类，权重 (0,2,0)→(0,1,0)）该报还是报。
+
+20. **★ "迁移之后的删除"必须补登记，否则证据会一直红着（序 6 收尾轮实测）。**
+    5.9 无障碍收尾轮（commit `0986102`）主动删掉了三条 `cursor: pointer`
+    （`.dashboard-review-card` / `.note-list-item` / `.graph-legend-item`）。
+    删除发生在迁移**之后**，而差集是按"迁移前有、迁移后没有"判丢失的 ——
+    于是基线就是红的（三批各报 1 条丢失），却与任何一次迁移都无关。
+    按既有机制在三批的 `resolvedConflicts` 里登记即可（这只是"已声明删除"的
+    另一种成因：不是输掉的声明，而是后来被主动删掉的声明）。
+    **教训**：改了某条已迁移规则的声明时，除了改代码，还要想一想
+    "这条声明在差集的哪一批里"。
+
 ## 6. 证据（四轮 / 全部批次）
 
 | 证据 | 文件 | 结论 |
@@ -647,7 +761,8 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | 第一批：迁移前清单 | `migration-evidence/5.6-04-before-batch1.md` | 5 个样式表共 60 条 |
 | 第二批：迁移前清单 | `migration-evidence/5.6-05-before-batch2.md` | `markdown-extras.css` 20 条 |
 | 第三批：迁移前清单 | `migration-evidence/5.6-06-before-batch3.md` | `learning.css` 9 条 + `responsive.css` 3 条 + `dashboard.css` 7 条 |
-| 第三批的"停" | `migration-evidence/5.6-07-markdown-adhd-stayed-global.md` | `markdown.css` 的 5 条 `.adhd-*` 规则原文 + 判据对照（**本批没搬它**） |
+| 第三批的"停" | `migration-evidence/5.6-07-markdown-adhd-stayed-global.md` | `markdown.css` 的 5 条 `.adhd-*` 规则原文 + 判据对照（**第三批当时没搬它**；文件头已注明这是历史结论，收尾见 `5.6-14`） |
+| 序 6 收尾：最后一处"停"被收掉 | `migration-evidence/5.6-14-adhd-moved-to-module.md` | 5 条 `.adhd-*` 规则 → `src/hooks/useAdhdReader.module.css`；4 个类名的**全部写入点**（8 处）逐处枚举 + 改法；三条理由的现状；差集 **5/0/0**；产物标记 5/3/2/1、kebab 退休类名 0；真 Chromium **4 328 条 computed 属性差异 0 条** |
 | 第四批：迁移前清单 | `migration-evidence/5.6-08-before-batch4.md` | `assessment.css` 20 条 + `refinements.css` 14 条（= 冲突胜者）+ `responsive.css` 1 条 |
 | 第四批：冲突裁决 | `migration-evidence/5.6-09-conflict-resolution.md` | 16 条属性的**实测胜者**逐条表 + "渲染没变"的 16 802 条属性对账 |
 | 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**；第三批 **21/0/0**；第四批 **35/0/0 + 19 条已裁决删除**；第五批 **13/0/0**；第六批 **53/0/0**；第七批 **71/0/0**；第八批 **7/0/0 + 13 条实测从未生效的规则删除**；第九批 **补丁层清空**（逐条搬家 28 条声明）。全部批次**丢失 0**；动画绑定全部自洽；动画体 6 条全部一致 |
@@ -698,6 +813,7 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | **第四批（序 5）** | `npm test` **21 files / 276 tests**（与迁移前一致，**没改任何既有测试**）；`npx tsc --noEmit` / `lint` / `npm run build` 退出 0；差集 **35/0/0 + 19 条已裁决删除**、产物校验退出 0（迁移前既有的 16 条冲突 → **0**）；`npm run e2e` **10 passed**、`npm run a11y` **10 passed**（第三批时挡路的 a11y spec 已被对方修好并提交）；临时探针实测 **16 802 条 computed 属性差异 0** |
 | **第五~九批（序 8/9/10/12/13）** | `npm test` **21 files / 276 tests**（与迁移前一致）；`npx tsc --noEmit` / `npm run lint` / `npm run build` 退出 0；差集：五批合计 **丢失 0**（13 / 53 / 71 / 7 / 补丁层清空）、产物校验退出 0（冲突 0 / 悬空动画 0 / 167 个退休类名 0 次 / `ORDER_PAIRS` 两条得主正确）；`npm run e2e` **10 passed**、`npm run a11y` **25 passed**（并行 agent 把 a11y 场景从 15 扩到 25，无下降）；临时探针实测 **3 024 条 computed 属性未声明差异 0**；两张补丁层清空后另有**逐条去向审计**（0 条静默丢失） |
 | **收尾轮（死代码清理 + 两项新检查）** | `npm test` **21 files / 276 tests**（**没改任何测试**）、`npx tsc --noEmit` / `npm run lint` / `npm run build` 退出 0、`npm run e2e` **10 passed**、`npm run a11y` **25 passed**；三个证据脚本退出 0（差集：第一批 **58 + 2 条已声明删除**、第八批 **7 + 19 条已声明删除**，其余批次原数，**丢失 0 全批次**）；新增三项检查全绿且**反向验证过**（改坏一处即报错，5 种）；死代码清理 **21/21** 条通过三向自检；产物里**死动画 0** |
+| **序 6 收尾（`.adhd-*` 进模块）** | `npm test` **21 files / 276 tests**（**没改任何测试**）、`npx tsc --noEmit` / `npm run lint` / `npm run build` 退出 0、`npm run e2e` **10 passed**、`npm run a11y` **26 passed（0 违规）**；三个证据脚本退出 0（本批差集 **5/0/0**；全批次**丢失 0**，含把 5.9 那三条"迁移之后的删除"补登记之后）；真 Chromium 对账 **4 328 条 computed 属性差异 0 条** |
 
 > 本轮的环境插曲（不是本批引入的）：执行期间并行 agent 正在改
 > `pages/Dashboard.tsx` / `TodayLearn.tsx` / `utils/labels.ts` / `base.css`，
@@ -757,8 +873,9 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 
 ### 7.1 下一批：序 8 / 9 / 10 / 12 / 13（**已全部完成**，见 §4.10）
 
-6 / 7 / 3 三行的结果见 §4.8：**6 是有记录的停**（`.adhd-*` 留全局，
-除非把 `src/hooks/useAdhdReader.ts` 纳入某一批的改动范围）；
+6 / 7 / 3 三行的结果见 §4.8：**6 当年是有记录的停**（`.adhd-*` 留全局），
+**前提写得很清楚**："除非把 `src/hooks/useAdhdReader.ts` 纳入某一批的改动范围" ——
+序 6 收尾轮正是这么做的（见 §4.11，**这一行现在也是 ✅**）；
 **7 按归属拆完了能拆的部分**（剩下 5 组是跨功能共用件）；
 **3 已通过抽 `StatCard` 组件收尾**；
 **5 已在第四批完成**（先裁决 16 条冲突再拆，见 §4.9）。
@@ -803,6 +920,18 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | `SLICE_MARKERS` | 16 个新类名/动画名（`qaUserBubble` … `statLabel`） | 19 个新类名（`scoreBar` … `knowledgePointsSection`） |
 | `RETIRED` | 14 个退休类名（含**只定义在补丁层**的 `list-toolbar`） | 19 个退休类名（`score-bar*` / `quiz-question-*` / `score-summary-*` / `score-value` / `knowledge-points-*`）。留全局的 `.assessment-*` 与 `.note-select-card*` **不列**，它们必须继续以 kebab 形态出现在产物里 |
 | 第四批的"新增一类差异" | — | 差集脚本从"逐字保留 / 值有变化 / 丢失"扩成四类：**已裁决删除**。理由是这一批删掉的 19 条声明既不是丢失也不是值变化，而是"按实测胜者删掉的死声明" —— 不单独声明的话，差集会把它们报成 19 条丢失（把真信号淹掉） |
+
+### 7.4 序 6 收尾的登记结果（**不登记 = 证据脚本对新批次静默不覆盖**）
+
+| 登记点 | 内容 |
+|---|---|
+| `css-migration-diff.mjs` 的 `BATCHES` | 第十个批次项：`beforeSheets: ['src/styles/markdown.css']`、1 个 `group`（`src/hooks/useAdhdReader.module.css` ← 4 个老类名）、`hardened: {}`、`keyframes: []`；`rev` 留空（`findRecentRev` 按内容定位：提交前=HEAD，提交后自动往回一格） |
+| 同一文件的 `resolvedConflicts` | **新增 3 条（第一批 / 第五批 / 第七批各一条）**：5.9 收尾轮主动删掉的 `cursor: pointer`（`.dashboard-review-card` / `.note-list-item` / `.graph-legend-item`）。它们不是冲突输家，`winner` 字段写明"不适用 —— 无障碍修复删掉的假可点信号"，`evidence` 指到 commit `0986102` 与原地注释 |
+| `verify-built-css.mjs` 的 `TOUCHED_BY_THIS_MIGRATION` | `styles/markdown.css`（本批只删了 `.adhd-*` 那一组）、`hooks/useAdhdReader.module.css` |
+| 同一文件的 `SLICE_MARKERS` | `adhdReaderActive` / `adhdBlock` / `adhdCurrentBlock` / `adhdLineMarker`（产物命中 5 / 3 / 2 / 1） |
+| 同一文件的 `RETIRED` | `adhd-reader-active` / `adhd-block` / `adhd-current-block` / `adhd-line-marker`（产物命中 0）。留全局的 `.markdown-body …` **不列** —— 它们必须继续以 kebab 形态出现在产物里 |
+| `CASCADE_PAIRS` / `ORDER_PAIRS` | **都不加**：这 5 条规则没有任何同属性、同权重的竞争对手（`.markdown-body` 那两条写的是 `line-height` / `font-size`，本批写的是 `position` / `transition` / `border-radius` / `box-shadow` / `pointer-events` / 行级标记那几条），也没有"同文件同权重靠先后"的一对 |
+| `gen-migration-evidence.mjs` | 新增一份 `5.6-14-adhd-moved-to-module.md`（迁移前清单 + 逐处写入点 + 三条理由的现状 + 三条机器证据）；`5.6-07` 的文件头加了一段**注明它是历史结论**并指到 `5.6-14` |
 
 ## 8. 本轮的环境限制：并行的无障碍 agent
 

@@ -160,6 +160,20 @@
 4. **`src/styles/markdown.css` 的 `.markdown-body` 后代选择器** ——
    内容来自 `marked` 渲染的 HTML 字符串，**没有组件可以挂类名**，
    属于事实上的第三方 DOM。
+
+   > 序 6 收尾轮之后这条有了准确的边界：**留全局的是 `.markdown-body` 这个类名本身**，
+   > 不是"这一整份样式表都不许动"。同一个文件里那 5 条 `.adhd-*` 规则
+   > （`.markdown-body.adhd-reader-active …` 后代选择器）已经搬进
+   > `src/hooks/useAdhdReader.module.css` —— 因为那 4 个类名的**写入点全在一个 hook 里**，
+   > 于是它们成了模块自己的本地类（产物里是 `._adhdBlock_hash`），
+   > 模块里只把 `.markdown-body` 写成 `:global(.markdown-body)` 去**引用**它
+   > （同 `App.module.css` 的 `.appLayout :global(.container)`）。
+   >
+   > ⚠️ 与本节末尾"半搬"的区别只有一句话：`:global(.markdown-body)` 引用的是
+   > **本来就该全局**的类名，而 `:global(.adhd-block)` 是把**本模块自己的**类名写成全局
+   > —— 后者才是一个字符都没被作用域化。
+   > **判据**：一个类名如果**写入点能拿到模块导出**（`classList.add(styles.x)` 这类），
+   > 它就该被作用域化；拿不到（`marked` 生成的 HTML、第三方 DOM）才留全局。
 5. **补丁层 `responsive.css` / `refinements.css` 目前命中的类** ——
    在对应组件迁移之前必须保持全局（迁移时把这些规则一起搬走）。
 
@@ -345,6 +359,16 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    `EMPTY_SHEET_EXCEPTIONS`）。实测：`refinements.css` 38 条 = 25 + 13 例外 + **0 丢失**；
    `responsive.css` 59 条 = 56 + 3 例外 + **0 丢失**（证据 `5.6-11`）。
 
+11. **压缩器还会压掉组合器两侧的空白**（序 6 收尾轮实测；计划 §5 雷区 19）：
+    源码 `.markdown-body.adhd-reader-active > .adhd-block` 在产物里是
+    `._adhdReaderActive_h>._adhdBlock_h`。`neutralSelector` 原来只归一了逗号两侧的
+    空格（上面第 7 条），于是**本仓库第一次迁移带子组合器的规则**时，
+    4 条带 `>` 的规则被整条报成"丢失" —— 而它们逐字都在产物里。
+    现在 `>` / `+` / `~` 两侧的空白一并归一（`~` 用 `(?!=)` 避开属性选择器的 `~=`）。
+    出处：`src/hooks/useAdhdReader.module.css` 的 5 条规则，产物 `NoteDetail-*.css`。
+    与逗号那条同理：组合器两侧的空白在 CSS 里没有语义，归一化不抹平任何真实差异 ——
+    第三批那条真错（后代选择器被写成单类、权重掉一档）该报还是报。
+
 **第五~九批（序 8~13）补在雷区表里的五条实测（详见计划 §5 雷区 14~18）：**
 
 6. **压缩器会合并相邻的同声明规则**、**会压掉选择器组里逗号后的空格** ——
@@ -390,7 +414,9 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 6. **仍然看不见的**（写在这里，免得下一个人以为已经全覆盖）：
    - **"两个类会不会命中同一个元素"只有 TSX 字面量级的证据**：跨选择器那一半靠
      `className` 里并列的类名（含模板串与三元分支里的字面量）。**拼不出来的写法**：
-     `classList.add(…)` 运行时加的类（`useAdhdReader.ts` 的 6 处）、`composes`、
+     `classList.add(…)` 运行时加的类（`useAdhdReader.ts` 的 **8 处**；序 6 收尾轮之后
+     那些名字改成从模块导出取，但**抽取器仍然看不见它们** —— 它读的是 TSX 字面量，
+     不是运行时的 classList）、`composes`、
      第三方 DOM（KaTeX / highlight.js），以及"两个类分别挂在父子元素上、
      但简写与长写作用在同一个盒子上"的情形。
    - **值级求解**：只判"两条声明争同一批长写属性"，**不展开简写的具体值**

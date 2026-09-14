@@ -1,13 +1,16 @@
 /**
- * Markdown 正文渲染（overhaul-plan 5.6 第三批：**本文件整体留全局，这是一次
- * 有记录的"停"，不是漏做**）
+ * Markdown 正文渲染（overhaul-plan 5.6）
  *
- * ## 为什么一条都不搬
+ * 第三批判的是"**本文件整体留全局，这是一次有记录的'停'**"。序 6 收尾轮把
+ * "停"的范围缩小了一半 —— **`.markdown-body` 那一半仍然留全局，5 条
+ * `.adhd-*` 规则已经搬进 `src/hooks/useAdhdReader.module.css`**：
  *
- * 计划里写的是"ADHD 阅读器（`.adhd-*`）进模块；`.markdown-body` 后代选择器留
- * 全局"。逐条核对之后这两半**无法分开** —— 5 条 `.adhd-*` 规则全部是
- * `.markdown-body.adhd-reader-active …` 的后代选择器，而 `.markdown-body`
- * 自己按判据必须留全局：
+ * | 部分 | 现状 | 依据 |
+ * |---|---|---|
+ * | `.markdown-body` 与它下面的正文规则（`h1`/`p`/`pre`/`table`/`blockquote`/KaTeX 兜底/768px 档） | **留全局** | 下面三条判据 |
+ * | 5 条 `.adhd-*` 规则 | **已进模块**（连同四个类名的导出常量） | 见 §".adhd-* 那一半为什么现在能搬" |
+ *
+ * ## 为什么 `.markdown-body` 必须留全局（三条判据逐条成立）
  *
  * | 用 `.markdown-body` 的地方 | 用途 |
  * |---|---|
@@ -18,38 +21,40 @@
  * 三个**不相邻**的功能在用它 ⇒ `css-convention.md` §4 第 2 条；
  * 正文 HTML 还是 `marked` 渲染出来的字符串（同一节第 4 条，"没有组件可以挂类名"）。
  *
- * ## `.adhd-*` 四个类名：**写入点全部在 `src/hooks/useAdhdReader.ts`**（逐处列清）
+ * ## `.adhd-*` 那一半为什么现在能搬（第三批判"不能搬"的两条理由都已消失）
  *
- * | 写入点 | 类名 | 操作 |
- * |---|---|---|
- * | `useAdhdReader.ts:36` | `adhd-line-marker` | `classList.contains`（读，判断该元素是不是标记条） |
- * | `useAdhdReader.ts:165` | `adhd-line-marker` | `marker.className = 'adhd-line-marker'`（整体赋值） |
- * | `useAdhdReader.ts:216` / `:274` | `adhd-current-block` | `classList.remove` |
- * | `useAdhdReader.ts:217` | `adhd-current-block` | `classList.add`（换行时切换当前块） |
- * | `useAdhdReader.ts:266` | `adhd-block` | `classList.add`（给每个 `marked` 顶层块加） |
- * | `useAdhdReader.ts:269` / `:272` | `adhd-reader-active` | `classList.add` / `remove`（开关阅读模式） |
+ * 第三批的"停"有两条理由，序 6 收尾轮逐条复核，两条都变了：
  *
- * 结论与三条判据的对照（缺一不可，所以**没有**任何一条能干净落地）：
+ * 1. **"改成语义查询"** —— 仍然不行，这条判据没变：这些类名是"给 `marked`
+ *    生成的块打标记"的**唯一**手段，DOM 上没有可用的语义角色/属性可以替代
+ *    （块是 `p` / `ul` / `pre`…，而且必须按"第几个顶层块"迭代）。
+ *    所以走的是第 2 条，不是第 1 条。
+ * 2. **"从模块导出常量"** —— 第三批写的是"不行：写入点所在的 `src/hooks/**`
+ *    不在本批允许改动的文件范围内"。那是**范围**问题，不是设计问题：
+ *    人类已批准把 hook 纳入范围，于是四个类名与 5 条规则一起住进
+ *    `src/hooks/useAdhdReader.module.css`，写入点改成 `styles.adhdBlock` 这类常量
+ *    （`useAdhdReader.ts` 里 8 处：`:47` / `:176` / `:227` / `:228` / `:277` /
+ *    `:280` / `:283` / `:285`，逐处见证据 `5.6-14`）。
+ *    第三批的另一半顾虑（"为 4 个类名让一个通用 hook `import` 某个页面的模块"）
+ *    也不成立：模块就放在 **hook 自己的目录**里，没有跨层 import。
+ * 3. **"留全局"** —— 这条判据判的是 **`.markdown-body`**（规范 §4 第 2、4 条），
+ *    而 `.markdown-body` 现在**仍然留全局**（就是本文件）。
+ *    ⚠️ 与规范 §4 末尾点名的"半搬"（`:global(.adhd-block)`，等于一个字符都没被
+ *    作用域化）的区别要看清：模块里四个类名**全是本地类**（产物里是
+ *    `._adhdBlock_hash`），只有 `.markdown-body` 写成 `:global(...)` ——
+ *    那是**引用**一个本来就该全局的类名，与 `App.module.css` 的
+ *    `.appLayout :global(.container)` 是同一种写法。
  *
- * 1. **改成语义查询**：不行。这些类名是"给 `marked` 生成的块打标记"的**唯一**
- *    手段，DOM 上没有可用的语义角色/属性可以替代（块是 `p` / `ul` / `pre`…，
- *    而且必须按"第几个顶层块"迭代）。
- * 2. **从模块导出常量**：不行。写入点在 `src/hooks/useAdhdReader.ts`，
- *    **不在本批允许改动的文件范围内**（本批只动 `src/styles/**`、
- *    `src/components/**`、`src/pages/**`、测试、`docs/**`、`scripts/**`）。
- *    即便能改，为了 4 个类名让一个通用 hook `import` 某个页面的模块，
- *    也是把归属颠倒过来。
- * 3. **留全局**：✅ 这就是本文件的做法，而且它不是"退路"而是**判据内的正解** ——
- *    5 条规则全是 `.markdown-body …` 后代选择器（第 4 条），`.markdown-body`
- *    本身又是跨功能类名（第 2 条）；把这些规则硬塞进模块只能靠
- *    `:global(.adhd-block)` 之类写法，那等于**一个字符都没被作用域化**，
- *    却把"这些类名是全项目约定"这件事藏进一个页面模块里 —— 正是规范 §4
- *    末尾说的"半搬"。
+ * 搬走的 5 条规则**值、顺序、权重逐字未变**（`:global(.markdown-body).adhdReaderActive`
+ * 与 `.markdown-body.adhd-reader-active` 同为 (0,2,0)），产物位置从 `index.css`
+ * 第 3 个样式表变成懒加载的 `NoteDetail-*.css`（仍在 `index.css` 之后注入），
+ * 而这 5 条没有任何同属性同权重的竞争对手 —— 胜负一条都不会翻转。
+ * 机器证据：`docs/migration-evidence/5.6-14-adhd-moved-to-module.md`、
+ * 差集 `5.6-02-rule-diff.md`（本批**逐字保留 5 / 值有变化 0 / 丢失 0**）。
  *
- * 附：`utils/markdown.ts` **不**注入这些类名（grep 0 命中），正文里出现的
- * `adhd-*` 只可能来自上面这一个 hook。`responsive.css` 对 `.adhd-*` 也是 0 命中，
- * 所以不存在"补丁层还在命中它"的问题。将来若要迁移，**先**把写入点搬进
- * 允许改动的范围（或把 hook 一起纳入那一批），再连这 5 条规则一起搬。
+ * 附：`utils/markdown.ts` **不**注入这些类名（序 6 收尾轮再次 grep，0 命中），
+ * 正文里出现的 `adhd-*` 只可能来自 `src/hooks/useAdhdReader.ts` 这一个 hook；
+ * `responsive.css` / `refinements.css` 对 `.adhd-*` 也是 0 命中。
  *
  * ⚠️ `.markdown-body` 在 `responsive.css` 的 768px 档还有一整组规则
  * （字号、断词、表格横向滚动、KaTeX 兜底）—— 序 13 已把它们**收回本文件末尾的
@@ -139,40 +144,17 @@
   padding: var(--space-sm) var(--space-md);
 }
 
-/* ── ADHD Reader 专注阅读模式 ── */
-
-/* 阅读模式激活时，把文章容器变为行级标记的定位上下文 */
-.markdown-body.adhd-reader-active {
-  position: relative;
-}
-
-/* 模糊度与透明度由 JS 按与阅读行的距离以渐变方式写入内联样式 */
-.markdown-body.adhd-reader-active > .adhd-block {
-  transition: filter 0.25s ease, opacity 0.25s ease;
-}
-
-/* 当前阅读块：保持清晰（filter/opacity 由内联样式驱动），仅保留轻量描边提示 */
-.markdown-body.adhd-reader-active > .adhd-block.adhd-current-block {
-  border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 4px var(--color-accent-light);
-}
-
-/* 当前块内部仍可保留少量层次：让当前块里的链接/按钮可点 */
-.markdown-body.adhd-reader-active > .adhd-block.adhd-current-block a {
-  pointer-events: auto;
-}
-
-/* 行级标记：一条位于行盒下方行距空隙中的下划线，完全不遮挡文字 */
-.markdown-body.adhd-reader-active .adhd-line-marker {
-  position: absolute;
-  z-index: 1;
-  pointer-events: none;
-  display: none;
-  height: 3px;
-  background: linear-gradient(90deg, var(--color-accent), rgba(37, 99, 235, 0.2));
-  border-radius: 2px;
-  transition: top 0.08s ease, left 0.08s ease, width 0.08s ease;
-}
+/* ── ADHD Reader 专注阅读模式：**已整组搬走**（5.6 序 6 收尾）────────────
+ * 这里原来住着 5 条 `.adhd-*` 规则（`.markdown-body.adhd-reader-active` …），
+ * 现在它们连同四个类名一起归 `src/hooks/useAdhdReader.module.css` 所有 ——
+ * 4 个类名由该模块导出、由 `src/hooks/useAdhdReader.ts` 写入。
+ *
+ * ⚠️ **不要在本文件里复活这四个类名。** 类名进模块后是 `._adhdBlock_hash`，
+ * 这里写 `.adhd-block` 既选不中任何元素（规则还在、永不生效 —— 与
+ * `css-convention.md` §3 雷区 2 同一类事故），又会重新把"这四个类名是全项目约定"
+ * 固化下来。规则原文与判据对照：`docs/migration-evidence/5.6-07`（第三批判"停"）
+ * 与 `5.6-14`（序 6 收尾轮搬走）；差集里这一批是"逐字保留 5 / 丢失 0"。
+ * ────────────────────────────────────────────────────────────────────── */
 
 /* ════════════════════════════════════════════════════════════════
  * 窄屏（overhaul-plan 5.6 序 13：`responsive.css` 按归属清空）
