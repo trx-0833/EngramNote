@@ -16,6 +16,9 @@
 卡片正文），因此这里显式钉住它，让变化是被告知的而不是被发现的。
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from app.config import Settings
@@ -141,10 +144,17 @@ class TestWiring:
         assert "settings.debug" not in src, "database.py 仍在读遗留的 settings.debug"
 
     def test_fastapi_debug_follows_app_env(self):
-        import io
+        """应用实例的 `debug` 必须等于 `settings.is_dev`（阶段 4.10）
 
-        src = io.open("app/main.py", encoding="utf-8").read()
-        assert "debug=settings.is_dev" in src, "FastAPI 的 debug 没有接在 app_env 上"
+        改造前这里读的是 `main.py` 的**源码文本**（断言里面有
+        `debug=settings.is_dev` 这行字）。阶段 0.10 把构造搬进
+        `create_app(config)` 工厂之后，"这行字在不在"已经不能表达
+        "这个 app 到底绑在谁身上"（换一个变量名照样能过）。
+        改成运行时断言：更强 —— 它读的是**真的那个 app 对象**。
+        """
+        from app.main import app, settings
+
+        assert app.debug is settings.is_dev, "FastAPI 的 debug 没有接在 app_env 上"
 
     def test_llm_provider_is_not_read_from_debug(self):
         """供应商选择不得再直接读 `debug`（否则解耦是假的）"""
@@ -155,4 +165,186 @@ class TestWiring:
         body = src.split("def get_llm_config", 1)[1].split("\n    def ", 1)[0]
         assert not re.search(r"self\.debug", body), (
             "get_llm_config 仍在读 debug —— 供应商与环境的耦合没有真正切断"
+        )
+
+
+class TestSchemaEndpointGating:
+    """阶段 0.10：`/docs`、`/openapi.json`、`/redoc` 的环境闸门
+
+    ## 这份测试要证明什么
+
+    改造前这三条路由在**任何**环境都公开：`FastAPI(...)` 没设
+    `docs_url` / `openapi_url` / `redoc_url`，于是一次匿名请求就能拿到
+    全部路由、参数名与认证方案（对攻击者是侦察，对本项目是无谓的暴露面）。
+
+    修法是生产姿态下**不注册**这几条路由（见 `main.py` 的
+    `_schema_endpoint_kwargs`）。因此测试必须同时钉住两侧：
+    生产真的没有了，开发真的还在 —— 只钉一侧的话，"把文档全删掉"
+    也能让测试变绿。
+
+    ⚠️ 为什么用 `create_app(cfg)` 现造应用：模块级 `app` 的姿态在 import
+    那一刻就冻结了，一个进程只能验证一种。工厂让两种姿态在同一个进程里
+    都能被真实地断言（这是 0.10 引入工厂的直接原因）。
+    """
+
+    @staticmethod
+    def _app_and_client(cfg: Settings):
+        """按给定配置造一个应用与它的进程内客户端（不起服务、不占端口）"""
+        from fastapi.testclient import TestClient
+
+        from app.main import create_app
+
+        app = create_app(cfg)
+        return app, TestClient(app)
+
+    def test_production_hides_schema_endpoints(self):
+        """★ 生产姿态：三条路由都不存在（404，与任意未知路径无法区分）"""
+        app, client = self._app_and_client(_settings(app_env="prod", debug=False))
+        assert (app.docs_url, app.redoc_url, app.openapi_url) == (None, None, None)
+
+        for path in ("/docs", "/openapi.json", "/redoc"):
+            resp = client.get(path)
+            assert resp.status_code == 404, (
+                f"{path} 在生产姿态仍可访问（{resp.status_code}）—— "
+                "文档与 schema 在公网可达等于把 API 清单送给扫描器"
+            )
+            lowered = resp.text.lower()
+            assert "swagger" not in lowered and "redoc" not in lowered
+
+    def test_development_keeps_schema_endpoints(self):
+        """★ 开发姿态：三条路由照旧可用（这是人操作 API 的方式）"""
+        _, client = self._app_and_client(_settings(app_env="dev", debug=False))
+
+        docs = client.get("/docs")
+        assert docs.status_code == 200, docs.text
+        assert "/openapi.json" in docs.text, "/docs 页面没有指向 schema"
+
+        schema = client.get("/openapi.json")
+        assert schema.status_code == 200, schema.text
+        assert "/api/notes" in schema.json()["paths"]
+
+        assert client.get("/redoc").status_code == 200
+
+    def test_legacy_debug_true_also_unlocks_docs(self):
+        """`DEBUG=true`（遗留开关）等价于 `APP_ENV=dev`，闸门也要跟着开
+
+        否则老 `.env` 的使用者会遇到"本地起得来、但 /docs 没了"这种
+        与本次改动无关的困惑。
+        """
+        _, client = self._app_and_client(_settings(debug=True))
+        assert client.get("/docs").status_code == 200
+
+    def test_in_process_schema_survives_production_posture(self):
+        """★ 关掉的是 HTTP 路由，不是 schema 生成能力
+
+        `scripts/dump_openapi.py` 走**进程内**的 `app.openapi()`，
+        不经过 HTTP 路由。若这里变成空路径，前端的类型/客户端生成会
+        静默断掉 —— "为了关文档而弄坏生成"是这次改动最可能的副作用。
+        """
+        app, _ = self._app_and_client(_settings(app_env="prod", debug=False))
+        spec = app.openapi()
+        assert len(spec["paths"]) >= 100, (
+            f"生产姿态下 app.openapi() 只有 {len(spec['paths'])} 条路径 —— "
+            "dump_openapi.py（前端生成的输入）会失效"
+        )
+        assert "/api/notes" in spec["paths"]
+        assert "/ready" in spec["paths"], "就绪端点应当在契约里（与 /health 同等）"
+
+    def test_schema_is_identical_in_both_postures(self):
+        """环境只决定"路由是否暴露"，不决定**契约内容**
+
+        两种姿态生成的 schema 必须逐字节相同，否则"生产关文档"就等于
+        悄悄改变了对外的 API 契约（前端生成会随环境漂移）。
+        """
+        from app.main import create_app
+
+        prod = create_app(_settings(app_env="prod", debug=False)).openapi()
+        dev = create_app(_settings(app_env="dev", debug=False)).openapi()
+        assert prod == dev
+
+
+class TestEnvExampleTemplateAgreesWithCode:
+    """`.env.example` 必须与代码默认值一致（阶段 0.10 修的是它自相矛盾）
+
+    ## 这份测试要证明什么
+
+    模板里曾经躺着一条**激活**的 `DEBUG=true`，还配着一句早已失效的说明
+    （"DEBUG=true 时使用 GLM，false 时使用 DeepSeek"）—— 而 4.10 之后
+    `debug` 只是遗留别名，供应商由 `LLM_PROVIDER` 决定。模板是**唯一**
+    会被照抄的东西（`cp .env.example .env`），所以它自相矛盾时，
+    后果是"照文档做的人得到与文档不同的行为"。
+
+    判据是机械的两条：
+
+    1. 每条**未注释**的赋值都必须是 `Settings` 的字段名（拼错即失败）；
+    2. 其值必须等于该字段在代码里的默认值。
+
+    第 2 条背后的约定是：**模板等于默认值**。想改行为请写进自己的 `.env`，
+    而不是改模板 —— 改模板等于改"新部署的默认行为"，而那种改动
+    没有任何测试看得见（这正是 `DEBUG=true` 能潜伏这么久的原因）。
+    """
+
+    #: 形如 `KEY=value` 的赋值行（注释行在前面就被跳过了）
+    _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
+
+    @staticmethod
+    def _template_path() -> Path:
+        return Path(__file__).resolve().parent.parent / ".env.example"
+
+    def _active_assignments(self) -> list[tuple[int, str, str]]:
+        """返回 [(行号, KEY, value)]，只含**未注释且非空行**的赋值"""
+        text = self._template_path().read_text(encoding="utf-8")
+        found: list[tuple[int, str, str]] = []
+        for lineno, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = self._ASSIGNMENT.match(line)
+            if match:
+                found.append((lineno, match.group(1), match.group(2).strip()))
+        return found
+
+    def test_template_exists_and_is_not_empty(self):
+        """防空转守卫：上面两条断言在"文件读不到"时会变成空转"""
+        assert self._template_path().is_file(), f"找不到 {self._template_path()}"
+        assignments = self._active_assignments()
+        assert len(assignments) >= 10, (
+            f"只解析到 {len(assignments)} 条激活赋值 —— 解析方式可能失效了"
+        )
+
+    def test_active_assignments_are_real_settings_fields(self):
+        unknown = [
+            (lineno, key) for lineno, key, _ in self._active_assignments()
+            if key.lower() not in Settings.model_fields
+        ]
+        assert not unknown, (
+            "`.env.example` 里有 Settings 不认识的字段（拼错了？改了名没同步？）: "
+            f"{unknown}"
+        )
+
+    def test_active_assignments_match_code_defaults(self):
+        """★ 这条断言就是本轮修的缺陷（模板写着 DEBUG=true，代码默认 False）"""
+        mismatched = []
+        for lineno, key, value in self._active_assignments():
+            default = Settings.model_fields[key.lower()].default
+            if str(default).strip().lower() != value.lower():
+                mismatched.append(
+                    f"第 {lineno} 行 {key}={value}（代码默认 {default!r}）"
+                )
+        assert not mismatched, (
+            "`.env.example` 的激活项与代码默认值不一致 —— 照抄模板的人会得到"
+            "与代码不同的行为：\n  " + "\n  ".join(mismatched)
+        )
+
+    def test_legacy_debug_is_not_enabled_by_the_template(self):
+        """★ 模板不得再提供**激活**的 `DEBUG=true`（它是遗留开关，见附录 AK）"""
+        text = self._template_path().read_text(encoding="utf-8")
+        assert not re.search(r"(?m)^\s*DEBUG\s*=\s*(true|1|yes)\s*$", text, re.IGNORECASE), (
+            "`.env.example` 又出现了激活的 DEBUG=true —— 它是遗留开关，"
+            "新部署应当用 APP_ENV / LOG_SQL / LLM_PROVIDER"
+        )
+        # 但必须**说明**它是什么：照抄旧 .env 的人要能看到"为什么还留着它"
+        assert "遗留" in text, "模板没有说明 DEBUG 是遗留开关"
+        assert "APP_ENV" in text and "LOG_SQL" in text and "LLM_PROVIDER" in text, (
+            "模板没有给出替代 DEBUG 的三个开关"
         )

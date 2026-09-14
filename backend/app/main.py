@@ -7,12 +7,17 @@ FastAPI 应用入口模块
 - 定义应用生命周期管理（启动时初始化数据库）
 - 配置 CORS 中间件（允许前端开发服务器跨域访问）
 - 注册 API 路由（统一挂载到 /api 前缀下）
-- 提供健康检查端点
+- 提供健康检查（/health，存活）与就绪检查（/ready，可服务）端点
+- 按运行环境决定交互式 schema 端点（/docs、/openapi.json、/redoc）是否注册
 
 设计决策：
 - 使用 lifespan 上下文管理器替代 on_event 装饰器（FastAPI 推荐方式）
 - CORS 仅允许开发服务器域名，生产环境应配置为实际前端域名
 - 所有 API 路由统一挂载到 /api 前缀，便于反向代理和版本管理
+- 应用由 `create_app()` 工厂构造（阶段 0.10）：应用的一部分行为取决于
+  运行环境（schema 端点是否注册），而"模块级直接构造"会把这件事冻结在
+  import 那一刻 —— 一个进程只能验证一种姿态。工厂让测试显式传入另一份
+  配置、构造出另一种姿态的应用来断言，同时模块级 `app` 保持原样。
 
 Celery 启动说明（独立进程，不嵌入 FastAPI）：
 - 启动 Celery Worker（处理异步任务）：
@@ -25,18 +30,21 @@ Celery 启动说明（独立进程，不嵌入 FastAPI）：
 
 from contextlib import asynccontextmanager
 import logging
+import os
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from .api.router import api_router
-from .config import get_settings
+from .config import Settings, get_settings
 from .core import context
 from .core.logging_config import setup_logging
 from .core.tempfile_compat import apply_tempfile_compat
-from .database import init_db
+from .database import get_session_factory, init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.request_context import RequestContextMiddleware
@@ -188,36 +196,229 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭 LLM 共享客户端失败: {e}")
 
 
-# 创建 FastAPI 应用实例
-# `debug=` 决定异常时是否把 traceback 回吐给客户端（阶段 4.10 起只看 app_env，
-# 与 SQL 日志、LLM 供应商无关）
-app = FastAPI(
-    title=settings.app_name,
-    description="AI 驱动的学习笔记管理与知识库工具",
-    version="0.1.0",
-    debug=settings.is_dev,
-    lifespan=lifespan,
-)
+# ===========================================================================
+# 阶段 0.10：交互式 schema 端点的环境闸门
+# ===========================================================================
 
-# 配置 CORS 中间件 — 允许前端开发服务器跨域访问
-# 生产环境应将 allow_origins 改为实际前端域名
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
-    allow_credentials=True,    # 允许携带 Cookie
-    allow_methods=["*"],       # 允许所有 HTTP 方法
-    allow_headers=["*"],       # 允许所有请求头
-)
+def _schema_endpoint_kwargs(cfg: Settings) -> dict[str, Any]:
+    """按运行环境决定 `/docs`、`/openapi.json`、`/redoc` 是否注册（阶段 0.10）
 
-# 注册全局异常处理中间件 — 捕获所有未处理异常，返回统一格式
-# 顺序说明：Starlette 的 add_middleware 是**前插**语义，因此后注册的在外层。
-# 实际执行顺序（外 → 内）为：
-#     RequestContext → ErrorHandler → RateLimit → CORS → 路由
-# 即 RequestContext 最先注入 request_id / user_id，限流器因此能读到已认证用户；
-# ErrorHandler 在其内层，保证限流返回的 429 也走统一错误信封。
-app.add_middleware(ErrorHandlerMiddleware)
-app.add_middleware(RequestContextMiddleware)
-app.add_middleware(RateLimitMiddleware)
+    ## 生产姿态：**整体关闭**（不注册路由），而不是"加保护"
+
+    这三条路由只服务一种人：正在读这份 API 的开发者。它们不是产品功能，
+    所以在生产姿态下直接不注册（FastAPI 原生开关：三个都传 `None`，
+    其 `setup()` 里每一段都被 `if self.openapi_url` 守着，于是一条也不留）。
+
+    **为什么不选"加认证"**（计划原文是"生产关闭**或**加保护"，这里明确选前者）：
+
+    1. `/docs` 是**浏览器**去取 `/openapi.json` 的（Swagger UI 的 JS 自行发请求），
+       给它套 Bearer 认证需要额外的 OAuth 转发/代理；而"在浏览器里看文档"
+       这件事在生产部署里本来就没有需求（要读文档去 dev 环境读）。
+    2. 本项目**没有管理员角色**这一层 —— 任何已登录用户都能拿到同一份 schema，
+       于是"加保护"实际只是把"公开"变成"对每个注册用户公开"，
+       安全收益接近于零，却多出一个需要维护与验证的中间件。
+    3. `/openapi.json` 对攻击者是**侦察**：一次匿名请求即可拿到全部路由、
+       参数名与认证方案。要挡住侦察，最省事且**不会被配错**的做法就是让它
+       不存在 —— `None` 是声明式的，没有"忘了加依赖"或"鉴权分支写反了"的形态。
+
+    ## 为什么不破坏本项目的工具链
+
+    `backend/scripts/dump_openapi.py` 走的是**进程内**的 `app.openapi()`：
+    它从已注册的路由对象生成 schema，是纯内存计算，**不经过 HTTP 路由**，
+    因此 `openapi_url=None` 对它没有任何影响（前端的类型/客户端生成照旧）。
+    配套测试
+    `tests/test_env_switches.py::TestSchemaEndpointGating::test_in_process_schema_survives_production_posture`
+    把这件事钉住了 —— 否则"为了关文档而弄坏前端生成"会是一次静默的倒退。
+
+    ## dev 姿态保持原样
+
+    三条路由都在（`/docs` 能点、`/openapi.json` 能取）：那是人操作 API 的方式，
+    也是本项目日常工作的方式。判断依据**沿用既有的** `settings.is_dev`
+    （`app_env` / 遗留 `debug` 折叠而来，见 `config.py`），不另立一套"是不是生产"。
+    """
+    if cfg.is_dev:
+        return {
+            "docs_url": "/docs",
+            "redoc_url": "/redoc",
+            "openapi_url": "/openapi.json",
+        }
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+# ===========================================================================
+# 阶段 0.10：/ready —— "这个实例现在能不能干活"，与 /health 分工不同
+# ===========================================================================
+#
+# ## 为什么不能只留 /health
+#
+# `/health` 回答的是"**进程还活着吗**"：不碰数据库、不碰 broker、不碰外部服务，
+# 只要事件循环还能回一个 JSON 就 200。这个语义是有意的 —— 它是**存活探针**
+# （liveness），进程管理器用它决定"要不要重启"。
+#
+# 正因为用它决定重启，它**绝不能**因为某个依赖不可用而失败：一次数据库抖动
+# 会让编排器把所有实例判定为死、成批重启；而重启既不修复数据库，还会打断
+# 正在执行的任务（SQLite 单写者下还会留下锁与半截事务）。**"忙"和"坏"必须
+# 分开表达** —— 这正是要同时有 /health 与 /ready 的原因，不是重复建设。
+#
+# `/ready` 回答的是"**现在能不能服务请求**"：数据库连得上、schema 在（表齐），
+# 否则把流量从这个实例上摘掉（readiness 探针），但**不**重启它。
+#
+# ## 队列深度为什么只报告、不决定就绪
+#
+# broker 里堆了一万条消息说明"慢"，不说明"坏"：实例本身完全有能力接单。
+# 把深度做成就绪判据会有两个后果 —— (1) 高峰期所有实例一起被判为未就绪，
+# 负载均衡器于是把流量发给**空无一物**的实例（或直接 502）；
+# (2) 若该判据被接到存活探针上，就是上面那种重启风暴。
+# 背压是另一个机制（限流/扩容），不该混进就绪判定。因此 `/ready` 只把
+# 深度**如实报出来**，状态码只由"能力"（数据库）决定。
+
+
+class DatabaseCheck(BaseModel):
+    """`/ready` 的数据库检查结果
+
+    `reason` 是**稳定原因码**而不是异常文本：`/ready` 与 `/health` 一样不能
+    要求认证（探针不会带 Token），而异常文本里会有库路径、SQL 片段等内部信息
+    （见 `tests/test_error_leakage.py` 的判据）。细节进服务端日志。
+    """
+
+    status: str
+    reason: Optional[str] = None
+
+
+class QueueDepth(BaseModel):
+    """`/ready` 的队列深度快照
+
+    三个数字的**各自含义**（不要相加，它们来自两个不同的存储）：
+
+    - `depth`：broker 里**等待 worker 接手**的消息数 —— 这才是"还有多少在排队"；
+    - `running`：`task_runs` 里正在执行的任务数；
+    - `pending`：`task_runs` 里已建记录但尚未开始的任务数。
+
+    `depth` 为 `None` 表示**当前后端测不到**（原因见 `source`），
+    而不是"零"。用 `None` 而不是 0 是刻意的：0 会让"没测"与"真的没人排队"
+    在监控面板上长得一模一样（与 `llm_calls.cost` 记 NULL 而非 0 同一条原则）。
+    """
+
+    depth: Optional[int] = None
+    running: Optional[int] = None
+    pending: Optional[int] = None
+    #: `depth` 的来源；测不到时是原因码（如 `redis_broker_not_probed`）
+    source: str
+
+
+class ReadinessResponse(BaseModel):
+    """`GET /ready` 的响应（200 与 503 **共用同一形状**）
+
+    失败时保持同样的字段结构，探针与看板才能用一套解析逻辑同时处理两种情况
+    （需要分支的只有 `status` 与状态码本身）。
+    """
+
+    status: str
+    app: str
+    database: DatabaseCheck
+    queue: QueueDepth
+
+
+#: Celery 默认队列名。`tasks/celery_app.py` **没有**覆盖 `task_default_queue`
+#: （它只设了 broker/结果后端与重试策略），所以消息文件的后缀是 `.celery.msg`。
+#: 队列名一旦改动，这里与 kombu 的计数口径要一起改（`_broker_queue_depth` 的说明）。
+_CELERY_DEFAULT_QUEUE = "celery"
+
+
+async def _task_status_counts() -> tuple[Optional[dict[str, int]], Optional[str]]:
+    """按状态统计 `task_runs`；失败时返回 `(None, 原因码)`
+
+    ## 为什么这一次查询同时充当"数据库就绪"判据
+
+    判据不是 `SELECT 1` —— 那只证明"连得上"，而**连得上但表不存在**的库
+    恰恰是本项目真实踩过的形态（CI 上临时库没建表 → 每个请求 500
+    `no such table: users`，见 `tests/conftest.py` 的会话级隔离说明）。
+    改成真查业务表之后，"连不上"与"schema 没就绪"都会在这里失败，
+    而这正是"能不能干活"这个问题的两个主要否定答案。
+
+    ⚠️ 查询本身是只读的，且不写任何东西：就绪探针会被高频调用，
+    探针**绝不能**成为数据变更的来源。
+
+    Returns:
+        (状态 → 行数 的映射, 失败原因码)；成功时原因码为 None
+    """
+    from sqlalchemy import func, select
+
+    from .models.task_run import TaskRun
+
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            rows = (await session.execute(
+                select(TaskRun.status, func.count()).group_by(TaskRun.status)
+            )).all()
+    except Exception as exc:
+        # 细节只进日志：响应里回的是稳定的原因码（见 DatabaseCheck 的说明）
+        logger.error(
+            "就绪检查失败：数据库不可用或 schema 未就绪 | %s: %s",
+            type(exc).__name__, exc, exc_info=True,
+        )
+        return None, "database_unavailable"
+
+    counts: dict[str, int] = {}
+    for status, count in rows:
+        # `TaskRun.status` 是 SAEnum：正常情况下拿到的是 TaskStatus 成员，
+        # 但驱动/方言差异下也可能是裸字符串 —— 两种都归一成 status 的取值。
+        key = getattr(status, "value", None) or str(status)
+        counts[key] = int(count)
+    return counts, None
+
+
+def _broker_queue_depth(cfg: Settings) -> tuple[Optional[int], str]:
+    """broker 里等待投递的消息数（`task_runs` 看不到的那一段）
+
+    ## 为什么必须问 broker，而不能只数 `task_runs`
+
+    `task_runs` 的行是 **worker 接手时**才建的
+    （`tasks/common.py::begin_task_run` → `task_run_service.ensure_task_run`，
+    建出来就是 `running`）。也就是说消息在 broker 里排队的那段时间，
+    数据库里**一行都没有** —— 只数 DB 会得到一个几乎恒为 0 的假指标，
+    而"用户不知道还有多少任务在排队"正是计划（附录 E-7）要解决的问题。
+    反过来 `pending` 这个状态在当前代码里基本不会出现（只有测试或将来
+    "API 侧预建记录"才会写），所以它只作为辅助信息如实报出。
+
+    ## 文件系统 broker 的计数口径
+
+    kombu 的文件系统传输把每条消息写成一个 `{时刻}_{uuid}.{队列}.msg` 文件，
+    消费者取走时**把文件移出该目录**（`Channel._get` 用 `shutil.move`），
+    所以"目录里剩下的 `.{队列}.msg` 文件数"就等于"还没被取走的消息数"。
+    这里与 kombu 自己的 `Channel._size(queue)` 是同一口径。
+
+    ⚠️ 只按**后缀**匹配队列名：broker 目录里还住着控制消息
+    （`...celery@主机名.celery.pidbox.msg`，本机实测残留了 15 个），
+    把它们算进业务队列会让深度凭空多出十几 —— 而这类"指标虚高"
+    一旦被当成基线，之后就再也没人看得出真正的积压。
+
+    本项目把 `data_folder_in` / `data_folder_out` 都指向 `get_celery_broker_dir()`
+    （Windows 上必须相同，见 `tasks/celery_app.py`），因此这一个目录就是整个
+    等待队列；两者分开的部署需要同时数两个目录，届时这里要跟着改。
+
+    ## 为什么 Redis 后端返回 None
+
+    量 Redis 队列需要 `redis` 客户端，而它在 `requirements.txt` 里是**注释掉的**
+    可选依赖。宁可如实报"测不到"（`None` + 原因码），也不要回一个假装是 0
+    的数字 —— 后者会让一份坏掉的监控看起来一切正常。
+    """
+    if (cfg.celery_backend or "").strip().lower() == "redis":
+        return None, "redis_broker_not_probed"
+
+    folder = cfg.get_celery_broker_dir()
+    suffix = f".{_CELERY_DEFAULT_QUEUE}.msg"
+    try:
+        names = os.listdir(folder)
+    except FileNotFoundError:
+        # 目录还不存在 = 一条消息也没投递过（broker 目录由生产者/worker 创建）
+        return 0, "filesystem_broker"
+    except OSError as exc:
+        logger.warning("就绪检查：broker 目录不可读（%s）: %s", folder, exc)
+        return None, "broker_dir_unreadable"
+    return sum(1 for name in names if name.endswith(suffix)), "filesystem_broker"
+
 
 # ---- 全局异常处理器：让所有 HTTP 错误响应体都携带 request_id ----
 # 说明：路由层抛出的 HTTPException / RequestValidationError 由 FastAPI
@@ -233,7 +434,6 @@ def _error_payload(status_code: int, detail: str, error_code: str) -> dict:
     }
 
 
-@app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     logger.warning(
         "HTTP 错误 | %s %s | status=%d | detail=%s",
@@ -255,7 +455,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
-@app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.warning(
         "参数校验错误 | %s %s | detail=%s",
@@ -274,7 +473,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # LLM 调用散布在理解任务、问答、语义判分等多条路径上（其中一部分在
 # Celery 任务里），逐个包 try 必然有漏。配额异常从 `llm_service` 统一抛出，
 # 在这里转成稳定错误码，客户端只需认 `error_code`（不随文案变化）。
-@app.exception_handler(LLMQuotaExceeded)
 async def llm_quota_exceeded_handler(request: Request, exc: LLMQuotaExceeded):
     logger.warning(
         "LLM 配额耗尽 | %s %s | %s", request.method, request.url.path, exc.detail,
@@ -285,19 +483,141 @@ async def llm_quota_exceeded_handler(request: Request, exc: LLMQuotaExceeded):
     )
 
 
-# 注册所有 API 路由，统一挂载到 /api 前缀下
-app.include_router(api_router, prefix="/api")
+def create_app(config: Optional[Settings] = None) -> FastAPI:
+    """构造并配置 FastAPI 应用实例
 
+    ## 为什么是工厂，而不是模块级直接 `app = FastAPI(...)`
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """
-    健康检查端点
+    阶段 0.10 之后，应用的一部分**构造期**行为取决于运行环境
+    （schema 端点是否注册）。模块级构造会把这件事冻结在 import 那一刻，
+    于是"验证生产姿态"与"验证开发姿态"必须在两个进程里各做一次 ——
+    测试没法在一个进程内同时钉住两种姿态。
+    工厂把姿态变成一个**显式入参**：默认仍是进程配置（`get_settings()`），
+    测试可以传入另一份配置构造出另一种姿态来断言（见
+    `tests/test_env_switches.py::TestSchemaEndpointGating`）。
 
-    用于监控和负载均衡器检测服务是否正常运行。
-    不需要认证，返回应用名称和状态。
+    Args:
+        config: 应用配置；缺省用进程级单例 `get_settings()`
 
     Returns:
-        dict: 包含 status 和 app 名称的字典
+        配置完成的 FastAPI 应用实例
     """
-    return {"status": "ok", "app": settings.app_name}
+    cfg = config if config is not None else settings
+
+    # 创建 FastAPI 应用实例
+    # `debug=` 决定异常时是否把 traceback 回吐给客户端（阶段 4.10 起只看 app_env，
+    # 与 SQL 日志、LLM 供应商无关）
+    # `docs_url` / `redoc_url` / `openapi_url` 由运行环境决定（阶段 0.10）：
+    # 生产姿态下三条路由都不注册 —— 理由见 `_schema_endpoint_kwargs`
+    app = FastAPI(
+        title=cfg.app_name,
+        description="AI 驱动的学习笔记管理与知识库工具",
+        version="0.1.0",
+        debug=cfg.is_dev,
+        lifespan=lifespan,
+        **_schema_endpoint_kwargs(cfg),
+    )
+
+    # 配置 CORS 中间件 — 允许前端开发服务器跨域访问
+    # 生产环境应将 allow_origins 改为实际前端域名
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cfg.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
+        allow_credentials=True,    # 允许携带 Cookie
+        allow_methods=["*"],       # 允许所有 HTTP 方法
+        allow_headers=["*"],       # 允许所有请求头
+    )
+
+    # 注册全局异常处理中间件 — 捕获所有未处理异常，返回统一格式
+    # 顺序说明：Starlette 的 add_middleware 是**前插**语义，因此后注册的在外层。
+    # 实际执行顺序（外 → 内）为：
+    #     RequestContext → ErrorHandler → RateLimit → CORS → 路由
+    # 即 RequestContext 最先注入 request_id / user_id，限流器因此能读到已认证用户；
+    # ErrorHandler 在其内层，保证限流返回的 429 也走统一错误信封。
+    app.add_middleware(ErrorHandlerMiddleware)
+    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(RateLimitMiddleware)
+
+    app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(LLMQuotaExceeded, llm_quota_exceeded_handler)
+
+    # 注册所有 API 路由，统一挂载到 /api 前缀下
+    app.include_router(api_router, prefix="/api")
+
+    @app.get("/health", response_model=HealthResponse)
+    async def health_check():
+        """
+        健康检查端点（**存活**探针，不检查任何依赖）
+
+        用于监控和负载均衡器检测服务是否正常运行。
+        不需要认证，返回应用名称和状态。
+
+        ⚠️ 刻意**不**在这里检查数据库/broker：本端点会被用来决定"要不要重启
+        进程"，任何依赖抖动都会被翻译成重启（见 `/ready` 上方的说明）。
+        "能不能干活"是 `/ready` 的问题。
+
+        Returns:
+            dict: 包含 status 和 app 名称的字典
+        """
+        return {"status": "ok", "app": cfg.app_name}
+
+    @app.get(
+        "/ready",
+        response_model=ReadinessResponse,
+        responses={
+            503: {
+                "model": ReadinessResponse,
+                "description": "未就绪：数据库不可达或 schema 未就绪（响应体形状与 200 相同）",
+            },
+        },
+    )
+    async def readiness_check():
+        """
+        就绪检查端点（**readiness** 探针，含义见本模块 `/ready` 上方说明）
+
+        判据只有一条：**数据库连得上且 schema 就绪**（用一次真实业务查询验证，
+        而不是 `SELECT 1`）。就绪时 200，否则 **503**，两种情况的响应体形状相同。
+
+        队列深度是**报告项**，不参与状态码：忙 ≠ 坏，详见上面
+        "队列深度为什么只报告、不决定就绪"。
+
+        不需要认证（探针不会带 Token），因此响应里只有稳定的状态与原因码，
+        不含异常文本、库路径等内部信息。
+        """
+        # 重新取一次配置，而不是用构造期的 `cfg`：`/ready` 读的是**当前生效**的
+        # broker 后端与目录，而模块级 `settings` 是 import 那一刻冻结的那一份
+        # （测试还会清 `get_settings` 的缓存换一个实例）。
+        cfg_now = get_settings()
+        counts, db_reason = await _task_status_counts()
+        db_ok = counts is not None
+        depth, depth_source = _broker_queue_depth(cfg_now)
+
+        payload = ReadinessResponse(
+            status="ready" if db_ok else "not_ready",
+            app=cfg.app_name,
+            database=DatabaseCheck(
+                status="ok" if db_ok else "error",
+                reason=db_reason,
+            ),
+            queue=QueueDepth(
+                depth=depth,
+                # 数据库已给出答案时，"没有这种状态的行"就是 0，不是"测不到"：
+                # 空表意味着此刻确实没有任务在跑/在等（`None` 只留给
+                # "库都没连上，无从统计"这一种情况）。
+                running=None if not db_ok else counts.get("running", 0),
+                pending=None if not db_ok else counts.get("pending", 0),
+                source=depth_source,
+            ),
+        )
+        return JSONResponse(
+            status_code=200 if db_ok else 503,
+            content=payload.model_dump(),
+        )
+
+    return app
+
+
+# 模块级应用实例：uvicorn 的入口（`app.main:app`）与全部既有导入点都指向它。
+# 它由工厂构造，因此与测试里 `create_app(cfg)` 走的是**同一条**代码路径。
+app = create_app()

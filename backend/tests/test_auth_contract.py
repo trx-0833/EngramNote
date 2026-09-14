@@ -42,6 +42,9 @@ _PROTECTED_ROUTES = [
 # 明确无需认证的接口
 _PUBLIC_ROUTES = [
     ("/health", "get"),
+    # 就绪探针（阶段 0.10）：探针不会带 Token，因此它必须公开；
+    # 反过来说，它也就不能回任何内部信息（判据见 tests/test_ready_endpoint.py）
+    ("/ready", "get"),
     ("/api/auth/login", "post"),
     ("/api/auth/register", "post"),
 ]
