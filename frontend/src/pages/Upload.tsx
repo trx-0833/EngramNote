@@ -381,42 +381,55 @@ export default function Upload() {
         上传学习资料
       </h1>
 
-      {/* 拖拽上传区域：支持点击和拖拽两种方式 */}
-      <div
+      {/* 拖拽上传区：支持点击和拖拽两种方式。
+          ⚠️ 原来这里整个容器是 `div[role="button"][tabIndex=0]` + 一个只认 `Enter`
+          的 `onKeyDown` —— 与 F-09 / F-30 / F-34 是同一个洞的又一处入口
+          （axe 报不出来：它里面没有可聚焦后代，所以没有 `nested-interactive`）。
+          Tab 会停在一个"不是按钮的按钮"上，而且 **Space 不生效**。
+          现在它是**真 `<button>`**：Enter 与 Space 都生效，读屏也会念"按钮"。
+          拖放事件仍挂在同一个元素上（拖放落在哪儿与改动前逐字相同）。
+          外观不用复位：`.uploadZone` 已经把 border/background/padding/text-align
+          全写好了（作者的类选择器胜过按钮的 UA 默认值），只需要把
+          font / line-height / color 显式继承过来 —— 否则按钮会换回系统字体。 */}
+      <button
+        type="button"
         className={`${styles.uploadZone}${dragActive ? ` ${styles.uploadZoneActive}` : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
+        aria-label="点击或拖拽文件上传"
         style={{
+          display: 'block',
+          width: '100%',
+          fontFamily: 'inherit',
+          lineHeight: 'inherit',
+          color: 'inherit',
           cursor: uploading ? 'wait' : 'pointer',
         }}
-        role="button"
-        tabIndex={0}
-        aria-label="点击或拖拽文件上传"
-        onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click() }}
       >
-        {/* 隐藏的文件输入框，通过 ref 触发 */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ALLOWED_EXTENSIONS.join(',')}
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-          aria-hidden="true"
-        />
-
-        <p style={{ fontSize: '1.125rem', fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
+        <span style={{ display: 'block', fontSize: '1.125rem', fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
           {uploading ? '处理中...' : '点击或拖拽文件到此处'}
-        </p>
-        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+        </span>
+        <span style={{ display: 'block', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
           支持 PDF、图片、Office 文档、音视频、Markdown 文件
-        </p>
+        </span>
         {/* 显示所有支持的文件扩展名 */}
-        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
           {ALLOWED_EXTENSIONS.join(' ')}
-        </p>
-      </div>
+        </span>
+      </button>
+
+      {/* 隐藏的文件输入框，通过 ref 触发。放在按钮**外面**：
+          按钮的内容模型只允许 phrasing content，`<input>` 嵌在里面是非法结构 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ALLOWED_EXTENSIONS.join(',')}
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+        aria-hidden="true"
+      />
 
       {/* 上传设置（prepare 完成后显示，可重命名文件；PDF 额外支持按页裁剪） */}
       {prepared && (

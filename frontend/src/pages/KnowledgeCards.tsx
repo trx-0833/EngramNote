@@ -4,7 +4,7 @@
  *              支持按卡片分类（常规/盲点/拓展）筛选、重点难点标记、掌握度进度条与拓展知识点生成
  */
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getKnowledgeCards, type KnowledgeCard } from '../api/client'
 import { generateExtension, generateExtensionQuestions, markCard } from '../api/knowledge'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -234,7 +234,6 @@ export default function KnowledgeCards() {
             border: '1px solid var(--color-border)',
             borderRadius: '8px',
             fontSize: '0.875rem',
-            outline: 'none',
             background: 'var(--color-bg)',
             color: 'var(--color-text)',
             boxSizing: 'border-box',
@@ -252,11 +251,17 @@ export default function KnowledgeCards() {
         <div>
           {filteredGroups.map(group => (
             <div key={group.note_id} style={{ marginBottom: 'var(--space-md)' }}>
+              {/* 分组头：折叠/展开是**一个真控件**。
+                  ⚠️ 这里原来是 `div.card[onClick]` —— 没有 `role`、没有 `tabIndex`，
+                  键盘**根本到不了**（axe 判不了这一类：它不模拟 Tab，见
+                  docs/a11y-audit.md §4.1）。改法与 F-30（今日资料文件夹头）逐字同形：
+                  外壳回到"盒子"，折叠行为落进 `<h2>` 里一个真 `<button aria-expanded>`
+                  （WAI-ARIA 手风琴的标准写法：标题里放按钮）。
+                  箭头 `aria-hidden`：展开了没有由它表达（`aria-expanded` 才是），
+                  留着只会让可访问名里多一个"▶"。 */}
               <div
                 className="card"
-                onClick={() => toggleGroup(group.note_id)}
                 style={{
-                  cursor: 'pointer',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
@@ -265,9 +270,6 @@ export default function KnowledgeCards() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                  <span className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}>
-                    ▶
-                  </span>
                   {/* `h2` 而不是 `<strong>`：分组头是**区块级标题**（按来源笔记分组），
                       卡片的标题（下面那个 h3）住在它里面。原来两端都不是标题，
                       于是大纲是 h1「知识卡片」→ h3「卡片标题」跳级（axe 的
@@ -276,7 +278,22 @@ export default function KnowledgeCards() {
                       而且没有新起任何名字、没有多任何一行文字。
                       字号/字重显式钉住（与 `<strong>` 的默认外观一致），
                       所以视觉不变 —— 与 F-14/F-15/F-18 的做法相同。 */}
-                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>{group.note_title}</h2>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.note_id)}
+                      aria-expanded={expandedNotes.has(group.note_id)}
+                      style={groupToggleStyle}
+                    >
+                      <span
+                        className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}
+                        aria-hidden="true"
+                      >
+                        ▶
+                      </span>
+                      <span>{group.note_title}</span>
+                    </button>
+                  </h2>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                     ({group.cards.length} 张卡片)
                   </span>
@@ -294,13 +311,23 @@ export default function KnowledgeCards() {
                     <div
                       key={card.id}
                       className="card card-hover"
-                      style={{ cursor: 'pointer', position: 'relative' }}
-                      onClick={() => navigate(`/cards/${card.id}`)}
+                      style={{ position: 'relative' }}
                     >
                       {/* 标题与徽章区 */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-sm)' }}>
                         <h3 style={{ fontSize: '1rem', fontWeight: 600, flex: 1, marginRight: 'var(--space-sm)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {card.title}
+                          {/* 卡片标题是**真链接**（可右键、可新标签页、Tab 一次即达），
+                              而不是"整张卡片 onClick" —— 原来外层是 `div.card[onClick]`，
+                              键盘到不了。与 F-17（笔记列表卡片）/ Dashboard 的笔记卡片同形：
+                              **卡片是盒子，控件在标题上**。下划线显式关掉：
+                              它是"整块可点的标题链接"，不是正文里的行内链接
+                              （正文链接必须带下划线，见 base.css 与 F-13）。 */}
+                          <Link
+                            to={`/cards/${card.id}`}
+                            style={{ color: 'inherit', textDecoration: 'none' }}
+                          >
+                            {card.title}
+                          </Link>
                         </h3>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                           {card.is_key_point && (
@@ -366,21 +393,18 @@ export default function KnowledgeCards() {
                             />
                           </div>
                           {card.mastery_level >= 80 && (
-                            <div
+                            /* 真 `<button>` 而不是 `div[onClick]`：这一行是"生成拓展知识点"的
+                               入口，键盘必须到得了（原来它是个没有 role/tabIndex 的 div，
+                               axe 判不了、Tab 也到不了）。外观按"一行 0.7rem 的提示文字"
+                               显式复位 —— 按钮的 UA 样式（字体族/行高/内边距）必须逐个还原，
+                               否则这里会长出按钮的默认外观。 */
+                            <button
+                              type="button"
                               onClick={e => handleGenerateExtension(e, card)}
-                              style={{
-                                marginTop: '4px',
-                                fontSize: '0.7rem',
-                                // `#c9a959`（`--color-accent`）白底只有 2.26:1，
-                                // 而这里是一行 0.7rem 的**提示文字**（要求 4.5:1）——
-                                // 与 a11y-audit 的 F-19/F-33 是同一个"金色压浅底"的洞。
-                                // `#8f7020` 是同色相压深一档：白底 4.66:1。
-                                color: '#8f7020',
-                                cursor: 'pointer',
-                              }}
+                              style={extensionHintStyle}
                             >
                               ✨ 建议生成拓展知识点
-                            </div>
+                            </button>
                           )}
                         </div>
                       )}
@@ -473,4 +497,49 @@ const menuItemStyle: React.CSSProperties = {
   fontSize: '0.8rem',
   cursor: 'pointer',
   borderRadius: '4px',
+}
+
+/**
+ * 分组头里那个折叠按钮的外观复位。
+ *
+ * 为什么要把 `font` / `color` / `background` / `border` / `padding` / `margin`
+ * 全部显式写出来：`<button>` 有自己的 UA 样式（系统字体、灰底、2px 边框、
+ * 居中文字、内边距），不复位的话"把 div 换成真按钮"就变成了一次改版。
+ * 这里的取值逐项对应**改动前那一行 div 的实际外观**：字号/字重/颜色继承
+ * 外层 `h2`（1rem / 700 / `--color-text`），背景与边框本来就没有。
+ */
+const groupToggleStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-sm)',
+  margin: 0,
+  padding: 0,
+  border: 'none',
+  background: 'none',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+}
+
+/**
+ * 「✨ 建议生成拓展知识点」那个按钮的外观复位（同上，逐项对应原来的 div）。
+ *
+ * `#8f7020` 是**修过的色值**，不要改回 `#c9a959`（`--color-accent`）：
+ * 它在白底只有 2.26:1，而这里是一行 0.7rem 的提示文字（要求 4.5:1）——
+ * 与 a11y-audit 的 F-19/F-33 是同一个"金色压浅底"的洞，`#8f7020`
+ * 是同色相压深一档（白底 4.66:1）。
+ */
+const extensionHintStyle: React.CSSProperties = {
+  display: 'block',
+  marginTop: '4px',
+  fontFamily: 'inherit',
+  fontSize: '0.7rem',
+  lineHeight: 'inherit',
+  color: '#8f7020',
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  textAlign: 'left',
+  cursor: 'pointer',
 }

@@ -41,6 +41,26 @@ const SCORE_FILL_CLASS: Record<'high' | 'mid' | 'low', string> = {
   low: styles.scoreBarFillLow,
 }
 
+/**
+ * 「选择笔记」卡片里那个按钮的外观复位。
+ *
+ * 卡片（`.note-select-card`）的样式没动，动的是**谁接行为**：原来是整个
+ * `div[onClick]`（键盘到不了），现在是标题里一个真 `<button>`。
+ * `<button>` 自带 UA 样式（系统字体、灰底、2px 边框、居中文字、内边距），
+ * 不复位就是一次改版；下面的取值逐项对应改动前那一行标题的实际外观
+ * （字号 1rem 与字重都从外层 `h3` 继承）。
+ */
+const noteSelectButtonStyle: React.CSSProperties = {
+  margin: 0,
+  padding: 0,
+  border: 'none',
+  background: 'none',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+}
+
 export default function LearningAssessment() {
   const toast = useToast()
   const [searchParams] = useSearchParams()
@@ -373,12 +393,27 @@ export default function LearningAssessment() {
                 <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>选择笔记</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-sm)' }}>
                   {compareLinkedPersonalNotes.map(n => (
+                    /* ⚠️ 原来卡片是 `div[onClick]`（没有 role/tabIndex）—— 键盘**到不了**，
+                       而"选中这张笔记"是整页下一步（比对/出题）的前提。
+                       形状与本文件里已有的多选卡片（`renderNoteCard`：
+                       `<label>` + 真 `<input type="checkbox">`）一致：**卡片是盒子，
+                       控件在标题上**。选中的是单张笔记，`aria-pressed` 表达选中态 ——
+                       原来只有 `.note-select-card-checked` 这个视觉类名，读屏读不到。
+                       字号 1rem 与 h3 继承来的 bold 都显式保留，**视觉不变**。 */
                     <div
                       key={n.id}
                       className={`note-select-card ${selectedPersonalNoteId === n.id ? 'note-select-card-checked' : ''}`}
-                      onClick={() => handleSelectPersonalNote(n.id)}
                     >
-                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>{n.title}</h3>
+                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPersonalNote(n.id)}
+                          aria-pressed={selectedPersonalNoteId === n.id}
+                          style={noteSelectButtonStyle}
+                        >
+                          {n.title}
+                        </button>
+                      </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                         关联资料: {selectedPersonalNoteId === n.id ? linkedMaterials.length : '—'} 篇
                       </p>
@@ -504,12 +539,21 @@ export default function LearningAssessment() {
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-sm)' }}>
                   {linkablePersonalNotes.map(n => (
+                    /* 与上面 compare 模式那一份同形（同一处修复的第二条渲染路径） */
                     <div
                       key={n.id}
                       className={`note-select-card ${selectedPersonalNoteId === n.id ? 'note-select-card-checked' : ''}`}
-                      onClick={() => handleSelectPersonalNote(n.id)}
                     >
-                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>{n.title}</h3>
+                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPersonalNote(n.id)}
+                          aria-pressed={selectedPersonalNoteId === n.id}
+                          style={noteSelectButtonStyle}
+                        >
+                          {n.title}
+                        </button>
+                      </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                         关联资料: {linkedMaterials.length} 篇
                       </p>

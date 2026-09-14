@@ -42,10 +42,16 @@
   margin-bottom: var(--space-xl);
 }
 
-/* ── 今日待复习卡片：左侧文案 + 右侧"开始复习"按钮 ── */
-
+/* ── 今日待复习卡片：左侧文案 + 右侧"开始复习"按钮 ──
+ *
+ * ⚠️ 这里**刻意没有** `cursor: pointer`：F-09 把这张卡片从
+ * `div[role="button"]` 改成"盒子 + 真按钮"之后，可点的只有那个按钮 ——
+ * 卡片上留着 `cursor: pointer` 会让鼠标用户以为整张卡能点
+ * （"看起来能点、点了没反应"）。手型光标由 `<button>` 自己提供。
+ * 顺带说明：`cursor` 是**继承属性**，卡片上的 pointer 会把它里面每一个
+ * `h2` / `p` 的计算值都变成 pointer —— 这正是 F-37 的键盘扫描把它报出来的原因
+ * （它报的是"整个手型区域里没有可 Tab 的控件"）。 */
 .dashboardReviewCard {
-  cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;

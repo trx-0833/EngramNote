@@ -130,11 +130,19 @@
   border-radius: 9999px;
 }
 
+/* 图例条目（**两个地方共用**，其中一个不可点）。
+ *
+ * ⚠️ 这里**刻意不写** `cursor: pointer`：工具栏那张卡片类型图例
+ * （`GraphToolbar.tsx:121`）用的是同一个类名，而它只是说明、不可点 ——
+ * 手型光标会让鼠标用户以为能点（"看起来能点、点了没反应"）。
+ * 真正可点的那一处（`GraphSidebar` 的关系类型图例）现在是**真 `<button>`**，
+ * 光标由全局的 `button { cursor: pointer }` 提供，不依赖这个类。
+ * 这一条是 F-37 的键盘扫描报出来的：它先报"手型区域里没有可 Tab 的控件"，
+ * 查下去才发现可点的那一份当时是个没有 role/tabIndex 的 `span`。 */
 .graphLegendItem {
   display: flex;
   align-items: center;
   gap: 4px;
-  cursor: pointer;
   padding: 2px 6px;
   border-radius: 9999px;
   transition: all 0.2s var(--ease-out-expo);

@@ -6,7 +6,7 @@
  * 3. 新建目标（弹窗式表单：名称、类型、目标掌握度、截止日期）
  * 4. 目标归档与删除（带二次确认）
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   getGoals, createGoal, archiveGoal, deleteGoal,
   type LearningGoal,
@@ -155,11 +155,31 @@ export default function LearningGoals() {
   }
 
   /** 取消新建，重置表单 */
-  function handleCancelCreate() {
+  const handleCancelCreate = useCallback(() => {
     setCreateForm(INITIAL_FORM)
     setFormError('')
     setShowCreateForm(false)
-  }
+  }, [])
+
+  /**
+   * Esc 关闭新建弹窗（a11y-audit 的键盘可达性一轮）。
+   *
+   * 原来这个弹窗**没有任何键盘退路**：只有"点遮罩"与"点取消"两条路，
+   * 而 `role="dialog"` / `aria-modal` 也都没有 —— 屏幕阅读器不会把
+   * 它念成一个对话框。
+   *
+   * 监听挂在 `document` 而不是弹窗容器上：挂在容器上要求 keydown 从容器内部
+   * 冒泡上来（`autoFocus` 落在名称输入框上时成立，但焦点一旦回到 `body`
+   * 就静默失效 —— 那种"看起来做了、实际不生效"最糟）。
+   */
+  useEffect(() => {
+    if (!showCreateForm) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') handleCancelCreate()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showCreateForm, handleCancelCreate])
 
   return (
     <div className="page-enter">
@@ -251,7 +271,18 @@ export default function LearningGoals() {
         </>
       )}
 
-      {/* 新建目标弹窗 */}
+      {/* 新建目标弹窗。
+          ── a11y-audit 的键盘可达性一轮（这一处此前**没有任何场景**覆盖，
+             所以先补 `learning-goals-create` 场景再改，见 e2e/a11y.spec.ts）──
+          补的四件事：
+            1. `role="dialog"` —— 屏幕阅读器把这一块念成对话框；
+            2. `aria-modal="true"` —— 明确"底下的内容此刻不参与交互"；
+            3. `aria-labelledby` 指到标题上 —— 对话框有可访问名（axe 的
+               `aria-dialog-name` 要求它，没有名字的对话框读屏只会念"对话框"）；
+            4. 四个 `<label>` 与输入框用 `htmlFor`/`id` **真的关联起来** ——
+               原来 label 只是视觉上的兄弟，点标签不会聚焦输入框，
+               读屏也报不出这些控件的名字（axe 的 `label` 规则第一次扫到就会报）。
+          `autoFocus` 本来就在名称输入框上（打开即聚焦），保持不变。 */}
       {showCreateForm && (
         <div
           style={{
@@ -267,17 +298,24 @@ export default function LearningGoals() {
         >
           <div
             className="card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="learning-goal-create-title"
             style={{ width: '90%', maxWidth: 480, padding: 'var(--space-lg)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ marginBottom: 'var(--space-md)' }}>新建学习目标</h3>
+            <h3 id="learning-goal-create-title" style={{ marginBottom: 'var(--space-md)' }}>新建学习目标</h3>
 
             {/* 名称输入 */}
             <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
+              <label
+                htmlFor="learning-goal-create-name"
+                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+              >
                 目标名称
               </label>
               <input
+                id="learning-goal-create-name"
                 type="text"
                 className="input"
                 placeholder="例如：掌握第一章核心概念"
@@ -290,10 +328,14 @@ export default function LearningGoals() {
 
             {/* 类型选择 */}
             <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
+              <label
+                htmlFor="learning-goal-create-type"
+                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+              >
                 目标类型
               </label>
               <select
+                id="learning-goal-create-type"
                 className="input"
                 value={createForm.type}
                 onChange={(e) => setCreateForm(prev => ({ ...prev, type: e.target.value as GoalType }))}
@@ -305,10 +347,14 @@ export default function LearningGoals() {
 
             {/* 目标掌握度 */}
             <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
+              <label
+                htmlFor="learning-goal-create-mastery"
+                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+              >
                 目标掌握度 (%)
               </label>
               <input
+                id="learning-goal-create-mastery"
                 type="number"
                 className="input"
                 min={0}
@@ -320,10 +366,14 @@ export default function LearningGoals() {
 
             {/* 截止日期 */}
             <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
+              <label
+                htmlFor="learning-goal-create-deadline"
+                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+              >
                 截止日期（可选）
               </label>
               <input
+                id="learning-goal-create-deadline"
                 type="date"
                 className="input"
                 value={createForm.deadline}

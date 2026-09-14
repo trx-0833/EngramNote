@@ -111,7 +111,13 @@ export default function ProjectCard({
               autoFocus
             />
           ) : (
-            <h3
+            /* `h2` 而不是 `h3`（a11y-audit **F-20**）：这一页的标题是 h1「项目」
+               （`ProjectsHeader`），卡片标题是它的**直接下级区块** ——
+               中间不存在第三级，写成 h3 就是 h1 → h3 跳级。
+               提升为 h2 之后大纲是 h1 → h2（每张卡片），层级是完整的，
+               而且**没有新起任何名字、没有多任何一行文字**（区块名就是卡片标题）。
+               字号 1.05rem 与字重 700 本来就显式钉着，所以**一个像素都没动**。 */
+            <h2
               style={{
                 fontSize: '1.05rem',
                 fontWeight: 700,
@@ -122,7 +128,7 @@ export default function ProjectCard({
               }}
             >
               {p.name}
-            </h3>
+            </h2>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
             <span className="badge" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>

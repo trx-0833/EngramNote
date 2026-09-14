@@ -3,7 +3,7 @@
  * @description 展示单张知识卡片的完整内容、原始出处和关联题目，支持编辑和删除
  */
 import { useCallback, useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { getKnowledgeCard, updateKnowledgeCard, deleteKnowledgeCard, getQuestions, type KnowledgeCard, type QuizItem } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ErrorDisplay from '../components/ErrorDisplay'
@@ -124,9 +124,14 @@ export default function CardDetail() {
           {card.note_title === '已删除的笔记' ? (
             <span style={{ color: 'var(--color-text-secondary)' }}>[已删除的笔记]</span>
           ) : (
-            <span style={{ color: 'var(--color-primary)', cursor: 'pointer' }} onClick={() => navigate(`/notes/${card.note_id}`)}>
+            /* ⚠️ 这里原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**。
+               现在它是真 `<Link>`（Tab 一次即达、可右键、可新标签页）。
+               下划线**刻意保留**（全局默认，base.css）：它就在一行文字里
+               （「来源笔记：<标题>」），属于 F-13 那一类 —— 链接必须不只靠颜色
+               与周围文字区分，`link-in-text-block` 会判它（card-detail 场景有门禁）。 */
+            <Link to={`/notes/${card.note_id}`} style={{ color: 'var(--color-primary)' }}>
               {card.note_title || '查看笔记'}
-            </span>
+            </Link>
           )}
         </p>
       ) : (

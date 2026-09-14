@@ -82,13 +82,20 @@
  * ⚠️ 这两个类名挂在**同时还有全局 `card card-hover`** 的元素上
  * （`<article className="card card-hover note-list-item">`）。逐属性核对过：
  * `.card` 写的是 background / border / border-radius / padding / box-shadow /
- * transition，`.noteListItem` 写的是 cursor / display / justify-content /
- * align-items —— **没有同名属性**，所以没有登记 `CASCADE_PAIRS`
+ * transition，`.noteListItem` 写的是 display / justify-content / align-items
+ * —— **没有同名属性**，所以没有登记 `CASCADE_PAIRS`
  * （跨属性竞争那种盲区见计划 §5 雷区 12）。
+ *
+ * ⚠️ `.noteListItem` 原本还有一条 `cursor: pointer`，**本轮删除**（F-37）：
+ * F-17 把这张卡片从 `article[role="button"]` 改成"盒子 + 标题链接 + 操作按钮"
+ * 之后，可点的只有里面的链接与按钮 —— 卡片上的手型光标是 F-17 那次修复
+ * **留下的残迹**（鼠标用户会以为整张卡能点，点了没反应）。
+ * 顺带说明为什么它是被"键盘扫描"而不是被人眼发现的：`cursor` 是**继承属性**，
+ * 卡片上的 pointer 会把它里面每一个 `span`（徽章、状态、大小）的计算值
+ * 都变成 pointer，于是扫描报出"整个手型区域里没有可 Tab 的控件"。
  * ════════════════════════════════════════════════════════════════ */
 
 .noteListItem {
-  cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;

@@ -4,7 +4,9 @@
  * 使用 SSE 流式响应实现实时答案展示，首字到达前显示"AI 正在思考..."
  */
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+// `useNavigate` 随引用来源那一行的改动一起去掉了：那一行现在是 `<Link to>`，
+// 不再需要"用 JS 跳转"（见引用列表的注释）。
+import { Link } from 'react-router-dom'
 import { askQuestionStream, type AnswerSource } from '../api/client'
 import { parseSSEStream } from '../utils/sse'
 import { useThrottledStream } from '../hooks/useStreamAnswer'
@@ -22,7 +24,6 @@ interface QARecord {
 }
 
 export default function QA() {
-  const navigate = useNavigate()
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -312,17 +313,26 @@ export default function QA() {
                         ? `/notes/${source.note_id}?${params}`
                         : `/notes/${source.note_id}`
                       // 引用编号与回答里的 [N] 对应（后端保证同一次遍历产出）
+                      //
+                      // ⚠️ 这里原来是 `div[onClick]`（没有 role/tabIndex）—— **键盘到不了**，
+                      // 而"点引用跳原文"是这一页除了提问之外唯一的操作。
+                      // 现在它是真 `<Link>`：可右键、可新标签页、可被读屏当"链接"列出、
+                      // Tab 一次即达（与 F-17 的卡片标题链接同形）。
+                      // 下划线**刻意保留**（全局默认）：它是正文块里的一行链接，
+                      // 属于 F-13 那一类（链接必须不只靠颜色与周围文字区分）。
+                      // `canJump=false` 时仍然给链接（只是没有定位参数）——
+                      // 原来它也是可点的，行为逐字不变。
                       return (
-                        <div
+                        <Link
                           key={source.chunk_id || sIdx}
+                          to={href}
+                          title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息，只能打开笔记'}
                           style={{
+                            display: 'block',
                             fontSize: '0.8rem',
                             color: canJump ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                            cursor: 'pointer',
                             marginBottom: '2px',
                           }}
-                          title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息，只能打开笔记'}
-                          onClick={() => navigate(href)}
                         >
                           [{sIdx + 1}] 📄 {source.note_title}
                           {source.heading_path
@@ -331,7 +341,7 @@ export default function QA() {
                               ? ` > ${source.chapter_title}`
                               : ''}
                           {!canJump && <span style={{ fontSize: '0.7rem' }}>（无定位）</span>}
-                        </div>
+                        </Link>
                       )
                     })}
                   </div>

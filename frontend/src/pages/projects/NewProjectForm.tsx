@@ -52,7 +52,10 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
       {!showForm ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>创建新项目</h3>
+            {/* `h2` 而不是 `h3`（a11y-audit **F-20**）：与 `ProjectCard` 同一次修复 ——
+                这一页的 h1 是「项目」，这些卡片标题就是它的直接下级区块。
+                字号 1rem / 字重 600 本来就显式钉着，**像素不变**。 */}
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>创建新项目</h2>
             <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
               项目为纯标签，创建后不生成物理目录；用标签给笔记打归属
             </p>
@@ -63,7 +66,7 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>新建项目</h3>
+          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>新建项目</h2>
           <div>
             <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>项目名称</label>
             <input

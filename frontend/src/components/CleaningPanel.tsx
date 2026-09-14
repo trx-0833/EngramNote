@@ -192,7 +192,15 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
         <>
           {/* 清洗统计摘要 */}
           <div className={styles.cleaningStats}>
-            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>清洗统计</h4>
+            {/* `h2` 而不是 `h4`（a11y-audit **F-08** 的真实成因）。
+                这一页的大纲是 h1（笔记标题，`NoteDetailHeader`）→ 本区块 → 正文。
+                原来「清洗统计」与「重复块」都写成 `h4`，于是 h1 之后直接出现 h4，
+                axe 的 `heading-order` 报的就是**这一个节点** —— 它来自页面自己的
+                元信息区块，**不是**用户的 Markdown（正文里的标题层级另外算，
+                见 docs/a11y-audit.md 里对 F-08 成因的更正）。
+                字号 0.875rem / 字重 600 本来就显式钉着，所以**一个像素都没动**
+                （与 F-18 / F-14/F-15 / trash / card-detail 的做法逐字相同）。 */}
+            <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>清洗统计</h2>
             <div style={{ display: 'flex', gap: 'var(--space-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
               <span>总分块: {totalChunks}</span>
               <span>重复块: {duplicateBlocks}</span>
@@ -221,9 +229,11 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
           {/* 重复块列表 */}
           {duplicatesDetail.length > 0 && (
             <div className={styles.duplicateBlocks}>
-              <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+              {/* 与「清洗统计」同级的第二个区块 → 同为 `h2`（同一个 F-08 修复的
+                  第二条渲染路径；它们只在重复块非空时渲染）。字数/字重不变。 */}
+              <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
                 重复块（{duplicatesDetail.length} 个）
-              </h4>
+              </h2>
               {duplicatesDetail.map((dup) => {
                 const expanded = expandedIndex === dup.block_index
                 const hasContent = !!dup.content || !!dup.original_content

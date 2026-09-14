@@ -8,7 +8,7 @@
  * 5. 按状态筛选文件
  */
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   getFolders,
   getFolderDetail,
@@ -98,7 +98,6 @@ function getStatusCategory(status: string): string {
  */
 export default function DailyMaterials() {
   const toast = useToast()
-  const navigate = useNavigate()
   /** 文件夹列表 */
   const [folders, setFolders] = useState<Folder[]>([])
   /** 当前展开的文件夹 ID */
@@ -499,19 +498,18 @@ export default function DailyMaterials() {
                           marginBottom: 'var(--space-xs)',
                           border: '1px solid var(--color-primary)',
                           borderRadius: '4px',
-                          outline: 'none',
                         }}
                         disabled={renaming}
                         aria-label="文件夹名称"
                       />
                     ) : (
-                      <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
+                      <h2 style={{ fontSize: '1.17em', fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
                         <button
                           type="button"
                           onClick={() => toggleFolder(folder.id)}
                           aria-expanded={expandedFolderId === folder.id}
                           style={{
-                            // 复位按钮的 UA 外观，只留下"可点"：字号/字重/颜色全部继承 h3，
+                            // 复位按钮的 UA 外观，只留下"可点"：字号/字重/颜色全部继承标题，
                             // 所以文件夹名的视觉与改动前一致（这次修的是结构，不是外观）
                             display: 'flex',
                             alignItems: 'center',
@@ -541,7 +539,7 @@ export default function DailyMaterials() {
                           </span>
                           <span>{folder.name}</span>
                         </button>
-                      </h3>
+                      </h2>
                     )}
                     <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
                       <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
@@ -670,25 +668,36 @@ export default function DailyMaterials() {
                       ) : (
                         <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
                           {filteredNotes.map((note) => (
+                            /* ⚠️ 这一行原来是 `div.card.card-hover[role="button"][tabIndex=0]`
+                               + 一个只认 `Enter` 的 `onKeyDown` —— axe **报不出来**
+                               （它只看"可聚焦元素里嵌可聚焦元素"，这一行里没有可聚焦后代），
+                               但 Tab 会停在一个"不是按钮的按钮"上，而且 Space 不生效。
+                               改法与同一页的文件夹头（F-30）逐字同形：外层回到"盒子"，
+                               行为落在**真链接**上（标题）—— 进笔记是导航，链接比按钮更准
+                               （可右键、可新标签页、Tab 一次即达）。 */
                             <div
                               key={note.id}
                               className="card card-hover"
                               style={{
-                                cursor: 'pointer',
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
                                 padding: 'var(--space-sm) var(--space-md)',
                               }}
-                              onClick={() => navigate(`/notes/${note.id}`)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/notes/${note.id}`) }}
                             >
                               <div style={{ flex: 1 }}>
-                                <h4 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
-                                  {note.title}
-                                </h4>
+                                {/* `h3` 而不是 `h4`：这一页的大纲是 h1「今日资料」→
+                                    h2（文件夹名，见上）→ h3（文件夹里的资料），
+                                    `h4` 会让 h2 与 h4 之间缺一级。字号 0.9rem/字重 500
+                                    本来就显式钉着，所以**一个像素都没动**。 */}
+                                <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}>
+                                  <Link
+                                    to={`/notes/${note.id}`}
+                                    style={{ color: 'inherit', textDecoration: 'none' }}
+                                  >
+                                    {note.title}
+                                  </Link>
+                                </h3>
                                 <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
                                   {/* 来源类型标签 */}
                                   <span className={`badge badge-${note.source_type}`}>

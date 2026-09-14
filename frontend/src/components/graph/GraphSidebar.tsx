@@ -523,16 +523,36 @@ function RelationLegend({
     <div className={styles.graphPanel}>
       <div className={styles.graphPanelTitle}>关系类型（点击高亮）</div>
       <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {/* ⚠️ 这里原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**，
+            而"点一下高亮这类关系"是这一块唯一的操作。axe 报不出来这一类
+            （它不模拟 Tab），是 F-37 的键盘扫描报出来的。
+            现在是真 `<button aria-pressed>`：Enter 与 Space 都生效，
+            读屏也会念出"按钮 + 是否按下"。外观靠 `.graphLegendItem` 那条类 +
+            下面这几个"复位按钮 UA 外观"的属性，视觉与改动前一致。 */}
         {Object.entries(RELATION_TYPE_LABELS).map(([type, label]) => (
-          <span
+          <button
             key={type}
+            type="button"
             className={`${styles.graphLegendItem}${highlightedRelationType === type ? ` ${styles.graphLegendItemActive}` : ''}`}
-            style={{ justifyContent: 'flex-start', cursor: 'pointer' }}
+            aria-pressed={highlightedRelationType === type}
+            style={{
+              justifyContent: 'flex-start',
+              border: 'none',
+              background: 'none',
+              fontFamily: 'inherit',
+              lineHeight: 'inherit',
+              color: 'inherit',
+              textAlign: 'left',
+            }}
             onClick={() => setHighlightedRelationType((prev) => (prev === type ? null : type))}
           >
-            <span className={styles.graphRelationLine} style={{ background: RELATION_TYPE_COLORS[type] }} />
+            <span
+              className={styles.graphRelationLine}
+              style={{ background: RELATION_TYPE_COLORS[type] }}
+              aria-hidden="true"
+            />
             {label}
-          </span>
+          </button>
         ))}
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px' }}>
           <span style={{ width: 20, height: 0, borderTop: '2px dashed var(--color-text-tertiary)', display: 'inline-block' }} />

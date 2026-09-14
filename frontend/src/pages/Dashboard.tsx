@@ -146,18 +146,31 @@ export default function Dashboard() {
       </section>
 
       {/* 今日学习目标概要 + 每日推荐任务（两栏布局见 Dashboard.module.css，
-          窄屏收成一列的媒体查询也在那里 —— 类名哈希后 responsive.css 选不中它） */}
+          窄屏收成一列的媒体查询也在那里 —— 类名哈希后 responsive.css 选不中它）
+
+          ── 这一段的两个改动（a11y-audit F-07 / §4.1）──
+          1. **标题级别**：卡片标题原来全是 `h3`，而 h1「欢迎使用 EngramNote」
+             与本页的区块标题（`h2`：今日学习报告 / 本周复习趋势 / 最近笔记）
+             之间缺一级 —— axe 的 `heading-order` 报的就是这个跳级。
+             修法是把这四张卡片**提升为 `h2`**：它们本来就是这一页的顶层区块
+             （与「最近笔记」平级），名字一个都没新起、一个字都没加。
+             字号用 `1.17em` 显式钉住 —— 这正是 UA 样式表里 `h3` 的字号，
+             所以计算后的字号与改动前逐像素相同（`em` 相对父元素，父元素没变）。
+          2. **键盘可达**：第一张卡片原来是 `div[role="button"][tabIndex=0]`，
+             而且只监听 `Enter`、不监听 `Space`（与已修的 F-09 是同一个洞的
+             另一处入口；axe 报不出来，因为它里面没有可聚焦后代）。
+             改法与 F-09 一致 —— 卡片回到"盒子"，行为落在**真链接**上：
+             进「学习目标」是导航，链接比按钮更准（可右键、可新标签页）。 */}
       <div className={styles.dashboardTwoCol}>
         {/* 今日学习目标卡片 */}
-        <div
-          className="card card-accent-left"
-          style={{ cursor: 'pointer' }}
-          onClick={() => navigate('/goals')}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter') navigate('/goals') }}
-        >
-          <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>今日学习目标</h3>
+        <div className="card card-accent-left">
+          <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+            {/* 下划线显式关掉：这是"整块可点的卡片标题"，不是正文里的行内链接
+                （正文链接必须带下划线，见 base.css 与 F-13） */}
+            <Link to="/goals" style={{ color: 'inherit', textDecoration: 'none' }}>
+              今日学习目标
+            </Link>
+          </h2>
           {goals.length === 0 ? (
             <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
               还没有学习目标，点击创建
@@ -216,7 +229,7 @@ export default function Dashboard() {
 
         {/* 每日推荐任务卡片 */}
         <div className="card card-accent-gold">
-          <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>每日推荐任务</h3>
+          <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>每日推荐任务</h2>
           {!dailyPlan || dailyPlan.total_count === 0 ? (
             <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
               今日暂无推荐任务
@@ -278,9 +291,9 @@ export default function Dashboard() {
         {reviewStats && reviewStats.due_count > 0 && (
           <div className={`card card-accent-left ${styles.dashboardReviewCard}`}>
             <div>
-              <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
+              <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
                 今日待复习: {reviewStats.due_count} 题
-              </h3>
+              </h2>
               <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
                 今日已完成 {reviewStats.today_done} 题 | 正确率 {reviewStats.today_accuracy}%
               </p>
@@ -292,19 +305,25 @@ export default function Dashboard() {
         {/* 薄弱点列表 */}
         {weakPoints.length > 0 && (
           <div className="card card-accent-error">
-            <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>薄弱点</h3>
+            <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>薄弱点</h2>
+            {/* 每一行是**真链接**：原来外层是 `div[onClick]`（没有 role/tabIndex），
+                键盘到不了 —— 而"跳到那张卡片"是这一行唯一的行为。
+                与 F-17（笔记列表卡片）/ CardDetail 的「来源笔记」同一次改法。
+                `link-in-text-block` 不会命中它：链接是块级（`display:flex`）且
+                自成一个区块，不是正文里被文字包住的行内链接。 */}
             {weakPoints.map(wp => (
-              <div
+              <Link
                 key={wp.card_id}
+                to={`/cards/${wp.card_id}`}
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   padding: 'var(--space-xs) 0',
                   borderBottom: '1px solid var(--color-border)',
-                  cursor: 'pointer',
+                  color: 'inherit',
+                  textDecoration: 'none',
                 }}
-                onClick={() => navigate(`/cards/${wp.card_id}`)}
               >
                 <div>
                   <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{wp.card_title}</span>
@@ -326,7 +345,7 @@ export default function Dashboard() {
                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                   错{wp.error_count}次 | {wp.accuracy}%
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         )}
@@ -535,11 +554,24 @@ interface DailyTaskBreakdownProps {
   navigate: (path: string) => void
 }
 
-/** 任务类型到中文标签的映射 */
+/**
+ * 任务类型到中文标签的映射。
+ *
+ * ⚠️ 键必须与契约一致：`RecommendedTask.task_type` 是
+ * `'review' | 'new_material' | 'weak_point'`（**单数**，见 api/goals.ts:32）。
+ * 这里原来写的是复数（`weak_points` / `new_materials`），于是标签查不到、
+ * 页面上**原样渲染出英文键** `weak_point` —— 与 TodayLearn 的
+ * `dailyTaskTypeLabels` 同源的那一份是对的，这一份写错了。
+ * 之所以一直没被发现：默认桩的 `/api/goals/daily-plan` 给的是 **400**
+ * （"无活跃目标"），「每日推荐任务」整块**从来不渲染**。
+ * 本轮的 `dashboard` 场景第一次把这块渲染出来（覆盖 `DAILY_PLAN`），
+ * 顺带把这两个键改对 —— 与 F-35 那次的"桩的字段名写错、页面照常渲染"同一类：
+ * **没被渲染过的分支里，任何错误都不会报出来。**
+ */
 const taskTypeLabels: Record<string, string> = {
-  weak_points: '薄弱点',
+  weak_point: '薄弱点',
   review: '复习',
-  new_materials: '新资料',
+  new_material: '新资料',
 }
 
 function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
@@ -595,26 +627,45 @@ function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
             </div>
             {/* 展示前 2 条任务标题作为示例 */}
             {arr.slice(0, 2).map((task, idx) => {
-              // 含 quiz_id 的任务点击跳转复习页
+              // 含 quiz_id / note_id 的任务可以点击跳转
               const clickable = !!task.quiz_id || !!task.note_id
-              return (
-                <div
+              const go = () => {
+                if (task.quiz_id) navigate('/review')
+                else if (task.note_id) navigate(`/notes/${task.note_id}`)
+              }
+              const rowStyle: React.CSSProperties = {
+                display: 'block',
+                width: '100%',
+                fontSize: '0.8rem',
+                color: 'var(--color-text-secondary)',
+                padding: '2px 0 2px var(--space-sm)',
+                textAlign: 'left',
+              }
+              // ⚠️ 可点的那些必须是**真按钮**：原来无论可不可点都渲染
+              // `div[onClick]`（没有 role/tabIndex），键盘**到不了**那一行。
+              // 不可点的保持普通 div —— 渲染一个按不动的按钮是另一种误导。
+              // `fontFamily` / `lineHeight` 显式继承：按钮的 UA 样式会把它们
+              // 换成系统字体与 `normal`，不复位就是一次改版（字号/颜色本来就在
+              // rowStyle 里显式写着）。`stopPropagation` 不再需要 —— 外层卡片
+              // 已经不是可点区域（这一页的另一处修复）。
+              return clickable ? (
+                <button
                   key={idx}
+                  type="button"
+                  onClick={go}
                   style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--color-text-secondary)',
-                    paddingLeft: 'var(--space-sm)',
-                    padding: '2px 0 2px var(--space-sm)',
-                    cursor: clickable ? 'pointer' : 'default',
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (task.quiz_id) navigate('/review')
-                    else if (task.note_id) navigate(`/notes/${task.note_id}`)
+                    ...rowStyle,
+                    fontFamily: 'inherit',
+                    lineHeight: 'inherit',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
                   }}
                 >
                   · {task.title}
-                </div>
+                </button>
+              ) : (
+                <div key={idx} style={rowStyle}>· {task.title}</div>
               )
             })}
           </div>

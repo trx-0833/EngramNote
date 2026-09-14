@@ -4,7 +4,7 @@
  * 用户可以在此查看今日学习任务、开始答题、查看进度。
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   getDueQuizzes, submitAnswer, getReviewStats, getDailyReport, getWeakPoints, getDailyPlan,
   type DueQuiz, type SubmitAnswerResponse, type ReviewStats, type DailyReport, type WeakPoint,
@@ -366,11 +366,14 @@ export default function TodayLearn() {
         <section style={{ marginBottom: 'var(--space-xl)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>薄弱点</h2>
           <div className="card card-accent-error">
+            {/* 每一行是**真链接**：原来外层是 `div[onClick]`（没有 role/tabIndex），
+                键盘到不了 —— 而"跳到那张卡片"是这一行唯一的行为。
+                与仪表盘上那一份（同形 JSX）同一次改法。 */}
             {weakPoints.map(wp => (
-              <div
+              <Link
                 key={wp.card_id}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-xs) 0', borderBottom: '1px solid var(--color-border)', cursor: 'pointer' }}
-                onClick={() => navigate(`/cards/${wp.card_id}`)}
+                to={`/cards/${wp.card_id}`}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-xs) 0', borderBottom: '1px solid var(--color-border)', color: 'inherit', textDecoration: 'none' }}
               >
                 <div>
                   <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{wp.card_title}</span>
@@ -387,7 +390,7 @@ export default function TodayLearn() {
                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                   错{wp.error_count}次 | {wp.accuracy}%
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         </section>
@@ -499,33 +502,23 @@ function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
                 // 是否可点击跳转
                 const clickable = !!task.quiz_id || !!task.note_id
                 const prio = priorityMeta[task.priority] || { color: 'var(--color-text-secondary)', label: String(task.priority) }
-                return (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: 'var(--space-xs) var(--space-sm)',
-                      borderRadius: 4,
-                      background: clickable ? 'var(--color-surface)' : 'transparent',
-                      cursor: clickable ? 'pointer' : 'default',
-                      border: clickable ? '1px solid var(--color-border)' : '1px solid transparent',
-                    }}
-                    onClick={() => {
-                      if (task.quiz_id) navigate('/review')
-                      else if (task.note_id) navigate(`/notes/${task.note_id}`)
-                    }}
-                    role={clickable ? 'button' : undefined}
-                    tabIndex={clickable ? 0 : undefined}
-                    onKeyDown={(e) => {
-                      if (!clickable) return
-                      if (e.key === 'Enter') {
-                        if (task.quiz_id) navigate('/review')
-                        else if (task.note_id) navigate(`/notes/${task.note_id}`)
-                      }
-                    }}
-                  >
+                const go = () => {
+                  if (task.quiz_id) navigate('/review')
+                  else if (task.note_id) navigate(`/notes/${task.note_id}`)
+                }
+                const rowStyle: React.CSSProperties = {
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  padding: 'var(--space-xs) var(--space-sm)',
+                  borderRadius: 4,
+                  background: clickable ? 'var(--color-surface)' : 'transparent',
+                  border: clickable ? '1px solid var(--color-border)' : '1px solid transparent',
+                  textAlign: 'left',
+                }
+                const inner = (
+                  <>
                     <span style={{ fontSize: '0.9rem', flex: 1 }}>{task.title}</span>
                     {/* 优先级徽章 */}
                     <span style={{
@@ -538,7 +531,28 @@ function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
                     }}>
                       {prio.label}
                     </span>
-                  </div>
+                  </>
+                )
+                // ⚠️ 这里原来无论可不可点都渲染 `div[role="button"][tabIndex=0]`，
+                // 而且只监听 `Enter`、**不监听 `Space`** —— 与 F-09 / F-30 / F-34
+                // 是同一个洞的又一处入口：Tab 停在一个"不是按钮的按钮"上，
+                // 而且它的键位约定与 `role="button"` 不符。axe 报不出来（里面
+                // 没有可聚焦后代），只有这里把它换成**真 `<button>`** 才算修好：
+                // 原生的 Enter **与** Space 都生效，读屏也会念"按钮"。
+                // 不可点的任务保持普通 div（渲染一个按不动的按钮是另一种误导）。
+                // 字族/行高/颜色显式继承：按钮的 UA 样式会把它们换掉，
+                // 不复位就是一次改版（字号本来就在内层 span 上写着）。
+                return clickable ? (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={go}
+                    style={{ ...rowStyle, fontFamily: 'inherit', lineHeight: 'inherit', color: 'inherit', cursor: 'pointer' }}
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <div key={idx} style={rowStyle}>{inner}</div>
                 )
               })}
             </div>

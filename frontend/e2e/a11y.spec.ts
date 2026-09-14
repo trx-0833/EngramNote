@@ -137,7 +137,26 @@ interface RegisteredRule {
 }
 
 /**
- * ## 5.9 修复轮之后：登记表从 30 条（68 个节点）降到 4 条（4 个节点）
+ * ## ★ 当前状态（Part A/B 收尾轮）：**`REGISTRY` 是空的**
+ *
+ * 扫描场景 **25 → 26**（新增 `learning-goals-create`：新建目标弹窗），
+ * 违规 **5 组 / 5 个节点 → 0**，登记表 **5 条 → 0 条**。
+ * 逐条的修法与"名字从哪儿来"见下面第二段注释（`REGISTRY` 的定义处）。
+ * **空表 = 零容忍**（不是"没有门禁"）：没登记的规则一律 `unregistered` → 失败。
+ *
+ * 本轮还补了**两类不依赖 axe 的门禁**（都在本文件里，见各自的注释）：
+ *   1. **键盘可达性扫描**（`findFakeAffordances`，每次 `auditScene` 都跑）——
+ *      "手型光标但键盘到不了" / "tabindex 挂在非控件上" / "role=button 挂在
+ *      div 上" 三类，全部按零容忍断言。这一轮 Part A 修的 12 处，
+ *      **axe 一处都没报过**（它不模拟 Tab，见 docs/a11y-audit.md §4.1）。
+ *   2. **Tab 走查断言**（`expectReachableByTab`）—— 在受影响的场景里真的按 Tab，
+ *      断言焦点会落到那个控件上（不是"它有 role=button"这种自证）。
+ *
+ * ⚠️ 下面这几段是**历史**（保留：它们是"改了多少"的凭据，删了就没法对照）。
+ * 读它们时请以本节的状态为准。
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * ## （历史）5.9 修复轮之后：登记表从 30 条（68 个节点）降到 4 条（4 个节点）
  *
  * 修掉的每一类都对应文档 §3 的一条发现，逐条证据见该文件；
  * 这里只记"还剩什么、为什么还留着"：
@@ -158,7 +177,7 @@ interface RegisteredRule {
  * 笔记角色下拉框）在 9 个场景里**一个节点都不剩**。历史计数见文档 §2。
  *
  * ────────────────────────────────────────────────────────────────────────
- * ## 覆盖轮（本轮）之后：4 条（4 个节点）→ **12 条（15 个节点）**
+ * ## （历史）覆盖轮之后：4 条（4 个节点）→ **12 条（15 个节点）**
  *
  * ⚠️ **这个数字变大不是回归，是覆盖面变大**：新增的 8 条全部挂在**新场景**上
  * （`notes-status-processing` / `daily-materials` / `today-learn` / `review`），
@@ -184,7 +203,7 @@ interface RegisteredRule {
  * 归属与修法逐条写在下面每条的 `reason` 里。
  *
  * ────────────────────────────────────────────────────────────────────────
- * ## 清债 + 覆盖第二轮（当前状态）：**12 条（15 个节点）→ 5 条（5 个节点）**，
+ * ## （历史）清债 + 覆盖第二轮：**12 条（15 个节点）→ 5 条（5 个节点）**，
  * ## 扫描场景 **15 → 25**
  *
  * 上面那 8 条债里 **7 条已修、登记项已删除**（F-28/F-29/F-30/F-32/F-33/F-34/F-35），
@@ -200,124 +219,73 @@ interface RegisteredRule {
  * **阈值断言**（axe 对单字符文本按设计不下结论，F-36 只能这样守，见 §10.7）。
  */
 
-const REGISTRY: RegisteredRule[] = [
-  // ── 仪表盘 ──────────────────────────────────────────────────────────
-  {
-    id: 'F-07',
-    rule: 'heading-order',
-    scene: 'dashboard',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      'h1「欢迎使用 EngramNote」之后直接出现卡片里的 h3，axe 报**第一个**跳级节点（「今日学习目标」）。' +
-      '同页的卡片标题还有「每日推荐任务」「今日待复习」「薄弱点」。' +
-      '判定为 **(b) 需要人工决定**（docs/a11y-audit.md §3 的 P3）。' +
-      '为什么本修轮没有顺手改成 h2：这一页的卡片是**两栏区块**（`Dashboard.module.css` 的 `.dashboardTwoCol`：' +
-      '今日学习目标 + 每日推荐任务 / 今日待复习 + 薄弱点），而这两组区块**没有区块级标题**，' +
-      '所以 h1 → 卡片标题之间本来就缺一级；把卡片标题降级成 h2 只能消掉报警，' +
-      '真正的结构问题（四个卡片在这一页上没有归属哪个区块）原样留着。' +
-      '要么给两组各加一个区块标题（"今日进度""需要关注"之类 —— 起名是产品/设计决定，' +
-      '而且会让仪表盘多出两行标题），要么接受当前层级。' +
-      '上限维持 1：多一个节点就失败。归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
-  },
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * ## ★ 当前状态：**登记表是空的**（Part A/B 收尾轮）
+ *
+ * `REGISTRY` 从 **5 条（5 个节点）→ 0 条**。这是本文件第一次出现空表，
+ * 含义必须说清楚：**空表不是"没有门禁"，而是门禁最紧的形态** ——
+ * `reconcile()` 对**没登记的规则**一律判 `unregistered` → 失败，
+ * 所以任何一条 axe 违规（哪怕只有 1 个节点）出现在任何一个场景里都会红。
+ * 没有豁免、没有上限、没有"先登记下来以后再修"。
+ *
+ * 删掉的 5 条全是 `heading-order`，而且是**同一类**：区块标题的级别缺一级。
+ * 它们"需要人拍板"的从来不是修法，而是**区块该叫什么名字**。
+ * 这一轮的答案是：**一个新名字都不用起** —— 每个区块的可访问名都取自
+ * 屏幕上**已经存在的字**（就是那些卡片/文件夹/资料自己的标题），
+ * 做法是把标题**提到它本来就该在的级别**（与 F-18、F-14/F-15、trash、
+ * card-detail、learning-assessment、knowledge-cards 的先例逐字相同：
+ * 级别与视觉大小是两件事，字号一律显式钉住）：
+ *
+ * | 已删除 | 原来 | 改成 | 名字从哪来（屏幕上已有的字） |
+ * |---|---|---|---|
+ * | F-07 / F-22 | dashboard（桌面 + 移动）：h1 → 卡片 `h3` | 四张卡片标题 `h3` → **`h2`**（字号 `1.17em` 钉住 = UA 的 `h3` 字号，**计算值不变**） | 「今日学习目标」「每日推荐任务」「今日待复习: N 题」「薄弱点」 |
+ * | F-20 | projects：h1 → 卡片 `h3` | `ProjectCard` 的标题与 `NewProjectForm` 的卡片标题 `h3` → **`h2`**（字号本来就显式写着：1.05rem / 1rem） | 项目名（「蓄电池基础」）与「创建新项目」 |
+ * | F-31 | daily-materials：h1 → 文件夹名 `h3` → 资料名 `h4` | 文件夹名 `h3` → **`h2`**、资料名 `h4` → **`h3`**（字号不变：`1.17em` 钉住 / 0.9rem 本来就显式） | 文件夹名（「2026-01-05 学习资料」）与资料标题 |
+ * | F-08 | note-detail：h1 → 「清洗统计」`h4` | `CleaningPanel` 的两个 `h4`（清洗统计 / 重复块）→ **`h2`**（字号 0.875rem 本来就显式） | 「清洗统计」「重复块（N 个）」 |
+ *
+ * ### ⚠️ F-08 的成因在这一轮被更正了（重要）
+ *
+ * 报出来的那**一个节点**是**页面自己的**「清洗统计」区块（`CleaningPanel.tsx`），
+ * **不是**用户的 Markdown。实测的标题序列是
+ * `H1 笔记标题 → H4 清洗统计 → H1 正文 → H2 正文`：其中只有 `H1 → H4`
+ * 是跳级；`H4 → H1` 是**上行**，而 axe 的判据是
+ * `currLevel - prevLevel <= 1`（`axe.js` 的 `headingOrderAfter`）—— 上行永远合法。
+ * 所以**一个字的用户内容都不用动**：把页面自己的 `h4` 放回 `h2`，F-08 整条消失。
+ * 上一轮"层级来自用户内容本身"的判断，把页面自己的元信息区块当成了用户正文
+ * —— 这正是 docs/a11y-audit.md 反复强调的那件事：**不实测的成因解释与没有解释一样误导**。
+ *
+ * ### 为什么"给两组各加一个区块标题"没有被采纳（F-07/F-22）
+ *
+ * 仪表盘那两组（`.dashboardTwoCol`）只是**两栏排版**，不是产品概念：
+ * 四张卡片各有各的标题、各有各的行为（进目标 / 展开任务 / 开始复习 / 进卡片）。
+ * 给它们硬造一个上位名字（"今日进度""需要关注"之类）会得到一个
+ * **只为了标题层级而存在的标题**，读屏的标题列表里会多出两个什么都不管的条目。
+ * 真正缺的那一级是"这些卡片是这一页的顶层区块"—— 而它们**本来就是**，
+ * 只是级别写小了一级。所以答案是提升**已经存在的**卡片标题，而不是发明新名字。
+ * projects 的 F-20、daily-materials 的 F-31 是同一件事的另外两处。
+ * ────────────────────────────────────────────────────────────────────────
+ */
+const REGISTRY: RegisteredRule[] = []
 
-  // ── 移动端视口下的仪表盘（同一份 DOM，与 F-07 同源）───────────────
-  {
-    id: 'F-22',
-    rule: 'heading-order',
-    scene: 'dashboard-mobile',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      '同 F-07 在窄屏（375×667）上的复现，同样是 1 个节点 —— 窄屏把两栏收成一列，' +
-      '标题层级与桌面完全一致，所以修法也必须是同一个决定。' +
-      '归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
-  },
-
-  // ── 笔记详情 ────────────────────────────────────────────────────────
-  {
-    id: 'F-08',
-    rule: 'heading-order',
-    scene: 'note-detail',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      'Markdown 正文里的 h4（清洗统计区）出现在页面 h1/h2 之后但没有 h3 —— 层级来自**用户内容本身**，属于"内容决定的结构"。' +
-      '判定为 **(b) 需要人工决定**（docs/a11y-audit.md §3 的 P3）：可选做法是渲染时归一化标题级别（h1→h2 整体下沉）或接受它；' +
-      '**不要**为了消警告去改用户内容。归属：需要设计决定，不是 5.9 修复轮。',
-  },
-
-  // ── 项目页 ──────────────────────────────────────────────────────────
-  {
-    id: 'F-20',
-    rule: 'heading-order',
-    scene: 'projects',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      '项目页 h1「项目」之后，卡片区里的 h3 之前没有 h2（与仪表盘的 F-07 同一类、同一个待决定的问题：' +
-      '卡片标题的级别是视觉层次的一部分，而卡片区没有区块标题）。' +
-      '归属：需要设计决定（5.6/产品），不是 5.9 修复轮。',
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  // 覆盖轮新增的 8 条登记项（场景见 docs/a11y-audit.md §9）
-  //
-  // ## 这些是**债**，不是"可以接受的现状"
-  //
-  // 项目口径（文件头 + docs §9）：**登记是例外，删掉登记项、回到零容忍才是目标**。
-  // 本轮之所以只登记不修：`frontend/src/**` 正在被并行的 CSS 迁移改动，
-  // 这一轮改应用代码**无法被验证**（改了可能修好也可能改坏，且与迁移冲突）。
-  // 所以本轮的任务是**先把信号拿到**：让这些页面/状态第一次真的被渲染出来、
-  // 被 axe 判过、被登记下来 —— 下一轮照 §9 的清单逐条修掉并**删除这些条目**
-  // （删掉即回到零容忍：该规则只要出现 1 个节点就红）。
-  //
-  // ## 上限一律 = 实测值（最紧写法）
-  //
-  // 每条的 `nodes` 都是本轮实测的节点数，没有留余量：多一个节点就失败。
-  // ## 没有放宽任何一条既有登记项
-  //
-  // F-07 / F-22 / F-08 / F-20 的上限仍然全是 1，一个字都没动；
-  // 已归零的规则（`color-contrast` 在 9 个旧场景里）**没有**因为本轮新增
-  // 场景而被重新登记 —— 新条目只挂在新场景上，旧场景仍是零容忍。
-  // ══════════════════════════════════════════════════════════════════════
-
-  // ══════════════════════════════════════════════════════════════════════
-  // 清债轮（本轮）：覆盖轮登记的 8 条里，**7 条的登记项已删除**
-  //
-  // | 已删除 | 怎么修的 |
-  // |---|---|
-  // | F-28 / F-29 | `--color-warning` `#c4860a` → `#936408`（白底 3.11 → 5.16:1，一处令牌两条一起消） |
-  // | F-30 | 今日资料文件夹头：外层去 role/tabIndex，折叠落在 `<h3>` 里那个真按钮上 |
-  // | F-32 | 答题复习页补 h1「答题复习」（无 h1 → 有，且没有引出 h1→h3 跳级） |
-  // | F-33 | `utils/labels.ts` 里**五张**颜色表一次过一遍（只修一张表就是上一轮的教训） |
-  // | F-34 | 今日学习「待复习」卡片：照 F-09 的形状，行为落在真按钮上 |
-  // | F-35 | 薄弱点徽章字/底一起改（`#c0392b` 压 `#c0392b1a`，3.13 → 4.68:1）+ 默认桩字段名改对 |
-  //
-  // **删除 = 收紧到最紧**：`reconcile()` 对没登记的规则判 `unregistered` → 失败，
-  // 也就是说这些规则从"有上限的豁免"回到了"零容忍"（1 个节点就红）。
-  // 留下的 F-31 与上面四条（F-07/F-22/F-08/F-20）是同一笔债：
-  // **待人工决定的标题层级**，不由 5.9 单方面清掉（见文件末尾的开放问题）。
-  //
-  // ⚠️ 本轮**一条件都没放宽**：F-07 / F-22 / F-08 / F-20 / F-31 的上限仍然全是 1。
-  // 新增场景带来的新违规另见文件末尾「覆盖轮（第二轮）」那一段。
-  // ── F-31：今日资料页的标题层级（**保留**：需要人工设计决定）──────────
-  {
-    id: 'F-31',
-    rule: 'heading-order',
-    scene: 'daily-materials',
-    impact: 'moderate',
-    nodes: 1,
-    reason:
-      'h1「今日资料」之后，文件夹卡片里的文件夹名是 h3（DailyMaterials.tsx:517），中间没有 h2 —— ' +
-      '与 F-07 / F-20 **同一类待人工决定的问题**（卡片标题的级别是视觉层次的一部分，' +
-      '而这一页的区块没有区块级标题）。' +
-      '不修的理由与 F-07 完全相同：**降级/升级只能消掉报警，真正的结构问题原样留着**，' +
-      '要么给列表区加一个区块标题（起名是产品/设计决定），要么接受当前层级。' +
-      '上限维持 1：多一个节点就失败。归属：需要设计决定（5.6/产品），不是 5.9 修复轮 —— ' +
-      '**但仍登记在案，属于待人工决定那笔债，不由 5.9 单方面清掉。**',
-  },
-]
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * ## 历史登记项（**已全部清偿**；`reason` 逐字留在 docs/a11y-audit.md §3）
+ *
+ * 删掉登记项这件事本身**就是收紧**（`reconcile()` 对没登记的规则判
+ * `unregistered` → 失败），所以"删除"从来不等于"放行"。
+ * 5 条的理由与修法逐条记在 docs/a11y-audit.md 的「修复」列与 §11；
+ * 这里只留一条最容易被重新提出的反对意见与它的答复：
+ *
+ * > **"把卡片标题从 h3 改成 h2 只是消掉报警，真正的结构问题原样留着。"**
+ *
+ * 答复：结构问题是"h1 与卡片标题之间缺一级"，改成 h2 **就是在补那一级**。
+ * 反过来说，"给两栏各起一个名字"才是引入一个产品上不存在的概念 ——
+ * 那不是修结构，那是**给排版加语义**。判据是：**这个标题下面管的是不是
+ * 一个真正的区块**。四张卡片各自独立（标题、行为、空状态都不同），
+ * 所以它们各自是一级；两栏只是它们恰好在屏幕上并排。
+ * ────────────────────────────────────────────────────────────────────────
+ */
 
 const ACTIVE_REGISTRY = REGISTRY
 
@@ -638,6 +606,248 @@ async function measureContrast(locator: Locator): Promise<ContrastMeasurement[]>
   })
 }
 
+/**
+ * ★ **F-37：键盘可达性扫描**（本文件唯一一条**不依赖 axe** 的通用门禁）
+ *
+ * ## 为什么必须有它：axe 不模拟 Tab
+ *
+ * axe 只看 DOM 与计算样式。于是下面这一类问题在 axe 眼里**完全不存在**：
+ *
+ *   - `div[onClick]` 既没有 `role` 也没有 `tabIndex` → **键盘根本到不了**。
+ *     `nested-interactive` 的前提是"外层有交互角色"，`aria-allowed-role`
+ *     的前提是"有一个不允许的角色" —— 两条件都不成立，于是**一条规则都不报**；
+ *   - `div[role="button"][tabIndex=0]` → axe 只在"里面还有可聚焦元素"时
+ *     报 `nested-interactive`；里面没有的话它一句话都不说，而线上症状是
+ *     **Tab 停在一个"不是按钮的按钮"上，而且只认 Enter、不认 Space**；
+ *   - 内联 `outline: 'none'` → 不属于任何 ARIA 规则，永远不报（§4.1）。
+ *
+ * 这一轮（Part A）修的 12 处**全部属于这一类** —— 也就是说：
+ * **这一整轮的输入不是 axe 给的，是"人工看代码 + grep"给的**。
+ * 那就必须给它补一条门禁，否则下一轮同样只能靠人再看一遍。
+ *
+ * ## 判据（三条，逐条对应"用户的键盘会遇到什么"）
+ *
+ * 1. **手型光标但不可聚焦**：`cursor: pointer` 是"这里能点"的承诺，
+ *    而元素自己不可聚焦、祖先里没有可聚焦控件、里面也没有 ——
+ *    鼠标能点、键盘永远到不了。
+ * 2. **`tabindex >= 0` 挂在非控件上**：Tab 会停在它上面，但它既不是链接
+ *    也不是按钮（读屏念不出"按钮"），Space 通常也不生效。
+ * 3. **`role="button"` / `role="link"` 挂在非原生元素上**：一个"不是按钮的按钮"。
+ *    项目口径是**用真控件**（F-09/F-17/F-30/F-34 四处修法一致），
+ *    所以这条按零容忍守着。真要出现合法用法，应该**先在这里写清理由再加白名单**，
+ *    而不是把规则删掉 —— 与 `REGISTRY` 是同一条规矩。
+ *
+ * ## 为什么是"扫描"而不是"只看我改过的那几处"
+ *
+ * 规则来自 `frontend/src/**` 的写法，不来自某个页面。这一轮就是靠这条判据
+ * 在**审计之外的页面**上又找出 4 处同类问题（`ProjectNotesList` 的笔记行、
+ * `Dashboard` 的薄弱点行与推荐任务行、`TodayLearn` 的薄弱点行）。
+ * 只盯着"改过的那几处"写断言，等于把"这类洞没有了"又一次误读成
+ * "这个洞修好了"（BG.11 那条教训）。
+ */
+async function findFakeAffordances(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    /** 元素的可读描述（够人找到它就行） */
+    const describe = (el: Element): string => {
+      const cls =
+        typeof el.className === 'string' && el.className.trim()
+          ? `.${el.className.trim().split(/\s+/).join('.')}`
+          : ''
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24)
+      return `${el.tagName.toLowerCase()}${cls}${text ? `「${text}」` : ''}`
+    }
+    /** 真的占了版面（`display:none` / 祖先隐藏的元素不参与判定） */
+    const isVisible = (el: Element): boolean => el.getClientRects().length > 0
+    /**
+     * 浏览器**能**把焦点交给它吗（≈ 会不会出现在 Tab 序列里）。
+     * `tabindex="-1"` 刻意不算：它能被 `focus()` 主动聚焦，但 Tab 到不了 ——
+     * 这一轮修的所有东西要的正是"Tab 到得了"。
+     */
+    const isTabbable = (el: Element): boolean => {
+      if (!isVisible(el)) return false
+      if (el.hasAttribute('disabled')) return false
+      const tabindex = el.getAttribute('tabindex')
+      if (tabindex !== null) return Number(tabindex) >= 0
+      const tag = el.tagName.toLowerCase()
+      if (tag === 'a' || tag === 'area') return el.hasAttribute('href')
+      return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea'
+    }
+    const NATIVE_INTERACTIVE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary'])
+
+    /**
+     * "手型区域"的最外层根。
+     *
+     * ⚠️ `cursor` 是**继承属性**：一个容器设了 `cursor: pointer`，它**所有**后代
+     * 的计算值都是 `pointer`。所以不能逐个元素判"它是不是可点区域" ——
+     * 那样会把容器里的每一个 `span` / `p` 都报一遍（第一版就是这么写的，
+     * 一次跑出 14 条噪音，其中 13 条是卡片里的徽章）。
+     * 正确的判据是：先找到这个手型区域的最外层根，再看**那个区域里**
+     * 有没有可 Tab 的控件 —— 一个区域只报一次。
+     */
+    const pointerRegionRoot = (el: Element): Element => {
+      let root = el
+      let node = el.parentElement
+      while (node && getComputedStyle(node).cursor === 'pointer') {
+        root = node
+        node = node.parentElement
+      }
+      return root
+    }
+
+    const findings: string[] = []
+    const reportedRegions = new Set<Element>()
+    for (const el of Array.from(document.querySelectorAll('*'))) {
+      if (!isVisible(el)) continue
+      const tag = el.tagName.toLowerCase()
+      const role = el.getAttribute('role')
+      const tabindex = el.getAttribute('tabindex')
+      const ownTabIndex = tabindex !== null && Number(tabindex) >= 0
+      const nativeInteractive = NATIVE_INTERACTIVE.has(tag)
+
+      // ① 手型区域里没有任何可 Tab 的控件（自己 / 区域根 / 区域内部都没有）
+      if (getComputedStyle(el).cursor === 'pointer') {
+        const root = pointerRegionRoot(el)
+        if (!reportedRegions.has(root) && !isTabbable(root)) {
+          const regionHasTabbable = Array.from(root.querySelectorAll('*')).some(isTabbable)
+          if (!regionHasTabbable) {
+            reportedRegions.add(root)
+            findings.push(
+              `① 手型光标（cursor:pointer）但整个区域里没有可 Tab 的控件：${describe(root)}`,
+            )
+          }
+        }
+        // 注意：这里**不** `continue` —— 区域根自己可能还是 ②/③ 的命中对象
+      }
+
+      // ② tabindex 挂在非控件上（Tab 停在"不是控件的东西"上）
+      if (ownTabIndex && !nativeInteractive && !role) {
+        findings.push(`② tabindex 挂在非控件上（Tab 会停在它上面，但它不是控件）：${describe(el)}`)
+        continue
+      }
+
+      // ③ role=button / role=link 挂在非原生元素上（"不是按钮的按钮"）
+      if ((role === 'button' || role === 'link') && !nativeInteractive) {
+        findings.push(`③ 假控件角色（role="${role}" 挂在 <${tag}> 上）：${describe(el)}`)
+        continue
+      }
+    }
+    return findings
+  })
+}
+
+/**
+ * ★ **F-37 的第二半：真的按 Tab**，断言焦点会落到目标元素上。
+ *
+ * ## 为什么不能只断言"它有 role=button"
+ *
+ * 那是**自证**：`role="button"` + `tabIndex={0}` 也满足它，而那种写法的
+ * 真实症状（键位不对、读屏语义不对）一个都测不出来。
+ * 这一条走的是用户的路：**点一下页面标题把"顺序焦点导航起点"定住，
+ * 然后一次次按 Tab**，直到焦点落到目标上（或超次数失败）。
+ *
+ * ## 起点为什么是"点 h1"
+ *
+ * `document.body.focus()` 不行（body 不可聚焦），而"从当前位置继续 Tab"
+ * 会受上一步交互影响（`ready()` 里往往点过按钮）—— 那样这条断言就不确定了。
+ * 浏览器有一条明确规则：**点击一个不可聚焦的元素，会把"顺序焦点导航起点"
+ * 设到它上面**，下一次 Tab 从它之后开始。页面 h1 是不可聚焦的、且在所有
+ * 场景里都先于被测控件出现，所以它是最稳的锚点。
+ *
+ * ⚠️ 弹窗场景（`learning-goals-create`）**不能**用这个锚点：遮罩盖住了 h1，
+ * 点击会被拦截。那一条改用"弹窗自己承诺的东西"（`role`/`aria-modal`/Esc）来测。
+ */
+async function expectReachableByTab(page: Page, target: Locator, label: string, maxTabs = 80): Promise<void> {
+  const handle = await target.first().elementHandle()
+  expect(handle, `${label}：目标元素不在 DOM 里，键盘门禁不成立`).not.toBeNull()
+
+  // 起点：页面标题（不可聚焦）—— 见上面的说明
+  await page.locator('main h1').first().click()
+
+  let tabs = 0
+  for (let i = 1; i <= maxTabs; i++) {
+    await page.keyboard.press('Tab')
+    tabs = i
+    if (await handle!.evaluate((el) => el === document.activeElement)) break
+  }
+
+  const landedOnTarget = await handle!.evaluate((el) => el === document.activeElement)
+  const landed = landedOnTarget
+    ? ''
+    : await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null
+        if (!el) return '（焦点已经不在页面里）'
+        const cls =
+          typeof el.className === 'string' && el.className.trim()
+            ? `.${el.className.trim().split(/\s+/).join('.')}`
+            : ''
+        return `${el.tagName.toLowerCase()}${cls}`
+      })
+
+  expect(
+    landedOnTarget,
+    `${label}：从页面标题起按了 ${tabs} 次 Tab，焦点都没有落到它上面（最后停在 ${landed}）` +
+      ' —— 也就是说**键盘到不了它**。修法是把它换成真控件（button / Link），' +
+      '而不是给它加 role + tabIndex（本项目四处先例：F-09/F-17/F-30/F-34）。',
+  ).toBe(true)
+
+  console.log(`   [键盘] ${label}：第 ${tabs} 次 Tab 落到它上面`)
+}
+
+/**
+ * ★ 「**改标题级别，不改外观**」的断言（Part B 的交付条件之一）。
+ *
+ * ## 为什么必须有它
+ *
+ * 本轮的 5 条 `heading-order` 全是"区块标题的级别缺一级"，修法是**提升级别**
+ * （h3 → h2、h4 → h2/h3）。而这个项目的样式表里有两条事实：
+ *
+ *   1. `base.css` 的全局 reset 把 `margin` / `padding` 清零了，
+ *      但**没有**清字号 —— 字号来自 UA 样式表：`h1 2em / h2 1.5em / h3 1.17em /
+ *      h4 1em / h5 .83em / h6 .67em`；
+ *   2. 因此"改级别"默认会**改字号**（h3 → h2 就是 1.17em → 1.5em，大了一圈）。
+ *
+ * 项目已有的做法是**把字号显式钉住**（F-18 的 `1.17rem`、F-14/F-15、
+ * trash、card-detail、learning-assessment 都是这么做的）。这条断言把
+ * "钉住了"从**口头承诺**变成**门禁**：它算出"改动前那一级在同一个父元素下
+ * 会是多少 px"（UA 的 em 倍率 × 父元素字号），再要求实测值等于它。
+ *
+ * ⚠️ 它**不是**在断言某个像素值：期望值由父元素的实时字号推出，
+ * 所以父元素字号变了、或者设计整体调了基准字号，这条断言照样成立 ——
+ * 它守的是"**级别与大小是两件事**"，不是"18.72px 这个数"。
+ *
+ * @param previousLevel 这个标题**改动前**的级别（例如 h3 → h2 时传 `'h3'`）
+ */
+async function expectFontSizeUnchanged(
+  target: Locator,
+  label: string,
+  previousLevel: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6',
+): Promise<void> {
+  /** UA 样式表里的 `font-size`（相对父元素的 em） */
+  const UA_EM: Record<string, number> = { h1: 2, h2: 1.5, h3: 1.17, h4: 1, h5: 0.83, h6: 0.67 }
+  const measured = await target.evaluate((el, ratio) => {
+    const parent = el.parentElement
+    const parentSize = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : 16
+    return {
+      actual: Number.parseFloat(getComputedStyle(el).fontSize),
+      expected: Math.round(parentSize * ratio * 100) / 100,
+      parentSize,
+      level: el.tagName.toLowerCase(),
+    }
+  }, UA_EM[previousLevel])
+
+  console.log(
+    `   [字号] ${label}：<${measured.level}> 实测 ${measured.actual}px，` +
+      `改动前的 <${previousLevel}> 在同一个父元素（${measured.parentSize}px）下是 ${measured.expected}px`,
+  )
+  expect(
+    measured.actual,
+    `${label}：改了标题级别之后字号跟着变了（实测 ${measured.actual}px，` +
+      `改动前的 <${previousLevel}> 是 ${measured.expected}px）—— ` +
+      '标题级别与视觉大小是两件事，改级别时必须把字号显式钉住' +
+      '（本项目的先例：F-18 的 `fontSize: 1.17rem`、card-detail 的 `1rem`…）。',
+  ).toBeCloseTo(measured.expected, 1)
+}
+
 /** 场景参数 */
 interface SceneOptions {
   scene: string
@@ -694,6 +904,24 @@ async function auditScene(page: Page, log: A11yStubLog, opts: SceneOptions): Pro
   expect(grew, `${opts.scene}: 已登记违规的**影响面扩大**了（同一规则命中更多元素）`).toEqual([])
   expect(upgraded, `${opts.scene}: 已登记违规的**严重度上升**了`).toEqual([])
 
+  // ── F-37：键盘可达性扫描（**每个场景都跑**，与 axe 无关）──
+  //
+  // 放在每个场景里而不是"只在我改过的那几页"：判据来自 `frontend/src/**`
+  // 的写法，不来自某个页面。这一轮就是靠它在本轮之前**没有任何场景覆盖**的
+  // 页面上又找出 4 处同类问题（见 findFakeAffordances 的说明）。
+  const fakeAffordances = await findFakeAffordances(page)
+  if (fakeAffordances.length > 0) {
+    console.log(`   [键盘] ${opts.scene}: 命中 ${fakeAffordances.length} 处"看起来能点、键盘到不了"`)
+    for (const item of fakeAffordances) console.log(`        ${item}`)
+  }
+  expect(
+    fakeAffordances,
+    `${opts.scene}: 出现"看起来能点、键盘到不了"的元素（F-37，见 docs/a11y-audit.md §4.1）。` +
+      'axe 结构上报不出这一类（它不模拟 Tab），所以只有这条扫描守着。' +
+      '修法是换成真控件（button / Link）或把行为移到真控件上，' +
+      '**不要**给 div 加 role + tabIndex。',
+  ).toEqual([])
+
   return result
 }
 
@@ -743,19 +971,55 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     })
   })
 
-  /** 已登录外壳 + 仪表盘：侧边栏（导航）、欢迎区、统计卡、最近笔记、趋势图 */
+  /**
+   * 已登录外壳 + 仪表盘：侧边栏（导航）、欢迎区、统计卡、最近笔记、趋势图。
+   *
+   * ## 本轮在这一页上加了两处
+   *
+   * 1. **`/api/goals/daily-plan` 从默认的 400 换成 `DAILY_PLAN`**。
+   *    默认桩给的是 400（"无活跃目标"），于是「每日推荐任务」整块**从来不渲染**，
+   *    里面那几行可点任务**一次都没被扫过**（F-37 的键盘扫描也一样看不见）。
+   *    用**场景级覆盖**而不是改默认桩：`dashboard-mobile` 与其它场景的基线
+   *    一个元素都不动（这是 fixtures 文件里那条规矩）。
+   * 2. **键盘走查**：卡片标题是链接、薄弱点每一行是链接 —— 都真的按 Tab 验过。
+   *    这两处此前分别是 `div[role="button"][tabIndex=0]`（只认 Enter）
+   *    与 `div[onClick]`（根本没有 role/tabIndex）—— **axe 两处都没报过**。
+   */
   test('已登录外壳与仪表盘', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page, { '/api/goals/daily-plan': DAILY_PLAN })
     await auditScene(page, log, {
       scene: 'dashboard',
       ready: async () => {
         await loginAs(page, '/')
         await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
         await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible()
+        // 推荐任务整块：只在 `total_count > 0` 时渲染（本轮才第一次出现）
+        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible()
+        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible()
       },
-      // 实测 208
+      // 实测 208（旧基线）→ 231（加上推荐任务整块之后）
       minNodes: 140,
     })
+
+    // ── 键盘走查（F-37 的第二半）──
+    await expectReachableByTab(page, page.getByRole('link', { name: '今日学习目标' }), '仪表盘：卡片标题「今日学习目标」')
+    await expectReachableByTab(page, page.getByRole('link', { name: '均充的适用场景' }), '仪表盘：薄弱点第一行')
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '复习「均充的适用场景」' }),
+      '仪表盘：每日推荐任务里可点的那一行',
+    )
+
+    // ── 「改级别不改外观」：这四张卡片的标题由 h3 提升为 h2（F-07）──
+    // 字号在 tsx 里显式钉成 `1.17em`（= UA 的 `h3` 字号），这条断言守着它。
+    await expectFontSizeUnchanged(page.getByRole('heading', { name: '今日学习目标' }), '仪表盘「今日学习目标」', 'h3')
+    await expectFontSizeUnchanged(page.getByRole('heading', { name: '每日推荐任务' }), '仪表盘「每日推荐任务」', 'h3')
+    await expectFontSizeUnchanged(
+      page.getByRole('heading', { name: /^今日待复习/ }),
+      '仪表盘「今日待复习: N 题」',
+      'h3',
+    )
+    await expectFontSizeUnchanged(page.getByRole('heading', { name: '薄弱点', exact: true }), '仪表盘「薄弱点」', 'h3')
   })
 
   /** 笔记列表：搜索框、角色 Tab、筛选标签、笔记卡片（含 `role="button"` 的卡片本身） */
@@ -834,6 +1098,16 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 183
       minNodes: 130,
     })
+
+    // ── 键盘走查（F-37 的第二半）：「关系类型（点击高亮）」图例 ──
+    // 原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**。
+    // 这一处是本轮**新找到**的：它不在人工清单里，是 F-37 的键盘扫描
+    // 在 `knowledge-graph` 场景上报出来的（"手型区域里没有可 Tab 的控件"）。
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '相关' }),
+      '知识图谱：关系类型图例（点击高亮）',
+    )
   })
 
   /** 项目页：标题、新建表单、项目卡片、说明区 */
@@ -888,6 +1162,30 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 157
       minNodes: 110,
     })
+
+    // ── 键盘走查（F-37 的第二半）──
+    // 资料行原来是 `div.card[role="button"][tabIndex=0]` + 只认 `Enter` 的
+    // `onKeyDown` —— axe **报不出来**（里面没有可聚焦后代），但 Tab 会停在一个
+    // "不是按钮的按钮"上，Space 也不生效。现在它是真 `<Link>`（在 `<h3>` 里）。
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '浮充与均充的讲义.pdf' }),
+      '今日资料：展开后的资料行',
+    )
+    // 文件夹头（F-30 那一次修的）也一起守着 —— 它是这一页的第一个真控件
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: /2026-01-05 学习资料/ }),
+      '今日资料：文件夹头（折叠/展开）',
+    )
+
+    // ── 「改级别不改外观」：文件夹名由 h3 提升为 h2（F-31）──
+    // 字号同样显式钉成 `1.17em`；文件夹里的资料名由 h4 提升为 h3（0.9rem 本来就显式写着）
+    await expectFontSizeUnchanged(
+      page.getByRole('heading', { name: '2026-01-05 学习资料' }),
+      '今日资料「文件夹名」',
+      'h3',
+    )
   })
 
   /**
@@ -922,6 +1220,16 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 171
       minNodes: 120,
     })
+
+    // ── 键盘走查（F-37 的第二半）：这一页此前有两处键盘到不了的地方 ──
+    // 薄弱点每一行是 `div[onClick]`；推荐任务的每一行是
+    // `div[role="button"][tabIndex=0]` + **只认 Enter 的** onKeyDown。
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '复习「均充的适用场景」' }),
+      '今日学习：推荐任务里可点的那一行',
+    )
+    await expectReachableByTab(page, page.getByRole('link', { name: '均充的适用场景' }), '今日学习：薄弱点第一行')
 
     // ── 量出三个优先级徽章（高/中/低）的真实色值与比值，并**把阈值钉成门禁** ──
     //
@@ -989,7 +1297,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       ready: async () => {
         await loginAs(page, '/upload')
         await expect(page.getByRole('heading', { name: '上传学习资料' })).toBeVisible()
-        // 这一页的主控件就是那个 role="button" 的拖拽区
+        // 这一页的主控件就是那个拖拽区（本轮从 `div[role="button"]`
+        // 换成**真 `<button>`**：Enter 与 Space 都生效，见下面键盘走查）
         await expect(page.getByRole('button', { name: '点击或拖拽文件上传' })).toBeVisible()
         // 项目标签来自 /api/projects：桩回空数组时这里只剩一句"暂无项目"
         await expect(page.getByRole('button', { name: '蓄电池基础' })).toBeVisible()
@@ -998,6 +1307,15 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 128
       minNodes: 90,
     })
+
+    // ── 键盘走查（F-37 的第二半）：拖拽区原来是 `div[role="button"][tabIndex=0]`
+    // + 只认 `Enter` 的 `onKeyDown`（axe 报不出来：里面没有可聚焦后代）。
+    // 现在是真 `<button>`，所以 Enter **与 Space** 都能打开文件选择框。
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '点击或拖拽文件上传' }),
+      '上传页：拖拽上传区',
+    )
   })
 
   /**
@@ -1191,6 +1509,15 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 121
       minNodes: 90,
     })
+
+    // ── 键盘走查（F-37 的第二半）：引用来源那一行原来是 `div[onClick]` ──
+    // （没有 role/tabIndex，键盘到不了），现在是真 `<Link>`。
+    // 它同时是 `link-in-text-block` 的判据现场：下划线**刻意保留**（全局默认）。
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: /引用|锂离子电池的浮充与均充/ }).first(),
+      '智能问答：引用来源那一行',
+    )
   })
 
   /**
@@ -1199,8 +1526,9 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * ⚠️ 分组**加载完成后默认是展开的**（`fetchCards` 里
    * `setExpandedNotes(new Set(grouped.map(...)))` —— 全部展开），
    * 所以这里刻意**不点**那个分组头：点一下反而会把它收起来。
-   * （分组头是 `div[onClick]`，没有 role/tabIndex，键盘到不了 ——
-   * 那一类 axe 判不了，记在文档 §4.1 的人工清单里。）
+   * （分组头此前是 `div[onClick]`、没有 role/tabIndex，**键盘到不了** ——
+   * 那一类 axe 判不了，本轮已换成 `<h2>` 里的真 `<button aria-expanded>`，
+   * 并由下面的 `expectReachableByTab` 真的按 Tab 守着。）
    */
   test('知识卡片：按笔记分组与卡片单元', async ({ page }) => {
     const log = await installA11yStubs(page)
@@ -1221,6 +1549,20 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 191
       minNodes: 135,
     })
+    // ── 键盘走查（F-37 的第二半）：这一页此前有**三处**键盘到不了的地方 ──
+    // 分组头是 `div[onClick]`、卡片本体是 `div[onClick]`、
+    // 「✨ 建议生成拓展知识点」是 `div[onClick]`；axe 三处全绿。
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '锂离子电池的浮充与均充' }),
+      '知识卡片：分组头（折叠/展开）',
+    )
+    await expectReachableByTab(page, page.getByRole('link', { name: '浮充的定义' }), '知识卡片：卡片标题链接')
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '✨ 建议生成拓展知识点' }),
+      '知识卡片：「建议生成拓展知识点」',
+    )
   })
 
   /**
@@ -1252,6 +1594,16 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 139
       minNodes: 100,
     })
+
+    // ── 键盘走查（F-37 的第二半）：「来源笔记」原来是 `span[onClick]` ──
+    // （没有 role/tabIndex，键盘到不了），现在是真 `<Link>`；它就在一行文字里
+    // （「来源笔记：<标题>」），所以下划线**不能**关掉 —— `link-in-text-block`
+    // 正是判它（这一页的场景因此同时守着那条规则）。
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '锂离子电池的浮充与均充' }),
+      '卡片详情：「来源笔记」链接',
+    )
   })
 
   /**
@@ -1276,7 +1628,9 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         await expect(page.getByRole('heading', { name: '选择笔记' })).toBeVisible()
         // 「关联资料: — 篇」是**有数据才有**的标记（空状态时整块不渲染）
         await expect(page.getByText('关联资料: — 篇')).toBeVisible()
-        await page.getByRole('heading', { name: '复盘：浮充的三个月' }).click()
+        // 选中的是**真控件**（本轮之前是 `div[onClick]`，键盘到不了）：
+        // 点击的位置从"整张卡片"变成"标题按钮"
+        await page.getByRole('button', { name: '复盘：浮充的三个月' }).click()
         await expect(page.getByText('将比对以下资料与该笔记：')).toBeVisible()
         await expect(page.getByText('• 锂离子电池的浮充与均充')).toBeVisible()
         await expect(page.getByRole('button', { name: '开始评估' })).toBeVisible()
@@ -1284,6 +1638,13 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 126
       minNodes: 90,
     })
+
+    // ── 键盘走查（F-37 的第二半）：笔记选择卡片原来是 `div[onClick]` ──
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '复盘：浮充的三个月' }),
+      '学习评估：笔记选择卡片',
+    )
   })
 
   /**
@@ -1311,6 +1672,64 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 138
       minNodes: 100,
     })
+  })
+
+  /**
+   * 学习目标：**新建目标弹窗**（`LearningGoals` 的第二个渲染分支）。
+   *
+   * ## 为什么必须单独一条场景（而不是"顺手修一下"）
+   *
+   * 弹窗只在 `showCreateForm === true` 时渲染 —— **不点「新建目标」就等于没扫过它**
+   * （没有渲染出来的 DOM，axe 的结果恒为 0 违规）。这一处此前**没有任何一层看得见**：
+   * `role="dialog"` / `aria-modal` / Esc / 四个 `<label>` 的 `htmlFor` 全都没有，
+   * 而 axe 的 `label` 规则**只有在弹窗被渲染出来时才会报**。
+   * 本轮先补这条场景、再改代码，就是为了让"改好了"这件事有证据
+   * （口径与 BG.11.1 一致：**先把信号拿到，再动代码**）。
+   *
+   * ## 这条用例断言的三件事（axe 能判两件，第三件只能靠实测）
+   *
+   * 1. **axe 扫弹窗渲染态** —— `label`（四个控件都要有可访问名）与
+   *    `aria-dialog-name`（对话框要有名字）都会在这里被判；
+   * 2. **结构** —— `role="dialog"` + `aria-modal="true"` + 可访问名来自标题
+   *    （`aria-labelledby`）。`aria-modal` **没有任何 axe 规则会检查**：
+   *    "该不该是模态"是产品语义，不是 DOM 合法性；
+   * 3. **Esc 退出** —— 此前完全没有键盘退路（只有"点遮罩"和"点取消"）。
+   */
+  test('学习目标：新建目标弹窗（role/aria-modal/Esc/htmlFor）', async ({ page }) => {
+    const log = await installA11yStubs(page, GOAL_STUBS)
+    await auditScene(page, log, {
+      scene: 'learning-goals-create',
+      ready: async () => {
+        await loginAs(page, '/goals')
+        await page.getByRole('button', { name: '新建目标' }).click()
+        await expect(page.getByRole('dialog')).toBeVisible()
+        // 四个控件都真的拿到了名字 —— `getByLabel` 走的就是"标签与控件的关联"
+        // （aria-label / aria-labelledby / label[for] / 包裹式 label），
+        // 所以这四行**就是** `htmlFor`/`id` 生效的证据。
+        await expect(page.getByLabel('目标名称')).toBeVisible()
+        await expect(page.getByLabel('目标类型')).toBeVisible()
+        await expect(page.getByLabel('目标掌握度 (%)')).toBeVisible()
+        await expect(page.getByLabel('截止日期（可选）')).toBeVisible()
+      },
+      // 实测 151（列表页 138 + 弹窗的十来个元素）
+      minNodes: 105,
+    })
+
+    // ── 结构：role / aria-modal / 可访问名（axe 只判得到最后一项）──
+    const dialog = page.getByRole('dialog')
+    await expect(dialog, '弹窗必须是 aria-modal：底下的内容此刻不参与交互').toHaveAttribute(
+      'aria-modal',
+      'true',
+    )
+    await expect(dialog, '对话框必须有可访问名，且名字来自它自己的标题').toHaveAccessibleName(
+      '新建学习目标',
+    )
+
+    // ── Esc 关掉弹窗（此前没有键盘退路）──
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog'), 'Esc 没有关掉弹窗').toHaveCount(0)
+    // 关掉之后回到列表态（「新建目标」按钮又在了），而不是把整页也带走
+    await expect(page.getByRole('button', { name: '新建目标' })).toBeVisible()
   })
 
   /** 回收站（`Trash`）：非空的已删除笔记（标题 + 删除时间 + 五项附属统计 + 恢复/彻底删除） */
@@ -1391,6 +1810,15 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       // 实测 158
       minNodes: 115,
     })
+
+    // ── 键盘走查（F-37 的第二半）：分组头原来是 `div[onClick]` ──
+    // （没有 role/tabIndex），里面还嵌着「查看笔记」真按钮；
+    // 现在是真 `<button aria-expanded>`，与「查看笔记」互为**兄弟**。
+    await expectReachableByTab(
+      page,
+      page.getByRole('button', { name: '锂离子电池的浮充与均充' }),
+      '问题集：分组头（折叠/展开）',
+    )
   })
 
   /**
@@ -1505,6 +1933,10 @@ test.describe('审计自检', () => {
       'card-detail',
       'learning-assessment',
       'learning-goals',
+      // ── Part A/B 收尾轮加进来的第 26 个场景 ──
+      // `LearningGoals` 的**弹窗**是另一个渲染分支（只在点开时存在），
+      // 此前没有任何一层看得见它：role/aria-modal/Esc/htmlFor 四件事都没做。
+      'learning-goals-create',
       'trash',
       'quick-review',
       'question-sets',

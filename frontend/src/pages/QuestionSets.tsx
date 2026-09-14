@@ -169,7 +169,6 @@ export default function QuestionSets() {
             border: '1px solid var(--color-border)',
             borderRadius: '8px',
             fontSize: '0.875rem',
-            outline: 'none',
             background: 'var(--color-bg)',
             color: 'var(--color-text)',
             boxSizing: 'border-box',
@@ -228,11 +227,16 @@ export default function QuestionSets() {
             if (filtered.length === 0) return null
             return (
               <div key={group.note_id} style={{ marginBottom: 'var(--space-md)' }}>
+                {/* 分组头：折叠/展开是**一个真控件**。
+                    ⚠️ 这里原来是 `div.card[onClick]`（没有 role/tabIndex，键盘到不了），
+                    里面还嵌着「查看笔记」真按钮。改法与 F-30 / KnowledgeCards 分组头同形：
+                    外壳回到"盒子"，折叠行为落进真 `<button aria-expanded>`，
+                    「查看笔记」是它的**兄弟**（不再是被点区域的后代）。
+                    `stopPropagation` 留着（外层已经没有 onClick 了）：它同时对
+                    "点空白处"这类调用有意义，删掉属于顺手重构。 */}
                 <div
                   className="card"
-                  onClick={() => toggleGroup(group.note_id)}
                   style={{
-                    cursor: 'pointer',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -241,10 +245,21 @@ export default function QuestionSets() {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                    <span className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}>
-                      ▶
-                    </span>
-                    <strong>{group.note_title}</strong>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.note_id)}
+                      aria-expanded={expandedNotes.has(group.note_id)}
+                      style={groupToggleStyle}
+                    >
+                      {/* 箭头只表达外观：展开状态由 `aria-expanded` 承担 */}
+                      <span
+                        className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}
+                        aria-hidden="true"
+                      >
+                        ▶
+                      </span>
+                      <strong>{group.note_title}</strong>
+                    </button>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                       ({filtered.length} 道题)
                     </span>
@@ -329,6 +344,28 @@ export default function QuestionSets() {
       )}
     </div>
   )
+}
+
+/**
+ * 分组头里那个折叠按钮的外观复位。
+ *
+ * `<button>` 有自己的 UA 样式（系统字体、灰底、2px 边框、居中文字、内边距），
+ * 不复位的话"把 div 换成真按钮"就变成了一次改版。下面的取值逐项对应
+ * **改动前那一行 div 的实际外观**：字号/字重/颜色继承外层（`<strong>` 的
+ * 700 与正文的 1em 都是继承来的），背景与边框本来就没有。
+ */
+const groupToggleStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-sm)',
+  margin: 0,
+  padding: 0,
+  border: 'none',
+  background: 'none',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
 }
 
 /** 答案折叠组件：默认隐藏答案和解析，点击按钮展开 */
