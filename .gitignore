@@ -98,6 +98,13 @@ frontend/.vite/
 
 # ---- Playwright E2E 产物（可再生成：失败 trace、截图、HTML 报告）----
 frontend/test-results/
+# 全链路层（`npm run e2e:full`）与它的探针层用**自己的**产物目录，理由见
+# playwright.config.ts 里 `e2e-full` project 的 outputDir 说明：
+# 它们要跑几分钟，期间另一个 Playwright 运行会清空 `test-results/`，
+# 于是这两层会炸在"产物写不进去"上，而测试本身是绿的。
+# 用通配 `test-results-*` 而不是逐个列举：以后再加一层不会再往 git status
+# 里漏一个目录（探针目录 `test-results-e2e-full-probe/` 就是这么漏出来的）。
+frontend/test-results-*/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/.playwright/
