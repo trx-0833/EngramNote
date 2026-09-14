@@ -3224,7 +3224,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
 | 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ✅ **三页全部完成**（附录 AX / AZ / BB）：`NoteDetail` 1184→**282**、`KnowledgeGraph` 1055→**248**、`Projects` 765→**113**；27 个新模块，**最大 248 行，超过 300 行的文件数为 0**。⚠️ 关键前提是"先补安全网再拆"：另两页是先补了 53 条页面级用例（并经变异验证）才动的手 |
-| 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | ⏸ **未做**（选择 CSS Modules 还是 Tailwind 是**产品/团队决策**，需确认） |
+| 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | 🟡 **方案已定，实施未开始**：**选用 CSS Modules**（2026-09-14 用户决策）。理由：与现有 CSS 心智最接近、**不新增构建链路**、且可以**逐文件迁移**而不必一次性冻结全站样式。⚠️ 代价是它不会让样式"写得更快"，换来的是"改动可验证、可增量"—— 在本项目"每步都要能验证"的前提下这是决定性的。**排在 5.10 之后**：响应式会先动一批 CSS，顺序反了要返工 |
 | 5.7 | **修 404**：新增真实 404 页面，不再静默重定向到登录页 | 错链有明确提示 | ✅ **已落地**（阶段 0，本轮核对确认）：`App.tsx` 的 `NotFound` 组件 + `path="*"`；未登录时的 `*` 才回登录页 |
 | 5.8 | **错误/空/加载三态组件化** + 全局 Toast | 无"白屏卡住" | ✅ **已落地**（阶段 0/Z，本轮核对确认）：`EmptyState.tsx` / `ErrorDisplay.tsx` / `LoadingSpinner.tsx` / `Toast.tsx` / `ErrorBoundary.tsx`，全仓 147 处使用 |
 | 5.9 | **可访问性**：键盘导航、focus trap（模态）、ARIA、对比度 | axe 无 critical | ⏸ **未做**（需要 axe 工具与浏览器环境；属大范围 UI 工作） |
