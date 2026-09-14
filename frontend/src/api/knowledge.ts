@@ -3,50 +3,34 @@
  * @description 联合分析、拓展知识点、卡片标记、盲点与掌握度查询
  */
 import { request, type KnowledgeCard } from './client'
+import type { Schema } from './generated/types'
 
-/** 联合分析响应 */
-export interface CombinedExtractResponse {
-  link_id: string
-  material_note_id: string
-  personal_note_id: string
-  regular_count: number
-  blind_spot_count: number
-  total_cards: number
-  message: string
-}
+// --- 知识点相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 拓展生成响应 */
-export interface ExtensionGenerateResponse {
-  parent_card_id: string
-  extension_cards: KnowledgeCard[]
-  message: string
-}
+/** 联合分析响应（生成自 `CombinedExtractResponse`） */
+export type CombinedExtractResponse = Schema<'CombinedExtractResponse'>;
 
-/** 盲点列表响应 */
-export interface BlindSpotListResponse {
-  items: KnowledgeCard[]
-  total: number
-  page: number
-  page_size: number
-}
+/** 拓展生成响应（生成自 `ExtensionGenerateResponse`） */
+export type ExtensionGenerateResponse = Schema<'ExtensionGenerateResponse'>;
 
-/** 掌握度概览条目 */
-export interface MasteryOverviewItem {
-  card_id: string
-  title: string
-  card_category: 'regular' | 'blind_spot' | 'extension'
-  mastery_level: number
-  is_key_point: boolean
-  is_difficulty: boolean
-  review_count: number
-}
+/** 盲点列表响应（生成自 `BlindSpotListResponse`） */
+export type BlindSpotListResponse = Schema<'BlindSpotListResponse'>;
 
-/** 掌握度概览响应 */
-export interface MasteryOverviewResponse {
-  items: MasteryOverviewItem[]
-  total: number
-  average_mastery: number
-}
+/** 掌握度概览条目（生成自 `MasteryOverviewItem`） */
+export type MasteryOverviewItem = Schema<'MasteryOverviewItem'>;
+
+/** 掌握度概览响应（生成自 `MasteryOverviewResponse`） */
+export type MasteryOverviewResponse = Schema<'MasteryOverviewResponse'>;
+
+/**
+ * 为拓展卡片立即出题的回执（生成自 `ExtensionQuestionsTriggeredResponse`）
+ *
+ * `target_categories` 带默认值 → 生成类型里是必填；目前恒为 `["extension"]`。
+ */
+export type ExtensionQuestionsTriggeredResponse = Schema<'ExtensionQuestionsTriggeredResponse'>;
+
+/** 语义关系推断结果（生成自 `SemanticRelationsResponse`） */
+export type SemanticRelationsResponse = Schema<'SemanticRelationsResponse'>;
 
 /** 触发联合分析 */
 export async function extractCombined(linkId: string): Promise<CombinedExtractResponse> {
@@ -61,8 +45,8 @@ export async function generateExtension(cardId: string, materialNoteId?: string)
   })
 }
 
-/** 为拓展卡片立即出题 */
-export async function generateExtensionQuestions(cardId: string): Promise<{ card_id: string; note_id: string; message: string }> {
+/** 为拓展卡片立即出题（生成自 `ExtensionQuestionsTriggeredResponse`，含 `target_categories`） */
+export async function generateExtensionQuestions(cardId: string): Promise<ExtensionQuestionsTriggeredResponse> {
   return request(`/knowledge/cards/${cardId}/generate-questions`, { method: 'POST' })
 }
 
@@ -93,7 +77,12 @@ export async function getMasteryOverview(params: { page?: number; page_size?: nu
   return request<MasteryOverviewResponse>(`/knowledge/mastery?${query}`)
 }
 
-/** 触发语义关系推断（在 graph 路由下） */
-export async function suggestSemanticRelations(): Promise<{ success: boolean; new_count: number; skipped_count: number; message: string }> {
+/**
+ * 触发语义关系推断（在 graph 路由下；生成自 `SemanticRelationsResponse`）
+ *
+ * 这是 §7.1 里唯一一个 `additionalProperties` 空壳（`SCHEMA_LOOSE`）端点：
+ * P1 把后端的 `Dict[str, Any]` 换成了真实模型，切换后它不再靠手写维护。
+ */
+export async function suggestSemanticRelations(): Promise<SemanticRelationsResponse> {
   return request('/graph/suggest-semantic', { method: 'POST' })
 }

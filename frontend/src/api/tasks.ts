@@ -9,45 +9,24 @@
  * 是这个项目正在被逐步拆掉的形态；新增的接口不该继续往那里堆。
  */
 import { request } from './client';
+import type { Schema } from './generated/types';
 
-/** 与后端 `TaskRunResponse` 逐字段对应 */
-export interface TaskRun {
-  task_id: string;
-  task_name: string;
-  note_id: string | null;
-  /** `pending` / `running` / `succeeded` / `failed` / `stale` / `cancelled` */
-  status: string;
-  /** 0.0 ~ 1.0 */
-  progress: number;
-  /** 可直接展示的阶段名（如"正在抽取知识点"），可能为空字符串 */
-  stage: string;
-  message: string | null;
-  attempt: number;
-  max_attempts: number;
-  error: string | null;
-  retryable: boolean;
-  heartbeat_at: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-}
+// --- 任务进度相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-export interface TaskRunList {
-  items: TaskRun[];
-  total: number;
-}
+/** 与后端 `TaskRunResponse` 逐字段对应（生成自 `TaskRunResponse`） */
+export type TaskRun = Schema<'TaskRunResponse'>;
 
-export interface CancelResult {
-  task_id: string;
-  status: string;
-  /**
-   * 是否已在服务端**强制终止**。
-   *
-   * 文件系统 broker 下通常为 `false`：任务会在下一个阶段边界自行退出。
-   * 前端必须如实展示这一点，否则用户会以为"点了取消就立刻停了"。
-   */
-  terminated: boolean;
-  detail: string;
-}
+/** 笔记任务列表响应（生成自 `TaskRunListResponse`） */
+export type TaskRunList = Schema<'TaskRunListResponse'>;
+
+/**
+ * 取消任务的结果（生成自 `CancelResponse`）
+ *
+ * `terminated` 表示是否已在服务端**强制终止**：文件系统 broker 下通常为 `false`
+ * （任务会在下一个阶段边界自行退出）。前端必须如实展示这一点，
+ * 否则用户会以为"点了取消就立刻停了"。
+ */
+export type CancelResult = Schema<'CancelResponse'>;
 
 /** 终态集合：这些状态不会再有进展，轮询应当停止 */
 export const TERMINAL_TASK_STATUSES = ['succeeded', 'failed', 'stale', 'cancelled'];

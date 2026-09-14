@@ -3,84 +3,46 @@
  * @description 笔记清洗触发、停止、状态查询、diff 对比与重复块操作。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 清洗触发响应 */
-export interface CleaningStartResponse {
-  /** 笔记 ID */
-  id: string;
-  /** 当前状态 */
-  status: string;
-  /** 提示信息 */
-  message: string;
-}
+// --- 清洗相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 停止清洗响应 */
-export interface CleaningStopResponse {
-  /** 笔记 ID */
-  id: string;
-  /** 当前状态 */
-  status: string;
-  /** 提示信息 */
-  message: string;
-}
+/** 清洗触发响应（生成自 `CleaningStartResponse`；`status` 现在是 `NoteStatus` 枚举） */
+export type CleaningStartResponse = Schema<'CleaningStartResponse'>;
 
-/** 清洗状态响应 */
-export interface CleaningStatusResponse {
-  /** 笔记 ID */
-  id: string;
-  /** 当前状态 */
-  status: string;
-  /** 清洗后 Markdown 路径 */
-  clean_md_path: string | null;
-  /** 错误信息 */
-  error_message: string | null;
-  /** 元数据（含清洗统计） */
-  metadata_: Record<string, unknown> | null;
-}
+/** 停止清洗响应（生成自 `CleaningStopResponse`；`status` 现在是 `NoteStatus` 枚举） */
+export type CleaningStopResponse = Schema<'CleaningStopResponse'>;
 
-/** 单行 diff 数据 */
-export interface DiffLine {
-  /** 行类型：added（新增）、removed（删除）、unchanged（未变） */
-  type: 'added' | 'removed' | 'unchanged';
-  /** 行内容 */
-  content: string;
-  /** 原始版行号 */
-  line_number_original: number | null;
-  /** 清洗版行号 */
-  line_number_clean: number | null;
-}
+/**
+ * 清洗状态响应（生成自 `CleaningStatusResponse`）
+ *
+ * ⚠️ 契约把 `clean_md_path` / `error_message` / `metadata_` 声明为
+ * `?: T | null`（可缺省**且**可空），不是"必有但可能是 null"。
+ */
+export type CleaningStatusResponse = Schema<'CleaningStatusResponse'>;
 
-/** diff 块数据（连续的变更行） */
-export interface DiffBlock {
-  /** 块内的行列表 */
-  lines: DiffLine[];
-}
+/**
+ * 单行 diff 数据（生成自 `DiffLine`）
+ *
+ * ⚠️ `type` 在契约里是 `string`，此前前端手写成
+ * `'added' | 'removed' | 'unchanged'` —— 切换后**前端反而变宽了**。
+ * 这是"后端没把这三个值声明成枚举"的直接后果，不是前端写错。
+ */
+export type DiffLine = Schema<'DiffLine'>;
 
-/** 清洗 diff 响应 */
-export interface CleaningDiffResponse {
-  /** 笔记 ID */
-  note_id: string;
-  /** 原始版行数 */
-  original_lines: number;
-  /** 清洗版行数 */
-  clean_lines: number;
-  /** diff 块列表 */
-  blocks: DiffBlock[];
-  /** 清洗统计信息 */
-  stats: Record<string, number> | null;
-}
+/** diff 块数据（连续的变更行；生成自 `DiffBlock`） */
+export type DiffBlock = Schema<'DiffBlock'>;
 
-/** 块操作响应（恢复/删除） */
-export interface BlockOperationResponse {
-  /** 笔记 ID */
-  note_id: string;
-  /** 块序号 */
-  block_index: number;
-  /** 操作类型 */
-  operation: 'restored' | 'deleted';
-  /** 提示信息 */
-  message: string;
-}
+/** 清洗 diff 响应（生成自 `CleaningDiffResponse`） */
+export type CleaningDiffResponse = Schema<'CleaningDiffResponse'>;
+
+/**
+ * 块操作响应（恢复/删除；生成自 `BlockOperationResponse`）
+ *
+ * 同 `DiffLine.type`：`operation` 在契约里也是 `string`，
+ * 手写的 `'restored' | 'deleted'` 联合因此被放宽。
+ */
+export type BlockOperationResponse = Schema<'BlockOperationResponse'>;
 
 /**
  * 手动触发笔记清洗

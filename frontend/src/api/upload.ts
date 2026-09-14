@@ -3,6 +3,7 @@
  * @description 单次上传、两阶段上传、上传状态查询、转换重试与文件夹内上传。
  */
 import { request, uploadRequest, type Note } from './client'
+import type { Schema } from './generated/types'
 
 /**
  * 上传文件
@@ -28,17 +29,13 @@ export async function uploadFile(file: File, backend?: string, noteRole?: string
   return uploadRequest<Note>('/upload', formData);
 }
 
-/** 两阶段上传阶段 1（prepare）的返回结果 */
-export interface PreparedUpload {
-  /** 临时上传标识，commit 时需回传 */
-  temp_id: string;
-  /** 原始文件名 */
-  filename: string;
-  /** 来源类型，如 pdf、docx 等 */
-  source_type: string;
-  /** PDF 页数，非 PDF 为 null */
-  page_count: number | null;
-}
+/**
+ * 两阶段上传阶段 1（prepare）的返回结果（生成自 `PrepareUploadResponse`）
+ *
+ * ⚠️ `source_type` 现在是 `SourceType` 枚举；`page_count` 是 `?: number | null`
+ * （契约里既允许缺省也允许 null）。
+ */
+export type PreparedUpload = Schema<'PrepareUploadResponse'>;
 
 /**
  * 两阶段上传阶段 1：接收文件并暂存到服务端临时目录
@@ -102,13 +99,31 @@ export async function commitUpload(tempId: string, opts: CommitUploadOptions = {
 }
 
 /**
+ * 上传/转换状态响应（生成自 `NoteStatusResponse`）
+ *
+ * ⚠️ `status` 是 `NoteStatus` 枚举（10 个值）；`error_message` 是
+ * `?: string | null`（可缺省**且**可空），不是"必有但可能为 null"。
+ */
+export type NoteStatusResponse = Schema<'NoteStatusResponse'>;
+
+/**
+ * 重试转换成功后用于"局部合并回当前笔记"的字段子集
+ *
+ * `RetryConvertButton`（产出）与 `NoteDetailHeader`（消费）此前**各写了一份**
+ * `{ status: string; error_message: string | null }`，两份都是手抄的。
+ * 阶段 5.1 / S2 把 `retryConvert` 的返回类型换成生成类型后，这两份手抄形状
+ * 立刻编译失败 —— 收成一个 `Pick<>` 就没有第三份了。
+ */
+export type RetryConvertOutcome = Pick<NoteStatusResponse, 'status' | 'error_message'>;
+
+/**
  * 获取上传/转换状态
  * 用于轮询检查文件上传后的异步处理进度。
  *
  * @param noteId - 笔记 ID
  * @returns 包含当前状态和可能的错误信息
  */
-export async function getUploadStatus(noteId: string): Promise<{ id: string; status: string; error_message: string | null }> {
+export async function getUploadStatus(noteId: string): Promise<NoteStatusResponse> {
   return request(`/upload/${noteId}/status`);
 }
 
@@ -119,7 +134,7 @@ export async function getUploadStatus(noteId: string): Promise<{ id: string; sta
  * @param noteId - 笔记 ID
  * @returns 重试后的笔记状态
  */
-export async function retryConvert(noteId: string): Promise<{ id: string; status: string; error_message: string | null }> {
+export async function retryConvert(noteId: string): Promise<NoteStatusResponse> {
   return request(`/upload/${noteId}/retry`, { method: 'POST' });
 }
 

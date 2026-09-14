@@ -3,132 +3,71 @@
  * @description 到期题目、提交答案、复习统计与历史、快速复习、复习提醒。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 到期题目 */
-export interface DueQuiz {
-  id: string;
-  card_id: string;
-  note_id: string;
-  question_type: string;
-  difficulty: string;
-  question: string;
-  options: string | null;
-  next_review_at: string | null;
-  review_count: number;
-  interval: number;
-  easiness_factor: number;
-}
+// --- 复习相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 到期题目列表响应 */
-export interface DueQuizListResponse {
-  items: DueQuiz[];
-  total: number;
-}
+/**
+ * 到期题目（生成自 `DueQuizResponse`）
+ *
+ * ⚠️ 比手写版本多了**必填的 `repetition`**（后端有默认值，一定会序列化出来）：
+ * 手写的 `DueQuiz` 把 `review_count` / `interval` / `easiness_factor` 标成必有、
+ * 却**根本没有 `repetition`** —— 这正是"前端类型描述的现实与契约不同"的一处。
+ */
+export type DueQuiz = Schema<'DueQuizResponse'>;
 
-/** 调度结果（字段名 `sm2` 是历史遗留：阶段 3.6 之后默认由 FSRS-5 产生） */
-export interface SM2Info {
-  interval: number;
-  repetition: number;
-  easiness_factor: number;
-  /** 占位提交（等待用户自评）时不推进调度，此处为 null */
-  next_review_at: string | null;
-  /** FSRS 评分档位 1-4；null = 本次未推进调度，或走的是 SM-2 回退路径 */
-  rating?: number | null;
-  /**
-   * **复习前**模型预测的可回忆概率（0-1）。
-   * 它解释间隔为什么是这个数：0.6 表示模型认为你已接近遗忘，
-   * 因此这次答对后间隔会涨得更多。SM-2 回退路径下为 null。
-   */
-  predicted_retention?: number | null;
-}
+/** 到期题目列表响应（生成自 `DueQuizListResponse`） */
+export type DueQuizListResponse = Schema<'DueQuizListResponse'>;
 
-/** 判分方式：choice/fill_blank 为可靠的自动判分，self_rating 为用户自评 */
+/** 调度结果（生成自 `SM2Info`；字段名 `sm2` 是历史遗留，阶段 3.6 之后默认由 FSRS-5 产生） */
+export type SM2Info = Schema<'SM2Info'>;
+
+/**
+ * 判分方式：choice/fill_blank 为可靠的自动判分，self_rating 为用户自评
+ *
+ * ⚠️ **契约里这只是 `string`**（`SubmitAnswerResponse.grading_method` 没写成枚举），
+ * 所以这个联合**约束不到任何东西**：它既不能保证后端只给这 5 个值，
+ * 也不能保证前端比较的那 5 个字面量是对的。保留它只是为了不改导出名 ——
+ * 真正要修的是后端把它声明成枚举。
+ */
 export type GradingMethod = 'choice' | 'fill_blank' | 'self_rating' | 'ungraded' | 'legacy';
 
 /**
- * LLM 语义判分明细（阶段 3.5）
+ * LLM 语义判分明细（生成自 `GradingDetail`）
  *
- * 关键设计：**不是 0-100 分，而是"缺了哪一点、误解了哪一点"** ——
- * 前者无法校准也没有指导价值，后者可展示、可核对。
+ * 关键设计：**不是 0-100 分，而是"缺了哪一点、误解了哪一点"**。
+ *
+ * ⚠️ 与手写版本的两处口径差：
+ * - `missing_points` / `misconceptions` / `confidence` / `reason` 带默认值，
+ *   生成类型里是**必填**（`verdict` 之外不再有 `?`）；
+ * - `verdict` 在契约里是 `string` 而不是 `'correct' | 'partial' | 'incorrect'` ——
+ *   后端刻意如此（库里可能存着已下线 verdict 的旧数据，收紧会让读取变 500）。
  */
-export interface GradingDetail {
-  verdict: 'correct' | 'partial' | 'incorrect';
-  missing_points?: string[];
-  misconceptions?: string[];
-  confidence?: number;
-  reason?: string;
-}
+export type GradingDetail = Schema<'GradingDetail'>;
 
-/** 提交答案响应 */
-export interface SubmitAnswerResponse {
-  quiz_id: string;
-  is_correct: boolean;
-  quality: number;
-  correct_answer: string;
-  explanation: string | null;
-  options: string[] | null;
-  question_type: string;
-  sm2: SM2Info;
-  /** 本次提交携带的自评分；未自评时为 null */
-  self_rating: number | null;
-  grading_method: GradingMethod;
-  /** 仍在等待用户自评：自动判分不可信且今日尚未自评。UI 据此展示四档自评 */
-  needs_self_assessment: boolean;
-  /** 本次提交是否补完了此前的占位记录 */
-  completing_placeholder: boolean;
-  /** 判分依据说明，用于向用户解释判分可信度 */
-  grading_reason: string | null;
-  /**
-   * 语义判分明细；`null` = 本次**没有**语义判分（未请求 / 判分失败 / 已自评）
-   *
-   * ⚠️ 不要把 null 当成"判分过但没发现问题" —— 那是两回事，
-   * 后者应当显示"没有发现遗漏"，前者应当什么都不显示。
-   */
-  grading_detail?: GradingDetail | null;
-}
+/** 提交答案响应（生成自 `SubmitAnswerResponse`） */
+export type SubmitAnswerResponse = Schema<'SubmitAnswerResponse'>;
 
-/** 复习统计 */
-export interface ReviewStats {
-  due_count: number;
-  today_done: number;
-  today_correct: number;
-  today_accuracy: number;
-  total_reviews: number;
-  total_correct: number;
-  total_accuracy: number;
-  total_quizzes: number;
-  /** 每日答题上限（后端单一来源，前端据此显示进度），见 docs/decisions.md#F-12 */
-  daily_limit: number;
-}
+/** 复习统计（生成自 `ReviewStatsResponse`） */
+export type ReviewStats = Schema<'ReviewStatsResponse'>;
 
-/** 复习历史条目 */
-export interface ReviewHistoryItem {
-  id: string;
-  quiz_id: string;
-  note_id: string;
-  user_answer: string;
-  is_correct: boolean;
-  quality: number;
-  time_spent_ms: number;
-  review_at: string | null;
-}
+/** 复习历史条目（生成自 `ReviewHistoryItem`） */
+export type ReviewHistoryItem = Schema<'ReviewHistoryItem'>;
 
-/** 复习历史响应 */
-export interface ReviewHistoryResponse {
-  items: ReviewHistoryItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+/** 复习历史响应（生成自 `ReviewHistoryResponse`） */
+export type ReviewHistoryResponse = Schema<'ReviewHistoryResponse'>;
 
 /** 快速复习题目（复用 DueQuiz 类型） */
 export type QuickQuiz = DueQuiz
 
-/** 快速复习响应 */
-export interface QuickReviewResponse {
-  items: QuickQuiz[];
-  total: number;
-}
+/**
+ * 快速复习响应
+ *
+ * ⚠️ `GET /review/quick/{note_id}` 在契约里**就是** `DueQuizListResponse`
+ * （后端 `response_model=DueQuizListResponse`），没有独立的模型 ——
+ * 所以这里直接指向同一个生成类型，而不是再手写一份同形状的接口。
+ */
+export type QuickReviewResponse = Schema<'DueQuizListResponse'>;
 
 /**
  * 获取今日到期复习题目
@@ -230,17 +169,8 @@ export async function submitQuickReviewAnswer(
   });
 }
 
-/** 复习提醒响应 */
-export interface ReminderResponse {
-  /** 当前到期需要复习的题目数 */
-  due_count: number;
-  /** 1小时内到期的题目数 */
-  due_in_1h_count: number;
-  /** 薄弱知识点数 */
-  weak_point_count: number;
-  /** 上次提醒时间 */
-  last_reminded_at: string | null;
-}
+/** 复习提醒响应（生成自 `ReminderResponse`） */
+export type ReminderResponse = Schema<'ReminderResponse'>;
 
 /** 获取复习提醒数据 */
 export async function getReminders(): Promise<ReminderResponse> {
@@ -258,60 +188,28 @@ export async function getReminders(): Promise<ReminderResponse> {
 // 用户一次也没法用。这里补上。
 // ---------------------------------------------------------------------------
 
-/** 到期可复习的卡片 */
-export interface DueCard {
-  card_id: string;
-  title: string;
-  /** 卡片正文；复习时先隐藏，点"显示答案"后再展开 */
-  content: string;
-  summary: string | null;
-  card_type: string;
-  chapter_title: string | null;
-  note_id: string | null;
-  /** 0-100 的掌握度（`current 还能回忆起这张卡的概率 × 100`） */
-  mastery_level: number;
-  interval_days: number;
-  repetition: number;
-  easiness_factor: number;
-  next_review_at: string | null;
-  review_count: number;
-  lapses: number;
-}
+/**
+ * 到期可复习的卡片（生成自 `CardReviewItem`）
+ *
+ * ⚠️ `mastery_level` / `interval_days` / `repetition` / `lapses` / `review_count` /
+ * `easiness_factor` 在后端都带默认值 → 生成类型里是**必填**；而 `summary` /
+ * `chapter_title` / `next_review_at` 这类 `anyOf[T, null]` 无默认值的字段是
+ * `?: T | null`（既可能缺省、也可能是 null）。
+ */
+export type DueCard = Schema<'CardReviewItem'>;
 
-/** 到期卡片列表响应 */
-export interface CardReviewListResponse {
-  items: DueCard[];
-  total: number;
-}
+/** 到期卡片列表响应（生成自 `CardReviewListResponse`） */
+export type CardReviewListResponse = Schema<'CardReviewListResponse'>;
 
-/** 卡片复习提交响应 */
-export interface CardReviewSubmitResponse {
-  card_id: string;
-  quality: number;
-  is_correct: boolean;
-  interval_days: number;
-  repetition: number;
-  easiness_factor: number;
-  next_review_at: string | null;
-  /** 刷新后的掌握度（0-100） */
-  mastery_level: number;
-  /**
-   * FSRS 的记忆强度 S（天）：回忆概率降到 90% 所需的天数。
-   *
-   * 这是"下次复习 N 天后"的依据 —— `interval_days` 正是由 S 与目标保持率
-   * 解出来的。`review_scheduler=sm2` 回退时为 null。
-   */
-  stability?: number | null;
-  /** FSRS 的难度 D（1-10）；SM-2 回退时为 null */
-  difficulty?: number | null;
-  /**
-   * **复习前**模型预测的可回忆概率（0-1）。
-   *
-   * 它解释间隔为什么是那个数：0.6 表示模型认为你已接近遗忘，
-   * 因此这次答对后间隔会涨得更多。
-   */
-  predicted_retention?: number | null;
-}
+/**
+ * 卡片复习提交响应（生成自 `CardReviewSubmitResponse`）
+ *
+ * `stability` 是 FSRS 的记忆强度 S（天）：回忆概率降到 90% 所需的天数 ——
+ * "下次复习 N 天后"的依据（`interval_days` 正是由 S 与目标保持率解出来的）；
+ * `review_scheduler=sm2` 回退时为 null。`difficulty` 是 FSRS 的难度 D（1-10）。
+ * `predicted_retention` 是**复习前**模型预测的可回忆概率（0-1）。
+ */
+export type CardReviewSubmitResponse = Schema<'CardReviewSubmitResponse'>;
 
 /**
  * 获取当前到期的卡片

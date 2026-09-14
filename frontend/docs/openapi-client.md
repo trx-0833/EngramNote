@@ -1171,3 +1171,236 @@ unconsumedOperations 9（原 8：新增的是 /ready）
 拿一天的快照去覆盖它，会让"哪个数字是哪一轮的"变得不可考 ——
 要更新那几张表，应当在手写类型稳定后单独做一轮。
 
+---
+
+## 13. 阶段 5.1 的 S1 + S2：冻结基线，然后**只换类型、不换请求**（2026-09-14）
+
+> §9.1 的 S1 与 S2，**只做这两步**。S3（按域替换请求函数体）/ S4（收敛 `client.ts`）/
+> S5（5.2 / 5.3）**一步都没开始**，§13.8 逐条列了没做的事。
+> 本文 §0~§12 与 §11 的数字都是**各自那一轮**的记录，本节不覆盖它们。
+
+### 13.1 S1：冻结基线（指纹 + 漂移数字）
+
+**产物指纹**（未改动，这一轮只读）：
+
+| 产物 | 字节 | sha256 |
+|---|---|---|
+| `backend/openapi.json` | 397 598 | `9a633977af6e37dc1e2153747c27d4844a75a2dea267cbee8bb7150e956bb471` |
+| `frontend/src/api/generated/schema.ts` | 291 991 | `56757632b50b60d07bcd583877b697a2b101afd300d261198350453847dd3cbd` |
+| `frontend/src/api/generated/openapi-drift.mjs` | 40 618 | `3f4fe90eecd308afbee356cd741e8e59f7d042b067db4bc13337deea8c527d8` |
+
+`schema.ts` 与 `openapi.json` 的 sha256 在 S2 **前后相同** —— S2 没有重新生成任何产物，
+只改了手写类型（这正是"改的是前端对契约的引用，不是契约本身"的可验证形式）。
+
+**漂移基线**（`node src/api/generated/openapi-drift.mjs --json=…`，退出 0）：见 §13.6 左列。
+
+> ⚠️ **§9.2 的 P4（把 `dump_openapi.py --check` 接进 CI）本轮仍然没做**：
+> 它要改 `.github/**`，不在本轮允许改动的文件清单里。**没有它，S2 之后前端仍然会在
+> "后端改了契约、`openapi.json` 没重新生成"的窗口里保持绿色** —— 这条风险没有被本轮消掉。
+
+### 13.2 S2 做了什么：**93 个手写 interface → 103 个生成类型别名**
+
+新增 `frontend/src/api/generated/types.ts`（32 行，**纯类型、零运行时**）：
+它只导出 `Schemas`（= `components['schemas']`）与
+`Schema<K extends keyof Schemas>`（按组件名取类型）。手写模块里的
+`export interface Note { … }` 因此变成 `export type Note = Schema<'NoteResponse'>`。
+
+| 口径 | 数 | 说明 |
+|---|---|---|
+| 删掉的手写 `export interface` | **93** | 其中 92 个"原地换成别名"，1 个（`GraphOperationResult`）删除，见 §13.4#6 |
+| 现在指向生成类型的别名 | **103** | 92 原地 + **11 个新名字**（见下） |
+| 新名字覆盖的"签名里没有名字的形状" | **17 个函数** | 11 个函数的 `Promise<{…}>` 是**内联**的（`git diff` 里逐条可见），另 6 个图谱操作共用一个手写 `GraphOperationResult` |
+| 仍然手写的 `export interface` | 2 | `RecommendedTask`（schema 里没有对应组件）、`CommitUploadOptions`（multipart 参数） |
+| 仍然手写的 `export type` | 3 | `NoteContentTarget`、`GradingMethod`、`QuickQuiz`（= `DueQuiz`） |
+
+11 个新名字（每个都对应一个原先手抄的响应形状；括号里是它接管的函数数）：
+
+```
+GraphRelationOperationResponse      ← confirm / reject / create / delete（4）
+GraphBatchOperationResponse         ← batch-confirm / batch-reject（2）
+NoteStatusResponse                  ← getUploadStatus / retryConvert（2）
+MessageResponse                     ← deleteFolder / deleteProject（2）
+ProjectNotesAddedResponse           ← addNotesToProject（1）
+ProjectNoteRemovedResponse          ← removeNoteFromProject（1）
+ExtensionQuestionsTriggeredResponse ← generateExtensionQuestions（1）
+SemanticRelationsResponse           ← suggestSemanticRelations（1）
+NoteVersionContentResponse          ← getVersion（1）
+ChapterSummaryListResponse          ← getChapterSummaries（1）
+CardDuplicateListResponse           ← getCardDuplicates（1）
+```
+
+**逐域别名数**：`notes.ts` 16、`qa.ts` 14、`review.ts` 13、`projects.ts` 11、
+`graph.ts` 10、`cleaning.ts` / `knowledge.ts` 各 7、`report.ts` 6、`client.ts` 5、
+`assessment.ts` 4、`goals.ts` / `tasks.ts` 各 3、`auth.ts` / `upload.ts` 各 2。
+
+**四处名字没对齐的地方，刻意保留前端名不改**：`Note ← NoteResponse`、
+`KnowledgeCard ← KnowledgeCardResponse`、`QuizItem ← QuizItemResponse`、
+`DueCard ← CardReviewItem`、`WeakPoint ← WeakPointItem`、`Annotation ← AnnotationResponse`、
+`LearningGoal ← GoalResponse`、`NoteLinksResponse ← LinkListResponse`、
+`UpdateLinksResponse ← LinkUpdateResponse`、`ReviewStats ← ReviewStatsResponse`、
+`TaskRun ← TaskRunResponse`、`TaskRunList ← TaskRunListResponse`、
+`CancelResult ← CancelResponse`、`DailyReport ← DailyReportResponse`、
+`LinkedMaterial ← LinkedMaterialItem`、`User ← UserResponse`、`NoteVersion ← NoteVersionResponse`。
+**这是 S2 的关键取舍**：别名左边是"调用方看到的名字"，右边是"契约里的模型名"，
+改名会让 S2 从"零调用方改动"变成一次全量重命名（74 个文件、79 处 import）。
+
+### 13.3 怎么保证"导出名 / 签名一个都没变"
+
+1. **只换类型声明，不动函数**：所有 111 个端点函数的**名字、参数表、参数默认值**
+   逐字未改；返回类型位置上的**类型名**未改（改的是那个名字指向的定义）。
+   `git diff -U0 -- frontend/src/api` 里所有涉及请求的行**只有类型实参**变了 ——
+   路径字面量、`method`、`body`、`headers`、`URLSearchParams` 一处未动
+   （已逐行核对，见 §13.7 的口径）。
+2. **`export *` 转发链不变**：`client.ts` 末尾 11 行 `export *` 一字未改，
+   所以"从 `api/client` 拿类型"的 68 处与"按域引入"的其余处全部照旧。
+3. **`vi.mock` 一处未改**：13 处 mock 点（10 个文件）的**模块工厂**一个字节都没动；
+   改的只是**个别 mock 的返回值字面量**（§13.4）。
+4. **新名字是纯增量**：11 个新导出名都是**新增**，没有任何旧导出名被删（唯一的例外是
+   `GraphOperationResult`，它没有任何调用方，见 §13.4#6）。
+5. **生成类型覆盖不到的横切层一行未动**：401 刷新单飞、超时（30 s / 上传 600 s）、
+   `Content-Type` 合并、204 / 空响应体处理、4 个 multipart 上传
+   （`uploadFile` / `commitUpload` / `uploadFileToFolder` / `prepareUpload`）
+   **仍然是手写**，因为生成类型**表达不了**它们（§9.2 三条已定形态的第 2、3 条）。
+   本轮的证据是 `bodyFindings` 25 → **25**（请求体差异一处没变）、
+   `unknownQueryParams` / `missingRequiredQuery` 0 → 0。
+
+### 13.4 ★ 切换后必须修的构造点：**6 个 mock 夹具（+1 处刻意绕过类型）+ 4 处生产代码**
+
+§9.1 预言的"先炸测试里的 mock 工厂"**确实发生了**，而且**全部集中在构造侧**
+（读侧一处都没炸）。逐条如下 —— 每一条都给出"缺的是哪个字段"与
+"**契约对不对**"的判断，因为这是本轮最有信息量的产出。
+共有 **20 个文件位置**报错（`tsc` 峰值 20 条），下面按根因归并成 12 条。
+
+| # | 位置 | 缺的字段 | 契约依据 | 判断 |
+|---|---|---|---|---|
+| 1 | `pages/Projects.test.tsx::makeNote()` | `note_role`、`project_ids`、`project_names`（**三个**，tsc 只报第一个） | 三者都带 `default`（`"material"` / `[]` / `[]`）→ pydantic **一定会序列化出来** → 生成类型必填 | **测试错、契约对**。这条夹具此前构造的是"后端从不返回的形状"；页面没读这三个字段，所以运行时一直看不出来 |
+| 2 | `pages/projects/helpers.test.ts::makeNote()` | 同上三个 | 同上 | 同上（同一份夹具的复制品） |
+| 3 | `pages/Projects.test.tsx` beforeEach | `addNotesToProject` 少 `project_id`；`removeNoteFromProject` 少 `note_id` | 后端 service 的 `return` 里本来就有（§11.7 #2/#3 已记为"前端少知道一个字段"） | **手写类型错、契约对**。mock 只是继承了手写类型的谎 |
+| 4 | `pages/Review.test.tsx::makeQuiz()` | `repetition` | `DueQuizResponse.repetition` 带默认值 → 必填；而手写 `DueQuiz` **根本没有这个字段** | **手写类型错、契约对**。这是"前端自认为完整、契约里缺一项"的形态 |
+| 5 | `pages/KnowledgeGraph.test.tsx::makeNode()` | `note_trashed` | `default: false` → 必填（它就是"是否过滤回收站节点"的判据） | **测试错、契约对** |
+| 6 | `pages/KnowledgeGraph.test.tsx` beforeEach | 3 处 `mockResolvedValue({ success: true })`：confirm / create 少 `relation_id`，batchConfirm 少 `confirmed_count` / `failed_count` / `rejected_count` | 4 个关系端点各有**固定**形状（§11.7 #1） | **手写类型错、契约对**：`GraphOperationResult`（`success` + 4 个全可选）是用一个类型盖住四种形状，测试于是只给了一个 `success` |
+| 7 | `pages/KnowledgeGraph.test.tsx:943` | —— | —— | **测试意图对，类型不该放宽**：用例专门喂 `card_type: 'unknown-type'`（"后端枚举将来加值、旧前端不能抛错"）。写 `as never` 是**刻意的**，与同一行既有的 `undefined as never` 同风格 |
+
+生产代码里被"类型错误逼出来"的一共 5 处，**其中 4 处被改、1 处被顺带修好**，
+**全部是纯类型修正（零运行时变化）**：
+
+| # | 位置 | 改法 | 为什么不是运行时改动 |
+|---|---|---|---|
+| 8 | `components/graph/types.ts::ForceGraphLink.similarity_score` | `number \| null` → `?: number \| null` | 读取方（`getLinkWidth` / `GraphCanvas:90` / `GraphSidebar:227,407`）用的都是 `== null` / `!= null`，对 `undefined` 与 `null` 完全一致。**没有**改成在边界上 `?? null` —— 那会把 undefined 变成 null，是真的行为变化 |
+| 9 | `pages/QuestionSets.tsx::AnswerSection.explanation` | `string \| null` → `?: string \| null` | 渲染分支是 `{explanation && …}` |
+| 10 | 报错在 `pages/NoteDetail.tsx:187`，**改在** `notedetail/NoteDetailHeader.tsx::onRoleUpdated` | 入参 `string \| undefined` → `string`（`NoteDetail.tsx` **本身一行未改**：参数类型由 props 上下文推断） | `note_role` 有默认值 → 契约保证一定给；页面本来就是"拿到就用" |
+| 11 | 报错在 `pages/NoteDetail.tsx:188` + `notedetail/RetryConvertButton.tsx:30`，**改在**后者的 props 与新增的 `RetryConvertOutcome` | 两处**手抄的同一份形状** `{status: string; error_message: string \| null}` → 共用一个 `RetryConvertOutcome = Pick<NoteStatusResponse, 'status' \| 'error_message'>` | 形状一个字没变，只是从两份抄写收成一份 |
+| 12 | `pages/NotesList.tsx:130` | 无改动 | 它是**被 #11 顺带修好的**：`retryConvert` 的返回类型换成 `NoteStatusResponse` 之后 `result.status` 就是 `NoteStatus` |
+
+**一个反面结论也要写下来**：这 12 条里**没有一条**是"生成类型比现实更严、需要给后端提 issue"。
+缺的字段全部是"后端一定会给"（带默认值）或"后端本来就在给"（service 的 return 里就有）——
+也就是说，**是前端类型在撒谎，不是契约过严**。
+
+### 13.5 `deleteAnnotation`：**刻意留在 HW_DISCARDS_BODY**
+
+`notes.ts` 的 `deleteAnnotation` 声明 `Promise<void>` 并 `await` 掉 `{success: true}`，
+契约里它是 `AnnotationDeleteResponse`。**改成返回生成类型要同时改函数体**
+（`return request<AnnotationDeleteResponse>(…)`）—— 那是 S3 的动作，不是 S2 的。
+所以它现在是 111 个函数里**唯一**一个非 `IDENTICAL` 且非 `NO_JSON_RESPONSE` 的。
+
+### 13.6 ★ 漂移前后对照（同一份脚本、同一份 schema、只改了手写类型）
+
+```powershell
+node src/api/generated/openapi-drift.mjs --json=before.json   # S1 冻结
+node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
+```
+
+| 指标 | S1（前） | S2（后） | 说明 |
+|---|---|---|---|
+| **`identical`** | 26 | **104** | +78：**全部 104 个有 JSON 响应的函数都两边等价** |
+| **`conflict`** | 37 | **0** | 归零 |
+| **`hwNarrower`** | 28 | **0** | 归零 |
+| **`hwWider`** | 13 | **0** | 归零 |
+| `hwDiscardsBody` | 1 | 1 | `deleteAnnotation`，**刻意留**（§13.5） |
+| `noJsonResponse` | 6 | 6 | 4 个 204 + 2 个 SSE，本来就没有响应体 |
+| **`compilerDiagnostics`** | 117 | **2** | 剩下的两条就是 `deleteAnnotation` 的 `void` 双向不兼容 |
+| **`schemaEnumNotModelled`** | 55 | **0** | 枚举不再是 `string`（`NoteStatus` / `SourceType` / `CardType` / `RelationType` / `RelationStatus` / `DifficultyLevel` / `QuestionType` 全部从生成类型来） |
+| **`schemaNullableHwNot`** | 34 | **0** | 可空字段不再被前端当"必有且非空" |
+| `bodyFindings` | 25 | 25 | **请求体一处没动**（S2 不碰请求） |
+| `unusedSchemaQuery` / `unknownQueryParams` / `missingRequiredQuery` | 3 / 0 / 0 | 3 / 0 / 0 | 同上 |
+| `arrayVsEnvelope` / `envelopeMismatches` | 0 / 0 | 0 / 0 | 仍是**否定结果**（§7.6 / BH.9） |
+| `unconsumedOperations` | 9 | 9 | 与前端无关 |
+| `handWrittenFunctions` / `pathMatched` / `pathMissing` | 111 / 111 / 0 | 111 / 111 / 0 | **判定对象一个没少**（这是"非空转"的守卫：104+1+6 = 111） |
+
+**逐函数判定迁移：78 个函数换了判定，方向全部是"变好"**，没有一个反向，
+而且**每一类的迁移都是一次性搬空的**——基线里非 IDENTICAL 的三类各自归零：
+
+| 迁移 | 个数 | 说明 |
+|---|---|---|
+| `CONFLICT → IDENTICAL` | **37** | = 基线里 `conflict` 的全部 |
+| `HW_NARROWER → IDENTICAL` | **28** | = 基线里 `hwNarrower` 的全部 |
+| `HW_WIDER → IDENTICAL` | **13** | = 基线里 `hwWider` 的全部 |
+| 合计 | **78** | 26（基线 IDENTICAL）+ 78 = **104**；104 + 1（`HW_DISCARDS_BODY`）+ 6（`NO_JSON_RESPONSE`）= **111** |
+
+**"104 个 IDENTICAL"的准确含义**：`Awaited<ReturnType<typeof f>>` 与
+`paths[…][method]['responses'][2xx]['content']['application/json']` **双向可赋值** ——
+也就是"前端对这个响应的假设"与"契约的保证"**逐字段等价**。
+它**不**等于"运行时一定对"（§8 的 6 条限制仍然成立：SSE 事件、`refreshSession`、
+超时、multipart 的 JSON 字符串字段都不在这份 schema 里）。
+
+### 13.7 验证（全部真跑过，都在 `frontend/` 下）
+
+| 命令 | 结果 |
+|---|---|
+| `npx.cmd tsc --noEmit` | **退出 0**（切换过程中峰值 **20 条**，全部在 §13.4 的 12 条根因里） |
+| `npm.cmd test` | **21 files / 278 tests 全通过**，退出 0（与基线同数，**没有减少**） |
+| `npm.cmd run lint` | 退出 0（`eslint src/`，新增的 `generated/types.ts` 也干净） |
+| `npm.cmd run build` | 退出 0（`tsc && vite build`，✓ built in 5.32s） |
+| `npm.cmd run e2e` | **10 passed**，退出 0（`--project=chromium`，端口 4319） |
+| `node src/api/generated/openapi-drift.mjs` | 退出 0，数字见 §13.6 |
+| `dump_openapi.py --check` | **未跑**（属后端/CI 的文件清单，且 P4 未做） |
+| 产物指纹 | `schema.ts` / `openapi.json` 的 sha256 与 S1 完全相同 |
+
+**"没有行为变化"的可核对口径**：`git diff -U0 -- frontend/src/api` 里，
+所有含 `request(` / `uploadRequest(` / `method:` / `body:` / `headers` /
+`JSON.stringify` / `URLSearchParams` 的新增或删除行，**只有类型实参不同**
+（例如 `request<GraphOperationResult>` → `request<GraphRelationOperationResponse>`），
+路径、方法、请求体一字未改。调用方的改动见 §13.4，全部是类型或测试夹具数据。
+
+### 13.8 明确**没做**的事
+
+| # | 没做 | 为什么 |
+|---|---|---|
+| 1 | **S3**（按域替换请求函数体） | 本轮范围是 S1+S2；S3 会碰 `utils/labels.ts` 的 status→class 映射等连锁点，必须逐域跑测试 |
+| 2 | **S4**（收敛 `client.ts`、删重复类型） | 同上；`client.ts` 的基础设施层本轮**一行未动** |
+| 3 | **S5**（5.2 TanStack Query / 5.3 Zustand） | 不属于 5.1 |
+| 4 | **P4**（`dump_openapi.py --check` 接 CI） | 要改 `.github/**`（不属本轮文件清单）。**S2 之后这条风险仍然存在** |
+| 5 | `deleteAnnotation` 的返回值 | 要改函数体 = S3（§13.5） |
+| 6 | 两个 SSE 端点的解析 | 它们**本来就是手写**（`client.ts:483` / `notes.ts:297`），且 `AnswerSource` 藏在 SSE 帧里，schema 永远看不到（§11.4） |
+| 7 | `tasks.ts:8` 那句"330 行、90 个函数"的化石注释 | 与类型无关；§3 已经记过，改它属于顺手清理，不在 S1/S2 的验收里 |
+| 8 | 生成类型覆盖不到的任何横切行为 | 401 刷新单飞 / 超时 / 204 / multipart 的 JSON 字符串字段**保持手写** |
+
+### 13.9 比 §9 预想得更难的地方
+
+1. **§9 只预言了"先炸测试里的 mock 工厂"**，实际是 **6 个测试夹具 + 1 处刻意绕过类型
+   + 4 处生产代码**（外加 1 处被顺带修好）。生产代码那 4 处里 2 处是**纯类型放宽**
+   （#8 / #9，读侧）、1 处是**两份手抄形状**（#11）、1 处是"契约保证一定给、
+   前端的 `| undefined` 本来就是多余的"（#10）。§9 的风险表只提了
+   "构造侧炸、读取侧统一改 `!= null`"，没提"同一份响应形状被两个组件各抄一遍"
+   这类**重复定义**也会被一起挤出来。
+2. **tsc 一次只报一个字段**：#1 的 `makeNote()` 其实缺**三个**必填字段，
+   但编译器只报第一个不兼容的属性。**"按报错数量估工作量"会低估**。
+3. **"签名不变"与"类型名不变"必须分开说**：`Note` 这个名字没变，
+   但它指向的类型**变了**（多了 3 个必填字段、2 个字段从 `string` 收窄成枚举）——
+   所以"调用方零改动"是**关于名字与参数表的承诺，不是关于类型的承诺**。
+   本轮的实际情况是：**名字 / 参数表 / import 全没动**（13 处 `vi.mock` 的模块工厂一字未改），
+   类型层面的改动落在 **15 个 `src/api/**` 文件**（14 改 + 1 新增 `generated/types.ts`）
+   与 **8 个 `src/api` 之外的文件**（1 个视图类型 + 1 个页面组件 + 1 个头部组件
+   + 1 个按钮组件 + 4 个测试文件）。**74 个调用方文件里，只有 3 个**（`QuestionSets.tsx`、
+   `NoteDetailHeader.tsx`、`RetryConvertButton.tsx`）真的被类型错误逼着改了。
+4. **`GraphOperationResult` 必须删除，否则 6 个函数永远 `HW_WIDER`**：
+   §9.1 的 S2 写的是"把 `export interface X` 换成 `export type X = …`"，
+   默认每个手写类型都有一个生成类型与之对应 —— 这个前提**对 6 个图谱操作不成立**
+   （一个前端类型盖着后端四种响应）。所以 S2 的准确表述是"**每个函数各自指向它那个端点的响应类型**"，
+   "一个 interface → 一个 alias"只是它最常见的形式。
+5. **枚举收窄没有在调用方炸开**：§9.2 预期"`utils/labels.ts`、`viewMode.ts` 这些把
+   status 当字符串比较的地方会报错"——**实际一处都没报**，因为 `statusLabels` / `statusClass`
+   是 `Record<string, …>` 索引，收窄后的联合仍然可以索引它。
+   这是**好消息，但不是"没有收益"**：收益在于"后端新增一个状态值、前端没有对应文案"
+   这件事从此会在 `Record<NoteStatus, …>` 的完整性检查里被要求（属 S3 范围）。
+

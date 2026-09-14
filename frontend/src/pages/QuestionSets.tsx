@@ -368,8 +368,15 @@ const groupToggleStyle: React.CSSProperties = {
   cursor: 'pointer',
 }
 
-/** 答案折叠组件：默认隐藏答案和解析，点击按钮展开 */
-function AnswerSection({ answer, explanation }: { answer: string; explanation: string | null }) {
+/**
+ * 答案折叠组件：默认隐藏答案和解析，点击按钮展开
+ *
+ * 阶段 5.1 / S2：`explanation` 改成可选（`?: string | null`）—— 契约里
+ * `QuizItemResponse.explanation` 是 `anyOf[string, null]` 且**没有默认值**，
+ * 也就是说后端既可能给 `null`、也可能整个字段不出现。渲染分支用的是
+ * `{explanation && …}`，对 `undefined` 与 `null` 完全一致，所以这是纯类型修正。
+ */
+function AnswerSection({ answer, explanation }: { answer: string; explanation?: string | null }) {
   const [show, setShow] = useState(false)
 
   return (

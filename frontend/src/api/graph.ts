@@ -3,60 +3,32 @@
  * @description 图谱节点/边、建议关系、关系确认/拒绝与子图查询。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 图谱节点，对应一张知识卡片 */
-export interface GraphNode {
-  /** 节点唯一标识（卡片 ID） */
-  id: string;
-  /** 卡片标题 */
-  title: string;
-  /** 卡片类型：concept / formula / qa / definition */
-  card_type: string;
-  /** 所属笔记 ID */
-  note_id: string;
-  /** 关联边数量 */
-  relation_count: number;
-  /** 所属笔记是否在回收站中，前端渲染时过滤回收站节点 */
-  note_trashed?: boolean;
-}
+// --- 图谱相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 图谱边，对应卡片间的关系 */
-export interface GraphEdge {
-  /** 边唯一标识 */
-  id: string;
-  /** 起点节点 ID */
-  source: string;
-  /** 终点节点 ID */
-  target: string;
-  /** 关系类型：related / prerequisite / subsequent / contrast */
-  relation_type: string;
-  /** 边状态：suggested / confirmed */
-  status: string;
-  /** 相似度分数 */
-  similarity_score: number | null;
-}
+/**
+ * 图谱节点，对应一张知识卡片（生成自 `GraphNode`）
+ *
+ * ⚠️ `note_id` 现在是 `?: string | null`：库里 `KnowledgeCard.note_id` **就是**
+ * nullable（物理删除笔记时"提升核心卡片"会把卡片变成独立节点），
+ * 契约只是如实声明。`card_type` 也收窄成 `CardType` 枚举。
+ */
+export type GraphNode = Schema<'GraphNode'>;
 
-/** 图谱数据，包含节点和边 */
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+/**
+ * 图谱边，对应卡片间的关系（生成自 `GraphEdge`）
+ *
+ * ⚠️ `relation_type` / `status` 现在是枚举（`RelationType` / `RelationStatus`）；
+ * `type` 是后端如实声明的可选字段（两条构建路径都不产出它）。
+ */
+export type GraphEdge = Schema<'GraphEdge'>;
 
-/** 建议关系 */
-export interface SuggestedRelation {
-  /** 建议关系 ID */
-  id: string;
-  /** 卡片 1 ID */
-  card_id_1: string;
-  /** 卡片 2 ID */
-  card_id_2: string;
-  /** 卡片 1 标题 */
-  card_1_title: string;
-  /** 卡片 2 标题 */
-  card_2_title: string;
-  /** 相似度分数 */
-  similarity_score: number;
-}
+/** 图谱数据，包含节点和边（生成自 `GraphData`） */
+export type GraphData = Schema<'GraphData'>;
+
+/** 建议关系（生成自 `SuggestedRelation`） */
+export type SuggestedRelation = Schema<'SuggestedRelation'>;
 
 /**
  * 获取知识图谱数据
@@ -91,13 +63,23 @@ export async function suggestRelations(): Promise<{ success: boolean; new_count:
   });
 }
 
-/** 图谱操作统一返回结构（success + 可选附加字段） */
-export interface GraphOperationResult {
-  success: boolean;
-  error?: string;
-  new_count?: number;
-  message?: string;
-}
+// ⚠️ 这里**没有**"图谱操作统一返回结构"了（阶段 5.1 / S2 删掉了它）。
+//
+// 手写的 `GraphOperationResult`（`success` + 4 个全可选字段）用一个"万能可选"
+// 形状盖住了后端**四种互不相同的**返回：`{success, relation_id}` /
+// `{success, new_count}` / `{success, confirmed_count, failed_count}` /
+// `{success, rejected_count, failed_count}`。代价是双向的：已知字段被写成可选，
+// 未知字段被静默丢掉（`.relation_id` 连类型提示都没有）。
+// 现在每个函数各自指向它那个端点的生成类型，**契约说什么就是什么**。
+//
+// 这两个类型按"关系操作"与"批量操作"分开，与后端模型一一对应：
+// `GraphRelationOperationResponse` / `GraphBatchOperationResponse`。
+
+/** 单个关系操作（confirm / reject / create / delete）的响应（生成自 `GraphRelationOperationResponse`） */
+export type GraphRelationOperationResponse = Schema<'GraphRelationOperationResponse'>;
+
+/** 批量确认/拒绝的响应（生成自 `GraphBatchOperationResponse`；`success` + 计数，无 `relation_id`） */
+export type GraphBatchOperationResponse = Schema<'GraphBatchOperationResponse'>;
 
 /**
  * 确认建议关系
@@ -105,8 +87,8 @@ export interface GraphOperationResult {
  *
  * @param relationId - 建议关系 ID
  */
-export async function confirmRelation(relationId: string): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>('/graph/confirm', {
+export async function confirmRelation(relationId: string): Promise<GraphRelationOperationResponse> {
+  return request<GraphRelationOperationResponse>('/graph/confirm', {
     method: 'POST',
     body: JSON.stringify({ relation_id: relationId }),
   });
@@ -118,8 +100,8 @@ export async function confirmRelation(relationId: string): Promise<GraphOperatio
  *
  * @param relationId - 建议关系 ID
  */
-export async function rejectRelation(relationId: string): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>('/graph/reject', {
+export async function rejectRelation(relationId: string): Promise<GraphRelationOperationResponse> {
+  return request<GraphRelationOperationResponse>('/graph/reject', {
     method: 'POST',
     body: JSON.stringify({ relation_id: relationId }),
   });
@@ -133,8 +115,8 @@ export async function rejectRelation(relationId: string): Promise<GraphOperation
  * @param cardId2 - 卡片 2 ID
  * @param relationType - 关系类型
  */
-export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>('/graph/relation', {
+export async function createRelation(cardId1: string, cardId2: string, relationType: string): Promise<GraphRelationOperationResponse> {
+  return request<GraphRelationOperationResponse>('/graph/relation', {
     method: 'POST',
     body: JSON.stringify({ card_id_1: cardId1, card_id_2: cardId2, relation_type: relationType }),
   });
@@ -146,21 +128,14 @@ export async function createRelation(cardId1: string, cardId2: string, relationT
  *
  * @param relationId - 关系 ID
  */
-export async function deleteRelation(relationId: string): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>(`/graph/relation/${relationId}`, {
+export async function deleteRelation(relationId: string): Promise<GraphRelationOperationResponse> {
+  return request<GraphRelationOperationResponse>(`/graph/relation/${relationId}`, {
     method: 'DELETE',
   });
 }
 
-/** 图谱统计数据 */
-export interface GraphStats {
-  total_nodes: number;
-  total_edges: number;
-  confirmed_edges: number;
-  suggested_edges: number;
-  relation_type_distribution: Array<{ relation_type: string; count: number }>;
-  isolated_nodes: number;
-}
+/** 图谱统计数据（生成自 `GraphStats`） */
+export type GraphStats = Schema<'GraphStats'>;
 
 /**
  * 获取知识图谱统计数据
@@ -169,20 +144,18 @@ export async function getGraphStats(): Promise<GraphStats> {
   return request<GraphStats>('/graph/stats');
 }
 
-/** 图搜索节点 */
-export interface GraphSearchNode {
-  id: string;
-  title: string;
-  card_type: string;
-  note_id: string;
-  relation_count: number;
-}
+/**
+ * 图搜索节点（生成自 `GraphSearchResult`）
+ *
+ * ⚠️ 名字与后端模型**不是**同名关系：后端的 `GraphSearchResult` 是"单条结果"，
+ * 外层信封才叫 `GraphSearchResponse`。前端保留 `GraphSearchNode` 这个名字，
+ * 因为 4 个调用方（drawNode / GraphToolbar / useCanvasObjects / useGraphSearch）
+ * 都按它引入 —— 改名会让 S2 从"零调用方改动"变成一次全量重命名。
+ */
+export type GraphSearchNode = Schema<'GraphSearchResult'>;
 
-/** 图搜索结果 */
-export interface GraphSearchResult {
-  items: GraphSearchNode[];
-  total: number;
-}
+/** 图搜索结果信封（生成自 `GraphSearchResponse`） */
+export type GraphSearchResult = Schema<'GraphSearchResponse'>;
 
 /**
  * 搜索图谱中的节点
@@ -195,12 +168,8 @@ export async function searchGraphNodes(keyword: string, limit = 20): Promise<Gra
   return request<GraphSearchResult>(`/graph/search?${params}`);
 }
 
-/** 节点子图响应 */
-export interface NodeSubgraph {
-  center_node: GraphNode;
-  neighbor_nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+/** 节点子图响应（生成自 `NodeSubgraph`） */
+export type NodeSubgraph = Schema<'NodeSubgraph'>;
 
 /**
  * 获取某个节点及其直接邻居的子图
@@ -216,8 +185,8 @@ export async function getNodeSubgraph(nodeId: string): Promise<NodeSubgraph> {
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchConfirmRelations(relationIds: string[]): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>('/graph/batch-confirm', {
+export async function batchConfirmRelations(relationIds: string[]): Promise<GraphBatchOperationResponse> {
+  return request<GraphBatchOperationResponse>('/graph/batch-confirm', {
     method: 'POST',
     body: JSON.stringify({ relation_ids: relationIds }),
   });
@@ -228,8 +197,8 @@ export async function batchConfirmRelations(relationIds: string[]): Promise<Grap
  *
  * @param relationIds - 建议关系 ID 列表
  */
-export async function batchRejectRelations(relationIds: string[]): Promise<GraphOperationResult> {
-  return request<GraphOperationResult>('/graph/batch-reject', {
+export async function batchRejectRelations(relationIds: string[]): Promise<GraphBatchOperationResponse> {
+  return request<GraphBatchOperationResponse>('/graph/batch-reject', {
     method: 'POST',
     body: JSON.stringify({ relation_ids: relationIds }),
   });

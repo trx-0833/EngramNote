@@ -62,7 +62,17 @@ export interface ForceGraphLink {
   target: string | ForceGraphNode
   relation_type: string
   status: string
-  similarity_score: number | null
+  /**
+   * 相似度分数
+   *
+   * 阶段 5.1 / S2：契约里 `GraphEdge.similarity_score` 是 `?: number | null`
+   * （既可能缺省、也可能是 null；`GET /graph` 与 `/graph/node/{id}/subgraph`
+   * 两条构建路径的口径本来就不同）。这里跟着改成可选 ——
+   * 读取方（`getLinkWidth` / GraphCanvas / GraphSidebar）用的都是 `== null` / `!= null`，
+   * 对 `undefined` 与 `null` 的处理**完全一致**，所以这是纯类型修正，
+   * 没有任何运行时行为变化。
+   */
+  similarity_score?: number | null
 }
 
 /** 侧边栏面板类型 */

@@ -59,6 +59,10 @@ function makeNote(over: Partial<Note> = {}): Note {
     trashed_at: null,
     created_at: '2026-09-01T10:00:00Z',
     updated_at: '2026-09-02T10:00:00Z',
+    // 阶段 5.1 / S2：带默认值的字段在生成类型里是必填（见 Projects.test.tsx 同名夹具）
+    note_role: 'material',
+    project_ids: [],
+    project_names: [],
     ...over,
   }
 }

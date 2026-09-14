@@ -3,58 +3,30 @@
  * @description 今日报告、7 天趋势与薄弱点列表。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 各题型正确率 */
-export interface QuestionTypeAccuracy {
-  question_type: string;
-  total: number;
-  correct: number;
-  accuracy: number;
-}
+// --- 报告相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
+//
+// `report.ts` 是判定质量最好的一域（3 个函数全部 IDENTICAL），
+// 换成生成类型后**逐字段等价**，是这一轮里唯一"零风险"的一域。
 
-/** 今日学习报告 */
-export interface DailyReport {
-  date: string;
-  new_mastered: number;
-  total_review_time_ms: number;
-  total_reviews: number;
-  today_accuracy: number;
-  weak_point_count: number;
-  question_type_accuracy: QuestionTypeAccuracy[];
-}
+/** 各题型正确率（生成自 `QuestionTypeAccuracy`） */
+export type QuestionTypeAccuracy = Schema<'QuestionTypeAccuracy'>;
 
-/** 单日趋势数据 */
-export interface WeeklyTrendItem {
-  date: string;
-  review_count: number;
-  correct_count: number;
-  accuracy: number;
-}
+/** 今日学习报告（生成自 `DailyReportResponse`） */
+export type DailyReport = Schema<'DailyReportResponse'>;
 
-/** 7天趋势响应 */
-export interface WeeklyTrendResponse {
-  items: WeeklyTrendItem[];
-  total_reviews: number;
-  avg_accuracy: number;
-}
+/** 单日趋势数据（生成自 `WeeklyTrendItem`） */
+export type WeeklyTrendItem = Schema<'WeeklyTrendItem'>;
 
-/** 薄弱点条目 */
-export interface WeakPoint {
-  card_id: string;
-  card_title: string;
-  card_type: string;
-  note_id: string;
-  note_title: string;
-  error_count: number;
-  total_reviews: number;
-  accuracy: number;
-}
+/** 7天趋势响应（生成自 `WeeklyTrendResponse`） */
+export type WeeklyTrendResponse = Schema<'WeeklyTrendResponse'>;
 
-/** 薄弱点列表响应 */
-export interface WeakPointsResponse {
-  items: WeakPoint[];
-  total: number;
-}
+/** 薄弱点条目（生成自 `WeakPointItem`） */
+export type WeakPoint = Schema<'WeakPointItem'>;
+
+/** 薄弱点列表响应（生成自 `WeakPointsResponse`） */
+export type WeakPointsResponse = Schema<'WeakPointsResponse'>;
 
 /**
  * 获取今日学习报告

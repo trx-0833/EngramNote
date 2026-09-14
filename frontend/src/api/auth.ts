@@ -7,6 +7,7 @@
  * 否则刷新失败会递归触发刷新。本文件只放"正常的"API 调用。
  */
 import { request, type User, type TokenResponse } from './client'
+import type { Schema } from './generated/types'
 
 /**
  * 用户注册
@@ -39,11 +40,13 @@ export async function login(email: string, password: string): Promise<TokenRespo
   });
 }
 
-/** 登出结果（阶段 6.3） */
-export interface LogoutResult {
-  /** 服务端实际撤销的刷新令牌行数（0 表示此前已经无效/已撤销） */
-  revoked: number;
-}
+/**
+ * 登出结果（阶段 6.3；阶段 5.1 / S2 起生成自 `LogoutResponse`）
+ *
+ * `revoked` 是服务端实际撤销的刷新令牌行数：0 表示此前已经无效/已撤销 ——
+ * 那不是失败，服务端保证"清掉服务端状态"在任何情况下都能被调用。
+ */
+export type LogoutResult = Schema<'LogoutResponse'>;
 
 /**
  * 登出：撤销服务端的刷新令牌（阶段 6.3）
@@ -78,11 +81,8 @@ export async function getMe(): Promise<User> {
 
 // --- 邮件提醒设置 API ---
 
-/** 用户邮件提醒设置 */
-export interface UserReminderSettings {
-  /** 是否开启邮件复习提醒 */
-  email_reminder_enabled: boolean;
-}
+/** 用户邮件提醒设置（阶段 5.1 / S2 起生成自 `UserReminderSettingsResponse`） */
+export type UserReminderSettings = Schema<'UserReminderSettingsResponse'>;
 
 /**
  * 获取当前用户的邮件提醒设置

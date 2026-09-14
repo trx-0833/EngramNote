@@ -116,6 +116,14 @@ function makeNote(over: Partial<Note> = {}): Note {
     trashed_at: null,
     created_at: '2026-09-01T10:00:00Z',
     updated_at: '2026-09-02T10:00:00Z',
+    // 阶段 5.1 / S2：契约里 `note_role`（default "material"）、
+    // `project_ids` / `project_names`（default []）都带默认值 →
+    // pydantic 一定会把它们序列化出来 → 生成类型里是**必填**。
+    // 这条夹具此前一个都没给：不是"后端可能不给"，而是"测试构造了一个
+    // 后端从不返回的形状"。
+    note_role: 'material',
+    project_ids: [],
+    project_names: [],
     ...over,
   }
 }
@@ -220,8 +228,12 @@ beforeEach(() => {
   mockedDetail.mockResolvedValue({ ...makeProject(), notes: [makeNoteInFolder()] })
   mockedScan.mockResolvedValue(makeScanResult())
   mockedNotes.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 999 })
-  mockedAddNotes.mockResolvedValue({ added: 1, not_found: 0 })
-  mockedRemoveNote.mockResolvedValue({ message: 'ok' })
+  // 阶段 5.1 / S2：这两个端点的响应比手写类型多一个必填字段 ——
+  // `addNotesToProject` 真的会回 `project_id`，`removeNoteFromProject` 真的会回 `note_id`
+  // （后端 service 的 return 里就有）。此前前端类型把它们丢掉了，
+  // mock 也就跟着"少给一个字段"。
+  mockedAddNotes.mockResolvedValue({ project_id: 'p-1', added: 1, not_found: 0 })
+  mockedRemoveNote.mockResolvedValue({ message: 'ok', note_id: 'n-1' })
 })
 
 afterEach(() => {

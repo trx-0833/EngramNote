@@ -3,6 +3,7 @@
  * @description 笔记的列表/详情/内容/归档/角色、回收站、批注、链接与版本历史相关接口。
  */
 import { request, authorizedFetch, notifyTokenExpired, type Note, type NoteDetail, type NoteListResponse } from './client'
+import type { Schema } from './generated/types'
 
 /**
  * 获取笔记列表（分页）
@@ -112,51 +113,22 @@ export async function deleteNote(noteId: string): Promise<void> {
   return request<void>(`/notes/${noteId}`, { method: 'DELETE' });
 }
 
-// --- 回收站相关类型 ---
+// --- 回收站相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 回收站列表项：笔记 + 附属统计（"恢复可还原什么"的展示依据） */
-export interface TrashNoteItem {
-  /** 笔记信息 */
-  note: Note;
-  /** 知识卡片数 */
-  card_count: number;
-  /** 题目数 */
-  quiz_count: number;
-  /** 批注数 */
-  annotation_count: number;
-  /** 版本数 */
-  version_count: number;
-  /** 双向链接数 */
-  link_count: number;
-}
+/** 回收站列表项：笔记 + 附属统计（"恢复可还原什么"的展示依据；生成自 `TrashNoteItem`） */
+export type TrashNoteItem = Schema<'TrashNoteItem'>;
 
-/** 回收站列表响应 */
-export interface TrashListResponse {
-  items: TrashNoteItem[];
-  total: number;
-}
+/** 回收站列表响应（生成自 `TrashListResponse`） */
+export type TrashListResponse = Schema<'TrashListResponse'>;
 
-/** 删除确认弹窗的关联统计 */
-export interface TrashInfoResponse {
-  /** 卡片总数 */
-  card_count: number;
-  /** 核心卡片数（is_key_point） */
-  key_card_count: number;
-  /** 双向链接数 */
-  link_count: number;
-}
+/** 删除确认弹窗的关联统计（生成自 `TrashInfoResponse`） */
+export type TrashInfoResponse = Schema<'TrashInfoResponse'>;
 
-/** 恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 null） */
-export interface RestoreResponse {
-  note: Note;
-  renamed_to: string | null;
-}
+/** 恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 null；生成自 `RestoreResponse`） */
+export type RestoreResponse = Schema<'RestoreResponse'>;
 
-/** 清空回收站结果 */
-export interface PurgeAllResponse {
-  purged: number;
-  failed: number;
-}
+/** 清空回收站结果（生成自 `PurgeAllResponse`） */
+export type PurgeAllResponse = Schema<'PurgeAllResponse'>;
 
 // --- 回收站 API ---
 
@@ -206,29 +178,18 @@ export async function purgeAllTrash(): Promise<PurgeAllResponse> {
   return request<PurgeAllResponse>(`/notes/trash/purge-all`, { method: 'DELETE' });
 }
 
-// --- 批注相关类型 ---
+// --- 批注相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
 /**
- * 批注信息
+ * 批注信息（生成自 `AnnotationResponse`）
+ *
+ * ⚠️ `type` 在契约里是 `string`，手写的 `'highlight' | 'underline'`
+ * 因此被放宽 —— 与 `DiffLine.type` 同一类：后端没把它声明成枚举。
  */
-export interface Annotation {
-  id: string;
-  note_id: string;
-  view_mode: string;
-  type: 'highlight' | 'underline';
-  text_content: string;
-  context_before: string;
-  context_after: string;
-  color: string | null;
-  created_at: string;
-}
+export type Annotation = Schema<'AnnotationResponse'>;
 
-/**
- * 批注列表响应
- */
-export interface AnnotationListResponse {
-  annotations: Annotation[];
-}
+/** 批注列表响应（生成自 `AnnotationListResponse`） */
+export type AnnotationListResponse = Schema<'AnnotationListResponse'>;
 
 // --- 批注 API ---
 
@@ -334,34 +295,29 @@ export async function askNoteQuestionStream(
   return response.body;
 }
 
-// --- 笔记-资料链接相关类型 ---
+// --- 笔记-资料链接相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
+//
+// ⚠️ 此前 `linked_materials[]` / `linked_personal_notes[]` 在 schema 里是裸
+// `dict`（§7.1 的内层空壳），前端只能靠手写维持正确；P2 补齐模型后它们
+// 现在指向真实 `$ref`（`LinkedMaterialItem` / `LinkedPersonalNoteItem`），
+// 切换后**这两处字段再也不靠手写维护** —— 这是本轮收益最大的地方之一。
 
-/** 已关联的学习资料 */
-export interface LinkedMaterial {
-  id: string;
-  title: string;
-  source_type: string | null;
-}
+/** 已关联的学习资料（生成自 `LinkedMaterialItem`；`source_type` 可缺省且可空） */
+export type LinkedMaterial = Schema<'LinkedMaterialItem'>;
 
-/** 引用该资料的个人笔记 */
-export interface LinkedPersonalNote {
-  id: string;
-  title: string;
-}
+/** 引用该资料的个人笔记（生成自 `LinkedPersonalNoteItem`） */
+export type LinkedPersonalNote = Schema<'LinkedPersonalNoteItem'>;
 
-/** 笔记链接关系响应 */
-export interface NoteLinksResponse {
-  personal_note_id: string;
-  linked_materials: LinkedMaterial[];
-  linked_personal_notes: LinkedPersonalNote[];
-  /** 悬挂链接数：资料被物理删除后置 NULL 的行数，用于显示"[已删除的笔记]"占位 */
-  dangling_material_count?: number;
-}
+/**
+ * 笔记链接关系响应（生成自 `LinkListResponse`）
+ *
+ * `dangling_material_count` 带默认值 → 生成类型里是**必填**：
+ * 它是资料被物理删除后置 NULL 的行数，用于显示"[已删除的笔记]"占位。
+ */
+export type NoteLinksResponse = Schema<'LinkListResponse'>;
 
-/** 更新链接关系响应 */
-export interface UpdateLinksResponse {
-  changed: boolean;
-}
+/** 更新链接关系响应（生成自 `LinkUpdateResponse`） */
+export type UpdateLinksResponse = Schema<'LinkUpdateResponse'>;
 
 // --- 链接管理 API ---
 
@@ -390,37 +346,22 @@ export async function updateNoteLinks(noteId: string, materialNoteIds: string[])
   });
 }
 
-// --- 版本历史类型定义 ---
+// --- 版本历史类型定义（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 笔记版本快照信息 */
-export interface NoteVersion {
-  id: string;
-  note_id: string;
-  version_number: number;
-  source: string;
-  content_size: number;
-  change_summary: string | null;
-  created_at: string;
-}
+/** 笔记版本快照信息（生成自 `NoteVersionResponse`） */
+export type NoteVersion = Schema<'NoteVersionResponse'>;
 
-/** 版本列表响应 */
-export interface NoteVersionListResponse {
-  versions: NoteVersion[];
-  total: number;
-}
+/** 版本列表响应（生成自 `NoteVersionListResponse`） */
+export type NoteVersionListResponse = Schema<'NoteVersionListResponse'>;
 
-/** 单行 diff 数据 */
-export interface NoteVersionDiffLine {
-  type: 'added' | 'removed' | 'unchanged';
-  content: string;
-}
+/** 单行 diff 数据（生成自 `NoteVersionDiffLine`） */
+export type NoteVersionDiffLine = Schema<'NoteVersionDiffLine'>;
 
-/** 版本对比 diff 响应 */
-export interface NoteVersionDiffResponse {
-  v1_number: number;
-  v2_number: number;
-  diff_lines: NoteVersionDiffLine[];
-}
+/** 版本对比 diff 响应（生成自 `NoteVersionDiffResponse`） */
+export type NoteVersionDiffResponse = Schema<'NoteVersionDiffResponse'>;
+
+/** 单个版本快照的 Markdown 内容（生成自 `NoteVersionContentResponse`） */
+export type NoteVersionContentResponse = Schema<'NoteVersionContentResponse'>;
 
 // --- 版本历史 API ---
 
@@ -430,7 +371,7 @@ export async function listVersions(noteId: string): Promise<NoteVersionListRespo
 }
 
 /** 预览指定版本的内容 */
-export async function getVersion(noteId: string, versionNumber: number): Promise<{ content: string; version_number: number }> {
+export async function getVersion(noteId: string, versionNumber: number): Promise<NoteVersionContentResponse> {
   return request(`/notes/${noteId}/versions/${versionNumber}`);
 }
 

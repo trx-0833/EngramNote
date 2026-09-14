@@ -3,144 +3,82 @@
  * @description 触发理解、状态查询、章节摘要、知识卡片、题目生成与 RAG 问答。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 知识卡片 */
-export interface KnowledgeCard {
-  id: string;
-  user_id: string;
-  note_id: string;
-  note_title: string;
-  card_type: string;
-  title: string;
-  content: string;
-  summary: string | null;
-  chapter_title: string | null;
-  source_text: string | null;
-  metadata_: Record<string, unknown> | null;
-  card_category: 'regular' | 'blind_spot' | 'extension';
-  is_key_point: boolean;
-  is_difficulty: boolean;
-  mastery_level: number;
-  source_note_ids: string[] | null;
-  parent_card_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
+// --- 理解管道与问答相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 知识卡片列表响应 */
-export interface KnowledgeCardListResponse {
-  items: KnowledgeCard[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+/**
+ * 知识卡片（生成自 `KnowledgeCardResponse`）
+ *
+ * ⚠️ `card_type` 现在是 `CardType` 枚举（concept / formula / qa / definition），
+ * 不再是 `string`。
+ */
+export type KnowledgeCard = Schema<'KnowledgeCardResponse'>;
 
-/** 题目 */
-export interface QuizItem {
-  id: string;
-  user_id: string;
-  card_id: string;
-  note_id: string;
-  note_title: string;
-  question_type: string;
-  difficulty: string;
-  question: string;
-  answer: string;
-  options: string | null;
-  explanation: string | null;
-  metadata_: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-}
+/** 知识卡片列表响应（生成自 `KnowledgeCardListResponse`） */
+export type KnowledgeCardListResponse = Schema<'KnowledgeCardListResponse'>;
 
-/** 题目列表响应 */
-export interface QuizItemListResponse {
-  items: QuizItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+/**
+ * 题目（生成自 `QuizItemResponse`）
+ *
+ * ⚠️ `question_type` / `difficulty` 现在是枚举
+ * （`QuestionType`：choice / fill_blank / short_answer；`DifficultyLevel`：easy / medium / hard）。
+ */
+export type QuizItem = Schema<'QuizItemResponse'>;
 
-/** 理解管道触发响应 */
-export interface UnderstandingImpact {
-  cards: number;
-  quizzes: number;
-  review_logs: number;
-  relations: number;
-}
+/** 题目列表响应（生成自 `QuizItemListResponse`） */
+export type QuizItemListResponse = Schema<'QuizItemListResponse'>;
 
-export interface UnderstandingStartResponse {
-  id: string;
-  status: string;
-  message: string;
-  /** archived 笔记未确认时返回 true，需用户二次确认后带 confirm=true 重调，见 docs/decisions.md#F-02 */
-  requires_confirm?: boolean;
-  impact?: UnderstandingImpact | null;
-}
+/** 理解管道影响面（生成自 `UnderstandingImpact`） */
+export type UnderstandingImpact = Schema<'UnderstandingImpact'>;
 
-/** 理解管道状态响应 */
-export interface UnderstandingStatusResponse {
-  id: string;
-  status: string;
-  error_message: string | null;
-}
+/**
+ * 理解管道触发响应（生成自 `UnderstandingStartResponse`）
+ *
+ * `requires_confirm` 带默认值 → 生成类型里是**必填**：
+ * archived 笔记未确认时后端一定会给出这个字段
+ * （确认后带 confirm=true 重调，见 docs/decisions.md#F-02）。
+ */
+export type UnderstandingStartResponse = Schema<'UnderstandingStartResponse'>;
 
-/** 章节摘要 */
-export interface ChapterSummary {
-  chapter_index: number;
-  chapter_title: string;
-  summary: string;
-  card_count: number;
-}
+/** 理解管道状态响应（生成自 `UnderstandingStatusResponse`；`status` 现在是 `NoteStatus`） */
+export type UnderstandingStatusResponse = Schema<'UnderstandingStatusResponse'>;
 
-/** 问答请求 */
-export interface QuestionRequest {
-  question: string;
-}
+/** 章节摘要（生成自 `ChapterSummary`） */
+export type ChapterSummary = Schema<'ChapterSummary'>;
 
-/** 问答引用来源 */
-export interface AnswerSource {
-  note_id: string;
-  note_title: string;
-  chapter_title: string | null;
-  relevant_text: string;
+/** 章节摘要列表响应（生成自 `ChapterSummaryListResponse`） */
+export type ChapterSummaryListResponse = Schema<'ChapterSummaryListResponse'>;
 
-  /**
-   * 定位字段（阶段 2.7：引用可回跳）
-   *
-   * 全部可选：检索降级或命中历史数据时可能缺失。缺失时应**退化为
-   * 只显示来源、不提供跳转**，而不是跳到错误位置。
-   */
-  chunk_id?: string | null;
-  chunk_index?: number | null;
-  /**
-   * 在**笔记 Markdown**（clean 副本）里的字符下标，左闭右开。
-   * 满足 `markdown.slice(char_start, char_end)` == 该 chunk 的完整内容。
-   */
-  char_start?: number | null;
-  char_end?: number | null;
-  /** 标题层级路径（如 "第一章 > 1.2 保护配置"） */
-  heading_path?: string | null;
-  line_start?: number | null;
-  line_end?: number | null;
-}
+/**
+ * 卡片去重建议列表（生成自 `CardDuplicateListResponse`）
+ *
+ * ⚠️ 每一条候选的 `score`（原始 n-gram 分，**排序键**）此前不在前端类型里 ——
+ * "为什么这条排第一"当时只有后端知道。
+ */
+export type CardDuplicateListResponse = Schema<'CardDuplicateListResponse'>;
 
-/** 问答响应 */
-export interface QuestionAnswerResponse {
-  question: string;
-  answer: string;
-  sources: AnswerSource[];
-  provider: string;
-  /** 检索降级状态：full_vector / hybrid / bm25_only */
-  retrieval_status?: string;
-}
+/** 问答请求（生成自 `QuestionRequest`） */
+export type QuestionRequest = Schema<'QuestionRequest'>;
 
-/** 题目生成响应 */
-export interface GenerateQuestionsResponse {
-  note_id: string;
-  message: string;
-  question_count: number;
-}
+/**
+ * 问答引用来源（生成自 `AnswerSource`）
+ *
+ * 定位字段（阶段 2.7：引用可回跳）在契约里全部是 `?: T | null` ——
+ * 检索降级或命中历史数据时可能缺失。缺失时应**退化为只显示来源、不提供跳转**，
+ * 而不是跳到错误位置。
+ *
+ * ⚠️ 同一份 `AnswerSource` 也藏在 SSE 的 `sources` 事件里（两个流式端点），
+ * 而 SSE 的事件模型 OpenAPI 表达不了 —— 那条路径上的类型**仍然只能手写**，
+ * 见 docs/openapi-client.md §11.4。
+ */
+export type AnswerSource = Schema<'AnswerSource'>;
+
+/** 问答响应（生成自 `QuestionAnswerResponse`） */
+export type QuestionAnswerResponse = Schema<'QuestionAnswerResponse'>;
+
+/** 题目生成响应（生成自 `GenerateQuestionsResponse`） */
+export type GenerateQuestionsResponse = Schema<'GenerateQuestionsResponse'>;
 
 /**
  * 触发笔记理解管道
@@ -165,7 +103,7 @@ export async function getUnderstandingStatus(noteId: string): Promise<Understand
 /**
  * 获取章节摘要
  */
-export async function getChapterSummaries(noteId: string): Promise<{ note_id: string; chapters: ChapterSummary[] }> {
+export async function getChapterSummaries(noteId: string): Promise<ChapterSummaryListResponse> {
   return request(`/understanding/${noteId}/chapters`);
 }
 
@@ -218,7 +156,7 @@ export async function getQuestions(page = 1, pageSize = 20, noteId?: string, key
 /**
  * 获取笔记的卡片去重建议
  */
-export async function getCardDuplicates(noteId: string): Promise<{ duplicates: Array<{ card_id: string; card_title: string; existing_card_id: string; existing_title: string; similarity: number }> }> {
+export async function getCardDuplicates(noteId: string): Promise<CardDuplicateListResponse> {
   return request(`/understanding/${noteId}/duplicates`);
 }
 

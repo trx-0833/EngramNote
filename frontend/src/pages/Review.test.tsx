@@ -52,6 +52,11 @@ function makeQuiz(over: Partial<DueQuiz> = {}): DueQuiz {
     review_count: 2,
     interval: 3,
     easiness_factor: 2.5,
+    // 阶段 5.1 / S2：契约（`DueQuizResponse.repetition`，带默认值）里这是**必填**，
+    // 而手写的 `DueQuiz` 根本没有这个字段 —— 也就是说这条夹具此前构造的是一个
+    // "前端自认为完整、契约里缺一项"的形状。SM-2 的 repetition 与 review_count
+    // 同源，这里给 2 保持与 review_count 一致。
+    repetition: 2,
     ...over,
   }
 }

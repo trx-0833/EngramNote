@@ -3,59 +3,42 @@
  * @description 笔记比对评估、开放性问题生成、作答评判与评估历史。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 评估结果 */
-export interface AssessmentResult {
-  /** 评估 ID */
-  id: string;
-  /** 评估模式：compare（笔记比对）或 quiz（开放性问题） */
-  mode: 'compare' | 'quiz';
-  /** 评分详情（compare: covered_points/uncovered_points；quiz: 各维度分数） */
-  scores: AssessmentScores;
-  /** 综合评分 */
-  overall_score: number;
-  /** 改进建议 */
-  suggestions: string;
-  /** 问题列表（quiz 模式） */
-  quiz_questions?: Array<{ index: number; question: string; key_points: string[] }>;
-  /** 答题结果列表（quiz 模式） */
-  quiz_answers?: QuizAnswerItem[];
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-}
+// --- 评估相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 评估评分明细（与后端 assessment_service 产出结构一致） */
-export interface AssessmentScores {
-  covered_points?: string[];
-  uncovered_points?: string[];
-  coverage_score?: number;
-  completeness_score?: number;
-  depth_score?: number;
-  clarity_score?: number;
-}
+/**
+ * 评估结果（生成自 `AssessmentResponse`）
+ *
+ * ⚠️ 与手写版本相比，**`scores` 从"必有"变成 `?: AssessmentScores | null`** ——
+ * 契约里 `scores` 是 `anyOf[AssessmentScores, null]` 且没有默认值。
+ * `generate-quiz` 未作答时后端返回的是 `{}`（不是 `null`），但类型上必须按
+ * "可能没有"处理：这正是那类"前端以为一定有、后端不保证"的假设被收掉的地方。
+ */
+export type AssessmentResult = Schema<'AssessmentResponse'>;
 
-/** 开放性问题作答与评判结果 */
-export interface QuizAnswerItem {
-  answer?: string;
-  judgment?: {
-    accuracy_score?: number;
-    completeness_score?: number;
-    depth_score?: number;
-    feedback?: string;
-  };
-}
+/**
+ * 评估评分明细（生成自 `AssessmentScores`）
+ *
+ * 同一个字段承载两种互斥形状，由 `mode` 决定：
+ * compare 是 `covered_points` / `uncovered_points` / `coverage_score` /
+ * `depth_score` / `clarity_score`；quiz 已作答是
+ * `total_questions` / `average_score`；quiz 未作答是 `{}`。
+ * 因此**每个字段都是 `?: T | null`** —— 没有任何一个字段是"任何模式下恒在"的。
+ * `completeness_score` 是前端此前多声明的一个字段：后端 compare 分支**从不产出**它。
+ */
+export type AssessmentScores = Schema<'AssessmentScores'>;
 
-/** 评估历史条目 */
-export interface AssessmentHistoryItem {
-  /** 评估 ID */
-  id: string;
-  /** 评估模式 */
-  mode: string;
-  /** 综合评分 */
-  overall_score: number;
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-}
+/**
+ * 一条作答及其评判（生成自 `QuizAnswer`）
+ *
+ * 比手写的 `QuizAnswerItem` 多一个**必填**的 `question_index`：
+ * 它取自请求体，用来回答"这份答案对应哪道题"。
+ */
+export type QuizAnswerItem = Schema<'QuizAnswer'>;
+
+/** 评估历史条目（生成自 `AssessmentHistoryItem`） */
+export type AssessmentHistoryItem = Schema<'AssessmentHistoryItem'>;
 
 /**
  * 笔记比对评估

@@ -5,99 +5,57 @@
  * 所有 API 请求均以 /api 为基础路径，通过 Bearer Token 进行身份认证。
  */
 
+import type { Schema } from './generated/types';
+
 /** API 基础路径，所有请求都会在此路径前缀下发起 */
 export const API_BASE = '/api';
 
-// --- 通用类型定义 ---
+// --- 通用类型定义（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
+//
+// 以下类型全部是 `src/api/generated/types.ts` 里生成 schema 的**别名**。
+// **导出名一个都没变**，所以 74 个调用方文件、79 处 import 与 10 个测试文件里的
+// 13 处 `vi.mock('…/api/…')` 都不需要改 —— 这正是 S2 选"换类型不换函数"的理由。
+//
+// ⚠️ 生成类型整体比手写类型**更严**：pydantic v2 把带默认值的字段排除出
+// OpenAPI 的 `required`，而 openapi-typescript v7 又按 `default` 把它们标回必填。
+// 对响应模型来说这是**对的**（有默认值的字段一定会被序列化出来），代价是
+// "少给字段"的构造点（测试里的 mock 工厂）会先编译失败 —— 那正是要暴露的东西。
 
-/** 用户信息 */
-export interface User {
-  /** 用户唯一标识 */
-  id: string;
-  /** 用户邮箱，同时作为登录账号 */
-  email: string;
-  /** 用户显示名称 */
-  username: string;
-  /** 账号是否激活 */
-  is_active: boolean;
-  /** 账号创建时间（ISO 8601 格式） */
-  created_at: string;
-}
+/** 用户信息（生成自 `UserResponse`） */
+export type User = Schema<'UserResponse'>;
 
-/** 认证令牌响应，登录/注册/刷新成功后返回 */
-export interface TokenResponse {
-  /** JWT 访问令牌，后续请求需携带此令牌 */
-  access_token: string;
-  /**
-   * 刷新令牌（阶段 6.3）：访问令牌过期时用它换新的一对令牌。
-   * 必须与访问令牌一起保存，否则会话无法续期、也无法被撤销。
-   */
-  refresh_token: string;
-  /** 令牌类型，固定为 "bearer" */
-  token_type: string;
-  /** 当前登录用户信息 */
-  user: User;
-}
+/**
+ * 认证令牌响应，登录/注册/刷新成功后返回（生成自 `TokenResponse`）
+ *
+ * 其中 `refresh_token` 是**必须**与访问令牌一起保存的：只存访问令牌等于
+ * 丢掉会话的撤销能力（阶段 6.3）。
+ */
+export type TokenResponse = Schema<'TokenResponse'>;
 
-/** 笔记概要信息，用于列表展示 */
-export interface Note {
-  /** 笔记唯一标识 */
-  id: string;
-  /** 所属用户 ID */
-  user_id: string;
-  /** 笔记标题，通常从文件名提取 */
-  title: string;
-  /** 来源类型，如 pdf、image、docx、pptx、xlsx、audio、video */
-  source_type: string;
-  /** 笔记角色：material（学习资料）或 personal_note（我的笔记） */
-  note_role?: string;
-  /** 所属项目标签 ID 数组（多对多） */
-  project_ids?: string[];
-  /** 所属项目标签名称数组（多对多） */
-  project_names?: string[];
-  /**
-   * 笔记处理状态，流转顺序：
-   * uploading → converting → converted → cleaning → cleaned → learning → archived
-   * 任何阶段都可能变为 failed
-   */
-  status: string;
-  /** 原始文件大小（字节） */
-  file_size: number;
-  /** 文档页数，仅 PDF/Office 文档有值 */
-  page_count: number | null;
-  /** 错误信息，仅 status 为 failed 时有值 */
-  error_message: string | null;
-  /** 移入回收站的时间（ISO 8601 格式），null 表示未删除 */
-  trashed_at: string | null;
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-  /** 最后更新时间（ISO 8601 格式） */
-  updated_at: string;
-}
+/**
+ * 笔记概要信息，用于列表展示（生成自 `NoteResponse`）
+ *
+ * ⚠️ 与手写版本相比的三处口径变化（都是**变准**，不是变宽）：
+ *
+ * - `status` / `source_type` 现在是枚举联合（`NoteStatus` 10 个值 /
+ *   `SourceType` 8 个值），不再是 `string` —— 此前 `client.ts` 的注释只写了
+ *   7 个状态、7 种来源，漏掉的 `cleaning_failed` / `learning_failed` / `failed`
+ *   与 `markdown` 没有任何机制能发现，现在由类型兜住；
+ * - `note_role` / `project_ids` / `project_names` 带默认值，生成类型里是**必填**
+ *   （后端一定会把它们序列化出来）；
+ * - `page_count` / `error_message` / `trashed_at` 这类 `anyOf[T, null]` 且无默认值的
+ *   字段生成的是 `?: T | null`，读的时候要用 `x != null` 而不是 `x !== null`。
+ */
+export type Note = Schema<'NoteResponse'>;
 
-/** 笔记详情，在 Note 基础上增加了 Markdown 内容和元数据 */
-export interface NoteDetail extends Note {
-  /** 原始 Markdown 内容，由后端从文件转换生成 */
-  original_md_content: string | null;
-  /** 清洗后的 Markdown 内容，由后端 AI 清洗流程生成 */
-  clean_md_content: string | null;
-  /** 文件元数据，如 PDF 的作者、标题等信息 */
-  metadata_: Record<string, unknown> | null;
-  /** 视频流地址，仅 source_type 为 video 时有值 */
-  video_url?: string;
-}
+/**
+ * 笔记详情，在 Note 基础上增加了 Markdown 内容和元数据
+ * （生成自 `NoteDetailResponse`）
+ */
+export type NoteDetail = Schema<'NoteDetailResponse'>;
 
-/** 笔记列表分页响应 */
-export interface NoteListResponse {
-  /** 当前页的笔记列表 */
-  items: Note[];
-  /** 笔记总数，用于计算分页 */
-  total: number;
-  /** 当前页码（从 1 开始） */
-  page: number;
-  /** 每页条数 */
-  page_size: number;
-}
+/** 笔记列表分页响应（生成自 `NoteListResponse`） */
+export type NoteListResponse = Schema<'NoteListResponse'>;
 
 // --- Token 管理 ---
 

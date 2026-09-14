@@ -3,46 +3,43 @@
  * @description 文件夹（按日期组织资料）、项目标签与 source/ 目录扫描导入。
  */
 import { request } from './client'
+import type { Schema } from './generated/types'
 
-/** 文件夹内的笔记概要 */
-export interface NoteInFolder {
-  /** 笔记 ID */
-  id: string;
-  /** 笔记标题 */
-  title: string;
-  /** 来源类型 */
-  source_type: string;
-  /** 处理状态 */
-  status: string;
-  /** 文件大小（字节） */
-  file_size: number;
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-}
+// --- 文件夹/项目相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 文件夹信息 */
-export interface Folder {
-  /** 文件夹 ID */
-  id: string;
-  /** 所属用户 ID */
-  user_id: string;
-  /** 文件夹名称 */
-  name: string;
-  /** 文件夹描述 */
-  description: string | null;
-  /** 文件夹日期（ISO 8601 格式） */
-  folder_date: string;
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-  /** 文件夹内笔记数量 */
-  note_count: number;
-}
+/**
+ * 文件夹内的笔记概要（生成自 `NoteInFolder`）
+ *
+ * ⚠️ `source_type` / `status` 现在是枚举；`file_size` **在这个模型里是真的**
+ * （它在后端 `required` 里）。别拿它去描述项目详情的笔记条目 —— 见下面
+ * `ProjectDetail` 的说明。
+ */
+export type NoteInFolder = Schema<'NoteInFolder'>;
 
-/** 文件夹详情，包含笔记列表 */
-export interface FolderDetail extends Folder {
-  /** 文件夹内的笔记列表 */
-  notes: NoteInFolder[];
-}
+/** 文件夹信息（生成自 `FolderResponse`） */
+export type Folder = Schema<'FolderResponse'>;
+
+/** 文件夹详情，包含笔记列表（生成自 `FolderDetailResponse`） */
+export type FolderDetail = Schema<'FolderDetailResponse'>;
+
+/** 项目信息（纯标签归属，不再作为 Vault 目录；生成自 `ProjectResponse`） */
+export type Project = Schema<'ProjectResponse'>;
+
+/**
+ * 项目详情，包含项目下的笔记列表（生成自 `ProjectDetailResponse`）
+ *
+ * ★ **这里修掉了 §7.4 那处"一个前端类型描述两个后端模型"**：
+ *
+ * - `GET /api/folders/{id}` → `FolderDetailResponse.notes[]` 用 `NoteInFolder`（**有** `file_size`）；
+ * - `GET /api/projects/{id}` → `ProjectDetailResponse.notes[]` 用 `NoteSummary`（**没有** `file_size`）。
+ *
+ * 而前端两处都声明成 `NoteInFolder`（`file_size: number` 必填）——
+ * 也就是说"项目详情里每篇笔记一定有 file_size"是一条**后端从未保证过**的假设。
+ * 切换后这一处由生成类型直接钉住，不需要改动任何调用方
+ * （`Projects.test.tsx` 里已有一条"缺 file_size 时照常渲染"的用例，
+ * 写测试的人早就知道那个类型在撒谎）。
+ */
+export type ProjectDetail = Schema<'ProjectDetailResponse'>;
 
 /**
  * 创建文件夹
@@ -100,34 +97,20 @@ export async function updateFolder(folderId: string, name: string): Promise<Fold
  * @param folderId - 文件夹 ID
  * @returns 操作结果
  */
-export async function deleteFolder(folderId: string): Promise<{ message: string }> {
-  return request<{ message: string }>(`/folders/${folderId}`, {
+export async function deleteFolder(folderId: string): Promise<MessageResponse> {
+  return request<MessageResponse>(`/folders/${folderId}`, {
     method: 'DELETE',
   });
 }
 
-/** 项目信息（纯标签归属，不再作为 Vault 目录） */
-export interface Project {
-  /** 项目 ID */
-  id: string;
-  /** 所属用户 ID */
-  user_id: string;
-  /** 项目显示名称，如 "Transformer 论文" */
-  name: string;
-  /** 项目描述 */
-  description: string | null;
-  /** 项目内笔记数量 */
-  note_count: number;
-  /** 创建时间（ISO 8601 格式） */
-  created_at: string;
-  /** 更新时间（ISO 8601 格式） */
-  updated_at: string;
-}
+/** 只带一句人类可读操作结果的响应（生成自 `MessageResponse`，folder/project 删除共用） */
+export type MessageResponse = Schema<'MessageResponse'>;
 
-/** 项目详情，包含项目下的笔记列表 */
-export interface ProjectDetail extends Project {
-  notes: NoteInFolder[];
-}
+/** 批量给笔记打项目标签的结果（生成自 `ProjectNotesAddedResponse`，比手写版多一个 `project_id`） */
+export type ProjectNotesAddedResponse = Schema<'ProjectNotesAddedResponse'>;
+
+/** 把笔记移出项目的结果（生成自 `ProjectNoteRemovedResponse`，比手写版多一个 `note_id`） */
+export type ProjectNoteRemovedResponse = Schema<'ProjectNoteRemovedResponse'>;
 
 /**
  * 创建项目
@@ -187,41 +170,22 @@ export async function updateProject(
  * @param projectId - 项目 ID
  * @returns 操作结果
  */
-export async function deleteProject(projectId: string): Promise<{ message: string }> {
-  return request<{ message: string }>(`/projects/${projectId}`, {
+export async function deleteProject(projectId: string): Promise<MessageResponse> {
+  return request<MessageResponse>(`/projects/${projectId}`, {
     method: 'DELETE',
   });
 }
 
-// --- 项目扫描导入 ---
+// --- 项目扫描导入（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
-/** 扫描导入的单条新笔记信息 */
-export interface ScanImportDetail {
-  id: string;
-  title: string;
-  status: string;
-  source_type: string | null;
-  path: string;
-}
+/** 扫描导入的单条新笔记信息（生成自 `ScanImportDetail`） */
+export type ScanImportDetail = Schema<'ScanImportDetail'>;
 
-/** 被跳过的文件信息 */
-export interface ScanSkipDetail {
-  path: string;
-  reason: string;
-}
+/** 被跳过的文件信息（生成自 `ScanSkipDetail`） */
+export type ScanSkipDetail = Schema<'ScanSkipDetail'>;
 
-/** 扫描 source/ 目录并导入新文件的响应 */
-export interface ScanImportResponse {
-  project_id: string;
-  project_name: string;
-  scanned: number;
-  imported: number;
-  skipped: number;
-  unsupported: number;
-  imported_notes: ScanImportDetail[];
-  skipped_details: ScanSkipDetail[];
-  unsupported_details: ScanSkipDetail[];
-}
+/** 扫描 source/ 目录并导入新文件的响应（生成自 `ScanImportResponse`） */
+export type ScanImportResponse = Schema<'ScanImportResponse'>;
 
 /**
  * 扫描导入：将手动放入项目 source/ 目录的新文件识别为笔记
@@ -240,10 +204,14 @@ export async function scanProject(projectId: string): Promise<ScanImportResponse
  *
  * @param projectId - 目标项目 ID
  * @param noteIds - 要添加的笔记 ID 列表
- * @returns 添加结果统计（added / not_found）
+ * @returns 添加结果统计（`project_id` + `added` + `not_found`）
+ *
+ * ⚠️ `not_found` 的语义是**差集**（请求 N 个、实际新增 M 个 → N-M），
+ * 它同时包含"笔记不存在/在回收站"与"本来就已经打了这个标签"两种情况 ——
+ * 读这个字段的人会自然以为是前者。
  */
-export async function addNotesToProject(projectId: string, noteIds: string[]): Promise<{ added: number; not_found: number }> {
-  return request<{ added: number; not_found: number }>(`/projects/${projectId}/notes`, {
+export async function addNotesToProject(projectId: string, noteIds: string[]): Promise<ProjectNotesAddedResponse> {
+  return request<ProjectNotesAddedResponse>(`/projects/${projectId}/notes`, {
     method: 'POST',
     body: JSON.stringify({ note_ids: noteIds }),
   });
@@ -254,10 +222,10 @@ export async function addNotesToProject(projectId: string, noteIds: string[]): P
  *
  * @param projectId - 项目 ID
  * @param noteId - 要移出的笔记 ID
- * @returns 操作结果
+ * @returns 操作结果（`message` + `note_id`）
  */
-export async function removeNoteFromProject(projectId: string, noteId: string): Promise<{ message: string }> {
-  return request<{ message: string }>(`/projects/${projectId}/notes/${noteId}`, {
+export async function removeNoteFromProject(projectId: string, noteId: string): Promise<ProjectNoteRemovedResponse> {
+  return request<ProjectNoteRemovedResponse>(`/projects/${projectId}/notes/${noteId}`, {
     method: 'DELETE',
   });
 }

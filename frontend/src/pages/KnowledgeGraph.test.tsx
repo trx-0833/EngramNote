@@ -249,6 +249,9 @@ function makeNode(over: Partial<GraphNode> = {}): GraphNode {
     card_type: 'concept',
     note_id: 'note-aaaa1111',
     relation_count: 3,
+    // 阶段 5.1 / S2：`note_trashed` 在后端带默认值（false）→ 生成类型里是**必填**。
+    // 这条字段是"所属笔记是否在回收站、渲染时过滤掉"的判据，工厂必须显式给出。
+    note_trashed: false,
     ...over,
   }
 }
@@ -371,10 +374,18 @@ beforeEach(() => {
     neighbor_nodes: [],
     edges: [],
   })
-  mockedConfirm.mockResolvedValue({ success: true })
-  mockedCreate.mockResolvedValue({ success: true })
+  // 阶段 5.1 / S2：这三处 mock 的返回值此前是"最小形状"（只有 success）。
+  // 生成类型把每个端点**自己**的固定形状钉住了：关系操作是
+  // `{success, relation_id}`，批量操作是 `{success, confirmed_count, failed_count, rejected_count}`。
+  mockedConfirm.mockResolvedValue({ success: true, relation_id: 'e-1' })
+  mockedCreate.mockResolvedValue({ success: true, relation_id: 'e-new' })
   mockedSuggest.mockResolvedValue({ success: true, new_count: 0 })
-  mockedBatchConfirm.mockResolvedValue({ success: true })
+  mockedBatchConfirm.mockResolvedValue({
+    success: true,
+    confirmed_count: 0,
+    failed_count: 0,
+    rejected_count: 0,
+  })
 })
 
 describe('加载与状态展示', () => {
@@ -938,9 +949,11 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expect(() => props.nodeCanvasObject(makeForce({ x: undefined, y: undefined }), ctx, 1)).not.toThrow()
     expect(() => props.nodeCanvasObject(makeForce({ x: NaN, y: NaN }), ctx, 1)).not.toThrow()
     // 未知卡片类型 / 缺标题 / 缺 relation_count：走兜底色与兜底形状
+    // （`unknown-type` 不在 `CardType` 枚举里，正是本用例要喂的输入：
+    //  后端枚举将来加了值、旧前端还没跟上时，画布不能抛错 —— 因此这里刻意绕过类型）
     expect(() =>
       props.nodeCanvasObject(
-        makeForce({ card_type: 'unknown-type', title: undefined as never, relation_count: undefined as never, x: 5, y: 5 }),
+        makeForce({ card_type: 'unknown-type' as never, title: undefined as never, relation_count: undefined as never, x: 5, y: 5 }),
         ctx,
         1,
       ),

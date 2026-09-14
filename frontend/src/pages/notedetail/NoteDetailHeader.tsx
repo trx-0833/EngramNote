@@ -5,7 +5,7 @@
  * 标签顺序、禁用/显示条件、`title` 提示文案、inline 样式均与拆分前一致。
  */
 import type { CSSProperties } from 'react'
-import { updateNoteRole, type NoteDetail } from '../../api/client'
+import { updateNoteRole, type NoteDetail, type RetryConvertOutcome } from '../../api/client'
 import { useToast } from '../../components/Toast'
 import { formatDateTime } from '../../utils/datetime'
 import { statusClass, statusLabels } from '../../utils/labels'
@@ -47,10 +47,20 @@ interface NoteDetailHeaderProps {
   onOpenVersionHistory: () => void
   /** 打开关联资料管理弹窗 */
   onManageLinks: () => void
-  /** 局部合并角色更新结果 */
-  onRoleUpdated: (noteRole: string | undefined) => void
-  /** 局部合并重试转换结果 */
-  onRetryConverted: (next: { status: string; error_message: string | null }) => void
+  /**
+   * 局部合并角色更新结果
+   *
+   * 阶段 5.1 / S2：`note_role` 在契约里**带默认值**（`material`）→ 生成类型里
+   * 是必填 `string`，"可能是 undefined"这个假设不成立，因此去掉 `| undefined`。
+   */
+  onRoleUpdated: (noteRole: string) => void
+  /**
+   * 局部合并重试转换结果
+   *
+   * 阶段 5.1 / S2：与 `RetryConvertButton` 共用 `retryConvert` 的生成返回类型，
+   * 不再手抄第二份 `{ status: string; error_message: string | null }`。
+   */
+  onRetryConverted: (next: RetryConvertOutcome) => void
   /** 跳转路由 */
   navigate: (path: string) => void
 }
