@@ -1308,6 +1308,13 @@ async def health_check():
 - ❌ 无 token/成本指标
 - ❌ 无检索质量指标
 
+> **2026-09-14 更正（附录 BK.2）**：上面第 2 条（无 `/ready`）与第 4 条（无任务队列深度指标）
+> **已经过期** —— 阶段 0.10 已收口：`/ready` 已存在（200/503 同一响应体形状），
+> 队列深度按 broker 里的 `*.celery.msg` 文件数如实报出（**只报告、不决定状态码**）。
+> ⚠️ 但本轮实现的判据**只有数据库**：这一行括号里写的"broker 可达、LLM 可达"**没有做**
+> （broker 只报深度；把 LLM 抖动翻译成"未就绪"是另一类错误）。
+> `/metrics`、OpenTelemetry、token/成本指标、检索质量指标**仍然没有** —— 本条的其余部分照旧成立。
+
 `architecture.md:183-187` 提到的可观测性是：**request_id + 结构化日志 + errors.log**。
 这只够事后查一个请求，**不够运维**。
 
@@ -1654,7 +1661,7 @@ Celery worker 直接 `import` 模型并使用 `tasks/common.py` 的会话工厂�
   （转换任务异常退出未清理）
 - `note_material_links` 表已有 **1 行两端皆 NULL 的死行**
 - `backend/data_backup_e2e/` 是完整的数据目录副本（含 models / chroma / storage）
-- `backend/` 根目录 15 个一次性脚本
+- `backend/` 根目录 15 个一次性脚本 —— **2026-09-14 已移入 `backend/scripts/dev/`**（根目录现无任何 `.py`，见计划 0.2 与**附录 BK.1**）
 
 ---
 
@@ -2287,6 +2294,11 @@ FastAPI 因此**无法感知鉴权要求** —— 生成的 `openapi.json` 里
 - `api/upload.py:440, 459, 854`：把异常写进 `error_message` 并回传客户端
 - `api/knowledge.py:97-98`：回显 LLM 错误
 
+> **2026-09-14 更正（附录 BK.5）**：第 1 行那三处已经不是 `raise HTTPException(500, detail=str(e))`，
+> 而是 `raise AppError(ASSESSMENT_*_FAILED, str(e), 500)`（阶段 0.11 的迁移**只加错误码、不改文案**）
+> —— **本条的 `str(e)` 泄漏仍然成立**，只是载体换了；这是那次迁移**刻意**的取舍
+> （"改文案就是行为变更"，所以留到单独一轮处理）。
+
 **后果**：客户端可拿到 httpx 上游异常、MinIO/S3 错误、
 **本地绝对路径（Windows 路径 + 用户名）**、SQL 片段、第三方 API 主机与状态码。
 
@@ -2910,7 +2922,7 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | # | 动作 | 解决 | 验收 | 状态（2026-09-14 核对） |
 |---|---|---|---|---|
 | 0.1 | **加 CI**：GitHub Actions 跑 `ruff` + `eslint` + `pytest -m "not integration"` | E-6 | 每个 PR 必过 | ✅ **已落地**（`.github/workflows/ci.yml`）：后端 ruff（app/tests/scripts 三段）+ 离线 pytest、前端 lint + tsc/build + Vitest + Playwright（阻断）、依赖安全扫描（建议性）、nginx/`.dockerignore` 配置守卫。**不只是存在** —— 它当场抓到过真缺陷（登录成功落 404、CI 依赖清单漂移 64 failed） |
-| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 | ✅ **已落地（搬迁已于 2026-09-14 执行，本条由此收口）**。守卫：`tests/conftest.py:128-142` 网络阻断（`ENGRAMNOTE_ALLOW_NETWORK_TESTS=1` 才放行）、`:313-370` **真实生产库写入守卫**（`before_cursor_execute` 层拦截）、`pytest.ini` 的 `norecursedirs = tests/integration`（8 个联网脚本已归位，`src` 收集期 8 errors → 0）。**搬迁**：15 个一次性脚本（`test*.py` × 11 / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py`）已全部移入 `backend/scripts/dev/`，`backend/` 根目录**已无任何 `.py`**；`test_clean_failed_api` 三个脚本里硬编码的库路径、`test_e2e.py` / `test_pdf_pipeline.py` / `test_convert_direct.py` 里按 `__file__` 推项目根的写法都已同步（否则搬迁会当场崩）。⚠️ **仍未做的一半**：`backend/tests/` 根下**仍有 9 个脚本式文件**（`test_full_e2e.py` / `test_full_flow.py` / `test_week5_6_integration.py` / `test_week8_e2e.py` / `test_week8_review.py` / `test_week8_review_existing.py` / `test_week9_10_e2e.py` / `test_week11_e2e.py` / `test_week12_e2e.py` —— 实测每个都是 0 条 `def test_`、只有 `main()` / `log_step()` 这类脚本结构，"`backend/tests/` 只留正式测试"这半未达成），且 14 个原被 `.gitignore` 忽略的文件移到新位置后**不再被忽略**（`.gitignore:63-69` 的收口没做，需人工决定是提交还是继续忽略）—— 两件都登记在 `backend/scripts/dev/README.md` |
+| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 | ✅ **已落地（搬迁已于 2026-09-14 执行，本条由此收口）**。守卫：`tests/conftest.py:128-142` 网络阻断（`ENGRAMNOTE_ALLOW_NETWORK_TESTS=1` 才放行）、`:313-370` **真实生产库写入守卫**（`before_cursor_execute` 层拦截）、`pytest.ini` 的 `norecursedirs = tests/integration`（8 个联网脚本已归位，`src` 收集期 8 errors → 0）。**搬迁**：15 个一次性脚本（`test*.py` × 11 / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py`）已全部移入 `backend/scripts/dev/`，`backend/` 根目录**已无任何 `.py`**；`test_clean_failed_api` 三个脚本里硬编码的库路径、`test_e2e.py` / `test_pdf_pipeline.py` / `test_convert_direct.py` 里按 `__file__` 推项目根的写法都已同步（否则搬迁会当场崩）。⚠️ **仍未做的一半**：`backend/tests/` 根下**仍有 9 个脚本式文件**（`test_full_e2e.py` / `test_full_flow.py` / `test_week5_6_integration.py` / `test_week8_e2e.py` / `test_week8_review.py` / `test_week8_review_existing.py` / `test_week9_10_e2e.py` / `test_week11_e2e.py` / `test_week12_e2e.py` —— 实测每个都是 0 条 `def test_`、只有 `main()` / `log_step()` 这类脚本结构，"`backend/tests/` 只留正式测试"这半未达成），且 14 个原被 `.gitignore` 忽略的文件移到新位置后**不再被忽略**（`.gitignore:63-69` 的收口没做，需人工决定是提交还是继续忽略）—— 两件都登记在 `backend/scripts/dev/README.md`；⚠️ **2026-09-14 后续**：那 14 个文件**已随搬迁入库**（`git ls-files backend/scripts/dev/` 共 **16** 个文件），"提交还是继续忽略"这个决定**已经做出**，剩下的是 `.gitignore:64-69` 那六条模式**不再命中任何文件**（一行收口，见**附录 BK.1 / BK.7**）；搬迁的完整对账（**59** 条 ruff 历史问题、两个疑似死文件、报告了但没改的旧引用清单）见**附录 BK.1** |
 | 0.3 | **关掉启动时的破坏性迁移**：`init_db()` 中 `_rebuild_dangling_tables()` 与 `database.py:580-587` 的全局去重改为**显式脚本 + 先备份**，不再随进程启动执行 | D-2 | 启动不再 DROP 表、不再删数据 | ✅ **已落地**：`database.py:260-301` 的 `init_db()` 只做 `create_all()` + `_migrate_sqlite()`（只加不删）+ FTS5 建表；`_rebuild_dangling_tables()`（`:1150`）与 `card_relations` 同键去重（`:1057-1059`）都在 `_destructive_migration_allowed()`（`:390-399`，需显式 `ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1`）之后；孤儿检查（`:1002-1036`）已改为**只报告不删除**，针对 `review_logs` 的两条 `DELETE` 不复存在 |
 | 0.4 | **SQLite 开 WAL**：`_set_sqlite_pragma` 加 `PRAGMA journal_mode=WAL`（实测当前为 `delete`）；`busy_timeout` 从 5000 提到 30000 | D-1 | 并发读写不再报 locked | ✅ **已落地**：`database.py:138` `PRAGMA journal_mode=WAL`、`:141` `busy_timeout=30000`、`:144` `synchronous=NORMAL`（另 `:131` `foreign_keys=ON`） |
 | 0.5 | **修正向量相似度公式**：`embedding_tasks.py:246` 的 `1/(1+distance)` 在归一化向量上等价于错误的度量（无关内容得 0.333，见 A-1）。collection 建时指定 `hnsw:space=cosine` 并改 `1.0 - distance`；**写一个重建全部 collection 的迁移脚本**（当前 `backend/data/chroma/` 有 90+ 个） | A-1 | 相似度落在 [0,1] 且可区分 | ✅ **已落地，但该路径此后已被整体替换**（⚠️ 读者勿误记为"待做"）：公式已在 `embedding_service.py:304-333` 改为 `cos = 1 - d/2`（并附"旧实现得 0.333 错在哪"的推导），单测曾逐行对齐理论余弦。**但它依赖的 Chroma 已在 2.4/2.4′ 被删除**：`chromadb` 移出 `requirements.txt`、`VectorStore` 删除、运行期改为 `chunks` 表 + 纯 Python 单位向量点积（`chunk_search_service.py:100-127`，含模型一致性检查），因此 `similarity_from_l2_distance()` 现在是**全仓零调用方的死代码**（`grep` 命中仅定义处）。"重建全部 collection 的迁移脚本"**从未写**，因为集合被**迁移到 `chunks` 表**（608 行、单一 `bge-m3`/1024 维、100% 可检索，附录 O/P）而不是被重建；`backend/data/chroma/` 目录仍在磁盘上（**实测 114 个子目录**），但已无任何运行期读取方 |
@@ -2918,8 +2930,8 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | 0.7 | **限流兜底**：`/auth/login`、`/auth/register` 加 IP 级限流；加登录失败计数与锁定；补恒定时间比较（用户不存在时也跑一次 bcrypt） | E-1 / E-2 | 爆破与用户枚举被阻断 | 🟡 **限流与时序对齐已落地，登录失败计数与锁定从未实现**。已落地：`middleware/rate_limit.py:59-105` 的规则表（`^/api/auth/login$` 10/min、`^/api/auth/register$` 5/min，超额 429 + `Retry-After`）；`auth_service.py:404-408` 的 `_DUMMY_HASH` 时序对齐（`:128`）。**缺的是"加登录失败计数与锁定"**：全仓 `grep` 三个关键词（`lockout`、`failed_attempt`、`login_attempt`）**零命中**（`database.py:1116` 的 `msvcrt.locking` 是文件锁，与登录无关），`users` 表也没有相关列。当前的爆破防护**只有**那两道 60 秒滑动窗口（≈10 次/分钟/IP），窗口一过即可继续 —— 计划要的"锁定"这一层不存在 |
 | 0.8 | **停止用户枚举**：注册对已占用邮箱/用户名返回统一文案 | E-2 | 无法枚举已注册用户 | ✅ **已落地**：`auth_service.py:363-369` 两种冲突合并为同一句 `"该邮箱或用户名已被使用，请更换后重试"`，且服务端日志才区分 `email_taken` / `username_taken`；登录侧同为统一失败（`:384-410`） |
 | 0.9 | **`debug` 默认改为 `False`**；`.env.example:113` 同步；`echo` 拆成独立开关 `db_echo`（当前 `debug=True` 把 bcrypt 哈希与全部学习内容写进明文日志，见 A-19） | E-5 / A-19 | 生产日志无用户内容 | ✅ **已落地**：`config.py:509` `debug: bool = False`；SQL echo 已拆成**独立开关** `log_sql`（`config.py:494` 默认 `False`，`database.py:90` `"echo": settings.log_sql`，不再跟随 `debug`）；命名是 `log_sql` 而不是计划写的 `db_echo`。⚠️ **`.env.example` 未同步干净**：`:39-41` 已有 `# DEBUG=false` 的遗留说明，但文件**末尾 `:142` 仍是裸的 `DEBUG=true`**，照抄模板会把 dev 姿态打开（应用内**不**开 SQL 日志，所以不再是 A-19 那个泄露，但仍是模板与代码默认值的矛盾） |
-| 0.10 | **`/ready` 端点 + 队列深度**；`/docs`、`/openapi.json` 生产关闭或加保护 | E-7 | 可判断服务是否可用 | ⏸ **未做**。`app/main.py` 全仓只有 `/health`（`:292`，返回 `{status, app}`）；`FastAPI(...)`（`:194-199`）**没有设 `docs_url` / `openapi_url` / `redoc_url`**，因此 `/docs`、`/openapi.json`、`/redoc` 在任何环境（含生产）都是**公开**的；没有任何队列深度端点。⚠️ 0.11 的 `request_id` 与错误信封可能让人以为 E-7 已收口 —— 那是两件事 |
-| 0.11 | **统一错误契约**：引入 `AppError(code, http_status, message)`，前端改按 `error_code` 分支（不再匹配中文，见 F-19）；停止用 `str(e)` 回传内部异常（H5） | E-10 | 后端改文案不破坏前端 | 🟡 **契约设施已落地，采用面很窄**。已落地：`core/app_error.py:30-55` 的 `AppError(code, message, http_status, data)`；`middleware/error_handler.py:52-63` 统一信封 `{detail, error_code, request_id}`（另 `main.py:243-255` 转发 `exc.headers`，`:271-285` 配额异常单独注册）；前端 `api/client.ts:381-383` **确实**优先读 `error_code`。**缺的是采用**：全仓 `raise AppError` **只有 2 处**（`version_service.py:208/226`），而 `raise HTTPException` **有 152 处**（含 `services/goal_service.py` 的 5 处）；且 `frontend/src/pages/TodayLearn.tsx:146` 与 `pages/Review.tsx:126` 仍在用 `message.includes('每日上限')` 匹配中文。所以"后端改文案不破坏前端"这条验收**尚未成立** |
+| 0.10 | **`/ready` 端点 + 队列深度**；`/docs`、`/openapi.json` 生产关闭或加保护 | E-7 | 可判断服务是否可用 | ✅ **已落地（2026-09-14，本条由此收口）**：生产姿态下 `/docs`、`/openapi.json`、`/redoc` **根本不注册**（FastAPI 原生三个 `None`，404 与未知路径不可区分），判据**沿用既有的** `cfg.is_dev`（没有第二套"是不是生产"）；新增 **`/ready`**（200/503、两种状态**同一响应体形状**）。此前记的是"⏸ **未做**。`app/main.py` 全仓只有 `/health`（`:292`，返回 `{status, app}`）；`FastAPI(...)`（`:194-199`）**没有设 `docs_url` / `openapi_url` / `redoc_url`**，因此 `/docs`、`/openapi.json`、`/redoc` 在任何环境（含生产）都是**公开**的；没有任何队列深度端点"——**这段已过期**（旧句要点保留对照）。落地要点：`_schema_endpoint_kwargs()`（`main.py:239-245`）、模块级 `app` 改为工厂 `create_app(config=None)`（`main.py:486`，**此前根本没有工厂**）、`dump_openapi.py` 走**进程内** `app.openapi()` 因此在生产姿态下照旧可用；`/ready` 的判据**只有数据库**（一次**只读聚合查询**，不是 `SELECT 1`），队列深度**只报告、不决定状态码**，`/health` 保持**零依赖**（DB 挂 ⇒ `/health` 200 + `/ready` 503；`main.py:548-616`）。★ 改掉设计的那次实测：`task_runs` 的行是 **worker 接手时**才建的（只数 DB 的"pending"几乎恒为 0，是**假指标**），真实积压在 broker ⇒ 按 `*.{queue}.msg` 文件数计（与 kombu `Channel._size` 同口径，**排除** `*.pidbox.msg`），测不到时 `depth=None`（不是 0）。完整记录见**附录 BK.2** |
+| 0.11 | **统一错误契约**：引入 `AppError(code, http_status, message)`，前端改按 `error_code` 分支（不再匹配中文，见 F-19）；停止用 `str(e)` 回传内部异常（H5） | E-10 | 后端改文案不破坏前端 | ✅ **后端侧已落地（2026-09-14，采用面 2/154 → 151/154）**：全仓 `raise HTTPException` **152 → 3**、`raise AppError` **2 → 151**（**AST** 实测）。**3 处存活的都是书面豁免**，全在 `app/api/auth.py`（`:103` / `:115` / `:227`），理由统一：必须带 `WWW-Authenticate: Bearer`，而 `ErrorHandlerMiddleware._error_response()` **不接受也不转发 `headers=`**（`middleware/error_handler.py:52-63`；路由层 `HTTPException` 走的是 `main.py:454` 转发了 `exc.headers` 的那个处理器）—— 豁免语法是紧邻 raise 的 `# error-contract: exempt — <理由>`。**错误码 80 个**（`core/app_error.py:40-212`，name == value、0 重复、0 未使用），**粒度规则**也写在表里（同一个 code 只要在"一个端点内"可区分即可，`app_error.py:53-56`）。守卫 `tests/test_error_contract_adoption.py`（516 行 / **16** 用例 / AST）实测账目：`app/api` **24** 个文件 / **3** 处 raise / **0** 违规 / **3** 条豁免；反空转有**合成源码**与**真源**两道证明；另有一个 diff 脚本对 **149** 个已迁移出口比对 `(status, message)` 多重集 ⇒ **零状态/文案漂移**。此前记的是"🟡 **契约设施已落地，采用面很窄** … `raise AppError` **只有 2 处**（`version_service.py:208/226`），而 `raise HTTPException` **有 152 处** … 所以"后端改文案不破坏前端"这条验收**尚未成立**"——**采用面那半已过期**（旧句要点保留对照）。⚠️ **仍未收口的一半是前端**：HEAD 上 `frontend/src/pages/TodayLearn.tsx:146` 与 `pages/Review.tsx:126` **仍是** `message.includes('每日上限')`；本轮把结构化的码交给了前端（`api/client.ts:314` 的 `ApiError.code`），两个页面的分流切换见**附录 BK.3 / BK.7** |
 | 0.12 | **修 nginx 生产配置**：`client_max_body_size 500m`（当前默认 1MB → **所有 >1MB 上传必然 413**）、`proxy_buffering off`（当前 SSE 被缓冲 → 流式失效）、`gzip_vary on`、静态资源缓存头 + `index.html no-cache`、安全响应头 | F-1 / F-21 | Docker 部署下上传与流式可用 | ⛔ **按既定路线不适用**（容器化已放弃，见 `README.md:265-276` 的"Docker 部署未经验证"横幅与 `docs/sqlite-single-writer.md`）。⚠️ **但文件是真的、内容是对的**：`frontend/nginx.conf:11` `client_max_body_size 500m`、`:50` `proxy_buffering off`、`:71` `gzip_vary on`、`:24-33` 静态资源 `immutable` + `index.html no-cache`、`:74-76` 安全头，且 CI 有回归守卫（`.github/workflows/ci.yml:351-366`）。**验收条件"Docker 部署下可用"无法在本项目的运行路径上验证**（这一轮也没有验证过）—— 所以这条是"不适用"，不是"已验证" |
 | 0.13 | **加 `frontend/.dockerignore`**（`node_modules`、`dist`）；`Dockerfile` 改 `npm ci` | F-4 | 镜像可在 Linux/CI 上构建 | ⛔ **按既定路线不适用**，且**前半已落地、后半未做**：`frontend/.dockerignore` 存在（22 行，排除 `node_modules` / `dist` / `.git` / `*.log` 等），CI 有守卫（`ci.yml:368-374`）；但 `frontend/Dockerfile:16` **仍是 `RUN npm install`**，不是计划要的 `npm ci`。整体判 ⛔ 是因为"镜像可在 Linux/CI 上构建"这条验收**在本项目的实际部署路径下不被检验** |
 | 0.14 | **加 ErrorBoundary**（`main.tsx` 全局 + 路由级 `key={pathname}`）；`renderMarkdown` 调用包 `useMemo` 与 try/catch 兜底 | F-2 | 单条坏数据不再整站白屏 | ✅ **已落地**：全局 `main.tsx:49-55`；路由级 `App.tsx:116-150` 用 `<ErrorBoundary resetKey={location.pathname}>`（`key` 语义的等价实现）；`utils/markdown.ts:265-288` 的 `renderMarkdown` 整体 try/catch，失败降级为**转义后的纯文本**；流式两处（`NoteAskPanel.tsx:71`、`QA.tsx` + `hooks/useStreamAnswer.ts`）已用 `useMemo` / 节流。⚠️ **未完全覆盖**：`LearningAssessment.tsx`（`:486/498/508/598/621/627/646`）与 `NoteDetail.tsx:160/163` **仍在渲染体里直接调用** `renderMarkdown(...)`（每渲染一次即重算）。有 try/catch 兜底，所以 F-2 的"整站白屏"验收成立；但"包 `useMemo`"这一半**没有全覆盖** |
@@ -2931,10 +2943,17 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 为后续重构赢得时间。
 
 > **2026-09-14 补记**：本阶段 17 条的**逐条状态此前从未存在过**（表头就没有 `状态` 列）。
-> 上表是按代码逐条核对后补的，**结论是"✅ 11 / 🟡 3（0.2、0.7、0.11）/ ⏸ 1（0.10）"
-> ——共 15 条；另 2 条（0.12、0.13）判"⛔ 按既定路线不适用"**
-> （⚠️ 0.13 实际是"不适用 + 前半已落地"的复合状态，见该行）；其中最容易被计划自身措辞误导的两条是
-> **0.7**（限流有、锁定无）与 **0.11**（`AppError` 有、采用无）。派工依据见**附录 BJ.1**。
+> 上表是按代码逐条核对后补的，**当时的结论是：✅ 11 / 🟡 3（0.2、0.7、0.11）/ ⏸ 1（0.10），
+> 共 15 条；另 2 条（0.12、0.13）判"⛔ 按既定路线不适用"**（旧句保留作对照）。
+> **同日稍后，0.2 / 0.10 / 0.11 三条已经收口**（见**附录 BK**）⇒
+> **现结论：✅ 14 / 🟡 1（0.7）/ ⏸ 0 / ⛔ 2** —— ✅ 新增的三条是
+> 0.2（15 个脚本搬出 `backend/` 根）、0.10（`/ready` + 三条 schema 路由生产姿态不注册）、
+> 0.11（采用面 2/154 → 151/154）。**0.7 那半没有变**（限流有、锁定无），
+> **0.11 那半已经变了**（`AppError` 有、采用无 → 采用面 151/154；
+> 前端两页的分流切换是另一件事，见 **BK.7**）。0.10 那一格原有的
+> "⚠️ 与 0.11 是两件事"仍然成立。0.12 / 0.13 仍判"⛔ 按既定路线不适用"
+> （⚠️ 0.13 实际是"不适用 + 前半已落地"的复合状态，见该行）。
+> 派工依据见**附录 BJ.1**，三条的收口证据见**附录 BK**。
 
 ### 阶段 1 · 换地基（2 周）—— 手术刀 1
 
@@ -3409,7 +3428,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 9 | **`_kb_cache` 模块级无界缓存** | `rag_service.py:47` | 有 DB 索引后不需要；无界字典是内存泄漏 |
 | 10 | **手写 API 函数与手写类型**（原写"`client.ts` 手写 90 个 API 函数"；**2026-09-14 实测修正**：是 **111** 个，而且 `client.ts` 现为 **490 行、只剩 1 个端点函数**，其余 110 个早已按域拆走 —— 要放弃的是**这一层手写契约**，不是某个文件的体积，见附录 BH） | `frontend/src/api/`（11 个域模块 + `client.ts` 的基础设施层） | 从 OpenAPI 生成（**第一期已生成并对比**；切换被后端 22 个缺 `response_model` 的端点阻塞，见附录 BH） |
 | 11 | **14 个全局 CSS 文件** | 约 2700 行 | 无作用域、互相覆盖、补丁式追加 |
-| 12 | **`backend/` 根目录 15 个一次性脚本** | `test*.py` / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py` 等 | 移入 `scripts/dev/` 并加环境守卫，或直接删 |
+| 12 | **`backend/` 根目录 15 个一次性脚本** | `test*.py` / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py` 等 | 移入 `scripts/dev/` 并加环境守卫，或直接删。→ **2026-09-14：搬迁已执行**（15 个脚本在 `backend/scripts/dev/`、根目录 0 个 `.py`，并已入库）；**"加环境守卫"这半没有做**（它们靠 `pytest.ini` 的 `testpaths = tests` 不被收集，其中 `test_cleaning_failed.py` 被点名时仍会打 `localhost:8000`）—— 见 0.2 与**附录 BK.1** |
 | 13 | **`backend/data_backup_e2e/`** | 完整的数据目录副本（含 models、chroma、storage） | 不应进版本库；加 `.gitignore` 并删除 |
 | 14 | **`docs/archive/`（约 390KB）与过期 `eslint-report*.txt`（约 470KB）** | `docs/` | 归档文档明确"内容可能过时"，但仍在被引用；清理后只留 `architecture.md`（重写）+ `decisions.md`（只读归档） |
 | 15 | **Vault 的"项目目录"承诺** | README:81-88、Projects 页展示的 Vault 路径 | 项目已是纯标签，磁盘只有 `inbox`。要么恢复目录隔离（则项目不能是纯标签），要么**从 UI 上诚实移除 Vault 路径展示**。**不能继续说谎** |
@@ -10330,7 +10349,7 @@ CI 挂 `--check`）→ **S2 只换类型、不换请求**（`export type X = com
 |---|---|
 | 怎么枚举表格 | 一行算**表头**：去掉缩进与 `>` 后以 `\|` 开头，且**下一行是分隔行**（只含 `\|` / `-` / `:` / 空白，且至少一个 `-`）；表体延续到不再以 `\|` 开头为止。**先剔除代码围栏（三连反引号）内的行**（ASCII 图里也有 `\|`，不剔就会把图当成表） |
 | 怎么算宽度 | 先把转义 `\|` 去掉，再数**未转义** `\|`，按"首/尾各减一"换算成格数；**行宽 > 表头 = 会被丢弃的格子** |
-| 结果：`docs/overhaul-plan.md` | 共 **224 张表**（2 列 87 / 3 列 98 / 4 列 29 / 5 列 8 / 6 列 2），**4 张有缺陷**（这 224 张**不含本表** —— 本表是修完之后才加进去的第 225 张；现在重跑同一判据应得 **225 张 / 0 张有缺陷**） |
+| 结果：`docs/overhaul-plan.md` | 共 **224 张表**（2 列 87 / 3 列 98 / 4 列 29 / 5 列 8 / 6 列 2），**4 张有缺陷**（这 224 张**不含本表** —— 本表是修完之后才加进去的第 225 张；现在重跑同一判据应得 **225 张 / 0 张有缺陷** —— ⚠️ 该判据此后被证明**只数了一个方向**、数字也已再变（**2026-09-14：230 张 / 0 张**），见本表后的更正） |
 | ① 阶段 4（`L3215`） | 表头 3 列，8 行带第 4 格状态 → 补 `\| 状态 \|` |
 | ② 阶段 6（`L3250`） | 同上，8 行状态 |
 | ③ §4.2 目标技术栈（`L2774`） | 两行被 `\|\|` 粘成一行（9 格 vs 表头 4 格）→ **"错误契约"那一整行从来没渲染过**；拆回两行 |
@@ -10338,6 +10357,15 @@ CI 挂 `--check`）→ **S2 只换类型、不换请求**（`export type X = com
 | 另一条独立检查 | "表格行里反引号内出现未转义 `\|`"全文档只有 **1 处**（就是 ④）—— 这条防的是"行宽刚好对上、内容却错位"的漏网 |
 | 结果：`frontend/docs/openapi-client.md` | 共 **14 张表，0 张有缺陷** |
 | ⚠️ 阶段 7 为什么没改 | 它的表头是 **2 列**（`\| # \| 动作 \|`），而**表体每一行也正好 2 格**、压根没有状态列 —— **没有任何格子被丢弃**。给它补一列 `状态` 只会多出一列空白，那不是修复；等它真的有状态可写时再加 |
+
+> **2026-09-14 更正（附录 BK.6）：上面的判据只数了一个方向，而后续扫出的 4 行缺陷
+> 全都是"比表头窄"的。** 上面写的"**行宽 > 表头 = 会被丢弃的格子**"漏掉了"**行宽 < 表头**"这一类：
+> GFM 会把缺的格子补成空格，于是内容**错位**（1.12 / 1.13 在 4 列的表头下只有 3 格
+> ⇒ ✅ **渲染在"验收"列**、`状态` 列是空的）或整列**空着**（5.2 / 5.3）。
+> **两个方向都要数**：宽 = 内容静默丢弃，窄 = 内容错位 / 缺格。
+> 补上这 4 行之后为 **230 张表 / 0 张有缺陷**（225 → 230 = BI / BJ 两张附录新增的 5 张表；
+> **2026-09-14 复跑同一判据实测 230 / 0**）—— 本附录（BK）自身再加 **7** 张表
+> ⇒ **收口时全文档 237 张 / 0 张**（同一判据，两个方向都数）。
 
 > ★ **这与本项目在代码里反复撞见的是同一个失败模式：一个"看起来在工作、实际什么都没做"的检查。**
 > 表格少一个表头列的代价是静默的 —— **内容没丢，只是没人看得到**：
@@ -10523,6 +10551,14 @@ CI 挂 `--check`）→ **S2 只换类型、不换请求**（`export type X = com
 | ⏸ 1 | **0.10**（**没有 `/ready`**，只有 `/health`；`FastAPI()` 未设 `docs_url`/`openapi_url`，因此 `/docs` 与 `/openapi.json` 在所有环境公开） |
 | ⛔ 2 | **0.12 / 0.13**（容器化已放弃；`nginx.conf` 与 `frontend/.dockerignore` **文件是真的且内容正确**，CI 亦有守卫，但"Docker 部署下可用"这条验收在本项目的运行路径上不被检验） |
 
+> **2026-09-14 更正（附录 BK）：本表是审计时点的结论，其中三行已在同一日收口。**
+> 0.2（搬迁已执行）、0.10（`/ready` 已有、三条 schema 路由生产姿态不注册）、
+> 0.11（`raise HTTPException` 152→3、`raise AppError` 2→151、80 个码、AST 守卫）
+> ⇒ 阶段 0 的现结论是 **✅ 14 / 🟡 1（0.7）/ ⏸ 0 / ⛔ 2**。
+> 下面两段里提到的 0.11 采用面（"`AppError` 2 处 vs `HTTPException` 152 处"、
+> "这条验收**尚未成立**"）**已经过期**；**0.7 那半一个字都没变**（限流有、锁定无）。
+> 旧行与旧句保留作对照，收口证据见**附录 BK**。
+
 **两条最容易被计划自身措辞读错的**：
 
 - **0.7**：计划把"限流"与"失败锁定"写在同一行、同一个验收里。实际只做了前一半。
@@ -10616,7 +10652,226 @@ prompt_version ∈ 列? False      llm_calls 行数 = 0
 
 ---
 
-**文档版本**：v5.5（**2026-09-14 状态缺口回填**：阶段 0 全 17 条补齐 `状态` 列并逐条给依据、
+## 附录 BK · 状态审计的收口：0.2 / 0.10 / 0.11 三条落地，外加一条可复现的 CORS 事实（2026-09-14）
+
+本附录承接 **BJ**。BJ 逐条核出阶段 0 的"✅ 11 / 🟡 3 / ⏸ 1 / ⛔ 2"，
+其中三条 —— **0.2 脚本搬迁、0.10 `/ready` 与生产姿态、0.11 错误契约的采用面** ——
+在**同一天稍后**被做掉了。本附录记这轮做了什么、**哪一次测量推翻了设计前提**、
+以及一件**测出来了但没修**的事实。
+
+阶段 0 表里对应的三个状态格已按本文档的规矩**就地更正并注明日期**
+（0.2 在搬迁那次提交里已改，本附录补上 0.10 / 0.11 两格与本节合计行），
+**旧句要点保留在格内作对照** —— 那三格与**附录 BJ.1** 的旧结论互为参照。
+
+⚠️ **时点**：本附录的全部事实以**写入时的 HEAD `c592645`** 为准
+（当时工作区只有两个前端文件被改动）。代码在动，读这段时请先确认
+`main.py` / `error_handler.py` / `review.py` / `.gitignore` 这几处**此后没有再被改过** ——
+BK.4 与 BK.7 记的正是它们的当时状态。
+
+### BK.1 0.2：15 个脚本搬出 `backend/` 根（顺带带出 59 条没人看见过的历史问题）
+
+| 项 | 值 |
+|---|---|
+| 搬迁 | `backend/` 根 15 个一次性脚本 → `backend/scripts/dev/`；根目录现在 **0 个 `.py`**（实测） |
+| 清单 | `backend/scripts/dev/README.md`（90 行）四列逐条列出：**文件 → 用途（文件头自述）→ 搬迁前的引用方 → 搬迁前的 git 状态** |
+| 引用同步（否则当场坏） | `test_e2e.py` / `test_pdf_pipeline.py` / `test_convert_direct.py` 三处用 `__file__` 上溯推"项目根"，文件下移两级后改**上溯三级**；`test_clean_failed_api` 那三个脚本里硬编码的库路径同步（其余脚本按 cwd 取值，搬迁不影响） |
+| 搬迁**带出来**的 59 条 | `ruff check scripts` 是**递归**的（`.github/workflows/ci.yml:63-68`），而这 15 个文件原来在 `backend/` 根 —— CI 只跑 `app` / `tests` / `scripts` 三段，**根目录不在任何一段里**；加之其中 14 个被 `.gitignore:64-69` 挡着**从未入库**。于是 59 条（**46×F541** f-string 无占位符 / 7×F401 未用导入 / 2×E401 / 2×E402 / 1×B007 / 1×F841）此前**没有任何人看见过**。已按最小改动修掉 |
+| 两个疑似死文件（**只登记，不删**） | `test.py`（11 行 generator 教学片段，与本项目无关）与 `restore_note.py`（7 行、写死一个笔记 UUID）—— 除计划文档自己的清单外**零引用方**；删不删不是这次搬迁能决定的 |
+| `pytest` 不受影响 | `pytest.ini` 的 `testpaths = tests` 决定了它们**过去和现在都不被收集**。⚠️ 但 `test_cleaning_failed.py` 定义了 `def test_cleaning_flow()`：被点名（`pytest tests/test_cleaning_failed.py`）时会**真的去打 `localhost:8000`** —— 将来要转正必须重写，不能搬回 `tests/` |
+
+**"报告了但没改"的旧引用**（不在本轮可改动的文件范围内，完整清单在 README 的"遗留 3"）：
+`backend/tests/test_full_e2e.py:753,762`、`backend/tests/测试账号信息.md:35,45`、
+`docs/archive/新手教学.md:4175`、`docs/archive/开发时间表.md:77,514`、
+`docs/code-review-report.md:44,150`、`docs/verification-report-20260830.md:24`、`.trae/documents/**`。
+没有一处是可执行的构建 / CI 路径；正确的命令现在写作 `python scripts/dev/<file>.py`
+（**cwd 仍是 `backend/`** —— 部分脚本按 cwd 找 `data/db/engramnote.db`）。
+
+⚠️ **`.gitignore` 的连带后果（已定性，收口待做）**：`.gitignore:64-69` 的六条模式
+（`backend/test.py` / `backend/test_api.py` / `backend/test_*.py` / `backend/verify_*.py` /
+`backend/reset_*.py` / `backend/restore_*.py`）都**带路径前缀、锚在仓库根**，
+文件一挪走就**不再命中**：实测旧路径仍匹配（`git check-ignore -v --no-index backend/test.py`
+→ `.gitignore:64`），新路径不匹配（`backend/scripts/dev/test.py` → 无输出、退出 1）。
+那 14 个文件随后**已随搬迁入库**（`git ls-files backend/scripts/dev/` = **16** 个文件），
+"提交还是继续忽略"这个决定**已经做出**；剩下的是那六条模式现在**匹配不到任何文件** ——
+删除或改写是**一行收口**，登记在 BK.7。
+
+⚠️ **搬迁时写的 README"遗留 1 / 遗留 2"记的是提交前的样子**（"这 14 个文件现在会以未跟踪文件
+的形式出现在 `git status` 里"、"`e2e_cleanup.py` 是唯一被 git 跟踪的文件"）——
+**入库之后这两句已经过期**（只登记，不改：那个文件不在本文件的改动范围内）。
+
+**0.10 的一个跨效应**（同上 README 遗留 4）：`test_e2e.py` 用 `GET /docs` 判"服务器起来了没有"，
+而 0.10 之后生产姿态**根本不注册 `/docs`** ⇒ 探针拿 404、脚本空等 30 秒后打印"[FAIL] 服务器启动超时"
+并退出 1 —— 而服务器其实早就起来了。两处探针改为 `GET /health`，并且**刻意不用 `/ready`**：
+`/ready` 回答的是"现在能不能干活"，把依赖抖动翻译成"我的子进程没起来"会把排查引向错误方向。
+**"拿调试端点当存活探针"本身才是缺陷** —— 任何门禁（关闭或认证）都会让它不再返回 200。
+
+### BK.2 0.10：生产姿态**不注册**那三条 schema 路由 + 新增 `/ready`
+
+| 决定 | 内容与理由 |
+|---|---|
+| 关法 | **不注册**，不是"加保护"：`docs_url` / `openapi_url` / `redoc_url` 三个都传 FastAPI 原生的 `None`（`main.py:239-245` 的 `_schema_endpoint_kwargs()`）⇒ 生产姿态下是 **404**，与"未知路径"**不可区分** |
+| 判据 | **沿用既有的 `cfg.is_dev`**（`config.py:522-525`：`app_env == "dev" or debug` 的遗留折叠），**没有第二套"我是不是生产"** |
+| 为什么不加认证 | 本项目**没有管理员角色**：任何已登录用户都能拿到同一份 schema ⇒ "加保护"实际是把"公开"变成"**对每个注册用户公开**"，收益接近零却多出一个要维护、要验证的中间件；而 `/openapi.json` 对攻击者是**侦察** —— 一次匿名请求即可拿到全部路由、参数名与认证方案 |
+| 为什么 `None` 优于门禁 | `None` 是**声明式**的：没有"忘了加依赖"或"鉴权分支写反了"的形态 |
+| dev 姿态 | **不变**（三条路由都在，`/docs` 能点、`/openapi.json` 能取） |
+| 工厂化 | 模块级 `app = FastAPI(...)` → `create_app(config: Optional[Settings] = None)`（`main.py:486`）。**此前根本没有工厂**（不是"改了签名"），把姿态变成**显式入参**之后，**一个进程里就能同时断言两种姿态**（`tests/test_env_switches.py::TestSchemaEndpointGating`） |
+| 不破坏工具链 | `dump_openapi.py` 走**进程内** `app.openapi()`（`:81-83`：不起服务、不连库、不占端口），`openapi_url=None` 对它没有任何影响；有配套用例钉住（`test_in_process_schema_survives_production_posture`）—— 否则"为了关文档而弄坏前端生成"会是一次静默的倒退 |
+
+**`/ready`：200 / 503，两种状态共用同一响应体形状**
+（`status` / `app` / `database{status, reason}` / `queue{depth, running, pending, source}`，`main.py:276-319`）。
+
+| 分工 | 内容 |
+|---|---|
+| `/health` = **存活** | **零依赖**（不碰 DB / broker / 外部服务）。拿它决定"要不要重启进程"，因此**绝不能**因依赖抖动而失败：一次数据库抖动会变成成批重启，而重启既不修数据库，还会打断正在跑的任务 |
+| `/ready` = **能不能干活** | 判据**只有数据库**：一次**只读聚合查询**（`select(TaskRun.status, func.count()).group_by(...)`），**不是 `SELECT 1`** —— "连得上但表不存在"是本项目真实踩过的形态（CI 临时库未建表 ⇒ 每个请求 500 `no such table: users`） |
+| 队列深度 | **报告项，永不参与状态码**：忙 ≠ 坏。把深度做成就绪判据，会让高峰期所有实例一起被判未就绪、负载均衡器把流量发给空实例；接到存活探针上就是重启风暴 |
+| 净效果 | DB 挂 ⇒ **`/health` 200 + `/ready` 503**（探针与看板可以只靠这一对区分"进程死了"和"依赖坏了"） |
+
+★ **改了设计的那次测量：只数数据库得到的"队列深度"是假指标。**
+`task_runs` 的行是 **worker 接手时**才建的（`tasks/common.py::begin_task_run` → `ensure_task_run`，
+建出来就是 `running`）—— 消息在 broker 里排队的那段时间，数据库里**一行都没有**，
+所以按 DB 数"pending"**几乎恒为 0**。
+真实积压在 **broker**：kombu 的文件系统传输把每条消息写成一个 `{时刻}_{uuid}.{队列}.msg` 文件、
+消费者取走时把文件**移出**该目录，因此"目录里剩下的 `.{队列}.msg` 文件数"就等于"还没被取走的消息数"
+（与 kombu 自己的 `Channel._size(queue)` **同口径**）。⚠️ **只按后缀匹配队列名**：
+目录里还住着控制消息（`…celery@主机.celery.pidbox.msg`，本机实测残留 **15** 个），
+把它们算进业务队列会让深度凭空多出十几 —— 而"指标虚高"一旦被当成基线，
+之后就再也没人看得出真正的积压。**测不到就报 `None`（不是 0）**：
+redis 后端（`redis_broker_not_probed`）与目录不可读（`broker_dir_unreadable`）都给 `None` + 原因码；
+只有"目录不存在 = 从没投递过一条消息"才是 0。
+
+⚠️ **代码里两条注释把中间件顺序写错了**（本轮核对时发现，**未改**）：
+`middleware/error_handler.py:20-22` 写的是"中间件挂在 CORS 内侧（CORS → ErrorHandler → RequestContext → 路由）"——
+**两侧都与实际相反**；`main.py:532-536` 把 `RateLimit` 与 `RequestContext` 的相对位置写反
+（它对"ErrorHandler 在 CORS 外侧"这一句是对的）。
+实测顺序（外 → 内；按注册顺序 + Starlette `insert(0, …)` / `reversed()` 语义）：
+**`RateLimit → RequestContext → ErrorHandler → CORS → ExceptionMiddleware → 路由`**。
+先在这里点名，是因为这两条注释正是下一节那条事实的**引路牌**。
+
+### BK.3 0.11：`raise HTTPException` **152 → 3**（3 处书面豁免），且**零状态/文案漂移**
+
+| 项 | 值 |
+|---|---|
+| 采用面 | `raise AppError` **2 → 151**、`raise HTTPException` **152 → 3**（**AST** 实测：解析 `raise` 的调用名，不是正则）。按出口算采用面 **2/154 → 151/154** |
+| 3 处存活 | 全部在 `app/api/auth.py`（`:103` / `:115` / `:227`） |
+| 为什么必须豁免 | 它们**必须带 `WWW-Authenticate: Bearer`**：`ErrorHandlerMiddleware._error_response()` 构造 `JSONResponse` 时**不接受、也不转发 `headers=`**（`error_handler.py:52-63`），而路由层 `HTTPException` 走的是 FastAPI `ExceptionMiddleware` + `main.py:454` 的 `http_exception_handler`，那里**转发** `headers=getattr(exc, "headers", None)`。换成 `AppError` 就是**丢掉质询头** |
+| 豁免语法 | 紧邻 raise 的注释 `# error-contract: exempt — <理由>`（守卫向上看 **3** 行；**理由为空不算豁免**） |
+| 码表 | **80** 个，全部 `NAME == VALUE`、**0 重复、0 未使用**（`app/core/app_error.py:40-212`；⚠️ 不是 `error_codes.py`，**没有这个文件**）。命名约定写在表头：不把 HTTP 状态码写进名字、按"资源 + 条件"取义、**一个 code 只表达一件事** |
+| 粒度规则 | 就写在码表里（`app_error.py:53-56`）：**判据是"调用方能否靠 code 区分处境"** —— 调用方知道自己调的是哪个端点，所以"清洗的状态闸门"与"重试的状态闸门"共用一个 `NOTE_STATUS_INVALID` 不会撞车；**给每个端点复制一份同义 code 只会让词表膨胀** |
+| 守卫 | `backend/tests/test_error_contract_adoption.py`（516 行 / **16** 用例 / AST）。实测账目：`app/api` **24** 个文件 / **3** 处 raise / **0** 违规 / **3** 条豁免；`app/services` **66** 个文件 / 0 处 |
+
+**反空转两道**（一个"零违规"的检查，必须先证明它抓得到东西）：
+
+1. **合成源码**：植入一处违规 ⇒ `violations == ['planted.py:3']`；带理由的标记 ⇒ 豁免、
+   且理由里确实含 `WWW-Authenticate`；**标记没有理由 ⇒ 仍是违规**；标记离得太远（>3 行）⇒ **不豁免**；
+   非 `HTTPException` 的 raise 不计入。
+2. **真源**：在**真实已迁移的** `tasks.py` 里临时植回一处 `raise HTTPException` ⇒
+   `violations` 由 `[]` 变成**指向该 `文件:行` 的条目**（守卫报的是相对 `backend/` 的路径，
+   形如 `app/api/tasks.py:NN`）。
+
+另有 `MIN_SCANNED_FILES = 15` 这类**下限断言**：目录被整体挪走 / 改名时，扫描会退化成
+"零个文件、零个违规"—— **而那看起来正是通过**。
+
+⚠️ **一处说法要更正**：守卫**没有**打印汇总行 —— `print(` 出现 **0** 次，
+`http_exception_raise_total` 这个标识符在文件里**不存在**。
+**`24 / 3 / 0 / 3` 是它的扫描函数实测出来的值**（外加 `scanned_files >= 15` 与
+`len(exemptions) == 3` 两条断言），不是一行输出。记这条是因为
+"引用一个并不存在的输出"正是本文件反复登记的那种形态。
+
+**"零漂移"是怎么证的**：一个 diff 脚本对 **HEAD 与工作区**逐一比对每个出口的
+`(status, message)` **多重集** —— **149 个已迁移出口全同**，即**状态码与用户可见文案零漂移**
+（152 − 3 = 149）。一个端点的前后对照留作样本：
+
+```
+迁移前  404 / "项目不存在" / HTTP_404
+迁移后  404 / "项目不存在" / PROJECT_NOT_FOUND
+```
+
+**变的只有 `error_code`** —— 这也是为什么下面 BK.5 第 1 条那条"改文案就是 bug"的规则
+在本轮被执行得如此死板。
+
+### BK.4 ★ 测出来的一条事实：`AppError` 的响应**没有 CORS 头**（**没修**，也不是本轮引入）
+
+**机制**：`AppError` 由 `ErrorHandlerMiddleware` 渲染，而这个中间件在 **`CORSMiddleware` 外侧**
+（BK.2 末尾那条实测顺序）⇒ 它生成的响应**根本不经过 CORS**，因此**没有 `Access-Control-Allow-Origin`**。
+而 `HTTPException` 的响应由**最内层** `ExceptionMiddleware` 渲染后**向外穿过** CORS ⇒ 有该头。
+
+**实测**（同一个 app）：
+
+| | 请求 | `access-control-allow-origin` |
+|---|---|---|
+| 迁移前 | `GET /api/projects/x`（HTTPException 路径） | **有** |
+| 迁移后 | `GET /api/tasks/x`（AppError 路径） | **没有**（响应里只有 `x-request-id`） |
+
+**今天的实际影响：零。** 前端与后端**同源**（走 Vite 代理），跨域调用不存在；
+而且**既有的 `AppError` 出口与 429 一直就是这个样子** —— 所以这**不是本轮引入的回归**，
+本轮只是把它变成了**可复现的事实**。
+
+**给要修它的人三句话**：① 位置在 `middleware/error_handler.py` 或 `main.py`；
+② 要害是 **CORS 与错误处理器的先后关系**，不是"给响应补一个头"（补头解决不了预检与
+`credentials`，也帮不了别的中间件路径）；③ ⚠️ **别信那两条注释**
+（`error_handler.py:20-22` 与 `main.py:532-536` 都把顺序写错了，见 BK.2 末尾）——
+以**注册顺序 + Starlette 前插 / `reversed()` 语义**为准。登记在 BK.7 第 1 条。
+
+### BK.5 本轮**刻意没改**的（每条都给理由，免得下一轮当成遗漏）
+
+| # | 没改的 | 理由 |
+|---|---|---|
+| 1 | `assessment.py` 三处 500 的 `str(e)` | 规则是"**改文案就是 bug**"：本轮**只加 `error_code`**，用户可见内容一字不动。⚠️ S-8（错误响应回传内部细节）**仍然成立**，只是载体从 `HTTPException` 换成了 `AppError` —— 该节已就地注明 |
+| 2 | 三处**仍由中文决定状态码**的地方 | `folders.py:246`（`if "不存在" in str(e)` ⇒ 404，否则 400）、`versions.py:207-209`、以及同类分支 —— **保留原判据与原状态码**；改判据＝改行为，是单独一件事 |
+| 3 | `DELETE /api/projects/{id}` 对"不存在"返回 **400**（GET / PATCH 是 404） | 历史取值，不改；**码名照实取**（`PROJECT_NOT_FOUND`），以免"码说 404、状态其实是 400"这种**更坏的谎** |
+| 4 | `quick_review` 的"题目不存在"返回 **400**，而 `review` 同一处境返回 **404** | 同上：两个端点各自的历史取值，本轮不统一 |
+| 5 | `goal_service.py` 里的**英文**文案 | 5 处里 3 处英文（`:146` `Maximum N active goals`、`:249` `Goal not found`、`:420` `No active goals, …`）、2 处中文（`:84` / `:96`）—— 迁移前就有的不一致，照原样搬 |
+| 6 | `versions.py` 那两处 `except ValueError` | 能落进去的**只有** `UnicodeDecodeError`（`ValueError` 的子类）⇒ 原写的"版本不存在 ⇒ 404"分支是**死代码**。码名照实取 `VERSION_CONTENT_UNAVAILABLE`（**不用码去撒谎**）；真正的版本缺失由 service 直接抛 `AppError(VERSION_NOT_FOUND)` |
+| 7 | `review.py:369` 的 `except HTTPException: raise` | 它**目前是死代码**（服务层现在抛 `AppError`），**但不只是冗余**：一旦哪个依赖抛 `AppError`，会被下面那个 `except Exception` 包成 500 `REVIEW_REMINDERS_FAILED` 而不是透传 ⇒ 应改成 `except (HTTPException, AppError): raise`（登记在 BK.7） |
+| 8 | docstring 里的 `Raises: HTTPException` 行 | **故意留着**：它们会**喂进 OpenAPI 描述**，而生成物（`backend/openapi.json` / `frontend/src/api/generated/schema.ts`）**刚刚重新生成过** —— 改它们会**立刻**让另一个 agent 的产物过期。要么连同生成物一起改，要么不改 |
+
+### BK.6 顺带修掉的两件，其中一件**更正了计划自己的方法论**
+
+1. **`eval_retrieval.py` 的静默空语料**（BJ.4 第 3 条已记，本轮已修，此处只补口径）：
+   改为**只读** `chunks` 表；**0 条文档 = 退出码 2 + 大横幅**
+   （与 `check_dependency_drift.py` 的"检查自身空转"**同一口径**）。
+   "没东西可测"从此**不是一个绿色的结果**。
+2. **四行缺格的表格**（阶段 1 的 1.12 / 1.13、阶段 5 的 5.2 / 5.3）：四列的表头下只有**三格** ——
+   1.12 / 1.13 的 ✅ **渲染在"验收"列**、`状态` 列是空的；5.2 / 5.3 的状态列整列空着。已补回四格。
+   补上之后（本附录之前）复跑同一判据实测 **230 张表 / 0 张有缺陷**
+   （225 → 230 = BI / BJ 两张附录新增的 5 张表）；**本附录自己又加了 7 张表
+   ⇒ 收口时全文档 237 张 / 0 张**。
+
+★ **方法论更正（比上面两件都重要）**：**BH.12 记的判据只数了一个方向。**
+它写的是"**行宽 > 表头 = 会被丢弃的格子**"，而这一轮扫出的 **4 行缺陷全都是"比表头窄"**——
+**按那条旧判据，这 4 行一个都抓不到**。两者的表现不同、但都是缺陷：
+**宽 = 内容被静默丢弃**（渲染出来看不见），**窄 = 内容错位或整列空着**（看得见，但是错的）。
+**扫描必须两个方向都数。** 这与 BH.10 / BE.2 / BF.3 / BG.3 是同一条判据：
+**"没有信号"与"信号是坏的"必须先能分开，才谈得上"这件事被检查过了"** ——
+本轮补上的正是"**检查本身漏了一半**"这一种。
+
+### BK.7 悬着的小事（不写下来就会丢）
+
+下表的状态同样是**本附录写入时**（HEAD `c592645`）的状态 —— 每一条都给了位置，
+便于下一轮逐条核对而不是重新找。
+
+| # | 事项 | 位置 / 现状 |
+|---|---|---|
+| 1 | **CORS 与错误处理器的顺序**（BK.4） | `middleware/error_handler.py` 或 `main.py`；今天无实际影响，但是一条可复现的事实，且两处注释把顺序写错了 |
+| 2 | `review.py` 的 `except HTTPException: raise` → `except (HTTPException, AppError): raise` | `review.py:369`；当前死代码，一旦有依赖抛 `AppError` 会被包成 500 |
+| 3 | docstring 里的 `Raises: HTTPException` 行 | 必须与 `openapi.json` / `schema.ts` 的**再生同批**做，否则又是"改一句、过期一个产物" |
+| 4 | `.gitignore:64-69` 六条**已经匹配不到任何文件**的模式 | 一行收口（删除或改写）；搬迁那 14 个文件已入库，所以这纯粹是**死规则** |
+| 5 | 依赖漂移检查**容忍缺失的可选依赖** | `check_dependency_drift.py` 在**瘦环境**里会因为 `httptools` / `watchfiles` 缺席（`installed is None`）而失败 —— **那次失败是环境性的、不是回归**（脚本自己已有 `EXIT_VACUOUS = 2` 的口径，但"缺一个可选依赖"目前只记作"未安装"、**不进 `problems`**）。⚠️ 本机实测 `httptools 0.7.1` / `watchfiles 1.1.1` **是装着的**，该失败只在瘦环境复现 |
+| 6 | 0.11 的**前端一半**：`TodayLearn.tsx` / `Review.tsx` 的分流切换 | HEAD 上它们**仍是** `message.includes('每日上限')`（`TodayLearn.tsx:146` / `Review.tsx:126`）。本轮已把结构化的码交给前端（`client.ts:314` 的 `ApiError.code`），并且 0.11 的提交里**已经带了要求它们改的用例**（`tests/test_error_contract_adoption.py::TestFrontendBranchesOnCode` 与 `pages/Review.test.tsx`）—— **两边配套，落地时必须一起** |
+| 7 | `backend/scripts/dev/README.md` 的"遗留 1 / 2" | 记的是**提交前**的状态（"14 个文件会以未跟踪文件出现"、"`e2e_cleanup.py` 是唯一被跟踪的文件"）；**入库后已过期**（只登记，不改 —— 那个文件不在本文件的改动范围内） |
+| 8 | `tests/test_error_contract_adoption.py:504` 引用的"`overhaul-plan` **第 10529 行**" | 该引用**本来就已经偏了**（现行 10529 行是 0.7 那段），而本附录会让行号**再次位移** ⇒ 这类引用应改成**附录锚点**（如"附录 BJ.1"），**不要引用行号** |
+
+🎯 **一句话**：**这三条收口里最值钱的不是"152 → 3"，而是那次测量 —— `task_runs` 的行是 worker
+接手时才建的，所以"队列深度"这个指标按原来的算法从一开始就只能读出 0；以及那条没修的事实：
+`AppError` 的响应到今天仍然没有 CORS 头。**
+
+---
+
+**文档版本**：v5.6（**2026-09-14 状态审计收口**：阶段 0 的 **0.2 / 0.10 / 0.11 三条落地**并就地更正状态
+（✅14 / 🟡1 / ⏸0 / ⛔2）、`AppError` 响应**缺 CORS 头**这条可复现事实的登记、
+表格扫描判据补成**两个方向**、评测脚本"空语料 = 退出码 2"，见**附录 BK**；
+**2026-09-14 状态缺口回填**：阶段 0 全 17 条补齐 `状态` 列并逐条给依据、
 阶段 1 的 1.1–1.5 与阶段 3 的 3.10/3.11 补记现状、`llm_calls.prompt_version` 缺口登记、
 阶段 7 五条只登记不加状态列，见**附录 BJ**；
 阶段 2、3、阶段 4 全部，阶段 5 的 5.1（第一期）/ 5.5 / 5.10 / 5.11 / 5.13
@@ -10635,7 +10890,9 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 真库第二轮清理与依赖漂移可见化见 BF，可访问性审计与覆盖轮见 BG，
 从 OpenAPI 生成客户端与 111 个手写函数的分歧见 BH，
 5.9 / 5.13 收尾与两条产品发现见 BI，
-状态缺口回填（阶段 0 全 17 条 / 1.1–1.5 / 3.10–3.11 / `llm_calls.prompt_version`）见 BJ）
+状态缺口回填（阶段 0 全 17 条 / 1.1–1.5 / 3.10–3.11 / `llm_calls.prompt_version`）见 BJ，
+状态审计的收口（阶段 0 的 0.2 / 0.10 / 0.11 三条、`AppError` 响应的 CORS 头缺失、
+表格扫描判据的两个方向、评测脚本空语料 = 退出码 2）见 BK）
 
 
 
