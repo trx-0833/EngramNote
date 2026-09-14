@@ -1,0 +1,171 @@
+{
+  "fixture_user_ids": [
+    "u1",
+    "u2"
+  ],
+  "targets": {
+    "users": [
+      "u1",
+      "u2"
+    ],
+    "folders": [
+      "f1",
+      "f2"
+    ],
+    "learning_goals": [
+      "35a1f6b5-dd20-4d9d-91bd-b73c74783f9f"
+    ]
+  },
+  "plan": [
+    {
+      "table": "learning_goals",
+      "column": "user_id",
+      "params": [
+        "u1",
+        "u2"
+      ],
+      "ids": [
+        "35a1f6b5-dd20-4d9d-91bd-b73c74783f9f"
+      ],
+      "count": 1
+    },
+    {
+      "table": "folders",
+      "column": "user_id",
+      "params": [
+        "u1",
+        "u2"
+      ],
+      "ids": [
+        "f1",
+        "f2"
+      ],
+      "count": 2
+    },
+    {
+      "table": "users",
+      "column": "id",
+      "params": [
+        "u1",
+        "u2"
+      ],
+      "ids": [
+        "u1",
+        "u2"
+      ],
+      "count": 2
+    }
+  ],
+  "total_rows": 5,
+  "exact_hits": [
+    {
+      "table": "folders",
+      "column": "user_id",
+      "value": "u1",
+      "rows": 1
+    },
+    {
+      "table": "folders",
+      "column": "user_id",
+      "value": "u2",
+      "rows": 1
+    },
+    {
+      "table": "folders",
+      "column": "name",
+      "value": "f1",
+      "rows": 1
+    },
+    {
+      "table": "folders",
+      "column": "name",
+      "value": "f2",
+      "rows": 1
+    },
+    {
+      "table": "folders",
+      "column": "id",
+      "value": "f1",
+      "rows": 1
+    },
+    {
+      "table": "folders",
+      "column": "id",
+      "value": "f2",
+      "rows": 1
+    },
+    {
+      "table": "learning_goals",
+      "column": "user_id",
+      "value": "u1",
+      "rows": 1
+    },
+    {
+      "table": "learning_goals",
+      "column": "id",
+      "value": "35a1f6b5-dd20-4d9d-91bd-b73c74783f9f",
+      "rows": 1
+    },
+    {
+      "table": "users",
+      "column": "id",
+      "value": "u1",
+      "rows": 1
+    },
+    {
+      "table": "users",
+      "column": "id",
+      "value": "u2",
+      "rows": 1
+    }
+  ],
+  "json_hits": [
+    {
+      "table": "learning_goals",
+      "column": "scope_folders",
+      "rowid": 1,
+      "values": [
+        "f1"
+      ],
+      "rows": 1
+    }
+  ],
+  "unexpected": [],
+  "counts_before": {
+    "assessment_results": 12,
+    "card_relations": 260,
+    "chunks": 608,
+    "chunks_fts": 608,
+    "chunks_fts_config": 1,
+    "chunks_fts_data": 175,
+    "chunks_fts_docsize": 608,
+    "chunks_fts_idx": 173,
+    "daily_plans": 0,
+    "folders": 6,
+    "knowledge_cards": 1181,
+    "learning_goals": 1,
+    "llm_cache": 0,
+    "llm_calls": 0,
+    "note_annotations": 5,
+    "note_material_links": 6,
+    "note_projects": 19,
+    "note_versions": 17,
+    "notes": 20,
+    "projects": 3,
+    "quiz_items": 1058,
+    "review_logs": 194,
+    "review_states": 2239,
+    "task_runs": 4,
+    "users": 4
+  },
+  "fk_before": [
+    [
+      "note_material_links",
+      3,
+      "users",
+      2
+    ]
+  ],
+  "integrity_before": "ok",
+  "journal_mode_before": "wal"
+}

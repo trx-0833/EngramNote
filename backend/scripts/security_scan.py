@@ -760,6 +760,11 @@ def main() -> int:
     # ── 退出码 ──
     # 2 = 必需扫描器没跑起来。这一条是本脚本存在的主要理由：
     # 把"配置了但从未真正执行"从一句易被忽略的"跳过"变成红灯。
+    #
+    # ⚠️ 这一段必须排在 `--json-out` **之后**：CI 把 JSON 报告当构建产物归档，
+    # 而"扫描器没跑起来"恰恰是最需要被人看到的时刻。若在这里提前 return，
+    # 归档步骤拿不到文件 —— 报告在最该存在的时候缺失（artifact 上传会因
+    # 文件不存在而失败或归档空目录，两种都不是想要的结果）。
     required_failures = []
     if not args.skip_python and not python_section["available"]:
         required_failures.append("pip-audit 未安装")

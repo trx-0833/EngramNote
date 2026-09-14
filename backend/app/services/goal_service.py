@@ -276,20 +276,23 @@ class GoalService:
 
         # 范围内卡片平均掌握度（叠加 user_id 过滤，防止旧数据跨用户渗漏；
         # 回收站笔记的卡片不计入统计，见 docs/decisions.md#F-09）
+        #
+        # ⚠ 空 scope 的含义是"范围内什么都没有"，**不是**"该用户的全部卡片"：
+        # 这里与下面同样用 `if scope_notes:` 的 total_count / reviewed_count、
+        # 以及 refresh_goal_progress / generate_daily_plan 保持一致。
+        #
+        # 本函数此前有一个 `else` 分支，在 scope_notes 为空时按 user_id 聚合
+        # **全部**卡片。当目标的最后一篇范围内笔记被删除（app/services/
+        # note_service.py::purge_note 步骤 5.2 正是把该笔记从 scope_notes 里摘掉、
+        # 目标本身保留）时，同一函数的三个聚合会互相矛盾：题目数与今日复习数
+        # 归零，而平均掌握度却突然开始统计范围外的卡片，progress_percentage
+        # 随之跳变。空范围必须是"没有东西可算"（avg_mastery = 0.0）。
+        # 现场记录见 backend/data/db/cleanup-notes-n1-n2.log §7.3。
         avg_mastery = 0.0
         if scope_notes:
             avg_result = await db.execute(
                 select(func.avg(KnowledgeCard.mastery_level)).where(
                     KnowledgeCard.note_id.in_(scope_notes),
-                    KnowledgeCard.user_id == user_id,
-                    Note.not_trashed(KnowledgeCard.note_id),
-                )
-            )
-            avg_value = avg_result.scalar()
-            avg_mastery = float(avg_value) if avg_value is not None else 0.0
-        else:
-            avg_result = await db.execute(
-                select(func.avg(KnowledgeCard.mastery_level)).where(
                     KnowledgeCard.user_id == user_id,
                     Note.not_trashed(KnowledgeCard.note_id),
                 )

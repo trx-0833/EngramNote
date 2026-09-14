@@ -1,5 +1,12 @@
 # 依赖版本策略：直接依赖用 ~= 锁定主次版本（允许补丁版本浮动）。
 # 精确 == 锁定留待部署环境 `pip freeze` 后再另立批次。
+#
+# ⚠ 这份清单描述的是"**全新安装**会得到什么"，不等于本机/CI **已经装好**的那套。
+#    两者已经差出好几个大版本（例如 fastapi 声明 ~=0.115.0 / 实际 0.141.1），
+#    而 `pip-audit -r requirements.txt` 扫的是前者 —— 于是"扫描显示没问题"
+#    可能在描述一个尚不存在的部署。差异用一条命令可见：
+#        python backend/scripts/check_dependency_drift.py
+#    （只读、不升级、不联网；漂移的处置是另一个决定，见 docs/security-scan.md）
 fastapi~=0.115.0
 uvicorn[standard]~=0.30.0
 sqlalchemy[asyncio]~=2.0.0
