@@ -17,16 +17,16 @@
  * 所以这里把动画体逐字复制进来。`base.css` 里的全局原版不删
  * （全局动画库仍可被 tsx 内联 `style={{ animation }}` 按裸名引用）。
  *
- * ## 两条"没有用户"的规则：**逐字搬过来，不删**
+ * ## 两条"没有用户"的规则：第一批逐字搬来，**收尾轮删掉**
  *
  * `.cleaning-progress` / `.cleaning-progress-bar` 是历史遗留：清洗进度条
  * 后来改由 `TaskProgress` 渲染（用的是全局 `.progress-bar*`），
- * 于是这两条规则在全项目**没有任何 TSX 引用**（grep 只命中本模块）。
- * 本轮**仍然逐字搬过来**，理由是本轮的契约是"证明什么都没丢"：
- * 删死规则是另一件事（死 CSS 清理），混进来会让"丢失"这条证据
- * 同时包含"搬家"和"清理"两种语义，审阅者无法判断哪条丢得有意、哪条是事故。
- * 死规则清理应当单开一轮，届时连同 `base.css` 里可能一起失去用户的
- * `@keyframes cleaning-pulse` 一并处理。
+ * 于是这两条规则在全项目**没有任何 TSX 引用**。第一批的契约是"证明什么都没丢"，
+ * 所以当时逐字搬进本模块、不删；收尾轮（死代码清理）核过证据后删除，
+ * 连同**只被 `.cleaningProgressBar` 引用的** `@keyframes cleaningPulse`
+ * 与 `base.css` 里那份原版 `cleaning-pulse` 一起
+ * （证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）。
+ * 换句话说：本模块**现在没有任何动画**。
  *
  * ## 与 responsive.css 的关系
  *
@@ -49,25 +49,6 @@
   padding-bottom: var(--space-sm);
   border-bottom: 1px solid var(--color-border);
   margin-bottom: var(--space-sm);
-}
-
-/* ── 清洗进度条（历史遗留：当前无 TSX 引用，见文件头）── */
-
-.cleaningProgress {
-  width: 100%;
-  height: 4px;
-  background: var(--color-bg);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.cleaningProgressBar {
-  width: 100%;
-  height: 100%;
-  background: var(--gradient-primary);
-  /* `cleaningPulse` 定义在本文件末尾 —— 模块内的动画名会被哈希，
-     引用与定义必须同域（见文件头）。 */
-  animation: cleaningPulse 1.5s ease-in-out infinite;
 }
 
 /* ── 重复块列表 ── */
@@ -165,13 +146,6 @@
   margin: 0;
 }
 
-/* ── 动画定义（动画体逐字复制自 base.css 的 `@keyframes cleaning-pulse`）── */
-
-@keyframes cleaningPulse {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
+/* `@keyframes cleaningPulse`（动画体逐字复制自 base.css 的 `cleaning-pulse`）
+   已随 `.cleaningProgressBar` 在收尾轮删除：它是那条规则的**唯一**引用者，
+   本模块现在没有任何动画。全局原版 `cleaning-pulse` 同批删除。 */

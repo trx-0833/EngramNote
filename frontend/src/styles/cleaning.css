@@ -3,16 +3,24 @@
  *
  * 原文件里的 16 条规则**逐字**搬到
  * `src/components/CleaningPanel.module.css`：
- *   `.cleaning-panel`、`.cleaning-stats`、`.cleaning-progress`、
- *   `.cleaning-progress-bar`、`.duplicate-blocks`、`.duplicate-block`
+ *   `.cleaning-panel`、`.cleaning-stats`、`.duplicate-blocks`、`.duplicate-block`
  *   （含 `:hover`）、`.duplicate-block-header`、`.duplicate-block-info`、
  *   `.duplicate-block-index`、`.duplicate-block-similarity`、
  *   `.duplicate-block-actions`、`.duplicate-block-compare`、
  *   `.duplicate-block-text-label`、`.duplicate-block-text-content`、
- *   `.duplicate-block-text-empty`；
+ *   `.duplicate-block-text-empty`
+ * （14 条；另外 2 条 `.cleaning-progress` / `.cleaning-progress-bar` 是死规则，
+ *  见下面的收尾轮说明）；
  * 以及 `.cleaning-progress-bar` 引用的 `@keyframes cleaning-pulse`
  * （复制进模块并改名 `cleaningPulse` —— 模块里的动画名会被哈希，
  * 定义必须与引用同域，详见模块文件头）。
+ *
+ * ⚠️ **收尾轮（死代码清理）**：`.cleaning-progress` 与 `.cleaning-progress-bar`
+ * 是零引用的死规则（清洗进度条后来改由 `TaskProgress` 用全局 `.progress-bar*` 渲染，
+ * 全项目没有任何 tsx 挂这两个类名），已连同模块内的 `@keyframes cleaningPulse`
+ * 与这里那份 `@keyframes cleaning-pulse` 一起删除。
+ * 证据：`docs/migration-evidence/5.6-13-dead-css-cleanup.md`。
+ * 于是**第一批的 16 条 = 14 条仍在 + 2 条已声明删除**（差集脚本里逐条登记）。
  *
  * 搬走的依据：grep `cleaning-` / `duplicate-` 全项目只命中
  * `components/CleaningPanel.tsx`；`responsive.css` / `refinements.css` 里

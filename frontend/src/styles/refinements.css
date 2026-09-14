@@ -22,7 +22,7 @@
  * | `@media 768` `.card { padding }` | `styles/components.css` | 同上（`.card` 是全局公共件）；它压的是同文件的 `.card { padding: var(--space-lg) }` |
  * | `.filter-pill` `::after` `.filter-pill-active::after`、`.segment-btn` `::after` `.segment-btn-active::after`、`@media 768` `.filter-pill { padding }` | `styles/learning.css` | 这两个类名的**定义在 learning.css**（4 个页面 / 2 个功能在用 ⇒ 留全局）。其中 768px 的 `padding` 简写与 `responsive.css` 的 `padding-left/right` 长写是**跨属性竞争**（计划 §5 雷区 12），搬过去时块内顺序照旧 |
  * | `.markdown-editor`(+`:focus`+768+480)、`.edit-toolbar`(+768/480) | `pages/notedetail/EditSplitView.module.css` | grep 只命中 `EditSplitView.tsx`（`.edit-toolbar` 是零引用的预留样式，逐字搬、不删） |
- * | `.link-modal` `.material-list-item`(-selected) `.type-badge`(-material) | `pages/notedetail/LinkManagerModal.module.css` | 同上（预留语义化类，零引用） |
+ * | `.link-modal` `.material-list-item`(-selected) `.type-badge`(-material) | 先 → `styles/components.css`，**收尾轮删除** | 零引用的预留语义化类。序 12 按"证明什么都没丢"逐字搬进全局层；收尾轮核过证据（`src/**` 的 TSX/TS grep 0 处、运行时拼类名 0 处）后整条删除 —— 见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md` |
  * | `[style*="rgba(0,0,0,0.5)"] …`（12 条） | **删除** | 真 Chromium 实测：该属性选择器命中 **0** 个元素（浏览器把内联 `rgba(0,0,0,0.5)` 序列化成带空格的 `rgba(0, 0, 0, 0.5)`）。迁移前就从未生效，删它可证明是空操作。逐条登记在 `BATCHES[].resolvedConflicts` |
  *
  * ## 留下的教训（写在这里，别只留在对话里）

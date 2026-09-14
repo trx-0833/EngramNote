@@ -141,8 +141,11 @@ const BATCHES = [
         classes: [
           'cleaning-panel',
           'cleaning-stats',
-          'cleaning-progress',
-          'cleaning-progress-bar',
+          // `cleaning-progress` / `cleaning-progress-bar` 原本在这里（第一批逐字搬进模块）。
+          // 收尾轮（死代码清理）把它们连同模块内的 `@keyframes cleaningPulse` 一起删了 ——
+          // 两个类名全项目 0 处 TSX 引用，删它是可证明的空操作。
+          // 证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`；
+          // 留在 `classes` 里会让 `checkRenames` 自检失败（模块里再也找不到 `.cleaningProgress`）。
           'duplicate-blocks',
           'duplicate-block',
           'duplicate-block-header',
@@ -196,6 +199,43 @@ const BATCHES = [
         orig: 'cleaning-pulse',
         module: 'src/components/CleaningPanel.module.css',
         renamed: 'cleaningPulse',
+        // 收尾轮（死代码清理）：全局原版与模块内那份**都删了** ——
+        // 模块内那份的唯一引用者是 `.cleaningProgressBar`，而那条规则零引用。
+        // `retired: true` 让这条比对的判据变成"全局原版确实存在过 + 模块里现在确实没有了"，
+        // 而不是"两份动画体一致"。谁把进度条加回来，这里会立刻报红。
+        retired: true,
+      },
+    ],
+    /**
+     * 收尾轮（死代码清理）：第一批那 60 条里，有 **2 条是零引用的死规则**
+     * （`.cleaning-progress` / `.cleaning-progress-bar`，清洗进度条后来改由
+     * `TaskProgress` 用全局 `.progress-bar*` 渲染）。第一批的契约是"证明什么都没丢"，
+     * 所以当时**逐字搬进模块、不删**；收尾轮核过证据后删除，登记在这里，
+     * 于是批次汇总会显示 58 逐字保留 + 2 已声明删除（合计仍是 60，不是"少了 2 条"）。
+     * 两个类名同时要从上面的 `classes` 里去掉：`checkRenames` 会回模块核对
+     * "由老类名推导出的新类名真的写在模块里"，而它们已经不在模块里了。
+     * 证据：`docs/migration-evidence/5.6-13-dead-css-cleanup.md`；
+     * 三个方向（迁移前有 → 源码没了 → 产物没了）的自检在
+     * `scripts/verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS`。
+     */
+    resolvedConflicts: [
+      {
+        sheet: 'src/styles/cleaning.css',
+        selector: '.cleaning-progress',
+        prop: '*',
+        value: '*',
+        note: '死代码清理：零引用（全项目没有任何 tsx 挂这个类名）⇒ 整条删除',
+        winner: '不适用 —— 0 处引用，删它是可证明的空操作',
+        evidence: 'grep `src/**` 的 TSX/TS 命中 0；运行时拼类名（classList/模板串/styles[…]）0 处',
+      },
+      {
+        sheet: 'src/styles/cleaning.css',
+        selector: '.cleaning-progress-bar',
+        prop: '*',
+        value: '*',
+        note: '死代码清理：零引用 ⇒ 整条删除（它还是模块内 `@keyframes cleaningPulse` 的唯一引用者，那条动画同批删除）',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
       },
     ],
   },
@@ -1029,52 +1069,8 @@ const BATCHES = [
           '跨属性竞争（计划 §5 雷区 12）：它是简写，压掉 `responsive.css` 那条 ' +
           '`padding-left/right: var(--space-md)`（序 13 搬进 learning.css 时保持"长写在前、简写在后"）',
       },
-      // ── 5 个零引用的**预留语义化类**：整条搬进 components.css（`prop: '*'`）──
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.link-modal', prop: '*', value: '*' },
-        to: { file: 'src/styles/components.css', context: '', selector: '.link-modal' },
-        why:
-          '零引用（`refinements.css` 原注释："待 tsx 后续接入 className 后可直接生效"）。' +
-          '搬进模块会**从产物里消失**（没有 tsx import 那个模块 ⇒ Vite 不编译它，实测差集报 6 条丢失），' +
-          '所以按规范 §4 留在全局层，等"把弹窗内联样式改成类"那一轮再收口',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.material-list-item', prop: '*', value: '*' },
-        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item' },
-        why: '同上',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.material-list-item:hover',
-          prop: '*',
-          value: '*',
-        },
-        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item:hover' },
-        why: '同上',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.material-list-item-selected',
-          prop: '*',
-          value: '*',
-        },
-        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item-selected' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.type-badge', prop: '*', value: '*' },
-        to: { file: 'src/styles/components.css', context: '', selector: '.type-badge' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.type-badge-material', prop: '*', value: '*' },
-        to: { file: 'src/styles/components.css', context: '', selector: '.type-badge-material' },
-        why: '同上',
-      },
+      // ── 5 个零引用的**预留语义化类**：序 12 逐字搬进 components.css，
+      //    收尾轮（死代码清理）**整条删除** —— 见本批 `resolvedConflicts` 末尾那 6 条 ──
     ]),
     /**
      * `[style*="rgba(0,0,0,0.5)"] …` 那 12 条 —— **整条规则删除**，
@@ -1188,6 +1184,32 @@ const BATCHES = [
         winner: '不适用 —— 同上',
         evidence: '同上',
       },
+      /**
+       * ── 收尾轮（死代码清理）：5 个零引用的预留语义化类，整条规则删除 ──
+       *
+       * 它们原本由**本批登记为 relocation**（序 12 从 `refinements.css` 逐字搬进
+       * `components.css`，`prop: '*'`）。收尾轮核过证据（`src/**` 的 TSX/TS 里
+       * 0 处引用、运行时拼类名 0 处、`LinkManagerModal.tsx` 用的是内联 style
+       * 一个类名都没挂）之后**整条删掉**，于是登记从 `relocations` 挪到这里：
+       * 删掉的声明同样既不是"丢失"也不是"值有变化"。
+       * 逐条证据见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。
+       */
+      ...[
+        '.link-modal',
+        '.material-list-item',
+        '.material-list-item:hover',
+        '.material-list-item-selected',
+        '.type-badge',
+        '.type-badge-material',
+      ].map((selector) => ({
+        sheet: 'src/styles/refinements.css',
+        selector,
+        prop: '*',
+        value: '*',
+        note: '死代码清理：零引用（预留语义化类）⇒ 整条删除，不是"搬家"',
+        winner: '不适用 —— 全项目 0 处引用（连挂类名的 tsx 都没有），删它是可证明的空操作',
+        evidence: 'grep `src/**` 的 TSX/TS 命中 0；运行时拼类名（classList/模板串/styles[…]）0 处',
+      })),
     ],
   },
   {
@@ -1705,11 +1727,13 @@ function relocationMatches(entry, sheet, context, selector, prop, value) {
 
 /**
  * 整条规则的搬家：`from.prop: '*'` 表示"这条规则的全部声明一起走"。
- * 用在零引用的**预留类**上（`.link-modal` / `.material-list-item*` / `.type-badge*`：
- * `refinements.css` 里写着"待 tsx 后续接入 className 后可直接生效"，
- * 全项目 0 处引用）。逐条声明登记 29 条太啰嗦且容易漏，所以按整条登记；
- * 严格的"逐声明一致"由一次性审计脚本
- * （`docs/migration-evidence/5.6-10-empty-patch-layers.md` 里那份）核对。
+ *
+ * 机制保留、**目前没有用户**：它原来服务于零引用的预留类
+ * （`.link-modal` / `.material-list-item*` / `.type-badge*`）—— 序 12 登记它们
+ * "整条搬进 components.css"，收尾轮核实零引用后改登记为 `resolvedConflicts`
+ * 的删除条目（同一个数组，只是从"搬家"变成"删除"），于是最后一批通配搬家也消失了。
+ * 留着是因为它同样是 `resolvedConflicts` 里"整条规则删除"的判据
+ * （13 条属性选择器 + 6 条预留类都用 `prop: '*'`）—— 两份登记共用一个写法。
  */
 function isWildcardRelocation(entry) {
   return entry.from.prop.trim() === '*'
@@ -2223,19 +2247,23 @@ for (const batch of BATCHES) {
     for (const e of extraDecls) console.log(`   ${e.key} → ${e.extra.join('; ')}`)
   }
 
-  // 已裁决的冲突：删掉的"输家声明"单独成节 ——
-  // 它们既不是"丢失"也不是"值有变化"，而是**按实测胜者删掉的死声明**。
+  // 从"迁移前"一侧摘掉、单独成节的**删除**：它们既不是"丢失"也不是"值有变化"。
+  // 现在有两类，靠 `note` 区分：
+  //   ① 序 5 的冲突裁决：按**实测胜者**删掉的输家声明（真 Chromium 的 computed style）；
+  //   ② 收尾轮的死代码清理：零引用的类 / 声明（grep + 运行时拼类名扫描的证据）。
   const dropHits = declaredDrops.filter((_, i) => dropHitCounts[i])
   if (dropHits.length) {
+    console.log('\n──── 从"迁移前"一侧删除的声明（逐条可查）────')
     console.log(
-      '\n──── 已裁决的冲突：从"迁移前"一侧删除的输家声明（逐条可查）────',
-    )
-    console.log(
-      `   共 ${dropHits.length} 条。胜者不是读源码推的，而是**真实 Chromium 的 computed style**` +
-        `（一次性探针走真实渲染路径，用完已删；配方见计划 §5 雷区 3）：`,
+      `   共 ${dropHits.length} 条。分两类：① 序 5 那批是**实测胜者**裁决出来的输家声明` +
+        `（一次性探针走真实渲染路径，用完已删；配方见计划 §5 雷区 3）；` +
+        `② 带"死代码清理"字样的那几条是**零引用**的声明（收尾轮删的），` +
+        `依据是 grep + 运行时拼类名扫描，证据 ` +
+        '`docs/migration-evidence/5.6-13-dead-css-cleanup.md`：',
     )
     for (const d of dropHits) {
       console.log(`   - ${d.sheet} \`${d.selector}\` { ${d.prop}: ${d.value} }`)
+      if (d.note) console.log(`       说明：${d.note}`)
       console.log(`       胜者：${d.winner}`)
       console.log(`       实测：${d.evidence}`)
     }
@@ -2274,7 +2302,7 @@ for (const batch of BATCHES) {
 
   console.log(
     `\n批次汇总：逐字保留 ${exact} / 值有变化 ${changed} / 丢失 ${lost}` +
-      (dropHits.length ? ` / 已裁决删除 ${dropHits.length}（实测胜者，逐条见上）` : ''),
+      (dropHits.length ? ` / 已声明删除 ${dropHits.length}（逐条见上）` : ''),
   )
   if (lost > 0) failed = true
 }
@@ -2312,12 +2340,35 @@ for (const f of distSheets) {
 
 // ── 动画体比对：改名不算丢，动画体必须一字不差 ──
 console.log('\n──── 动画体比对（模块内改名后的动画，动画体必须与全局原版一致）────')
-const sheetCache = new Map()
-const readHeadSheet = (rel) => {
-  if (!sheetCache.has(rel)) {
-    sheetCache.set(rel, execFileSync('git', ['show', `HEAD:frontend/${rel}`], { encoding: 'utf8' }))
+/**
+ * ⚠️ 原版从**按内容定位的修订**里读，而不是写死 `HEAD`（收尾轮改的）。
+ *
+ * 收尾轮删掉了 4 个"已经没有样式表用户"的全局 `@keyframes`
+ * （`scaleIn` / `cleaning-pulse` / `glowPulse` / `graph-spin`，
+ * 见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）。
+ * 写死 `HEAD` 的话，这一轮**提交之后** `git show HEAD:…/base.css` 里就没有
+ * `@keyframes scaleIn` 了 ⇒ `a === null` ⇒ 这条比对会对所有后来的人报红
+ * ——而规则本身没有任何问题。`graph.css` 的文件头早就记着这个陷阱
+ * （"把原文删掉，提交之后那条比对就找不到原版"），收尾轮用与
+ * `findRecentRev` 同一套办法解决：从 HEAD 往回找**第一个还含有这个
+ * `@keyframes`** 的修订。与提交顺序、与后来删掉原版的提交都解耦。
+ */
+const keyframeSourceCache = new Map()
+const readKeyframeSource = (rel, name) => {
+  const cacheKey = `${rel}::${name}`
+  if (keyframeSourceCache.has(cacheKey)) return keyframeSourceCache.get(cacheKey)
+  const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i')
+  const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(root, rel), candidate)))
+  if (!rev) {
+    console.error(
+      `✗ 从 HEAD 往回 40 个提交里找不到还含有 \`@keyframes ${name}\` 的 ${rel} —— ` +
+        `登记写错了类名，或那个文件从来没有过这条动画。不能据此下"动画体一致"的结论。`,
+    )
+    process.exit(3)
   }
-  return sheetCache.get(rel)
+  const text = readFromGit(path.join(root, rel), rev)
+  keyframeSourceCache.set(cacheKey, { rev, text })
+  return keyframeSourceCache.get(cacheKey)
 }
 const normKeyframes = (css, name) => {
   const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i')
@@ -2345,18 +2396,31 @@ const normKeyframes = (css, name) => {
     .toLowerCase()
 }
 let animOk = true
+let keyframeChecks = 0
 for (const batch of BATCHES) {
   for (const kf of batch.keyframes) {
-    const a = normKeyframes(readHeadSheet(kf.fromSheet), kf.orig)
-    const b = normKeyframes(fs.readFileSync(path.join(root, kf.module), 'utf8'), kf.renamed)
-    const same = a !== null && a === b
+    keyframeChecks += 1
+    const src = readKeyframeSource(kf.fromSheet, kf.orig)
+    const a = normKeyframes(src.text, kf.orig)
+    const moduleText = fs.readFileSync(path.join(root, kf.module), 'utf8')
+    const b = normKeyframes(moduleText, kf.renamed)
+    // `retired: true`（收尾轮新增）：这条动画在"死代码清理"里删掉了 ——
+    // 断言**模块里也没有了**，而不是"和原版一致"。
+    const same = kf.retired ? a !== null && b === null : a !== null && a === b
     if (!same) animOk = false
-    console.log(`${same ? '✓' : '✗'} @keyframes ${kf.orig}（${kf.fromSheet}）→ ${kf.renamed}（${kf.module}）`)
+    console.log(
+      `${same ? '✓' : '✗'} @keyframes ${kf.orig}（${kf.fromSheet}@${src.rev}）→ ` +
+        `${kf.renamed}（${kf.module}）${kf.retired ? '【收尾轮已随死代码清理删除】' : ''}`,
+    )
     if (!same) {
-      console.log(`     全局：${a}`)
-      console.log(`     模块：${b}`)
+      console.log(`     全局原版：${a}`)
+      console.log(`     模块现状：${b}${kf.retired ? '（期望 null：清理后不该再有）' : ''}`)
     }
   }
+}
+if (keyframeChecks === 0) {
+  console.error('✗ 一条 @keyframes 比对都没有 —— 登记表空了，这项检查等于不存在')
+  process.exit(3)
 }
 
 console.log(

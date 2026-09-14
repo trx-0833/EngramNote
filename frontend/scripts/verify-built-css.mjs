@@ -31,7 +31,16 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { parseRules, splitSelectors, stripComments } from './lib/css-parse.mjs'
+import { parseRules, splitSelectors, stripComments, findRecentRev, readFromGit } from './lib/css-parse.mjs'
+import {
+  collectCascadeDecls,
+  findMediaWars,
+  findShorthandClashes,
+  findCrossClassShorthandClashes,
+  coAppliedClassGroups,
+  fileRank,
+  isSingleClassSelector,
+} from './lib/css-cascade.mjs'
 
 /** 去掉注释（保留一个短别名，读起来比到处写 stripComments 顺） */
 const clean = stripComments
@@ -61,6 +70,21 @@ const sheets = cssFiles.map((f) => ({
   mtime: fs.statSync(path.join(assetsDir, f)).mtimeMs,
 }))
 const all = sheets.map((s) => s.css).join('\n')
+
+/**
+ * 级联求解用的扁平表（收尾轮新增的两项检查：跨媒体查询覆盖战 / 简写 vs 长写）。
+ *
+ * ⚠️ **只有"静态层在前、懒加载 chunk 在后"这一条是确定的**：
+ * `index-<hash>.css` 由 `<head>` 里的 `<link>` 引入，懒加载页面/组件的 chunk
+ * 由 `__vitePreload` 随后注入（计划 §5 雷区 8 的补充说明）。
+ * **两个不同 chunk 之间的先后静态判不了**（取决于路由先加载谁），
+ * 所以 `lib/css-cascade.mjs` 的 `pickWinner` 在那一种组合上返回 `unknown`
+ * —— 那种竞争必须显式报出来，不能猜一个顺序然后当成结论。
+ */
+const sheetsInCascadeOrder = [...sheets].sort(
+  (a, b) => fileRank(a.name) - fileRank(b.name) || a.name.localeCompare(b.name),
+)
+const cascadeDecls = collectCascadeDecls(sheetsInCascadeOrder)
 
 let failed = false
 
@@ -556,6 +580,376 @@ for (const pair of ORDER_PAIRS) {
   }
 }
 
+// ── 3c. 跨媒体查询覆盖战（overhaul-plan 5.6 收尾轮新增的检查之一）──
+//
+// ## 为什么既有三道检查都看不见它
+//
+// `css-migration-diff.mjs` 按 `(上下文 + 选择器 + 属性)` 建键，于是
+// `@media (max-width: 768px) .markdown-body .katex :: font-size` 与
+// `.markdown-body .katex :: font-size` 落在**两个键**上，谁赢看不见。
+// 而 `@media` **不增加权重**：同选择器、同属性时，胜负**纯粹是源序**。
+//
+// ## 实例（迁移前就存在，计划 §4.7）
+//
+// `markdown.css` 768px 档的 `.markdown-body .katex { font-size: 1em }` 与
+// `markdown-extras.css` 顶层的 `1.1em` 权重同为 (0,2,0)，后者在产物里更靠后
+// ⇒ 那条窄屏字号**从未生效**。
+//
+// ## 判据与"响亮失败"
+//
+// 报"媒体查询那条在源序上更靠前"的每一对；**候选对为 0 就报错**
+// ——那意味着这项检查没在扫描任何东西（前几轮的"空检查"事故就是这么来的）。
+// 今天的发现逐条登记在 `MEDIA_WAR_RULES`：登记一条就说明"这条是已知的、
+// 有意留着的"；**没登记的发现 = 红灯**，必须有人去看。
+// 采集与求解用的是 `lib/css-cascade.mjs`（与下面的简写检查同一份实现）。
+const MEDIA_WAR_RULES = [
+  {
+    id: 'katex 窄屏字号（已知：迁移前就从未生效）',
+    match: (f) =>
+      f.sel === '.markdown-body .katex' &&
+      f.prop === 'font-size' &&
+      f.media.context === '@media (max-width: 768px)' &&
+      f.media.val === '1em' &&
+      f.top.val === '1.1em',
+    why:
+      '`markdown.css` 的 768px 档想在小屏把公式字号收一档，但 `markdown-extras.css` 的顶层 ' +
+      '`1.1em` 在产物里更靠后、权重相同 ⇒ 这条窄屏规则从未生效（计划 §4.7 / 规范 §7 盲区 4）。' +
+      '**不要顺手"修好"它**：让它生效是改外观，得单开一轮带截图对比。' +
+      '登记在这里的意思是"已量过、已知、故意留着"。',
+  },
+]
+
+console.log('\n跨媒体查询覆盖战（同选择器 + 同属性，`@media` 里那条被顶层压掉）：')
+const mediaWar = findMediaWars(cascadeDecls)
+if (mediaWar.candidates === 0) {
+  failed = true
+  console.log(
+    '   ✗ 候选对 0 条 —— 这项检查**没在扫描任何东西**。产物里应当存在大量' +
+      '"同选择器同属性、一条在 @media 里一条在顶层"的对（今天的实测是几十对）；' +
+      '为 0 说明解析或采集坏了，不能当成"没有覆盖战"。',
+  )
+} else {
+  console.log(
+    `   · 候选 ${mediaWar.candidates} 对（同选择器 + 同属性、两侧值不同、一条在 @media 里）；` +
+      `其中媒体查询那条**在源序上输掉**的 ${mediaWar.findings.length} 条`,
+  )
+}
+for (const f of mediaWar.findings) {
+  console.log(`   ${MEDIA_WAR_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.sel} { ${f.prop} }`)
+  console.log(
+    `       @media 那条：${f.media.context} 值 ${f.media.val}（${f.media.file} @${f.media.order}）`,
+  )
+  console.log(
+    `       顶层那条  ：值 ${f.top.val}（${f.top.file} @${f.top.order}）  ⇒ 得主 ${f.winner}` +
+      (f.winner === 'unknown' ? '（两个懒加载 chunk 之间静态判不了先后）' : ''),
+  )
+}
+{
+  const matched = new Set()
+  for (const rule of MEDIA_WAR_RULES) {
+    const hits = mediaWar.findings.filter(rule.match)
+    if (hits.length === 0) {
+      failed = true
+      console.log(`   ✗ 注册的「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`)
+      continue
+    }
+    hits.forEach((h) => matched.add(h))
+    console.log(`   ✓ 已登记：${rule.id}（命中 ${hits.length} 条）—— ${rule.why}`)
+  }
+  const unregistered = mediaWar.findings.filter((f) => !matched.has(f))
+  if (unregistered.length) {
+    failed = true
+    console.log(`   ✗ 未登记的覆盖战 ${unregistered.length} 条（**新的**，必须有人决定是修还是登记）：`)
+    for (const f of unregistered) console.log(`      - ${f.sel} { ${f.prop} }：${f.media.val} → ${f.top.val}`)
+  }
+}
+
+// ── 3d. 简写 vs 长写竞争（收尾轮新增的检查之二，计划 §5 雷区 12）──
+//
+// ## 为什么既有三道检查都看不见它
+//
+// 差集按 `(上下文 + 选择器 + 属性)` 建键、冲突统计与 `CASCADE_PAIRS` /
+// `ORDER_PAIRS` 按**属性名**配对 —— 而 `border`（简写，会展开出
+// `border-left-*` 三条长写）与 `border-left`（长写）是**两个名字**，
+// 选择器往往也不同，三道检查一处都配不上。
+//
+// ## 两半分开做，因为它们能提供的证据不一样
+//
+// 1. **同选择器那一半**（`SHORTHAND_CLASH_RULES`）：读源码就能看见顺序，
+//    所以这一半的价值是"逐条登记谁赢、被压掉的那条是不是有意为之"；
+//    注册表按**属性模式**登记（例如"`background` 简写 + `background-clip` 长写"
+//    是渐变文字那套写法），因此**同模式的新声明不会报红**（这条限制写在
+//    规范 §7 的盲区一节）。
+// 2. **跨选择器那一半**（`CROSS_CLASS_SHORTHAND_RULES`）：这是真正看不见的那种
+//    ——`.card` 与 `.qaAiCard` 并列写在同一个元素上
+//    （`` className={`card ${styles.qaAiCard}`} ``），谁赢只看**产物里的先后**。
+//    "两个类命中同一个元素"这件事由 TSX 的 `className` 提供证据
+//    （`lib/css-cascade.mjs` 的 `coAppliedClassGroups`），注册表按**类名对**登记，
+//    所以**新的类名对一定报红**。
+//
+// ## 响亮失败（四道）
+//
+// ① 同选择器候选对为 0 → 报错；② 跨选择器候选对为 0 → 报错；
+// ③ TSX 里抽不到任何"并列 ≥2 个类名"的 `className` → 报错（抽取器失明）；
+// ④ 注册项一条都没命中 → 报错。缺任何一道，这项检查都可能变成一条永远绿灯。
+const SHORTHAND_CLASH_RULES = [
+  {
+    id: '渐变文字三件套：`background` 简写 + `background-clip: text`',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-clip',
+    why:
+      '`background` 简写会把 `background-clip` 重置回 `border-box`，所以"渐变文字"必须写成' +
+      '`background` 在前、`background-clip: text` 在后（本项目 6 处 + KaTeX/评分卡各 1 处）。' +
+      '顺序反了渐变就整块铺满元素、文字看不见 —— 而这条顺序在产物里逐字保留，本检查就是在钉它。',
+  },
+  {
+    id: '渐变文字配 `background-color: transparent`',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-color',
+    why: '同上那套写法（`-webkit-text-fill-color: transparent` 的兜底），顺序同样不能反。',
+  },
+  {
+    id: '进度条流光：`background` 简写 + `background-size`',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-size',
+    why: '`shimmer` 动画靠 `background-size: 200% 100%` 移动渐变；被简写重置就没有流光。',
+  },
+  {
+    id: '先给简写、再单独改一边（padding）',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'longhand',
+    why:
+      '`padding: …` 之后紧跟一条 `padding-top` / `padding-left` / `padding-bottom` 覆盖某一边 ——' +
+      '同一规则内声明顺序固定，长写在后面赢。这是**有意**的写法（`.markdown-body blockquote` /' +
+      '`._appLayout .container` 的安全区内边距 / 图谱侧栏）。',
+  },
+  {
+    id: '窄屏 `padding` 简写压掉 `padding-left/right` 长写（赢家是简写）',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'shorthand',
+    why:
+      '`learning.css` 的 768px 档里，`responsive.css` 搬来的 `padding-left/right: var(--space-md)`' +
+      '在前、`refinements.css` 搬来的 `padding: var(--space-xs) var(--space-sm)` 在后 ⇒ **简写赢**。' +
+      '序 13 搬家时保持了"长写在前、简写在后"，这条顺序就是行为（探针实测过，见证据 5.6-12）。',
+  },
+  {
+    id: 'Loader 转圈：`border` 简写 + 某一边的 `border-*-color` 长写',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'border' && /^border-.*-color$/.test(f.long.prop),
+    why: '转圈的"缺口"就是靠事后改一边的颜色做出来的（`.spinner` / `._graphSearchSpinner`）。',
+  },
+  {
+    id: '`text-decoration` 简写 + `text-decoration-*` 长写',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'text-decoration',
+    why: '批注下划线要指定颜色与粗细，简写（`underline`）在前、长写在后，顺序不能反。',
+  },
+  {
+    id: '`border` 简写 + 更窄的简写（`border-left` / `border-top`）',
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'border' &&
+      /^border-(left|right|top|bottom)$/.test(f.long.prop),
+    why:
+      '答案卡左边加粗竖线、评分卡顶部彩条都是这个写法。**这正是雷区 12 的形态**，' +
+      '只不过这里两半在同一个选择器里（顺序可读）；跨选择器的版本见下面那份注册表。',
+  },
+  {
+    id: '`border-color` 简写 + `border-left-color` 长写（hover 态）',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'border-color' && f.long.prop === 'border-left-color',
+    why: '答案卡 hover 只改左边框颜色，长写在简写之后。',
+  },
+  {
+    id: 'KaTeX 自己的 `font` 简写 + `line-height`',
+    match: (f) => f.kind === 'same-selector' && f.short.prop === 'font' && f.long.prop === 'line-height',
+    why: '第三方（KaTeX 的 CSS）就是这么写的；它不在我们的改动范围里，登记是为了"已知"。',
+  },
+]
+
+const CROSS_CLASS_SHORTHAND_RULES = [
+  {
+    id: 'card × card-accent-gold（`border` 简写 + `border-left` 长写）',
+    match: (f) => pairIs(f, 'card', 'card-accent-gold'),
+    why: '金色左边框要压掉 `.card` 的 1px 全边框；`card-accent-*` 在 `components.css` 里排在 `.card` 之后 ⇒ 长写赢。',
+  },
+  { id: 'card × card-accent-left', match: (f) => pairIs(f, 'card', 'card-accent-left'), why: '同上。' },
+  { id: 'card × card-accent-error', match: (f) => pairIs(f, 'card', 'card-accent-error'), why: '同上。' },
+  { id: 'card × card-accent-warning', match: (f) => pairIs(f, 'card', 'card-accent-warning'), why: '同上。' },
+  {
+    id: 'card × _qaAiCard（雷区 12 的原始实例）',
+    match: (f) => pairIs(f, 'card', '_qaAiCard'),
+    why:
+      '`QA.tsx` 的 `` className={`card ${styles.qaAiCard}`} ``：全局 `.card` 写 `border: 1px solid`（简写），' +
+      '模块 `.qaAiCard` 写 `border-left: 3px solid`（长写）。权重同为 (0,1,0)，谁赢只看先后 ——' +
+      'QA 是懒加载 chunk，其 CSS 由 `__vitePreload` 在 `index.css` **之后**注入 ⇒ 长写赢（金色左边框）。' +
+      '第三批之前这条只有一次性 jsdom 探针 + 文档守着，现在是常设检查。',
+  },
+  {
+    id: 'filter-pill × filter-pill-active（`border` 简写 + `border-color` 长写）',
+    match: (f) => pairIs(f, 'filter-pill', 'filter-pill-active'),
+    why: '选中态只换边框颜色；`.filter-pill-active` 排在 `.filter-pill` 之后。',
+  },
+  {
+    id: 'note-select-card × note-select-card-checked',
+    match: (f) => pairIs(f, 'note-select-card', 'note-select-card-checked'),
+    why: '学习评估页的勾选态：`border` 简写与 `border-color` / `border-left-width` 长写各一对，长写赢。',
+  },
+  {
+    id: '_quizOption × _quizOptionSelected',
+    match: (f) => pairIs(f, '_quizOption', '_quizOptionSelected'),
+    why: '答题卡选中态换边框色（模块内两条规则，长写在后）。',
+  },
+  {
+    id: '_graphBtn × _graphBtnActive',
+    match: (f) => pairIs(f, '_graphBtn', '_graphBtnActive'),
+    why: '图谱工具栏的激活态换边框色；`Graph.module.css` 里 active 排在后（`ORDER_PAIRS` 另钉了 hover 那一条）。',
+  },
+  {
+    id: '_uploadZone × _uploadZoneActive',
+    match: (f) => pairIs(f, '_uploadZone', '_uploadZoneActive'),
+    why: '拖拽悬停态换成强调色虚线；模块内 active 排在后。',
+  },
+]
+
+/**
+ * 注册表的双向自检：每个注册项至少命中一条发现，每条发现至少被一个注册项命中。
+ * 两个方向都要报错 —— 只查一个方向的话，"注册表写空"或"新竞争悄悄出现"都能溜过去。
+ */
+function checkClashRegistry(label, findings, rules) {
+  const matched = new Set()
+  let stale = 0
+  for (const rule of rules) {
+    const hits = findings.filter(rule.match)
+    if (hits.length === 0) {
+      stale += 1
+      failed = true
+      console.log(`   ✗ ${label}「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`)
+      continue
+    }
+    hits.forEach((h) => matched.add(h))
+  }
+  const unregistered = findings.filter((f) => !matched.has(f))
+  if (unregistered.length) {
+    failed = true
+    console.log(`   ✗ ${label}未登记 ${unregistered.length} 条（**新的**竞争，必须有人决定是修还是登记）：`)
+    for (const f of unregistered) {
+      console.log(
+        `      - ${f.subject}${f.context ? ` ${f.context}` : ''}：${f.short.prop}（简写）vs ${f.long.prop}（长写）` +
+          ` → 得主 ${f.winner}`,
+      )
+    }
+  }
+  if (!stale && !unregistered.length) {
+    console.log(`   ✓ ${label}${rules.length} 条注册全部命中，今天的 ${findings.length} 条发现全部已登记（双向自检通过）`)
+  }
+  return matched.size
+}
+
+/** 跨选择器的发现按（类名对 + 交叠 + 两侧属性 + 得主）去重，只保留出现位置清单 */
+function dedupeShorthandFindings(findings) {
+  const byKey = new Map()
+  for (const f of findings) {
+    const kind = f.classes ? 'cross-class' : 'same-selector'
+    const subject = f.classes ? f.classes.join(' × ') : f.sel
+    const key = `${kind}|${subject}|${f.context || ''}|${f.longhand}|${f.shorthand.prop}|${f.long.prop}|${f.winner}`
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        kind,
+        subject,
+        classes: f.classes,
+        context: f.context || '',
+        overlap: f.longhand,
+        short: f.shorthand,
+        long: f.long,
+        winner: f.winner,
+        wheres: [],
+      })
+    }
+    if (f.where) byKey.get(key).wheres.push(f.where)
+  }
+  return [...byKey.values()]
+}
+
+/**
+ * 类名对的比较**不看顺序**：`className` 里哪个写在前面不影响它是同一对，
+ * 而"注册表写反了顺序就永远绿灯"正是那种最难发现的空检查。
+ */
+const pairIs = (f, a, b) =>
+  Array.isArray(f.classes) && [...f.classes].sort().join('|') === [a, b].sort().join('|')
+
+// ── 3d-1. 同选择器 ──
+console.log('\n简写 vs 长写（同选择器 + 同上下文，顺序即行为）：')
+const sameSelectorClashes = findShorthandClashes(cascadeDecls)
+if (sameSelectorClashes.candidates === 0) {
+  failed = true
+  console.log('   ✗ 候选对 0 条 —— 这项检查**没在扫描任何东西**（今天的产物里就有二十几对），不能当成"没有竞争"。')
+} else {
+  const deduped = dedupeShorthandFindings(sameSelectorClashes.findings)
+  console.log(
+    `   · 候选 ${sameSelectorClashes.candidates} 对（同选择器同上下文里"简写与长写落在同一批长写属性上"）；` +
+      `去重后 ${deduped.length} 条`,
+  )
+  for (const f of deduped) {
+    console.log(
+      `   ${SHORTHAND_CLASH_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.subject} ${f.context || '(顶层)'}` +
+        ` :: ${f.overlap}`,
+    )
+    console.log(
+      `       简写 ${f.short.prop}: ${f.short.val}（${f.short.file} @${f.short.order}）` +
+        `  vs  长写 ${f.long.prop}: ${f.long.val}（${f.long.file} @${f.long.order}）  ⇒ 得主 ${f.winner}`,
+    )
+  }
+  checkClashRegistry('同选择器注册表：', deduped, SHORTHAND_CLASH_RULES)
+}
+
+// ── 3d-2. 跨选择器（证据来自 TSX 的 className）──
+console.log('\n简写 vs 长写（跨选择器：TSX 证明两个类名并列在同一个元素上）：')
+;(function crossClassCheck() {
+  const srcTsx = []
+  ;(function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.tsx')) {
+        srcTsx.push({ file: path.relative(process.cwd(), p).replace(/\\/g, '/'), text: fs.readFileSync(p, 'utf8') })
+      }
+    }
+  })(path.join(process.cwd(), 'src'))
+  const coGroups = coAppliedClassGroups(srcTsx)
+  if (coGroups.length === 0) {
+    failed = true
+    console.log('   ✗ TSX 里一个"并列 ≥2 个类名"的 className 都没抽到 —— 抽取器失明，这项检查等于不存在。')
+    return
+  }
+  const singleClassKeys = new Set(
+    cascadeDecls.filter((d) => d.context === '' && isSingleClassSelector(d.sel)).map((d) => d.sel.replace(/^\./, '')),
+  )
+  if (singleClassKeys.size === 0) {
+    failed = true
+    console.log('   ✗ 产物里一个"单类规则"都没有 —— 类名表是空的，这项检查等于不存在。')
+    return
+  }
+  const lookup = (ref) => {
+    const key = ref.kind === 'module' ? `_${ref.name}` : ref.name
+    return singleClassKeys.has(key) ? key : null
+  }
+  const cross = findCrossClassShorthandClashes(cascadeDecls, coGroups, lookup)
+  const deduped = dedupeShorthandFindings(cross.findings)
+  console.log(
+    `   · TSX 里并列 ≥2 个类名的 className ${coGroups.length} 处；` +
+      `两侧都是"单类规则"且落在同一批长写属性上的候选 ${cross.candidates} 对；去重后 ${deduped.length} 条`,
+  )
+  for (const f of deduped) {
+    console.log(`   ${CROSS_CLASS_SHORTHAND_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.subject} :: ${f.overlap}`)
+    console.log(
+      `       简写 ${f.short.prop}: ${f.short.val}（${f.short.file} @${f.short.order}）` +
+        `  vs  长写 ${f.long.prop}: ${f.long.val}（${f.long.file} @${f.long.order}）  ⇒ 得主 ${f.winner}`,
+    )
+    if (f.wheres.length) console.log(`       出现位置：${[...new Set(f.wheres)].slice(0, 4).join(' / ')}`)
+  }
+  if (deduped.length === 0) {
+    failed = true
+    console.log(
+      '   ✗ 跨选择器的候选 0 条 —— 今天产物里至少有 `card × _qaAiCard`（雷区 12 的实例）等十来对，' +
+        '为 0 说明"TSX 抽取 → 产物类名解析"这条链断了，不能当成"没有竞争"。',
+    )
+  }
+  checkClashRegistry('跨选择器注册表：', deduped, CROSS_CLASS_SHORTHAND_RULES)
+})()
+
 // ── 4. 迁移切片是否真的进产物 ──
 // 按批次列：类名（哈希后仍保留原名）与动画名。任何一个 0 次命中都说明
 // "规则搬了但类名没挂上"或"动画定义没搬进来"。
@@ -580,9 +974,10 @@ const SLICE_MARKERS = [
   // 第一批：cleaning
   'cleaningPanel',
   'cleaningStats',
-  'cleaningProgress',
-  'cleaningProgressBar',
-  'cleaningPulse',
+  // `cleaningProgress` / `cleaningProgressBar` / `cleaningPulse` 三个标记在收尾轮移除：
+  // 那两条规则零引用（没有任何 TSX 挂它们），连同只被它们引用的 `cleaningPulse`
+  // 一起在死代码清理里删掉了 —— 留在这里会让这项检查**永远红灯**，
+  // 而"哪些东西被删了、凭什么"登记在 `CLEANUP_RETIREMENTS` 里（见文件末尾）。
   'duplicateBlocks',
   'duplicateBlock',
   'duplicateBlockHeader',
@@ -874,8 +1269,9 @@ const RETIRED = [
   'note-list-item',
   'note-list-actions',
   'edit-split',
-  // 第六批（序 9）：侧边栏整节 + 应用骨架。留全局的 `.navbar*`（5 条）**不列** ——
-  // 它没有归属组件、grep 0 处引用，留在 layout.css 等"死 CSS 清理"轮。
+  // 第六批（序 9）：侧边栏整节 + 应用骨架。`.navbar*`（旧顶部导航栏）**不列在这里** ——
+  // 它在收尾轮被删除了（零引用），由文件末尾的 `CLEANUP_RETIREMENTS` 用
+  // "迁移前有 → 源码没了 → 产物没了"三个方向自检，比这份名单更严。
   'sidebar',
   'sidebar-collapsed',
   'sidebar-mobile-open',
@@ -899,8 +1295,8 @@ const RETIRED = [
   'app-layout',
   'app-layout-collapsed',
   'sidebar-mobile-toggle',
-  // 第七批（序 10）：图谱的 47 个类名。`graph.css` 里**保留**的
-  // `@keyframes graph-spin` 不带类名，不在退休名单的范围内。
+  // 第七批（序 10）：图谱的 47 个类名。`graph.css` 里那个 `@keyframes graph-spin`
+  // 不带类名，不在退休名单的范围内 —— 它在收尾轮被删除，由 `CLEANUP_RETIREMENTS` 自检。
   'graph-page',
   'graph-page-main',
   'graph-sidebar',
@@ -965,5 +1361,245 @@ console.log(
     ? `   ✓ ${RETIRED.length} 个退休类名在产物中全部为 0 次`
     : `   ✗ ${retiredHits} 个退休类名仍然出现在产物里`,
 )
+
+// ════════════════════════════════════════════════════════════════════
+// ── 6. 收尾轮：死代码清理的**常设护栏** ──
+//
+// ## 为什么删除也要有护栏
+//
+// "删掉零引用的东西"这件事本身可能出错，而且错法有两种：
+//   ① **删错了**（其实还有人用）—— 删除前的证据（grep + 运行时拼类名扫描）
+//      是一次性劳动，落不进代码里；
+//   ② **删对了但没删干净**（产物里还留着，或只删了定义没删引用）。
+// 所以这里把"删了什么"登记成表，每条都做**三个方向**的自检：
+//   a. **迁移前确实有它** —— 从 HEAD 往回按内容找"那个文件里还有这个名字"的
+//      修订（与 `css-migration-diff.mjs` 的 `findRecentRev` 同一套办法；
+//      写死 HEAD 会在删除提交之后失效）；
+//   b. **现在源码里确实没有它** —— 扫 `src/**/*.css`（模块与全局样式表都算）；
+//      有残留 ⇒ 说明删了一半；
+//   c. **产物里确实没有它** —— 类名按 `.name(?![\w-])` 匹配、`@keyframes` 按
+//      `@keyframes name` 匹配、令牌按 `--name` 匹配。
+// 再加上"表不能为空"这一条，这套检查不可能退化成永远绿灯。
+//
+// 第三条（类名在产物里消失）与上面 `RETIRED` 有重叠但**不重复**：
+// `RETIRED` 登记的是"迁移时退休的 kebab 类名"，这里是"收尾轮删掉的死代码"，
+// 并且多了 a/b 两个方向 —— 而 a 正是"删除有据"的机器可验版本。
+// ════════════════════════════════════════════════════════════════════
+const CLEANUP_RETIREMENTS = [
+  // ── 布局：旧顶部导航栏（收尾轮 · 第 1 组）──
+  {
+    kind: 'class',
+    name: 'navbar',
+    sheet: 'src/styles/layout.css',
+    why: '旧顶部导航栏：TSX/TS 里 0 处引用、运行时拼类名 0 处；迁移前 `.navbar{display:none}` 就已经把它藏掉了',
+  },
+  { kind: 'class', name: 'navbar-logo', sheet: 'src/styles/layout.css', why: '同上（`.navbar-logo:hover` 与它共用类名）' },
+  { kind: 'class', name: 'navbar-links', sheet: 'src/styles/layout.css', why: '同上' },
+  { kind: 'class', name: 'navbar-logout', sheet: 'src/styles/layout.css', why: '同上（`.navbar-logout:hover` 与它共用类名）' },
+  {
+    kind: 'token',
+    name: '--navbar-height',
+    sheet: 'src/styles/base.css',
+    why: '唯一读者是 `.navbar { height: var(--navbar-height) }`，随 `.navbar*` 同批删除',
+  },
+  // ── 零引用的预留语义化类（收尾轮 · 第 2 组）──
+  {
+    kind: 'class',
+    name: 'link-modal',
+    sheet: 'src/styles/refinements.css',
+    why: '零引用预留类（`LinkManagerModal.tsx` 用的是内联 style，一个类名都没挂）',
+  },
+  { kind: 'class', name: 'material-list-item', sheet: 'src/styles/refinements.css', why: '同上（`:hover` 变体共用类名）' },
+  { kind: 'class', name: 'material-list-item-selected', sheet: 'src/styles/refinements.css', why: '同上' },
+  { kind: 'class', name: 'type-badge', sheet: 'src/styles/refinements.css', why: '同上' },
+  { kind: 'class', name: 'type-badge-material', sheet: 'src/styles/refinements.css', why: '同上' },
+  // ── 没有用户的 @keyframes（收尾轮 · 第 3 组）──
+  {
+    kind: 'keyframes',
+    name: 'scaleIn',
+    sheet: 'src/styles/base.css',
+    why: '迁移时复制成模块里的 `authScaleIn` / `feedbackScaleIn` 后，全局这份再没有引用者',
+  },
+  {
+    kind: 'keyframes',
+    name: 'cleaning-pulse',
+    sheet: 'src/styles/base.css',
+    why: '复制成模块里的 `cleaningPulse`；收尾轮连那条死规则 `.cleaningProgressBar` 与模块内的 `cleaningPulse` 一起删了',
+  },
+  {
+    kind: 'keyframes',
+    name: 'glowPulse',
+    sheet: 'src/styles/base.css',
+    why: '复制成模块里的 `uploadGlowPulse` 后再没有引用者（计划 §7.0 第 5 条）',
+  },
+  {
+    kind: 'keyframes',
+    name: 'slideDown',
+    sheet: 'src/styles/base.css',
+    why: '从来没有过用户（全项目 grep 只命中定义本身）',
+  },
+  { kind: 'keyframes', name: 'pulse', sheet: 'src/styles/base.css', why: '同上' },
+  { kind: 'keyframes', name: 'float', sheet: 'src/styles/base.css', why: '同上（`ProjectsErrorBanner.tsx` 里的 `float` 是 CSS 属性，不是动画）' },
+  { kind: 'keyframes', name: 'gradientShift', sheet: 'src/styles/base.css', why: '同上' },
+  {
+    kind: 'keyframes',
+    name: 'graph-spin',
+    sheet: 'src/styles/graph.css',
+    why: '复制成模块里的 `graphSpin` 后再没有引用者；它原来"不删"的第①条理由（动画体比对读 git HEAD 的原文）已改成按内容定位修订',
+  },
+  // ── 模块里的死规则（收尾轮 · 第 4 组）──
+  {
+    kind: 'class',
+    name: 'cleaningProgress',
+    sheet: 'src/components/CleaningPanel.module.css',
+    why: '清洗进度条改由 `TaskProgress` 渲染（用全局 `.progress-bar*`），这条规则全项目 0 处 TSX 引用（第一批逐字搬来时就没用户）',
+  },
+  {
+    kind: 'class',
+    name: 'cleaningProgressBar',
+    sheet: 'src/components/CleaningPanel.module.css',
+    why: '同上，它是模块内 `@keyframes cleaningPulse` 的唯一引用者',
+  },
+  {
+    kind: 'keyframes',
+    name: 'cleaningPulse',
+    sheet: 'src/components/CleaningPanel.module.css',
+    why: '只被 `.cleaningProgressBar` 引用；那条规则删了它就没有用户',
+  },
+]
+
+console.log('\n收尾轮死代码清理（三个方向逐条自检：迁移前有 → 源码里没了 → 产物里没了）：')
+if (CLEANUP_RETIREMENTS.length === 0) {
+  failed = true
+  console.log('   ✗ 登记表为空 —— 这套检查等于不存在')
+}
+const cleanupSourceCache = new Map()
+/** 从 HEAD 往回找"这个文件里还有这个名字"的修订（按内容定位，见文件头 a 条） */
+function findCleanupRev(sheet, name, kind) {
+  const cacheKey = `${sheet}::${kind}::${name}`
+  if (cleanupSourceCache.has(cacheKey)) return cleanupSourceCache.get(cacheKey)
+  const re =
+    kind === 'keyframes' ? new RegExp(`@keyframes\\s+${name.replace(/[-]/g, '\\-')}\\s*\\{`) : new RegExp(`(\\.|--)?${name.replace(/[-]/g, '\\-')}(?![\\w-])`)
+  const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(process.cwd(), sheet), candidate)))
+  const out = rev ? { rev, text: readFromGit(path.join(process.cwd(), sheet), rev) } : null
+  cleanupSourceCache.set(cacheKey, out)
+  return out
+}
+{
+  let okCount = 0
+  for (const item of CLEANUP_RETIREMENTS) {
+    const srcAbs = path.join(process.cwd(), item.sheet)
+    const problems = []
+    // a. 迁移前确实有它
+    const gitRev = findCleanupRev(item.sheet, item.name, item.kind)
+    if (!gitRev) {
+      problems.push('从 HEAD 往回 40 个提交里找不到"那个文件里还有它"的修订 ⇒ 名字或来源样式表写错了')
+    }
+    // b. 现在源码里确实没有它
+    //    ⚠️ 比较前**必须剥注释**：这几条删除都在原处留了墓碑注释
+    //    （写明"删了什么、凭什么"），注释里出现类名不是"还有人用它"。
+    //    不剥的话这套自检会对自己的文档报红 —— 而"给删除留注释"正是本项目
+    //    的既有做法（`auth.css` / `responsive.css` / `refinements.css` 都是）。
+    const srcHits = []
+    for (const abs of srcCssFiles) {
+      const text = stripComments(fs.readFileSync(abs, 'utf8'))
+      const re =
+        item.kind === 'keyframes'
+          ? new RegExp(`@keyframes\\s+${item.name.replace(/[-]/g, '\\-')}\\s*\\{`, 'g')
+          : new RegExp(`(\\.|--)?${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
+      if (re.test(text)) srcHits.push(path.relative(process.cwd(), abs).replace(/\\/g, '/'))
+    }
+    if (srcHits.length) problems.push(`源码里还有：${[...new Set(srcHits)].join(', ')}`)
+    // c. 产物里确实没有它
+    const distRe =
+      item.kind === 'keyframes'
+        ? new RegExp(`@keyframes\\s+${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
+        : item.kind === 'token'
+          ? new RegExp(`--${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
+          : new RegExp(`\\.${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
+    const distHits = (all.match(distRe) || []).length
+    if (distHits) problems.push(`产物里还有 ${distHits} 次`)
+    if (problems.length) {
+      failed = true
+      console.log(`   ✗ ${item.kind} \`${item.name}\`（${item.sheet}）：${problems.join('；')}`)
+    } else {
+      okCount += 1
+      console.log(`   ✓ ${item.kind} \`${item.name}\`：迁移前在 ${item.sheet}（${gitRev.rev}）有，源码与产物都没有了 —— ${item.why}`)
+    }
+  }
+  console.log(`   ${okCount}/${CLEANUP_RETIREMENTS.length} 条通过三个方向的自检`)
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ── 7. 产物里"定义了但没有任何引用"的 @keyframes ──
+//
+// 上面的第 1 项查的是"**引用**有没有定义"（悬空动画）；这一项查反方向：
+// "**定义**有没有引用"。死动画正是收尾轮删掉的那一批（`scaleIn` /
+// `cleaning-pulse` / `glowPulse` / `slideDown` / `pulse` / `float` /
+// `gradientShift` / `graph-spin`），删完之后这条检查让它**不可能悄悄回来**。
+//
+// ⚠️ 有一个合法的例外：**只被 tsx 行内样式引用**的动画。
+// 行内 `style={{ animation: 'shake …' }}` 不过 CSS Modules、也不进产物 CSS，
+// 所以样式表里查不到引用者 —— 但它真的在用（`ErrorDisplay.tsx`）。
+// 这类动画必须**点名登记**在 `INLINE_ONLY_KEYFRAMES` 里，
+// 并且登记项本身也要自检：产物里必须有这个定义、且**样式表里确实没有**引用
+// （否则说明它已经有样式表用户了，登记项过期 ⇒ 报错）。
+// ════════════════════════════════════════════════════════════════════
+const INLINE_ONLY_KEYFRAMES = [
+  {
+    name: 'shake',
+    where: 'components/ErrorDisplay.tsx:12 的 style={{ animation: \'shake 0.4s ease, fadeIn …\' }}',
+    why: '错误卡片的抖动只写在行内样式里；行内样式不过 CSS Modules，所以产物 CSS 里看不到引用者',
+  },
+]
+console.log('\n产物里"定义了但样式表没人引用"的 @keyframes：')
+{
+  const definedAll = new Map() // name → [file]
+  const usedAll = new Map() // name → [file]
+  for (const s of sheets) {
+    const css = clean(s.css)
+    for (const m of css.matchAll(/@keyframes\s+([\w-]+)/g)) {
+      if (!definedAll.has(m[1])) definedAll.set(m[1], [])
+      definedAll.get(m[1]).push(s.name)
+    }
+    for (const m of css.matchAll(/(?:^|[;{])\s*animation(?:-name)?\s*:\s*([^;{}]+)/g)) {
+      for (const name of animationNamesFrom(m[1])) {
+        if (!usedAll.has(name)) usedAll.set(name, [])
+        usedAll.get(name).push(s.name)
+      }
+    }
+  }
+  if (definedAll.size === 0) {
+    failed = true
+    console.log('   ✗ 产物里一个 @keyframes 都没有 —— 解析坏了，不能据此说"没有死动画"')
+  }
+  const inlineOnly = new Map(INLINE_ONLY_KEYFRAMES.map((k) => [k.name, k]))
+  const dead = [...definedAll.keys()].filter((n) => !usedAll.has(n) && !inlineOnly.has(n))
+  for (const n of dead) {
+    failed = true
+    console.log(`   ✗ ${n}（定义在 ${definedAll.get(n).join(', ')}）：没有任何 animation 引用它 —— 死动画`)
+  }
+  for (const k of INLINE_ONLY_KEYFRAMES) {
+    const definedIn = definedAll.get(k.name)
+    if (!definedIn) {
+      failed = true
+      console.log(`   ✗ 登记的"只有行内用户"的动画 \`${k.name}\` 在产物里没有定义 —— 登记项过期或写错了`)
+      continue
+    }
+    if (usedAll.has(k.name)) {
+      failed = true
+      console.log(
+        `   ✗ 登记的"只有行内用户"的动画 \`${k.name}\` 现在**有样式表引用**了（${usedAll.get(k.name).join(', ')}）` +
+          ` —— 登记项过期，请把它从 INLINE_ONLY_KEYFRAMES 里删掉`,
+      )
+      continue
+    }
+    console.log(`   ✓ ${k.name}：产物里有定义（${definedIn.join(', ')}）、样式表里 0 引用，属登记的"仅行内使用"—— ${k.why}`)
+  }
+  console.log(
+    `   ${dead.length === 0 ? '✓' : '✗'} 产物内 ${definedAll.size} 个 @keyframes：` +
+      `${usedAll.size} 个有样式表引用 + ${INLINE_ONLY_KEYFRAMES.length} 个登记的"仅行内使用"，死动画 ${dead.length} 个`,
+  )
+}
 
 process.exit(failed ? 1 : 0)

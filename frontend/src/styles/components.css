@@ -342,68 +342,31 @@ h1, h2, h3 {
 }
 
 /* ════════════════════════════════════════════════════════════════
- * 预留的语义化类（零引用；overhaul-plan 5.6 序 12 从 `refinements.css` 收回）
+ * 删除记录：5 个零引用的"预留语义化类"（overhaul-plan 5.6 收尾轮的死代码清理）
  *
- * `refinements.css` 的原注释：「当前弹窗 DOM 使用 inline style 渲染，未挂载
- * 语义化 className……待 tsx 后续接入 className 后可直接生效」。
- * 全项目 grep **0 处引用**，所以按前几批的规矩**逐字搬来不删**（删死规则属于
- * "死代码清理"，混进来会让"丢失 0"这条证据同时包含两种语义；计划 §7.0 第 2 条）。
+ * 这里原来有 6 条规则：`.link-modal`、`.material-list-item`（含 `:hover`）、
+ * `.material-list-item-selected`、`.type-badge`、`.type-badge-material`。
+ * `refinements.css` 的原注释是「当前弹窗 DOM 使用 inline style 渲染，未挂载
+ * 语义化 className……待 tsx 后续接入 className 后可直接生效」——
+ * 迁移时按"证明什么都没丢"的契约**逐字搬过来不删**，本轮清理删掉。
  *
- * 为什么留在**全局层**而不是某个组件模块：`[style*=…]` 那 13 条一起被删之后，
- * 已经没有"拥有它们的组件"可挂（`LinkManagerModal.tsx` 用的是 inline style，
- * 一个类名都没挂）。硬塞进 `LinkManagerModal.module.css` 会有一个更现实的后果：
- * **没有任何 tsx import 那个模块 ⇒ Vite 不会把它编进产物**，
- * 这几条规则会从产物里凭空消失（规则清单差集当场报 6 条丢失）。
- * 真正接入它们的那一轮，应当连同"把弹窗的内联样式改成类"一起做（那是改外观，
- * 要带截图对比），届时再把这几条移进模块。
+ * ## 凭什么说它们是死的（证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）
+ *
+ * | 检查 | 结果 |
+ * |---|---|
+ * | `src/**` 全量 grep 这 5 个类名 | TSX/TS 里 **0 处**（只在 `LinkManagerModal.tsx` 与 `refinements.css` 的注释里被提到） |
+ * | 运行时拼类名（`classList.add('…')` / 模板字符串 / `styles[...]`） | 0 处 |
+ * | 谁生成这段 DOM | `pages/notedetail/LinkManagerModal.tsx` 用的是**内联 style**，一个类名都没挂（这正是它们零引用的原因） |
+ * | 删后复核 | `scripts/verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS` 逐条自检"迁移前确实有、现在源码与产物里都没有" |
+ *
+ * ## 这一轮为什么是"删"而不是"搬进模块"
+ *
+ * 第七批（序 10）实测过：把零引用的类搬进 `LinkManagerModal.module.css`
+ * 的结果是**规则从产物里消失**（没有任何 tsx import 那个模块 ⇒ Vite 不编译它，
+ * 差集当场报 6 条丢失）。零引用的类既不能搬、也没有读者，那就只剩删除。
+ * 将来真要把弹窗的内联样式改成类，应当是"写新样式 + 带截图对比"的一轮，
+ * 而不是把这几条 3 年前的预留样式捞回来。
  * ════════════════════════════════════════════════════════════════ */
-
-.link-modal {
-  max-width: 560px;
-  max-height: 80vh;
-  overflow-y: auto;
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  background: var(--color-surface);
-  box-shadow: 0 8px 32px rgba(15, 52, 96, 0.12);
-}
-
-.material-list-item {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  border-radius: var(--radius-md);
-  border-left: 3px solid transparent;
-  background: var(--color-surface);
-  cursor: pointer;
-  transition: background 0.2s var(--ease-out-expo), border-color 0.2s var(--ease-out-expo);
-}
-
-.material-list-item:hover {
-  background: var(--color-primary-light);
-}
-
-.material-list-item-selected {
-  border-left-color: var(--color-accent);
-  background: var(--color-accent-light);
-}
-
-.type-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.type-badge-material {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
 
 /* ════════════════════════════════════════════════════════════════
  * 窄屏（overhaul-plan 5.6 序 13：`responsive.css` 按归属清空）

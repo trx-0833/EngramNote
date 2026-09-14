@@ -21,6 +21,12 @@
 > / `npm run lint` / `npm run build` 退出 0、`npm run e2e` / `npm run a11y`、三个证据脚本
 > 全部退出 0；真 Chromium 探针 **3 024 条 computed 属性，未声明差异 0 条**
 > （证据 `5.6-12`）。
+>
+> **收尾轮（死代码清理 + 两项常设检查）已完成**：§7.0 的 5 条待办全部 ✅ ——
+> 删掉 14 条零引用规则 / 9 个没有用户的 `@keyframes` / 1 个零读者令牌
+> （证据 `5.6-13`），并把"跨媒体查询覆盖战"与"简写 vs 长写"做成
+> `node scripts/verify-built-css.mjs` 里的常设检查（求解器
+> `scripts/lib/css-cascade.mjs`，与解析器一样只此一份）。
 
 ## 1. 为什么不是一次性迁移
 
@@ -153,7 +159,7 @@ B 组按原计划搬的话，`TodayLearn.tsx` 就得
 | 发现 | 处理 | 理由 |
 |---|---|---|
 | `.duplicate-block-text`（`CleaningPanel.tsx` 挂了它，**14 个样式表都没定义**） | **删除类名**，保留嵌套 div | 与试点轮删 `.feedback-pending` 同一处理；删 div 会改 DOM 层级，超出"纯搬家" |
-| `.cleaning-progress` / `.cleaning-progress-bar`（**没有任何 TSX 引用**） | **逐字搬进模块，不删** | 本轮的契约是"证明什么都没丢"。删死规则是"死 CSS 清理"，混进来会让"丢失"同时包含两种语义。已登记在 §7 |
+| `.cleaning-progress` / `.cleaning-progress-bar`（**没有任何 TSX 引用**） | **逐字搬进模块，不删** | 本轮的契约是"证明什么都没丢"。删死规则是"死 CSS 清理"，混进来会让"丢失"同时包含两种语义。已登记在 §7。**→ 收尾轮已删除**（连模块内的 `@keyframes cleaningPulse` 与 `base.css` 的 `cleaning-pulse` 一起；证据 `5.6-13`） |
 | `--color-bg-subtle` 从未在 `:root` 定义 | **照抄不改** | 三处用者的 fallback 各不相同（`#f7f8fa` / `#f7f7f8` / `#f5f6f8`），收成令牌要改掉其中两个颜色 = 顺手改外观 |
 
 ### 4.5 TSX 侧唯一的结构性改动
@@ -199,10 +205,12 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
 
 ### 4.7 未搬但值得记账
 
-- `.markdown-body .katex { font-size: 1em }`（`responsive.css` 的 768px 档）
-  **从未生效**：它与 `markdown-extras.css` 的顶层 `1.1em` 权重相同（0,2,0），
-  媒体查询不增加权重，而后者在产物里更靠后（字节 36081 vs 37916）。
-  迁移前就如此，与 5.6 无关；属于规范 §7 盲区 4 记的那个检查缺口。
+- `.markdown-body .katex { font-size: 1em }`（原 `responsive.css` 768px 档，序 13 后
+  住在 `markdown.css`）**从未生效**：它与 `markdown-extras.css` 的顶层 `1.1em`
+  权重相同（0,2,0），媒体查询不增加权重，而后者在产物里更靠后（字节 36081 vs 37916）。
+  迁移前就如此，与 5.6 无关。
+  **→ 收尾轮把它变成了常设检查的第一个登记项**（`verify-built-css.mjs` 的
+  `MEDIA_WAR_RULES`）：以后同类覆盖战一律红灯，这一条因为是"已知、故意留着"才放行。
   **不要**顺手改：那会改变窄屏外观，得单独一轮带截图。
 - `markdown-extras.css` 的**导入位置仍然是语义的**（必须排在 `responsive.css`
   之后）：虽然 `.ask-ai-input` 搬走了，`responsive.css` 里还有针对
@@ -282,10 +290,12 @@ selector 是行为的一部分，不是排版 —— 已改回后代选择器。
 
 ### 4.8.5 顺手记账：`glowPulse` 也没有样式表用户了
 
-与第一批之后的 `scaleIn` / `cleaning-pulse` 同样处理 —— **不删**。
+与第一批之后的 `scaleIn` / `cleaning-pulse` 同样处理 —— 迁移期间**不删**。
 它仍可被行内样式按裸名引用（`LearningAssessment.tsx` 就在用 `slideUp`、
 `ErrorDisplay.tsx` 在用 `shake` + `fadeIn`），删它属于"死代码清理"，
 单独一轮做（§7.0 第 2 条）。
+**→ 收尾轮已核实"没有任何行内/运行时引用"并删除**（连同 `scaleIn` /
+`cleaning-pulse` / `graph-spin` 与 4 个从来没有用户的动画；证据 `5.6-13`）。
 
 ## 4.9 第四批：序 5 `assessment.css` —— 先裁决冲突，再按归属拆
 
@@ -394,6 +404,8 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 4. **没有 tsx import 的模块不会进产物**：`.link-modal` 等 5 个零引用的预留类若放进
    `LinkManagerModal.module.css`，Vite 不会编译那个模块 ⇒ 规则从产物里消失
    （差集当场报 6 条丢失）。**零引用的类只能留全局**（或先给它们一个真正的挂载点）。
+   **→ 收尾轮的结论更进一步**：既搬不走又没有读者，那就**删掉**（这 5 个类 + `layout.css`
+   的 `.navbar*` 都是这么处理的；证据 `5.6-13`）——"留在全局"只是迁移期间的权宜。
 5. **模块之间"同权重、同文件、靠先后"的竞争也是行为**：`Sidebar.module.css` 里
    `.sidebarMobileOpen { transform: translateX(0) }` 一旦排到
    `.sidebar, .sidebarCollapsed { transform: translateX(-100%) }` 前面，
@@ -557,16 +569,25 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
     当前顺序是对的：懒加载页面的模块 CSS 由 `__vitePreload` 在 `index.css`
     **之后**注入。**结论**：模块类与全局类并列写在同一个元素上时，除了看
     "有没有同名属性竞争"，还要看"简写会不会展开出对方的长写"。
-    这一条目前只能靠**文档 + 一次探针**守住，配方就记在这里。
+    配方记在这里（jsdom 只认字面值、不解析 `var()`，所以要换值再拼产物）。
 
-    > 第四批补了一句：**这条竞争的存在性本身可以被自动发现**。
+    > **收尾轮：这一条已经有常设检查了**，不再只靠文档 + 一次性探针：
+    > `scripts/verify-built-css.mjs` 的"简写 vs 长写（跨选择器）"一节用
+    > `lib/css-cascade.mjs` 从 TSX 的 `className` 里取"这两个类名并列在同一个
+    > 元素上"的证据，再在产物上按"权重 → 源序（`index.css` 先、懒加载 chunk 后）"
+    > 算得主。今天实测：TSX 里 200 处并列类名 → 30 对候选 → 去重 11 条，
+    > 全部登记在 `CROSS_CLASS_SHORTHAND_RULES`（**新增的类名对一定报红**）；
+    > 同选择器的那一半另有 24 条（按属性模式登记）。
+    > 今天**没有**未登记的竞争 —— 这是"当前产物是干净的"这句话第一次有机器证据。
+    > 它仍然看不见什么，逐条写在规范 §7 第 6 条。
+    >
+    > 第四批补的那句仍然成立：**这条竞争的存在性本身可以被自动发现**。
     > 第四批裁决 `.quiz-question-card` 时，`.quizQuestionCard` 里
     > `border: 1px solid` + `border-left: 4px solid` 写在**同一条规则内**
     > （顺序固定，不依赖产物先后），所以没有引入新的盲区；
     > 而 `.card-hover:hover` 那种"跨文件同权重"由 `verify-built-css.mjs`
     > 的冲突统计直接报出来（`TOUCHED_BY_THIS_MIGRATION` 一旦包含该文件，
-    > 它就必须归零）。真正剩下的盲区只有"**跨文件 + 简写 vs 长写 + 不同选择器**"
-    > 这一种组合 —— 目前只有 `.qaAiCard` × `.card` 这一例，已登记在案。
+    > 它就必须归零）。
 13. **★ 压缩器的两种新等价改写（第三批实测，已进差集归一化）。**
     不补的话它们会伪装成"丢失"，把真变化淹掉 —— 第三批同一轮里正好
     真假各一条（§4.8.4）：
@@ -630,7 +651,8 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | 第四批：迁移前清单 | `migration-evidence/5.6-08-before-batch4.md` | `assessment.css` 20 条 + `refinements.css` 14 条（= 冲突胜者）+ `responsive.css` 1 条 |
 | 第四批：冲突裁决 | `migration-evidence/5.6-09-conflict-resolution.md` | 16 条属性的**实测胜者**逐条表 + "渲染没变"的 16 802 条属性对账 |
 | 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**；第三批 **21/0/0**；第四批 **35/0/0 + 19 条已裁决删除**；第五批 **13/0/0**；第六批 **53/0/0**；第七批 **71/0/0**；第八批 **7/0/0 + 13 条实测从未生效的规则删除**；第九批 **补丁层清空**（逐条搬家 28 条声明）。全部批次**丢失 0**；动画绑定全部自洽；动画体 6 条全部一致 |
-| 产物 CSS 校验 | `migration-evidence/5.6-03-built-css.md` | 悬空动画 **0**；改动范围内冲突 **0**（迁移前既有的 16 条也已在第四批清成 0）；级联得主正确（`CASCADE_PAIRS` + 新增的 `ORDER_PAIRS`）；**167 个退休类名在产物中 0 次**；切片标记全部命中 |
+| 产物 CSS 校验 | `migration-evidence/5.6-03-built-css.md` | 悬空动画 **0**；改动范围内冲突 **0**（迁移前既有的 16 条也已在第四批清成 0）；级联得主正确（`CASCADE_PAIRS` + 新增的 `ORDER_PAIRS`）；**167 个退休类名在产物中 0 次**；切片标记全部命中。**收尾轮又加了三项**：跨媒体查询覆盖战（68 对候选 / 1 条已登记 / 0 条未登记）、简写 vs 长写（同选择器 24 条 + 跨选择器 11 条，全部已登记）、收尾轮死代码清理的三向自检（**21/21**）与"产物里没有死动画"（13 个 `@keyframes` = 12 个有引用 + 1 个登记的"仅行内使用"、死动画 **0**） |
+| 收尾轮：死代码清理 | `migration-evidence/5.6-13-dead-css-cleanup.md` | 21 个登记条目 = **14 条零引用规则 + 9 个没有用户的 `@keyframes` + 1 个零读者令牌**；每一条都有"TSX/TS grep 0 处 + 运行时拼类名 0 处 + 产物 0 次"三类证据，以及"迁移前那个文件里确实有它（按内容定位修订）"的机器自检 |
 | 序 8/9/10 的迁移前清单 | `migration-evidence/5.6-10-before-batches-8-9-10.md` | components 挂点 / 侧边栏+App 骨架 / 图谱，每一组都同时列出"全局样式表那半"与"`responsive.css` 那半" |
 | 序 12/13 + 补丁层清空审计 | `migration-evidence/5.6-11-before-batches-12-13-and-empty-patch-layers.md` | `refinements.css` 38 条 = 25 条逐字在工作区找到 + 13 条实测删除 + **0 条静默丢失**；`responsive.css` 59 条 = 56 + 3（`:root` 两条随元素走 / 1 条属性选择器删除）+ **0 条静默丢失** |
 | 序 8~13 的渲染对账 | `migration-evidence/5.6-12-rendered-unchanged-probe.md` | 真 Chromium，10 个场景 × 56 个样本 × 54 条 computed 属性 = **3 024 条值，未声明差异 0 条**；唯一差异是已声明的动画改名；顺带实测 `[style*="rgba(0,0,0,0.5)"]` 命中 **0** 个元素 |
@@ -675,6 +697,7 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | **第三批** | `npm test` **21 files / 276 tests**（+1 文件 / +3：新增 `components/StatCard.test.tsx`）；`npx tsc --noEmit` / `lint` / `npm run build` 退出 0；差集 **21/0/0** 与产物校验退出 0；`e2e` 里**原有的 10 个用例 10 passed**，但 `npm run e2e` 整体退出 1 —— 并行 agent 正在写的 `e2e/a11y.spec.ts`（未跟踪文件）有 8 个用例失败，原因全是"页面停在加载/登录态 ⇒ 找不到标题"，与本批无关（详见 §8） |
 | **第四批（序 5）** | `npm test` **21 files / 276 tests**（与迁移前一致，**没改任何既有测试**）；`npx tsc --noEmit` / `lint` / `npm run build` 退出 0；差集 **35/0/0 + 19 条已裁决删除**、产物校验退出 0（迁移前既有的 16 条冲突 → **0**）；`npm run e2e` **10 passed**、`npm run a11y` **10 passed**（第三批时挡路的 a11y spec 已被对方修好并提交）；临时探针实测 **16 802 条 computed 属性差异 0** |
 | **第五~九批（序 8/9/10/12/13）** | `npm test` **21 files / 276 tests**（与迁移前一致）；`npx tsc --noEmit` / `npm run lint` / `npm run build` 退出 0；差集：五批合计 **丢失 0**（13 / 53 / 71 / 7 / 补丁层清空）、产物校验退出 0（冲突 0 / 悬空动画 0 / 167 个退休类名 0 次 / `ORDER_PAIRS` 两条得主正确）；`npm run e2e` **10 passed**、`npm run a11y` **25 passed**（并行 agent 把 a11y 场景从 15 扩到 25，无下降）；临时探针实测 **3 024 条 computed 属性未声明差异 0**；两张补丁层清空后另有**逐条去向审计**（0 条静默丢失） |
+| **收尾轮（死代码清理 + 两项新检查）** | `npm test` **21 files / 276 tests**（**没改任何测试**）、`npx tsc --noEmit` / `npm run lint` / `npm run build` 退出 0、`npm run e2e` **10 passed**、`npm run a11y` **25 passed**；三个证据脚本退出 0（差集：第一批 **58 + 2 条已声明删除**、第八批 **7 + 19 条已声明删除**，其余批次原数，**丢失 0 全批次**）；新增三项检查全绿且**反向验证过**（改坏一处即报错，5 种）；死代码清理 **21/21** 条通过三向自检；产物里**死动画 0** |
 
 > 本轮的环境插曲（不是本批引入的）：执行期间并行 agent 正在改
 > `pages/Dashboard.tsx` / `TodayLearn.tsx` / `utils/labels.ts` / `base.css`，
@@ -700,27 +723,37 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 
 ## 7. 下一批计划（按风险从窄到宽）
 
-### 7.0 已完成 / 待做的跨批次事项
+### 7.0 已完成 / 待做的跨批次事项（**收尾轮之后：全部 ✅**）
 
 1. ✅ **`main.tsx` 导入顺序已修正**：全局样式表提到应用组件之前，
    产物顺序 = ①令牌 → ②全局 → ③模块，雷区 8 根治。
    选择器也从 `:global(.btn).authSubmit` 还原成单类。
-2. ⏳ **死 CSS 清理单独一轮**：`.cleaning-progress` / `.cleaning-progress-bar`
-   （无 TSX 引用）、`base.css` 里已失去全部用户的 `@keyframes scaleIn` /
-   `cleaning-pulse`、以及登记过的其它死类名（`.feedback-pending` /
-   `.duplicate-block-text` / `.ask-ai-sources` / `.ask-ai-source-item` 已在前几批删除）。
-   带"确认无引用"的证据再删。
-3. ⏳ **补一个检查盲区**：跨媒体查询的覆盖战目前看不见
-   （实例：`responsive.css` 768px 的 `.markdown-body .katex { font-size: 1em }`
-   被 `markdown-extras.css` 的顶层 `1.1em` 压掉 —— 权重相同、后者更靠后，
-   这条窄屏规则**从未生效**；迁移前就如此）。详见规范 §7 盲区 4。
-4. ⏳ **跨属性竞争（简写 vs 长写）也看不见** —— 第三批新登记的雷区 12。
-   目前只有文档 + 一次性探针（配方在雷区 12 里，20 行）。要做成常设检查，
-   得在产物上做"权重 + 顺序 + **简写展开**"的真实求解，与第 3 条是同一类工作，
-   建议合并成一轮。
-5. ⏳ **第三批留下的 `glowPulse`**：`.upload-zone-active::after` 搬走后，
-   它和 `scaleIn` / `cleaning-pulse` 一样没有样式表用户了（行内样式仍可用）。
-   与前两条一起进"死 CSS 清理"轮。
+2. ✅ **死 CSS 清理已完成**（收尾轮）：`layout.css` 的 6 条 `.navbar*` +
+   `base.css` 的 `--navbar-height`（它的唯一读者就是 `.navbar`）、
+   `components.css` 的 5 个零引用预留类（6 条规则）、`base.css` 7 个没有用户的
+   `@keyframes`、`graph.css` 的 `graph-spin`、模块里的 `.cleaningProgress*`
+   （连同它的 `cleaningPulse`）—— 共 **21 个登记条目 = 14 条规则 + 9 个动画定义
+   + 1 个令牌**。逐条证据（含"运行时拼类名"扫描）见证据 `5.6-13`；
+   三向自检（迁移前有 → 源码没了 → 产物没了）在 `verify-built-css.mjs` 的
+   `CLEANUP_RETIREMENTS`。
+   （`.feedback-pending` / `.duplicate-block-text` / `.ask-ai-sources` /
+   `.ask-ai-source-item` 已在前几批删除。）
+3. ✅ **跨媒体查询覆盖战已有常设检查**（收尾轮）：
+   `verify-built-css.mjs` 的"跨媒体查询覆盖战"一节（求解器 `lib/css-cascade.mjs`）。
+   今天实测：**68 对候选、1 条"媒体查询那条输掉"**，就是
+   `markdown.css` 768px 的 `.markdown-body .katex { font-size: 1em }` 被
+   `markdown-extras.css` 顶层 `1.1em` 压掉那条 —— 已登记为"已知、故意留着"
+   （修它是改外观，要单开一轮带截图）。**未登记的覆盖战一律红灯**。
+4. ✅ **跨属性竞争（简写 vs 长写）也已有常设检查**（收尾轮，雷区 12）：
+   同一份求解器；同选择器那一半（今天 24 条，按属性模式登记）+
+   跨选择器那一半（今天 11 条去重后，按**类名对**登记，`card × _qaAiCard`
+   这个原始实例终于有常设检查了）。盲区（值级求解、`:hover` 态、
+   `classList.add` 拼出来的类名、grid/place 等族）逐条写在规范 §7 第 6 条。
+5. ✅ **`glowPulse` 已随死代码清理删除**（连同 `scaleIn` / `cleaning-pulse` /
+   `graph-spin` 与 4 个从来没有用户的动画）。
+6. ✅ **两项检查的"防空"是硬要求**：候选对为 0、注册项空转、有发现未登记、
+   TSX 抽取器失明 —— 每一种都**报错退出**，不做"没发现问题"的假通过。
+   反向验证记录在规范 §7（改坏一处即报错，实测过 5 种）。
 
 ### 7.1 下一批：序 8 / 9 / 10 / 12 / 13（**已全部完成**，见 §4.10）
 
@@ -740,10 +773,10 @@ class 属性按预期变了：**18 个元素拿到哈希类名**（模块生效�
 | 12 | `refinements.css` | ✅ 第八批：先消灭 `[style*=…]` 那 12 条（实测从未生效 ⇒ 删除），再把 `.card-hover:hover` 的胜者值搬回 `components.css`，其余按归属拆 |
 | 13 | `responsive.css` | ✅ 第九批：最后 28 条声明各回归属；文件只剩注释（**没删文件**） |
 
-**⚠️ 仍未做的两件事**（都不属于"迁移"，属于"清理"或"补检查"）：
-`components.css` 里还留着 5 个零引用的预留类（`.link-modal` / `.material-list-item*` /
-`.type-badge*`）、`layout.css` 里还留着 5 条 `.navbar*`、`base.css` 里还留着 4 个
-没有样式表用户的 `@keyframes` —— 都登记在 §7.0 第 2 条的死代码清理轮。
+**⚠️ 仍未做的两件事** 已在收尾轮做完（见 §7.0）：`components.css` 里那 5 个零引用的
+预留类（`.link-modal` / `.material-list-item*` / `.type-badge*`）、`layout.css` 里那
+5 条 `.navbar*`、`base.css` 里那 4 个（实为 7 个 + `graph.css` 1 个）没有样式表用户的
+`@keyframes` —— 全部删除，逐条证据见 `migration-evidence/5.6-13-dead-css-cleanup.md`。
 
 ### 7.2 每批的登记动作（不登记 = 证据脚本对新批次**静默不覆盖**）
 

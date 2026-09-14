@@ -1,6 +1,11 @@
 /**
- * 知识图谱样式 —— **已整份按归属搬走**（overhaul-plan 5.6 序 10），
- * 本文件只剩一条已无样式表用户的 `@keyframes`
+ * 知识图谱样式 —— **已整份按归属搬走 + 最后一个 `@keyframes` 也删了**
+ * （overhaul-plan 5.6 序 10 搬走，收尾轮删掉残留的 `@keyframes graph-spin`）
+ *
+ * 本文件现在只剩注释，与 `auth.css` / `cleaning.css` / `diff.css` /
+ * `layout.css` / `responsive.css` / `refinements.css` 的先例相同：
+ * `mobile-input-font-size.test.ts` 断言 `src/styles/*.css` 每一个都被 `main.tsx`
+ * 引入，所以**空掉的样式表不能删文件**。
  *
  * ## 搬到哪了
  *
@@ -13,23 +18,21 @@
  * （768px 档 14 条 + 480px 档 2 条）—— 类名一旦被哈希，留在补丁层里的
  * 选择器就再也选不中它（规则还在、永不生效），所以两半必须同批处理。
  *
- * ## 为什么 `@keyframes graph-spin` 留在这里
+ * ## 为什么 `@keyframes graph-spin` 这一轮删掉了（收尾轮）
  *
- * `.graph-search-spinner` 的 `animation: graph-spin …` 已随规则进模块，
+ * `.graph-search-spinner` 的 `animation: graph-spin …` 随规则进了模块，
  * 并按仓库的既有做法把**动画体逐字复制**成模块里的 `@keyframes graphSpin`
  * （引用与定义在同一份模块里，产物里两边一起被哈希，绑定自洽）。
+ * 于是全局这一份**没有任何样式表用户**，也没有任何 tsx 行内样式引用它
+ * （`src/**` 全量 grep 只命中注释），属于死代码 ⇒ 收尾轮删除。
  *
- * 全局这一份**不删**，两个理由：
- *   ① `scripts/css-migration-diff.mjs` 的动画体比对读的是 **git HEAD 的
- *      `src/styles/graph.css`** —— 把原文删掉，提交之后那条比对就找不到原版、
- *      会对所有后来的人报红（它与 `base.css` 里那几个动画是同一套机制）；
- *   ② 全局 `@keyframes` 仍可被 tsx 的行内样式按裸名引用（内联样式不过 CSS Modules）。
+ * 它原来"不删"的两个理由现在都解决了：
+ *   ① `scripts/css-migration-diff.mjs` 的动画体比对原来读的是 **git HEAD** 的
+ *      本文件 —— 删掉原文、提交之后那条比对会找不到原版并对所有人报红。
+ *      收尾轮把那段改成**从 HEAD 往回按内容定位**"还含有这个 `@keyframes`
+ *      的修订"（与 `findRecentRev` 同一套办法），于是删除不再有后遗症；
+ *   ② "行内样式可能按裸名引用它" —— 全项目 0 处引用（含 `style={{ animation }}`、
+ *      `classList`、模板拼接），这是删除的前提而不是假设。
  *
- * 于是它和 `base.css` 的 `scaleIn` / `cleaning-pulse` / `glowPulse` 一样，
- * 成了"没有样式表用户但暂时留着"的动画 —— 死代码清理单独一轮做
- * （`docs/css-migration-plan.md` §7.0 第 2 条已登记）。
+ * 证据：`docs/migration-evidence/5.6-13-dead-css-cleanup.md`。
  */
-
-@keyframes graph-spin {
-  to { transform: translateY(-50%) rotate(360deg); }
-}

@@ -96,8 +96,9 @@
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* ── 导航栏高度（旧，兼容保留）── */
-  --navbar-height: 64px;
+  /* `--navbar-height`（旧顶部导航栏的高度）已在 5.6 收尾轮随
+     `layout.css` 的 `.navbar*` 一起删除：它唯一读者就是 `.navbar { height: … }`。
+     证据见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。 */
 
   /* ── 侧边栏 ── */
   --sidebar-width: 240px;
@@ -168,7 +169,38 @@ a:hover {
   color: var(--color-accent);
 }
 
-/* ── 关键帧动画 ── */
+/**
+ * ── 关键帧动画（全局动画库）──
+ *
+ * ## 收尾轮（死代码清理）删掉了 7 个没有用户的动画
+ *
+ * 全局 `@keyframes` 是**唯一**能被 tsx 的行内 `style={{ animation: '…' }}`
+ * 按裸名引用的动画（内联样式不过 CSS Modules）——所以迁移期间一个都没删：
+ * 前几批的契约是"证明什么都没丢"，而删动画属于另一件事。收尾轮逐条核过
+ * "样式表用户 + 行内用户 + 运行时拼字符串"三类读者之后删掉下面这 7 个，
+ * 证据在 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`：
+ *
+ * | 动  画 | 为什么没有用户了 |
+ * |---|---|
+ * | `scaleIn` | 迁移时被**复制并改名**成模块里的 `authScaleIn` / `feedbackScaleIn`，全局这份再没人引用（计划 §7.0 第 2 条） |
+ * | `cleaning-pulse` | 同上（模块里的 `cleaningPulse`）；收尾轮连模块里那条死规则 `.cleaningProgressBar` 一起删了 |
+ * | `glowPulse` | 同上（模块里的 `uploadGlowPulse`，计划 §7.0 第 5 条） |
+ * | `slideDown` / `pulse` / `float` / `gradientShift` | **从来没有过用户**：全项目（含 tsx 行内样式、e2e、docs）grep 只命中它们自己的定义 |
+ *
+ * 留下的 5 个都有真用户（逐条可查）：`fadeIn`（`components.css` 的 `.page-enter` /
+ * `.fade-in` + `ErrorDisplay.tsx` 行内）、`slideUp`（`.slide-up` +
+ * `LearningAssessment.tsx` 行内）、`shimmer`（`dashboard.css` 的 `.progress-bar-fill::after`）、
+ * `spin`（`learning.css` 的 `.spinner`）、`shake`（**只有** `ErrorDisplay.tsx` 的行内样式
+ * ——它是唯一一个"没有样式表用户、但有行内用户"的动画，所以
+ * `scripts/verify-built-css.mjs` 的 `INLINE_ONLY_KEYFRAMES` 里点了它的名）。
+ *
+ * ## 新增动画的规矩
+ *
+ * ① 模块里要用的动画必须**把动画体复制进模块并改名**（雷区 1：动画名会被一起哈希）；
+ * ② 全局这一层只放"多个不相邻功能共用"或"行内样式要用"的动画；
+ * ③ 加进来就**必须有读者** —— `verify-built-css.mjs` 现在会逐个产物文件核对
+ * "定义了但没人引用的 @keyframes"，为 0 才算过。
+ */
 
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -180,44 +212,13 @@ a:hover {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes gradientShift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes glowPulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(201, 169, 89, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(201, 169, 89, 0.4); }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes shake {
@@ -226,9 +227,4 @@ a:hover {
   40% { transform: translateX(4px); }
   60% { transform: translateX(-3px); }
   80% { transform: translateX(3px); }
-}
-
-@keyframes cleaning-pulse {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
 }

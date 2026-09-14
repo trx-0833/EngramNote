@@ -1,6 +1,28 @@
 /**
- * 旧顶部导航栏（`.navbar*`）——**本文件已按归属拆空，只剩这一组无人使用的规则**
- * （overhaul-plan 5.6 序 9）
+ * 旧顶部导航栏（`.navbar*`）—— **已删除，本文件只剩注释**
+ * （overhaul-plan 5.6 收尾轮：死 CSS 清理，见 `docs/css-migration-plan.md` §7.0 第 2 条）
+ *
+ * 与 `auth.css` / `cleaning.css` / `diff.css` / `responsive.css` / `refinements.css`
+ * 的先例相同：`mobile-input-font-size.test.ts` 断言 `src/styles/*.css` 每一个
+ * 都被 `main.tsx` 引入，所以**空掉的样式表不能删文件**。
+ *
+ * ## 这一轮删了什么（6 条规则）
+ *
+ * `.navbar` / `.navbar-logo` / `.navbar-logo:hover` / `.navbar-links` /
+ * `.navbar-logout` / `.navbar-logout:hover`
+ *
+ * ## 凭什么说它是死的（证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）
+ *
+ * | 检查 | 结果 |
+ * |---|---|
+ * | `src/**` 全量 grep `navbar` | TSX/TS 里 **0 处**（唯一命中在 `components/Sidebar.tsx` 的一句注释："视觉重构：替代原有顶部 Navbar"） |
+ * | 运行时拼类名（`classList.add('…')` / 模板字符串 / `styles[...]`） | 0 处 —— 本项目全部 9 个 `classList.*` 调用点与 40+ 处模板拼接都扫过，没有一个和 `navbar` 有关 |
+ * | 产物 | `.navbar{…display:none…}` 本身就是墓碑：迁移前的视觉重构就已经把这条导航栏整个 `display:none` 掉了，侧边栏接管了导航 |
+ * | 删后复核 | `scripts/verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS` 逐条自检"迁移前那份样式表里确实有它、现在源码与产物里都没有它" |
+ *
+ * `--navbar-height`（`base.css` 的 `:root`，注释写着"旧，兼容保留"）唯一的读者就是
+ * `.navbar { height: var(--navbar-height) }`，所以**同一个提交里一起删掉** ——
+ * 留着会变成一个零读者的令牌（同样的证据链，见证据文件）。
  *
  * ## 已经搬走的（不要在这里重新定义）
  *
@@ -13,69 +35,4 @@
  * 所以搬走的规则在产物里仍然晚于 `components.css` 的 `.btn` / `.container`
  * 之类，权重与先后关系逐条不变（`verify-built-css.mjs` 的 `CASCADE_PAIRS`
  * 与规则清单差集都验过）。
- *
- * ## 为什么 `.navbar*` 还留在这里
- *
- * 这一组（5 条规则 + 1 条 `:hover`）是**旧顶部导航栏**的样式，
- * `.navbar { display: none }` 就是它的墓碑：视觉重构之后侧边栏接管了导航，
- * 全项目 grep `.navbar` 命中的 tsx **一个也没有**（`src/**` 下 0 处）。
- *
- * 之所以不在这里删：本轮每一批的契约都是"证明什么都没丢"，
- * 而删死规则属于**死代码清理**，会让"丢失 0"这条证据同时包含两种语义
- * （前几批的 `.cleaning-progress` / `.feedback-pending` 都是按这条规矩处理的）。
- * 它也没有"归属组件"可搬 —— 没有任何组件渲染它，硬塞进某个模块只会让
- * "谁生成这段 DOM"更难查（规范 §4 第 3、4 条的同类情形）。
- * 待办登记在 `docs/css-migration-plan.md` §7.0 第 2 条：带"确认无引用"的证据单独一轮删除。
  */
-
-.navbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--navbar-height);
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(232, 230, 225, 0.6);
-  display: none; /* 视觉重构：隐藏旧导航栏 */
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--space-lg);
-  z-index: 100;
-  box-shadow: 0 1px 8px rgba(26, 26, 46, 0.04);
-}
-
-.navbar-logo {
-  font-family: var(--font-serif);
-  font-size: 1.35rem;
-  font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  cursor: pointer;
-  transition: opacity 0.2s ease;
-  border: none;
-  background-color: transparent;
-}
-
-.navbar-logo:hover {
-  opacity: 0.85;
-}
-
-.navbar-links {
-  display: flex;
-  gap: var(--space-xs);
-  align-items: center;
-}
-
-.navbar-logout {
-  color: var(--color-text-secondary);
-  font-size: 0.875rem;
-  transition: color 0.2s ease;
-}
-
-.navbar-logout:hover {
-  color: var(--color-error);
-}

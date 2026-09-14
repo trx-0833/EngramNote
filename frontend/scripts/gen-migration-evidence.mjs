@@ -518,10 +518,10 @@ write(
     '（类名一旦哈希，留在补丁层里的选择器永远选不中，计划 §5 雷区 2）。\n' +
     '修订由 `css-rule-inventory.mjs` **按内容自动定位**（从 HEAD 往回找第一个还含有\n' +
     '这些类名的提交），所以清单头部的 `@HEAD~N` 会随提交数变化，规则内容不会。\n\n' +
-    '⚠️ `layout.css` 里还有 5 条 `.navbar*`（旧顶部导航栏）**留全局不搬**：全项目\n' +
-    'grep 0 处引用、没有归属组件可挂，登记在计划 §7.0 第 2 条的死代码清理轮。\n' +
-    '`graph.css` 同理保留 `@keyframes graph-spin`（动画体已逐字复制成模块里的\n' +
-    '`graphSpin`；原版不删的理由写在两个文件头）。\n\n' +
+    '⚠️ 收尾轮（死代码清理）之后，`layout.css` 与 `graph.css` 也只剩注释了：\n' +
+    '前者的 5 条 `.navbar*`（旧顶部导航栏，全项目 grep 0 处引用）、后者的 `@keyframes graph-spin`\n' +
+    '（动画体早已逐字复制成模块里的 `graphSpin`）都已删除 —— 见计划 §7.0 第 2 条与\n' +
+    '`docs/migration-evidence/5.6-13-dead-css-cleanup.md`。\n\n' +
     parts789.join('\n\n'),
 )
 
@@ -565,6 +565,23 @@ const EMPTY_SHEET_EXCEPTIONS = [
   {
     match: (sel) => sel === ':root',
     why: '`--page-pad-y-*` 两条自定义属性随 `.app-layout` 收进 App.module.css 的 `.appLayout`（序 9，选择器变了）',
+  },
+  {
+    // 收尾轮（死代码清理）：5 个零引用的"预留语义化类"（6 条规则，含 `:hover`）
+    match: (sel) =>
+      [
+        '.link-modal',
+        '.material-list-item',
+        '.material-list-item:hover',
+        '.material-list-item-selected',
+        '.type-badge',
+        '.type-badge-material',
+      ].includes(sel),
+    why:
+      '收尾轮死代码清理：这 5 个类是零引用的"预留语义化类"（`LinkManagerModal.tsx` 用的是内联 style，' +
+      '一个类名都没挂；`src/**` 的 TSX/TS grep 0 处、运行时拼类名 0 处）⇒ 删除，' +
+      '登记在 `css-migration-diff.mjs` 第八批的 `resolvedConflicts` 与 ' +
+      '`verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS`；证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`',
   },
 ]
 
@@ -659,12 +676,16 @@ write(
     '迁移前那份样式表里的每一条规则，都能在工作区的某个 CSS 里找到\n' +
     '"上下文 + 选择器（类名 kebab→camel 归一）+ 声明逐字相同"的那一条，\n' +
     '或者落在显式例外表里（每条都写明依据）。\n\n' +
-    '例外只有两类：\n' +
+    '例外有三类：\n' +
     '1. **13 条属性选择器 `[style*="rgba(0,0,0,0.5)"] …`**：真 Chromium 实测该选择器\n' +
     '   命中 **0** 个元素（React 走 CSSOM 赋内联值，浏览器把它序列化成带空格的\n' +
     '   `rgba(0, 0, 0, 0.5)`），也就是说这些规则**迁移前就从未生效**，删它是可证明的空操作；\n' +
     '2. **`:root` 的 `--page-pad-y-*`**：随 `.app-layout` 收进 `App.module.css` 的 `.appLayout`\n' +
-    '   （选择器变了，值一字未改；`relocations` 里有双向自检）。\n\n' +
+    '   （选择器变了，值一字未改；`relocations` 里有双向自检）；\n' +
+    '3. **5 个零引用的"预留语义化类"**（`.link-modal` / `.material-list-item*` / `.type-badge*`，6 条规则）：\n' +
+    '   序 12 逐字搬进 `components.css`，收尾轮（死代码清理）**整条删除** ——\n' +
+    '   `src/**` 的 TSX/TS grep 0 处、运行时拼类名 0 处，`LinkManagerModal.tsx` 用的是内联 style。\n' +
+    '   证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。\n\n' +
     '## 去向审计结果\n\n' +
     auditLines.join('\n') +
     '\n## 迁移前清单（按类名分组）\n\n' +
@@ -754,6 +775,120 @@ write(
   ].join('\n'),
 )
 
+// ── 10. 收尾轮：死代码清理的证据 ──
+// 这一轮的删除**不能靠"看起来没人用"**：每一条都要有"TSX/TS grep 0 处 +
+// 运行时拼类名 0 处 + 产物里 0 次"三类证据，而"迁移前确实有它"这一侧
+// 由 `verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS` 机器自检（从 HEAD 往回
+// 按内容找修订）。这里的原文是一次性扫描脚本的真实输出（用完已删）。
+write(
+  '5.6-13-dead-css-cleanup.md',
+  '5.6 收尾轮：死 CSS 清理（逐条证据 + 三个方向的自检）',
+  [
+    '## 删了什么（4 组，共 21 个条目）',
+    '',
+    '| 组 | 条目 | 依据 |',
+    '|---|---|---|',
+    '| 旧顶部导航栏 | `layout.css` 的 6 条 `.navbar*` 规则（`.navbar` / `-logo`(+`:hover`) / `-links` / `-logout`(+`:hover`)）+ `base.css` 的 `--navbar-height` | TSX/TS 0 处引用（唯一命中是 `Sidebar.tsx` 里一句"替代原有顶部 Navbar"的注释）；`.navbar{display:none}` 本身说明视觉重构后它已经被藏掉了 |',
+    '| 零引用的预留语义化类 | `components.css` 的 6 条规则（`.link-modal` / `.material-list-item`(+`:hover`) / `-selected` / `.type-badge` / `-material`） | TSX/TS 0 处引用；`LinkManagerModal.tsx` 用的是内联 style，一个类名都没挂 |',
+    '| 没有用户的 `@keyframes` | `base.css` 7 个（`scaleIn` / `cleaning-pulse` / `glowPulse` / `slideDown` / `pulse` / `float` / `gradientShift`）+ `graph.css` 的 `graph-spin` + 模块里的 `cleaningPulse` | 前三个是迁移时"复制 + 改名"进模块后失去全局引用者（计划 §7.0 第 2、5 条）；`slideDown` / `pulse` / `float` / `gradientShift` **从来没有过用户**；`graphSpin` 同理 |',
+    '| 模块里的死规则 | `CleaningPanel.module.css` 的 `.cleaningProgress` / `.cleaningProgressBar` | 清洗进度条改由 `TaskProgress` 用全局 `.progress-bar*` 渲染；全项目 0 处 TSX 引用（第一批"逐字搬来不删"时就记过账） |',
+    '',
+    '**合计**：登记表 21 个条目（`verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS`，实测 21/21 通过）',
+    '= **11 个类名**（覆盖 14 条规则：`.navbar*` 6 条、预留类 6 条、`.cleaningProgress*` 2 条）',
+    '+ **9 个 `@keyframes` 定义**（全局 8：`base.css` 的 `scaleIn` / `cleaning-pulse` / `glowPulse` /',
+    '`slideDown` / `pulse` / `float` / `gradientShift` 与 `graph.css` 的 `graph-spin`；',
+    '模块内 1：`CleaningPanel.module.css` 的 `cleaningPulse`）',
+    '+ **1 个令牌**（`--navbar-height`）。模块里的 `graphSpin` / `authScaleIn` / `feedbackScaleIn` /',
+    '`qaSlideUp` / `uploadGlowPulse` / `sidebarOverlayFadeIn` / `feedbackShake` **都有引用者，不动**。',
+    '',
+    '> 记账口径说明：任务清单里写的是"`base.css` 4 个没有用户的 `@keyframes`"。',
+    '> 实测把"没有用户"分成了两类：**迁移孤儿** 3 个（`scaleIn` / `cleaning-pulse` / `glowPulse`，',
+    '> 计划 §7.0 第 2、5 条各自点过名）与**从来没有用户** 4 个（`slideDown` / `pulse` / `float` /',
+    '> `gradientShift`）。任务里的"4"正好是后者；本轮把 7 个一起删了 —— 两类都是零引用，',
+    '> 而且 `verify-built-css.mjs` 新增的"定义了但没人引用"检查（第 7 项）现在要求',
+    '> **产物里每个 `@keyframes` 都有引用者**，只删一半会让那条检查永远红灯。',
+    '',
+    '## 证据一：`src/**` 全量扫描（一次性脚本的真实输出，用完已删）',
+    '',
+    '扫描范围：`src/**/*.{ts,tsx,css}` 的每一行；另有一种专门找"运行时拼出来的类名"的',
+    '模式（`classList.add/remove/toggle/contains`、模板字符串、`styles[...]`）。',
+    '',
+    '```',
+    '=== TOKEN navbar —— src 下 13 处 ===',
+    '   src/components/Sidebar.tsx:4: * 视觉重构：替代原有顶部 Navbar        ← 注释，不是引用',
+    '   src/styles/base.css:100:   --navbar-height: 64px;',
+    '   src/styles/layout.css:31:  .navbar {',
+    '   src/styles/layout.css:49:  .navbar-logo {',
+    '   src/styles/layout.css:63:  .navbar-logo:hover {',
+    '   src/styles/layout.css:67:  .navbar-links {',
+    '   src/styles/layout.css:73:  .navbar-logout {',
+    '   src/styles/layout.css:79:  .navbar-logout:hover {',
+    '   （其余 5 处是 layout.css 文件头注释里解释"为什么还留着"的文字）',
+    '',
+    '=== TOKEN link-modal —— src 下 3 处 ===',
+    '   src/pages/notedetail/LinkManagerModal.tsx:10: * 5 个预留语义化类（`.link-modal` / …   ← 注释',
+    '   src/styles/components.css:361: .link-modal {',
+    '   src/styles/refinements.css:25: （文件头注释里的去向表）',
+    '',
+    '=== TOKEN material-list-item —— src 下 3 处 ===（同样只有注释 + 定义）',
+    '=== TOKEN type-badge —— src 下 3 处 ===（同样只有注释 + 定义）',
+    '=== TOKEN cleaningProgress —— src 下 5 处 ===',
+    '   src/components/CleaningPanel.module.css:56: .cleaningProgress {',
+    '   src/components/CleaningPanel.module.css:64: .cleaningProgressBar {',
+    '   （其余 3 处是"它没有用户"的记账注释）',
+    '',
+    '=== 动态类名写入点（classList / 模板字符串 / styles[） ===',
+    '   共 60 余处（`styles.sidebarOpenLock` / `` `${styles.quizOption}…` `` /',
+    '   `` `filter-pill${…}` `` …），**没有任何一处**与上面这些名字有关；',
+    '   `useAdhdReader.ts` 的 6 处 `classList.*` 是 `.adhd-*`（另一件事，见证据 5.6-07）。',
+    '```',
+    '',
+    '## 证据二：产物里的动画名（CSS Modules 会把动画名一起哈希，所以必须看产物）',
+    '',
+    '```',
+    '产物 @keyframes 定义（迁移 + 清理之后）：',
+    '   index-*.css: fadeIn, slideUp, shimmer, spin, shake, citation-flash,',
+    '                _sidebarOverlayFadeIn_*, _authScaleIn_*',
+    '   KnowledgeGraph-*.css: _graphSpin_*      QA-*.css: _qaSlideUp_*',
+    '   Upload-*.css: _uploadGlowPulse_*        useSelfRating-*.css: _feedbackScaleIn_*, _feedbackShake_*',
+    '   NoteDetail-*.css: （清理后已无动画）',
+    '',
+    '删除前逐个动画名在产物里出现的位置（每个都只出现 1 次 = 只有定义、没有引用）：',
+    '   graph-spin: index-*.css×1        scaleIn: index-*.css×1',
+    '   cleaning-pulse: index-*.css×1    glowPulse: index-*.css×1',
+    '   slideDown: index-*.css×1         gradientShift: index-*.css×1',
+    '```',
+    '',
+    '## 证据三：机器自检（`verify-built-css.mjs`，三个方向）',
+    '',
+    '每个条目都要过：**a. 迁移前那个文件里确实有它**（从 HEAD 往回按内容定位修订 ——',
+    '写死 `HEAD` 会在删除提交之后失效）→ **b. 源码里没有了**（剥注释后比较，',
+    '否则墓碑注释本身会把自检弄红）→ **c. 产物里没有了**。',
+    '输出见 `5.6-03-built-css.md` 的"收尾轮死代码清理"一节（实测 21/21 通过）；',
+    '同一份输出里还有新增的"产物里定义了但没人引用的 `@keyframes`"检查 ——',
+    '它让这一轮删掉的动画**不可能悄悄回来**（唯一的合法例外 `shake` 是"只被行内样式引用"，',
+    '点名登记在 `INLINE_ONLY_KEYFRAMES` 里）。',
+    '',
+    '## 差集侧：这些删除怎么记账的',
+    '',
+    '`css-migration-diff.mjs` 的批次汇总里，第一批从 **60 逐字保留** 变成',
+    '**58 逐字保留 + 2 已声明删除**（那两个 `.cleaning-progress*` 就是本条表格里的一组），',
+    '第八批从 13 条"从未生效"的删除变成 **19 条已声明删除**（多了 5 个预留类的 6 条规则）。',
+    '两处都不是"少了东西"，而是"删掉的东西逐条登记过"。',
+    '',
+    '## 与"不删"原则的关系（这条写入规范）',
+    '',
+    '前几批**刻意不删**任何一条（契约是"证明什么都没丢"），所以死代码攒到了这一轮。',
+    '这一轮之后的分工是：',
+    '',
+    '- 迁移相关的工作仍然"逐字搬、不删"，用差集证明"丢失 0"；',
+    '- **删除**必须单独一轮、单独成节（`resolvedConflicts` 的 `note` 字段 + `CLEANUP_RETIREMENTS` 表），',
+    '  并且带上"谁在用它"的反向证据；',
+    '- 删掉的类名/动画名**不许悄悄回来**：`CLEANUP_RETIREMENTS` 与',
+    '  "产物里没有死动画"两项检查一起兜住。',
+  ].join('\n'),
+)
+
 // ── 10. 差集（核心证据，含所有批次） ──
 const diff = run('css-migration-diff.mjs')
 write(
@@ -784,4 +919,10 @@ write(
 console.log('已生成：')
 for (const f of files) console.log(`  docs/migration-evidence/${f.name}  (${f.bytes} B)`)
 console.log('\n退出码：差集=' + diff.code + ' 产物校验=' + verify.code)
-if (diff.code !== 0 || verify.code !== 0) process.exit(1)
+if (auditFailed) {
+  console.error(
+    '✗ 去向审计里有"既找不到也没有例外"的规则 —— 那是**静默丢失**，' +
+      '要么把它找回来，要么在 EMPTY_SHEET_EXCEPTIONS 里写明依据。',
+  )
+}
+if (diff.code !== 0 || verify.code !== 0 || auditFailed) process.exit(1)

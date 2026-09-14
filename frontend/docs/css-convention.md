@@ -64,17 +64,24 @@
    `animation: :global(scaleIn)` **构建立刻失败**（PostCSS `Double colon`，
    声明值里不认 `:global()`）。
    **正确做法：把用到的 `@keyframes` 定义搬进模块自己**（动画体逐字复制），
-   名字改成 `组件前缀+名字`（如 `feedbackScaleIn`）。全局的原版不要删 ——
-   它仍可被 tsx 内联 `style={{ animation: 'shake …' }}` 按裸名引用
+   名字改成 `组件前缀+名字`（如 `feedbackScaleIn`）。**迁移那一轮**全局的原版不要删 ——
+   它可能仍被 tsx 内联 `style={{ animation: 'shake …' }}` 按裸名引用
    （内联样式不过 CSS Modules），也是全局动画库的一部分。
    `scripts/verify-built-css.mjs` 会**逐产物文件**检查"引用的动画在本文件内
    有没有定义"。
 
    > 第一批之后 `scaleIn` 已经**没有样式表用户**了（最后一个用户 `auth.css`
-   > 把它复制成 `authScaleIn` 搬进了模块），`cleaning-pulse` 同样
-   > （它的唯一用户 `.cleaning-progress-bar` 是死规则，见 §4 末）。
-   > 这两条全局 `@keyframes` 暂时**留着不删**：删它们属于"死代码清理"，
-   > 与搬家混在一起会让"丢失 0"这条证据同时包含两种语义。
+   > 把它复制成 `authScaleIn` 搬进了模块），`cleaning-pulse` / `glowPulse` /
+   > `graph-spin` 同样（它们的用户都被复制 + 改名搬进了模块）。
+   > 迁移期间这 4 条**留着不删**：删它们属于"死代码清理"，与搬家混在一起
+   > 会让"丢失 0"这条证据同时包含两种语义。
+   >
+   > **收尾轮已经删掉了它们**（连同另外 4 个从来没有过用户的
+   > `slideDown` / `pulse` / `float` / `gradientShift`，以及模块内失去用户的
+   > `cleaningPulse`）：证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。
+   > 删除后多了一道**常设检查**：`verify-built-css.mjs` 要求产物里每个
+   > `@keyframes` 都**有引用者**，唯一的合法例外是"只被行内样式引用"的
+   > `shake`（点名登记在 `INLINE_ONLY_KEYFRAMES`）—— 死动画不可能再悄悄回来。
 
 2. **类名哈希后，`responsive.css` 里的选择器再也选不中它。**
    规则还在、永不生效 —— 与 `mobile-input-font-size.test.ts` 文件头记的
@@ -93,8 +100,11 @@
    这就是"模块与组件同目录"的硬性理由。
 
    > 同理，**空掉的全局样式表不能删**（第一批之后 `auth.css` / `cleaning.css` /
-   > `diff.css` 只剩注释）：删文件就要连带删 `main.tsx` 里的 import。
-   > 留一个只有注释的文件既满足断言，又把"这些类名去哪了"写在原处。
+   > `diff.css` 只剩注释；序 12/13 与收尾轮之后 `refinements.css` /
+   > `responsive.css` / `layout.css` / `graph.css` 也是）：删文件就要连带删
+   > `main.tsx` 里的 import。
+   > 留一个只有注释的文件既满足断言，又把"这些类名去哪了"写在原处 ——
+   > 收尾轮删掉的东西也在原处留了墓碑注释（写明依据与证据文件）。
 
 4. **不要为了"顺手统一"改外观。**
    比如给 `.quiz-option` 加 `composes: btn from global` 很"合理"，但它的 DOM 上
@@ -195,7 +205,9 @@
 7. `npm run build`，然后：
    - `node scripts/css-migration-diff.mjs` —— 差集必须 **丢失 0**；
    - `node scripts/verify-built-css.mjs` —— 无悬空动画、改动范围内无冲突、
-     级联得主正确、退休类名已消失；
+     级联得主正确、退休类名已消失、**跨媒体查询覆盖战 0 条未登记**、
+     **简写 vs 长写 0 条未登记**、**产物里没有死动画**（收尾轮新增的三项；
+     任何一项的"候选对为 0"也是失败 —— 那是检查失明，不是没问题）；
    - `node scripts/gen-migration-evidence.mjs` —— 落证据文件。
 8. `npm test` / `npx tsc --noEmit` / `npm run lint` / `npm run build` 四道全绿。
 
@@ -232,10 +244,11 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头）+ `findRecentRev`（按内容定位"迁移前"） |
+| `scripts/lib/css-parse.mjs` | 四个脚本共用的 CSS 解析器（**只此一份**，见文件头）+ `findRecentRev`（按内容定位"迁移前"） |
+| `scripts/lib/css-cascade.mjs` | 收尾轮新增：级联求解（权重 / 源序 / 简写展开表 / 从 TSX 抽"并列类名"），**只服务 `verify-built-css.mjs` 的三项新检查**，不含第二个解析器 |
 | `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git` 读 git 版本（修订**自动定位**，可 `--rev` 覆盖） |
-| `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明。**四类差异**：逐字保留 / 值有变化 / 丢失 / **已裁决删除**（`resolvedConflicts`，见下） |
-| `scripts/verify-built-css.mjs` | 产物校验：**逐文件**悬空动画、冲突归因到源文件、级联次序、切片标记、退休类名、产物新鲜度 |
+| `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明。**四类差异**：逐字保留 / 值有变化 / 丢失 / **已声明删除**（`resolvedConflicts`，见下） |
+| `scripts/verify-built-css.mjs` | 产物校验（**收尾轮之后这里就是那个"一条命令"**）：逐文件悬空动画、冲突归因到源文件、级联次序、切片标记、退休类名、产物新鲜度，加上**跨媒体查询覆盖战**、**简写 vs 长写**（同选择器 + 跨选择器）、**死代码清理的三向自检**、**产物里没有死动画** |
 | `scripts/gen-migration-evidence.mjs` | 把上面三者的输出写成 `docs/migration-evidence/*.md` |
 
 **第四批新增的第四类差异：`resolvedConflicts`（"已裁决删除"）。**
@@ -352,35 +365,75 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    给 worktree 起 dev server 要给**独立的 vite `cacheDir`**（共用
    `node_modules/.vite` 会让图谱页崩到错误边界）。
 
-**已知的检查盲区**（第二批发现、第三批又发现一个。5.6 收尾时的状态：
-第 4 条仍**没有常设检查**，靠"窄屏规则与基础规则同文件、顺序可读" + 探针兜住；
-第 5 条同样没有常设检查，但 `.filter-pill` 那处**跨属性竞争**已被探针实测钉过一次
-（`notes-mobile` 场景 54 条属性差异 0，见证据 `5.6-12`））：
+**已知的检查盲区**（第二批发现、第三批又发现一个；**收尾轮把第 4、5 条做成了
+常设检查**，剩下的写在第 6 条里）：
 
-4. **"窄屏规则被同权重的桌面规则压掉"这类事故，现有工具看不见。**
-   实例：`responsive.css` 的 `@media (max-width:768px) { .markdown-body .katex
+4. ~~**"窄屏规则被同权重的桌面规则压掉"这类事故，现有工具看不见。**~~
+   **→ 收尾轮已补上常设检查**：`scripts/verify-built-css.mjs` 的
+   "跨媒体查询覆盖战"一节（求解器在 `scripts/lib/css-cascade.mjs`）。
+   实例仍在案：`markdown.css` 的 `@media (max-width:768px) { .markdown-body .katex
    { font-size: 1em } }` 与 `markdown-extras.css` 的顶层
-   `.markdown-body .katex { font-size: 1.1em }` 权重相同（都是 0,2,0），
+   `.markdown-body .katex { font-size: 1.1em }` 权重同为 (0,2,0)，
    媒体查询**不增加权重**，而后者在产物里更靠后（实测字节 36081 vs 37916）
-   —— 于是那条窄屏字号**从未生效过**（迁移前就如此，与 5.6 无关）。
-   差集脚本按 `(上下文 + 选择器 + 属性)` 建键，`@media` 里的规则与顶层规则
-   落在不同键上，所以这种"跨上下文覆盖战"不会被报出来。
-   要补的话应当是在产物上做一次**权重+顺序的真实求解**（像 `CASCADE_PAIRS`
-   那样，但自动枚举同选择器对），代价是要引入 DOM 知识以判断元素是否真同时命中。
-5. **跨属性竞争（简写 vs 长写）也看不见 —— 第三批发现。**
-   实例：`` className={`card ${styles.qaAiCard}`} ``，全局 `.card` 写
-   `border: 1px solid …`（简写会展开出 `border-left-*`），模块 `.qaAiCard` 写
-   `border-left: 3px solid …`（长写）。两者权重同为 (0,1,0)，
-   **谁赢只看产物里的先后**，而：
-   - 差集按 (上下文 + 选择器 + 属性) 建键 —— 选择器不同，不配对；
-   - 产物校验的冲突统计与 `CASCADE_PAIRS` 按**属性名**配对 —— `border` 与
-     `border-left` 是两个名字，配不上。
+   ⇒ 那条窄屏字号**从未生效**（迁移前就如此）。现在它被登记成
+   `MEDIA_WAR_RULES` 的第一条"已知、故意留着"：让它生效是**改外观**，
+   得单开一轮带截图（计划 §4.7）。细节与它自己的盲区见下面那一节。
+5. ~~**跨属性竞争（简写 vs 长写）也看不见 —— 第三批发现。**~~
+   **→ 收尾轮已补上常设检查**（同一份 `lib/css-cascade.mjs`，
+   `verify-built-css.mjs` 的"简写 vs 长写"两节）。实例：`` className={`card
+   ${styles.qaAiCard}`} ``，全局 `.card` 写 `border: 1px solid …`（简写会展开出
+   `border-left-*`），模块 `.qaAiCard` 写 `border-left: 3px solid …`（长写）。
+   两条权重同为 (0,1,0)，**谁赢只看产物里的先后**，而差集按
+   (上下文 + 选择器 + 属性) 建键（选择器不同 ⇒ 不配对）、冲突统计与
+   `CASCADE_PAIRS` 按属性名配对（`border` 与 `border-left` 是两个名字 ⇒ 配不上）。
+   现在这条**有名字、有得主、有人盯着**（`CROSS_CLASS_SHORTHAND_RULES`）。
+6. **仍然看不见的**（写在这里，免得下一个人以为已经全覆盖）：
+   - **"两个类会不会命中同一个元素"只有 TSX 字面量级的证据**：跨选择器那一半靠
+     `className` 里并列的类名（含模板串与三元分支里的字面量）。**拼不出来的写法**：
+     `classList.add(…)` 运行时加的类（`useAdhdReader.ts` 的 6 处）、`composes`、
+     第三方 DOM（KaTeX / highlight.js），以及"两个类分别挂在父子元素上、
+     但简写与长写作用在同一个盒子上"的情形。
+   - **值级求解**：只判"两条声明争同一批长写属性"，**不展开简写的具体值**
+     （`border: 1px solid var(--x)` 不会被拆成三条长写的值）。所以"两边其实写了
+     同一个值"这种无害情况也会被列出来（注册表按模式登记即可）。
+   - **简写表的覆盖面**是 border / padding / margin / background / font / inset
+     （任务点名的六族）+ border-radius / gap / flex / overflow / transition /
+     text-decoration / list-style / outline。**没有**做 CSS 全量简写表 ——
+     一份又长又没人维护的表只会变成噪音源；`grid-*` / `place-*` / `columns`
+     之类目前**不在**扫描范围内。
+   - **`:hover` / `:focus` 等状态不参与跨选择器配对**（只比基态单类规则）：
+     `.card:hover` 上的简写与另一个类的长写之间的竞争不会被报出来。
+   - **两个懒加载 chunk 之间的先后静态判不了**：那种组合报 `unknown`
+     （得主必须靠人看，不能猜）。`index.css` ↔ chunk 这一种是确定的
+     （chunk 由 `__vitePreload` 在 `index.css` 之后注入 —— 计划 §5 雷区 8 的补充）。
 
-   第三批用一次性探针实测过（配方见 `css-migration-plan.md` §5 雷区 12）：
-   jsdom 对**字面值**的 `border` 简写会正确展开（对照实验能随顺序翻转胜负），
-   但不解析 `var()`，所以要先把 `var(…)` 换成字面色、再读**真实产物**拼顺序。
-   结论：模块类与全局类并列写在同一个元素上时，除了看"有没有同名属性竞争"，
-   还要看"简写会不会展开出对方的长写" —— 这一条目前只能靠文档 + 探针守住。
+### 收尾轮（死代码清理 + 三项新检查）新增的登记点
+
+全部走**同一个入口**：`node scripts/verify-built-css.mjs`（退出码非 0 = 有问题）。
+求解器只有一份，在 `scripts/lib/css-cascade.mjs`（与解析器 `lib/css-parse.mjs` 一样
+"只此一份"）—— **没有**第二个 CSS 解析器。
+
+| 检查 | 登记表 | 报什么 | 响亮失败（防空检查） |
+|---|---|---|---|
+| 跨媒体查询覆盖战 | `MEDIA_WAR_RULES` | 同选择器 + 同属性，`@media` 里那条**在源序上被顶层压掉**的每一对 | ① 候选对为 0 ⇒ 报错（今天实测 68 对候选）；② 注册项一条都没命中 ⇒ 报错；③ 有发现没登记 ⇒ 报错 |
+| 简写 vs 长写（同选择器） | `SHORTHAND_CLASH_RULES`（按**属性模式**登记） | 同一（选择器 + 上下文）下简写与长写落在同一批长写属性上的每一对 + 得主 | 候选对为 0 ⇒ 报错（今天 24 对）；注册项空转 ⇒ 报错 |
+| 简写 vs 长写（跨选择器） | `CROSS_CLASS_SHORTHAND_RULES`（按**类名对**登记，比较时忽略顺序） | TSX 里并列在同一个 `className` 上的两个**单类**规则，展开后落在同一批长写属性上 + 得主 | ① TSX 里抽不到任何"并列 ≥2 个类名"的 `className` ⇒ 报错（抽取器失明）；② 产物里没有单类规则 ⇒ 报错；③ 候选对为 0 ⇒ 报错；④ 注册项空转 / 有未登记的类名对 ⇒ 报错 |
+| 死代码清理不许回来 | `CLEANUP_RETIREMENTS` | 收尾轮删掉的类名 / `@keyframes` / 令牌**三个方向**自检：迁移前那个文件里确实有它（从 HEAD 往回**按内容**定位修订，写死 `HEAD` 会在删除提交之后失效）→ 源码里没了（**剥注释后**比较，否则墓碑注释会把自检弄红）→ 产物里没了 | 表为空 ⇒ 报错；任一条对不上 ⇒ 报错 |
+| 产物里没有死动画 | `INLINE_ONLY_KEYFRAMES` | 每个 `@keyframes` 定义都要**有引用者**；唯一合法例外是"只被 tsx 行内样式引用"（`shake`，点名登记） | 产物里 0 个定义 ⇒ 报错；登记的"仅行内"动画其实有样式表引用 ⇒ 报错（登记过期）；有定义没人引用 ⇒ 报错 |
+
+**反向验证过（收尾轮实测，改完即还原）**：把 `cascadeDecls` 换空 ⇒ 两项检查都报
+"候选对 0 条"并退出 1；把 TSX 抽取结果换空 ⇒ 报"抽取器失明"；把一条注册项的判据
+改错 ⇒ 同时报"空注册"与"未登记 1 条"；把 `INLINE_ONLY_KEYFRAMES` 换成 `fadeIn`
+⇒ 报"它现在有样式表引用"并把 `shake` 报成死动画；把 `CLEANUP_RETIREMENTS` 里的名字
+改一个字母 ⇒ 报"从 HEAD 往回 40 个提交里找不到还含有它的修订"。
+也就是说这几项**不可能退化成永远绿灯**。
+
+**同选择器的注册表按"属性模式"登记、跨选择器的按"类名对"登记** —— 这个区别是有意的：
+前者表达"这种写法（`background` + `background-clip`）是已知且正确的"，
+所以**新的同模式声明不会报红**；后者表达"这两个类名并列在同一个元素上"，
+所以**新的类名对一定会报红**。想收紧前者，就把 `SHORTHAND_CLASH_RULES` 的 `match`
+写成对具体选择器的断言。
+
 
 **第四批（序 5）的补充：裁决一场"谁也没决定过"的冲突，要用真浏览器量。**
 

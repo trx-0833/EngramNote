@@ -12,12 +12,12 @@
  *
  * `.uploadZoneActive::after` 引用全局 `@keyframes glowPulse`（base.css）。
  * 搬进模块后裸名会被哈希、定义留在全局 ⇒ 悬空 ⇒ 拖拽时的呼吸光晕
- * 静默消失。所以动画体逐字复制进本文件并改名 `uploadGlowPulse`；
- * `base.css` 的原版不删（全局动画库的一部分，行内样式仍可裸名引用）。
+ * 静默消失。所以动画体逐字复制进本文件并改名 `uploadGlowPulse`。
  *
  * 记账：`glowPulse` 在本批之后**没有任何样式表用户**了（最后一个就是这条）。
- * 删它属于"死代码清理"，与搬家混在一起会让"丢失 0"这条证据同时包含
- * 两种语义 —— 与 `scaleIn` / `cleaning-pulse` 同样处理，登记在计划 §7.0。
+ * 收尾轮的死代码清理已经把它连同 `scaleIn` / `cleaning-pulse` 一起删掉
+ * （证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）；
+ * 本模块的 `uploadGlowPulse` 有引用者，**不动**。
  */
 
 /* ── 拖拽上传区 ── */
