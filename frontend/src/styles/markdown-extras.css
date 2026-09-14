@@ -142,11 +142,16 @@
   padding: 12px 14px;
 }
 
+/* iOS Safari 在聚焦 font-size **小于 16px** 的输入框时会把整页放大
+   （focus zoom），textarea 同样中招 —— 所以这里必须 ≥1rem，不能写 0.9rem。
+   注意这个值**只能在本文件里改**：main.tsx 里的导入顺序是
+   responsive.css(12) → markdown-extras.css(13)，同权重的窄屏兜底规则
+   写进 responsive.css 会输给这一行，看着像生效其实没生效。 */
 .ask-ai-input {
   width: 100%;
   resize: vertical;
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 1rem;
   line-height: 1.6;
   padding: 8px 10px;
   border: 1px solid var(--color-border, #ddd);

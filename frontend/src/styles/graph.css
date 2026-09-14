@@ -378,12 +378,17 @@
   margin-left: var(--space-md);
 }
 
+/* 1rem = 16px：iOS Safari 聚焦 font-size 小于 16px 的输入框会放大整页。
+   基础值必须写在这里（而不是在 responsive.css 里按 768px 兜底）：
+   那条兜底只对 ≤768px 的视口成立，手机横屏（844–932px）照样会缩放；
+   而且 responsive.css 在 main.tsx 里排在本文件**之前**，
+   值的归属权本来就在本文件。 */
 .graph-search-input {
   width: 180px;
   padding: 5px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 0.8rem;
+  font-size: 1rem;
   background: var(--color-surface);
   color: var(--color-text);
   outline: none;

@@ -200,6 +200,23 @@ body.sidebar-open-lock {
   letter-spacing: 0;
 }
 
+/* 侧边栏的一行 = 导航按钮 +（可选的）行内快捷操作。
+   包一层 div 是为了让两者成为**兄弟**而不是父子：<button> 里嵌 <button>
+   是非法 HTML（React: validateDOMNesting 警告），键盘与读屏也没法把
+   「笔记列表」和「上传资料」当成两个独立目标。
+   行本身当定位上下文，操作按钮才能绝对定位钉在右端 ——
+   这样导航按钮仍整行铺满，悬停高亮的范围与改动前一致。 */
+.sidebar-item-row {
+  position: relative;
+}
+
+/* 带快捷操作的那一行，给标签留出 + 的位置：
+   38px = 8px(按钮自身右内边距) + 22px(+ 的宽度) + 8px(原来是 flex gap)，
+   与「+ 嵌在按钮里」时标签可用宽度完全相同，长标签不会滑到 + 底下。 */
+.sidebar-item-row:has(.sidebar-item-action) .sidebar-item {
+  padding-right: 38px;
+}
+
 .sidebar-item {
   display: flex;
   align-items: center;
@@ -257,7 +274,13 @@ body.sidebar-open-lock {
 }
 
 .sidebar-item-action {
-  margin-left: auto;
+  /* 与导航按钮是兄弟节点（见 .sidebar-item-row）：绝对定位钉在行的右端，
+     几何位置与"曾经嵌在按钮里"时一致 —— 右边缘距行尾 8px（= 原来的右内边距），
+     垂直居中（原来是 flex 的 align-items: center）。 */
+  position: absolute;
+  right: var(--space-sm);
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -267,7 +290,6 @@ body.sidebar-open-lock {
   font-size: 1.1rem;
   color: var(--color-text-tertiary);
   transition: all 0.15s ease;
-  flex-shrink: 0;
   border: none;
   background: transparent;
   cursor: pointer;

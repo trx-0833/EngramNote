@@ -159,10 +159,12 @@
     font-size: 0.8rem;
   }
 
-  /* 图谱工具条里的搜索框与类型下拉原为 0.8rem（12.8px）：手机上既难读，
+  /* 图谱工具条里的类型下拉原为 0.8rem（12.8px）：手机上既难读，
      聚焦时 iOS 还会自动把整页放大。responsive.css 在 graph.css 之后加载，
-     同权重即可覆盖，不必用 !important。 */
-  .graph-search-input,
+     同权重即可覆盖，不必用 !important。
+     旁边的搜索框（.graph-search-input）**不再**在这里兜底 ——
+     它的 1rem 已经写在 graph.css 里（值的归属权在拥有它的样式表，
+     而且本文件只覆盖 ≤768px，手机横屏的 844–932px 覆盖不到）。 */
   .graph-filter-select {
     font-size: 1rem;
   }

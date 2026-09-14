@@ -115,24 +115,32 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMob
                 <div className="sidebar-section-title">{section.title}</div>
               )}
               {section.items.map(item => (
-                <button
-                  key={item.path}
-                  className={`sidebar-item${isActive(item.path) ? ' sidebar-item-active' : ''}`}
-                  onClick={() => handleNav(item.path)}
-                >
-                  <span className="sidebar-item-icon">{item.icon}</span>
-                  <span className="sidebar-item-label">{item.label}</span>
+                /* 每行包一层 div：行内快捷操作（笔记分组的「+ 上传资料」）
+                   必须是导航按钮的**兄弟**节点 —— 把一个 <button> 嵌进
+                   另一个 <button> 是非法 HTML（React 会报 validateDOMNesting），
+                   键盘 Tab 也只会落在外层那颗按钮上。
+                   行本身是定位上下文，+ 的位置由 layout.css 的
+                   .sidebar-item-action 绝对定位钉在右端，视觉与嵌套时一致；
+                   两者不再是父子，点击也就不需要 stopPropagation 了。 */
+                <div key={item.path} className="sidebar-item-row">
+                  <button
+                    className={`sidebar-item${isActive(item.path) ? ' sidebar-item-active' : ''}`}
+                    onClick={() => handleNav(item.path)}
+                  >
+                    <span className="sidebar-item-icon">{item.icon}</span>
+                    <span className="sidebar-item-label">{item.label}</span>
+                  </button>
                   {/* 上传快捷入口在笔记分组 */}
                   {item.path === '/notes' && !collapsed && (
                     <button
                       className="sidebar-item-action"
-                      onClick={(e) => { e.stopPropagation(); handleNav('/upload') }}
+                      onClick={() => handleNav('/upload')}
                       aria-label="上传资料"
                     >
                       +
                     </button>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           ))}

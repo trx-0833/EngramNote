@@ -189,3 +189,59 @@ describe('桌面形态不回归', () => {
     expect(dashboard.className).toContain('sidebar-item-active')
   })
 })
+
+/**
+ * overhaul-plan 5.9：可交互元素不能嵌套。
+ *
+ * 原实现把「+ 上传资料」放在「笔记列表」那颗 <button> 里面 ——
+ * 非法 HTML，React 会报 validateDOMNesting，键盘 Tab 也只会落到外层按钮上，
+ * 读屏把两个目的地念成一条。修法是让两者成为**兄弟**节点（见 Sidebar.tsx）。
+ *
+ * 这几条用例是照着"当年为什么坏"写的，而不是照着实现写的。
+ *
+ * 为什么没有"监听 console.error 断言没有 validateDOMNesting 告警"这条：
+ * React 对同一种父子标签组合**每个进程只报一次**（实测：同文件第二次渲染
+ * 就是 0 条），所以在共享的测试文件里它取决于用例执行顺序 —— 会变成
+ * "有时红有时绿"的假护栏。告警的消失改用人工核验（整文件跑一遍看 stderr）。
+ */
+describe('可交互元素不嵌套（5.9）', () => {
+  it('★ 导航项按钮里不再套着按钮：上传入口与它是兄弟节点', () => {
+    renderSidebar({ mobileOpen: true })
+    const notesItem = screen.getByRole('button', { name: /笔记列表/ })
+
+    // 判据：一个可交互元素出现在另一个可交互元素**内部**
+    expect(notesItem.querySelector('button, a, input, select, textarea, [role="button"]')).toBeNull()
+
+    const action = screen.getByRole('button', { name: '上传资料' })
+    expect(action.className).toContain('sidebar-item-action')
+    // 同级 = 同一个 .sidebar-item-row 的两个孩子（+ 的位置由 layout.css 绝对定位负责）
+    expect(action.parentElement).toBe(notesItem.parentElement)
+    expect(action.parentElement?.className).toContain('sidebar-item-row')
+  })
+
+  it('★ 侧边栏里任何可交互元素都不再套着可交互元素（不止笔记那一行）', () => {
+    renderSidebar({ mobileOpen: true })
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    const interactive = [...nav.querySelectorAll('button, a, input, select, textarea, [role="button"]')]
+    expect(interactive.length).toBeGreaterThan(10) // 14 个入口 + 头部/底部按钮
+    const nested = interactive
+      .filter((el) => el.querySelector('button, a, input, select, textarea, [role="button"]'))
+      .map((el) => el.textContent)
+    expect(nested, '这些可交互元素里还套着可交互元素').toEqual([])
+  })
+
+  it('★ 上传入口不再算进导航项的内容（两个动作各是各的）', () => {
+    renderSidebar({ mobileOpen: true })
+    const notesItem = screen.getByRole('button', { name: /笔记列表/ })
+    // 嵌套时这里读出来是「☰笔记列表+」：+ 成了导航项内容的一部分
+    expect(notesItem.textContent).not.toContain('+')
+    expect(notesItem).not.toHaveAccessibleName(/上传资料/)
+    expect(screen.getByRole('button', { name: '上传资料' })).toBeInTheDocument()
+  })
+
+  it('★ 点 + 只跳 /upload：不再靠 stopPropagation 兜住冒泡', async () => {
+    renderSidebar({ mobileOpen: true })
+    await userEvent.click(screen.getByRole('button', { name: '上传资料' }))
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/upload')
+  })
+})
