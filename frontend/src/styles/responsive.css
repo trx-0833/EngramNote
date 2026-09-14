@@ -1,17 +1,96 @@
-/* ── 响应式 ── */
+/* ════════════════════════════════════════════════════════════════
+ * 响应式 / 手机可用性（overhaul-plan 5.10）
+ *
+ * ## 断点只有两个，为什么是这两个
+ *
+ * - `768px`：手机横屏 / 平板竖屏的上界，也是**本项目原本就在用的**断点
+ *   （汉堡抽屉、容器内边距都挂在这里）。桌面侧边栏是 240px 固定宽度，
+ *   视口一旦窄于 768px，正文只剩不到 530px，再窄就会出现"每行三两个字"。
+ *   把主要适配集中在这一个断点上，规则之间的相互覆盖关系才看得清。
+ * - `480px`：常见窄屏手机（360–430px 逻辑宽度，本项验收目标区间）。
+ *   这里做两件在更宽屏上没必要做的事：内边距收到 8px、触控目标抬到 44px。
+ *
+ * 其余"挤压/溢出"尽量用**内在尺寸**解决（`min()`、`auto-fit`、`flex-wrap`），
+ * 而不是再造断点 —— 断点越少，桌面端被误伤的概率越低。
+ *
+ * ## 与桌面的关系
+ *
+ * 本文件**只新增**媒体查询内的规则，不改任何桌面基础样式；
+ * 需要覆盖某个基础规则时，紧跟着写明被覆盖的原规则（与 refinements.css 的
+ * 注释风格一致），便于回退与后续 CSS Modules 迁移时逐条搬运。
+ * ════════════════════════════════════════════════════════════════ */
+
+/* ── 页面纵向内边距：移动端顶部要额外让出固定汉堡按钮的高度 ──
+   这两个变量只在本文件内使用（图谱页算可用高度时要减掉它们），
+   写在顶部是为了让"汉堡按钮占了多高"只有一个数据源。 */
+:root {
+  --page-pad-y-top: 64px;
+  --page-pad-y-bottom: var(--space-md);
+}
 
 @media (max-width: 768px) {
-  .sidebar {
+  /* ══ 1. 导航：侧边栏 → 抽屉 ══ */
+
+  /* 原规则（layout.css）: .sidebar { position: fixed; width: var(--sidebar-width); }
+     .sidebar-collapsed { width: var(--sidebar-collapsed-width); }
+     手机上抽屉宽度按视口算；并且必须**同时覆盖 .sidebar-collapsed** ——
+     用户在桌面上收起过侧边栏时组件会把该类一起带上，
+     不覆盖的话抽屉只有 64px 宽、只剩图标（"每个入口都还能到达"当场失效）。 */
+  .sidebar,
+  .sidebar-collapsed {
+    width: min(86vw, var(--sidebar-width));
     transform: translateX(-100%);
-    width: var(--sidebar-width);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .sidebar-mobile-open {
     transform: translateX(0);
   }
 
+  /* 抽屉里一律按展开形态渲染：折叠态是桌面专有的表达 */
+  .sidebar-collapsed .sidebar-item-label {
+    display: inline;
+  }
+
+  .sidebar-collapsed .sidebar-item {
+    justify-content: flex-start;
+    padding: var(--space-sm);
+  }
+
+  .sidebar-collapsed .sidebar-section-title {
+    text-align: left;
+    padding: var(--space-sm) var(--space-sm) var(--space-xs);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+  }
+
+  .sidebar-collapsed .sidebar-section-title::after {
+    content: none;
+  }
+
+  .sidebar-collapsed .sidebar-item-action {
+    display: flex;
+  }
+
+  /* 桌面折叠按钮在抽屉里没有意义（抽屉本身就是"收起"状态） */
+  .sidebar-collapse-btn {
+    display: none;
+  }
+
+  .sidebar-mobile-close {
+    width: 44px;
+    height: 44px;
+    font-size: 1.25rem;
+  }
+
   .sidebar-mobile-toggle {
     display: flex;
+    width: 44px;
+    height: 44px;
+    top: calc(var(--space-sm) + env(safe-area-inset-top, 0px));
+    left: calc(var(--space-sm) + env(safe-area-inset-left, 0px));
+    font-size: 1.35rem;
   }
 
   .app-layout,
@@ -19,24 +98,322 @@
     margin-left: 0;
   }
 
-  .app-layout .container {
-    padding: var(--space-md) var(--space-md);
+  /* 触控目标：抽屉里每个入口 ≥44px（原：padding 4px 8px + 0.875rem ≈ 29px） */
+  .sidebar-item {
+    min-height: 44px;
+    font-size: 0.95rem;
   }
 
+  .sidebar-item-action {
+    width: 32px;
+    height: 32px;
+    font-size: 1.25rem;
+  }
+
+  .sidebar-section-title {
+    padding-top: var(--space-sm);
+  }
+
+  /* 原规则: .app-layout .container { padding: var(--space-xl) var(--space-xl); }
+     移动端顶部额外让出汉堡按钮，否则它会盖住每页第一行（标题/搜索框）。 */
+  .app-layout .container {
+    padding: var(--page-pad-y-bottom) var(--space-md);
+    padding-top: var(--page-pad-y-top);
+  }
+
+  /* ══ 2. 通用触控目标与溢出保护 ══ */
+
+  /* 桌面按钮高约 33px，手指按不准；移动端统一抬到 40px，
+     480px 以下再抬到 44px（见下一段）。 */
+  .btn {
+    min-height: 40px;
+  }
+
+  .filter-pill,
+  .segment-btn,
+  .graph-btn,
+  .graph-control-btn {
+    min-height: 40px;
+  }
+
+  .filter-pill,
+  .segment-btn,
+  .graph-btn {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  /* 输入控件同样抬到 40px（原：padding 8px 16px ≈ 37px 高）。
+     checkbox / radio 必须排除 —— 它们的固有尺寸是 13px 见方，
+     被拉成 40px 高会把整行撑开（analysis.css 里已有一处同类兜底）。 */
+  select,
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea {
+    min-height: 40px;
+  }
+
+  /* 原规则（保留自改造前）: .btn-ghost 在窄屏收一档字号与左右内边距 ——
+     幽灵按钮常成排出现（项目卡片底部、图谱面板），桌面尺寸在手机上会挤成两行。 */
   .btn-ghost {
     padding: var(--space-xs) var(--space-sm);
     font-size: 0.8rem;
   }
+
+  /* 图谱工具条里的搜索框与类型下拉原为 0.8rem（12.8px）：手机上既难读，
+     聚焦时 iOS 还会自动把整页放大。responsive.css 在 graph.css 之后加载，
+     同权重即可覆盖，不必用 !important。 */
+  .graph-search-input,
+  .graph-filter-select {
+    font-size: 1rem;
+  }
+
+  /* 卡片是页面级容器：长英文/URL 不该把整页顶出横向滚动条 */
+  .card {
+    overflow-wrap: anywhere;
+  }
+
+  /* ══ 3. 仪表盘 / 笔记列表 / 各页页头 ══ */
+
+  /* 页头（标题 + 操作按钮）在各页面都是同一种内联 flex 行：
+     「知识卡片 / 今日资料 / 回收站 / 学习目标 / 卡片详情」的标题与按钮并排，
+     窄屏上标题被压成两三行、按钮挤到屏幕外 → 允许换行。
+     类名由各页面挂在同一个 div 上，只影响窄屏。 */
+  .page-header-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-sm);
+  }
+
+  /* F-16：Dashboard.tsx 的两处 `1fr 1fr` 在 375px 屏上每列不到 170px，
+     中文标题被逐字挤断。窄屏收成一列。 */
+  .dashboard-two-col {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  /* 待复习卡片：标题 + "开始复习"按钮，窄屏允许换行 */
+  .dashboard-review-card {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  /* 笔记列表项：正文与"删除/重试"挤在同一行会把标题压成一条竖线，
+     窄屏改为上下两段，按钮靠右。 */
+  .note-list-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .note-list-item h3 {
+    overflow-wrap: anywhere;
+  }
+
+  .note-list-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  /* ══ 4. 笔记详情：长文阅读 ══ */
+
+  /* 原规则（NoteDetailHeader 内联）: display:flex; justify-content:space-between
+     标题与 8 个操作按钮同行，窄屏必然溢出 → 上下排列，按钮组允许换行。 */
+  .note-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .note-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .note-detail-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  /* 原规则（markdown.css）: .markdown-body { font-size: 0.95rem; line-height: 1.8 }
+     手机上 15px 正文偏小，抬到 16px 并把行高放宽，保证每行 15–20 字的舒适行长。 */
+  .markdown-body {
+    font-size: 1rem;
+    line-height: 1.85;
+  }
+
+  .markdown-body h1 { font-size: 1.35rem; }
+  .markdown-body h2 { font-size: 1.2rem; }
+  .markdown-body h3 { font-size: 1.05rem; }
+
+  /* 长英文单词、URL、行内代码在窄屏上必须能断行 */
+  .markdown-body p,
+  .markdown-body li,
+  .markdown-body blockquote,
+  .markdown-body :not(pre) > code {
+    overflow-wrap: anywhere;
+  }
+
+  /* 宽表格：表格自身成为横向滚动容器（CSS 无法给表格套一层 wrapper，
+     display:block + overflow-x:auto 是纯 CSS 下唯一不丢表格语义的办法） */
+  .markdown-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .markdown-body th,
+  .markdown-body td {
+    padding: var(--space-xs) var(--space-sm);
+    white-space: normal;
+  }
+
+  /* 行间公式：原规则已有 overflow-x:auto，这里补上 max-width 与字号，
+     避免公式比容器宽时整页跟着横向滚动 */
+  .markdown-body .katex-block,
+  .markdown-body .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .markdown-body .katex {
+    font-size: 1em;
+  }
+
+  /* 代码块本身已有 overflow-x:auto，只收字号，让一屏能多看几列 */
+  .markdown-body pre {
+    font-size: 0.85rem;
+  }
+
+  /* 编辑分屏：两栏在手机上并排等于两栏都不能用 */
+  .edit-split {
+    grid-template-columns: 1fr;
+  }
+
+  /* ══ 5. 复习：四档自评 ══ */
+
+  /* 自评按钮是复习闭环里唯一必须点准的东西。
+     原样（内联 padding 8px 16px + 两行文字）约 52px 高，但行数不定
+     （hint 在窄屏会换成三行，也可能只剩一行），这里把下限钉死 ≥56px。 */
+  .self-rating-btn {
+    min-height: 56px;
+  }
+
+  /* ══ 6. 知识图谱：画布 + 侧栏 ══ */
+
+  /* F-16：GraphSidebar 固定 320px —— 375px 屏上画布只剩约 55px 宽的一条竖缝。
+     窄屏改为贴底的抽屉式面板：画布保留完整宽度，面板浮在上方，
+     由工具栏上一直可见的「收起/展开」按钮开合（该按钮的行为不变）。 */
+  .graph-page {
+    height: calc(100vh - var(--page-pad-y-top) - var(--page-pad-y-bottom));
+    height: calc(100dvh - var(--page-pad-y-top) - var(--page-pad-y-bottom));
+  }
+
+  .graph-toolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .graph-toolbar-left,
+  .graph-toolbar-right {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .graph-search-box {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .graph-search-input,
+  .graph-search-input:focus {
+    width: 100%;
+  }
+
+  .graph-sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 50vh;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+    background: var(--color-bg);
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -8px 24px rgba(26, 26, 46, 0.12);
+    z-index: 90;
+    overscroll-behavior: contain;
+  }
+
+  /* 缩略图在手机上是纯占地（画布本来就小）；缩放控件挪到画布右上，
+     否则会被抽屉面板盖住。 */
+  .graph-minimap {
+    display: none;
+  }
+
+  .graph-controls {
+    top: 12px;
+    bottom: auto;
+    flex-direction: row;
+  }
+
+  .graph-control-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* ══ 7. 弹窗与浮层 ══ */
+
+  /* 原规则（各 Modal 内联）: 遮罩无内边距，卡片 width:100% —— 手机上弹窗贴边。
+     refinements.css 已在用同一条属性选择器命中这些遮罩（rgba(0,0,0,0.5)）。 */
+  [style*="rgba(0,0,0,0.5)"] {
+    padding: var(--space-md);
+  }
 }
 
 @media (max-width: 480px) {
-  .sidebar {
-    width: 85vw;
+  :root {
+    --page-pad-y-top: 60px;
+    --page-pad-y-bottom: var(--space-sm);
+  }
+
+  .sidebar,
+  .sidebar-collapsed {
+    width: 88vw;
     max-width: var(--sidebar-width);
   }
 
+  /* 原规则: .app-layout .container { padding: var(--space-md); padding-top: 64px } */
   .app-layout .container {
-    padding: var(--space-sm) var(--space-sm);
+    padding: var(--page-pad-y-bottom) var(--space-sm);
+    padding-top: var(--page-pad-y-top);
+  }
+
+  /* 窄屏手机的触控目标按 44px 下限（Apple HIG / WCAG 2.5.5 的建议值） */
+  .btn {
+    min-height: 44px;
+  }
+
+  .self-rating-btn {
+    min-height: 60px;
+  }
+
+  /* 笔记详情的操作按钮：一行两个，不再挤成"一个字一行"的竖排 */
+  .note-detail-actions .btn {
+    flex: 1 1 calc(50% - var(--space-sm));
+  }
+
+  /* 搜索框与"共 N 条"并排时，窄屏会把输入框压到只剩几十像素 → 各占一行 */
+  .list-toolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .list-toolbar .search-input-wrapper {
+    flex: 1 1 100%;
+    max-width: none;
   }
 
   .knowledge-points-grid {
@@ -47,5 +424,20 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-sm);
+  }
+
+  /* 图谱工具条竖排后，右侧按钮组也要能整行铺开（原来是靠右挤在一起） */
+  .graph-toolbar-right {
+    width: 100%;
+  }
+
+  /* 统计数字在 2 列布局下容易换成两行，收一档字号 */
+  .stat-number {
+    font-size: 1.5rem;
+  }
+
+  /* 图表标题在窄屏上按 1.25rem 会顶到换行，收一档 */
+  .heading-serif {
+    overflow-wrap: anywhere;
   }
 }

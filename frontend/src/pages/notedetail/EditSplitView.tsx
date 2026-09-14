@@ -35,13 +35,14 @@ export default function EditSplitView({
         <button className="btn btn-primary" onClick={onSave} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
         <button className="btn btn-secondary" onClick={onCancel} disabled={saving}>取消</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-md)' }}>
+      {/* 分屏栅格用 min(320px, 100%) 做内在尺寸：窄屏自动变单栏，不需要额外断点 */}
+      <div className="edit-split">
         <textarea
           className="markdown-editor card"
           value={editContent}
           onChange={(e) => onEditContentChange(e.target.value)}
           disabled={saving}
-          style={{ width: '100%', minHeight: '60vh', padding: '1.5rem', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: '1.6', resize: 'vertical', border: '1px solid var(--color-border)', borderRadius: '0.5rem', outline: 'none' }}
+          style={{ width: '100%', minHeight: '60vh', fontFamily: 'inherit', fontSize: '0.95rem', lineHeight: '1.6', resize: 'vertical', border: '1px solid var(--color-border)', borderRadius: '0.5rem', outline: 'none' }}
         />
         <article
           className="card markdown-body"

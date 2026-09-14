@@ -163,8 +163,8 @@ export default function LearningGoals() {
 
   return (
     <div className="page-enter">
-      {/* 页头：标题 + 新建按钮 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      {/* 页头：标题 + 新建按钮（窄屏换行，见 .page-header-row） */}
+      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
         <h1 className="heading-serif gradient-text" style={{ fontSize: '2rem' }}>
           学习目标
         </h1>

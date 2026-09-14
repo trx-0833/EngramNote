@@ -186,7 +186,7 @@ export default function KnowledgeCards() {
 
   return (
     <div className="page-enter">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
         <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>知识卡片</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>共 {total} 张卡片</span>
@@ -278,7 +278,8 @@ export default function KnowledgeCards() {
               {expandedNotes.has(group.note_id) && (
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                  // min(320px, 100%)：窄屏（可用宽度 <320px）不再撑出横向滚动
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))',
                   gap: 'var(--space-md)',
                 }}>
                   {group.cards.map(card => (

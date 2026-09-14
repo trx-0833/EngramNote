@@ -339,7 +339,8 @@ export default function TodayLearn() {
             role="button"
             tabIndex={0}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* 窄屏换行：标题与"开始复习"并排会被压扁（.page-header-row） */}
+            <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>今日待复习: {dueCount} 题</h3>
                 <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>

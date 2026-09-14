@@ -43,6 +43,11 @@ import {
 
 import type { Note, NoteInFolder, Project } from '../api/client'
 import ErrorBoundary from '../components/ErrorBoundary'
+import { ToastProvider } from '../components/Toast'
+import { resetContractDriftNotices } from './contractDrift'
+// 源码原文（`?raw`，由 vite/client 声明类型）：确认"写法是否统一"只能在源码层面断言
+import graphMutationsSource from './knowledgegraph/useGraphMutations.ts?raw'
+import useProjectsSource from './projects/useProjects.ts?raw'
 
 // ── mock 掉整条 API 层：本文件测的是页面行为，不是接口契约 ──
 vi.mock('../api/client', async () => {
@@ -158,20 +163,24 @@ function NoteDetailStub() {
 
 function renderPage(initialEntry = '/projects') {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route
-          path="/projects"
-          element={
-            // 与 App.tsx 一致：页面被路由级错误边界包住
-            <ErrorBoundary resetKey="/projects">
-              <Projects />
-            </ErrorBoundary>
-          }
-        />
-        <Route path="/notes/:noteId" element={<NoteDetailStub />} />
-      </Routes>
-    </MemoryRouter>,
+    // 真实 ToastProvider（与 main.tsx 一致）：契约漂移提示就走这条全局出口，
+    // 因此"提示出现了没有"可以在真实 DOM 上断言，而不是靠替身自说自话
+    <ToastProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route
+            path="/projects"
+            element={
+              // 与 App.tsx 一致：页面被路由级错误边界包住
+              <ErrorBoundary resetKey="/projects">
+                <Projects />
+              </ErrorBoundary>
+            }
+          />
+          <Route path="/notes/:noteId" element={<NoteDetailStub />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   )
 }
 
@@ -200,6 +209,9 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   // 破坏性操作都要二次确认：默认"用户点了确定"，需要取消的用例自己改
   confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
+  // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
+  resetContractDriftNotices()
 
   mockedProjects.mockResolvedValue([makeProject()])
   mockedCreate.mockResolvedValue(makeProject({ id: 'p-9' }))
@@ -646,5 +658,164 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expect(screen.getByText('BERT 预训练')).toBeInTheDocument()
     expect(screen.getAllByRole('checkbox')).toHaveLength(1)
     expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * 宽容解析的另一半（overhaul-plan AZ.7）：形状不对时**必须有人知道**。
+ *
+ * 上面那组用例证明的是"不白屏"，但也正是它们把真实的契约破坏吞掉了 ——
+ * 后端一直回 `{items:[…]}`，页面一直正常显示，没有任何地方会报错。
+ * 这一组用例钉住：漂移浮出成一条非阻塞提示（全局 toast），且**正常响应一条都不报**
+ * —— 一个总在响的提示比没有提示更糟，用户会学会无视它。
+ */
+describe('契约漂移的可见性（既容忍又报出来）', () => {
+  it('★ 包装载荷：既照常渲染项目，又浮出一条说明是哪个接口的提示', async () => {
+    mockedProjects.mockResolvedValue({ items: [makeProject()] } as never)
+    renderPage()
+
+    // 容忍照旧：项目还在（不能说成"一个都没有"）
+    expect(await screen.findByText('Transformer 论文精读')).toBeInTheDocument()
+
+    // 提示浮出来，且能看出是哪个接口、什么形状
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('GET /projects 的响应结构与约定不符')
+    expect(notice).toHaveTextContent('items 包装')
+
+    // 非阻塞、不替换内容：页面骨架与卡片都还在，也没有弹窗
+    expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /查看笔记（2）/ })).toBeInTheDocument()
+  })
+
+  it('★ 非数组载荷：降级为空状态的同时报出来，不是静默当作"没有项目"', async () => {
+    mockedProjects.mockResolvedValue(undefined as never)
+    renderPage()
+
+    expect(await screen.findByText('还没有项目')).toBeInTheDocument()
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('GET /projects 的响应结构与约定不符')
+    expect(notice).toHaveTextContent('不是数组')
+  })
+
+  it('★ 正常响应一条提示都不报（最重要的反向断言）', async () => {
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+
+    // 展开项目会再走一遍 `/projects/{id}` 的 notes 归一化，同样不该报警
+    await expandProject()
+    expect(await screen.findByText('Attention Is All You Need')).toBeInTheDocument()
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('安全：候选笔记响应缺 items（形状漂移）时给出空候选并报出漂移，而不是谎称加载失败', async () => {
+    mockedNotes.mockResolvedValue({ total: 0 } as never)
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+
+    await userEvent.click(screen.getByRole('button', { name: '添加笔记' }))
+
+    // 面板照常打开、给出空候选说明；不能再显示"加载候选笔记失败"（那会让用户去重试网络）
+    expect(await screen.findByText('暂无可添加的笔记')).toBeInTheDocument()
+    expect(screen.queryByText('加载候选笔记失败，请稍后重试')).not.toBeInTheDocument()
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('GET /notes 的响应结构与约定不符')
+    expect(notice).toHaveTextContent('items')
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * `formatSize(0)`（BB.8 第 4 条）：0 字节是真实大小，不是"未知"。
+ * 这里断言用户真正看到的那一格，而不是只测格式化函数 —— 修复的价值在于
+ * 一条 0 字节的笔记不再显示成 `—`（与"后端没给这个字段"无法区分）。
+ */
+describe('文件大小显示', () => {
+  it('0 字节的笔记显示 0 B，而不是"—"', async () => {
+    mockedDetail.mockResolvedValue({
+      ...makeProject(),
+      notes: [makeNoteInFolder({ file_size: 0 })],
+    })
+    renderPage()
+    await expandProject()
+
+    const row = (await screen.findByText('Attention Is All You Need')).closest(
+      '.note-select-card',
+    ) as HTMLElement
+    expect(within(row).getByText('0 B')).toBeInTheDocument()
+    expect(within(row).queryByText('—')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * 两个错误槽位（BB.8 第 5 条）：页面级失败与重命名校验曾经共用 `error`，
+ * 于是点掉"加载失败"会把"名称不能为空"一起抹掉 —— 用户看不到自己为什么没保存成功。
+ */
+describe('页面级失败与重命名校验各自独立', () => {
+  /** 让两条提示同时在场：先触发重命名校验，再让后端的列表请求失败 */
+  async function showBothErrors() {
+    let calls = 0
+    mockedProjects.mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) return [makeProject()]
+      throw new Error('网络不通')
+    })
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+
+    await userEvent.click(screen.getByRole('button', { name: '重命名' }))
+    const nameInputs = screen.getAllByPlaceholderText('项目名称')
+    await userEvent.clear(nameInputs[1])
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText('项目名称不能为空')
+
+    // 删除后重拉列表：这一次后端不通 → 页面级失败
+    await userEvent.click(screen.getByRole('button', { name: '删除' }))
+    await screen.findByText('加载项目列表失败，请稍后重试')
+  }
+
+  it('两条同时在场，且各有各的关闭按钮', async () => {
+    await showBothErrors()
+
+    expect(screen.getByText('项目名称不能为空')).toBeInTheDocument()
+    expect(screen.getByText('加载项目列表失败，请稍后重试')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '✕' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关闭重命名提示' })).toBeInTheDocument()
+  })
+
+  it('★ 关掉"加载失败"不会顺手清掉"名称不能为空"', async () => {
+    await showBothErrors()
+
+    await userEvent.click(screen.getByRole('button', { name: '✕' }))
+
+    expect(screen.queryByText('加载项目列表失败，请稍后重试')).not.toBeInTheDocument()
+    expect(screen.getByText('项目名称不能为空')).toBeInTheDocument()
+  })
+
+  it('★ 反向同理：关掉重命名校验不会清掉"加载失败"', async () => {
+    await showBothErrors()
+
+    await userEvent.click(screen.getByRole('button', { name: '关闭重命名提示' }))
+
+    expect(screen.queryByText('项目名称不能为空')).not.toBeInTheDocument()
+    expect(screen.getByText('加载项目列表失败，请稍后重试')).toBeInTheDocument()
+  })
+})
+
+/**
+ * 确认写法统一（BB.8 第 2 条）：`useProjects` 曾用 `window.confirm`，`useGraphMutations`
+ * 用裸 `confirm`。浏览器里是同一个函数，所以**运行时不可观测** —— 只有源码层面的断言
+ * 才能让"下次又写回 window.confirm"变红。行为（破坏性操作必须先问）由上面
+ * 「删除项目必须先确认」「移出笔记要先确认」两条用例各自钉住，这条只管写法一致。
+ */
+describe('破坏性操作的确认写法统一', () => {
+  it('两个页面的确认调用都用裸 confirm（全站多数写法），且确认没有被删掉', () => {
+    const joined = [useProjectsSource, graphMutationsSource].join('\n')
+
+    expect(joined).not.toContain('window.confirm(')
+    expect(useProjectsSource).toContain('if (!confirm(') // useProjects 的两次二次确认仍在
+    expect(graphMutationsSource).toContain('if (!confirm(') // useGraphMutations 的两处也仍是裸 confirm
   })
 })

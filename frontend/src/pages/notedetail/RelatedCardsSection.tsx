@@ -30,7 +30,8 @@ export default function RelatedCardsSection({
   return (
     <div style={{ marginTop: 'var(--space-lg)' }}>
       <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>关联知识卡片 ({relatedCards.length})</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-md)' }}>
+      {/* min(280px, 100%)：320px 窄屏（可用宽度约 256px）下不再横向溢出 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 'var(--space-md)' }}>
         {relatedCards.slice(0, MAX_VISIBLE_CARDS).map(card => (
           <div
             key={card.id}

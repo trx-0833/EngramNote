@@ -27,6 +27,8 @@ export default function Projects() {
     loading,
     error,
     clearError,
+    renameError,
+    clearRenameError,
     renaming,
     expanded,
     scanning,
@@ -56,6 +58,16 @@ export default function Projects() {
 
       {error && <ProjectsErrorBanner error={error} onDismiss={clearError} />}
 
+      {/* 重命名校验（"项目名称不能为空"）：与页面级失败分成两条，
+          点掉其中一条不会连带清掉另一条（原来共用一个 error 槽位就会） */}
+      {renameError && (
+        <ProjectsErrorBanner
+          error={renameError}
+          onDismiss={clearRenameError}
+          dismissLabel="关闭重命名提示"
+        />
+      )}
+
       {/* 新建项目 */}
       <NewProjectForm onCreated={loadProjects} />
 
@@ -75,7 +87,9 @@ export default function Projects() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            // min(340px, 100%)：可用宽度不足 340px 时（<356px 的窄屏）不再撑出横向滚动；
+            // 宽屏下 min() 取 340px，与改动前逐像素一致（overhaul-plan 5.10）
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))',
             gap: 16,
             alignItems: 'stretch',
           }}

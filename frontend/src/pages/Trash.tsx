@@ -108,8 +108,8 @@ export default function Trash() {
 
   return (
     <div className="page-enter">
-      {/* 头部：标题 + 清空按钮 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      {/* 头部：标题 + 清空按钮（窄屏换行，见 .page-header-row） */}
+      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
         <div>
           <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>回收站</h1>
           <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>

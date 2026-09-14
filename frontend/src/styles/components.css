@@ -222,6 +222,45 @@ input::placeholder, textarea::placeholder {
 /* 未知/空状态的显式兜底，避免拼不出类名时完全没有样式 */
 .status-unknown { color: var(--color-text-secondary); }
 
+/* ── 页面级布局挂点（响应式适配用）──
+   这些类只描述"这一行/这一块怎么排"，不含任何业务样式。
+   之所以要从 tsx 的内联样式搬过来：内联样式优先级高于媒体查询，
+   留在 tsx 里就等于放弃了对窄屏的适配能力（overhaul-plan §2.8 F-16）。
+   移动端的具体覆盖见 responsive.css。 */
+
+/* 笔记列表项：左侧正文 + 右侧操作按钮 */
+.note-list-item {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.note-list-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* 笔记详情页头部：标题 + 操作按钮组 */
+.note-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-md);
+}
+
+.note-detail-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* 编辑模式：左编辑右预览的分屏 */
+.edit-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--space-md);
+}
+
 /* ── 工具类 ── */
 
 .page-enter {

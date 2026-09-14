@@ -136,7 +136,7 @@ export default function NotesList() {
   return (
     <div className="page-enter">
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
-      <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
+      <div className="list-toolbar" style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
         <div className="search-input-wrapper">
           <svg className="search-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" />
@@ -211,14 +211,13 @@ export default function NotesList() {
           {notes.map((note) => (
             <article
               key={note.id}
-              className="card card-hover"
-              style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              className="card card-hover note-list-item"
               onClick={() => navigate(`/notes/${note.id}`)}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/notes/${note.id}`) }} // 支持键盘 Enter 键触发导航
             >
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>{note.title}</h3>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
                   {/* 来源类型标签 */}
@@ -258,7 +257,7 @@ export default function NotesList() {
                 )}
               </div>
               {/* 操作按钮区域 */}
-              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+              <div className="note-list-actions">
                 {/* 重试按钮，仅 failed 状态显示 */}
                 {note.status === 'failed' && (
                   <button

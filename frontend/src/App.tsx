@@ -94,8 +94,13 @@ function AppRoutes() {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-      {/* 移动端汉堡菜单 */}
-      <button className="sidebar-mobile-toggle" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
+      {/* 移动端汉堡菜单（桌面由 CSS 隐藏；抽屉打开时抽屉会盖住它，见 layout.css） */}
+      <button
+        className="sidebar-mobile-toggle"
+        onClick={() => setMobileOpen(true)}
+        aria-label="打开菜单"
+        aria-expanded={mobileOpen}
+      >
         {'\u2630'}
       </button>
       <div className={`app-layout${sidebarCollapsed ? ' app-layout-collapsed' : ''}`}>

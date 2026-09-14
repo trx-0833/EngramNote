@@ -133,11 +133,44 @@
   border-radius: 0;
 }
 
+/* 移动端抽屉的关闭按钮：由 Sidebar 组件在 mobileOpen 时渲染，
+   桌面上这份样式不会出现（桌面侧边栏常驻，没有"关掉它"这回事）。 */
+.sidebar-mobile-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebar-mobile-close:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
 .sidebar-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-sm) var(--space-sm);
+  /* 抽屉内滚动到边界时不要把手势传给背后的页面 */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 抽屉打开时锁住页面滚动（类名由 Sidebar 组件挂到 body 上）。
+   不锁的话，手指在遮罩上滑动会把背后的页面滚走，
+   关掉抽屉后用户会发现自己不知道被带到哪里了。 */
+body.sidebar-open-lock {
+  overflow: hidden;
 }
 
 .sidebar-section {
@@ -294,7 +327,9 @@
   position: fixed;
   top: var(--space-sm);
   left: var(--space-sm);
-  z-index: 101;
+  /* 99 而不是 101：抽屉（.sidebar，z-index 100）打开时必须盖住这个按钮。
+     原来 101 会让汉堡按钮浮在抽屉头上，和抽屉里的 Logo 叠在一起。 */
+  z-index: 99;
   width: 40px;
   height: 40px;
   border-radius: var(--radius-sm);

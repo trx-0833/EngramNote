@@ -1,5 +1,24 @@
 /* ── 仪表盘统计卡片 ── */
 
+/* 仪表盘的两栏区块（今日目标 + 每日任务、待复习 + 薄弱点）。
+   原为 Dashboard.tsx 的内联 `gridTemplateColumns: '1fr 1fr'`：内联样式
+   赢不了媒体查询，手机上就永远两列（overhaul-plan §2.8 F-16）。
+   搬到类里之后 responsiveness 由 responsive.css 的 768px 断点接管。 */
+.dashboard-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+/* 今日待复习卡片：左侧文案 + 右侧"开始复习"按钮 */
+.dashboard-review-card {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .stat-card {
   text-align: center;
   padding: var(--space-lg) var(--space-md);

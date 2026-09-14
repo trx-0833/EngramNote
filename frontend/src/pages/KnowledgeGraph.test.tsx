@@ -159,6 +159,7 @@ import {
   suggestRelations,
 } from '../api/client'
 import KnowledgeGraph from './KnowledgeGraph'
+import { resetContractDriftNotices } from './contractDrift'
 
 const mockedGraphData = vi.mocked(getGraphData)
 const mockedSuggestions = vi.mocked(getSuggestions)
@@ -341,6 +342,9 @@ function canvasProps(): ForceGraphMockProps {
 beforeEach(() => {
   fg.props = null
   lastCanvasCtx = null
+  // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
+  // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
+  resetContractDriftNotices()
   mockedGraphData.mockResolvedValue(makeGraph())
   mockedStats.mockResolvedValue(makeStats())
   mockedSuggestions.mockResolvedValue([])
@@ -680,6 +684,127 @@ describe('图谱交互', () => {
     await userEvent.click(screen.getByRole('button', { name: '生成相关建议' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('嵌入服务未就绪')
+  })
+})
+
+/**
+ * 宽容解析的另一半（overhaul-plan AZ.7）：形状不对时**必须有人知道**。
+ *
+ * 下面的漂移用例（以及文件末尾那一组）证明的是"喂残缺数据不白屏"，
+ * 但也正是它们把真实的契约破坏吞掉了 —— 后端一直回 `{items:[…]}`，页面一直正常显示，
+ * 没有任何地方会报错。这一组钉住：漂移浮出成一条非阻塞提示（全局 toast），
+ * 且**正常响应一条都不报** —— 一个总在响的提示比没有提示更糟，用户会学会无视它。
+ */
+describe('契约漂移的可见性（既容忍又报出来）', () => {
+  it('★ 包装载荷（/graph/suggestions 回 {items:[…]}）：既照常渲染又浮出提示', async () => {
+    mockedSuggestions.mockResolvedValue({ items: [makeSuggestion()] } as never)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    await userEvent.click(screen.getByRole('button', { name: /建议/ }))
+    // 容忍照旧：建议照常渲染（数据其实在）
+    expect(screen.getByText(/建议关系 \(1\)/)).toBeInTheDocument()
+
+    // 提示浮出来，且能看出是哪个接口、什么形状
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/suggestions')
+    expect(String(toast.warning.mock.calls[0][1])).toContain('items')
+  })
+
+  it('★ 非数组载荷（stats 的分布字段是对象）：面板降级的同时报出来', async () => {
+    mockedStats.mockResolvedValue(makeStats({ relation_type_distribution: { related: 1 } as never }))
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    // 降级照旧：只少一段条形图，四个基础数字还在
+    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expect(screen.getByText('待确认')).toBeInTheDocument()
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/stats')
+    expect(String(toast.warning.mock.calls[0][1])).toContain('relation_type_distribution')
+  })
+
+  it('★ 正常响应一条提示都不报（最重要的反向断言）', async () => {
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    // 再走一次写操作后的重拉：加载路径与重拉路径都不该报警
+    await userEvent.click(screen.getByTestId('fg-link-e-1'))
+    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
+
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('★ 去重：同一处漂移在反复重拉中只提示一次（确认后每次写操作都会重拉统计）', async () => {
+    mockedStats.mockResolvedValue(makeStats({ relation_type_distribution: {} as never }))
+    renderPage()
+    await screen.findByText('知识图谱')
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+
+    // 写操作后重拉统计：漂移又出现了一次，但提示不该再来一条
+    await userEvent.click(screen.getByTestId('fg-link-e-1'))
+    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(mockedStats).toHaveBeenCalledTimes(2))
+
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * BB.8 第 1 条：8 处"重新拉取"抽成了 `refetchGraphAndStats(mode)`。
+ * 合并的是重复**写法**，不是可观测**行为** —— 两种方式的调用顺序与失败行为不同
+ * （顺序版：图谱失败就不拉统计；并发版：两个请求同时发出），所以两条路径各钉一条用例。
+ * 把任何一条改成另一种写法，对应用例立刻变红。
+ */
+describe('写操作后重拉的调用顺序（抽取后必须逐字不变）', () => {
+  it('★ 单条确认后的重拉是顺序 await：图谱请求还挂着时统计请求不发', async () => {
+    const pendingGraph = deferred<GraphData>()
+    renderPage()
+    await screen.findByText('知识图谱')
+    expect(mockedStats).toHaveBeenCalledTimes(1) // 首屏加载的统计
+
+    mockedGraphData.mockImplementation(() => pendingGraph.promise)
+    await userEvent.click(screen.getByTestId('fg-link-e-1'))
+    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
+
+    // 图谱还没回来 → 统计请求**还没发**（合并成 Promise.all 就会立刻发出第二条）
+    expect(mockedStats).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      pendingGraph.resolve(makeGraph())
+    })
+
+    await waitFor(() => expect(mockedStats).toHaveBeenCalledTimes(2))
+  })
+
+  it('★ 批量确认后的重拉是 Promise.all：图谱请求还挂着时统计请求已经发出', async () => {
+    // 批量按钮只在有两条以上建议时出现（见 GraphSidebar），所以这里给两条
+    mockedSuggestions.mockResolvedValue([
+      makeSuggestion({ id: 's-1' }),
+      makeSuggestion({ id: 's-2', card_1_title: '浮充电压公式', card_2_title: '浮充与均充的区别' }),
+    ])
+    const pendingGraph = deferred<GraphData>()
+    renderPage()
+    await screen.findByText('知识图谱')
+    await userEvent.click(screen.getByRole('button', { name: /建议/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: '全选' }))
+
+    mockedGraphData.mockImplementation(() => pendingGraph.promise)
+    await userEvent.click(screen.getByRole('button', { name: '批量确认 (2)' }))
+    await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
+
+    // 图谱请求挂着，统计照样已经发出（被"顺手统一"成顺序 await 就会变红）
+    expect(mockedStats).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      pendingGraph.resolve(makeGraph())
+    })
   })
 })
 

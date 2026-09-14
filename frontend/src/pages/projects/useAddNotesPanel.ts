@@ -4,6 +4,9 @@
  * 候选笔记只列「尚未归属本项目」的（否则同一篇笔记会被反复添加）、
  * 面板同时只打开一个、打开与关闭都会重置勾选/搜索/错误、
  * 提交成功后关闭面板并刷新列表（展开态还要刷新详情，否则被移出的笔记还挂在页面上）。
+ *
+ * 唯一一处非"纯搬"的补充（BB.8 第 3 条）：候选条目数组原来直接 `data.items.filter(...)`，
+ * 现在过 `unwrapCandidateNotes`（与其它列表接口同一道判据），漂移不再伪装成加载失败。
  */
 import { useState } from 'react'
 import {
@@ -12,6 +15,7 @@ import {
   type Note,
   type Project,
 } from '../../api/client'
+import { unwrapCandidateNotes } from './helpers'
 
 interface UseAddNotesPanelOptions {
   /** 刷新项目列表（笔记归属变化会影响 note_count） */
@@ -39,9 +43,11 @@ export function useAddNotesPanel({
     setAddSearch('')
     setAddError('')
     try {
-      // 拉取全部笔记（分页上限 999），过滤出尚未打上当前项目标签的作为候选
+      // 拉取全部笔记（分页上限 999），过滤出尚未打上当前项目标签的作为候选。
+      // 条目数组统一过 unwrapCandidateNotes（判据只有一处）：`items` 缺失/类型不对时
+      // 归一成空候选并报出契约漂移，而不是当作"加载候选笔记失败" —— 后者会误导用户重试。
       const data = await getNotes(1, 999, undefined, undefined)
-      setCandidateNotes(data.items.filter((n) => !n.project_ids?.includes(p.id)))
+      setCandidateNotes(unwrapCandidateNotes(data).filter((n) => !n.project_ids?.includes(p.id)))
     } catch (err) {
       console.error('加载候选笔记失败:', err)
       setAddError('加载候选笔记失败，请稍后重试')

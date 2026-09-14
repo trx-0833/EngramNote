@@ -77,9 +77,10 @@ export default function NoteDetailHeader({
 
   return (
     <header style={{ marginBottom: 'var(--space-lg)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-md)' }}>
+      {/* 标题 + 操作按钮组：窄屏下改为上下排列、按钮换行（见 responsive.css 的 768px 断点） */}
+      <div className="note-detail-header">
         <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>{note.title}</h1>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+        <div className="note-detail-actions">
           {editMode === 'view' && (
             <button
               className="btn btn-secondary"

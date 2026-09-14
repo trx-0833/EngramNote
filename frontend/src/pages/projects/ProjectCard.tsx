@@ -78,8 +78,10 @@ export default function ProjectCard({
 }: ProjectCardProps) {
   const isRenaming = !!rename
   const isExpanded = !!detail
-  // 详情里的 notes 与 `/projects` 走同一道拆包判据：缺字段/包装对象都不该让 `notes.map` 白屏
-  const notes: NoteInFolder[] = unwrapProjectNotes(detail?.notes)
+  // 详情里的 notes 与 `/projects` 走同一道拆包判据：缺字段/包装对象都不该让 `notes.map` 白屏。
+  // 但"还没展开"必须排除在判据之外：没有详情就是没有笔记列表，把 `undefined` 喂给
+  // unwrapProjectNotes 会把每一次列表渲染都报成契约漂移。
+  const notes: NoteInFolder[] = detail ? unwrapProjectNotes(detail.notes) : []
 
   return (
     <div

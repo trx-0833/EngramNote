@@ -261,7 +261,8 @@ export default function QuestionSets() {
                 {expandedNotes.has(group.note_id) && (
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                    // min(360px, 100%)：360px 屏上原本必然横向溢出（可用宽度不足 360px）
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(min(360px, 100%), 1fr))',
                     gap: 'var(--space-md)',
                   }}>
                     {filtered.map(q => (

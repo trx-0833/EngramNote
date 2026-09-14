@@ -149,14 +149,7 @@ export default function KnowledgeGraph() {
   const suggestedCount = forceGraphData.links.filter((e) => e.status === 'suggested').length
 
   return (
-    <div
-      className="page-enter"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: 'calc(100vh - var(--space-xl) * 2)',
-      }}
-    >
+    <div className="page-enter graph-page">
       {/* 顶部栏 */}
       <GraphToolbar
         nodeCount={nodeCount}
@@ -188,7 +181,7 @@ export default function KnowledgeGraph() {
       )}
 
       {/* 主内容区 */}
-      <div style={{ display: 'flex', flex: 1, gap: 'var(--space-md)', minHeight: 0 }}>
+      <div className="graph-page-main">
         {/* 图谱区域 */}
         <GraphCanvas
           graphRef={graphRef}

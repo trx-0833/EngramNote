@@ -2,7 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 移动端（overhaul-plan 5.10）：viewport 原本就是对的（width=device-width,
+         initial-scale=1.0，且没有 maximum-scale/user-scalable=no 这种禁用缩放的写法）。
+         这里只补 viewport-fit=cover，让刘海屏铺满安全区；左右/下安全区补偿在 responsive.css。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" />

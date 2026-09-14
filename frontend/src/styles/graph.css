@@ -1,5 +1,32 @@
 /* ── 知识图谱（视觉重构）── */
 
+/* 图谱页骨架（原先写在 KnowledgeGraph.tsx 的内联样式里）。
+   搬到 CSS 是为了让响应式文件能改它——内联样式优先级高于媒体查询，
+   手机上就改不动这个高度。类名是**样式挂点**，不含任何业务含义。 */
+.graph-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--space-xl) * 2);
+}
+
+.graph-page-main {
+  display: flex;
+  flex: 1;
+  gap: var(--space-md);
+  min-height: 0;
+}
+
+/* 图谱侧边栏：桌面固定 320px（原为 GraphSidebar.tsx 的内联样式，
+   同样为了让 480px 以下能改成贴底抽屉而搬到这里） */
+.graph-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
 /* 图谱容器：水墨丹青视觉重构 —— 宣纸底 + 四角墨色晕染 + 装裱画框
    原: .graph-canvas { background: radial-gradient(ellipse at center, rgba(15, 52, 96, 0.04) 0%, transparent 70%), linear-gradient(rgba(15, 52, 96, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 52, 96, 0.03) 1px, transparent 1px), var(--color-bg); background-size: 100% 100%, 24px 24px, 24px 24px, auto; border: 1px solid var(--color-border-light); border-radius: var(--radius-md); overflow: hidden; position: relative; } */
 .graph-canvas {

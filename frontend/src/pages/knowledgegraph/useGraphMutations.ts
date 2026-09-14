@@ -5,6 +5,10 @@
  * 单条确认/拒绝是「先 `getGraphData` 再 `getGraphStats`」（顺序 await），
  * 批量与创建/删除是 `Promise.all`，生成建议只在 `new_count > 0` 时重拉。
  * 这些顺序影响"确认后数字与图是否同步"，不能顺手统一。
+ * BB.8 第 1 条的处置：8 处"重新拉取"抽成本文件内的 `refetchGraphAndStats(mode)` ——
+ * 归一化与写回只写一次（BB.6 那种"漏了一处判据"从此不可能再发生），而两种 `mode`
+ * 让**调用次数与发起顺序逐字不变**：顺序版仍是"图谱失败就不拉统计"，
+ * 并发版仍是"两个请求同时发出"。合并的是重复的**写法**，不是可观测的**行为**。
  *
  * 失败路径只报 toast / 面板内错误，**不把已确认的建议从列表里抹掉**（否则用户以为成功了）。
  *
@@ -78,6 +82,31 @@ export function useGraphMutations({
   /** 创建关系提交中 */
   const [creating, setCreating] = useState(false)
 
+  /**
+   * 写操作后"重新拉取图谱 + 统计"的唯一出口
+   *
+   * 这 8 处原先各写一遍（确认/拒绝是顺序 await，批量/删除/创建/生成是 Promise.all），
+   * 重复的代价不是行数而是**判据会漂**：BB.6 里 7 处 `setStats(原始值)` 漏了 `normalizeStats`
+   * 就是这么来的 —— 抽出来后归一化只可能写一次。
+   *
+   * `mode` 必须显式传、不能统一成一种：两种方式的**调用次数与失败行为可观测地不同** ——
+   * `parallel` 两个请求同时发出（一个失败时另一个已经在路上），`sequential` 先拉图谱、
+   * 写完再拉统计（图谱失败时统计**根本不会发**）。`KnowledgeGraph.test.tsx` 有两条用例
+   * 专门钉这两种顺序，所以"顺手统一成 Promise.all"会立刻变红。
+   */
+  async function refetchGraphAndStats(mode: 'parallel' | 'sequential') {
+    if (mode === 'parallel') {
+      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
+      setGraphData(data)
+      setStats(normalizeStats(statsData))
+      return
+    }
+    const data = await getGraphData()
+    setGraphData(data)
+    const statsData = await getGraphStats()
+    setStats(normalizeStats(statsData))
+  }
+
   /** 确认建议关系 */
   async function handleConfirm(relationId: string) {
     setActionLoading(relationId)
@@ -85,10 +114,7 @@ export function useGraphMutations({
       await confirmRelation(relationId)
       setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
       clearSelectedLink() // 清除选中的待审边，避免详情面板残留旧状态
-      const data = await getGraphData()
-      setGraphData(data)
-      const statsData = await getGraphStats()
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('sequential')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '操作失败')
     } finally {
@@ -103,10 +129,7 @@ export function useGraphMutations({
       await rejectRelation(relationId)
       setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
       clearSelectedLink() // 清除选中的待审边，避免详情面板残留旧状态
-      const data = await getGraphData()
-      setGraphData(data)
-      const statsData = await getGraphStats()
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('sequential')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '操作失败')
     } finally {
@@ -122,9 +145,7 @@ export function useGraphMutations({
       await batchConfirmRelations(Array.from(selectedSuggestions))
       setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)))
       clearSelectedSuggestions()
-      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-      setGraphData(data)
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('parallel')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '批量操作失败')
     } finally {
@@ -141,9 +162,7 @@ export function useGraphMutations({
       await batchRejectRelations(Array.from(selectedSuggestions))
       setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)))
       clearSelectedSuggestions()
-      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-      setGraphData(data)
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('parallel')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '批量操作失败')
     } finally {
@@ -162,9 +181,7 @@ export function useGraphMutations({
       // 真正缺失/非数组才归一成空列表
       setSuggestions(normalizeSuggestions(sug))
       if (result.new_count > 0) {
-        const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-        setGraphData(data)
-        setStats(normalizeStats(statsData))
+        await refetchGraphAndStats('parallel')
       }
     } catch (err) {
       setSuggestError(err instanceof Error ? err.message : '生成建议失败')
@@ -180,9 +197,7 @@ export function useGraphMutations({
     try {
       await deleteRelation(relationId)
       clearSelectedLink()
-      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-      setGraphData(data)
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('parallel')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '删除失败')
     } finally {
@@ -197,9 +212,7 @@ export function useGraphMutations({
     try {
       await createRelation(createFirstNode.id, createSecondNode.id, createRelationType)
       exitCreateMode()
-      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-      setGraphData(data)
-      setStats(normalizeStats(statsData))
+      await refetchGraphAndStats('parallel')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '创建失败')
     } finally {

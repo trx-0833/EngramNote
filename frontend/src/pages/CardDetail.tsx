@@ -98,7 +98,8 @@ export default function CardDetail() {
 
   return (
     <div className="page-enter">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-lg)' }}>
+      {/* 标题 + 操作按钮行：窄屏换行（.page-header-row，见 responsive.css） */}
+      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-lg)' }}>
         <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>{card.title}</h1>
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           {editing ? (

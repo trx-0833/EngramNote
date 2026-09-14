@@ -585,16 +585,7 @@ export default function GraphSidebar(props: GraphSidebarProps) {
   } = props
 
   return (
-    <div
-      style={{
-        width: 320,
-        flexShrink: 0,
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-md)',
-      }}
-    >
+    <div className="graph-sidebar">
       {/* 图谱统计面板 */}
       {stats && <StatsPanel stats={stats} />}
 

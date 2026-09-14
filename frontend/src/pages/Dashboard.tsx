@@ -138,8 +138,8 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* 今日学习目标概要 + 每日推荐任务 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)', marginBottom: 'var(--space-xl)' }}>
+      {/* 今日学习目标概要 + 每日推荐任务（两栏布局见 dashboard.css，窄屏收成一列） */}
+      <div className="dashboard-two-col">
         {/* 今日学习目标卡片 */}
         <div
           className="card card-accent-left"
@@ -279,17 +279,11 @@ export default function Dashboard() {
       )}
 
       {/* 复习提醒 + 薄弱点 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)', marginBottom: 'var(--space-xl)' }}>
+      <div className="dashboard-two-col">
         {/* 待复习卡片 */}
         {reviewStats && reviewStats.due_count > 0 && (
           <div
-            className="card card-accent-left"
-            style={{
-              cursor: 'pointer',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
+            className="card card-accent-left dashboard-review-card"
             onClick={() => navigate('/review')}
             role="button"
             tabIndex={0}

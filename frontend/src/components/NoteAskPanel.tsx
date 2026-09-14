@@ -254,12 +254,26 @@ export default function NoteAskPanel({
   }
 
   // 定位：默认显示在选区上方，贴近顶部时显示在下方；拖拽后按用户摆放位置固定
+  //
+  // 夹取区间必须用**面板的实际宽度**算，不能用常量 PANEL_WIDTH：
+  // 窄屏（例如 375px）上面板宽度被 maxWidth 压到 351px，若仍按 480 算，
+  // 右边界 = 375 - 240 - 8 = 127 小于左边界 248，再叠加 translate(-50%)
+  // 就把整个浮层推出屏幕左侧 —— 选段提问在手机上完全够不着
+  // （overhaul-plan §2.8 F-16）。宽屏下 panelWidth 恒为 480，行为与改动前一致。
+  const panelWidth = Math.min(PANEL_WIDTH, Math.max(window.innerWidth - 24, 0))
+  const halfWidth = panelWidth / 2
+  const minLeft = halfWidth + 8
+  const maxLeft = window.innerWidth - halfWidth - 8
+  const panelLeft = maxLeft > minLeft
+    ? Math.min(Math.max(panelPos.x, minLeft), maxLeft)
+    : window.innerWidth / 2 // 视口比面板还窄：居中，由 maxWidth 保证不溢出
+
   const panelStyle: CSSProperties = {
     position: 'fixed',
-    left: Math.min(Math.max(panelPos.x, PANEL_WIDTH / 2 + 8), window.innerWidth - PANEL_WIDTH / 2 - 8),
+    left: panelLeft,
     top: panelPos.y,
     transform: panelAbove ? 'translate(-50%, calc(-100% - 10px))' : 'translate(-50%, 12px)',
-    width: PANEL_WIDTH,
+    width: panelWidth,
     maxWidth: 'calc(100vw - 24px)',
     maxHeight: '60vh',
     overflowY: 'auto',

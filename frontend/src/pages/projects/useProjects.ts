@@ -2,11 +2,19 @@
  * @file 项目页的数据层：列表加载、重命名、删除、展开详情、扫描导入
  * @description 自 `pages/Projects.tsx` 拆分（overhaul-plan 5.5），**只搬不改**：
  * 失败文案（如「加载项目列表失败，请稍后重试」「项目名称不能为空」）、
- * `console.error` 的日志点、`window.confirm` 的确认文案、以及
+ * `console.error` 的日志点、确认文案、以及
  * "删除项目只移除标签、笔记与文件保留"的语义全部逐字保留。
  *
  * 破坏性操作（删除项目 / 移出笔记）的二次确认在各自的处理器里，
  * 取消时**不发请求**；扫描导入只在 `imported > 0` 时刷新列表。
+ *
+ * 三处 BB.8 收尾（语义不变，只改"错在哪、报给谁"）：
+ * 1. `window.confirm` → 裸 `confirm`：全站 8 处裸调用 vs 4 处 `window.confirm`，
+ *    统一到多数写法（浏览器里是同一个函数，测试里的 `window.confirm` 间谍照样命中）；
+ * 2. 重命名校验（"项目名称不能为空"）从页面级 `error` 槽位里分出来 ——
+ *    共用一个槽位时点掉"加载失败"会把"名称不能为空"一起抹掉，用户看不到自己为什么没保存成功；
+ * 3. 挂上契约漂移提示的唯一出口（见 `pages/contractDrift.ts`）：`/projects` 与
+ *    `/projects/{id}` 的形状漂移在归一化时上报，由这里接到全局 toast。
  */
 import { useEffect, useState } from 'react'
 import {
@@ -21,12 +29,16 @@ import {
   type ProjectDetail,
   type ScanImportResponse,
 } from '../../api/client'
+import { useContractDriftNotice } from '../contractDrift'
 import { unwrapProjects } from './helpers'
 
 export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  /** 页面级失败（加载/删除/扫描/重命名请求失败…）：与重命名校验分开，各报各的 */
   const [error, setError] = useState('')
+  /** 重命名表单的校验错误（"项目名称不能为空"），不能被页面级失败的关闭按钮顺手清掉 */
+  const [renameError, setRenameError] = useState('')
 
   // 重命名（行内编辑）
   const [renaming, setRenaming] = useState<Record<string, { name: string; description: string }>>({})
@@ -37,6 +49,10 @@ export function useProjects() {
   // 扫描导入
   const [scanning, setScanning] = useState<Record<string, boolean>>({})
   const [scanResults, setScanResults] = useState<Record<string, ScanImportResponse | null>>({})
+
+  // 契约漂移的提示出口（本页面所有归一化的上报都从这里接到全局 toast）。
+  // 放在既有 hook 之后：新增 hook 不改变上面那些 hook 的调用顺序。
+  useContractDriftNotice()
 
   /** 加载项目列表 */
   async function loadProjects() {
@@ -62,6 +78,8 @@ export function useProjects() {
 
   /** 开始重命名 */
   function startRename(p: Project) {
+    // 上一次的校验错误属于上一次编辑，重开表单就不该再挂着
+    setRenameError('')
     setRenaming((prev) => ({ ...prev, [p.id]: { name: p.name, description: p.description ?? '' } }))
   }
 
@@ -76,9 +94,10 @@ export function useProjects() {
     if (!edit) return
     const name = edit.name.trim()
     if (!name) {
-      setError('项目名称不能为空')
+      setRenameError('项目名称不能为空')
       return
     }
+    setRenameError('')
     try {
       await updateProject(p.id, edit.name.trim(), edit.description.trim() || undefined)
       setRenaming((prev) => {
@@ -95,6 +114,7 @@ export function useProjects() {
 
   /** 取消重命名 */
   function cancelRename(p: Project) {
+    setRenameError('') // 表单没了，表单上的校验错误也不该留在页面上
     setRenaming((prev) => {
       const next = { ...prev }
       delete next[p.id]
@@ -104,7 +124,7 @@ export function useProjects() {
 
   /** 删除项目（只删标签，笔记与文件保留） */
   async function handleDelete(p: Project) {
-    if (!window.confirm(`确定删除项目「${p.name}」？删除仅移除该项目标签，关联笔记与文件都会保留。`)) {
+    if (!confirm(`确定删除项目「${p.name}」？删除仅移除该项目标签，关联笔记与文件都会保留。`)) {
       return
     }
     try {
@@ -171,7 +191,7 @@ export function useProjects() {
 
   /** 将笔记移出项目（破坏性操作：先 confirm，取消则不发请求） */
   async function handleRemoveNote(p: Project, n: NoteInFolder) {
-    if (!window.confirm(`确定将笔记「${n.title}」移出项目「${p.name}」？`)) {
+    if (!confirm(`确定将笔记「${n.title}」移出项目「${p.name}」？`)) {
       return
     }
     try {
@@ -189,11 +209,18 @@ export function useProjects() {
     setError('')
   }
 
+  /** 关闭重命名校验提示（只清自己那一条） */
+  function clearRenameError() {
+    setRenameError('')
+  }
+
   return {
     projects,
     loading,
     error,
     clearError,
+    renameError,
+    clearRenameError,
     renaming,
     expanded,
     scanning,

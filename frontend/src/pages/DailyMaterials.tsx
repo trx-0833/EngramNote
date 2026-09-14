@@ -431,7 +431,7 @@ export default function DailyMaterials() {
   return (
     <div className="page-enter">
       {/* 页面标题和操作按钮 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
         <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
           今日资料
         </h1>
