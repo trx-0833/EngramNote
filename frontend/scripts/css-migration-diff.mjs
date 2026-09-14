@@ -69,6 +69,15 @@ const root = process.cwd()
  *   "必须靠提权才能赢"的正当场景，在这里登记即可 —— 不登记的话差集会把它
  *   误报成"丢失 1 条 + 新增 1 条"；
  * - `keyframes`：搬进模块并改名的 `@keyframes`（动画体必须与全局原版一致）。
+ * - `resolvedConflicts`（第四批新增）：**被裁决的"输家声明"**。
+ *   序 5 的 `assessment.css` 与 `refinements.css` 对 `.quiz-question-card` /
+ *   `-number` / `-text` 写了 14 条同名属性的不同值（`.score-summary-number` 另有 5 条
+ *   跨选择器的覆盖）—— 两边权重相同，**谁赢只看导入顺序**。
+ *   迁移的契约不允许"照抄一套"，于是先用真实 Chromium 读 computed style 测出胜者，
+ *   再把**输的那套删掉**。删掉的声明既不是"丢失"也不是"值有变化"，
+ *   而是**第三种、必须逐条声明**的差异，所以在这里登记：脚本把它从"迁移前"
+ *   一侧摘掉、单独成节列出（谁赢、凭什么），并**自检**每条声明都真的命中过 ——
+ *   写错一条（类名拼错、值改了）会报错退出，不会变成一条永远绿灯的空声明。
  *
  * ⚠️ `rev` 一般**不用写**：留空时脚本按内容自动定位"迁移前"（从 HEAD 往回找
  * 第一个还含有本批老类名的修订）。写死 `HEAD~N` 会被并行的无关提交打乱 ——
@@ -289,6 +298,229 @@ const BATCHES = [
       },
     ],
   },
+  {
+    id: '第四批：assessment.css 按归属拆分 + assessment × refinements 冲突裁决',
+    // 本批尚未提交 → 迁移前按内容自动定位（= 第三批提交后的状态）。
+    // 三个来源：assessment.css（本页私有的 20 条）、refinements.css（补丁层的 14 条）、
+    // responsive.css（480px 的 `.knowledge-points-grid` 一条）。
+    beforeSheets: [
+      'src/styles/assessment.css',
+      'src/styles/refinements.css',
+      'src/styles/responsive.css',
+    ],
+    groups: [
+      {
+        // 留全局的（不在这个清单里）：`.assessment-header` / `-title` / `-subtitle`
+        // （学习评估页 + `pages/projects/ProjectsHeader.tsx`）与 `.note-select-card*`
+        // （+ `pages/projects/ProjectNotesList.tsx`，且 `Projects.test.tsx` 按类名查询）
+        // —— 判据是规范 §4 第 2 条（两个不相邻功能），见 assessment.css 文件头。
+        module: 'src/pages/LearningAssessment.module.css',
+        classes: [
+          'score-bar',
+          'score-bar-header',
+          'score-bar-label',
+          'score-bar-value',
+          'score-bar-track',
+          'score-bar-fill',
+          'score-bar-fill-high',
+          'score-bar-fill-mid',
+          'score-bar-fill-low',
+          'quiz-question-card',
+          'quiz-question-card-active',
+          'quiz-question-number',
+          'quiz-question-text',
+          'score-summary-card',
+          'score-summary-number',
+          'score-summary-label',
+          'score-value',
+          'knowledge-points-grid',
+          'knowledge-points-section',
+        ],
+      },
+    ],
+    // 本批没有需要提权的规则：模块类都单独挂在元素上，没有"全局类 + 模块类
+    // 并列写在同一个元素"的情况（`CASCADE_PAIRS` 因此也不需要新增条目，
+    // 与第三批同理）。唯一的"半覆盖"是 `.scoreSummaryCard .scoreSummaryNumber`
+    // —— 那条**故意保留两条规则**，因为合并会把它从 (0,2,0) 降到 (0,1,0)。
+    hardened: {},
+    // 本批不搬 `@keyframes`：这一批规则里一条 `animation` 都没有
+    // （`LearningAssessment.tsx` 的行内 `animation: 'slideUp …'` 用的是全局动画，
+    // 不过 CSS Modules，`base.css` 的定义不受影响）。
+    keyframes: [],
+    /**
+     * 被裁决的"输家声明"（19 条）。判据不是源码顺序，而是**真实 Chromium 的
+     * computed style**：一次性探针走真实渲染路径（登录 → /assessment →
+     * 开放性问题 → 生成问题 → 提交答案）读 `.quiz-question-card` /
+     * `-number` / `-text` / `.score-summary-number` 的全部 computed 属性，
+     * 并额外用真实指针 hover、真实焦点触发 `:focus-within`。
+     * 实测结论：14 条冲突**全部**由后加载的 `refinements.css` 取胜
+     * （`quiz-question-card` 的 `border-radius` = 16px 而不是 10px、
+     * `-number` 的 32px / 50% / 金色、`-text` 的 1.125rem / flex-start …）。
+     * 探针用完已删，配方与完整实测值见 `docs/css-migration-plan.md` §5 雷区 3
+     * 与 `docs/migration-evidence/5.6-09-conflict-resolution.md`。
+     */
+    resolvedConflicts: [
+      // ── `.quiz-question-card`（5 条）──
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-card',
+        prop: 'border-radius',
+        value: 'var(--radius-md)',
+        winner: 'refinements.css 的 `.quiz-question-card { border-radius: var(--radius-lg) }`',
+        evidence: 'computed border-radius = 16px（--radius-lg），不是 10px',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-card',
+        prop: 'padding',
+        value: 'var(--space-lg)',
+        winner: 'refinements.css 的 `padding: 24px`',
+        evidence:
+          'computed padding = 24px；两侧**数值相同**（--space-lg = 24px），' +
+          '所以这条只是写法之争，删输家不改变渲染',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-card',
+        prop: 'margin-bottom',
+        value: 'var(--space-md)',
+        winner: 'refinements.css 的 `margin-bottom: 16px`',
+        evidence:
+          'computed margin-bottom = 16px；两侧**数值相同**（--space-md = 16px），同上',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-card',
+        prop: 'box-shadow',
+        value: 'var(--shadow-sm)',
+        winner: 'refinements.css 的 `box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06)`',
+        evidence: 'computed box-shadow = rgba(15,52,96,.06) 0 2px 8px（不是 --shadow-sm 的双层阴影）',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-card',
+        prop: 'transition',
+        value: 'border-color 0.2s ease',
+        winner: 'refinements.css 的 `transition: border-color .25s …, box-shadow .25s …`',
+        evidence: 'computed transition-property = border-color, box-shadow、duration = .25s, .25s',
+      },
+      // ── `.quiz-question-number`（6 条）──
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'width',
+        value: '28px',
+        winner: 'refinements.css 的 `width: 32px`',
+        evidence: 'computed width = 32px',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'height',
+        value: '28px',
+        winner: 'refinements.css 的 `height: 32px`',
+        evidence: 'computed height = 32px',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'border-radius',
+        value: '9999px',
+        winner: 'refinements.css 的 `border-radius: 50%`',
+        evidence: 'computed border-radius = 50%（32px 见方下与 9999px 视觉相同，但胜者是 50%）',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'background',
+        value: 'var(--gradient-primary)',
+        winner: 'refinements.css 的 `background: var(--color-accent-light)`',
+        evidence: 'computed background-image = none、background-color = rgba(201,169,89,.12)（金色淡底）',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'color',
+        value: 'white',
+        winner: 'refinements.css 的 `color: var(--color-accent)`',
+        evidence: 'computed color = rgb(201,169,89)，不是白字',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-number',
+        prop: 'font-size',
+        value: '0.8rem',
+        winner: 'refinements.css 的 `font-size: 0.9rem`',
+        evidence: 'computed font-size = 14.4px（0.9rem），不是 12.8px',
+      },
+      // ── `.quiz-question-text`（3 条）──
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-text',
+        prop: 'align-items',
+        value: 'center',
+        winner: 'refinements.css 的 `align-items: flex-start`',
+        evidence: 'computed align-items = flex-start',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-text',
+        prop: 'gap',
+        value: 'var(--space-xs)',
+        winner: 'refinements.css 的 `gap: var(--space-sm)`',
+        evidence: 'computed column-gap = 8px（--space-sm），不是 4px',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.quiz-question-text',
+        prop: 'font-size',
+        value: '0.95rem',
+        winner: 'refinements.css 的 `font-size: 1.125rem`',
+        evidence: 'computed font-size = 18px（1.125rem），不是 15.2px',
+      },
+      // ── `.score-summary-number`：不是同名属性冲突，而是补丁层用 (0,2,0) 压掉单类 ──
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.score-summary-number',
+        prop: 'font-size',
+        value: '2.5rem',
+        winner: 'refinements.css 的 `.score-summary-card .score-summary-number { font-size: 2rem }`（权重 (0,2,0)）',
+        evidence: 'computed font-size = 32px（2rem），不是 40px',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.score-summary-number',
+        prop: 'background',
+        value: 'var(--gradient-primary)',
+        winner: 'refinements.css 的 `background: none`',
+        evidence: 'computed background-image = none（渐变字被补丁层关掉，改成金色实字）',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.score-summary-number',
+        prop: '-webkit-background-clip',
+        value: 'text',
+        winner: 'refinements.css 的 `-webkit-background-clip: unset`',
+        evidence: 'computed background-clip = border-box',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.score-summary-number',
+        prop: 'background-clip',
+        value: 'text',
+        winner: 'refinements.css 的 `background-clip: unset`',
+        evidence: 'computed background-clip = border-box',
+      },
+      {
+        sheet: 'src/styles/assessment.css',
+        selector: '.score-summary-number',
+        prop: '-webkit-text-fill-color',
+        value: 'transparent',
+        winner: 'refinements.css 的 `-webkit-text-fill-color: var(--color-accent)`',
+        evidence: 'computed color = rgb(201,169,89)（金色实字，不是透明填充）',
+      },
+    ],
+  },
 ]
 
 // ── 归一化 ──
@@ -498,6 +730,42 @@ function checkRenames(batch) {
   return problems
 }
 
+/**
+ * 已裁决的冲突：把"输家声明"从**迁移前**一侧摘掉，并逐条记账。
+ *
+ * ## 为什么这是第三种差异（既不是"丢失"也不是"值有变化"）
+ *
+ * 序 5 的 `assessment.css` 与 `refinements.css` 对同一个选择器写了不同的值，
+ * 权重相同 ⇒ 谁生效只看导入顺序。这是迁移前就存在的债，**裁决它需要证据**：
+ * 真实 Chromium 的 computed style（配方见计划 §5 雷区 3）。
+ * 一旦按胜者搬迁，"迁移前有、迁移后无"的那条声明在差集里天然长得像"丢失"。
+ * 所以这里显式声明，并要求每条都**真的命中过** ——
+ * 写错类名/值只会让自检报"这条声明一次都没命中"，而不是变成一条永远绿灯的空声明。
+ *
+ * 命中过的条目单独成节打印（谁赢、凭什么），并从摘要里区分开。
+ */
+function applyResolvedDrops(batch, rel, context, selector, decls, hitCounts) {
+  const drops = batch.resolvedConflicts || []
+  if (drops.length === 0) return decls
+  const kept = []
+  for (const [p, v] of decls) {
+    const hitIdx = drops.findIndex(
+      (d) =>
+        d.sheet === rel &&
+        d.selector === selector.trim() &&
+        (!d.context || d.context === context) &&
+        d.prop.trim().toLowerCase() === p.trim().toLowerCase() &&
+        canonValue(d.value) === canonValue(v),
+    )
+    if (hitIdx >= 0 && !hitCounts[hitIdx]) {
+      hitCounts[hitIdx] = 1
+      continue
+    }
+    kept.push([p, v])
+  }
+  return kept
+}
+
 /** 批次 → 归一化选择器所需的映射表（老名 → 新名 / 占位符） */
 function batchMaps(batch) {
   const remap = [] // [oldName, newName, placeholder]
@@ -577,6 +845,9 @@ for (const batch of BATCHES) {
 
   // ── 侧别 A：迁移前（git 修订里的源码） ──
   const beforeRules = []
+  // 已裁决的"输家声明"命中计数：batch.resolvedConflicts 里每条都必须命中一次，
+  // 否则说明这条声明是凭空写的（类名/值对不上），要报错而不是静默放过。
+  const dropHitCounts = new Array((batch.resolvedConflicts || []).length).fill(0)
   const rev = batch.rev || resolveBeforeRev(batch, oldNames)
   if (!rev) {
     console.error(
@@ -595,12 +866,33 @@ for (const batch of BATCHES) {
       if (classesOf(r.selector).some((c) => oldNames.has(c))) {
         beforeRules.push({
           side: `${rel}@${rev}`,
+          sheet: rel,
           context: r.context,
           selector: r.selector,
-          decls: canonDecls(r.decls),
+          // 已被裁决删除的输家声明在这里摘掉：它们不是"丢失"，
+          // 而是"按实测胜者删掉的死声明"，单独成节列出
+          decls: canonDecls(
+            applyResolvedDrops(batch, rel, r.context, r.selector, r.decls, dropHitCounts),
+          ),
         })
       }
     }
+  }
+
+  const declaredDrops = batch.resolvedConflicts || []
+  const missedDrops = declaredDrops
+    .map((d, i) => ({ d, i }))
+    .filter(({ i }) => !dropHitCounts[i])
+  if (missedDrops.length) {
+    console.error(
+      `✗ ${batch.id}：resolvedConflicts 里有 ${missedDrops.length} 条声明**一条都没命中**` +
+        `（类名/值/来源样式表对不上）。这种"声明了却什么也没删"的条目会让差集看起来更干净，` +
+        `所以直接报错：`,
+    )
+    for (const { d } of missedDrops) {
+      console.error(`   - ${d.sheet} ${d.selector} { ${d.prop}: ${d.value} }`)
+    }
+    process.exit(3)
   }
 
   // ── 侧别 B：迁移后（dist 产物） ──
@@ -667,6 +959,17 @@ for (const batch of BATCHES) {
       console.log(`     原声明：${b.decls.join('; ')}`)
       continue
     }
+    /**
+     * 这条规则来自哪个样式表、哪些属性已被"裁决"过。
+     * 被裁决的属性，其胜者声明会出现在迁移后的同一条规则里 ——
+     * 那属于**已经声明过的差异**（下面单独成节），不算"产物凭空多出"，
+     * 否则会把 16 条已解释的条目伪装成构建器注入，把真信号淹掉。
+     */
+    const resolvedProps = new Set(
+      (batch.resolvedConflicts || [])
+        .filter((d) => d.sheet === b.sheet && d.selector === b.selector.trim())
+        .map((d) => d.prop.trim().toLowerCase()),
+    )
     const bm = toMap(b.decls)
     let best = null
     for (const c of cands) {
@@ -674,7 +977,12 @@ for (const batch of BATCHES) {
       const missing = [...bm.keys()].filter((k) => !cm.has(k))
       const diff = [...bm.keys()].filter((k) => cm.has(k) && cm.get(k) !== bm.get(k))
       if (missing.length === 0 && diff.length === 0) {
-        best = { c, extra: [...cm.keys()].filter((k) => !bm.has(k)).map((k) => `${k}:${cm.get(k)}`) }
+        best = {
+          c,
+          extra: [...cm.keys()]
+            .filter((k) => !bm.has(k) && !resolvedProps.has(k))
+            .map((k) => `${k}:${cm.get(k)}`),
+        }
         break
       }
       if (!best) best = { c, missing, diff, extra: [] }
@@ -689,7 +997,12 @@ for (const batch of BATCHES) {
     if (best.extra.length) extraDecls.push({ key: key(b), extra: best.extra })
     exact++
     console.log(`✓ 逐字保留：${key(b)}`)
-    if (best.extra.length) console.log(`     ※ 产物多出：${best.extra.join('; ')}（构建器注入）`)
+    if (best.extra.length) {
+      console.log(
+        `     ※ 产物多出：${best.extra.join('; ')}` +
+          `（构建器注入，或同一选择器下由"已裁决的胜者"补上的声明 —— 见下面那一节）`,
+      )
+    }
   }
 
   console.log('\n──── 新增的规则（产物有、迁移前无）────')
@@ -699,9 +1012,27 @@ for (const batch of BATCHES) {
   for (const a of added) console.log(`+ ${key(a)} { ${a.decls.join('; ')} }`)
 
   if (extraDecls.length) {
-    console.log('\n──── 产物多出的声明（加法，不是丢失；来源是构建器而非本次改动）────')
+    console.log('\n──── 产物多出的声明（加法，不是丢失；来源是构建器或胜者补上的声明）────')
     console.log(`   共 ${extraDecls.length} 条规则出现多余声明：`)
     for (const e of extraDecls) console.log(`   ${e.key} → ${e.extra.join('; ')}`)
+  }
+
+  // 已裁决的冲突：删掉的"输家声明"单独成节 ——
+  // 它们既不是"丢失"也不是"值有变化"，而是**按实测胜者删掉的死声明**。
+  const dropHits = declaredDrops.filter((_, i) => dropHitCounts[i])
+  if (dropHits.length) {
+    console.log(
+      '\n──── 已裁决的冲突：从"迁移前"一侧删除的输家声明（逐条可查）────',
+    )
+    console.log(
+      `   共 ${dropHits.length} 条。胜者不是读源码推的，而是**真实 Chromium 的 computed style**` +
+        `（一次性探针走真实渲染路径，用完已删；配方见计划 §5 雷区 3）：`,
+    )
+    for (const d of dropHits) {
+      console.log(`   - ${d.sheet} \`${d.selector}\` { ${d.prop}: ${d.value} }`)
+      console.log(`       胜者：${d.winner}`)
+      console.log(`       实测：${d.evidence}`)
+    }
   }
 
   // 选择器强化是"声明过的差异"，单独说清楚：它改了选择器文本，
@@ -721,7 +1052,8 @@ for (const batch of BATCHES) {
   }
 
   console.log(
-    `\n批次汇总：逐字保留 ${exact} / 值有变化 ${changed} / 丢失 ${lost}`,
+    `\n批次汇总：逐字保留 ${exact} / 值有变化 ${changed} / 丢失 ${lost}` +
+      (dropHits.length ? ` / 已裁决删除 ${dropHits.length}（实测胜者，逐条见上）` : ''),
   )
   if (lost > 0) failed = true
 }

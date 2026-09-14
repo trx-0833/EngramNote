@@ -403,9 +403,11 @@
      —— 它存在的唯一目的就是这两条窄屏规则；类名一旦被哈希，写在这里的选择器
      就再也选不中它（规则还在、永不生效），所以必须跟着组件走。 */
 
-  .knowledge-points-grid {
-    grid-template-columns: 1fr;
-  }
+  /* 知识点对比列表：两条并排在窄屏上每列不到 170px。
+     ⚠️ 这条规则（`.knowledge-points-grid { grid-template-columns: 1fr }`）
+     已随组件搬进 `src/pages/LearningAssessment.module.css`
+     （overhaul-plan 5.6 序 5）—— 类名被哈希后，写在这里的选择器
+     **选不中任何东西**（规则还在、永不生效），见 css-convention.md §3 雷区 2。 */
 
   .graph-toolbar {
     flex-direction: column;

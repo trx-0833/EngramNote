@@ -166,6 +166,12 @@
 
 ## 5. 迁移一个文件的标准流程
 
+0. **先确认这个样式表有没有"在打架"**：`node scripts/verify-built-css.mjs` 的
+   "迁移前既有的冲突"一节会按**源文件**归因列出（第四批开始时是
+   `assessment.css + refinements.css` 14 条 + `components.css + refinements.css` 2 条）。
+   命中了就**先裁决再搬**：裁决必须有实测证据（真实 Chromium 读 computed style，
+   配方见 `css-migration-plan.md` §5 雷区 3），照抄一套源码里的值不算裁决。
+   裁决结果按 `BATCHES` 的 `resolvedConflicts` 登记（见 §7）。
 1. `node scripts/css-rule-inventory.mjs <文件> --class <切片类名> --from-git [--rev HEAD~1]`
    先拿到**迁移前清单**（`--from-git` 是因为工作区里很快就没旧版本了；
    已经提交过的批次要 `--rev HEAD~1`，否则读到的是"规则已经搬走"的版本，
@@ -222,9 +228,23 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 |---|---|
 | `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头）+ `findRecentRev`（按内容定位"迁移前"） |
 | `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git` 读 git 版本（修订**自动定位**，可 `--rev` 覆盖） |
-| `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明 |
+| `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明。**四类差异**：逐字保留 / 值有变化 / 丢失 / **已裁决删除**（`resolvedConflicts`，见下） |
 | `scripts/verify-built-css.mjs` | 产物校验：**逐文件**悬空动画、冲突归因到源文件、级联次序、切片标记、退休类名、产物新鲜度 |
 | `scripts/gen-migration-evidence.mjs` | 把上面三者的输出写成 `docs/migration-evidence/*.md` |
+
+**第四批新增的第四类差异：`resolvedConflicts`（"已裁决删除"）。**
+`assessment.css` × `refinements.css` 那 16 条冲突裁决之后，迁移时删掉的是
+"永远不生效的死声明"——它既不是"丢失"（不是事故）也不是"值有变化"
+（产物里根本没这条声明了）。不显式声明的话，差集会把它们报成 16 条丢失，
+把真信号淹掉。所以 `BATCHES` 里逐条登记
+`{ sheet, selector, prop, value, winner, evidence }`：脚本从"迁移前"一侧摘掉它们、
+单独成节打印（谁赢、凭什么），并**自检每条都真的命中过** ——
+写错类名或值会报错退出，不会变成一条永远绿灯的空声明。
+登记的是**实测**结论（`evidence` 字段写 computed 值），不是源码里的先后。
+
+**两个方向都反向验证过**（第四批实测）：把某条的 `value` 改成一个不存在的值 →
+脚本报"这条声明一条都没命中"并 `exit 3`；把整条删掉（= 不登记这次删除）→
+该属性被报成"丢失"并 `exit 1`。也就是说**漏登记不可能静默通过**。
 
 这些脚本的判断都带**自检**：任何一侧解析出 0 条规则就报错退出，
 而不是当成"没有差异"。解析器前后错过三次（伪类冒号被改写成 `: hover`、
@@ -295,3 +315,28 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    但不解析 `var()`，所以要先把 `var(…)` 换成字面色、再读**真实产物**拼顺序。
    结论：模块类与全局类并列写在同一个元素上时，除了看"有没有同名属性竞争"，
    还要看"简写会不会展开出对方的长写" —— 这一条目前只能靠文档 + 探针守住。
+
+**第四批（序 5）的补充：裁决一场"谁也没决定过"的冲突，要用真浏览器量。**
+
+`assessment.css` × `refinements.css` 的 16 条冲突是**迁移前既有**的：
+两个文件权重相同、都在 `main.tsx` 里静态引入，"哪套生效"只取决于导入顺序。
+这类债不能靠读源码"选一套自己喜欢的"，也不能靠人肉比产物的字节位置。
+可复用的做法（完整配方在计划 §5 雷区 3，结论在证据 `5.6-09`）：
+
+1. 用仓库里现成的 Playwright 写一个**一次性探针 spec**（用完删；别改 `e2e/**`
+   里别人的文件），走真实渲染路径（登录 → 目标页 → 触发目标状态），
+   `getComputedStyle` 导出**全部**属性 —— computed 是级联求解后的结果，
+   简写 vs 长写（上面第 5 条那个盲区）会自动体现在解析出来的长写上；
+2. **等过渡结束**再读（每个状态变化后 ≥600ms），否则读到的是过渡中间值：
+   第四批实测非 hover 态的 `box-shadow` 读成 `0 2.7px 9.4px rgba(…,.067)`
+   （回落到静止值的 64% 处）、`.card-hover:hover` 的 `transform` 读成
+   `matrix(1,0,0,1,0,0)`（过渡起点），两条都会让人得出"两边都没生效"的错误结论；
+3. "渲染结果没变"要用**同一把尺子**量两次：迁移前用
+   `git worktree add --detach <临时目录> HEAD`（只读 HEAD，不碰工作区 ——
+   仓库里常有并行 agent，`git stash` 会把别人的改动一起搅进来）+
+   `node_modules` junction 起独立 dev server；迁移后把前一次的 JSON 用
+   `route.fulfill({ path })` 喂回页面逐属性比对。第四批：**16 802 条 computed
+   属性差异 0**（class 属性按预期 18 个变哈希 / 13 个一字不变）；
+4. 探针要落盘 JSON 时**别用 `node:fs`**：本项目没有 `@types/node`，而 `e2e/`
+   在 `tsconfig.json` 的 `include` 里 ⇒ `tsc`（= `npm run build` 的第一步）直接红；
+   `download.saveAs(path)` 由 Playwright 落盘，绕开这个坑。

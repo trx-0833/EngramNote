@@ -1,0 +1,339 @@
+/**
+ * 学习评估页（LearningAssessment）私有样式
+ * （overhaul-plan 5.6 序 5：`assessment.css` 按归属拆分 + 与 `refinements.css` 的冲突裁决）
+ *
+ * ## 为什么这些类名能进模块
+ *
+ * 判据是 `css-convention.md` §4 第 2 条（grep 出的**文件数**）。本批逐组核过：
+ *
+ * | 类名 | grep 命中 | 去向 |
+ * |---|---|---|
+ * | `.score-bar*`（9 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
+ * | `.quiz-question-*`（4 + 9 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
+ * | `.score-summary-*`（3 + 4 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
+ * | `.knowledge-points-*`（4 条 + responsive 的 1 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
+ * | `.assessment-header` `.assessment-title` `.assessment-subtitle` | `LearningAssessment.tsx` **与** `pages/projects/ProjectsHeader.tsx` | **留全局**（两个不相邻功能） |
+ * | `.note-select-card` `.note-select-card-checked` `:hover` `.note-select-card input[type=checkbox]` | `LearningAssessment.tsx` **与** `pages/projects/ProjectNotesList.tsx`，另有 `Projects.test.tsx` 按类名查询 | **留全局** |
+ * | `input[type="checkbox"]`（裸元素选择器） | 全项目兜底（修 `input{width:100%}` 撑满 checkbox） | **留全局**（规范 §4 第 1 条：重置/基础元素选择器） |
+ *
+ * 后三行不是漏搬：把跨页面共用的类名塞进某个页面的模块，等于让另一个页面
+ * 反向 import 本页（第一批 `.stat-card` 的结论，见计划 §4.3）。
+ *
+ * ## 本文件里每一组规则的来源
+ *
+ * 20 条来自 `src/styles/assessment.css`、14 条来自 `src/styles/refinements.css`、
+ * 1 条来自 `src/styles/responsive.css`（480px 的 `.knowledge-points-grid`）。
+ * 后两个文件是**补丁层**：`refinements.css` 存在的意义就是覆盖别人，
+ * `responsive.css` 的窄屏规则一旦留在原地就再也选不中被哈希的类名
+ * （`css-convention.md` §3 雷区 2）。
+ *
+ * ## ⚠️ 冲突裁决：14 + 2 条属性冲突（本批的头号任务）
+ *
+ * `assessment.css` 与 `refinements.css` 对 `.quiz-question-card` / `-number` /
+ * `-text` 有 **14 条同名属性写了不同的值**，`.card-hover:hover` 另有 2 条。
+ * 两个文件都在 `main.tsx` 里静态引入、权重相同 ⇒ **谁赢只看导入顺序**，
+ * 迁移前没有任何人做过这个决定。
+ *
+ * **裁决方式**：不是读源码推、而是在**真实 Chromium** 里读 computed style
+ * （一次性探针，走真实渲染路径：登录 → /assessment → 开放性问题 → 生成问题，
+ * 用完已删；配方与实测值见计划 §5 雷区 3 与
+ * `docs/migration-evidence/5.6-09-conflict-resolution.md`）。
+ * 结论：**16 条全部是 `refinements.css`（后加载的补丁层）赢**。
+ * 所以本文件写的是**胜者**的声明，输的那一套（`assessment.css` 的 14 条）
+ * 已删除，删掉的是"永远不生效的死声明"，渲染结果逐属性不变。
+ *
+ * 逐条对照（左=输、右=赢，本文件保留右列）：
+ *   - `.quiz-question-card`：`border-radius` `--radius-md`(10px) → `--radius-lg`(16px)；
+ *     `padding` `--space-lg`(24px) → `24px`；`margin-bottom` `--space-md`(16px) → `16px`
+ *     （这两条**值相同**，只是写法不同，谁赢渲染都一样）；
+ *     `box-shadow` `--shadow-sm` → `0 2px 8px rgba(15,52,96,.06)`；
+ *     `transition` `border-color .2s ease` → `border-color .25s, box-shadow .25s`（`--ease-out-expo`）。
+ *   - `.quiz-question-number`：`width/height` 28px → 32px；`border-radius` 9999px → 50%；
+ *     `background` `--gradient-primary` → `--color-accent-light`；`color` white → `--color-accent`；
+ *     `font-size` .8rem → .9rem。
+ *   - `.quiz-question-text`：`align-items` center → flex-start；`gap` `--space-xs` → `--space-sm`；
+ *     `font-size` .95rem → 1.125rem。
+ *
+ * 另外两条**不是**同名属性冲突、但同样是"补丁层半覆盖"，一并按实测结果处理：
+ *   - `.score-summary-number`：`assessment.css` 的单类规则写 `2.5rem` + 渐变字，
+ *     `refinements.css` 用 `.score-summary-card .score-summary-number`（权重 (0,2,0)）压掉
+ *     字号/配色/背景裁剪。实测 computed：`font-size: 32px`（=2rem）、
+ *     `color: rgb(201,169,89)`（=--color-accent）、`background-image: none`。
+ *     所以单类规则里那 5 条被压掉的声明删掉，**两条规则的结构保留**
+ *     （合并会降权重 —— 见下面那段注释）。
+ *   - `.score-bar-value`：补丁层只是**追加**了 `color: var(--color-primary)`，合并即可。
+ *
+ * ## 预留类名：逐字搬进模块，**不删**（死 CSS 清理是单独一轮，见计划 §7.0 第 2 条）
+ *
+ *   - `.quizQuestionCardActive`：`refinements.css` 的注释写明"待 tsx 给当前题挂载
+ *     `.quiz-question-card-active` 后生效"，全项目 grep 无写入点 —— 现状靠
+ *     `:focus-within` 实现同等效果。
+ *   - `.scoreSummaryCard .scoreValue`：同样标注"待 tsx 接入后生效"，无写入点。
+ *
+ * 搬它们不是"顺手留死代码"：本轮的契约是"证明什么都没丢"，删规则属于另一种语义。
+ *
+ * ## 与全局层的竞争：本批**没有**新增同权重竞争
+ *
+ * DOM 上这些元素只挂模块类（`className={styles.quizQuestionCard}`），
+ * 没有"全局类 + 模块类"并列写在同一个元素上的情况 ——
+ * 所以 `scripts/verify-built-css.mjs` 的 `CASCADE_PAIRS` 本批**不需要**新增条目
+ * （沿用第三批的先例：没有同名属性、同权重、跨文件的竞争就不登记）。
+ * 唯一与全局层挨着的是模块里的**后代**选择器 `.quizQuestionCard textarea`：
+ * 它权重 (0,1,1) 高于全局的 `textarea` 元素规则 (0,0,1)，与先后无关。
+ * 注意 textarea 的 `width/min-height` 由 tsx 行内样式给（`100%` / `100px`），
+ * 行内样式永远赢，本文件里的 `min-height: 120px` 是**迁移前就有的死声明**，
+ * 照抄不改（改它属于视觉改动，要单独一轮带截图）。
+ */
+
+/* ── 评分条 ── */
+
+.scoreBar {
+  margin-bottom: var(--space-md);
+}
+
+.scoreBarHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-xs);
+}
+
+.scoreBarLabel {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.scoreBarValue {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.scoreBarTrack {
+  height: 8px;
+  background: var(--color-border-light);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.scoreBarFill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.6s var(--ease-out-expo);
+  position: relative;
+}
+
+.scoreBarFillHigh {
+  background: linear-gradient(90deg, var(--color-success), #34d399);
+}
+
+.scoreBarFillMid {
+  background: linear-gradient(90deg, var(--color-warning), #f59e0b);
+}
+
+.scoreBarFillLow {
+  background: linear-gradient(90deg, var(--color-error), #ef4444);
+}
+
+/* ── 问题卡片（14 条冲突的战场，下面写的是**实测胜者**）── */
+
+.quizQuestionCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  /* 顺序要紧：`border-left` 长写必须排在 `border` 简写之后，否则被简写重置 */
+  border-left: 4px solid var(--color-border); /* 默认竖线（非当前题）*/
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06);
+  transition: border-color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
+}
+
+.quizQuestionCard:hover {
+  border-color: var(--color-border);
+  border-left-color: var(--color-primary-light);
+  box-shadow: 0 4px 12px rgba(15, 52, 96, 0.08);
+}
+
+/* 当前题：包含聚焦 textarea 的卡片高亮（CSS-only，无需改 tsx） */
+.quizQuestionCard:focus-within {
+  border-left-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.1);
+}
+
+/* 预留语义化类：待 tsx 给当前题挂载后生效（现状由 :focus-within 兜住） */
+.quizQuestionCardActive {
+  border-left-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.1);
+}
+
+/* 题号：金色圆形徽章 */
+.quizQuestionNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-right: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* 题目文本：放大字号 + 提升行高，让题目更醒目 */
+.quizQuestionText {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: 1.125rem;
+  line-height: 1.7;
+  color: var(--color-text);
+  font-weight: 600;
+  margin-top: 12px;
+  margin-bottom: var(--space-md);
+}
+
+/* 答案输入区：白底 + 聚焦时主色描边 + 光晕
+   （width/minHeight 由 tsx 行内样式设置，行内优先级更高，这里的 min-height 不生效） */
+.quizQuestionCard textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  transition: border-color 0.2s var(--ease-out-expo), box-shadow 0.2s var(--ease-out-expo);
+  resize: vertical;
+}
+
+.quizQuestionCard textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.quizQuestionCard textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+/* ── 综合评分卡片 ── */
+
+.scoreSummaryCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-top: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-xl);
+  margin-top: var(--space-md);
+  text-align: center;
+  box-shadow: var(--shadow-md);
+}
+
+/* 金色大号数字。
+   ⚠️ 这里**故意保留两条规则**（而不是合并成一条），两个理由：
+   1. 权重是行为的一部分：补丁层的胜者靠 `.score-summary-card .score-summary-number`
+      (0,2,0) 压过单类 (0,1,0)。合并成单类是把权重从 (0,2,0) 降到 (0,1,0)
+      —— 第三批 `.list-toolbar .search-input-wrapper` 被写成单类时，差集正是靠
+      这一条报出的"1 条丢失 + 1 条新增"（计划 §4.8.4）。
+   2. 差集脚本按「上下文 + 选择器 + 属性」建键：结构保留，两条规则才能各自
+      逐字对上迁移前的自己。
+   基础规则里被补丁层压掉的那 5 条（`font-size: 2.5rem`、`background: var(--gradient-primary)`、
+   `-webkit-background-clip: text`、`-webkit-text-fill-color: transparent`、
+   `background-clip: text`）已删除 —— 实测 computed 是补丁层的 `2rem` + `--color-accent`
+   + `background-image: none`（探针证据见文件头与 5.6-09）。 */
+.scoreSummaryNumber {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: var(--space-xs);
+}
+
+.scoreSummaryCard .scoreSummaryNumber {
+  font-size: 2rem;
+  color: var(--color-accent);
+  font-weight: 700;
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: var(--color-accent);
+}
+
+/* 预留 .score-value 类（任务建议命名），待 tsx 接入后生效 */
+.scoreSummaryCard .scoreValue {
+  font-size: 2rem;
+  color: var(--color-accent);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.scoreSummaryLabel {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* 建议列表：每条带左侧 3px 金色竖线 + padding-left 12px */
+.scoreSummaryCard li {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 12px;
+  margin-bottom: var(--space-sm);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.scoreSummaryCard li:last-child {
+  margin-bottom: 0;
+}
+
+/* ── 知识点对比列表 ── */
+
+.knowledgePointsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.knowledgePointsSection h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.knowledgePointsSection ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.knowledgePointsSection li {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
+  background: var(--color-bg);
+}
+
+/* 480px 档：两栏并排在窄屏上每列不到 170px（原 responsive.css 的最后一条
+   `.knowledge-points-grid` 规则）。断点值沿用全局的 480px，不另造断点。 */
+@media (max-width: 480px) {
+  .knowledgePointsGrid {
+    grid-template-columns: 1fr;
+  }
+}

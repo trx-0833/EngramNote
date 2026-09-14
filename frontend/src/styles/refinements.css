@@ -58,7 +58,16 @@
 }
 
 /* === 4. 卡片层级增强 === */
-/* 原样式 .card-hover:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); border-color: var(--color-border); } */
+/* 原样式 .card-hover:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); border-color: var(--color-border); }
+ *
+ * ⚠️ overhaul-plan 5.6 序 5 的**冲突裁决**（实测，不是推理）：这条 `:hover`
+ * 与 `components.css` 里的同名规则权重相同（都是 (0,1,0)），本文件在
+ * `main.tsx` 里更靠后 ⇒ **本文件的 `translateY(-2px)` + `--shadow-lg` 赢**。
+ * 在真实 Chromium 里读 computed 确认过：hover 时
+ * `transform: matrix(1,0,0,1,0,-2)`、`box-shadow` = `--shadow-lg` 的值
+ * （配方见计划 §5 雷区 3）。既然胜负由导入顺序决定、且没有第二种解释，
+ * `components.css` 里那两条**输的声明已删除**（它只保留同值的 `border-color`），
+ * 于是这条竞争不再是"未裁决的战争"。表见 5.6-09。 */
 .card-hover {
   transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo);
 }
@@ -164,144 +173,45 @@
 
 /* ────────────────────────────────────────────────────────
  * 页面1：开放性问题页面（LearningAssessment quiz 模式）
- * 改造目标：题目卡片是主角，让用户第一眼看到题目
+ *
+ * ⚠️ 这一节**已经整节搬走**（overhaul-plan 5.6 序 5）：
+ * `.quiz-question-card` / `:hover` / `:focus-within` / `-active` / `-number` /
+ * `-text` / `textarea`(含 `::placeholder` / `:focus`)、
+ * `.score-summary-card .score-summary-number` / `.score-value` / `li`、
+ * `.score-bar-value` —— 全部进了 `src/pages/LearningAssessment.module.css`。
+ *
+ * 搬走时顺带**裁决了本文件与 `assessment.css` 的冲突**：两边对
+ * `.quiz-question-card` / `-number` / `-text` 写了 14 条同名属性的不同值，
+ * 谁赢只看 `main.tsx` 的导入顺序（本文件在后 ⇒ 本节全胜）。
+ * 用真实 Chromium 读 computed style 确认了这一点（配方见计划 §5 雷区 3），
+ * 于是**胜者的值随规则一起进模块**，输的那 14 条已从 `assessment.css` 删除。
+ * 逐条表：`docs/migration-evidence/5.6-09-conflict-resolution.md`。
+ *
+ * 注意：下方 `=== 4. 卡片层级增强 ===` 的 `.card-hover:hover` **没有**搬
+ * —— 它作用在 8 个页面的卡片上，按规范 §4 第 2 条留全局。
  * ──────────────────────────────────────────────────────── */
 
-/* 1. 题目卡片升级：左侧 4px 竖线 + 大圆角 + 专属阴影 */
+/* 1. 题目卡片升级（已搬走 → 见本节顶部说明） */
 /* 原: .quiz-question-card { background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: var(--radius-md); padding: var(--space-lg); margin-bottom: var(--space-md); box-shadow: var(--shadow-sm); transition: border-color 0.2s ease; } */
-.quiz-question-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
-  border-left: 4px solid var(--color-border); /* 默认竖线（非当前题）*/
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06);
-  transition: border-color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
-}
 
 /* 原: .quiz-question-card:hover { border-color: var(--color-border); } */
-.quiz-question-card:hover {
-  border-color: var(--color-border);
-  border-left-color: var(--color-primary-light);
-  box-shadow: 0 4px 12px rgba(15, 52, 96, 0.08);
-}
 
-/* 当前题：左侧竖线变为主色实线 + 阴影加深。
-   现有 tsx 未挂载该类，使用 :focus-within 让包含聚焦 textarea 的卡片高亮，
-   实现"当前题"视觉效果（CSS-only，无需改 tsx）。 */
-.quiz-question-card:focus-within {
-  border-left-color: var(--color-primary);
-  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.1);
-}
+/* 原: .quiz-question-card:focus-within { border-left-color: var(--color-primary); box-shadow: 0 4px 16px rgba(15, 52, 96, 0.1); } */
 
-/* 预留语义化类：待 tsx 给当前题挂载 .quiz-question-card-active 后生效 */
-.quiz-question-card-active {
-  border-left-color: var(--color-primary);
-  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.1);
-}
+/* 原: .quiz-question-card-active（预留语义化类，无 tsx 挂载点） */
 
-/* 2. 题号：金色圆形徽章 */
+/* 2. 题号：金色圆形徽章（已搬走） */
 /* 原: .quiz-question-number { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9999px; background: var(--gradient-primary); color: white; font-size: 0.8rem; font-weight: 600; margin-right: var(--space-sm); flex-shrink: 0; } */
-.quiz-question-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--color-accent-light);
-  color: var(--color-accent);
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-right: var(--space-sm);
-  flex-shrink: 0;
-}
 
-/* 3. 题目文本：放大字号 + 提升行高，让题目更醒目 */
+/* 3. 题目文本：放大字号 + 提升行高（已搬走） */
 /* 原: .quiz-question-text { display: flex; align-items: center; gap: var(--space-xs); font-weight: 600; margin-bottom: var(--space-md); font-size: 0.95rem; } */
-.quiz-question-text {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-sm);
-  font-size: 1.125rem;
-  line-height: 1.7;
-  color: var(--color-text);
-  font-weight: 600;
-  margin-top: 12px;
-  margin-bottom: var(--space-md);
-}
 
-/* 4. 答案输入区 textarea：白底 + 聚焦时主色描边 + 光晕 */
-/* 注：textarea 的 width/minHeight 由 tsx inline style 设置（100%/100px），
-   受 inline style 优先级限制无法覆盖；此处覆盖 padding/border/border-radius/focus 等。 */
-.quiz-question-card textarea {
-  width: 100%;
-  min-height: 120px; /* 期望值，实际受 inline minHeight:100px 限制 */
-  padding: 12px 16px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  transition: border-color 0.2s var(--ease-out-expo), box-shadow 0.2s var(--ease-out-expo);
-  resize: vertical;
-}
+/* 4. 答案输入区 textarea（已搬走：`.quiz-question-card textarea` 三条） */
 
-.quiz-question-card textarea::placeholder {
-  color: var(--color-text-tertiary);
-}
-
-.quiz-question-card textarea:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-light);
-}
-
-/* 5. 评估结果卡片：评分用金色大号数字 */
+/* 5. 评估结果卡片（已搬走：`.score-summary-card .score-summary-number` /
+   `.score-value` / `li` 与 `.score-bar-value`） */
 /* 原: .score-summary-number { font-family: var(--font-serif); font-size: 2.5rem; font-weight: 700; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1; margin-bottom: var(--space-xs); } */
-.score-summary-card .score-summary-number {
-  font-size: 2rem;
-  color: var(--color-accent);
-  font-weight: 700;
-  background: none;
-  -webkit-background-clip: unset;
-  background-clip: unset;
-  -webkit-text-fill-color: var(--color-accent);
-}
-
-/* 预留 .score-value 类（任务建议命名），待 tsx 接入后生效 */
-.score-summary-card .score-value {
-  font-size: 2rem;
-  color: var(--color-accent);
-  font-weight: 700;
-  line-height: 1;
-}
-
-/* 建议列表：每条带左侧 3px 金色竖线 + padding-left 12px */
-.score-summary-card li {
-  border-left: 3px solid var(--color-accent);
-  padding-left: 12px;
-  margin-bottom: var(--space-sm);
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  line-height: 1.7;
-}
-
-.score-summary-card li:last-child {
-  margin-bottom: 0;
-}
-
-/* 评分条数值微调：与金色徽章风格呼应 */
 /* 原: .score-bar-value { font-family: var(--font-serif); font-size: 1rem; font-weight: 700; } */
-.score-bar-value {
-  font-family: var(--font-serif);
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-primary);
-}
 
 
 /* ────────────────────────────────────────────────────────

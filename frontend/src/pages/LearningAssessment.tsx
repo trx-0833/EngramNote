@@ -21,6 +21,25 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import { renderMarkdown } from '../utils/markdown'
 import { useToast } from '../components/Toast'
+// 本页私有样式（overhaul-plan 5.6 序 5）：`.score-bar*` / `.quiz-question-*` /
+// `.score-summary-*` / `.knowledge-points-*` 从 `src/styles/assessment.css` 拆出，
+// 与 `refinements.css` 打架的那 14 条按实测胜者并入，480px 的
+// `.knowledge-points-grid` 从 `responsive.css` 一起搬进来 —— 见 LearningAssessment.module.css 文件头
+import styles from './LearningAssessment.module.css'
+
+/**
+ * 评分条填充色的类名查表。
+ *
+ * ⚠️ **不能**写成模板串 `` `score-bar-fill-${level}` ``：类名进 CSS Modules 后
+ * 会被哈希（`.scoreBarFillHigh` → `._scoreBarFillHigh_hash`），拼出来的字符串
+ * 在产物里不存在 —— 构建期不报错、规则清单也看不出来，只是颜色静默消失。
+ * 查表还能让 `tsc` 守住完整性（少一个键直接报错）。同 `DiffView.tsx` 的 `LINE_TYPE_CLASS`。
+ */
+const SCORE_FILL_CLASS: Record<'high' | 'mid' | 'low', string> = {
+  high: styles.scoreBarFillHigh,
+  mid: styles.scoreBarFillMid,
+  low: styles.scoreBarFillLow,
+}
 
 export default function LearningAssessment() {
   const toast = useToast()
@@ -247,15 +266,15 @@ export default function LearningAssessment() {
 
   // Render score bar
   const renderScoreBar = (label: string, score: number) => {
-    const fillClass = score >= 80 ? 'score-bar-fill-high' : score >= 60 ? 'score-bar-fill-mid' : 'score-bar-fill-low'
+    const fillClass = score >= 80 ? SCORE_FILL_CLASS.high : score >= 60 ? SCORE_FILL_CLASS.mid : SCORE_FILL_CLASS.low
     return (
-      <div className="score-bar">
-        <div className="score-bar-header">
-          <span className="score-bar-label">{label}</span>
-          <span className="score-bar-value">{score}<span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', fontWeight: 400 }}>/100</span></span>
+      <div className={styles.scoreBar}>
+        <div className={styles.scoreBarHeader}>
+          <span className={styles.scoreBarLabel}>{label}</span>
+          <span className={styles.scoreBarValue}>{score}<span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', fontWeight: 400 }}>/100</span></span>
         </div>
-        <div className="score-bar-track">
-          <div className={`score-bar-fill ${fillClass}`} style={{ width: `${score}%` }} />
+        <div className={styles.scoreBarTrack}>
+          <div className={`${styles.scoreBarFill} ${fillClass}`} style={{ width: `${score}%` }} />
         </div>
       </div>
     )
@@ -415,9 +434,9 @@ export default function LearningAssessment() {
               {renderScoreBar('综合评分', result.overall_score)}
 
               {((result.scores?.covered_points?.length ?? 0) > 0 || (result.scores?.uncovered_points?.length ?? 0) > 0) && (
-                <div className="knowledge-points-grid">
+                <div className={styles.knowledgePointsGrid}>
                   {(result.scores?.covered_points?.length ?? 0) > 0 && (
-                    <div className="knowledge-points-section">
+                    <div className={styles.knowledgePointsSection}>
                       <h4 style={{ color: 'var(--color-success)' }}>
                         <span>✓</span> 已覆盖知识点
                       </h4>
@@ -429,7 +448,7 @@ export default function LearningAssessment() {
                     </div>
                   )}
                   {(result.scores?.uncovered_points?.length ?? 0) > 0 && (
-                    <div className="knowledge-points-section">
+                    <div className={styles.knowledgePointsSection}>
                       <h4 style={{ color: 'var(--color-error)' }}>
                         <span>✗</span> 未覆盖知识点
                       </h4>
@@ -523,9 +542,9 @@ export default function LearningAssessment() {
             <>
               {/* Questions */}
               {(quizAssessment.quiz_questions || []).map((q, idx) => (
-                <div key={idx} className="quiz-question-card">
-                  <div className="quiz-question-text">
-                    <span className="quiz-question-number">{idx + 1}</span>
+                <div key={idx} className={styles.quizQuestionCard}>
+                  <div className={styles.quizQuestionText}>
+                    <span className={styles.quizQuestionNumber}>{idx + 1}</span>
                     <div style={{ flex: 1 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(q.question) }} />
                   </div>
                   <textarea
@@ -545,10 +564,10 @@ export default function LearningAssessment() {
                 <>
                   {/* Quiz judgment results */}
                   {(quizResult.quiz_answers || []).map((qa: QuizAnswerItem, idx: number) => (
-                    <div key={idx} className="quiz-question-card">
+                    <div key={idx} className={styles.quizQuestionCard}>
                       {/* 题目 */}
-                      <div className="quiz-question-text">
-                        <span className="quiz-question-number">{idx + 1}</span>
+                      <div className={styles.quizQuestionText}>
+                        <span className={styles.quizQuestionNumber}>{idx + 1}</span>
                         <div style={{ flex: 1 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(quizAssessment?.quiz_questions?.[idx]?.question || '') }} />
                       </div>
                       {/* 用户答案回显 */}
@@ -570,9 +589,9 @@ export default function LearningAssessment() {
                       )}
                     </div>
                   ))}
-                  <div className="score-summary-card">
-                    <div className="score-summary-number">{quizResult.overall_score}</div>
-                    <div className="score-summary-label">综合评分</div>
+                  <div className={styles.scoreSummaryCard}>
+                    <div className={styles.scoreSummaryNumber}>{quizResult.overall_score}</div>
+                    <div className={styles.scoreSummaryLabel}>综合评分</div>
                     {quizResult.suggestions && (
                       <div style={{ fontSize: '0.875rem', marginTop: 'var(--space-md)', color: 'var(--color-text-secondary)', textAlign: 'left' }} dangerouslySetInnerHTML={{ __html: renderMarkdown(quizResult.suggestions) }} />
                     )}

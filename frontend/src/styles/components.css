@@ -151,9 +151,15 @@ input::placeholder, textarea::placeholder {
   transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
+/* ⚠️ 这条规则里的 `transform` 与 `box-shadow` 已被**删除**（overhaul-plan 5.6 序 5
+ * 的冲突裁决）：`refinements.css` 对同一个选择器写了 `translateY(-2px)` 与
+ * `--shadow-lg`，两者权重相同（都是 (0,1,0)），而它在 `main.tsx` 里更靠后
+ * ⇒ 那边**一直**是胜者。真实 Chromium 读 computed 确认过（hover 时
+ * `transform: matrix(1,0,0,1,0,-2)`、`box-shadow` = `--shadow-lg`）。
+ * 这里只留下同值的 `border-color`；`transform` / `box-shadow` 归
+ * `refinements.css` 那一份所有。序 12 拆掉那个补丁层时，应当把这两条值
+ * **搬回本文件**，而不是在别处再写一遍。逐条表：5.6-09-conflict-resolution.md。 */
 .card-hover:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
   border-color: var(--color-border);
 }
 

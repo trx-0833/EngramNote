@@ -223,6 +223,18 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   'pages/Upload.module.css',
   'pages/NotesList.module.css',
   'components/StatCard.module.css',
+  // 第四批（序 5）：assessment.css 按归属拆分 + 与 refinements.css 的冲突裁决。
+  // 三个全局样式表都真的动过：assessment.css / refinements.css 各删掉自己那一套里
+  // **输的**声明，responsive.css 的 480px `.knowledge-points-grid` 搬进模块。
+  // 加进这个集合 = "本文件剩下的冲突都必须在本轮解决"，
+  // 所以加了它们之后，那 16 条迁移前既有的冲突必须彻底归零（实测确实归零）。
+  'styles/assessment.css',
+  'styles/refinements.css',
+  'pages/LearningAssessment.module.css',
+  // `components.css` 只删了两条被 `.card-hover:hover` 压掉的声明
+  // （`transform: translateY(-1px)` / `box-shadow: var(--shadow-md)`），
+  // 但它确实属于"本批改动范围"，登记进来才能让"该文件再冒出冲突"变成红灯。
+  'styles/components.css',
 ])
 
 const annotated = clashes.map((c) => {
@@ -523,6 +535,26 @@ const SLICE_MARKERS = [
   'statCardPurple',
   'statNumber',
   'statLabel',
+  // 第四批（序 5）：学习评估页私有部分（assessment.css + refinements.css + responsive.css）
+  'scoreBar',
+  'scoreBarHeader',
+  'scoreBarLabel',
+  'scoreBarValue',
+  'scoreBarTrack',
+  'scoreBarFill',
+  'scoreBarFillHigh',
+  'scoreBarFillMid',
+  'scoreBarFillLow',
+  'quizQuestionCard',
+  'quizQuestionCardActive',
+  'quizQuestionNumber',
+  'quizQuestionText',
+  'scoreSummaryCard',
+  'scoreSummaryNumber',
+  'scoreSummaryLabel',
+  'scoreValue',
+  'knowledgePointsGrid',
+  'knowledgePointsSection',
 ]
 console.log('\n迁移切片类名/动画在产物中的出现次数：')
 for (const marker of SLICE_MARKERS) {
@@ -618,6 +650,30 @@ const RETIRED = [
   'stat-card-purple',
   'stat-number',
   'stat-label',
+  // 第四批（序 5）：学习评估页搬进模块的 19 个类名。
+  // 留在全局的 `.assessment-header` / `-title` / `-subtitle` 与 `.note-select-card*`
+  // **必须**继续以 kebab 形态出现在产物里（学习评估页 + 项目页共用），
+  // 所以不列进这份退休名单。`score-bar` 这类前缀名靠 `(?![\w-])` 边界
+  // 与 `score-bar-fill` 区分开，两者都列也不会互相误判。
+  'score-bar',
+  'score-bar-header',
+  'score-bar-label',
+  'score-bar-value',
+  'score-bar-track',
+  'score-bar-fill',
+  'score-bar-fill-high',
+  'score-bar-fill-mid',
+  'score-bar-fill-low',
+  'quiz-question-card',
+  'quiz-question-card-active',
+  'quiz-question-number',
+  'quiz-question-text',
+  'score-summary-card',
+  'score-summary-number',
+  'score-summary-label',
+  'score-value',
+  'knowledge-points-grid',
+  'knowledge-points-section',
 ]
 console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
 let retiredHits = 0

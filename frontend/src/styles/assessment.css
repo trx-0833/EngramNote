@@ -1,6 +1,32 @@
-/* ── 学习评估（视觉重构）── */
+/* ── 学习评估（视觉重构）──
+ *
+ * overhaul-plan 5.6 序 5：学习评估**页私有**的部分已经搬进
+ * `src/pages/LearningAssessment.module.css`（20 条）——
+ * `.score-bar*`(9) / `.quiz-question-*`(4) / `.score-summary-*`(3) /
+ * `.knowledge-points-*`(4)。搬走时**同时**做了两件事：
+ *
+ * 1. 与 `refinements.css` 的 **14 条属性冲突**按"真实 Chromium 里测出来的胜者"裁决
+ *    （胜者全部是后加载的补丁层；被压掉的 14 条声明已删除，不是搬走）。
+ *    逐条表 + 实测值见 `docs/migration-evidence/5.6-09-conflict-resolution.md`，
+ *    配方见 `docs/css-migration-plan.md` §5 雷区 3；
+ * 2. `responsive.css` 480px 的 `.knowledge-points-grid` 一起搬了进去 ——
+ *    类名哈希后，写在该文件的窄屏选择器会**永远选不中**（规范 §3 雷区 2）。
+ *
+ * ## 本文件剩下的部分为什么必须留全局（`css-convention.md` §4）
+ *
+ * | 类名 | 判据 |
+ * |---|---|
+ * | `.assessment-header` `.assessment-title` `.assessment-subtitle` | 被 `pages/LearningAssessment.tsx` **与** `pages/projects/ProjectsHeader.tsx` 共用（第 2 条：两个不相邻功能） |
+ * | `.note-select-card` `.note-select-card-checked` `:hover` `.note-select-card input[type=checkbox]` | 被 `pages/LearningAssessment.tsx` **与** `pages/projects/ProjectNotesList.tsx` 共用，另有 `pages/Projects.test.tsx` 按 `.note-select-card` 查询（第 2 条 + 测试按类名查询） |
+ * | `input[type="checkbox"]` | 兜底修正全局 `input{width:100%}` 把裸 checkbox 撑满 flex 容器的问题；没有"拥有者组件"（第 1 条：重置 / 基础元素选择器） |
+ *
+ * 这三组的**消费点**分布在两个不相邻的页面功能上，把类名塞进学习评估页的模块
+ * 会逼 Projects 反向 import 另一个页面的模块 —— 第一批 `.stat-card` 的结论
+ * （计划 §4.3）在这里同样成立。它们要等到"学习评估页与项目页共用一份卡片样式"
+ * 被抽成真正的共享组件（像第三批抽 `StatCard` 那样）才可能搬走。
+ */
 
-/* 页面头部 */
+/* 页面头部（`.assessment-*`：学习评估页 + 项目页共用） */
 .assessment-header {
   margin-bottom: var(--space-xl);
 }
@@ -21,7 +47,7 @@
   font-size: 0.9rem;
 }
 
-/* 笔记选择卡片 */
+/* 笔记选择卡片（学习评估页 + 项目页共用；`Projects.test.tsx` 按它查询） */
 .note-select-card {
   display: flex;
   align-items: center;
@@ -62,157 +88,4 @@ input[type="checkbox"] {
   width: auto;
   margin: 0;
   accent-color: var(--color-primary);
-}
-
-/* 评分条容器 */
-.score-bar {
-  margin-bottom: var(--space-md);
-}
-
-.score-bar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: var(--space-xs);
-}
-
-.score-bar-label {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.score-bar-value {
-  font-family: var(--font-serif);
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.score-bar-track {
-  height: 8px;
-  background: var(--color-border-light);
-  border-radius: 9999px;
-  overflow: hidden;
-}
-
-.score-bar-fill {
-  height: 100%;
-  border-radius: 9999px;
-  transition: width 0.6s var(--ease-out-expo);
-  position: relative;
-}
-
-.score-bar-fill-high {
-  background: linear-gradient(90deg, var(--color-success), #34d399);
-}
-
-.score-bar-fill-mid {
-  background: linear-gradient(90deg, var(--color-warning), #f59e0b);
-}
-
-.score-bar-fill-low {
-  background: linear-gradient(90deg, var(--color-error), #ef4444);
-}
-
-/* 问题卡片 */
-.quiz-question-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  padding: var(--space-lg);
-  margin-bottom: var(--space-md);
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s ease;
-}
-
-.quiz-question-card:hover {
-  border-color: var(--color-border);
-}
-
-.quiz-question-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  background: var(--gradient-primary);
-  color: white;
-  font-size: 0.8rem;
-  font-weight: 600;
-  margin-right: var(--space-sm);
-  flex-shrink: 0;
-}
-
-.quiz-question-text {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-weight: 600;
-  margin-bottom: var(--space-md);
-  font-size: 0.95rem;
-}
-
-/* 综合评分卡片 */
-.score-summary-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
-  border-top: 3px solid var(--color-primary);
-  border-radius: var(--radius-md);
-  padding: var(--space-xl);
-  margin-top: var(--space-md);
-  text-align: center;
-  box-shadow: var(--shadow-md);
-}
-
-.score-summary-number {
-  font-family: var(--font-serif);
-  font-size: 2.5rem;
-  font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  line-height: 1;
-  margin-bottom: var(--space-xs);
-}
-
-.score-summary-label {
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* 知识点对比列表 */
-.knowledge-points-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-md);
-  margin-top: var(--space-md);
-}
-
-.knowledge-points-section h4 {
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--space-sm);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.knowledge-points-section ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.knowledge-points-section li {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-  margin-bottom: 2px;
-  background: var(--color-bg);
 }
