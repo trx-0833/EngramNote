@@ -7,6 +7,10 @@
  *
  * 卡片自身不持有状态：草稿（重命名/展开详情/扫描结果/候选笔记）都在 `pages/projects/`
  * 的 hooks 里，与拆分前同源。
+ *
+ * 5.10 移动端补丁：卡片的两行按钮都靠**内联样式**排版、没有类名，所以 responsive.css
+ * 改不到它们 —— 320px 视口下五个按钮会把卡片撑出横向滚动。补的是 `flexWrap: 'wrap'`
+ * （四处：头部行、头部按钮组、底部行、底部按钮组；宽屏无溢出可换，像素不变）。
  */
 import type { Note, NoteInFolder, Project, ProjectDetail, ScanImportResponse } from '../../api/client'
 import AddNotesPanel from './AddNotesPanel'
@@ -95,7 +99,8 @@ export default function ProjectCard({
       }}
     >
       {/* 项目头：名称 + 笔记数 */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+      {/* flexWrap：窄屏（~320px）时右侧两个按钮整组换到第二行，而不是把卡片撑出横向滚动 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {isRenaming ? (
             <input
@@ -125,8 +130,8 @@ export default function ProjectCard({
             </span>
           </div>
         </div>
-        {/* 操作按钮 */}
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        {/* 操作按钮（flexShrink:0 让它们不被标题压缩；因此必须能换行，否则窄屏溢出） */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
           <button
             className="btn btn-ghost"
             title="从已有笔记中选择并添加到本项目"
@@ -184,8 +189,9 @@ export default function ProjectCard({
         />
       )}
 
-      {/* 底部操作行 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--color-border-light)', paddingTop: 10, marginTop: 'auto' }}>
+      {/* 底部操作行：这行没有类名（样式全在内联），所以窄屏的换行也只能在这里加。
+          不加 flexWrap 时 320px 视口上「查看笔记（N）＋重命名＋删除」会横向溢出卡片 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--color-border-light)', paddingTop: 10, marginTop: 'auto' }}>
         <button
           className="btn btn-ghost"
           style={{ fontSize: '0.8rem', padding: '4px 8px' }}
@@ -194,7 +200,7 @@ export default function ProjectCard({
           <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>▶</span>
           {isExpanded ? '收起笔记' : `查看笔记（${p.note_count ?? 0}）`}
         </button>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           <button
             className="btn btn-ghost"
             style={{ fontSize: '0.8rem', padding: '4px 8px' }}

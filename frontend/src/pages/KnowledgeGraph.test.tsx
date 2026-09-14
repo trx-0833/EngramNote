@@ -326,6 +326,13 @@ function renderPage() {
   )
 }
 
+/** jsdom 没有真实视口，`window.innerWidth` 是唯一能决定"窄屏还是宽屏"的入口 */
+const DEFAULT_VIEWPORT_WIDTH = 1024
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
+}
+
 /**
  * 断言「整页没有崩到错误边界」。单靠它是不够的（页面可能是空白）——
  * 契约漂移用例必须同时断言**降级后用户实际看到的东西**。
@@ -342,6 +349,9 @@ function canvasProps(): ForceGraphMockProps {
 beforeEach(() => {
   fg.props = null
   lastCanvasCtx = null
+  // 每个用例都从宽屏开始：侧边栏的默认开合取决于视口宽度，残留的窄屏值会让
+  // 后面的用例莫名其妙地"少了统计面板"。窄屏用例自己改，改完由这里复位。
+  setViewportWidth(DEFAULT_VIEWPORT_WIDTH)
   // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
   // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
   resetContractDriftNotices()
@@ -688,6 +698,48 @@ describe('图谱交互', () => {
 })
 
 /**
+ * 侧边栏的**首屏默认值**（overhaul-plan 5.10 移动端补丁）：手机上侧边栏是固定底部抽屉
+ * （`max-height: 50vh`），默认展开等于首屏就盖掉半张画布 —— 用户得先找到「收起」才看得见图。
+ * 断点与 responsive.css 的 `@media (max-width: 768px)` 同值（两处不同值会出现
+ * "CSS 当手机、JS 当桌面"的错位）。
+ *
+ * 桌面行为必须逐字不变：宽屏仍默认展开（下面第二条用例专门守这一点）。
+ */
+describe('侧边栏的首屏默认值（窄屏收起 / 宽屏展开）', () => {
+  it('★ 窄屏（375px）默认收起，且「展开」仍然能打开它', async () => {
+    setViewportWidth(375)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    // 首屏不该有侧边栏内容（统计面板），按钮应显示「展开」
+    expect(screen.queryByText('图谱统计')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '展开' })).toBeInTheDocument()
+
+    // 改的只是默认值：开关本身照旧可用
+    await userEvent.click(screen.getByRole('button', { name: '展开' }))
+    expect(screen.getByText('图谱统计')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument()
+  })
+
+  it('★ 宽屏（1024px）仍默认展开（桌面行为逐字不变）', async () => {
+    setViewportWidth(1024)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    expect(screen.getByText('图谱统计')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument()
+  })
+
+  it('边界：正好 768px 算窄屏（与 CSS 的 max-width: 768px 同值，不差一个像素）', async () => {
+    setViewportWidth(768)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    expect(screen.queryByText('图谱统计')).not.toBeInTheDocument()
+  })
+})
+
+/**
  * 宽容解析的另一半（overhaul-plan AZ.7）：形状不对时**必须有人知道**。
  *
  * 下面的漂移用例（以及文件末尾那一组）证明的是"喂残缺数据不白屏"，
@@ -735,7 +787,29 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
 
+    // 搜索接口也一样：`{items:[…],total}` 里 items 是**约定字段**、不是包装对象，
+    // 用错判据（把它当顶层数组契约）就会让每次正常搜索都弹一条无用提示
+    await userEvent.type(screen.getByPlaceholderText('搜索卡片...'), '浮充')
+    await waitFor(() => expect(mockedSearch).toHaveBeenCalled(), { timeout: 2000 })
+
     expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('★ 搜索接口返回残缺结构时也会报出来（本目录最后一处没走判据的列表赋值）', async () => {
+    mockedSearch.mockResolvedValue({} as never)
+    renderPage()
+    await screen.findByText('知识图谱')
+
+    await userEvent.type(screen.getByPlaceholderText('搜索卡片...'), '不存在')
+    await waitFor(() => expect(mockedSearch).toHaveBeenCalled(), { timeout: 2000 })
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
+    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/search')
+    expect(String(toast.warning.mock.calls[0][1])).toContain('items')
+
+    // 退化行为不变：不崩，也不残留旧结果（GraphToolbar 的 length 检查照旧兜底）
+    expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument()
+    expect(screen.getByText('知识图谱')).toBeInTheDocument()
   })
 
   it('★ 去重：同一处漂移在反复重拉中只提示一次（确认后每次写操作都会重拉统计）', async () => {

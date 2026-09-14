@@ -8,13 +8,30 @@
  *    并因 `nodeCanvasObject` 依赖含 `hoverNode` 而重绘整张画布；
  * 2. 各点击回调设置的面板与选中项（含 `handleLinkClick` 里 `setActivePanel(null)`、
  *    `handleBackgroundClick` 里"创建模式下不清面板"的分支）一字未动。
+ *
+ * 5.10 移动端补丁：`sidebarOpen` 的**初始值**改为窄屏感知（宽屏仍是默认展开，
+ * 与拆分前逐字一致），理由见该 state 上的注释。
  */
 import { useCallback, useRef, useState } from 'react'
 import type { ForceGraphLink, ForceGraphNode, SidebarPanel } from '../../components/graph/types'
 
+/**
+ * 窄屏断点：与 responsive.css 的 `@media (max-width: 768px)` 一致。
+ * 两处必须同值 —— 不一致会出现"CSS 已经把它当手机（底部抽屉），JS 还当桌面（默认展开）"，
+ * 首屏就有一张盖住半张画布的抽屉。
+ */
+const NARROW_SCREEN_MAX_WIDTH = 768
+
 export function useGraphInteraction() {
-  /** 侧边栏状态 */
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  /**
+   * 侧边栏状态
+   *
+   * 宽屏默认展开（与拆分前逐字一致）；**窄屏默认收起**：手机上侧边栏是固定底部抽屉
+   * （`max-height: 50vh`），默认展开等于首屏就盖掉半张画布，用户得先找到「收起」才看得见图。
+   * 只在首次挂载时判定：之后窗口尺寸变化不重置用户的选择（手机上转屏不该把用户
+   * 手动收起的侧栏又弹开）。
+   */
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > NARROW_SCREEN_MAX_WIDTH)
   const [activePanel, setActivePanel] = useState<SidebarPanel>(null)
 
   /** 选中的节点 */

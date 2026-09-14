@@ -182,4 +182,11 @@ describe('formatSize', () => {
     expect(formatSize(undefined)).toBe('—')
     expect(formatSize(Number.NaN)).toBe('—')
   })
+
+  it('负数（不可能的大小）按未知处理，而不是把脏数据当事实显示', () => {
+    // 文件大小非负：真出现负数说明后端那个字段算错了。显示 "-5 B" 会让用户以为这是真的，
+    // 与"字段缺失"共用 "—" 才诚实 —— 两者对用户的意义相同：这个大小不可信。
+    expect(formatSize(-5)).toBe('—')
+    expect(formatSize(-1)).toBe('—')
+  })
 })

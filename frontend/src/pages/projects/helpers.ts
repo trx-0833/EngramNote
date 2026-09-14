@@ -37,11 +37,12 @@ export const TYPE_BADGE: Record<string, string> = {
  *
  * `0` 是**真实大小**（0 字节的笔记就是 0 字节），不是"未知"。原来的 `if (!bytes)`
  * 把 0 和缺失值混为一谈，于是 0 字节的笔记显示成 `—`，与"后端没给这个字段"看起来一样。
- * 现在 `—` 只表示"没有值 / 不是有效数字"（`null` / `undefined` / `NaN`），
- * 0 及以上一律给出真实大小。
+ * 负数不可能存在（文件大小非负），显示成 `-5 B` 等于把脏数据当成事实告诉用户，
+ * 所以也归入"未知"。于是 `—` 的含义收敛为"没有值 / 不是有效数字"（`null` / `undefined` /
+ * `NaN` / 负数），0 及以上一律给出真实大小。
  */
 export function formatSize(bytes: number | null | undefined): string {
-  if (bytes == null || !Number.isFinite(bytes)) return '—'
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`

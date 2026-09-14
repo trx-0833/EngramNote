@@ -7,6 +7,9 @@
  * 候选过滤里的 `(n.title ?? '')` 是白屏护栏：`title` 可能为 null（后端/历史数据），
  * 原来直接 `null.toLowerCase()` 一输入搜索词就崩。缺失标题按空串处理 ——
  * 只在搜索关键词为空时留在候选里，其余情况不参与匹配。
+ *
+ * 5.10 移动端补丁：搜索框不再内联 `font-size: 0.8rem`（< 16px 会让 iOS 聚焦时放大整页），
+ * 交给全局的 `input { font-size: 1rem }`。理由写在该输入框上方。
  */
 import type { Note } from '../../api/client'
 import { statusClass } from '../../utils/labels'
@@ -63,7 +66,10 @@ export default function AddNotesPanel({
         value={search}
         onChange={(e) => onChangeSearch(e.target.value)}
         placeholder="按标题搜索候选笔记…"
-        style={{ width: '100%', marginBottom: 8, fontSize: '0.8rem' }}
+        // 故意不设内联 font-size：全局 `input, textarea { font-size: 1rem }`（components.css）
+        // 正好是 16px。原来的 0.8rem（12.8px）会让 iOS Safari 在聚焦时把**整页**放大，
+        // 用户得手动缩小才能继续操作（面板其余文字仍按 0.8rem，不受影响）。
+        style={{ width: '100%', marginBottom: 8 }}
       />
       {error && <div style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginBottom: 8 }}>{error}</div>}
       <div

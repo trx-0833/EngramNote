@@ -3,9 +3,18 @@
  * @description 自 `pages/KnowledgeGraph.tsx` 拆分（overhaul-plan 5.5），**只搬不改**：
  * 防抖间隔 300ms、关键词清空时同步清空结果、请求失败退化成空结果列表
  * （接口返回残缺结构时不崩、也不残留旧结果）均与拆分前逐字一致。
+ *
+ * 唯一补充：结果数组原来写的是 `result.items || []`（本目录最后一处没走判据的列表赋值），
+ * 现在过 `unwrapPageItems` —— 与 `/notes` 同一个形状（`{items,total}`，`items` 就是约定字段），
+ * 因此漂移会被报出来，而不是静默容忍。退化行为不变：非数组 → 空列表，
+ * 消费侧（`GraphToolbar` 的 `searchResults.length > 0`）照旧兜底。
  */
 import { useEffect, useRef, useState } from 'react'
 import { searchGraphNodes, type GraphSearchNode } from '../../api/client'
+import { unwrapPageItems } from '../contractDrift'
+
+/** 提示文案里的接口名：与后端对账时直接用 */
+const SOURCE_GRAPH_SEARCH = 'GET /graph/search'
 
 export function useGraphSearch() {
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -20,7 +29,7 @@ export function useGraphSearch() {
     setSearching(true)
     try {
       const result = await searchGraphNodes(keyword, 15)
-      setSearchResults(result.items || [])
+      setSearchResults(unwrapPageItems<GraphSearchNode>(result, SOURCE_GRAPH_SEARCH))
     } catch {
       setSearchResults([])
     } finally {

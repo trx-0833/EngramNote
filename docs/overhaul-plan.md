@@ -9046,12 +9046,19 @@ jsdom **不加载样式表、不做布局**。因此以下全部**只有规则�
 前两项是**真缺陷**，只是落在当时另一个代理正在编辑的目录里：
 
 1. `pages/projects/ProjectCard.tsx` 底部操作行 `display:flex` 缺 `flex-wrap`：
-   ~320px 视口上 5 个按钮会**横向溢出**。该行没有类名，CSS 侧无法干净命中
-   （属性选择器过宽，不可接受），需在该文件加 `flexWrap: 'wrap'`；
+   ~320px 视口上 5 个按钮会**横向溢出**。**已修**（4 处内联 flex 行都加 `flexWrap: 'wrap'`；
+   这些行**没有类名**，CSS 侧无法干净命中，所以只能在 TSX 里修）。
 2. `pages/knowledgegraph/useGraphInteraction.ts` 的 `sidebarOpen` 默认 `true`：
-   手机上**首屏就展开贴底抽屉**，盖住约半屏画布。窄屏应默认收起；
-3. 两处输入框字号 <16px（`AddNotesPanel` 搜索框内联 0.8rem、`.ask-ai-input` 0.9rem），
-   会让 **iOS 聚焦时自动放大页面**；修它们需要 `!important` 或改内联样式，故留给后续；
+   手机上**首屏就展开贴底抽屉**，盖住约半屏画布。**已修**：初值改为
+   `window.innerWidth > 768`（与 CSS 断点同值，注释写明两者必须一致）；桌面仍是默认展开。
+3. **iOS 聚焦缩放**（输入框字号 <16px 会触发）：`AddNotesPanel` 的搜索框**已修** ——
+   它本来是内联 `0.8rem` **压住了全局正确的 `1rem`**，删掉内联样式即恢复正确（不是绕过去）。
+   ⚠️ **仍未修的两处，且必须改在正确的位置**：`.ask-ai-input`
+   （`styles/markdown-extras.css:149`，0.9rem）与 `.graph-search-input`
+   （`styles/graph.css:386`，0.8rem）。**不能**从 TSX 注入内联覆盖 ——
+   内联样式会永久压过样式表并**掩盖正确的修法**；而且 `markdown-extras.css` 在
+   `responsive.css` **之后**加载，所以写在 responsive.css 里的媒体查询也会输，
+   必须改在各自样式表里。
 4. `components/Sidebar.tsx` 里"上传资料"按钮**嵌在导航项按钮内部**
    （`<button>` 套 `<button>`，React 会告警 DOM 嵌套非法）—— 改造前既有，属 5.9 范围。
 

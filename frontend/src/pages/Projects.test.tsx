@@ -819,3 +819,49 @@ describe('破坏性操作的确认写法统一', () => {
     expect(graphMutationsSource).toContain('if (!confirm(') // useGraphMutations 的两处也仍是裸 confirm
   })
 })
+
+/**
+ * 窄屏布局（overhaul-plan 5.10 的移动端补丁）：项目卡片的两行按钮靠**内联样式**排版、
+ * 没有类名，所以 responsive.css 改不到它们 —— 320px 视口上按钮会把卡片撑出横向滚动。
+ *
+ * ## 为什么只能断言内联样式
+ *
+ * jsdom **不做布局**：`flexWrap: 'wrap'` 到底有没有让按钮换到第二行，只能在真浏览器里看。
+ * 这里钉住的是"那条决定换行的声明还在" —— 删掉它用例立刻变红，而这正是缺陷复发的唯一入口。
+ * 同理，输入框字号在 jsdom 里也不参与计算（样式表不加载），所以只能断言"没有内联覆盖"。
+ */
+describe('窄屏布局：溢出用换行解决，而不是撑破卡片', () => {
+  it('★ 底部操作行可以换行（查看笔记（N）/ 重命名 / 删除 三个按钮）', async () => {
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+
+    const row = screen.getByRole('button', { name: /查看笔记（2）/ }).parentElement as HTMLElement
+
+    expect(row.style.flexWrap).toBe('wrap')
+    // 换行只是溢出时的兜底：两端对齐与间距不变，宽屏排版与改动前一致
+    expect(row.style.justifyContent).toBe('space-between')
+    expect(row.style.gap).toBe('8px')
+  })
+
+  it('★ 顶部操作按钮组同样可以换行（它 flexShrink:0，自己不会缩）', async () => {
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+
+    const group = screen.getByRole('button', { name: '添加笔记' }).parentElement as HTMLElement
+
+    expect(group.style.flexWrap).toBe('wrap')
+    expect(group.style.flexShrink).toBe('0')
+  })
+
+  it('★ 添加笔记搜索框不再内联小字号（< 16px 会让 iOS 聚焦时放大整页）', async () => {
+    renderPage()
+    await screen.findByText('Transformer 论文精读')
+    await userEvent.click(screen.getByRole('button', { name: '添加笔记' }))
+
+    const input = await screen.findByPlaceholderText(/按标题搜索候选笔记/)
+
+    // 内联优先于样式表：留着 0.8rem（12.8px）就会盖掉全局的 `input { font-size: 1rem }`
+    // （components.css:115，正好 16px）。jsdom 不加载样式表，所以这里钉的是"没有内联覆盖"。
+    expect(input.style.fontSize).toBe('')
+  })
+})
