@@ -10,11 +10,22 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.app_error import (
+    NOTE_CONTENT_TOO_LARGE,
+    NOTE_MARKDOWN_PATH_MISSING,
+    NOTE_NOT_FOUND,
+    NOTE_NOT_VIDEO,
+    NOTE_ORIGINAL_NOT_EDITABLE,
+    NOTE_ROLE_INVALID,
+    NOTE_STATUS_INVALID,
+    NOTE_VIDEO_FILE_MISSING,
+    AppError,
+)
 from ...database import get_db
 from ...models.note import Note, NoteRole, NoteStatus, SourceType
 from ...models.user import User
@@ -81,9 +92,10 @@ async def list_notes(
     if note_role is not None:
         valid_roles = [e.value for e in NoteRole]
         if note_role not in valid_roles:
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+            raise AppError(
+                NOTE_ROLE_INVALID,
+                f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+                400,
             )
     notes, total = await get_notes_list(
         db, current_user.id, page, page_size, keyword, note_role=note_role, project_id=project_id
@@ -113,9 +125,10 @@ async def list_archived_notes(
     if note_role is not None:
         valid_roles = [e.value for e in NoteRole]
         if note_role not in valid_roles:
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+            raise AppError(
+                NOTE_ROLE_INVALID,
+                f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+                400,
             )
     notes, total = await get_notes_list(
         db, current_user.id, page, page_size, note_status=NoteStatus.archived, note_role=note_role
@@ -154,7 +167,7 @@ async def get_note(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 从对象存储中读取 Markdown 内容
     original_md = await get_note_markdown_content(note)
@@ -196,7 +209,7 @@ async def update_note_api(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     updated = await update_note(db, note, req)
     return await _build_note_response(db, updated)
@@ -218,7 +231,7 @@ async def update_note_content(
     # 1. 校验笔记归属
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 2. 校验处理中状态
     processing_statuses = {
@@ -226,32 +239,36 @@ async def update_note_content(
         NoteStatus.cleaning, NoteStatus.learning,
     }
     if note.status in processing_statuses:
-        raise HTTPException(
-            status_code=400,
-            detail=f"笔记正在处理中（{note.status.value}），暂不可编辑",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"笔记正在处理中（{note.status.value}），暂不可编辑",
+            400,
         )
 
     # 2.1 原始版内容不可编辑（只读），仅允许编辑清洗版
     if req.target == "original":
-        raise HTTPException(
-            status_code=400,
-            detail="原始版内容不可编辑，请切换到清洗版后编辑",
+        raise AppError(
+            NOTE_ORIGINAL_NOT_EDITABLE,
+            "原始版内容不可编辑，请切换到清洗版后编辑",
+            400,
         )
 
     # 3. 校验内容大小（5MB 限制，按字节数计算）
     content_size = len(req.content.encode("utf-8"))
     if content_size > 5 * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail="内容过大（超过 5MB），请缩短后重试",
+        raise AppError(
+            NOTE_CONTENT_TOO_LARGE,
+            "内容过大（超过 5MB），请缩短后重试",
+            400,
         )
 
     # 4. 保存内容
     success = await note_service.save_note_content(db, note, req.content, req.target)
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail="目标 Markdown 路径为空，资料可能尚未转换完成",
+        raise AppError(
+            NOTE_MARKDOWN_PATH_MISSING,
+            "目标 Markdown 路径为空，资料可能尚未转换完成",
+            400,
         )
 
     # 5. 返回更新后的笔记信息
@@ -282,15 +299,16 @@ async def archive_note_api(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if note.status not in (
         NoteStatus.archived, NoteStatus.cleaned,
         NoteStatus.learning_failed, NoteStatus.converted,
     ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"当前状态 {note.status.value} 不允许归档/取消归档操作",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"当前状态 {note.status.value} 不允许归档/取消归档操作",
+            400,
         )
 
     if note.status == NoteStatus.archived:
@@ -341,14 +359,15 @@ async def update_note_role(
     # 验证 note_role 值是否合法
     valid_roles = [e.value for e in NoteRole]
     if note_role not in valid_roles:
-        raise HTTPException(
-            status_code=400,
-            detail=f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+        raise AppError(
+            NOTE_ROLE_INVALID,
+            f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+            400,
         )
 
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     note.note_role = NoteRole(note_role)
     await db.commit()
@@ -394,9 +413,9 @@ async def stream_video(
     )
     note = result.scalars().first()
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
     if note.source_type != SourceType.video:
-        raise HTTPException(status_code=400, detail="该笔记不是视频类型")
+        raise AppError(NOTE_NOT_VIDEO, "该笔记不是视频类型", 400)
 
     # 2. MinIO 模式：生成预签名 URL 并重定向
     if settings.storage_backend == "minio":
@@ -406,7 +425,7 @@ async def stream_video(
     # 3. 本地存储：流式返回文件，支持 Range 请求
     video_path = _resolve_storage_path(settings.minio_bucket_original, note.original_file_path)
     if not video_path.exists():
-        raise HTTPException(status_code=404, detail="视频文件不存在")
+        raise AppError(NOTE_VIDEO_FILE_MISSING, "视频文件不存在", 404)
 
     file_size = video_path.stat().st_size
 

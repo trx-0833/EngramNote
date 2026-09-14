@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
+from ..core.app_error import AUTH_INVALID_CREDENTIALS, AUTH_REGISTRATION_REJECTED, AppError
 from ..models.user import User
 from ..schemas.user import (
     LogoutRequest,
@@ -96,6 +97,9 @@ async def get_current_user_dependency(
     # 解码 JWT，获取 user_id
     user_id = decode_access_token(token)
     if not user_id:
+        # error-contract: exempt — 响应必须带 WWW-Authenticate 头（RFC 7235）；
+        # AppError 走 ErrorHandlerMiddleware，而该中间件不转发 headers（本次改动
+        # 无权修改 middleware/**），迁过去会让这个头静默消失，见 tests/test_auth_contract.py
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效或过期的令牌",
@@ -107,6 +111,7 @@ async def get_current_user_dependency(
     user = result.scalars().first()
     # 同时验证用户存在且未被禁用
     if not user or not user.is_active:
+        # error-contract: exempt — 同上：必须保留 WWW-Authenticate 质询头
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在或已禁用",
@@ -136,7 +141,9 @@ async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db))
     try:
         user = await register_user(db, req)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise AppError(
+            AUTH_REGISTRATION_REJECTED, str(e), status.HTTP_400_BAD_REQUEST
+        ) from e
 
     # 注册成功后自动签发令牌对，免去用户再次登录
     token = create_access_token(user.id)
@@ -171,9 +178,8 @@ async def login(req: UserLoginRequest, db: AsyncSession = Depends(get_db)):
     user = await authenticate_user(db, req.email, req.password)
     if not user:
         # 统一返回"邮箱或密码错误"，不区分是邮箱不存在还是密码错误，防止信息泄露
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="邮箱或密码错误",
+        raise AppError(
+            AUTH_INVALID_CREDENTIALS, "邮箱或密码错误", status.HTTP_401_UNAUTHORIZED,
         )
 
     token = create_access_token(user.id)
@@ -217,6 +223,7 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """
     rotated = await rotate_refresh_token(db, req.refresh_token)
     if rotated is None:
+        # error-contract: exempt — 刷新失败的 401 同样必须带 WWW-Authenticate 头
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="刷新令牌无效或已失效，请重新登录",

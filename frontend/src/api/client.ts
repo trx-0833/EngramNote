@@ -334,6 +334,37 @@ export async function authorizedFetch(
 }
 
 /**
+ * 带错误码的 API 错误（阶段 0.11：统一错误契约）
+ *
+ * 后端错误响应统一为 `{detail, error_code, request_id}`（见后端
+ * `middleware/error_handler.py`）。其中 `error_code` 是**稳定**的机器可读标识，
+ * `detail` 是面向用户的中文文案 —— 文案会随措辞调整，错误码不会。
+ *
+ * ## 为什么要有这个类
+ *
+ * 改造前 `error_code` 只被拼进 message 字符串（形如 `"HTTP_404: 笔记不存在"`），
+ * 调用方拿不到结构化的码，想按错误类型分流就只能对**中文文案**做匹配
+ * （`message.includes('每日上限')`）—— 后端把文案改一个字，前端分支就静默
+ * 失效，而失效的样子是"页面不跳转"而不是报错（overhaul-plan 的 F-19 记的
+ * 正是这个形态）。`code` 字段让分流依据与文案解耦。
+ *
+ * ## 为什么 message 的构造一个字都没改
+ *
+ * `message` 仍是 `${error_code}: ${detail}`（没有 error_code 时就是 detail）：
+ * 展示层看到的内容不变，本次改造**只新增**结构化的 `code`。
+ */
+export class ApiError extends Error {
+  /** 后端 error_code；响应里没有该字段时为 null（如客户端本地生成的 401 文案） */
+  readonly code: string | null
+
+  constructor(message: string, code: string | null = null) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
+/**
  * 通用请求封装函数
  * 自动附加 Content-Type 和 Authorization 头，统一处理错误响应。
  * 已导出，供 api/ 目录下的模块化 API 文件复用。
@@ -345,7 +376,8 @@ export async function authorizedFetch(
  * @param path - API 路径（不含基础路径前缀，如 /auth/login）
  * @param options - fetch 请求选项
  * @returns 解析后的 JSON 响应数据
- * @throws 当响应状态码非 2xx 时抛出 Error，包含后端返回的 detail 信息
+ * @throws {ApiError} 当响应状态码非 2xx 时抛出，message 含后端 detail，
+ *   `code` 为后端 error_code（调用方应按 code 分流，不要匹配文案）
  */
 export async function request<T>(
   path: string,
@@ -381,7 +413,7 @@ export async function request<T>(
     // 错误响应统一为 {detail, error_code, request_id}：优先识别稳定的 error_code
     // （存在时前置，供上层按错误码分流/定位），缺失时回退中文 detail 文案兜底。
     const errorCode = typeof error.error_code === 'string' && error.error_code ? error.error_code : null;
-    throw new Error(errorCode ? `${errorCode}: ${detail}` : detail);
+    throw new ApiError(errorCode ? `${errorCode}: ${detail}` : detail, errorCode);
   }
 
   // 204 No Content 无响应体，返回 undefined
@@ -416,13 +448,14 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
   if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
+      throw new ApiError('登录已过期，请重新登录');
     }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     const detail = Array.isArray(error.detail)
       ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
       : (error.detail || `请求失败: ${response.status}`);
-    throw new Error(detail);
+    // message 仍是 detail（与改造前逐字一致），只是额外带上结构化的 code
+    throw new ApiError(detail, typeof error.error_code === 'string' ? error.error_code : null);
   }
 
   const text = await response.text();
@@ -461,13 +494,13 @@ export async function askQuestionStream(question: string, signal?: AbortSignal):
   if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
-      throw new Error('登录已过期，请重新登录');
+      throw new ApiError('登录已过期，请重新登录');
     }
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     const detail = Array.isArray(error.detail)
       ? error.detail.map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e)).join('; ')
       : (error.detail || `请求失败: ${response.status}`);
-    throw new Error(detail);
+    throw new ApiError(detail, typeof error.error_code === 'string' ? error.error_code : null);
   }
   if (!response.body) {
     throw new Error('浏览器不支持流式响应');

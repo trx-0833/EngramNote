@@ -148,7 +148,7 @@ def test_f07_delete_note_cleans_note_projects(test_db):
 # ---------------------------------------------------------------------------
 
 def test_f09_goal_scope_idor_rejected(test_db):
-    from fastapi import HTTPException
+    from app.core.app_error import GOAL_SCOPE_FOLDER_INVALID, GOAL_SCOPE_NOTE_INVALID, AppError
 
     async def _run_test():
         from app.models.user import User
@@ -198,9 +198,10 @@ def test_f09_goal_scope_idor_rejected(test_db):
                 scope_folders = []
                 target_mastery = 80.0
                 deadline = None
-            with pytest.raises(HTTPException) as exc:
+            with pytest.raises(AppError) as exc:
                 await goal_service.create_goal("u1", ReqBad(), s)
-            assert exc.value.status_code == 400
+            assert exc.value.http_status == 400
+            assert exc.value.code == GOAL_SCOPE_NOTE_INVALID
 
             # 越权 folder 拒绝
             class ReqBad2:
@@ -210,9 +211,10 @@ def test_f09_goal_scope_idor_rejected(test_db):
                 scope_folders = ["f2"]
                 target_mastery = 80.0
                 deadline = None
-            with pytest.raises(HTTPException) as exc2:
+            with pytest.raises(AppError) as exc2:
                 await goal_service.create_goal("u1", ReqBad2(), s)
-            assert exc2.value.status_code == 400
+            assert exc2.value.http_status == 400
+            assert exc2.value.code == GOAL_SCOPE_FOLDER_INVALID
 
     _run(_run_test())
 

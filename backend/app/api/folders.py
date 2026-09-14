@@ -20,12 +20,18 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import logging
 
 from ..database import get_db
+from ..core.app_error import (
+    FOLDER_DATE_INVALID,
+    FOLDER_NOT_EMPTY,
+    FOLDER_NOT_FOUND,
+    AppError,
+)
 from ..models.user import User
 from ..schemas.common import MessageResponse
 from ..schemas.folder import (
@@ -77,7 +83,9 @@ async def create_folder(
                 tzinfo=timezone.utc,
             )
         except ValueError as e:
-            raise HTTPException(status_code=400, detail="无效的日期格式，请使用 ISO 格式如 2024-01-15") from e
+            raise AppError(
+                FOLDER_DATE_INVALID, "无效的日期格式，请使用 ISO 格式如 2024-01-15", 400
+            ) from e
 
     folder = await svc_create_folder(
         user_id=current_user.id,
@@ -153,7 +161,7 @@ async def get_folder(
         db=db,
     )
     if not detail:
-        raise HTTPException(status_code=404, detail="文件夹不存在")
+        raise AppError(FOLDER_NOT_FOUND, "文件夹不存在", 404)
 
     return FolderDetailResponse(
         id=detail["id"],
@@ -197,7 +205,7 @@ async def update_folder(
             db=db,
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise AppError(FOLDER_NOT_FOUND, str(e), 404) from e
 
     return FolderResponse(**updated)
 
@@ -233,6 +241,8 @@ async def delete_folder(
         )
         return result
     except ValueError as e:
+        # 两种失败原因用不同的 error_code：服务层靠文案区分（"不存在" / "非空"），
+        # 状态码 404 / 400 也据此分流 —— 迁移只固定 code，不改这个既有判据。
         if "不存在" in str(e):
-            raise HTTPException(status_code=404, detail=str(e)) from e
-        raise HTTPException(status_code=400, detail=str(e)) from e
+            raise AppError(FOLDER_NOT_FOUND, str(e), 404) from e
+        raise AppError(FOLDER_NOT_EMPTY, str(e), 400) from e

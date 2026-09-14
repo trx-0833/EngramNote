@@ -19,11 +19,16 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
+from ..core.app_error import (
+    PROJECT_NOTE_LINK_NOT_FOUND,
+    PROJECT_NOT_FOUND,
+    AppError,
+)
 from ..models.project import Project
 from ..models.user import User
 from ..schemas.common import MessageResponse
@@ -110,7 +115,7 @@ async def get_project(
     """
     detail = await project_service.get_project(db, project_id, current_user.id)
     if not detail:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise AppError(PROJECT_NOT_FOUND, "项目不存在", 404)
     return detail
 
 
@@ -141,7 +146,7 @@ async def update_project(
             db, project_id, current_user.id, req.name, req.description
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise AppError(PROJECT_NOT_FOUND, str(e), 404) from e
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)
@@ -169,7 +174,8 @@ async def delete_project(
     try:
         return await project_service.delete_project(db, project_id, current_user.id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # 状态码保持 400（历史取值，不改）；code 说明"项目不存在或无权访问"
+        raise AppError(PROJECT_NOT_FOUND, str(e), 400) from e
 
 
 @router.post("/{project_id}/scan", response_model=ScanImportResponse)
@@ -201,7 +207,7 @@ async def scan_project_source(
     )
     project = result.scalars().first()
     if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise AppError(PROJECT_NOT_FOUND, "项目不存在", 404)
 
     return await project_service.scan_project_source(db, project, current_user.id)
 
@@ -236,7 +242,7 @@ async def add_notes(
             db, project_id, current_user.id, req.note_ids
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise AppError(PROJECT_NOT_FOUND, str(e), 404) from e
 
 
 @router.delete("/{project_id}/notes/{note_id}", response_model=ProjectNoteRemovedResponse)
@@ -268,4 +274,6 @@ async def remove_note(
             db, project_id, note_id, current_user.id
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        # 服务层两种文案："项目不存在或无权访问" / "笔记不在该项目中"，
+        # 共同点是**这一次的 项目-笔记 关联不可用**，故共用一个 code。
+        raise AppError(PROJECT_NOTE_LINK_NOT_FOUND, str(e), 404) from e

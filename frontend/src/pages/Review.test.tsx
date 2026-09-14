@@ -156,8 +156,50 @@ describe('答题复习的进度显示（与卡片复习页共用同一组件）'
   })
 })
 
-describe('答题复习的回车约定（与卡片复习页一致）', () => {
-  it('★ 焦点不在按钮上时，回车提交答案', async () => {
+describe('每日限额的分流依据是 error_code，不是中文文案（阶段 0.11）', () => {
+  /** 造一个带 code 的异常，模拟 api/client 抛出的 ApiError（结构一致） */
+  function apiError(code: string, message: string): Error {
+    const err = new Error(message) as Error & { code?: string }
+    err.code = code
+    return err
+  }
+
+  it('★ error_code=DAILY_REVIEW_LIMIT_REACHED 时进入"复习完成"，且刷新统计', async () => {
+    // 文案里**故意不带**"每日上限"四个字：只要分支还在匹配中文，这条就会红
+    // （这正是 F-19 要消灭的形态 —— 后端改文案不该影响前端分支）。
+    mockedSubmit.mockRejectedValue(
+      apiError('DAILY_REVIEW_LIMIT_REACHED', '今日额度已用完'),
+    )
+    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }))
+
+    renderPage()
+    await loaded()
+
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行')
+    await userEvent.click(screen.getByRole('button', { name: '提交答案' }))
+
+    expect(await screen.findByText('复习完成')).toBeInTheDocument()
+    // 进入完成页前必须重新拉一次统计（否则"今日已完成"显示的是旧值）
+    expect(mockedStats).toHaveBeenCalledTimes(2)
+  })
+
+  it('其它错误码仍然报错，不会被误判成"今日完成"', async () => {
+    mockedSubmit.mockRejectedValue(apiError('REVIEW_QUIZ_NOT_FOUND', '题目不存在'))
+
+    renderPage()
+    await loaded()
+
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行')
+    await userEvent.click(screen.getByRole('button', { name: '提交答案' }))
+
+    // 没被误判成"额度用尽"：没有跳完成页，也没有多拉一次统计
+    expect(screen.queryByText('复习完成')).not.toBeInTheDocument()
+    expect(screen.getByText('浮充是什么？')).toBeInTheDocument()
+    expect(mockedStats).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('答题复习的回车约定（与卡片复习页一致）', () => {  it('★ 焦点不在按钮上时，回车提交答案', async () => {
     mockedSubmit.mockResolvedValue(makeResult())
     renderPage()
     await loaded()

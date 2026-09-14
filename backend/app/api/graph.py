@@ -18,9 +18,17 @@
   由用户通过 POST /suggest 显式触发
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.app_error import (
+    GRAPH_NODE_NOT_FOUND,
+    GRAPH_RELATION_IDS_EMPTY,
+    GRAPH_RELATION_NOT_FOUND,
+    GRAPH_RELATION_OPERATION_FAILED,
+    GRAPH_SUGGESTION_FAILED,
+    AppError,
+)
 from ..database import get_db
 from ..models.user import User
 from ..api.auth import get_current_user_dependency
@@ -120,7 +128,7 @@ async def get_node_subgraph(
         db=db,
     )
     if result is None:
-        raise HTTPException(status_code=404, detail="节点不存在或无权访问")
+        raise AppError(GRAPH_NODE_NOT_FOUND, "节点不存在或无权访问", 404)
     return result
 
 
@@ -161,7 +169,7 @@ async def suggest_relations_api(
     except GraphSuggestionError as e:
         # 保留原始异常链（raise ... from e）：图谱建议失败通常源于上游
         # LLM 超时或额度问题，丢掉 cause 会让排障时看不到真正原因。
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        raise AppError(GRAPH_SUGGESTION_FAILED, str(e), 503) from e
     return {"success": True, "new_count": new_count}
 
 
@@ -183,7 +191,9 @@ async def confirm_relation(
     )
 
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "操作失败"))
+        raise AppError(
+            GRAPH_RELATION_OPERATION_FAILED, result.get("error", "操作失败"), 400
+        )
 
     return result
 
@@ -206,7 +216,9 @@ async def reject_relation(
     )
 
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "操作失败"))
+        raise AppError(
+            GRAPH_RELATION_OPERATION_FAILED, result.get("error", "操作失败"), 400
+        )
 
     return result
 
@@ -223,7 +235,7 @@ async def batch_confirm(
     一次性确认多条建议关系。
     """
     if not req.relation_ids:
-        raise HTTPException(status_code=400, detail="关系 ID 列表不能为空")
+        raise AppError(GRAPH_RELATION_IDS_EMPTY, "关系 ID 列表不能为空", 400)
 
     return await graph_service.batch_confirm_suggestions(
         relation_ids=req.relation_ids,
@@ -244,7 +256,7 @@ async def batch_reject(
     一次性拒绝多条建议关系。
     """
     if not req.relation_ids:
-        raise HTTPException(status_code=400, detail="关系 ID 列表不能为空")
+        raise AppError(GRAPH_RELATION_IDS_EMPTY, "关系 ID 列表不能为空", 400)
 
     return await graph_service.batch_reject_suggestions(
         relation_ids=req.relation_ids,
@@ -273,7 +285,9 @@ async def create_relation(
     )
 
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "操作失败"))
+        raise AppError(
+            GRAPH_RELATION_OPERATION_FAILED, result.get("error", "操作失败"), 400
+        )
 
     return result
 
@@ -296,7 +310,9 @@ async def delete_relation(
     )
 
     if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("error", "关系不存在"))
+        raise AppError(
+            GRAPH_RELATION_NOT_FOUND, result.get("error", "关系不存在"), 404
+        )
 
     return result
 

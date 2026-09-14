@@ -29,11 +29,37 @@ import tempfile
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, UploadFile, File, Form, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import TMP_UPLOAD_DIR, get_settings
+from ..core.app_error import (
+    FOLDER_NOT_FOUND,
+    NOTE_NOT_FOUND,
+    NOTE_ROLE_INVALID,
+    NOTE_STATUS_INVALID,
+    UPLOAD_ARCHIVE_REJECTED,
+    UPLOAD_CONTENT_MISMATCH,
+    UPLOAD_CROP_UNSUPPORTED_TYPE,
+    UPLOAD_EXTENSION_MISMATCH,
+    UPLOAD_FILE_NAME_EMPTY,
+    UPLOAD_FILE_NAME_INVALID,
+    UPLOAD_FILE_NAME_TOO_LONG,
+    UPLOAD_FILE_TOO_LARGE,
+    UPLOAD_FORMAT_UNSUPPORTED,
+    UPLOAD_NOTE_COUNT_LIMIT_REACHED,
+    UPLOAD_PDF_CROP_FAILED,
+    UPLOAD_PDF_PARSE_FAILED,
+    UPLOAD_PDF_TOO_MANY_PAGES,
+    UPLOAD_SCRIPT_CONTENT_REJECTED,
+    UPLOAD_STORAGE_QUOTA_EXCEEDED,
+    UPLOAD_STORAGE_WRITE_FAILED,
+    UPLOAD_TEMP_DATA_INVALID,
+    UPLOAD_TEMP_EXPIRED,
+    UPLOAD_TEMP_ID_INVALID,
+    AppError,
+)
 from ..database import get_db
 from ..models.note import Note, NoteRole, NoteStatus, SourceType
 from ..models.folder import Folder
@@ -167,13 +193,13 @@ async def _stream_upload(
     Args:
         file: 上传文件对象
         dest_path: 落盘目标路径
-        max_size: 大小上限（字节），超限抛 HTTPException 并删除已写入文件
+        max_size: 大小上限（字节），超限抛 AppError 并删除已写入文件
 
     Returns:
         tuple: (total_size, sha256_hex, head_bytes)
 
     Raises:
-        HTTPException 400: 文件大小超过限制
+        AppError 400 UPLOAD_FILE_TOO_LARGE: 文件大小超过限制
     """
     sha256 = hashlib.sha256()
     head = b""
@@ -186,9 +212,10 @@ async def _stream_upload(
                     break
                 total_size += len(chunk)
                 if total_size > max_size:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"文件大小超过限制 ({max_size // (1024 * 1024)}MB)",
+                    raise AppError(
+                        UPLOAD_FILE_TOO_LARGE,
+                        f"文件大小超过限制 ({max_size // (1024 * 1024)}MB)",
+                        400,
                     )
                 if len(head) < _MD_SNIFF_HEAD_SIZE:
                     head += chunk[:_MD_SNIFF_HEAD_SIZE - len(head)]
@@ -311,9 +338,10 @@ async def _do_upload(
         )
         used = used_result.scalar_one()
         if used + total_size > quota:
-            raise HTTPException(
-                status_code=400,
-                detail=f"存储空间不足：已使用 {used // (1024 * 1024)}MB，配额 {settings.max_storage_per_user_mb}MB",
+            raise AppError(
+                UPLOAD_STORAGE_QUOTA_EXCEEDED,
+                f"存储空间不足：已使用 {used // (1024 * 1024)}MB，配额 {settings.max_storage_per_user_mb}MB",
+                400,
             )
 
     # 1b. 单用户笔记数上限（阶段 6.4）：容量配额挡不住"传一万个小文件"，
@@ -326,7 +354,7 @@ async def _do_upload(
             int(count_result.scalar_one() or 0), max_notes=settings.max_notes_per_user,
         )
         if note_reason:
-            raise HTTPException(status_code=400, detail=note_reason)
+            raise AppError(UPLOAD_NOTE_COUNT_LIMIT_REACHED, note_reason, 400)
 
     # 2. 解析项目标签数组（JSON 字符串，支持多标签）；未指定时不归属任何项目
     selected_project_ids: list = []
@@ -357,9 +385,10 @@ async def _do_upload(
             )
         )
         if not folder_result.scalars().first():
-            raise HTTPException(
-                status_code=400,
-                detail="文件夹不存在或无权访问",
+            raise AppError(
+                FOLDER_NOT_FOUND,
+                "文件夹不存在或无权访问",
+                400,
             )
 
     # 3. 创建笔记记录
@@ -380,7 +409,7 @@ async def _do_upload(
     try:
         note_role_enum = NoteRole(note_role)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"无效的 note_role 值: {note_role}") from e
+        raise AppError(NOTE_ROLE_INVALID, f"无效的 note_role 值: {note_role}", 400) from e
 
     note = Note(
         id=note_id,
@@ -461,7 +490,7 @@ async def _do_upload(
         await db.refresh(note)
         write_note_meta(note)
         logger.error("文件上传失败: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试") from e
+        raise AppError(UPLOAD_STORAGE_WRITE_FAILED, "文件上传失败，请稍后重试", 500) from e
 
     # 5. 更新状态为 converting 并触发 Celery 异步任务
     note.status = NoteStatus.converting
@@ -524,13 +553,14 @@ async def upload_document(
     """
     # 1. 校验文件扩展名
     if not file.filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
+        raise AppError(UPLOAD_FILE_NAME_EMPTY, "文件名不能为空", 400)
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_EXTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
+        raise AppError(
+            UPLOAD_FORMAT_UNSUPPORTED,
+            f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
+            400,
         )
 
     # 根据扩展名确定文件来源类型
@@ -545,17 +575,19 @@ async def upload_document(
 
         # 2.5 文件内容签名校验（防止伪装文件上传）
         if not _validate_magic(ext, head):
-            raise HTTPException(
-                status_code=400,
-                detail=f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+            raise AppError(
+                UPLOAD_CONTENT_MISMATCH,
+                f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+                400,
             )
 
         # 2.6 .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
         violation = _sniff_md_content(ext, head)
         if violation:
-            raise HTTPException(
-                status_code=400,
-                detail=f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
+            raise AppError(
+                UPLOAD_SCRIPT_CONTENT_REJECTED,
+                f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
+                400,
             )
 
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
@@ -593,18 +625,19 @@ async def prepare_upload(
         HTTPException 400: 文件名不合法、格式不支持、大小超限、内容签名不匹配、PDF 解析失败
     """
     if not file.filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
+        raise AppError(UPLOAD_FILE_NAME_EMPTY, "文件名不能为空", 400)
 
     # 拒绝带路径分隔符的文件名，防止路径穿越
     filename = os.path.basename(file.filename)
     if filename != file.filename:
-        raise HTTPException(status_code=400, detail="文件名不合法")
+        raise AppError(UPLOAD_FILE_NAME_INVALID, "文件名不合法", 400)
 
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
+        raise AppError(
+            UPLOAD_FORMAT_UNSUPPORTED,
+            f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
+            400,
         )
 
     # 根据扩展名确定文件来源类型
@@ -619,16 +652,18 @@ async def prepare_upload(
     try:
         _, file_hash, head = await _stream_upload(file, str(dest), max_size)
         if not _validate_magic(ext, head):
-            raise HTTPException(
-                status_code=400,
-                detail=f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+            raise AppError(
+                UPLOAD_CONTENT_MISMATCH,
+                f"文件内容与格式不匹配，不是有效的 {ext} 文件",
+                400,
             )
         # .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
         violation = _sniff_md_content(ext, head)
         if violation:
-            raise HTTPException(
-                status_code=400,
-                detail=f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
+            raise AppError(
+                UPLOAD_SCRIPT_CONTENT_REJECTED,
+                f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
+                400,
             )
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -647,7 +682,7 @@ async def prepare_upload(
         if reason:
             shutil.rmtree(temp_dir, ignore_errors=True)
             logger.warning("压缩包检查未通过: file=%s, reason=%s", filename, reason)
-            raise HTTPException(status_code=400, detail=reason)
+            raise AppError(UPLOAD_ARCHIVE_REJECTED, reason, 400)
 
     # PDF 返回页数供前端裁剪配置使用；其他格式返回 null（本轮不支持分页）
     page_count = None
@@ -662,9 +697,10 @@ async def prepare_upload(
             # 目录结构送给任何能上传文件的人。详情只进服务端日志，
             # 客户端拿 request_id 来对（响应体已统一带 request_id）。
             logger.warning("PDF 页数解析失败（详情只进日志）: file=%s, error=%s", dest.name, e)
-            raise HTTPException(
-                status_code=400,
-                detail="PDF 解析失败：文件可能已损坏或加密，请确认后重试",
+            raise AppError(
+                UPLOAD_PDF_PARSE_FAILED,
+                "PDF 解析失败：文件可能已损坏或加密，请确认后重试",
+                400,
             ) from e
 
         # 阶段 6.4：页数上限。在这里拦而不是在转换任务里拦 ——
@@ -673,7 +709,7 @@ async def prepare_upload(
         if page_reason:
             shutil.rmtree(temp_dir, ignore_errors=True)
             logger.warning("PDF 页数超限: file=%s, pages=%s", filename, page_count)
-            raise HTTPException(status_code=400, detail=page_reason)
+            raise AppError(UPLOAD_PDF_TOO_MANY_PAGES, page_reason, 400)
 
     logger.info(
         "上传暂存成功: user_id=%s, filename=%s, size=%d, source_type=%s, page_count=%s",
@@ -735,18 +771,18 @@ async def commit_upload(
     """
     # 1. 严格校验 temp_id 为 UUID，防止路径穿越
     if not _TEMP_ID_RE.fullmatch(temp_id):
-        raise HTTPException(status_code=400, detail="无效的临时上传标识")
+        raise AppError(UPLOAD_TEMP_ID_INVALID, "无效的临时上传标识", 400)
     temp_dir = TMP_UPLOAD_DIR / temp_id
     if not temp_dir.is_dir():
-        raise HTTPException(status_code=400, detail="临时上传已失效，请重新选择文件")
+        raise AppError(UPLOAD_TEMP_EXPIRED, "临时上传已失效，请重新选择文件", 400)
 
     files = [p for p in temp_dir.iterdir() if p.is_file()]
     if len(files) != 1:
-        raise HTTPException(status_code=400, detail="临时上传数据异常，请重新选择文件")
+        raise AppError(UPLOAD_TEMP_DATA_INVALID, "临时上传数据异常，请重新选择文件", 400)
     src_path = files[0]
     ext = src_path.suffix.lower()
     if ext not in ALLOWED_EXTS:
-        raise HTTPException(status_code=400, detail="临时文件格式不受支持")
+        raise AppError(UPLOAD_FORMAT_UNSUPPORTED, "临时文件格式不受支持", 400)
     source_type = _EXT_TO_SOURCE_TYPE[ext]
     src_name = src_path.name
 
@@ -755,13 +791,14 @@ async def commit_upload(
     if filename and filename.strip():
         new_name = filename.strip()
         if os.path.basename(new_name) != new_name:
-            raise HTTPException(status_code=400, detail="文件名不能包含路径分隔符")
+            raise AppError(UPLOAD_FILE_NAME_INVALID, "文件名不能包含路径分隔符", 400)
         if len(new_name) > 255:
-            raise HTTPException(status_code=400, detail="文件名过长（最多 255 字符）")
+            raise AppError(UPLOAD_FILE_NAME_TOO_LONG, "文件名过长（最多 255 字符）", 400)
         if os.path.splitext(new_name)[1].lower() != ext:
-            raise HTTPException(
-                status_code=400,
-                detail=f"文件名扩展名必须为 {ext}，请保留文件类型后缀",
+            raise AppError(
+                UPLOAD_EXTENSION_MISMATCH,
+                f"文件名扩展名必须为 {ext}，请保留文件类型后缀",
+                400,
             )
         display_name = new_name
 
@@ -772,9 +809,10 @@ async def commit_upload(
     try:
         if want_crop:
             if source_type != SourceType.pdf:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"仅支持 PDF 裁剪，当前文件类型为 {source_type.value}",
+                raise AppError(
+                    UPLOAD_CROP_UNSUPPORTED_TYPE,
+                    f"仅支持 PDF 裁剪，当前文件类型为 {source_type.value}",
+                    400,
                 )
             try:
                 page_count = pdf_crop.get_pdf_page_count(str(src_path))
@@ -793,9 +831,10 @@ async def commit_upload(
                     "PDF 裁剪失败（详情只进日志）: file=%s, spec=%s, error=%s",
                     src_path.name, crop_page_range, e,
                 )
-                raise HTTPException(
-                    status_code=400,
-                    detail="PDF 裁剪失败：页码范围可能无效，或文件已损坏",
+                raise AppError(
+                    UPLOAD_PDF_CROP_FAILED,
+                    "PDF 裁剪失败：页码范围可能无效，或文件已损坏",
+                    400,
                 ) from e
 
         # 计算待存储文件的 SHA-256（裁剪版或原文件）
@@ -848,7 +887,7 @@ async def get_upload_status(
     )
     note = result.scalars().first()
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     return NoteStatusResponse(
         id=note.id,
@@ -886,13 +925,14 @@ async def retry_convert(
     )
     note = result.scalars().first()
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 仅允许 failed 状态重试
     if note.status != NoteStatus.failed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"当前状态为 {note.status.value}，仅失败状态可重试",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"当前状态为 {note.status.value}，仅失败状态可重试",
+            400,
         )
 
     # 清除错误信息，重置状态

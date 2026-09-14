@@ -23,9 +23,18 @@ import difflib
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.app_error import (
+    CLEANING_CONTENT_UNREADABLE,
+    CLEANING_IN_PROGRESS,
+    CLEANING_MARKER_NOT_FOUND,
+    CLEANING_NOT_DONE,
+    NOTE_NOT_FOUND,
+    NOTE_STATUS_INVALID,
+    AppError,
+)
 from ..database import get_db
 from ..models.note import NoteStatus
 from ..models.user import User
@@ -112,19 +121,21 @@ async def start_cleaning(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if note.status == NoteStatus.cleaning:
         # 进行中禁止重复触发（防连点产生两个 Celery 任务），见 docs/decisions.md#F-29
-        raise HTTPException(
-            status_code=409,
-            detail="清洗任务正在进行中，请等待完成或先停止",
+        raise AppError(
+            CLEANING_IN_PROGRESS,
+            "清洗任务正在进行中，请等待完成或先停止",
+            409,
         )
 
     if note.status not in (NoteStatus.converted, NoteStatus.cleaned, NoteStatus.cleaning_failed):
-        raise HTTPException(
-            status_code=400,
-            detail=f"笔记当前状态为 {note.status.value}，只有 converted、cleaned 或 cleaning_failed 状态可以触发清洗",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"笔记当前状态为 {note.status.value}，只有 converted、cleaned 或 cleaning_failed 状态可以触发清洗",
+            400,
         )
 
     # 先将数据库状态更新为 cleaning，避免前端刷新时仍显示旧状态
@@ -173,12 +184,13 @@ async def stop_cleaning(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if note.status != NoteStatus.cleaning:
-        raise HTTPException(
-            status_code=400,
-            detail=f"笔记当前状态为 {note.status.value}，只有 cleaning 状态可以停止清洗",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"笔记当前状态为 {note.status.value}，只有 cleaning 状态可以停止清洗",
+            400,
         )
 
     # 更新笔记状态为清洗失败
@@ -228,7 +240,7 @@ async def get_cleaning_status(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     return CleaningStatusResponse(
         id=note.id,
@@ -261,17 +273,17 @@ async def get_cleaning_diff(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if not note.clean_md_path:
-        raise HTTPException(status_code=400, detail="笔记尚未完成清洗")
+        raise AppError(CLEANING_NOT_DONE, "笔记尚未完成清洗", 400)
 
     # 读取原始版和清洗版内容
     original_md = await get_note_markdown_content(note)
     clean_md = await get_clean_markdown_content(note)
 
     if not original_md or not clean_md:
-        raise HTTPException(status_code=500, detail="无法读取 Markdown 内容")
+        raise AppError(CLEANING_CONTENT_UNREADABLE, "无法读取 Markdown 内容", 500)
 
     # 计算行级 diff
     original_lines = original_md.splitlines()
@@ -343,15 +355,15 @@ async def restore_duplicate_block(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if not note.clean_md_path:
-        raise HTTPException(status_code=400, detail="笔记尚未完成清洗")
+        raise AppError(CLEANING_NOT_DONE, "笔记尚未完成清洗", 400)
 
     # 读取当前清洗副本
     clean_md = await get_clean_markdown_content(note)
     if not clean_md:
-        raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
+        raise AppError(CLEANING_CONTENT_UNREADABLE, "无法读取清洗副本内容", 500)
 
     # 优先用重复块自身 index 匹配（新数据）；旧数据回退 duplicate_of，见 docs/decisions.md#F-11。
     # 找不到目标块时必须报错，避免"元数据已更新但文件未变"的静默不一致。
@@ -364,9 +376,10 @@ async def restore_duplicate_block(
 
     updated_md = _apply_block_operation(clean_md, block_index, dup_of, "restore")
     if updated_md is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+        raise AppError(
+            CLEANING_MARKER_NOT_FOUND,
+            f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+            400,
         )
 
     # 上传更新后的清洗副本
@@ -419,15 +432,15 @@ async def delete_duplicate_block(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if not note.clean_md_path:
-        raise HTTPException(status_code=400, detail="笔记尚未完成清洗")
+        raise AppError(CLEANING_NOT_DONE, "笔记尚未完成清洗", 400)
 
     # 读取当前清洗副本
     clean_md = await get_clean_markdown_content(note)
     if not clean_md:
-        raise HTTPException(status_code=500, detail="无法读取清洗副本内容")
+        raise AppError(CLEANING_CONTENT_UNREADABLE, "无法读取清洗副本内容", 500)
 
     # 同上：删除操作同样校验匹配成功才更新元数据，见 docs/decisions.md#F-11
     dup_of = None
@@ -439,9 +452,10 @@ async def delete_duplicate_block(
 
     updated_md = _apply_block_operation(clean_md, block_index, dup_of, "delete")
     if updated_md is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+        raise AppError(
+            CLEANING_MARKER_NOT_FOUND,
+            f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+            400,
         )
 
     # 上传更新后的清洗副本

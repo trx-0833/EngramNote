@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.app_error import AppError
 from app.services.upload_safety import (
     ArchiveStats,
     archive_stats,
@@ -212,11 +213,13 @@ class TestRouteRejectsBomb:
         user = User(id="u-bomb", email="b@e.com", username="b", hashed_password="x")
         # 用真实的 UploadFile（`_stream_upload` 走的是它的 async read）
         upload = upload_mod.UploadFile(filename="bomb.docx", file=io.BytesIO(bomb.read_bytes()))
-        with pytest.raises(upload_mod.HTTPException) as exc:
+        # 错误契约迁移（阶段 0.11）后这里抛的是 AppError：状态码在 http_status、
+        # 文案在 message。断言的**语义**不变（400 + 说明压缩比/体积）。
+        with pytest.raises(AppError) as exc:
             await upload_mod.prepare_upload(file=upload, current_user=user)
 
-        assert exc.value.status_code == 400
-        detail = str(exc.value.detail)
+        assert exc.value.http_status == 400
+        detail = str(exc.value.message)
         assert "压缩比" in detail or "体积" in detail
         # 拒绝时要顺手清掉临时目录（否则被拒的文件仍然占着磁盘）
         leftover = list((upload_mod.TMP_UPLOAD_DIR).glob("*")) if upload_mod.TMP_UPLOAD_DIR.exists() else []

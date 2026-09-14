@@ -59,11 +59,20 @@ import json
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.app_error import (
+    CARD_NOT_FOUND,
+    EMPTY_QUESTION,
+    NOTE_NOT_FOUND,
+    NOTE_STATUS_INVALID,
+    UNDERSTANDING_IN_PROGRESS,
+    UNDERSTANDING_NO_CARDS,
+    AppError,
+)
 from ..database import get_db
 from ..models.note import Note, NoteStatus
 from ..models.user import User
@@ -119,19 +128,21 @@ async def start_understanding(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if note.status == NoteStatus.learning:
         # 进行中禁止重复触发，见 docs/decisions.md#F-29
-        raise HTTPException(
-            status_code=409,
-            detail="理解任务正在进行中，请等待完成",
+        raise AppError(
+            UNDERSTANDING_IN_PROGRESS,
+            "理解任务正在进行中，请等待完成",
+            409,
         )
 
     if note.status not in (NoteStatus.cleaned, NoteStatus.learning_failed, NoteStatus.archived):
-        raise HTTPException(
-            status_code=400,
-            detail=f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
+        raise AppError(
+            NOTE_STATUS_INVALID,
+            f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
+            400,
         )
 
     # archived 笔记未确认时，只返回影响数量，不执行任何删除（见 docs/decisions.md#F-02）
@@ -247,7 +258,7 @@ async def get_understanding_status(
     """查询笔记理解状态"""
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     return UnderstandingStatusResponse(
         id=note.id,
@@ -265,7 +276,7 @@ async def get_chapter_summaries(
     """获取笔记的章节摘要列表"""
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 查询该笔记的知识卡片，按章节分组
     result = await db.execute(
@@ -312,7 +323,7 @@ async def get_note_cards(
     """获取笔记关联的知识卡片"""
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 计算总数
     count_query = select(func.count()).select_from(KnowledgeCard).where(
@@ -415,7 +426,7 @@ async def get_card_detail(
     )
     card = result.scalars().first()
     if not card:
-        raise HTTPException(status_code=404, detail="知识卡片不存在")
+        raise AppError(CARD_NOT_FOUND, "知识卡片不存在", 404)
 
     # JOIN Note 表获取笔记标题（note_id 为 NULL 的是独立/提升卡片）
     note_title = None
@@ -449,7 +460,7 @@ async def update_card(
     )
     card = result.scalars().first()
     if not card:
-        raise HTTPException(status_code=404, detail="知识卡片不存在")
+        raise AppError(CARD_NOT_FOUND, "知识卡片不存在", 404)
 
     if req.title is not None:
         card.title = req.title
@@ -489,7 +500,7 @@ async def delete_card(
     )
     card = result.scalars().first()
     if not card:
-        raise HTTPException(status_code=404, detail="知识卡片不存在")
+        raise AppError(CARD_NOT_FOUND, "知识卡片不存在", 404)
 
     # 删除关联的卡片关系
     await db.execute(
@@ -573,7 +584,7 @@ async def ask_question(
     """
     # 拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用（见 docs/decisions.md#F-31）
     if not req.question or not req.question.strip():
-        raise HTTPException(status_code=422, detail="问题不能为空")
+        raise AppError(EMPTY_QUESTION, "问题不能为空", 422)
 
     rag_service = RAGService()
     result = await rag_service.answer_question(
@@ -720,7 +731,7 @@ async def generate_questions(
     """触发题目生成"""
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 检查是否有知识卡片
     count_result = await db.execute(
@@ -732,7 +743,7 @@ async def generate_questions(
     card_count = count_result.scalar() or 0
 
     if card_count == 0:
-        raise HTTPException(status_code=400, detail="该笔记暂无知识卡片，请先触发理解管道")
+        raise AppError(UNDERSTANDING_NO_CARDS, "该笔记暂无知识卡片，请先触发理解管道", 400)
 
     # 触发 Celery 题目生成任务（透传定向出题参数）
     generate_questions_task.delay(note_id, target_categories, target_difficulty)
@@ -755,7 +766,7 @@ async def get_note_questions(
     """获取笔记关联的题目"""
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 计算总数
     count_query = select(func.count()).select_from(QuizItem).where(

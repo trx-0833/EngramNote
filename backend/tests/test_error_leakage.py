@@ -26,9 +26,10 @@ import io
 import logging
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.app_error import AppError
 from app.main import _log_security_posture, app
 from app.middleware.error_handler import ErrorHandlerMiddleware
 
@@ -61,10 +62,10 @@ class TestNoInternalDetailLeak:
         )
         user = User(id="u-leak", email="leak@e.com", username="leak", hashed_password="x")
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             await upload_mod.prepare_upload(file=upload, current_user=user)
 
-        detail = str(exc.value.detail)
+        detail = str(exc.value.message)
         assert "cannot open" not in detail, "响应里带出了解析库的原始报错"
         assert "engramnote" not in detail and "D:\\" not in detail, "响应里带出了服务器路径"
         assert "sqlite3" not in detail

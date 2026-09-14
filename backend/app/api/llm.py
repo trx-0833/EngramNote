@@ -38,11 +38,16 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.auth import get_current_user_dependency
+from ..core.app_error import (
+    LLM_USAGE_GROUP_BY_INVALID,
+    PROMPT_VERSION_INVALID,
+    AppError,
+)
 from ..database import get_db
 from ..models.user import User
 from ..services import llm_accounting_service, prompt_version_report_service
@@ -146,9 +151,10 @@ async def get_llm_usage(
     这是最常见的问题形态："我这个月在哪些场景上花得最多"。
     """
     if group_by not in GROUP_BY_CHOICES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"group_by 只能是 {'/'.join(GROUP_BY_CHOICES)} 之一",
+        raise AppError(
+            LLM_USAGE_GROUP_BY_INVALID,
+            f"group_by 只能是 {'/'.join(GROUP_BY_CHOICES)} 之一",
+            400,
         )
 
     until = datetime.now(timezone.utc)
@@ -159,7 +165,8 @@ async def get_llm_usage(
             db, user_id=current_user.id, since=since, until=until, group_by=group_by,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 服务层的防御性重复校验（同一个维度白名单），语义与上面一致
+        raise AppError(LLM_USAGE_GROUP_BY_INVALID, str(exc), 400) from exc
 
     from ..config import get_settings
 
@@ -440,12 +447,13 @@ async def get_prompt_version_report(
     `notes` 会直接把这件事讲清楚；调用方**不要**把 NULL 渲染成"第一版"。
     """
     if version is not None and not _VERSION_PATTERN.fullmatch(version):
-        raise HTTPException(
-            status_code=400,
-            detail=(
+        raise AppError(
+            PROMPT_VERSION_INVALID,
+            (
                 "version 只能是 `unknown`（版本未知那一桶）或纯数字版本号"
                 f"（如 1 / 2），收到 {version!r}"
             ),
+            400,
         )
 
     until = datetime.now(timezone.utc)

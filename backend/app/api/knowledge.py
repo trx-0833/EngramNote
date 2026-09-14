@@ -22,10 +22,19 @@ HTTP 接口，对应 Q4~Q9 中"联合分析→盲点→拓展→出题→标记�
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.app_error import (
+    CARD_CATEGORY_INVALID,
+    CARD_NOT_EXTENSION,
+    CARD_NOT_FOUND,
+    COMBINED_EXTRACT_FAILED,
+    EXTENSION_GENERATE_FAILED,
+    NOTE_MATERIAL_LINK_NOT_FOUND,
+    AppError,
+)
 from ..database import get_db
 from ..models.user import User
 from ..models.note import Note
@@ -69,7 +78,7 @@ async def extract_combined_endpoint(
     """
     result = await extract_combined(link_id, current_user.id, db)
     if isinstance(result, dict) and "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        raise AppError(COMBINED_EXTRACT_FAILED, result["error"], 400)
     return CombinedExtractResponse(**result)
 
 
@@ -93,7 +102,7 @@ async def generate_extension_endpoint(
         card_id, current_user.id, db, material_note_id=req.material_note_id
     )
     if isinstance(result, dict) and "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        raise AppError(EXTENSION_GENERATE_FAILED, result["error"], 400)
     return ExtensionGenerateResponse(**result)
 
 
@@ -122,11 +131,11 @@ async def generate_questions_for_extension(
     )
     card = result.scalars().first()
     if not card:
-        raise HTTPException(status_code=404, detail="知识卡片不存在或无权访问")
+        raise AppError(CARD_NOT_FOUND, "知识卡片不存在或无权访问", 404)
 
     # 仅允许拓展卡片用此端点立即出题
     if card.card_category != CardCategory.extension:
-        raise HTTPException(status_code=400, detail="仅拓展卡片可使用此端点")
+        raise AppError(CARD_NOT_EXTENSION, "仅拓展卡片可使用此端点", 400)
 
     # 触发 Celery 出题任务（定向：拓展类别 + 困难难度）
     generate_questions_task.delay(
@@ -166,7 +175,7 @@ async def mark_card(
     )
     card = result.scalars().first()
     if not card:
-        raise HTTPException(status_code=404, detail="知识卡片不存在或无权访问")
+        raise AppError(CARD_NOT_FOUND, "知识卡片不存在或无权访问", 404)
 
     if req.is_key_point is not None:
         card.is_key_point = req.is_key_point
@@ -220,7 +229,7 @@ async def list_blind_spots(
         )
         link = link_result.scalars().first()
         if not link:
-            raise HTTPException(status_code=404, detail="笔记-资料关联不存在或无权访问")
+            raise AppError(NOTE_MATERIAL_LINK_NOT_FOUND, "笔记-资料关联不存在或无权访问", 404)
         link_personal_id = link.personal_note_id
         link_material_id = link.material_note_id
 
@@ -272,9 +281,10 @@ async def mastery_overview(
         try:
             cat = CardCategory(card_category)
         except ValueError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的卡片类别: {card_category}，合法值为 regular/blind_spot/extension",
+            raise AppError(
+                CARD_CATEGORY_INVALID,
+                f"无效的卡片类别: {card_category}，合法值为 regular/blind_spot/extension",
+                400,
             ) from e
         conditions.append(KnowledgeCard.card_category == cat)
 

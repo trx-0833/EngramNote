@@ -1,6 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.app_error import (
+    ASSESSMENT_ANSWER_FAILED,
+    ASSESSMENT_ANSWER_REJECTED,
+    ASSESSMENT_COMPARE_FAILED,
+    ASSESSMENT_QUIZ_GENERATE_FAILED,
+    AppError,
+)
 from ..database import get_db
 from ..api.auth import get_current_user_dependency
 from ..models.user import User
@@ -37,7 +44,10 @@ async def compare_assessment(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        # 文案保持原样（str(e)）：本次迁移只加 error_code，不改用户可见内容。
+        # 注意这条出口把内部异常文本回给了客户端（计划里的 H5 项），
+        # 属于既有行为，改它会是行为变更，因此留给后续单独处理。
+        raise AppError(ASSESSMENT_COMPARE_FAILED, str(e), 500) from e
 
 
 @router.post("/generate-quiz", response_model=AssessmentResponse)
@@ -55,7 +65,7 @@ async def generate_quiz(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise AppError(ASSESSMENT_QUIZ_GENERATE_FAILED, str(e), 500) from e
 
 
 @router.post("/submit-answer", response_model=AssessmentResponse)
@@ -73,9 +83,9 @@ async def submit_answer(
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise AppError(ASSESSMENT_ANSWER_REJECTED, str(e), 400) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise AppError(ASSESSMENT_ANSWER_FAILED, str(e), 500) from e
 
 
 @router.get("/history/{note_id}", response_model=list[AssessmentHistoryItem])

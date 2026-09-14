@@ -29,6 +29,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
+from ..core.app_error import (
+    CARD_NOT_FOUND,
+    CARD_REVIEW_STATE_UNAVAILABLE,
+    DAILY_REVIEW_LIMIT_REACHED,
+    REVIEW_QUIZ_NOT_FOUND,
+    REVIEW_REMINDERS_FAILED,
+    AppError,
+)
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
 from ..models.review_log import ReviewLog
@@ -113,9 +121,12 @@ async def submit_answer(
     )
 
     if "error" in result:
+        # 限额用尽与"题目不存在"是**两种不同的用户处境**：前者应当直接进入
+        # "今日已完成"页，后者是错误。因此给两个分支不同的 error_code，
+        # 前端按 code 分流（不再匹配中文文案）。
         if "上限" in result["error"]:
-            raise HTTPException(status_code=429, detail=result["error"])
-        raise HTTPException(status_code=404, detail=result["error"])
+            raise AppError(DAILY_REVIEW_LIMIT_REACHED, result["error"], 429)
+        raise AppError(REVIEW_QUIZ_NOT_FOUND, result["error"], 404)
 
     return SubmitAnswerResponse.from_service_result(result)
 
@@ -265,13 +276,13 @@ async def submit_card_review(
         )
     )).scalars().first()
     if card is None:
-        raise HTTPException(status_code=404, detail="卡片不存在")
+        raise AppError(CARD_NOT_FOUND, "卡片不存在", 404)
 
     state = await review_state_service.get_state(
         db, current_user.id, ITEM_TYPE_CARD, card_id,
     )
     if state is None:
-        raise HTTPException(status_code=404, detail="卡片复习状态不可用")
+        raise AppError(CARD_REVIEW_STATE_UNAVAILABLE, "卡片复习状态不可用", 404)
 
     quality = max(0, min(5, int(req.self_rating)))
     now = datetime.now(timezone.utc)
@@ -364,6 +375,4 @@ async def get_reminders(
             current_user.id, e,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=500, detail="获取复习提醒数据失败"
-        ) from e
+        raise AppError(REVIEW_REMINDERS_FAILED, "获取复习提醒数据失败", 500) from e

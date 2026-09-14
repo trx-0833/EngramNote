@@ -15,11 +15,12 @@
 - 如果没有题目，返回空列表（前端处理"暂无题目"提示）
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
+from ..core.app_error import REVIEW_QUIZ_NOT_FOUND, AppError
 from ..models.user import User
 from ..models.note import Note
 from ..models.quiz_item import QuizItem
@@ -85,7 +86,7 @@ async def submit_quick_review_answer(
         )
     )
     if not quiz_result.scalars().first():
-        raise HTTPException(status_code=404, detail="题目不存在或不属于该笔记")
+        raise AppError(REVIEW_QUIZ_NOT_FOUND, "题目不存在或不属于该笔记", 404)
 
     result = await review_service.submit_answer(
         quiz_id=req.quiz_id,
@@ -99,6 +100,7 @@ async def submit_quick_review_answer(
     )
 
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        # skip_daily_limit / skip_due_check 都开着，此处只可能是"题目不存在"
+        raise AppError(REVIEW_QUIZ_NOT_FOUND, result["error"], 400)
 
     return SubmitAnswerResponse.from_service_result(result)

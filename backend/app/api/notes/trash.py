@@ -4,9 +4,15 @@
 原 api/notes.py 拆分出的回收站部分：移入回收站、恢复、彻底删除与清空。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.app_error import (
+    NOTE_NOT_FOUND,
+    NOTE_NOT_TRASHED,
+    NOTE_RESTORE_CONFLICT,
+    AppError,
+)
 from ...database import get_db
 from ...models.user import User
 from ...schemas.note import (
@@ -103,7 +109,7 @@ async def delete_note_api(
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 移入回收站（软删除）
     await trash_note(db, note)
@@ -123,7 +129,7 @@ async def get_note_trash_info(
     """
     note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
     info = await get_trash_info(db, note)
     return TrashInfoResponse(**info)
 
@@ -148,14 +154,14 @@ async def restore_note_api(
     """
     note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
     if note.trashed_at is None:
-        raise HTTPException(status_code=400, detail="该笔记不在回收站中")
+        raise AppError(NOTE_NOT_TRASHED, "该笔记不在回收站中", 400)
 
     try:
         restored, renamed_to = await restore_note(db, note)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise AppError(NOTE_RESTORE_CONFLICT, str(e), 409) from e
     return RestoreResponse(
         note=await _build_note_response(db, restored),
         renamed_to=renamed_to,
@@ -184,6 +190,6 @@ async def purge_note_api(
     """
     note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     await purge_note(db, note, promote_key_cards=promote_key_cards)

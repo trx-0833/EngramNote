@@ -20,11 +20,12 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.auth import get_current_user_dependency
+from ..core.app_error import TASK_NOT_FOUND, AppError
 from ..database import get_db
 from ..models.task_run import TaskRun
 from ..models.user import User
@@ -98,9 +99,13 @@ class CancelResponse(BaseModel):
 
 
 def _require_owner(run: Optional[TaskRun], user: User) -> TaskRun:
-    """校验任务归属；不存在或不属于当前用户时一律 404（不泄露存在性）"""
+    """校验任务归属；不存在或不属于当前用户时一律 404（不泄露存在性）
+
+    Raises:
+        AppError 404 TASK_NOT_FOUND: 任务不存在或不属于当前用户
+    """
     if run is None or (run.user_id is not None and run.user_id != user.id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+        raise AppError(TASK_NOT_FOUND, "任务不存在", status.HTTP_404_NOT_FOUND)
     return run
 
 

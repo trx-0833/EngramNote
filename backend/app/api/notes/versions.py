@@ -4,9 +4,16 @@
 原 api/notes.py 拆分出的版本历史部分。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.app_error import (
+    NOTE_NOT_FOUND,
+    NOTE_VERSION_RESTORE_REJECTED,
+    VERSION_CONTENT_UNAVAILABLE,
+    VERSION_NOT_FOUND,
+    AppError,
+)
 from ...database import get_db
 from ...models.user import User
 from ...schemas.note_version import (
@@ -49,7 +56,7 @@ async def list_note_versions(
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 查询版本历史
     versions = await version_service.list_versions(note_id, current_user.id, db)
@@ -90,7 +97,7 @@ async def diff_note_versions(
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 生成 diff
     try:
@@ -98,7 +105,10 @@ async def diff_note_versions(
             note_id, v1, v2, current_user.id, db
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        # "任一版本不存在"由 version_service 直接抛 AppError(VERSION_NOT_FOUND) 上抛，
+        # 不会进这里；能落进 except ValueError 的是内容解码失败
+        # （UnicodeDecodeError 是 ValueError 子类），故 code 取"内容不可读"。
+        raise AppError(VERSION_CONTENT_UNAVAILABLE, str(e), 404) from e
 
     return NoteVersionDiffResponse(
         v1_number=diff_data["v1_number"],
@@ -135,7 +145,7 @@ async def get_note_version_content(
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 读取版本内容
     try:
@@ -143,7 +153,8 @@ async def get_note_version_content(
             note_id, version_number, current_user.id, db
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        # 同 diff：版本缺失走 AppError(VERSION_NOT_FOUND)，此处只剩解码失败
+        raise AppError(VERSION_CONTENT_UNAVAILABLE, str(e), 404) from e
 
     return {"content": content, "version_number": version_number}
 
@@ -181,7 +192,7 @@ async def restore_note_version(
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 恢复版本
     try:
@@ -189,10 +200,13 @@ async def restore_note_version(
             note_id, version_number, current_user.id, db
         )
     except ValueError as e:
-        # 区分"版本不存在"和"笔记路径缺失"两种错误
+        # 区分"版本不存在"（404）和其余拒绝原因（400）：保持原有的文案判据与状态码，
+        # 只把两个出口固定成不同的 code。注意 400 这一支有三种原因
+        # （笔记不存在 / 无可写 Markdown 路径 / 当前内容读取失败），
+        # 用一个 code 概括，详情仍在文案里。
         message = str(e)
         if "不存在" in message and "版本" in message:
-            raise HTTPException(status_code=404, detail=message) from e
-        raise HTTPException(status_code=400, detail=message) from e
+            raise AppError(VERSION_NOT_FOUND, message, 404) from e
+        raise AppError(NOTE_VERSION_RESTORE_REJECTED, message, 400) from e
 
     return NoteVersionResponse.model_validate(new_version)

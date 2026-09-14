@@ -6,10 +6,21 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.app_error import (
+    ANNOTATION_NOT_FOUND,
+    ANNOTATION_TOO_LONG,
+    ANNOTATION_TYPE_INVALID,
+    ANNOTATION_VIEW_MODE_INVALID,
+    MATERIAL_NOT_FOUND,
+    MATERIAL_ROLE_INVALID,
+    NOTE_NOT_FOUND,
+    NOTE_NOT_PERSONAL,
+    AppError,
+)
 from ...database import get_db
 from ...models.note import NoteRole
 from ...models.user import User
@@ -35,7 +46,7 @@ async def get_note_links(
     """获取笔记的链接关系"""
     note = await note_service.get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     linked_materials = []
     linked_personal_notes = []
@@ -86,20 +97,22 @@ async def update_note_links(
     """更新笔记-资料链接关系"""
     note = await note_service.get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 仅 personal_note 可设置正向链接
     if note.note_role != NoteRole.personal_note:
-        raise HTTPException(status_code=400, detail="仅个人笔记可设置关联资料")
+        raise AppError(NOTE_NOT_PERSONAL, "仅个人笔记可设置关联资料", 400)
 
     # 校验所有 material_note_ids 归属和角色
     if request.material_note_ids:
         for material_id in request.material_note_ids:
             material = await note_service.get_note_detail(db, material_id, current_user.id)
             if not material:
-                raise HTTPException(status_code=404, detail=f"资料 {material_id} 不存在")
+                raise AppError(MATERIAL_NOT_FOUND, f"资料 {material_id} 不存在", 404)
             if material.note_role != NoteRole.material:
-                raise HTTPException(status_code=400, detail=f"笔记 {material_id} 不是学习资料")
+                raise AppError(
+                    MATERIAL_ROLE_INVALID, f"笔记 {material_id} 不是学习资料", 400
+                )
 
     # 更新链接
     changed = await note_service.update_note_material_links(
@@ -134,7 +147,7 @@ async def get_annotations(
     """获取笔记批注列表"""
     note = await note_service.get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     annotations = await note_service.get_annotations(db, note_id, current_user.id, view_mode)
     return {"annotations": annotations}
@@ -150,17 +163,19 @@ async def create_annotation(
     """创建批注"""
     note = await note_service.get_note_detail(db, note_id, current_user.id)
     if not note:
-        raise HTTPException(status_code=404, detail="笔记不存在")
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 校验 type 和 view_mode 合法值
     if request.type not in ("highlight", "underline"):
-        raise HTTPException(status_code=400, detail="type 必须为 highlight 或 underline")
+        raise AppError(ANNOTATION_TYPE_INVALID, "type 必须为 highlight 或 underline", 400)
     if request.view_mode not in ("original", "clean"):
-        raise HTTPException(status_code=400, detail="view_mode 必须为 original 或 clean")
+        raise AppError(
+            ANNOTATION_VIEW_MODE_INVALID, "view_mode 必须为 original 或 clean", 400
+        )
 
     # 限制 text_content 长度
     if len(request.text_content) > 5000:
-        raise HTTPException(status_code=400, detail="批注内容过长")
+        raise AppError(ANNOTATION_TOO_LONG, "批注内容过长", 400)
 
     annotation = await note_service.create_annotation(
         db, current_user.id, note_id,
@@ -180,5 +195,5 @@ async def delete_annotation_endpoint(
     """删除批注"""
     success = await note_service.delete_annotation(db, annotation_id, current_user.id, note_id)
     if not success:
-        raise HTTPException(status_code=404, detail="批注不存在")
+        raise AppError(ANNOTATION_NOT_FOUND, "批注不存在", 404)
     return {"success": True}

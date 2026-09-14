@@ -24,9 +24,15 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from fastapi import HTTPException
-
 from ..config import get_settings
+from ..core.app_error import (
+    GOAL_ACTIVE_LIMIT_REACHED,
+    GOAL_NONE_ACTIVE,
+    GOAL_NOT_FOUND,
+    GOAL_SCOPE_FOLDER_INVALID,
+    GOAL_SCOPE_NOTE_INVALID,
+    AppError,
+)
 from ..models.folder import Folder
 from ..models.learning_goal import LearningGoal, DailyPlan, GoalType, GoalStatus
 from ..models.knowledge_card import KnowledgeCard
@@ -75,7 +81,9 @@ async def _validate_goal_scopes(
             )
         )
         if (count_result.scalar() or 0) != len(note_ids):
-            raise HTTPException(status_code=400, detail="目标范围包含不存在或无权访问的笔记")
+            raise AppError(
+                GOAL_SCOPE_NOTE_INVALID, "目标范围包含不存在或无权访问的笔记", 400
+            )
 
     if folder_ids:
         count_result = await db.execute(
@@ -85,7 +93,9 @@ async def _validate_goal_scopes(
             )
         )
         if (count_result.scalar() or 0) != len(folder_ids):
-            raise HTTPException(status_code=400, detail="目标范围包含不存在或无权访问的文件夹")
+            raise AppError(
+                GOAL_SCOPE_FOLDER_INVALID, "目标范围包含不存在或无权访问的文件夹", 400
+            )
 
 
 class GoalService:
@@ -133,9 +143,10 @@ class GoalService:
         )
         active_count = count_result.scalar() or 0
         if active_count >= MAX_ACTIVE_GOALS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Maximum {MAX_ACTIVE_GOALS} active goals",
+            raise AppError(
+                GOAL_ACTIVE_LIMIT_REACHED,
+                f"Maximum {MAX_ACTIVE_GOALS} active goals",
+                400,
             )
 
         # 兼容 pydantic 模型与普通对象
@@ -235,7 +246,7 @@ class GoalService:
         )
         goal = result.scalars().first()
         if not goal:
-            raise HTTPException(status_code=404, detail="Goal not found")
+            raise AppError(GOAL_NOT_FOUND, "Goal not found", 404)
         return goal
 
     # ------------------------------------------------------------------
@@ -406,9 +417,8 @@ class GoalService:
         )
         active_goals = list(goals_result.scalars().all())
         if not active_goals:
-            raise HTTPException(
-                status_code=400,
-                detail="No active goals, please create a goal first",
+            raise AppError(
+                GOAL_NONE_ACTIVE, "No active goals, please create a goal first", 400
             )
 
         scope_notes: List[str] = []

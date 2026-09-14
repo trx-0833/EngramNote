@@ -86,7 +86,8 @@ async def create_goal(
     Raises:
         HTTPException 400: 活跃目标数已达上限（5 个）
     """
-    # goal_service.create_goal 内部会在活跃目标数超限时抛出 HTTPException(400)
+    # goal_service.create_goal 内部会在活跃目标数超限时抛出
+    # AppError(GOAL_ACTIVE_LIMIT_REACHED, http_status=400)
     goal = await goal_service.create_goal(current_user.id, req, db)
     return _build_goal_response(goal)
 
@@ -142,7 +143,8 @@ async def get_daily_plan(
     Raises:
         HTTPException 400: 用户无活跃目标，需先创建目标
     """
-    # generate_daily_plan 内部会在用户无活跃目标时抛出 HTTPException(400)
+    # generate_daily_plan 内部会在用户无活跃目标时抛出
+    # AppError(GOAL_NONE_ACTIVE, http_status=400)
     plan = await goal_service.generate_daily_plan(current_user.id, db)
     return DailyPlanResponse.model_validate(plan)
 
@@ -170,7 +172,7 @@ async def get_goal(
     Raises:
         HTTPException 404: 目标不存在或不属于当前用户
     """
-    # get_goal 内部会在目标不存在时抛出 HTTPException(404)
+    # get_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
     progress = await goal_service.get_goal_progress(goal_id, current_user.id, db)
     return _build_goal_response(goal, progress)
@@ -201,7 +203,7 @@ async def update_goal(
     Raises:
         HTTPException 404: 目标不存在或不属于当前用户
     """
-    # get_goal 内部会在目标不存在时抛出 HTTPException(404)
+    # get_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
 
     # 更新 scope 时校验归属，防止引用他人笔记/文件夹（IDOR），见 docs/decisions.md#F-09
@@ -259,7 +261,7 @@ async def archive_goal(
     Raises:
         HTTPException 404: 目标不存在或不属于当前用户
     """
-    # archive_goal 内部会在目标不存在时抛出 HTTPException(404)
+    # archive_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.archive_goal(goal_id, current_user.id, db)
     return _build_goal_response(goal)
 
@@ -284,7 +286,7 @@ async def delete_goal(
     Raises:
         HTTPException 404: 目标不存在或不属于当前用户
     """
-    # delete_goal 内部会在目标不存在时抛出 HTTPException(404)
+    # delete_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     await goal_service.delete_goal(goal_id, current_user.id, db)
 
 
