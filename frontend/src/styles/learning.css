@@ -49,48 +49,15 @@
   pointer-events: none;
 }
 
-/* ── 选项按钮（答题） ── */
-
-.quiz-option {
-  padding: var(--space-sm) var(--space-md);
-  text-align: left;
-  border: 2px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
-  transition: all 0.25s var(--ease-out-expo);
-  font-size: 0.95rem;
-}
-
-.quiz-option:hover {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-  transform: translateX(4px);
-}
-
-.quiz-option-selected {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-  box-shadow: 0 0 0 3px rgba(15, 52, 96, 0.08);
-}
-
-/* ── 反馈区域 ── */
-
-.feedback-correct {
-  padding: var(--space-md);
-  border-radius: var(--radius-sm);
-  background: var(--color-success-light);
-  border: 1px solid var(--color-success);
-  animation: scaleIn 0.3s var(--ease-out-expo);
-}
-
-.feedback-incorrect {
-  padding: var(--space-md);
-  border-radius: var(--radius-sm);
-  background: var(--color-error-light);
-  border: 1px solid var(--color-error);
-  animation: shake 0.4s ease;
-}
+/* ── 选项按钮（答题）/ 反馈区域：已迁往 CSS Modules ──
+   原 `.quiz-option` / `.quiz-option-selected` / `.feedback-correct` /
+   `.feedback-incorrect` 四条规则**逐字**搬到
+   `components/quiz/QuizAnswerCard.module.css`（overhaul-plan 5.6 试点切片）。
+   搬走的依据：全项目 grep 只有 QuizAnswerCard.tsx 用它们，
+   留在这里会让 `learning.css` 永远不敢删改。
+   ⚠️ 本文件其余类名（`.upload-zone` / `.qa-*` / `.segment-*` /
+   `.state-*` / `.spinner` / `.search-input-*` / `.collapse-arrow` /
+   `.filter-pill`）**仍被切片外的页面使用，必须留在全局**。 */
 
 /* ── 筛选标签 ── */
 

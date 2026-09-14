@@ -5,7 +5,9 @@
  *
  * 答题复习（`QuizAnswerCard`）与卡片复习（`CardReview`）此前各写了一份
  * **逐行相同**的四档按钮：同一份 `selfRatingOptions`、同一个
- * `self-rating-btn` 类名、同一套内联样式。两份并行实现必然漂移 ——
+ * `self-rating-btn` 类名（现已随本组件迁入 `SelfRatingButtons.module.css`
+ * 并哈希化，见 overhaul-plan 5.6）、同一套内联样式。
+ * 两份并行实现必然漂移 ——
  * 本项目的 `statusClass` 就是这么漂移的（overhaul-plan §2.8 F-13）：
  * 一页改了档位说明，另一页不会跟着改。
  *
@@ -29,6 +31,9 @@
  */
 import type { ReactNode } from 'react'
 import { selfRatingOptions } from '../../utils/labels'
+// 自评按钮的触控目标（含 768/480 两条窄屏规则）已搬进本模块，
+// 见 SelfRatingButtons.module.css 文件头"为什么同时装桌面值与响应式值"
+import styles from './SelfRatingButtons.module.css'
 
 /**
  * 把 SM-2 quality 分翻译成用户看到的档位名
@@ -72,7 +77,7 @@ export default function SelfRatingButtons({
         {selfRatingOptions.map(opt => (
           <button
             key={opt.quality}
-            className="btn self-rating-btn"
+            className={`btn ${styles.selfRatingBtn}`}
             onClick={() => onRate(opt.quality)}
             disabled={submitting}
             style={{

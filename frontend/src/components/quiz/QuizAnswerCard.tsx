@@ -11,6 +11,9 @@ import type { SubmitAnswerResponse } from '../../api/client'
 import SourceContext from './SourceContext'
 // 四档自评控件与卡片复习页共用（5.12：两条复习流程的统一件）
 import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons'
+// 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
+// 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
+import styles from './QuizAnswerCard.module.css'
 import {
   questionTypeLabels,
   difficultyLabels,
@@ -180,7 +183,7 @@ export default function QuizAnswerCard({
               {options.map((opt, i) => (
                 <button
                   key={i}
-                  className={`quiz-option${userAnswer === opt ? ' quiz-option-selected' : ''}`}
+                  className={`${styles.quizOption}${userAnswer === opt ? ` ${styles.quizOptionSelected}` : ''}`}
                   onClick={() => onSelectAnswer(opt)}
                 >
                   {opt}
@@ -278,7 +281,6 @@ export default function QuizAnswerCard({
               还没自评的简答题都标成"回答错误"，是明确的误导。 */}
           {needsSelfAssessment ? (
             <div
-              className="feedback-pending"
               style={{
                 marginBottom: 'var(--space-md)',
                 padding: 'var(--space-sm) var(--space-md)',
@@ -294,7 +296,7 @@ export default function QuizAnswerCard({
             </div>
           ) : (
             <div
-              className={result?.is_correct ? 'feedback-correct' : 'feedback-incorrect'}
+              className={result?.is_correct ? styles.feedbackCorrect : styles.feedbackIncorrect}
               style={{ marginBottom: 'var(--space-md)' }}
             >
               <p style={{ fontWeight: 600, color: result?.is_correct ? '#4caf50' : '#f44336' }}>

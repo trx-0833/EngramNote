@@ -1,0 +1,155 @@
+# CSS 约定（overhaul-plan 5.6）
+
+> 本文件是 CSS Modules 迁移的**规范**，不是进度报告。
+> 迁移进度与逐文件风险见 `docs/migration-evidence/`，本轮（试点）的实测证据见该目录。
+
+## 1. 三层结构
+
+```
+① 令牌层   src/styles/base.css        :root { --color-* / --space-* / --radius-* … }
+② 全局层   src/styles/*.css           重置、跨功能共用件（.btn / .card / .container …）
+③ 模块层   src/**/X.module.css        单个组件/页面自己的样式（默认去处）
+```
+
+**新增样式默认进第 ③ 层。** 只有满足第 4 节"必须留全局"的判据才进第 ② 层。
+
+## 2. 令牌层
+
+令牌**只住 `base.css` 的 `:root`**，不新建 `tokens.css`、不在组件里定义全局令牌。
+理由：`mobile-input-font-size.test.ts` 断言 `src/styles` 下每个 `.css` 都被
+`main.tsx` 引入，且把导入顺序当作级联顺序的真实来源；新增一个样式表就要同时
+维护"导入位置"这个隐含契约，而令牌层的价值恰恰在于**没有顺序语义**。
+
+现有命名族（沿用，不要另造同义词）：
+
+| 族 | 例 | 说明 |
+|---|---|---|
+| `--color-*` | `--color-primary` `--color-border-light` `--color-success-light` | 语义色；`-light` 是低透明度底 |
+| `--color-*-rgb` | `--color-primary-rgb: 15, 52, 96` | **专供拼 alpha**：`rgba(var(--color-primary-rgb), 0.16)` |
+| `--gradient-*` | `--gradient-primary` | 渐变 |
+| `--space-*` | `--space-xs`…`--space-2xl` | 间距 |
+| `--radius-*` | `--radius-sm`…`--radius-xl` `--radius-full` | 圆角 |
+| `--shadow-*` | `--shadow-sm`…`--shadow-xl` `--shadow-glow` | 阴影 |
+| `--font-*` | `--font-sans` `--font-serif` `--font-mono` | 字族 |
+| `--ease-*` | `--ease-out-expo` `--ease-in-out` | 缓动曲线 |
+
+**加新令牌的判据**：同一个**语义**的值在项目里手写了 **≥3 处**。
+只出现一两次的魔法数字不要进令牌层 —— 那只是把写死换个地方。
+
+**已知缺口（下一轮补）**：字号与 z-index 目前仍是硬编码，且重复很多
+（`0.8rem` 13 处、`1rem` 11 处、`0.875rem` 9 处；`z-index` 有 100/99/90/5/1
+混用）。补的时候按上面的判据一次补齐、**单独一轮做**，不要和组件迁移混在一起
+（那会同时改动上百条声明，diff 无法审阅）。
+
+## 3. 模块层
+
+### 命名与位置
+
+| 事项 | 规则 |
+|---|---|
+| 文件名 | `组件名.module.css`，**与组件同目录** |
+| 位置 | **绝不放 `src/styles/`** —— 见下方"雷区" |
+| 导入 | `import styles from './X.module.css'`（放在其他 import 之后，附一行中文说明为什么从这里取类名） |
+| 类名 | CSS 里 `camelCase`（`.quizOption`），TSX 里 `styles.quizOption` |
+| 组合 | 模板字符串：`` className={`${styles.a}${on ? ` ${styles.b}` : ''}`} `` |
+| 保留全局类 | 直接并列：`` className={`btn ${styles.selfRatingBtn}`} `` |
+
+### 雷区 ⚠️ 这些是实测踩过的，不是理论风险
+
+1. **`@keyframes` 动画名会被一起哈希。**
+   模块里写 `animation: scaleIn 0.3s`（`scaleIn` 定义在 `base.css`）会被改写成
+   `animation: _scaleIn_<hash> 0.3s`，而产物里**没有**这个 `@keyframes` ——
+   动画静默消失，源码和规则清单都看不出来。
+   实测三种写法：`animation: scaleIn`、`animation-name: scaleIn` 都会被哈希；
+   `animation: :global(scaleIn)` **构建立刻失败**（PostCSS `Double colon`，
+   声明值里不认 `:global()`）。
+   **正确做法：把用到的 `@keyframes` 定义搬进模块自己**（动画体逐字复制），
+   名字改成 `组件前缀+名字`（如 `feedbackScaleIn`）。全局的原版不要删 ——
+   可能还有别的全局样式表在用（`scaleIn` 就还挂在 `auth.css` 上）。
+   `scripts/verify-built-css.mjs` 会检查"引用的动画在本文件内有没有定义"。
+
+2. **类名哈希后，`responsive.css` 里的选择器再也选不中它。**
+   规则还在、永不生效 —— 与 `mobile-input-font-size.test.ts` 文件头记的
+   那个级联 bug 是同一类事故。**响应式规则必须跟着组件一起搬进模块**，
+   媒体查询断点值沿用全局的 `768px` / `480px`，不另造断点。
+
+3. **`src/styles/` 下不能放模块文件。**
+   `mobile-input-font-size.test.ts` 会读该目录下所有 `.css` 并断言每一个都被
+   `main.tsx` 导入；模块文件按需加载、不在那里，测试会直接失败。
+   这就是"模块与组件同目录"的硬性理由。
+
+4. **不要为了"顺手统一"改外观。**
+   比如给 `.quiz-option` 加 `composes: btn from global` 很"合理"，但它的 DOM 上
+   从来没有 `btn`，compose 会注入 `padding / border-radius / font-weight /
+   transition / position / overflow` —— 一次纯搬家就变成了视觉改动，
+   而本轮要证明的恰恰是"没变"。要统一按钮基线请单开一轮，带截图对比。
+
+## 4. 什么时候类名**必须**留在全局
+
+按顺序判断，命中任一条就留全局：
+
+1. **重置 / 基础元素选择器** —— `*, *::before`、`html`、`body`、`a`、`input[type=checkbox]`。
+   这类样式没有"拥有者组件"，且必须早于一切规则生效。
+2. **跨功能共用件** —— 被**两个以上不相邻功能**使用的类。
+   判据是 grep 出来的**文件数**，不是"感觉像公共组件"：
+   `.btn`（45 处引用）、`.card`（35 处）、`.container`、`.progress-bar`
+   （Dashboard / LearningGoals / TodayLearn / TaskProgress / ReviewProgress 五处在用）
+   → 留全局。
+3. **第三方 DOM 的类** —— KaTeX（`.katex` / `.katex-block` / `.katex-display`）、
+   highlight.js（`.hljs*`）、`react-force-graph` 生成的 canvas。
+   我们控制不了它们的类名，只能全局命中。
+4. **`src/styles/markdown.css` 的 `.markdown-body` 后代选择器** ——
+   内容来自 `marked` 渲染的 HTML 字符串，**没有组件可以挂类名**，
+   属于事实上的第三方 DOM。
+5. **补丁层 `responsive.css` / `refinements.css` 目前命中的类** ——
+   在对应组件迁移之前必须保持全局（迁移时把这些规则一起搬走）。
+
+**留在全局的代价要写在文件头**：`learning.css` 在本轮迁移后加了一段注释，
+点名列出"哪些类名仍被切片外页面使用、因此不能删"。
+没有这段注释，下一个读代码的人会以为整个文件都死了。
+
+## 5. 迁移一个文件的标准流程
+
+1. `node scripts/css-rule-inventory.mjs <文件> --class <切片类名> --from-git`
+   先拿到**迁移前清单**（`--from-git` 是因为工作区里很快就没旧版本了）。
+2. grep 确认这些类名**只被切片内的文件使用**。命中切片外 → **停**，
+   要么把那个文件也纳入本轮，要么把这些类名留在全局（见第 4 节第 2 条）。
+3. 把规则搬进 `X.module.css`；`@keyframes` 按第 3 节雷区 1 处理；
+   响应式规则一起搬。
+4. 改 TSX：`className="a b"` → `` className={`${styles.a} ${styles.b}`} ``。
+5. 从全局样式表删掉原规则，**在原地留一段注释**说明搬去哪了、
+   以及本文件还有哪些类名不能删。
+6. grep 全项目确认没有残留的字面类名（含测试里的 `querySelector('.old-name')`）。
+7. `npm run build`，然后：
+   - `node scripts/css-migration-diff.mjs` —— 差集必须 **丢失 0**；
+   - `node scripts/verify-built-css.mjs` —— 无悬空动画、改动范围内无冲突；
+   - `node scripts/gen-migration-evidence.mjs` —— 落证据文件。
+8. `npm test` / `npx tsc --noEmit` / `npm run lint` / `npm run build` 四道全绿。
+
+## 6. 测试里的类名查询
+
+**优先改用语义查询**（`getByRole` / `getByText` / `getByLabelText`）。
+类名是哈希的，写 `.quiz-option` 的测试在迁移后必然失效；
+而"按角色+文本找按钮"既不受改名影响，也更接近用户看到的东西。
+
+确实需要按类名查时（例如只关心某个纯展示元素），两种做法：
+
+- **留在全局**：该类名本来就在全局层（如 `.progress-bar-fill` 被 5 处共用）。
+- **用 `styles` 导出**：测试 `import styles from './X.module.css'` 后
+  `container.querySelector('.' + styles.foo)`。Vite 在测试环境下对 CSS Modules
+  返回真实的类名映射，这条路可行，但把测试和实现细节绑得更紧，非必要不用。
+
+## 7. 证据工具
+
+| 脚本 | 作用 |
+|---|---|
+| `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头） |
+| `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git` 读 HEAD 版本 |
+| `scripts/css-migration-diff.mjs` | 迁移前(HEAD) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验 |
+| `scripts/verify-built-css.mjs` | 产物校验：悬空动画、冲突归因到源文件、退休类名是否消失、产物新鲜度 |
+| `scripts/gen-migration-evidence.mjs` | 把上面三者的输出写成 `docs/migration-evidence/*.md` |
+
+这些脚本的判断都带**自检**：任何一侧解析出 0 条规则就报错退出，
+而不是当成"没有差异"。本轮解析器前后错过三次（伪类冒号被改写成 `: hover`、
+`@media` 里的规则被静默丢弃、产物里 `._className` 多一个下划线导致匹配不到），
+每次都险些得出"规则全丢了 / 全在"的相反结论。

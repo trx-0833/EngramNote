@@ -1,0 +1,129 @@
+/**
+ * QuizAnswerCard 的样式（overhaul-plan 5.6：CSS Modules 试点切片）
+ *
+ * ## 为什么这些规则从 learning.css 搬到这里
+ *
+ * `.quiz-option` / `.feedback-correct` / `.feedback-incorrect` 此前住在全局
+ * `learning.css` 里，但**只有这个组件用**（grep 全项目只命中本文件）。
+ * 住在全局表的代价是真实的：`learning.css` 无法安全删除或重构，因为
+ * "还有谁在用这些类名"只能靠 grep 猜，而猜错就是界面静默走形。
+ * 搬进模块后，类名参与哈希（`.quizOption` → `._quizOption_1a0d4_52`），
+ * 这个文件**只要还被这个组件 import 就不可能被误删**。
+ *
+ * ## 为什么**没有**用 `composes: btn from global`
+ *
+ * 常识会建议"按钮都该 compose 全局 `.btn`"，但这里不行：
+ * `.quiz-option` 的 DOM 上**从来没有** `btn` 类（见 tsx），
+ * compose 会把 `.btn` 的 `padding / border-radius / font-weight: 500 /
+ * transition / position: relative / overflow: hidden` 一并注入，
+ * 于是这次"纯搬家"就变成了**一次视觉改动**。
+ * 本轮的任务是"证明没丢东西"，不是顺手改外观 ——
+ * 要统一按钮基线请单开一轮，并带上截图对比。
+ *
+ * ## ⚠️ 坑：全局 `@keyframes` 不能从模块里"裸名引用"
+ *
+ * 原规则 `animation: scaleIn 0.3s ...`（`@keyframes scaleIn` 定义在 base.css）
+ * 直接搬进模块，产物会变成
+ * `animation:_scaleIn_1aa19_1 .3s ...` —— 而产物里**没有任何**
+ * `@keyframes _scaleIn_1aa19_1`。类名、选择器、声明在文本上全都在，
+ * 只有动画静默失效；规则清单差集也抓不到，是检查 dist 产物才发现的。
+ *
+ * 实测（本轮用一个临时探针 `.module.css` 逐条构建比对，验证后已删除；
+ * 结论记录在 `docs/css-convention.md` §3 雷区 1）：
+ *   - `animation: scaleIn …`        → `_scaleIn_<hash>`（悬空）
+ *   - `animation-name: scaleIn`     → `_scaleIn_<hash>`（同样悬空）
+ *   - `animation: :global(scaleIn)` → **构建立刻失败**（PostCSS "Double colon"，
+ *     声明值里不认 `:global()`）
+ *   - 本模块内 `@keyframes` + 本地引用 → 自洽，正常工作
+ *
+ * 所以这里把用到的两个动画**定义搬进模块**（动画体逐字复制自 base.css）。
+ * 这不只是绕过限制，方向也是对的：`shake` 全项目**只有**反馈区在用，
+ * 它本来就该跟着用它的组件走；而写进模块后动画名参与哈希，
+ * 不会与将来别的模块里的同名动画相互覆盖。
+ * base.css 里的全局定义**不能删** —— `scaleIn` 还挂在 auth.css 上。
+ *
+ * ## 与 responsive.css 的关系
+ *
+ * 这个切片的两条类名（`.quiz-option` / `.feedback-*`）**不在**
+ * responsive.css 里，所以搬迁不涉及响应式规则。同切片的
+ * `.self-rating-btn` 则相反 —— 它的响应式规则跟着它一起搬进了
+ * SelfRatingButtons.module.css（见那里的文件头）。
+ */
+
+.quizOption {
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.25s var(--ease-out-expo);
+  font-size: 0.95rem;
+}
+
+.quizOption:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  transform: translateX(4px);
+}
+
+.quizOptionSelected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  /* 原 learning.css 手写 `rgba(15, 52, 96, 0.08)` —— 与
+     `--color-primary-light` 是同一个值。--color-primary-rgb 存在的唯一目的
+     就是拼 alpha（见 docs/overhaul-plan.md F-18），这里改用令牌，
+     值一字不变。 */
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.feedbackCorrect {
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-light);
+  border: 1px solid var(--color-success);
+  animation: feedbackScaleIn 0.3s var(--ease-out-expo);
+}
+
+.feedbackIncorrect {
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--color-error-light);
+  border: 1px solid var(--color-error);
+  animation: feedbackShake 0.4s ease;
+}
+
+/* ── 动画定义（动画体逐字复制自 base.css 的 scaleIn / shake）──
+   放在模块内是为了让"定义"与"引用"在同一个作用域里自洽（见文件头）。
+   名字改成 `feedback*` 而非沿用 `scaleIn`/`shake`：模块内的名字会被哈希，
+   沿用旧名会让"这是个全局动画"的错觉留在阅读者脑子里。 */
+
+@keyframes feedbackScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes feedbackShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}

@@ -293,12 +293,11 @@
 
   /* ══ 5. 复习：四档自评 ══ */
 
-  /* 自评按钮是复习闭环里唯一必须点准的东西。
-     原样（内联 padding 8px 16px + 两行文字）约 52px 高，但行数不定
-     （hint 在窄屏会换成三行，也可能只剩一行），这里把下限钉死 ≥56px。 */
-  .self-rating-btn {
-    min-height: 56px;
-  }
+  /* `.self-rating-btn` 的触控目标下限（768px: 56px / 480px: 60px）
+     已随组件迁往 `components/quiz/SelfRatingButtons.module.css`
+     （overhaul-plan 5.6 试点切片）。**必须跟着搬**：类名一旦被
+     CSS Modules 哈希，写在这里的选择器就再也选不中它 ——
+     规则还在、永不生效，正是本文件顶部记的那类级联事故。 */
 
   /* ══ 6. 知识图谱：画布 + 侧栏 ══ */
 
@@ -396,10 +395,6 @@
   /* 窄屏手机的触控目标按 44px 下限（Apple HIG / WCAG 2.5.5 的建议值） */
   .btn {
     min-height: 44px;
-  }
-
-  .self-rating-btn {
-    min-height: 60px;
   }
 
   /* 笔记详情的操作按钮：一行两个，不再挤成"一个字一行"的竖排 */
