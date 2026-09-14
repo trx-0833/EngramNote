@@ -23,6 +23,17 @@ export default function Login() {
 
     try {
       await login(email, password)
+      // 登录成功后必须显式跳到 `/`。
+      //
+      // 为什么不能"靠路由表自己切过去"：`/login` 这条路由只注册在 App.tsx 的
+      // **未登录**分支里，切成已登录分支后 pathname 仍停在 `/login`，
+      // 而已登录分支的路由表没有它 —— 于是落到 `path="*"` 的 404 页。
+      // 从 `/` 进入的用户看不出问题（pathname 本来就是 `/`），只有从
+      // `/login`（注册页页脚点过来，或直接输地址）登录的人会撞上。
+      //
+      // 放在 `await` 之后的成功路径上：`login` 抛错（401 等）时**不会**执行，
+      // 失败仍然留在登录页显示错误（见上面的 catch）。
+      navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')
     } finally {

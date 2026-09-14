@@ -132,6 +132,187 @@ jobs:
       - name: TypeScript + build
         run: npm run build
 
+      - name: Cache Playwright browsers
+        # 只缓存 Chromium（见下一节）：Playwright 的浏览器是 ~430MB 的独立二进制，
+        # 每次 CI 重下会白白多花几分钟。缓存键绑在 package-lock.json 上 ——
+        # 版本一变键就变，不会出现"缓存里是旧 revision、测试却以为装好了"。
+        #
+        # 缓存的是下载后的浏览器目录，**不包含** `playwright install` 的其他副作用，
+        # 所以下一节的安装步骤无论缓存命中与否都必须执行（命中时它只是快速校验）。
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Chromium for E2E
+        # 只装 Chromium，**绝不** `playwright install`（不带参数 = 三个浏览器全下）。
+        #
+        # `--with-deps` 在 ubuntu runner 上是必需的：它补齐 headless Chromium
+        # 依赖的系统库；缺了会得到 "Host system is missing dependencies" 类的报错。
+        # 注意 `--with-deps` 需要 sudo 装 apt 包，所以这一条不能只靠缓存跳过。
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright E2E (blocking)
+        # 这一层是**阻断性**的，与 format:check 不同。
+        #
+        # 为什么值得阻断：它是本仓库唯一跑在**真浏览器**里的一层 ——
+        # tsc / eslint / build 三道静态检查全是绿的也可能出问题，而本层首次
+        # 启用就当场抓到一条真实缺陷（从 `/login` 登录成功后会落到 404：
+        # 已登录路由表里没有 `/login`，且登录成功后没有任何跳转）。
+        # 那条缺陷在 Vitest 里永远看不见 —— jsdom 里路由是 mock 出来的路径，
+        # 真实地址栏、真实 history、真实 SPA fallback 都不参与。
+        #
+        # 成本可控：全部用例用 `page.route` 桩掉 `/api`，彼此不共享状态、
+        # 不需要后端/数据库，本机实测 9~10 条用例约 10~17 秒。
+        #
+        # `npm run e2e` 是自洽的：dev server 由 playwright.config.ts 的
+        # webServer 自动拉起与关闭（端口 4319、--strictPort），
+        # CI 里**不需要**另外起服务，也不能改成复用已存在的服务 ——
+        # 复用会让"测的到底是哪份代码"不可知（见 playwright.config.ts 注释）。
+        timeout-minutes: 10
+        run: npm run e2e
+
+  security-scan:
+    name: Security scan (advisory)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # ── 为什么这个 job 是"建议性"的（不会让构建变红） ──────────────────────
+    #
+    # 扫描**必须跑**，但**不能**成为合并门禁。两条实测理由：
+    #
+    # 1. 它今天必然会报出**按设计无法修**的发现：11 条 npm 建议全部落在
+    #    构建/测试工具链里，另有 1 条上游明确表示"不会有修复"的 Python 建议。
+    # 2. 另有一批发现只存在于 requirements 的**声明路径**上（pip-audit 用
+    #    `-r` 解析全新安装会拿到的版本集合），本机实际环境与它并不一致。
+    #
+    # 于是今天若拿 `--fail-on high` 当门禁，CI 会**长期常红**。常红的门禁只有
+    # 一个结局：被人加 `|| true` 或直接删掉 —— 那比没有门禁更糟，因为它会
+    # 制造"我们已经在管安全了"的假象。所以这里的选择是：
+    # **跑它、归档报告、把它摆到明面上（job summary + 注解），但不阻断合并。**
+    #
+    # 门禁的**正确**升级路径是先把上面两类发现处理掉（或在脚本里显式豁免并
+    # 写明理由），再把 `--fail-on` 换成具体阈值。在那之前不装作已经守住了。
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
+
+      - name: Install scan dependencies
+        # pip-audit 是脚本的**必需**扫描器之一（装不上 → 退出码 2）。
+        # 不钉版本：本 job 是建议性的，钉住反而会在漏洞库换代时增加维护面；
+        # 扫描器版本会随 JSON 报告一起归档，结果永远可追溯。
+        run: python -m pip install pip-audit
+
+      - name: Install frontend dependencies
+        # `npm audit` 是另一个必需扫描器，它读 frontend/package-lock.json。
+        # 用与 frontend job 完全相同的 `npm ci`（同一份锁文件、同一条路径）——
+        # 这里刻意不换花样：两个 job 对"前端依赖装出来是什么样"必须一致，
+        # 否则扫描结果描述的就不是被测试的那棵树。
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run security scan (report only, never blocks)
+        id: scan
+        # 输出 JSON 报告供归档。脚本在**内部**已修好 Windows/GBK 下 pip-audit
+        # 崩溃、镜像源没有 audit 端点这两个坑（见 security_scan.py 文件头）。
+        run: |
+          set -o pipefail
+          # `|| true` 在这里的作用域是**最小**的：只吃掉脚本自己的退出码，
+          # 随后的步骤会把它翻译成可见的状态。绝不能在这里静默了事。
+          python scripts/security_scan.py --json-out ../security-scan-report.json 2>&1 | tee security-scan.log || true
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Report scanner status
+        # ── 退出码 2 的处理决定（这是本 job 里唯一需要动脑的地方） ──────────
+        #
+        # 退出码含义：0 = 跑完了没发现 / 1 = 有发现达阈值（本 job 不用）/ 
+        # 2 = **必需的扫描器没能运行**（pip-audit 未安装、npm audit 失败、
+        #     网络不通导致公告库拉不下来）。
+        #
+        # 决定：**不因 2 而失败构建，但把它变成无法忽略的可见状态。**
+        #
+        # 为什么不失败：code 2 的主因是网络/环境，而不是本次提交引入了什么。
+        # 让一次 registry 抖动把 PR 变红，属于"红灯指向的原因不是代码" —— 
+        # 这正是上面那条"常红 → 被 `|| true`"路径的起点。安全结论的缺失
+        # 不该以"某个提交有罪"的形式表达。
+        #
+        # 为什么不静默：静默就是本仓库反复踩到的"配置了却从未真正执行" 
+        # （rate limit 规则从未匹配、CI 依赖清单漂移、扫描器一次没跑过）。
+        # 所以 code 2 会：写进 job summary、打 ::warning 注解（在 PR 的
+        # Files/Checks 界面上直接可见）、把 JSON 报告归档、并保留原始输出。
+        #
+        # 唯一的硬失败是"连报告文件都没产出"：那是**这个 job 自己**坏了，
+        # 与扫描器在目标机器上能否联网无关，必须红。
+        env:
+          EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          REPORT=../security-scan-report.json
+
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::扫描脚本未产出报告文件 $REPORT（退出码 ${EXIT_CODE}）—— 这一步本身失败了，不是扫描器的问题"
+            exit 1
+          fi
+
+          MISSING=$(python - <<'PY'
+          import json, pathlib
+          r = json.loads(pathlib.Path("../security-scan-report.json").read_text(encoding="utf-8"))
+          missing = []
+          if not r["python"].get("available") and not r["python"].get("skipped"):
+              missing.append("pip-audit")
+          for scan in r["python"].get("scans", []):
+              if not scan.get("ok"):
+                  missing.append("pip-audit:" + str(scan.get("target")))
+          if not r["node"].get("ok") and not r["node"].get("skipped"):
+              missing.append("npm audit")
+          print("、".join(missing))
+          PY
+          )
+
+          {
+            echo "## 依赖安全扫描（建议性，不阻断合并）"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 退出码 | \`${EXIT_CODE}\`（0=完成 / 1=达阈值 / 2=必需扫描器没跑起来） |"
+            echo "| 未运行的必需扫描器 | ${MISSING:-无} |"
+            echo "| 完整 JSON 报告 | 见本 job 的构建产物 \`security-scan-report\` |"
+            echo ""
+            echo "判定为建议性的理由、以及升级成门禁的前置条件，见 \`.github/workflows/ci.yml\` 中本 job 的注释。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$EXIT_CODE" = "2" ]; then
+            echo "::warning::安全扫描的必需扫描器未能运行（$MISSING）。本次**没有**得到任何安全结论 —— 这既不是「没问题」也不是「发现了问题」，而是「扫描没跑成」。请检查网络/扫描器可用性后重跑。"
+          elif [ "$EXIT_CODE" = "1" ]; then
+            echo "::warning::安全扫描有发现达到阈值（本 job 未启用 --fail-on，故不阻断）"
+          else
+            echo "扫描完成：必需扫描器全部运行。"
+          fi
+
+          echo "──────── 扫描输出（完整日志随构建产物归档） ────────"
+          cat security-scan.log
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-report
+          # 两个文件都保留：JSON 供机器读，日志供人读（含"哪个扫描器没跑"的原因）
+          path: |
+            backend/security-scan-report.json
+            backend/security-scan.log
+          if-no-files-found: error
+          retention-days: 30
+
   docker-nginx-config:
     name: Docker build context sanity
     runs-on: ubuntu-latest

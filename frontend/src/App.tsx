@@ -13,7 +13,7 @@
  * 现改为按路由 React.lazy 懒加载；首屏只保留登录/仪表盘所需的代码。
  */
 import { lazy, Suspense, useState } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Sidebar from './components/Sidebar'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -110,6 +110,14 @@ function AppRoutes() {
           <ErrorBoundary resetKey={location.pathname}>
             <Suspense fallback={<RouteFallback />}>
               <Routes>
+                {/* 认证入口的已登录兜底（与未登录分支里那两条同路径路由对应）：
+                    令牌在 localStorage 里长期有效，用户完全可能带着已登录状态
+                    回到 /login（历史记录、书签，或注册成功后回退一格）。
+                    这里若不拦，pathname 会停在 /login 而本表没有这条路由，
+                    于是落到下面的 path="*" 渲染出 404 —— 与"登录成功后停在
+                    /login"是同一个洞的另一个入口，只修跳转等于把它留着。 */}
+                <Route path="/login" element={<Navigate to="/" replace />} />
+                <Route path="/register" element={<Navigate to="/" replace />} />
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/notes" element={<NotesList />} />
                 <Route path="/notes/:noteId" element={<NoteDetail />} />

@@ -52,14 +52,14 @@ npx playwright install chromium
 
 ## 2. 这一层到底测了什么
 
-4 个 spec 文件、**9 条用例（8 条执行 + 1 条 `fixme`，见 §5）**，全部对 Chromium 跑：
+4 个 spec 文件、**10 条用例（全部执行）**，全部对 Chromium 跑：
 
 | 文件 | 用例 | 证明的事 |
 |---|---|---|
 | `e2e/app-shell.spec.ts` | 2 | `index.html` 返回 200、React 真的挂载、无未捕获异常；**全局 CSS 令牌层与 CSS Module 层都作用到了元素上**（用计算后的布局值判定，不是拼类名） |
 | `e2e/auth-routing.spec.ts` | 2 | 未登录直接访问 `/`、`/notes`、`/graph`、`/upload`、`/review/cards` 都拿到 **200 + 登录页**（SPA fallback 生效）；登录页 → 注册页是客户端路由而非整页刷新 |
 | `e2e/login-form.spec.ts` | 2 | 浏览器**原生约束校验**拦下空表单与非法邮箱，且**一个 `/api` 请求都没发出去** |
-| `e2e/login-api.spec.ts` | 2+1 | 凭据正确 → 一对令牌落盘 → 切到已登录外壳 → Dashboard 渲染；凭据错误 → 统一文案、不写令牌、留在登录页。（+1 条 `fixme`，见 §5） |
+| `e2e/login-api.spec.ts` | 4 | 凭据正确 → 一对令牌落盘 → 切到已登录外壳 → Dashboard 渲染；凭据错误 → 统一文案、不写令牌、留在登录页；**从 `/login` 登录成功 → 地址栏变成 `/` 且渲染 Dashboard（不是 404）**；已登录后访问 `/login`、`/register` → 重定向到 `/` |
 
 ### 关键设计取舍
 
@@ -114,7 +114,7 @@ npx playwright install chromium
 
 ---
 
-## 5. 本轮 E2E 发现的**产品缺陷**（未修改产品代码）
+## 5. 本轮 E2E 发现的**产品缺陷**（已修复）
 
 ### 从 `/login` 登录成功后会落到 404
 
@@ -124,22 +124,26 @@ npx playwright install chromium
 2. 点页脚「注册」→ 客户端路由到 `/register`
 3. 点页脚「登录」→ 客户端路由到 `/login`
 4. 输入**正确**凭据并提交
-5. 登录成功、令牌落盘、已登录外壳出现 —— 但 `main` 里是 **404「页面不存在」**
+5. 修复前：登录成功、令牌落盘、已登录外壳出现 —— 但 `main` 里是 **404「页面不存在」**
 
 **原因**：`App.tsx` 的已登录路由表里**没有 `/login`**（它只在未登录分支注册），
-而登录成功后没有任何"跳到 `/`"的动作（全仓 `grep` 只有 `Register.tsx:113` 一处
-`navigate('/login')`，没有任何 `navigate('/')`），于是 `location.pathname` 仍是
+而登录成功后没有任何"跳到 `/`"的动作，于是 `location.pathname` 仍是
 `/login`，落到 `path="*"` 的 `NotFound`。用户必须手动把地址改回 `/`。
 
-**为什么没有顺手修掉**：本任务是"补测试工具链"，硬规则明确要求
-**不修改应用行为**；这条缺陷的正确修法（登录后跳转 vs. 已登录表里保留 `/login` 兜底）
-是一个需要产品决策的改动。
+**修法（两半都修，只修一半等于把同一个洞留给另一个入口）：**
 
-**它被留成了一条可执行复现**：`login-api.spec.ts` 末尾的
-`test.fixme('已知缺陷：从 /login 登录成功后会落到 404…')`。
-用例体断言的是**期望行为**（能看到仪表盘），所以修好之后把 `test.fixme` 改回 `test`
-即可。它在每次运行的汇总里以 `skipped` 出现，**不是静默通过** ——
-`fixme` 而不是删掉，是因为"删掉"等于丢失证据，"断言 404 存在"等于把缺陷固化。
+| 位置 | 改动 |
+|---|---|
+| `src/pages/Login.tsx` | 登录**成功**后 `navigate('/')`（放在 `await login(...)` 之后、`catch` 之外：401 仍然留在登录页显示统一文案） |
+| `src/App.tsx` | 已登录分支里给 `/login`、`/register` 各加一条 `<Route element={<Navigate to="/" replace />} />` —— 令牌长期有效，用户完全可能带着已登录状态回到这两个地址（历史记录、书签、注册后回退） |
+
+**发现它的是哪条用例**：`login-api.spec.ts` 里原本的 `test.fixme`
+（用例体断言的是**期望行为**：能看到仪表盘）。修好后它变回真用例，
+并补了一条"已登录后直接访问 `/login`、`/register`"的用例守住第二半。
+
+这条缺陷在 Vitest 里**永远看不见**：jsdom 里没有真实地址栏、没有真实
+history、没有 SPA fallback，路由是在 mock 出来的路径上跑的。
+它也是本层值得做成**阻断性**门禁的直接证据（见 §7）。
 
 ---
 
@@ -174,21 +178,17 @@ http://127.0.0.1:4319/src/api/goals.ts
 
 ## 7. 与 CI 的关系
 
-**本层目前没有进 `.github/workflows/ci.yml`。** 理由与做法：
+**本层已接入 `.github/workflows/ci.yml` 的 `frontend` job，并且是阻断性的。**
 
-- 它需要跑 `npx playwright install --with-deps chromium`，会显著拉长 CI 时间；
-- 本任务是"先把这一层在本地真正跑起来"，接线是独立的一步（改 CI 属于流程决策）。
+- `frontend` job 在 `npm run build` 之后增加三步：
+  `actions/cache@v4`（缓存 `~/.cache/ms-playwright`，键绑 `package-lock.json`）、
+  `npx playwright install --with-deps chromium`（**只装 Chromium**）、
+  `npm run e2e`（`timeout-minutes: 10`）。
+- **不需要**在 CI 里另外起服务：dev server 仍由 `playwright.config.ts` 的
+  `webServer` 自动拉起/关闭，端口 4319、`reuseExistingServer: false`。
+- 缓存键绑定锁文件是有意的：Playwright 的浏览器 revision 跟着
+  `@playwright/test` 版本走，键不随版本变会出现"缓存里是旧 revision"。
 
-要接的话，在 `frontend` job 的 `npm ci` 之后加：
-
-```yaml
-      - name: Install Chromium for E2E
-        run: npx playwright install --with-deps chromium
-
-      - name: Playwright E2E
-        run: npm run e2e
-```
-
-⚠️ 注意 `npx playwright install` 在 CI 上默认从 `cdn.playwright.dev` 拉；
-如果 runner 所在网络下不动（本机就是这种情况），需要设
-`PLAYWRIGHT_DOWNLOAD_HOST`（见 §1）。
+离线环境的一个已知事实：本机 `cdn.playwright.dev` 下不动（见 §1）。
+GitHub runner 不受影响；若换到同样受限的网络，需要设
+`PLAYWRIGHT_DOWNLOAD_HOST`，那是环境变量而不是配置项，所以没有写进 workflow。
