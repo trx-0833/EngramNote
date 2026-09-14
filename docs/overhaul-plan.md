@@ -2897,28 +2897,39 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 
 ### 阶段 0 · 止血（1 周）—— 不动架构，只消除正在流血的风险
 
-| # | 动作 | 解决 | 验收 |
-|---|---|---|---|
-| 0.1 | **加 CI**：GitHub Actions 跑 `ruff` + `eslint` + `pytest -m "not integration"` | E-6 | 每个 PR 必过 |
-| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 |
-| 0.3 | **关掉启动时的破坏性迁移**：`init_db()` 中 `_rebuild_dangling_tables()` 与 `database.py:580-587` 的全局去重改为**显式脚本 + 先备份**，不再随进程启动执行 | D-2 | 启动不再 DROP 表、不再删数据 |
-| 0.4 | **SQLite 开 WAL**：`_set_sqlite_pragma` 加 `PRAGMA journal_mode=WAL`（实测当前为 `delete`）；`busy_timeout` 从 5000 提到 30000 | D-1 | 并发读写不再报 locked |
-| 0.5 | **修正向量相似度公式**：`embedding_tasks.py:246` 的 `1/(1+distance)` 在归一化向量上等价于错误的度量（无关内容得 0.333，见 A-1）。collection 建时指定 `hnsw:space=cosine` 并改 `1.0 - distance`；**写一个重建全部 collection 的迁移脚本**（当前 `backend/data/chroma/` 有 90+ 个） | A-1 | 相似度落在 [0,1] 且可区分 |
-| 0.6 | **停止删除 `review_logs`**：删除孤儿清理中针对 `review_logs` 的两条 SQL；并把 `generate_questions` 的"先删后建"改为**影子生成 + 原子替换**（见 §2.6 M-5） | L-3 / D-3 / M-5 | 学习记录不再被删 |
-| 0.7 | **限流兜底**：`/auth/login`、`/auth/register` 加 IP 级限流；加登录失败计数与锁定；补恒定时间比较（用户不存在时也跑一次 bcrypt） | E-1 / E-2 | 爆破与用户枚举被阻断 |
-| 0.8 | **停止用户枚举**：注册对已占用邮箱/用户名返回统一文案 | E-2 | 无法枚举已注册用户 |
-| 0.9 | **`debug` 默认改为 `False`**；`.env.example:113` 同步；`echo` 拆成独立开关 `db_echo`（当前 `debug=True` 把 bcrypt 哈希与全部学习内容写进明文日志，见 A-19） | E-5 / A-19 | 生产日志无用户内容 |
-| 0.10 | **`/ready` 端点 + 队列深度**；`/docs`、`/openapi.json` 生产关闭或加保护 | E-7 | 可判断服务是否可用 |
-| 0.11 | **统一错误契约**：引入 `AppError(code, http_status, message)`，前端改按 `error_code` 分支（不再匹配中文，见 F-19）；停止用 `str(e)` 回传内部异常（H5） | E-10 | 后端改文案不破坏前端 |
-| 0.12 | **修 nginx 生产配置**：`client_max_body_size 500m`（当前默认 1MB → **所有 >1MB 上传必然 413**）、`proxy_buffering off`（当前 SSE 被缓冲 → 流式失效）、`gzip_vary on`、静态资源缓存头 + `index.html no-cache`、安全响应头 | F-1 / F-21 | Docker 部署下上传与流式可用 |
-| 0.13 | **加 `frontend/.dockerignore`**（`node_modules`、`dist`）；`Dockerfile` 改 `npm ci` | F-4 | 镜像可在 Linux/CI 上构建 |
-| 0.14 | **加 ErrorBoundary**（`main.tsx` 全局 + 路由级 `key={pathname}`）；`renderMarkdown` 调用包 `useMemo` 与 try/catch 兜底 | F-2 | 单条坏数据不再整站白屏 |
-| 0.15 | **`QuestionSets` 分页循环加硬上限**：`page <= MAX_PAGES` + `if (data.items.length === 0) break` | F-3 | 不再无限请求后端 |
-| 0.16 | **`DailyMaterials` 轮询加清理**（`pollTimerRef` + effect cleanup 的 `cancelled` 标志） | F-5 | 卸载后不再发请求 |
-| 0.17 | **补 CSS `.status-learning` / `.status-learning-failed` / `.status-archived`**，统一 `statusClass()` 函数（当前四个页面渲染成无样式裸文本，见 F-13） | F-13 | 状态样式全站一致 |
+> ⚠️ **本表原无状态列**（表头是 `| # | 动作 | 解决 | 验收 |`）。
+> **2026-09-14 逐条核对代码后补入 `状态` 列**（附录 BJ）——
+> 缺口是"从来没有过"，不是"跟丢了"，因此这里补的是**证据**而不是一列标记。
+> 派工说明：`✅` 已完成 / `🟡` 部分完成 / `⏸` 未做 / `⛔` 按既定路线不适用。
+
+| # | 动作 | 解决 | 验收 | 状态（2026-09-14 核对） |
+|---|---|---|---|---|
+| 0.1 | **加 CI**：GitHub Actions 跑 `ruff` + `eslint` + `pytest -m "not integration"` | E-6 | 每个 PR 必过 | ✅ **已落地**（`.github/workflows/ci.yml`）：后端 ruff（app/tests/scripts 三段）+ 离线 pytest、前端 lint + tsc/build + Vitest + Playwright（阻断）、依赖安全扫描（建议性）、nginx/`.dockerignore` 配置守卫。**不只是存在** —— 它当场抓到过真缺陷（登录成功落 404、CI 依赖清单漂移 64 failed） |
+| 0.2 | **测试隔离**：`conftest.py` 加守卫，禁止测试触网/写生产库；把 `backend/` 根目录 15 个脚本移入 `scripts/dev/`；`backend/tests/` 只留正式测试 | E-6 | `pytest` 离线可跑、零 API 调用 | 🟡 **守卫已落地，脚本搬迁未做**。守卫：`tests/conftest.py:128-142` 网络阻断（`ENGRAMNOTE_ALLOW_NETWORK_TESTS=1` 才放行）、`:313-370` **真实生产库写入守卫**（`before_cursor_execute` 层拦截）、`pytest.ini` 的 `norecursedirs = tests/integration`（8 个联网脚本已归位，`src` 收集期 8 errors → 0）。**缺的是后半段**：`backend/` 根目录**仍有 15 个一次性脚本**（`test*.py` × 11 / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py`），**`backend/scripts/dev/` 这个目录不存在** —— 计划字面的那次搬迁从未执行 |
+| 0.3 | **关掉启动时的破坏性迁移**：`init_db()` 中 `_rebuild_dangling_tables()` 与 `database.py:580-587` 的全局去重改为**显式脚本 + 先备份**，不再随进程启动执行 | D-2 | 启动不再 DROP 表、不再删数据 | ✅ **已落地**：`database.py:260-301` 的 `init_db()` 只做 `create_all()` + `_migrate_sqlite()`（只加不删）+ FTS5 建表；`_rebuild_dangling_tables()`（`:1150`）与 `card_relations` 同键去重（`:1057-1059`）都在 `_destructive_migration_allowed()`（`:390-399`，需显式 `ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1`）之后；孤儿检查（`:1002-1036`）已改为**只报告不删除**，针对 `review_logs` 的两条 `DELETE` 不复存在 |
+| 0.4 | **SQLite 开 WAL**：`_set_sqlite_pragma` 加 `PRAGMA journal_mode=WAL`（实测当前为 `delete`）；`busy_timeout` 从 5000 提到 30000 | D-1 | 并发读写不再报 locked | ✅ **已落地**：`database.py:138` `PRAGMA journal_mode=WAL`、`:141` `busy_timeout=30000`、`:144` `synchronous=NORMAL`（另 `:131` `foreign_keys=ON`） |
+| 0.5 | **修正向量相似度公式**：`embedding_tasks.py:246` 的 `1/(1+distance)` 在归一化向量上等价于错误的度量（无关内容得 0.333，见 A-1）。collection 建时指定 `hnsw:space=cosine` 并改 `1.0 - distance`；**写一个重建全部 collection 的迁移脚本**（当前 `backend/data/chroma/` 有 90+ 个） | A-1 | 相似度落在 [0,1] 且可区分 | ✅ **已落地，但该路径此后已被整体替换**（⚠️ 读者勿误记为"待做"）：公式已在 `embedding_service.py:304-333` 改为 `cos = 1 - d/2`（并附"旧实现得 0.333 错在哪"的推导），单测曾逐行对齐理论余弦。**但它依赖的 Chroma 已在 2.4/2.4′ 被删除**：`chromadb` 移出 `requirements.txt`、`VectorStore` 删除、运行期改为 `chunks` 表 + 纯 Python 单位向量点积（`chunk_search_service.py:100-127`，含模型一致性检查），因此 `similarity_from_l2_distance()` 现在是**全仓零调用方的死代码**（`grep` 命中仅定义处）。"重建全部 collection 的迁移脚本"**从未写**，因为集合被**迁移到 `chunks` 表**（608 行、单一 `bge-m3`/1024 维、100% 可检索，附录 O/P）而不是被重建；`backend/data/chroma/` 目录仍在磁盘上（**实测 114 个子目录**），但已无任何运行期读取方 |
+| 0.6 | **停止删除 `review_logs`**：删除孤儿清理中针对 `review_logs` 的两条 SQL；并把 `generate_questions` 的"先删后建"改为**影子生成 + 原子替换**（见 §2.6 M-5） | L-3 / D-3 / M-5 | 学习记录不再被删 | ✅ **前半已落地，后半按记录的理由不执行**。前半：启动路径的 `review_logs` 孤儿 `DELETE` 已删除，改为只报告（`database.py:1002-1036`）。⚠️ 后半（"影子生成 + 原子替换"）**没有做**：重新生成题目时**仍然删除该笔记旧题目对应的复习记录**（`understand_tasks.py:274`、`api/understanding.py:155`、`api/understanding.py:518`、`note_service.py:597`），这是"重新生成"语义的**有意**取舍（见 §2.6 M-5 与 `docs/decisions.md#F-29`），不是待修缺陷 —— 但把它记成"已完成"会让下一个人以为这条链路已无删除 |
+| 0.7 | **限流兜底**：`/auth/login`、`/auth/register` 加 IP 级限流；加登录失败计数与锁定；补恒定时间比较（用户不存在时也跑一次 bcrypt） | E-1 / E-2 | 爆破与用户枚举被阻断 | 🟡 **限流与时序对齐已落地，登录失败计数与锁定从未实现**。已落地：`middleware/rate_limit.py:59-105` 的规则表（`^/api/auth/login$` 10/min、`^/api/auth/register$` 5/min，超额 429 + `Retry-After`）；`auth_service.py:404-408` 的 `_DUMMY_HASH` 时序对齐（`:128`）。**缺的是"加登录失败计数与锁定"**：全仓 `grep` 三个关键词（`lockout`、`failed_attempt`、`login_attempt`）**零命中**（`database.py:1116` 的 `msvcrt.locking` 是文件锁，与登录无关），`users` 表也没有相关列。当前的爆破防护**只有**那两道 60 秒滑动窗口（≈10 次/分钟/IP），窗口一过即可继续 —— 计划要的"锁定"这一层不存在 |
+| 0.8 | **停止用户枚举**：注册对已占用邮箱/用户名返回统一文案 | E-2 | 无法枚举已注册用户 | ✅ **已落地**：`auth_service.py:363-369` 两种冲突合并为同一句 `"该邮箱或用户名已被使用，请更换后重试"`，且服务端日志才区分 `email_taken` / `username_taken`；登录侧同为统一失败（`:384-410`） |
+| 0.9 | **`debug` 默认改为 `False`**；`.env.example:113` 同步；`echo` 拆成独立开关 `db_echo`（当前 `debug=True` 把 bcrypt 哈希与全部学习内容写进明文日志，见 A-19） | E-5 / A-19 | 生产日志无用户内容 | ✅ **已落地**：`config.py:509` `debug: bool = False`；SQL echo 已拆成**独立开关** `log_sql`（`config.py:494` 默认 `False`，`database.py:90` `"echo": settings.log_sql`，不再跟随 `debug`）；命名是 `log_sql` 而不是计划写的 `db_echo`。⚠️ **`.env.example` 未同步干净**：`:39-41` 已有 `# DEBUG=false` 的遗留说明，但文件**末尾 `:142` 仍是裸的 `DEBUG=true`**，照抄模板会把 dev 姿态打开（应用内**不**开 SQL 日志，所以不再是 A-19 那个泄露，但仍是模板与代码默认值的矛盾） |
+| 0.10 | **`/ready` 端点 + 队列深度**；`/docs`、`/openapi.json` 生产关闭或加保护 | E-7 | 可判断服务是否可用 | ⏸ **未做**。`app/main.py` 全仓只有 `/health`（`:292`，返回 `{status, app}`）；`FastAPI(...)`（`:194-199`）**没有设 `docs_url` / `openapi_url` / `redoc_url`**，因此 `/docs`、`/openapi.json`、`/redoc` 在任何环境（含生产）都是**公开**的；没有任何队列深度端点。⚠️ 0.11 的 `request_id` 与错误信封可能让人以为 E-7 已收口 —— 那是两件事 |
+| 0.11 | **统一错误契约**：引入 `AppError(code, http_status, message)`，前端改按 `error_code` 分支（不再匹配中文，见 F-19）；停止用 `str(e)` 回传内部异常（H5） | E-10 | 后端改文案不破坏前端 | 🟡 **契约设施已落地，采用面很窄**。已落地：`core/app_error.py:30-55` 的 `AppError(code, message, http_status, data)`；`middleware/error_handler.py:52-63` 统一信封 `{detail, error_code, request_id}`（另 `main.py:243-255` 转发 `exc.headers`，`:271-285` 配额异常单独注册）；前端 `api/client.ts:381-383` **确实**优先读 `error_code`。**缺的是采用**：全仓 `raise AppError` **只有 2 处**（`version_service.py:208/226`），而 `raise HTTPException` **有 152 处**（含 `services/goal_service.py` 的 5 处）；且 `frontend/src/pages/TodayLearn.tsx:146` 与 `pages/Review.tsx:126` 仍在用 `message.includes('每日上限')` 匹配中文。所以"后端改文案不破坏前端"这条验收**尚未成立** |
+| 0.12 | **修 nginx 生产配置**：`client_max_body_size 500m`（当前默认 1MB → **所有 >1MB 上传必然 413**）、`proxy_buffering off`（当前 SSE 被缓冲 → 流式失效）、`gzip_vary on`、静态资源缓存头 + `index.html no-cache`、安全响应头 | F-1 / F-21 | Docker 部署下上传与流式可用 | ⛔ **按既定路线不适用**（容器化已放弃，见 `README.md:265-276` 的"Docker 部署未经验证"横幅与 `docs/sqlite-single-writer.md`）。⚠️ **但文件是真的、内容是对的**：`frontend/nginx.conf:11` `client_max_body_size 500m`、`:50` `proxy_buffering off`、`:71` `gzip_vary on`、`:24-33` 静态资源 `immutable` + `index.html no-cache`、`:74-76` 安全头，且 CI 有回归守卫（`.github/workflows/ci.yml:351-366`）。**验收条件"Docker 部署下可用"无法在本项目的运行路径上验证**（这一轮也没有验证过）—— 所以这条是"不适用"，不是"已验证" |
+| 0.13 | **加 `frontend/.dockerignore`**（`node_modules`、`dist`）；`Dockerfile` 改 `npm ci` | F-4 | 镜像可在 Linux/CI 上构建 | ⛔ **按既定路线不适用**，且**前半已落地、后半未做**：`frontend/.dockerignore` 存在（22 行，排除 `node_modules` / `dist` / `.git` / `*.log` 等），CI 有守卫（`ci.yml:368-374`）；但 `frontend/Dockerfile:16` **仍是 `RUN npm install`**，不是计划要的 `npm ci`。整体判 ⛔ 是因为"镜像可在 Linux/CI 上构建"这条验收**在本项目的实际部署路径下不被检验** |
+| 0.14 | **加 ErrorBoundary**（`main.tsx` 全局 + 路由级 `key={pathname}`）；`renderMarkdown` 调用包 `useMemo` 与 try/catch 兜底 | F-2 | 单条坏数据不再整站白屏 | ✅ **已落地**：全局 `main.tsx:49-55`；路由级 `App.tsx:116-150` 用 `<ErrorBoundary resetKey={location.pathname}>`（`key` 语义的等价实现）；`utils/markdown.ts:265-288` 的 `renderMarkdown` 整体 try/catch，失败降级为**转义后的纯文本**；流式两处（`NoteAskPanel.tsx:71`、`QA.tsx` + `hooks/useStreamAnswer.ts`）已用 `useMemo` / 节流。⚠️ **未完全覆盖**：`LearningAssessment.tsx`（`:486/498/508/598/621/627/646`）与 `NoteDetail.tsx:160/163` **仍在渲染体里直接调用** `renderMarkdown(...)`（每渲染一次即重算）。有 try/catch 兜底，所以 F-2 的"整站白屏"验收成立；但"包 `useMemo`"这一半**没有全覆盖** |
+| 0.15 | **`QuestionSets` 分页循环加硬上限**：`page <= MAX_PAGES` + `if (data.items.length === 0) break` | F-3 | 不再无限请求后端 | ✅ **已落地**：`pages/QuestionSets.tsx:75` `MAX_PAGES = 100`、`:82` `while (page <= MAX_PAGES)`、`:89` 空页即停、`:91` 取够 `total` 即停，`:96-101` 截断时 `console.warn` 并如实改 `total` |
+| 0.16 | **`DailyMaterials` 轮询加清理**（`pollTimerRef` + effect cleanup 的 `cancelled` 标志） | F-5 | 卸载后不再发请求 | ✅ **已落地**：`pages/DailyMaterials.tsx:144` `pollTimerRef`、`:146` `unmountedRef`（即计划写的 `cancelled` 标志）、`:149-154` `stopPolling()`、`:156-162` 卸载 effect 同时置标志并清定时器（`Upload.tsx:90-96` 早已是同款实现） |
+| 0.17 | **补 CSS `.status-learning` / `.status-learning-failed` / `.status-archived`**，统一 `statusClass()` 函数（当前四个页面渲染成无样式裸文本，见 F-13） | F-13 | 状态样式全站一致 | ✅ **已落地**：`utils/labels.ts:113-115` 三个类名 + `:119` `statusClass()` 单一出口；`styles/components.css:262-264` 三条规则齐备；6 个消费页面全部改走 `statusClass()`（`DailyMaterials` / `Dashboard` / `NotesList` / `AddNotesPanel` / `ProjectNotesList` / `NoteDetailHeader`），`projects/helpers.ts:29-30` 记录了此处曾经的绕过表 |
 
 **阶段 0 的价值**：不改变架构，但把"随时可能丢数据/被爆破/静默失效"的风险按下去，
 为后续重构赢得时间。
+
+> **2026-09-14 补记**：本阶段 17 条的**逐条状态此前从未存在过**（表头就没有 `状态` 列）。
+> 上表是按代码逐条核对后补的，**结论是"✅ 11 / 🟡 3（0.2、0.7、0.11）/ ⏸ 1（0.10）"
+> ——共 15 条；另 2 条（0.12、0.13）判"⛔ 按既定路线不适用"**
+> （⚠️ 0.13 实际是"不适用 + 前半已落地"的复合状态，见该行）；其中最容易被计划自身措辞误导的两条是
+> **0.7**（限流有、锁定无）与 **0.11**（`AppError` 有、采用无）。派工依据见**附录 BJ.1**。
 
 ### 阶段 1 · 换地基（2 周）—— 手术刀 1
 
@@ -2929,11 +2940,11 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 1.1 | 引入 PostgreSQL：`docker-compose` 启用 postgres，`DATABASE_URL` 切 `postgresql+asyncpg://` | 全部测试在 PG 上通过 | ⛔ 不执行（无 Docker） |
-| 1.2 | **删除手写迁移**：移除 `_migrate_sqlite()` / `_rebuild_dangling_tables()`（约 -400 行）；`init_db()` 只做连通性检查，**不再建表、不再改 schema** | 启动不再改 schema | ⛔ 不执行（手写迁移是 SQLite 路线的唯一通道）。但**启动零破坏性**已达成：重建函数已移出启动路径，见 1.2′ |
-| 1.3 | ⚠️ **Alembic 从零重建**。现有迁移链（001→010）**从未生效过**（见 §2.6 M-1） | 空库 → `alembic upgrade head` → 全表 + `alembic_version` | ⛔ 不执行（无 PG）。**但 M-1 的结论仍成立**：迁移链确实从未生效，schema 由手写迁移维持 |
-| 1.4 | **数据迁移脚本**：SQLite → PG（含 chroma → pgvector 的向量搬运） | 迁移后行数/内容哈希一致；项目归属不丢 | ⛔ 不执行 |
-| 1.5 | 引入 Redis：Celery broker/backend 切 Redis | 多 worker 并发跑任务且不 OOM | ⛔ 不执行。**但"每 worker 加载一份 2.3GB 嵌入模型"的约束已写进 `sqlite-single-writer.md`**（`-c 1`） |
+| 1.1 | 引入 PostgreSQL：`docker-compose` 启用 postgres，`DATABASE_URL` 切 `postgresql+asyncpg://` | 全部测试在 PG 上通过 | ⛔ 不执行（无 Docker）——**2026-09-14 补记**：路线依据见 `docs/sqlite-single-writer.md` 与 `README.md:122`（"曾因磁盘空间不足明确放弃容器化与 PG/Redis"）；`requirements.txt:39` 的 `asyncpg` 已注释、`:44-45` 的 `redis` 亦为注释。**没有任何东西存活下来**：`database.py` 的 `_sqlite()` 分支是运行期的唯一分支 |
+| 1.2 | **删除手写迁移**：移除 `_migrate_sqlite()` / `_rebuild_dangling_tables()`（约 -400 行）；`init_db()` 只做连通性检查，**不再建表、不再改 schema** | 启动不再改 schema | ⛔ 不执行（手写迁移是 SQLite 路线的唯一通道）。**原始关切里"启动零破坏性"这一半已达成**：重建函数已移出启动路径（需显式闸门）。**仍成立的部分**：`_migrate_sqlite()`（`database.py:437`，`init_db()` 在 `:291` 调用它）**依旧存在、依旧在每个进程启动时执行**，Schema 演进**只有这一条通道**（Alembic 见 1.3）；所以计划写的"约 -400 行删除"在 SQLite 路线下**不是未做，是不该做** |
+| 1.3 | ⚠️ **Alembic 从零重建**。现有迁移链（001→010）**从未生效过**（见 §2.6 M-1） | 空库 → `alembic upgrade head` → 全表 + `alembic_version` | ⛔ 不执行（无 PG）。**但 M-1 的结论仍成立，且本轮逐条复核为"从未运行过"**（2026-09-14，三条独立证据）：① 真库 26 张表里**没有 `alembic_version`**（`sqlite_master` 只读查询）；② `backend/alembic.ini:6` 的 `sqlalchemy.url` 仍是 `postgresql+asyncpg://engram:…`，与 SQLite 路线**不匹配**，`alembic/env.py:35-39` 用同步 `engine_from_config` 读它；③ **当前 Python 环境里 `alembic` 包根本没装**（`import alembic` → `ModuleNotFoundError`，尽管 `requirements.txt:26` 声明了它）。另：`versions/` 已有 **011 个**迁移文件（比本行写的 001→010 多一个 `011_refresh_tokens.py`，即 6.3 那个，当时也**只单独跑过它一个**）。**结论：迁移链至今不是可用路径，schema 继续由手写迁移维持** |
+| 1.4 | **数据迁移脚本**：SQLite → PG（含 chroma → pgvector 的向量搬运） | 迁移后行数/内容哈希一致；项目归属不丢 | ⛔ 不执行（无 PG）。**"向量搬运"这件事以另一种方式做过**：向量已从 90+ Chroma collection 搬进 `chunks` 表（608 行、单一 `bge-m3`/1024 维、100% 可检索，附录 O/P）；行数/内容哈希一致这条验收**没有对象**（没有目标库） |
+| 1.5 | 引入 Redis：Celery broker/backend 切 Redis | 多 worker 并发跑任务且不 OOM | ⛔ 不执行（无 Redis）。**但"每 worker 加载一份 2.3GB 嵌入模型"的约束已写进 `sqlite-single-writer.md`**（`-c 1`）；限流器刻意保留**进程内**实现（`middleware/rate_limit.py:15-16` 与 `services/llm/rate_limit.py` 都写明"将来水平扩展时再换 Redis，接口不变"） |
 | 1.6 | **任务可靠性**：全局 `task_reject_on_worker_lost=True`、`task_time_limit`、`soft_time_limit` | 杀 worker → 任务自动重投 | ✅ 已落地（附录 F.2；文件 broker 无 visibility timeout，改用 DB 心跳自愈补偿） |
 | 1.7 | 新增 `task_runs` 表 + 进度上报 + `GET /api/tasks/{id}` + 取消接口 | UI 显示真实百分比 | ✅ 已落地（附录 F.2，含 IDOR 校验与诚实的 `terminated=false`） |
 | 1.8 | **僵尸任务自愈**：Beat 定时扫描 `heartbeat_at` 超时的 `task_runs` | worker 崩溃后笔记不再永久卡住 | ✅ 已落地（Beat 每 5 分钟） |
@@ -3088,20 +3099,28 @@ M-4 与 1.13 仍未做。）
 > 已做的工作，但表格本身从未更新，读者无法判断进度）。核对结论是
 > **已完成的多是"表结构"、未完成的多是"算法"** —— 这正是本项目一贯的形态：
 > schema 先行，行为留空。
+>
+> 📌 **表内所有"194 条"与"真库 FSRS 记录数为 0"的计数为 2026-09-11 快照。**
+> **2026-09-14 复核**：真库 `review_logs` 已是 **195 条**，其中 **1 条是 FSRS 时期
+> 产生的真实复习记录**（`rating` / `self_rating` 非空、`grading_method='self_rating'`、
+> `item_type='card'`、`review_at='2026-09-14 08:28:25'`，对应 `review_states` 行
+> `stability` 非空）—— "样本还没开始积累"变成了"样本刚开始积累"，
+> 但 **n=1 不足以支撑 3.10 / 3.11 / 3.14 的任何调参或拟合**，三条的结论不变。
+> 行数快照同见附录 BJ.4。
 
 | # | 动作 | 验收 | 状态（2026-09-11 核对） |
 |---|---|---|---|
 | 3.1 | 新增 `review_states` 表；把 `interval/repetition/EF/next_review_at` 从 `quiz_items` 迁出 | 数据无损迁移 | ✅ `review_states` 2241 行；键为 `(user_id, item_type, item_id)` |
 | 3.2 | `review_logs` 重建为不可变事件流（加 `rating`、`predicted_retention`、`item_type`） | 历史日志迁移保留 | ✅ **已落地**（随 3.6 一起，见附录 W.8）：三列均为纯加列；194 行历史 `item_type` 全部回填 `quiz`；`rating`/`predicted_retention` 保持 NULL（SM-2 时期没有这两个量，填数就是发明） |
 | 3.3 | **删除字符 n-gram 判分**（`_score_short_answer` 整段移除） | 随机文本不再得高分 | ✅ 已删除；改用 Levenshtein 比率 |
-| 3.4 | **引入用户自评四档**（Again/Hard/Good/Easy）作为主评分来源 | UI 有四个按钮 | 🟡 字段与 API 已就位（`self_rating`），且 3.6 已把四档**原样**用作 FSRS 的 rating（`{0,3,4,5} → {Again,Hard,Good,Easy}`）。但 **194 条历史日志中 0 条有值** —— 无人用过，效果仍未验证 |
+| 3.4 | **引入用户自评四档**（Again/Hard/Good/Easy）作为主评分来源 | UI 有四个按钮 | 🟡 字段与 API 已就位（`self_rating`），且 3.6 已把四档**原样**用作 FSRS 的 rating（`{0,3,4,5} → {Again,Hard,Good,Easy}`）。但 **194 条历史日志中 0 条有值** —— 无人用过，效果仍未验证。**2026-09-14 复核更新**：真库现在是 **195 条日志，其中 1 条 `self_rating` / `rating` 非空**（`grading_method='self_rating'`、`item_type='card'`、`review_at='2026-09-14 08:28:25'`）—— **第一次真实自评已经发生**，"无人用过"这句话从此不再成立；但 n=1 仍然说明不了任何效果，验收（"效果可验证"）依旧未达成 |
 | 3.5 | **简答题 LLM 语义判分**：输出 `verdict + missing_points + misconceptions` | 答错时给出具体缺失点 | ✅ **已落地**（附录 V）：`grade_short_answer` + 三档 verdict + 置信度门槛；`review_logs.grading_detail` 存结构化明细。**默认关闭、显式请求**（含实测理由） |
 | 3.6 | **把 SM-2 换成 FSRS**（含 `stability`/`difficulty` 建模） | 同等保持率下复习量下降 | ✅ **已落地**（附录 W）：`fsrs_service`（FSRS-5，19 个公开默认参数）+ `scheduler_service` 门面；`review_states.stability/difficulty` 新列；旧行按 `S := interval` 接管不清零；`review_scheduler` 可回退 SM-2。62 个新测试。**复习量下降这一条尚无实测** —— 真库还没有一行 FSRS 产生的记录 |
 | 3.7 | **修正 `next_review_at` 基准**：以计划到期日为基准（非 now）；加 fuzz | 间隔不被提前复习缩短 | ✅ **已落地**（附录 X）：基准问题由 3.6 结构性解决（间隔由 S 解出，不再 `interval * EF`）；本轮补上 **fuzz**（同批卡片摊开）与 **到期时刻对齐**（锚到业务时区凌晨 4 点）。另修掉一个更隐蔽的错误：`elapsed` 从**连续小时差**改为**业务日差**（23:00→次日 08:00 曾被判成"同日"而走短时公式） |
 | 3.8 | **leech 检测**：`lapses >= 8` → 标记并要求重写卡片 | 顽固卡片被识别 | 🟡 有 `lapses` 字段与相关代码；**实际效果未见度量**。3.6 之后 `lapses` 的口径未变（仍是"任何 quality<3 都 +1"），而 FSRS 的 `state` 已能区分"没学会"与"学过又忘了" |
 | 3.9 | **修掉 `mastery` 公式**：基于 FSRS `retrievability` 的"当前可回忆概率" | 3 个月未复习的卡片掌握度下降 | ✅ **已落地**（附录 Y）：曲线由指数 `2^(-t/S)` 换成 **FSRS 幂律**，S 取自 `review_states.stability`（缺失时按 `S := interval_days` 换算，与调度器同一条规则）；顺带修掉"卡片级复习永远不计入成功率"的查询缺陷。真库重算：**1183 张卡从全 0 变成 132 张有分** |
-| 3.10 | **新卡与复习卡分开限额**（`new_per_day` / `review_per_day` 可配） | 到期队列收敛 | ⬜ **未做**（无这两个配置项）。3.6 之后有了 `R` 与 `state`，两个口径都可直接计数 |
-| 3.11 | **薄弱点排序加时间衰减** + overdue 权重 | 老错误不再霸榜 | ⬜ 未核对 |
+| 3.10 | **新卡与复习卡分开限额**（`new_per_day` / `review_per_day` 可配） | 到期队列收敛 | ⏸ **未做（2026-09-14 逐条核对确认）**：全仓 `grep` `new_per_day\|review_per_day` **零命中** —— 两个配置项不存在。现在**只有一个**限额 `config.daily_review_limit` → `review_service.DAILY_REVIEW_LIMIT`（`review_service.py:43`，类型侧单一出口 `schemas/review.py:308` 的 `daily_limit: int = 10`），且它是**新卡与复习卡合用**的一个平数。3.6 之后 `R` 与 `state` 都在库里，两个口径都可直接计数 —— 卡的是**产品参数**（"新卡多少张合适"要实测），不是技术前提 |
+| 3.11 | **薄弱点排序加时间衰减** + overdue 权重 | 老错误不再霸榜 | ⏸ **未做（2026-09-14 核对完毕，此前写的是"未核对"）**：`review_service.py:111-149` 的排序只有两个键 —— `next_review_at ASC NULLS FIRST`，然后 `error_count DESC`（`error_subq` 对 `ReviewLog.is_correct IS FALSE` 求和）。**没有时间衰减，也没有 overdue 权重**：`error_count` 是**该卡片历次错误的总和**，没有任何时间窗或半衰期，所以一条一年前的错误与昨天的错误权重完全相同 —— 这正是"老错误霸榜"的机制本身。全仓 `grep` `time_decay` 零命中。（另：`learning_metrics_service.py:342-365` 有 `overdue` **计数**，但那是度量层，不参与排序） |
 | 3.12 | **卡片可直接复习**（`item_type='card'`），不再依赖是否出过题 | 死卡片消失 | ✅ `ITEM_TYPE_CARD` / `ITEM_TYPE_QUIZ` 均已存在；3.6 起两条复习路径**共用同一个调度入口**。**前端在 2026-09-11 才补上**（附录 AA）：后端接口早已齐备，但前端一直没有调用方，用户一次也没法用 |
 | 3.13 | **复习页显示原文上下文**：答错时一键展开 `source_quote` 与原文段落 | 答错能立刻回看原文 | ✅ **已落地**（附录 Z）：`components/quiz/SourceContext.tsx` 懒加载卡片 `source_text`，答错后可一键展开并跳回笔记原文。真库实测：191 张被复习过的卡片 **100%** 有 `source_text`（全库覆盖率 99.8%），所以这个功能有真实内容可显示 |
 | 3.14 | **度量层**：保持率曲线、校准曲线、lapse 分布、FSRS 参数拟合报表 | 用户能看到"我 30 天保持率 87%" | 🟡 已落地（附录 G），但**返回 `insufficient_data=true`**。3.6 起 `rating` 与 `predicted_retention` 开始积累，但真库当前 FSRS 记录数为 **0** —— 诚实但暂时无用 |
@@ -3183,7 +3202,7 @@ M-4 与 1.13 仍未做。）
 |---|---|
 | ✅ 已完成（此前的止血/前端轮次） | 5.4 路由级懒加载、5.7 真 404、5.8 三态组件 + Toast、5.11 任务进度 UI（本轮补） |
 | ✅ 已完成 | 5.12 复习 UI（两页的共享交互件已统一）、5.13 测试（Vitest 与 Playwright 都已落地，**两层都进 CI 阻断**，见附录 AB/BE/BF.6） |
-| ✅ 已完成（5.9 的修复一半除外） | 5.5 拆分巨型页面（三页全部拆完，附录 AX/AZ/BB）、5.10 响应式（附录 BC）**已完成**；5.9 可访问性**审计 + 修复 + 覆盖三轮都已落盘，修复仍在进行**（附录 BG；覆盖轮把扫描场景扩到 15 个，见 BG.11） |
+| ✅ 已完成（**2026-09-14 更正：此前写"5.9 的修复一半除外"**） | 5.5 拆分巨型页面（三页全部拆完，附录 AX/AZ/BB）、5.10 响应式（附录 BC）**已完成**；5.9 可访问性**审计 + 修复 + 覆盖 + 收尾四轮都已落盘并清零 —— 修复已完成，不再有"修复的一半"**（审计与覆盖轮见附录 BG，覆盖轮把扫描场景扩到 15 个（BG.11）；收尾轮把场景推到 26 个、**违规 0 组 / 0 个节点、`REGISTRY` 已空**，见**附录 BI.1**）；5.13 的字面链路也已跑通（见**附录 BI.2**） |
 | 🟡 第一期完成、切换被后端阻塞 | 5.1 OpenAPI 生成（**选型已定**：`openapi-typescript@7.13.0`，不再是"待拍板"）：schema 与生成类型已落盘、111 个手写函数的分歧已机械判定；但**前置全在后端**（22 个端点缺 `response_model`），见**附录 BH** |
 | ⚠️ 需先确认 | 5.2 TanStack Query、5.3 Zustand（**选型即决策**）。5.6 CSS 体系重建的**选型与机制已定、9 个样式表已迁**（剩 6 个，批次顺序见 `frontend/docs/css-migration-plan.md` §7） |
 ⚠️ 4.6 与 4.7 的关系要澄清：**4.7 并不依赖 4.6**。计划里写的缓存键是
@@ -3221,7 +3240,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 4.3 | **配额与告警**：用户级 token/金额配额；超限拒绝并给出明确错误码 | 无法无限烧钱 | ✅ **已落地**（附录 AD）：每日 token/金额配额（默认关）；检查在**发起请求之前**，超限抛 `LLMQuotaExceeded` → 全局处理器转成 `429 / LLM_QUOTA_EXCEEDED`。**配了金额上限但没配单价时，该上限无法执行并会告警**，不假装生效 |
 | 4.4 | **限流重构**：从"进程级 10 RPM"改为"按用户 + 按供应商"的令牌桶 | 单用户不饿死他人 | ✅ **已落地**（附录 AH）：`KeyedRateLimiter` 按 key 分桶，网关串成**三层**（用户 → 供应商 → 总闸门，总闸门最后取以免被个人限额扣住）。⚠️ **改用进程内桶，未引 Redis** —— 单写者已被强制，Redis 的差别只剩"重启清零"；无用户上下文的调用共用一个 `__anonymous__` 桶（不是免检）。⚠️ 后两层**默认关闭**（`LLM_USER_MAX_RPM=0`），理由见附录 AH.4 |
 | 4.5 | **修复事件循环问题**：Celery 任务改为 `asyncio.run()` **一次**包裹整个任务体（而非 6 次）；限流器/信号量改为**每 loop 惰性创建** | 无线程/loop 冲突，无连接泄漏 | ✅ **已落地**（附录 AH）：`tasks/loop.py` 的 `task_loop()` + `run_async()` 让**一个任务一个 loop**（任务体仍是同步函数，见 AH.2 对计划字面要求的偏离）；网关资源改为以 loop 对象为键的 `WeakKeyDictionary` 惰性创建，顺带修掉"配置被冻结在首次实例化"的根因 —— **附录 AE.8 那个测试侧 fixture 因此被删除** |
-| 4.6 | **Prompt 版本化**：每个 prompt 有 `prompt_version`，写入 cards/quiz_items | 可评估 prompt 改动的效果 | ✅ **已落地**（附录 AJ）：`prompts.PROMPT_VERSIONS` + `prompt_version(name)`（**未登记返回 None，不猜**），`knowledge_cards` / `quiz_items` 各加一列并写入。⚠️ 历史行**不回填**（"未知"≠"第一版"）。版本号与提示词摘要**绑在测试里**：改文本必须同时升版本，否则 `test_prompt_version` 失败。⚠️ 可评估性目前只到"能按版本分组"，还没有消费这一列的报表（属阶段 6）。**写入侧已核实接通**：全仓只有一处生产调用点（`understanding_service.save_knowledge_cards` ← `understanding_service.py:472` 传入 `prompt_version("understanding_session")`，题目侧见 `understand_tasks.py:366`），其余出现处都是测试。**真库现状**：`knowledge_cards` 1183 行、`quiz_items` 1058 行**全部为 `NULL`** —— 与"历史行不回填"一致（这批内容都产生于 4.6 之前），**不是缺陷**。⚠️ 由此推出一条对被报表的影响：**在 4.6 之后没有新的理解/出题运行之前，按 `prompt_version` 分组的报表只会显示一列"版本未知"** —— 报表本身可以做，但它的价值要等新内容产生才兑现 |
+| 4.6 | **Prompt 版本化**：每个 prompt 有 `prompt_version`，写入 cards/quiz_items | 可评估 prompt 改动的效果 | ✅ **已落地（但"可评估"有一处明确缺口，见本条末尾）**（附录 AJ）：`prompts.PROMPT_VERSIONS` + `prompt_version(name)`（**未登记返回 None，不猜**），`knowledge_cards` / `quiz_items` 各加一列并写入。⚠️ 历史行**不回填**（"未知"≠"第一版"）。版本号与提示词摘要**绑在测试里**：改文本必须同时升版本，否则 `test_prompt_version` 失败。**写入侧已核实接通**，并且是**四处**生产写入点（`understanding_service.py:472` 的 `understanding_session`、`knowledge_link_service.py:130` 的 `combined_analysis_session`、`:510` 的 `generate_extension_knowledge`、`understand_tasks.py:366` 的 `question_session` —— 来源扫描见 `prompt_version_report_service.py:33-45`）。**真库现状（2026-09-14 复核）**：`knowledge_cards` 1181 行、`quiz_items` 1058 行**全部为 `NULL`** —— 与"历史行不回填"一致，**不是缺陷**。读取侧**已经补上**（阶段 6 的那半）：`GET /api/llm/prompt-versions`（`api/llm.py:418`）+ `prompt_version_report_service`，且它把三种"没有数据"分开讲（已登记无产出 / 数据里有登记表里没有 / NULL 未知）。<br>⏸ **未做的一项（2026-09-14 补记，本轮实测）**：**`llm_calls` 记账表上没有 `prompt_version`**。只读实测：`llm_calls` **20 列**（`user_id / note_id / task / scene / provider / model / prompt_tokens / completion_tokens / total_tokens / cached_tokens / cost / currency / latency_ms / success / error / id / created_at / updated_at / cached / saved_tokens`），**没有 `prompt_version`**；该表 0 行。这一列只存在于 `knowledge_cards` 与 `quiz_items`。**后果**：`llm_calls` 能回答"谁、哪篇笔记、哪个场景、花了多少"，**不能**回答"这笔钱是哪一版提示词花的" —— 而后者正是 4.6 的验收（"可评估 prompt 改动的效果"）在**成本**这一侧的落点：今天的报表只能按版本比较"产出了多少内容、内容后来表现如何"，无法按版本比较"这一版更贵还是更便宜"。**补法不是加一列那么简单**：`llm_calls` 的写入点在网关（`services/llm/gateway.py`），而"当前正在跑哪个 prompt 版本"在**场景方法**层才知道，需要把版本号沿调用链传进网关（或让网关按 `scene` 反查登记表）；这也是它至今没做的原因。**这是一条台账口径的缺口，不是数据错误** —— 已写入附录 BJ.3 |
 | 4.7 | **LLM 响应缓存**：相同 (prompt_version, input_hash) 命中缓存，不重复付费 | 重跑理解成本大降 | ✅ **已落地**（附录 AF）：`llm_cache` 表 + `chat_detailed` 出口缓存，键 = 完整输入（provider/base_url/model/messages/采样参数）的 sha256。命中时**照样记一行 `llm_calls`**（`cached=True`、`cost=0`、`saved_tokens=N`），因此节省**可见**。默认开，TTL 30 天 |
 | 4.8 | **抽取幂等**：重跑理解时按 `content_hash` 复用已存在的卡片，只补差集 | 重跑不再产生重复卡片 | ✅ **已落地**（附录 AE）：`knowledge_cards.content_hash` + `card_intake_service`。**只补差集、永不删除**（删卡会把 `review_states` 变成孤儿行）。真库实测：跨天重跑过的笔记数为 **0**，所以这是**预防性**修复 |
 | 4.9 | **卡片质量门**：空内容/过短/无 `source_quote` 的卡片不入库；单次抽取数量上限 | 脏卡片无法入库 | ✅ **已落地**（附录 AE）：正文 <10 字 / 标题 <2 字 / 无 `source_text` 一律拒收，**被拒的数量与原因全部上报**（不静默丢弃）；单次新建上限 500。真库实测只会拦下 4 + 2 张存量卡 |
@@ -3240,11 +3259,11 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | 🟡 **部分落地（已迁 9 个样式表，剩 6 个）**：**机制 + 试点 + 三批迁移**已落地（附录 BB 与 `frontend/docs/css-migration-plan.md`）。**9 个样式表动过**（`auth` / `cleaning` / `diff` / `dashboard` / `markdown` / `learning` / `markdown-extras` / `responsive` / `base` 令牌层；其中 `markdown` 是核实后的**停**、`base` 只加令牌），**108 条规则逐条核对、丢失 0**（试点 7 + 第一/二/三批 60 / 20 / 21，每批三份证据），`main.tsx` 的导入顺序重排根治了"模块 CSS 排在全局样式表之前"的级联反转。⚠️ 一条**有记录的停**：`markdown.css` 的 5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 4 个类名的写入点在 `src/hooks/useAdhdReader.ts`（当时不在可改范围），硬搬只能写成 `:global(...)`。**剩 6 个**（序 5 / 8 / 9 / 10 / 12 / 13：`assessment` / `components` / `layout` / `graph` / `refinements` / `responsive`）互相咬合、必须**成批**处理 —— **每一批的剩余顺序与前置条件写在 `frontend/docs/css-migration-plan.md` §7**（不读那份文件不要动这几张表） |
 | 5.7 | **修 404**：新增真实 404 页面，不再静默重定向到登录页 | 错链有明确提示 | ✅ **已落地**（阶段 0，本轮核对确认）：`App.tsx` 的 `NotFound` 组件 + `path="*"`；未登录时的 `*` 才回登录页 |
 | 5.8 | **错误/空/加载三态组件化** + 全局 Toast | 无"白屏卡住" | ✅ **已落地**（阶段 0/Z，本轮核对确认）：`EmptyState.tsx` / `ErrorDisplay.tsx` / `LoadingSpinner.tsx` / `Toast.tsx` / `ErrorBoundary.tsx`，全仓 147 处使用 |
-| 5.9 | **可访问性**：键盘导航、focus trap（模态）、ARIA、对比度 | axe 无 critical | 🟡 **部分落地（审计 / 修复 / 覆盖三轮已落盘，修复进行中）**：审计一半见**附录 BG** —— axe-core 4.13 + 真 Chromium（`npm run a11y`；**覆盖轮后 15 条用例覆盖 15 个场景**，非空夹具、未定义 `/api` 一律 501、"axe 真的跑了"四道断言），CI 里**顾问式**接入（`continue-on-error: true`，升级条件写在 job 注释里）。⚠️ **计划的原验收"axe 无 critical"当场不成立**：审计轮实测 **30 组 / 68 节点**违规（critical **2** / serious 39 / moderate 21 / minor 6）—— **应用不是无障碍合格的**；而"没报出来"也不等于"没问题"（Tab 顺序、屏幕阅读器语义、动态区域它都看不见，**根本没有触控目标尺寸规则**，且**单字符文本的对比度它按设计不判**，见 BG.11.5）。⚠️ **违规数变过两次，都不是回归**：修复轮 30 / 68 → **4 / 4**（2 条 critical 已清），覆盖轮 4 / 4 → **12 / 15** —— 后者是**扫描场景从 10 个扩到 15 个**带来的可见度（11 个新节点全在新场景上，旧场景一个都没变，`upload` 0 / 0）。逐条发现与归属见 `frontend/docs/a11y-audit.md`，三轮判断见 BG.5（基线）/ BG.10（审计验收）/ **BG.11（覆盖轮）**，**修复轮正在进行**（改动在 `frontend/src/**`） |
+| 5.9 | **可访问性**：键盘导航、focus trap（模态）、ARIA、对比度 | axe 无 critical | ✅ **已完成（审计 / 修复 / 覆盖 / 收尾四轮都已落盘）**（**2026-09-14 更正：此前标 🟡，记的是"部分落地、修复进行中"**）：收尾轮见**附录 BI.1** —— `npm run a11y` **26 passed / 26 个场景**、违规 **0 组 / 0 个节点**、`REGISTRY` **5 条 → 0 条**（空表 = 零容忍）；新增两道常驻门禁（**每个场景都跑**的键盘可达性零容忍扫描 + **真的按 Tab** 的走查断言），**18 处**逐处改用**真控件**（`<button>` / `<Link>`，**没有一处**用 `role` + `tabIndex` 去补）；`REGISTRY` 里最后 **5 条 `heading-order` 全部清掉**，其中 ★ **F-08 此前记的成因是错的** —— 违规节点是本页自己的 `<h4>清洁统计</h4>`、**不是用户的 Markdown 内容**，而 `H4 → H1` 是**上移**、**上移对 axe 永远合法**，因此**没有动一个字的用户内容、也不需要任何豁免**（完整记录见 `frontend/docs/a11y-audit.md` **§11**）。审计一半见**附录 BG** —— axe-core 4.13 + 真 Chromium（`npm run a11y`；**覆盖轮后 15 条用例覆盖 15 个场景**（收尾轮后为 **26 个场景**），非空夹具、未定义 `/api` 一律 501、"axe 真的跑了"四道断言），CI 里**顾问式**接入（`continue-on-error: true`，升级条件写在 job 注释里）。⚠️ **计划的原验收"axe 无 critical"当场不成立**：审计轮实测 **30 组 / 68 节点**违规（critical **2** / serious 39 / moderate 21 / minor 6）—— **应用不是无障碍合格的**；而"没报出来"也不等于"没问题"（Tab 顺序、屏幕阅读器语义、动态区域它都看不见，**根本没有触控目标尺寸规则**，且**单字符文本的对比度它按设计不判**，见 BG.11.5）。⚠️ **违规数变过两次，都不是回归**：修复轮 30 / 68 → **4 / 4**（2 条 critical 已清），覆盖轮 4 / 4 → **12 / 15** —— 后者是**扫描场景从 10 个扩到 15 个**带来的可见度（11 个新节点全在新场景上，旧场景一个都没变，`upload` 0 / 0）。逐条发现与归属见 `frontend/docs/a11y-audit.md`，三轮判断见 BG.5（基线）/ BG.10（审计验收）/ **BG.11（覆盖轮）**，**修复轮已完成**（改动在 `frontend/src/**`；**2026-09-14 更正：此前写"修复轮正在进行"**），收尾轮判断见**附录 BI.1** |
 | 5.10 | **响应式**：`responsive.css` 只有 41 行 → 补齐移动端布局 | 手机可用 | ✅ **已落地**（附录 BC）：断点只加两个（768 / 480），其余挤压交给内在尺寸（`min()` / `auto-fit` / `flex-wrap`）；`responsive.css` 51 → **443 行**（本轮复核 **430 行**，差额是 5.6 从它抽走的 7 条规则）。修的是真缺陷不只是"看着挤"：`NoteAskPanel` 浮层被推出屏幕外、图谱页 375px 上画布只剩约 55px 竖缝、长 URL 顶出整页横向滚动、自评按钮偏小；另 +3 文件 / +20 用例。⚠️ jsdom 不加载样式表、不做布局 —— 抽屉实际宽度、触控真实高度、`env(safe-area-inset-*)`、`100dvh` **只有规则声明，没有渲染结果**（BC.6） |
 | 5.11 | **任务进度 UI**：真实进度条 + 阶段名 + 取消按钮 | 取代"转圈" | ✅ **已落地**（附录 AO）：新增 `api/tasks.ts` + `components/TaskProgress.tsx`，接在笔记详情的转换中状态与清洗面板上。**后端契约从阶段 1′ 起就有，前端此前一次都没消费过** |
 | 5.12 | **复习 UI 重做**：四档自评 + 答错展开原文 + 引用回跳 | 核心流程体验 | ✅ **已落地**（阶段 3.12 / 附录 AA：卡片复习页、四档自评、原文折叠/解析；引用回跳见附录 Z 的 `citationJump`）。⚠️ 原写的"剩余：答题复习页与卡片复习页的统一"**已经不做剩下了**（`b037771`）：两条流程共用同一套交互件（`SelfRatingButtons` / `ReviewProgress` / `useReviewKeyboard` / `SourceContext`），刻意**不**统一的三处（评分来源、提交路径、调度依据面板）各自写了理由 —— 见 `frontend/src/pages/CardReview.tsx` 文件头 |
-| 5.13 | **Vitest + Playwright**：核心流程 E2E（上传→理解→复习→问答） | CI 里有 E2E | 🟡 **两层都已落地并接入 CI（都是阻断的），但计划字面的链路仍缺**：**Vitest 21 文件 / 276 用例**（附录 AB；本轮复核 `npm test` 退出 0）、**Playwright 4 个 spec / 10 passed / 0 skipped**（附录 BE.3 + BF.5/BF.6），并当场抓到一条真缺陷（从 `/login` 登录成功落 404，已修）。⚠️ 验收写的"CI 里有 E2E"**已经满足**；覆盖的却仍是"外壳 + 认证入口"级别的冒烟 —— 计划字面的"上传→理解→复习→问答"**没有做**，边界见 `frontend/docs/e2e.md` §4 |
+| 5.13 | **Vitest + Playwright**：核心流程 E2E（上传→理解→复习→问答） | CI 里有 E2E | ✅ **已完成（2026-09-14 更正：此前标 🟡，记的是"两层都已落地并接入 CI，但计划字面的链路仍缺"）**：计划字面的**上传→理解→复习→问答**已经真的跑通 —— 对着**真实后端 + 真实 LLM**（走 **OpenCode 的网关**：`base_url=https://opencode.ai/zen/go/v1`，按 `backend/.env` 配置 —— ⚠️ **变量名里写的是 DEEPSEEK，端点却是 OpenCode**），**6 passed × 3 runs**；这一层**只在 `ENGRAMNOTE_E2E_FULL=1` 时跑**，与阻断的 `npm run e2e`（**仍是 10 passed**）隔离，用一次性 DB / 存储 / broker，并实测**真库未被触碰**（附录 BI.2）。⚠️ **它挖出一条会污染生产库的危险**：`get_celery_broker_dir()` **硬编码 `backend/data/celery`、没有环境变量入口**，只配 `DATABASE_URL` 的测试后端会把任务投到**生产的文件系统 broker**，被人类的 `start.bat` worker 抢去用**真库**执行 —— **一次 E2E 就能污染生产知识库**；实际用的缓解是**在 import `celery_app` 之前、进程内完成隔离**（BI.2.1）。⚠️ 仍然不覆盖：PDF / Office / 音频上传路径、**全部失败路径**、多 worker / 多用户（`frontend/docs/e2e.md` §8.6）。另外两层照旧：**Vitest 21 文件 / 276 用例**（附录 AB；本轮复核 `npm test` 退出 0）、**Playwright 4 个 spec / 10 passed / 0 skipped**（附录 BE.3 + BF.5/BF.6），并当场抓到一条真缺陷（从 `/login` 登录成功落 404，已修）。验收写的"CI 里有 E2E"**已经满足**；**2026-09-14 更正** —— 此前接着写的是"覆盖的却仍是"外壳 + 认证入口"级别的冒烟 —— 计划字面的"上传→理解→复习→问答"**没有做**"，那句**已经过期**（字面链路已跑通，见**附录 BI.2**），旧句保留在此以对照；两层冒烟的边界仍见 `frontend/docs/e2e.md` §4，全链路层不覆盖的部分见 §8.6 |
 
 ### 阶段 6 · 安全与合规收口（1 周）
 
@@ -3268,6 +3287,22 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 7.3 | 用真实数据拟合 FSRS 个人化参数，发布"你的记忆模型"页面 |
 | 7.4 | 发布"学习效果报告"：保持率、校准、薄弱领域、卡片质量榜 |
 | 7.5 | 文档重写：`architecture.md` 从零重写，删除全部 `F-xx` 引用与归档文档 |
+
+> **2026-09-14 记（只登记，不加状态列）**：本表**与阶段 0 一样从来没有 `状态` 列**
+> （表头 `| # | 动作 |`，2 列），因此这 5 条**从未有过逐条的状态跟踪**；
+> 本轮**没有**给它们补 `状态` 列 —— 补一列只会多出五个空格，
+> 那正是 BH.12 与 BI.4 已经否过一次的做法（理由见该两处）。
+>
+> 本轮只登记一个**可核对的事实**（读的是这五条动作本身有没有对应物，不是凭印象）：
+> 其一，7.3 的"个人化参数拟合"**没有**任何实现 —— `fsrs_service` 用的是
+> **19 个公开默认参数** `DEFAULT_W`，该处注释明确写着它是"预留的拟合插槽"
+> （计划正文把参数拟合归给 3.14，而 3.14 目前返回 `insufficient_data=true`）；
+> 其二，7.2 的 A/B 与 7.1 的"灰度双跑"在代码里**没有对应物**
+> （`grep` `ab_test` / `gray` / `canary` 零命中）。
+> 除此之外**不给出**任何"已完成/未完成"的判断 —— 剩下三条（7.4 的对外发布形态、
+> 7.5 的文档重写范围）需要人来定，不是代码能替他们回答的。
+> 其余四条与 4.6 / 6.6 / 5.13 的产物有交集（如 `GET /api/llm/prompt-versions` 报表、
+> 学习度量层），哪些算"7.4 的一部分落地"属于判断，本轮不做。
 
 **总工期**：约 **12 周**（单人 + AI 辅助）。若要求更短，
 可砍阶段 7 与 6.6-6.7，但**阶段 0/1/3 不可压缩**。
@@ -10326,8 +10361,252 @@ CI 挂 `--check`）→ **S2 只换类型、不换请求**（`export type X = com
 
 ---
 
-**文档版本**：v5.3（阶段 2、3、阶段 4 全部，阶段 5 的 5.1（第一期）/ 5.5 / 5.10 / 5.11 / 5.13
-与 5.9 的审计 / 修复 / 覆盖三轮，阶段 6 的 6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.8
+## 附录 BI · 阶段 5.9 / 5.13 收尾，以及两条产品发现（2026-09-14）
+
+本附录记三件事：**5.9 与 5.13 都已经收尾**（此前状态列标的是 🟡）、
+收尾过程中暴露的一条**会污染生产库的危险**、以及**两条已上报、未修的产品发现**。
+计划正文里对应的状态格已按本文档的规矩**就地更正并注明日期**（阶段 5 表里的
+5.9 / 5.13 两行，与"下一阶段（阶段 5 前端）的真实状态"表里那一行），
+**旧的句子没有被删掉** —— 那三处更正与本附录互为对照。
+
+### BI.1 5.9 已完成（不再是 🟡）
+
+收尾轮（Part A/B）的输入是 BG.11 末尾那份"axe 判不了、只在人工清单里"的列表，
+与 `REGISTRY` 里剩下的 5 条 `heading-order`。收场数字：
+
+| 项 | 值 |
+|---|---|
+| `npm run a11y` | **26 passed** —— **26 个场景**全部扫过（含本轮新增的第 26 个场景 `learning-goals-create`） |
+| 违规 | **0 组 / 0 个节点**（零容忍） |
+| `REGISTRY` | **5 条 → 0 条**，即**空表** —— "未登记的违规一条都不许有" |
+| 键盘修复 | **18 处**（`a11y-audit.md` §11.1 那张表），**全部用真控件**（`<button>` / `<Link>`），**没有一处**用 `role` + `tabIndex` 去补 |
+| `heading-order` | 最后 **5 条全部清掉**（F-07 / F-22 / F-20 / F-31 / F-08） |
+
+**新增两道常驻门禁**（都是"每一轮都跑"，不是一次性脚本）：
+
+1. **键盘可达性扫描，零容忍**：跑在 `auditScene()` 里，**每一个场景都跑**；
+   判据是"用户的键盘会遇到什么"（手型光标但整个区域里没有可 Tab 的控件 /
+   `tabindex >= 0` 挂在没有交互角色的非原生控件上 / `role="button"`、`role="link"`
+   挂在非原生元素上）—— 这三类 axe **一条都不报**（机制见 §11.2）。
+2. **Tab 走查断言**（`expectReachableByTab`）：**真的按 Tab**，断言焦点真的落到目标上。
+   只断言"它有 `role=button`"是自证，证明不了"Tab 到得了"。
+
+两道门禁都做过**变异测试**（改回 `div[role="button"]`、把 `maxTabs` 调小、
+删掉 `aria-modal`、把 `Escape` 写成 `EscapeX`，五次都确实变红），见 §11.4。
+
+★ **F-08 此前记的成因是错的**（这一轮实测推翻了上一轮的解释）：F-08 一直被记成
+"标题层级来自**用户自己的 Markdown**"。**实测不是** —— 报出来的那一个节点是
+**本页自己的 `<h4>清洁统计</h4>`**（`CleaningPanel` 的元信息区块），
+与用户的 Markdown 内容无关；`H1 → H4` 是**跳级**（axe 的判据是
+`currLevel - prevLevel <= 1`），而 **`H4 → H1` 是上移，上移对 axe 永远合法**。
+因此：**一个字的用户内容都没有动，也没有登记任何豁免** —— 修的是我们自己的
+标签层级，`heading-order` 整条消失。另外两条路线（渲染时归一化用户 Markdown
+的标题级别、登记一条带理由的豁免）都被否掉，各自的代价见 §11.5。
+
+逐条修法、命名口径与完整记录见 `frontend/docs/a11y-audit.md` **§11**。
+
+### BI.2 5.13 已完成（不再是 🟡）
+
+计划 5.13 的验收是"CI 里有 E2E"，字面链路是 **上传→理解→复习→问答**。
+此前落地的两层（Vitest / Playwright）仍是"外壳 + 认证入口"级别的冒烟，
+**字面链路没有做**；这一轮补上了：
+
+| 项 | 值 |
+|---|---|
+| 跑的是什么 | **字面的上传 → 理解 → 复习 → 问答**，对着**真实后端 + 真实 LLM**（不是桩） |
+| LLM 走哪 | **OpenCode 的网关**：`base_url=https://opencode.ai/zen/go/v1`，按 `backend/.env` 配置 |
+| 结果 | **6 passed × 3 runs** |
+| 怎么开 | **只在 `ENGRAMNOTE_E2E_FULL=1` 时注册这一层**，与阻断的 `npm run e2e`（**仍是 10 passed**）完全隔离 |
+| 隔离靠什么 | 一次性数据库 / 存储 / broker（`backend/scripts/_e2e_full_*.py`），并**实测真库未被触碰**（真库 `mtime` 跑前跑后一致，且临时库确实存在） |
+
+⚠️ **命名陷阱（读配置时不要被它骗）**：环境变量名里写的是 `DEEPSEEK_*`，
+端点却是 **OpenCode** 的网关，**不是** `api.deepseek.com` ——
+名字里的 DEEPSEEK 只是历史命名。**"名字叫 DEEPSEEK"与"请求发给谁"是两件事。**
+
+#### BI.2.1 危险：只配 `DATABASE_URL` 的测试后端会把任务投到**生产 broker**
+
+**这是本附录最重要的一段。**
+
+`get_celery_broker_dir()` **硬编码返回 `DATA_DIR / "celery" / "broker"`**
+（`DATA_DIR` 就是 `backend/data`），**没有任何环境变量入口**；而
+`app/tasks/celery_app.py` 在**模块层**就把这个值写进了 Celery 配置。于是：
+
+1. 一个"只设了 `DATABASE_URL`"的测试后端，任务仍然被投递到
+   **生产那套文件系统 broker**；
+2. 只要人类的 `start.bat` 起着 worker，它就会**抢走**这些任务
+   （文件系统 broker 是"谁先 rename 谁拿到"，**没有任何所有权标记**）；
+3. 而那个 worker 用的是**真实数据库**。
+
+**后果：一次 E2E 运行就能污染生产知识库。**
+
+**实际用的缓解方式**：隔离放在**进程内、在 import `celery_app` 之前**完成
+（`_e2e_full_bootstrap.py` 在任何 `app.*` import 之前把 broker / 结果后端 /
+暂存目录换到临时根；未设置开关时它是空操作）。⚠️ **刻意不给 `app/config.py`
+加环境变量入口**：那会动到生产启动路径的配置面，而这一层只需要"测试时换目录"，
+隔离逻辑留在测试侧、产品代码零改动 —— 但这也意味着
+**"配置面缺一个入口"这件事仍然存在**，只是这一层绕开了它。
+
+#### BI.2.2 这一层仍然不覆盖什么
+
+- **PDF / Office / 音频的上传路径**（只跑了文本类笔记的链路）；
+- **全部失败路径** —— 只断言"成功时产出正确"，不测"失败时表现如何"；
+- **多 worker / 多用户**（这一层 `workers: 1` + `serial`，且是单用户串行）。
+
+### BI.3 两条产品发现（**已上报，未修**）
+
+#### BI.3.1 RAG 的向量通道在真实链路里是**退化的**
+
+`/ask/stream` 的 `meta.retrieval_status` 实测**恒为 `hybrid`，从来没有出现过
+`full_vector`**。机制：`rag_service._encode_via_celery` 只等 **10 秒**
+（`task.get(text, 10)`），而 worker 里加载 `bge-m3` 要**几十秒**（首次约 55 秒），
+编码这一路因此**每次都赶不上**，只能降级成"词法命中 + 编码成功但向量无命中"。
+
+**净效果：向量通路从来没有被端到端地跑过一次。** 现在测出来的检索质量，
+测的是 BM25 / FTS5 的能力，**不是"混合检索"的能力**。
+
+#### BI.3.2 `LLM_PRICE_*` 未设置 ⇒ 成本聚合读作 **0**
+
+`backend/.env` 里没有配单价（`LLM_PRICE_*` 为空），于是 `llm_calls.cost` 记的是
+**NULL**，聚合出来的 `totals.cost=0`，**读起来像"免费"**；而同一个响应其实
+返回了 `price_configured=false`。
+
+**这是一个报表陷阱：`0` 不等于"免费"，它等于"没配单价、算不出来"。**
+把 `cost=0` 当作"花了 0 元"来读，会得出一个完全没有依据的结论。
+
+### BI.4 记录到的文档缺口（**报告，不要静默重构**）
+
+- **阶段 0 与阶段 7 的表格根本没有状态列** —— 阶段 1 / 4 / 5 / 6 的表才有
+  `状态` 列（其中阶段 4 / 5 / 6 的表头 `状态` 列还是最近才补上的，见 BH.12 / BH.13）。
+  所以这两个阶段**从来就没有逐条的状态跟踪**：不是"跟丢了"，是**从来没有过**。
+- 本轮**核对过这件事**（读的是两张表的表头行，不是凭印象）：
+  阶段 0 的表头是 `| # | 动作 | 解决 | 验收 |`（**4 列，没有 `状态`**）；
+  阶段 7 的表头是 `| # | 动作 |`（**2 列，没有 `状态`**）。
+- **处理方式：只登记，不重构。** 本轮**不给**这两张表加状态列 ——
+  加一列会把"这两个阶段本来就只写到动作层"这个事实盖掉，
+  而缺的并不是一列，是**逐条的状态证据**。
+  阶段 7 这半边此前已在 BH.12 记过一次（当时的结论同样是**不给它补一列空的 `状态`**），
+  本附录补上阶段 0 这半边。缺口现在**在记录里**，而不是被一次结构改动"修好"。
+
+🎯 **一句话**：这一轮把两个 🟡 收成 ✅，同时留下一条比它们更值钱的警告 ——
+**"测试跑在生产 broker 上"这件事，差一次运行就能变成一次数据事故。**
+
+---
+
+## 附录 BJ · 状态缺口回填：阶段 0 全 17 条、阶段 1 的 1.1–1.5、阶段 3 的 3.10/3.11（2026-09-14）
+
+本附录承接 **BI.4**。BI.4 记的是"阶段 0 与阶段 7 的表根本没有状态列，
+本轮只登记、不重构"。**本轮把阶段 0 那半边补上了，方法不同**：
+
+| | BI.4（2026-09-14 早些时候） | 本附录（2026-09-14） |
+|---|---|---|
+| 阶段 0 | 只登记缺口 | **给 17 条逐条查代码，回填 `状态` + 一行理由** |
+| 阶段 7 | 只登记缺口 | **仍然只登记**（不加状态列），只补了两条**可核对**的事实，见 BJ.2 |
+| 依据 | 读的是**表头行** | 读的是**代码与真库**（每条都给 `file:line` 或只读查询） |
+
+**为什么这次敢补列、上次不敢**：BH.12/BI.4 拒绝补列的理由是
+"缺的不是一列，是**逐条的状态证据**" —— 空列会把缺口盖掉。
+本轮把**证据**补齐了，所以列里写的是结论 + 依据，而不是一个标记。
+**阶段 7 之所以仍然不补**：它的五条是产品/运营动作（灰度、A/B、对外报表），
+代码能给的最多是一句"没有对应物"，补一列只会多出五个空格 —— 那正是被否过一次的做法。
+
+### BJ.1 阶段 0：完成 11 / 部分 3 / 未做 1 / 按路线不适用 2
+
+| 判定 | 项 |
+|---|---|
+| ✅ 11 | 0.1 CI、0.3 启动零破坏性、0.4 WAL、0.5 相似度公式、0.6 停止删 `review_logs`、0.8 统一注册文案、0.9 `debug` 默认、0.14 ErrorBoundary、0.15 分页上限、0.16 轮询清理、0.17 状态样式 |
+| 🟡 3 | **0.2**（守卫全落地，`backend/` 根目录那 15 个脚本**从未搬**，`scripts/dev/` 不存在）、**0.7**（限流+时序对齐落地，**登录失败计数与锁定零命中**）、**0.11**（`AppError`/错误信封落地，但 **`raise AppError` 2 处 vs `raise HTTPException` 152 处**，前端两处仍在匹配中文） |
+| ⏸ 1 | **0.10**（**没有 `/ready`**，只有 `/health`；`FastAPI()` 未设 `docs_url`/`openapi_url`，因此 `/docs` 与 `/openapi.json` 在所有环境公开） |
+| ⛔ 2 | **0.12 / 0.13**（容器化已放弃；`nginx.conf` 与 `frontend/.dockerignore` **文件是真的且内容正确**，CI 亦有守卫，但"Docker 部署下可用"这条验收在本项目的运行路径上不被检验） |
+
+**两条最容易被计划自身措辞读错的**：
+
+- **0.7**：计划把"限流"与"失败锁定"写在同一行、同一个验收里。实际只做了前一半。
+  当前的爆破防护**只有** 60 秒滑动窗口（≈10 次/分钟/IP），窗口一过即可继续 ——
+  这与计划想象的"锁定"是两种强度。
+- **0.11**：`AppError` 存在、错误信封存在、前端也真的读 `error_code` ——
+  逐条看每一样都"有"，但**采用面是 2/113**。这正是本项目反复出现的形态：
+  **设施建好了，采用没跟上**；而"后端改文案不破坏前端"这条验收，
+  只要还有一处 `message.includes('每日上限')` 就不成立。
+
+**另有三条"做完后被别的工作取代"的，不要误读成待做**：
+0.5 的公式对了，但它依赖的 Chroma 已按 2.4/2.4′ 删除（公式现在是**死代码**，
+"重建 collection 的脚本"从未写，因为集合被**迁移到 `chunks` 表**）；
+0.6 的后半（影子生成 + 原子替换）按 §2.6 M-5 / `docs/decisions.md#F-29`
+**有意不做**；0.9 的开关改名成 `log_sql`（计划写的是 `db_echo`）。
+
+### BJ.2 阶段 7：仍然只登记（5 条）
+
+7.1 灰度双跑 / 7.2 真实用户 A/B / 7.3 拟合个人化 FSRS 参数 / 7.4 发布学习效果报告 /
+7.5 从零重写 `architecture.md`。**本轮不给它们任何状态**，只补两条可核对的事实：
+7.3 的参数拟合**没有**实现（`fsrs_service` 用的 `DEFAULT_W` 是 19 个公开默认值，
+注释自称"预留的拟合插槽"）；7.1 与 7.2 在 `app/` 与 `src/` 里**零对应物**
+（`grep` `ab_test` / `canary` / `灰度` 均 0 命中）。其余三条需要人来定，代码替不了。
+
+### BJ.3 `llm_calls` 没有 `prompt_version`（4.6 的缺口）
+
+只读实测（`file:…engramnote.db?mode=ro`）：
+
+```
+llm_calls 列数 = 20
+user_id, note_id, task, scene, provider, model, prompt_tokens, completion_tokens,
+total_tokens, cached_tokens, cost, currency, latency_ms, success, error,
+id, created_at, updated_at, cached, saved_tokens
+prompt_version ∈ 列? False      llm_calls 行数 = 0
+```
+
+`prompt_version` 只存在于 `knowledge_cards` 与 `quiz_items`。因此 4.6 的
+**内容侧**溯源成立（`knowledge_cards` / `quiz_items` 都带版本号，四处写入点已接通，
+读取侧 `GET /api/llm/prompt-versions` 也已落地），**花费侧**溯源不成立：
+`llm_calls` 能回答"谁、哪篇笔记、哪个场景、花了多少"，
+**不能**回答"这笔钱是哪一版提示词花的"。
+**一个带 `prompt_version` 的台账才是让"这笔花费来自哪一版提示词"可回答的东西** ——
+在那之前，按版本比较只能比"产出了多少内容、内容后来表现如何"，比不了成本。
+
+⚠️ **它不是"加一列"就完**：`llm_calls` 的写入点在网关
+（`services/llm/gateway.py`），而"此刻在跑哪个 prompt 版本"只有**场景方法**知道 ——
+要么把版本号沿调用链传进网关，要么让网关按 `scene` 反查登记表。
+这一层设计成本就是它至今没做的原因，**不是遗漏**。
+
+### BJ.4 顺带核对到的三处过期（都不改正文数字，只在此登记）
+
+1. **`README.md:273-274` 已过期**：它仍写着两条"已知问题（未修）"——
+   `nginx.conf` 未设 `client_max_body_size`、`frontend/.dockerignore` 未排除
+   `node_modules`。**两条都已经修了**（`nginx.conf:11`、`.dockerignore` 22 行，
+   CI 还有守卫）。横幅里"当前部署方式不是 Docker"这半仍然正确，
+   过期的只是"未修"那半 —— 属于 §2.1 S-4 那一类"文档成为负债"。
+2. **真库行数与正文快照不一致**：附录 A.1/E.5 记的是
+   `knowledge_cards 1183 / quiz_items 1058 / review_logs 194`；
+   2026-09-14 只读实测为 **1181 / 1058 / 195**（`notes 20`、`users 4`、
+   `card_relations 260`、`chunks 608`、新增 26 张表含 `chunks_fts*` 与 `task_runs`）。
+   差额是这几轮真库清理与真实使用造成的，**不是缺陷**；但拿附录 A 的绝对数字
+   去断言"今天也一样"会得到错误结论。
+3. **`backend/scripts/eval_retrieval.py:271-305` 的 `load_chunk_corpus()` 仍然
+   `import chromadb`**（函数名与注释说的是"Chroma 里实际索引的内容"），
+   而 `chromadb` 已按 2.4 从依赖里删除、当前环境也确实**没装**。
+   后果是**静默**的：`except ImportError: return []` → 语料为空，
+   评测按"没有这个语料"继续跑。它属于 2.4 收尾的残留（不是新缺陷），
+   ⚠️ 但**读这份评测输出时要知道**：`--corpus both` 里的 chunk 那一路
+   在当前环境下走的是**另一条**读取路径，别把它当成 Chroma 语料。
+
+### BJ.5 验收方式（先证伪，再确认）
+
+| 项 | 手段 |
+|---|---|
+| 真库事实（表、列、行数、FSRS 记录） | **只读**连接 `file:…engramnote.db?mode=ro` 的 SQL 查询；**全程未写库**（`mtime` 与行数由并发进程改动，与本轮无关） |
+| 代码事实 | 逐条 `read`/`grep`，每条结论附 `file:line` |
+| "从未运行过 Alembic" | 三条独立证据：真库无 `alembic_version` 表、`alembic.ini:6` 指向 PG、`import alembic` 在本机 `ModuleNotFoundError` |
+| 未做的事 | **没有改任何代码**（本轮是审计 + 只改本文件）、**没有跑测试套件**、**没有提交** |
+
+🎯 **一句话**：**"状态列缺失"和"状态是假的"是两种病 —— 这一轮治的是前一种，
+并且刻意只治了有证据的那一半。**
+
+---
+
+**文档版本**：v5.5（**2026-09-14 状态缺口回填**：阶段 0 全 17 条补齐 `状态` 列并逐条给依据、
+阶段 1 的 1.1–1.5 与阶段 3 的 3.10/3.11 补记现状、`llm_calls.prompt_version` 缺口登记、
+阶段 7 五条只登记不加状态列，见**附录 BJ**；
+阶段 2、3、阶段 4 全部，阶段 5 的 5.1（第一期）/ 5.5 / 5.10 / 5.11 / 5.13
+与 5.9 的审计 / 修复 / 覆盖 / 收尾四轮（5.9 与 5.13 至此都已收尾），阶段 6 的 6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.8
 见附录 J–AV 与 BA；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
 卡片复习 UI 见 AA，前端测试框架见 AB，LLM 记账见 AC，配额见 AD，
@@ -10340,7 +10619,9 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 两页安全网见 AZ，刷新令牌与登出撤销见 BA，两页拆分见 BB，移动端见 BC，
 契约漂移可见化见 BD，真实库清理与依赖扫描/端到端见 BE，
 真库第二轮清理与依赖漂移可见化见 BF，可访问性审计与覆盖轮见 BG，
-从 OpenAPI 生成客户端与 111 个手写函数的分歧见 BH）
+从 OpenAPI 生成客户端与 111 个手写函数的分歧见 BH，
+5.9 / 5.13 收尾与两条产品发现见 BI，
+状态缺口回填（阶段 0 全 17 条 / 1.1–1.5 / 3.10–3.11 / `llm_calls.prompt_version`）见 BJ）
 
 
 
