@@ -2020,6 +2020,9 @@ onLinkHover={(link) => setHoverLink(link)}
 - `QuizState` 在 `Review.tsx:12`、`QuickReview.tsx:20`、`TodayLearn.tsx:21` **三处逐字重复**
 - `NoteGroup` 在 `KnowledgeCards.tsx:15` 与 `QuestionSets.tsx:24` 重复
 - **无 OpenAPI 生成类型**（grep `openapi|schema.d.ts` 0 命中）
+  —— ⚠️ 这是**审计当时**的现状（2026-09-14 补注）：本轮已生成
+  `frontend/src/api/generated/schema.ts`，且这条路的**阻塞项不在前端**
+  （22 个端点缺 `response_model`），见附录 BH
 - `eslint-disable` **27 处**，其中 `react-hooks/set-state-in-effect` **15 处**
   —— 说明"在 effect 里同步 setState"已成全项目习惯
 
@@ -2241,10 +2244,18 @@ FastAPI 因此**无法感知鉴权要求** —— 生成的 `openapi.json` 里
 - 用 OpenAPI 生成的 SDK / 前端类型**不会附带 Authorization 头**，
   接入方按文档实现**必然 401**
 - 契约层面"哪些接口需要认证"**不可机器判定**，安全评审与自动化测试失去依据
-- 这**直接阻断了 §阶段 5 的"从 OpenAPI 生成前端客户端"计划**
+- 这**直接阻断了 §阶段 5 的"从 OpenAPI 生成前端客户端"计划** —— ⚠️ **这一条已经修复**（见本节末的复核）
 
 **修复方向**：改用 `fastapi.security.HTTPBearer`，为受保护路由统一声明
 `responses={401: ..., 403: ...}`。**这是阶段 5 的前置条件。**
+
+> ✅ **已经兑现（阶段 0 的第 11 号动作；2026-09-14 复核）**：`openapi.json` 现有
+> `components.securitySchemes.HTTPBearer`，118 个操作里 **114 个带 `security` 声明**
+> （另外 4 个是 `/health` 与注册/登录/刷新这类免认证端点），`test_auth_contract.py`
+> 26 条用例锁死。所以 **S-6 不再是 5.1 的阻塞项** ——
+> 5.1 真正的阻塞在**响应侧**（22 个端点缺 `response_model`，见附录 BH）：
+> ★ **同一件事两年前卡在"请求侧的鉴权声明"，现在卡在"响应侧的类型"** ——
+> 这类"前置条件已经满足、但没人回头改掉那句断言"的残留，正是本文件最容易被误读的地方。
 
 #### 🟡 S-7 `limit` / `page_size` / 请求体普遍缺少上界
 
@@ -2759,7 +2770,7 @@ rating               ← 用户自评 / 判分结果
 | **LLM 网关** | `llm_service.py`（831 行）+ 类级限流 | **独立 `LLMGateway`**：预算、记账、缓存、熔断、结构化输出校验、prompt 版本化 | P5、P7 |
 | **可观测性** | request_id + 日志 | **+ Prometheus `/metrics` + `/ready` + OTel trace + 成本看板** | P5、P8 |
 | **前端状态** | `useState`/`useEffect` 自管 | **TanStack Query**（服务端状态）+ **Zustand**（UI 状态）+ **路由级懒加载** | E-8 |
-| **前端类型** | 手写 90 个 API 函数 + 手写类型 | **从后端的 OpenAPI 生成客户端与类型**（`openapi-typescript` / `orval`） | 消除契约漂移 |
+| **前端类型** | 手写 **111** 个 API 函数（**原文写 90 —— 2026-09-14 实测修正**，见附录 BH）+ 手写类型 | **从后端的 OpenAPI 生成客户端与类型**（选型已定 `openapi-typescript`：schema 与类型已生成、111 个函数的分歧已量出；**切换卡在后端补响应模型**，见附录 BH） | 消除契约漂移 |
 | **测试** | 无 CI、混入危险脚本 | **pytest + testcontainers + Vitest + Playwright + GitHub Actions** | P8 || **错误契约** | 中文文案 + 5 态返回 | **稳定错误码 + `AppError` + RFC 7807 problem+json** | E-10 |
 | **配置** | 一个 `debug` 开关控三件事 | **拆开**：`env` / `log_sql` / `llm_provider` 独立 | E-5 |
 
@@ -3172,7 +3183,8 @@ M-4 与 1.13 仍未做。）
 | ✅ 已完成（此前的止血/前端轮次） | 5.4 路由级懒加载、5.7 真 404、5.8 三态组件 + Toast、5.11 任务进度 UI（本轮补） |
 | ✅ 已完成 | 5.12 复习 UI（两页的共享交互件已统一）、5.13 测试（Vitest 与 Playwright 都已落地，**两层都进 CI 阻断**，见附录 AB/BE/BF.6） |
 | ✅ 已完成（5.9 的修复一半除外） | 5.5 拆分巨型页面（三页全部拆完，附录 AX/AZ/BB）、5.10 响应式（附录 BC）**已完成**；5.9 可访问性**审计 + 修复 + 覆盖三轮都已落盘，修复仍在进行**（附录 BG；覆盖轮把扫描场景扩到 15 个，见 BG.11） |
-| ⚠️ 需先确认 | 5.1 OpenAPI 代码生成、5.2 TanStack Query、5.3 Zustand（**选型即决策**）。5.6 CSS 体系重建的**选型与机制已定、9 个样式表已迁**（剩 6 个，批次顺序见 `frontend/docs/css-migration-plan.md` §7） |
+| 🟡 第一期完成、切换被后端阻塞 | 5.1 OpenAPI 生成（**选型已定**：`openapi-typescript@7.13.0`，不再是"待拍板"）：schema 与生成类型已落盘、111 个手写函数的分歧已机械判定；但**前置全在后端**（22 个端点缺 `response_model`），见**附录 BH** |
+| ⚠️ 需先确认 | 5.2 TanStack Query、5.3 Zustand（**选型即决策**）。5.6 CSS 体系重建的**选型与机制已定、9 个样式表已迁**（剩 6 个，批次顺序见 `frontend/docs/css-migration-plan.md` §7） |
 ⚠️ 4.6 与 4.7 的关系要澄清：**4.7 并不依赖 4.6**。计划里写的缓存键是
 `(prompt_version, input_hash)`，但缓存键取**完整输入**（messages 里就有提示词）
 已经覆盖了"提示词变了"这件事；`prompt_version` 的真正用途是**溯源**
@@ -3217,9 +3229,9 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 
 ### 阶段 5 · 前端重建（2.5 周）
 
-| # | 动作 | 验收 |
-|---|---|---|
-| 5.1 | **从 OpenAPI 生成类型与客户端**，删除手写 `client.ts` 的 90 个函数与重复类型 | 前后端契约不可能漂移 |
+| # | 动作 | 验收 | 状态 |
+|---|---|---|---|
+| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **第一期完成（生成 + 分歧对比），切换被后端阻塞（22 个端点缺 `response_model`，见附录 BH）**：`backend/openapi.json`（102 路径 / 118 操作 / 156 schema，sha256 逐字节可复现）与 `src/api/generated/schema.ts`（261 KB / 10 000 行，`tsc` / `build` / `lint` / `prettier` 全过）已落盘；漂移检查器（**TypeScript 编译器 API，不是正则**）判定 **111/111 个端点全部命中**（0 缺失、0 方法错），类型分布 **IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21 / SCHEMA_LOOSE 1 / NO_JSON_RESPONSE 4**。⚠️ **没改一行调用方、没接入应用、没加运行时依赖** —— 切换的前置 P1–P4 与步骤 S1–S5 见附录 BH，逐函数对照表见 `frontend/docs/openapi-client.md` |
 | 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 |
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
@@ -3354,7 +3366,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 7 | **SM-2 自实现** | `sm2_service.py` 的调度部分 | 换 FSRS；判分部分保留但重写。✅ **已换**（阶段 3.6，附录 W）：调度走 FSRS-5，SM-2 只作为 `review_scheduler=sm2` 的回退路径保留 |
 | 8 | **`debug` 单一开关** | `config.debug` 同时控 SQL 日志 / FastAPI debug / LLM 供应商 | 拆成三个 |
 | 9 | **`_kb_cache` 模块级无界缓存** | `rag_service.py:47` | 有 DB 索引后不需要；无界字典是内存泄漏 |
-| 10 | **`client.ts` 手写 90 个 API 函数 + 手写类型** | 前端 | 从 OpenAPI 生成 |
+| 10 | **手写 API 函数与手写类型**（原写"`client.ts` 手写 90 个 API 函数"；**2026-09-14 实测修正**：是 **111** 个，而且 `client.ts` 现为 **490 行、只剩 1 个端点函数**，其余 110 个早已按域拆走 —— 要放弃的是**这一层手写契约**，不是某个文件的体积，见附录 BH） | `frontend/src/api/`（11 个域模块 + `client.ts` 的基础设施层） | 从 OpenAPI 生成（**第一期已生成并对比**；切换被后端 22 个缺 `response_model` 的端点阻塞，见附录 BH） |
 | 11 | **14 个全局 CSS 文件** | 约 2700 行 | 无作用域、互相覆盖、补丁式追加 |
 | 12 | **`backend/` 根目录 15 个一次性脚本** | `test*.py` / `verify_clean.py` / `e2e_cleanup.py` / `reset_cleaning.py` / `restore_note.py` 等 | 移入 `scripts/dev/` 并加环境守卫，或直接删 |
 | 13 | **`backend/data_backup_e2e/`** | 完整的数据目录副本（含 models、chroma、storage） | 不应进版本库；加 `.gitignore` 并删除 |
@@ -7759,7 +7771,7 @@ sha256（messages 的每一个字符都在内）。少一个空格、多一个�
 
 | 文件 | 内容 |
 |---|---|
-| `frontend/src/api/tasks.ts` | `listNoteTasks` / `getTask` / `cancelTask` + `TaskRun` 类型 + `isTerminal`。**单独成文件**而不是塞进 330 行、90 个函数的 `client.ts` —— 那正是 5.1/5.3 要拆掉的东西，新增接口不该继续往里堆 |
+| `frontend/src/api/tasks.ts` | `listNoteTasks` / `getTask` / `cancelTask` + `TaskRun` 类型 + `isTerminal`。**单独成文件**而不是继续往 `client.ts` 里堆 —— 那正是 5.1/5.3 要拆掉的东西，新增接口不该继续往里堆。⚠️ **2026-09-14 修正**：原文写"330 行、90 个函数的 `client.ts`"，两个数字都不成立 —— 手写 API 函数实测是 **111** 个（**从来不是 90**），而 `client.ts` 现在 **490 行、只剩 1 个端点函数**（其余 110 个早已按域拆走）。这句话的**理由仍然成立**（新增接口按域独立成文件是对的），但它描述的是一个**已经拆完**的状态，见附录 BH |
 | `frontend/src/components/TaskProgress.tsx` | 真实进度条 + 阶段名 + 尝试次数 + 取消按钮；接口不可用时退回静态文案 |
 
 ### AO.3 三条刻意的行为（也是测试盯的地方）
@@ -9998,7 +10010,306 @@ BG.8 给阻断化写的两条前置条件是 ① `REGISTRY` 清空或降到可�
 
 ---
 
-**文档版本**：v5.2（阶段 2、3、阶段 4 全部，阶段 5 的 5.5 / 5.10 / 5.11 / 5.13
+## 附录 BH · 阶段 5.1 第一步：从 OpenAPI 生成类型与客户端（**只生成与对比，未切换**）（2026-09-14）
+
+### BH.1 这一轮只做了 5.1 的**前半**：把"契约漂移"从感觉变成数字
+
+5.1 的验收是"前后端契约不可能漂移"。本轮先把**能持续回答这句话的工具**做出来，
+**一行调用方都不改**：
+
+| 产物 | 规模 | 为什么是它 |
+|---|---|---|
+| `backend/openapi.json` | 102 路径 / 118 操作 / 156 组件 schema / 356 080 字节 | `dump_openapi.py` 在**进程内**调 `app.openapi()` 落盘（不起服务、不连库、不占端口）。本项目的子路由挂在自定义 `_IncludedRouter` 上，`app.routes` 只有 **6 项、一条业务路由都没有** —— 路由枚举只有这一条路可用 |
+| `frontend/src/api/generated/schema.ts` | 261 409 字节 / 10 000 行 | `openapi-typescript@7.13.0`（devDependency）生成，**纯类型**、构建时被完全擦除 |
+| `frontend/src/api/generated/openapi-drift.mjs` | 一个 Node CLI | 用 **TypeScript 编译器 API**（不是正则）回答"端点在不在、类型对不对、错在哪"；不参与打包，但要过 lint |
+
+**确定性也是验收的一部分**：`dump_openapi.py` 用 `sort_keys=True`、无时间戳、
+`newline=""`（避免 Windows 把 `\n` 翻成 `\r\n`），连续三次生成 sha256 完全相同
+（`e21c85952c30…`）；`npm run gen:api` 重复执行产物 hash 不变。
+
+> 为什么先做这个而不是直接切：**生成类型只是"另一方的说法"**。没有机械对照，
+> "切换"就只是把一份没人读过的报告换成另一份 —— 而本项目已经吃过一次亏（BH.10）。
+
+### BH.2 ★ 修正：手写 API 函数是 **111 个**，不是计划里写的 ~90
+
+计划的**四处**都写着"手写 90 个 API 函数"（§4.2 目标技术栈、阶段 5 的 5.1 行、
+第八部分放弃清单第 10 项、附录 AO.2 的 `tasks.ts` 说明）。**这个数字是错的**，实测口径：
+
+| 口径 | 数 | 怎么数的 |
+|---|---|---|
+| 本轮判定对象：**发起请求的导出函数** | **111** | AST 找出所有 `export function` 且函数体里调了 `request<T>(字面量路径)` / `uploadRequest` / `authorizedFetch` 的函数 |
+| 其中不同的 `方法 + 路径` | 110 | `uploadFile` 与 `uploadFileToFolder` 都打 `POST /api/upload` |
+| `src/api/*.ts` 的**全部**导出函数 | 121 | 121 − 111 = 10 个非端点导出：`client.ts` 的 9 个（`getToken`/`setTokens`/`clearTokens`/`notifyTokenExpired`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`/`getRefreshToken`）+ `tasks.ts` 的 `isTerminal` |
+
+四处已**就地改成 111 并标注日期**（§4.2 / 5.1 / 第八部分第 10 项 / AO.2）——
+不是悄悄重写：本文件的规矩是"改了哪个数、什么时候改的、依据在哪"留在原处。
+
+### BH.3 计划里"330 行、90 个函数的 `client.ts`"是**拆分之前**的描述
+
+`client.ts` 现在是 **490 行**，并且**只剩 1 个端点函数**（`askQuestionStream`，SSE）：
+其余 **110 个早已按域拆走**，文件尾是 11 行 `export *`（`auth` / `notes` / `upload` /
+`cleaning` / `qa` / `review` / `report` / `assessment` / `graph` / `projects` / `goals`；
+`knowledge.ts` / `tasks.ts` 由页面直接按域引入）。`client.ts` 自己只剩下：token 存取、
+401 → 刷新一次 → 重放一次（含单飞）、超时、`Content-Type` 合并、204 / 空响应体处理、
+`export *` 转发。
+
+> 这条与 BH.2 是同一个毛病的两种形态：**"`client.ts` 很臃肿"曾经是事实，拆完之后它
+> 变成了化石**（会让读者去做已经做完的事）；而**"90 个函数"从来就不是事实**
+> （会让读者按错误的工作量估工）。附录 AO.5 记过一次同类教训 ——
+> 照着过时的表格排期，就会去拆已经拆完的东西。
+
+### BH.4 ★★ 真正的阻塞项在**后端**：22 个端点没有响应模型
+
+**这是本轮唯一一条能决定"能不能切"的发现，而计划里从来没有提到过它。**
+
+- schema 里 **23 个操作的 2xx 响应是空 schema `{}`**（本轮独立复核：
+  `"application/json": {"schema": {}}`）—— 其中 `/health` 与
+  `GET /api/notes/{id}/video` **没有任何前端调用方**，前端实际调的 111 个端点里命中 **21 个**；
+- 另有 **1 个**端点的响应是 `additionalProperties: true` 的空壳
+  （`knowledge.ts suggestSemanticRelations`）；
+- 21 + 1 = **22 个**：它们的生成类型是 `unknown` / `{[k: string]: unknown}`，
+  **切换等于拿 `unknown` 换掉手写类型，净亏**。
+
+分布（22 个一个不漏）：
+
+| 模块 | 数 | 端点 |
+|---|---|---|
+| `graph.ts` | **9** | `suggestRelations` / `confirmRelation` / `rejectRelation` / `createRelation` / `deleteRelation` / `getGraphStats` / `getNodeSubgraph` / `batchConfirmRelations` / `batchRejectRelations`（`getGraphData` / `getSuggestions` / `searchGraphNodes` 三个不在内） |
+| `projects.ts` | 4 | `deleteFolder` / `deleteProject` / `addNotesToProject` / `removeNoteFromProject` |
+| `notes.ts` | 4 | `deleteAnnotation` / `updateNoteLinks` / `getVersion` / `askNoteQuestionStream`（SSE） |
+| `knowledge.ts` | 2 | `generateExtensionQuestions`（空 `{}`）+ `suggestSemanticRelations`（`additionalProperties` 空壳） |
+| `upload.ts` | 1 | `prepareUpload` |
+| `qa.ts` | 1 | `getCardDuplicates` |
+| `client.ts` | 1 | `askQuestionStream`（SSE，本来就没有 JSON 模型） |
+
+> ★ **这一条把 5.1 的工作量从"前端"挪到了"后端"。** 计划把 5.1 写成一项纯前端任务
+> （"前端类型：手写 → 从 OpenAPI 生成"），而实测的阻塞是**后端每个路由要补
+> `response_model=`** —— 前端既做不了这件事，也等不到它。**22 个端点补齐之前，
+> 切换一步都动不了**（生成与对比不受影响，顺序见 BH.11）。
+> ⚠️ 还要注意这 22 个里 **`graph.ts` 占了 9 个**：图谱是判定最差的一域，
+> 而它恰好排在 S3 的中段（**必须等 P1**）。
+
+### BH.5 4 处"外层有模型、内层是空壳"：**手写类型最值钱的地方，生成够不到**
+
+编译器报 `Index signature for type 'string' is missing`（TS 的 `interface` **不会**
+自动获得隐式索引签名，所以手写类型赋不给 `{[k: string]: unknown}`）：
+
+| 位置 | schema 写了什么 | 前端按什么解析 |
+|---|---|---|
+| `AssessmentResponse.scores` | `{type: object, additionalProperties: true}` | `{covered_points, uncovered_points, coverage_score, completeness_score, depth_score, clarity_score}` |
+| `AssessmentResponse.quiz_questions[]` | 同上 | `{index, question, key_points}` |
+| `SubmitAnswerResponse.grading_detail` | 同上 `\| null` | `{verdict, missing_points, misconceptions, confidence, reason}` |
+| `LinkListResponse.linked_materials[]` / `linked_personal_notes[]` | 同上 | `{id, title, source_type}` / `{id, title}` |
+
+> 这 4 处（5 个字段）**恰好是 5.1 想消灭的那类风险所在**：字段全靠前端手写维护、
+> 后端改字段前端不会知道 —— 但**生成解决不了它**，只有后端补模型才能解决。
+> ★ **收益最大的地方，正是这一轮工具够不到的地方**，所以 P2 不是"顺手"，是收益项。
+
+### BH.6 111 个函数的机械判定：只有 19 个两边一致
+
+```
+handWrittenFunctions     111     手写 API 函数
+distinctEndpoints        110     去重后的 方法+路径
+pathMatched              111     路径+方法在 schema 中命中
+pathMissing                0     ← 0 个缺失
+methodMissing              0     ← 0 个方法错
+```
+
+| 判定 | 数 | 含义 |
+|---|---|---|
+| `IDENTICAL` | 19 | 两边等价 |
+| `HW_NARROWER` | 28 | 前端类型更窄（假设更强：后端可能不给它以为一定有的东西） |
+| `HW_WIDER` | 4 | 前端类型更宽（唯一一类"前端接受后端保证不了的值"，见 BH.7a） |
+| `CONFLICT` | 34 | **两边都不相容 —— 其中必有一方描述错了现实** |
+| `SCHEMA_UNTYPED` | 21 | schema 没写响应模型（BH.4） |
+| `SCHEMA_LOOSE` | 1 | schema 是 `additionalProperties` 空壳（BH.4） |
+| `NO_JSON_RESPONSE` | 4 | 204，本来就没有响应体 |
+
+判定全部来自编译器（每个函数生成一份探针 TS，让编译器回答**双向可赋值性**），
+结构化 diff 只用于解释 —— 两者的关系是"编译器说不对"＋"差异在这里"，
+**不是互相佐证**。逐函数对照表（111 行）、判定口径与逐条诊断见
+**`frontend/docs/openapi-client.md` §6**（本附录不复制）。
+
+### BH.7 三类具体漂移，每一类都说清"为什么"
+
+**(a) 枚举：后端 10 个，前端只建模了 3 个。** 未建模的 7 个：`NoteStatus`
+（**一个就影响 21 个字段处**）/ `SourceType` / `CardType` / `RelationType` /
+`RelationStatus` / `DifficultyLevel` / `QuestionType`。**这 4 个函数因此被判 `HW_WIDER`**：
+`cleaning.ts` 的 `startCleaning` / `stopCleaning`、`graph.ts` 的 `searchGraphNodes`、
+`qa.ts` 的 `startUnderstanding`。
+⚠️ 顺带查出**两处注释已经漏了**（不是类型问题，是文档问题）：`client.ts` 的状态流转
+只写了 7 个值（`NoteStatus` 实际 **10** 个，另有 `cleaning_failed` / `learning_failed` /
+`failed`），来源类型只写了 7 个（实际 **8** 个，多一个 `markdown`）——
+**前端类型是 `string`，所以"注释漏了 3 个状态"这件事没有任何机制能发现**。
+✅ **枚举值本身写错的 0 处**（已建模的 3 个与后端逐值一致）—— 全是"后端是枚举、
+前端是 `string`"。
+
+**(b) 可空性：9 处 schema 允许 `null`、前端不接受。** 两处会当场炸：
+
+| 位置 | 后果 |
+|---|---|
+| `getSuggestions[].similarity_score` | schema `number \| null`，前端 `number` —— **排序/展示会拿到 `null`** |
+| `compareAssessment` 的 `.quiz_questions` / `.quiz_answers` | schema 允许 `null`，前端 `?:` 只在"没有"时跳过，**收到 `null` 时 `.map()` 抛错** |
+| `getNote.video_url` / `getProjectDetail.notes[].source_type` | 前者前端漏了 `null`，后者笔记卡片徽章会拿到 `null` |
+
+**(c) ★ 一处真错：一个前端类型描述了两个后端模型。**
+
+```
+projects.ts getProjectDetail
+  EXTRA_REQUIRED_FIELD @ getProjectDetail.notes[].file_size — 前端类型有、schema 没有
+```
+
+- `GET /api/folders/{id}` → `FolderDetailResponse.notes[]` 用 **`NoteInFolder`**（**有** `file_size`，且在 `required` 里）；
+- `GET /api/projects/{id}` → `ProjectDetailResponse.notes[]` 用 **`NoteSummary`**（**没有** `file_size`）；
+- 前端两处都声明成 `NoteInFolder`（`file_size: number` 必填）—— **后端自己就不一致**。
+
+**佐证不是推理，是一条已经存在的用例**：`Projects.test.tsx:428` 名叫
+*"安全：笔记行缺 file_size / source_type / status 时照常渲染"* ——
+**写测试的人早就知道这个类型在撒谎**。目前页面没有真的读 `file_size`
+（只有列表端点的 `Note` 被 `DailyMaterials` / `NotesList` 读），所以是**潜在错误而非
+线上故障** —— 也正因如此它一直没被发现。
+
+> 这一类错误只有"机械对照"捞得出来：它不违反任何测试、不产生任何告警，
+> 缺字段时页面**照常渲染** —— BD 那一轮加的容错护栏正是为此，
+> 而护栏同时也是"漂移不再报警"的原因。
+
+### BH.8 可选性口径不一致（53 个函数，**最大的一类**）：机制不是"后端有 bug"
+
+诊断里 `Type 'undefined' is not assignable` 命中 **53 个函数**，方向有两个，含义完全不同：
+
+1. **schema 可选、前端当成必有**（危险方向）：`DueQuizResponse` 的
+   `easiness_factor` / `interval` / `repetition` / `review_count`（pydantic 有默认值）
+   在 schema 里**都是可选**，而前端 `DueQuiz` 把其中三个标成必有、
+   **并且根本没有 `repetition`**；
+2. **schema 必有、前端写成可选**（相对安全，但会掩盖"后端一定会给"）：
+   如 `updateNote` 的 `note_role`。
+
+> ⚠️ **机制必须写清楚，否则会得出"后端有 bug"的错误结论**：这不是 pydantic 的疏忽，
+> 而是**两条规则叠加** ——
+> ① pydantic v2 把**带默认值**的字段排除出 OpenAPI 的 `required`；
+> ② **`openapi-typescript` v7 又把"带 `default` 的字段"重新标回必填**
+> （生成的 `NoteResponse` 里是 `note_role: string`，不是 `note_role?: string`）。
+> 对 pydantic 响应模型来说 ② **是对的**（有默认值的字段一定会被序列化出来），
+> 所以**切换后前端会更准**，但前端那些 `?:` 会先编译失败；
+> 反方向（`anyOf[T, null]` 且**没有**默认值的）生成的是 `?: T | null`，
+> 于是所有 `x !== null` 的判据要统一改成 `x != null`，否则"字段名拼错 / 后端没给"
+> 会静默通过。
+> ★ **这是系统性的口径差，不是逐个 case 的偶发分歧** —— 换句话说，
+> 它不能用"遇到一个改一个"的方式收掉。
+
+### BH.9 ★ 一条诚实的否定结果：期待中的"数组 vs `{items,total}`"是 **0 例**
+
+计划（附录 AZ.7 / BB.5）记过一类形状错误：**列表端点被包了一层信封，
+前端按数组解析**。本轮把 schema 里 **19 个"列表被包了一层"的端点**逐个机械核对：
+
+```
+envelopeEndpoints    19      schema 里"列表被包了一层"的端点
+envelopeMismatches    0      前端按数组解析的（即该类错误）
+```
+
+**前端 19 个全部声明为信封对象，一个都没写成数组**；`projects.ts` 里那段
+`notes: {items:[…]}` 的防拆包逻辑（`Projects.test.tsx:413`）今天是
+**冗余防御，不是活 bug**。其余"0 例"的核对一并列出（同样的道理：不写下来，
+读者分不清"查过没有"和"没查"）：
+
+| 项 | 数 |
+|---|---|
+| 前端传了 schema 未声明的 query 参数 | 0 |
+| 漏传必填 query 参数 | 0 |
+| 枚举**值集合**不一致（`ENUM_DRIFT`） | 0 |
+| 数组 vs 信封 | 0 |
+| 后端有可选 query 参数、前端没用 | 3（**能力未被消费，不是漂移**） |
+
+> ★ **这是本轮唯一一条"预期有收益、实测为 0"的结果，必须专门记下来**：不写，
+> **下一个人会把同一份期待再做一遍**。5.1 的真实收益不在这类形状错误上，
+> 而在枚举收窄（BH.7a）与"**后端给、前端类型里没有**"的 22 个字段上
+> （切换后它们会一次性变成可选字段，前端可以按需消费）。
+> AZ.7 记录的是**页面级**症状，本轮回答的是"**契约级**还有没有同类" ——
+> 两者不矛盾：页面确实被漂移打崩过，但漂移不来自列表信封。
+
+### BH.10 ★ 检查器自己的空转 bug：**0 条诊断曾经被当成"通过"**
+
+`openapi-drift.mjs` 的**第一版有两个 bug**（探针文件在 `createProgram` 之后才填内容；
+TS 内部把路径统一成 `/` 而脚本用 `\` 比对，于是所有诊断被过滤掉），症状是
+**"0 诊断 + 106 个 IDENTICAL"** —— 一份**看起来全绿**的报告。现在：两个坑都写进了
+代码注释；并且**生成了探针却一条诊断都没有时，脚本直接抛错**，而不是输出结论
+（"0 诊断 ⇒ throw"）。
+
+> **一个只会输出"通过"的检查器，与没有检查器在结论上无法区分。**
+> 这与 BE.2 的"退出码 2 ≠ 0 条发现"、BF.3 的"未安装被读成没漂移"、
+> BG.3 的"空白页面的 axe 恒为 0 违规"是同一条判据 ——
+> **必须能把"没有信号"和"信号是坏的"分开**。本轮把这条判据做进了工具本身，
+> 而不是靠人记得。
+
+### BH.11 切换计划（**本轮不执行**）：前置全在后端，步骤逐步可回滚
+
+**前置 P1–P4 —— 全在后端：**
+
+| # | 动作 | 为什么必须先做 |
+|---|---|---|
+| P1 | 给 BH.4 那 **22 个端点**补 `response_model=` | 否则生成类型是 `unknown`，切换 = 用 `unknown` 换掉手写类型，净亏 |
+| P2 | 给 BH.5 那 **4 处内层空壳**补模型 | 同上；这 4 处是手写类型最"值钱"的地方 |
+| P3 | 决定 `POST /api/auth/logout` 的 body 是否真的可选（schema 里是 `anyOf: [LogoutRequest, null]`） | 否则生成的客户端会把 body 变可选 —— **唯一一条要"拍板"而不是"补代码"的前置** |
+| P4 | 把 `dump_openapi.py --check` 接进 CI | 没有它，前端会在"后端已改、schema 未更新"的窗口里继续绿 |
+
+**步骤 S1–S5（每一步都可独立回滚）**：S1 冻结基线（提交 `openapi.json` 与漂移报告，
+CI 挂 `--check`）→ **S2 只换类型、不换请求**（`export type X = components['schemas']['XResponse']`，
+**调用方零改动**）→ S3 按域替换请求函数体（顺序按当前判定质量：`report` → `tasks` →
+`auth` → `knowledge` → `graph`（**必须等 P1**）→ `notes` → `review` → `qa` → `projects`
+→ `upload`）→ S4 收敛 `client.ts`（保留基础设施层）→ S5 才轮到 5.2 / 5.3。
+
+三条**已经定下**的形态（写进计划，以免下一轮重新讨论）：
+
+1. **保留同名导出函数、只换函数体** —— **13 处 `vi.mock('…/api/…')`**（分布 10 个测试文件：
+   8 个用 `'../api/…'`、2 个用 `'../../api/…'`；`frontend/docs/openapi-client.md` §9.2 记作
+   "8 个测试文件" —— 那 8 个是**只数了单层 `../`** 的那一半，按 mock 点算应以 **13 处**为准）
+   因此不用改；一旦改成 `client.GET('/api/notes')` 那种调用形态，**13 处全部要重写**；
+2. **401 刷新单飞 / 超时（普通 30 s、上传 600 s）/ `Content-Type` 合并 /
+   204 与空响应体处理必须保持手写** —— 这些横切行为 schema 里没有、生成客户端表达不了；
+   也**不引入** `openapi-fetch` 之类的运行时（本轮已定"不加运行时依赖"）；
+3. **multipart 上传的 4 个函数保持手写**（`uploadFile` / `commitUpload` /
+   `uploadFileToFolder` / `prepareUpload` 把 `project_ids`、`linked_material_ids`
+   塞成 **JSON 字符串**放进 FormData，OpenAPI 只能表达"这是 string"）。
+
+完整的分步顺序、每一步"先炸什么 / 怎么验证"与逐条风险清单（调用方面积 74 个源文件、
+79 处 import；261 KB 类型文件对 `tsc` 的负担）见 **`frontend/docs/openapi-client.md` §9**
+（本附录不复制那张表）。
+
+### BH.12 顺带修掉的一处渲染缺陷：**状态标记此前根本没被渲染**
+
+阶段 4 / 5 / 6 三张表的表头是 **3 列**（`| # | 动作 | 验收 |`），而带状态的行动项把
+✅ / 🟡 写在**第 4 格** —— GFM 的规则是"行的单元格多于表头时，**多出来的被忽略**"，
+也就是说：**这些状态标记只存在于源码里，渲染出来看不见**。本文件自己的惯例并非如此
+（阶段 1 / 2 / 3 的表头写的是 `| # | 动作 | 验收 | 状态 |`）。
+
+本轮只改了**阶段 5** 那张表的表头 —— 5.1 的状态就在这一格里，**不改等于这次修正
+渲染不出来**。⚠️ **阶段 4 与阶段 6 两张表的表头仍是 3 列，同样的状态标记同样不渲染**，
+这里**故意留着**：那不是本轮的范围，而且一次改三张表会让本轮的 diff 混进格式改动。
+
+> 这与 BH.10 是同一类：**"写了"和"看得见"不是一回事**，而这一次连检查器都没有 ——
+> 表格少一个表头列的代价是静默的：**内容没丢，只是没人看得到**。
+
+### BH.13 验收
+
+| 项 | 结果 |
+|---|---|
+| `python backend/scripts/dump_openapi.py` | 退出 0，356 080 字节，`paths=102 operations=118 schemas=156 sha256=e21c85952c30`；**连续 3 次 sha256 相同** |
+| `python backend/scripts/dump_openapi.py --check` | 退出 0（CI 断言"落盘 schema 与当前代码一致"） |
+| `npm run gen:api`（重复执行） | 退出 0，`schema.ts` hash 不变 |
+| `npx tsc --noEmit` / `npm run build` / `npm run lint` / `prettier --check` | 全部退出 0（生成文件与漂移脚本都干净） |
+| `npm test` | **21 files / 276 tests 全通过** |
+| 端点覆盖 | **111/111** 命中，**0 缺失、0 方法错** |
+| 未改动 | `frontend/src/api/` 下**除新增 `generated/` 外零改动**；未改 pages / components / 样式 / e2e；**未加运行时依赖**；未提交 |
+| 本轮对计划的改动 | 111 的四处修正 + `client.ts` 现状 + 5.1 的状态行与"需先确认" + §2.9 S-6 的前置已兑现 + 阶段 5 表头补上 `状态` 列（此前第 4 格在渲染时被丢弃，见 BH.12）（本附录，另见 §4.2 / 阶段 5 / 第八部分 / AO.2） |
+
+> 🎯 **一句话**：这一轮**没有让契约不再漂移，它让漂移第一次可测量** ——
+> 而测量的第一个产出是：**5.1 卡在后端，不在前端。**
+> 计划原来把它写成一项纯前端任务，**这个前提是错的**；
+> 同样值钱的是那条否定结果（BH.9）：**我们以为会抓到的那类形状错误，一个都不存在。**
+
+---
+
+**文档版本**：v5.3（阶段 2、3、阶段 4 全部，阶段 5 的 5.1（第一期）/ 5.5 / 5.10 / 5.11 / 5.13
 与 5.9 的审计 / 修复 / 覆盖三轮，阶段 6 的 6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.6 / 6.8
 见附录 J–AV 与 BA；
 FSRS 见 W，到期时刻策略见 X，掌握度曲线见 Y，前端接线见 Z，
@@ -10011,7 +10322,8 @@ NoteDetail 安全网见 AP，错误泄露与安全姿态见 AQ，上传安全护
 对象存储快照见 AW，NoteDetail 拆分见 AX，临时库清理见 AY，
 两页安全网见 AZ，刷新令牌与登出撤销见 BA，两页拆分见 BB，移动端见 BC，
 契约漂移可见化见 BD，真实库清理与依赖扫描/端到端见 BE，
-真库第二轮清理与依赖漂移可见化见 BF，可访问性审计与覆盖轮见 BG）
+真库第二轮清理与依赖漂移可见化见 BF，可访问性审计与覆盖轮见 BG，
+从 OpenAPI 生成客户端与 111 个手写函数的分歧见 BH）
 
 
 
