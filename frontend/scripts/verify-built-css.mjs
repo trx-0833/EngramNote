@@ -235,6 +235,22 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   // （`transform: translateY(-1px)` / `box-shadow: var(--shadow-md)`），
   // 但它确实属于"本批改动范围"，登记进来才能让"该文件再冒出冲突"变成红灯。
   'styles/components.css',
+  // 第五批（序 8）：`components.css` 的 5 条页面级布局挂点 +
+  // `responsive.css` 里同一批类名的 8 条窄屏规则 → 三个组件模块。
+  // 两个全局样式表本来就在上面（components.css 第四批登记过、
+  // responsive.css 试点轮登记过），这里补上三个新模块。
+  'pages/notedetail/NoteDetailHeader.module.css',
+  'pages/notedetail/EditSplitView.module.css',
+  // `pages/NotesList.module.css` 第三批已登记（同一份模块里又多了 5 条）
+  // 第六批（序 9）：`layout.css` 整节按归属拆分（Sidebar / App 骨架）+
+  // `responsive.css` 里命中同一批类名的 12 条窄屏规则。
+  'styles/layout.css',
+  'components/Sidebar.module.css',
+  'App.module.css',
+  // 第七批（序 10）：`graph.css` 整份进图谱功能模块 +
+  // `responsive.css` 里命中同一批类名的 16 条窄屏规则。
+  'styles/graph.css',
+  'components/graph/Graph.module.css',
 ])
 
 const annotated = clashes.map((c) => {
@@ -442,6 +458,104 @@ for (const pair of CASCADE_PAIRS) {
   }
 }
 
+// ── 3b. 同文件内、同权重的**模块规则之间**的先后（顺序就是行为）──
+//
+// ## 为什么 `CASCADE_PAIRS` 覆盖不到这一种（第六批序 9 新增）
+//
+// `CASCADE_PAIRS` 比的是"全局类 × 模块类"，而这一批最危险的一处竞争**两边都是
+// 模块类**：`Sidebar.module.css` 的 768px 块里
+//
+//   .sidebar, .sidebar-collapsed { transform: translateX(-100%) }   ← 抽屉藏起来
+//   .sidebar-mobile-open         { transform: translateX(0) }       ← 抽屉滑出来
+//
+// 两条权重同为 (0,1,0)、都带同一个类名（同一个元素上并列），媒体查询又不增加权重
+// ⇒ **得主只由这一块里的先后决定**。一旦有人"顺手"把 `.sidebar-mobile-open`
+// 排到前面，抽屉再也滑不出来，而规则清单差集、冲突统计、动画检查**全都不会响**
+// （两条规则都还在、值也没改 —— 与第一批的"级联反转"是同一类事故）。
+// 所以这里单独钉住"谁必须排在后面"。
+//
+// 声明格式：
+//   context —— 媒体查询上下文（原样，与解析器给出的字符串一致）
+//   prop    —— 竞争的属性
+//   winner  —— 必须生效的模块类名（kebab 或 camel 都行，匹配时会剥哈希）
+//   losers  —— 与它同权重、必须排在它**前面**的类名
+const ORDER_PAIRS = [
+  {
+    label:
+      '移动端抽屉：`.sidebar-mobile-open { transform: translateX(0) }` 必须排在 ' +
+      '`.sidebar, .sidebar-collapsed { transform: translateX(-100%) }` 之后',
+    context: '@media (max-width: 768px)',
+    prop: 'transform',
+    winner: 'sidebarMobileOpen',
+    losers: ['sidebar', 'sidebarCollapsed'],
+    why:
+      '三个类名并列在同一个 <nav> 上、权重同为 (0,1,0)，得主只看块内先后。' +
+      '顺序反了 = 抽屉再也滑不出来（translateX(0) 被 translateX(-100%) 盖住），' +
+      '而这在源码、规则清单、冲突统计里都看不出来。',
+  },
+  {
+    label:
+      '图谱按钮的 active+hover 态：`.graph-btn-active:hover` 必须排在 `.graph-btn:hover` 之后' +
+      '（第七批序 10 搬进 `components/graph/Graph.module.css` 时顺序一字未改）',
+    context: '',
+    prop: 'color',
+    winner: 'graphBtnActive',
+    losers: ['graphBtn'],
+    why:
+      '`.graph-btn:hover` 与 `.graph-btn-active:hover` 权重同为 (0,2,0)，' +
+      '两条都命中"创建关系"按钮的按下态时得主只看先后 —— 顺序反了，' +
+      '激活态会退回普通 hover 的墨蓝字/淡底，看起来像按钮没被激活。',
+  },
+]
+
+console.log('\n同文件内同权重的模块规则先后（顺序就是行为）：')
+for (const pair of ORDER_PAIRS) {
+  const decls = []
+  for (const s of sheets) {
+    let idx = 0
+    for (const r of parseRules(s.css)) {
+      if (r.context !== pair.context) continue
+      for (const sel of splitSelectors(r.selector)) {
+        idx++
+        const bare = stripHash(sel)
+        const names = [pair.winner, ...pair.losers]
+        const hit = names.find((n) => new RegExp(`\\._?${n}(?![\\w-])`).test(bare))
+        if (!hit) continue
+        for (const [prop, val] of r.decls) {
+          if (prop.trim().toLowerCase() !== pair.prop) continue
+          decls.push({ cls: hit, sel: bare, val: val.replace(/\s+/g, ' ').trim(), order: idx, file: s.name })
+        }
+      }
+    }
+  }
+  const present = new Set(decls.map((d) => d.cls))
+  const missing = [pair.winner, ...pair.losers].filter((n) => !present.has(n))
+  if (missing.length) {
+    failed = true
+    console.log(`   ✗ ${pair.label}：产物里找不到 ${missing.join(', ')} 的 ${pair.prop} 声明 —— 这项检查没起作用`)
+    continue
+  }
+  // 得主 = 权重最高者；权重相同则同文件内**更靠后**者
+  const winnerOf = decls.reduce((best, d) => {
+    const sp = cmpSpec(specificity(d.sel), specificity(best.sel))
+    if (sp > 0) return d
+    if (sp < 0) return best
+    if (d.file === best.file) return d.order > best.order ? d : best
+    return best
+  })
+  if (winnerOf.cls !== pair.winner) {
+    failed = true
+    console.log(`   ✗ ${pair.label}`)
+    console.log(`      实际得主是 ${winnerOf.sel}（${winnerOf.file} @${winnerOf.order}，值 ${winnerOf.val}）`)
+    if (pair.why) console.log(`      为什么钉这条：${pair.why}`)
+  } else {
+    console.log(
+      `   ✓ ${pair.label}：得主 = ${winnerOf.sel}（${winnerOf.file}，值 ${winnerOf.val}，` +
+        `压过 ${decls.filter((d) => d !== winnerOf).map((d) => d.sel).join(', ') || '（无同属性对手）'}）`,
+    )
+  }
+}
+
 // ── 4. 迁移切片是否真的进产物 ──
 // 按批次列：类名（哈希后仍保留原名）与动画名。任何一个 0 次命中都说明
 // "规则搬了但类名没挂上"或"动画定义没搬进来"。
@@ -555,6 +669,85 @@ const SLICE_MARKERS = [
   'scoreValue',
   'knowledgePointsGrid',
   'knowledgePointsSection',
+  // 第五批（序 8）：页面级布局挂点进模块（含 768px/480px 窄屏规则）
+  'noteDetailHeader',
+  'noteDetailActions',
+  'noteListItem',
+  'noteListActions',
+  'editSplit',
+  // 第六批（序 9）：侧边栏 / 抽屉 / 应用骨架（含窄屏规则与遮罩动画）
+  'sidebarCollapsed',
+  'sidebarMobileOpen',
+  'sidebarHeader',
+  'sidebarLogo',
+  'sidebarCollapseBtn',
+  'sidebarMobileClose',
+  'sidebarBody',
+  'sidebarOpenLock',
+  'sidebarSection',
+  'sidebarSectionTitle',
+  'sidebarItemRow',
+  'sidebarItem',
+  'sidebarItemActive',
+  'sidebarItemIcon',
+  'sidebarItemLabel',
+  'sidebarItemAction',
+  'sidebarDivider',
+  'sidebarFooter',
+  'sidebarOverlay',
+  'sidebarOverlayFadeIn',
+  'appLayout',
+  'appLayoutCollapsed',
+  'sidebarMobileToggle',
+  // 第七批（序 10）：图谱功能（graph.css 的 47 个类名 + graphSpin 动画）
+  'graphPage',
+  'graphPageMain',
+  'graphSidebar',
+  'graphCanvas',
+  'graphToolbar',
+  'graphToolbarLeft',
+  'graphToolbarRight',
+  'graphLegend',
+  'graphLegendItem',
+  'graphLegendItemActive',
+  'graphLegendDot',
+  'graphBtn',
+  'graphBtnActive',
+  'graphBadge',
+  'graphCreateHint',
+  'graphPanel',
+  'graphPanelTitle',
+  'graphSuggestionCard',
+  'graphRelationLine',
+  'graphControls',
+  'graphControlBtn',
+  'graphMinimap',
+  'graphSuggestionScoreBar',
+  'graphSuggestionScoreBarFill',
+  'graphStatsGrid',
+  'graphStatItem',
+  'graphStatValue',
+  'graphStatLabel',
+  'graphStatsBarRow',
+  'graphStatsBarLabel',
+  'graphStatsBarTrack',
+  'graphStatsBarFill',
+  'graphStatsBarCount',
+  'graphSearchBox',
+  'graphSearchInput',
+  'graphSearchSpinner',
+  'graphSearchResults',
+  'graphSearchResultItem',
+  'graphSearchResultDot',
+  'graphSearchResultTitle',
+  'graphSearchResultType',
+  'graphFilterSelect',
+  'graphNeighborItem',
+  'graphNeighborDot',
+  'graphNeighborTitle',
+  'graphNeighborRel',
+  'graphNeighborCount',
+  'graphSpin',
 ]
 console.log('\n迁移切片类名/动画在产物中的出现次数：')
 for (const marker of SLICE_MARKERS) {
@@ -674,6 +867,87 @@ const RETIRED = [
   'score-value',
   'knowledge-points-grid',
   'knowledge-points-section',
+  // 第五批（序 8）：三个组件各带自己的窄屏规则一起进模块。
+  // `responsive.css` 里对应位置留了注释（"已随组件搬走"），不留选择器。
+  'note-detail-header',
+  'note-detail-actions',
+  'note-list-item',
+  'note-list-actions',
+  'edit-split',
+  // 第六批（序 9）：侧边栏整节 + 应用骨架。留全局的 `.navbar*`（5 条）**不列** ——
+  // 它没有归属组件、grep 0 处引用，留在 layout.css 等"死 CSS 清理"轮。
+  'sidebar',
+  'sidebar-collapsed',
+  'sidebar-mobile-open',
+  'sidebar-header',
+  'sidebar-logo',
+  'sidebar-collapse-btn',
+  'sidebar-mobile-close',
+  'sidebar-body',
+  'sidebar-open-lock',
+  'sidebar-section',
+  'sidebar-section-title',
+  'sidebar-item-row',
+  'sidebar-item',
+  'sidebar-item-active',
+  'sidebar-item-icon',
+  'sidebar-item-label',
+  'sidebar-item-action',
+  'sidebar-divider',
+  'sidebar-footer',
+  'sidebar-overlay',
+  'app-layout',
+  'app-layout-collapsed',
+  'sidebar-mobile-toggle',
+  // 第七批（序 10）：图谱的 47 个类名。`graph.css` 里**保留**的
+  // `@keyframes graph-spin` 不带类名，不在退休名单的范围内。
+  'graph-page',
+  'graph-page-main',
+  'graph-sidebar',
+  'graph-canvas',
+  'graph-toolbar',
+  'graph-toolbar-left',
+  'graph-toolbar-right',
+  'graph-legend',
+  'graph-legend-item',
+  'graph-legend-item-active',
+  'graph-legend-dot',
+  'graph-btn',
+  'graph-btn-active',
+  'graph-badge',
+  'graph-create-hint',
+  'graph-panel',
+  'graph-panel-title',
+  'graph-suggestion-card',
+  'graph-relation-line',
+  'graph-controls',
+  'graph-control-btn',
+  'graph-minimap',
+  'graph-suggestion-score-bar',
+  'graph-suggestion-score-bar-fill',
+  'graph-stats-grid',
+  'graph-stat-item',
+  'graph-stat-value',
+  'graph-stat-label',
+  'graph-stats-bar-row',
+  'graph-stats-bar-label',
+  'graph-stats-bar-track',
+  'graph-stats-bar-fill',
+  'graph-stats-bar-count',
+  'graph-search-box',
+  'graph-search-input',
+  'graph-search-spinner',
+  'graph-search-results',
+  'graph-search-result-item',
+  'graph-search-result-dot',
+  'graph-search-result-title',
+  'graph-search-result-type',
+  'graph-filter-select',
+  'graph-neighbor-item',
+  'graph-neighbor-dot',
+  'graph-neighbor-title',
+  'graph-neighbor-rel',
+  'graph-neighbor-count',
 ]
 console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
 let retiredHits = 0

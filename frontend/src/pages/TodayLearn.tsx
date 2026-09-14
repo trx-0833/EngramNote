@@ -23,7 +23,7 @@ import { useToast } from '../components/Toast'
 // 统计卡片（overhaul-plan 5.6 第三批）：与 Dashboard 共用的 `.stat-card*` 已抽成
 // 组件、样式进模块 —— 本页不再需要 `dashboard.css` 里的全局类名
 import StatCard from '../components/StatCard'
-import { cardTypeLabels } from '../utils/labels'
+import { cardTypeLabels, weakPointBadge } from '../utils/labels'
 
 /** 单题答题状态 */
 interface QuizState {
@@ -229,7 +229,10 @@ export default function TodayLearn() {
         {todayDone < dailyLimit ? (
           <button className="btn btn-primary" onClick={startReview}>继续复习</button>
         ) : (
-          <p style={{ color: '#ff9800', fontWeight: 600 }}>今日已完成 {dailyLimit} 道题，休息一下吧！</p>
+          // 原值 `#ff9800` 白底只有 2.16:1（0.9rem 文字要求 4.5:1），
+          // 与 F-36 的「中」优先级徽章是同一个色值 —— 换成 `--color-warning`
+          // 的取值（#936408，白底 5.16:1），不再各处写一份橙。
+          <p style={{ color: 'var(--color-warning)', fontWeight: 600 }}>今日已完成 {dailyLimit} 道题，休息一下吧！</p>
         )}
       </div>
     )
@@ -322,17 +325,17 @@ export default function TodayLearn() {
         </section>
       )}
 
-      {/* 待复习任务 */}
+      {/* 待复习任务。
+          ⚠️ 这里**没有** role="button"、容器也不再可聚焦 —— 与仪表盘那张卡片
+          （F-09，`Dashboard.tsx`）同形：原来外层是 `div[role="button"][tabIndex=0]`
+          而里面又有一个真 `<button>开始复习</button>`，axe 判 nested-interactive
+          （F-34），且外层只监听 Enter、不监听 Space，与 role="button" 的约定不符。
+          改法就是审计建议的字面做法：**卡片只是盒子，行为落在真有名字的按钮上**。
+          键盘结果更好：Tab 只停一次，且按钮原生支持 Space。 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>待复习任务</h2>
         {dueCount > 0 ? (
-          <div
-            className="card card-accent-left"
-            style={{ cursor: 'pointer' }}
-            onClick={startReview}
-            role="button"
-            tabIndex={0}
-          >
+          <div className="card card-accent-left">
             {/* 窄屏换行：标题与"开始复习"并排会被压扁（.page-header-row） */}
             <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -341,7 +344,7 @@ export default function TodayLearn() {
                   今日已完成 {todayDone} 题 | 正确率 {stats?.today_accuracy ?? 0}%
                 </p>
               </div>
-              <button className="btn btn-primary">开始复习</button>
+              <button className="btn btn-primary" onClick={startReview}>开始复习</button>
             </div>
             {/* 进度条 */}
             <div className="progress-bar" style={{ marginTop: 'var(--space-md)' }}>
@@ -373,7 +376,10 @@ export default function TodayLearn() {
                   <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{wp.card_title}</span>
                   <span style={{
                     fontSize: '0.75rem', marginLeft: 'var(--space-sm)', padding: '1px 6px', borderRadius: 3,
-                    background: '#f4433620', color: '#f44336',
+                    // 与仪表盘上那份**共用同一个常量**：这段徽章在两页上写过两遍，
+                    // 而 F-35 只在一页上报出来（另一页被桩的字段名藏住了），
+                    // 所以修法与取值都收在 utils/labels.ts 的 weakPointBadge 里。
+                    background: weakPointBadge.background, color: weakPointBadge.color,
                   }}>
                     {cardTypeLabels[wp.card_type] || wp.card_type}
                   </span>
@@ -407,11 +413,39 @@ const dailyTaskTypeLabels: Record<string, string> = {
   new_material: '新资料',
 }
 
-/** 优先级到颜色与中文标签的映射 */
+/**
+ * 优先级到颜色与中文标签的映射
+ *
+ * ── 为什么三个色值全换了（a11y-audit **F-36**）──
+ *
+ * 这三个徽章是**白字压色块**（第 501 行 `color: '#fff'`），而原值
+ * `#f44336` / `#ff9800` / `#10b981` 与白色的对比度分别是
+ * **3.68 / 2.16 / 2.54:1**，11.2px 常规字重要求 4.5:1 —— **三个全部不达标**。
+ *
+ * ⚠️ **axe 永远报不出这三条**，所以它们没有登记项、也没有上限，
+ * 唯一的信号是 `e2e/a11y.spec.ts` 里那条 `measureContrast` 断言。
+ * 机制（读 axe-core 4.13 源码确认，`colorContrastEvaluate`）：
+ * `shortTextContent = visibleText.length === 1` ——
+ * 文本只有一个字符、且对比度不足时它**不下结论**，节点进 `incomplete`，
+ * 永远不会变成 violation。「高 / 中 / 低」正好各一个字。
+ *
+ * 取值：**压深一档、色相不变**（与 F-06 的 `--color-success`、
+ * F-19 的金绿两档同一个做法），并尽量落在项目已有的语义色上：
+ *
+ * | 优先级 | 原值 | 白字 | 新值 | 白字 | 说明 |
+ * |---|---|---|---|---|---|
+ * | 1 高 | `#f44336` | 3.68:1 | `#c0392b` | **5.44:1** | = `--color-error` |
+ * | 2 中 | `#ff9800` | 2.16:1 | `#936408` | **5.16:1** | = `--color-warning` |
+ * | 3 低 | `#10b981` | 2.54:1 | `#25714a` | **5.93:1** | = `--color-success` |
+ *
+ * 「中」直接用 `--color-warning` 的取值：两处本来就是同一个语义
+ * （"需要注意但不是错误"），共用色值才不会又出现"改了令牌漏了字面量"。
+ * 与该令牌一样，这是 `#ff9800` 加深后的琥珀色，色相没换。
+ */
 const priorityMeta: Record<number, { color: string; label: string }> = {
-  1: { color: '#f44336', label: '高' },
-  2: { color: '#ff9800', label: '中' },
-  3: { color: '#10b981', label: '低' },
+  1: { color: '#c0392b', label: '高' },
+  2: { color: '#936408', label: '中' },
+  3: { color: '#25714a', label: '低' },
 }
 
 function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {

@@ -463,34 +463,26 @@ export default function DailyMaterials() {
         <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
           {folders.map((folder) => (
             <div key={folder.id} className="card" style={{ overflow: 'hidden' }}>
-              {/* 文件夹头部：点击展开/折叠 */}
+              {/* 文件夹头部：折叠/展开是一**个控件**，操作按钮是它的**兄弟**。
+                  ⚠️ 这里原来是 `div[role="button"][tabIndex=0]` 包着「重命名」「删除」
+                  两个真按钮 —— axe 判 nested-interactive（F-30），与已修的 F-09
+                  （仪表盘卡片）/ F-17（笔记列表卡片）是同一个洞的第三个入口。
+                  改法就是 F-09 跑通的那个形状（**控件之间是兄弟**）：
+                  外层回到"盒子"，折叠行为落在真有名字的按钮上（`<h3>` 里的
+                  `<button aria-expanded>`，这是 WAI-ARIA 手风琴的标准写法：
+                  标题里放按钮，屏幕阅读器念"三级标题 + <文件夹名> + 按钮 + 已折叠"）。
+                  副作用是"点整行"变成"点文件夹名"：与 F-09 的取舍一致 ——
+                  外壳只负责外观，行为在有名字的控件上；键盘 Tab 也只停一次。 */}
               <div
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  cursor: 'pointer',
                   padding: 'var(--space-md)',
                 }}
-                onClick={() => toggleFolder(folder.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter') toggleFolder(folder.id) }}
-                aria-expanded={expandedFolderId === folder.id}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
-                  {/* 展开/折叠箭头 */}
-                  <span
-                    style={{
-                      transition: 'transform 0.2s',
-                      transform: expandedFolderId === folder.id ? 'rotate(90deg)' : 'rotate(0deg)',
-                      color: 'var(--color-text-secondary)',
-                      fontSize: '0.75rem',
-                    }}
-                  >
-                    ▶
-                  </span>
-                  <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     {editingFolderId === folder.id ? (
                       <input
                         ref={renameInputRef}
@@ -498,7 +490,6 @@ export default function DailyMaterials() {
                         value={editingName}
                         onChange={(e) => setEditingName(e.target.value)}
                         onKeyDown={(e) => handleRenameKeyDown(folder.id, e)}
-                        onClick={(e) => e.stopPropagation()}
                         style={{
                           width: '100%',
                           maxWidth: '360px',
@@ -515,7 +506,41 @@ export default function DailyMaterials() {
                       />
                     ) : (
                       <h3 style={{ fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
-                        {folder.name}
+                        <button
+                          type="button"
+                          onClick={() => toggleFolder(folder.id)}
+                          aria-expanded={expandedFolderId === folder.id}
+                          style={{
+                            // 复位按钮的 UA 外观，只留下"可点"：字号/字重/颜色全部继承 h3，
+                            // 所以文件夹名的视觉与改动前一致（这次修的是结构，不是外观）
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 'var(--space-md)',
+                            width: '100%',
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            margin: 0,
+                            font: 'inherit',
+                            color: 'inherit',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {/* 展开/折叠箭头（装饰：状态由 aria-expanded 表达） */}
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              transition: 'transform 0.2s',
+                              transform: expandedFolderId === folder.id ? 'rotate(90deg)' : 'rotate(0deg)',
+                              color: 'var(--color-text-secondary)',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            ▶
+                          </span>
+                          <span>{folder.name}</span>
+                        </button>
                       </h3>
                     )}
                     <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
@@ -528,8 +553,12 @@ export default function DailyMaterials() {
                     </div>
                   </div>
                 </div>
-                {/* 文件夹操作按钮：编辑态显示保存/取消，否则显示重命名/删除 */}
-                <div style={{ display: 'flex', gap: 'var(--space-xs)', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                {/* 文件夹操作按钮：编辑态显示保存/取消，否则显示重命名/删除。
+                    这些按钮是折叠控件（上面 h3 里那个）的**兄弟** —— 不是它的后代。
+                    `stopPropagation` 已经不是必需的（外层那个 role="button" 没有了），
+                    但各 handler 里仍留着：它们同时对"点空白处"这类调用有意义，
+                    删掉属于顺手重构，与这次可访问性修复无关，所以刻意没动。 */}
+                <div style={{ display: 'flex', gap: 'var(--space-xs)', alignItems: 'center' }}>
                   {editingFolderId === folder.id ? (
                     <>
                       <button

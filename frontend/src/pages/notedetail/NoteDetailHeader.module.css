@@ -62,3 +62,66 @@
     0 0 0 2px #fff,
     0 0 0 4px var(--color-primary-hover);
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * 页头骨架（overhaul-plan 5.6 序 8）
+ *
+ * 从 `src/styles/components.css` 搬来 2 条（`.note-detail-header` /
+ * `.note-detail-actions`），并从 `src/styles/responsive.css` 的 768px 档搬来
+ * 3 条、480px 档搬来 1 条 —— 全项目 grep 只命中本组件
+ * （`pages/notedetail/NoteDetailHeader.tsx`）。
+ *
+ * ## 为什么响应式规则必须一起搬（css-convention.md §3 雷区 2）
+ *
+ * 类名一旦被 CSS Modules 哈希，`responsive.css` 里那三条选择器就
+ * **选不中任何东西**：规则还在、永不生效。窄屏下标题与 8 个操作按钮仍会挤在
+ * 一行（这正是它们存在的理由），而且没有任何报错。
+ *
+ * ## 保留后代选择器，不合并（selector 是行为的一部分）
+ *
+ * `.note-detail-actions .btn` 权重 (0,2,0)，靠它压过 `.btn` 自身的
+ * `padding` 之类单类规则。搬进模块时 `.btn` 必须写成 `:global(.btn)` ——
+ * 不写就会连 `.btn` 一起被哈希（产物里指向一个不存在的类名，整条规则失效）；
+ * 写成 `:global(.btn)` 后产物是 `._noteDetailActions_hash .btn`，权重与原来逐字相同。
+ * 480px 档那条 `flex: 1 1 calc(50% - var(--space-sm))` 必须排在 768px 档**之后**
+ * （两条都命中时后者胜），顺序与它们在 `responsive.css` 里的先后一致。
+ * ════════════════════════════════════════════════════════════════ */
+
+.noteDetailHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-md);
+}
+
+.noteDetailActions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 768px) {
+  /* 原规则（NoteDetailHeader 内联）: display:flex; justify-content:space-between
+     标题与 8 个操作按钮同行，窄屏必然溢出 → 上下排列，按钮组允许换行。 */
+  .noteDetailHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .noteDetailActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .noteDetailActions :global(.btn) {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 笔记详情的操作按钮：一行两个，不再挤成"一个字一行"的竖排 */
+  .noteDetailActions :global(.btn) {
+    flex: 1 1 calc(50% - var(--space-sm));
+  }
+}

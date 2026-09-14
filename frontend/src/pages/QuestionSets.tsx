@@ -346,7 +346,12 @@ function AnswerSection({ answer, explanation }: { answer: string; explanation: s
       </button>
       {show && (
         <div>
-          <p style={{ fontSize: '0.875rem', color: '#10b981', lineHeight: 1.5 }}>
+          {/* 答案文字：原值 `#10b981` 白底只有 2.54:1（0.875rem，要求 4.5:1）——
+              与 a11y-audit 的 F-36（今日学习的「低」优先级徽章，同一个色值）
+              是同一次"亮绿压浅底"的洞。`#25714a` = `--color-success`，白底 5.93:1。
+              这行答案此前从未被任何一层判过（要点击「显示答案」才渲染），
+              本轮的 `question-sets` 场景会点开它，所以它现在有门禁。 */}
+          <p style={{ fontSize: '0.875rem', color: '#25714a', lineHeight: 1.5 }}>
             <strong>答案：</strong>{answer}
           </p>
           {explanation && (

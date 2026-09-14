@@ -101,7 +101,10 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
           )}
           {!loading && error && (
             <div>
-              <p style={{ color: '#f44336' }}>{error}</p>
+              {/* `var(--color-error)` 而不是字面量 `#f44336`：后者白底 3.68:1，
+                  压在 `--color-bg`（#faf9f7）上更低，而这行是 0.9rem 的错误文案
+                  （要求 4.5:1）。同一语义在 base.css 里有取值，不再各写一份。 */}
+              <p style={{ color: 'var(--color-error)' }}>{error}</p>
               <button className="btn btn-link" onClick={() => void load()}>
                 重试
               </button>

@@ -241,6 +241,16 @@ export default function QuickReview() {
       onKeyDown={handleKeyDown}
       style={{ maxWidth: 700, margin: '0 auto' }}
     >
+      {/* 页面标题（与已修的 F-32「答题复习」同一处判据：这一页此前
+          `<h1>`~`<h6>` 数量为 0，axe 判 page-has-heading-one）。
+          词取自项目里已有的说法：`ReviewProgress` 的文件头把四条复习流程
+          列成「答题复习 / **快速复习** / 今日学习 / 卡片复习」。
+          同样刻意**不用** `ReviewProgress` 的 `title`：那会把进度条挤到第二行，
+          而答题侧的排版本来就是"标题在别处 + 一行式进度条"（见该组件文件头）。 */}
+      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>
+        快速复习
+      </h1>
+
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress
         index={currentIndex}

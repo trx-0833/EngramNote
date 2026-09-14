@@ -136,7 +136,12 @@ export default function CardDetail() {
             style={{
               padding: '2px 8px',
               background: 'var(--color-accent-light)',
-              color: 'var(--color-accent)',
+              // 压在 `--color-accent-light`（rgba(201,169,89,.12) 叠白 = #f9f5eb）
+              // 上的是 0.75rem 的文字，`--color-accent`（#c9a959）在那里只有
+              // **2.07:1**（要求 4.5:1）—— 与 a11y-audit 的 F-19/F-33 是同一个
+              // "金色压浅底"的洞，只是这次不在 labels.ts 的颜色表里，是内联的。
+              // `#7d6417` 是同一支金压深后的取值：对该底色 5.19:1、对白底 5.66:1。
+              color: '#7d6417',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.75rem',
             }}
@@ -174,28 +179,34 @@ export default function CardDetail() {
         )}
       </div>
 
-      {/* 章节摘要 */}
+      {/* 章节摘要。
+          `h2` 而不是 `h3`：这一页的页面标题是卡片标题（h1），下面是**三个平级的
+          区块**（章节摘要 / 原始出处 / 关联题目）—— 中间本来就不存在第三级，
+          写成 h3 会让大纲变成 h1 → h3 跳级（axe 的 heading-order）。
+          字号与字重都显式钉着（`fontSize: '1rem'` / `fontWeight: 600`），
+          所以改级别**一个像素都没动** —— 这与已修的 F-14/F-15（`CardFace` 的
+          h3→h2）、F-18（笔记列表卡片标题 h3→h2）是同一个做法。 */}
       {card.summary && !editing && (
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>章节摘要</h3>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>章节摘要</h2>
           <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>{card.summary}</p>
         </div>
       )}
 
-      {/* 原始出处 */}
+      {/* 原始出处（与「章节摘要」同级，见上面的说明） */}
       {card.source_text && !editing && (
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>原始出处</h3>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>原始出处</h2>
           <blockquote style={{ borderLeft: '3px solid var(--color-primary)', paddingLeft: 'var(--space-md)', color: 'var(--color-text-secondary)', lineHeight: 1.6, margin: 0 }}>
             {card.source_text}
           </blockquote>
         </div>
       )}
 
-      {/* 关联题目 */}
+      {/* 关联题目（同上：与「章节摘要」同级的区块标题） */}
       {questions.length > 0 && !editing && (
         <div className="card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>关联题目 ({questions.length})</h3>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>关联题目 ({questions.length})</h2>
           {questions.map((q, idx) => (
             <div key={q.id} style={{ padding: 'var(--space-md)', borderBottom: idx < questions.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
               <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)', fontSize: '0.75rem' }}>

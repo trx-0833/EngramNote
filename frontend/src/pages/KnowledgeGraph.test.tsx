@@ -53,6 +53,13 @@ import {
 import type { GraphData, GraphNode, GraphStats, SuggestedRelation } from '../api/client'
 import ErrorBoundary from '../components/ErrorBoundary'
 import type { ForceGraphLink, ForceGraphNode } from '../components/graph/types'
+// 图谱的类名归模块所有（overhaul-plan 5.6 序 10）：字面量 `.graph-panel` 之流
+// 在产物里是哈希过的，必然查不到。这里改不动语义查询的几处（面板/建议卡片/
+// 结果项都是纯展示 div，没有角色可查，为测试加 role 属于产品改动），
+// 所以按规范 §6 的第二种做法用模块导出的类名 —— 与 `NoteAskPanel.test.tsx`
+// （`.ask-ai-panel`）、`StatCard.test.tsx` 同一处理。
+// 能改成语义查询的都已改：搜索框用的是 `getByPlaceholderText('搜索卡片...')`。
+import graphStyles from '../components/graph/Graph.module.css'
 
 // ── 画布库替身：捕获 props、暴露可点击的节点/边、提供与真实库同形的 ref API ──
 interface ForceGraphMockProps {
@@ -518,7 +525,7 @@ describe('图谱交互', () => {
 
     await userEvent.click(screen.getByTestId('fg-node-c-1'))
 
-    const panel = screen.getByText('节点详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('节点详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
     expect(within(panel).getByText('概念')).toBeInTheDocument()
     expect(within(panel).getByRole('button', { name: '查看知识点详情' })).toBeInTheDocument()
@@ -558,14 +565,14 @@ describe('图谱交互', () => {
     await waitFor(() => expect(mockedSearch).toHaveBeenCalledWith('区别', 15), { timeout: 2000 })
     const hit = await screen.findByText('浮充与均充的区别')
     // 结果项显示中文类型（"问答" 在类型下拉框里也有一份，所以必须限定在结果项内断言）
-    const item = hit.closest('.graph-search-result-item') as HTMLElement
+    const item = hit.closest(`.${graphStyles.graphSearchResultItem}`) as HTMLElement
     expect(within(item).getByText('问答')).toBeInTheDocument()
 
     await userEvent.click(hit)
 
     // 聚焦 = 画布真的被指挥去居中/放大 + 节点详情跟着切过去
     expect(fg.api?.zoom).toHaveBeenCalledWith(3, 400)
-    const panel = screen.getByText('节点详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('节点详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('浮充与均充的区别')).toBeInTheDocument()
   })
 
@@ -587,7 +594,7 @@ describe('图谱交互', () => {
 
     await userEvent.click(screen.getByTestId('fg-link-e-1'))
 
-    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('关系详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('相关')).toBeInTheDocument()
     expect(within(panel).getByText('建议')).toBeInTheDocument()
     expect(within(panel).getByText('0.82')).toBeInTheDocument()
@@ -631,7 +638,7 @@ describe('图谱交互', () => {
     await userEvent.click(screen.getByRole('button', { name: /建议/ }))
     expect(screen.getByText('建议关系 (2)')).toBeInTheDocument()
 
-    const card = screen.getByText('浮充的定义').closest('.graph-suggestion-card') as HTMLElement
+    const card = screen.getByText('浮充的定义').closest(`.${graphStyles.graphSuggestionCard}`) as HTMLElement
     await userEvent.click(within(card).getByRole('button', { name: '确认' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('关系已被他人确认'))
@@ -670,7 +677,7 @@ describe('图谱交互', () => {
     await screen.findByText('知识图谱')
     await userEvent.click(screen.getByRole('button', { name: /建议/ }))
 
-    const card = screen.getByText('浮充的定义').closest('.graph-suggestion-card') as HTMLElement
+    const card = screen.getByText('浮充的定义').closest(`.${graphStyles.graphSuggestionCard}`) as HTMLElement
     await userEvent.click(within(card).getByRole('checkbox'))
 
     const selectAll = screen.getByRole('checkbox', { name: '全选' }) as HTMLInputElement
@@ -769,7 +776,7 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     await screen.findByText('知识图谱')
 
     // 降级照旧：只少一段条形图，四个基础数字还在
-    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expect(document.querySelector(`.${graphStyles.graphStatsBarRow}`)).toBeNull()
     expect(screen.getByText('待确认')).toBeInTheDocument()
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1))
@@ -783,7 +790,7 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
 
     // 再走一次写操作后的重拉：加载路径与重拉路径都不该报警
     await userEvent.click(screen.getByTestId('fg-link-e-1'))
-    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('关系详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
 
@@ -820,7 +827,7 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
 
     // 写操作后重拉统计：漂移又出现了一次，但提示不该再来一条
     await userEvent.click(screen.getByTestId('fg-link-e-1'))
-    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('关系详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(mockedStats).toHaveBeenCalledTimes(2))
 
@@ -843,7 +850,7 @@ describe('写操作后重拉的调用顺序（抽取后必须逐字不变）', (
 
     mockedGraphData.mockImplementation(() => pendingGraph.promise)
     await userEvent.click(screen.getByTestId('fg-link-e-1'))
-    const panel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('关系详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     await userEvent.click(within(panel).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(mockedGraphData).toHaveBeenCalledTimes(2))
 
@@ -1011,7 +1018,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expect(screen.getByText('图谱统计')).toBeInTheDocument()
     expect(screen.getByText('待确认')).toBeInTheDocument()
     expect(screen.getByText('孤立节点')).toBeInTheDocument()
-    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expect(document.querySelector(`.${graphStyles.graphStatsBarRow}`)).toBeNull()
     expectNoCrash()
   })
 
@@ -1024,7 +1031,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
 
     // 确认待审边 → 页面会"重新拉取"图谱与统计，漂移发生在这一次重拉上
     await userEvent.click(screen.getByTestId('fg-link-e-1'))
-    const detailPanel = screen.getByText('关系详情').closest('.graph-panel') as HTMLElement
+    const detailPanel = screen.getByText('关系详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     await userEvent.click(within(detailPanel).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(mockedStats).toHaveBeenCalledTimes(2))
 
@@ -1035,7 +1042,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     // 与加载路径同判据：分布归一成空 → 面板保留四个基础数字，只是没有分布条，整页不白屏
     expect(screen.getByText('图谱统计')).toBeInTheDocument()
     expect(screen.getByText('待确认')).toBeInTheDocument()
-    expect(document.querySelector('.graph-stats-bar-row')).toBeNull()
+    expect(document.querySelector(`.${graphStyles.graphStatsBarRow}`)).toBeNull()
     expectNoCrash()
   })
 
@@ -1050,7 +1057,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     // 而不是把建议整批丢掉只显示"暂无建议关系"
     const panelTitle = screen.getByText(/建议关系 \(1\)/)
     expect(panelTitle).toBeInTheDocument()
-    const panel = panelTitle.closest('.graph-panel') as HTMLElement
+    const panel = panelTitle.closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
     expect(within(panel).getByText('均充的定义')).toBeInTheDocument()
     expect(within(panel).getByText(/相似度: 0\.87/)).toBeInTheDocument()
@@ -1081,7 +1088,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
 
     // 与加载路径同判据：拆包后照常渲染出这条建议，而不是崩到错误边界、也不是"暂无建议关系"
     const panelTitle = await screen.findByText(/建议关系 \(1\)/)
-    const panel = panelTitle.closest('.graph-panel') as HTMLElement
+    const panel = panelTitle.closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()
     expect(within(panel).getByText('均充的定义')).toBeInTheDocument()
     expect(within(panel).getByText(/相似度: 0\.87/)).toBeInTheDocument()
@@ -1122,7 +1129,7 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
 
     await userEvent.click(screen.getByTestId('fg-node-c-1'))
 
-    const panel = screen.getByText('节点详情').closest('.graph-panel') as HTMLElement
+    const panel = screen.getByText('节点详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement
     expect(within(panel).getByText('未知来源')).toBeInTheDocument()
     // 详情其余字段照常可用：标题、关联数与两个入口按钮都在
     expect(within(panel).getByText('浮充的定义')).toBeInTheDocument()

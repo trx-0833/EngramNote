@@ -1,0 +1,427 @@
+/**
+ * 侧边栏（+ 移动端抽屉）的私有样式
+ * （overhaul-plan 5.6 序 9：`layout.css` 按归属拆分 + `responsive.css` 的同一批规则随行）
+ *
+ * ## 从哪来（全项目 grep 只命中 `components/Sidebar.tsx`）
+ *
+ * - `src/styles/layout.css`：`.sidebar` `.sidebar-collapsed` `.sidebar-mobile-open`
+ *   `.sidebar-header` `.sidebar-logo`(+`:hover`) `.sidebar-collapse-btn`(+`:hover`)
+ *   `.sidebar-mobile-close`(+`:hover`) `.sidebar-body` `body.sidebar-open-lock`
+ *   `.sidebar-section` `.sidebar-section-title` `.sidebar-item-row` `.sidebar-item`(+`:hover`)
+ *   `.sidebar-item-active` `.sidebar-item-icon` `.sidebar-item-label` `.sidebar-item-action`(+`:hover`)
+ *   `.sidebar-divider` `.sidebar-footer` `.sidebar-overlay`，以及 `.sidebar-collapsed` 的 6 条后代规则；
+ * - `src/styles/responsive.css`：768px 档 11 条（抽屉宽度/位移、折叠态在抽屉里一律按展开
+ *   形态渲染、关闭与汉堡按钮的 44px 触控目标、`.sidebar-item` 44px 触控目标…）
+ *   + 480px 档 1 条（抽屉宽度 88vw）。
+ *
+ * 两半**必须同批处理**：类名一旦被哈希，留在 `responsive.css` 里的选择器就
+ * 再也选不中它（规则还在、永不生效）—— 计划 §5 雷区 2、规范 §3 雷区 2。
+ * 类名按规范 §3 写成 camelCase（TSX 里是 `styles.sidebarItem`）。
+ *
+ * ## 规则顺序 = 行为，逐条保持原样
+ *
+ * 这批规则里有 5 处纯粹靠**先后**决定胜负（媒体查询不增加权重）：
+ *
+ * | 得主 | 被压的 | 依据 |
+ * |---|---|---|
+ * | 768px `.sidebar, .sidebar-collapsed { width: min(86vw…) ; transform: translateX(-100%) }` | 顶层 `.sidebar { width: var(--sidebar-width) }` / `.sidebar-collapsed { width: … }` | 同权重、媒体块在后 |
+ * | 768px `.sidebar-mobile-open { transform: translateX(0) }` | 上面那条 `translateX(-100%)` | 同权重、**同在一个媒体块内且更靠后** |
+ * | 768px `.sidebar-collapsed .sidebar-item { justify-content: flex-start; padding }` | 顶层 `.sidebar-collapsed .sidebar-item { justify-content: center; padding }` | 同上 |
+ * | 480px `.sidebar, .sidebar-collapsed { width: 88vw }` | 768px 档那条宽度 | 480 块在 768 块之后 |
+ * | `.sidebar-item-active` / `:hover` 那几对 | 基础 `.sidebar-item` | 权重或先后（选择器一字未改） |
+ *
+ * 所以本文件的排版是**先全部基础规则、后两个媒体块（768 → 480）**。
+ * 想调整顺序前请先读上面这张表：`transform: translateX(0)` 一旦排到
+ * `translateX(-100%)` 前面，抽屉就再也打不开了 —— 这一条已经固化成
+ * `scripts/verify-built-css.mjs` 的 `ORDER_PAIRS`（产物级自动检查）。
+ *
+ * ## 两处必须特殊处理的地方
+ *
+ * 1. **`body.sidebar-open-lock` → `body.sidebarOpenLock`**：类名挂在
+ *    `document.body` 上（`Sidebar.tsx` 的 effect），选择器保持"元素 + 类"的形态，
+ *    产物里是 `body._sidebarOpenLock_hash`，权重 (0,1,1) 与原来相同。
+ * 2. **`@keyframes fadeIn` 必须复制进来并改名**（雷区 1 的第七次实例）：
+ *    `.sidebar-overlay` 写的是裸名 `animation: fadeIn 0.2s ease`，而 `fadeIn`
+ *    定义在全局 `base.css`。搬进模块后动画名会被一起哈希，定义却留在原处
+ *    ⇒ 产物里指向一个不存在的 `@keyframes`，遮罩的淡入**静默消失**
+ *    （源码与规则清单都看不出来，只有产物能）。这里把动画体逐字复制成
+ *    `sidebarOverlayFadeIn`；`base.css` 的原版**不删**（`page-enter` 等还在用）。
+ */
+
+/* ══ 侧边栏本体 ══ */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: width 0.25s var(--ease-out-expo);
+  overflow: hidden;
+}
+
+.sidebarCollapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-md);
+  height: 56px;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
+}
+
+.sidebarLogo {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 700;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  cursor: pointer;
+  border: none;
+  background-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.sidebarLogo:hover {
+  opacity: 0.8;
+}
+
+.sidebarCollapsed .sidebarLogo {
+  font-size: 1.3rem;
+}
+
+.sidebarCollapseBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebarCollapseBtn:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.sidebarCollapsed .sidebarCollapseBtn {
+  width: 100%;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* 移动端抽屉的关闭按钮：由 Sidebar 组件在 mobileOpen 时渲染，
+   桌面上这份样式不会出现（桌面侧边栏常驻，没有"关掉它"这回事）。 */
+.sidebarMobileClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebarMobileClose:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.sidebarBody {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-sm) var(--space-sm);
+  /* 抽屉内滚动到边界时不要把手势传给背后的页面 */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 抽屉打开时锁住页面滚动（类名由 Sidebar 组件挂到 body 上）。
+   不锁的话，手指在遮罩上滑动会把背后的页面滚走，
+   关掉抽屉后用户会发现自己不知道被带到哪里了。
+   ⚠️ 选择器保持"元素 + 类"：产物里是 `body._sidebarOpenLock_hash`。 */
+body.sidebarOpenLock {
+  overflow: hidden;
+}
+
+.sidebarSection {
+  margin-bottom: var(--space-xs);
+}
+
+.sidebarSectionTitle {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sidebar-section-title);
+  padding: var(--space-sm) var(--space-sm) var(--space-xs) var(--space-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebarCollapsed .sidebarSectionTitle {
+  text-align: center;
+  padding: var(--space-sm) 0 var(--space-xs) 0;
+  font-size: 0;
+}
+
+.sidebarCollapsed .sidebarSectionTitle::after {
+  content: '···';
+  font-size: 0.6rem;
+  letter-spacing: 0;
+}
+
+/* 侧边栏的一行 = 导航按钮 +（可选的）行内快捷操作。
+   包一层 div 是为了让两者成为**兄弟**而不是父子：<button> 里嵌 <button>
+   是非法 HTML（React: validateDOMNesting 警告），键盘与读屏也没法把
+   「笔记列表」和「上传资料」当成两个独立目标。
+   行本身当定位上下文，操作按钮才能绝对定位钉在右端 ——
+   这样导航按钮仍整行铺满，悬停高亮的范围与改动前一致。 */
+.sidebarItemRow {
+  position: relative;
+}
+
+/* 带快捷操作的那一行，给标签留出 + 的位置：
+   38px = 8px(按钮自身右内边距) + 22px(+ 的宽度) + 8px(原来是 flex gap)，
+   与「+ 嵌在按钮里」时标签可用宽度完全相同，长标签不会滑到 + 底下。
+   ⚠️ `:has()` 里的类名也必须一起改成 camelCase —— 它是同一个模块的类。 */
+.sidebarItemRow:has(.sidebarItemAction) .sidebarItem {
+  padding-right: 38px;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--sidebar-item-radius);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 450;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.sidebarItem:hover {
+  background: var(--sidebar-item-hover);
+  color: var(--color-primary);
+}
+
+.sidebarItemActive {
+  background: var(--sidebar-item-active);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.sidebarItemIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.sidebarItemLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebarCollapsed .sidebarItem {
+  justify-content: center;
+  padding: var(--space-sm) 0;
+}
+
+.sidebarCollapsed .sidebarItemLabel {
+  display: none;
+}
+
+.sidebarItemAction {
+  /* 与导航按钮是兄弟节点（见 .sidebarItemRow）：绝对定位钉在行的右端，
+     几何位置与"曾经嵌在按钮里"时一致 —— 右边缘距行尾 8px（= 原来的右内边距），
+     垂直居中（原来是 flex 的 align-items: center）。 */
+  position: absolute;
+  right: var(--space-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  color: var(--color-text-tertiary);
+  transition: all 0.15s ease;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sidebarItemAction:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.sidebarCollapsed .sidebarItemAction {
+  display: none;
+}
+
+/* ⚠️ 死规则，**逐字搬来不删**：全项目没有任何 tsx 挂 `.sidebar-divider`
+   （grep 0 处）。本轮的契约是"证明什么都没丢"，删死规则属于"死代码清理"，
+   混进来会让"丢失 0"这条证据同时包含两种语义（与第一批的
+   `.cleaning-progress*`、第二批的 `.ask-ai-sources` 同一处理）。
+   待办登记在计划 §7.0 第 2 条。 */
+.sidebarDivider {
+  height: 1px;
+  background: var(--sidebar-border);
+  margin: var(--space-sm) var(--space-md);
+}
+
+.sidebarFooter {
+  border-top: 1px solid var(--sidebar-border);
+  padding: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── 移动端侧边栏遮罩 ── */
+
+.sidebarOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 99;
+  animation: sidebarOverlayFadeIn 0.2s ease;
+}
+
+/* `animation: fadeIn …` 的动画体逐字复制（原版在 base.css，**不删**）：
+   CSS Modules 会把动画名一起哈希，裸名引用会在产物里悬空 ⇒ 遮罩淡入消失。 */
+@keyframes sidebarOverlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 窄屏（原 `responsive.css`，值一字未改；两块的先后与原来一致）
+ * ════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* ══ 导航：侧边栏 → 抽屉 ══ */
+
+  /* 原规则: .sidebar { position: fixed; width: var(--sidebar-width); }
+     .sidebar-collapsed { width: var(--sidebar-collapsed-width); }
+     手机上抽屉宽度按视口算；并且必须**同时覆盖 .sidebar-collapsed** ——
+     用户在桌面上收起过侧边栏时组件会把该类一起带上，
+     不覆盖的话抽屉只有 64px 宽、只剩图标（"每个入口都还能到达"当场失效）。 */
+  .sidebar,
+  .sidebarCollapsed {
+    width: min(86vw, var(--sidebar-width));
+    transform: translateX(-100%);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* ⚠️ 这一条必须留在这条媒体块的**最后面**（在 `.sidebar, .sidebarCollapsed` 之后）：
+     三个类名并列在同一个 <nav> 上、权重同为 (0,1,0)，媒体查询不增加权重，
+     得主只看这里的先后。顺序反了抽屉就再也滑不出来，而且源码/规则清单/冲突统计
+     都看不出来 —— 已固化成 `scripts/verify-built-css.mjs` 的 `ORDER_PAIRS`。 */
+  .sidebarMobileOpen {
+    transform: translateX(0);
+  }
+
+  /* 抽屉里一律按展开形态渲染：折叠态是桌面专有的表达 */
+  .sidebarCollapsed .sidebarItemLabel {
+    display: inline;
+  }
+
+  .sidebarCollapsed .sidebarItem {
+    justify-content: flex-start;
+    padding: var(--space-sm);
+  }
+
+  .sidebarCollapsed .sidebarSectionTitle {
+    text-align: left;
+    padding: var(--space-sm) var(--space-sm) var(--space-xs);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+  }
+
+  .sidebarCollapsed .sidebarSectionTitle::after {
+    content: none;
+  }
+
+  .sidebarCollapsed .sidebarItemAction {
+    display: flex;
+  }
+
+  /* 桌面折叠按钮在抽屉里没有意义（抽屉本身就是"收起"状态） */
+  .sidebarCollapseBtn {
+    display: none;
+  }
+
+  .sidebarMobileClose {
+    width: 44px;
+    height: 44px;
+    font-size: 1.25rem;
+  }
+
+  /* 触控目标：抽屉里每个入口 ≥44px（原：padding 4px 8px + 0.875rem ≈ 29px） */
+  .sidebarItem {
+    min-height: 44px;
+    font-size: 0.95rem;
+  }
+
+  .sidebarItemAction {
+    width: 32px;
+    height: 32px;
+    font-size: 1.25rem;
+  }
+
+  .sidebarSectionTitle {
+    padding-top: var(--space-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar,
+  .sidebarCollapsed {
+    width: 88vw;
+    max-width: var(--sidebar-width);
+  }
+}

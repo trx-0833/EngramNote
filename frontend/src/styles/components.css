@@ -108,6 +108,33 @@ button {
   width: 60%;
 }
 
+/* ── 按钮禁用态（overhaul-plan 5.6 序 12：从 `refinements.css` 收回本文件）──
+ *
+ * 原注释：**原样式：无 disabled 状态，禁用按钮仅靠浏览器默认外观**。
+ * 这两组规则一直住在补丁层里，收回本文件的**位置**是关键：
+ *   - `.btn:disabled` 与 `.btn-primary:hover` / `.btn-danger:hover` 权重相同
+ *     （都是 (0,2,0)：类 + 伪类），禁用的主按钮同时被悬停时，得主只看先后；
+ *   - 补丁层原来排在最后 ⇒ 禁用态赢。本文件里这两组排在全部 `:hover` 规则**之后**，
+ *     所以胜负关系逐字不变（真 Chromium 的 computed 对账过，见探针证据）。
+ *
+ * `pointer-events: auto` 是**刻意**的：禁用按钮仍要能显示 title tooltip，
+ * 误触发由 onClick 内部判断。 */
+.btn:disabled,
+.btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+  /* 保留 pointer-events: auto 使 disabled 按钮仍能显示 title tooltip；
+     通过 onClick 内部判断 disabled 状态防止误触发 */
+  pointer-events: auto;
+}
+
+.btn-primary:disabled,
+.btn-danger:disabled {
+  opacity: 0.6;
+}
+
 /* ── 输入框 ── */
 
 input, textarea {
@@ -151,15 +178,27 @@ input::placeholder, textarea::placeholder {
   transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
-/* ⚠️ 这条规则里的 `transform` 与 `box-shadow` 已被**删除**（overhaul-plan 5.6 序 5
- * 的冲突裁决）：`refinements.css` 对同一个选择器写了 `translateY(-2px)` 与
- * `--shadow-lg`，两者权重相同（都是 (0,1,0)），而它在 `main.tsx` 里更靠后
- * ⇒ 那边**一直**是胜者。真实 Chromium 读 computed 确认过（hover 时
- * `transform: matrix(1,0,0,1,0,-2)`、`box-shadow` = `--shadow-lg`）。
- * 这里只留下同值的 `border-color`；`transform` / `box-shadow` 归
- * `refinements.css` 那一份所有。序 12 拆掉那个补丁层时，应当把这两条值
- * **搬回本文件**，而不是在别处再写一遍。逐条表：5.6-09-conflict-resolution.md。 */
+/* ── 卡片悬停（overhaul-plan 5.6 序 12：从 `refinements.css` 收回本文件）──
+ *
+ * 这两条原来是**补丁层**的规则：`refinements.css` 在 `main.tsx` 里最后加载，
+ * 对同一个选择器写了 `translateY(-2px)` 与 `--shadow-lg`，权重与本文件那条
+ * `translateY(-1px)` / `--shadow-md` 相同（都是 (0,1,0)）⇒ 补丁层一直赢
+ * （序 5 用真实 Chromium 读过 computed：hover 时 `transform: matrix(1,0,0,1,0,-2)`、
+ * `box-shadow` = `--shadow-lg` 的值，逐条表见 5.6-09）。
+ * 序 5 当时把**输的两条**从本文件删掉、原地留了注释，指明了"序 12 拆补丁层时
+ * 应当把这两条值搬回本文件"——就是这里。现在 `.card-hover` 只有一个定义处，
+ * 不再存在"同权重、跨文件、靠导入顺序决胜负"的隐形竞争。
+ *
+ * 顺序也是行为：`.card-hover` 紧跟在 `.card` 之后（它的 `transition` 压
+ * `.card` 的 `transition`，两者权重相同、同在产物 `index.css` 里）。
+ * `verify-built-css.mjs` 的 `CASCADE_PAIRS` 钉住了这一条。 */
+.card-hover {
+  transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo);
+}
+
 .card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
   border-color: var(--color-border);
 }
 
@@ -228,44 +267,26 @@ input::placeholder, textarea::placeholder {
 /* 未知/空状态的显式兜底，避免拼不出类名时完全没有样式 */
 .status-unknown { color: var(--color-text-secondary); }
 
-/* ── 页面级布局挂点（响应式适配用）──
-   这些类只描述"这一行/这一块怎么排"，不含任何业务样式。
-   之所以要从 tsx 的内联样式搬过来：内联样式优先级高于媒体查询，
-   留在 tsx 里就等于放弃了对窄屏的适配能力（overhaul-plan §2.8 F-16）。
-   移动端的具体覆盖见 responsive.css。 */
+/* ── 页面级布局挂点（已整组搬进模块，overhaul-plan 5.6 序 8）──
+   这一段原本是 5 条"页面级布局挂点"（只描述这一行/这一块怎么排，不含业务样式，
+   当年从 tsx 的内联样式搬过来是因为内联样式压得过媒体查询）。
+   序 8 按归属搬到各自的组件模块，**连同 `responsive.css` 里对应的窄屏规则**
+   ——类名一旦被哈希，留在补丁层里的选择器就再也选不中它（雷区 2）：
 
-/* 笔记列表项：左侧正文 + 右侧操作按钮 */
-.note-list-item {
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+   | 原类名 | 去哪了 | 判据（grep 出的文件数） |
+   |---|---|---|
+   | `.note-list-item` `.note-list-actions` | `pages/NotesList.module.css` | 只命中 `pages/NotesList.tsx` |
+   | `.note-detail-header` `.note-detail-actions` | `pages/notedetail/NoteDetailHeader.module.css` | 只命中 `pages/notedetail/NoteDetailHeader.tsx` |
+   | `.edit-split` | `pages/notedetail/EditSplitView.module.css` | 只命中 `pages/notedetail/EditSplitView.tsx` |
 
-.note-list-actions {
-  display: flex;
-  gap: var(--space-sm);
-}
+   随行搬走的 `responsive.css` 规则：768px 档 7 条（`.note-list-item`、
+   `.note-list-item h3`、`.note-list-actions`、`.note-detail-header`、
+   `.note-detail-actions`、`.note-detail-actions .btn`、`.edit-split`）
+   + 480px 档 1 条（`.note-detail-actions .btn`）。
 
-/* 笔记详情页头部：标题 + 操作按钮组 */
-.note-detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-md);
-}
-
-.note-detail-actions {
-  display: flex;
-  gap: var(--space-sm);
-}
-
-/* 编辑模式：左编辑右预览的分屏 */
-.edit-split {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
-  gap: var(--space-md);
-}
+   ⚠️ `.note-list-item` 元素上还有全局的 `card card-hover`（见 `NotesList.tsx`）：
+   两者没有同名属性竞争（`.card` 管背景/边框/内边距/阴影，`.noteListItem`
+   管 cursor/display/justify-content/align-items），所以没有登记 `CASCADE_PAIRS`。 */
 
 /* ── 工具类 ── */
 
@@ -318,4 +339,140 @@ h1, h2, h3 {
 .heading-serif {
   font-family: var(--font-serif);
   font-weight: 700;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 预留的语义化类（零引用；overhaul-plan 5.6 序 12 从 `refinements.css` 收回）
+ *
+ * `refinements.css` 的原注释：「当前弹窗 DOM 使用 inline style 渲染，未挂载
+ * 语义化 className……待 tsx 后续接入 className 后可直接生效」。
+ * 全项目 grep **0 处引用**，所以按前几批的规矩**逐字搬来不删**（删死规则属于
+ * "死代码清理"，混进来会让"丢失 0"这条证据同时包含两种语义；计划 §7.0 第 2 条）。
+ *
+ * 为什么留在**全局层**而不是某个组件模块：`[style*=…]` 那 13 条一起被删之后，
+ * 已经没有"拥有它们的组件"可挂（`LinkManagerModal.tsx` 用的是 inline style，
+ * 一个类名都没挂）。硬塞进 `LinkManagerModal.module.css` 会有一个更现实的后果：
+ * **没有任何 tsx import 那个模块 ⇒ Vite 不会把它编进产物**，
+ * 这几条规则会从产物里凭空消失（规则清单差集当场报 6 条丢失）。
+ * 真正接入它们的那一轮，应当连同"把弹窗的内联样式改成类"一起做（那是改外观，
+ * 要带截图对比），届时再把这几条移进模块。
+ * ════════════════════════════════════════════════════════════════ */
+
+.link-modal {
+  max-width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 32px rgba(15, 52, 96, 0.12);
+}
+
+.material-list-item {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: var(--radius-md);
+  border-left: 3px solid transparent;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: background 0.2s var(--ease-out-expo), border-color 0.2s var(--ease-out-expo);
+}
+
+.material-list-item:hover {
+  background: var(--color-primary-light);
+}
+
+.material-list-item-selected {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-light);
+}
+
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.type-badge-material {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 窄屏（overhaul-plan 5.6 序 13：`responsive.css` 按归属清空）
+ *
+ * 这一节收的是"类名留全局、窄屏规则在补丁层"的那几条 —— 它们**不能**跟着
+ * 组件进模块（类名本来就是跨功能共用的），所以按归属收回各自的基础样式表。
+ * 逐条登记在 `scripts/css-migration-diff.mjs` 的 `BATCHES[].relocations`
+ * （双向自检：迁移前找得到、目标里落得下），值一个字未改。
+ *
+ * 位置语义：整个媒体块排在文件末尾 ⇒ 与原来"补丁层最后加载"的胜负关系一致。
+ * ════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* 桌面按钮高约 33px，手指按不准；移动端统一抬到 40px，
+     480px 以下再抬到 44px（见下一段）。 */
+  .btn {
+    min-height: 40px;
+  }
+
+  /* 输入控件同样抬到 40px（原：padding 8px 16px ≈ 37px 高）。
+     checkbox / radio 必须排除 —— 它们的固有尺寸是 13px 见方，
+     被拉成 40px 高会把整行撑开。原规则是裸元素选择器（没有类名可搬），
+     它属于规范 §4 第 1 条的"重置 / 基础元素选择器"，所以只能留在全局层。 */
+  select,
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea {
+    min-height: 40px;
+  }
+
+  /* 原规则（保留自改造前）: `.btn-ghost` 在窄屏收一档字号与左右内边距 ——
+     幽灵按钮常成排出现（项目卡片底部、图谱面板），桌面尺寸在手机上会挤成两行。 */
+  .btn-ghost {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+  }
+
+  /* 卡片是页面级容器：长英文/URL 不该把整页顶出横向滚动条。
+     另注：`.card` 的窄屏内边距收窄（`padding: var(--space-md)`）原来在
+     `refinements.css`，也在这一批收回本文件 —— 见下面那一节。 */
+  .card {
+    overflow-wrap: anywhere;
+  }
+
+  /* 卡片内边距收窄，留出更多内容空间（原 `refinements.css` 的补丁规则）：
+     它压的是本文件 `.card { padding: var(--space-lg) }`，同权重、媒体查询
+     不增加权重 ⇒ **必须排在那条之后**，也就是必须留在本媒体块里。 */
+  .card {
+    padding: var(--space-md);
+  }
+
+  /* 页头（标题 + 操作按钮）在各页面都是同一种内联 flex 行：
+     「知识卡片 / 今日资料 / 回收站 / 学习目标 / 卡片详情」的标题与按钮并排，
+     窄屏上标题被压成两三行、按钮挤到屏幕外 → 允许换行。
+     类名由各页面挂在同一个 div 上（5 个页面 ⇒ 规范 §4 第 2 条：留全局），
+     原本**只定义在 `responsive.css`** 里。 */
+  .page-header-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  /* 窄屏手机的触控目标按 44px 下限（Apple HIG / WCAG 2.5.5 的建议值） */
+  .btn {
+    min-height: 44px;
+  }
+
+  /* 图表标题在窄屏上按 1.25rem 会顶到换行，收一档 */
+  .heading-serif {
+    overflow-wrap: anywhere;
+  }
 }

@@ -69,3 +69,51 @@
     max-width: none;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════
+ * 列表项骨架（overhaul-plan 5.6 序 8）
+ *
+ * 从 `src/styles/components.css` 搬来 2 条（`.note-list-item` /
+ * `.note-list-actions`），并从 `src/styles/responsive.css` 的 768px 档搬来
+ * 3 条（`.note-list-item` / `.note-list-item h3` / `.note-list-actions`）——
+ * 全项目 grep 只命中 `pages/NotesList.tsx`。类名哈希后写在补丁层里的选择器
+ * 会永远选不中（雷区 2），所以窄屏规则必须跟着走；断点沿用 768px。
+ *
+ * ⚠️ 这两个类名挂在**同时还有全局 `card card-hover`** 的元素上
+ * （`<article className="card card-hover note-list-item">`）。逐属性核对过：
+ * `.card` 写的是 background / border / border-radius / padding / box-shadow /
+ * transition，`.noteListItem` 写的是 cursor / display / justify-content /
+ * align-items —— **没有同名属性**，所以没有登记 `CASCADE_PAIRS`
+ * （跨属性竞争那种盲区见计划 §5 雷区 12）。
+ * ════════════════════════════════════════════════════════════════ */
+
+.noteListItem {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.noteListActions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 768px) {
+  /* 笔记列表项：正文与"删除/重试"挤在同一行会把标题压成一条竖线，
+     窄屏改为上下两段，按钮靠右。 */
+  .noteListItem {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .noteListItem h3 {
+    overflow-wrap: anywhere;
+  }
+
+  .noteListActions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+}

@@ -105,8 +105,11 @@ const TARGETS: Target[] = [
   },
   {
     className: 'graph-search-input',
+    moduleClassName: 'graphSearchInput',
     tag: 'input',
-    owner: 'graph.css',
+    // 5.6 序 10：随 `graph.css` 整份搬进图谱功能模块，
+    // 所有权（以及这条护栏的 owner）跟着走
+    owner: 'components/graph/Graph.module.css',
     where: 'GraphToolbar.tsx 的图谱搜索框',
   },
 ]

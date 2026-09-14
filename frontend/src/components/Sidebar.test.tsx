@@ -16,6 +16,18 @@
  * - `.sidebar-item` 的 44px 触控高度、折叠态（collapsed）下标签由 CSS 恢复显示；
  * - 页面顶部内边距是否刚好让开汉堡按钮。
  * 本文件只钉"行为"：谁能关掉抽屉、点了之后状态变成什么。
+ *
+ * ## 关于类名（overhaul-plan 5.6 序 9 改过这一文件）
+ *
+ * 侧边栏的全部类名 + 窄屏规则原来住在全局的 `layout.css` / `responsive.css`，
+ * 序 9 搬进了 `Sidebar.module.css`（模块类名在产物里是哈希的）。
+ * 其中能改成语义查询的都改了（`getByRole` 本来就是这个文件的写法）；
+ * 剩下的是**类名本身就是判据**的几处 —— "遮罩这个装饰 div 存不存在"、
+ * "body 上有没有滚动锁"、"某一行是不是带 active 类"、"两个按钮是不是兄弟
+ * （= 同一行容器 `.sidebar-item-row` 的两个孩子）"。这些没有 ARIA 等价物，
+ * 所以按规范 §6 的第二种做法：`import styles from './Sidebar.module.css'`
+ * 用模块导出的类名查询。**没有**为了测试把任何一个类名留在全局 ——
+ * 那会让该类的窄屏规则永远无法随组件搬走（雷区 2）。
  */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -23,6 +35,8 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import Sidebar from './Sidebar'
+// 遮罩 / 滚动锁 / 行容器 / active 态的类名（哈希后只在模块里对得上）—— 见文件头
+import styles from './Sidebar.module.css'
 
 // useAuth 由 AuthContext 提供；这里只用到 logout 一个字段（vi.hoisted 让工厂能引用它）
 const auth = vi.hoisted(() => ({ logout: vi.fn() }))
@@ -115,11 +129,11 @@ describe('移动端抽屉：三条关闭路径', () => {
 
   it('★ 遮罩只在抽屉打开时渲染，点遮罩关闭抽屉', async () => {
     const { unmount } = renderSidebar({ mobileOpen: false })
-    expect(document.querySelector('.sidebar-overlay')).toBeNull()
+    expect(document.querySelector(`.${styles.sidebarOverlay}`)).toBeNull()
     unmount()
 
     const { onMobileClose } = renderSidebar({ mobileOpen: true })
-    const overlay = document.querySelector('.sidebar-overlay')
+    const overlay = document.querySelector(`.${styles.sidebarOverlay}`)
     expect(overlay).not.toBeNull()
     await userEvent.click(overlay as HTMLElement)
     expect(onMobileClose).toHaveBeenCalledTimes(1)
@@ -148,14 +162,14 @@ describe('移动端抽屉：打开时锁住页面滚动', () => {
         <Sidebar collapsed={false} onToggleCollapse={vi.fn()} mobileOpen onMobileClose={vi.fn()} />
       </MemoryRouter>,
     )
-    expect(document.body.classList.contains('sidebar-open-lock')).toBe(true)
+    expect(document.body.classList.contains(styles.sidebarOpenLock)).toBe(true)
 
     rerender(
       <MemoryRouter>
         <Sidebar collapsed={false} onToggleCollapse={vi.fn()} mobileOpen={false} onMobileClose={vi.fn()} />
       </MemoryRouter>,
     )
-    expect(document.body.classList.contains('sidebar-open-lock')).toBe(false)
+    expect(document.body.classList.contains(styles.sidebarOpenLock)).toBe(false)
   })
 
   it('★ 抽屉还开着就被卸载时也必须解锁（锁留在 body 上整页会再也滚不动）', () => {
@@ -164,14 +178,14 @@ describe('移动端抽屉：打开时锁住页面滚动', () => {
         <Sidebar collapsed={false} onToggleCollapse={vi.fn()} mobileOpen onMobileClose={vi.fn()} />
       </MemoryRouter>,
     )
-    expect(document.body.classList.contains('sidebar-open-lock')).toBe(true)
+    expect(document.body.classList.contains(styles.sidebarOpenLock)).toBe(true)
     unmount()
-    expect(document.body.classList.contains('sidebar-open-lock')).toBe(false)
+    expect(document.body.classList.contains(styles.sidebarOpenLock)).toBe(false)
   })
 
   it('抽屉没打开时不加锁（桌面端不该受影响）', () => {
     renderSidebar({ mobileOpen: false })
-    expect(document.body.classList.contains('sidebar-open-lock')).toBe(false)
+    expect(document.body.classList.contains(styles.sidebarOpenLock)).toBe(false)
   })
 })
 
@@ -186,7 +200,7 @@ describe('桌面形态不回归', () => {
   it('折叠态下当前路由的条目仍然带 active 类（收起不等于丢失选中态）', () => {
     renderSidebar({ collapsed: true, mobileOpen: true })
     const dashboard = screen.getByRole('button', { name: /仪表盘/ })
-    expect(dashboard.className).toContain('sidebar-item-active')
+    expect(dashboard.className).toContain(styles.sidebarItemActive)
   })
 })
 
@@ -213,10 +227,10 @@ describe('可交互元素不嵌套（5.9）', () => {
     expect(notesItem.querySelector('button, a, input, select, textarea, [role="button"]')).toBeNull()
 
     const action = screen.getByRole('button', { name: '上传资料' })
-    expect(action.className).toContain('sidebar-item-action')
-    // 同级 = 同一个 .sidebar-item-row 的两个孩子（+ 的位置由 layout.css 绝对定位负责）
+    expect(action.className).toContain(styles.sidebarItemAction)
+    // 同级 = 同一个行容器的两个孩子（+ 的位置由模块里的绝对定位负责）
     expect(action.parentElement).toBe(notesItem.parentElement)
-    expect(action.parentElement?.className).toContain('sidebar-item-row')
+    expect(action.parentElement?.className).toContain(styles.sidebarItemRow)
   })
 
   it('★ 侧边栏里任何可交互元素都不再套着可交互元素（不止笔记那一行）', () => {

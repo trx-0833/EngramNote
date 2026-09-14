@@ -52,8 +52,13 @@
  * 允许改动的范围（或把 hook 一起纳入那一批），再连这 5 条规则一起搬。
  *
  * ⚠️ `.markdown-body` 在 `responsive.css` 的 768px 档还有一整组规则
- * （字号、断词、表格横向滚动、KaTeX 兜底）——它们依赖同一批全局类名，
- * 本批同样不动（那属于最后一批"responsive.css 与组件级联一起处理"）。
+ * （字号、断词、表格横向滚动、KaTeX 兜底）—— 序 13 已把它们**收回本文件末尾的
+ * 媒体块**（`responsive.css` 要清空），这是"按归属回家"而不是迁移：类名本来就
+ * 留全局，`markdown.css` 就是拥有 `.markdown-body` 的样式表。
+ * ⚠️ 其中 `.markdown-body .katex { font-size: 1em }` 这一条**从未生效**：
+ * 它与 `markdown-extras.css` 顶层那条 `1.1em` 权重相同（都是 (0,2,0)），
+ * 而后者在产物里更靠后。收进本文件后它**依然**在后面，胜负关系逐字不变
+ * （想让它生效是"改外观"，得单开一轮带截图，见计划 §4.7）。
  */
 
 /* ── Markdown 渲染 ── */
@@ -167,4 +172,73 @@
   background: linear-gradient(90deg, var(--color-accent), rgba(37, 99, 235, 0.2));
   border-radius: 2px;
   transition: top 0.08s ease, left 0.08s ease, width 0.08s ease;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 窄屏（overhaul-plan 5.6 序 13：`responsive.css` 按归属清空）
+ *
+ * 这一组原来是 `responsive.css` 的 768px 档里最长的一段（13 条规则）。
+ * 类名全部留全局（规范 §4 第 2 / 4 条：`.markdown-body` 被三个不相邻功能使用，
+ * 正文 HTML 还是 `marked` 生成的字符串），所以按归属回到**定义它们的本文件**，
+ * 而不是硬塞进某个组件模块。值一个字未改，逐条登记在
+ * `scripts/css-migration-diff.mjs` 的 `BATCHES[].relocations`。
+ *
+ * 位置语义：整个媒体块排在文件末尾 ⇒ 与本文件顶层规则的关系与原来一致
+ * （原本 `responsive.css` 也在 `markdown.css` 之后加载）。唯一**看不见**的关系是
+ * `.markdown-body .katex { font-size: 1em }` 与 `markdown-extras.css` 的
+ * `1.1em` 之争：`main.tsx` 里 markdown.css 仍排在 markdown-extras.css 之前，
+ * 所以那条窄屏字号**依然不生效**（迁移前就如此，见文件头）。
+ * ════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* 原规则（markdown.css）: .markdown-body { font-size: 0.95rem; line-height: 1.8 }
+     手机上 15px 正文偏小，抬到 16px 并把行高放宽，保证每行 15–20 字的舒适行长。 */
+  .markdown-body {
+    font-size: 1rem;
+    line-height: 1.85;
+  }
+
+  .markdown-body h1 { font-size: 1.35rem; }
+  .markdown-body h2 { font-size: 1.2rem; }
+  .markdown-body h3 { font-size: 1.05rem; }
+
+  /* 长英文单词、URL、行内代码在窄屏上必须能断行 */
+  .markdown-body p,
+  .markdown-body li,
+  .markdown-body blockquote,
+  .markdown-body :not(pre) > code {
+    overflow-wrap: anywhere;
+  }
+
+  /* 宽表格：表格自身成为横向滚动容器（CSS 无法给表格套一层 wrapper，
+     display:block + overflow-x:auto 是纯 CSS 下唯一不丢表格语义的办法） */
+  .markdown-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .markdown-body th,
+  .markdown-body td {
+    padding: var(--space-xs) var(--space-sm);
+    white-space: normal;
+  }
+
+  /* 行间公式：原规则已有 overflow-x:auto，这里补上 max-width 与字号，
+     避免公式比容器宽时整页跟着横向滚动 */
+  .markdown-body .katex-block,
+  .markdown-body .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .markdown-body .katex {
+    font-size: 1em;
+  }
+
+  /* 代码块本身已有 overflow-x:auto，只收字号，让一屏能多看几列 */
+  .markdown-body pre {
+    font-size: 0.85rem;
+  }
 }

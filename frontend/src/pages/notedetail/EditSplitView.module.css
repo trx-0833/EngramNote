@@ -1,0 +1,120 @@
+/**
+ * 编辑模式：左编辑右预览的分屏（overhaul-plan 5.6 序 8）
+ *
+ * 从 `src/styles/components.css` 搬来 1 条（`.edit-split`），并从
+ * `src/styles/responsive.css` 的 768px 档搬来 1 条（`.edit-split { grid-template-columns: 1fr }`）。
+ * 全项目 grep 只命中本组件（`pages/notedetail/EditSplitView.tsx`）。
+ *
+ * ## 为什么窄屏那条必须跟着搬（css-convention.md §3 雷区 2）
+ *
+ * 分屏的基础规则自带内在尺寸（`minmax(min(320px, 100%), 1fr)`），窄屏本来就会
+ * 收成一栏；768px 那条是**显式兜底**，保证手机上一定是单栏。
+ * 类名一旦被哈希，留在 `responsive.css` 里的选择器就选不中任何东西 ——
+ * 规则还在、永不生效，且没有任何报错。
+ *
+ * 两条规则现在同住本文件、**顺序与原来一致（基础在前、768px 在后）**：
+ * 媒体查询不增加权重，得主只由先后决定，所以顺序就是行为的一部分。
+ *
+ * ## 本模块里搬进来的第二个类名：`.markdown-editor`
+ *
+ * `EditSplitView.tsx` 的 `<textarea className={`${styles.markdownEditor} card`}>`
+ * 用的是 `refinements.css` 的补丁规则（序 12 搬进来）。它的绝大多数声明被 tsx 的
+ * **内联样式**压掉（内联样式权重最高），只有 padding / color / background / transition
+ * 与 768px 的 padding 真正生效 —— 搬它时按这个事实逐条交代，没有顺手删死声明。
+ */
+.editSplit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--space-md);
+}
+
+@media (max-width: 768px) {
+  /* 编辑分屏：两栏在手机上并排等于两栏都不能用 */
+  .editSplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 编辑器与编辑工具栏（overhaul-plan 5.6 序 12：`refinements.css` 按归属拆分）
+ *
+ * 两个类名全项目 grep 只命中本组件（`pages/notedetail/EditSplitView.tsx`）：
+ *   - `.markdown-editor` 是那个 `<textarea>`（`className="markdown-editor card"`）；
+ *   - `.edit-toolbar` 是**预留样式**（当前按钮组用 inline style 排列，tsx 还没挂它）
+ *     —— 按前几批的规矩**逐字搬来不删**，死规则清理单独一轮
+ *     （计划 §7.0 第 2 条）。将来接入时写 `styles.editToolbar` 即可。
+ *
+ * ## ⚠️ 这个 textarea 的绝大多数声明被**内联样式**压着（搬之前就如此）
+ *
+ * tsx 的 `style={{ width, minHeight, fontFamily, fontSize, lineHeight, resize,
+ * border, borderRadius, outline }}` 权重最高，所以 `.markdown-editor` 里
+ * `width / min-height / font-family / font-size / line-height / resize / border /
+ * border-radius` 这些声明**一条都不生效**，两条媒体查询里的
+ * `min-height: 360px/280px`、`font-size: 13px` 同样不生效。
+ * 真正生效的只有 `padding`、`color`、`background`、`transition`
+ * 与 768px 档的 `padding: var(--space-md)`。
+ *
+ * 这不是本批造成的，本批的契约是"逐字搬、渲染不变"：所以上面每一条都照抄，
+ * 没有顺手删死声明（那属于"死代码清理"）。真 Chromium 的 computed 对账
+ * （探针 `notedetail-edit-mobile`）证明搬迁前后逐属性一致。
+ * ════════════════════════════════════════════════════════════════ */
+
+.markdownEditor {
+  width: 100%;
+  min-height: 500px;
+  padding: var(--space-lg);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  transition: border-color 0.2s var(--ease-out-expo), box-shadow 0.2s var(--ease-out-expo);
+}
+
+.markdownEditor:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+/* 预留样式：当前编辑/预览/保存/取消按钮组用 inline style 排列，此样式供后续接入 */
+.editToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+@media (max-width: 768px) {
+  /* 编辑器在小屏下降低最小高度与字号 */
+  .markdownEditor {
+    min-height: 360px;
+    font-size: 13px;
+    padding: var(--space-md);
+  }
+
+  /* 工具栏允许换行 */
+  .editToolbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .markdownEditor {
+    min-height: 280px;
+  }
+
+  /* 小屏下按钮组按钮占满宽度。
+     ⚠️ `.btn` 是**全局类**（components.css），必须写 `:global(...)`，
+     否则会被一起哈希、产物里选不中任何按钮；权重仍是 (0,2,0)。 */
+  .editToolbar :global(.btn) {
+    flex: 1;
+  }
+}

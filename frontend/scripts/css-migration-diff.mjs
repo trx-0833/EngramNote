@@ -50,7 +50,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseRules, classesOf, findRecentRev, readFromGit } from './lib/css-parse.mjs'
+import { parseRules, classesOf, findRecentRev, readFromGit, splitSelectors } from './lib/css-parse.mjs'
 
 const root = process.cwd()
 
@@ -521,6 +521,939 @@ const BATCHES = [
       },
     ],
   },
+  {
+    id: '第五批（序 8）：components.css 的页面级布局挂点（note-detail / note-list / edit-split）',
+    // 本批尚未提交 → 迁移前按内容自动定位（= 第四批提交后的状态）。
+    // 两个来源：components.css（5 条页面级布局挂点）、responsive.css（同一批类名的
+    // 窄屏规则 8 条：768px 档 7 条 + 480px 档 1 条）—— 两半必须同批处理，
+    // 留一半在补丁层里 = 规则还在、永不生效（计划 §5 雷区 2）。
+    beforeSheets: ['src/styles/components.css', 'src/styles/responsive.css'],
+    groups: [
+      {
+        module: 'src/pages/notedetail/NoteDetailHeader.module.css',
+        classes: ['note-detail-header', 'note-detail-actions'],
+      },
+      {
+        module: 'src/pages/NotesList.module.css',
+        classes: ['note-list-item', 'note-list-actions'],
+      },
+      {
+        module: 'src/pages/notedetail/EditSplitView.module.css',
+        classes: ['edit-split'],
+      },
+    ],
+    // 本批没有需要提权的规则：`.noteDetailActions :global(.btn)` 里的 `:global`
+    // 不是提权，而是**保住原来的后代选择器**（`.note-detail-actions .btn`，权重 (0,2,0)）——
+    // 不写 `:global` 的话 `.btn` 会被一起哈希，产物里指向一个不存在的类名。
+    // 权重与原来逐字相同，所以不是 `hardened`（那是"权重只升不降"的声明）。
+    hardened: {},
+    // 本批不搬 `@keyframes`：这批规则里一条 `animation` 都没有。
+    keyframes: [],
+  },
+  {
+    id: '第六批（序 9）：layout.css 按归属拆分（Sidebar / App 骨架）+ responsive.css 同批规则',
+    // 本批尚未提交 → 迁移前按内容自动定位（= 第五批提交后的状态）。
+    // 两个来源：layout.css（侧边栏整节 + `.app-layout*` + `.sidebar-mobile-toggle`，
+    // 共 27 条）与 responsive.css（命中同一批类名的窄屏规则 12 条：
+    // 768px 档 11 条 + 480px 档 1 条）。两半必须同批 —— 留一半在补丁层里
+    // 就是"规则还在、永不生效"（计划 §5 雷区 2）。
+    beforeSheets: ['src/styles/layout.css', 'src/styles/responsive.css'],
+    groups: [
+      {
+        // 留全局的：`.navbar*`（5 条，grep 0 处引用 —— 没有归属组件可搬，
+        // 死规则留到"死 CSS 清理"轮，见 layout.css 文件头）
+        module: 'src/components/Sidebar.module.css',
+        classes: [
+          'sidebar',
+          'sidebar-collapsed',
+          'sidebar-mobile-open',
+          'sidebar-header',
+          'sidebar-logo',
+          'sidebar-collapse-btn',
+          'sidebar-mobile-close',
+          'sidebar-body',
+          'sidebar-open-lock',
+          'sidebar-section',
+          'sidebar-section-title',
+          'sidebar-item-row',
+          'sidebar-item',
+          'sidebar-item-active',
+          'sidebar-item-icon',
+          'sidebar-item-label',
+          'sidebar-item-action',
+          'sidebar-divider',
+          'sidebar-footer',
+          'sidebar-overlay',
+        ],
+      },
+      {
+        module: 'src/App.module.css',
+        classes: ['app-layout', 'app-layout-collapsed', 'sidebar-mobile-toggle'],
+      },
+    ],
+    // 本批没有需要提权的规则。`.app-layout .container` 里的 `:global(.container)`
+    // 不是提权而是**保住全局类名**（`.container` 留在 components.css）：
+    // 产物是 `._appLayout_hash .container`，权重仍 (0,2,0)，与迁移前逐字相同。
+    hardened: {},
+    // `.sidebar-overlay` 写的是裸名 `animation: fadeIn`（定义在 base.css）——
+    // 搬进模块后动画名会被一起哈希而定义留在原处 ⇒ 遮罩淡入静默消失。
+    // 动画体逐字复制成 `sidebarOverlayFadeIn`（雷区 1 的第七次实例）。
+    keyframes: [
+      {
+        fromSheet: 'src/styles/base.css',
+        orig: 'fadeIn',
+        module: 'src/components/Sidebar.module.css',
+        renamed: 'sidebarOverlayFadeIn',
+      },
+    ],
+    /**
+     * 本批唯一"工具原本看不见"的搬家：`responsive.css` 顶部的
+     * `:root { --page-pad-y-top: 64px; --page-pad-y-bottom: var(--space-md) }`
+     * （480px 档另有 60px / var(--space-sm)）。
+     *
+     * `:root` 的选择器里**一个类名都没有**，所以它从来不在差集的视野里
+     * （`classesOf` 是空的）—— 不登记的话，这条被搬走的声明永远不会被任何检查看见。
+     * 两个变量随 `.app-layout` 收进 `src/App.module.css` 的 `.appLayout`：
+     * 它们的两处读者（`.app-layout .container` 与图谱模块的 `.graph-page`）
+     * 都在 `.app-layout` 的子树里，继承关系与计算值完全相同；
+     * `:root` 属于令牌层（base.css），补丁层不该定义全局令牌（规范 §2）。
+     * 自定义属性名不参与 CSS Modules 哈希，变量名与值一个字未改。
+     */
+    relocations: [
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '', selector: ':root', prop: '--page-pad-y-top', value: '64px' },
+        to: { file: 'src/App.module.css', context: '', selector: '.appLayout' },
+        why: '`:root` 里没有类名 → 差集看不见；随 `.appLayout` 收进模块（值不变）',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '', selector: ':root', prop: '--page-pad-y-bottom', value: 'var(--space-md)' },
+        to: { file: 'src/App.module.css', context: '', selector: '.appLayout' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 480px)',
+          selector: ':root',
+          prop: '--page-pad-y-top',
+          value: '60px',
+        },
+        to: { file: 'src/App.module.css', context: '@media (max-width: 480px)', selector: '.appLayout' },
+        why: '窄屏覆盖值随同一条规则搬（480px 档）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 480px)',
+          selector: ':root',
+          prop: '--page-pad-y-bottom',
+          value: 'var(--space-sm)',
+        },
+        to: { file: 'src/App.module.css', context: '@media (max-width: 480px)', selector: '.appLayout' },
+        why: '同上',
+      },
+    ],
+  },
+  {
+    id: '第七批（序 10）：graph.css 整份进图谱模块 + responsive.css 同批规则',
+    // 本批尚未提交 → 迁移前按内容自动定位（= 第六批提交后的状态）。
+    beforeSheets: ['src/styles/graph.css', 'src/styles/responsive.css'],
+    groups: [
+      {
+        // 整个图谱功能一份模块：`.graph-panel` / `.graph-panel-title` /
+        // `.graph-legend` / `.graph-legend-item` 被两个以上组件共用，
+        // 拆开只会复制或逼出跨目录 import（理由写在 Graph.module.css 文件头）。
+        module: 'src/components/graph/Graph.module.css',
+        classes: [
+          'graph-page',
+          'graph-page-main',
+          'graph-sidebar',
+          'graph-canvas',
+          'graph-toolbar',
+          'graph-toolbar-left',
+          'graph-toolbar-right',
+          'graph-legend',
+          'graph-legend-item',
+          'graph-legend-item-active',
+          'graph-legend-dot',
+          'graph-btn',
+          'graph-btn-active',
+          'graph-badge',
+          'graph-create-hint',
+          'graph-panel',
+          'graph-panel-title',
+          'graph-suggestion-card',
+          'graph-relation-line',
+          'graph-controls',
+          'graph-control-btn',
+          'graph-minimap',
+          'graph-suggestion-score-bar',
+          'graph-suggestion-score-bar-fill',
+          'graph-stats-grid',
+          'graph-stat-item',
+          'graph-stat-value',
+          'graph-stat-label',
+          'graph-stats-bar-row',
+          'graph-stats-bar-label',
+          'graph-stats-bar-track',
+          'graph-stats-bar-fill',
+          'graph-stats-bar-count',
+          'graph-search-box',
+          'graph-search-input',
+          'graph-search-spinner',
+          'graph-search-results',
+          'graph-search-result-item',
+          'graph-search-result-dot',
+          'graph-search-result-title',
+          'graph-search-result-type',
+          'graph-filter-select',
+          'graph-neighbor-item',
+          'graph-neighbor-dot',
+          'graph-neighbor-title',
+          'graph-neighbor-rel',
+          'graph-neighbor-count',
+        ],
+      },
+    ],
+    // 本批没有需要提权的规则：所有选择器都是单类或"类 + 元素/伪类"，
+    // 没有"全局类 + 模块类并列写在同一个元素"的情况（与第三、四批同理）。
+    hardened: {},
+    // `.graph-search-spinner` 的裸名 `animation: graph-spin` —— 动画体逐字复制成
+    // 模块里的 `graphSpin`；全局原版留在 graph.css（**不删**），
+    // 理由写在 graph.css 与 Graph.module.css 的文件头。
+    keyframes: [
+      {
+        fromSheet: 'src/styles/graph.css',
+        orig: 'graph-spin',
+        module: 'src/components/graph/Graph.module.css',
+        renamed: 'graphSpin',
+      },
+    ],
+    /**
+     * `responsive.css` 的两条**四选择器组**：`.filter-pill` / `.segment-btn`
+     * 留全局、`.graph-btn` / `.graph-control-btn` 进模块 ⇒ 组必须拆开。
+     * 不登记的话差集会报"1 条丢失 + 1 条新增"，而两边其实一个值都没改。
+     */
+    relocations: [
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn, .graph-control-btn',
+          prop: 'min-height',
+          value: '40px',
+        },
+        to: {
+          file: 'src/components/graph/Graph.module.css',
+          context: '@media (max-width: 768px)',
+          selector: '.graphBtn, .graphControlBtn',
+        },
+        why: '图谱两个类进模块（`.filter-pill, .segment-btn` 那半留在 responsive.css 等序 13）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn',
+          prop: 'padding-left',
+          value: 'var(--space-md)',
+        },
+        to: { file: 'src/components/graph/Graph.module.css', context: '@media (max-width: 768px)', selector: '.graphBtn' },
+        why: '同上（选择器组拆开，值不变）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn',
+          prop: 'padding-right',
+          value: 'var(--space-md)',
+        },
+        to: { file: 'src/components/graph/Graph.module.css', context: '@media (max-width: 768px)', selector: '.graphBtn' },
+        why: '同上（选择器组拆开，值不变）',
+      },
+    ],
+  },
+  {
+    id: '第八批（序 12）：refinements.css 按归属拆分（补丁层清空）',
+    // 本批尚未提交 → 迁移前按内容自动定位（= 第七批提交后的状态）。
+    // 两个来源：refinements.css（38 条）与 responsive.css（该文件里的
+    // `[style*="rgba(0,0,0,0.5)"] { padding }` 一条 —— 与 refinements 那 12 条同类，一起裁决）。
+    beforeSheets: ['src/styles/refinements.css', 'src/styles/responsive.css'],
+    groups: [
+      {
+        // `.markdown-editor` = 分屏左边的 textarea；`.edit-toolbar` 是零引用的预留样式
+        // （逐字搬、不删，死代码清理单独一轮）
+        module: 'src/pages/notedetail/EditSplitView.module.css',
+        classes: ['markdown-editor', 'edit-toolbar'],
+      },
+    ],
+    // 本批没有需要提权的规则；`.editToolbar :global(.btn)` 里的 `:global` 是
+    // **保住全局类名**（`.btn` 留在 components.css），权重 (0,2,0) 与原来相同。
+    hardened: {},
+    keyframes: [],
+    /**
+     * 没有进模块的那些规则：类名留全局（`.card-hover` / `.btn:disabled` /
+     * `.filter-pill` / `.segment-btn` / `.card`），所以按归属搬回**拥有该类名的
+     * 全局样式表**；选择器文本与值一个字未改。逐条双向自检。
+     */
+    relocations: [
+      // ── `.btn` 的禁用态 → components.css（放在全部 `:hover` 规则之后，顺序即行为）──
+      { prop: 'cursor', value: 'not-allowed' },
+      { prop: 'opacity', value: '0.55' },
+      { prop: 'transform', value: 'none' },
+      { prop: 'box-shadow', value: 'none' },
+      { prop: 'pointer-events', value: 'auto' },
+    ].map((d) => ({
+      from: {
+        sheet: 'src/styles/refinements.css',
+        context: '',
+        selector: '.btn:disabled, .btn[disabled]',
+        prop: d.prop,
+        value: d.value,
+      },
+      to: { file: 'src/styles/components.css', context: '', selector: '.btn:disabled, .btn[disabled]' },
+      why: '全局公共件 `.btn` 的禁用态回家；与 `.btn-*-hover` 同权重 ⇒ 必须排在它们之后（本文件里就在后面）',
+    })).concat([
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.btn-primary:disabled, .btn-danger:disabled',
+          prop: 'opacity',
+          value: '0.6',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '',
+          selector: '.btn-primary:disabled, .btn-danger:disabled',
+        },
+        why: '同上',
+      },
+      // ── `.card-hover`：序 5 裁决出来的**胜者**搬回全局卡片定义处 ──
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.card-hover',
+          prop: 'transition',
+          value:
+            'transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo)',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover' },
+        why: '序 5 的裁决结论：胜者在补丁层 ⇒ 拆补丁层时把值搬回 `.card` 旁边（现在只有一个定义处）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.card-hover:hover',
+          prop: 'transform',
+          value: 'translateY(-2px)',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+        why: '序 5 实测胜者（hover 时 computed transform = matrix(1,0,0,1,0,-2)）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.card-hover:hover',
+          prop: 'box-shadow',
+          value: 'var(--shadow-lg)',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+        why: '序 5 实测胜者（hover 时 computed box-shadow = --shadow-lg 的值）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.card-hover:hover',
+          prop: 'border-color',
+          value: 'var(--color-border)',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+        why: '这一条两边本来就同值（序 5 只删了输的两条），一起收口到同一个定义处',
+      },
+      // ── `.card` 的窄屏内边距 → components.css 的 768 块 ──
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '@media (max-width: 768px)',
+          selector: '.card',
+          prop: 'padding',
+          value: 'var(--space-md)',
+        },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.card' },
+        why: '压的是同文件的 `.card { padding: var(--space-lg) }`，媒体块在文件末尾 ⇒ 胜负关系不变',
+      },
+      // ── `.filter-pill` / `.segment-btn` 的指示线 → learning.css（定义它们的地方）──
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill', prop: 'position', value: 'relative' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill' },
+        why: '两个类名的定义在 learning.css（4 个页面 / 2 个功能在用 ⇒ 留全局）',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'content', value: "''" },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '金色指示线随类名回家',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'position', value: 'absolute' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'bottom', value: '-2px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'left', value: '50%' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'width', value: '0' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'height', value: '2px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'background', value: 'var(--gradient-gold)' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'border-radius', value: '1px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'transform', value: 'translateX(-50%)' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.filter-pill::after',
+          prop: 'transition',
+          value: 'width 0.25s var(--ease-out-expo)',
+        },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill-active::after', prop: 'width', value: '60%' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill-active::after' },
+        why: '激活态；必须排在 `.filter-pill::after` 之后（同权重）',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn', prop: 'position', value: 'relative' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn' },
+        why: '同上（`.segment-btn` 的定义也在 learning.css）',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'content', value: "''" },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'position', value: 'absolute' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'bottom', value: '1px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'left', value: '20%' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'width', value: '0' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'height', value: '2px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'background', value: 'var(--color-accent)' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'border-radius', value: '1px' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.segment-btn::after',
+          prop: 'transition',
+          value: 'width 0.25s var(--ease-out-expo)',
+        },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn-active::after', prop: 'width', value: '60%' },
+        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn-active::after' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill',
+          prop: 'padding',
+          value: 'var(--space-xs) var(--space-sm)',
+        },
+        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill' },
+        why:
+          '跨属性竞争（计划 §5 雷区 12）：它是简写，压掉 `responsive.css` 那条 ' +
+          '`padding-left/right: var(--space-md)`（序 13 搬进 learning.css 时保持"长写在前、简写在后"）',
+      },
+      // ── 5 个零引用的**预留语义化类**：整条搬进 components.css（`prop: '*'`）──
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.link-modal', prop: '*', value: '*' },
+        to: { file: 'src/styles/components.css', context: '', selector: '.link-modal' },
+        why:
+          '零引用（`refinements.css` 原注释："待 tsx 后续接入 className 后可直接生效"）。' +
+          '搬进模块会**从产物里消失**（没有 tsx import 那个模块 ⇒ Vite 不编译它，实测差集报 6 条丢失），' +
+          '所以按规范 §4 留在全局层，等"把弹窗内联样式改成类"那一轮再收口',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.material-list-item', prop: '*', value: '*' },
+        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.material-list-item:hover',
+          prop: '*',
+          value: '*',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item:hover' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/refinements.css',
+          context: '',
+          selector: '.material-list-item-selected',
+          prop: '*',
+          value: '*',
+        },
+        to: { file: 'src/styles/components.css', context: '', selector: '.material-list-item-selected' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.type-badge', prop: '*', value: '*' },
+        to: { file: 'src/styles/components.css', context: '', selector: '.type-badge' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.type-badge-material', prop: '*', value: '*' },
+        to: { file: 'src/styles/components.css', context: '', selector: '.type-badge-material' },
+        why: '同上',
+      },
+    ]),
+    /**
+     * `[style*="rgba(0,0,0,0.5)"] …` 那 12 条 —— **整条规则删除**，
+     * 依据是真 Chromium 实测：该属性选择器命中 **0** 个元素
+     * （浏览器把内联 `rgba(0,0,0,0.5)` 序列化成带空格的 `rgba(0, 0, 0, 0.5)`，
+     * 不带空格的子串永远匹配不上）⇒ 迁移前就从未生效。
+     * `prop: '*'` 表示"这条规则的全部声明"。
+     */
+    resolvedConflicts: [
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] > .card',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 没有任何元素命中这个选择器（不是"谁赢"，是"从来没生效"）',
+        evidence: '探针实测：无空格形态命中 0 / 带空格形态命中 1 / 页面里真的存在 1 个遮罩',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] > .card > h3',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上（同一个属性选择器前缀）',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card label',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card label:hover',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card label:has(input:checked)',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card label input[type="checkbox"]',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card label span',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card > div[style*="justify-content: flex-end"]',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上（属性选择器链里两段都用了不带空格的写法）',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card .btn-primary',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card .btn-primary:hover',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card .btn-primary:active',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card .btn-secondary',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+      {
+        sheet: 'src/styles/refinements.css',
+        selector: '[style*="rgba(0,0,0,0.5)"] .card .btn-secondary:hover',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 同上',
+        evidence: '同上',
+      },
+    ],
+  },
+  {
+    id: '第九批（序 13）：responsive.css 清空（补丁层的最后一节）',
+    /**
+     * 这一批**没有任何类名进模块**：剩下的规则要么是跨功能共用的全局类名
+     * （`.btn` / `.card` / `.page-header-row` / `.filter-pill` / `.segment-btn` /
+     * `.heading-serif` / 裸元素重置），要么是 `marked` 生成的正文类名
+     * （`.markdown-body …`）—— 按规范 §4 全部留全局，只是"回到拥有它的样式表"。
+     *
+     * 所以它走 `groups: []` 这条特殊通道：证据不是"逐条保留"，
+     * 而是"① 本批登记的每一条声明双向自检通过 + ② 工作区里的 `responsive.css`
+     * 真的只剩注释（解析出 0 条规则）"。
+     *
+     * 这张表在 HEAD 里还有 30 余条规则属于更早的批次（试点 / 第一 / 第三 /
+     * 序 5 / 序 8 / 序 9 / 序 10 各自登记过），它们不在本批的清单里 ——
+     * 跨批次的合并审计见 `docs/migration-evidence/5.6-10-empty-patch-layers.md`。
+     */
+    beforeSheets: ['src/styles/responsive.css'],
+    groups: [],
+    hardened: {},
+    keyframes: [],
+    relocations: [
+      // ── 768px：通用触控目标 / 溢出保护 → components.css ──
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn', prop: 'min-height', value: '40px' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn' },
+        why: '`.btn` 是全局公共件（45 处引用）⇒ 留在 components.css 的媒体块里',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn, .graph-control-btn',
+          prop: 'min-height',
+          value: '40px',
+        },
+        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        why:
+          '⚠️ 与序 10 登记的是**同一条** `from` 声明：四个选择器组里 ' +
+          '`.graph-btn` / `.graph-control-btn` 那半随组件进了图谱模块（序 10 登记），' +
+          '`.filter-pill` / `.segment-btn` 这半留全局 → 进 learning.css（本批登记）。' +
+          '组的拆分已发生，所以 `from.selector` 写的是迁移前的原始组文本',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn',
+          prop: 'padding-left',
+          value: 'var(--space-md)',
+        },
+        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        why: '同上（注意它被 refinements 那条 `padding` 简写压掉，见序 12 的登记）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn, .graph-btn',
+          prop: 'padding-right',
+          value: 'var(--space-md)',
+        },
+        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: 'select, input:not([type="checkbox"]):not([type="radio"]), textarea',
+          prop: 'min-height',
+          value: '40px',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: 'select, input:not([type="checkbox"]):not([type="radio"]), textarea',
+        },
+        why: '裸元素重置（规范 §4 第 1 条）：没有"拥有者组件"，只能留在全局层',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn-ghost', prop: 'padding', value: 'var(--space-xs) var(--space-sm)' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn-ghost' },
+        why: '`.btn-ghost` 定义在 components.css',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn-ghost', prop: 'font-size', value: '0.8rem' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn-ghost' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.card', prop: 'overflow-wrap', value: 'anywhere' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.card' },
+        why: '`.card` 是全局公共件',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.page-header-row', prop: 'flex-wrap', value: 'wrap' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.page-header-row' },
+        why: '5 个页面在用的页头挂点（规范 §4 第 2 条）；类名原来**只定义在 responsive.css**，现在回到 components.css 的页面级挂点区',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.page-header-row', prop: 'row-gap', value: 'var(--space-sm)' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.page-header-row' },
+        why: '同上',
+      },
+      // ── 768px：`.markdown-body` 一整组 → markdown.css（拥有它的样式表）──
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body', prop: 'font-size', value: '1rem' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body' },
+        why: '类名留全局（三个不相邻功能在用 + `marked` 生成的 DOM）⇒ 回到 markdown.css',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body', prop: 'line-height', value: '1.85' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h1', prop: 'font-size', value: '1.35rem' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h1' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h2', prop: 'font-size', value: '1.2rem' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h2' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h3', prop: 'font-size', value: '1.05rem' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h3' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
+          prop: 'overflow-wrap',
+          value: 'anywhere',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
+        },
+        why: '长英文/URL/行内代码必须能断行（选择器组原样保留）',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'display', value: 'block' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        why: '宽表格自身成为横向滚动容器',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'max-width', value: '100%' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'overflow-x', value: 'auto' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+          prop: '-webkit-overflow-scrolling',
+          value: 'touch',
+        },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body th, .markdown-body td',
+          prop: 'padding',
+          value: 'var(--space-xs) var(--space-sm)',
+        },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body th, .markdown-body td' },
+        why: '同上（选择器组原样保留）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body th, .markdown-body td',
+          prop: 'white-space',
+          value: 'normal',
+        },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body th, .markdown-body td' },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex-block, .markdown-body .katex-display',
+          prop: 'max-width',
+          value: '100%',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex-block, .markdown-body .katex-display',
+        },
+        why: 'KaTeX 是第三方 DOM：类名只能全局命中（规范 §4 第 3 条）',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex-block, .markdown-body .katex-display',
+          prop: 'overflow-x',
+          value: 'auto',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex-block, .markdown-body .katex-display',
+        },
+        why: '同上',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body .katex', prop: 'font-size', value: '1em' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body .katex' },
+        why:
+          '这条**从未生效**（被 markdown-extras.css 顶层同权重的 1.1em 压掉，计划 §4.7）；' +
+          '搬进 markdown.css 后它仍在 markdown-extras.css 之前 ⇒ 胜负关系逐字不变',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body pre', prop: 'font-size', value: '0.85rem' },
+        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body pre' },
+        why: '代码块只收字号',
+      },
+      // ── 480px ──
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 480px)', selector: '.btn', prop: 'min-height', value: '44px' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 480px)', selector: '.btn' },
+        why: '48px 档的触控目标下限（Apple HIG / WCAG 2.5.5）',
+      },
+      {
+        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 480px)', selector: '.heading-serif', prop: 'overflow-wrap', value: 'anywhere' },
+        to: { file: 'src/styles/components.css', context: '@media (max-width: 480px)', selector: '.heading-serif' },
+        why: '`.heading-serif` 定义在 components.css',
+      },
+    ],
+    /**
+     * `[style*="rgba(0,0,0,0.5)"] { padding: var(--space-md) }`（768px 档）——
+     * 与 refinements.css 那 12 条同一个属性选择器前缀，**命中 0 个元素**，
+     * 迁移前就从未生效。真 Chromium 实测见序 12 的登记与证据文件。
+     */
+    resolvedConflicts: [
+      {
+        sheet: 'src/styles/responsive.css',
+        context: '@media (max-width: 768px)',
+        selector: '[style*="rgba(0,0,0,0.5)"]',
+        prop: '*',
+        value: '*',
+        winner: '不适用 —— 没有任何元素命中这个选择器（"从来没生效"，不是"谁赢"）',
+        evidence: '探针实测：无空格形态命中 0 / 带空格形态命中 1 / 页面里真的存在 1 个遮罩',
+      },
+    ],
+  },
 ]
 
 // ── 归一化 ──
@@ -731,18 +1664,114 @@ function checkRenames(batch) {
 }
 
 /**
+ * 已登记的"搬家"（第五批新增的第五类差异）：**同一条声明从 A 挪到 B，值不变**。
+ *
+ * ## 为什么需要它
+ *
+ * 本工具按 `groups`（老类名 → 新模块）把规则分成"在切片里"和"不在切片里"，
+ * 而 5.6 的后半程（序 9/12/13）要做一件工具原本看不见的事：
+ * **把声明从一个全局样式表挪到另一个全局样式表**，或者**把一条多选择器组拆开**
+ * （重的部分随组件进模块、留全局的那部分进它自己的样式表）。
+ * 两种情况下"迁移前有、迁移后那一处没有"都会长得像"丢失"：
+ *
+ * - `.graph-btn, .graph-control-btn` 与 `.filter-pill, .segment-btn` 原来在
+ *   `responsive.css` 的**同一条规则**里（`min-height: 40px`）。图谱写进模块、
+ *   `filter-pill` 留全局 ⇒ 选择器组必须拆开，两次搬家都没有"值变化"；
+ * - `responsive.css` 的 `:root { --page-pad-y-top: 64px }` 根本没有类名
+ *   （`classesOf` 是空的），本来就不在差集的视野里 —— 不登记的话，
+ *   这条搬走的声明**永远不会被任何检查看见**（正是"漏登记 = 静默不覆盖"）。
+ *
+ * ## 自检（两个方向都响亮失败）
+ *
+ * ① `from` 在"迁移前"的源文本里必须**找得到**（sheet + context + selector + prop + value
+ *    逐字对上，值走 `canonValue`）—— 写错类名会报"一次都没命中"；
+ * ② `to` 在目标文件里必须**找得到**（该选择器所在的规则里，有同名同值的声明）——
+ *    搬丢了会报"目标里没有这条"。
+ * 两条都通过才打印，所以这份清单不可能变成一串永远绿灯的空声明。
+ *
+ * 登记的声明会从"迁移前"一侧摘掉（否则会被报成丢失），并从摘要里单独成节。
+ */
+function relocationMatches(entry, sheet, context, selector, prop, value) {
+  const f = entry.from
+  return (
+    f.sheet === sheet &&
+    (f.context || '') === context &&
+    f.selector === selector.trim() &&
+    (f.prop.trim() === '*' ||
+      (f.prop.trim().toLowerCase() === prop.trim().toLowerCase() &&
+        canonValue(f.value) === canonValue(value)))
+  )
+}
+
+/**
+ * 整条规则的搬家：`from.prop: '*'` 表示"这条规则的全部声明一起走"。
+ * 用在零引用的**预留类**上（`.link-modal` / `.material-list-item*` / `.type-badge*`：
+ * `refinements.css` 里写着"待 tsx 后续接入 className 后可直接生效"，
+ * 全项目 0 处引用）。逐条声明登记 29 条太啰嗦且容易漏，所以按整条登记；
+ * 严格的"逐声明一致"由一次性审计脚本
+ * （`docs/migration-evidence/5.6-10-empty-patch-layers.md` 里那份）核对。
+ */
+function isWildcardRelocation(entry) {
+  return entry.from.prop.trim() === '*'
+}
+
+/** 从某条规则的声明里摘掉"已登记的搬家"，并记账（命中次数） */
+function applyRelocations(batch, rel, context, selector, decls, hitCounts) {
+  const entries = batch.relocations || []
+  if (entries.length === 0) return decls
+  const kept = []
+  for (const [p, v] of decls) {
+    const idx = entries.findIndex((e) => relocationMatches(e, rel, context, selector, p, v))
+    if (idx >= 0) {
+      hitCounts[idx] += 1
+      continue
+    }
+    kept.push([p, v])
+  }
+  return kept
+}
+
+/** 目标文件里有没有这条声明（`to.selector` 可以是某个选择器组里的一员） */
+function relocationLands(entry, droppedDecls = 0) {
+  const abs = path.join(root, entry.to.file)
+  if (!fs.existsSync(abs)) return false
+  const wildcard = isWildcardRelocation(entry)
+  const want = wildcard ? '' : entry.from.prop.trim().toLowerCase()
+  const wantVal = wildcard ? '' : canonValue(entry.from.value)
+  for (const r of parseRules(fs.readFileSync(abs, 'utf8'))) {
+    if (entry.to.context !== undefined && entry.to.context !== r.context) continue
+    // `to.selector` 可以写成**整个选择器组**（`.a, .b`）或组里的一员：
+    // 两种都接受 —— 组在产物/源码里可能跨行，所以先归一空白再比。
+    const norm = (s) => s.replace(/\s+/g, ' ').trim()
+    const members = splitSelectors(r.selector).map(norm)
+    if (!members.includes(norm(entry.to.selector)) && norm(r.selector) !== norm(entry.to.selector)) {
+      continue
+    }
+    if (wildcard) {
+      // 整条搬家：目标那条规则至少要装下搬走的这么多声明
+      if (r.decls.length >= droppedDecls) return true
+      continue
+    }
+    if (r.decls.some(([p, v]) => p.trim().toLowerCase() === want && canonValue(v) === wantVal)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * 已裁决的冲突：把"输家声明"从**迁移前**一侧摘掉，并逐条记账。
  *
- * ## 为什么这是第三种差异（既不是"丢失"也不是"值有变化"）
+ * ## 第五批起支持 `prop: '*'`（整条规则）
  *
- * 序 5 的 `assessment.css` 与 `refinements.css` 对同一个选择器写了不同的值，
- * 权重相同 ⇒ 谁生效只看导入顺序。这是迁移前就存在的债，**裁决它需要证据**：
- * 真实 Chromium 的 computed style（配方见计划 §5 雷区 3）。
- * 一旦按胜者搬迁，"迁移前有、迁移后无"的那条声明在差集里天然长得像"丢失"。
- * 所以这里显式声明，并要求每条都**真的命中过** ——
- * 写错类名/值只会让自检报"这条声明一次都没命中"，而不是变成一条永远绿灯的空声明。
- *
- * 命中过的条目单独成节打印（谁赢、凭什么），并从摘要里区分开。
+ * 序 13 清空 `responsive.css` / 序 12 拆 `refinements.css` 时遇到一类
+ * **整条规则都该删**的声明：`[style*="rgba(0,0,0,0.5)"] …` 那 13 条。
+ * 真 Chromium 实测该属性选择器命中 **0** 个元素（浏览器把内联
+ * `rgba(0,0,0,0.5)` 序列化成带空格的 `rgba(0, 0, 0, 0.5)` ⇒ 不带空格的子串
+ * 永远匹配不上），所以这些规则**迁移前就从未生效**，删它是可证明的空操作。
+ * 逐条声明 40 多条声明太啰嗦、且容易漏一条，于是允许 `prop: '*'` /
+ * `value: '*'`：匹配该 (来源样式表 + 上下文 + 选择器) 规则下的**全部声明**。
+ * 自检不变 —— 该规则必须真的存在，否则报"一条都没命中"。
  */
 function applyResolvedDrops(batch, rel, context, selector, decls, hitCounts) {
   const drops = batch.resolvedConflicts || []
@@ -754,12 +1783,20 @@ function applyResolvedDrops(batch, rel, context, selector, decls, hitCounts) {
         d.sheet === rel &&
         d.selector === selector.trim() &&
         (!d.context || d.context === context) &&
-        d.prop.trim().toLowerCase() === p.trim().toLowerCase() &&
-        canonValue(d.value) === canonValue(v),
+        (d.prop.trim() === '*' ||
+          (d.prop.trim().toLowerCase() === p.trim().toLowerCase() &&
+            canonValue(d.value) === canonValue(v))),
     )
-    if (hitIdx >= 0 && !hitCounts[hitIdx]) {
-      hitCounts[hitIdx] = 1
-      continue
+    if (hitIdx >= 0) {
+      // 通配条目吃掉整条规则的全部声明；精确条目只吃第一条（原来就是这样）
+      if (drops[hitIdx].prop.trim() === '*') {
+        hitCounts[hitIdx] += 1
+        continue
+      }
+      if (!hitCounts[hitIdx]) {
+        hitCounts[hitIdx] = 1
+        continue
+      }
     }
     kept.push([p, v])
   }
@@ -804,7 +1841,18 @@ function neutralSelector(sel, remap) {
   }
   // 压缩器把 `::before` / `::after` 压成 `:before` / `:after`（同义写法）。
   // 不归一化的话，四条带伪元素的规则会被报成"丢失 + 新增"。
-  return s.replace(/::/g, ':').replace(/\s+/g, ' ').trim()
+  //
+  // 第六批（序 9）又补一条：**选择器组里逗号后的空格被压掉** ——
+  // 源码 `.sidebar,\n  .sidebar-collapsed` 解析成 `.sidebar, .sidebar-collapsed`，
+  // 产物里是 `._sidebar_hash,._sidebarCollapsed_hash`（逗号后无空格）。
+  // 不归一化就会把三条"选择器组"规则（`.sidebar, .sidebar-collapsed` 的 768/480
+  // 两档 + `.app-layout, .app-layout-collapsed`）全报成丢失 —— 而它们逐字都在产物里。
+  // 逗号两侧的空格在 CSS 里没有语义，归一化不会抹平任何真实差异。
+  return s
+    .replace(/::/g, ':')
+    .replace(/\s*,\s*/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 // ── 产物新鲜度（拿旧产物下结论是这类脚本最危险的失败方式）──
@@ -848,14 +1896,53 @@ for (const batch of BATCHES) {
   // 已裁决的"输家声明"命中计数：batch.resolvedConflicts 里每条都必须命中一次，
   // 否则说明这条声明是凭空写的（类名/值对不上），要报错而不是静默放过。
   const dropHitCounts = new Array((batch.resolvedConflicts || []).length).fill(0)
-  const rev = batch.rev || resolveBeforeRev(batch, oldNames)
+  // 已登记的"搬家"命中计数：同样每条都必须命中（否则就是一条永远绿灯的空声明）
+  const relocEntries = batch.relocations || []
+  const relocHitCounts = new Array(relocEntries.length).fill(0)
+  /**
+   * 有些批次**没有任何类名进模块**（序 13 只是把 `responsive.css` 的规则
+   * 按归属搬去别的全局样式表 / 模块），于是"按类名定位迁移前的修订"这条路走不通
+   * （`oldNames` 是空集）。这时按**声明**定位：从 HEAD 往回找第一个
+   * "这一批登记的每一条 `from` 声明都还在"的修订。与类名定位同样与提交顺序解耦。
+   */
+  const groupsEmpty = (batch.groups || []).length === 0
+  const resolveBeforeRevByDecls = () =>
+    findRecentRev((candidate) => {
+      const wanted = [
+        ...relocEntries.map((e) => e.from),
+        ...(batch.resolvedConflicts || []).map((d) => ({
+          sheet: d.sheet,
+          context: d.context,
+          selector: d.selector,
+          prop: d.prop,
+          value: d.value,
+        })),
+      ]
+      return wanted.every((f) =>
+        parseRules(readFromGit(path.join(root, f.sheet), candidate)).some(
+          (r) =>
+            r.selector.trim() === f.selector &&
+            (!f.context || f.context === r.context) &&
+            (f.prop === '*' ||
+              r.decls.some(
+                ([p, v]) =>
+                  p.trim().toLowerCase() === f.prop.trim().toLowerCase() &&
+                  canonValue(v) === canonValue(f.value),
+              )),
+        ),
+      )
+    })
+  const rev = batch.rev || (groupsEmpty ? resolveBeforeRevByDecls() : resolveBeforeRev(batch, oldNames))
   if (!rev) {
     console.error(
-      `✗ ${batch.id}：从 HEAD 往回 40 个提交里找不到"还含有本批类名"的修订。` +
-        `要么类名写错了，要么这个批次其实没迁移过 —— 两种情况都不该继续编差集。`,
+      `✗ ${batch.id}：从 HEAD 往回 40 个提交里找不到"迁移前"。` +
+        `要么登记写错了，要么这个批次其实没迁移过 —— 两种情况都不该继续编差集。`,
     )
     process.exit(3)
   }
+  /** 没有任何声明被"搬家"或"裁决删除"吃掉的规则（用于空批次的自检） */
+  const leftoverRules = []
+  let leftoverDeclCount = 0
   for (const rel of batch.beforeSheets) {
     const abs = path.join(root, rel)
     // 侧别 A 用 git 读，这样"迁移前"是那个修订的真实内容，
@@ -863,20 +1950,54 @@ for (const batch of BATCHES) {
     const repoRel = path.relative(path.join(root, '..'), abs).replace(/\\/g, '/')
     const css = execFileSync('git', ['show', `${rev}:${repoRel}`], { encoding: 'utf8' })
     for (const r of parseRules(css)) {
+      // 已登记的搬家 / 已裁决的删除：先从这条规则的声明里摘掉（记账），
+      // 摘空了就整条不再参与比对。这一步要在"类名过滤"**之前**做，因为有些被搬的
+      // 声明所在的选择器根本没有类名（`:root`、`[style*=…]`），它们从来就不在 beforeRules 里。
+      const afterReloc = applyRelocations(batch, rel, r.context, r.selector, r.decls, relocHitCounts)
+      const afterDrops = applyResolvedDrops(batch, rel, r.context, r.selector, afterReloc, dropHitCounts)
+      if (afterDrops.length === r.decls.length && r.decls.length > 0) {
+        leftoverRules.push(`${rel} ${r.context || '(顶层)'} \`${r.selector}\``)
+        leftoverDeclCount += r.decls.length
+      }
+      if (afterDrops.length === 0 && r.decls.length > 0) continue
       if (classesOf(r.selector).some((c) => oldNames.has(c))) {
         beforeRules.push({
           side: `${rel}@${rev}`,
           sheet: rel,
           context: r.context,
           selector: r.selector,
-          // 已被裁决删除的输家声明在这里摘掉：它们不是"丢失"，
-          // 而是"按实测胜者删掉的死声明"，单独成节列出
-          decls: canonDecls(
-            applyResolvedDrops(batch, rel, r.context, r.selector, r.decls, dropHitCounts),
-          ),
+          decls: canonDecls(afterDrops),
         })
       }
     }
+  }
+
+  // ① 已登记的搬家必须在"迁移前"找得到（找不到 = 类名/值/来源样式表写错了）
+  const missedRelocs = relocEntries
+    .map((e, i) => ({ e, i }))
+    .filter(({ i }) => relocHitCounts[i] === 0)
+  if (missedRelocs.length) {
+    console.error(
+      `✗ ${batch.id}：relocations 里有 ${missedRelocs.length} 条声明在"迁移前"**一条都没命中**` +
+        `（sheet / context / selector / prop / value 有一样对不上）。直接报错，` +
+        `否则它会变成一条永远绿灯的空登记：`,
+    )
+    for (const { e } of missedRelocs) {
+      console.error(`   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`)
+    }
+    process.exit(3)
+  }
+  // ② 每一条都必须真的落在目标文件里（搬丢了要在这里炸，而不是静默"搬家成功"）
+  const lostRelocs = relocEntries.filter((e, i) => !relocationLands(e, relocHitCounts[i]))
+  if (lostRelocs.length) {
+    console.error(
+      `✗ ${batch.id}：relocations 里有 ${lostRelocs.length} 条**在目标文件里找不到**` +
+        `（选择器不在那条规则里，或值不同）。搬家没落地就不能从"迁移前"一侧摘掉它：`,
+    )
+    for (const e of lostRelocs) {
+      console.error(`   - → ${e.to.file} \`${e.to.selector}\` 应有 { ${e.from.prop}: ${e.from.value} }`)
+    }
+    process.exit(3)
   }
 
   const declaredDrops = batch.resolvedConflicts || []
@@ -893,6 +2014,56 @@ for (const batch of BATCHES) {
       console.error(`   - ${d.sheet} ${d.selector} { ${d.prop}: ${d.value} }`)
     }
     process.exit(3)
+  }
+
+  /**
+   * 没有任何类名进模块的批次（序 13："把 `responsive.css` 清空"）：
+   * 这一批不存在"逐条保留"这种证据 —— 它的证据是**完整性**：
+   *   ① 迁移前那份样式表里的**每一条声明**都被 `relocations` / `resolvedConflicts`
+   *      逐条吃掉（没有一条是"顺手不要了"）；
+   *   ② 工作区里的那个样式表**真的空了**（解析出 0 条规则）。
+   * 两条都过才算这一批做完；任何一条遗留都会在这里点名。
+   */
+  if (groupsEmpty) {
+    console.log(`迁移前（git ${rev} 源码）：${batch.beforeSheets.join(', ')}`)
+    console.log(`本批没有任何类名进模块（规则只是换了归属）⇒ 证据是"完整性"而不是"逐条保留"\n`)
+    const notEmpty = []
+    for (const rel of batch.beforeSheets) {
+      const left = parseRules(fs.readFileSync(path.join(root, rel), 'utf8'))
+      if (left.length) notEmpty.push(`${rel} 还剩 ${left.length} 条规则`)
+    }
+    if (notEmpty.length) {
+      console.error('✗ 这一批声称"清空"，但工作区里还有规则：')
+      for (const r of notEmpty) console.error(`   - ${r}`)
+      process.exit(1)
+    }
+    console.log(
+      `✓ 本批登记的 ${relocEntries.length} 条声明搬家全部双向自检通过、` +
+        `${(batch.resolvedConflicts || []).length} 条"确认从未生效"的规则已删除`,
+    )
+    console.log(`✓ 工作区里的样式表已只剩注释（解析出 0 条规则）：${batch.beforeSheets.join(', ')}`)
+    console.log(
+      `·  这**一张**表里另有 ${leftoverRules.length} 条规则（${leftoverDeclCount} 条声明）` +
+        `不归本批：它们由试点 / 第一 / 第三 / 序 5 / 序 8 / 序 9 / 序 10 各自登记并验证过 ——`,
+    )
+    console.log(
+      `   跨批次的合并审计是一次性脚本（输出收在 docs/migration-evidence/5.6-10-empty-patch-layers.md），` +
+        `本脚本只保证"本批登记的双向自检 + 工作区里那张表真的空了"。`,
+    )
+    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────')
+    for (const e of relocEntries) {
+      console.log(
+        `   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`,
+      )
+      console.log(`       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``)
+      if (e.why) console.log(`       理由：${e.why}`)
+    }
+    console.log('\n──── 已裁决的删除（实测选择器命中 0 个元素，迁移前就从未生效）────')
+    for (const d of batch.resolvedConflicts || []) {
+      console.log(`   - ${d.sheet} ${d.context || '(顶层)'} \`${d.selector}\` { ${d.prop} }`)
+      console.log(`       依据：${d.evidence}`)
+    }
+    continue
   }
 
   // ── 侧别 B：迁移后（dist 产物） ──
@@ -952,7 +2123,38 @@ for (const batch of BATCHES) {
   }
 
   for (const b of beforeRules) {
-    const cands = afterByKey.get(key(b)) || []
+    let cands = afterByKey.get(key(b)) || []
+    /**
+     * 压缩器会把**相邻、且声明逐字相同**的规则合并成一个选择器组。
+     * 第七批（序 10）实测：`Graph.module.css` 里
+     *
+     *   .graphToolbar { flex-wrap: wrap; row-gap: var(--space-xs) }
+     *   .graphToolbarLeft, .graphToolbarRight { flex-wrap: wrap; row-gap: var(--space-xs) }
+     *
+     * 在产物里合成了一条
+     * `._graphToolbar_h,._graphToolbarLeft_h,._graphToolbarRight_h{flex-wrap:wrap;row-gap:var(--space-xs)}`
+     * —— 于是"同 (上下文 + 选择器)"这个 key 两条都落空，被报成 2 条丢失，
+     * 而它们逐字都在产物里（合并的前提就是声明完全相同，语义等价）。
+     *
+     * 所以落空时退一步找**超集规则**：上下文相同、成员集合 ⊇ 本条、
+     * 声明逐字相同。三个条件缺一不可，任何真的丢声明都仍然会走到"丢失"分支。
+     * 命中时单独注明"被压缩器合并"，不让它悄悄混进"逐字保留"。
+     */
+    let mergedInto = null
+    if (cands.length === 0 && b.decls.length > 0) {
+      const members = (sel) => splitSelectors(sel).map((s) => neutralSelector(s, remap).trim())
+      const mine = members(b.selector)
+      const hit = afterRules.find(
+        (a) =>
+          a.context === b.context &&
+          a.decls.join(';') === b.decls.join(';') &&
+          mine.every((m) => members(a.selector).includes(m)),
+      )
+      if (hit) {
+        cands = [hit]
+        mergedInto = hit.selector
+      }
+    }
     if (cands.length === 0) {
       lost++
       console.log(`✗ 丢失：${key(b)}`)
@@ -996,7 +2198,11 @@ for (const batch of BATCHES) {
     }
     if (best.extra.length) extraDecls.push({ key: key(b), extra: best.extra })
     exact++
-    console.log(`✓ 逐字保留：${key(b)}`)
+    console.log(
+      mergedInto
+        ? `✓ 逐字保留（压缩器合并了选择器组，产物里是 ${mergedInto}）：${key(b)}`
+        : `✓ 逐字保留：${key(b)}`,
+    )
     if (best.extra.length) {
       console.log(
         `     ※ 产物多出：${best.extra.join('; ')}` +
@@ -1032,6 +2238,21 @@ for (const batch of BATCHES) {
       console.log(`   - ${d.sheet} \`${d.selector}\` { ${d.prop}: ${d.value} }`)
       console.log(`       胜者：${d.winner}`)
       console.log(`       实测：${d.evidence}`)
+    }
+  }
+
+  // 已登记的"搬家"：单独成节 —— 它们既不是丢失也不是值变化，
+  // 而是"同一条声明换了个地方，值一个字没改"（含多选择器组被拆开的情形）。
+  if (relocEntries.length) {
+    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────')
+    console.log(`   共 ${relocEntries.length} 条。两个方向都自检过：`)
+    console.log('   ① 在"迁移前"的源文本里真的存在；② 在目标文件里真的落在声明的选择器上。')
+    for (const e of relocEntries) {
+      console.log(
+        `   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`,
+      )
+      console.log(`       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``)
+      if (e.why) console.log(`       理由：${e.why}`)
     }
   }
 

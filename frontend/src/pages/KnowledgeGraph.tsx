@@ -26,6 +26,8 @@ import { useGraphMutations } from './knowledgegraph/useGraphMutations'
 import { useGraphSearch } from './knowledgegraph/useGraphSearch'
 import { useSubgraph } from './knowledgegraph/useSubgraph'
 import { useSuggestionSelection } from './knowledgegraph/useSuggestionSelection'
+// 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
+import styles from '../components/graph/Graph.module.css'
 
 export default function KnowledgeGraph() {
   const navigate = useNavigate()
@@ -149,7 +151,7 @@ export default function KnowledgeGraph() {
   const suggestedCount = forceGraphData.links.filter((e) => e.status === 'suggested').length
 
   return (
-    <div className="page-enter graph-page">
+    <div className={`page-enter ${styles.graphPage}`}>
       {/* 顶部栏 */}
       <GraphToolbar
         nodeCount={nodeCount}
@@ -172,7 +174,7 @@ export default function KnowledgeGraph() {
 
       {/* 创建模式提示 */}
       {interaction.createMode && (
-        <div className="graph-create-hint">
+        <div className={styles.graphCreateHint}>
           <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>●</span>
           {interaction.createFirstNode
             ? `已选择: ${interaction.createFirstNode.title}，请点击第二个节点`
@@ -181,7 +183,7 @@ export default function KnowledgeGraph() {
       )}
 
       {/* 主内容区 */}
-      <div className="graph-page-main">
+      <div className={styles.graphPageMain}>
         {/* 图谱区域 */}
         <GraphCanvas
           graphRef={graphRef}

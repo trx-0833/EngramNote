@@ -15,9 +15,11 @@ import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels'
 import { useToast } from '../components/Toast'
-// 本页私有样式（overhaul-plan 5.6 第三批）：`.search-input-*` 从 `src/styles/learning.css`
+// 本页私有样式（overhaul-plan 5.6 第三批 + 序 8）：`.search-input-*` 从 `src/styles/learning.css`
 // 拆出，`.list-toolbar` 的两条 480px 规则从 `src/styles/responsive.css` 一起搬进来
-// （类名哈希后写在全局补丁层里的选择器会永远选不中）—— 见 NotesList.module.css 文件头
+// （类名哈希后写在全局补丁层里的选择器会永远选不中）；序 8 再把
+// `.note-list-item` / `.note-list-actions`（含 768px 档 3 条）从
+// `components.css` + `responsive.css` 搬进来 —— 见 NotesList.module.css 文件头
 import styles from './NotesList.module.css'
 
 /**
@@ -235,7 +237,7 @@ export default function NotesList() {
                button 角色（F-16）。改法与已修掉的 Sidebar 同形：**控件之间是兄弟**。
                标题现在就是真链接（可右键、可新标签页、Tab 一次即达），
                删除/重试是各自独立的按钮，靠 flex + `.note-list-actions` 仍排在右侧。 */
-            <article key={note.id} className="card card-hover note-list-item">
+            <article key={note.id} className={`card card-hover ${styles.noteListItem}`}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {/* `h2` 而不是 `h3`：这一页的顶层标题是上面的 h1「笔记」，
                     中间没有任何层级 —— h1 → h3 是跳级，axe 判 `heading-order`
@@ -297,7 +299,7 @@ export default function NotesList() {
                 )}
               </div>
               {/* 操作按钮区域 */}
-              <div className="note-list-actions">
+              <div className={styles.noteListActions}>
                 {/* 重试按钮，仅 failed 状态显示 */}
                 {note.status === 'failed' && (
                   <button

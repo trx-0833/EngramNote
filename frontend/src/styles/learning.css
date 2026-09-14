@@ -88,6 +88,88 @@
   font-weight: 600;
 }
 
+/* ── 指示线（overhaul-plan 5.6 序 12：从 `refinements.css` 按归属收回）──
+ *
+ * 这 6 条一直住在补丁层里，但它们作用的就是本文件定义的 `.filter-pill` /
+ * `.segment-btn`（两个类名都留全局：4 个页面在用 `.filter-pill`、
+ * 2 个不相邻功能在用 `.segment-btn`，见文件头的判据表）。补丁层要清空，
+ * 规则自然回到拥有这两个类名的样式表。
+ *
+ * 顺序是行为：`.filter-pill::after { width: 0 }` 必须排在
+ * `.filter-pill-active::after { width: 60% }` 之前（同权重，后者是激活态）。
+ * 全部值逐字未改，登记在 `css-migration-diff.mjs` 的 `BATCHES[].relocations`。 */
+
+/* 资料/笔记 filter-pill：active 态增加金色底部指示线动画 */
+.filter-pill {
+  position: relative;
+}
+
+.filter-pill::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background: var(--gradient-gold);
+  border-radius: 1px;
+  transform: translateX(-50%);
+  transition: width 0.25s var(--ease-out-expo);
+}
+
+/* 原样式（refinements.css）: .filter-pill-active { background: var(--gradient-primary); … } */
+.filter-pill-active::after {
+  width: 60%;
+}
+
+/* 视图切换 segment-btn：active 态增加底部指示线 */
+.segment-btn {
+  position: relative;
+}
+
+.segment-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 1px;
+  left: 20%;
+  width: 0;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  transition: width 0.25s var(--ease-out-expo);
+}
+
+/* 原样式（refinements.css）: .segment-btn-active { background: var(--color-surface); … } */
+.segment-btn-active::after {
+  width: 60%;
+}
+
+/* ── 窄屏（序 13：`responsive.css` 里命中这两个类名的触控目标）──
+ *
+ * ⚠️ 两条 padding 的关系是**跨属性竞争**（计划 §5 雷区 12）：
+ *   `.filter-pill, .segment-btn { padding-left/right: var(--space-md) }`（原 responsive）
+ *   `.filter-pill { padding: var(--space-xs) var(--space-sm) }`（原 refinements，430 行）
+ * 两条同上下文、同权重，**后者的 padding 简写压掉前者的左右长写**
+ * （补丁层在 `main.tsx` 里更靠后）。所以块内顺序必须是"长写在前、简写在后"。
+ * 三条都逐字搬来、顺序照旧，登记在 `relocations` 里。 */
+@media (max-width: 768px) {
+  .filter-pill,
+  .segment-btn {
+    min-height: 40px;
+  }
+
+  .filter-pill,
+  .segment-btn {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  /* filter-pill 触控友好（原 `refinements.css`；简写压上面那两条长写） */
+  .filter-pill {
+    padding: var(--space-xs) var(--space-sm);
+  }
+}
+
 /* ── 折叠箭头 ── */
 
 .collapse-arrow {

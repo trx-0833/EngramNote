@@ -5,6 +5,9 @@
  * 左侧 Markdown 文本域、右侧即时渲染（`renderMarkdown(editContent)`），
  * 按钮文案与禁用条件均与拆分前一致。
  */
+// 分屏栅格的类名归模块所有（overhaul-plan 5.6 序 8）；见 EditSplitView.module.css
+import styles from './EditSplitView.module.css'
+
 interface EditSplitViewProps {
   /** 编辑中的 Markdown 原文 */
   editContent: string
@@ -35,10 +38,12 @@ export default function EditSplitView({
         <button className="btn btn-primary" onClick={onSave} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
         <button className="btn btn-secondary" onClick={onCancel} disabled={saving}>取消</button>
       </div>
-      {/* 分屏栅格用 min(320px, 100%) 做内在尺寸：窄屏自动变单栏，不需要额外断点 */}
-      <div className="edit-split">
+      {/* 分屏栅格用 min(320px, 100%) 做内在尺寸：窄屏自动变单栏，不需要额外断点。
+          ⚠️ 768px 那条显式兜底（grid-template-columns: 1fr）也住在同一个模块里
+          —— 类名哈希后写在 responsive.css 里的选择器会永远选不中。 */}
+      <div className={styles.editSplit}>
         <textarea
-          className="markdown-editor card"
+          className={`${styles.markdownEditor} card`}
           value={editContent}
           onChange={(e) => onEditContentChange(e.target.value)}
           disabled={saving}

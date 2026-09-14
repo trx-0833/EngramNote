@@ -364,7 +364,13 @@ export default function LearningAssessment() {
               />
             ) : (
               <div style={{ marginBottom: 'var(--space-lg)' }}>
-                <h3 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>选择笔记</h3>
+                {/* `h2` 而不是 `h3`：这一页的页面标题是 h1（学习评估），
+                    这些是它的**直接下级区块**（选择笔记 / 学习资料 / 我的笔记 /
+                    评估结果），中间不存在第三级 —— 写成 h3 就是 h1 → h3 跳级
+                    （axe 的 heading-order）。字号/字重/字距都显式钉着，
+                    所以**一个像素都没动**，做法与已修的 F-18（笔记列表卡片
+                    h3→h2）、F-14/F-15（CardFace h3→h2）逐字相同。 */}
+                <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>选择笔记</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--space-sm)' }}>
                   {compareLinkedPersonalNotes.map(n => (
                     <div
@@ -372,7 +378,7 @@ export default function LearningAssessment() {
                       className={`note-select-card ${selectedPersonalNoteId === n.id ? 'note-select-card-checked' : ''}`}
                       onClick={() => handleSelectPersonalNote(n.id)}
                     >
-                      <h4 style={{ marginBottom: '0.25rem' }}>{n.title}</h4>
+                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>{n.title}</h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                         关联资料: {selectedPersonalNoteId === n.id ? linkedMaterials.length : '—'} 篇
                       </p>
@@ -394,7 +400,7 @@ export default function LearningAssessment() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)', marginBottom: 'var(--space-lg)' }}>
               {/* Material notes */}
               <div className="card">
-                <h3 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>学习资料</h3>
+                <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>学习资料</h2>
                 {materialNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>暂无学习资料</p>
                 ) : (
@@ -405,7 +411,7 @@ export default function LearningAssessment() {
               </div>
               {/* Personal notes */}
               <div className="card">
-                <h3 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>我的笔记</h3>
+                <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>我的笔记</h2>
                 {personalNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>暂无个人笔记（请先上传并标记为"我的笔记"）</p>
                 ) : (
@@ -427,7 +433,7 @@ export default function LearningAssessment() {
           {/* Results */}
           {result && (
             <div className="card" style={{ animation: 'slideUp 0.4s var(--ease-out-expo)' }}>
-              <h3 className="heading-serif" style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>评估结果</h3>
+              <h2 className="heading-serif" style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>评估结果</h2>
               {renderScoreBar('内容覆盖度', result.scores?.coverage_score || 0)}
               {renderScoreBar('思考深度', result.scores?.depth_score || 0)}
               {renderScoreBar('结构清晰度', result.scores?.clarity_score || 0)}
@@ -437,9 +443,9 @@ export default function LearningAssessment() {
                 <div className={styles.knowledgePointsGrid}>
                   {(result.scores?.covered_points?.length ?? 0) > 0 && (
                     <div className={styles.knowledgePointsSection}>
-                      <h4 style={{ color: 'var(--color-success)' }}>
+                      <h3 style={{ color: 'var(--color-success)', fontSize: '1rem' }}>
                         <span>✓</span> 已覆盖知识点
-                      </h4>
+                      </h3>
                       <ul>
                         {result.scores?.covered_points?.map((p: string, i: number) => (
                           <li key={i}><div dangerouslySetInnerHTML={{ __html: renderMarkdown(p) }} /></li>
@@ -449,9 +455,9 @@ export default function LearningAssessment() {
                   )}
                   {(result.scores?.uncovered_points?.length ?? 0) > 0 && (
                     <div className={styles.knowledgePointsSection}>
-                      <h4 style={{ color: 'var(--color-error)' }}>
+                      <h3 style={{ color: 'var(--color-error)', fontSize: '1rem' }}>
                         <span>✗</span> 未覆盖知识点
-                      </h4>
+                      </h3>
                       <ul>
                         {result.scores?.uncovered_points?.map((p: string, i: number) => (
                           <li key={i}><div dangerouslySetInnerHTML={{ __html: renderMarkdown(p) }} /></li>
@@ -492,7 +498,7 @@ export default function LearningAssessment() {
           {/* Quiz mode - 已链接模式：选择 personal_note */}
           {mode === 'quiz' && useLinkedMode ? (
             <div style={{ marginBottom: 'var(--space-lg)' }}>
-              <h3 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>选择笔记</h3>
+              <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>选择笔记</h2>
               {linkablePersonalNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>暂无可选笔记</p>
               ) : (
@@ -503,7 +509,7 @@ export default function LearningAssessment() {
                       className={`note-select-card ${selectedPersonalNoteId === n.id ? 'note-select-card-checked' : ''}`}
                       onClick={() => handleSelectPersonalNote(n.id)}
                     >
-                      <h4 style={{ marginBottom: '0.25rem' }}>{n.title}</h4>
+                      <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>{n.title}</h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                         关联资料: {linkedMaterials.length} 篇
                       </p>
@@ -523,7 +529,7 @@ export default function LearningAssessment() {
           ) : (
             /* Quiz mode - 手动选择资料 */
             <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-              <h3 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>学习资料</h3>
+              <h2 style={{ fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-sm)' }}>学习资料</h2>
               {materialNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>暂无学习资料</p>
               ) : (

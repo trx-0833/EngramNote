@@ -1,4 +1,32 @@
-/* ── 导航栏（旧，保留兼容）── */
+/**
+ * 旧顶部导航栏（`.navbar*`）——**本文件已按归属拆空，只剩这一组无人使用的规则**
+ * （overhaul-plan 5.6 序 9）
+ *
+ * ## 已经搬走的（不要在这里重新定义）
+ *
+ * | 原类名 | 去哪了 | 判据 |
+ * |---|---|---|
+ * | `.sidebar` `.sidebar-collapsed` `.sidebar-mobile-open` `.sidebar-header` `.sidebar-logo` `.sidebar-collapse-btn` `.sidebar-mobile-close` `.sidebar-body` `body.sidebar-open-lock` `.sidebar-section` `.sidebar-section-title` `.sidebar-item-row` `.sidebar-item` `.sidebar-item-active` `.sidebar-item-icon` `.sidebar-item-label` `.sidebar-item-action` `.sidebar-footer` `.sidebar-overlay` | `components/Sidebar.module.css` | grep 只命中 `components/Sidebar.tsx`；`responsive.css` 768px/480px 档命中同一批类名的 12 条规则**同批随行**（雷区 2） |
+ * | `.app-layout` `.app-layout-collapsed` `.app-layout .container` `.sidebar-mobile-toggle` | `App.module.css` | grep 只命中 `App.tsx`；`responsive.css` 的 4 条窄屏规则随行；`:root` 的 `--page-pad-y-*` 也一并收进 `.appLayout`（见该文件头第 2 条） |
+ *
+ * 拆分是从 `main.tsx` 的导入顺序倒推的：全局样式表在前、模块在后，
+ * 所以搬走的规则在产物里仍然晚于 `components.css` 的 `.btn` / `.container`
+ * 之类，权重与先后关系逐条不变（`verify-built-css.mjs` 的 `CASCADE_PAIRS`
+ * 与规则清单差集都验过）。
+ *
+ * ## 为什么 `.navbar*` 还留在这里
+ *
+ * 这一组（5 条规则 + 1 条 `:hover`）是**旧顶部导航栏**的样式，
+ * `.navbar { display: none }` 就是它的墓碑：视觉重构之后侧边栏接管了导航，
+ * 全项目 grep `.navbar` 命中的 tsx **一个也没有**（`src/**` 下 0 处）。
+ *
+ * 之所以不在这里删：本轮每一批的契约都是"证明什么都没丢"，
+ * 而删死规则属于**死代码清理**，会让"丢失 0"这条证据同时包含两种语义
+ * （前几批的 `.cleaning-progress` / `.feedback-pending` 都是按这条规矩处理的）。
+ * 它也没有"归属组件"可搬 —— 没有任何组件渲染它，硬塞进某个模块只会让
+ * "谁生成这段 DOM"更难查（规范 §4 第 3、4 条的同类情形）。
+ * 待办登记在 `docs/css-migration-plan.md` §7.0 第 2 条：带"确认无引用"的证据单独一轮删除。
+ */
 
 .navbar {
   position: fixed;
@@ -50,317 +78,4 @@
 
 .navbar-logout:hover {
   color: var(--color-error);
-}
-
-/* ── 侧边栏（视觉重构）── */
-
-.sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: var(--sidebar-width);
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
-  display: flex;
-  flex-direction: column;
-  z-index: 100;
-  transition: width 0.25s var(--ease-out-expo);
-  overflow: hidden;
-}
-
-.sidebar-collapsed {
-  width: var(--sidebar-collapsed-width);
-}
-
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-md);
-  height: 56px;
-  border-bottom: 1px solid var(--sidebar-border);
-  flex-shrink: 0;
-}
-
-.sidebar-logo {
-  font-family: var(--font-serif);
-  font-size: 1.15rem;
-  font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  cursor: pointer;
-  border: none;
-  background-color: transparent;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.2s ease;
-}
-
-.sidebar-logo:hover {
-  opacity: 0.8;
-}
-
-.sidebar-collapsed .sidebar-logo {
-  font-size: 1.3rem;
-}
-
-.sidebar-collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-tertiary);
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.sidebar-collapse-btn:hover {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
-.sidebar-collapsed .sidebar-collapse-btn {
-  width: 100%;
-  margin: 0;
-  border-radius: 0;
-}
-
-/* 移动端抽屉的关闭按钮：由 Sidebar 组件在 mobileOpen 时渲染，
-   桌面上这份样式不会出现（桌面侧边栏常驻，没有"关掉它"这回事）。 */
-.sidebar-mobile-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 1.1rem;
-  line-height: 1;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.sidebar-mobile-close:hover {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
-.sidebar-body {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-sm) var(--space-sm);
-  /* 抽屉内滚动到边界时不要把手势传给背后的页面 */
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* 抽屉打开时锁住页面滚动（类名由 Sidebar 组件挂到 body 上）。
-   不锁的话，手指在遮罩上滑动会把背后的页面滚走，
-   关掉抽屉后用户会发现自己不知道被带到哪里了。 */
-body.sidebar-open-lock {
-  overflow: hidden;
-}
-
-.sidebar-section {
-  margin-bottom: var(--space-xs);
-}
-
-.sidebar-section-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--sidebar-section-title);
-  padding: var(--space-sm) var(--space-sm) var(--space-xs) var(--space-sm);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.sidebar-collapsed .sidebar-section-title {
-  text-align: center;
-  padding: var(--space-sm) 0 var(--space-xs) 0;
-  font-size: 0;
-}
-
-.sidebar-collapsed .sidebar-section-title::after {
-  content: '···';
-  font-size: 0.6rem;
-  letter-spacing: 0;
-}
-
-/* 侧边栏的一行 = 导航按钮 +（可选的）行内快捷操作。
-   包一层 div 是为了让两者成为**兄弟**而不是父子：<button> 里嵌 <button>
-   是非法 HTML（React: validateDOMNesting 警告），键盘与读屏也没法把
-   「笔记列表」和「上传资料」当成两个独立目标。
-   行本身当定位上下文，操作按钮才能绝对定位钉在右端 ——
-   这样导航按钮仍整行铺满，悬停高亮的范围与改动前一致。 */
-.sidebar-item-row {
-  position: relative;
-}
-
-/* 带快捷操作的那一行，给标签留出 + 的位置：
-   38px = 8px(按钮自身右内边距) + 22px(+ 的宽度) + 8px(原来是 flex gap)，
-   与「+ 嵌在按钮里」时标签可用宽度完全相同，长标签不会滑到 + 底下。 */
-.sidebar-item-row:has(.sidebar-item-action) .sidebar-item {
-  padding-right: 38px;
-}
-
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--sidebar-item-radius);
-  color: var(--color-text-secondary);
-  font-size: 0.875rem;
-  font-weight: 450;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-  overflow: hidden;
-  border: none;
-  background: transparent;
-  width: 100%;
-  text-align: left;
-  font-family: inherit;
-  line-height: 1.5;
-}
-
-.sidebar-item:hover {
-  background: var(--sidebar-item-hover);
-  color: var(--color-primary);
-}
-
-.sidebar-item-active {
-  background: var(--sidebar-item-active);
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.sidebar-item-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  font-size: 1rem;
-}
-
-.sidebar-item-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sidebar-collapsed .sidebar-item {
-  justify-content: center;
-  padding: var(--space-sm) 0;
-}
-
-.sidebar-collapsed .sidebar-item-label {
-  display: none;
-}
-
-.sidebar-item-action {
-  /* 与导航按钮是兄弟节点（见 .sidebar-item-row）：绝对定位钉在行的右端，
-     几何位置与"曾经嵌在按钮里"时一致 —— 右边缘距行尾 8px（= 原来的右内边距），
-     垂直居中（原来是 flex 的 align-items: center）。 */
-  position: absolute;
-  right: var(--space-sm);
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  font-size: 1.1rem;
-  color: var(--color-text-tertiary);
-  transition: all 0.15s ease;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.sidebar-item-action:hover {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
-.sidebar-collapsed .sidebar-item-action {
-  display: none;
-}
-
-.sidebar-divider {
-  height: 1px;
-  background: var(--sidebar-border);
-  margin: var(--space-sm) var(--space-md);
-}
-
-.sidebar-footer {
-  border-top: 1px solid var(--sidebar-border);
-  padding: var(--space-sm);
-  flex-shrink: 0;
-}
-
-/* ── 主内容区（侧边栏布局）── */
-
-.app-layout {
-  margin-left: var(--sidebar-width);
-  min-height: 100vh;
-  transition: margin-left 0.25s var(--ease-out-expo);
-}
-
-.app-layout-collapsed {
-  margin-left: var(--sidebar-collapsed-width);
-}
-
-.app-layout .container {
-  max-width: none;
-  padding: var(--space-xl) var(--space-xl);
-}
-
-/* ── 移动端侧边栏遮罩 ── */
-
-.sidebar-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 99;
-  animation: fadeIn 0.2s ease;
-}
-
-.sidebar-mobile-toggle {
-  display: none;
-  position: fixed;
-  top: var(--space-sm);
-  left: var(--space-sm);
-  /* 99 而不是 101：抽屉（.sidebar，z-index 100）打开时必须盖住这个按钮。
-     原来 101 会让汉堡按钮浮在抽屉头上，和抽屉里的 Logo 叠在一起。 */
-  z-index: 99;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-  color: var(--color-text);
-  font-size: 1.2rem;
 }

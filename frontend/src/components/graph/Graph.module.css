@@ -1,0 +1,705 @@
+/**
+ * 知识图谱功能的样式（overhaul-plan 5.6 序 10）
+ *
+ * ## 为什么整个功能只有一份模块
+ *
+ * 图谱的 DOM 分散在 6 个文件里：`pages/KnowledgeGraph.tsx`（页面骨架）、
+ * `pages/knowledgegraph/GraphToolbar.tsx`（工具条/搜索/图例）、
+ * `components/graph/{GraphSidebar,NodeInspector,GraphCanvas,Minimap}.tsx`。
+ * 而 `graph.css` 里有 5 条规则被**两个以上组件共用**：
+ *
+ * | 类名 | 用它的组件 |
+ * |---|---|
+ * | `.graph-panel` `.graph-panel-title` | GraphSidebar + NodeInspector |
+ * | `.graph-legend` `.graph-legend-item` | GraphSidebar + GraphToolbar |
+ *
+ * 它们不是"跨功能共用件"（规范 §4 第 2 条要求的是**两个以上不相邻功能**），
+ * 而是同一个功能内部的结构件：拆成 6 份模块只会让这几条被复制 6 份，
+ * 或者逼出组件目录之间的互相 import。所以整份样式放在功能自己的组件目录下，
+ * 由这 6 个文件共同 import（页面 import 组件是正常方向，反过来才是问题）。
+ *
+ * ## 从哪来（全项目 grep 只命中上面这 6 个文件）
+ *
+ * - `src/styles/graph.css` 的 60 条规则（47 个类名 + `@keyframes graph-spin` 的引用）；
+ * - `src/styles/responsive.css` 的 16 条：768px 档 14 条（页面高度、工具条换行、
+ *   搜索框整行、侧边栏改贴底抽屉、缩略图隐藏、缩放控件挪位、类型下拉字号，
+ *   以及 `.graph-btn` / `.graph-control-btn` 从共享选择器组里拆出来的触控目标与内边距）
+ *   + 480px 档 2 条（工具条竖排、按钮组整行）。
+ *   两半必须同批 —— 类名哈希后留在补丁层里的选择器永远选不中（雷区 2）。
+ *
+ * ## `@keyframes graphSpin` 为什么是"复制 + 改名"而不是"整体搬走"
+ *
+ * `.graph-search-spinner` 写的是裸名 `animation: graph-spin 0.6s linear infinite`。
+ * 定义与引用都在 `graph.css` 里，一起搬进模块后 CSS Modules 会把**两边**同时哈希，
+ * 产物里仍然自洽 —— 但仓库的既有做法（试点、第一批到第三批）是
+ * **把动画体逐字复制进模块并改名，全局原版不删**：
+ *   ① `BATCHES.keyframes` 的动画体比对读的是 **git HEAD 的全局样式表**，
+ *      把原版删掉会让那条比对在提交之后找不到原文而报错（工具是给后面的人用的）；
+ *   ② 全局 `@keyframes` 仍可被 tsx 的行内样式按裸名引用（内联样式不过 CSS Modules）。
+ * 所以 `graph.css` 里保留原版（它已没有样式表用户，登记在计划 §7.0 第 2 条的死代码清理轮）。
+ *
+ * ## 顺序就是行为（两处，都被产物检查盯住）
+ *
+ * 1. **基础规则在前、两个媒体块在后**（与原文件 graph.css → responsive.css 的先后一致）：
+ *    `.graph-search-input:focus`、`.graph-control-btn` 尺寸、`.graph-sidebar` 的抽屉形态、
+ *    `.graph-filter-select` 字号等，都靠"同权重 + 块在后"取胜。
+ * 2. **`.graphBtn` / `.graphBtn:hover` / `.graphBtnActive` / `.graphBtnActive:hover`
+ *    四条的相对顺序一字未改**：`.graph-btn-active:hover`(0,2,0) 压 `.graph-btn:hover`(0,2,0)
+ *    靠的就是它排在后面；而 `.graph-btn-active`(0,1,0) 压不过任何一个 `:hover`。
+ *
+ * ## 分享出去的那两条触控目标规则（原 `responsive.css` 里的四选择器组）
+ *
+ * 原规则把 `.filter-pill` / `.segment-btn`（留全局）与 `.graph-btn` / `.graph-control-btn`
+ * （本模块）写在**同一个选择器组**里。拆开是必然的，逐条登记在
+ * `scripts/css-migration-diff.mjs` 的 `BATCHES[].relocations` 里（值不变、双向自检）。
+ */
+
+/* 图谱页骨架（原先写在 KnowledgeGraph.tsx 的内联样式里）。
+   搬到 CSS 是为了让响应式文件能改它——内联样式优先级高于媒体查询，
+   手机上就改不动这个高度。类名是**样式挂点**，不含任何业务含义。 */
+.graphPage {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--space-xl) * 2);
+}
+
+.graphPageMain {
+  display: flex;
+  flex: 1;
+  gap: var(--space-md);
+  min-height: 0;
+}
+
+/* 图谱侧边栏：桌面固定 320px（原为 GraphSidebar.tsx 的内联样式，
+   同样为了让 480px 以下能改成贴底抽屉而搬到这里） */
+.graphSidebar {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* 图谱容器：水墨丹青视觉重构 —— 宣纸底 + 四角墨色晕染 + 装裱画框
+   原: .graphCanvas { background: radial-gradient(ellipse at center, rgba(15, 52, 96, 0.04) 0%, transparent 70%), linear-gradient(rgba(15, 52, 96, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 52, 96, 0.03) 1px, transparent 1px), var(--color-bg); background-size: 100% 100%, 24px 24px, 24px 24px, auto; border: 1px solid var(--color-border-light); border-radius: var(--radius-md); overflow: hidden; position: relative; } */
+.graphCanvas {
+  background:
+    radial-gradient(ellipse at 18% 12%, rgba(45, 138, 86, 0.07) 0%, transparent 55%),   /* 青绿晕染（左上，远山） */
+    radial-gradient(ellipse at 86% 84%, rgba(192, 57, 43, 0.055) 0%, transparent 55%),  /* 赭石晕染（右下，印章余韵） */
+    radial-gradient(ellipse at 50% 46%, rgba(26, 26, 46, 0.045) 0%, transparent 62%),   /* 中央墨晕 */
+    var(--graph-paper);                                                                  /* 宣纸底 */
+  border: 1px solid var(--graph-frame);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-md);               /* 装裱双层画框 */
+  overflow: hidden;
+  position: relative;
+}
+
+/* 工具栏 */
+.graphToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-shrink: 0;
+}
+
+.graphToolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.graphToolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* 图例 */
+.graphLegend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  padding: 4px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: 9999px;
+}
+
+.graphLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  transition: all 0.2s var(--ease-out-expo);
+  user-select: none;
+}
+
+.graphLegendItem:hover {
+  background: var(--color-primary-light);
+}
+
+.graphLegendItemActive {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.graphLegendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px; /* 印章式小圆角方块（原: 50%） */
+  display: inline-block;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* 工具栏按钮 */
+.graphBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out-expo);
+  position: relative;
+  font-family: inherit;
+}
+
+.graphBtn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.graphBtnActive {
+  background: var(--gradient-primary);
+  color: white;
+  border-color: transparent;
+}
+
+.graphBtnActive:hover {
+  color: white;
+  background: var(--gradient-primary);
+  opacity: 0.9;
+}
+
+/* 建议数量徽章 */
+.graphBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* 创建模式提示 */
+.graphCreateHint {
+  background: var(--color-accent-light);
+  color: var(--color-text);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  border-left: 3px solid var(--color-accent);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* 侧边栏面板 */
+.graphPanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.graphPanelTitle {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* 建议关系卡片 */
+.graphSuggestionCard {
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg);
+  transition: border-color 0.2s ease;
+}
+
+.graphSuggestionCard:hover {
+  border-color: var(--color-accent);
+}
+
+/* 关系类型图例线 */
+.graphRelationLine {
+  width: 20px;
+  height: 2px;
+  display: inline-block;
+  border-radius: 1px;
+}
+
+/* 缩放控件容器（水墨重构：宣纸底 + 装裱色边）
+   原: .graphControls { position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); padding: 4px; box-shadow: var(--shadow-sm); z-index: 5; } */
+.graphControls {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(245, 240, 228, 0.92);
+  border: 1px solid var(--graph-frame);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-sm);
+  z-index: 5;
+}
+
+/* 单个缩放按钮 */
+.graphControlBtn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.15s var(--ease-out-expo);
+  font-family: inherit;
+  line-height: 1;
+}
+
+.graphControlBtn:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.graphControlBtn:active {
+  transform: scale(0.92);
+}
+
+/* Minimap 缩略图（水墨重构：宣纸半透明底 + 装裱色边框）
+   原: .graphMinimap { position: absolute; bottom: 12px; left: 12px; width: 140px; height: 90px; background: rgba(255, 255, 255, 0.92); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); z-index: 5; pointer-events: none; overflow: hidden; } */
+.graphMinimap {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 140px;
+  height: 90px;
+  background: rgba(245, 240, 228, 0.92);
+  border: 1px solid var(--graph-frame);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--graph-frame-inner), var(--shadow-sm);
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.graphMinimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 建议卡片相似度进度条 */
+.graphSuggestionScoreBar {
+  height: 4px;
+  background: var(--color-border-light);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.graphSuggestionScoreBarFill {
+  height: 100%;
+  background: var(--gradient-gold);
+  border-radius: 9999px;
+  transition: width 0.4s var(--ease-out-expo);
+}
+
+/* ── 知识图谱增强样式 ── */
+
+/* 统计面板网格 */
+.graphStatsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: var(--space-sm);
+}
+
+.graphStatItem {
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  text-align: center;
+  border: 1px solid var(--color-border);
+}
+
+.graphStatValue {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+.graphStatLabel {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* 统计柱状图 */
+.graphStatsBarRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 0.75rem;
+}
+
+.graphStatsBarLabel {
+  width: 36px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.graphStatsBarTrack {
+  flex: 1;
+  height: 8px;
+  background: var(--color-bg);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.graphStatsBarFill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.5s var(--ease-out-expo);
+  min-width: 2px;
+}
+
+.graphStatsBarCount {
+  width: 20px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* 搜索框 */
+.graphSearchBox {
+  position: relative;
+  margin-left: var(--space-md);
+}
+
+/* 1rem = 16px：iOS Safari 聚焦 font-size 小于 16px 的输入框会放大整页。
+   基础值必须写在这里（而不是在 responsive.css 里按 768px 兜底）：
+   那条兜底只对 ≤768px 的视口成立，手机横屏（844–932px）照样会缩放；
+   而且 responsive.css 在 main.tsx 里排在本文件**之前**，
+   值的归属权本来就在本文件。 */
+.graphSearchInput {
+  width: 180px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.2s, width 0.2s;
+}
+
+.graphSearchInput:focus {
+  width: 240px;
+  border-color: var(--color-primary);
+}
+
+.graphSearchInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.graphSearchSpinner {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: graphSpin 0.6s linear infinite;
+}
+
+@keyframes graphSpin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* 搜索下拉结果 */
+.graphSearchResults {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  z-index: 100;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.graphSearchResultItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.8rem;
+}
+
+.graphSearchResultItem:hover {
+  background: var(--color-primary-light);
+}
+
+.graphSearchResultDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graphSearchResultTitle {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.graphSearchResultType {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* 类型过滤器选择框 */
+.graphFilterSelect {
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  outline: none;
+  cursor: pointer;
+}
+
+/* 焦点可见（axe 不检查这一条，见 a11y-audit §4.1）：
+   原来只有 `border-color` 变化，1px 边框从 #e8e6e1 变到 #0f3460 在
+   深色纸纹背景上不够显眼；补一圈 2px 白色内环 + 2px 墨色外环
+   （`box-shadow` 不参与布局，工具栏不会因为聚焦而位移）。 */
+.graphFilterSelect:focus {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--color-primary);
+}
+
+/* 邻居节点列表 */
+.graphNeighborItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.graphNeighborItem:hover {
+  background: var(--color-primary-light);
+  border-color: var(--color-border);
+}
+
+.graphNeighborDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.graphNeighborTitle {
+  font-size: 0.8rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphNeighborRel {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  margin-top: 1px;
+}
+
+.graphNeighborCount {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 窄屏（原 `responsive.css`，值一字未改；两块的先后与原来一致）
+ * ════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* 触控目标：原规则是 `.filter-pill, .segment-btn, .graph-btn, .graph-control-btn`
+     四选择器组（`responsive.css` 的"通用触控目标"一节）。组里前两个留全局，
+     后两个进了本模块 ⇒ 组必须拆开。逐条登记见 `BATCHES[].relocations`。 */
+  .graphBtn,
+  .graphControlBtn {
+    min-height: 40px;
+  }
+
+  /* 同上：原 `.filter-pill, .segment-btn, .graph-btn { padding-left/right }` */
+  .graphBtn {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  /* 图谱工具条里的类型下拉原为 0.8rem（12.8px）：手机上既难读，
+     聚焦时 iOS 还会自动把整页放大。responsive.css 在 graph.css 之后加载，
+     同权重即可覆盖，不必用 !important —— 现在两条都在本模块里，
+     **媒体块在基础规则之后**，胜负关系逐字不变。
+     旁边的搜索框（`.graphSearchInput`）**不在这里兜底**：
+     它的 1rem 已经写在基础规则里（值的归属权在拥有它的规则里，
+     而且本块只覆盖 ≤768px，手机横屏的 844–932px 覆盖不到）。 */
+  .graphFilterSelect {
+    font-size: 1rem;
+  }
+
+  /* F-16：GraphSidebar 固定 320px —— 375px 屏上画布只剩约 55px 宽的一条竖缝。
+     窄屏改为贴底的抽屉式面板：画布保留完整宽度，面板浮在上方，
+     由工具栏上一直可见的「收起/展开」按钮开合（该按钮的行为不变）。 */
+  .graphPage {
+    height: calc(100vh - var(--page-pad-y-top) - var(--page-pad-y-bottom));
+    height: calc(100dvh - var(--page-pad-y-top) - var(--page-pad-y-bottom));
+  }
+
+  .graphToolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .graphToolbarLeft,
+  .graphToolbarRight {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .graphSearchBox {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .graphSearchInput,
+  .graphSearchInput:focus {
+    width: 100%;
+  }
+
+  .graphSidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 50vh;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+    background: var(--color-bg);
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -8px 24px rgba(26, 26, 46, 0.12);
+    z-index: 90;
+    overscroll-behavior: contain;
+  }
+
+  /* 缩略图在手机上是纯占地（画布本来就小）；缩放控件挪到画布右上，
+     否则会被抽屉面板盖住。 */
+  .graphMinimap {
+    display: none;
+  }
+
+  .graphControls {
+    top: 12px;
+    bottom: auto;
+    flex-direction: row;
+  }
+
+  .graphControlBtn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .graphToolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+
+  /* 图谱工具条竖排后，右侧按钮组也要能整行铺开（原来是靠右挤在一起） */
+  .graphToolbarRight {
+    width: 100%;
+  }
+}

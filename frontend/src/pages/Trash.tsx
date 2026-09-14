@@ -143,9 +143,15 @@ export default function Trash() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
                 {/* 左侧：标题 + 元信息 + 附属统计 */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-xs)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {/* `h2` 而不是 `h3`：这一页的大纲是 h1「回收站」→ 每张卡片，
+                      中间不存在任何区块级标题 —— 写成 h3 就是 h1 → h3 跳级
+                      （axe 的 heading-order）。字号与字重都显式钉着
+                      （`fontSize: '1rem'` / `fontWeight: 600`），所以改级别
+                      **一个像素都没动**，做法与已修的 F-18（笔记列表卡片
+                      h3→h2）逐字相同。 */}
+                  <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-xs)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {item.note.title}
-                  </h3>
+                  </h2>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
                     {sourceTypeLabels[item.note.source_type] || item.note.source_type}
                     {' · '}

@@ -268,7 +268,15 @@ export default function KnowledgeCards() {
                   <span className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}>
                     ▶
                   </span>
-                  <strong>{group.note_title}</strong>
+                  {/* `h2` 而不是 `<strong>`：分组头是**区块级标题**（按来源笔记分组），
+                      卡片的标题（下面那个 h3）住在它里面。原来两端都不是标题，
+                      于是大纲是 h1「知识卡片」→ h3「卡片标题」跳级（axe 的
+                      heading-order）—— 把已经存在的这个分组名提升为 h2 之后，
+                      大纲变成 h1 → h2（来源笔记）→ h3（卡片），**层级是完整的**，
+                      而且没有新起任何名字、没有多任何一行文字。
+                      字号/字重显式钉住（与 `<strong>` 的默认外观一致），
+                      所以视觉不变 —— 与 F-14/F-15/F-18 的做法相同。 */}
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>{group.note_title}</h2>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                     ({group.cards.length} 张卡片)
                   </span>
@@ -363,7 +371,11 @@ export default function KnowledgeCards() {
                               style={{
                                 marginTop: '4px',
                                 fontSize: '0.7rem',
-                                color: '#c9a959',
+                                // `#c9a959`（`--color-accent`）白底只有 2.26:1，
+                                // 而这里是一行 0.7rem 的**提示文字**（要求 4.5:1）——
+                                // 与 a11y-audit 的 F-19/F-33 是同一个"金色压浅底"的洞。
+                                // `#8f7020` 是同色相压深一档：白底 4.66:1。
+                                color: '#8f7020',
                                 cursor: 'pointer',
                               }}
                             >

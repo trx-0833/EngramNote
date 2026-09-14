@@ -33,6 +33,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { parseRules, splitSelectors, findRecentRev, readFromGit } from './lib/css-parse.mjs'
 
 const root = process.cwd()
 const outDir = path.join(root, 'docs/migration-evidence')
@@ -449,7 +450,311 @@ write(
     `\`\`\`\n${adhd.out.trim()}\n\`\`\``,
 )
 
-// ── 6. 差集（核心证据，含所有批次） ──
+// ── 7. 序 8 / 9 / 10 的迁移前清单（第五、六、七批） ──
+const batch789Sheets = [
+  {
+    title: '序 8：components.css 的页面级布局挂点（+ responsive.css 同批窄屏规则）',
+    sheets: [
+      { sheet: 'src/styles/components.css', classes: ['note-detail-header', 'note-detail-actions', 'note-list-item', 'note-list-actions', 'edit-split'] },
+      { sheet: 'src/styles/responsive.css', classes: ['note-detail-header', 'note-detail-actions', 'note-list-item', 'note-list-actions', 'edit-split'] },
+    ],
+  },
+  {
+    title: '序 9：layout.css 按归属拆分（Sidebar / App 骨架）+ responsive.css 同批规则',
+    sheets: [
+      {
+        sheet: 'src/styles/layout.css',
+        classes: [
+          'sidebar', 'sidebar-collapsed', 'sidebar-mobile-open', 'sidebar-header', 'sidebar-logo',
+          'sidebar-collapse-btn', 'sidebar-mobile-close', 'sidebar-body', 'sidebar-open-lock',
+          'sidebar-section', 'sidebar-section-title', 'sidebar-item-row', 'sidebar-item',
+          'sidebar-item-active', 'sidebar-item-icon', 'sidebar-item-label', 'sidebar-item-action',
+          'sidebar-divider', 'sidebar-footer', 'sidebar-overlay',
+          'app-layout', 'app-layout-collapsed', 'sidebar-mobile-toggle',
+        ],
+      },
+      { sheet: 'src/styles/responsive.css', classes: ['sidebar', 'sidebar-mobile-open', 'app-layout', 'sidebar-mobile-toggle', 'sidebar-item', 'sidebar-item-action', 'sidebar-section-title', 'sidebar-collapse-btn', 'sidebar-mobile-close'] },
+    ],
+  },
+  {
+    title: '序 10：graph.css 整份进图谱功能模块 + responsive.css 同批规则',
+    sheets: [
+      {
+        sheet: 'src/styles/graph.css',
+        classes: [
+          'graph-page', 'graph-page-main', 'graph-sidebar', 'graph-canvas', 'graph-toolbar',
+          'graph-toolbar-left', 'graph-toolbar-right', 'graph-legend', 'graph-legend-item',
+          'graph-legend-item-active', 'graph-legend-dot', 'graph-btn', 'graph-btn-active',
+          'graph-badge', 'graph-create-hint', 'graph-panel', 'graph-panel-title',
+          'graph-suggestion-card', 'graph-relation-line', 'graph-controls', 'graph-control-btn',
+          'graph-minimap', 'graph-suggestion-score-bar', 'graph-suggestion-score-bar-fill',
+          'graph-stats-grid', 'graph-stat-item', 'graph-stat-value', 'graph-stat-label',
+          'graph-stats-bar-row', 'graph-stats-bar-label', 'graph-stats-bar-track',
+          'graph-stats-bar-fill', 'graph-stats-bar-count', 'graph-search-box',
+          'graph-search-input', 'graph-search-spinner', 'graph-search-results',
+          'graph-search-result-item', 'graph-search-result-dot', 'graph-search-result-title',
+          'graph-search-result-type', 'graph-filter-select', 'graph-neighbor-item',
+          'graph-neighbor-dot', 'graph-neighbor-title', 'graph-neighbor-rel', 'graph-neighbor-count',
+        ],
+      },
+      { sheet: 'src/styles/responsive.css', classes: ['graph-page', 'graph-toolbar', 'graph-toolbar-left', 'graph-toolbar-right', 'graph-search-box', 'graph-search-input', 'graph-sidebar', 'graph-minimap', 'graph-controls', 'graph-control-btn', 'graph-filter-select', 'graph-btn'] },
+    ],
+  },
+]
+const parts789 = []
+for (const group of batch789Sheets) {
+  const blocks = []
+  for (const s of group.sheets) {
+    const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
+    if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
+    blocks.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  }
+  parts789.push(`## ${group.title}\n\n${blocks.join('\n\n')}`)
+}
+write(
+  '5.6-10-before-batches-8-9-10.md',
+  '5.6 迁移前：序 8 / 序 9 / 序 10（components 挂点 → Sidebar/App 骨架 → 图谱）的规则清单',
+  '每一组都同时列出**全局样式表那半**与 **`responsive.css` 那半** —— 这两半必须同批\n' +
+    '（类名一旦哈希，留在补丁层里的选择器永远选不中，计划 §5 雷区 2）。\n' +
+    '修订由 `css-rule-inventory.mjs` **按内容自动定位**（从 HEAD 往回找第一个还含有\n' +
+    '这些类名的提交），所以清单头部的 `@HEAD~N` 会随提交数变化，规则内容不会。\n\n' +
+    '⚠️ `layout.css` 里还有 5 条 `.navbar*`（旧顶部导航栏）**留全局不搬**：全项目\n' +
+    'grep 0 处引用、没有归属组件可挂，登记在计划 §7.0 第 2 条的死代码清理轮。\n' +
+    '`graph.css` 同理保留 `@keyframes graph-spin`（动画体已逐字复制成模块里的\n' +
+    '`graphSpin`；原版不删的理由写在两个文件头）。\n\n' +
+    parts789.join('\n\n'),
+)
+
+// ── 8. 序 12 / 13 的迁移前清单 + **两张补丁层清空的逐条去向审计** ──
+const batch1213Sheets = [
+  {
+    sheet: 'src/styles/refinements.css',
+    classes: [
+      'markdown-editor', 'edit-toolbar', 'btn', 'card-hover', 'filter-pill', 'filter-pill-active',
+      'segment-btn', 'segment-btn-active', 'card', 'link-modal', 'material-list-item',
+      'material-list-item-selected', 'type-badge', 'type-badge-material',
+    ],
+  },
+  {
+    sheet: 'src/styles/responsive.css',
+    classes: [
+      'btn', 'filter-pill', 'segment-btn', 'btn-ghost', 'card', 'page-header-row',
+      'markdown-body', 'heading-serif',
+    ],
+  },
+]
+const parts1213 = []
+for (const s of batch1213Sheets) {
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
+  parts1213.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+}
+
+/**
+ * 两张补丁层清空后的**逐条去向审计**（自包含，不依赖 BATCHES 表）：
+ * 对迁移前那份样式表里的每一条规则，在工作区的**全部** CSS 里找一条
+ * "上下文相同 + 选择器相同（类名 kebab→camel 归一）+ 声明逐字相同"的规则。
+ * 找不到的必须落在下面的显式例外表里（每条都要写清依据），否则报错退出。
+ */
+const EMPTY_SHEET_EXCEPTIONS = [
+  {
+    // 13 条属性选择器：真 Chromium 实测命中 0 个元素（浏览器把内联 rgba 序列化成带空格的形式）
+    match: (sel) => sel.startsWith('[style*="rgba(0,0,0,0.5)"]'),
+    why: '实测选择器命中 0 个元素（迁移前就从未生效）⇒ 已删除；见探针输出与 BATCHES[].resolvedConflicts',
+  },
+  {
+    match: (sel) => sel === ':root',
+    why: '`--page-pad-y-*` 两条自定义属性随 `.app-layout` 收进 App.module.css 的 `.appLayout`（序 9，选择器变了）',
+  },
+]
+
+function normalizedSelector(sel) {
+  return sel
+    // `:global(.container)` → `.container`（模块里保住全局类名的写法，产物里就是 `.container`）
+    .replace(/:global\(([^)]*)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .replace(/\.([a-z][\w-]*)/gi, (_, name) => `.${name.replace(/-([a-z0-9])/g, (m, c) => c.toUpperCase()).toLowerCase()}`)
+    .trim()
+}
+function declList(decls) {
+  return decls.map(([p, v]) => `${p.trim().toLowerCase()}:${v.replace(/\s+/g, ' ').trim()}`)
+}
+function normalizedDecls(decls) {
+  return declList(decls).sort().join(';')
+}
+
+const workspaceSheets = []
+;(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) walk(path.join(dir, e.name))
+    else if (e.name.endsWith('.css')) workspaceSheets.push(path.join(dir, e.name))
+  }
+})(path.join(root, 'src'))
+const workspaceRules = workspaceSheets.flatMap((abs) =>
+  parseRules(fs.readFileSync(abs, 'utf8')).map((r) => ({
+    file: path.relative(root, abs).replace(/\\/g, '/'),
+    context: r.context,
+    members: splitSelectors(r.selector).map(normalizedSelector),
+    decls: declList(r.decls),
+  })),
+)
+
+/**
+ * 一条规则算"找到了"的判据（三条缺一不可）：
+ *   1. **每个选择器成员**都能在工作区里找到一条同上下文的规则**包含它** ——
+ *      这允许"选择器组被拆开"（`.filter-pill, .segment-btn, .graph-btn` 拆成
+ *      留全局的一半 + 进模块的一半，计划里两次都登记了）；
+ *   2. 那条规则**包含本条规则的全部声明**（逐字，空白归一）；
+ *   3. 找不到就落进显式例外表，否则计入"静默丢失"并让脚本失败。
+ */
+function findRule(rule) {
+  const members = splitSelectors(rule.selector).map(normalizedSelector)
+  const decls = declList(rule.decls)
+  return members.every((m) =>
+    workspaceRules.some((w) => w.context === rule.context && w.members.includes(m) && decls.every((d) => w.decls.includes(d))),
+  )
+}
+
+const auditLines = []
+let auditFailed = false
+for (const sheet of ['src/styles/responsive.css', 'src/styles/refinements.css']) {
+  const rev = findRecentRev((candidate) => parseRules(readFromGit(path.join(root, sheet), candidate)).length > 5)
+  if (!rev) throw new Error(`审计：找不到 ${sheet} 还有内容的修订`)
+  const rules = parseRules(readFromGit(path.join(root, sheet), rev))
+  let inPlace = 0
+  const excepted = []
+  const missing = []
+  for (const r of rules) {
+    if (findRule(r)) {
+      inPlace += 1
+      continue
+    }
+    const ex = EMPTY_SHEET_EXCEPTIONS.find((e) => e.match(r.selector.trim()))
+    if (ex) {
+      excepted.push(`${r.context || '(顶层)'} \`${r.selector}\` —— ${ex.why}`)
+      continue
+    }
+    missing.push(`${r.context || '(顶层)'} \`${r.selector}\` { ${r.decls.map(([p]) => p).join(', ')} }`)
+  }
+  auditLines.push(
+    `### ${sheet}（迁移前 ${rev} 有 ${rules.length} 条规则）`,
+    '',
+    `- **逐字在工作区里找到**：${inPlace} 条`,
+    `- **按显式例外处理**：${excepted.length} 条`,
+    ...excepted.map((x) => `    - ${x}`),
+    `- **既找不到也没有例外（= 静默丢失）**：${missing.length} 条`,
+    ...missing.map((x) => `    - ✗ ${x}`),
+    '',
+  )
+  if (missing.length) auditFailed = true
+}
+
+write(
+  '5.6-11-before-batches-12-13-and-empty-patch-layers.md',
+  '5.6 迁移前：序 12 / 序 13（两张补丁层清空）的规则清单 + 逐条去向审计',
+  '`refinements.css` 与 `responsive.css` 是两层"后加载覆盖前面"的补丁，' +
+  '**清空它们**（而不是删文件 —— `mobile-input-font-size.test.ts` 断言每个\n' +
+    '`src/styles/*.css` 都被 `main.tsx` 引入）是 5.6 的最后两步。\n' +
+    '这一批的证据不是"逐条保留"（规则只是换了归属），而是**去向审计**：\n' +
+    '迁移前那份样式表里的每一条规则，都能在工作区的某个 CSS 里找到\n' +
+    '"上下文 + 选择器（类名 kebab→camel 归一）+ 声明逐字相同"的那一条，\n' +
+    '或者落在显式例外表里（每条都写明依据）。\n\n' +
+    '例外只有两类：\n' +
+    '1. **13 条属性选择器 `[style*="rgba(0,0,0,0.5)"] …`**：真 Chromium 实测该选择器\n' +
+    '   命中 **0** 个元素（React 走 CSSOM 赋内联值，浏览器把它序列化成带空格的\n' +
+    '   `rgba(0, 0, 0, 0.5)`），也就是说这些规则**迁移前就从未生效**，删它是可证明的空操作；\n' +
+    '2. **`:root` 的 `--page-pad-y-*`**：随 `.app-layout` 收进 `App.module.css` 的 `.appLayout`\n' +
+    '   （选择器变了，值一字未改；`relocations` 里有双向自检）。\n\n' +
+    '## 去向审计结果\n\n' +
+    auditLines.join('\n') +
+    '\n## 迁移前清单（按类名分组）\n\n' +
+    parts1213.join('\n\n'),
+)
+
+// ── 9. 序 8~13 的"渲染没变"实测（真 Chromium 探针，迁移前后各跑一次） ──
+// 探针是一次性的（`e2e/zz-cssprobe-*.spec.ts` + 临时 worktree），用完已删 ——
+// 结论必须固化在这里，否则它只活在某个人的对话里。
+write(
+  '5.6-12-rendered-unchanged-probe.md',
+  '5.6 序 8~13：真实 Chromium 的 computed style 对账（迁移前 worktree HEAD vs 迁移后工作区）',
+  [
+    '## 怎么量的（配方见 `css-convention.md` §7 / 计划 §5 雷区 3）',
+    '',
+    '1. `git worktree add --detach D:\\engramnote-cssprobe-head HEAD`（**只读 HEAD，不碰工作区** ——',
+    '   仓库里有并行 agent，`git stash` 会把别人的改动一起搅进来）+ `node_modules` junction，',
+    '   在该工作树里起独立 dev server（4321）。',
+    '   ⚠️ 必须给 worktree 一个**独立的 vite 缓存目录**（`cacheDir`）：与工作区共用一个',
+    '   `node_modules/.vite` 时两边会互相覆盖预打包产物，症状是图谱页崩到错误边界',
+    '   （`Cannot read properties of null (reading \'useRef\')` —— react-force-graph 拿不到 React）。',
+    '2. **录制**：10 个场景（`/notes` 桌面/窄屏/抽屉打开/hover 卡片、`/notes/note-1` 桌面/窄屏/编辑态/',
+    '   关联资料弹窗、`/graph` 桌面/窄屏），每个场景等"就绪元素可见"再等 400ms 排版稳定，',
+    '   读 **54 条 computed 属性**；hover 场景等 700ms 让过渡结束（不等会读到中间值）。',
+    '3. **比对**：同一份探针跑在当前工作区，把上一次的 JSON 用 `route.fulfill({ path })` 喂回页面，',
+    '   逐属性比。落盘/读取都**不用 `node:fs`**（本项目没有 `@types/node`）：',
+    '   录制用 `download.saveAs()`，比对用 `route.fulfill({ path })`。',
+    '',
+    '## 结果',
+    '',
+    '| 场景 | 样本 × 属性 | 差异 | class 属性（哈希）变化 / 不变 |',
+    '|---|---|---|---|',
+    '| notes-desktop | 8 × 54 | **0** | 5 / 3 |',
+    '| notes-mobile | 6 × 54 | **0** | 4 / 2 |',
+    '| notes-mobile-drawer-open | 3 × 54 | 1（已声明：遮罩动画改名） | 3 / 0 |',
+    '| notes-desktop-card-hover | 1 × 54 | **0** | 1 / 0 |',
+    '| notedetail-desktop | 4 × 54 | **0** | 3 / 1 |',
+    '| notedetail-mobile | 4 × 54 | **0** | 2 / 2 |',
+    '| notedetail-edit-mobile | 2 × 54 | **0** | 2 / 0 |',
+    '| notedetail-link-modal | 6 × 54 | **0** | 0 / 6 |',
+    '| graph-desktop | 12 × 54 | **0** | 12 / 0 |',
+    '| graph-mobile | 10 × 54 | **0** | 10 / 0 |',
+    '',
+    '**合计 56 个样本 × 54 条属性 = 3 024 条 computed 值；未声明的差异 0 条。**',
+    '',
+    '唯一一条差异是**已声明**的：`.sidebar-overlay` 的 `animation-name` 从 `fadeIn` 变成',
+    '`_sidebarOverlayFadeIn_hash`。CSS Modules 会把 `@keyframes` 名一起哈希，而定义留在',
+    '`base.css` ⇒ 产物里悬空、动画静默消失（计划 §5 雷区 1）。修法是把动画体逐字复制进',
+    '`Sidebar.module.css` 并改名：动画体一致（差集脚本的"动画体比对"逐条核对）、',
+    '引用与定义在同一产物文件里（`verify-built-css.mjs` 的"悬空动画引用 0 条"）。',
+    '所以这一条是"必须改的名字"，不是回归。',
+    '',
+    '## 顺带量到的两件事',
+    '',
+    '### 1. `[style*="rgba(0,0,0,0.5)"]` 是死选择器（真浏览器实测）',
+    '',
+    '在真实打开「管理关联资料」弹窗的页面里统计：',
+    '',
+    '```',
+    '[probe] link-modal 遮罩选择器命中：无空格=0 带空格=1 实际遮罩=1',
+    '[probe] 遮罩 style 属性：position: fixed; inset: 0px; background: rgba(0, 0, 0, 0.5);',
+    '        z-index: 1000; display: flex; align-items: center; justify-…',
+    '```',
+    '',
+    '也就是说 `refinements.css` 的 12 条 + `responsive.css` 的 1 条属性选择器规则',
+    '**迁移前就从未生效**。计划 §7.1 原来设想"先给弹窗一个真类名再搬"——',
+    '实测证明那会**改变外观**（那 13 条突然开始生效），超出"证明什么都没丢"的契约，',
+    '所以本轮按"实测从未生效 ⇒ 删除"处理，并逐条登记（`prop: \'*\'`）。',
+    '',
+    '### 2. 简写 vs 长写的跨属性竞争（计划 §5 雷区 12）在窄屏上真的存在',
+    '',
+    '`responsive.css` 的 `.filter-pill, .segment-btn { padding-left/right: var(--space-md) }`',
+    '与 `refinements.css` 的 `@media 768 .filter-pill { padding: var(--space-xs) var(--space-sm) }`',
+    '同上下文、同权重 ⇒ **后者的简写压掉前者的左右长写**。两条搬进 `learning.css` 时',
+    '保持了"长写在前、简写在后"的顺序，探针的 `notes-mobile` 场景（含 `.filter-pill`）',
+    '54 条属性差异 0 条，实测确认胜负关系没变。',
+    '',
+    '## 探针自身的两个坑（记下来，别重踩）',
+    '',
+    '1. **拼后代选择器必须用 `:is()`**：`[class~="a"],[class*="b_"] .btn` 是**两个**选择器',
+    '   （`[class~="a"]` 或 `[class*="b_"] .btn`），第一个会把容器 div 自己匹配走 ——',
+    '   于是 `actionButton` 对照的是"容器 vs 按钮"，26 条属性差异全是假的。',
+    '   `:is([class~="a"],[class*="b_"]) .btn` 才是"a 或 b 里面的 .btn"。',
+    '2. **`page.waitForEvent(\'download\')` 必须在触发之前注册**：下载事件可能在',
+    '   `page.evaluate` 期间就发出，后注册会一直等到超时（第一次跑 9 个场景全卡在 90s 超时）。',
+    '   另外用 Blob URL 而不是 `data:` URL 更稳。',
+  ].join('\n'),
+)
+
+// ── 10. 差集（核心证据，含所有批次） ──
 const diff = run('css-migration-diff.mjs')
 write(
   '5.6-02-rule-diff.md',

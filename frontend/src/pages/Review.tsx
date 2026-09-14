@@ -219,7 +219,9 @@ export default function Review() {
 
         {reachedDailyLimit ? (
           <div className="card card-accent-warning" style={{ textAlign: 'center', marginBottom: 'var(--space-md)' }}>
-            <p style={{ fontWeight: 600, color: '#ff9800' }}>今日已完成 {dailyLimit} 道题，休息一下吧！</p>
+            {/* 原值 `#ff9800`（白底 2.16:1）与 F-36 的「中」徽章同色值，
+                换成 `--color-warning` 的取值（#936408，白底 5.16:1）。 */}
+            <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>今日已完成 {dailyLimit} 道题，休息一下吧！</p>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>明天再来继续复习</p>
           </div>
         ) : (
@@ -252,6 +254,22 @@ export default function Review() {
       onKeyDown={handleKeyDown}
       style={{ maxWidth: 700, margin: '0 auto' }}
     >
+      {/* 页面标题（a11y-audit **F-32**：这一页此前 `<h1>`~`<h6>` 数量为 **0**，
+          axe 判 page-has-heading-one）。
+          ⚠️ 补 h1 时要一起看**层级**：这一页在答题态下除此之外**没有任何标题**
+          （`QuizAnswerCard` 里全是 p/span/button），所以补上 h1 就是完整的
+          大纲，不存在上一轮踩到的 `h1 → h3` 跳级（§8.4 第 1 条）。
+          为什么写在页面里而不是用 `ReviewProgress` 的 `title`：那个组件的文件头
+          写明了两种排版的分工 ——"**答题复习侧：页面标题在别处**（或没有），
+          进度条与两侧计数排在同一行"。也就是说标题本来就该长在这一页上，
+          只是一直没写；传 `title` 会把进度条挤到第二行，那是改版式，
+          不是修可访问性。
+          标题用词取自项目里已有的说法：`CardReview.tsx` 里指到这一页的链接
+          文案就是「答题复习」（`ReviewProgress` 的文件头也这么称呼它）。 */}
+      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>
+        答题复习
+      </h1>
+
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress
         index={currentIndex}

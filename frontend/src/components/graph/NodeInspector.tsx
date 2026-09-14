@@ -1,5 +1,7 @@
 import { cardTypeColors as CARD_TYPE_COLORS, cardTypeLabels as CARD_TYPE_LABELS } from '../../utils/labels'
 import type { ForceGraphNode } from './types'
+// 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
+import styles from './Graph.module.css'
 
 interface NodeInspectorProps {
   node: ForceGraphNode
@@ -15,12 +17,12 @@ export default function NodeInspector({ node, navigate, onViewSubgraph, loadingS
   const noteId = node.note_id
   return (
     <div
-      className="graph-panel"
+      className={styles.graphPanel}
       style={{
         borderTop: `4px solid ${CARD_TYPE_COLORS[node.card_type] || '#6b7280'}`,
       }}
     >
-      <div className="graph-panel-title">节点详情</div>
+      <div className={styles.graphPanelTitle}>节点详情</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>标题</span>

@@ -278,7 +278,13 @@ export default function QuizAnswerCard({
           {/* 判分结果
               等待自评时（needs_self_assessment）**不显示对错**：此时后端给的
               quality 只是占位值（简答题固定 1 = "错误"），照常渲染会把每个
-              还没自评的简答题都标成"回答错误"，是明确的误导。 */}
+              还没自评的简答题都标成"回答错误"，是明确的误导。
+
+              ⚠️ 下面两处"回答正确 / 回答错误"的文字色原本是字面量
+              `#4caf50` / `#f44336`（白底 2.78:1 / 3.68:1，都不到 4.5:1），
+              已改成 `--color-success` / `--color-error` 两个令牌（5.93:1 / 5.17:1）。
+              换令牌而不是换字面量：同一语义在 `base.css` 里已经有取值，
+              两处各写一份必然漂移（a11y-audit 的 F-19 → F-33 就是这么来的）。 */}
           {needsSelfAssessment ? (
             <div
               style={{
@@ -299,7 +305,7 @@ export default function QuizAnswerCard({
               className={result?.is_correct ? styles.feedbackCorrect : styles.feedbackIncorrect}
               style={{ marginBottom: 'var(--space-md)' }}
             >
-              <p style={{ fontWeight: 600, color: result?.is_correct ? '#4caf50' : '#f44336' }}>
+              <p style={{ fontWeight: 600, color: result?.is_correct ? 'var(--color-success)' : 'var(--color-error)' }}>
                 {result?.is_correct ? '回答正确!' : '回答错误'}
               </p>
               {!result?.is_correct && (

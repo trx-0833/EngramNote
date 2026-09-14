@@ -49,11 +49,21 @@ const DEFAULT_DURATION_MS = 4000
 /** 错误停留更久，便于阅读 */
 const ERROR_DURATION_MS = 7000
 
+/**
+ * 每种提示的外观。
+ *
+ * ⚠️ 括号里的是 CSS 变量的**兜底字面量**：正常路径上 `base.css` 一定定义了
+ * 这些变量，所以兜底值永远不生效 —— 正因如此它们很容易在改令牌时被漏掉
+ * （a11y 修复轮就把 `--color-success` 改成了 `#25714a`、`--color-warning`
+ * 改成了 `#936408`）。这里一并跟上，免得哪天变量真的缺失时得到一对
+ * 与令牌不一致的旧色值。`border` 只用于 3px 的图标边框（非文字），
+ * 不参与 4.5:1 的判据，所以只保证"与令牌一致"，不额外挑值。
+ */
 const KIND_STYLE: Record<ToastKind, { bg: string; border: string; icon: string }> = {
-  success: { bg: 'var(--color-success-bg, #eaf7ef)', border: 'var(--color-success, #2d8a56)', icon: '✓' },
+  success: { bg: 'var(--color-success-bg, #eaf7ef)', border: 'var(--color-success, #25714a)', icon: '✓' },
   error: { bg: 'var(--color-error-bg, #fdecea)', border: 'var(--color-error, #c0392b)', icon: '✕' },
   info: { bg: 'var(--color-bg-subtle, #f5f6f8)', border: 'var(--color-primary, #0f3460)', icon: 'i' },
-  warning: { bg: 'var(--color-warning-bg, #fdf6e3)', border: 'var(--color-warning, #c4860a)', icon: '!' },
+  warning: { bg: 'var(--color-warning-bg, #fdf6e3)', border: 'var(--color-warning, #936408)', icon: '!' },
 }
 
 let nextId = 1

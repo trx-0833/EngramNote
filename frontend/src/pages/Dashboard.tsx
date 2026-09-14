@@ -26,7 +26,7 @@ import ReminderBanner from '../components/ReminderBanner'
 // 抽成组件后样式随组件进模块 —— 见 StatCard.module.css 文件头
 import StatCard from '../components/StatCard'
 import { useToast } from '../components/Toast'
-import { sourceTypeLabels, statusLabels, statusClass, cardTypeLabels, questionTypeLabels } from '../utils/labels'
+import { sourceTypeLabels, statusLabels, statusClass, cardTypeLabels, questionTypeLabels, weakPointBadge } from '../utils/labels'
 // 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
 // 连带 768px 的两条响应式规则（见 Dashboard.module.css 文件头）
 import styles from './Dashboard.module.css'
@@ -313,8 +313,12 @@ export default function Dashboard() {
                     marginLeft: 'var(--space-sm)',
                     padding: '1px 6px',
                     borderRadius: 3,
-                    background: '#f4433620',
-                    color: '#f44336',
+                    // 与今日学习页那份**共用同一个常量**（utils/labels.ts 的 weakPointBadge）。
+                    // F-35 是在今日学习页报出来的（3.13:1），但这段 JSX 在**这一页上也有**
+                    // 且字面相同 —— 它之所以没在本页报警，是因为默认桩的字段名与
+                    // `WeakPoint` 契约不一致，渲染出的是 undefined 文本 + 空徽章，
+                    // 而**空文本没有对比度可判**（见 e2e/a11y-fixtures.ts 的说明）。
+                    background: weakPointBadge.background, color: weakPointBadge.color,
                   }}>
                     {cardTypeLabels[wp.card_type] || wp.card_type}
                   </span>

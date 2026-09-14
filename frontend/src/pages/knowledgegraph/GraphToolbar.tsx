@@ -6,6 +6,8 @@
  * 「创建关系 / 建议 / 收起-展开」三个按钮的类名与文案均逐字保留。
  */
 import type { GraphSearchNode } from '../../api/client'
+// 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
+import styles from '../../components/graph/Graph.module.css'
 import {
   cardTypeColors as CARD_TYPE_COLORS,
   cardTypeLabels as CARD_TYPE_LABELS,
@@ -52,8 +54,8 @@ export default function GraphToolbar({
   onToggleSidebar,
 }: GraphToolbarProps) {
   return (
-    <div className="graph-toolbar" style={{ marginBottom: 'var(--space-md)' }}>
-      <div className="graph-toolbar-left">
+    <div className={styles.graphToolbar} style={{ marginBottom: 'var(--space-md)' }}>
+      <div className={styles.graphToolbarLeft}>
         <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
           知识图谱
         </h1>
@@ -63,29 +65,29 @@ export default function GraphToolbar({
         </span>
 
         {/* 搜索框 */}
-        <div className="graph-search-box">
+        <div className={styles.graphSearchBox}>
           <input
             type="text"
-            className="graph-search-input"
+            className={styles.graphSearchInput}
             placeholder="搜索卡片..."
             value={searchKeyword}
             onChange={(e) => onSearchKeywordChange(e.target.value)}
           />
-          {searching && <span className="graph-search-spinner" />}
+          {searching && <span className={styles.graphSearchSpinner} />}
           {searchResults.length > 0 && (
-            <div className="graph-search-results">
+            <div className={styles.graphSearchResults}>
               {searchResults.map((r) => (
                 <div
                   key={r.id}
-                  className="graph-search-result-item"
+                  className={styles.graphSearchResultItem}
                   onClick={() => onFocusNode(r.id)}
                 >
                   <span
-                    className="graph-search-result-dot"
+                    className={styles.graphSearchResultDot}
                     style={{ background: CARD_TYPE_COLORS[r.card_type] || '#6b7280' }}
                   />
-                  <span className="graph-search-result-title">{r.title}</span>
-                  <span className="graph-search-result-type">
+                  <span className={styles.graphSearchResultTitle}>{r.title}</span>
+                  <span className={styles.graphSearchResultType}>
                     {CARD_TYPE_LABELS[r.card_type] || r.card_type}
                   </span>
                 </div>
@@ -95,14 +97,14 @@ export default function GraphToolbar({
         </div>
       </div>
 
-      <div className="graph-toolbar-right">
+      <div className={styles.graphToolbarRight}>
         {/* 卡片类型过滤器。
             可访问名：这里刻意用 `aria-label` 而不是可见的 `<label>` ——
             工具栏是横向排布的一行控件，插入一个可见标签会把搜索框、过滤器、
             图例挤到第二行（布局改动，超出本轮范围）。axe 的 `select-name`
             接受 aria-label；名字是否"念出来清楚"属于人工复核（a11y-audit §4.2）。 */}
         <select
-          className="graph-filter-select"
+          className={styles.graphFilterSelect}
           aria-label="按卡片类型筛选"
           value={filterCardType || ''}
           onChange={(e) => onFilterCardTypeChange(e.target.value || null)}
@@ -114,11 +116,11 @@ export default function GraphToolbar({
         </select>
 
         {/* 图例 */}
-        <div className="graph-legend">
+        <div className={styles.graphLegend}>
           {Object.entries(CARD_TYPE_LABELS).map(([type, label]) => (
-            <span key={type} className="graph-legend-item">
+            <span key={type} className={styles.graphLegendItem}>
               <span
-                className="graph-legend-dot"
+                className={styles.graphLegendDot}
                 style={{ background: CARD_TYPE_COLORS[type] }}
               />
               {label}
@@ -128,7 +130,7 @@ export default function GraphToolbar({
 
         {/* 创建关系按钮 */}
         <button
-          className={`graph-btn ${createMode ? 'graph-btn-active' : ''}`}
+          className={`${styles.graphBtn}${createMode ? ` ${styles.graphBtnActive}` : ''}`}
           onClick={onToggleCreateMode}
         >
           {createMode ? '取消' : '创建关系'}
@@ -136,18 +138,18 @@ export default function GraphToolbar({
 
         {/* 建议按钮 */}
         <button
-          className="graph-btn"
+          className={styles.graphBtn}
           onClick={onToggleSuggestions}
         >
           建议
           {suggestionsCount > 0 && (
-            <span className="graph-badge">{suggestionsCount}</span>
+            <span className={styles.graphBadge}>{suggestionsCount}</span>
           )}
         </button>
 
         {/* 侧边栏切换 */}
         <button
-          className="graph-btn"
+          className={styles.graphBtn}
           onClick={onToggleSidebar}
         >
           {sidebarOpen ? '收起' : '展开'}

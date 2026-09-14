@@ -1,0 +1,114 @@
+/**
+ * 应用骨架（主内容区 + 移动端汉堡按钮）的私有样式
+ * （overhaul-plan 5.6 序 9：`layout.css` 按归属拆分 + `responsive.css` 的同一批规则随行）
+ *
+ * ## 从哪来（全项目 grep 只命中 `App.tsx`）
+ *
+ * - `src/styles/layout.css`：`.appLayout` `.appLayoutCollapsed`
+ *   `.appLayout .container` `.sidebarMobileToggle`；
+ * - `src/styles/responsive.css`：768px 档 3 条（`.sidebarMobileToggle` 的 44px 触控目标、
+ *   `.appLayout, .appLayoutCollapsed { margin-left: 0 }`、
+ *   `.appLayout .container` 的顶部内边距让开汉堡按钮）+ 480px 档 1 条（同一处内边距收窄）。
+ *
+ * 类名按规范 §3 写成 camelCase（TSX 里是 `styles.appLayout`）。
+ *
+ * ## 两个必须说明的地方
+ *
+ * 1. **`.appLayout .container` 里的 `.container` 是全局类**（`<main className="container page-enter">`，
+ *    见 `App.tsx`；`.container` 的定义留在 `components.css`）。所以模块里必须写
+ *    `:global(.container)` —— 不写的话它会被一起哈希，产物里指向一个不存在的类名，
+ *    整条规则失效。产物是 `._appLayout_hash .container`，权重仍是 (0,2,0)：
+ *    它靠权重压过 `components.css` 的单类 `.container`，与源序无关（保持原样）。
+ * 2. **`responsive.css` 的 `:root { --page-pad-y-top / --page-pad-y-bottom }`
+ *    搬成了 `.appLayout` 上的自定义属性**（值一字未改：64px / var(--space-md)，
+ *    480px 档 60px / var(--space-sm)）。这两个变量是"汉堡按钮占多高"的单一数据源，
+ *    全项目只有两处读者：本文件的 `.appLayout .container` 与图谱模块的 `.graphPage`
+ *    （算可用高度时减掉它们）。两处都在 `.appLayout` 的**子树**里，所以把定义从
+ *    `:root` 收到 `.appLayout` 上，继承关系与计算值完全相同 ——
+ *    而 `:root` 属于令牌层（`base.css`），补丁层不该定义全局令牌（规范 §2）。
+ *    自定义属性名不参与 CSS Modules 哈希，所以变量名保持原样。
+ *    （`:root` 的选择器里没有类名 ⇒ 规则清单差集看不见这条声明，
+ *    所以它在 `css-migration-diff.mjs` 的 `relocations` 里逐条登记、双向自检。）
+ *
+ * ## 窄屏两块的先后
+ *
+ * 480px 档的 `.appLayout :global(.container)` 压 768px 档的同名规则（同权重，后者在前），
+ * 与原文件里的先后一致。`margin-left` / `min-height` 那几条没有竞争者。
+ */
+
+.appLayout {
+  margin-left: var(--sidebar-width);
+  min-height: 100vh;
+  transition: margin-left 0.25s var(--ease-out-expo);
+  /* 汉堡按钮占的高度：唯一数据源（原 responsive.css 的 `:root`，见文件头第 2 条） */
+  --page-pad-y-top: 64px;
+  --page-pad-y-bottom: var(--space-md);
+}
+
+.appLayoutCollapsed {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+/* `.container` 是全局类（App.tsx 的 `<main className="container page-enter">`），
+   必须写 `:global(...)` 保住它 —— 权重 (0,2,0)，与迁移前逐字相同。 */
+.appLayout :global(.container) {
+  max-width: none;
+  padding: var(--space-xl) var(--space-xl);
+}
+
+.sidebarMobileToggle {
+  display: none;
+  position: fixed;
+  top: var(--space-sm);
+  left: var(--space-sm);
+  /* 99 而不是 101：抽屉（.sidebar，z-index 100）打开时必须盖住这个按钮。
+     原来 101 会让汉堡按钮浮在抽屉头上，和抽屉里的 Logo 叠在一起。 */
+  z-index: 99;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+  font-size: 1.2rem;
+}
+
+@media (max-width: 768px) {
+  .sidebarMobileToggle {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    top: calc(var(--space-sm) + env(safe-area-inset-top, 0px));
+    left: calc(var(--space-sm) + env(safe-area-inset-left, 0px));
+    font-size: 1.35rem;
+  }
+
+  .appLayout,
+  .appLayoutCollapsed {
+    margin-left: 0;
+  }
+
+  /* 原规则: .appLayout .container { padding: var(--space-xl) var(--space-xl); }
+     移动端顶部额外让出汉堡按钮，否则它会盖住每页第一行（标题/搜索框）。 */
+  .appLayout :global(.container) {
+    padding: var(--page-pad-y-bottom) var(--space-md);
+    padding-top: var(--page-pad-y-top);
+  }
+}
+
+@media (max-width: 480px) {
+  .appLayout {
+    --page-pad-y-top: 60px;
+    --page-pad-y-bottom: var(--space-sm);
+  }
+
+  /* 原规则: .appLayout .container { padding: var(--space-md); padding-top: 64px } */
+  .appLayout :global(.container) {
+    padding: var(--page-pad-y-bottom) var(--space-sm);
+    padding-top: var(--page-pad-y-top);
+  }
+}

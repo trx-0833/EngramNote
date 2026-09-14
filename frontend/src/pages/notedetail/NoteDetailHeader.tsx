@@ -80,10 +80,12 @@ export default function NoteDetailHeader({
 
   return (
     <header style={{ marginBottom: 'var(--space-lg)' }}>
-      {/* 标题 + 操作按钮组：窄屏下改为上下排列、按钮换行（见 responsive.css 的 768px 断点） */}
-      <div className="note-detail-header">
+      {/* 标题 + 操作按钮组：窄屏下改为上下排列、按钮换行。
+          这两层骨架（以及窄屏那 3 条）已随组件搬进 NoteDetailHeader.module.css
+          —— 类名哈希后写在 responsive.css 里的选择器会永远选不中（5.6 序 8）。 */}
+      <div className={styles.noteDetailHeader}>
         <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>{note.title}</h1>
-        <div className="note-detail-actions">
+        <div className={styles.noteDetailActions}>
           {editMode === 'view' && (
             <button
               className="btn btn-secondary"

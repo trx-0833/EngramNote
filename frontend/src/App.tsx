@@ -18,6 +18,9 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Sidebar from './components/Sidebar'
 import ErrorBoundary from './components/ErrorBoundary'
 import LoadingSpinner from './components/LoadingSpinner'
+// 应用骨架的类名归模块所有（overhaul-plan 5.6 序 9）：`layout.css` 的
+// `.app-layout*` / `.sidebar-mobile-toggle` + `responsive.css` 里同一批窄屏规则
+import styles from './App.module.css'
 
 // ── 登录前页面（首屏必需，保持静态导入以最快呈现登录框） ──
 import Login from './pages/Login'
@@ -97,16 +100,16 @@ function AppRoutes() {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-      {/* 移动端汉堡菜单（桌面由 CSS 隐藏；抽屉打开时抽屉会盖住它，见 layout.css） */}
+      {/* 移动端汉堡菜单（桌面由 CSS 隐藏；抽屉打开时抽屉会盖住它，见 App.module.css） */}
       <button
-        className="sidebar-mobile-toggle"
+        className={styles.sidebarMobileToggle}
         onClick={() => setMobileOpen(true)}
         aria-label="打开菜单"
         aria-expanded={mobileOpen}
       >
         {'\u2630'}
       </button>
-      <div className={`app-layout${sidebarCollapsed ? ' app-layout-collapsed' : ''}`}>
+      <div className={`${styles.appLayout}${sidebarCollapsed ? ` ${styles.appLayoutCollapsed}` : ''}`}>
         <main className="container page-enter">
           {/* 按路由重置的错误边界：某条数据触发渲染异常后，
               切换到别的页面即可自动恢复，不必刷新（§2.8 F-2） */}

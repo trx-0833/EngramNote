@@ -1,6 +1,8 @@
 import type { RefObject, MutableRefObject } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import Minimap from './Minimap'
+// 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
+import styles from './Graph.module.css'
 import {
   type ForceGraphNode,
   type ForceGraphLink,
@@ -46,7 +48,7 @@ export default function GraphCanvas({
   onBackgroundClick,
 }: GraphCanvasProps) {
   return (
-    <div className="graph-canvas" ref={graphCanvasRef} style={{ flex: 1 }}>
+    <div className={styles.graphCanvas} ref={graphCanvasRef} style={{ flex: 1 }}>
       <ForceGraph2D
         ref={graphRef}
         graphData={forceGraphData}
@@ -103,10 +105,10 @@ export default function GraphCanvas({
       <Minimap minimapRef={minimapRef} />
 
       {/* 缩放控件 */}
-      <div className="graph-controls">
-        <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k * 1.4, 400) }} aria-label="放大" title="放大">+</button>
-        <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k / 1.4, 400) }} aria-label="缩小" title="缩小">−</button>
-        <button className="graph-control-btn" onClick={() => { const fg = graphRef.current; if (fg) fg.zoomToFit(400, 60) }} aria-label="适应屏幕" title="适应屏幕" style={{ fontSize: '0.85rem' }}>⤢</button>
+      <div className={styles.graphControls}>
+        <button className={styles.graphControlBtn} onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k * 1.4, 400) }} aria-label="放大" title="放大">+</button>
+        <button className={styles.graphControlBtn} onClick={() => { const fg = graphRef.current; if (fg) fg.zoom(viewportRef.current.k / 1.4, 400) }} aria-label="缩小" title="缩小">−</button>
+        <button className={styles.graphControlBtn} onClick={() => { const fg = graphRef.current; if (fg) fg.zoomToFit(400, 60) }} aria-label="适应屏幕" title="适应屏幕" style={{ fontSize: '0.85rem' }}>⤢</button>
       </div>
     </div>
   )

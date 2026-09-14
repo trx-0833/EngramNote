@@ -7,6 +7,8 @@ import type {
   SuggestedRelation,
 } from '../../api/client'
 import NodeInspector from './NodeInspector'
+// 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
+import styles from './Graph.module.css'
 import {
   type ForceGraphNode,
   type ForceGraphLink,
@@ -65,47 +67,47 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
   const maxCount = Math.max(1, ...distribution.map((x) => x.count))
 
   return (
-    <div className="graph-panel">
-      <div className="graph-panel-title">图谱统计</div>
-      <div className="graph-stats-grid">
-        <div className="graph-stat-item">
-          <span className="graph-stat-value">{stats.total_nodes}</span>
-          <span className="graph-stat-label">节点</span>
+    <div className={styles.graphPanel}>
+      <div className={styles.graphPanelTitle}>图谱统计</div>
+      <div className={styles.graphStatsGrid}>
+        <div className={styles.graphStatItem}>
+          <span className={styles.graphStatValue}>{stats.total_nodes}</span>
+          <span className={styles.graphStatLabel}>节点</span>
         </div>
-        <div className="graph-stat-item">
-          <span className="graph-stat-value">{stats.confirmed_edges}</span>
-          <span className="graph-stat-label">边</span>
+        <div className={styles.graphStatItem}>
+          <span className={styles.graphStatValue}>{stats.confirmed_edges}</span>
+          <span className={styles.graphStatLabel}>边</span>
         </div>
-        <div className="graph-stat-item">
-          <span className="graph-stat-value" style={{ color: 'var(--color-warning)' }}>
+        <div className={styles.graphStatItem}>
+          <span className={styles.graphStatValue} style={{ color: 'var(--color-warning)' }}>
             {stats.suggested_edges}
           </span>
-          <span className="graph-stat-label">待确认</span>
+          <span className={styles.graphStatLabel}>待确认</span>
         </div>
-        <div className="graph-stat-item">
-          <span className="graph-stat-value" style={{ color: 'var(--color-text-tertiary)' }}>
+        <div className={styles.graphStatItem}>
+          <span className={styles.graphStatValue} style={{ color: 'var(--color-text-tertiary)' }}>
             {stats.isolated_nodes}
           </span>
-          <span className="graph-stat-label">孤立节点</span>
+          <span className={styles.graphStatLabel}>孤立节点</span>
         </div>
       </div>
       {distribution.length > 0 && (
         <div style={{ marginTop: 'var(--space-xs)' }}>
           {distribution.map((d) => (
-            <div key={d.relation_type} className="graph-stats-bar-row">
-              <span className="graph-stats-bar-label">
+            <div key={d.relation_type} className={styles.graphStatsBarRow}>
+              <span className={styles.graphStatsBarLabel}>
                 {RELATION_TYPE_LABELS[d.relation_type] || d.relation_type}
               </span>
-              <div className="graph-stats-bar-track">
+              <div className={styles.graphStatsBarTrack}>
                 <div
-                  className="graph-stats-bar-fill"
+                  className={styles.graphStatsBarFill}
                   style={{
                     width: `${Math.min(100, (d.count / maxCount) * 100)}%`,
                     background: RELATION_TYPE_COLORS[d.relation_type] || '#9a9ab0',
                   }}
                 />
               </div>
-              <span className="graph-stats-bar-count">{d.count}</span>
+              <span className={styles.graphStatsBarCount}>{d.count}</span>
             </div>
           ))}
         </div>
@@ -133,8 +135,8 @@ function SubgraphPanel({
   const subgraphEdges = subgraphData.edges ?? []
 
   return (
-    <div className="graph-panel" style={{ borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}` }}>
-      <div className="graph-panel-title">
+    <div className={styles.graphPanel} style={{ borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}` }}>
+      <div className={styles.graphPanelTitle}>
         关联节点
         <button
           style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-primary)' }}
@@ -158,25 +160,25 @@ function SubgraphPanel({
           return (
             <div
               key={n.id}
-              className="graph-neighbor-item"
+              className={styles.graphNeighborItem}
               onClick={() => {
                 const fn = graphData?.nodes.find((gn) => gn.id === n.id) as ForceGraphNode
                 if (fn) focusNode(n.id)
               }}
             >
               <span
-                className="graph-neighbor-dot"
+                className={styles.graphNeighborDot}
                 style={{ background: CARD_TYPE_COLORS[n.card_type] || '#6b7280' }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="graph-neighbor-title">{n.title}</div>
+                <div className={styles.graphNeighborTitle}>{n.title}</div>
                 {edge && (
-                  <div className="graph-neighbor-rel">
+                  <div className={styles.graphNeighborRel}>
                     {RELATION_TYPE_LABELS[edge.relation_type] || edge.relation_type}
                   </div>
                 )}
               </div>
-              <span className="graph-neighbor-count">{n.relation_count}</span>
+              <span className={styles.graphNeighborCount}>{n.relation_count}</span>
             </div>
           )
         })}
@@ -203,8 +205,8 @@ function LinkDetailPanel({
   onDelete: (relationId: string) => void
 }) {
   return (
-    <div className="graph-panel">
-      <div className="graph-panel-title">关系详情</div>
+    <div className={styles.graphPanel}>
+      <div className={styles.graphPanelTitle}>关系详情</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div>
           <span style={{ color: 'var(--color-text-secondary)' }}>类型：</span>
@@ -309,8 +311,8 @@ function SuggestionsPanel({
   onReject: (relationId: string) => void
 }) {
   return (
-    <div className="graph-panel">
-      <div className="graph-panel-title">
+    <div className={styles.graphPanel}>
+      <div className={styles.graphPanelTitle}>
         建议关系 ({suggestions.length})
         {suggestions.length > 1 && (
           <label
@@ -385,7 +387,7 @@ function SuggestionsPanel({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
           {suggestions.map((s) => (
-            <div key={s.id} className="graph-suggestion-card">
+            <div key={s.id} className={styles.graphSuggestionCard}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-xs)' }}>
                 {suggestions.length > 1 && (
                   <input
@@ -404,9 +406,9 @@ function SuggestionsPanel({
                   <div style={{ color: 'var(--color-text-secondary)', marginBottom: '6px', fontSize: '0.75rem' }}>
                     相似度: {s.similarity_score != null ? s.similarity_score.toFixed(2) : '—'}
                     {s.similarity_score != null && (
-                      <div className="graph-suggestion-score-bar">
+                      <div className={styles.graphSuggestionScoreBar}>
                         <div
-                          className="graph-suggestion-score-bar-fill"
+                          className={styles.graphSuggestionScoreBarFill}
                           style={{ width: `${Math.round(s.similarity_score * 100)}%` }}
                         />
                       </div>
@@ -471,8 +473,8 @@ function CreateRelationPanel({
   onCancel: () => void
 }) {
   return (
-    <div className="graph-panel">
-      <div className="graph-panel-title">创建关系</div>
+    <div className={styles.graphPanel}>
+      <div className={styles.graphPanelTitle}>创建关系</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>节点 1：</span>
@@ -518,17 +520,17 @@ function RelationLegend({
   setHighlightedRelationType: Dispatch<SetStateAction<string | null>>
 }) {
   return (
-    <div className="graph-panel">
-      <div className="graph-panel-title">关系类型（点击高亮）</div>
+    <div className={styles.graphPanel}>
+      <div className={styles.graphPanelTitle}>关系类型（点击高亮）</div>
       <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {Object.entries(RELATION_TYPE_LABELS).map(([type, label]) => (
           <span
             key={type}
-            className={`graph-legend-item ${highlightedRelationType === type ? 'graph-legend-item-active' : ''}`}
+            className={`${styles.graphLegendItem}${highlightedRelationType === type ? ` ${styles.graphLegendItemActive}` : ''}`}
             style={{ justifyContent: 'flex-start', cursor: 'pointer' }}
             onClick={() => setHighlightedRelationType((prev) => (prev === type ? null : type))}
           >
-            <span className="graph-relation-line" style={{ background: RELATION_TYPE_COLORS[type] }} />
+            <span className={styles.graphRelationLine} style={{ background: RELATION_TYPE_COLORS[type] }} />
             {label}
           </span>
         ))}
@@ -585,7 +587,7 @@ export default function GraphSidebar(props: GraphSidebarProps) {
   } = props
 
   return (
-    <div className="graph-sidebar">
+    <div className={styles.graphSidebar}>
       {/* 图谱统计面板 */}
       {stats && <StatsPanel stats={stats} />}
 
