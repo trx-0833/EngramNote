@@ -1,0 +1,153 @@
+/**
+ * Diff 对比视图的样式（overhaul-plan 5.6：第一批迁移，序 3）
+ *
+ * ## 为什么整表搬进来
+ *
+ * 原 `src/styles/diff.css` 的 21 条规则，全项目只有
+ * `components/DiffView.tsx` 在用（grep 前缀 `diff-` 只命中这一个组件 +
+ * 那个样式表）。它不在 `responsive.css` / `refinements.css` 里出现，
+ * 也没有测试按这些类名查询 —— 与 `cleaning.css` 同属"低风险、整表搬"。
+ *
+ * ## 类名映射：`diff-line-${type}` 是**拼出来**的，必须改成查表
+ *
+ * 原 TSX 用模板串拼类名：`` `diff-line diff-line-${line.type}` ``，
+ * 类型是 `added | removed | unchanged`。哈希之后拼字符串不再可能
+ * （拼出来的名字不是产物里的类名），所以 TSX 侧改成一个显式查表
+ * （见 `DiffView.tsx` 的 `LINE_TYPE_CLASS`）。查表还有额外好处：
+ * 少了一种类型、或者将来多一种类型，TypeScript 会直接报错，
+ * 而拼字符串只会静默渲染出一个没有样式的类名。
+ *
+ * ## 本轮**不合并**的重复规则
+ *
+ * `.diff-line-removed { background: #fef2f2 }` / `.diff-line-added { background: #f0fdf4 }`
+ * 里的十六进制底色没有对应的令牌（`--color-error-light` 是 rgba 淡底，
+ * 与 `#fef2f2` 不是同一个值）。按 `css-convention.md` §3 雷区 4，
+ * 本轮只搬家、不改值，所以照抄；要不要给"差量行底色"补令牌单独提。
+ *
+ * ## 与 responsive.css 的关系
+ *
+ * 无（`diff-*` 在 responsive.css 里出现 0 次）。
+ */
+
+/* ── 外壳与表头 ── */
+
+.diffContainer {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.diffSummary {
+  display: flex;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.diffHeader {
+  display: flex;
+  gap: 0;
+  padding: var(--space-xs) var(--space-md);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* 表头三列：两个行号列固定宽 + 内容列自适应。
+   列宽必须与下方 .diffLineNumber / .diffLineContent 完全一致，
+   否则表头与正文会错位 —— 修改时请成对改。 */
+.diffColLabel {
+  flex-shrink: 0;
+}
+
+.diffColLabel:nth-child(1) { width: 50px; text-align: right; }
+.diffColLabel:nth-child(2) { width: 50px; text-align: right; margin-left: var(--space-sm); }
+.diffColLabel:nth-child(3) { flex: 1; margin-left: var(--space-sm); }
+
+/* ── 正文 ── */
+
+.diffBody {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.diffBlock {
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.diffBlock:last-child {
+  border-bottom: none;
+}
+
+.diffLine {
+  display: flex;
+  align-items: stretch;
+  min-height: 24px;
+}
+
+.diffLinePrefix {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  user-select: none;
+}
+
+.diffLineNumber {
+  flex-shrink: 0;
+  width: 40px;
+  text-align: right;
+  padding-right: var(--space-sm);
+  color: var(--color-text-tertiary);
+  user-select: none;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.diffLineContent {
+  flex: 1;
+  padding-left: var(--space-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── 三种行状态 ──
+   底色给"整行"，行号/前缀与正文的颜色给"行内的两个子元素"（后代选择器），
+   所以每增加一种状态要同时改三处（底色 + 前缀 + 正文）。 */
+
+.diffLineRemoved {
+  background: #fef2f2;
+}
+
+.diffLineRemoved .diffLinePrefix {
+  color: var(--color-error);
+}
+
+.diffLineRemoved .diffLineContent {
+  color: #991b1b;
+}
+
+.diffLineAdded {
+  background: #f0fdf4;
+}
+
+.diffLineAdded .diffLinePrefix {
+  color: var(--color-success);
+}
+
+.diffLineAdded .diffLineContent {
+  color: #166534;
+}
+
+.diffLineUnchanged {
+  background: transparent;
+}

@@ -23,6 +23,9 @@ import ErrorDisplay from '../components/ErrorDisplay'
 import ReminderBanner from '../components/ReminderBanner'
 import { useToast } from '../components/Toast'
 import { sourceTypeLabels, statusLabels, statusClass, cardTypeLabels, questionTypeLabels } from '../utils/labels'
+// 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
+// 连带 768px 的两条响应式规则（见 Dashboard.module.css 文件头）
+import styles from './Dashboard.module.css'
 
 /**
  * 仪表盘页面组件
@@ -138,8 +141,9 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* 今日学习目标概要 + 每日推荐任务（两栏布局见 dashboard.css，窄屏收成一列） */}
-      <div className="dashboard-two-col">
+      {/* 今日学习目标概要 + 每日推荐任务（两栏布局见 Dashboard.module.css，
+          窄屏收成一列的媒体查询也在那里 —— 类名哈希后 responsive.css 选不中它） */}
+      <div className={styles.dashboardTwoCol}>
         {/* 今日学习目标卡片 */}
         <div
           className="card card-accent-left"
@@ -279,11 +283,11 @@ export default function Dashboard() {
       )}
 
       {/* 复习提醒 + 薄弱点 */}
-      <div className="dashboard-two-col">
+      <div className={styles.dashboardTwoCol}>
         {/* 待复习卡片 */}
         {reviewStats && reviewStats.due_count > 0 && (
           <div
-            className="card card-accent-left dashboard-review-card"
+            className={`card card-accent-left ${styles.dashboardReviewCard}`}
             onClick={() => navigate('/review')}
             role="button"
             tabIndex={0}
@@ -350,7 +354,7 @@ export default function Dashboard() {
               {weeklyTrend.map(day => (
                 <div key={day.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   {/* 柱状图 */}
-                  <div className={`trend-bar${day.accuracy < 60 ? ' trend-bar-warning' : ''}`} style={{
+                  <div className={`${styles.trendBar}${day.accuracy < 60 ? ` ${styles.trendBarWarning}` : ''}`} style={{
                     height: Math.max(day.review_count / maxReviewCount * 80, 4),
                   }}>
                     {/* 数量标签 */}

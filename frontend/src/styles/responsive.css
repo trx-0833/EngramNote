@@ -186,17 +186,11 @@
   }
 
   /* F-16：Dashboard.tsx 的两处 `1fr 1fr` 在 375px 屏上每列不到 170px，
-     中文标题被逐字挤断。窄屏收成一列。 */
-  .dashboard-two-col {
-    grid-template-columns: 1fr;
-    gap: var(--space-md);
-  }
-
-  /* 待复习卡片：标题 + "开始复习"按钮，窄屏允许换行 */
-  .dashboard-review-card {
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-  }
+     中文标题被逐字挤断。窄屏收成一列。
+     ⚠️ 这两条（`.dashboard-two-col` / `.dashboard-review-card`）已随组件
+     搬进 `src/pages/Dashboard.module.css`（overhaul-plan 5.6 第一批）——
+     类名被哈希后，写在这里的选择器**选不中任何东西**（规则还在、永不生效）。
+     这就是为什么它们必须跟着组件走：见 css-convention.md §3 雷区 2。 */
 
   /* 笔记列表项：正文与"删除/重试"挤在同一行会把标题压成一条竖线，
      窄屏改为上下两段，按钮靠右。 */

@@ -1,141 +1,18 @@
-/* ── 登录/注册页背景装饰 ── */
-
-.auth-bg {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-md);
-  background: var(--gradient-hero);
-  position: relative;
-  overflow: hidden;
-}
-
-.auth-bg::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -30%;
-  width: 80%;
-  height: 80%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(201, 169, 89, 0.08) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.auth-bg::after {
-  content: '';
-  position: absolute;
-  bottom: -40%;
-  left: -20%;
-  width: 60%;
-  height: 60%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(15, 52, 96, 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.auth-card {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2xl);
-  box-shadow: var(--shadow-xl);
-  width: 100%;
-  max-width: 420px;
-  animation: scaleIn 0.5s var(--ease-out-expo);
-  position: relative;
-  z-index: 1;
-}
-
-.auth-title {
-  font-family: var(--font-serif);
-  font-size: 1.75rem;
-  font-weight: 700;
-  text-align: center;
-  margin-bottom: var(--space-lg);
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.auth-input-group {
-  position: relative;
-  margin-bottom: var(--space-md);
-}
-
-.auth-input-group label {
-  display: block;
-  margin-bottom: var(--space-xs);
-  font-weight: 500;
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.auth-input-group input {
-  padding-left: 40px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.8);
-}
-
-.auth-input-icon {
-  position: absolute;
-  left: 12px;
-  bottom: 11px;
-  width: 18px;
-  height: 18px;
-  color: var(--color-text-tertiary);
-  pointer-events: none;
-}
-
-.auth-submit {
-  width: 100%;
-  padding: var(--space-md);
-  font-size: 1rem;
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  background: var(--gradient-primary);
-  color: white;
-  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.3);
-  transition: all 0.3s var(--ease-out-expo);
-}
-
-.auth-submit:hover {
-  box-shadow: 0 6px 24px rgba(15, 52, 96, 0.4);
-  transform: translateY(-1px);
-}
-
-.auth-submit:active {
-  transform: translateY(0);
-}
-
-.auth-footer {
-  margin-top: var(--space-lg);
-  text-align: center;
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.auth-footer a {
-  color: var(--color-accent);
-  font-weight: 500;
-  position: relative;
-}
-
-.auth-footer a::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  width: 0;
-  height: 1px;
-  background: var(--color-accent);
-  transition: width 0.3s var(--ease-out-expo);
-}
-
-.auth-footer a:hover::after {
-  width: 100%;
-}
+/**
+ * 认证页（登录 / 注册）样式 —— **已整体迁出**（overhaul-plan 5.6 第一批，序 1）
+ *
+ * 原文件里的 16 条规则**逐字**搬到 `src/pages/Auth.module.css`：
+ *   `.auth-bg`（含 `::before` / `::after`）、`.auth-card`、`.auth-title`、
+ *   `.auth-input-group`（含 `label` / `input` 后代）、`.auth-input-icon`、
+ *   `.auth-submit`（含 `:hover` / `:active`）、`.auth-footer`（含 `a` /
+ *   `a::after` / `a:hover::after`）。
+ * 搬走的依据：全项目 grep 只有 `Login.tsx` / `Register.tsx` 用这些类名。
+ *
+ * 为什么**保留这个空文件**而不是删掉：`src/styles/mobile-input-font-size.test.ts`
+ * 断言本目录下每个 `.css` 都被 `main.tsx` 引入，而 `main.tsx` 不在本轮允许改动的
+ * 文件范围内 —— 删文件就会连带改 `main.tsx`。留一个只有注释的文件既满足断言，
+ * 又把"这些类名去哪了"写在原处（下一个读代码的人先看到的就是这里）。
+ *
+ * ⚠️ 本文件**不再定义任何规则**。新增认证页样式请写进
+ * `src/pages/Auth.module.css`（模块层），不要再往这里加全局类名。
+ */

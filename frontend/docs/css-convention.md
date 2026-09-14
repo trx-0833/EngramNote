@@ -65,8 +65,16 @@
    声明值里不认 `:global()`）。
    **正确做法：把用到的 `@keyframes` 定义搬进模块自己**（动画体逐字复制），
    名字改成 `组件前缀+名字`（如 `feedbackScaleIn`）。全局的原版不要删 ——
-   可能还有别的全局样式表在用（`scaleIn` 就还挂在 `auth.css` 上）。
-   `scripts/verify-built-css.mjs` 会检查"引用的动画在本文件内有没有定义"。
+   它仍可被 tsx 内联 `style={{ animation: 'shake …' }}` 按裸名引用
+   （内联样式不过 CSS Modules），也是全局动画库的一部分。
+   `scripts/verify-built-css.mjs` 会**逐产物文件**检查"引用的动画在本文件内
+   有没有定义"。
+
+   > 第一批之后 `scaleIn` 已经**没有样式表用户**了（最后一个用户 `auth.css`
+   > 把它复制成 `authScaleIn` 搬进了模块），`cleaning-pulse` 同样
+   > （它的唯一用户 `.cleaning-progress-bar` 是死规则，见 §4 末）。
+   > 这两条全局 `@keyframes` 暂时**留着不删**：删它们属于"死代码清理"，
+   > 与搬家混在一起会让"丢失 0"这条证据同时包含两种语义。
 
 2. **类名哈希后，`responsive.css` 里的选择器再也选不中它。**
    规则还在、永不生效 —— 与 `mobile-input-font-size.test.ts` 文件头记的
@@ -78,11 +86,50 @@
    `main.tsx` 导入；模块文件按需加载、不在那里，测试会直接失败。
    这就是"模块与组件同目录"的硬性理由。
 
+   > 同理，**空掉的全局样式表不能删**（第一批之后 `auth.css` / `cleaning.css` /
+   > `diff.css` 只剩注释）：删文件就要连带删 `main.tsx` 里的 import。
+   > 留一个只有注释的文件既满足断言，又把"这些类名去哪了"写在原处。
+
 4. **不要为了"顺手统一"改外观。**
    比如给 `.quiz-option` 加 `composes: btn from global` 很"合理"，但它的 DOM 上
    从来没有 `btn`，compose 会注入 `padding / border-radius / font-weight /
    transition / position / overflow` —— 一次纯搬家就变成了视觉改动，
    而本轮要证明的恰恰是"没变"。要统一按钮基线请单开一轮，带截图对比。
+
+5. **⚠️ 模块的 CSS 在产物里排在全局样式表**之前**（第一批实测，最容易被忽略）。**
+   Vite 按**模块图顺序**产出 CSS，而 `main.tsx` 第 4 行就 `import App`、
+   样式表第 7 行之后才引入 —— 于是**静态引入的组件，其模块 CSS 排在
+   全部全局样式表之前**。实测产物 `index.css` 的字节位置：
+   `Auth.module.css` = 1、`base.css` 的 `:root` = 2551、`.btn` = 6555
+   （具体数字随构建略有浮动，量级不变）。
+
+   后果：`.auth-submit` 这种"在全局 `.btn` 之上覆盖几个属性"的规则，
+   两者权重相同（都是单类），搬进模块后**先后关系反转**，`.btn` 反而盖住了
+   它的 `padding / font-size / font-weight / transition`（按钮肉眼可见地
+   变小变细）。文本差集看不出这种损失 —— 两条规则都还在、值也没改。
+
+   **修法：模块里把全局类写进选择器，显式提高权重。**
+
+   ```css
+   /* :global() 在**选择器**里合法（在声明值里才会构建失败，见雷区 1） */
+   :global(.btn).authSubmit { padding: var(--space-md); font-size: 1rem; }
+   /* 产物：`.btn._authSubmit_1hcab_41`，权重 (0,2,0) > (0,1,0)，与先后无关 */
+   ```
+
+   `verify-built-css.mjs` 的 `CASCADE_PAIRS` 会逐属性算"谁最终生效"，
+   得主与迁移前不一致就红。**新增一条与全局类打架的模块规则时，
+   必须往 `CASCADE_PAIRS` 里加一行**，否则这项检查覆盖不到它。
+
+   > 反面提醒：**懒加载**的页面/组件，其模块 CSS 会打成独立 chunk，
+   > 在 `index.css` **之后**才注入，那一侧不存在反转
+   > （`Dashboard.module.css`、`NoteDetail-*.css` 就是这种）。
+   > 所以不要无脑给所有模块规则加 `:global()`：只在"同元素上真有同权重
+   > 竞争 **且** 该组件是静态引入"时才需要。
+   >
+   > **结构性根治方案**（第一批不允许改 `main.tsx`，故未做）：把 `main.tsx` 的
+   > `import App` 挪到全局样式表之后，让产物顺序变成 ①令牌 → ②全局 → ③模块，
+   > 与 §1 的分层图一致，雷区 5 整体消失。已记入
+   > `docs/css-migration-plan.md` 的下一轮建议。
 
 ## 4. 什么时候类名**必须**留在全局
 
@@ -104,27 +151,49 @@
 5. **补丁层 `responsive.css` / `refinements.css` 目前命中的类** ——
    在对应组件迁移之前必须保持全局（迁移时把这些规则一起搬走）。
 
-**留在全局的代价要写在文件头**：`learning.css` 在本轮迁移后加了一段注释，
-点名列出"哪些类名仍被切片外页面使用、因此不能删"。
+**第一批的两个实例，可以当判据的样板：**
+
+| 类名 | 判定 | 依据 |
+|---|---|---|
+| `.dashboard-two-col` `.dashboard-review-card` `.trend-bar*` | 进模块 | grep 只命中 `pages/Dashboard.tsx` |
+| `.stat-card*` `.stat-number` `.stat-label` | **留全局** | `Dashboard.tsx` **与** `TodayLearn.tsx` 都在用；搬进 `Dashboard.module.css` 会逼 `TodayLearn` 跨页 import 一个页面模块 |
+| `.progress-bar` `.progress-bar-fill` | **留全局** | 5 处在用（第 2 条），另有 2 个测试按类名查询 |
+
+**留全局的代价要写在文件头**：`learning.css`、`dashboard.css` 在迁移后都加了
+一段注释，点名列出"哪些类名仍被切片外页面使用、因此不能删"，
+以及"它们要等到什么条件才可能搬走"。
 没有这段注释，下一个读代码的人会以为整个文件都死了。
+
+**边界不清时宁可停在边界上并写明**：把 `.stat-card` 留在全局是"部分迁移"，
+但它是**按归属画的边界**（B 组 = 跨页共用），不是"搬了一半"。
+半搬的定义是"同一个 SASS/样式表里一组互相依赖的规则只搬走一部分"。
 
 ## 5. 迁移一个文件的标准流程
 
-1. `node scripts/css-rule-inventory.mjs <文件> --class <切片类名> --from-git`
-   先拿到**迁移前清单**（`--from-git` 是因为工作区里很快就没旧版本了）。
+1. `node scripts/css-rule-inventory.mjs <文件> --class <切片类名> --from-git [--rev HEAD~1]`
+   先拿到**迁移前清单**（`--from-git` 是因为工作区里很快就没旧版本了；
+   已经提交过的批次要 `--rev HEAD~1`，否则读到的是"规则已经搬走"的版本，
+   清单为空而脚本会报错退出）。
 2. grep 确认这些类名**只被切片内的文件使用**。命中切片外 → **停**，
    要么把那个文件也纳入本轮，要么把这些类名留在全局（见第 4 节第 2 条）。
 3. 把规则搬进 `X.module.css`；`@keyframes` 按第 3 节雷区 1 处理；
    响应式规则一起搬。
 4. 改 TSX：`className="a b"` → `` className={`${styles.a} ${styles.b}`} ``。
+   **拼出来的类名**（`` `diff-line-${type}` ``）要改成显式查表 ——
+   哈希后拼字符串必然失效，而查表还能让 tsc 帮你守住完整性。
 5. 从全局样式表删掉原规则，**在原地留一段注释**说明搬去哪了、
    以及本文件还有哪些类名不能删。
 6. grep 全项目确认没有残留的字面类名（含测试里的 `querySelector('.old-name')`）。
 7. `npm run build`，然后：
    - `node scripts/css-migration-diff.mjs` —— 差集必须 **丢失 0**；
-   - `node scripts/verify-built-css.mjs` —— 无悬空动画、改动范围内无冲突；
+   - `node scripts/verify-built-css.mjs` —— 无悬空动画、改动范围内无冲突、
+     级联得主正确、退休类名已消失；
    - `node scripts/gen-migration-evidence.mjs` —— 落证据文件。
 8. `npm test` / `npx tsc --noEmit` / `npm run lint` / `npm run build` 四道全绿。
+
+**往 `BATCHES` / `CASCADE_PAIRS` / `SLICE_MARKERS` / `RETIRED` 里登记本批**
+（`css-migration-diff.mjs` 与 `verify-built-css.mjs` 各有一处）。
+新类名不用手写：约定是 kebab → camelCase，脚本自己推导并回模块文件核对。
 
 ## 6. 测试里的类名查询
 
@@ -139,17 +208,43 @@
   `container.querySelector('.' + styles.foo)`。Vite 在测试环境下对 CSS Modules
   返回真实的类名映射，这条路可行，但把测试和实现细节绑得更紧，非必要不用。
 
+**实测定论**（第一批用一个临时探针跑了一遍，用完已删）：
+Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认导出是一个
+**Proxy**，任意属性访问返回 `_<属性名>_<6位哈希>`（如 `styles.authBg`
+→ `"_authBg_cce552"`），**且 `Object.keys(styles)` 是空数组**。
+所以：
+
+- `styles.foo` 用起来没问题（是字符串，不是 `undefined`）；
+- `' .' + styles.foo` 能查得到元素；
+- 但**别对 `styles` 做枚举**（`Object.entries(styles)` / `Object.keys(styles)`
+  拿到的是空），那会静默得到"什么都没有"。需要遍历时只能显式列出键
+  （`DiffView.module.css` 的 `LINE_TYPE_CLASS` 就是这么写的）。
+
 ## 7. 证据工具
 
 | 脚本 | 作用 |
 |---|---|
 | `scripts/lib/css-parse.mjs` | 三个脚本共用的 CSS 解析器（**只此一份**，见文件头） |
-| `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git` 读 HEAD 版本 |
-| `scripts/css-migration-diff.mjs` | 迁移前(HEAD) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验 |
-| `scripts/verify-built-css.mjs` | 产物校验：悬空动画、冲突归因到源文件、退休类名是否消失、产物新鲜度 |
+| `scripts/css-rule-inventory.mjs` | 按类名/前缀导出规则清单，`--from-git [--rev R]` 读某个修订的版本 |
+| `scripts/css-migration-diff.mjs` | 迁移前(git) vs 迁移后(dist) 逐条差集 + 动画绑定/动画体校验；批次在文件头的 `BATCHES` 里声明 |
+| `scripts/verify-built-css.mjs` | 产物校验：**逐文件**悬空动画、冲突归因到源文件、级联次序、切片标记、退休类名、产物新鲜度 |
 | `scripts/gen-migration-evidence.mjs` | 把上面三者的输出写成 `docs/migration-evidence/*.md` |
 
 这些脚本的判断都带**自检**：任何一侧解析出 0 条规则就报错退出，
-而不是当成"没有差异"。本轮解析器前后错过三次（伪类冒号被改写成 `: hover`、
+而不是当成"没有差异"。解析器前后错过三次（伪类冒号被改写成 `: hover`、
 `@media` 里的规则被静默丢弃、产物里 `._className` 多一个下划线导致匹配不到），
 每次都险些得出"规则全丢了 / 全在"的相反结论。
+
+**第一批又踩到两次，都记在这里：**
+
+1. **类名后面紧跟哈希分隔符 `_`，属于 `\w`** ——
+   `\._?authSubmit(?![\w-])` 对产物里的 `._authSubmit_1hcab_41` **一条都匹配不上**，
+   于是"级联次序"这一项报的是"两侧没有同属性竞争"（**假通过**）。
+   凡是要在产物里按类名匹配，都要**先剥哈希再判边界**。
+2. **压缩器的等价改写会伪装成"值有变化"** ——
+   `rgba(255,255,255,.92)` → `#ffffffeb`、`#fffc` ↔ `#ffffffcc`、
+   `color: white` → `#fff`、`::after` → `:after`、`content: ""` → `content: ''`。
+   差集脚本里每一条都归一化了，并且**逐条写明出处**：不归一化就会有 6 条假警报
+   把真变化淹掉，归一化时若不写明依据，又会变成"把差异抹平"。
+   另有 `-webkit-user-select` 这类**构建器注入**的声明：它是加法不是丢失，
+   单独一节列出、不当作失败。

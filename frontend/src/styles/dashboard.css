@@ -1,23 +1,30 @@
-/* ── 仪表盘统计卡片 ── */
+/**
+ * 仪表盘统计卡片 / 进度条样式（overhaul-plan 5.6 第一批：**只搬走了仪表盘私有部分**）
+ *
+ * ## 本文件现在还剩什么、为什么它们必须留在这里
+ *
+ * 原 17 条规则里，5 条（`.dashboard-two-col`、`.dashboard-review-card`、
+ * `.trend-bar` ×3）已搬进 `src/pages/Dashboard.module.css`。**剩下的 12 条留全局**：
+ *
+ * | 组 | 类名 | 谁在用 | 为什么不留不行 |
+ * |---|---|---|---|
+ * | B | `.stat-card`（含 `::before` 与 4 个配色变体、`:hover`）、`.stat-number`、`.stat-label` | `Dashboard.tsx` + `TodayLearn.tsx` | 两个页面都在用同一套"统计卡片"。搬进任一页面的模块都会逼另一页跨页 import；`.stat-number` 还被 `responsive.css` 的 480px 档命中（见下） |
+ * | C | `.progress-bar`、`.progress-bar-fill`（含 `::after`） | Dashboard / LearningGoals / TodayLearn / TaskProgress / ReviewProgress **5 处** | 跨功能共用件（`css-convention.md` §4 第 2 条）。`ReviewProgress.test.tsx` 与 `Review.test.tsx` 还按 `.progress-bar-fill` 查询 |
+ *
+ * `.progress-bar-fill::after` 的 `animation: shimmer` 用的是 `base.css` 里的
+ * **全局** `@keyframes shimmer` —— 这两条都留在全局层，所以引用仍然成立，
+ * 不需要像模块那样把动画定义搬过来。**如果将来把 `.progress-bar*` 搬进模块，
+ * 必须同时把 `@keyframes shimmer` 复制进去并改名**，否则动画会静默消失
+ * （见 `css-convention.md` §3 雷区 1）。
+ *
+ * `.progress-bar` 的用法：外层 `.progress-bar` + 内层 `.progress-bar-fill`
+ * （宽度由行内 style 给百分比），结构在 5 处调用点是统一的。
+ *
+ * ⚠️ 新增仪表盘**私有**样式请写进 `src/pages/Dashboard.module.css`；
+ * 本文件只承接"确实被多处共用"的类名。
+ */
 
-/* 仪表盘的两栏区块（今日目标 + 每日任务、待复习 + 薄弱点）。
-   原为 Dashboard.tsx 的内联 `gridTemplateColumns: '1fr 1fr'`：内联样式
-   赢不了媒体查询，手机上就永远两列（overhaul-plan §2.8 F-16）。
-   搬到类里之后 responsiveness 由 responsive.css 的 768px 断点接管。 */
-.dashboard-two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-lg);
-  margin-bottom: var(--space-xl);
-}
-
-/* 今日待复习卡片：左侧文案 + 右侧"开始复习"按钮 */
-.dashboard-review-card {
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+/* ── 统计卡片（Dashboard.tsx / TodayLearn.tsx 共用）── */
 
 .stat-card {
   text-align: center;
@@ -31,6 +38,7 @@
   overflow: hidden;
 }
 
+/* 顶部 3px 色条：4 个变体各自改它的 background（见下） */
 .stat-card::before {
   content: '';
   position: absolute;
@@ -67,28 +75,11 @@
   margin-top: var(--space-xs);
 }
 
-/* ── 趋势图 ── */
+/* 注：`.stat-number` 在窄屏收一档字号（480px 档）的那条规则
+   留在 `responsive.css` 里 —— 类名仍是全局的，那条规则能正常命中，
+   不需要跟着搬（与 `.dashboard-two-col` 的情况相反）。 */
 
-.trend-bar {
-  width: 100%;
-  max-width: 40px;
-  border-radius: 6px 6px 0 0;
-  transition: all 0.3s var(--ease-out-expo);
-  position: relative;
-  background: var(--gradient-primary);
-}
-
-.trend-bar-warning {
-  background: linear-gradient(180deg, #f59e0b, #d97706);
-}
-
-.trend-bar:hover {
-  filter: brightness(1.1);
-  transform: scaleY(1.02);
-  transform-origin: bottom;
-}
-
-/* ── 进度条 ── */
+/* ── 进度条（5 处共用）── */
 
 .progress-bar {
   height: 6px;
@@ -105,6 +96,8 @@
   position: relative;
 }
 
+/* 填充条上的流光：`shimmer` 定义在 base.css（全局），
+   与这两条规则同层，所以引用成立。 */
 .progress-bar-fill::after {
   content: '';
   position: absolute;

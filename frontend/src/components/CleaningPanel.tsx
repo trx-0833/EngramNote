@@ -15,6 +15,8 @@ import {
   type NoteDetail,
 } from '../api/client'
 import TaskProgress from './TaskProgress'
+// 清洗面板样式（overhaul-plan 5.6）：原 src/styles/cleaning.css 整表迁到这里
+import styles from './CleaningPanel.module.css'
 
 interface DuplicateBlock {
   block_index: number
@@ -119,7 +121,7 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
   const cleanStats = metadata?.clean_stats as Record<string, number> | null
 
   return (
-    <div className="cleaning-panel">
+    <div className={styles.cleaningPanel}>
       {/* 错误提示 */}
       {error && (
         <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', marginBottom: 'var(--space-sm)' }}>
@@ -189,7 +191,7 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
       {note.status === 'cleaned' && (
         <>
           {/* 清洗统计摘要 */}
-          <div className="cleaning-stats">
+          <div className={styles.cleaningStats}>
             <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>清洗统计</h4>
             <div style={{ display: 'flex', gap: 'var(--space-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
               <span>总分块: {totalChunks}</span>
@@ -218,7 +220,7 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
 
           {/* 重复块列表 */}
           {duplicatesDetail.length > 0 && (
-            <div className="duplicate-blocks">
+            <div className={styles.duplicateBlocks}>
               <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
                 重复块（{duplicatesDetail.length} 个）
               </h4>
@@ -226,15 +228,15 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
                 const expanded = expandedIndex === dup.block_index
                 const hasContent = !!dup.content || !!dup.original_content
                 return (
-                  <div key={dup.block_index} className="duplicate-block">
-                    <div className="duplicate-block-header">
-                      <div className="duplicate-block-info">
-                        <span className="duplicate-block-index">块 {dup.block_index}</span>
-                        <span className="duplicate-block-similarity">
+                  <div key={dup.block_index} className={styles.duplicateBlock}>
+                    <div className={styles.duplicateBlockHeader}>
+                      <div className={styles.duplicateBlockInfo}>
+                        <span className={styles.duplicateBlockIndex}>块 {dup.block_index}</span>
+                        <span className={styles.duplicateBlockSimilarity}>
                           与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
                         </span>
                       </div>
-                      <div className="duplicate-block-actions">
+                      <div className={styles.duplicateBlockActions}>
                         <button
                           className="btn btn-secondary"
                           style={{ fontSize: '0.75rem', padding: '2px 8px' }}
@@ -264,28 +266,32 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
 
                     {/* 块内容对比（供人工核对重复判断是否准确） */}
                     {expanded && (
-                      <div className="duplicate-block-compare">
+                      <div className={styles.duplicateBlockCompare}>
                         {hasContent ? (
                           <>
-                            <div className="duplicate-block-text">
-                              <div className="duplicate-block-text-label">
+                            {/* 这一层 div 原本挂着 `duplicate-block-text`，但**全项目
+                                14 个样式表都没有定义它** —— 死类名，本轮随迁移删除
+                                （与试点轮删 `.feedback-pending` 同一处理）。
+                                嵌套保留：删掉它会改变 DOM 层级，那超出"纯搬家"。 */}
+                            <div>
+                              <div className={styles.duplicateBlockTextLabel}>
                                 保留的块 {dup.duplicate_of}（首次出现）
                               </div>
-                              <pre className="duplicate-block-text-content">
+                              <pre className={styles.duplicateBlockTextContent}>
                                 {dup.original_content || '（内容缺失）'}
                               </pre>
                             </div>
-                            <div className="duplicate-block-text">
-                              <div className="duplicate-block-text-label">
+                            <div>
+                              <div className={styles.duplicateBlockTextLabel}>
                                 重复的块 {dup.block_index}
                               </div>
-                              <pre className="duplicate-block-text-content">
+                              <pre className={styles.duplicateBlockTextContent}>
                                 {dup.content || '（内容缺失）'}
                               </pre>
                             </div>
                           </>
                         ) : (
-                          <p className="duplicate-block-text-empty">
+                          <p className={styles.duplicateBlockTextEmpty}>
                             该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看
                           </p>
                         )}

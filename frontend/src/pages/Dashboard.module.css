@@ -1,0 +1,93 @@
+/**
+ * 仪表盘页面私有样式（overhaul-plan 5.6：第一批迁移，序 4 —— **按归属拆分**）
+ *
+ * ## 为什么 dashboard.css 只搬走一部分
+ *
+ * 原文件 17 条规则按"谁在用"分成三组，只有第一组能安全搬进模块：
+ *
+ * | 组 | 规则 | 去向 | 判据 |
+ * |---|---|---|---|
+ * | A 仪表盘私有 | `.dashboard-two-col` `.dashboard-review-card` `.trend-bar`(×3) | **本模块** | grep 只命中 `pages/Dashboard.tsx` |
+ * | B 跨页共用 | `.stat-card`(×9) `.stat-label` | 留 `dashboard.css` | `Dashboard.tsx` **与** `TodayLearn.tsx` 都在用 |
+ * | C 跨功能共用 | `.progress-bar` `.progress-bar-fill`(×2) | 留 `dashboard.css` | Dashboard / LearningGoals / TodayLearn / TaskProgress / ReviewProgress **5 处**；`ReviewProgress.test.tsx` / `Review.test.tsx` 还按 `.progress-bar-fill` 查询 |
+ *
+ * B 组为什么**不**搬：把它搬进来的话，`TodayLearn.tsx` 就得
+ * `import styles from './Dashboard.module.css'` —— 页面模块被另一个页面引用，
+ * 等于把"归属"这件事重新搞乱（而且 `dashboard.css` 里那 9 条规则
+ * 本来也不是"仪表盘"独有，是"统计卡片"这个未抽出的公共件）。
+ * 正确的下一步是把它抽成一个真正的 `StatCard` 组件再连样式一起搬，
+ * 那是重构、不是搬家，按 `css-convention.md` §3 雷区 4 单开一轮。
+ * 本轮的选择是**停在这条界线上并写明**，而不是半搬。
+ *
+ * `.stat-number` 还有一条 480px 的窄屏规则留在 `responsive.css`：
+ * 既然这个类名仍是全局的，那条规则**不需要动**（能正常命中）。
+ *
+ * ## 响应式规则跟着组件走（本轮唯一需要搬的两条）
+ *
+ * 原 `responsive.css` 768px 档里针对 `.dashboard-two-col` /
+ * `.dashboard-review-card` 的两条规则一并搬进本文件。理由是
+ * `css-convention.md` §3 雷区 2：类名哈希后全局选择器**选不中**它，
+ * 规则还在、永不生效 —— 而且它是 F-16 那个 bug 的修复本体
+ * （`Dashboard.tsx` 原来是内联 `gridTemplateColumns: '1fr 1fr'`，
+ * 内联样式赢不了媒体查询，手机上永远两列）。
+ * 断点值沿用全局的 768px，不另造断点。
+ */
+
+/* ── 两栏区块（今日目标 + 每日任务、待复习 + 薄弱点）── */
+
+.dashboardTwoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+/* ── 今日待复习卡片：左侧文案 + 右侧"开始复习"按钮 ── */
+
+.dashboardReviewCard {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ── 7 天趋势柱状图 ──
+   高度由 tsx 的内联 `height` 给（按当天复习量算），宽度与配色在这里。 */
+
+.trendBar {
+  width: 100%;
+  max-width: 40px;
+  border-radius: 6px 6px 0 0;
+  transition: all 0.3s var(--ease-out-expo);
+  position: relative;
+  background: var(--gradient-primary);
+}
+
+/* 正确率 < 60% 的那天换成琥珀色。必须排在 `.trendBar` **之后** ——
+   两者权重相同，先后决定谁生效（原 dashboard.css 也是这个顺序）。 */
+.trendBarWarning {
+  background: linear-gradient(180deg, #f59e0b, #d97706);
+}
+
+.trendBar:hover {
+  filter: brightness(1.1);
+  transform: scaleY(1.02);
+  transform-origin: bottom;
+}
+
+/* ── 窄屏（原 responsive.css 768px 档，值一字未改）── */
+
+@media (max-width: 768px) {
+  /* F-16：两处 `1fr 1fr` 在 375px 屏上每列不到 170px，
+     中文标题被逐字挤断 → 收成一列。 */
+  .dashboardTwoCol {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  /* 待复习卡片：标题 + "开始复习"按钮，窄屏允许换行 */
+  .dashboardReviewCard {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+}

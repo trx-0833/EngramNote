@@ -13,9 +13,13 @@
  *
  * ## 用法
  *
- *   # 迁移前（工作区里已经没有旧规则了，所以要回到 HEAD 取）
+ *   # 迁移前（工作区里已经没有旧规则了，所以要回到 git 修订里取）
  *   node scripts/css-rule-inventory.mjs src/styles/learning.css \
  *        --class quiz-option,feedback-correct --from-git
+ *
+ *   # 指定修订：已经提交过的批次，它的"迁移前"在 HEAD 之前
+ *   node scripts/css-rule-inventory.mjs src/styles/learning.css \
+ *        --class quiz-option --from-git --rev HEAD~1
  *
  *   # 按选择器前缀过滤
  *   node scripts/css-rule-inventory.mjs src/styles/learning.css --prefix quiz-,feedback-
@@ -53,7 +57,9 @@ function formatRule(r) {
 
 const file = argv[0]
 if (!file) {
-  console.error('用法: node scripts/css-rule-inventory.mjs <css文件> [--prefix a,b] [--class a,b] [--from-git]')
+  console.error(
+    '用法: node scripts/css-rule-inventory.mjs <css文件> [--prefix a,b] [--class a,b] [--from-git] [--rev HEAD~1]',
+  )
   process.exit(2)
 }
 
@@ -64,13 +70,18 @@ const classArg = argv.indexOf('--class')
 const exactClasses =
   classArg >= 0 && argv[classArg + 1] ? new Set(argv[classArg + 1].split(',').filter(Boolean)) : null
 const fromGit = argv.includes('--from-git')
+// `--rev` 默认 HEAD：已经提交过的批次（比如试点）它的"迁移前"在 HEAD 之前，
+// 写死 HEAD 会读到"规则已经搬走"的版本，于是清单是空的 —— 而空清单最容易被
+// 误读成"这些规则本来就不存在"。
+const revArg = argv.indexOf('--rev')
+const rev = revArg >= 0 && argv[revArg + 1] ? argv[revArg + 1] : 'HEAD'
 
-const css = fromGit ? readFromGit(path.resolve(file)) : fs.readFileSync(file, 'utf8')
+const css = fromGit ? readFromGit(path.resolve(file), rev) : fs.readFileSync(file, 'utf8')
 let rules = parseRules(css)
-// 自检：解析出 0 条规则几乎一定是解析器或路径出了问题，
+// 自检：解析出 0 条规则几乎一定是解析器或路径/修订出了问题，
 // 而不是"这个文件真的没有规则"。静默返回空清单会让差集看起来"没丢东西"。
 if (rules.length === 0) {
-  console.error(`✗ 从 ${file} 解析出 0 条规则：检查路径/解析器，不要把它当成"文件是空的"`)
+  console.error(`✗ 从 ${file} 解析出 0 条规则：检查路径/解析器/修订，不要把它当成"文件是空的"`)
   process.exit(3)
 }
 if (prefixes) {
@@ -81,7 +92,7 @@ if (exactClasses) {
 }
 
 console.log(
-  `# ${path.basename(file)}${fromGit ? ' @HEAD' : ''}` +
+  `# ${path.basename(file)}${fromGit ? ` @${rev}` : ''}` +
     `${prefixes ? ` prefix=${prefixes.join('|')}` : ''}` +
     `${exactClasses ? ` classes=${[...exactClasses].join('|')}` : ''} —— ${rules.length} 条规则`,
 )

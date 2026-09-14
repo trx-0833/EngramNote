@@ -1,0 +1,177 @@
+/**
+ * 清洗面板的样式（overhaul-plan 5.6：第一批迁移，序 2）
+ *
+ * ## 为什么整表搬进来
+ *
+ * 原 `src/styles/cleaning.css` 的 16 条规则，全项目只有
+ * `components/CleaningPanel.tsx` 在用（grep 类名前缀 `cleaning-` / `duplicate-`
+ * 只命中这一个组件 + 那个样式表）。它不在 `responsive.css` 里出现，
+ * 也没有任何测试按这些类名查询 —— 属于计划里"低风险、整表搬"的一档。
+ *
+ * ## ⚠️ 动画：`cleaning-pulse` 的 `@keyframes` 一起搬进来（改名 `cleaningPulse`）
+ *
+ * 原 `.cleaning-progress-bar` 写 `animation: cleaning-pulse 1.5s ease-in-out infinite`，
+ * 定义在 `base.css`。CSS Modules 会把**动画名一起哈希**：裸名搬进模块后
+ * 产物里会出现 `animation:_cleaningPulse_<hash>` 而**没有**同名 `@keyframes`
+ * —— 动画静默消失，规则清单差集看不见（见 `css-convention.md` §3 雷区 1）。
+ * 所以这里把动画体逐字复制进来。`base.css` 里的全局原版不删
+ * （全局动画库仍可被 tsx 内联 `style={{ animation }}` 按裸名引用）。
+ *
+ * ## 两条"没有用户"的规则：**逐字搬过来，不删**
+ *
+ * `.cleaning-progress` / `.cleaning-progress-bar` 是历史遗留：清洗进度条
+ * 后来改由 `TaskProgress` 渲染（用的是全局 `.progress-bar*`），
+ * 于是这两条规则在全项目**没有任何 TSX 引用**（grep 只命中本模块）。
+ * 本轮**仍然逐字搬过来**，理由是本轮的契约是"证明什么都没丢"：
+ * 删死规则是另一件事（死 CSS 清理），混进来会让"丢失"这条证据
+ * 同时包含"搬家"和"清理"两种语义，审阅者无法判断哪条丢得有意、哪条是事故。
+ * 死规则清理应当单开一轮，届时连同 `base.css` 里可能一起失去用户的
+ * `@keyframes cleaning-pulse` 一并处理。
+ *
+ * ## 与 responsive.css 的关系
+ *
+ * 无：这些类名在 `responsive.css` 里出现 0 次，所以不涉及"响应式规则必须
+ * 跟着组件搬"那条雷区（`auth.css` 同样如此）。
+ */
+
+/* ── 面板外壳 ── */
+
+.cleaningPanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.cleaningStats {
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-sm);
+}
+
+/* ── 清洗进度条（历史遗留：当前无 TSX 引用，见文件头）── */
+
+.cleaningProgress {
+  width: 100%;
+  height: 4px;
+  background: var(--color-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cleaningProgressBar {
+  width: 100%;
+  height: 100%;
+  background: var(--gradient-primary);
+  /* `cleaningPulse` 定义在本文件末尾 —— 模块内的动画名会被哈希，
+     引用与定义必须同域（见文件头）。 */
+  animation: cleaningPulse 1.5s ease-in-out infinite;
+}
+
+/* ── 重复块列表 ── */
+
+.duplicateBlocks {
+  margin-top: var(--space-sm);
+}
+
+.duplicateBlock {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-xs);
+  background: var(--color-bg);
+  transition: border-color 0.2s ease;
+}
+
+.duplicateBlock:hover {
+  border-color: var(--color-border);
+}
+
+.duplicateBlockHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.duplicateBlockInfo {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 0.8rem;
+}
+
+.duplicateBlockIndex {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.duplicateBlockSimilarity {
+  color: var(--color-text-secondary);
+}
+
+.duplicateBlockActions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+/* 块内容对比区（人工核对重复判断） */
+.duplicateBlockCompare {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.duplicateBlockTextLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+/* 内容是清洗产物（可能很长），所以限高 + 滚动，并保留换行与长词断行，
+   否则一段没有空格的 OCR 文本会把面板横向撑破。 */
+.duplicateBlockTextContent {
+  font-size: 0.78rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+  /* `--color-bg-subtle` 全项目**从未被定义**（base.css 的 :root 里没有它），
+     所以这个 fallback 一直在生效。本轮照抄不改：三处使用者的 fallback
+     分别是 #f7f8fa / #f7f7f8 / #f5f6f8（CleaningPanel / ErrorBoundary / Toast），
+     收成令牌就得改掉其中两个的颜色 —— 属于"顺手改外观"，
+     见 css-convention.md §3 雷区 4。 */
+  background: var(--color-bg-subtle, #f7f8fa);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  margin: 0;
+  font-family: inherit;
+  color: var(--color-text);
+}
+
+.duplicateBlockTextEmpty {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* ── 动画定义（动画体逐字复制自 base.css 的 `@keyframes cleaning-pulse`）── */
+
+@keyframes cleaningPulse {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

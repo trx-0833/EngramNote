@@ -10,6 +10,8 @@
  * 4. 响应式设计
  */
 import { type DiffBlock, type DiffLine } from '../api/client'
+// diff 视图样式（overhaul-plan 5.6）：原 src/styles/diff.css 整表迁到这里
+import styles from './DiffView.module.css'
 
 interface DiffViewProps {
   /** diff 块数据 */
@@ -21,26 +23,40 @@ interface DiffViewProps {
 }
 
 /**
+ * 行类型 → 模块类名的查表
+ *
+ * 原来是 `` `diff-line diff-line-${line.type}` `` 拼字符串。类名哈希之后
+ * 拼出来的名字不是产物里的类名（`._diffLineRemoved_<hash>`），
+ * 于是行高亮会静默失效 —— 而且是**构建期看不出、规则清单也看不出**的那种失效。
+ * 写成查表后，类型少一个键 TypeScript 就会报错（`Record<DiffLine['type'], string>`）。
+ */
+const LINE_TYPE_CLASS: Record<DiffLine['type'], string> = {
+  added: styles.diffLineAdded,
+  removed: styles.diffLineRemoved,
+  unchanged: styles.diffLineUnchanged,
+}
+
+/**
  * 渲染单行 diff 内容
  */
 function DiffLineRow({ line }: { line: DiffLine }) {
-  const className = `diff-line diff-line-${line.type}`
+  const className = `${styles.diffLine} ${LINE_TYPE_CLASS[line.type]}`
   const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '
 
   return (
     <div className={className}>
-      <span className="diff-line-prefix">{prefix}</span>
-      <span className="diff-line-number">
+      <span className={styles.diffLinePrefix}>{prefix}</span>
+      <span className={styles.diffLineNumber}>
         {line.type === 'removed' || line.type === 'unchanged'
           ? line.line_number_original ?? ''
           : ''}
       </span>
-      <span className="diff-line-number">
+      <span className={styles.diffLineNumber}>
         {line.type === 'added' || line.type === 'unchanged'
           ? line.line_number_clean ?? ''
           : ''}
       </span>
-      <span className="diff-line-content">{line.content}</span>
+      <span className={styles.diffLineContent}>{line.content}</span>
     </div>
   )
 }
@@ -54,7 +70,7 @@ function DiffLineRow({ line }: { line: DiffLine }) {
 export default function DiffView({ blocks, originalLines, cleanLines }: DiffViewProps) {
   if (!blocks || blocks.length === 0) {
     return (
-      <div className="diff-container">
+      <div className={styles.diffContainer}>
         <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: 'var(--space-md)' }}>
           两个版本完全相同，没有差异。
         </p>
@@ -63,25 +79,25 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
   }
 
   return (
-    <div className="diff-container">
+    <div className={styles.diffContainer}>
       {/* 统计信息 */}
-      <div className="diff-summary">
+      <div className={styles.diffSummary}>
         <span>原始版 {originalLines} 行</span>
         <span>清洗版 {cleanLines} 行</span>
         <span>{blocks.length} 处差异</span>
       </div>
 
       {/* 表头 */}
-      <div className="diff-header">
-        <span className="diff-col-label">原始版</span>
-        <span className="diff-col-label">清洗版</span>
-        <span className="diff-col-label">内容</span>
+      <div className={styles.diffHeader}>
+        <span className={styles.diffColLabel}>原始版</span>
+        <span className={styles.diffColLabel}>清洗版</span>
+        <span className={styles.diffColLabel}>内容</span>
       </div>
 
       {/* diff 内容 */}
-      <div className="diff-body">
+      <div className={styles.diffBody}>
         {blocks.map((block, blockIdx) => (
-          <div key={blockIdx} className="diff-block">
+          <div key={blockIdx} className={styles.diffBlock}>
             {block.lines.map((line, lineIdx) => (
               <DiffLineRow key={lineIdx} line={line} />
             ))}

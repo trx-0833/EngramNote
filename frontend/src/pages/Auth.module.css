@@ -1,0 +1,241 @@
+/**
+ * 登录 / 注册页的样式（overhaul-plan 5.6：第一批迁移，序 1）
+ *
+ * ## 为什么这两个页面共用一个模块
+ *
+ * 样式原本住在全局 `auth.css` 里，而全项目只有 `Login.tsx` / `Register.tsx`
+ * 在用（grep 只命中这两个文件 + 那个样式表）。两个页面是**同一个功能**
+ * （认证入口）的两半，视觉上是同一张卡片，所以合成一个模块、
+ * 与页面同目录 —— 而不是各拆一份，否则改一次卡片圆角要改两个文件。
+ *
+ * ## ⚠️ 坑一：`@keyframes` 名字会被一起哈希（试点轮实测过的老坑）
+ *
+ * 原 `.auth-card` 写的是 `animation: scaleIn 0.5s …`，而 `scaleIn` 定义在
+ * `base.css`。**裸名搬进模块会静默失效**：产物里会变成
+ * `animation:_scaleIn_<hash> …`，而那个名字在产物里没有任何 `@keyframes`
+ * 与之对应 —— 选择器和声明在文本上一个不少，只有动画没了，
+ * 规则清单差集看不见（试点轮实测详情见 `css-convention.md` §3 雷区 1）。
+ *
+ * 处理方式与试点一致：把动画**定义搬进模块**（动画体逐字复制自 base.css），
+ * 名字改成 `authScaleIn`。改名的理由有两层：
+ *   1. 模块里的名字必然被哈希，沿用 `scaleIn` 只会让读者误以为它是全局动画；
+ *   2. `base.css` 的 `scaleIn` 这次是**真的**变成了"可能还有别处要用"的
+ *      全局动画库成员（`Login`/`Register` 是它最后一个样式表用户，
+ *      但 tsx 的内联 `style={{ animation: … }}` 不走 CSS Modules，
+ *      仍然按裸名解析全局定义 —— 见 LearningAssessment.tsx / ErrorDisplay.tsx）。
+ *      所以全局定义**不删**，只在这里复制一份。
+ *
+ * ## ⚠️ 坑二：搬家会改变规则在级联里的位置（本轮实测，最容易被忽略的一条）
+ *
+ * 全局样式表的先后由 `main.tsx` 的 import 顺序决定，而模块的 CSS 跟着
+ * **组件在模块图里的位置**进入产物 —— `main.tsx` 第 4 行就 `import App`，
+ * 样式表在第 7 行之后才被引入，于是**静态引入的组件，其模块 CSS 排在
+ * 全部全局样式表之前**。实测产物 `index.css` 里的字节位置：
+ * `Auth.module.css` = 1、`base.css` 的 `:root` = 2551、`.btn` = 6555
+ * （具体数字随构建略有浮动，量级不变）。
+ *
+ * `.auth-submit` 与全局 `.btn`（`components.css`）作用在同一个 `<button>` 上，
+ * 两者权重相同（都是单类），所以"谁生效"完全取决于先后：搬进模块后
+ * `.btn` 会反过来盖住 `.auth-submit` 的 `padding / font-size / font-weight /
+ * transition`（按钮肉眼可见地变小变细）。
+ * 修法不是"记得把模块放在后面"（做不到），而是**显式提高权重**：
+ * 这条规则写成 `:global(.btn).authSubmit`（见下方注释）。
+ * `scripts/verify-built-css.mjs` 的"级联次序"检查会逐属性核对
+ * "该赢的仍然赢"，所以下次谁再搬一条与全局类打架的规则会立刻红。
+ *
+ * 结构性根治方案（**本轮不允许改 `main.tsx`，故未做**）：
+ * 把 `main.tsx` 的 `import App` 挪到全局样式表之后，让产物顺序变成
+ * ①令牌 → ②全局 → ③模块，与 `css-convention.md` §1 的分层一致。
+ * 这条已记入 `docs/css-migration-plan.md` 的下一轮建议。
+ *
+ * ## 反向说明：本模块没有任何响应式规则
+ *
+ * `auth.css` 的 16 条规则在 `responsive.css` 里**没有**对应项，
+ * 所以这次搬迁不涉及"响应式规则跟着组件走"那条雷区。
+ * （Auth 相关类名只在 responsive.css 里出现过 0 次，实测见迁移证据。）
+ */
+
+/* ── 背景装饰层 ── */
+
+.authBg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+  background: var(--gradient-hero);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 右上、左下两团柔光：用伪元素而不是额外 DOM，页面结构里不留纯装饰节点 */
+.authBg::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -30%;
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201, 169, 89, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.authBg::after {
+  content: '';
+  position: absolute;
+  bottom: -40%;
+  left: -20%;
+  width: 60%;
+  height: 60%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(15, 52, 96, 0.15) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── 毛玻璃卡片 ── */
+
+.authCard {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
+  box-shadow: var(--shadow-xl);
+  width: 100%;
+  max-width: 420px;
+  /* `authScaleIn` 定义在本文件末尾；引用与定义同域才自洽（见文件头坑一） */
+  animation: authScaleIn 0.5s var(--ease-out-expo);
+  position: relative;
+  z-index: 1;
+}
+
+.authTitle {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: var(--space-lg);
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── 输入框 ── */
+
+.authInputGroup {
+  position: relative;
+  margin-bottom: var(--space-md);
+}
+
+/* 后代选择器在模块里同样会被哈希：`.authInputGroup label`
+   → `._authInputGroup_x_hash label`。这里能命中，是因为 label/input
+   是**这个 div 的子元素**，与类名哈希无关。 */
+.authInputGroup label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+/* 左侧留出 40px 给图标；权重 (0,1,1) 高于 components.css 的 `input` (0,0,1)，
+   所以这条**不依赖**级联顺序 —— 与 .authSubmit 的情况不同（见文件头坑二）。 */
+.authInputGroup input {
+  padding-left: 40px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.authInputIcon {
+  position: absolute;
+  left: 12px;
+  bottom: 11px;
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
+/* ── 提交按钮 ──
+   tsx 上是 `className={`btn ${styles.authSubmit}`}`：`.btn` 提供按钮基线，
+   这里只覆盖认证页需要更大的那一档。这条规则与 `.btn` 权重相同，
+   **必须靠级联顺序取胜**（见文件头坑二，由 verify-built-css.mjs 检查）。 */
+
+/* `:global(.btn)` 不是装饰：tsx 上这个按钮同时挂着全局 `.btn`，
+   而**模块的 CSS 在产物里排在全局样式表之前**（实测：Auth.module.css 是
+   index.css 的第 1 个字节，base.css 的 `:root` 在 2550，`.btn` 在 6554）。
+   两者权重相同时后者胜 —— 于是 `.btn` 会反过来盖住这里的
+   `padding / font-size / font-weight / transition`，按钮肉眼变小变细。
+   把全局类写进选择器（权重 0,2,0）让"谁覆盖谁"不再依赖文件先后。
+   `:global()` 在**选择器**里是标准写法（在声明值里才会构建失败，
+   见 css-convention.md §3 雷区 1）。 */
+:global(.btn).authSubmit {
+  width: 100%;
+  padding: var(--space-md);
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.3);
+  transition: all 0.3s var(--ease-out-expo);
+}
+
+.authSubmit:hover {
+  box-shadow: 0 6px 24px rgba(15, 52, 96, 0.4);
+  transform: translateY(-1px);
+}
+
+.authSubmit:active {
+  transform: translateY(0);
+}
+
+/* ── 页脚："没有账号？注册" ── */
+
+.authFooter {
+  margin-top: var(--space-lg);
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.authFooter a {
+  color: var(--color-accent);
+  font-weight: 500;
+  position: relative;
+}
+
+/* 下划线用伪元素从 0 宽展开，而不是 text-decoration：
+   展开过程本身是动画，`text-decoration` 做不到。 */
+.authFooter a::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: var(--color-accent);
+  transition: width 0.3s var(--ease-out-expo);
+}
+
+.authFooter a:hover::after {
+  width: 100%;
+}
+
+/* ── 动画定义（动画体逐字复制自 base.css 的 `@keyframes scaleIn`）──
+   放在模块内，让"定义"与"引用"在同一个作用域里自洽：
+   模块里的动画名会被哈希，只有同文件内的定义才对得上（见文件头坑一）。 */
+
+@keyframes authScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

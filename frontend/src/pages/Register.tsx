@@ -5,6 +5,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+// 认证页样式（overhaul-plan 5.6）：与 Login 共用一份，见 Auth.module.css 文件头
+import styles from './Auth.module.css'
 
 export default function Register() {
   const navigate = useNavigate()
@@ -36,14 +38,14 @@ export default function Register() {
   }
 
   return (
-    <div className="auth-bg">
-      <div className="auth-card">
-        <h1 className="auth-title">注册 EngramNote</h1>
+    <div className={styles.authBg}>
+      <div className={styles.authCard}>
+        <h1 className={styles.authTitle}>注册 EngramNote</h1>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-          <div className="auth-input-group">
+          <div className={styles.authInputGroup}>
             <label htmlFor="email">邮箱</label>
-            <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="16" rx="2" />
               <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
             </svg>
@@ -58,9 +60,9 @@ export default function Register() {
             />
           </div>
 
-          <div className="auth-input-group">
+          <div className={styles.authInputGroup}>
             <label htmlFor="username">用户名</label>
-            <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
@@ -77,9 +79,9 @@ export default function Register() {
             />
           </div>
 
-          <div className="auth-input-group">
+          <div className={styles.authInputGroup}>
             <label htmlFor="password">密码</label>
-            <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
@@ -101,12 +103,12 @@ export default function Register() {
             </p>
           )}
 
-          <button type="submit" className="btn auth-submit" disabled={loading}>
+          <button type="submit" className={`btn ${styles.authSubmit}`} disabled={loading}>
             {loading ? '注册中...' : '注册'}
           </button>
         </form>
 
-        <p className="auth-footer">
+        <p className={styles.authFooter}>
           已有账号？{' '}
           <a href="/login" onClick={(e) => { e.preventDefault(); navigate('/login') }}>
             登录
