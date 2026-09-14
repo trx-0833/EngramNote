@@ -18,11 +18,16 @@
 - 所有响应统一附带 X-Request-ID 头
 
 设计决策：
-- 使用 BaseHTTPMiddleware 挂在 ErrorHandlerMiddleware 内侧
-  （CORS → ErrorHandler → RequestContext → 路由），保证：
-  1) 路由层抛出的异常先经本中间件记录访问日志（含 context），再被
-     ErrorHandlerMiddleware 捕获转成统一错误响应；
-  2) 错误响应同样携带 X-Request-ID。
+- 使用 BaseHTTPMiddleware 挂在 ErrorHandlerMiddleware **外侧**
+  （生效次序：RateLimit → RequestContext → CORS → ErrorHandler → 路由），保证：
+  1) 错误响应同样携带 X-Request-ID（本中间件在响应回程上无条件设置该头，
+     包括错误渲染器造出来的 4xx/5xx 与 CORS 自己应答的预检）；
+  2) 4xx/5xx 按状态码进访问日志（WARNING/ERROR）—— 注意错误在到达本中间件
+     之前**已经**被内层的 ErrorHandlerMiddleware 渲染成响应了，所以这里看到
+     的是"带错误状态码的正常响应"，而不是异常；下面的 `except` 只是兜底
+     （能逃出 ErrorHandler 的只剩 BaseException 一类）。
+- 不改用纯 ASGI 中间件：contextvars 的注入/重置需要与请求严格配对，
+  BaseHTTPMiddleware 的 finally 语义已经满足，且本中间件不读请求体。
 - 用户解析失败（无效 Token）只影响日志关联字段，不拦截请求——
   认证本身由 /api/auth 依赖处理。
 """

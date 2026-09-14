@@ -17,9 +17,14 @@
    ERROR 级日志同时落入 errors.log 独立文件，定位不再大海捞针。
 
 设计决策：
-- 中间件挂在 CORS 内侧、RequestContextMiddleware 外侧
-  （CORS → ErrorHandler → RequestContext → 路由），因此能捕获
-  路由层及请求上下文中间件抛出的所有未处理异常。
+- 本中间件是**最内层的用户中间件**：生效次序（外 → 内）为
+      RateLimit → RequestContext → CORS → ErrorHandler → ExceptionMiddleware → 路由
+  因此路由层（以及 ExceptionMiddleware 未接手的）一切未处理异常都落到这里。
+- ⚠️ `CORSMiddleware` 必须紧贴本中间件**外侧**（main.py 的注册次序）。
+  本中间件是"自己造响应"的中间件，而一个响应只会经过**外侧**中间件的 send
+  包装 —— CORS 若在里侧，`AppError` 渲染出的响应就不带
+  `Access-Control-Allow-Origin`（阶段 0.11 迁移后所有业务错误都走这条路，
+  实测证据见 tests/test_cors_middleware_order.py）。
 - 不向客户端返回堆栈（安全），但服务端日志保留完整堆栈。
 """
 

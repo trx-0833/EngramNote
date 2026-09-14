@@ -518,8 +518,67 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         **_schema_endpoint_kwargs(cfg),
     )
 
-    # 配置 CORS 中间件 — 允许前端开发服务器跨域访问
-    # 生产环境应将 allow_origins 改为实际前端域名
+    # ===================================================================
+    # 中间件注册 —— 次序是这里最容易搞错的东西，先读这段再动
+    # ===================================================================
+    #
+    # ## starlette 的次序语义
+    #
+    # `add_middleware` 是**前插**（`user_middleware.insert(0, ...)`），build 时
+    # 用 `reversed()` 逐层包裹 —— 于是**后注册的在外层**，请求先到它，
+    # 响应最后从它出去。（这条语义由
+    # `tests/test_cors_middleware_order.py::test_starlette_prepend_semantics_are_what_we_assume`
+    # 钉住，别在这里凭印象推。）
+    #
+    # ## 生效的嵌套（外 → 内，实测）
+    #
+    #     ServerErrorMiddleware          starlette 自带，永远在最外
+    #       RateLimitMiddleware          限流（最外层用户中间件）
+    #         RequestContextMiddleware   request_id / user_id / 访问日志
+    #           CORSMiddleware           ← 必须在错误渲染器**外侧**
+    #             ErrorHandlerMiddleware 把 AppError / 未知异常渲染成统一信封
+    #               ExceptionMiddleware  starlette 自带（HTTPException / 校验错误）
+    #                 APIRouter
+    #
+    # ## 为什么 CORS 必须紧贴 ErrorHandler 的外侧（本次修的缺陷）
+    #
+    # 一个中间件**自己造出来**的响应，只会经过它外侧那些中间件的 send 包装。
+    # `AppError` 是 `ErrorHandlerMiddleware` 自己构造响应的（异常走到它那里就被
+    # 吃掉了），所以 CORS 只要在它里侧，这个响应就永远不会被加上
+    # `Access-Control-Allow-Origin`；而 `HTTPException` 由最内层的
+    # `ExceptionMiddleware` 渲染，响应必须穿过 CORS 才出得去，于是一直带着该头。
+    #
+    # 阶段 0.11 把 152 处 `HTTPException` 迁到 `AppError`，等于把**所有**业务错误
+    # 从"带头的那条渲染路径"搬到了"不带头的那条"：状态码与响应体一模一样，
+    # 服务端日志里也看不出差别，只有跨域时浏览器会把它们变成不可读的 CORS 失败
+    # （前端连 4xx 状态码与 error_code 都拿不到）。今天前端走 Vite 同源代理，
+    # 所以没坏 —— 这正是它值得现在就修的原因：它是一颗静默的雷。
+    # 判据、证据与结构断言见 `tests/test_cors_middleware_order.py`。
+    #
+    # ## 为什么 CORS 不干脆放到最外层（另一个真实取舍）
+    #
+    # 放到最外层会顺带改掉两件**本不属于本次修复**的事：
+    #   1. 预检（OPTIONS）由 CORSMiddleware 自己应答、不经过路由，放最外层后它
+    #      就不再经过 RequestContextMiddleware —— 预检响应会丢 `X-Request-ID`、
+    #      也不再进访问日志；
+    #   2. 限流中间件短路返回的 429 会从"没有 ACAO"变成"有 ACAO"（它今天是
+    #      最外层用户中间件，同样绕过了 CORS）。
+    # 因此这里取**最小位移**：只把 CORS 从 ErrorHandler 里侧挪到外侧，
+    # 其余三个中间件的相对次序一个都没动 —— 于是"哪个中间件看到哪个异常"
+    # 完全没变（ErrorHandler 仍是 AppError 唯一的捕获者；RequestContext 仍在
+    # 外侧把 4xx/5xx 记进访问日志）。
+    #
+    # ⚠ 已知不一致（**本次未修**，另立任务）：RateLimitMiddleware 注册得比
+    # RequestContextMiddleware 更晚 ⇒ 它实际在最外层，跑在请求上下文注入**之前**。
+    # 后果是 `rate_limit._client_key` 读不到 `context.get_user_id()`，
+    # "按已认证用户计数"那条分支从未生效（一直按 IP 计数，即上面的注释原文
+    # "限流器因此能读到已认证用户"与事实相反）；它返回的 429 里
+    # `request_id` 也恒为 None。属行为变更，需要单独评估再动。
+    # ===================================================================
+
+    # 最内层用户中间件：统一错误渲染器
+    app.add_middleware(ErrorHandlerMiddleware)
+    # ↓ 紧贴其外：错误响应必须穿过它，否则丢掉 Access-Control-Allow-Origin
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cfg.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
@@ -527,15 +586,8 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         allow_methods=["*"],       # 允许所有 HTTP 方法
         allow_headers=["*"],       # 允许所有请求头
     )
-
-    # 注册全局异常处理中间件 — 捕获所有未处理异常，返回统一格式
-    # 顺序说明：Starlette 的 add_middleware 是**前插**语义，因此后注册的在外层。
-    # 实际执行顺序（外 → 内）为：
-    #     RequestContext → ErrorHandler → RateLimit → CORS → 路由
-    # 即 RequestContext 最先注入 request_id / user_id，限流器因此能读到已认证用户；
-    # ErrorHandler 在其内层，保证限流返回的 429 也走统一错误信封。
-    app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RequestContextMiddleware)
+    # 最外层用户中间件：限流（越早拒绝越省事）
     app.add_middleware(RateLimitMiddleware)
 
     app.add_exception_handler(HTTPException, http_exception_handler)

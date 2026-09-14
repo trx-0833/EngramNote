@@ -366,8 +366,15 @@ async def get_reminders(
             user_id=current_user.id, db=db
         )
         return ReminderResponse(**reminders)
-    except HTTPException:
-        # 透传已知的 HTTP 异常
+    except (HTTPException, AppError):
+        # 透传**已知的错误契约异常**，交给上层统一渲染：
+        #   - HTTPException：需要额外响应头的场景（本文件当前用不到，但保持透传语义）；
+        #   - AppError：统一错误契约的业务异常（阶段 0.11 起服务层的标准抛法）。
+        # ⚠️ 这里必须是元组而不是只写 HTTPException：下面的 `except Exception` 会把
+        #    任何 AppError 吞成 500 REVIEW_REMINDERS_FAILED —— 那等于把一个真实的
+        #    4xx（比如"卡片不存在"）谎报成服务端故障，而两者的状态码与 error_code
+        #    都不同，前端的按码分流会静默走错分支。这正是"统一错误契约"最容易
+        #    被局部兜底破坏的地方：异常类型换了，兜底的形状没跟着换。
         raise
     except Exception as e:
         logger.error(

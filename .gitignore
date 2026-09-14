@@ -60,7 +60,37 @@ _backup/
 # ---- 测试文件目录 ----
 testfiles/
 
-# ---- 临时测试脚本（backend 根目录下的零散测试文件） ----
+# ---- 一次性草稿脚本（只匹配 backend/ 根目录）----
+#
+# ## 这六条守的是什么
+#
+# 「有人在 `backend/` 根随手丢一个 test_*.py / verify_*.py 当草稿」这**一种**情形。
+# 模式里带 `/` ⇒ 相对本文件所在目录（仓库根）且**不递归**：`backend/test_*.py`
+# 只匹配 `backend/` 根那一层，不会命中 `backend/tests/**` 或任何子目录。
+#
+# ## ⚠️ 刻意**不**把规则延伸到 backend/scripts/dev/（本轮复核的结论）
+#
+# 2026-09-14 把 15 个一次性脚本从 `backend/` 根搬到了 `backend/scripts/dev/`
+# （见该目录的 README.md），其中 14 个当时是"未跟踪 + 被忽略"，1 个
+# （`e2e_cleanup.py`）已被跟踪。搬迁那次提交（b73ebfd）把它们**全部入库**了 ——
+# 而 README 的遗留清单里，人工决定正是"提交它们（推荐：归档脚本本就该入库）"，
+# 所以"它们不再是未跟踪文件"是**已做出的决定**，不是本文件漏改造成的意外：
+#
+#   * 现状：`git ls-files backend/scripts/dev` 列出全部 16 个文件（15 脚本 + README），
+#     `git status` 在这个目录下**一个未跟踪文件都没有** —— 没有任何东西在污染状态。
+#   * 把这六条延伸成 `backend/scripts/dev/test_*.py` 之类，对已入库的 14 个
+#     **没有任何效果**（.gitignore 只作用于未跟踪文件），却会让该目录里
+#     **将来新增**的同名文件被静默忽略 —— 一个"看起来已提交、其实没入库"的
+#     坑，正是"悄悄忽略了本该入库的东西"。归档目录里不该出现半隐形的文件名。
+#   * 真要把它们重新排除出版本控制，那是一次 `git rm --cached` + 提交的决定
+#     （并应同步更新该 README），**不是**靠在这里加忽略规则 —— 那只会留下一批
+#     "既被跟踪、又列在 .gitignore 里"的自相矛盾状态。
+#
+# ## ⚠️ 也**不要**把它们改写成不带路径前缀的写法
+#
+# `test_*.py` / `**/test_*.py` 会连 `backend/tests/**` 整套测试一起忽略掉
+# （那是本仓库最不能丢的东西）。这条不变量由
+# `backend/tests/test_gitignore_scope.py` 用 `git check-ignore --no-index` 钉住。
 backend/test.py
 backend/test_api.py
 backend/test_*.py

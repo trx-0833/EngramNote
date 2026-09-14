@@ -30,6 +30,22 @@
 （因此不需要 JWT/数据库配置，毫秒级返回）。
 
 ================================================================================
+"没查到"的三种含义**必须分开**（本文件的核心判据，别把它们混成一个）
+================================================================================
+1. **声明了却没装**（`requirements*.txt` 里有、本机查不到）——
+   这是**发现**，不是信息。清单说"这套环境应该有它"，而它不在 ⇒
+   报告里以 `!!` 标出、计入 `counts.not_installed`，并且**不**进任何信息桶。
+2. **只靠 extra 才会带上来的传递依赖没装**（如 `uvicorn[standard]` 的
+   httptools / watchfiles）——这是**信息**。装不装它取决于声明的 extras 与
+   平台，瘦环境里它本来就不在；把它当失败会让这个检查在瘦环境里**常红**，
+   而常红的检查最后只会得到一句 `|| true`（比没有检查更糟）。
+3. **硬依赖的传递包没装**（父包无条件声明了它，却没查到）——这是**矛盾**：
+   已安装的元数据与已装的文件系统对不上（例如 `--no-deps` 装出来的环境）。
+   这一段的结论不可信，因此以 `⚠` 单列出来。
+
+只有第 1、3 种会出现在"需要处理"的措辞里；第 2 种永远是信息。
+
+================================================================================
 用法
 ================================================================================
     python backend/scripts/check_dependency_drift.py      # 仓库根或 backend/ 下均可
@@ -91,7 +107,8 @@ V_UNKNOWN = "unknown"
 _VERDICT_LABEL = {
     V_OUT_OF_RANGE: "!! 超出声明范围",
     V_UNKNOWN: "?? 无法判定",
-    V_NOT_INSTALLED: "?? 未安装",
+    # 声明了却查不到 ⇒ **发现**（不是信息）：`!!` 与"超出声明范围"同级
+    V_NOT_INSTALLED: "!! 未安装（声明了却没装）",
     V_IN_RANGE: "OK 在声明范围内",
 }
 
@@ -192,6 +209,13 @@ def transitive_dependencies(
     extra 的处理：`uvicorn[standard]` 的依赖带 `extra == "standard"` 标记，
     只有被声明请求过的 extra 才真的会被安装；标记在 extra="" 与各声明 extra
     下各求值一次。
+
+    ⚠ **"未安装"要分两种**（见文件头）：
+      - `optional_only=True`：**每一条**把它带上来的声明都带非空 extra 标记
+        ⇒ 它是可选依赖，没装属于正常（瘦环境）；
+      - `optional_only=False`：至少有一条父包在 `extra=""`（无条件）下就需要它
+        ⇒ 它是硬依赖，没装说明这套环境自身矛盾。
+    这两个取值由 `split_missing_transitive()` 用来分桶，别在这里把它们合并。
     """
     extras_by_name: dict[str, set[str]] = {}
     for entry in declared:
@@ -213,10 +237,14 @@ def transitive_dependencies(
                 req = Requirement(raw_req)
             except Exception:  # noqa: BLE001 - 元数据里的怪行跳过即可
                 continue
+            #: 让这条约束成立的**非空** extra（空列表 = 无条件成立）
+            extras_ok: list[str] = []
             if req.marker is not None:
                 extras = [""] + sorted(extras_by_name.get(canonical, set()))
-                if not any(req.marker.evaluate({"extra": e}) for e in extras):
+                matched = [e for e in extras if req.marker.evaluate({"extra": e})]
+                if not matched:
                     continue
+                extras_ok = sorted({e for e in matched if e})
             dep = canonicalize_name(req.name)
             if dep in declared_names:
                 continue
@@ -227,8 +255,17 @@ def transitive_dependencies(
                     "installed": installed_version(req.name),
                     "required_by": [],
                     "constraint_from_out_of_range_parent": False,
+                    #: 是否**只**因某个 extra 才被需要（见上方说明）
+                    "optional_only": True,
+                    #: 需要它的那些 extra 名（空 = 无条件）
+                    "extras": [],
                 },
             )
+            if extras_ok:
+                item["extras"] = sorted(set(item["extras"]) | set(extras_ok))
+            else:
+                # 有一条无条件依赖 ⇒ 它是硬依赖（缺失就是环境矛盾）
+                item["optional_only"] = False
             if from_out_of_range_parent:
                 item["constraint_from_out_of_range_parent"] = True
             item["required_by"].append(
@@ -238,6 +275,8 @@ def transitive_dependencies(
                     "parent_in_declared_range": not from_out_of_range_parent,
                     # 原始约束字符串（空串 = 任意版本）；显示时再加括号
                     "specifier": str(req.specifier),
+                    # 这条依赖是在哪些 extra 下成立的（空 = 无条件）
+                    "extras": extras_ok,
                 }
             )
 
@@ -248,6 +287,42 @@ def transitive_dependencies(
         collected.values(),
         key=lambda i: (not i["constraint_from_out_of_range_parent"], i["name"].lower()),
     )
+
+
+def split_missing_transitive(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把"查不到已安装版本"的传递依赖分成 (可选缺失, 硬依赖缺失)
+
+    做成纯函数是为了能被直接断言：分桶判据一旦写反（把硬缺失当信息放过去，
+    或把瘦环境里的可选缺失当失败），检查就会出现"永远没问题"或"永远红"
+    这两种都不可用的形态。语义见文件头"没查到"的三种含义。
+    """
+    optional: list[dict[str, Any]] = []
+    required: list[dict[str, Any]] = []
+    for item in items:
+        if item.get("installed") is not None:
+            continue
+        (optional if item.get("optional_only") else required).append(item)
+    return optional, required
+
+
+def _missing_brief(item: dict[str, Any]) -> dict[str, Any]:
+    """缺失项的摘要（报告与 --json 共用；只放可 JSON 序列化的普通类型）"""
+    return {
+        "name": item["name"],
+        "extras": list(item.get("extras") or []),
+        "optional_only": bool(item.get("optional_only")),
+        "required_by": [
+            {
+                "parent": r["parent"],
+                "parent_installed": r["parent_installed"],
+                "specifier": r["specifier"],
+                "extras": list(r.get("extras") or []),
+            }
+            for r in item["required_by"]
+        ],
+    }
 
 
 def _satisfies_all(installed: Optional[str], required_by: list[dict[str, Any]]) -> Optional[bool]:
@@ -332,6 +407,9 @@ def analyze(files: Optional[list[Path]] = None) -> dict[str, Any]:
         V_UNKNOWN: sum(1 for e in declared if e["verdict"] == V_UNKNOWN),
     }
     counts["drift"] = counts[V_OUT_OF_RANGE]
+    #: "声明了却没装"的条数 —— 与上面的 verdict 计数是同一件事，单独给个名字，
+    #: 因为报告与判据里要反复引用它（它是**发现**，不是信息，见文件头）
+    counts["declared_missing"] = counts[V_NOT_INSTALLED]
     report["counts"] = counts
 
     out_of_range_parents = {
@@ -345,6 +423,12 @@ def analyze(files: Optional[list[Path]] = None) -> dict[str, Any]:
     report["transitive_from_out_of_range_parent"] = sum(
         1 for i in report["transitive"] if i["constraint_from_out_of_range_parent"]
     )
+    # ---- "没查到"要分桶：可选缺失 = 信息；硬缺失 = 矛盾（见文件头）----
+    _optional_absent, _required_absent = split_missing_transitive(report["transitive"])
+    report["transitive_missing_optional"] = [_missing_brief(i) for i in _optional_absent]
+    report["transitive_missing_required"] = [_missing_brief(i) for i in _required_absent]
+    counts["transitive_missing_optional"] = len(report["transitive_missing_optional"])
+    counts["transitive_missing_required"] = len(report["transitive_missing_required"])
     return report
 
 
@@ -404,6 +488,10 @@ def print_report(report: dict[str, Any]) -> None:
             + _pad(entry["installed"] or "—", 16)
             + _VERDICT_LABEL[entry["verdict"]]
         )
+    if counts[V_NOT_INSTALLED]:
+        print(f"  ⚠ 上面 {counts[V_NOT_INSTALLED]} 条是**发现**（清单说该有、本机查不到），"
+              "不是信息：")
+        print("     与'可选 extra 没装'是两件事（后者是 ○ 信息，见 [3]）—— 判据见本文件头部。")
 
     if report["unpinned"]:
         print(thin)
@@ -424,6 +512,8 @@ def print_report(report: dict[str, Any]) -> None:
     print("[3] 清单里没有、但会被带上来的传递依赖（约束取自**已安装**的父包）")
     print("    父包自己已超出声明范围时（下面带 ⚑ 的行），这里看到的约束**不是**声明路径")
     print("    上的那条约束 —— starlette / pydantic-core 这类包正是从这里开始分叉的。")
+    print("    行尾标注：'可选依赖未安装' = **信息**（不算漂移）；'硬依赖缺失' = 需处理。")
+    print("    ○ = 可选依赖未安装且父包在声明范围内（父包超范围时行首已经是 ⚑）")
     if not report["transitive"]:
         print("  （无）")
     for item in report["transitive"]:
@@ -432,11 +522,39 @@ def print_report(report: dict[str, Any]) -> None:
             + (f"({r['specifier']})" if r["specifier"] else "(任意)")
             for r in item["required_by"]
         )
-        mark = "⚑ " if item["constraint_from_out_of_range_parent"] else "  "
+        absent_optional = item["installed"] is None and item["optional_only"]
+        if item["constraint_from_out_of_range_parent"]:
+            mark = "⚑ "
+        elif absent_optional:
+            mark = "○ "
+        else:
+            mark = "  "
         note = ""
-        if item["version_ok"] is False:
+        if item["installed"] is None:
+            if absent_optional:
+                extras = ",".join(item["extras"]) or "?"
+                # 刻意写成"信息"：瘦环境里它本来就不在，把它当失败会让检查常红
+                note = f"   ← 可选依赖未安装（extra={extras}）：信息，不算漂移"
+            else:
+                note = "   ← ⚠ 硬依赖缺失：已安装元数据与已装文件不一致，需处理"
+        elif item["version_ok"] is False:
             note = "   ← 连已安装的父包都不接受这个版本"
-        print(f"  {mark}{_pad(item['name'], 26)}已安装 {_pad(str(item['installed']), 14)}{parents}{note}")
+        state = "—（未安装）" if item["installed"] is None else str(item["installed"])
+        print(f"  {mark}{_pad(item['name'], 26)}已安装 {_pad(state, 14)}{parents}{note}")
+
+    if report["transitive_missing_required"]:
+        print(thin)
+        print("[3b] ⚠ 硬依赖缺失（**不是**信息，需要处理）")
+        print("     父包在无条件（extra=\"\"）情形下就声明了它们，本机却查不到 —— 这说明")
+        print("     已安装的元数据与已装的文件互相矛盾（典型成因：`pip install --no-deps`），")
+        print("     [3] 里与这些包相关的推断都不可信。")
+        for brief in report["transitive_missing_required"]:
+            parents = ", ".join(
+                f"{r['parent']} {r['parent_installed']}"
+                + (f" ({r['specifier']})" if r["specifier"] else " (任意)")
+                for r in brief["required_by"]
+            )
+            print(f"    - {brief['name']}  ←  {parents}")
 
     if report["skipped_lines"]:
         print(thin)
@@ -451,15 +569,21 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"  查到已安装版本          : {counts['installed_known']}")
     print(f"  在声明范围内            : {counts[V_IN_RANGE]}")
     print(f"  超出声明范围（漂移）    : {counts[V_OUT_OF_RANGE]}")
-    print(f"  未安装                  : {counts[V_NOT_INSTALLED]}")
+    print(f"  未安装（**声明**了却没装）: {counts[V_NOT_INSTALLED]}   ← 发现，需处理")
     print(f"  无法判定                : {counts[V_UNKNOWN]}")
     print(f"  传递依赖条目            : {report['transitive_total']}"
           f"（其中 {report['transitive_from_out_of_range_parent']}"
           f" 条的约束来自已超出声明范围的父包）")
+    print(f"    其中未安装 · 可选 extras : {counts['transitive_missing_optional']}"
+          "   ← 信息，不算漂移（瘦环境里本来就没有）")
+    print(f"    其中未安装 · 硬依赖     : {counts['transitive_missing_required']}"
+          "   ← 发现，需处理（元数据与已装文件不一致）")
     print(bar)
     print("说明：漂移**存在与否都不影响退出码 0** —— 今天这些差异是本仓库的既有事实")
     print("      （requirements.txt 用 ~= 声明、环境早已更新，两者都不是本脚本能改的）。")
     print("      要把它当门禁：--fail-on-drift（退出码 1）；检查自身失效：退出码 2。")
+    print("      '可选依赖没装'（○）永远是信息；'声明了却没装'（!!）与'硬依赖缺失'（⚠）")
+    print("      是发现 —— 它们在报告里以 !! / ⚠ 单列，不混进任何信息桶。")
     print("      漏洞结论请以 docs/security-scan.md 记录的扫描口径为准，并注意它扫的是哪一套。")
     print(bar)
 
