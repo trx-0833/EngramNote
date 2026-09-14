@@ -15,6 +15,10 @@ import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels'
 import { useToast } from '../components/Toast'
+// 本页私有样式（overhaul-plan 5.6 第三批）：`.search-input-*` 从 `src/styles/learning.css`
+// 拆出，`.list-toolbar` 的两条 480px 规则从 `src/styles/responsive.css` 一起搬进来
+// （类名哈希后写在全局补丁层里的选择器会永远选不中）—— 见 NotesList.module.css 文件头
+import styles from './NotesList.module.css'
 
 /**
  * 笔记列表页面组件
@@ -136,9 +140,9 @@ export default function NotesList() {
   return (
     <div className="page-enter">
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
-      <div className="list-toolbar" style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
-        <div className="search-input-wrapper">
-          <svg className="search-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <div className={styles.listToolbar} style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
+        <div className={styles.searchInputWrapper}>
+          <svg className={styles.searchInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>

@@ -21,6 +21,10 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import ErrorDisplay from '../components/ErrorDisplay'
 import ReminderBanner from '../components/ReminderBanner'
+// 统计卡片（overhaul-plan 5.6 第三批）：`.stat-card*` / `.stat-number` /
+// `.stat-label` 原是全局类名、被本页与 TodayLearn 以同一 DOM 结构共用，
+// 抽成组件后样式随组件进模块 —— 见 StatCard.module.css 文件头
+import StatCard from '../components/StatCard'
 import { useToast } from '../components/Toast'
 import { sourceTypeLabels, statusLabels, statusClass, cardTypeLabels, questionTypeLabels } from '../utils/labels'
 // 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
@@ -237,30 +241,10 @@ export default function Dashboard() {
             今日学习报告 ({dailyReport.date})
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-md)' }}>
-            <div className="stat-card stat-card-blue">
-              <div className="stat-number">
-                {dailyReport.new_mastered}
-              </div>
-              <div className="stat-label">新掌握</div>
-            </div>
-            <div className="stat-card stat-card-green">
-              <div className="stat-number">
-                {dailyReport.total_reviews}
-              </div>
-              <div className="stat-label">复习次数</div>
-            </div>
-            <div className="stat-card stat-card-gold">
-              <div className="stat-number">
-                {dailyReport.today_accuracy}%
-              </div>
-              <div className="stat-label">正确率</div>
-            </div>
-            <div className="stat-card stat-card-purple">
-              <div className="stat-number">
-                {formatTime(dailyReport.total_review_time_ms)}
-              </div>
-              <div className="stat-label">复习时长</div>
-            </div>
+            <StatCard variant="blue" value={dailyReport.new_mastered} label="新掌握" />
+            <StatCard variant="green" value={dailyReport.total_reviews} label="复习次数" />
+            <StatCard variant="gold" value={`${dailyReport.today_accuracy}%`} label="正确率" />
+            <StatCard variant="purple" value={formatTime(dailyReport.total_review_time_ms)} label="复习时长" />
           </div>
 
           {/* 各题型正确率 */}

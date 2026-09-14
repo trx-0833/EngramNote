@@ -1,3 +1,61 @@
+/**
+ * Markdown 正文渲染（overhaul-plan 5.6 第三批：**本文件整体留全局，这是一次
+ * 有记录的"停"，不是漏做**）
+ *
+ * ## 为什么一条都不搬
+ *
+ * 计划里写的是"ADHD 阅读器（`.adhd-*`）进模块；`.markdown-body` 后代选择器留
+ * 全局"。逐条核对之后这两半**无法分开** —— 5 条 `.adhd-*` 规则全部是
+ * `.markdown-body.adhd-reader-active …` 的后代选择器，而 `.markdown-body`
+ * 自己按判据必须留全局：
+ *
+ * | 用 `.markdown-body` 的地方 | 用途 |
+ * |---|---|
+ * | `pages/notedetail/MarkdownReader.tsx` | `className="card markdown-body"`（阅读态） |
+ * | `pages/notedetail/EditSplitView.tsx` | `className="card markdown-body"`（编辑分屏预览） |
+ * | `components/NoteAskPanel.tsx` | `className={`${styles.askAiAnswer} markdown-body`}`，并且 `document.querySelector('.markdown-body')` 取正文容器 |
+ *
+ * 三个**不相邻**的功能在用它 ⇒ `css-convention.md` §4 第 2 条；
+ * 正文 HTML 还是 `marked` 渲染出来的字符串（同一节第 4 条，"没有组件可以挂类名"）。
+ *
+ * ## `.adhd-*` 四个类名：**写入点全部在 `src/hooks/useAdhdReader.ts`**（逐处列清）
+ *
+ * | 写入点 | 类名 | 操作 |
+ * |---|---|---|
+ * | `useAdhdReader.ts:36` | `adhd-line-marker` | `classList.contains`（读，判断该元素是不是标记条） |
+ * | `useAdhdReader.ts:165` | `adhd-line-marker` | `marker.className = 'adhd-line-marker'`（整体赋值） |
+ * | `useAdhdReader.ts:216` / `:274` | `adhd-current-block` | `classList.remove` |
+ * | `useAdhdReader.ts:217` | `adhd-current-block` | `classList.add`（换行时切换当前块） |
+ * | `useAdhdReader.ts:266` | `adhd-block` | `classList.add`（给每个 `marked` 顶层块加） |
+ * | `useAdhdReader.ts:269` / `:272` | `adhd-reader-active` | `classList.add` / `remove`（开关阅读模式） |
+ *
+ * 结论与三条判据的对照（缺一不可，所以**没有**任何一条能干净落地）：
+ *
+ * 1. **改成语义查询**：不行。这些类名是"给 `marked` 生成的块打标记"的**唯一**
+ *    手段，DOM 上没有可用的语义角色/属性可以替代（块是 `p` / `ul` / `pre`…，
+ *    而且必须按"第几个顶层块"迭代）。
+ * 2. **从模块导出常量**：不行。写入点在 `src/hooks/useAdhdReader.ts`，
+ *    **不在本批允许改动的文件范围内**（本批只动 `src/styles/**`、
+ *    `src/components/**`、`src/pages/**`、测试、`docs/**`、`scripts/**`）。
+ *    即便能改，为了 4 个类名让一个通用 hook `import` 某个页面的模块，
+ *    也是把归属颠倒过来。
+ * 3. **留全局**：✅ 这就是本文件的做法，而且它不是"退路"而是**判据内的正解** ——
+ *    5 条规则全是 `.markdown-body …` 后代选择器（第 4 条），`.markdown-body`
+ *    本身又是跨功能类名（第 2 条）；把这些规则硬塞进模块只能靠
+ *    `:global(.adhd-block)` 之类写法，那等于**一个字符都没被作用域化**，
+ *    却把"这些类名是全项目约定"这件事藏进一个页面模块里 —— 正是规范 §4
+ *    末尾说的"半搬"。
+ *
+ * 附：`utils/markdown.ts` **不**注入这些类名（grep 0 命中），正文里出现的
+ * `adhd-*` 只可能来自上面这一个 hook。`responsive.css` 对 `.adhd-*` 也是 0 命中，
+ * 所以不存在"补丁层还在命中它"的问题。将来若要迁移，**先**把写入点搬进
+ * 允许改动的范围（或把 hook 一起纳入那一批），再连这 5 条规则一起搬。
+ *
+ * ⚠️ `.markdown-body` 在 `responsive.css` 的 768px 档还有一整组规则
+ * （字号、断词、表格横向滚动、KaTeX 兜底）——它们依赖同一批全局类名，
+ * 本批同样不动（那属于最后一批"responsive.css 与组件级联一起处理"）。
+ */
+
 /* ── Markdown 渲染 ── */
 
 .markdown-body {

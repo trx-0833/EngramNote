@@ -1,0 +1,71 @@
+/**
+ * 笔记列表页私有样式（overhaul-plan 5.6 第三批：`learning.css` 按归属拆分）
+ *
+ * 从 `src/styles/learning.css` 搬来 3 条规则（`.search-input-wrapper`、
+ * `.search-input-wrapper input`、`.search-input-icon`），并从
+ * `src/styles/responsive.css` 的 480px 档搬来 2 条（`.list-toolbar`、
+ * `.list-toolbar .search-input-wrapper`）。全项目 grep 只命中
+ * `pages/NotesList.tsx`。
+ *
+ * ## 响应式规则必须跟着组件走（css-convention.md §3 雷区 2）
+ *
+ * `.list-toolbar` 这个类名**只定义在 `responsive.css` 里**（全项目唯一一处），
+ * 也就是说它存在的唯一目的就是那两条窄屏规则：搜索框与"共 N 条"并排时
+ * 把输入框压到只剩几十像素，所以 ≤480px 让它们各占一行。
+ * 类名一旦被哈希，写在 `responsive.css` 里的选择器就**选不中任何东西** ——
+ * 规则还在、永不生效（与 `.dashboard-two-col`、`.self-rating-btn` 同一类事故）。
+ * 所以这两条一起搬进本模块，断点沿用全局的 480px，不另造断点。
+ *
+ * 级联对照（迁移前 → 迁移后，得主不变）：
+ *   - `.list-toolbar .search-input-wrapper`（0,2,0，responsive）压
+ *     `.search-input-wrapper`（0,1,0，learning）——靠**权重**取胜；
+ *   - 两条规则现在都住在本模块里，**选择器与权重都保持原样**（(0,2,0) 压
+ *     (0,1,0)），只是换了个源文件。值一个字没改。
+ *
+ * ⚠️ 本批第一次写的时候，把 `.listToolbar .searchInputWrapper` 写成了单类
+ * `.searchInputWrapper` —— 规则清单差集当场报了 1 条"丢失 + 1 条新增"
+ * （权重从 0,2,0 掉到 0,1,0）。selector 是行为的一部分，不是排版。
+ */
+
+/* ── 工具条（搜索框 + "共 N 条"）── */
+
+.searchInputWrapper {
+  position: relative;
+  max-width: 400px;
+}
+
+.searchInputWrapper input {
+  padding-left: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.searchInputIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
+/* ── 窄屏（原 responsive.css 480px 档，值一字未改）── */
+
+@media (max-width: 480px) {
+  /* 搜索框与"共 N 条"并排时，窄屏会把输入框压到只剩几十像素 → 各占一行 */
+  .listToolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  /* 选择器保持**原来的后代关系**（`.list-toolbar .search-input-wrapper`）：
+     两个类名都在本模块里，产物里是 `._listToolbar_hash ._searchInputWrapper_hash`，
+     权重仍是 (0,2,0)。不要"顺手"简化成单类 —— 那会降低权重、改变它与
+     基础规则（以及将来可能出现的其它规则）的胜负关系，属于行为改动。 */
+  .listToolbar .searchInputWrapper {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}

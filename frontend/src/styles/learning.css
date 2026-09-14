@@ -1,63 +1,32 @@
-/* ── 问答气泡 ── */
-
-.qa-user-bubble {
-  background: var(--gradient-primary);
-  color: white;
-  padding: var(--space-sm) var(--space-md);
-  border-radius: 16px 16px 4px 16px;
-  max-width: 70%;
-  display: inline-block;
-  animation: slideUp 0.3s var(--ease-out-expo);
-}
-
-.qa-ai-card {
-  border-left: 3px solid var(--color-accent);
-  animation: slideUp 0.3s var(--ease-out-expo);
-}
-
-/* ── 拖拽上传区 ── */
-
-.upload-zone {
-  border: 2px dashed var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2xl);
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s var(--ease-out-expo);
-  background: var(--color-surface);
-  position: relative;
-  overflow: hidden;
-}
-
-.upload-zone:hover {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-
-.upload-zone-active {
-  border-color: var(--color-accent);
-  background: var(--color-accent-light);
-  box-shadow: var(--shadow-glow);
-}
-
-.upload-zone-active::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-lg);
-  animation: glowPulse 1.5s ease-in-out infinite;
-  pointer-events: none;
-}
-
-/* ── 选项按钮（答题）/ 反馈区域：已迁往 CSS Modules ──
-   原 `.quiz-option` / `.quiz-option-selected` / `.feedback-correct` /
-   `.feedback-incorrect` 四条规则**逐字**搬到
-   `components/quiz/QuizAnswerCard.module.css`（overhaul-plan 5.6 试点切片）。
-   搬走的依据：全项目 grep 只有 QuizAnswerCard.tsx 用它们，
-   留在这里会让 `learning.css` 永远不敢删改。
-   ⚠️ 本文件其余类名（`.upload-zone` / `.qa-*` / `.segment-*` /
-   `.state-*` / `.spinner` / `.search-input-*` / `.collapse-arrow` /
-   `.filter-pill`）**仍被切片外的页面使用，必须留在全局**。 */
+/**
+ * 跨功能共用件：筛选标签 / 分段控件 / 折叠箭头 / 空态与加载
+ * （overhaul-plan 5.6：**按归属拆了三批**，本文件只剩"确实跨功能"的类名）
+ *
+ * ## 已经搬走的（不要在这里重新定义）
+ *
+ * | 原类名 | 去哪了 | 判据 |
+ * |---|---|---|
+ * | `.quiz-option` `.quiz-option-selected` `.feedback-correct` `.feedback-incorrect` | `components/quiz/QuizAnswerCard.module.css` | 试点切片：grep 只命中 `QuizAnswerCard.tsx` |
+ * | `.qa-user-bubble` `.qa-ai-card` | `pages/QA.module.css` | 第三批：grep 只命中 `pages/QA.tsx`；`slideUp` 复制成 `qaSlideUp` |
+ * | `.upload-zone` `.upload-zone:hover` `.upload-zone-active` `.upload-zone-active::after` | `pages/Upload.module.css` | 第三批：grep 只命中 `pages/Upload.tsx`；`glowPulse` 复制成 `uploadGlowPulse` |
+ * | `.search-input-wrapper` `.search-input-wrapper input` `.search-input-icon` | `pages/NotesList.module.css` | 第三批：grep 只命中 `pages/NotesList.tsx`；`responsive.css` 480px 档的 `.list-toolbar` 两条规则一起搬 |
+ *
+ * ## 本文件剩下的类名为什么**必须**留全局
+ *
+ * 判据是 `css-convention.md` §4 的"grep 出来的**文件数**"，不是感觉：
+ *
+ * | 类名 | 用它的文件 | 为什么不能进模块 |
+ * |---|---|---|
+ * | `.filter-pill` `.filter-pill-active` | `DailyMaterials.tsx` / `NotesList.tsx` / `Upload.tsx` / `QuestionSets.tsx`（4 个不相邻功能） | 跨功能共用件；而且它是**补丁层**的目标：`refinements.css` 给 `.filter-pill` 加 `position: relative` 与 `::after` 金色指示线，`responsive.css` 768px 档抬触控目标 —— 类名一哈希，这两处一起静默失效（雷区 2、判据 5） |
+ * | `.segment-control` `.segment-btn` `.segment-btn-active` | `LearningAssessment.tsx` / `notedetail/ViewModeTabs.tsx`（两个不相邻功能） | 同上；`refinements.css`（`::after` 指示线）与 `responsive.css`（768px 触控目标）也在命中它 |
+ * | `.collapse-arrow` `.collapse-arrow-open` | `KnowledgeCards.tsx` / `QuestionSets.tsx` / `projects/ProjectCard.tsx`（3 个功能） | 跨功能共用件，且只有 2 条声明、没有独立归属 |
+ * | `.state-container` `.state-icon` `.state-message` `.state-description` | `components/EmptyState.tsx` / `LoadingSpinner.tsx` / `ErrorDisplay.tsx` + `pages/Projects.tsx` | 这是**共享 UI 原语**（与 `.btn` / `.card` 同层）：三个组件各用其中一部分，搬进任一组件模块都会逼另外两个跨组件 import。要收进模块得先抽出统一的 `StateBlock` 组件 —— 那是重构，按雷区 4 单开一轮 |
+ * | `.spinner` | `LoadingSpinner.tsx` + `Projects.tsx`（后者自己拼了一份同样的加载块） | 同上；且它的 `animation: spin` 引用全局 `@keyframes spin`，留全局时引用与定义同层 |
+ *
+ * ⚠️ `ErrorDisplay.tsx` 的行内 `style={{ animation: 'shake …, fadeIn …' }}`
+ * 依赖 `base.css` 里的**全局** `@keyframes shake` / `fadeIn` —— 行内样式不过
+ * CSS Modules，只能按裸名引用。搬 `.state-*` 时别顺手把这两个动画删了。
+ */
 
 /* ── 筛选标签 ── */
 
@@ -130,30 +99,6 @@
 
 .collapse-arrow-open {
   transform: rotate(90deg);
-}
-
-/* ── 搜索框 ── */
-
-.search-input-wrapper {
-  position: relative;
-  max-width: 400px;
-}
-
-.search-input-wrapper input {
-  padding-left: 36px;
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
-.search-input-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  color: var(--color-text-tertiary);
-  pointer-events: none;
 }
 
 /* ── 空状态/加载/错误组件 ── */

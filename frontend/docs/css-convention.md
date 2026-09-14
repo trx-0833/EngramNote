@@ -255,7 +255,21 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    现在两个脚本都从 HEAD 往回**按内容**找"第一个还含有这批老类名的提交"
    （`lib/css-parse.mjs` 的 `findRecentRev`），与提交顺序完全解耦。
 
-**已知的检查盲区**（第二批发现，尚未补）：
+**第三批：归一化清单又加两条，而且"假差异"与"真错误"是同一轮里一起出现的：**
+
+4. **`border-radius` 四值 → 三值**：`border-radius: 16px 16px 4px 16px` 被压成
+   `border-radius:16px 16px 4px`（第 4 个值省略时取第 2 个值，渲染完全相同）。
+   出处：`.qaUserBubble`（产物 `QA-*.css`）。见差集脚本的 `canonRadius`。
+5. **`inset` 简写被降级成长写**：源码 `inset: 0`，产物里是
+   `top:0;right:0;bottom:0;left:0`（构建器按目标浏览器把简写降级）。
+   出处：`.uploadZoneActive::after`（产物 `Upload-*.css`）。这是**声明级**改写，
+   所以在 `canonDecls`（不是 `canonValue`）里把两侧都展开成四条长写。
+6. **同一轮里差集还抓到一条真错**：把 `.list-toolbar .search-input-wrapper`
+   在模块里写成单类 `.searchInputWrapper` —— 报"1 条丢失 + 1 条新增"
+   （权重 (0,2,0) → (0,1,0)）。**selector 是行为的一部分，不是排版。**
+   这条正好说明"归一化"与"抓真错"不冲突：把等价改写抹平之后，剩下的差异就是真的。
+
+**已知的检查盲区**（第二批发现、第三批又发现一个，都尚未补）：
 
 4. **"窄屏规则被同权重的桌面规则压掉"这类事故，现有工具看不见。**
    实例：`responsive.css` 的 `@media (max-width:768px) { .markdown-body .katex
@@ -267,3 +281,17 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
    落在不同键上，所以这种"跨上下文覆盖战"不会被报出来。
    要补的话应当是在产物上做一次**权重+顺序的真实求解**（像 `CASCADE_PAIRS`
    那样，但自动枚举同选择器对），代价是要引入 DOM 知识以判断元素是否真同时命中。
+5. **跨属性竞争（简写 vs 长写）也看不见 —— 第三批发现。**
+   实例：`` className={`card ${styles.qaAiCard}`} ``，全局 `.card` 写
+   `border: 1px solid …`（简写会展开出 `border-left-*`），模块 `.qaAiCard` 写
+   `border-left: 3px solid …`（长写）。两者权重同为 (0,1,0)，
+   **谁赢只看产物里的先后**，而：
+   - 差集按 (上下文 + 选择器 + 属性) 建键 —— 选择器不同，不配对；
+   - 产物校验的冲突统计与 `CASCADE_PAIRS` 按**属性名**配对 —— `border` 与
+     `border-left` 是两个名字，配不上。
+
+   第三批用一次性探针实测过（配方见 `css-migration-plan.md` §5 雷区 12）：
+   jsdom 对**字面值**的 `border` 简写会正确展开（对照实验能随顺序翻转胜负），
+   但不解析 `var()`，所以要先把 `var(…)` 换成字面色、再读**真实产物**拼顺序。
+   结论：模块类与全局类并列写在同一个元素上时，除了看"有没有同名属性竞争"，
+   还要看"简写会不会展开出对方的长写" —— 这一条目前只能靠文档 + 探针守住。

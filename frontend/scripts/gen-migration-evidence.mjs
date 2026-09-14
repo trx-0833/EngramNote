@@ -15,6 +15,9 @@
  *   docs/migration-evidence/5.6-03-built-css.md             产物 CSS 校验（**含所有批次**）
  *   docs/migration-evidence/5.6-04-before-batch1.md         第一批：迁移前规则清单
  *   docs/migration-evidence/5.6-05-before-batch2.md         第二批：迁移前规则清单
+ *   docs/migration-evidence/5.6-06-before-batch3.md         第三批：迁移前规则清单
+ *   docs/migration-evidence/5.6-07-markdown-adhd-stayed-global.md
+ *                                                           第三批的"停"：`.adhd-*` 留全局
  *
  * ⚠️ 修订（rev）**不用手写**：两个脚本都从 HEAD 往回按内容找"还含有这批老类名"
  * 的第一个提交。原来写死 `HEAD~1` / `HEAD~2`，被并行的无关提交打乱过 ——
@@ -167,7 +170,89 @@ write(
     parts2.join('\n\n'),
 )
 
-// ── 4. 差集（核心证据，含所有批次） ──
+// ── 4. 第三批（learning 按归属拆分 + dashboard 余下）迁移前清单 ──
+const batch3Sheets = [
+  {
+    // 按"谁在用"拆成三组：`.qa-*` → QA 页、`.upload-zone*` → Upload 页、
+    // `.search-input-*` → NotesList 页。留在全局的（`.filter-pill*` /
+    // `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner`）不在清单里。
+    sheet: 'src/styles/learning.css',
+    classes: [
+      'qa-user-bubble', 'qa-ai-card',
+      'upload-zone', 'upload-zone-active',
+      'search-input-wrapper', 'search-input-icon',
+    ],
+  },
+  {
+    // `.list-toolbar` 这个类名**只定义在补丁层**（全项目唯一一处），
+    // `.stat-number` 是被搬走的统计卡片类的窄屏档 —— 三条都必须跟着组件走，
+    // 否则类名哈希后它们永远选不中任何东西（雷区 2）。
+    sheet: 'src/styles/responsive.css',
+    classes: ['list-toolbar', 'search-input-wrapper', 'stat-number'],
+  },
+  {
+    // dashboard.css 余下的 9 条：先抽 `components/StatCard.tsx`，样式随组件进模块
+    sheet: 'src/styles/dashboard.css',
+    classes: [
+      'stat-card', 'stat-card-blue', 'stat-card-green', 'stat-card-gold',
+      'stat-card-purple', 'stat-number', 'stat-label',
+    ],
+  },
+]
+const parts3 = []
+for (const s of batch3Sheets) {
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
+  parts3.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+}
+write(
+  '5.6-06-before-batch3.md',
+  '5.6 迁移前：第三批（learning 按归属拆分 + dashboard 余下 → StatCard）的规则清单',
+  '三个样式表各自只列出**本批搬走**的类名对应的规则。修订由\n' +
+    '`css-rule-inventory.mjs` **按内容自动定位**（从 HEAD 往回找第一个还含有\n' +
+    '这些类名的提交），所以清单头部的 `@HEAD~N` 会随提交数变化，规则内容不会。\n\n' +
+    '`dashboard.css` 的 `.progress-bar*`（3 条）与 `learning.css` 的\n' +
+    '`.filter-pill*` / `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner`\n' +
+    '**留全局**，不在清单里 —— 判据（grep 出的文件数）写在两个样式表的文件头。\n\n' +
+    parts3.join('\n\n'),
+)
+
+// ── 5. 第三批的"停"：markdown.css 的 `.adhd-*` 留全局（留一份可核对的清单）──
+// 这不是"迁移前"清单，而是"核对后决定不动"的清单：把 5 条规则的原文留下来，
+// 下一个读代码的人可以直接对照 `docs/css-migration-plan.md` §7.1 的判据。
+const adhd = run('css-rule-inventory.mjs', [
+  'src/styles/markdown.css',
+  '--class',
+  'adhd-reader-active,adhd-block,adhd-current-block,adhd-line-marker',
+  '--from-git',
+])
+if (adhd.code !== 0) throw new Error(`清单生成失败（markdown.css）：${adhd.out}`)
+write(
+  '5.6-07-markdown-adhd-stayed-global.md',
+  '5.6 第三批：markdown.css 的 `.adhd-*` 规则 —— 逐处核对写入点后**留全局**',
+  '**本批没有搬 `markdown.css` 的任何一条规则**（计划 §7.1 事先标了"可能是个停"）。\n' +
+    '下面这份清单是"决定不动"的那 5 条规则原文，留作核对。\n\n' +
+    '## 为什么不动\n\n' +
+    '1. 5 条规则**全部**是 `.markdown-body.adhd-reader-active …` 的后代选择器，\n' +
+    '   而 `.markdown-body` 自己按判据必须留全局：三个**不相邻**功能在用它\n' +
+    '   （`pages/notedetail/MarkdownReader.tsx`、`pages/notedetail/EditSplitView.tsx`、\n' +
+    '   `components/NoteAskPanel.tsx` —— 后者还 `document.querySelector(".markdown-body")`），\n' +
+    '   正文 HTML 又来自 `marked` 渲染的字符串（`css-convention.md` §4 第 2、4 条）。\n' +
+    '2. 四个 `.adhd-*` 类名的**全部写入点**都在 `src/hooks/useAdhdReader.ts`\n' +
+    '   （`classList.add/remove/contains` 与一次 `className = "adhd-line-marker"` 整体赋值）——\n' +
+    '   逐处表见 `src/styles/markdown.css` 文件头。三条判据逐条对照：\n' +
+    '   "改成语义查询"不行（这些类名是给 `marked` 生成的块打标记的唯一手段）、\n' +
+    '   "从模块导出常量"不行（写入点所在的 `src/hooks/**` 不在本批允许改动的文件范围内，\n' +
+    '   且为 4 个类名让通用 hook 去 import 页面模块等于颠倒归属）、\n' +
+    '   "留全局"成立（第 1 条已给出判据依据）。\n' +
+    '3. `utils/markdown.ts` 不注入这些类名（grep 0 命中）；`responsive.css`\n' +
+    '   对 `.adhd-*` 也 0 命中 —— 不存在"补丁层还在命中它"的问题。\n\n' +
+    '⚠️ 硬塞进模块只能写成 `:global(.adhd-block)` 之类，那等于一个字符都没被\n' +
+    '作用域化，却把"这些类名是全项目约定"藏进一个页面模块里（规范 §4 末尾的"半搬"）。\n\n' +
+    `\`\`\`\n${adhd.out.trim()}\n\`\`\``,
+)
+
+// ── 6. 差集（核心证据，含所有批次） ──
 const diff = run('css-migration-diff.mjs')
 write(
   '5.6-02-rule-diff.md',

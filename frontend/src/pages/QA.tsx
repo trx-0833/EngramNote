@@ -9,6 +9,9 @@ import { askQuestionStream, type AnswerSource } from '../api/client'
 import { parseSSEStream } from '../utils/sse'
 import { useThrottledStream } from '../hooks/useStreamAnswer'
 import EmptyState from '../components/EmptyState'
+// 本页私有样式（overhaul-plan 5.6 第三批）：`.qa-*` 从 `src/styles/learning.css` 拆出，
+// 连同被哈希的 `@keyframes slideUp`（改名 `qaSlideUp`）—— 见 QA.module.css 文件头
+import styles from './QA.module.css'
 
 interface QARecord {
   question: string;
@@ -252,12 +255,12 @@ export default function QA() {
             <div key={`${record.question}#${idx}`} style={{ marginBottom: 'var(--space-md)' }}>
               {/* 问题 */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-sm)' }}>
-                <div className="qa-user-bubble">
+                <div className={styles.qaUserBubble}>
                   {record.question}
                 </div>
               </div>
               {/* 回答 */}
-              <div className="card qa-ai-card">
+              <div className={`card ${styles.qaAiCard}`}>
                 {isThinking ? (
                   // 思考中状态：首字到达前显示
                   <div style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic', lineHeight: 1.8 }}>

@@ -1,12 +1,16 @@
 # 5.6 CSS 体系重建 —— 进度与剩余迁移计划
 
-> 状态：**机制已建立 + 试点已落地 + 第一批（4 表）已落地 + 第二批（markdown-extras 拆分）已落地**。
+> 状态：**机制已建立 + 试点已落地 + 第一批（4 表）已落地 + 第二批（markdown-extras 拆分）已落地
+> + 第三批（learning 按归属拆分 + dashboard 收尾/StatCard）已落地**。
 > 规范见 [`css-convention.md`](./css-convention.md)；实测证据见
 > [`migration-evidence/`](./migration-evidence/)。
 >
-> 进度：序 **1 / 2 / 3 已完成**，序 **4 按归属部分完成**，
-> 序 **11 按归属部分完成**（`.ask-ai-*` / `.selection-menu` 已搬；
-> KaTeX 与批注规则按"第三方 DOM"留全局）。序 5–10 / 12 / 13 未动。
+> 进度：序 **1 / 2 / 3 已完成**，序 **4 已完成**（第三批抽出 `StatCard` 组件后
+> `.stat-card*` 连样式一起进模块），序 **6 是"有记录的停"**（`.adhd-*` 留全局，
+> 见 §4.8 与证据 `5.6-07`），序 **7 按归属部分完成**（三个单消费者组已搬，
+> 跨功能的 5 组留全局），序 **11 按归属部分完成**
+> （`.ask-ai-*` / `.selection-menu` 已搬；KaTeX 与批注规则按"第三方 DOM"留全局）。
+> 序 5 / 8 / 9 / 10 / 12 / 13 未动。
 >
 > **`main.tsx` 的导入顺序已修正**（全局样式表提到组件之前）——
 > 第一批发现的"级联反转"雷区已**根治**，护栏见规范 §3 雷区 5。
@@ -34,10 +38,10 @@
 | 1 | `auth.css` | 7 | 登录/注册卡片 | 低：只被 auth 页用 | ✅ **已完成** → `pages/Auth.module.css`（Login + Register 共用） |
 | 2 | `cleaning.css` | 15 | 清洗面板、重复块对比 | 低：`CleaningPanel` 专用 | ✅ **已完成** → `components/CleaningPanel.module.css` |
 | 3 | `diff.css` | 13 | 版本对比 | 低 | ✅ **已完成** → `components/DiffView.module.css` |
-| 4 | `dashboard.css` | 13 | 仪表盘卡片、统计数字 | 中：`.progress-bar*` 被 **5 处**共用；`.stat-card*` 被 **2 个页面**共用 | ⚠️ **部分完成**：仪表盘私有的 5 条 → `pages/Dashboard.module.css`；`.stat-card*`(9) 与 `.progress-bar*`(3) **留全局**（见 §4.3） |
+| 4 | `dashboard.css` | 13 | 仪表盘卡片、统计数字 | 中：`.progress-bar*` 被 **5 处**共用；`.stat-card*` 被 **2 个页面**共用 | ✅ **已完成**（第一批搬走仪表盘私有的 5 条；第三批抽出 `components/StatCard.tsx` 后把 `.stat-card*`(9) + `.stat-number` 的 480px 档搬进 `components/StatCard.module.css`；`.progress-bar*`(3) 按判据留全局，见 §4.3） |
 | 5 | `assessment.css` | 22 | 学习评估页 | **高**：`.quiz-question-*` 与 `refinements.css` 打架（14 条属性冲突，§6 实测仍在）；`.knowledge-points-grid` 被 `responsive.css` 命中 | 先解决冲突再拆 |
-| 6 | `markdown.css` | 5 | `.markdown-body` + ADHD 阅读器 | **高**：内容来自 `marked`，没有组件可挂类名 | 只搬 ADHD 部分；`.markdown-body` 后代选择器留全局 |
-| 7 | `learning.css` | **18**（迁移前 22） | 问答气泡/上传区/选项/反馈/筛选/分段/搜索/空态/加载 | 中：试点已搬走 4 条；剩余 18 个类名被 8 个切片外页面使用 | 按"谁在用"逐组拆，不能整表搬 |
+| 6 | `markdown.css` | 5 | `.markdown-body` + ADHD 阅读器 | **高**：内容来自 `marked`，没有组件可挂类名 | ⛔ **有记录的停**（第三批核实）：5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 `.markdown-body` 被 3 个不相邻功能共用（判据 2、4）；4 个类名的**全部写入点**在 `src/hooks/useAdhdReader.ts`（classList 字面量），该目录不在本批可改范围。逐处表 + 判据对照见 §4.8 与证据 `5.6-07` |
+| 7 | `learning.css` | **18**（迁移前 22） | 问答气泡/上传区/选项/反馈/筛选/分段/搜索/空态/加载 | 中：试点已搬走 4 条；第三批又搬走 6 条（三个单消费者组）；剩 12 条被多个不相邻功能共用 | ⚠️ **按归属部分完成**：`.qa-*`→`pages/QA.module.css`、`.upload-zone*`→`pages/Upload.module.css`、`.search-input-*`→`pages/NotesList.module.css`；`.filter-pill*` / `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner` 留全局（§4.8 有逐组的文件数） |
 | 8 | `components.css` | 52 | `.btn` `.card` `.badge` `.container` 等公共件 | **最高**：`.btn` 45 处、`.card` 35 处引用；`.container` 被测试查 | 几乎全留全局；只把明确单一归属的（`.note-detail-*`、`.note-list-*`、`.edit-split`）拆出 |
 | 9 | `layout.css` | 27 | 侧边栏 / 顶栏 / 布局骨架 | **最高**：`responsive.css` 命中 12 个类名、测试命中 5 个 | 与 `responsive.css` 一起整批处理，测试同步改 |
 | 10 | `graph.css` | 47 | 知识图谱 | **最高**：`responsive.css` 命中 12 个类名，测试查 `.graph-search-input` | 与 `responsive.css` 一起整批处理 |
@@ -196,17 +200,101 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
   之后）：虽然 `.ask-ai-input` 搬走了，`responsive.css` 里还有针对
   `.markdown-body .katex-block` / `.katex-display` 的窄屏规则与它同层竞争。
 
+## 4.8 第三批：`markdown.css`（停）+ `learning.css` 按归属拆分 + `dashboard.css` 收尾
+
+### 4.8.1 一个"停"：`markdown.css` 一条没搬
+
+计划 §7.1 事先把它标成"可能是个停"，核实后**确实是**。5 条 `.adhd-*` 规则
+**全部**是 `.markdown-body.adhd-reader-active …` 的后代选择器，两半没法分开：
+
+| 事实 | 出处 |
+|---|---|
+| `.markdown-body` 被 **3 个不相邻功能**使用 | `pages/notedetail/MarkdownReader.tsx`、`pages/notedetail/EditSplitView.tsx`、`components/NoteAskPanel.tsx`（后者还 `document.querySelector('.markdown-body')`） |
+| 4 个 `.adhd-*` 类名的**全部写入点**在 `src/hooks/useAdhdReader.ts` | `:36` `classList.contains('adhd-line-marker')`、`:165` `marker.className = 'adhd-line-marker'`、`:216/:217/:274` `adhd-current-block`、`:266` `adhd-block`、`:269/:272` `adhd-reader-active` |
+| `utils/markdown.ts` **不**注入这些类名 | grep 0 命中（计划里那个"可能"排除了） |
+| `responsive.css` 对 `.adhd-*` 0 命中 | 不存在"补丁层还在命中它" |
+
+三条判据逐条对照 ⇒ 前两条都不成立（没有可替代的语义查询；写入点所在的
+`src/hooks/**` 不在本批允许改动的文件范围内），第三条成立 ⇒ **留全局**。
+把它硬塞进模块只能写成 `:global(.adhd-block)`，等于一个字符都没被作用域化，
+却把"这是全项目约定"藏进页面模块里 —— 规范 §4 末尾定义的"半搬"。
+逐处表写在 `markdown.css` 文件头，规则原文留证 `migration-evidence/5.6-07`。
+
+### 4.8.2 搬了什么（21 条，逐条可查）
+
+| 来源 | 条数 | 去向 | 判据（grep 出的文件数） |
+|---|---|---|---|
+| `learning.css` `.qa-user-bubble` `.qa-ai-card` | 2 | `pages/QA.module.css` | 只命中 `QA.tsx` |
+| `learning.css` `.upload-zone` `:hover` `-active` `-active::after` | 4 | `pages/Upload.module.css` | 只命中 `Upload.tsx` |
+| `learning.css` `.search-input-wrapper` `… input` `.search-input-icon` | 3 | `pages/NotesList.module.css` | 只命中 `NotesList.tsx` |
+| `responsive.css` 480px `.list-toolbar`、`.list-toolbar .search-input-wrapper` | 2 | `pages/NotesList.module.css` | `.list-toolbar` 这个类名**只定义在补丁层**（全项目唯一一处），存在的唯一目的就是这两条窄屏规则 |
+| `dashboard.css` `.stat-card`(含 `::before`/`:hover`/4 变体) `.stat-number` `.stat-label` | 9 | `components/StatCard.module.css` | 被 `Dashboard.tsx` + `TodayLearn.tsx` 共用 → **先抽组件**（§4.8.3） |
+| `responsive.css` 480px `.stat-number` | 1 | `components/StatCard.module.css` | 类名进模块后，留在补丁层的选择器会永远选不中 |
+
+差集：**21 条逐字保留 / 0 值变化 / 0 丢失**（证据 `5.6-02`）。
+动画两条：`slideUp` → `qaSlideUp`、`glowPulse` → `uploadGlowPulse`
+（动画体逐字复制，产物里"引用与定义同一文件"实测 0 悬空）。
+
+**留下的 12 条**（`learning.css`）与 **3 条**（`dashboard.css` 的 `.progress-bar*`）
+不是懒：`.filter-pill*`（4 个页面 + `refinements.css` 的 `::after` 指示线 +
+`responsive.css` 的触控目标）、`.segment-*`（2 个页面 + 同样两层补丁）、
+`.collapse-arrow*`（3 个页面）、`.state-*` / `.spinner`（3 个共享组件 + Projects 页，
+是与 `.btn` / `.card` 同层的共享 UI 原语）、`.progress-bar*`（5 处在用 +
+2 个测试按类名查询）——全部命中规范 §4 第 2 / 5 条。逐组判据写进了
+`learning.css` / `dashboard.css` 的文件头（规范 §4 要求"留全局的代价要写在文件头"）。
+
+### 4.8.3 `StatCard`：本批唯一一次重构，理由是判据要求的
+
+原计划（§7.1 序 3）写的就是"先抽 `StatCard` 组件，再连样式搬"。做完之后：
+
+- `components/StatCard.tsx`：`variant` / `value` / `label` 三个 props，
+  变体→类名走**显式查表**（`VARIANT_CLASS`），不用 `styles[...]` 动态取值
+  —— 测试环境下模块默认导出是 Proxy、`Object.keys(styles)` 是空数组（规范 §6）。
+- `components/StatCard.module.css`：D 组 9 条 + 480px 那条，共 10 条。
+- 两个调用点各 4 张卡片 → 4 个 `<StatCard />`，**DOM 层级、类名语义、
+  每个声明值都逐字不变**（`div > div + div`）。
+- 新增 `components/StatCard.test.tsx`（3 个用例）：把结构与"4 个变体
+  必须渲染出 4 个不同类名"钉死 —— 计划要求这一步"带视觉核对"，
+  无头环境里能做到的等价物就是它。
+
+### 4.8.4 工具这次**抓到了一条真错**（记下来，别把它当成噪音）
+
+第一次提交时我把 `responsive.css` 的 `.list-toolbar .search-input-wrapper`
+在模块里"顺手"写成了单类 `.searchInputWrapper`。差集立刻报
+**1 条丢失 + 1 条新增**（权重从 (0,2,0) 掉到 (0,1,0)）。
+selector 是行为的一部分，不是排版 —— 已改回后代选择器。
+
+同一轮里差集还报过 2 条**假**丢失，两条都是压缩器的等价改写，
+已按"逐条写明出处"的规矩补进归一化（规范 §7 第 2 条那份清单）：
+
+| 形态 | 出处（实测） |
+|---|---|
+| `border-radius: 16px 16px 4px 16px` → `border-radius:16px 16px 4px`（第 4 值省略时取第 2 值） | `.qaUserBubble`，产物 `QA-*.css` |
+| `inset: 0` → `top:0;right:0;bottom:0;left:0`（构建器按目标浏览器把简写**降级**成长写） | `.uploadZoneActive::after`，产物 `Upload-*.css` |
+
+### 4.8.5 顺手记账：`glowPulse` 也没有样式表用户了
+
+与第一批之后的 `scaleIn` / `cleaning-pulse` 同样处理 —— **不删**。
+它仍可被行内样式按裸名引用（`LearningAssessment.tsx` 就在用 `slideUp`、
+`ErrorDisplay.tsx` 在用 `shake` + `fadeIn`），删它属于"死代码清理"，
+单独一轮做（§7.0 第 2 条）。
+
 ## 5. 雷区（按危险程度，★ = 第一批新发现）
 
 1. **动画名会被一起哈希（试点实测，最阴）。**
    任何把含 `animation` 的规则搬进模块的地方都要处理：要么把 `@keyframes`
    定义搬进模块，要么别搬这条规则。受影响：
-   `learning.css`（`slideUp` / `glowPulse` / `fadeIn` / `spin`）、
+   `learning.css`（~~`slideUp`~~ / ~~`glowPulse`~~ 已在第三批随
+   `.qa-*` / `.upload-zone*` 复制成 `qaSlideUp` / `uploadGlowPulse`；
+   `fadeIn` / `spin` 仍安全 —— 它们所在的 `.state-*` / `.spinner`
+   按判据留全局）、
    `components.css`（`fadeIn` / `slideUp`）、`dashboard.css`（`shimmer`，
    连同 `.progress-bar*` 一起留全局所以暂时安全）、`layout.css`（`fadeIn`）、
    `graph.css`（`graph-spin`）、`markdown-extras.css`（`citation-flash`，
    但那条规则留在全局，所以引用与定义同层，不需要搬）。
-   ~~`auth.css`~~ / ~~`cleaning.css`~~ 已在第一批处理完毕。
+   ~~`auth.css`~~ / ~~`cleaning.css`~~ 已在第一批处理完毕，
+   第三批的 `QA.module.css`（`qaSlideUp`）/ `Upload.module.css`
+   （`uploadGlowPulse`）同理。
    第二批**没有**需要搬的动画：`.ask-ai-*` / `.selection-menu` 里一条 `animation` 都没有。
 8. **★ 模块的 CSS 与全局样式表的先后** —— 详见 §5 下方说明，**已根治**。
 2. **`responsive.css` 与 `layout.css` / `graph.css` 是同一批类名的两半。**
@@ -269,16 +357,54 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
     但每来一个无关提交就要重算一遍。现在两个脚本都**按内容**定位：
     从 HEAD 往回找第一个"还含有这批老类名"的提交
     （`lib/css-parse.mjs` 的 `findRecentRev`），与提交顺序完全解耦。
+12. **★ 跨属性竞争（简写 vs 长写）现有脚本全都看不见（第三批发现）。**
+    实例：`QA.tsx` 的 AI 卡片是 `` className={`card ${styles.qaAiCard}`} ``，
+    全局 `.card` 写 `border: 1px solid …`（**简写**，会展开出
+    `border-left-*` 三条长写），模块 `.qaAiCard` 写
+    `border-left: 3px solid var(--color-accent)`（**长写**）。两条权重同为
+    (0,1,0)，谁赢完全取决于**产物里的先后**。
 
-## 6. 证据（三轮 / 全部批次）
+    为什么三道检查都漏掉它：
+    - `css-migration-diff.mjs` 按 (上下文 + 选择器 + 属性) 建键 ——
+      选择器不同（`.card` vs `._qaAiCard_hash`），根本不配对；
+    - `verify-built-css.mjs` 的冲突统计与 `CASCADE_PAIRS` 都按**属性名**
+      配对 —— `border` 与 `border-left` 是两个名字，配不上；
+    - 两个脚本对"同权重 + 跨文件"本来也只能报"判不了"。
+
+    **实测（临时探针，用完已删）**：jsdom 对**字面值**的 `border` 简写会正确
+    展开（对照实验：长写在后 → `3px solid blue`；简写在后 → `1px solid red`），
+    但它不解析 `var()`。所以配方是"把 `var(…)` 替换成字面色，读**真实产物**
+    的两个 CSS 文件，按 chunk 注入顺序拼起来算 `getComputedStyle`"：
+
+    ```
+    index-*.css 在前、QA-*.css 在后（= 真实顺序） → border-left = 3px  （模块赢）
+    两个文件对调（反向对照）                     → border-left = 1px  （.card 赢）
+    ```
+
+    当前顺序是对的：懒加载页面的模块 CSS 由 `__vitePreload` 在 `index.css`
+    **之后**注入。**结论**：模块类与全局类并列写在同一个元素上时，除了看
+    "有没有同名属性竞争"，还要看"简写会不会展开出对方的长写"。
+    这一条目前只能靠**文档 + 一次探针**守住，配方就记在这里。
+13. **★ 压缩器的两种新等价改写（第三批实测，已进差集归一化）。**
+    不补的话它们会伪装成"丢失"，把真变化淹掉 —— 第三批同一轮里正好
+    真假各一条（§4.8.4）：
+    - `border-radius: 16px 16px 4px 16px` → `border-radius:16px 16px 4px`
+      （第 4 个值省略时取第 2 个值，渲染完全相同）；
+    - `inset: 0` → `top:0;right:0;bottom:0;left:0`
+      （构建器按目标浏览器把简写**降级**成长写；这是**声明级**改写，
+      所以在 `canonDecls` 里展开，不是 `canonValue`）。
+
+## 6. 证据（四轮 / 全部批次）
 
 | 证据 | 文件 | 结论 |
 |---|---|---|
 | 试点：迁移前清单 | `migration-evidence/5.6-01-before-*.md` | `learning.css` 5 条 + `responsive.css` 2 条 |
 | 第一批：迁移前清单 | `migration-evidence/5.6-04-before-batch1.md` | 5 个样式表共 60 条 |
 | 第二批：迁移前清单 | `migration-evidence/5.6-05-before-batch2.md` | `markdown-extras.css` 20 条 |
-| 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**（逐字保留 / 值有变化 / 丢失）；动画绑定全部自洽；动画体 4 条全部一致 |
-| 产物 CSS 校验 | `migration-evidence/5.6-03-built-css.md` | 悬空动画 **0**；改动范围内冲突 **0**；级联得主正确（靠源序）；**59 个退休类名在产物中 0 次**；切片标记全部命中 |
+| 第三批：迁移前清单 | `migration-evidence/5.6-06-before-batch3.md` | `learning.css` 9 条 + `responsive.css` 3 条 + `dashboard.css` 7 条 |
+| 第三批的"停" | `migration-evidence/5.6-07-markdown-adhd-stayed-global.md` | `markdown.css` 的 5 条 `.adhd-*` 规则原文 + 判据对照（**本批没搬它**） |
+| 规则清单差集 | `migration-evidence/5.6-02-rule-diff.md` | 试点 **7/0/0**；第一批 **60/0/0**；第二批 **20/0/0**；第三批 **21/0/0**（逐字保留 / 值有变化 / 丢失）；动画绑定全部自洽；动画体 6 条全部一致 |
+| 产物 CSS 校验 | `migration-evidence/5.6-03-built-css.md` | 悬空动画 **0**；改动范围内冲突 **0**；级联得主正确（靠源序）；**73 个退休类名在产物中 0 次**；切片标记全部命中 |
 
 修订不再手写：两个脚本都从 HEAD 往回**按内容**定位"迁移前"（见规范 §7 第 3 条）。
 
@@ -293,6 +419,11 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
 @keyframes _cleaningPulse_76z94_1{0%{transform:translate(-100%)}100%{transform:translate(100%)}}
 @media (max-width: 768px){._dashboardTwoCol_1l4yv_38{grid-template-columns:1fr;gap:var(--space-md)}}
 ._askAiInput_hash{…;font-size:1rem;…}         ← iOS 聚焦缩放护栏的目标，现在归模块所有
+._qaUserBubble_1lr0k_43{…;border-radius:16px 16px 4px;animation:_qaSlideUp_1lr0k_1 .3s …}
+@keyframes _qaSlideUp_1lr0k_1{0%{opacity:0;transform:translateY(16px)}to{…}}
+._uploadZoneActive_1j5js_13:after{…;top:0;right:0;bottom:0;left:0;…animation:_uploadGlowPulse_1j5js_1 1.5s …}
+@media (max-width: 480px){._listToolbar_1fqhn_54 ._searchInputWrapper_1fqhn_28{flex:1 1 100%;max-width:none}}
+._statCard_be3qp_1{…}._statCardBlue_be3qp_29:before{background:var(--gradient-primary)}
 ```
 
 ### 各轮四道验证（全绿）
@@ -302,16 +433,19 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
 | 试点 + 第一批 | `npm test` **20 files / 272 tests**（与迁移前一致）；`tsc` / `lint` / `build` 退出 0；两个证据脚本退出 0 |
 | **`main.tsx` 重排** | `npm test` **20 files / 272 tests**；`tsc` / `lint` / `build` 退出 0；级联检查显示 `.authSubmit` **靠源序**取胜 |
 | **第二批** | `npm test` **20 files / 273 tests**（+1：新增"模块层必须排在全局层之后"用例）；`tsc` / `lint` / `build` 退出 0；差集 20/0/0；产物校验退出 0 |
+| **第三批** | `npm test` **21 files / 276 tests**（+1 文件 / +3：新增 `components/StatCard.test.tsx`）；`npx tsc --noEmit` / `lint` / `npm run build` 退出 0；差集 **21/0/0** 与产物校验退出 0；`e2e` 里**原有的 10 个用例 10 passed**，但 `npm run e2e` 整体退出 1 —— 并行 agent 正在写的 `e2e/a11y.spec.ts`（未跟踪文件）有 8 个用例失败，原因全是"页面停在加载/登录态 ⇒ 找不到标题"，与本批无关（详见 §8） |
 
-### 测试改动（三处，全部有据）
+### 测试改动（三处 + 一处新增）
 
-前两轮**没有修改任何测试**。第二批改了三处，逐条说明理由：
+前两轮**没有修改任何测试**。第二批改了三处，第三批**没有改任何既有测试**
+（三个页面都没有测试文件，且迁移只换类名），只新增了一个：
 
 | 文件 | 改动 | 理由 |
 |---|---|---|
 | `components/NoteAskPanel.test.tsx` | `.ask-ai-panel` 字面量 → `styles.askAiPanel` | 类名进模块后被哈希，字面量查询必然拿到 `null` 并抛错。**没有**换成 `getByRole`：本文件断言的是内联几何（`style.left/width`），面板根节点在 a11y 树上没有稳定角色，为测试加 `role="dialog"` 属于产品/无障碍改动（还牵涉焦点管理），不该混进"纯搬家"。规范 §6 明确允许这条退路 |
 | `styles/mobile-input-font-size.test.ts`（护栏） | 扫描范围加 `src/**/*.module.css`；`.ask-ai-input` 的 owner 改为 `components/NoteAskPanel.module.css`；`Target` 增加 `moduleClassName` | **收紧而非放宽**。不扩范围的话，输入框的 `font-size` 一进模块，护栏就再也看不见它 —— 全绿，但护栏已经空了（"静默失明比测试红更危险"） |
 | `styles/mobile-input-font-size.test.ts`（新增用例） | "模块层必须排在全局层之后：`main.tsx` 里组件 import 在样式表 import 之后" | 把 `main.tsx` 的重排变成单测级护栏，不需要构建就能发现回退 |
+| `components/StatCard.test.tsx`（第三批**新增**） | 3 个用例：结构与迁移前逐字一致（`div > div + div`、类名映射）；4 个变体渲染出 4 个互不相同的类名组合；`value` 支持字符串 | 计划给"抽 `StatCard`"加的前置条件是"一次带视觉核对的独立改动"。无头环境里能做到的等价物就是把这个组件被两个页面依赖的**结构契约**钉死：漏一个变体、把 `value`/`label` 挂错节点、把外层换成 `<span>`，全都当场红 |
 
 ## 7. 下一批计划（按风险从窄到宽）
 
@@ -329,25 +463,81 @@ CSS Modules 返回的 Proxy 枚举出来是空的，见规范 §6。）
    （实例：`responsive.css` 768px 的 `.markdown-body .katex { font-size: 1em }`
    被 `markdown-extras.css` 的顶层 `1.1em` 压掉 —— 权重相同、后者更靠后，
    这条窄屏规则**从未生效**；迁移前就如此）。详见规范 §7 盲区 4。
+4. ⏳ **跨属性竞争（简写 vs 长写）也看不见** —— 第三批新登记的雷区 12。
+   目前只有文档 + 一次性探针（配方在雷区 12 里，20 行）。要做成常设检查，
+   得在产物上做"权重 + 顺序 + **简写展开**"的真实求解，与第 3 条是同一类工作，
+   建议合并成一轮。
+5. ⏳ **第三批留下的 `glowPulse`**：`.upload-zone-active::after` 搬走后，
+   它和 `scaleIn` / `cleaning-pulse` 一样没有样式表用户了（行内样式仍可用）。
+   与前两条一起进"死 CSS 清理"轮。
 
-### 7.1 下一批样式表：6 + 7 + 3（11 已完成）
+### 7.1 下一批：序 5 / 8 / 9 / 10 / 12 / 13（6、7、3 已完成或停在边界上）
+
+6 / 7 / 3 三行的结果见 §4.8：**6 是有记录的停**（`.adhd-*` 留全局，
+除非把 `src/hooks/useAdhdReader.ts` 纳入某一批的改动范围）；
+**7 按归属拆完了能拆的部分**（剩下 5 组是跨功能共用件）；
+**3 已通过抽 `StatCard` 组件收尾**。
+
+剩下六个样式表互相咬合，必须成批处理，顺序建议：
 
 | 序 | 样式表 | 拆分边界 | 前置条件 |
 |---|---|---|---|
-| 6 | `markdown.css` | ADHD 阅读器（`.adhd-*`）进模块；`.markdown-body` 后代选择器留全局（`marked` 产物，无组件） | ⚠️ **可能是个"停"**：`useAdhdReader.ts` 用 `classList.add/remove/contains` 直接操作 `.adhd-block` / `.adhd-current-block` / `.adhd-reader-active` / `.adhd-line-marker` 四个类名，`utils/markdown.ts` 也可能往 HTML 里插它们 —— 迁移前必须先把这几个类名的**全部写入点**列清楚，判断是"改成语义查询"还是"从模块导出常量"还是"留全局" |
-| 7 | `learning.css` | 按"谁在用"逐组拆（`.qa-*` / `.upload-zone*` / `.segment-*` / `.state-*` / `.spinner` / `.search-input-*` / `.collapse-arrow` / `.filter-pill`） | 每组先 grep 出文件数，命中 2 个以上不相邻功能就留全局 |
-| 3（余下） | `dashboard.css` | `.stat-card*` + `.stat-label` → 先抽 `StatCard` 组件（`Dashboard.tsx` + `TodayLearn.tsx` 共用），再连样式搬 | 抽组件是重构，需要一次带视觉核对的独立改动 |
+| 5 | `assessment.css` | 学习评估页私有部分 | **先解决与 `refinements.css` 的 14 条属性冲突**（`.quiz-question-card` / `-number` / `-text`），决定留哪一套；`.knowledge-points-grid` 被 `responsive.css` 480px 命中，要一起搬 |
+| 8 | `components.css` | 只把明确单一归属的拆出（`.note-detail-*`、`.note-list-*`、`.edit-split`） | `.btn`(45) / `.card`(35) / `.container`(测试查询) 留全局；`.note-list-*` / `.note-detail-*` 与 `responsive.css` 的窄屏规则成对，**同一批**处理 |
+| 9 | `layout.css` + `responsive.css` | 侧边栏 / 顶栏 / 布局骨架 | `responsive.css` 命中 12 个类名、`App.test.tsx` / `Sidebar.test.tsx` 命中 5 个 —— 测试同步改成语义查询 |
+| 10 | `graph.css` + `responsive.css` | 知识图谱 | `responsive.css` 命中 12 个类名；`KnowledgeGraph.test.tsx` 查 `.graph-search-input` |
+| 12 | `refinements.css` | 补丁层按归属拆到各组件 | 它存在的意义就是覆盖别人：先消灭 `[style*="rgba(0,0,0,0.5)"]` 这种选择器（给弹窗一个真类名），再搬 |
+| 13 | `responsive.css` | 最后清空 | 上面每一批都把属于自己的规则带走，拆完本文件应能删除（对照 `auth.css` / `cleaning.css` / `diff.css` 的先例：**只剩注释也不能删文件**，`mobile-input-font-size.test.ts` 会拒绝新增/删除 `src/styles/*.css`） |
 
-### 7.2 最后一批（必须成批处理）
-
-`assessment.css`（先解决与 `refinements.css` 的 14 条冲突）→ `components.css`
-→ `layout.css` + `responsive.css` + 测试 → `graph.css` + `responsive.css`
-→ `refinements.css`（拆完删文件）。
-
-**每批的登记动作**（不登记 = 证据脚本对新批次**静默不覆盖**）：
+### 7.2 每批的登记动作（不登记 = 证据脚本对新批次**静默不覆盖**）
 
 - `css-migration-diff.mjs` 的 `BATCHES`（`beforeSheets` + `groups` + `keyframes`；
   `rev` 一般留空，脚本按内容自动定位；`hardened` 只在**确实提权**时才写）；
 - `verify-built-css.mjs` 的 `TOUCHED_BY_THIS_MIGRATION` / `CASCADE_PAIRS`（有同权重竞争才加）
   / `SLICE_MARKERS` / `RETIRED`；
-- `gen-migration-evidence.mjs` 里加一份本批的"迁移前清单"。
+- `gen-migration-evidence.mjs` 里加一份本批的"迁移前清单"（第三批还多加了一份
+  `5.6-07`：把"决定不搬"的规则也留成证据）。
+
+### 7.3 第三批的登记结果（照着抄）
+
+| 登记点 | 本批加的内容 |
+|---|---|
+| `BATCHES` | 第三个批次项：`beforeSheets` 三个样式表、4 个 `groups`（QA / Upload / NotesList / StatCard）、2 个 `keyframes`（`slideUp`→`qaSlideUp`、`glowPulse`→`uploadGlowPulse`） |
+| `TOUCHED_BY_THIS_MIGRATION` | `pages/QA.module.css` / `pages/Upload.module.css` / `pages/NotesList.module.css` / `components/StatCard.module.css` |
+| `CASCADE_PAIRS` | **没加**：本批没有"同名属性、同权重、跨文件"的竞争（`.qaAiCard` × `.card` 是简写 vs 长写，按属性名配不上，登记在雷区 12） |
+| `SLICE_MARKERS` | 16 个新类名/动画名（`qaUserBubble` … `statLabel`） |
+| `RETIRED` | 14 个退休类名（含**只定义在补丁层**的 `list-toolbar`） |
+
+## 8. 本轮的环境限制：并行的无障碍 agent
+
+第三批执行期间，另一个 agent 正在写无障碍工具，产生了两个**未跟踪**文件
+`frontend/e2e/a11y.spec.ts` / `a11y-fixtures.ts`。因为 `tsconfig.json` 的
+`include` 里有 `e2e`，它们会进入本项目的类型检查与 e2e 运行。两个影响：
+
+**① `tsc` / `npm run build` 一度被挡住（已恢复）。** 中途实测：
+
+```
+e2e/a11y-fixtures.ts(300,15): error TS2580: Cannot find name 'process'.
+e2e/a11y.spec.ts(280,9): error TS6133: 'manualChecks' is declared but its value is never read.
+e2e/a11y.spec.ts(288,3): error TS2741: Property 'manualChecks' is missing in type ...
+```
+
+错误**全部**在 `e2e/`，`src/` 下 0 条（用 `tsc --noEmit | Select-String '^src/'`
+核对过）。`npm run build` = `tsc && vite build`，所以构建也停在 `tsc` 段。
+本批不允许改 `frontend/e2e/**`（那个 agent 正在改），当时的处理是：
+先用 `npx vite build` 产出 `dist` 让证据脚本照常跑，并用"错误按目录分类"
+证明本批没有引入任何类型错误。**收尾时对方已修好**：`npx tsc --noEmit`
+与 `npm run build` 都已退出 0，产物与证据都是用 `npm run build` 的产物重跑的。
+
+**② `npm run e2e` 整体退出 1，但失败全在对方那份新 spec 里。**
+分别实测：
+
+| 命令 | 结果 |
+|---|---|
+| `npx playwright test e2e/app-shell.spec.ts e2e/auth-routing.spec.ts e2e/login-api.spec.ts e2e/login-form.spec.ts`（**迁移前就在的 4 个 spec**） | **10 passed**，退出 0 —— 与基线 10 passed / 0 skipped 一致 |
+| `npm run e2e`（含对方新加的 `a11y.spec.ts`） | 11 passed / **8 failed**，退出 1 |
+
+8 条失败的形态**完全一样**：`getByRole('heading', …).toBeVisible()` →
+`element(s) not found`，快照里页面停在"加载中…"或登录页 —— 那是"后端没起/夹具没播种"
+造成的，不是样式问题（没有一条提到 contrast / target size / 类名）。
+要判断"某条 e2e 失败是不是 5.6 引起的"，**跑上面那条只含 4 个老 spec 的命令**即可。

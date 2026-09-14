@@ -1,0 +1,73 @@
+/**
+ * 智能问答页私有样式（overhaul-plan 5.6 第三批：`learning.css` 按归属拆分）
+ *
+ * 从 `src/styles/learning.css` 搬来 2 条规则：
+ *   `.qa-user-bubble` / `.qa-ai-card` —— 全项目 grep 只命中 `pages/QA.tsx`
+ *   （`responsive.css` / `refinements.css` 对二者 0 命中，所以没有响应式规则
+ *   需要跟着搬）。
+ *
+ * ## 动画：`@keyframes` 必须跟着规则一起搬（css-convention.md §3 雷区 1）
+ *
+ * 两条规则都写 `animation: slideUp …`，引用的是 `base.css` 里的**全局**
+ * `@keyframes slideUp`。CSS Modules 会把 `animation` 值里的动画名一起哈希
+ * （实测 `animation: slideUp` 与 `animation-name: slideUp` 都会被改写），
+ * 而定义留在全局样式表里 —— 名字对不上，**动画静默消失**：规则、选择器、
+ * 声明在文本上全都在，规则清单差集也看不出来，只有产物里的
+ * "引用 vs 定义"逐文件比对能发现。
+ *
+ * 处理：把动画体**逐字复制**到本文件并改名 `qaSlideUp`。`base.css` 的原版
+ * **不删** —— 它还有两类用户：
+ *   1. `components.css` 的 `.fade-in` / `.stagger-*`；
+ *   2. `LearningAssessment.tsx` 的行内 `style={{ animation: 'slideUp …' }}`。
+ *      行内样式不过 CSS Modules，只能按裸名引用全局动画。
+ *
+ * ## 记账：`.qaAiCard` 与全局 `.card` 的同权重竞争（不要"顺手"改动）
+ *
+ * DOM 上是 `className="card qa-ai-card"`：全局 `.card`（components.css）写的是
+ * `border: 1px solid …` **简写**，本模块写的是 `border-left: 3px solid …`
+ * **长写**。两条权重同为 (0,1,0)，于是"谁在后谁赢"：
+ *
+ *   - 迁移前：`learning.css` 在 `main.tsx` 里排第 9，`.card` 所在的
+ *     `components.css` 排第 2 ⇒ 金色左边框生效；
+ *   - 迁移后：本文件属于 `QA` 懒加载 chunk，它的 CSS 由 chunk 在
+ *     `index.css` **之后**注入 ⇒ 仍然是金色左边框。
+ *
+ * 为什么必须写成文档而不是交给脚本：`scripts/verify-built-css.mjs` 的冲突检查
+ * 按**属性名**配对（`border` 与 `border-left` 是两个名字），配不上这一对；
+ * `CASCADE_PAIRS` 同样只比同名属性。所以这里只能靠"说明 + 产物顺序"守住，
+ * 别把 `border-left` 改成 `border` 简写 —— 那会真的把 `.card` 的边框压掉。
+ *
+ * **实测（第三批的临时探针，用完已删；配方记在计划 §5 雷区 12）**：
+ * 用 jsdom 读**真实产物** CSS（`index-*.css` 里有 `.card{…border:1px solid…}`、
+ * `QA-*.css` 里有 `._qaAiCard_*{…border-left:3px solid…}`），按"index 先、
+ * QA chunk 后"拼接后算出的 `border-left` 是 **3px solid**（模块赢）；
+ * 把两个文件顺序对调（反向对照）立刻变成 **1px**（`.card` 赢）。
+ * 也就是说这条竞争真实存在、且胜负完全由 chunk 注入顺序决定 ——
+ * 懒加载页面的模块 CSS 由 `__vitePreload` 在 `index.css` 之后注入，
+ * 所以当前顺序是对的。
+ */
+
+/* ── 用户提问气泡（右对齐，深色胶囊）── */
+
+.qaUserBubble {
+  background: var(--gradient-primary);
+  color: white;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 16px 16px 4px 16px;
+  max-width: 70%;
+  display: inline-block;
+  animation: qaSlideUp 0.3s var(--ease-out-expo);
+}
+
+/* ── AI 回答卡片（与全局 `.card` 并列使用，见文件头"记账"）── */
+
+.qaAiCard {
+  border-left: 3px solid var(--color-accent);
+  animation: qaSlideUp 0.3s var(--ease-out-expo);
+}
+
+/* 逐字复制自 `base.css` 的 `@keyframes slideUp`，只改名（见文件头） */
+@keyframes qaSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}

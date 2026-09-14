@@ -20,6 +20,9 @@ import ReviewProgress from '../components/quiz/ReviewProgress'
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
 import { useSelfRating } from '../hooks/useSelfRating'
 import { useToast } from '../components/Toast'
+// 统计卡片（overhaul-plan 5.6 第三批）：与 Dashboard 共用的 `.stat-card*` 已抽成
+// 组件、样式进模块 —— 本页不再需要 `dashboard.css` 里的全局类名
+import StatCard from '../components/StatCard'
 import { cardTypeLabels } from '../utils/labels'
 
 /** 单题答题状态 */
@@ -311,22 +314,10 @@ export default function TodayLearn() {
             今日报告 ({dailyReport.date})
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 'var(--space-md)' }}>
-            <div className="stat-card stat-card-blue">
-              <div className="stat-number">{dailyReport.new_mastered}</div>
-              <div className="stat-label">新掌握</div>
-            </div>
-            <div className="stat-card stat-card-green">
-              <div className="stat-number">{dailyReport.total_reviews}</div>
-              <div className="stat-label">复习次数</div>
-            </div>
-            <div className="stat-card stat-card-gold">
-              <div className="stat-number">{dailyReport.today_accuracy}%</div>
-              <div className="stat-label">正确率</div>
-            </div>
-            <div className="stat-card stat-card-purple">
-              <div className="stat-number">{formatTime(dailyReport.total_review_time_ms)}</div>
-              <div className="stat-label">复习时长</div>
-            </div>
+            <StatCard variant="blue" value={dailyReport.new_mastered} label="新掌握" />
+            <StatCard variant="green" value={dailyReport.total_reviews} label="复习次数" />
+            <StatCard variant="gold" value={`${dailyReport.today_accuracy}%`} label="正确率" />
+            <StatCard variant="purple" value={formatTime(dailyReport.total_review_time_ms)} label="复习时长" />
           </div>
         </section>
       )}

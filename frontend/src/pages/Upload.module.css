@@ -1,0 +1,61 @@
+/**
+ * 上传页私有样式（overhaul-plan 5.6 第三批：`learning.css` 按归属拆分）
+ *
+ * 从 `src/styles/learning.css` 搬来 4 条规则：
+ *   `.upload-zone` / `.upload-zone:hover` / `.upload-zone-active` /
+ *   `.upload-zone-active::after` —— 全项目 grep 只命中 `pages/Upload.tsx`
+ *   （`responsive.css` / `refinements.css` 对它们 0 命中，没有响应式规则
+ *   需要跟着搬；窄屏可用性由上传区自身的 `padding: var(--space-2xl)`
+ *   与内联布局负责）。
+ *
+ * ## 动画：`@keyframes` 必须跟着规则一起搬（css-convention.md §3 雷区 1）
+ *
+ * `.uploadZoneActive::after` 引用全局 `@keyframes glowPulse`（base.css）。
+ * 搬进模块后裸名会被哈希、定义留在全局 ⇒ 悬空 ⇒ 拖拽时的呼吸光晕
+ * 静默消失。所以动画体逐字复制进本文件并改名 `uploadGlowPulse`；
+ * `base.css` 的原版不删（全局动画库的一部分，行内样式仍可裸名引用）。
+ *
+ * 记账：`glowPulse` 在本批之后**没有任何样式表用户**了（最后一个就是这条）。
+ * 删它属于"死代码清理"，与搬家混在一起会让"丢失 0"这条证据同时包含
+ * 两种语义 —— 与 `scaleIn` / `cleaning-pulse` 同样处理，登记在计划 §7.0。
+ */
+
+/* ── 拖拽上传区 ── */
+
+.uploadZone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s var(--ease-out-expo);
+  background: var(--color-surface);
+  position: relative;
+  overflow: hidden;
+}
+
+.uploadZone:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.uploadZoneActive {
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+  box-shadow: var(--shadow-glow);
+}
+
+.uploadZoneActive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  animation: uploadGlowPulse 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 逐字复制自 `base.css` 的 `@keyframes glowPulse`，只改名（见文件头） */
+@keyframes uploadGlowPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(201, 169, 89, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(201, 169, 89, 0.4); }
+}

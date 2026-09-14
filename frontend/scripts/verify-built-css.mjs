@@ -218,6 +218,11 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   'styles/markdown-extras.css',
   'components/NoteAskPanel.module.css',
   'pages/notedetail/SelectionMenu.module.css',
+  // 第三批：learning 按归属拆分（QA / Upload / NotesList）+ dashboard 余下（StatCard）
+  'pages/QA.module.css',
+  'pages/Upload.module.css',
+  'pages/NotesList.module.css',
+  'components/StatCard.module.css',
 ])
 
 const annotated = clashes.map((c) => {
@@ -498,6 +503,26 @@ const SLICE_MARKERS = [
   'askAiProvider',
   // 第二批：批注操作浮层
   'selectionMenu',
+  // 第三批：QA 页（提问气泡 + AI 卡片，动画随规则改名搬进模块）
+  'qaUserBubble',
+  'qaAiCard',
+  'qaSlideUp',
+  // 第三批：上传页（拖拽区 + 呼吸光晕动画）
+  'uploadZone',
+  'uploadZoneActive',
+  'uploadGlowPulse',
+  // 第三批：笔记列表页（工具条 + 搜索框；含从 responsive.css 搬来的 480px 两条）
+  'listToolbar',
+  'searchInputWrapper',
+  'searchInputIcon',
+  // 第三批：统计卡片（dashboard.css 余下部分 → components/StatCard）
+  'statCard',
+  'statCardBlue',
+  'statCardGreen',
+  'statCardGold',
+  'statCardPurple',
+  'statNumber',
+  'statLabel',
 ]
 console.log('\n迁移切片类名/动画在产物中的出现次数：')
 for (const marker of SLICE_MARKERS) {
@@ -574,6 +599,25 @@ const RETIRED = [
   'ask-ai-error',
   'ask-ai-provider',
   'selection-menu',
+  // 第三批：learning.css 的三组（各只有 1 个消费者）+ responsive.css 里
+  // **只定义在补丁层**的 `.list-toolbar`；以及 dashboard.css 余下的统计卡片组。
+  // 同表里留在全局的 `.filter-pill*` / `.segment-*` / `.collapse-arrow*` /
+  // `.state-*` / `.spinner`，以及 `dashboard.css` 的 `.progress-bar*`
+  // **必须**继续以 kebab 形态出现，所以不列进来。
+  'qa-user-bubble',
+  'qa-ai-card',
+  'upload-zone',
+  'upload-zone-active',
+  'list-toolbar',
+  'search-input-wrapper',
+  'search-input-icon',
+  'stat-card',
+  'stat-card-blue',
+  'stat-card-green',
+  'stat-card-gold',
+  'stat-card-purple',
+  'stat-number',
+  'stat-label',
 ]
 console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
 let retiredHits = 0

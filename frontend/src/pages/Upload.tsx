@@ -11,6 +11,9 @@ import {
   getUploadStatus, getNotes, getProjects,
   type Note, type Project, type PreparedUpload,
 } from '../api/client'
+// 本页私有样式（overhaul-plan 5.6 第三批）：`.upload-zone*` 从 `src/styles/learning.css`
+// 拆出，连同被哈希的 `@keyframes glowPulse`（改名 `uploadGlowPulse`）—— 见文件头
+import styles from './Upload.module.css'
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -380,7 +383,7 @@ export default function Upload() {
 
       {/* 拖拽上传区域：支持点击和拖拽两种方式 */}
       <div
-        className={`upload-zone${dragActive ? ' upload-zone-active' : ''}`}
+        className={`${styles.uploadZone}${dragActive ? ` ${styles.uploadZoneActive}` : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

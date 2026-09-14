@@ -226,6 +226,69 @@ const BATCHES = [
     // `.markdown-body mark.citation-highlight`，引用与定义仍在同一层。
     keyframes: [],
   },
+  {
+    id: '第三批：learning 按归属拆分 + dashboard 余下（StatCard）',
+    // 本批尚未提交 → 迁移前就读 HEAD（= 第二批提交后的状态）。
+    // 三个来源样式表：learning.css（`.qa-*` / `.upload-zone*` / `.search-input-*`）、
+    // responsive.css（`.list-toolbar` 两条 480px 规则 + `.stat-number` 的 480px 规则）、
+    // dashboard.css（`.stat-card*` / `.stat-number` / `.stat-label`）。
+    beforeSheets: [
+      'src/styles/learning.css',
+      'src/styles/responsive.css',
+      'src/styles/dashboard.css',
+    ],
+    groups: [
+      {
+        module: 'src/pages/QA.module.css',
+        classes: ['qa-user-bubble', 'qa-ai-card'],
+      },
+      {
+        module: 'src/pages/Upload.module.css',
+        classes: ['upload-zone', 'upload-zone-active'],
+      },
+      {
+        // `.list-toolbar` 这个类名**只**在 responsive.css 里出现过（全项目唯一一处），
+        // 所以必须在这里声明：不声明的话那两条 480px 规则会被算成"丢失"
+        // （旧类名集合里没有它，侧别 A 就一条也捞不到）。
+        module: 'src/pages/NotesList.module.css',
+        classes: ['list-toolbar', 'search-input-wrapper', 'search-input-icon'],
+      },
+      {
+        // 统计卡片：先抽出 `components/StatCard.tsx`，样式再随组件进模块。
+        // `stat-card-*` 的 4 个配色变体只出现在 `::before` 上，推导规则
+        // （kebab → camel）与模块里的 `.statCardBlue::before` 一致。
+        module: 'src/components/StatCard.module.css',
+        classes: [
+          'stat-card',
+          'stat-card-blue',
+          'stat-card-green',
+          'stat-card-gold',
+          'stat-card-purple',
+          'stat-number',
+          'stat-label',
+        ],
+      },
+    ],
+    // 本批没有需要提权的规则：模块类都只写在自家元素上，两个与全局类并列的地方
+    // （`.qaAiCard` 挨着 `.card`、`.state-*` 之类）都没有**同名属性**竞争 ——
+    // `.qaAiCard` 与 `.card` 争的是 `border-left` 长写 vs `border` 简写，
+    // 差集脚本按属性名配对，本来也不会把它误报成"丢失 + 新增"。
+    hardened: {},
+    keyframes: [
+      {
+        fromSheet: 'src/styles/base.css',
+        orig: 'slideUp',
+        module: 'src/pages/QA.module.css',
+        renamed: 'qaSlideUp',
+      },
+      {
+        fromSheet: 'src/styles/base.css',
+        orig: 'glowPulse',
+        module: 'src/pages/Upload.module.css',
+        renamed: 'uploadGlowPulse',
+      },
+    ],
+  },
 ]
 
 // ── 归一化 ──
@@ -244,9 +307,17 @@ const BATCHES = [
  * 3. `#fffc` ↔ `#ffffffcc` —— 压缩器把可缩写的形式写到最短；同样展开。
  * 4. `color: white` ↔ `color: #fff` —— 命名色被压成十六进制。
  * 5. `content: ''` ↔ `content: ""` —— 引号风格。
+ * 6. `border-radius: 16px 16px 4px 16px` ↔ `border-radius:16px 16px 4px`
+ *    —— 第 4 个值省略时取第 2 个值，渲染完全相同（第三批实测：
+ *    `.qaUserBubble` 的胶囊圆角）。见 `canonRadius`。
+ * 7. `inset: 0` ↔ `top:0;right:0;bottom:0;left:0` —— 构建器把 `inset`
+ *    简写**降级**成四条长写（第三批实测：`.uploadZoneActive::after`）。
+ *    这是声明级的改写，所以由 `canonDecls` 里的 `expandInset` 两侧展开。
  *
- * 这五条都是**产物**层面的等价改写，与"搬家有没有改变语义"无关；
- * 不归一化的话它们会伪装成 6 条"值有变化"，把真正的变化淹掉。
+ * 这七条都是**产物**层面的等价改写，与"搬家有没有改变语义"无关；
+ * 不归一化的话它们会伪装成"值有变化"，把真正的变化淹掉
+ * （第三批实测：`.listToolbar .searchInputWrapper` 被误写成单类时，
+ * 差集正是靠这里报出的"1 条丢失 + 1 条新增"抓到的）。
  */
 const TOKEN_EQUIV = {
   'var(--color-primary-light)': 'rgba(15,52,96,.08)',
@@ -293,6 +364,54 @@ function canonValue(v) {
 }
 
 /**
+ * `border-radius` 的四值 → 三值（第三批新增的等价改写，逐条说明出处）。
+ *
+ * CSS 规定"第 4 个值省略时取第 2 个值"，所以压缩器会把
+ * `border-radius: 16px 16px 4px 16px`（第 4 值与第 2 值相同）收成
+ * `border-radius:16px 16px 4px` —— 渲染结果完全相同。
+ * 实测出处：`pages/QA.module.css` 的 `.qaUserBubble`（原 `learning.css`
+ * 的 `.qa-user-bubble` 胶囊气泡），产物 `dist/assets/QA-*.css`。
+ * 不归一化的话它会被报成 1 条"丢失"，把真变化淹掉。
+ *
+ * 只处理这一个形态：带 `/`（椭圆半径）或 `var()` / `calc()` 时原样返回，
+ * 不做任何猜测。
+ */
+function canonRadius(v) {
+  if (/[/()]/.test(v)) return v
+  const parts = v.trim().split(/\s+/)
+  if (parts.length === 4 && parts[3] === parts[1]) return parts.slice(0, 3).join(' ')
+  return v
+}
+
+/**
+ * `inset` 简写 → 四条长写（第三批新增，声明级改写，所以在 `canonDecls` 里做）。
+ *
+ * `inset` 是 `top/right/bottom/left` 的简写，构建器按目标浏览器
+ * （Vite 默认 target ≈ safari14 / chrome87）把它**降级**成长写。
+ * 实测出处：`pages/Upload.module.css` 的 `.uploadZoneActive::after`
+ * （原 `learning.css` 的 `.upload-zone-active::after`），源码写 `inset: 0`，
+ * 产物 `dist/assets/Upload-*.css` 里是
+ * `top:0;right:0;bottom:0;left:0` —— 语义完全相同，但按属性名配对时
+ * 会整整少一条声明（差集报"丢失：产物缺 inset"）。
+ *
+ * 看不懂的写法（`var()` / `calc()` / 斜杠）返回 null，调用方原样保留 ——
+ * 宁可留着一条可疑差异，也不猜。
+ */
+function expandInset(v) {
+  const parts = v.trim().split(/\s+/)
+  if (parts.length < 1 || parts.length > 4) return null
+  if (parts.some((p) => /[(),/]/.test(p))) return null
+  // 简写展开规则：1 值→四边；2 值→上下 / 左右；3 值→上 / 左右 / 下；4 值→上右下左
+  const [t, r = t, b = t, l = r] = parts
+  return [
+    ['top', t],
+    ['right', r],
+    ['bottom', b],
+    ['left', l],
+  ]
+}
+
+/**
  * 声明列表 → "prop:val" 排序后的数组。
  *
  * `animation` / `animation-name` 的值**整条归一成 `NAME`**，不参与文本比对：
@@ -305,13 +424,22 @@ function canonValue(v) {
  * 传进来的已经只是值（`feedbackScaleIn 0.3s …`），不含属性名，永远匹配不上。
  */
 function canonDecls(decls) {
-  return decls
-    .map(([p, v]) => {
-      const prop = p.trim().toLowerCase()
-      if (prop === 'animation' || prop === 'animation-name') return `${prop}:NAME`
-      return `${prop}:${canonValue(v)}`
-    })
-    .sort()
+  const out = []
+  for (const [p, v] of decls) {
+    const prop = p.trim().toLowerCase()
+    if (prop === 'animation' || prop === 'animation-name') {
+      out.push(`${prop}:NAME`)
+      continue
+    }
+    // `inset` 简写被构建器降级成四条长写 → 两侧都展开成同样的四个键再比
+    const inset = prop === 'inset' ? expandInset(v) : null
+    if (inset) {
+      for (const [longhand, value] of inset) out.push(`${longhand}:${canonValue(value)}`)
+      continue
+    }
+    out.push(`${prop}:${canonValue(prop === 'border-radius' ? canonRadius(v) : v)}`)
+  }
+  return out.sort()
 }
 
 /**
