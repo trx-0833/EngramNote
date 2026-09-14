@@ -23,8 +23,6 @@
   这两个接口恰好会在最需要它们的时刻（访问令牌已过期）不可用。
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -232,7 +230,7 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/logout", response_model=LogoutResponse)
-async def logout(req: Optional[LogoutRequest] = None, db: AsyncSession = Depends(get_db)):
+async def logout(req: LogoutRequest = None, db: AsyncSession = Depends(get_db)):
     """
     登出接口（阶段 6.3）：撤销刷新令牌
 
@@ -249,6 +247,19 @@ async def logout(req: Optional[LogoutRequest] = None, db: AsyncSession = Depends
     3. 接口是幂等的：重复登出、拿已撤销/已过期的令牌登出都返回 200。
        请求体本身也是可选的（`req=None` 等价于空体），
        因为"清不干净"比"校验得严"在这里危险得多。
+
+    ## 请求体为什么真的可选（阶段 5.1 的 schema 修正）
+
+    "无请求体也能调用"是**行为**，"schema 里 body 允许 null"是**契约**，
+    改造前这两者不一致：签名写的是 `Optional[LogoutRequest] = None`，
+    FastAPI 于是把请求体声明成 `anyOf: [LogoutRequest, null]` 且 `required: false`
+    —— "可空"和"可缺省"在生成的客户端里是两件不同的事
+    （`body: LogoutRequest | null` 会逼调用方显式传一个 `null`）。
+
+    现在签名改成 `req: LogoutRequest = None`：默认值 `None` 依然让 FastAPI 把
+    请求体标成**可选**（`required: false`），但类型注解不再注入 `null` 分支，
+    schema 里就是干净的 `$ref: LogoutRequest`。运行时行为不变：
+    无请求体时 `req is None`，下面一行 `req or LogoutRequest()` 照旧兜底。
 
     代价与缓解：这是一个"未认证即可写库"的端点，因此挂了限流规则
     （见 middleware/rate_limit.py 的 `logout` 规则）。

@@ -267,3 +267,70 @@ class MasteryOverviewResponse(BaseModel):
     items: List[MasteryOverviewItem]
     total: int
     average_mastery: float
+
+
+# --- 卡片查重（阶段 5.1）---
+
+
+class CardDuplicateItem(BaseModel):
+    """一张卡片与另一张已存在卡片的重复候选
+
+    出处：`api/understanding.py:519-523`（`get_card_duplicates` 里把
+    `detect_card_duplicates` 的每条结果展开后补上"源卡片"信息）：
+
+        {"card_id": card.id, "card_title": card.title, **d}
+
+    其中 `d` 来自 `services/understanding_service.detect_card_duplicates`
+    的构造（`understanding_service.py:600-605`）：
+
+        {"existing_card_id": ..., "existing_title": ...,
+         "similarity": min(score / 100.0, 1.0), "score": score}
+
+    ⚠️ **`score` 是前端类型里没有的那个字段**：前端
+    `frontend/src/api/qa.ts` 的 `getCardDuplicates` 只声明了
+    `{card_id, card_title, existing_card_id, existing_title, similarity}`。
+    也就是说前端少知道一个字段（原始 n-gram 匹配分，未归一化）。
+    它是**排序键**（`duplicates.sort(key=lambda x: x["score"], reverse=True)`，
+    且只取前 5 条），所以"为什么这条排在前面"目前只有后端知道。
+    """
+
+    card_id: str
+    card_title: str
+    existing_card_id: str
+    existing_title: str
+    #: 归一化到 0-1 的相似度（`score / 100` 截顶）——展示用
+    similarity: float
+    #: 原始 n-gram 加权匹配分（未归一化，可大于 100）——排序用
+    score: int
+
+
+class CardDuplicateListResponse(BaseModel):
+    """笔记的卡片查重建议"""
+
+    duplicates: List[CardDuplicateItem]
+
+
+# --- 拓展卡片出题触发（阶段 5.1）---
+
+
+class ExtensionQuestionsTriggeredResponse(BaseModel):
+    """为拓展卡片触发出题任务后的回执
+
+    出处：`api/knowledge.py:137-142`：
+
+        {"card_id": card_id, "note_id": card.note_id,
+         "message": "拓展卡片出题任务已触发", "target_categories": ["extension"]}
+
+    ⚠️ 这是**触发回执**而不是结果：Celery 任务此时只是排进队列，
+    响应里既没有题目数量也没有任务 ID。`target_categories` 目前恒为
+    `["extension"]`（出题任务被硬编码成只出拓展类），
+    它被放进响应是为了让"这次触发的定向条件"对客户端可见。
+
+    前端 `frontend/src/api/knowledge.ts` 的 `generateExtensionQuestions`
+    只声明了 `{card_id, note_id, message}`，**少了 `target_categories`**。
+    """
+
+    card_id: str
+    note_id: str
+    message: str
+    target_categories: List[str] = []

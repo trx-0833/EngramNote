@@ -40,6 +40,7 @@ from .database import init_db
 from .middleware.error_handler import ErrorHandlerMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.request_context import RequestContextMiddleware
+from .schemas.common import HealthResponse
 from .services.llm_accounting_service import LLMQuotaExceeded
 
 # 获取全局配置
@@ -288,7 +289,7 @@ async def llm_quota_exceeded_handler(request: Request, exc: LLMQuotaExceeded):
 app.include_router(api_router, prefix="/api")
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
     健康检查端点

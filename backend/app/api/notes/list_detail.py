@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...models.note import Note, NoteRole, NoteStatus, SourceType
 from ...models.user import User
+from ...schemas.common import Mp4StreamResponse
 from ...schemas.note import (
     NoteContentUpdateRequest,
     NoteDetailResponse,
@@ -360,7 +361,7 @@ def _resolve_storage_path(bucket: str, object_name: str) -> Path:
     return _resolve_path(bucket, object_name)
 
 
-@router.get("/{note_id}/video")
+@router.get("/{note_id}/video", response_class=Mp4StreamResponse)
 async def stream_video(
     note_id: str,
     current_user: User = Depends(get_current_user_dependency),

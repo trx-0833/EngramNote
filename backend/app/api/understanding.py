@@ -15,11 +15,44 @@ AI 理解管道 API 模块
 - 触发题目生成（POST /api/understanding/{note_id}/generate-questions）
 - 获取笔记题目（GET /api/understanding/{note_id}/questions）
 - 获取所有题目（GET /api/understanding/questions）
+- 卡片查重建议（GET /api/understanding/{note_id}/duplicates）
 
 设计决策：
 - 所有接口需要用户认证，且只能操作自己的数据
 - 只有 cleaned 或 learning_failed 状态的笔记可以触发理解
 - RAG 问答跨用户所有笔记检索
+
+## SSE 事件契约（阶段 5.1：`POST /ask/stream` 为什么**不写** `response_model`）
+
+与 `app/api/notes/ask.py` 的 `/{note_id}/ask/stream` 是同一回事，也是同一个结论：
+
+- `response_model=` 描述的是"一个 JSON 文档"，而本端点返回的是
+  **`text/event-stream` 的帧序列**。处理函数返回 `StreamingResponse`，
+  套上 `response_model` 会导致校验失败或**被包装成一次性 `JSONResponse`**
+  —— 后者直接破坏流式行为，属于禁止项。
+- OpenAPI 3.1 能声明 `text/event-stream` 这个 media type，
+  但**没有**表达"事件名 → data 结构"的能力。硬塞 JSON schema 只会得到
+  "看着有类型、实际对不上"的契约。
+
+因此做法是：用 `EventStreamResponse` 如实声明 media type
+（此前 schema 里它被标成 `application/json` + 空 schema，是**错的**），
+并把事件契约写在下面。
+
+事件契约（`\n\n` 分隔帧，`data` 均为 JSON）：
+
+| event     | data                                                         | 出现时机 |
+|-----------|--------------------------------------------------------------|----------|
+| `meta`    | `{"retrieval_status": "<状态>", "provider": "<提供商>"}`       | 首个事件（检索阶段结束、LLM 开始之前） |
+| `token`   | `{"content": "<片段>"}`                                        | 每个流式片段一个 |
+| `sources` | `{"sources": [<AnswerSource 数组>], "provider": "<提供商>"}`   | 所有 token 之后、`done` 之前 |
+| `done`    | `{}`                                                          | 正常结束 |
+| `error`   | `{"message": "<原因>"}`，部分分支另有 `error_code`             | 校验失败或流中断，**之后流即结束** |
+
+⚠️ `sources` 事件里的单个 source 结构**就是** `schemas.knowledge.AnswerSource`
+（`note_id` / `note_title` / `chapter_title` / `relevant_text` / 定位字段），
+它是本端点唯一能被 OpenAPI 复用的部分 —— 但它藏在 SSE 帧里，schema 仍然看不到。
+`error` 事件同样有两种形态：空问题时带 `error_code=EMPTY_QUESTION`，
+未预期异常时**只有** `message`。
 """
 
 import json
@@ -39,6 +72,7 @@ from ..models.quiz_item import QuizItem
 from ..models.review_log import ReviewLog
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
+from ..schemas.common import EventStreamResponse
 from ..schemas.knowledge import (
     UnderstandingStartRequest,
     UnderstandingImpact,
@@ -49,6 +83,7 @@ from ..schemas.knowledge import (
     KnowledgeCardResponse,
     KnowledgeCardListResponse,
     CardUpdateRequest,
+    CardDuplicateListResponse,
     QuizItemResponse,
     QuizItemListResponse,
     QuestionRequest,
@@ -492,7 +527,7 @@ async def delete_card(
     await db.commit()
 
 
-@router.get("/{note_id}/duplicates")
+@router.get("/{note_id}/duplicates", response_model=CardDuplicateListResponse)
 async def get_card_duplicates(
     note_id: str,
     current_user: User = Depends(get_current_user_dependency),
@@ -573,7 +608,7 @@ async def ask_question(
     )
 
 
-@router.post("/ask/stream")
+@router.post("/ask/stream", response_class=EventStreamResponse)
 async def ask_question_stream(
     req: QuestionRequest,
     current_user: User = Depends(get_current_user_dependency),

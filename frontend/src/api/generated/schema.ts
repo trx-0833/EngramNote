@@ -145,6 +145,19 @@ export interface paths {
      *        请求体本身也是可选的（`req=None` 等价于空体），
      *        因为"清不干净"比"校验得严"在这里危险得多。
      *
+     *     ## 请求体为什么真的可选（阶段 5.1 的 schema 修正）
+     *
+     *     "无请求体也能调用"是**行为**，"schema 里 body 允许 null"是**契约**，
+     *     改造前这两者不一致：签名写的是 `Optional[LogoutRequest] = None`，
+     *     FastAPI 于是把请求体声明成 `anyOf: [LogoutRequest, null]` 且 `required: false`
+     *     —— "可空"和"可缺省"在生成的客户端里是两件不同的事
+     *     （`body: LogoutRequest | null` 会逼调用方显式传一个 `null`）。
+     *
+     *     现在签名改成 `req: LogoutRequest = None`：默认值 `None` 依然让 FastAPI 把
+     *     请求体标成**可选**（`required: false`），但类型注解不再注入 `null` 分支，
+     *     schema 里就是干净的 `$ref: LogoutRequest`。运行时行为不变：
+     *     无请求体时 `req is None`，下面一行 `req or LogoutRequest()` 照旧兜底。
+     *
      *     代价与缓解：这是一个"未认证即可写库"的端点，因此挂了限流规则
      *     （见 middleware/rate_limit.py 的 `logout` 规则）。
      *
@@ -3040,6 +3053,21 @@ export interface components {
       /** View Mode */
       view_mode: string;
     };
+    /**
+     * AnnotationDeleteResponse
+     * @description 删除批注的结果
+     *
+     *     出处：`api/notes/links.py:183`：`return {"success": True}`
+     *
+     *     ⚠️ 前端 `frontend/src/api/notes.ts` 的 `deleteAnnotation` 把它标成
+     *     `Promise<void>`（连返回值都不看），实际后端一直返回 `{"success": true}`。
+     *     这是"前端比现实更窄"（丢掉了一个恒为 true 的字段），**不是 bug**，
+     *     但切到生成类型后前端会看到它 —— 属于收益而非风险。
+     */
+    AnnotationDeleteResponse: {
+      /** Success */
+      success: boolean;
+    };
     /** AnnotationListResponse */
     AnnotationListResponse: {
       /** Annotations */
@@ -3157,23 +3185,92 @@ export interface components {
       /** Overall Score */
       overall_score: number;
       /** Quiz Answers */
-      quiz_answers?:
-        | {
-            [key: string]: unknown;
-          }[]
-        | null;
+      quiz_answers?: components['schemas']['QuizAnswer'][] | null;
       /** Quiz Questions */
-      quiz_questions?:
-        | {
-            [key: string]: unknown;
-          }[]
-        | null;
-      /** Scores */
-      scores: {
-        [key: string]: unknown;
-      };
+      quiz_questions?: components['schemas']['QuizQuestion'][] | null;
+      scores?: components['schemas']['AssessmentScores'] | null;
       /** Suggestions */
       suggestions: string;
+    };
+    /**
+     * AssessmentScores
+     * @description 评估评分明细
+     *
+     *     ## 出处与"为什么是一个并集模型"
+     *
+     *     `AssessmentResult.scores` 是一个 JSON 列，**同一个字段承载两种互斥形状**，
+     *     由 `mode` 决定（`services/assessment_service.py`）：
+     *
+     *     - `mode == "compare"`（`compare_assessment`，第 102-108 行）恒有 5 个键：
+     *       `coverage_score` / `depth_score` / `clarity_score` /
+     *       `covered_points` / `uncovered_points`
+     *     - `mode == "quiz"` 且**已提交答案**（`submit_answers`，第 349-352 行）恒有 2 个键：
+     *       `total_questions` / `average_score`
+     *     - `mode == "quiz"` 且**尚未作答**（`generate_quiz`，第 154 / 233 行）是 **`{}`**
+     *       —— 空字典，不是"缺字段"
+     *
+     *     ## 为什么全部字段可选
+     *
+     *     三种形态必须共用同一个模型（OpenAPI 的 `$ref` 无法按兄弟字段 `mode` 分流，
+     *     pydantic 也没有"判别式联合"能表达"看 mode 决定 scores 的形状"）。
+     *     全部可选是**如实**的：任何单个字段都不是"任何模式下恒在"。
+     *     代价是前端拿不到"compare 模式一定有 coverage_score"的保证 ——
+     *     要拿到它就得把 `scores` 拆成两个端点专属字段，那是接口形状变更（产品决策），
+     *     不在"补类型"的范围内。
+     *
+     *     ## ⚠️ 为什么需要 `_omit_unset_none`（否则响应体会变）
+     *
+     *     pydantic 默认把**有默认值但输入里没出现的字段**也序列化出来。于是
+     *     `generate_quiz` 的 `scores={}` 会从 `{}` 变成
+     *
+     *         {"covered_points": null, "uncovered_points": null, ..., "average_score": null}
+     *
+     *     这是响应体形状变化，本阶段禁止。而 `exclude_none=True` 是**过粗**的工具：
+     *     它会连"输入里显式为 null"的字段一起删（`covered_points: null` 本来是存在的）。
+     *     正确判据是"**输入里出现过这个键吗**"，也就是 pydantic 的
+     *     `__pydantic_fields_set__`：没出现过 + 值为 None → 省略；出现过 → 原样输出
+     *     （含显式 null）。探针实测（`scripts/_tmp_ser_probe.py`，已删）：
+     *     嵌套位置也会走这个序列化器，`Outer(inner={})` 得到 `{"inner": {}}`。
+     *
+     *     同理，compare 模式里 `covered_points` 显式为 `[]` 必须保持 `[]`（它"出现过"），
+     *     不会被这条规则碰到。
+     */
+    AssessmentScores: {
+      /**
+       * Average Score
+       * @description quiz：各题 question_score 的算术平均
+       */
+      average_score?: number | null;
+      /**
+       * Clarity Score
+       * @description compare：结构清晰度 0-100
+       */
+      clarity_score?: number | null;
+      /**
+       * Coverage Score
+       * @description compare：内容覆盖度 0-100
+       */
+      coverage_score?: number | null;
+      /**
+       * Covered Points
+       * @description compare：笔记已覆盖的知识点
+       */
+      covered_points?: string[] | null;
+      /**
+       * Depth Score
+       * @description compare：思考深度 0-100
+       */
+      depth_score?: number | null;
+      /**
+       * Total Questions
+       * @description quiz：本次作答的题目数
+       */
+      total_questions?: number | null;
+      /**
+       * Uncovered Points
+       * @description compare：资料里有、笔记未覆盖的知识点
+       */
+      uncovered_points?: string[] | null;
     };
     /**
      * BatchConfirmRequest
@@ -3349,6 +3446,50 @@ export interface components {
      * @enum {string}
      */
     CardCategory: 'regular' | 'blind_spot' | 'extension';
+    /**
+     * CardDuplicateItem
+     * @description 一张卡片与另一张已存在卡片的重复候选
+     *
+     *     出处：`api/understanding.py:519-523`（`get_card_duplicates` 里把
+     *     `detect_card_duplicates` 的每条结果展开后补上"源卡片"信息）：
+     *
+     *         {"card_id": card.id, "card_title": card.title, **d}
+     *
+     *     其中 `d` 来自 `services/understanding_service.detect_card_duplicates`
+     *     的构造（`understanding_service.py:600-605`）：
+     *
+     *         {"existing_card_id": ..., "existing_title": ...,
+     *          "similarity": min(score / 100.0, 1.0), "score": score}
+     *
+     *     ⚠️ **`score` 是前端类型里没有的那个字段**：前端
+     *     `frontend/src/api/qa.ts` 的 `getCardDuplicates` 只声明了
+     *     `{card_id, card_title, existing_card_id, existing_title, similarity}`。
+     *     也就是说前端少知道一个字段（原始 n-gram 匹配分，未归一化）。
+     *     它是**排序键**（`duplicates.sort(key=lambda x: x["score"], reverse=True)`，
+     *     且只取前 5 条），所以"为什么这条排在前面"目前只有后端知道。
+     */
+    CardDuplicateItem: {
+      /** Card Id */
+      card_id: string;
+      /** Card Title */
+      card_title: string;
+      /** Existing Card Id */
+      existing_card_id: string;
+      /** Existing Title */
+      existing_title: string;
+      /** Score */
+      score: number;
+      /** Similarity */
+      similarity: number;
+    };
+    /**
+     * CardDuplicateListResponse
+     * @description 笔记的卡片查重建议
+     */
+    CardDuplicateListResponse: {
+      /** Duplicates */
+      duplicates: components['schemas']['CardDuplicateItem'][];
+    };
     /**
      * CardMarkRequest
      * @description 标记重点/难点请求
@@ -3965,6 +4106,36 @@ export interface components {
       parent_card_id: string;
     };
     /**
+     * ExtensionQuestionsTriggeredResponse
+     * @description 为拓展卡片触发出题任务后的回执
+     *
+     *     出处：`api/knowledge.py:137-142`：
+     *
+     *         {"card_id": card_id, "note_id": card.note_id,
+     *          "message": "拓展卡片出题任务已触发", "target_categories": ["extension"]}
+     *
+     *     ⚠️ 这是**触发回执**而不是结果：Celery 任务此时只是排进队列，
+     *     响应里既没有题目数量也没有任务 ID。`target_categories` 目前恒为
+     *     `["extension"]`（出题任务被硬编码成只出拓展类），
+     *     它被放进响应是为了让"这次触发的定向条件"对客户端可见。
+     *
+     *     前端 `frontend/src/api/knowledge.ts` 的 `generateExtensionQuestions`
+     *     只声明了 `{card_id, note_id, message}`，**少了 `target_categories`**。
+     */
+    ExtensionQuestionsTriggeredResponse: {
+      /** Card Id */
+      card_id: string;
+      /** Message */
+      message: string;
+      /** Note Id */
+      note_id: string;
+      /**
+       * Target Categories
+       * @default []
+       */
+      target_categories: string[];
+    };
+    /**
      * FolderCreate
      * @description 文件夹创建请求
      */
@@ -4252,6 +4423,82 @@ export interface components {
       type?: components['schemas']['GoalType'] | null;
     };
     /**
+     * GradingDetail
+     * @description LLM 语义判分明细（阶段 3.5；阶段 5.1 补齐类型）
+     *
+     *     出处：`services/llm/scenes.py:542-548`（`grade_short_answer` 的最后一步）——
+     *
+     *         outcome = validate_items([result], GradeResult, source="grade_short_answer")
+     *         if not outcome.valid:
+     *             return None
+     *         return outcome.valid[0].model_dump()
+     *
+     *     也就是说这里输出的**就是** `services/llm/structured.py::GradeResult` 的
+     *     `model_dump()`：`verdict` 必须是 `VERDICTS` 之一（`correct` / `partial` /
+     *     `incorrect`，`structured.py:45`），`confidence` 被裁剪到 0-1，
+     *     `missing_points` / `misconceptions` 形状不对时被置为 `[]`。
+     *     该字典经 `review_service.py:436` 写进 `SubmitAnswerResponse.grading_detail`。
+     *
+     *     ⚠️ 本模型**刻意不 import `GradeResult`**：`GradeResult` 带
+     *     `verdict` 白名单校验器，直接把它当响应模型会让"库里存着历史上某个
+     *     已下线 verdict 的旧数据"变成 500。响应模型只描述**形状**，
+     *     不重新执行写入时的业务校验 —— 这是"读到旧数据也不能炸"的要求。
+     *
+     *     ⚠️ `verdict` 用 `str` 而不是 `Literal["correct","partial","incorrect"]`：
+     *     同样的理由（旧数据 + 前端 `grading_detail` 是展示用途）。
+     *     它现在是 `GradeResult` 的白名单保证的，一旦那个白名单放宽，
+     *     这里不会跟着报错。
+     */
+    GradingDetail: {
+      /**
+       * Confidence
+       * @default 0
+       */
+      confidence: number;
+      /** Misconceptions */
+      misconceptions?: string[];
+      /** Missing Points */
+      missing_points?: string[];
+      /**
+       * Reason
+       * @default
+       */
+      reason: string;
+      /** Verdict */
+      verdict: string;
+    };
+    /**
+     * GraphBatchOperationResponse
+     * @description 批量确认 / 拒绝建议关系的结果
+     *
+     *     出处：
+     *     - `graph_service.batch_confirm_suggestions` → `{success, confirmed_count, failed_count}`
+     *     - `graph_service.batch_reject_suggestions`  → `{success, rejected_count, failed_count}`
+     *
+     *     两个字段都**有默认值 0**：两个端点各自只填自己那一个计数，
+     *     但返回字典里两个键都恒在（另一个是 0）。声明成两个独立可选字段会让
+     *     "批量拒绝的响应里有没有 confirmed_count" 变成一个需要读实现才能回答的问题。
+     */
+    GraphBatchOperationResponse: {
+      /**
+       * Confirmed Count
+       * @default 0
+       */
+      confirmed_count: number;
+      /**
+       * Failed Count
+       * @default 0
+       */
+      failed_count: number;
+      /**
+       * Rejected Count
+       * @default 0
+       */
+      rejected_count: number;
+      /** Success */
+      success: boolean;
+    };
+    /**
      * GraphData
      * @description 完整图数据，包含所有节点和边
      */
@@ -4276,6 +4523,8 @@ export interface components {
       status: components['schemas']['RelationStatus'];
       /** Target */
       target: string;
+      /** Type */
+      type?: string | null;
     };
     /**
      * GraphNode
@@ -4286,7 +4535,7 @@ export interface components {
       /** Id */
       id: string;
       /** Note Id */
-      note_id: string;
+      note_id?: string | null;
       /**
        * Note Trashed
        * @default false
@@ -4299,6 +4548,27 @@ export interface components {
       relation_count: number;
       /** Title */
       title: string;
+    };
+    /**
+     * GraphRelationOperationResponse
+     * @description 单条关系操作结果（确认 / 拒绝 / 手动创建 / 删除）
+     *
+     *     出处（均为 4 处成功分支的 return）：
+     *     - `graph_service.confirm_relation`  → `{"success": True, "relation_id": relation_id}`
+     *     - `graph_service.reject_relation`   → 同上
+     *     - `graph_service.create_relation`   → `{"success": True, "relation_id": relation.id}`
+     *     - `graph_service.delete_relation`   → 同上
+     *
+     *     失败分支不在这里：`result["success"]` 为 False 时 API 层已经抛
+     *     HTTPException（400 / 404），响应体走统一错误信封 `{detail, error_code, request_id}`。
+     *     因此 `success` 在**成功响应**里恒为 True —— 保留它是因为客户端已经在读这个字段，
+     *     把它去掉等于单方面改契约。
+     */
+    GraphRelationOperationResponse: {
+      /** Relation Id */
+      relation_id: string;
+      /** Success */
+      success: boolean;
     };
     /**
      * GraphSearchResponse
@@ -4319,16 +4589,67 @@ export interface components {
       /** Id */
       id: string;
       /** Note Id */
-      note_id: string;
+      note_id?: string | null;
       /** Relation Count */
       relation_count: number;
       /** Title */
       title: string;
     };
+    /**
+     * GraphStats
+     * @description 知识图谱统计数据
+     */
+    GraphStats: {
+      /** Confirmed Edges */
+      confirmed_edges: number;
+      /** Isolated Nodes */
+      isolated_nodes: number;
+      /** Relation Type Distribution */
+      relation_type_distribution: components['schemas']['RelationTypeCount'][];
+      /** Suggested Edges */
+      suggested_edges: number;
+      /** Total Edges */
+      total_edges: number;
+      /** Total Nodes */
+      total_nodes: number;
+    };
+    /**
+     * GraphSuggestResponse
+     * @description 基于嵌入相似度的关系建议结果
+     *
+     *     出处：`graph.py:161`（`suggest_relations_api` 的 return），
+     *     服务层 `graph_service.auto_suggest_relations` 只返回一个 int（新增条数）。
+     */
+    GraphSuggestResponse: {
+      /** New Count */
+      new_count: number;
+      /** Success */
+      success: boolean;
+    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
       detail?: components['schemas']['ValidationError'][];
+    };
+    /**
+     * HealthResponse
+     * @description `GET /health` 的响应
+     *
+     *     出处：`app/main.py` 的 `health_check`：`{"status": "ok", "app": settings.app_name}`
+     *
+     *     ⚠️ 这个端点**没有前端调用方**（漂移报告把它列在"schema 里无调用方的 8 个操作"里），
+     *     补它纯粹是为了让"22 个端点之外"的同类缺口也一并收口 —— 它同样属于
+     *     "schema 里是空壳 → 生成类型是 `unknown`"。它不在前端本轮要切换的 22 个里，
+     *     因此**不计入** 22 的分子。
+     *
+     *     刻意**不**把 `app` 改名为 `app_name`：字段名是对外契约的一部分，
+     *     `/health` 的消费方（负载均衡探针、监控脚本）读的是 `app`。
+     */
+    HealthResponse: {
+      /** App */
+      app: string;
+      /** Status */
+      status: string;
     };
     /**
      * KnowledgeCardListResponse
@@ -4472,18 +4793,62 @@ export interface components {
        * Linked Materials
        * @default []
        */
-      linked_materials: {
-        [key: string]: unknown;
-      }[];
+      linked_materials: components['schemas']['LinkedMaterialItem'][];
       /**
        * Linked Personal Notes
        * @default []
        */
-      linked_personal_notes: {
-        [key: string]: unknown;
-      }[];
+      linked_personal_notes: components['schemas']['LinkedPersonalNoteItem'][];
       /** Personal Note Id */
       personal_note_id: string;
+    };
+    /**
+     * LinkUpdateResponse
+     * @description 更新笔记-资料链接的结果
+     *
+     *     出处：`api/notes/links.py:123`：`return {"changed": changed}`
+     *
+     *     `changed` 来自 `note_service.update_note_material_links` 的布尔返回值：
+     *     True 表示链接集合真的变了（同时会顺带把相关 quiz 缓存标记为 stale）。
+     *     前端 `frontend/src/api/notes.ts` 的 `UpdateLinksResponse` 与之一致。
+     */
+    LinkUpdateResponse: {
+      /** Changed */
+      changed: boolean;
+    };
+    /**
+     * LinkedMaterialItem
+     * @description 被个人笔记引用的资料条目
+     *
+     *     出处：`api/notes/links.py:46-53`（`get_note_links` 里列表推导的字典）：
+     *
+     *         {"id": m.id, "title": m.title,
+     *          "source_type": m.source_type.value if m.source_type else None}
+     *
+     *     ⚠️ `source_type` **确实可空**：`Note.source_type` 在库里是 nullable，
+     *     该分支显式写了 `if m.source_type else None`。前端
+     *     `frontend/src/api/notes.ts` 的 `LinkedMaterial` 正好也写的是
+     *     `source_type: string | null` —— 两边一致，这是少见的"前端比后端契约更准"的一处
+     *     （此前 schema 里这里是裸 `dict`，所以前端只能靠手写维持正确）。
+     */
+    LinkedMaterialItem: {
+      /** Id */
+      id: string;
+      source_type?: components['schemas']['SourceType'] | null;
+      /** Title */
+      title: string;
+    };
+    /**
+     * LinkedPersonalNoteItem
+     * @description 引用了该资料的个人笔记条目
+     *
+     *     出处：`api/notes/links.py:68`：`[{"id": n.id, "title": n.title} for n in personal_notes]`
+     */
+    LinkedPersonalNoteItem: {
+      /** Id */
+      id: string;
+      /** Title */
+      title: string;
     };
     /**
      * LogoutRequest
@@ -4546,6 +4911,29 @@ export interface components {
       items: components['schemas']['MasteryOverviewItem'][];
       /** Total */
       total: number;
+    };
+    /**
+     * MessageResponse
+     * @description 只带一句人类可读操作结果的响应
+     *
+     *     刻意**不**给 `message` 设默认值：调用方必须显式给出文案，
+     *     否则会生成一个"永远是空字符串"的字段 —— 那种字段在契约里
+     *     看起来存在，实际没有任何信息。
+     */
+    MessageResponse: {
+      /** Message */
+      message: string;
+    };
+    /**
+     * NodeSubgraph
+     * @description 某个节点及其直接邻居的子图
+     */
+    NodeSubgraph: {
+      center_node: components['schemas']['GraphNode'];
+      /** Edges */
+      edges: components['schemas']['GraphEdge'][];
+      /** Neighbor Nodes */
+      neighbor_nodes: components['schemas']['GraphNode'][];
     };
     /** NoteAskRequest */
     NoteAskRequest: {
@@ -4798,6 +5186,24 @@ export interface components {
       title?: string | null;
     };
     /**
+     * NoteVersionContentResponse
+     * @description 单个版本快照的 Markdown 内容（预览用）
+     *
+     *     出处：`api/notes/versions.py:147`：
+     *
+     *         return {"content": content, "version_number": version_number}
+     *
+     *     `version_number` 就是**请求路径里那个**版本号（不是从内容里解析出来的），
+     *     回显它是为了让调用方不必把路径参数与响应配起来读 —— 前端
+     *     `frontend/src/api/notes.ts` 的 `getVersion` 也正按 `{content, version_number}` 解析。
+     */
+    NoteVersionContentResponse: {
+      /** Content */
+      content: string;
+      /** Version Number */
+      version_number: number;
+    };
+    /**
      * NoteVersionDiffLine
      * @description 单行 diff 数据
      */
@@ -4866,6 +5272,43 @@ export interface components {
        */
       confirm?: boolean | null;
     };
+    /**
+     * PrepareUploadResponse
+     * @description 两阶段上传阶段 1（`POST /api/upload/prepare`）的响应
+     *
+     *     出处：`api/upload.py:682-687`：
+     *
+     *         {"temp_id": temp_id, "filename": filename,
+     *          "source_type": source_type.value, "page_count": page_count}
+     *
+     *     `page_count` 的语义**不是"未知"而是"该格式没有页的概念"**：
+     *     实现里只有 `source_type == SourceType.pdf` 才去解析页数
+     *     （`upload.py:651-655`），其余格式一律 `None`（代码注释写的是
+     *     "其他格式返回 null（本轮不支持分页）"）。前端 `PreparedUpload.page_count`
+     *     也写成 `number | null` —— 两边一致。
+     *
+     *     `temp_id` 是服务端生成的 UUID，落盘目录名就是它，
+     *     commit 阶段会**先做 UUID 格式校验**再拼路径（防路径穿越）。
+     */
+    PrepareUploadResponse: {
+      /**
+       * Filename
+       * @description 服务端保存时使用的文件名（已剥离路径分隔符）
+       */
+      filename: string;
+      /**
+       * Page Count
+       * @description PDF 的页数；非 PDF 格式恒为 null（该格式没有页的概念）
+       */
+      page_count?: number | null;
+      /** @description 按扩展名判定的来源类型 */
+      source_type: components['schemas']['SourceType'];
+      /**
+       * Temp Id
+       * @description 临时上传标识（UUID），commit 阶段原样回传
+       */
+      temp_id: string;
+    };
     /** ProjectCreate */
     ProjectCreate: {
       /**
@@ -4914,6 +5357,19 @@ export interface components {
       user_id: string;
     };
     /**
+     * ProjectNoteRemovedResponse
+     * @description 把一篇笔记移出项目的结果
+     *
+     *     出处：`project_service.remove_note_from_project` 的 return
+     *     （`projects.py:264` 的端点原样转发）：`{"message": ..., "note_id": note_id}`
+     */
+    ProjectNoteRemovedResponse: {
+      /** Message */
+      message: string;
+      /** Note Id */
+      note_id: string;
+    };
+    /**
      * ProjectNotesAddRequest
      * @description 向项目批量添加笔记的请求（空列表等业务校验由服务层负责）
      */
@@ -4923,6 +5379,28 @@ export interface components {
        * @description 要添加到项目的笔记 ID 列表
        */
       note_ids?: string[];
+    };
+    /**
+     * ProjectNotesAddedResponse
+     * @description 批量给笔记打项目标签的结果
+     *
+     *     出处：`project_service.add_notes_to_project` 的 return
+     *     （`projects.py:232` 的端点原样转发）：
+     *
+     *         {"project_id": project.id, "added": added, "not_found": len(note_ids) - added}
+     *
+     *     ⚠️ `not_found` 的语义是**差集**（请求了 N 个、实际新增 M 个 → N-M），
+     *     它同时包含"笔记不存在/在回收站"与"本来就已经打了这个标签"两种情况 ——
+     *     读这个字段的人会自然以为是前者。**本轮只记录，不改行为**
+     *     （改分母是产品决策，不是类型修复）。
+     */
+    ProjectNotesAddedResponse: {
+      /** Added */
+      added: number;
+      /** Not Found */
+      not_found: number;
+      /** Project Id */
+      project_id: string;
     };
     /** ProjectResponse */
     ProjectResponse: {
@@ -5204,6 +5682,29 @@ export interface components {
        */
       total: number;
     };
+    /**
+     * QuizAnswer
+     * @description 一条作答及其评判（`AssessmentResult.quiz_answers` 的元素）
+     *
+     *     出处：`services/assessment_service.py` 第 338-342 行：
+     *
+     *         judged_answers.append({"question_index": q_idx,
+     *                                "answer": user_answer,
+     *                                "judgment": judgment})
+     *
+     *     `question_index` 取自**请求体**里用户提交的 `question_index`
+     *     （`answer.get("question_index", 0)`），因此它可能与
+     *     `quiz_questions` 里的 `index` 不一致（例如用户改过题序）。
+     *     前端 `QuizAnswerItem` 只声明了 `answer` / `judgment`，**没有**
+     *     `question_index` —— 于是"这份答案对应哪道题"在前端类型里是缺失信息。
+     */
+    QuizAnswer: {
+      /** Answer */
+      answer: string;
+      judgment?: components['schemas']['QuizJudgment'] | null;
+      /** Question Index */
+      question_index: number;
+    };
     /** QuizGenerateRequest */
     QuizGenerateRequest: {
       /** Material Note Ids */
@@ -5267,6 +5768,74 @@ export interface components {
       updated_at: string;
       /** User Id */
       user_id: string;
+    };
+    /**
+     * QuizJudgment
+     * @description 单题评判明细（`quiz_answers[].judgment`）
+     *
+     *     出处：`services/assessment_service.py` 第 316-336 行 —— 同样是
+     *     **LLM 返回的 JSON 原样透传**（`judgment = json.loads(response)`），
+     *     解析失败时用一份全 0 的兜底字典（第 328-336 行），
+     *     键为 `accuracy_score` / `completeness_score` / `depth_score` /
+     *     `question_score` / `feedback` / `covered_key_points` / `missed_key_points`。
+     *
+     *     提示词（第 294-303 行）只要求前 5 个键 + 两个列表；
+     *     `question_score` 被 `submit_answers` 用来算总分（第 343 行
+     *     `judgment.get("question_score", 0)`）。
+     *
+     *     ⚠️ 与 `QuizQuestion` 不同，这里**全部字段可选**：兜底字典与提示词
+     *     并不完全一致，而且 `covered_key_points` / `missed_key_points`
+     *     在提示词里是"要求"而非"保证"。判分缺失是**可恢复**状态
+     *     （总分按 0 计），不该让整个响应 500。
+     *
+     *     ⚠️ 同样需要 `_omit_unset_none`：LLM 没返回某个键时，
+     *     响应里不该多出一个 `null`（那会改变响应体形状）。
+     */
+    QuizJudgment: {
+      /** Accuracy Score */
+      accuracy_score?: number | null;
+      /** Completeness Score */
+      completeness_score?: number | null;
+      /** Covered Key Points */
+      covered_key_points?: string[] | null;
+      /** Depth Score */
+      depth_score?: number | null;
+      /** Feedback */
+      feedback?: string | null;
+      /** Missed Key Points */
+      missed_key_points?: string[] | null;
+      /** Question Score */
+      question_score?: number | null;
+    };
+    /**
+     * QuizQuestion
+     * @description 开放性问题（`AssessmentResult.quiz_questions` 的元素）
+     *
+     *     出处：`services/assessment_service.py` 第 205-209 行 ——
+     *     **原样透传 LLM 返回的 `result_data["questions"]`**：
+     *
+     *         result_data = json.loads(response)
+     *         questions = result_data.get("questions", [])
+     *
+     *     提示词（第 180-189 行）要求每项为
+     *     `{"index": int, "question": str, "key_points": [str]}`。
+     *
+     *     ⚠️ 三个字段都是**必填**：模型从这里往下游用，缺一个就是脏数据。
+     *     之前是 `List[Dict[str, Any]]`，也就是说脏数据可以一路传到前端才炸
+     *     （`getQuiz` 的页面按 `q.key_points.map(...)` 渲染）。
+     *     这里收紧到必填的行为后果**仅限于"早失败"**：LLM 返回缺字段时，
+     *     `/assessment/generate-quiz` 会抛 ResponseValidationError（500）而不是
+     *     把半成品交给前端。这是有意为之，但**属于新引入的运行时风险**，
+     *     见 `frontend/docs/openapi-client.md` 的记录。若实测触发，
+     *     正确做法是给 `key_points` 一个 `default_factory=list` 而不是退回 `Any`。
+     */
+    QuizQuestion: {
+      /** Index */
+      index: number;
+      /** Key Points */
+      key_points: string[];
+      /** Question */
+      question: string;
     };
     /**
      * QuizVersionStats
@@ -5437,6 +6006,16 @@ export interface components {
      * @enum {string}
      */
     RelationType: 'related' | 'prerequisite' | 'subsequent' | 'contrast';
+    /**
+     * RelationTypeCount
+     * @description 按关系类型的统计
+     */
+    RelationTypeCount: {
+      /** Count */
+      count: number;
+      /** Relation Type */
+      relation_type: string;
+    };
     /**
      * ReminderResponse
      * @description 复习提醒响应
@@ -5737,6 +6316,30 @@ export interface components {
       reason: string;
     };
     /**
+     * SemanticRelationsResponse
+     * @description LLM 语义关系推断的结果
+     *
+     *     出处：`graph_service.suggest_semantic_relations` 的两处 return
+     *     （`graph.py:300` 的端点直接原样转发）：
+     *
+     *     - 卡片不足 2 张：`{success: True, new_count: 0, skipped_count: 0, message: "卡片数量不足"}`
+     *     - 正常结束：`{success, new_count, skipped_count, message}`（message 是拼出来的中文摘要）
+     *
+     *     ⚠️ 这个端点在漂移报告里被记为 `SCHEMA_LOOSE`（`Dict[str, Any]` →
+     *     `additionalProperties: true`），它是本轮 22 个端点里唯一一个
+     *     "看着有声明、实际等于没声明"的。
+     */
+    SemanticRelationsResponse: {
+      /** Message */
+      message: string;
+      /** New Count */
+      new_count: number;
+      /** Skipped Count */
+      skipped_count: number;
+      /** Success */
+      success: boolean;
+    };
+    /**
      * SourceType
      * @description 文档来源类型枚举
      *
@@ -5787,13 +6390,8 @@ export interface components {
       correct_answer: string;
       /** Explanation */
       explanation?: string | null;
-      /**
-       * Grading Detail
-       * @description 阶段 3.5 的 LLM 语义判分明细：`{verdict, missing_points, misconceptions, confidence, reason}`。`null` = 本次没有语义判分（未请求 / 判分失败 / 已自评），**不是**「判分过但没发现问题」——UI 应据此区分两种状态。
-       */
-      grading_detail?: {
-        [key: string]: unknown;
-      } | null;
+      /** @description 阶段 3.5 的 LLM 语义判分明细：`{verdict, missing_points, misconceptions, confidence, reason}`。`null` = 本次没有语义判分（未请求 / 判分失败 / 已自评），**不是**「判分过但没发现问题」——UI 应据此区分两种状态。 */
+      grading_detail?: components['schemas']['GradingDetail'] | null;
       /**
        * Grading Method
        * @description 本次判分方式：choice/fill_blank/self_rating/ungraded/legacy
@@ -6526,7 +7124,7 @@ export interface operations {
     };
     requestBody?: {
       content: {
-        'application/json': components['schemas']['LogoutRequest'] | null;
+        'application/json': components['schemas']['LogoutRequest'];
       };
     };
     responses: {
@@ -6990,7 +7588,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['MessageResponse'];
         };
       };
       /** @description Validation Error */
@@ -7289,7 +7887,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphBatchOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7322,7 +7920,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphBatchOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7355,7 +7953,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphRelationOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7386,7 +7984,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['NodeSubgraph'];
         };
       };
       /** @description Validation Error */
@@ -7419,7 +8017,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphRelationOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7452,7 +8050,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphRelationOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7483,7 +8081,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphRelationOperationResponse'];
         };
       };
       /** @description Validation Error */
@@ -7546,7 +8144,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphStats'];
         };
       };
     };
@@ -7566,7 +8164,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['GraphSuggestResponse'];
         };
       };
     };
@@ -7586,9 +8184,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': {
-            [key: string]: unknown;
-          };
+          'application/json': components['schemas']['SemanticRelationsResponse'];
         };
       };
     };
@@ -7701,7 +8297,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['ExtensionQuestionsTriggeredResponse'];
         };
       };
       /** @description Validation Error */
@@ -8176,7 +8772,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['AnnotationDeleteResponse'];
         };
       };
       /** @description Validation Error */
@@ -8242,7 +8838,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'text/event-stream': string;
         };
       };
       /** @description Validation Error */
@@ -8343,7 +8939,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['LinkUpdateResponse'];
         };
       };
       /** @description Validation Error */
@@ -8570,7 +9166,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['NoteVersionContentResponse'];
         };
       };
       /** @description Validation Error */
@@ -8637,7 +9233,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'video/mp4': string;
         };
       };
       /** @description Validation Error */
@@ -8752,7 +9348,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['MessageResponse'];
         };
       };
       /** @description Validation Error */
@@ -8822,7 +9418,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['ProjectNotesAddedResponse'];
         };
       };
       /** @description Validation Error */
@@ -8854,7 +9450,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['ProjectNoteRemovedResponse'];
         };
       };
       /** @description Validation Error */
@@ -9405,7 +10001,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'text/event-stream': string;
         };
       };
       /** @description Validation Error */
@@ -9666,7 +10262,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['CardDuplicateListResponse'];
         };
       };
       /** @description Validation Error */
@@ -9901,7 +10497,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['PrepareUploadResponse'];
         };
       };
       /** @description Validation Error */
@@ -9992,7 +10588,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': unknown;
+          'application/json': components['schemas']['HealthResponse'];
         };
       };
     };

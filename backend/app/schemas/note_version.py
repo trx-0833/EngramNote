@@ -41,6 +41,22 @@ class NoteVersionDiffResponse(BaseModel):
     diff_lines: List[NoteVersionDiffLine]
 
 
+class NoteVersionContentResponse(BaseModel):
+    """单个版本快照的 Markdown 内容（预览用）
+
+    出处：`api/notes/versions.py:147`：
+
+        return {"content": content, "version_number": version_number}
+
+    `version_number` 就是**请求路径里那个**版本号（不是从内容里解析出来的），
+    回显它是为了让调用方不必把路径参数与响应配起来读 —— 前端
+    `frontend/src/api/notes.ts` 的 `getVersion` 也正按 `{content, version_number}` 解析。
+    """
+
+    content: str
+    version_number: int
+
+
 # --- 请求模型 ---
 
 

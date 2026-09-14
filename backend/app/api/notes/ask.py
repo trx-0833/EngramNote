@@ -15,6 +15,38 @@
 - 复用 LLMService.chat_stream（scene=note_ask_stream）流式生成，
   SSE 事件格式与 /api/understanding/ask/stream 保持一致：
   meta（provider）→ token... → done / error。
+
+## SSE 事件契约（阶段 5.1：为什么这里**不写** response_model）
+
+`response_model=` 只描述"一个 JSON 文档"，而本端点返回的是 **`text/event-stream`
+的帧序列**，两者不是同一种东西：
+
+1. `response_model=` 会让 FastAPI 把处理函数的返回值当作**待校验的 JSON 数据**；
+   本函数返回的是 `StreamingResponse` 对象，套上 `response_model` 要么校验失败，
+   要么被 FastAPI 包装成 `JSONResponse` —— 那会直接**改变运行时行为**（流变成一次性 JSON）。
+2. OpenAPI 3.1 能表达 `text/event-stream` 这个 **media type**，
+   但**表达不了 SSE 的事件名与每种事件的 data 结构**（没有 `events` 关键字）。
+   硬塞一个 JSON schema 只会得到一个"看起来有类型、实际对不上"的契约。
+
+因此这里的做法是：
+- 用 `EventStreamResponse` 把 **media type 如实声明出去**
+  （此前 schema 里它是 `application/json` + 空 schema = `unknown`，是**错的**：
+  客户端照着生成的类型去 `response.json()` 会直接抛错）；
+- 把事件契约写在代码里（下面这个 docstring）与 `frontend/docs/openapi-client.md`，
+  并明确记录"OpenAPI 表达不了它"。
+
+事件契约（两种事件名共用 `data` 为 JSON 的形态，`\n\n` 分隔帧）：
+
+| event   | data                                                     | 出现时机 |
+|---------|----------------------------------------------------------|----------|
+| `meta`  | `{"provider": "<LLM 提供商>"}`                            | 首个事件，校验通过之后 |
+| `token` | `{"content": "<片段>"}`                                   | 每个流式片段一个 |
+| `done`  | `{}`                                                     | 正常结束 |
+| `error` | `{"message": "<原因>"}`，部分分支另有 `error_code`        | 校验失败或流中断，**之后流即结束** |
+
+⚠️ `error` 事件的两种形态：笔记不存在/问题为空/选中文本为空时带
+`error_code`（`EMPTY_QUESTION` / `EMPTY_SELECTED_TEXT`），
+未预期异常时**只有** `message`（异常文本，不保证有 error_code）。
 """
 
 import json
@@ -27,6 +59,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config import get_settings
 from ...database import get_db
 from ...models.user import User
+from ...schemas.common import EventStreamResponse
 from ...schemas.note_ask import NoteAskRequest
 from ...services.llm_service import LLMService
 from ...services.note_service import get_note_detail
@@ -37,7 +70,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/{note_id}/ask/stream")
+@router.post("/{note_id}/ask/stream", response_class=EventStreamResponse)
 async def ask_note_stream(
     note_id: str,
     req: NoteAskRequest,

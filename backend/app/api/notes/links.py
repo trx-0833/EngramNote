@@ -13,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...models.note import NoteRole
 from ...models.user import User
-from ...schemas.note_material_link import LinkCreateRequest, LinkListResponse
+from ...schemas.note_material_link import LinkCreateRequest, LinkListResponse, LinkUpdateResponse
 from ...schemas.note_annotation import (
     AnnotationCreateRequest,
+    AnnotationDeleteResponse,
     AnnotationResponse,
     AnnotationListResponse,
 )
@@ -75,7 +76,7 @@ async def get_note_links(
     }
 
 
-@router.put("/{note_id}/links")
+@router.put("/{note_id}/links", response_model=LinkUpdateResponse)
 async def update_note_links(
     note_id: str,
     request: LinkCreateRequest,
@@ -169,7 +170,7 @@ async def create_annotation(
     return annotation
 
 
-@router.delete("/{note_id}/annotations/{annotation_id}")
+@router.delete("/{note_id}/annotations/{annotation_id}", response_model=AnnotationDeleteResponse)
 async def delete_annotation_endpoint(
     note_id: str,
     annotation_id: str,

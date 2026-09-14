@@ -45,6 +45,20 @@
         "title": "AnnotationCreateRequest",
         "type": "object"
       },
+      "AnnotationDeleteResponse": {
+        "description": "删除批注的结果\n\n出处：`api/notes/links.py:183`：`return {\"success\": True}`\n\n⚠️ 前端 `frontend/src/api/notes.ts` 的 `deleteAnnotation` 把它标成\n`Promise<void>`（连返回值都不看），实际后端一直返回 `{\"success\": true}`。\n这是\"前端比现实更窄\"（丢掉了一个恒为 true 的字段），**不是 bug**，\n但切到生成类型后前端会看到它 —— 属于收益而非风险。",
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "AnnotationDeleteResponse",
+        "type": "object"
+      },
       "AnnotationListResponse": {
         "properties": {
           "annotations": {
@@ -323,8 +337,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/QuizAnswer"
                 },
                 "type": "array"
               },
@@ -338,8 +351,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/QuizQuestion"
                 },
                 "type": "array"
               },
@@ -350,9 +362,14 @@
             "title": "Quiz Questions"
           },
           "scores": {
-            "additionalProperties": true,
-            "title": "Scores",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentScores"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "suggestions": {
             "title": "Suggestions",
@@ -362,12 +379,108 @@
         "required": [
           "id",
           "mode",
-          "scores",
           "overall_score",
           "suggestions",
           "created_at"
         ],
         "title": "AssessmentResponse",
+        "type": "object"
+      },
+      "AssessmentScores": {
+        "description": "评估评分明细\n\n## 出处与\"为什么是一个并集模型\"\n\n`AssessmentResult.scores` 是一个 JSON 列，**同一个字段承载两种互斥形状**，\n由 `mode` 决定（`services/assessment_service.py`）：\n\n- `mode == \"compare\"`（`compare_assessment`，第 102-108 行）恒有 5 个键：\n  `coverage_score` / `depth_score` / `clarity_score` /\n  `covered_points` / `uncovered_points`\n- `mode == \"quiz\"` 且**已提交答案**（`submit_answers`，第 349-352 行）恒有 2 个键：\n  `total_questions` / `average_score`\n- `mode == \"quiz\"` 且**尚未作答**（`generate_quiz`，第 154 / 233 行）是 **`{}`**\n  —— 空字典，不是\"缺字段\"\n\n## 为什么全部字段可选\n\n三种形态必须共用同一个模型（OpenAPI 的 `$ref` 无法按兄弟字段 `mode` 分流，\npydantic 也没有\"判别式联合\"能表达\"看 mode 决定 scores 的形状\"）。\n全部可选是**如实**的：任何单个字段都不是\"任何模式下恒在\"。\n代价是前端拿不到\"compare 模式一定有 coverage_score\"的保证 ——\n要拿到它就得把 `scores` 拆成两个端点专属字段，那是接口形状变更（产品决策），\n不在\"补类型\"的范围内。\n\n## ⚠️ 为什么需要 `_omit_unset_none`（否则响应体会变）\n\npydantic 默认把**有默认值但输入里没出现的字段**也序列化出来。于是\n`generate_quiz` 的 `scores={}` 会从 `{}` 变成\n\n    {\"covered_points\": null, \"uncovered_points\": null, ..., \"average_score\": null}\n\n这是响应体形状变化，本阶段禁止。而 `exclude_none=True` 是**过粗**的工具：\n它会连\"输入里显式为 null\"的字段一起删（`covered_points: null` 本来是存在的）。\n正确判据是\"**输入里出现过这个键吗**\"，也就是 pydantic 的\n`__pydantic_fields_set__`：没出现过 + 值为 None → 省略；出现过 → 原样输出\n（含显式 null）。探针实测（`scripts/_tmp_ser_probe.py`，已删）：\n嵌套位置也会走这个序列化器，`Outer(inner={})` 得到 `{\"inner\": {}}`。\n\n同理，compare 模式里 `covered_points` 显式为 `[]` 必须保持 `[]`（它\"出现过\"），\n不会被这条规则碰到。",
+        "properties": {
+          "average_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "quiz：各题 question_score 的算术平均",
+            "title": "Average Score"
+          },
+          "clarity_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "compare：结构清晰度 0-100",
+            "title": "Clarity Score"
+          },
+          "coverage_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "compare：内容覆盖度 0-100",
+            "title": "Coverage Score"
+          },
+          "covered_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "compare：笔记已覆盖的知识点",
+            "title": "Covered Points"
+          },
+          "depth_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "compare：思考深度 0-100",
+            "title": "Depth Score"
+          },
+          "total_questions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "quiz：本次作答的题目数",
+            "title": "Total Questions"
+          },
+          "uncovered_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "compare：资料里有、笔记未覆盖的知识点",
+            "title": "Uncovered Points"
+          }
+        },
+        "title": "AssessmentScores",
         "type": "object"
       },
       "BatchConfirmRequest": {
@@ -746,6 +859,62 @@
         ],
         "title": "CardCategory",
         "type": "string"
+      },
+      "CardDuplicateItem": {
+        "description": "一张卡片与另一张已存在卡片的重复候选\n\n出处：`api/understanding.py:519-523`（`get_card_duplicates` 里把\n`detect_card_duplicates` 的每条结果展开后补上\"源卡片\"信息）：\n\n    {\"card_id\": card.id, \"card_title\": card.title, **d}\n\n其中 `d` 来自 `services/understanding_service.detect_card_duplicates`\n的构造（`understanding_service.py:600-605`）：\n\n    {\"existing_card_id\": ..., \"existing_title\": ...,\n     \"similarity\": min(score / 100.0, 1.0), \"score\": score}\n\n⚠️ **`score` 是前端类型里没有的那个字段**：前端\n`frontend/src/api/qa.ts` 的 `getCardDuplicates` 只声明了\n`{card_id, card_title, existing_card_id, existing_title, similarity}`。\n也就是说前端少知道一个字段（原始 n-gram 匹配分，未归一化）。\n它是**排序键**（`duplicates.sort(key=lambda x: x[\"score\"], reverse=True)`，\n且只取前 5 条），所以\"为什么这条排在前面\"目前只有后端知道。",
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "card_title": {
+            "title": "Card Title",
+            "type": "string"
+          },
+          "existing_card_id": {
+            "title": "Existing Card Id",
+            "type": "string"
+          },
+          "existing_title": {
+            "title": "Existing Title",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "card_id",
+          "card_title",
+          "existing_card_id",
+          "existing_title",
+          "similarity",
+          "score"
+        ],
+        "title": "CardDuplicateItem",
+        "type": "object"
+      },
+      "CardDuplicateListResponse": {
+        "description": "笔记的卡片查重建议",
+        "properties": {
+          "duplicates": {
+            "items": {
+              "$ref": "#/components/schemas/CardDuplicateItem"
+            },
+            "title": "Duplicates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "duplicates"
+        ],
+        "title": "CardDuplicateListResponse",
+        "type": "object"
       },
       "CardMarkRequest": {
         "description": "标记重点/难点请求",
@@ -1855,6 +2024,38 @@
         "title": "ExtensionGenerateResponse",
         "type": "object"
       },
+      "ExtensionQuestionsTriggeredResponse": {
+        "description": "为拓展卡片触发出题任务后的回执\n\n出处：`api/knowledge.py:137-142`：\n\n    {\"card_id\": card_id, \"note_id\": card.note_id,\n     \"message\": \"拓展卡片出题任务已触发\", \"target_categories\": [\"extension\"]}\n\n⚠️ 这是**触发回执**而不是结果：Celery 任务此时只是排进队列，\n响应里既没有题目数量也没有任务 ID。`target_categories` 目前恒为\n`[\"extension\"]`（出题任务被硬编码成只出拓展类），\n它被放进响应是为了让\"这次触发的定向条件\"对客户端可见。\n\n前端 `frontend/src/api/knowledge.ts` 的 `generateExtensionQuestions`\n只声明了 `{card_id, note_id, message}`，**少了 `target_categories`**。",
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note_id": {
+            "title": "Note Id",
+            "type": "string"
+          },
+          "target_categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "card_id",
+          "note_id",
+          "message"
+        ],
+        "title": "ExtensionQuestionsTriggeredResponse",
+        "type": "object"
+      },
       "FolderCreate": {
         "description": "文件夹创建请求",
         "properties": {
@@ -2380,6 +2581,73 @@
         "title": "GoalUpdateRequest",
         "type": "object"
       },
+      "GradingDetail": {
+        "description": "LLM 语义判分明细（阶段 3.5；阶段 5.1 补齐类型）\n\n出处：`services/llm/scenes.py:542-548`（`grade_short_answer` 的最后一步）——\n\n    outcome = validate_items([result], GradeResult, source=\"grade_short_answer\")\n    if not outcome.valid:\n        return None\n    return outcome.valid[0].model_dump()\n\n也就是说这里输出的**就是** `services/llm/structured.py::GradeResult` 的\n`model_dump()`：`verdict` 必须是 `VERDICTS` 之一（`correct` / `partial` /\n`incorrect`，`structured.py:45`），`confidence` 被裁剪到 0-1，\n`missing_points` / `misconceptions` 形状不对时被置为 `[]`。\n该字典经 `review_service.py:436` 写进 `SubmitAnswerResponse.grading_detail`。\n\n⚠️ 本模型**刻意不 import `GradeResult`**：`GradeResult` 带\n`verdict` 白名单校验器，直接把它当响应模型会让\"库里存着历史上某个\n已下线 verdict 的旧数据\"变成 500。响应模型只描述**形状**，\n不重新执行写入时的业务校验 —— 这是\"读到旧数据也不能炸\"的要求。\n\n⚠️ `verdict` 用 `str` 而不是 `Literal[\"correct\",\"partial\",\"incorrect\"]`：\n同样的理由（旧数据 + 前端 `grading_detail` 是展示用途）。\n它现在是 `GradeResult` 的白名单保证的，一旦那个白名单放宽，\n这里不会跟着报错。",
+        "properties": {
+          "confidence": {
+            "default": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "misconceptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Misconceptions",
+            "type": "array"
+          },
+          "missing_points": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Points",
+            "type": "array"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "GradingDetail",
+        "type": "object"
+      },
+      "GraphBatchOperationResponse": {
+        "description": "批量确认 / 拒绝建议关系的结果\n\n出处：\n- `graph_service.batch_confirm_suggestions` → `{success, confirmed_count, failed_count}`\n- `graph_service.batch_reject_suggestions`  → `{success, rejected_count, failed_count}`\n\n两个字段都**有默认值 0**：两个端点各自只填自己那一个计数，\n但返回字典里两个键都恒在（另一个是 0）。声明成两个独立可选字段会让\n\"批量拒绝的响应里有没有 confirmed_count\" 变成一个需要读实现才能回答的问题。",
+        "properties": {
+          "confirmed_count": {
+            "default": 0,
+            "title": "Confirmed Count",
+            "type": "integer"
+          },
+          "failed_count": {
+            "default": 0,
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "default": 0,
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "GraphBatchOperationResponse",
+        "type": "object"
+      },
       "GraphData": {
         "description": "完整图数据，包含所有节点和边",
         "properties": {
@@ -2436,6 +2704,17 @@
           "target": {
             "title": "Target",
             "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
           }
         },
         "required": [
@@ -2459,8 +2738,15 @@
             "type": "string"
           },
           "note_id": {
-            "title": "Note Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
           },
           "note_trashed": {
             "default": false,
@@ -2480,10 +2766,28 @@
         "required": [
           "id",
           "title",
-          "card_type",
-          "note_id"
+          "card_type"
         ],
         "title": "GraphNode",
+        "type": "object"
+      },
+      "GraphRelationOperationResponse": {
+        "description": "单条关系操作结果（确认 / 拒绝 / 手动创建 / 删除）\n\n出处（均为 4 处成功分支的 return）：\n- `graph_service.confirm_relation`  → `{\"success\": True, \"relation_id\": relation_id}`\n- `graph_service.reject_relation`   → 同上\n- `graph_service.create_relation`   → `{\"success\": True, \"relation_id\": relation.id}`\n- `graph_service.delete_relation`   → 同上\n\n失败分支不在这里：`result[\"success\"]` 为 False 时 API 层已经抛\nHTTPException（400 / 404），响应体走统一错误信封 `{detail, error_code, request_id}`。\n因此 `success` 在**成功响应**里恒为 True —— 保留它是因为客户端已经在读这个字段，\n把它去掉等于单方面改契约。",
+        "properties": {
+          "relation_id": {
+            "title": "Relation Id",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "relation_id"
+        ],
+        "title": "GraphRelationOperationResponse",
         "type": "object"
       },
       "GraphSearchResponse": {
@@ -2519,8 +2823,15 @@
             "type": "string"
           },
           "note_id": {
-            "title": "Note Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
           },
           "relation_count": {
             "title": "Relation Count",
@@ -2535,10 +2846,70 @@
           "id",
           "title",
           "card_type",
-          "note_id",
           "relation_count"
         ],
         "title": "GraphSearchResult",
+        "type": "object"
+      },
+      "GraphStats": {
+        "description": "知识图谱统计数据",
+        "properties": {
+          "confirmed_edges": {
+            "title": "Confirmed Edges",
+            "type": "integer"
+          },
+          "isolated_nodes": {
+            "title": "Isolated Nodes",
+            "type": "integer"
+          },
+          "relation_type_distribution": {
+            "items": {
+              "$ref": "#/components/schemas/RelationTypeCount"
+            },
+            "title": "Relation Type Distribution",
+            "type": "array"
+          },
+          "suggested_edges": {
+            "title": "Suggested Edges",
+            "type": "integer"
+          },
+          "total_edges": {
+            "title": "Total Edges",
+            "type": "integer"
+          },
+          "total_nodes": {
+            "title": "Total Nodes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_nodes",
+          "total_edges",
+          "confirmed_edges",
+          "suggested_edges",
+          "relation_type_distribution",
+          "isolated_nodes"
+        ],
+        "title": "GraphStats",
+        "type": "object"
+      },
+      "GraphSuggestResponse": {
+        "description": "基于嵌入相似度的关系建议结果\n\n出处：`graph.py:161`（`suggest_relations_api` 的 return），\n服务层 `graph_service.auto_suggest_relations` 只返回一个 int（新增条数）。",
+        "properties": {
+          "new_count": {
+            "title": "New Count",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "new_count"
+        ],
+        "title": "GraphSuggestResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2552,6 +2923,25 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "`GET /health` 的响应\n\n出处：`app/main.py` 的 `health_check`：`{\"status\": \"ok\", \"app\": settings.app_name}`\n\n⚠️ 这个端点**没有前端调用方**（漂移报告把它列在\"schema 里无调用方的 8 个操作\"里），\n补它纯粹是为了让\"22 个端点之外\"的同类缺口也一并收口 —— 它同样属于\n\"schema 里是空壳 → 生成类型是 `unknown`\"。它不在前端本轮要切换的 22 个里，\n因此**不计入** 22 的分子。\n\n刻意**不**把 `app` 改名为 `app_name`：字段名是对外契约的一部分，\n`/health` 的消费方（负载均衡探针、监控脚本）读的是 `app`。",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "app"
+        ],
+        "title": "HealthResponse",
         "type": "object"
       },
       "KnowledgeCardListResponse": {
@@ -2840,8 +3230,7 @@
           "linked_materials": {
             "default": [],
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/LinkedMaterialItem"
             },
             "title": "Linked Materials",
             "type": "array"
@@ -2849,8 +3238,7 @@
           "linked_personal_notes": {
             "default": [],
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/LinkedPersonalNoteItem"
             },
             "title": "Linked Personal Notes",
             "type": "array"
@@ -2864,6 +3252,68 @@
           "personal_note_id"
         ],
         "title": "LinkListResponse",
+        "type": "object"
+      },
+      "LinkUpdateResponse": {
+        "description": "更新笔记-资料链接的结果\n\n出处：`api/notes/links.py:123`：`return {\"changed\": changed}`\n\n`changed` 来自 `note_service.update_note_material_links` 的布尔返回值：\nTrue 表示链接集合真的变了（同时会顺带把相关 quiz 缓存标记为 stale）。\n前端 `frontend/src/api/notes.ts` 的 `UpdateLinksResponse` 与之一致。",
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "changed"
+        ],
+        "title": "LinkUpdateResponse",
+        "type": "object"
+      },
+      "LinkedMaterialItem": {
+        "description": "被个人笔记引用的资料条目\n\n出处：`api/notes/links.py:46-53`（`get_note_links` 里列表推导的字典）：\n\n    {\"id\": m.id, \"title\": m.title,\n     \"source_type\": m.source_type.value if m.source_type else None}\n\n⚠️ `source_type` **确实可空**：`Note.source_type` 在库里是 nullable，\n该分支显式写了 `if m.source_type else None`。前端\n`frontend/src/api/notes.ts` 的 `LinkedMaterial` 正好也写的是\n`source_type: string | null` —— 两边一致，这是少见的\"前端比后端契约更准\"的一处\n（此前 schema 里这里是裸 `dict`，所以前端只能靠手写维持正确）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "LinkedMaterialItem",
+        "type": "object"
+      },
+      "LinkedPersonalNoteItem": {
+        "description": "引用了该资料的个人笔记条目\n\n出处：`api/notes/links.py:68`：`[{\"id\": n.id, \"title\": n.title} for n in personal_notes]`",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "LinkedPersonalNoteItem",
         "type": "object"
       },
       "LogoutRequest": {
@@ -2971,6 +3421,49 @@
           "average_mastery"
         ],
         "title": "MasteryOverviewResponse",
+        "type": "object"
+      },
+      "MessageResponse": {
+        "description": "只带一句人类可读操作结果的响应\n\n刻意**不**给 `message` 设默认值：调用方必须显式给出文案，\n否则会生成一个\"永远是空字符串\"的字段 —— 那种字段在契约里\n看起来存在，实际没有任何信息。",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MessageResponse",
+        "type": "object"
+      },
+      "NodeSubgraph": {
+        "description": "某个节点及其直接邻居的子图",
+        "properties": {
+          "center_node": {
+            "$ref": "#/components/schemas/GraphNode"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "neighbor_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Neighbor Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "center_node",
+          "neighbor_nodes",
+          "edges"
+        ],
+        "title": "NodeSubgraph",
         "type": "object"
       },
       "NoteAskRequest": {
@@ -3546,6 +4039,25 @@
         "title": "NoteUpdateRequest",
         "type": "object"
       },
+      "NoteVersionContentResponse": {
+        "description": "单个版本快照的 Markdown 内容（预览用）\n\n出处：`api/notes/versions.py:147`：\n\n    return {\"content\": content, \"version_number\": version_number}\n\n`version_number` 就是**请求路径里那个**版本号（不是从内容里解析出来的），\n回显它是为了让调用方不必把路径参数与响应配起来读 —— 前端\n`frontend/src/api/notes.ts` 的 `getVersion` 也正按 `{content, version_number}` 解析。",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "version_number"
+        ],
+        "title": "NoteVersionContentResponse",
+        "type": "object"
+      },
       "NoteVersionDiffLine": {
         "description": "单行 diff 数据",
         "properties": {
@@ -3685,6 +4197,44 @@
         "title": "NoteVersionRestoreRequest",
         "type": "object"
       },
+      "PrepareUploadResponse": {
+        "description": "两阶段上传阶段 1（`POST /api/upload/prepare`）的响应\n\n出处：`api/upload.py:682-687`：\n\n    {\"temp_id\": temp_id, \"filename\": filename,\n     \"source_type\": source_type.value, \"page_count\": page_count}\n\n`page_count` 的语义**不是\"未知\"而是\"该格式没有页的概念\"**：\n实现里只有 `source_type == SourceType.pdf` 才去解析页数\n（`upload.py:651-655`），其余格式一律 `None`（代码注释写的是\n\"其他格式返回 null（本轮不支持分页）\"）。前端 `PreparedUpload.page_count`\n也写成 `number | null` —— 两边一致。\n\n`temp_id` 是服务端生成的 UUID，落盘目录名就是它，\ncommit 阶段会**先做 UUID 格式校验**再拼路径（防路径穿越）。",
+        "properties": {
+          "filename": {
+            "description": "服务端保存时使用的文件名（已剥离路径分隔符）",
+            "title": "Filename",
+            "type": "string"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "PDF 的页数；非 PDF 格式恒为 null（该格式没有页的概念）",
+            "title": "Page Count"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType",
+            "description": "按扩展名判定的来源类型"
+          },
+          "temp_id": {
+            "description": "临时上传标识（UUID），commit 阶段原样回传",
+            "title": "Temp Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "temp_id",
+          "filename",
+          "source_type"
+        ],
+        "title": "PrepareUploadResponse",
+        "type": "object"
+      },
       "ProjectCreate": {
         "properties": {
           "description": {
@@ -3774,6 +4324,25 @@
         "title": "ProjectDetailResponse",
         "type": "object"
       },
+      "ProjectNoteRemovedResponse": {
+        "description": "把一篇笔记移出项目的结果\n\n出处：`project_service.remove_note_from_project` 的 return\n（`projects.py:264` 的端点原样转发）：`{\"message\": ..., \"note_id\": note_id}`",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note_id": {
+            "title": "Note Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "note_id"
+        ],
+        "title": "ProjectNoteRemovedResponse",
+        "type": "object"
+      },
       "ProjectNotesAddRequest": {
         "description": "向项目批量添加笔记的请求（空列表等业务校验由服务层负责）",
         "properties": {
@@ -3787,6 +4356,30 @@
           }
         },
         "title": "ProjectNotesAddRequest",
+        "type": "object"
+      },
+      "ProjectNotesAddedResponse": {
+        "description": "批量给笔记打项目标签的结果\n\n出处：`project_service.add_notes_to_project` 的 return\n（`projects.py:232` 的端点原样转发）：\n\n    {\"project_id\": project.id, \"added\": added, \"not_found\": len(note_ids) - added}\n\n⚠️ `not_found` 的语义是**差集**（请求了 N 个、实际新增 M 个 → N-M），\n它同时包含\"笔记不存在/在回收站\"与\"本来就已经打了这个标签\"两种情况 ——\n读这个字段的人会自然以为是前者。**本轮只记录，不改行为**\n（改分母是产品决策，不是类型修复）。",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "not_found": {
+            "title": "Not Found",
+            "type": "integer"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "added",
+          "not_found"
+        ],
+        "title": "ProjectNotesAddedResponse",
         "type": "object"
       },
       "ProjectResponse": {
@@ -4239,6 +4832,35 @@
         "title": "QuestionTypeAccuracy",
         "type": "object"
       },
+      "QuizAnswer": {
+        "description": "一条作答及其评判（`AssessmentResult.quiz_answers` 的元素）\n\n出处：`services/assessment_service.py` 第 338-342 行：\n\n    judged_answers.append({\"question_index\": q_idx,\n                           \"answer\": user_answer,\n                           \"judgment\": judgment})\n\n`question_index` 取自**请求体**里用户提交的 `question_index`\n（`answer.get(\"question_index\", 0)`），因此它可能与\n`quiz_questions` 里的 `index` 不一致（例如用户改过题序）。\n前端 `QuizAnswerItem` 只声明了 `answer` / `judgment`，**没有**\n`question_index` —— 于是\"这份答案对应哪道题\"在前端类型里是缺失信息。",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "judgment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuizJudgment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "question_index": {
+            "title": "Question Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question_index",
+          "answer"
+        ],
+        "title": "QuizAnswer",
+        "type": "object"
+      },
       "QuizGenerateRequest": {
         "properties": {
           "material_note_ids": {
@@ -4394,6 +5016,123 @@
           "updated_at"
         ],
         "title": "QuizItemResponse",
+        "type": "object"
+      },
+      "QuizJudgment": {
+        "description": "单题评判明细（`quiz_answers[].judgment`）\n\n出处：`services/assessment_service.py` 第 316-336 行 —— 同样是\n**LLM 返回的 JSON 原样透传**（`judgment = json.loads(response)`），\n解析失败时用一份全 0 的兜底字典（第 328-336 行），\n键为 `accuracy_score` / `completeness_score` / `depth_score` /\n`question_score` / `feedback` / `covered_key_points` / `missed_key_points`。\n\n提示词（第 294-303 行）只要求前 5 个键 + 两个列表；\n`question_score` 被 `submit_answers` 用来算总分（第 343 行\n`judgment.get(\"question_score\", 0)`）。\n\n⚠️ 与 `QuizQuestion` 不同，这里**全部字段可选**：兜底字典与提示词\n并不完全一致，而且 `covered_key_points` / `missed_key_points`\n在提示词里是\"要求\"而非\"保证\"。判分缺失是**可恢复**状态\n（总分按 0 计），不该让整个响应 500。\n\n⚠️ 同样需要 `_omit_unset_none`：LLM 没返回某个键时，\n响应里不该多出一个 `null`（那会改变响应体形状）。",
+        "properties": {
+          "accuracy_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy Score"
+          },
+          "completeness_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completeness Score"
+          },
+          "covered_key_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Covered Key Points"
+          },
+          "depth_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth Score"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          },
+          "missed_key_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Key Points"
+          },
+          "question_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Score"
+          }
+        },
+        "title": "QuizJudgment",
+        "type": "object"
+      },
+      "QuizQuestion": {
+        "description": "开放性问题（`AssessmentResult.quiz_questions` 的元素）\n\n出处：`services/assessment_service.py` 第 205-209 行 ——\n**原样透传 LLM 返回的 `result_data[\"questions\"]`**：\n\n    result_data = json.loads(response)\n    questions = result_data.get(\"questions\", [])\n\n提示词（第 180-189 行）要求每项为\n`{\"index\": int, \"question\": str, \"key_points\": [str]}`。\n\n⚠️ 三个字段都是**必填**：模型从这里往下游用，缺一个就是脏数据。\n之前是 `List[Dict[str, Any]]`，也就是说脏数据可以一路传到前端才炸\n（`getQuiz` 的页面按 `q.key_points.map(...)` 渲染）。\n这里收紧到必填的行为后果**仅限于\"早失败\"**：LLM 返回缺字段时，\n`/assessment/generate-quiz` 会抛 ResponseValidationError（500）而不是\n把半成品交给前端。这是有意为之，但**属于新引入的运行时风险**，\n见 `frontend/docs/openapi-client.md` 的记录。若实测触发，\n正确做法是给 `key_points` 一个 `default_factory=list` 而不是退回 `Any`。",
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "key_points": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Points",
+            "type": "array"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "question",
+          "key_points"
+        ],
+        "title": "QuizQuestion",
         "type": "object"
       },
       "QuizVersionStats": {
@@ -4630,6 +5369,25 @@
         ],
         "title": "RelationType",
         "type": "string"
+      },
+      "RelationTypeCount": {
+        "description": "按关系类型的统计",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "relation_type": {
+            "title": "Relation Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation_type",
+          "count"
+        ],
+        "title": "RelationTypeCount",
+        "type": "object"
       },
       "ReminderResponse": {
         "description": "复习提醒响应\n\n返回当前用户的复习提醒概览数据，包括到期题目数、\n1 小时内到期题目数、薄弱知识点数和上次提醒时间。\n\n字段与 notification_service.NotificationService.get_reminders() 返回的字典键一致。",
@@ -5125,6 +5883,35 @@
         "title": "ScanSkipDetail",
         "type": "object"
       },
+      "SemanticRelationsResponse": {
+        "description": "LLM 语义关系推断的结果\n\n出处：`graph_service.suggest_semantic_relations` 的两处 return\n（`graph.py:300` 的端点直接原样转发）：\n\n- 卡片不足 2 张：`{success: True, new_count: 0, skipped_count: 0, message: \"卡片数量不足\"}`\n- 正常结束：`{success, new_count, skipped_count, message}`（message 是拼出来的中文摘要）\n\n⚠️ 这个端点在漂移报告里被记为 `SCHEMA_LOOSE`（`Dict[str, Any]` →\n`additionalProperties: true`），它是本轮 22 个端点里唯一一个\n\"看着有声明、实际等于没声明\"的。",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "new_count": {
+            "title": "New Count",
+            "type": "integer"
+          },
+          "skipped_count": {
+            "title": "Skipped Count",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "new_count",
+          "skipped_count",
+          "message"
+        ],
+        "title": "SemanticRelationsResponse",
+        "type": "object"
+      },
       "SourceType": {
         "description": "文档来源类型枚举\n\n标识上传文件的类型，决定后续的转换处理方式：\n- PDF/图片/Office 文档 → 调用 Mineru 转换为 Markdown\n- 音视频 → 调用 ASR 引擎转写为文本",
         "enum": [
@@ -5211,15 +5998,13 @@
           "grading_detail": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/GradingDetail"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "阶段 3.5 的 LLM 语义判分明细：`{verdict, missing_points, misconceptions, confidence, reason}`。`null` = 本次没有语义判分（未请求 / 判分失败 / 已自评），**不是**「判分过但没发现问题」——UI 应据此区分两种状态。",
-            "title": "Grading Detail"
+            "description": "阶段 3.5 的 LLM 语义判分明细：`{verdict, missing_points, misconceptions, confidence, reason}`。`null` = 本次没有语义判分（未请求 / 判分失败 / 已自评），**不是**「判分过但没发现问题」——UI 应据此区分两种状态。"
           },
           "grading_method": {
             "default": "legacy",
@@ -6459,21 +7244,13 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "登出接口（阶段 6.3）：撤销刷新令牌\n\n## 为什么这个接口不需要认证\n\n它的凭证是请求体里的刷新令牌本身，且**允许它已经无效**：\n\n1. 登出的目的是\"让服务端忘掉这个会话\"。如果要求先出示有效访问令牌，\n   那么访问令牌一旦过期（用户离开一天后回来点登出）就再也清不掉\n   服务端的会话状态 —— 撤销能力恰好在你最需要它的时候失效；\n2. 服务端只根据**签名可验证**的令牌里的 jti/sub 动手，不接受客户端传\n   user_id。因此\"免认证\"不等于\"任何人能注销别人的会话\"：\n   没有那枚令牌就撤销不了任何东西（返回 `revoked=0`）；\n3. 接口是幂等的：重复登出、拿已撤销/已过期的令牌登出都返回 200。\n   请求体本身也是可选的（`req=None` 等价于空体），\n   因为\"清不干净\"比\"校验得严\"在这里危险得多。\n\n代价与缓解：这是一个\"未认证即可写库\"的端点，因此挂了限流规则\n（见 middleware/rate_limit.py 的 `logout` 规则）。\n\n## 撤销范围\n\n- 默认只撤销提交的这一枚（本设备）；其他设备各有自己的链，不受影响；\n- `all_devices=true` 撤销该用户全部刷新令牌（\"退出所有设备\"）。\n  各设备下一次刷新会 401 → 前端清本地状态回登录页；\n- ⚠️ **已签发的访问令牌在各自 `exp` 之前仍然有效**（无状态令牌的固有性质，\n  见 services/refresh_token_service.py 模块说明 §1）。本接口保证的是\n  会话无法再被延长。\n\nArgs:\n    req: 可选的 refresh_token 与 all_devices 开关；缺省（无请求体）视为空请求\n    db: 异步数据库会话\n\nReturns:\n    LogoutResponse: `revoked` = 实际撤销的行数（0 = 无需清理或令牌不可验证）",
+        "description": "登出接口（阶段 6.3）：撤销刷新令牌\n\n## 为什么这个接口不需要认证\n\n它的凭证是请求体里的刷新令牌本身，且**允许它已经无效**：\n\n1. 登出的目的是\"让服务端忘掉这个会话\"。如果要求先出示有效访问令牌，\n   那么访问令牌一旦过期（用户离开一天后回来点登出）就再也清不掉\n   服务端的会话状态 —— 撤销能力恰好在你最需要它的时候失效；\n2. 服务端只根据**签名可验证**的令牌里的 jti/sub 动手，不接受客户端传\n   user_id。因此\"免认证\"不等于\"任何人能注销别人的会话\"：\n   没有那枚令牌就撤销不了任何东西（返回 `revoked=0`）；\n3. 接口是幂等的：重复登出、拿已撤销/已过期的令牌登出都返回 200。\n   请求体本身也是可选的（`req=None` 等价于空体），\n   因为\"清不干净\"比\"校验得严\"在这里危险得多。\n\n## 请求体为什么真的可选（阶段 5.1 的 schema 修正）\n\n\"无请求体也能调用\"是**行为**，\"schema 里 body 允许 null\"是**契约**，\n改造前这两者不一致：签名写的是 `Optional[LogoutRequest] = None`，\nFastAPI 于是把请求体声明成 `anyOf: [LogoutRequest, null]` 且 `required: false`\n—— \"可空\"和\"可缺省\"在生成的客户端里是两件不同的事\n（`body: LogoutRequest | null` 会逼调用方显式传一个 `null`）。\n\n现在签名改成 `req: LogoutRequest = None`：默认值 `None` 依然让 FastAPI 把\n请求体标成**可选**（`required: false`），但类型注解不再注入 `null` 分支，\nschema 里就是干净的 `$ref: LogoutRequest`。运行时行为不变：\n无请求体时 `req is None`，下面一行 `req or LogoutRequest()` 照旧兜底。\n\n代价与缓解：这是一个\"未认证即可写库\"的端点，因此挂了限流规则\n（见 middleware/rate_limit.py 的 `logout` 规则）。\n\n## 撤销范围\n\n- 默认只撤销提交的这一枚（本设备）；其他设备各有自己的链，不受影响；\n- `all_devices=true` 撤销该用户全部刷新令牌（\"退出所有设备\"）。\n  各设备下一次刷新会 401 → 前端清本地状态回登录页；\n- ⚠️ **已签发的访问令牌在各自 `exp` 之前仍然有效**（无状态令牌的固有性质，\n  见 services/refresh_token_service.py 模块说明 §1）。本接口保证的是\n  会话无法再被延长。\n\nArgs:\n    req: 可选的 refresh_token 与 all_devices 开关；缺省（无请求体）视为空请求\n    db: 异步数据库会话\n\nReturns:\n    LogoutResponse: `revoked` = 实际撤销的行数（0 = 无需清理或令牌不可验证）",
         "operationId": "logout_api_auth_logout_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/LogoutRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Req"
+                "$ref": "#/components/schemas/LogoutRequest"
               }
             }
           }
@@ -7116,7 +7893,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7610,7 +8389,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphBatchOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7655,7 +8436,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphBatchOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7700,7 +8483,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphRelationOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7746,7 +8531,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/NodeSubgraph"
+                }
               }
             },
             "description": "Successful Response"
@@ -7791,7 +8578,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphRelationOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7836,7 +8625,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphRelationOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7882,7 +8673,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphRelationOperationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -7980,7 +8773,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphStats"
+                }
               }
             },
             "description": "Successful Response"
@@ -8005,7 +8800,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSuggestResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -8031,9 +8828,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Suggest Semantic Relations Api Api Graph Suggest Semantic Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SemanticRelationsResponse"
                 }
               }
             },
@@ -8257,7 +9052,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionQuestionsTriggeredResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -9120,7 +9917,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationDeleteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -9217,8 +10016,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -9369,7 +10170,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LinkUpdateResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -9729,7 +10532,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/NoteVersionContentResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -9834,8 +10639,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "video/mp4": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -9954,7 +10761,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10112,7 +10921,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectNotesAddedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -10167,7 +10978,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectNoteRemovedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -11021,8 +11834,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -11522,7 +12337,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CardDuplicateListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -11927,7 +12744,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PrepareUploadResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -12058,7 +12877,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
               }
             },
             "description": "Successful Response"

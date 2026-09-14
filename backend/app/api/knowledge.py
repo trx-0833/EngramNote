@@ -37,6 +37,7 @@ from ..schemas.knowledge import (
     KnowledgeCardResponse,
     CardMarkRequest,
     ExtensionGenerateRequest,
+    ExtensionQuestionsTriggeredResponse,
     CombinedExtractResponse,
     ExtensionGenerateResponse,
     BlindSpotListResponse,
@@ -96,7 +97,7 @@ async def generate_extension_endpoint(
     return ExtensionGenerateResponse(**result)
 
 
-@router.post("/cards/{card_id}/generate-questions")
+@router.post("/cards/{card_id}/generate-questions", response_model=ExtensionQuestionsTriggeredResponse)
 async def generate_questions_for_extension(
     card_id: str,
     current_user: User = Depends(get_current_user_dependency),

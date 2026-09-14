@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db
 from ...models.user import User
 from ...schemas.note_version import (
+    NoteVersionContentResponse,
     NoteVersionDiffResponse,
     NoteVersionListResponse,
     NoteVersionResponse,
@@ -106,7 +107,7 @@ async def diff_note_versions(
     )
 
 
-@router.get("/{note_id}/versions/{version_number}")
+@router.get("/{note_id}/versions/{version_number}", response_model=NoteVersionContentResponse)
 async def get_note_version_content(
     note_id: str,
     version_number: int,

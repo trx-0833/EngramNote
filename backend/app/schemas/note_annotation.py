@@ -27,3 +27,17 @@ class AnnotationResponse(BaseModel):
 
 class AnnotationListResponse(BaseModel):
     annotations: List[AnnotationResponse]
+
+
+class AnnotationDeleteResponse(BaseModel):
+    """删除批注的结果
+
+    出处：`api/notes/links.py:183`：`return {"success": True}`
+
+    ⚠️ 前端 `frontend/src/api/notes.ts` 的 `deleteAnnotation` 把它标成
+    `Promise<void>`（连返回值都不看），实际后端一直返回 `{"success": true}`。
+    这是"前端比现实更窄"（丢掉了一个恒为 true 的字段），**不是 bug**，
+    但切到生成类型后前端会看到它 —— 属于收益而非风险。
+    """
+
+    success: bool

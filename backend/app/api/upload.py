@@ -41,6 +41,7 @@ from ..models.note_project import NoteProject
 from ..models.project import Project
 from ..models.user import User
 from ..schemas.note import NoteResponse, NoteStatusResponse
+from ..schemas.upload import PrepareUploadResponse
 from ..api.auth import get_current_user_dependency
 from ..services import note_service
 from ..services import pdf_crop
@@ -569,7 +570,7 @@ async def upload_document(
             os.unlink(tmp_path)
 
 
-@router.post("/prepare")
+@router.post("/prepare", response_model=PrepareUploadResponse)
 async def prepare_upload(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user_dependency),

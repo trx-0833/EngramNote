@@ -18,8 +18,6 @@
   由用户通过 POST /suggest 显式触发
 """
 
-from typing import Any, Dict
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +26,8 @@ from ..models.user import User
 from ..api.auth import get_current_user_dependency
 from ..schemas.graph import (
     GraphData,
+    GraphStats,
+    NodeSubgraph,
     SuggestedRelation,
     ConfirmRelationRequest,
     RejectRelationRequest,
@@ -35,6 +35,10 @@ from ..schemas.graph import (
     BatchConfirmRequest,
     BatchRejectRequest,
     GraphSearchResponse,
+    GraphRelationOperationResponse,
+    GraphSuggestResponse,
+    GraphBatchOperationResponse,
+    SemanticRelationsResponse,
 )
 from ..services import graph_service
 from ..services.graph_service import GraphSuggestionError, suggest_semantic_relations
@@ -59,7 +63,7 @@ async def get_graph(
     )
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=GraphStats)
 async def get_graph_stats(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
@@ -99,7 +103,7 @@ async def search_graph(
     return {"items": items, "total": len(items)}
 
 
-@router.get("/node/{node_id}/subgraph")
+@router.get("/node/{node_id}/subgraph", response_model=NodeSubgraph)
 async def get_node_subgraph(
     node_id: str,
     current_user: User = Depends(get_current_user_dependency),
@@ -138,7 +142,7 @@ async def get_suggestions(
     )
 
 
-@router.post("/suggest")
+@router.post("/suggest", response_model=GraphSuggestResponse)
 async def suggest_relations_api(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
@@ -161,7 +165,7 @@ async def suggest_relations_api(
     return {"success": True, "new_count": new_count}
 
 
-@router.post("/confirm")
+@router.post("/confirm", response_model=GraphRelationOperationResponse)
 async def confirm_relation(
     req: ConfirmRelationRequest,
     current_user: User = Depends(get_current_user_dependency),
@@ -184,7 +188,7 @@ async def confirm_relation(
     return result
 
 
-@router.post("/reject")
+@router.post("/reject", response_model=GraphRelationOperationResponse)
 async def reject_relation(
     req: RejectRelationRequest,
     current_user: User = Depends(get_current_user_dependency),
@@ -207,7 +211,7 @@ async def reject_relation(
     return result
 
 
-@router.post("/batch-confirm")
+@router.post("/batch-confirm", response_model=GraphBatchOperationResponse)
 async def batch_confirm(
     req: BatchConfirmRequest,
     current_user: User = Depends(get_current_user_dependency),
@@ -228,7 +232,7 @@ async def batch_confirm(
     )
 
 
-@router.post("/batch-reject")
+@router.post("/batch-reject", response_model=GraphBatchOperationResponse)
 async def batch_reject(
     req: BatchRejectRequest,
     current_user: User = Depends(get_current_user_dependency),
@@ -249,7 +253,7 @@ async def batch_reject(
     )
 
 
-@router.post("/relation")
+@router.post("/relation", response_model=GraphRelationOperationResponse)
 async def create_relation(
     req: CreateRelationRequest,
     current_user: User = Depends(get_current_user_dependency),
@@ -274,7 +278,7 @@ async def create_relation(
     return result
 
 
-@router.delete("/relation/{relation_id}")
+@router.delete("/relation/{relation_id}", response_model=GraphRelationOperationResponse)
 async def delete_relation(
     relation_id: str,
     current_user: User = Depends(get_current_user_dependency),
@@ -297,7 +301,7 @@ async def delete_relation(
     return result
 
 
-@router.post("/suggest-semantic", response_model=Dict[str, Any])
+@router.post("/suggest-semantic", response_model=SemanticRelationsResponse)
 async def suggest_semantic_relations_api(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),

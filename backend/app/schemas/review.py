@@ -5,9 +5,9 @@
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from ..models.quiz_item import QuestionType, DifficultyLevel
 
@@ -101,6 +101,54 @@ class SM2Info(BaseModel):
     )
 
 
+class GradingDetail(BaseModel):
+    """LLM 语义判分明细（阶段 3.5；阶段 5.1 补齐类型）
+
+    出处：`services/llm/scenes.py:542-548`（`grade_short_answer` 的最后一步）——
+
+        outcome = validate_items([result], GradeResult, source="grade_short_answer")
+        if not outcome.valid:
+            return None
+        return outcome.valid[0].model_dump()
+
+    也就是说这里输出的**就是** `services/llm/structured.py::GradeResult` 的
+    `model_dump()`：`verdict` 必须是 `VERDICTS` 之一（`correct` / `partial` /
+    `incorrect`，`structured.py:45`），`confidence` 被裁剪到 0-1，
+    `missing_points` / `misconceptions` 形状不对时被置为 `[]`。
+    该字典经 `review_service.py:436` 写进 `SubmitAnswerResponse.grading_detail`。
+
+    ⚠️ 本模型**刻意不 import `GradeResult`**：`GradeResult` 带
+    `verdict` 白名单校验器，直接把它当响应模型会让"库里存着历史上某个
+    已下线 verdict 的旧数据"变成 500。响应模型只描述**形状**，
+    不重新执行写入时的业务校验 —— 这是"读到旧数据也不能炸"的要求。
+
+    ⚠️ `verdict` 用 `str` 而不是 `Literal["correct","partial","incorrect"]`：
+    同样的理由（旧数据 + 前端 `grading_detail` 是展示用途）。
+    它现在是 `GradeResult` 的白名单保证的，一旦那个白名单放宽，
+    这里不会跟着报错。
+    """
+
+    verdict: str
+    missing_points: List[str] = Field(default_factory=list)
+    misconceptions: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str = ""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_none(self, handler):
+        """省略"输入里没出现且值为 None"的字段
+
+        与 `schemas.assessment.AssessmentScores._omit_unset_none` 同一个理由与
+        同一个判据（`__pydantic_fields_set__`）：全部字段都有默认值，
+        pydantic 默认会把缺省字段补成 `null` 写进响应，而那是**响应体形状变化**。
+        正常路径下本字段由 `GradeResult.model_dump()` 产出（五键齐全），
+        本规则只在"某个键确实缺失"时生效。
+        """
+        data = handler(self)
+        provided = self.__pydantic_fields_set__
+        return {k: v for k, v in data.items() if v is not None or k in provided}
+
+
 class SubmitAnswerResponse(BaseModel):
     """提交答案响应"""
     quiz_id: str
@@ -128,7 +176,7 @@ class SubmitAnswerResponse(BaseModel):
     grading_reason: Optional[str] = Field(
         default=None, description="判分依据说明，供 UI 展示判分可信度"
     )
-    grading_detail: Optional[Dict[str, Any]] = Field(
+    grading_detail: Optional[GradingDetail] = Field(
         default=None,
         description=(
             "阶段 3.5 的 LLM 语义判分明细："

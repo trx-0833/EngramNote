@@ -64,6 +64,39 @@ class ScanImportResponse(BaseModel):
     unsupported_details: List[ScanSkipDetail] = []
 
 
+# --- 标签维护响应（阶段 5.1：此前这 3 个端点没有 response_model）---
+
+
+class ProjectNotesAddedResponse(BaseModel):
+    """批量给笔记打项目标签的结果
+
+    出处：`project_service.add_notes_to_project` 的 return
+    （`projects.py:232` 的端点原样转发）：
+
+        {"project_id": project.id, "added": added, "not_found": len(note_ids) - added}
+
+    ⚠️ `not_found` 的语义是**差集**（请求了 N 个、实际新增 M 个 → N-M），
+    它同时包含"笔记不存在/在回收站"与"本来就已经打了这个标签"两种情况 ——
+    读这个字段的人会自然以为是前者。**本轮只记录，不改行为**
+    （改分母是产品决策，不是类型修复）。
+    """
+
+    project_id: str
+    added: int
+    not_found: int
+
+
+class ProjectNoteRemovedResponse(BaseModel):
+    """把一篇笔记移出项目的结果
+
+    出处：`project_service.remove_note_from_project` 的 return
+    （`projects.py:264` 的端点原样转发）：`{"message": ..., "note_id": note_id}`
+    """
+
+    message: str
+    note_id: str
+
+
 # --- 请求模型 ---
 
 class ProjectCreate(BaseModel):

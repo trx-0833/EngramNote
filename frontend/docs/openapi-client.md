@@ -648,3 +648,451 @@ npm.cmd run gen:api:drift
 > 16:2x 报 16 条 `Cannot find name 'graphStyles'`（全在 `src/pages/KnowledgeGraph.test.tsx`），
 > 45 秒后重跑即恢复 0 —— 那是另一个 agent 正在编辑该文件的中间状态，
 > 与本轮的 `generated/` 无关（该文件不引用生成目录）。
+
+---
+
+## 11. 前置修复 P1/P2/P3 已完成（**2026-09-14 17:5x，后端侧**）
+
+> 本节由**后端 agent**写。§9.0 的前置表里 P1（22 个端点补 `response_model=`）、
+> P2（4 处内层空壳）、P3（logout 的 body 是否可选）**全部做完**；
+> P4（把 `dump_openapi.py --check` 接进 CI）**没做**，因为它要改 `.github/**`，
+> 那不在本轮允许改动的文件清单里（见 §11.10 与 §11.11）。
+>
+> **本文 §0~§10 一个字都没改**，它们是上一轮的记录。本节的**所有数字都是
+> 修完之后重跑命令得到的**，不是推算的。
+
+### 11.0 一句话结论
+
+| 问题 | 答案 |
+|---|---|
+| §7.1 的 22 个端点解决了吗 | **解决了 20 个**（补了真实 `response_model=`） |
+| 剩下 2 个呢 | **2 个 SSE 端点的 `SCHEMA_UNTYPED` 也归零了**，但不是靠 `response_model=` —— 它们是**流**，`response_model` 是错的工具，改成如实声明 `text/event-stream`（§11.4） |
+| 4 处内层空壳呢 | **5 处全部补齐**（`linked_materials[]` 与 `linked_personal_notes[]` 是两处，§7.1 原文把它们算成一处） |
+| 漂移报告怎么说 | `schemaUntyped` **21 → 0**，`schemaLoose` **1 → 0**，`identical` 19 → 26 |
+| 请求/响应体变了吗 | **没有**。但过程中**改过一个测试**，且发现了 6 处"前端类型与后端现实不符"（§11.7） |
+| 后端测试 | **1051 passed / 3 skipped**（本轮新增 14 条守卫用例） |
+
+### 11.1 重新推导：22 这个数字对，但清单要分两层
+
+这次**没有照抄 §7.1 的清单**，而是直接从 `backend/openapi.json` 机械枚举
+所有操作的 2xx 响应，判定"空 schema `{}` 或 `additionalProperties: true`"。
+结果 **24 个**端点，不是 22 个：
+
+```
+paths=102 ops=118 schemas=156
+UNTYPED / LOOSE 2xx responses: 24
+```
+
+多出来的 2 个是 **`GET /api/notes/{note_id}/video`** 与 **`GET /health`**。
+它们**不在 22 里**，原因不是漏数，而是**口径不同**：
+
+- §7.1 的 22 是"**前端调用方**遇到 `unknown` 的端点数"（漂移脚本按手写函数排的）；
+- 我这里的 24 是"schema 里所有空壳 2xx 端点"（不区分有没有调用方）。
+
+两者只差这两个端点，而它们正好都在 §5 那份"schema 里无前端调用方的 8 个操作"
+名单里（`video` 在名单内，`/health` 也在）。**所以 22 与 24 都能对上，没有矛盾** ——
+但读的时候必须知道分母是什么，否则会出现"清单只有 22 条、实际修了 24 个"的困惑。
+本轮**两个都修了**。
+
+另一个必须写下来的口径事实：**§7.1 的四条分类加起来是 22，但它把
+`linked_materials[]` 与 `linked_personal_notes[]` 写在同一行算一处**，
+实现时是**两个模型**。P2 的动作条目数因此是 5 而不是 4
+（§7.1 表格里那两行本来就是并列写的，只是一行的编号）。
+
+### 11.2 逐端点：模型 + 真实形状是怎么确定的
+
+判定基准是**处理函数真正返回的东西**（handler 的 `return` + 它调用的 service
+的 `return`），**不是**前端类型。前端类型只在最后一步用来对照。
+
+| # | 端点 | 新增/修改的模型 | 形状出处（file:line） |
+|---|---|---|---|
+| 1 | `GET /api/graph/stats` | `GraphStats`（模型本来就有，**只是没挂上**） | `services/graph_service.py:853-860` |
+| 2 | `GET /api/graph/node/{id}/subgraph` | `NodeSubgraph`（同上，模型本就有） | `graph_service.py:1039-1049` |
+| 3 | `POST /api/graph/suggest` | `GraphSuggestResponse`（新） | `api/graph.py:161` + `graph_service.auto_suggest_relations` 返回 `int` |
+| 4 | `POST /api/graph/confirm` | `GraphRelationOperationResponse`（新） | `graph_service.py:409` / `:448` / `:525` / `:545` / `:581` |
+| 5 | `POST /api/graph/reject` | 同上 | 同上 |
+| 6 | `POST /api/graph/relation` | 同上 | `graph_service.py:525` / `:545` |
+| 7 | `DELETE /api/graph/relation/{id}` | 同上 | `graph_service.py:581` |
+| 8 | `POST /api/graph/batch-confirm` | `GraphBatchOperationResponse`（新） | `graph_service.py:1092-1096` |
+| 9 | `POST /api/graph/batch-reject` | 同上 | `graph_service.py:1139-1143` |
+| 10 | `POST /api/graph/suggest-semantic` | `SemanticRelationsResponse`（新，**替掉 `Dict[str, Any]`**） | `graph_service.py:616` 与 `:761-766` |
+| 11 | `DELETE /api/folders/{id}` | `MessageResponse`（新，共用） | `services/folder_service.py:289` |
+| 12 | `DELETE /api/projects/{id}` | `MessageResponse` | `services/project_service.py:245` |
+| 13 | `POST /api/projects/{id}/notes` | `ProjectNotesAddedResponse`（新） | `project_service.py:409-413` |
+| 14 | `DELETE /api/projects/{id}/notes/{nid}` | `ProjectNoteRemovedResponse`（新） | `project_service.py:456` |
+| 15 | `DELETE /api/notes/{id}/annotations/{aid}` | `AnnotationDeleteResponse`（新） | `api/notes/links.py:183` |
+| 16 | `PUT /api/notes/{id}/links` | `LinkUpdateResponse`（新） | `api/notes/links.py:123` |
+| 17 | `GET /api/notes/{id}/versions/{n}` | `NoteVersionContentResponse`（新） | `api/notes/versions.py:147` |
+| 18 | `POST /api/notes/{id}/ask/stream` | **无 JSON 模型**（SSE，见 §11.4） | `api/notes/ask.py:119-123` |
+| 19 | `POST /api/upload/prepare` | `PrepareUploadResponse`（新） | `api/upload.py:682-687` |
+| 20 | `GET /api/understanding/{id}/duplicates` | `CardDuplicateListResponse` + `CardDuplicateItem`（新） | `api/understanding.py:519-525` + `understanding_service.py:600-605` |
+| 21 | `POST /api/knowledge/cards/{id}/generate-questions` | `ExtensionQuestionsTriggeredResponse`（新） | `api/knowledge.py:137-142` |
+| 22 | `POST /api/understanding/ask/stream` | **无 JSON 模型**（SSE，见 §11.4） | `api/understanding.py:670-674` |
+| ＋ | `GET /api/notes/{id}/video` | **无 JSON 模型**（字节流） | `api/notes/list_detail.py:436-461` |
+| ＋ | `GET /health` | `HealthResponse`（新） | `app/main.py:302` |
+
+内层空壳（P2）：
+
+| 位置 | 修复前 | 修复后 | 形状出处 |
+|---|---|---|---|
+| `AssessmentResponse.scores` | `Dict[str, Any]` | `AssessmentScores` | `assessment_service.py:102-108`（compare 5 键）/ `:349-352`（quiz 2 键）/ `:154,233`（未作答 `{}`） |
+| `AssessmentResponse.quiz_questions[]` | `List[Dict[str, Any]]` | `QuizQuestion` | `assessment_service.py:205-209`，LLM 的 `result_data["questions"]` 原样透传 |
+| `AssessmentResponse.quiz_answers[]` | `List[Dict[str, Any]]` | `QuizAnswer` + `QuizJudgment` | `assessment_service.py:338-342`（元素）、`:316-336`（judgment） |
+| `SubmitAnswerResponse.grading_detail` | `Optional[Dict[str, Any]]` | `Optional[GradingDetail]` | `services/llm/scenes.py:542-548` 的 `GradeResult.model_dump()` |
+| `LinkListResponse.linked_materials[]` | `List[dict]` | `LinkedMaterialItem` | `api/notes/links.py:46-53` |
+| `LinkListResponse.linked_personal_notes[]` | `List[dict]` | `LinkedPersonalNoteItem` | `api/notes/links.py:68` |
+
+**"形状出处"这类注释被写进了代码**（每个新模型的 docstring 里都有 `file:line`
+与那段 return 的字面内容），理由是：`response_model=` 最容易的失效方式就是
+"照着前端类型抄一遍"，而下一个人没法判断当时到底看的是哪一边。
+
+### 11.3 一个必须记住的坑：`response_model` 会**补全**可选字段
+
+这是本轮唯一一次"差点改了响应体"的地方，值得单独写下来。
+
+pydantic v2 序列化一个响应模型时，会把**有默认值但输入里没出现的字段
+也写进 JSON**。于是：
+
+```python
+# 修复前
+scores: Dict[str, Any]           # 库里存的是 {} → 响应体 "scores": {}
+# 天真地改成
+scores: AssessmentScores         # 7 个字段都有默认值 → "scores": {"covered_points": null, ...}
+```
+
+`generate-quiz`（未作答的 quiz）的 `scores` 就是 `{}`，所以天真改法会**改变响应体**。
+`exclude_none=True` 是**过粗**的工具：它会把"输入里显式为 `null`"的字段也删掉
+（`covered_points: null` 本来是在的），那是**另一个方向**的形状变化。
+
+正确判据是"**输入里出现过这个键吗**"，也就是 pydantic 的
+`__pydantic_fields_set__`。`AssessmentScores` / `QuizJudgment` / `GradingDetail`
+三个模型都带同一个 `@model_serializer(mode="wrap")`：
+
+```python
+data = handler(self)
+provided = self.__pydantic_fields_set__
+return {k: v for k, v in data.items() if v is not None or k in provided}
+```
+
+实测（16 组输入，含 `{}`、显式 `null`、部分键、嵌套位置）**逐字节相同**。
+如果将来有人给这几个模型加 `exclude_none=True`，形状会静默改变 ——
+`tests/test_semantic_grading.py` 里有一条断言把 `grading_detail` 的
+完整 JSON 钉住了，就是为了防这件事。
+
+### 11.4 SSE 与视频流：`response_model` 是**错的工具**（明说）
+
+§7.1 把 2 个 SSE 端点算进"22 个需要补 `response_model` 的端点"。
+**这个归类是错的**，本轮的处理方式与它不同，理由如下：
+
+1. `response_model=` 的语义是"把返回值当 JSON 数据校验并序列化"。
+   这两个处理函数返回的是 `StreamingResponse` 对象，套上 `response_model`
+   只有两种结局：校验失败，或者**被包装成一次性 `JSONResponse`** ——
+   后者会把流变成"等 LLM 全部生成完再返回一个大 JSON"，
+   是**行为破坏**（前端 `client.ts` 的 `getReader()` 循环会直接失效）。
+2. OpenAPI 3.1 **能**表达 `text/event-stream` 这个 media type，
+   但**没有**表达"事件名 → data 结构"的能力（没有 `events` 关键字）。
+   硬塞一个 JSON schema 只会得到"看起来有类型、实际对不上"的契约。
+
+所以做的不是"补模型"，而是**让 schema 说真话**：
+
+```python
+class EventStreamResponse(StreamingResponse):
+    media_type = "text/event-stream"     # app/schemas/common.py
+
+@router.post("/ask/stream", response_class=EventStreamResponse)
+```
+
+（`response_class` 只在**生成 OpenAPI 时**被读；处理函数仍然显式
+`return StreamingResponse(...)`，Starlette 见到 `Response` 实例就直接用它，
+**运行时不经过这个类**。实测：两个端点的 `content-type` 仍是
+`text/event-stream; charset=utf-8`，`event: error` 帧照常吐出。）
+
+修完的效果：这两个端点在 `openapi.json` 里从
+「`200` → `application/json` → `{}`」变成「`200` → `text/event-stream`」（无 schema）。
+漂移脚本给它们的判定从 `SCHEMA_UNTYPED` 变成 **`NO_JSON_RESPONSE`**，
+`noJsonResponse` 4 → 6。**这才是正确的分类** —— 它们本来就没有 JSON 响应体。
+
+同样处理了 `GET /api/notes/{note_id}/video`（`Mp4StreamResponse`，`video/mp4`）：
+
+- 本地存储模式：**200** 全量流、命中 `Range` 头时 **206** 部分内容；
+- MinIO 模式：**307** 重定向到预签名 URL。
+
+`response_class` 只能把 200/206 的 media type 声明对，
+**307 那一支 OpenAPI 表达不了**（FastAPI 不会为它自动生成响应条目）。
+这个端点在切换时的正确做法是"保持手写"（它本来就没有前端调用方，见 §5）。
+
+**事件契约写在哪了**：`app/api/notes/ask.py` 与 `app/api/understanding.py`
+的**模块 docstring** 里各有一张表。两处的差异必须写清楚，
+否则前端会按同一套解析两种流：
+
+| | `POST /api/notes/{id}/ask/stream` | `POST /api/understanding/ask/stream` |
+|---|---|---|
+| `meta` | `{"provider": "..."}` | `{"retrieval_status": "...", "provider": "..."}` |
+| `token` | `{"content": "..."}` | `{"content": "..."}` |
+| `sources` | **没有这个事件** | `{"sources": [<AnswerSource 数组>], "provider": "..."}` |
+| `done` | `{}` | `{}` |
+| `error` | `{"message": ...}`（空问题/空选中文本时另有 `error_code`） | 同左（空问题时 `error_code=EMPTY_QUESTION`） |
+
+> ⚠️ `sources` 事件里的单个 source **就是** `schemas.knowledge.AnswerSource`
+> （`note_id` / `note_title` / `chapter_title` / `relevant_text` +
+> `chunk_id` / `chunk_index` / `char_start` / `char_end` / `heading_path` /
+> `line_start` / `line_end`）。它是这两个端点里**唯一能被 OpenAPI 复用的部分**，
+> 但它藏在 SSE 帧里，所以 schema 仍然看不到。前端要拿到它的类型，
+> **只能手写** —— 这是 SSE 无法生成客户端的那部分成本的准确边界。
+
+### 11.5 P3：`/auth/logout` 的 body **确实可选**，且 schema 现在说真话
+
+先回答 §9.0 的 P3"是不是真的可选"：**是**。证据有三层：
+
+1. **代码**：`api/auth.py` 的处理函数第一行就是 `body = req or LogoutRequest()`；
+2. **测试**：`tests/test_refresh_tokens.py:497` 的
+   `test_no_request_body_at_all_still_returns_200` 真的发了一次**不带 body** 的
+   `POST /api/auth/logout` 并断言 200 + `revoked == 0`；
+3. **语义**：文档字符串写明"清不干净比校验得严危险得多"，
+   连 `{"refresh_token": null}` / `{}` / `{"all_devices": true}` 都必须 200。
+
+但**契约此前没说真话**：签名是 `req: Optional[LogoutRequest] = None`，
+FastAPI 于是生成 `anyOf: [LogoutRequest, null]` 且 `required: false`。
+"可空"与"可缺省"在生成的客户端里是两件事 —— `body: LogoutRequest | null`
+会逼调用方显式传 `null` 才能满足类型。
+
+改成 `req: LogoutRequest = None`（默认值保留 `None`）：请求体仍标 `required: false`，
+但 schema 变成干净的 `$ref: LogoutRequest`。**运行时行为不变**，
+实测四种形态（无 body / `{}` / `null` / `{"refresh_token": null}`）全部 200 + `revoked: 0`。
+
+### 11.6 命令输出：前后对比（都是真跑出来的）
+
+修完重新生成 schema：
+
+```powershell
+& C:\Users\admin\anaconda3\envs\mineru_env\python.exe backend\scripts\dump_openapi.py
+# [ OK ] 已写入 D:\engramnote\backend\openapi.json (392545 字节) | paths=102 operations=118 schemas=181 sha256=c3adfe8be0a8
+& C:\Users\admin\anaconda3\envs\mineru_env\python.exe backend\scripts\dump_openapi.py --check
+# [ OK ] D:\engramnote\backend\openapi.json 与当前代码一致 | paths=102 operations=118 schemas=181 sha256=c3adfe8be0a8
+```
+
+| | 修前 | 修后 |
+|---|---|---|
+| 文件字节 | 356 080 | **392 545**（+36 465） |
+| `paths` | 102 | 102（**不变**） |
+| `operations` | 118 | 118（**不变**） |
+| `schemas` | 156 | **181**（+25） |
+| `sha256` 前 12 位 | `e21c85952c30` | `c3adfe8be0a8` |
+
+> `paths` / `operations` 不变是关键佐证：本轮**没有增删任何路由**，
+> 只补了响应声明。
+
+漂移报告（`npm run gen:api:drift`，同一份脚本同一份判定口径）：
+
+| 指标 | 修前 | 修后 | 说明 |
+|---|---|---|---|
+| **`schemaUntyped`** | **21** | **0** | ← P1 的主目标 |
+| **`schemaLoose`** | **1** | **0** | ← `suggest-semantic` |
+| `identical` | 19 | **26** | +7 |
+| `hwWider` | 4 | 13 | 前端类型**比后端保证更宽**（见 §11.7） |
+| `conflict` | 34 | 37 | +3：`getNodeSubgraph` / `searchGraphNodes` / `prepareUpload` |
+| `hwNarrower` | 28 | 28 | 不变 |
+| `hwDiscardsBody` | 0 | 1 | `deleteAnnotation`（前端签名是 `Promise<void>`） |
+| `noJsonResponse` | 4 | **6** | +2 = 两个 SSE 端点**分类修正** |
+| `compilerDiagnostics` | 122 | 117 | −5 |
+| `bodyFindings` | 26 | 25 | −1 |
+| `envelopeEndpoints` | 19 | 20 | +1 = `getCardDuplicates` 的 `{duplicates: [...]}` |
+| `envelopeMismatches` | 0 | **0** | 新增的那个也没有被前端当数组解析 |
+| `schemaEnumNotModelled` | 49 | **55** | +6：新声明的枚举（`CardType` / `RelationType` / `RelationStatus` / `SourceType`）暴露出的既有漂移 |
+| `schemaNullableHwNot` | 9 | **34** | +25：同上，新声明的可空字段暴露出的既有漂移 |
+| `unknownQueryParams` / `missingRequiredQuery` | 0 / 0 | 0 / 0 | 不变 |
+| `unconsumedOperations` | 8 | 8 | 不变 |
+
+**`schemaUntyped` 与 `schemaLoose` 双归零 = §7.1 描述的阻塞项已经不存在。**
+
+判定分布的变化（逐函数，23 个函数换了判定）：
+
+```
+src/api/graph.ts       getGraphStats              SCHEMA_UNTYPED -> IDENTICAL
+src/api/graph.ts       suggestRelations           SCHEMA_UNTYPED -> IDENTICAL
+src/api/knowledge.ts   suggestSemanticRelations   SCHEMA_LOOSE   -> IDENTICAL
+src/api/notes.ts       getVersion                 SCHEMA_UNTYPED -> IDENTICAL
+src/api/notes.ts       updateNoteLinks            SCHEMA_UNTYPED -> IDENTICAL
+src/api/projects.ts    deleteFolder               SCHEMA_UNTYPED -> IDENTICAL
+src/api/projects.ts    deleteProject              SCHEMA_UNTYPED -> IDENTICAL
+src/api/client.ts      askQuestionStream          SCHEMA_UNTYPED -> NO_JSON_RESPONSE
+src/api/notes.ts       askNoteQuestionStream      SCHEMA_UNTYPED -> NO_JSON_RESPONSE
+src/api/notes.ts       deleteAnnotation           SCHEMA_UNTYPED -> HW_DISCARDS_BODY
+src/api/graph.ts       confirmRelation            SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       rejectRelation             SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       createRelation             SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       deleteRelation             SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       batchConfirmRelations      SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       batchRejectRelations       SCHEMA_UNTYPED -> HW_WIDER
+src/api/knowledge.ts   generateExtensionQuestions SCHEMA_UNTYPED -> HW_WIDER
+src/api/projects.ts    addNotesToProject          SCHEMA_UNTYPED -> HW_WIDER
+src/api/projects.ts    removeNoteFromProject      SCHEMA_UNTYPED -> HW_WIDER
+src/api/qa.ts          getCardDuplicates          SCHEMA_UNTYPED -> HW_WIDER
+src/api/graph.ts       getNodeSubgraph            SCHEMA_UNTYPED -> CONFLICT
+src/api/upload.ts      prepareUpload              SCHEMA_UNTYPED -> CONFLICT
+src/api/graph.ts       searchGraphNodes           HW_WIDER       -> CONFLICT
+```
+
+**没有一个函数变得更差**：`HW_WIDER` 从 4 涨到 13 是**变准**而不是变差 ——
+"前端类型比 schema 宽"里，7 个是前端**缺字段**（`relation_id` / `project_id` /
+`note_id` / `score` / `target_categories` / `confirmed_count` …），
+2 个是前端签名丢了返回值。这属于 §11.7 那一类。
+
+### 11.7 顺带发现：6 处"前端类型与后端现实不符"（**报告，不修改**）
+
+这几处都是**补完 schema 之后才被机械暴露出来**的，属于 §7.1 P1/P2 的直接产物。
+按要求**没有改任何响应体**去迁就它们，也没有改前端（那不在本轮文件清单里）。
+
+| # | 端点 | 前端类型 | 后端实际给 | 性质 |
+|---|---|---|---|---|
+| 1 | `graph.ts` 的关系操作（6 个） | `GraphOperationResult`（`success` + 4 个**全可选**） | 每个端点各有一份**固定**形状：`{success, relation_id}` / `{success, new_count}` / `{success, confirmed_count, failed_count}` / `{success, rejected_count, failed_count}` | 前端用一个"万能可选"类型盖住 4 种形状 → 已知字段被写成可选，**未知字段被静默丢掉**（`.relation_id` 现在拿不到类型提示） |
+| 2 | `projects.ts addNotesToProject` | `{added, not_found}` | 还有 `project_id` | 前端少知道一个字段 |
+| 3 | `projects.ts removeNoteFromProject` | `{message}` | 还有 `note_id` | 同上 |
+| 4 | `knowledge.ts generateExtensionQuestions` | `{card_id, note_id, message}` | 还有 `target_categories: ["extension"]` | 同上 |
+| 5 | `qa.ts getCardDuplicates` | 没有 `score` | 每条候选都有 `score`（原始 n-gram 分，**排序键**） | 同上；"为什么这条排第一"目前只有后端知道 |
+| 6 | `notes.ts deleteAnnotation` | `Promise<void>` | `{success: true}` | 前端把返回值整个丢了 |
+
+**另外两处是"前端类型里有、后端不给"**（与 §7.4 的 `file_size` 同类）：
+
+- `AssessmentScores.completeness_score`：前端声明了，后端 compare 分支
+  **从来不产出**这个键（提示词要的是 coverage / depth / clarity 三个维度）。
+- `graph.ts GraphEdge.type`（若前端将来要读）：后端两条构建路径都不产出，
+  本轮**没有给它填值**，只是如实声明为可选（`GraphEdge.type`）。
+
+**一处语义名不副实**（值得记一笔，不是 bug）：
+`ProjectNotesAddedResponse.not_found` 是**差集**
+（`len(note_ids) - added`），它同时包含"笔记不存在/在回收站"与
+"本来就已经打了这个标签"两种情况。读这个字段的人会自然以为是前者。
+**改分母是产品决策，本轮只记录。**
+
+### 11.8 序列化口径的两处变化（不是 bug，但必须写下来）
+
+1. **`NodeSubgraph` 的 edges 会多出 `"type": null`。**
+   `GET /graph` 走的是"直接构造 `GraphEdge(...)` 实例"（pydantic v2 不校验实例，
+   缺省字段**不写进 JSON**）；而 `GET /graph/node/{id}/subgraph` 是"从 dict 校验"
+   （缺省的可选字段会被补成 `null`）。加了 `GraphEdge.type` 之后，
+   后者会多出这个键。对前端是**加法**：`edge.type` 从 `undefined` 变成 `null`，
+   两者都是假值。其它可选字段（`similarity_score`）本来就是这样。
+2. **`GraphNode.note_id` / `GraphSearchResult.note_id` 从 `str` 改成 `Optional[str]`。**
+   库里 `KnowledgeCard.note_id` **就是 nullable**（物理删除笔记时"提升核心卡片"
+   会置 NULL，卡片成为独立节点），`get_graph_data` 之所以没炸是因为它构造实例、
+   不走校验；而 `get_node_subgraph` 是**从 dict 校验**的。也就是说：
+   在 `note_id` 声明为 `str` 的世界里，**只要出现一张独立卡片，
+   `GET /graph/node/{id}/subgraph` 就会 500**。改成可空是**修契约**：
+   该字段为 null 时序列化结果与非校验路径完全一致。
+
+### 11.9 测试与 lint
+
+| 检查 | 结果 |
+|---|---|
+| `python -s -m pytest -q`（修前基线） | **1037 passed / 3 skipped**（190.77s） |
+| `python -s -m pytest -q`（修后） | **1051 passed / 3 skipped** |
+| 修后**失败并已处理**的用例 | **1 个**，见下 |
+| `python -m ruff check app tests scripts` | **All checks passed!** |
+| `dump_openapi.py --check` | 退出 0 |
+| 新增守卫用例 | `tests/test_openapi_response_contract.py`，14 条 |
+
+#### 唯一失败的测试：`test_semantic_grading.py::TestGradingDetailReachesTheClient`
+
+```
+>       assert resp.grading_detail["verdict"] == "partial"
+E       TypeError: 'GradingDetail' object is not subscriptable
+```
+
+**判断：测试的读法过时了，模型是对的。**
+
+- 这条用例的**意图**是"判分明细必须真的出现在响应对象上"（它自己在 docstring 里
+  写明：改造前 service 算好并落库了，但 `SubmitAnswerResponse` 没声明字段，
+  pydantic 静默丢弃 → "功能看起来做好了，界面毫无反应"）。
+- 它的**手段**是下标读 dict。本轮把 `grading_detail` 从 `Dict[str, Any]`
+  收紧成 `GradingDetail` 模型（正是为了消灭 §7.1 里那处 `SCHEMA_LOOSE`），
+  于是下标读不再成立 —— 这是**类型收紧的正常后果**，不是"响应模型改坏了序列化"。
+- 因此改的是**测试的读法**（`resp.grading_detail.verdict`），
+  意图与断言的**强度都没有降低**；另外补了一条更强的断言：
+  把 `grading_detail` 的**完整 JSON**钉死，防止将来有人给它加
+  `exclude_none=True` 把形状改坏（§11.3 那个坑）。
+- 这是**唯一**一个因为本轮改动而失败的用例。其余 1036 条全绿，
+  说明"响应模型改变序列化行为"这件事**没有**在别处造成响应体变化。
+
+#### 新增的守卫（防止退回）
+
+`tests/test_openapi_response_contract.py`：用 `app.openapi()` 机械枚举
+**所有**操作，断言每个带 JSON 的 2xx 都不是空壳（`{}` /
+`additionalProperties: true` / 全空壳的 `anyOf`）。白名单是**穷举**的
+（4 个 204 + 2 个 SSE + 1 个视频），每条都写了理由，
+并且有一条断言防止白名单里留下僵尸条目。
+
+**为什么必须有它**：把 `response_model=GraphStats` 删掉，后端现有测试**全绿** ——
+唯一的信号来自前端的漂移报告，而那是另一条 CI 链。
+实测：临时删掉那一行后，新守卫报
+
+```
+GET /api/graph/stats 200: 响应 schema 是空壳 ({}) —— 缺 response_model=
+```
+
+同文件还锁住了：logout 的 body 可选且非 `anyOf`、两个 SSE 端点的 media type
+必须是 `text/event-stream`（**防的是"为了让 schema 有类型而给它硬塞 JSON 模型"**）、
+视频端点是 `video/mp4`、以及 5 处内层空壳必须指向真实 `$ref`。
+
+### 11.10 明确**没有做**的事
+
+| # | 没做的事 | 为什么 | 需要什么才能做 |
+|---|---|---|---|
+| 1 | 给 SSE 端点造 JSON 响应模型 | `response_model` 会把流包装成一次性 JSON，是行为破坏；OpenAPI 也表达不了事件名→data | 前端**必须**手写这 2 个端点的解析（`client.ts:450` / `notes.ts:297` 已经是手写的），并在生成类型之外单独维护 `sources` 事件的 `AnswerSource` 类型 |
+| 2 | 让 `GraphEdge.type` / `similarity_score` 在两条路径上一致 | 属于"改响应内容"，本轮只做类型 | 产品决策；若要做，应在 `get_graph_data` 里也补上并按需要决定是否总是输出 `null` |
+| 3 | 修 `projects.ts` 把 `NoteSummary` 当成 `NoteInFolder`（§7.4 的 `file_size`） | 属 `frontend/src/**`，本轮禁止改动 | 5.1 正式切换时按域替换类型即可暴露（现在仍被记为 `MISSING_REQUIRED_FIELD`） |
+| 4 | 改 `AssessmentScores.completeness_score` 这类"前端有、后端不给" | 要么改前端类型、要么改后端产出，两者都是产品决策 | 先确认 compare 评估到底要不要"完整性"维度 |
+| 5 | 把 `dump_openapi.py --check` 接进 CI（P4） | 要改 `.github/**`，不在本轮允许改动的文件清单里 | 一条 CI step；命令与退出码语义 §1.4 已经写好 |
+| 6 | 拆分 `ProjectNotesAddedResponse.not_found` 的两个含义 | 改字段语义是产品决策，不是类型修复 | 先决定要不要区分"不存在"与"本来就打了标签" |
+| 7 | 让 `QuizQuestion` 的三个字段可选 | 现在收紧成必填，**理论上** LLM 返回缺字段会让 `generate-quiz` 变成 500（此前会静默把半成品传给前端） | 这是**有意的早失败**，但属于新引入的运行时风险，需要观察；触发时给 `key_points` 加 `default_factory=list` 即可，**不要**退回 `Any` |
+
+### 11.11 本轮改动的文件（后端侧，供 5.1 正式切换时对照）
+
+```
+backend/app/api/auth.py                        logout 的 body 签名
+backend/app/api/folders.py                     delete_folder 挂 MessageResponse
+backend/app/api/graph.py                       9 个端点挂模型；删掉未用的 typing 导入
+backend/app/api/knowledge.py                   generate-questions 挂模型
+backend/app/api/notes/ask.py                   SSE media type + 事件契约文档
+backend/app/api/notes/links.py                 links PUT / annotations DELETE 挂模型
+backend/app/api/notes/list_detail.py           视频端点 media type
+backend/app/api/notes/versions.py              get_version_content 挂模型
+backend/app/api/projects.py                    3 个端点挂模型
+backend/app/api/understanding.py               duplicates 挂模型；SSE media type + 事件契约文档
+backend/app/api/upload.py                      prepare 挂模型
+backend/app/main.py                            /health 挂模型
+backend/app/schemas/common.py                  【新】MessageResponse / HealthResponse
+                                               / EventStreamResponse / Mp4StreamResponse
+backend/app/schemas/upload.py                  【新】PrepareUploadResponse
+backend/app/schemas/assessment.py              scores / quiz_questions / quiz_answers 内层
+backend/app/schemas/graph.py                   9 个响应模型 + GraphEdge.type + note_id 可空
+backend/app/schemas/knowledge.py               CardDuplicate* / ExtensionQuestionsTriggered*
+backend/app/schemas/note_annotation.py         AnnotationDeleteResponse
+backend/app/schemas/note_material_link.py      LinkedMaterial* / LinkUpdateResponse
+backend/app/schemas/note_version.py            NoteVersionContentResponse
+backend/app/schemas/project.py                 ProjectNotesAdded* / ProjectNoteRemoved*
+backend/app/schemas/review.py                  GradingDetail
+backend/openapi.json                           重新生成（392 545 字节）
+backend/tests/test_semantic_grading.py         1 处读法（下标 → 属性）+ 1 条形状断言
+backend/tests/test_openapi_response_contract.py 【新】14 条守卫
+```
+
+**没改**：`frontend/src/**`（`src/api/generated/schema.ts` 是
+`npm run gen:api` 的产物，由生成脚本写的）、`frontend/e2e/**`、
+`frontend/scripts/**`、`.github/**`、`docs/overhaul-plan.md`。
+**没加**依赖、**没加** Alembic 迁移、**没提交**。
+
+### 11.12 给 5.1 正式切换的更新版前置判断
+
+§9.0 的 P1/P2/P3 已完成，**§7.1 描述的阻塞项不再成立**。但切换前还需要知道三件事
+（它们不是新的阻塞项，而是"切换时会看到什么"）：
+
+1. **`HW_WIDER` 从 4 涨到 13**：这 13 个里有 9 个是前端**缺字段**。
+   按 §9.1 的 S3 逐域替换时，这些会以"前端 mock 少字段"或
+   "页面读不到本该有的字段"的形式暴露 —— 是**收益**，但要留工时。
+2. **`schemaNullableHwNot` 从 9 涨到 34**：新声明的可空字段把既有的
+   "`x !== null` 放行 `undefined`"问题从 9 处放大到 34 处。
+   §9.2 那条缓解措施（统一改 `x != null`）的**适用面比原来大得多**。
+3. **`schemaEnumNotModelled` 从 49 涨到 55**：同理，新声明的 4 个枚举
+   （`CardType` / `RelationType` / `RelationStatus` / `SourceType`）
+   让"前端写 `string`"的字段处变多了。§9.2 的"枚举收窄连锁反应"要按 55 处估。

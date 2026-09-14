@@ -18,6 +18,8 @@
 因此这里重点锁**降级行为与映射口径**，而不是"能不能调通 LLM"。
 """
 
+import json
+
 import pytest
 
 from app.services.sm2_service import (
@@ -344,9 +346,23 @@ class TestGradingDetailReachesTheClient:
         assert resp.grading_detail is not None, (
             "判分明细没有出现在响应对象上 —— 响应模型漏声明字段，Pydantic 会静默丢弃"
         )
-        assert resp.grading_detail["verdict"] == "partial"
-        assert resp.grading_detail["missing_points"] == ["接地刀闸"]
-        assert resp.grading_detail["misconceptions"] == ["把浮充说成均充"]
+        # 阶段 5.1：`grading_detail` 从 `Dict[str, Any]` 收紧成 `GradingDetail` 模型
+        # （补掉漂移报告里的 SCHEMA_LOOSE 空壳），因此这里按**属性**读而不是下标读。
+        # 断言本身没变：仍然在验"字段真的到了响应对象上、且值没被改过"。
+        # 序列化出去的 JSON 与收紧前逐字节相同（见 schemas/review.py 的
+        # `GradingDetail._omit_unset_none`），所以这是类型收紧而非接口变更。
+        assert resp.grading_detail.verdict == "partial"
+        assert resp.grading_detail.missing_points == ["接地刀闸"]
+        assert resp.grading_detail.misconceptions == ["把浮充说成均充"]
+        # 再补一条"越过了响应模型也还是同一份 JSON"的证据，防止将来有人
+        # 把 GradingDetail 的序列化行为改坏（例如顺手加 exclude_none）。
+        assert json.loads(resp.model_dump_json())["grading_detail"] == {
+            "verdict": "partial",
+            "missing_points": ["接地刀闸"],
+            "misconceptions": ["把浮充说成均充"],
+            "confidence": 0.92,
+            "reason": "漏了一种刀闸",
+        }
 
     async def test_placeholder_response_has_null_detail(self, test_db):
         """未判分时必须是 `null`，不能是空对象

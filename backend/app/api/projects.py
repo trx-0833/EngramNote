@@ -26,9 +26,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models.project import Project
 from ..models.user import User
+from ..schemas.common import MessageResponse
 from ..schemas.project import (
     ProjectCreate,
     ProjectDetailResponse,
+    ProjectNoteRemovedResponse,
+    ProjectNotesAddedResponse,
     ProjectNotesAddRequest,
     ProjectResponse,
     ProjectUpdate,
@@ -141,7 +144,7 @@ async def update_project(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.delete("/{project_id}")
+@router.delete("/{project_id}", response_model=MessageResponse)
 async def delete_project(
     project_id: str,
     current_user: User = Depends(get_current_user_dependency),
@@ -203,7 +206,7 @@ async def scan_project_source(
     return await project_service.scan_project_source(db, project, current_user.id)
 
 
-@router.post("/{project_id}/notes")
+@router.post("/{project_id}/notes", response_model=ProjectNotesAddedResponse)
 async def add_notes(
     project_id: str,
     req: ProjectNotesAddRequest,
@@ -236,7 +239,7 @@ async def add_notes(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.delete("/{project_id}/notes/{note_id}")
+@router.delete("/{project_id}/notes/{note_id}", response_model=ProjectNoteRemovedResponse)
 async def remove_note(
     project_id: str,
     note_id: str,

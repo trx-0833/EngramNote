@@ -27,6 +27,7 @@ import logging
 
 from ..database import get_db
 from ..models.user import User
+from ..schemas.common import MessageResponse
 from ..schemas.folder import (
     FolderCreate,
     FolderDetailResponse,
@@ -201,7 +202,7 @@ async def update_folder(
     return FolderResponse(**updated)
 
 
-@router.delete("/{folder_id}", status_code=status.HTTP_200_OK)
+@router.delete("/{folder_id}", response_model=MessageResponse, status_code=status.HTTP_200_OK)
 async def delete_folder(
     folder_id: str,
     current_user: User = Depends(get_current_user_dependency),
