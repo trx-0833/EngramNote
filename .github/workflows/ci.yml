@@ -136,6 +136,11 @@ jobs:
         # 特意打印"真实库在不在"：2026-09-15 那次 pytest 红，根因就是
         # `backend/data/` 整个不入版本控制 → runner 上没有真库 → 一条
         # 依赖真库的 CLI 用例必然失败。这一行能让同类问题**一眼**定位。
+        #
+        # `continue-on-error` 是必须的：诊断**只是观察者**，它自己出错
+        # （脚本笔误、注解超长被拒）绝不能把一个本来全绿的 job 变红 ——
+        # 否则"为了让失败可见"的手段本身成了新的失败源。
+        continue-on-error: true
         if: failure()
         run: |
           python3 - <<'PY'
@@ -347,6 +352,10 @@ jobs:
         # 只盯 vitest 会在下一次红的时候再一次"看不到现场"。
         # `steps.a11y.outcome` 单独判一次：a11y 是 `continue-on-error`，
         # 它的红不会让 job 红，但仍然需要被看见（否则那一层等于没跑）。
+        #
+        # `continue-on-error`（本步自己）：诊断只是观察者，它出错不能把
+        # 本来全绿的 job 变红 —— 理由同后端那条。
+        continue-on-error: true
         if: failure() || steps.a11y.outcome == 'failure'
         run: |
           python3 - <<'PY'
