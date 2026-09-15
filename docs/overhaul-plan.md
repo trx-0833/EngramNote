@@ -11426,6 +11426,25 @@ TypeError: webidl.util.markAsUncloneable is not a function
 `undici@8` 用到 Node 22 才有的内部 API（`markAsUncloneable`），
 而 jsdom 在 Node 20 上 `require` 它就抛异常。**装得上 ≠ 跑得动。**
 
+**本机决定性复现**（这一步把"最可能的解释"变成"已验证的根因"）：
+装一个 Node 20 不需要动本机环境 —— `npx` 就能取到那个版本的二进制：
+
+```
+frontend> npx -y node@20.19.5 -e "require('jsdom')"
+TypeError: webidl.util.markAsUncloneable is not a function
+    at new CacheStorage (…/node_modules/undici/lib/web/cache/cachestorage.js:20:17)
+    at Object.<anonymous> (…/node_modules/undici/index.js:179:25)
+    at Object.<anonymous> (…/node_modules/jsdom/lib/api.js:12:33)     退出码 1
+
+frontend> node -e "require('jsdom')"     # v22.22.3
+JSDOM_LOADED                                                        退出码 0
+```
+
+两侧的栈**与 CI 注解逐帧一致**（同样的三帧、同样的顺序、同样的消息），
+而且"退出码 1 / 0"正好解释了 vitest 为什么报 `no tests` 而不是"某条用例失败"。
+这同时验证了新增那道守卫的**失败形态**：它不是在"加一条看起来有用的检查"，
+它在 Node 太旧时的报错就是上面第一段。
+
 修法（四层，缺一层就会复发）：
 
 | # | 改动 | 为什么不能省 |
