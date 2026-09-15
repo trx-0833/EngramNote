@@ -114,53 +114,11 @@ jobs:
         continue-on-error: true
 
       - name: Pytest (offline; real network is blocked by tests/conftest.py)
-        id: pytest
         # 环境变量显式声明"禁止联网测试"，让守卫的意图在 CI 里可见。
         # integration 用例会被自动跳过（它们需要真实 LLM / MinerU API key）。
-        #
-        # 输出同时落一份到 `/tmp/pytest.log`：下一步（临时诊断）要在失败时
-        # 把尾部变成注解 —— job 日志端点需要认证，注解匿名可读。
         env:
           ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"
-        run: |
-          set -o pipefail
-          python -m pytest -q 2>&1 | tee /tmp/pytest.log
-
-      - name: 诊断（临时）：把失败步骤的日志尾部写成注解
-        # ⚠️ 临时诊断，CI 全绿之后就删（连同 pytest 那一步里的 `tee`）。
-        # 理由同前端那条：job 日志端点需要认证，而 `::error::` 注解匿名可读。
-        #
-        # 条件从"pytest 红了"放宽成"job 红了"：P4 的 `dump_openapi.py --check`
-        # 也在同一个 job 里，只盯 pytest 会在它红的时候看不到现场。
-        #
-        # 特意打印"真实库在不在"：2026-09-15 那次 pytest 红，根因就是
-        # `backend/data/` 整个不入版本控制 → runner 上没有真库 → 一条
-        # 依赖真库的 CLI 用例必然失败。这一行能让同类问题**一眼**定位。
-        #
-        # `continue-on-error` 是必须的：诊断**只是观察者**，它自己出错
-        # （脚本笔误、注解超长被拒）绝不能把一个本来全绿的 job 变红 ——
-        # 否则"为了让失败可见"的手段本身成了新的失败源。
-        continue-on-error: true
-        if: failure()
-        run: |
-          python3 - <<'PY'
-          import os
-          import platform
-
-          def esc(s: str) -> str:
-              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-
-          real_db = os.path.join('data', 'db', 'engramnote.db')
-          print('::error title=pytest 环境::%s' % esc(
-              'py=%s cwd=%s 真实库存在=%s' % (
-                  platform.python_version(), os.getcwd(), os.path.exists(real_db))))
-
-          if os.path.exists('/tmp/pytest.log'):
-              text = open('/tmp/pytest.log', encoding='utf-8', errors='replace').read()
-              lines = [ln for ln in text.splitlines() if ln.strip()]
-              print('::error title=pytest 尾部（共 %d 行）::%s' % (
-                  len(lines), esc('\n'.join(lines[-45:]))[:7000]))
-          PY
+        run: python -m pytest -q
 
       # 检索质量评测（阶段 2.9）的**绝对指标**刻意不放在 CI 里：
       #   - 绝对指标取决于真实资料内容，写成阈值门禁会在资料更新时误报，
@@ -248,7 +206,6 @@ jobs:
         continue-on-error: true
 
       - name: Vitest (unit + component, jsdom)
-        id: vitest
         # 这一层是**阻断性**的，与 format:check 不同。
         #
         # 为什么必须有：在附录 Z / AA 两轮里前端只有 tsc + eslint + build
@@ -258,19 +215,10 @@ jobs:
         #
         # 用例保持在纯前端范围内：所有 API 模块都被 vi.mock 掉，
         # 不发真实请求，因此不需要后端或数据库。
-        #
-        # 输出同时落一份到 `/tmp/vitest.log`：末尾那条（临时诊断）要在失败时
-        # 把日志尾部变成注解 —— 因为 **job 日志端点需要认证**，而注解公开可读。
-        run: |
-          set -o pipefail
-          npm test 2>&1 | tee /tmp/vitest.log
+        run: npm test
 
       - name: TypeScript + build
-        id: build
-        # 同样落盘一份给末尾的诊断步骤（理由同 vitest 那一步）。
-        run: |
-          set -o pipefail
-          npm run build 2>&1 | tee /tmp/build.log
+        run: npm run build
 
       - name: Cache Playwright browsers
         # 只缓存 Chromium（见下一节）：Playwright 的浏览器是 ~430MB 的独立二进制，
@@ -310,10 +258,7 @@ jobs:
         # CI 里**不需要**另外起服务，也不能改成复用已存在的服务 ——
         # 复用会让"测的到底是哪份代码"不可知（见 playwright.config.ts 注释）。
         timeout-minutes: 10
-        id: e2e
-        run: |
-          set -o pipefail
-          npm run e2e 2>&1 | tee /tmp/e2e.log
+        run: npm run e2e
 
       - name: Playwright a11y audit (axe-core, advisory)
         # ── 为什么这一层是**建议性**的、而不是阻断性的 ────────────────────
@@ -342,55 +287,7 @@ jobs:
         # 本机实测约 21~24 秒。
         continue-on-error: true
         timeout-minutes: 10
-        id: a11y
-        run: |
-          set -o pipefail
-          npm run a11y 2>&1 | tee /tmp/a11y.log
-
-      - name: 诊断（临时）：把失败步骤的日志尾部写成注解
-        # ⚠️ 这一条是**临时诊断**，CI 全绿之后就删（连同各步骤里的 `tee`）。
-        #
-        # 为什么需要它：job 日志要认证才能下载（403），但 `::error::` 注解可以
-        # 匿名读（实测 `/check-runs/{id}/annotations`）。本机（Windows / Node 22）
-        # 全绿而 runner 上红时，注解是**唯一**能看到现场的东西。
-        #
-        # 覆盖范围刻意是**所有**会失败的步骤：2026-09-15 修掉 Node 版本之后，
-        # `TypeScript + build` / Playwright 两层是**第一次**在 Linux 上真跑，
-        # 只盯 vitest 会在下一次红的时候再一次"看不到现场"。
-        # `steps.a11y.outcome` 单独判一次：a11y 是 `continue-on-error`，
-        # 它的红不会让 job 红，但仍然需要被看见（否则那一层等于没跑）。
-        #
-        # `continue-on-error`（本步自己）：诊断只是观察者，它出错不能把
-        # 本来全绿的 job 变红 —— 理由同后端那条。
-        continue-on-error: true
-        if: failure() || steps.a11y.outcome == 'failure'
-        run: |
-          python3 - <<'PY'
-          import os
-          import platform
-
-          def esc(s: str) -> str:
-              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-
-          print('::error title=环境::%s' % esc(
-              'node=%s cwd=%s 测试文件数=%d' % (
-                  platform.python_version(), os.getcwd(),
-                  sum(1 for r, _, fs in os.walk('src')
-                      for f in fs if f.endswith(('.test.ts', '.test.tsx'))),
-              )))
-          # git 里的测试文件数：与磁盘对比即可排除"文件没被跟踪"这一类误判
-          tracked = os.popen("git ls-files 'src/**/*.test.ts' 'src/**/*.test.tsx' | wc -l").read().strip()
-          print('::error title=git 跟踪的测试文件数::%s' % esc(tracked))
-
-          for path in ('/tmp/vitest.log', '/tmp/build.log', '/tmp/e2e.log', '/tmp/a11y.log'):
-              if not os.path.exists(path):
-                  continue
-              text = open(path, encoding='utf-8', errors='replace').read()
-              lines = [ln for ln in text.splitlines() if ln.strip()]
-              body = '\n'.join(lines[-45:])
-              print('::error title=%s 尾部（共 %d 行）::%s' % (
-                  os.path.basename(path), len(lines), esc(body)[:7000]))
-          PY
+        run: npm run a11y
 
   security-scan:
     name: Security scan (advisory)

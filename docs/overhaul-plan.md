@@ -11538,6 +11538,41 @@ CI 断言文字的形状一致（`评测脚本退出码 1: Traceback …`）。*
 （`check_env.py` 现在读 `package.json`；前端 job 现在直接 `require('jsdom')` 去问运行时；
 Node 版本现在读 `.nvmrc`）。
 
+#### BO.5.5 收口：**CI 全绿（run #10 / sha `ac07020`）**，临时诊断按约定撤除
+
+第 4 次推送（run **#10**）**四个 job 全部 success**，而且这是历史上第一次
+这些关卡真的在 runner 上跑完 —— 之前每一轮都因为前面那处红而把后面的步骤
+`skipped` 掉了：
+
+| job | 关键步骤（按顺序） | 结论 |
+|---|---|---|
+| Backend (lint + tests, offline) | ruff ×3 → **`dump_openapi.py --check`** → ruff format（顾问） → **pytest** | ✅ 全绿 |
+| Frontend (lint + typecheck + build) | setup-node（**读 `.nvmrc`**） → `npm ci` → **新增的 jsdom 守卫** → ESLint → `gen:api` 幂等 → Prettier → **Vitest** → **`tsc && vite build`** → 装 Chromium → **Playwright E2E** → **a11y 审计** | ✅ 全绿（**后四项首次在 Linux 上真跑**） |
+| Security scan (advisory) | pip-audit / npm audit | ✅ |
+| Docker build context sanity | 四条守卫生效 | ✅ |
+
+> 步数口径：上面的"全绿"指 **job 定义里写着的步骤**（后端 9 条 / 前端 13 条，
+> 撤除诊断后的条数）**无一失败**。run 的报告里还会多出 runner 自己补的
+> `Set up job` 与 `Post …` / `Complete job`，因此界面上看到的条数会多几条。
+
+两个 job 末尾那条临时诊断都显示 `skipped` —— 这正是它该有的样子（只在失败时执行）。
+既然它已完成使命（**两次红的根因都是靠它交出来的注解定位的**），按 BO.5.2 里
+写下的约定**撤除**：
+
+- 删掉两条"诊断（临时）"步骤；
+- `npm test` / `npm run build` / `npm run e2e` / `npm run a11y` / `pytest`
+  恢复成不带 `tee` 的直连命令（`set -o pipefail` 一并去掉 —— 它当初只是为了
+  让管道里的失败不被 `tee` 吞掉，没有 `tee` 就不需要它）；
+- 删掉只为诊断存在的 `id: pytest / vitest / build / e2e / a11y`。
+
+**净变化可以逐行核对**：`git diff <诊断引入前> -- .github/workflows/ci.yml`
+只有 **60 行**增删，全是本轮真正想留下的东西（P4 的环境变量、Node 版本、
+那道 jsdom 守卫、以及两处注释更正），**没有任何脚手架残留**。
+
+**留下的是知识，不是脚手架**：job 日志为什么看不到（`/actions/jobs/{id}/logs` → 403）、
+注解为什么能匿名读（`/check-runs/{id}/annotations` → 200）、"让 CI 自己交出现场"
+这套做法、以及两次红的完整根因，都在 BO.5.2 / BO.5.3 里。下次遇到同类情况照着做即可。
+
 
 | # | 事项 | 状态 |
 |---|---|---|
@@ -11551,7 +11586,14 @@ Node 版本现在读 `.nvmrc`）。
 
 ---
 
-**文档版本**：v5.15（**2026-09-15 CI 三次红 → 逐次定位 → 全绿**：第一次带着本轮新关卡
+**文档版本**：v5.16（**2026-09-15 CI 全绿收口**：run **#10**（sha `ac07020`）**四个 job
+全部 success** —— 这是本轮新加的前端 vitest / Playwright 两层 / 契约检查**第一次**在
+runner 上真的跑完（此前每一轮都被前面那处红 `skipped` 掉：后端 job 9 条、前端 job 13 条
+步骤无一失败，口径见 BO.5.5）；
+临时诊断按 BO.5.2 里写下的约定**撤除**，`ci.yml` 相对"诊断引入前"的净变化只剩
+**60 行**（全是 P4 环境变量、Node 版本、jsdom 守卫与两处注释更正）——
+逐项台账见**附录 BO.5.5**，根因见 BO.5.2 / BO.5.3；
+v5.15 —— **2026-09-15 CI 三次红 → 逐次定位 → 全绿**：第一次带着本轮新关卡
 真跑 CI，连红三轮，每轮的根因都写进**附录 BO.5** —— ① 后端 `dump_openapi.py --check`
 缺环境变量（BO.5.1，已修）；② 前端 **vitest 报 `Test Files  no tests`**，
 根因是 **runner 上 Node 20 装得下 `jsdom@30` 却跑不动它**（`undici@8` 要 Node ≥22.19，
