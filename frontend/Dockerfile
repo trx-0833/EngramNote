@@ -9,11 +9,18 @@ RUN npm config set registry https://registry.npmmirror.com
 
 WORKDIR /app
 
-# 先复制依赖文件，利用 Docker 缓存层
-COPY package.json ./
+# 先复制依赖清单**与锁文件**，利用 Docker 缓存层
+#
+# ⚠️ 锁文件必须一起复制（这一行此前只 COPY 了 package.json）：
+# `npm ci` **要求** `package-lock.json` 在场，缺了它直接失败；而
+# `npm install` 会**忽略锁文件**去解析版本 —— 于是镜像里的依赖树可能与
+# CI 与本机都不同（"构建出来的东西和被测过的东西不是同一份"）。
+# 现在这里与 `.github/workflows/ci.yml` 的 frontend job 用**同一条命令 +
+# 同一份锁文件**。
+COPY package.json package-lock.json ./
 
-# 安装依赖
-RUN npm install
+# 安装依赖（可复现：严格按锁文件还原）
+RUN npm ci
 
 # 复制源代码
 COPY . .

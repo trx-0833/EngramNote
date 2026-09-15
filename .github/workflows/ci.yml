@@ -412,3 +412,22 @@ jobs:
             echo "::error::frontend/.dockerignore 缺失或未排除 node_modules"
             exit 1
           fi
+
+      - name: frontend Dockerfile must install from the lockfile
+        # 回归守卫（2026-09-14 补）：该文件此前是 `COPY package.json ./` +
+        # `RUN npm install`，**两处都不对**，而且它们是一对：
+        #   * `npm install` 会忽略锁文件去解析版本 → 镜像里的依赖树可能与
+        #     CI 与本机都不同（"构建出来的东西和被测过的东西不是同一份"）；
+        #   * 只把 `install` 改成 `ci`、却不补锁文件的 COPY，`npm ci` **直接失败**。
+        #     实测：只给 package.json 时 `npm ci` 报 EUSAGE 退出 1；
+        #     补上 package-lock.json 后同一条命令 "added 371 packages" 退出 0。
+        # 所以两条一起守，缺一条都回到"镜像构建与 CI 不是同一份依赖"。
+        run: |
+          if ! grep -q "COPY package.json package-lock.json" frontend/Dockerfile; then
+            echo "::error::frontend/Dockerfile 没有复制 package-lock.json（npm ci 需要它）"
+            exit 1
+          fi
+          if ! grep -q "RUN npm ci" frontend/Dockerfile; then
+            echo "::error::frontend/Dockerfile 不是用 npm ci 安装（锁文件必须被尊重）"
+            exit 1
+          fi

@@ -3275,7 +3275,14 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 
 | # | 动作 | 验收 | 状态 |
 |---|---|---|---|
-| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **S1 / S2 / S3a / S3b / S4 已完成，S5 与 P3 未做**（**2026-09-14 续记**，见附录 BL / BM）。历史：第一期只生成与对比 —— `backend/openapi.json`（现已 103 路径 / 119 操作 / 184 schema）与 `src/api/generated/schema.ts` 落盘，漂移检查器（**TypeScript 编译器 API，不是正则**）判定 111/111 端点全部命中，当时分布 IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21。**续记**：P1–P3 补完（`schemaUntyped 21 → 0`）→ **S2 换响应类型**（`identical 19 → 104`）→ **S3a 换请求体**（34 个 JSON 请求体接入契约；`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、`compilerDiagnostics 2 → 0`、`identical 104 → 105`）→ **S3b 换查询串**（18 个调用点；参数名改为编译期检查，仪器三处升级 + 两个新分母，两次变异验证）→ **S4 收敛 `client.ts`**（三处重复错误解析合一；"删除重复类型"经清点在 S2 已完成）→ **P4 接进 CI**（`dump_openapi.py --check` + `gen:api` 幂等性两条配对步骤）。全程**分母未动**：判定对象 111、被比过的请求体 34、参数名检出 54。**未做**：**S5**（5.2 / 5.3，计划已出，见附录 BM.6）、**P3**（logout body 是否可选）。逐点记录见 `frontend/docs/openapi-client.md` §14 / §15 |
+| 5.1 | **从 OpenAPI 生成类型与客户端**，替换手写 API 函数（**111** 个 —— **原文写"90 个"，2026-09-14 实测修正**，见附录 BH）与重复类型 | 前后端契约不可能漂移 | 🟡 **S1 / S2 / S3a / S3b / S4 已完成，S5 与 P3 未做**（**2026-09-14 续记**，见附录 BL / BM）。历史：第一期只生成与对比 —— `backend/openapi.json`（现已 103 路径 / 119 操作 / 184 schema）与 `src/api/generated/schema.ts` 落盘，漂移检查器（**TypeScript 编译器 API，不是正则**）判定 111/111 端点全部命中，当时分布 IDENTICAL 19 / HW_NARROWER 28 / HW_WIDER 4 / CONFLICT 34 / SCHEMA_UNTYPED 21。**续记**：P1–P3 补完（`schemaUntyped 21 → 0`）→ **S2 换响应类型**（`identical 19 → 104`）→ **S3a 换请求体**（34 个 JSON 请求体接入契约；`bodyFindings 25 → 0`、`hwDiscardsBody 1 → 0`、`compilerDiagnostics 2 → 0`、`identical 104 → 105`）→ **S3b 换查询串**（18 个调用点；参数名改为编译期检查，仪器三处升级 + 两个新分母，两次变异验证）→ **S4 收敛 `client.ts`**（三处重复错误解析合一；"删除重复类型"经清点在 S2 已完成）→ **P4 接进 CI**（`dump_openapi.py --check` + `gen:api` 幂等性两条配对步骤）。全程**分母未动**：判定对象 111、被比过的请求体 34、参数名检出 54。**未做**：**S5**（5.2 / 5.3，计划已出，见附录 BM.6）。
+**P3 已收口**（2026-09-14 复核）：`POST /api/auth/logout` 的请求体**确实可选**，
+且这件事在 5.1 那一轮就改完了 —— 签名从 `Optional[LogoutRequest] = None` 改成
+`req: LogoutRequest = None`，schema 里因而是干净的 `requestBody?: $ref`（不再有
+`| null` 分支），运行时行为不变（`req or LogoutRequest()` 兜底）；
+理由（登出必须在访问令牌过期后仍可用、幂等、未认证但需持令牌）写在
+`app/api/auth.py` 的 logout docstring 里（第 3 点与"请求体为什么真的可选"两节）。
+逐点记录见 `frontend/docs/openapi-client.md` §14 / §15 |
 | 5.2 | 引入 **TanStack Query**：替换手写 fetch + `setInterval` 轮询 | 有缓存/重试/取消/去重 | ⏸ **未做（计划已出，待批）**：`frontend/package.json` 里没有 `@tanstack/react-query`（`swr` / `jotai` / `redux` 同样没有），`src/**` 零命中；**28 个文件在 `useEffect` 里取数、3 处 `setInterval` 轮询**（实测）。迁移计划（4 个批次、5 条不变量、行为变化清单、四个待决策项）见 `frontend/docs/query-and-state-plan.md` 与附录 BM.6 |
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做（计划已出，待批）**：`frontend/package.json` 里没有 `zustand`，`from 'zustand'` 零命中；今天是 2 个 context（`AuthContext` / `Toast`）+ props 传递。⚠️ 验收口径需改：最大的页面是 `DailyMaterials.tsx` **682** 行 / `GraphSidebar.tsx` **679** / `Dashboard.tsx` **676**，"全部减半"在不重写 UI 的前提下做不到 —— 计划里换成三条可测口径（详见计划文档 §3.3） |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
@@ -11103,7 +11110,7 @@ M1 那行里最值得记的是：**报错项（`unknownQueryParams`）始终是 
 | # | 事项 | 现状 / 下一步 |
 |---|---|---|
 | 1 | **S5（5.2 / 5.3）** | 计划已出、**未动手**；等 BM.6 的四个决定 |
-| 2 | P3：`POST /api/auth/logout` 的 body 是否真的可选 | 未动（前端与契约一致） |
+| 2 | ~~P3：`POST /api/auth/logout` 的 body 是否真的可选~~ | ✅ **已收口**（复核发现 5.1 那轮就改完了）：签名 `req: LogoutRequest = None`，schema 是干净的 `requestBody?: $ref`（无 `| null` 分支），运行时不变；理由写在 `app/api/auth.py` 的 logout docstring（见 5.1 行的补记） |
 | 3 | `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 是否统一 | 未动（行为变更，需单独决策） |
 | 4 | 清空字段的服务层语义 | 未动（`project_service.py:196-199` / `understanding.py:465-468` / `knowledge.py:180-183` 三处 `if x is not None`） |
 | 5 | RAG 向量通道 `hybrid` 的成因 | 未定论；判定方法见 BL.8 第 6 条 |
@@ -11183,6 +11190,10 @@ M1 那行里最值得记的是：**报错项（`unknownQueryParams`）始终是 
 ⚠️ 我此前给的两个说法都不对：`task.get(10)` 的 10 秒超时**不是**本例的原因
 （它在"问题编码"那一侧，且超时不取消任务），"索引时滞"这个说法也太含糊 ——
 时滞的原因就是"没人跑脚本"。
+
+**第二次独立复现（同日，前端提示接线之后跑的那次全链路）**：上传 →
+38 秒后提问，`retrieval_status` 仍是 `hybrid`、`sources: 1`（BM25 找到了那一段）、
+`done: true` —— **不是偶发**，而是"刚导入的笔记在补嵌入之前必然如此"。
 
 ### BN.5 只有"代码级证据"、没有实测的一条
 
