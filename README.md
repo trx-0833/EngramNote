@@ -143,6 +143,9 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
 > —— 这是 2026-09-15 CI 上真实踩到的坑（`docs/overhaul-plan.md` 附录 BO.5）。
 > `check_env.py` 会读上面那个字段来判版本，CI 的前端 job 里另有一道
 > `node -e "require('jsdom')"` 守卫，让这类失败**指名道姓**。
+> 开发机用 `nvm use` 的话，`frontend/.nvmrc` 也钉在同一个下界（`22.22.2`），
+> 而且 **CI 的 `setup-node` 直接读这个文件**（`node-version-file`）——
+> 版本号只有一处，不会出现"CI 与开发机各写一个、然后悄悄漂移"。
 
 ### 一键安装与检测
 
@@ -605,11 +608,11 @@ python -c "from modelscope import snapshot_download; snapshot_download('Qwen/Qwe
 | 依赖安全 | `pip-audit` / `npm audit`（结果归档 + job summary） | 建议性 |
 | 部署配置 | `nginx.conf` 两条（`client_max_body_size` / `proxy_buffering off`）+ `.dockerignore` + `Dockerfile` 用锁文件安装 | 阻断 |
 
-> **前端那几层的运行时前提**：CI 前端 job 固定 **Node 22**（`engines.node` 就是
-> `jsdom@30` 的要求），并在装完依赖后先跑一道
-> `node -e "require('jsdom')"` 守卫 —— 否则 Node 版本不对时，vitest 的失败
-> 形态是一句与原因无关的 `Test Files  no tests`（2026-09-15 实测，见
-> `docs/overhaul-plan.md` 附录 BO.5）。
+> **前端那几层的运行时前提**：CI 前端 job 的 Node 版本**读 `frontend/.nvmrc`**
+> （`22.22.2` = `engines.node` 的下界，也是 `jsdom@30` 的要求），并在装完依赖后
+> 先跑一道 `node -e "require('jsdom')"` 守卫 —— 否则 Node 版本不对时，
+> vitest 的失败形态是一句与原因无关的 `Test Files  no tests`（2026-09-15 实测，
+> 见 `docs/overhaul-plan.md` 附录 BO.5）。
 
 - [安全扫描记录](docs/security-scan.md) — 当次 `pip-audit` / `npm audit` 的原始结果与"为什么不设阈值"的处置口径
 

@@ -11453,6 +11453,7 @@ JSDOM_LOADED                                                        退出码 0
 | 2 | 前端 job 新增一步 `node -e "require('jsdom')"`（**独立成步**） | 把"Node 太旧"变成**步骤名自己就是诊断**。塞进 `&&` 里只会又得到一句 `no tests` |
 | 3 | `frontend/package.json` 的 `engines.node`：`>=18.0.0` → **`^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0`**（`package-lock.json` 里根条目的镜像字段同步改） | 旧声明是**假话**：它让 npm 在 Node 18/20 上只发警告。改后 npm 的 EBADENGINE 直接点名要求 |
 | 4 | `frontend/Dockerfile` 的 `node:18-alpine` → **`node:22-alpine`** | 同一份锁文件、同一类坑。⚠️ **这一处未经构建验证**（本约束：不用 Docker），只保证与 CI/本机一致 |
+| 5 | `frontend/.nvmrc`：`18` → **`22.22.2`**，并让 CI 的 `setup-node` **读这个文件**（`node-version-file: frontend/.nvmrc`）而不是在 workflow 里再写一个 `"22"` | `nvm use` 的人原本会拿到 Node 18（同一个谎的第三种写法）。而"两个文件各写一个版本号"正是本轮反复出问题的形态本身 —— 能读文件就不要抄常量 |
 
 顺带把**用户侧的同一个谎**也修了：`check_env.py` 原来写死 `major >= 18`，
 于是它在 Node 20 上打印 `✅ Node.js v20`，而同一台机器的 `npm test` 报 `no tests`。
@@ -11526,14 +11527,16 @@ CI 断言文字的形状一致（`评测脚本退出码 1: Traceback …`）。*
 #### BO.5.4 这一轮顺带暴露的一类系统性缺陷：**"声明与现实不符"**
 
 三次红里有**两次**不是代码错，而是**声明过期**：`engines.node: >=18.0.0`（真实要求 22.22.2）、
-`node:18-alpine`（同一份锁文件）、`check_env.py` 里写死的 `18`、以及 `ci.yml` 那段
-"评测不放进 CI"的注释。它们全都在**同一个方向**上撒谎：**把要求说得比实际低** ——
+`node:18-alpine`（同一份锁文件）、`check_env.py` 里写死的 `18`、`frontend/.nvmrc` 里的 `18`、
+以及 `ci.yml` 那段"评测不放进 CI"的注释。它们全都在**同一个方向**上撒谎：
+**把要求说得比实际低** ——
 于是失败发生在离原因最远的地方（`no tests`、`file not found`、`exit code 1`）。
 
 这与本仓库此前抓到的"检查自身空转"是同一族病，只是方向相反：
 那边是**报了绿但什么都没测**，这边是**声明比现实宽松**。判据也一样地机械：
 **凡是"某个常量描述另一个文件的事实"，都该改成读那个文件**
-（`check_env.py` 现在读 `package.json`；前端 job 现在直接 `require('jsdom')` 去问运行时）。
+（`check_env.py` 现在读 `package.json`；前端 job 现在直接 `require('jsdom')` 去问运行时；
+Node 版本现在读 `.nvmrc`）。
 
 
 | # | 事项 | 状态 |

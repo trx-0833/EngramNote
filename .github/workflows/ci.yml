@@ -184,7 +184,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # ⚠️ 必须是 22 —— 不是"随便挑个新版本"，而是**依赖自己的要求**：
+          # 版本**读 `frontend/.nvmrc`**（= 开发机 `nvm use` 用的同一个文件），
+          # 不在 CI 里另写一个常量 —— 这就是本轮反复出现的那类缺陷：
+          # "某个常量描述另一个文件的事实"，两处一旦漂移，失败还发生在离原因最远的地方。
+          # `.nvmrc` 的值（22.22.2）同时是 `engines.node` 的下界。
+          #
+          # ⚠️ 为什么必须是 22 —— 不是"随便挑个新版本"，而是**依赖自己的要求**：
           #   - `jsdom@30` 的 engines 是 `^22.22.2 || ^24.15.0 || >=26.0.0`
           #   - 它依赖的 `undici@8` 要求 `node >= 22.19.0`
           # 本机（Node 22.22.3）一直是绿的，所以这一条在 2026-09-15 CI 第一次
@@ -193,8 +198,10 @@ jobs:
           # 期就炸 —— 失败形态是每个测试文件的**环境初始化**都失败，
           # vitest 汇总成一句极具误导性的 `Test Files  no tests`（看起来像
           # "找不到测试文件"，与真实原因"Node 太旧"毫无关系）。
+          # 本机用 `npx -y node@20.19.5 -e "require('jsdom')"` 复现出的栈与 CI
+          # 注解逐帧一致（见 docs/overhaul-plan.md 附录 BO.5.2）。
           # 下一个步骤把这个坑单独钉出来，让它以后一眼可见。
-          node-version: "22"
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
