@@ -11330,29 +11330,58 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 而前一次尝试恰好撞上不可达的那一段。判据要按**多次尝试的成功率**看，
 不要按单次失败下"这条路不通"的结论（我第一次的结论就下早了）。
 
-### BO.5 CI：第一次带着本轮新关卡真实执行
+### BO.5 CI：第一次带着本轮新关卡真实执行 —— **两处红，都记账**
 
-推送触发了 CI（`CI` workflow，run **#6**，sha `9afcfed`），随后用 GitHub 公开 API
-轮询到结论 —— 这是四条新关卡第一次在 GitHub runner 上跑：
+推送触发 CI（`CI` workflow，run **#6**，sha `9afcfed`）。逐 job 结果：
 
-| 关卡 | 本机实测 | runner 实测 |
+| job | 结论 | 说明 |
 |---|---|---|
-| `python scripts/dump_openapi.py --check` | 退出 0 | 见 BO.5.1 |
-| `npm run gen:api` + `git diff --exit-code -- src/api/generated/schema.ts` | 退出 0（幂等） | 见 BO.5.1 |
-| `frontend/Dockerfile` 两条守卫（`COPY … package-lock.json` / `RUN npm ci`） | 当前文件 OK、旧形态 FAIL | 见 BO.5.1 |
-| `nginx.conf` 两条守卫（既有） | 未改动 | 见 BO.5.1 |
+| Backend (lint + tests, offline) | ❌ | ruff 三条 ✅、**新增的 `dump_openapi.py --check` 红**（后续 pytest 因此被跳过） |
+| Frontend (lint + typecheck + build) | ❌ | ESLint ✅、**新增的 `gen:api` 幂等检查 ✅**、Prettier ✅、**Vitest 红**（后续 build / e2e / a11y 被跳过） |
+| Security scan (advisory) | ✅ | 建议性 job，正常跑完 |
+| Docker build context sanity | ✅ | **四条守卫全过**（含本轮新加的两条：`COPY … package-lock.json` / `RUN npm ci`） |
 
-历史对照：上一轮 CI（run **#5**，sha `c951eb1`，2026-09-11）**成功** ——
-说明这套工作流在本项目上是能跑绿的，本轮的失败（如果有）应当先怀疑**新加的那几条**，
-而不是怀疑环境。
+**历史对照很重要**：上一轮"绿"的 CI（run **#5**，sha `c951eb1`，2026-09-11）里
+**既没有 vitest 也没有 e2e/a11y/契约检查** —— 那套前端测试框架是本轮之前的几轮才加的。
+所以"前端 vitest 红"**不是本轮引入的回归**，而是它**第一次在 runner 上跑**。
 
-#### BO.5.1 runner 上的逐 job / 逐 step 结果
+#### BO.5.1 后端那一步的根因与修复（真问题，已修）
 
-**（结论见下方"CI 结果"一栏；本节在拿到结论后回填）**
+```
+pydantic_core._pydantic_core.ValidationError: 1 validation error for Settings
+  Value error, 生产环境必须配置 JWT_SECRET_KEY（生成方法：python -c "…token_hex(32)"）
+```
 
-CI 结果：见下一节 BO.6（拿到 runner 结论后写入）。
+- **为什么会这样**：runner 上没有 `backend/.env`（被 `.gitignore` 忽略，本机才有一份），
+  而 `app/config.py:491` 的 `app_env` 默认值是 **`prod`**，`:566` 的校验于是要求 `JWT_SECRET_KEY`
+  → `import app.main` 当场抛异常 → 这一步报的其实是"**环境不满足**"，
+  **不是**"契约不一致"。这两件事必须能分开，否则门禁会以"契约漂移"的名义撒谎。
+- **本机复现**：把 `app/` + `scripts/` 拷到**没有 `.env`** 的临时目录，跑同一个脚本 → 同样报错（决定性）。
+- **修法**（与 `tests/conftest.py:61` 对 pytest 做的事一致：那里早就
+  `os.environ.setdefault("JWT_SECRET_KEY", …)`，注释里写明了这个坑）：
+  给这一步 `APP_ENV=dev` + 一个**假**的 `JWT_SECRET_KEY`。
+- **关键验证**：带上这两个变量、在**没有 `.env`** 的目录里生成，
+  产物与仓库里的 `openapi.json` **逐字节相同**（402 798 字节 / sha256 `2e0f1a88eb49`）
+  ⇒ **schema 本身与环境无关**，缺的只是"让 import 过 Settings 校验"这两个变量。
 
-### BO.6 悬着的小事（本轮之后）
+#### BO.5.2 前端 vitest：第一次在 runner 上跑，原因靠"让 CI 自己交出来"定位
+
+job 日志端点要认证（`/actions/jobs/{id}/logs` → **HTTP 403**），
+但 **check-run 的注解匿名可读**（本轮实测：`/check-runs/{id}/annotations` 返回 200）。
+于是给前端 job 加了一条**临时**诊断：`npm test` 的输出落 `/tmp/vitest.log`，
+失败时用 `::error::` 把"失败用例 + 断言摘要 + 环境"写成注解（按 GitHub 规则转义换行）。
+
+本机（Windows / Node 22）先排除了四类常见成因（都是机械检查，不是猜）：
+
+| 成因 | 结论 |
+|---|---|
+| 大小写不一致的导入（Windows 绿 / Linux 红） | **442 个相对导入全查，0 命中**（`tsc` 管不到 CSS/资源导入，所以单独查了） |
+| 依赖 `dist/` 等构建产物 | 测试不读产物；且 CI 里 vitest 跑在 `vite build` **之前** |
+| 时区 / locale | 测试里 `toLocale*` 零命中 |
+| Node 新 API（21+/22+） | `Object.groupBy` / `withResolvers` / `toSorted` / `structuredClone` 等零命中 |
+| `process.env.CI` 分支 | 测试里零命中 |
+
+**结论与修法：见 BO.5.3（拿到注解后回填）。**
 
 | # | 事项 | 状态 |
 |---|---|---|

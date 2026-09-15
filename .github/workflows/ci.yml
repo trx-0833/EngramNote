@@ -114,11 +114,36 @@ jobs:
         continue-on-error: true
 
       - name: Pytest (offline; real network is blocked by tests/conftest.py)
+        id: pytest
         # 环境变量显式声明"禁止联网测试"，让守卫的意图在 CI 里可见。
         # integration 用例会被自动跳过（它们需要真实 LLM / MinerU API key）。
+        #
+        # 输出同时落一份到 `/tmp/pytest.log`：下一步（临时诊断）要在失败时
+        # 把尾部变成注解 —— job 日志端点需要认证，注解匿名可读。
         env:
           ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"
-        run: python -m pytest -q
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee /tmp/pytest.log
+
+      - name: 诊断（临时）：把 pytest 失败尾部写成注解
+        # ⚠️ 临时诊断，拿到失败原因后就删（理由同前端那一条）。
+        # 第一次真跑 CI 时这一步报的是 `Event loop is closed`，而**本机 1119 passed**；
+        # 上一轮绿的 CI（run #5）里 pytest 是通过的，所以要看到真正的失败栈。
+        if: failure() && steps.pytest.outcome == 'failure'
+        run: |
+          python3 - <<'PY'
+          import os
+          import platform
+          text = open('/tmp/pytest.log', encoding='utf-8', errors='replace').read()
+          def esc(s):
+              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          lines = [ln for ln in text.splitlines() if ln.strip()]
+          body = '\n'.join(lines[-45:])
+          print('::error title=pytest 尾部（共 %d 行）::%s' % (len(lines), esc(body)[:7000]))
+          env = 'py=%s cwd=%s' % (platform.python_version(), os.getcwd())
+          print('::error title=pytest 环境::%s' % esc(env))
+          PY
 
       # 检索质量评测（阶段 2.9）刻意**不**放在 CI 里：
       #   - CI 上没有真实资料库（`backend/data/` 被 .gitignore 忽略），
@@ -200,18 +225,29 @@ jobs:
         # 而 runner（Linux / Node 20）上这一步红了；job 日志要认证才能下载，
         # 但 `::error::` 注解可以匿名读（已实测：`/check-runs/{id}/annotations`）。
         # 注解里按 GitHub 的转义规则编码换行（%25 / %0D / %0A）。
+        #
+        # 2026-09-15 第二版：第一次只筛关键词，结果只看到 "Test Files no tests" ——
+        # 所以改成**原样输出日志尾部**，再附一份"能看到哪些测试文件"的清单。
         if: failure() && steps.vitest.outcome == 'failure'
         run: |
+          {
+            echo "::group::环境与文件清单"
+            node --version
+            npx vitest --version
+            echo "test 文件数: $(find src -name '*.test.ts' -o -name '*.test.tsx' | wc -l)"
+            find src -name '*.test.ts' -o -name '*.test.tsx' | head -8
+            ls -la | head -12
+            echo "::endgroup::"
+          } || true
           python3 - <<'PY'
-          import re
+          import os, platform
           text = open('/tmp/vitest.log', encoding='utf-8', errors='replace').read()
           def esc(s: str) -> str:
               return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          keys = re.compile(r'(FAIL|×|✓ src|AssertionError|Timeout|Error:|Expected|Received|Test Files|Tests )')
-          keep = [ln for ln in text.splitlines() if keys.search(ln)]
-          msg = '\n'.join(keep[:80]) if keep else text[-4000:]
-          print(f"::error title=vitest 失败摘要::{esc(msg)[:6000]}")
-          print(f"::error title=vitest 环境::node={__import__('platform').python_version()} cwd={__import__('os').getcwd()}")
+          tail = '\n'.join([ln for ln in text.splitlines() if ln.strip()][-60:])
+          print(f"::error title=vitest 日志尾部::{esc(tail)[:7000]}")
+          n = sum(1 for _ in os.walk('src'))
+          print(f"::error title=vitest 环境::node={platform.node()} py={platform.python_version()} cwd={os.getcwd()} 测试文件数={sum(1 for r,_,fs in os.walk('src') for f in fs if f.endswith(('.test.ts','.test.tsx')))}")
           PY
 
       - name: TypeScript + build
