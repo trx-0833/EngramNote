@@ -23,10 +23,19 @@
 > 现在**没有任何"补丁层"了**：窄屏规则与它们覆盖的基础规则住在同一个文件里，
 > 顺序即行为，由 `CASCADE_PAIRS` / `ORDER_PAIRS` 与单测护栏钉住。
 >
-> 收尾状态（本轮末次实测）：`npm test` **21 files / 276 tests**、`npx tsc --noEmit`
-> / `npm run lint` / `npm run build` 退出 0、`npm run e2e` / `npm run a11y`、三个证据脚本
-> 全部退出 0；真 Chromium 探针 **3 024 条 computed 属性，未声明差异 0 条**
+> 收尾状态（**2026-09-14 复核时复跑**，与下方各批的原始记录数字不同属正常）：
+> `npm test` **24 files / 295 tests**、`npx tsc --noEmit` / `npm run lint` / `npm run build`
+> 退出 0、`npm run e2e` **10 passed** / `npm run a11y` **26 passed**、
+> `node scripts/verify-built-css.mjs` 退出 0（含媒体战 1 条已登记、简写/长写 24 对、
+> 死代码三向自检 21/21）；真 Chromium 探针 **3 024 条 computed 属性，未声明差异 0 条**
 > （证据 `5.6-12`）。
+>
+> ⚠️ **`docs/overhaul-plan.md` 的 5.6 行曾写"已迁 9 个样式表，剩 6 个"——那句话已更正**
+> （2026-09-14）：**文件还在 ≠ 有活没干**。`base.css` 是令牌层（永不迁）；
+> `components` / `learning` / `markdown` / `markdown-extras` 留的是按判据刻意留全局的规则；
+> `auth` / `cleaning` / `diff` / `responsive` / `refinements` 五个**只剩注释**，
+> 但 `mobile-input-font-size.test.ts` 断言"每个 `src/styles/*.css` 都必须被 `main.tsx`
+> 引入且导入顺序即级联顺序"，所以**不能删文件、也不能摘 import**（见 §2 的 14 行盘点）。
 >
 > **收尾轮（死代码清理 + 两项常设检查）已完成**：§7.0 的 5 条待办全部 ✅ ——
 > 删掉 14 条零引用规则 / 9 个没有用户的 `@keyframes` / 1 个零读者令牌

@@ -571,7 +571,36 @@ python -c "from modelscope import snapshot_download; snapshot_download('Qwen/Qwe
 
 ## 文档
 
+**入口**
+
 - [架构文档](docs/architecture.md) — 系统架构、目录导航、数据流、状态机、数据库概览、技术债索引（**首选入口**，随代码更新）
+- [决策记录](docs/decisions.md) — 关键取舍与历史缺陷编号（F-xx）的归档（**只读**：新决策写进整改计划与代码注释）
+- [单写者约束](docs/sqlite-single-writer.md) — 为什么 SQLite 路线下只能跑一个进程 / 一个 worker（`-c 1`）
+
+**重构与验收记录**
+
+- [整改计划 `docs/overhaul-plan.md`](docs/overhaul-plan.md) — 阶段 0–7 的全量计划、逐条状态表与逐轮附录（**本仓库最完整的一份过程记录**，含"哪些不影响使用""还剩什么"两张总表）
+- [契约与前端生成客户端](frontend/docs/openapi-client.md) — 从 OpenAPI 生成类型、漂移检查器、S1–S5 的逐轮记录与守卫设计
+- [CSS 规范](frontend/docs/css-convention.md) / [CSS 迁移计划](frontend/docs/css-migration-plan.md) — CSS Modules 约定、雷区表、14 个样式表的逐批判定与证据
+- [前端取数与状态计划](frontend/docs/query-and-state-plan.md) — 5.2 TanStack Query / 5.3 Zustand 的迁移计划（**待批，未动代码**）
+
+**质量门禁（CI = `.github/workflows/ci.yml`）**
+
+| 层 | 内容 | 是否阻断 |
+|---|---|---|
+| 后端 | `ruff check app tests scripts` + `pytest -q`（离线，网络被 `tests/conftest.py` 挡住） | 阻断 |
+| 后端 · 契约 | `python scripts/dump_openapi.py --check`（代码 → `openapi.json`） | 阻断 |
+| 前端 | `eslint` + `vitest` + `tsc && vite build` | 阻断 |
+| 前端 · 契约 | `npm run gen:api` 后 `git diff --exit-code`（`openapi.json` → `schema.ts` 必须幂等） | 阻断 |
+| 前端 · 真浏览器 | `playwright --project=chromium`（e2e，桩掉 `/api`） | 阻断 |
+| 前端 · 可访问性 | `playwright --project=a11y`（axe-core；**REGISTRY 空 = 已清零**） | 建议性 |
+| 依赖安全 | `pip-audit` / `npm audit`（结果归档 + job summary） | 建议性 |
+| 部署配置 | `nginx.conf` 两条（`client_max_body_size` / `proxy_buffering off`）+ `.dockerignore` + `Dockerfile` 用锁文件安装 | 阻断 |
+
+- [安全扫描记录](docs/security-scan.md) — 当次 `pip-audit` / `npm audit` 的原始结果与"为什么不设阈值"的处置口径
+
+**历史**
+
 - [归档文档](docs/archive/) — 历史设计/教学/开发记录（项目架构、项目图解、新手教学等），仅供追溯，内容可能过时
 
 ---

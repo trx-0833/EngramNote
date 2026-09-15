@@ -3287,7 +3287,7 @@ fuzz 是唯一能立刻改善真实体验的一项（同批导入的卡片会在
 | 5.3 | 引入 **Zustand** 管理 UI 状态；消除 prop drilling | 页面组件行数减半 | ⏸ **未做（计划已出，待批）**：`frontend/package.json` 里没有 `zustand`，`from 'zustand'` 零命中；今天是 2 个 context（`AuthContext` / `Toast`）+ props 传递。⚠️ 验收口径需改：最大的页面是 `DailyMaterials.tsx` **682** 行 / `GraphSidebar.tsx` **679** / `Dashboard.tsx` **676**，"全部减半"在不重写 UI 的前提下做不到 —— 计划里换成三条可测口径（详见计划文档 §3.3） |
 | 5.4 | **路由级懒加载**：18 个页面全部 `React.lazy` + 按需分包 | 首屏不含 force-graph/katex | ✅ **已落地**（阶段 0 的 F-7 止血项，本轮核对确认）：`App.tsx` 18 个登录后页面全部 `lazy()`，构建产物中 `graph-*.js` 186KB / `markdown-*.js` 393KB 均为**独立 chunk**，入口 `index-*.js` 仅 22KB |
 | 5.5 | 拆分巨型页面：`NoteDetail.tsx`(1030) / `KnowledgeGraph.tsx`(868→文档称 1547) / `Projects.tsx`(728) | 单文件 <300 行 | ✅ **三页全部完成**（附录 AX / AZ / BB）：`NoteDetail` 1184→**282**、`KnowledgeGraph` 1055→**248**、`Projects` 765→**113**；本轮复核三页为 **290 / 249 / 135** 行（拆分时记的是 282 / 248 / 113 —— 之后各页又陆续长了几行，前提"单文件 <300 行"仍成立），三个拆分目录共 **51 个模块、最大 263 行、超过 300 行的 0 个**。⚠️ 关键前提是"先补安全网再拆"：另两页是先补了 53 条页面级用例（并经变异验证）才动的手 |
-| 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | 🟡 **部分落地（已迁 9 个样式表，剩 6 个）**：**机制 + 试点 + 三批迁移**已落地（附录 BB 与 `frontend/docs/css-migration-plan.md`）。**9 个样式表动过**（`auth` / `cleaning` / `diff` / `dashboard` / `markdown` / `learning` / `markdown-extras` / `responsive` / `base` 令牌层；其中 `markdown` 是核实后的**停**、`base` 只加令牌），**108 条规则逐条核对、丢失 0**（试点 7 + 第一/二/三批 60 / 20 / 21，每批三份证据），`main.tsx` 的导入顺序重排根治了"模块 CSS 排在全局样式表之前"的级联反转。⚠️ 一条**有记录的停**：`markdown.css` 的 5 条 `.adhd-*` 规则全是 `.markdown-body.adhd-reader-active …` 后代选择器，而 4 个类名的写入点在 `src/hooks/useAdhdReader.ts`（当时不在可改范围），硬搬只能写成 `:global(...)`。**剩 6 个**（序 5 / 8 / 9 / 10 / 12 / 13：`assessment` / `components` / `layout` / `graph` / `refinements` / `responsive`）互相咬合、必须**成批**处理 —— **每一批的剩余顺序与前置条件写在 `frontend/docs/css-migration-plan.md` §7**（不读那份文件不要动这几张表） |
+| 5.6 | **CSS 体系重建**：14 个全局 CSS → CSS Modules 或 Tailwind + design token 层 | 样式可预测、无覆盖战争 | ✅ **已完成（2026-09-14 复核收口）**。**机制 + 试点 + 十批迁移全部落地**（附录 BB 与 `frontend/docs/css-migration-plan.md`）；序 **1/2/3/4/5/6/8/9/10/12/13 完成**，序 7/11 **按归属部分完成**（剩下的是跨功能共用件与第三方 DOM，按规范 §4 本就该留全局）；**108 条规则逐条核对、丢失 0**（试点 7 + 各批 60 / 20 / 21 …，每批三份证据见 `frontend/docs/migration-evidence/5.6-01..14`）；`main.tsx` 导入顺序重排根治了"模块 CSS 排在全局样式表之前"的级联反转；那张有记录的"停"（`markdown.css` 的 5 条 `.adhd-*`）**已收掉**（进 `src/hooks/useAdhdReader.module.css`，类名由模块导出）。  ⚠️ **"剩 6 个"是误读，已更正**：文件还在 ≠ 有活没干 —— `base.css` 是令牌层（永不迁）；`components` / `learning` / `markdown` / `markdown-extras` 保留的是按判据**刻意留全局**的规则（`.btn` 45 处引用、`:global(.markdown-body)` 由 marked 生成、KaTeX 是第三方 DOM…）；`auth` / `cleaning` / `diff` / `responsive` / `refinements` 五个**只剩注释却仍被 `main.tsx` 导入** —— 因为 `mobile-input-font-size.test.ts` 断言"每个 `src/styles/*.css` 都必须被引入且导入顺序即级联顺序"，**删文件会直接红**。常设检查（产物级，`node scripts/verify-built-css.mjs`）：跨媒体查询覆盖战（1 条已登记的"故意留着"）、简写 vs 长写（同选择器 24 对 + 跨选择器 11 条去重）、死代码三向自检 **21/21**。逐条判定见 `frontend/docs/css-migration-plan.md` §2 的 14 行盘点与 §7.0 |
 | 5.7 | **修 404**：新增真实 404 页面，不再静默重定向到登录页 | 错链有明确提示 | ✅ **已落地**（阶段 0，本轮核对确认）：`App.tsx` 的 `NotFound` 组件 + `path="*"`；未登录时的 `*` 才回登录页 |
 | 5.8 | **错误/空/加载三态组件化** + 全局 Toast | 无"白屏卡住" | ✅ **已落地**（阶段 0/Z，本轮核对确认）：`EmptyState.tsx` / `ErrorDisplay.tsx` / `LoadingSpinner.tsx` / `Toast.tsx` / `ErrorBoundary.tsx`，全仓 147 处使用 |
 | 5.9 | **可访问性**：键盘导航、focus trap（模态）、ARIA、对比度 | axe 无 critical | ✅ **已完成（审计 / 修复 / 覆盖 / 收尾四轮都已落盘）**（**2026-09-14 更正：此前标 🟡，记的是"部分落地、修复进行中"**）：收尾轮见**附录 BI.1** —— `npm run a11y` **26 passed / 26 个场景**、违规 **0 组 / 0 个节点**、`REGISTRY` **5 条 → 0 条**（空表 = 零容忍）；新增两道常驻门禁（**每个场景都跑**的键盘可达性零容忍扫描 + **真的按 Tab** 的走查断言），**18 处**逐处改用**真控件**（`<button>` / `<Link>`，**没有一处**用 `role` + `tabIndex` 去补）；`REGISTRY` 里最后 **5 条 `heading-order` 全部清掉**，其中 ★ **F-08 此前记的成因是错的** —— 违规节点是本页自己的 `<h4>清洁统计</h4>`、**不是用户的 Markdown 内容**，而 `H4 → H1` 是**上移**、**上移对 axe 永远合法**，因此**没有动一个字的用户内容、也不需要任何豁免**（完整记录见 `frontend/docs/a11y-audit.md` **§11**）。审计一半见**附录 BG** —— axe-core 4.13 + 真 Chromium（`npm run a11y`；**覆盖轮后 15 条用例覆盖 15 个场景**（收尾轮后为 **26 个场景**），非空夹具、未定义 `/api` 一律 501、"axe 真的跑了"四道断言），CI 里**顾问式**接入（`continue-on-error: true`，升级条件写在 job 注释里）。⚠️ **计划的原验收"axe 无 critical"当场不成立**：审计轮实测 **30 组 / 68 节点**违规（critical **2** / serious 39 / moderate 21 / minor 6）—— **应用不是无障碍合格的**；而"没报出来"也不等于"没问题"（Tab 顺序、屏幕阅读器语义、动态区域它都看不见，**根本没有触控目标尺寸规则**，且**单字符文本的对比度它按设计不判**，见 BG.11.5）。⚠️ **违规数变过两次，都不是回归**：修复轮 30 / 68 → **4 / 4**（2 条 critical 已清），覆盖轮 4 / 4 → **12 / 15** —— 后者是**扫描场景从 10 个扩到 15 个**带来的可见度（11 个新节点全在新场景上，旧场景一个都没变，`upload` 0 / 0）。逐条发现与归属见 `frontend/docs/a11y-audit.md`，三轮判断见 BG.5（基线）/ BG.10（审计验收）/ **BG.11（覆盖轮）**，**修复轮已完成**（改动在 `frontend/src/**`；**2026-09-14 更正：此前写"修复轮正在进行"**），收尾轮判断见**附录 BI.1** |
@@ -11251,7 +11251,82 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 
 ---
 
-**文档版本**：v5.12（**2026-09-14 docstring 的 `Raises:` 批量更正**：实测 **68 处 / 14 个文件**
+---
+
+## 附录 BO · 5.6 收官确认与首次推送（2026-09-14）
+
+### BO.0 一句话
+
+用户要求"把样式表做完再推送"。**核查结论：样式表早就做完了** ——
+14 个样式表**每一个都有过判定**，没有一条规则处于"还没决定去哪"的状态；
+`docs/overhaul-plan.md` 里那句"已迁 9 个样式表，**剩 6 个**"是**误导性表述**：
+它数的是"文件还在不在"，而不是"还有没有活"。本轮把这句话更正，并**推送**。
+
+### BO.1 为什么"剩 6 个"是误读（逐条判定）
+
+| 样式表 | 文件里现在是什么 | 为什么不能/不该动 |
+|---|---|---|
+| `base.css` | 令牌层 + 重置 | 计划里写明**永不迁移**（design token 的唯一来源） |
+| `components.css` | `.btn` / `.card` / `.container` / `.badge` / `.status-*` + 两段媒体块 | **跨功能共用件**：`.btn` 45 处、`.card` 35 处引用；搬进任何单个模块都会让其他文件的类名悬空 |
+| `learning.css` | `.filter-pill*` / `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner` | 同样是跨功能共用件（§4.8 有逐组的文件数） |
+| `markdown.css` | `:global(.markdown-body)` 及其正文规则、768px 档 | 内容由 `marked` 生成，**没有组件可以挂类名** |
+| `markdown-extras.css` | KaTeX 4 条 + 批注高亮 6 条 | KaTeX 是**第三方 DOM**；批注高亮由 `annotation` 渲染路径写入 |
+| `auth` / `cleaning` / `diff` / `responsive` / `refinements` | **只剩注释（0 条规则）** | **不能删文件、也不能摘 import**：`mobile-input-font-size.test.ts` 断言"每个 `src/styles/*.css` 都被 `main.tsx` 引入，且导入顺序就是级联顺序"。删掉即红 |
+
+**机器证据**（本轮复跑）：`node scripts/verify-built-css.mjs` 退出 0 ——
+跨媒体查询覆盖战 1 条(**已登记的"故意留着"**)、简写 vs 长写 24 对同选择器 + 11 条跨选择器去重、
+死代码三向自检 **21/21**；`npm run build` 0、`npm test` 24 files / 295 tests、
+`e2e` 10 passed、`a11y` 26 passed。
+
+### BO.2 推送前的安全审计（这个仓库里有真实用户数据）
+
+| 检查 | 结果 |
+|---|---|
+| 远端 / 分支 | `origin` = `github.com/trx-0833/EngramNote.git`，`main` **领先 108 个提交**（说明此前推过，不是首次） |
+| 已跟踪文件总数 | **570** |
+| `.env` / 真实库 / 备份 / 模型 / 真实笔记 / `testfiles` / `resource` | **全部未跟踪**（`git ls-files` 各 0 个） |
+| 密钥扫描（`sk-` / `ghp_` / `AKIA` / 私钥块） | 已跟踪文件里 **0 命中** |
+| `.env.example` | 只有空占位符（`DEEPSEEK_API_KEY=` 等），已公开且无真值 |
+| 这 108 个提交新增的文件 | 无 `.env` / `.db` / `.key` / `.pem` / `secret` / `credential` |
+| ⚠️ 唯一需要知情的 | `backend/tests/测试账号信息.md` **在 `origin/main` 里**（早已公开）：内容是**本地** e2e 弱口令测试账号（`e2e…@example.com` / `Test@123456`），账号只存在于被忽略的 SQLite 里。判定为低风险、本轮**不动**（要撤需要改写历史，属另一个决定） |
+
+### BO.3 推送后 CI 会跑什么（预期与风险）
+
+这是**第一次带着本轮加的契约检查**跑 CI。四条新关卡与它们在本机的实测：
+
+| 关卡 | 本机实测 |
+|---|---|
+| `python scripts/dump_openapi.py --check` | 退出 0（`paths=103 operations=119 schemas=185 sha256=2e0f1a88eb49`） |
+| `npm run gen:api` + `git diff --exit-code -- src/api/generated/schema.ts` | 退出 0（幂等） |
+| `frontend/Dockerfile` 两条守卫（`COPY … package-lock.json` / `RUN npm ci`） | 对当前文件两条都 OK，对旧形态副本两条都 FAIL |
+| `nginx.conf` 两条守卫（既有） | 未改动 |
+
+⚠️ **仍未验证的是 GitHub runner 上那一次真实执行**（本轮之前没有推送）：
+可依赖的间接证据是"同一个 job 里的 pytest 本来就 `import app.main`"，
+而 `dump_openapi.py` 只多做 `app.openapi()`（纯内存、不连库、不起服务）。
+若某条在 CI 上失败，先分清"写着与当前代码不一致"（= 真忘了重新生成）
+与 import/配置类报错（= 环境问题）—— 两者都不许用 `|| true` 掩盖。
+
+### BO.4 悬着的小事（本轮之后）
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | **S5（5.2 / 5.3）** | 计划已出、**未动代码**；等三个口径 + 依赖批准（`query-and-state-plan.md` §6） |
+| 2 | 3 条"契约有、UI 没传"的查询参数；`updateGoal` 接 UI | 属产品功能 |
+| 3 | `ApiError.message` 三处入口统一 | 等你一句话（改用户可见文案） |
+| 4 | 自动补向量（挂 Beat 或随清洗触发） | 等频率/内存策略；判定依据已有（`/ready` 的 `index.pending_embeddings`） |
+| 5 | "清空字段"的服务层语义 | 行为变更，未动 |
+| 6 | `backend/tests/测试账号信息.md` 是否需要从公开历史里撤掉 | 见 BO.2 最后一行 |
+| 7 | 0.7 登录锁定 / 3.10 分开限额 / 3.11 时间衰减 / 6.7 阈值门禁 / 阶段 7 | 见附录 BN 的分档表 |
+
+---
+
+**文档版本**：v5.13（**2026-09-14 5.6 收官确认 + 首次推送**：核查发现样式表迁移**早已完成**，
+"剩 6 个"是把"文件还在"读成了"活没干"（`base.css` 令牌层永不迁、4 份保留刻意全局的规则、
+5 份只剩注释却因 `mobile-input-font-size.test.ts` 的断言不能删），见**附录 BO**；
+推送前做了安全审计（真实库 / `.env` / 备份 / 笔记全部未跟踪，密钥 0 命中）；
+README 的"文档"一节重写成入口 / 重构记录 / **质量门禁表** / 历史四段）；
+v5.12 —— **2026-09-14 docstring 的 `Raises:` 批量更正**：实测 **68 处 / 14 个文件**
 （计划里记的 57 处只数了 `app/api/**`），其中 **43 处写着早已不成立的 `HTTPException`**
 → 41 处改成冻结格式 `AppError: 条件（CODE → 状态码）`、2 处是 `auth.py` 的书面豁免；
 顺带改正 **4 处"文档在说谎"**（漏写真实存在的错误码/同码不同状态）。
