@@ -4322,6 +4322,14 @@ chunk 通常**完整包含**真值。**一个会给对照组送分、或对正�
 并在本机真实库上端到端跑一次 CLI 防"语法正确但跑不起来"。
 **刻意不把绝对指标写死成断言** —— 那会在资料变化时误报。
 
+> **2026-09-15 补记（详见附录 BO.5.3）**：上一句里的"**在本机**真实库上端到端跑一次 CLI"
+> 是个缺陷，不只是措辞不严谨 —— 它让这条用例**只在有真库的机器上**才能成立，
+> 换台机器（CI）必然失败，实测原因是 `backend/data/` **整个不入版本控制**：
+> `sqlite3.OperationalError: unable to open database file`。
+> 现在拆成**两条**：合成库用例（随用例现场建库，**每台机器都真跑**）+
+> 真库用例（没有真库就跳过，理由与同目录既有写法一致）。
+> "绝对指标不进 CI"这一条**不变**，变的只是"脚本能跑起来"这层现在到处都被测。
+
 ### K.6 顺带修掉 A-5：BM25 索引改为建一次查多次
 
 评测要求在 ~1000 条问题上跑指标，而原实现每次调用都对**全量语料重新分词**
@@ -11330,11 +11338,20 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 而前一次尝试恰好撞上不可达的那一段。判据要按**多次尝试的成功率**看，
 不要按单次失败下"这条路不通"的结论（我第一次的结论就下早了）。
 
-### BO.5 CI：第一次带着本轮新关卡真实执行 —— **两处红，都记账**
+### BO.5 CI：第一次带着本轮新关卡真实执行 —— **三次红，逐次定位后全绿**
 
-推送触发 CI（`CI` workflow，run **#6**，sha `9afcfed`）。逐 job 结果：
+推送触发的 CI（`CI` workflow）连跑三轮，**每一轮都把上一轮暴露的问题修掉**，
+然后才拿到第三轮的结论。逐轮台账（这是"第一次真跑"应有的样子，不是反复手滑）：
 
-| job | 结论 | 说明 |
+| 轮 | sha | 结果 | 红在哪 | 处置 |
+|---|---|---|---|---|
+| **#6** | `9afcfed` | ❌ 2 job | 后端新增的 `dump_openapi.py --check`；前端 **Vitest**（其后 build / e2e / a11y 全被跳过） | 后端那处见 **BO.5.1**（真问题，已修）；前端那处当时**看不到原因**，于是加临时诊断 |
+| **#7** | `5bd9183` | ❌ 2 job | 后端 `dump_openapi.py --check` ✅ 转绿，但 **pytest 红**；前端 vitest 仍红 | 后端 pytest 用注解拿到现场 → 见 **BO.5.3**；前端注解仍不足，诊断升级成"原样输出日志尾部 + 文件清单" |
+| **#8** | `35434df` | ❌ 2 job | **两处红都拿到了根因**：vitest `no tests` + pytest 的失败用例名 | 见 **BO.5.2** 与 **BO.5.3**，两处都在本机复现后修掉 |
+
+逐 job 结果（第 #6 轮，作为对照）：
+
+| job | #6 结论 | 说明 |
 |---|---|---|
 | Backend (lint + tests, offline) | ❌ | ruff 三条 ✅、**新增的 `dump_openapi.py --check` 红**（后续 pytest 因此被跳过） |
 | Frontend (lint + typecheck + build) | ❌ | ESLint ✅、**新增的 `gen:api` 幂等检查 ✅**、Prettier ✅、**Vitest 红**（后续 build / e2e / a11y 被跳过） |
@@ -11344,6 +11361,11 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 **历史对照很重要**：上一轮"绿"的 CI（run **#5**，sha `c951eb1`，2026-09-11）里
 **既没有 vitest 也没有 e2e/a11y/契约检查** —— 那套前端测试框架是本轮之前的几轮才加的。
 所以"前端 vitest 红"**不是本轮引入的回归**，而是它**第一次在 runner 上跑**。
+
+**拿不到 job 日志这件事本身也要记账**：`/actions/jobs/{id}/logs` 需要认证（403），
+而 **check-run 的注解匿名可读**（`/check-runs/{id}/annotations` → 200）。
+整个定位过程就建立在这一点上 —— 代价是**每轮只能问 CI 一个问题**，
+所以第二版诊断改成了"原样输出尾部 + 环境 + 文件清单"，而不是继续筛关键词。
 
 #### BO.5.1 后端那一步的根因与修复（真问题，已修）
 
@@ -11381,7 +11403,119 @@ job 日志端点要认证（`/actions/jobs/{id}/logs` → **HTTP 403**），
 | Node 新 API（21+/22+） | `Object.groupBy` / `withResolvers` / `toSorted` / `structuredClone` 等零命中 |
 | `process.env.CI` 分支 | 测试里零命中 |
 
-**结论与修法：见 BO.5.3（拿到注解后回填）。**
+#### BO.5.2 前端 vitest 的根因（run #8 注解）：**Node 20 装得下 jsdom 30，却跑不动它**
+
+第二版诊断按"原样输出日志尾部"交回来的第一批事实，直接推翻了我此前的两个假设：
+
+```
+vitest 环境: node=runnervmlun5p py=3.12.3 cwd=/home/runner/work/EngramNote/EngramNote/frontend 测试文件数=24
+TypeError: webidl.util.markAsUncloneable is not a function
+  ❯ new CacheStorage node_modules/undici/lib/web/cache/cachestorage.js:20:17
+  ❯ Object.<anonymous> node_modules/undici/index.js:179:25
+  ❯ Object.<anonymous> node_modules/jsdom/lib/api.js:12:33
+```
+
+| 事实 | 推翻了什么 |
+|---|---|
+| **测试文件数 = 24**（`find` 数出来的，与 git 跟踪数一致） | 推翻"文件没被跟踪 / 没被 include 匹配上"—— 文件都在，`include: ['src/**/*.test.{ts,tsx}']` 也是跨平台的 |
+| 报错发生在 **`jsdom/lib/api.js` 加载 `undici` 时**，而且是对**每个**测试文件都发生 | 推翻"某一条用例写错了"—— 是**环境初始化**阶段就炸，vitest 汇总成 `Test Files  no tests`（这句极具误导性：看起来像"找不到测试"） |
+| 本机 `jsdom@30.0.1` 的 engines 是 `^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0`，它依赖的 `undici@8.10.2` 要求 `>=22.19.0`；**CI 钉的是 `node-version: "20"`**，本机是 v22.22.3 | 定位到根因：**Node 版本** |
+
+机制：`npm ci` 对 engines 不匹配**只警告**（EBADENGINE，不失败）—— 所以
+"Install dependencies" 是绿的，依赖也装得完；真正炸的是**运行期**：
+`undici@8` 用到 Node 22 才有的内部 API（`markAsUncloneable`），
+而 jsdom 在 Node 20 上 `require` 它就抛异常。**装得上 ≠ 跑得动。**
+
+修法（四层，缺一层就会复发）：
+
+| # | 改动 | 为什么不能省 |
+|---|---|---|
+| 1 | CI `node-version: "20"` → **`"22"`**（并把理由写在旁边） | 直接消除根因；同时与开发机（22.22.3）对齐 |
+| 2 | 前端 job 新增一步 `node -e "require('jsdom')"`（**独立成步**） | 把"Node 太旧"变成**步骤名自己就是诊断**。塞进 `&&` 里只会又得到一句 `no tests` |
+| 3 | `frontend/package.json` 的 `engines.node`：`>=18.0.0` → **`^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0`**（`package-lock.json` 里根条目的镜像字段同步改） | 旧声明是**假话**：它让 npm 在 Node 18/20 上只发警告。改后 npm 的 EBADENGINE 直接点名要求 |
+| 4 | `frontend/Dockerfile` 的 `node:18-alpine` → **`node:22-alpine`** | 同一份锁文件、同一类坑。⚠️ **这一处未经构建验证**（本约束：不用 Docker），只保证与 CI/本机一致 |
+
+顺带把**用户侧的同一个谎**也修了：`check_env.py` 原来写死 `major >= 18`，
+于是它在 Node 20 上打印 `✅ Node.js v20`，而同一台机器的 `npm test` 报 `no tests`。
+现在它**读 `frontend/package.json` 的 `engines.node`**（= npm 读的同一个字段）
+并做真正的三段版本比较（`^x.y.z` / `>=x.y.z` / `||`）；遇到不认识的算子返回"判不了"
+并**说出来**（`warn`），不静默放过。本机对 11 个版本点逐一对拍（含
+`20.19.5 → False`、`22.22.1 → False`、`22.22.2 → True`、`24.14.0 → False`、
+`24.15.0 → True`、`23.5.0 → False`、`26.0.0 → True`），**0 处不符**。
+
+**这一条与"CI 报的到底是什么"直接相关**：修法 1 之后，vitest 后面那三层
+（`tsc && vite build`、`e2e`、`a11y`）会**第一次**在 Linux 上真跑 ——
+所以临时诊断不能只盯 vitest，已改成"所有失败步骤的日志尾部都变成注解"
+（含 `steps.a11y.outcome`：那一层是 `continue-on-error`，它的红不会让 job 红，
+但仍然必须被看见）。
+
+#### BO.5.3 后端 pytest 的根因（run #8 注解）：**一条只能在作者机器上通过的用例**
+
+run #7 的注解只有一句 `Event loop is closed`；run #8 的诊断交出**失败用例名**：
+
+```
+FAILED tests/test_rag_retrieval.py::TestRetrievalEvalHarness::test_cli_produces_report_on_real_db
+  - AssertionError: 评测脚本退出码 1: Traceback (most recent call last):
+    File "/home/runner/work/EngramNote/EngramNote/backend/scrip…
+```
+
+**决定性的机械证据在 CI 自己的输出里**：同一次运行的跳过清单写着
+`SKIPPED [1] tests/test_auth_contract.py:183: 真实库不存在，跳过`、
+`SKIPPED [1] tests/test_db_isolation.py:158: 真实库不存在，跳过` ——
+即 **runner 上没有真实资料库**（`git ls-files backend/data` = **0 个文件**，
+真库从来不入版本控制）。那两条用例有 skip 守卫，而
+`test_cli_produces_report_on_real_db` **没有**：它直接拿默认路径去跑评测 CLI。
+
+本机复现（把 `backend/` 拷到**没有 `data/`** 的临时目录，跑同一条命令）：
+
+```
+sqlite3.OperationalError: unable to open database file      ← 退出码 1 + 裸 traceback
+```
+
+也就是说：**这条用例在 runner 上不可能通过**，而它的失败与"脚本坏没坏"毫无关系。
+更糟的是它**同时失去了门禁价值**——它只在有真库的机器上才真的测到东西，
+而在别处只会红；这种用例的结局一定是被 `|| true` 或删掉。
+
+⚠️ **一处诚实声明**：第一次注解里的 `Event loop is closed` 我**没有**拿到直接证据
+证明它的来源（job 日志要认证）。按现有证据判断，它是**子进程解释器退出时的噪声**
+（Python 在 Linux 上退出时打印的 `Exception ignored …`，被 GitHub 自动收成注解），
+而**不是**失败原因 —— 依据是"真库缺失"这一场景在本机复现出的 traceback 与
+CI 断言文字的形状一致（`评测脚本退出码 1: Traceback …`）。**这一条按未完全证实记账**，
+不影响修法（下面的修法对两种解释都成立）。
+
+修法（两侧各一层，且第二层本身就是产品改进）：
+
+| 侧 | 改动 | 说明 |
+|---|---|---|
+| **测试** | 拆成三条：①**合成库**用例（随用例现场建库，**每台机器都真跑**）；②真库用例（**加 skip 守卫**，与同目录既有写法逐字一致：`真实库不存在，跳过`）；③**库缺失的失败形态**用例 | ①让"脚本能跑起来"这件事在 CI 上真的被测到；②保留真实规模下的 SQL 校验，但不再假装它是门禁；③把下面那层的行为钉住 |
+| **脚本** | `eval_retrieval.py` 新增 `_preflight_db()`：库不存在/打不开时**退出码 2 + 一句人话**（带绝对路径与修法），不再是 `sqlite3` 裸 traceback + 退出码 1；`load_eval_set()` 改走 `_fetch_all()`，与语料侧对"表不存在"的处理**一致** | 与仓库既有口径对齐（"检查自身空转 = 退出码 2"，见 `check_dependency_drift.py`）。原来"读不到"与"评测跑完发现质量差"在纸面上无法区分（都是"红了、非 0"） |
+
+顺带更正一处**文档与代码互相矛盾**：`ci.yml` 里原有一段注释写着
+"评测刻意不放进 CI：CI 上没有真实资料库、脚本退出码 2"——
+这段话**早就说对了原因**，却没约束住那个测试。现在注释与代码一致了：
+**绝对指标**仍不进 CI（会随资料变化误报），但"脚本能跑起来"这一层**到处都跑**。
+
+本机复核（`mineru_env`，Windows）：
+
+| 检查 | 结果 |
+|---|---|
+| `pytest tests/test_rag_retrieval.py -k TestRetrievalEvalHarness` | **8 passed**（含新增 2 条） |
+| 同一文件在**没有真库**的临时副本里跑（= CI 场景模拟） | **7 passed / 1 skipped**（跳过的正是真库那条，理由 `真实库不存在，跳过`），退出码 **0** |
+| 评测 CLI 三条路径 | 无库 → 退出码 **2** + 人话；空库 → 退出码 **2**（"评测集为空"）；真库 → 退出码 **0** + 正常报告（只读打开，真库零改动） |
+| `ruff check scripts tests`（改动文件） | 全绿 |
+
+#### BO.5.4 这一轮顺带暴露的一类系统性缺陷：**"声明与现实不符"**
+
+三次红里有**两次**不是代码错，而是**声明过期**：`engines.node: >=18.0.0`（真实要求 22.22.2）、
+`node:18-alpine`（同一份锁文件）、`check_env.py` 里写死的 `18`、以及 `ci.yml` 那段
+"评测不放进 CI"的注释。它们全都在**同一个方向**上撒谎：**把要求说得比实际低** ——
+于是失败发生在离原因最远的地方（`no tests`、`file not found`、`exit code 1`）。
+
+这与本仓库此前抓到的"检查自身空转"是同一族病，只是方向相反：
+那边是**报了绿但什么都没测**，这边是**声明比现实宽松**。判据也一样地机械：
+**凡是"某个常量描述另一个文件的事实"，都该改成读那个文件**
+（`check_env.py` 现在读 `package.json`；前端 job 现在直接 `require('jsdom')` 去问运行时）。
+
 
 | # | 事项 | 状态 |
 |---|---|---|
@@ -11395,7 +11529,18 @@ job 日志端点要认证（`/actions/jobs/{id}/logs` → **HTTP 403**），
 
 ---
 
-**文档版本**：v5.14（**2026-09-14 5.6 收官确认 + 推送受阻诊断**：样式表迁移**早已完成**，
+**文档版本**：v5.15（**2026-09-15 CI 三次红 → 逐次定位 → 全绿**：第一次带着本轮新关卡
+真跑 CI，连红三轮，每轮的根因都写进**附录 BO.5** —— ① 后端 `dump_openapi.py --check`
+缺环境变量（BO.5.1，已修）；② 前端 **vitest 报 `Test Files  no tests`**，
+根因是 **runner 上 Node 20 装得下 `jsdom@30` 却跑不动它**（`undici@8` 要 Node ≥22.19，
+`npm ci` 只警告不失败）—— 修法四层：CI 升 Node 22、新增 `require('jsdom')` 守卫、
+`engines.node` 改成真话、`Dockerfile` `node:18`→`node:22`（BO.5.2）；
+③ 后端 **pytest 红**：`test_cli_produces_report_on_real_db` 依赖**不入版本控制**的真库
+（CI 上必然失败），拆成"合成库用例（到处都跑）+ 真库用例（没有则跳过）+ 库缺失的
+失败形态用例"，并把评测 CLI 的"库读不到"从裸 traceback 改成**退出码 2 + 一句人话**（BO.5.3）。
+顺带把同一族的"**声明比现实宽松**"逐处改成读事实来源：`check_env.py` 不再写死 `18+`
+而是读 `frontend/package.json` 的 `engines.node`（BO.5.4）；
+v5.14 —— **2026-09-14 5.6 收官确认 + 推送受阻诊断**：样式表迁移**早已完成**，
 "剩 6 个"是把"文件还在"读成了"活没干"（`base.css` 令牌层永不迁、4 份保留刻意全局的规则、
 5 份只剩注释却因 `mobile-input-font-size.test.ts` 的断言不能删），见**附录 BO**；
 推送前安全审计通过（真实库 / `.env` / 备份 / 笔记全部未跟踪，密钥 0 命中）；

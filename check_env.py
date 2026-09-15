@@ -273,23 +273,92 @@ def check_python():
 # ============================================================
 # 2. 检测 Node.js
 # ============================================================
+def _node_engines_requirement():
+    """读 `frontend/package.json` 的 `engines.node` —— 单一来源，不再写死常量
+
+    为什么不再写死"18+"（2026-09-15）：常量会过期，而过期的表现是**假绿**。
+    本脚本曾在 Node 20 上打印 `✅ Node.js v20`，同一台机器上 `npm test` 报的
+    却是一句与原因无关的 `Test Files  no tests` —— vitest 的 jsdom 环境
+    （`jsdom@30`）要求 `^22.22.2 || ^24.15.0 || >=26.0.0`，它依赖的
+    `undici@8` 要求 `>=22.19`。`npm ci` 对 engines 不匹配**只警告**，
+    所以"版本够不够"必须有人明判；读包自己的声明（= npm 读的同一个字段）
+    才不会出现"检查脚本说没问题、测试却跑不起来"。
+    """
+    try:
+        pkg = json.loads((FRONTEND_DIR / "package.json").read_text(encoding="utf-8"))
+        return (pkg.get("engines") or {}).get("node") or ""
+    except Exception:
+        return ""
+
+
+def _satisfies_node(version, requirement):
+    """版本是否满足 `engines.node` 声明；返回 True / False / None
+
+    只实现本仓库实际用到的两种算子：
+      - `^x.y.z`  = 主版本相同且 >= x.y.z
+      - `>=x.y.z` = 不小于 x.y.z
+    多个子句用 `||` 连接（npm 的语义是"任一满足即可"）。
+
+    遇到不认识的算子返回 **None**（"判不了"），由调用方**说出来** ——
+    不静默放过。本仓库反复抓到的病就是"检查器自己空转却报绿"。
+    """
+    def parts(text):
+        nums = text.split(".")
+        if len(nums) < 3 or not all(n.isdigit() for n in nums[:3]):
+            return None
+        return tuple(int(n) for n in nums[:3])
+
+    current = parts(version)
+    if current is None or not requirement.strip():
+        return None
+    known = False
+    for clause in requirement.split("||"):
+        clause = clause.strip()
+        if not clause:
+            continue
+        if clause.startswith("^"):
+            want = parts(clause[1:])
+            if want is None:
+                return None
+            known = True
+            if current[0] == want[0] and current >= want:
+                return True
+        elif clause.startswith(">="):
+            want = parts(clause[2:])
+            if want is None:
+                return None
+            known = True
+            if current >= want:
+                return True
+        else:
+            return None
+    return False if known else None
+
+
 def check_node():
     header("步骤 2/10：检测 Node.js 环境")
+    requirement = _node_engines_requirement()
     try:
         result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
         version = result.stdout.strip().lstrip("v")
-        major = int(version.split(".")[0])
-        if major >= 18:
-            ok(f"Node.js v{version}")
+        satisfied = _satisfies_node(version, requirement)
+        if satisfied is True:
+            ok(f"Node.js v{version}（满足前端要求 {requirement}）")
             record_pass()
+        elif satisfied is None:
+            warn(
+                f"Node.js v{version}：无法判定是否满足前端要求"
+                f"（engines.node = {requirement or '未声明'}），本项跳过"
+            )
+            record_warn()
         else:
-            fail(f"Node.js 版本过低：v{version}，需要 18+")
-            info("请安装 Node.js 18+：https://nodejs.org/")
+            fail(f"Node.js 版本过低：v{version}，前端要求 {requirement}")
+            info(f"请安装满足 {requirement} 的 Node.js：https://nodejs.org/")
             record_fail()
             return False
     except FileNotFoundError:
         fail("未检测到 Node.js")
-        info("请安装 Node.js 18+：https://nodejs.org/")
+        info(f"请安装满足 {requirement or '22+'} 的 Node.js：https://nodejs.org/")
         record_fail()
         return False
     except Exception as e:

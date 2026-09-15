@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-blue.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev)
 
@@ -130,11 +130,19 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
 | 软件 | 版本 | 说明 |
 |------|------|------|
 | **Python** | 3.10+ | 推荐 conda 环境 |
-| **Node.js** | 18+ | 前端构建 |
+| **Node.js** | 22.22.2+ | 前端构建与测试（见下方说明） |
 | **Git** | 2.0+ | 克隆项目 |
 | **pip** | 23+ | Python 包管理 |
 
 > **无需安装**：PostgreSQL、Redis、MinIO —— 默认使用 SQLite + 文件系统 broker + 本地文件存储，零外部依赖。
+
+> ⚠️ **Node 版本不是"越新越好"，也不是随便写的**：`frontend/package.json` 的
+> `engines.node` 抄的是 `jsdom@30` 自己的声明（`^22.22.2 || ^24.15.0 || >=26.0.0`），
+> 而 `jsdom` 是 `vitest` 跑组件测试的环境。**Node 18/20 上 `npm ci` 只会警告
+> （EBADENGINE）、装得完，但 `npm test` 会报一句与原因无关的 `Test Files  no tests`**
+> —— 这是 2026-09-15 CI 上真实踩到的坑（`docs/overhaul-plan.md` 附录 BO.5）。
+> `check_env.py` 会读上面那个字段来判版本，CI 的前端 job 里另有一道
+> `node -e "require('jsdom')"` 守卫，让这类失败**指名道姓**。
 
 ### 一键安装与检测
 
@@ -158,7 +166,7 @@ python check_env.py --fix
 | 步骤 | 检测内容 | 自动修复 |
 |------|----------|----------|
 | 1 | Python 3.10+ 版本 | - |
-| 2 | Node.js 18+ 与 npm | - |
+| 2 | Node.js（版本要求读 `frontend/package.json` 的 `engines.node`）与 npm | - |
 | 3 | 后端 Python 依赖（17 个包 + qwen_asr 可选） | 清华 PyPI 源自动安装 |
 | 4 | 前端 Node 依赖 | 淘宝 npm 源自动安装 |
 | 5 | .env 配置文件 | 从 .env.example 自动创建 |
@@ -596,6 +604,12 @@ python -c "from modelscope import snapshot_download; snapshot_download('Qwen/Qwe
 | 前端 · 可访问性 | `playwright --project=a11y`（axe-core；**REGISTRY 空 = 已清零**） | 建议性 |
 | 依赖安全 | `pip-audit` / `npm audit`（结果归档 + job summary） | 建议性 |
 | 部署配置 | `nginx.conf` 两条（`client_max_body_size` / `proxy_buffering off`）+ `.dockerignore` + `Dockerfile` 用锁文件安装 | 阻断 |
+
+> **前端那几层的运行时前提**：CI 前端 job 固定 **Node 22**（`engines.node` 就是
+> `jsdom@30` 的要求），并在装完依赖后先跑一道
+> `node -e "require('jsdom')"` 守卫 —— 否则 Node 版本不对时，vitest 的失败
+> 形态是一句与原因无关的 `Test Files  no tests`（2026-09-15 实测，见
+> `docs/overhaul-plan.md` 附录 BO.5）。
 
 - [安全扫描记录](docs/security-scan.md) — 当次 `pip-audit` / `npm audit` 的原始结果与"为什么不设阈值"的处置口径
 

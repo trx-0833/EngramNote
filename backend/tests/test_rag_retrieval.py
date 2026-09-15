@@ -700,6 +700,118 @@ class TestBM25ScoringUnchanged:
         assert service._bm25_slot[0] == "u4", "槽位应只保留最近一个用户"
 
 
+def _eval_cli_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "scripts",
+        "eval_retrieval.py",
+    )
+
+
+def _real_db_path() -> str:
+    """真实资料库路径（**不入版本控制**，只存在于有资料的那台机器上）"""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data",
+        "db",
+        "engramnote.db",
+    )
+
+
+def _run_eval_cli(*args: str):
+    """跑一次 `scripts/eval_retrieval.py`，返回 `CompletedProcess`
+
+    ⚠️ 必须**同时**固定子进程的输出编码，只给 subprocess 传 encoding 不够：
+    子进程被管道捕获时，Windows 上 Python 用 ANSI 代码页（中文系统为 GBK）
+    编码 stdout，于是它写出 GBK 字节、我们用 utf-8 解码 → 所有中文变
+    U+FFFD，断言 "评测问题数    : 5" 永远匹配不上。
+
+    实测：本组用例曾**依赖环境变量**通过 —— 在 PYTHONUTF8/PYTHONIOENCODING
+    已设置的 shell 里绿，换一个干净环境（mineru_env）立刻红。这类
+    "随环境变色"的测试不是门禁，因此这里显式传 env，不再依赖外部设置。
+
+    另外显式传 `encoding="utf-8"`：若脚本输出含中文而这里用默认编码解码，
+    会在读取线程里抛 UnicodeDecodeError（而不是让断言失败），
+    报错形态与真实问题完全无关，极难排查。
+    """
+    import subprocess
+    import sys as _sys
+
+    backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run(
+        [_sys.executable, _eval_cli_path(), *args],
+        cwd=backend,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=child_env,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _make_fixture_db(path: str, *, pairs: int = 6) -> None:
+    """造一个**最小可用**的库：只含评测脚本真正读的那几张表
+
+    ## 为什么需要它（2026-09-15，CI 第一次真跑 pytest 时暴露）
+
+    原来的 CLI 用例**只在真实库上跑**，而真库不入版本控制
+    （`git ls-files backend/data` = 0 个文件）→ CI 上 `backend/data/` 整个
+    不存在，这条用例必然以裸 traceback 失败（CI 实测
+    `sqlite3.OperationalError: unable to open database file`）。
+    一个只在作者机器上能过的用例不是门禁：它在别处**只会变红**，
+    而变红的原因与"脚本坏没坏"无关 —— 于是这一层要么被 `|| true`，
+    要么被删掉，两种结局都等于它不存在。
+
+    合成库让"脚本能跑起来"这件事在**所有**机器上都被真的测到。
+    真库那条用例保留（合成库造不出 1181 张卡片、1058 条 quiz 的真实规模），
+    但**没有真库时跳过**。
+
+    ## 列必须与脚本的查询逐一对齐（少一列就是 `no such column`）
+
+    - `quiz_items(id, question, card_id, note_id)` → 评测集（`load_eval_set`）
+    - `knowledge_cards(id, note_id, title, content, chapter_title, source_text)`
+      → 卡片语料（`load_card_corpus`）+ 真值 `source_text`
+    - `notes(id, trashed_at)` → 卡片语料里那条"回收站笔记不参与"的过滤
+    """
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    try:
+        con.executescript(
+            """
+            CREATE TABLE notes (id TEXT PRIMARY KEY, trashed_at TEXT);
+            CREATE TABLE knowledge_cards (
+                id TEXT PRIMARY KEY, note_id TEXT, title TEXT, content TEXT,
+                chapter_title TEXT, source_text TEXT);
+            CREATE TABLE quiz_items (
+                id TEXT PRIMARY KEY, question TEXT, card_id TEXT, note_id TEXT);
+            """
+        )
+        for i in range(pairs):
+            cid, nid = f"card-{i}", f"note-{i}"
+            body = (
+                f"拉哇水电站第 {i} 台水轮发电机组额定容量为 {100 + i}MW，"
+                f"转子重量约 {i}00 吨，由厂家 {i} 号车间制造。"
+            )
+            con.execute("INSERT INTO notes (id, trashed_at) VALUES (?, NULL)", (nid,))
+            con.execute(
+                "INSERT INTO knowledge_cards "
+                "(id, note_id, title, content, chapter_title, source_text) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (cid, nid, f"机组 {i}", body, f"第 {i} 章", body),
+            )
+            con.execute(
+                "INSERT INTO quiz_items (id, question, card_id, note_id) "
+                "VALUES (?, ?, ?, ?)",
+                (f"quiz-{i}", f"第 {i} 台机组的额定容量是多少？", cid, nid),
+            )
+        con.commit()
+    finally:
+        con.close()
+
+
 class TestRetrievalEvalHarness:
     """阶段 2.9 评测脚本自身的守护
 
@@ -773,38 +885,62 @@ class TestRetrievalEvalHarness:
         # 但逐字相等仍应命中（真值本身很短时）
         assert self._overlaps(tiny, tiny)
 
-    def test_cli_produces_report_on_real_db(self):
-        """CLI 端到端可跑（在真实库上只读跑 5 条）
+    def test_cli_produces_report_on_synthetic_db(self, tmp_path):
+        """CLI 端到端可跑（**合成库** → 每台机器上都会真的跑）
 
-        防止"脚本语法正确但跑不起来"—— 评测脚本是离线工具，
-        不会在应用启动路径上被 import，因此语法/依赖错误不会被其他测试发现。
+        判据与原真库用例一致（退出码 0 + 打印出指标 + `--limit` 生效），
+        只把主语从"作者的真库"换成"随用例一起造的库"。
         """
-        import subprocess
-        import sys as _sys
+        db = str(tmp_path / "fixture.db")
+        _make_fixture_db(db, pairs=6)
 
-        backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # ⚠️ 必须**同时**固定子进程的输出编码，只给 subprocess 传 encoding 不够：
-        # 子进程被管道捕获时，Windows 上 Python 用 ANSI 代码页（中文系统为 GBK）
-        # 编码 stdout，于是它写出 GBK 字节、我们用 utf-8 解码 → 所有中文变
-        # U+FFFD，断言 "评测问题数    : 5" 永远匹配不上。
-        #
-        # 实测：本测试曾**依赖环境变量**通过 —— 在 PYTHONUTF8/PYTHONIOENCODING
-        # 已设置的 shell 里绿，换一个干净环境（mineru_env）立刻红。这类
-        # "随环境变色"的测试不是门禁，因此这里显式传 env，不再依赖外部设置。
-        child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-        proc = subprocess.run(
-            [_sys.executable, os.path.join(backend, "scripts", "eval_retrieval.py"),
-             "--limit", "5", "--corpus", "cards", "--show-missed", "0"],
-            cwd=backend, capture_output=True, text=True, timeout=600,
-            env=child_env,
-            # 显式 utf-8：若脚本输出含中文而这里用默认编码解码，
-            # 会在读取线程里抛 UnicodeDecodeError（而不是让断言失败），
-            # 报错形态与真实问题完全无关，极难排查。
-            encoding="utf-8", errors="replace",
+        proc = _run_eval_cli(
+            "--db", db, "--limit", "5", "--corpus", "cards", "--show-missed", "0"
         )
+
         assert proc.returncode == 0, f"评测脚本退出码 {proc.returncode}: {proc.stderr[-800:]}"
         assert "Recall@5" in proc.stdout, f"输出缺少指标:\n{proc.stdout[-800:]}"
         assert "评测问题数    : 5" in proc.stdout, "未按 --limit 限制评测条数"
+
+    def test_cli_produces_report_on_real_db(self):
+        """CLI 端到端可跑（在**真实库**上只读跑 5 条；没有真库则跳过）
+
+        保留它是因为合成库覆盖不到"SQL 与真 schema 是否真的对得上" ——
+        真库有上千张卡片、上千条 quiz，列名/类型/空值分布上的差异只有在
+        它上面才看得出来。但它**不能**是唯一的门禁（见上一条用例的说明）。
+        """
+        if not os.path.exists(_real_db_path()):
+            pytest.skip("真实库不存在，跳过")
+
+        proc = _run_eval_cli("--limit", "5", "--corpus", "cards", "--show-missed", "0")
+
+        assert proc.returncode == 0, f"评测脚本退出码 {proc.returncode}: {proc.stderr[-800:]}"
+        assert "Recall@5" in proc.stdout, f"输出缺少指标:\n{proc.stdout[-800:]}"
+        assert "评测问题数    : 5" in proc.stdout, "未按 --limit 限制评测条数"
+
+    def test_cli_reports_missing_db_without_traceback(self, tmp_path):
+        """库不存在时必须是**一句人话 + 退出码 2**，而不是 sqlite3 裸 traceback
+
+        2026-09-15 CI 实测：真库缺失时脚本以
+        `sqlite3.OperationalError: unable to open database file` + **退出码 1**
+        结束 —— 一条只说了"打不开"、没说"哪个文件、为什么、怎么办"的信息，
+        且与"评测跑完且发现质量差"在纸面上无法区分（都是"红了、退出码非 0"）。
+        本仓库对"检查自身空转"的统一口径是**退出码 2**（见
+        `scripts/check_dependency_drift.py`），"库读不到"属于同一类。
+
+        这条用例钉住三件事：退出码 2、消息里带 `--db` 的路径、没有 traceback。
+        """
+        missing = str(tmp_path / "not-there.db")
+        proc = _run_eval_cli(
+            "--db", missing, "--limit", "5", "--corpus", "cards", "--show-missed", "0"
+        )
+
+        assert proc.returncode == 2, (
+            f"退出码应为 2（检查自身空转），实际 {proc.returncode}；"
+            f"输出尾部：{(proc.stdout + proc.stderr)[-500:]}"
+        )
+        assert missing in proc.stdout, "错误消息里没有给出 --db 指向的路径"
+        assert "Traceback" not in proc.stderr, f"仍然是裸 traceback：\n{proc.stderr[-500:]}"
 
 
 # ---------------------------------------------------------------------------

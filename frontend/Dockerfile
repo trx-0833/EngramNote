@@ -2,7 +2,13 @@
 # 多阶段构建：Node.js 构建 → Nginx 运行
 
 # ---- 阶段1: 构建前端 ----
-FROM node:18-alpine AS builder
+# ⚠️ 22 不是"顺手升级"：锁文件里的 `jsdom@30` 要求 `^22.22.2 || ^24.15.0 || >=26`，
+# 它依赖的 `undici@8` 要求 `node >= 22.19`。`npm ci` 对 engines 不匹配**只警告**
+# （EBADENGINE，不失败），所以 Node 18 的镜像能装完依赖却在跑测试时炸 ——
+# 2026-09-15 CI 上就是这么红的（Node 20 + jsdom 30 → vitest 报 "no tests"）。
+# 镜像这一层只跑 `npm run build`（不需要 jsdom），但让**构建环境与实际要求**
+# 差着三个大版本只会把同一个坑留给下一次。
+FROM node:22-alpine AS builder
 
 # 使用淘宝 npm 镜像加速
 RUN npm config set registry https://registry.npmmirror.com

@@ -126,34 +126,45 @@ jobs:
           set -o pipefail
           python -m pytest -q 2>&1 | tee /tmp/pytest.log
 
-      - name: 诊断（临时）：把 pytest 失败尾部写成注解
-        # ⚠️ 临时诊断，拿到失败原因后就删（理由同前端那一条）。
-        # 第一次真跑 CI 时这一步报的是 `Event loop is closed`，而**本机 1119 passed**；
-        # 上一轮绿的 CI（run #5）里 pytest 是通过的，所以要看到真正的失败栈。
-        if: failure() && steps.pytest.outcome == 'failure'
+      - name: 诊断（临时）：把失败步骤的日志尾部写成注解
+        # ⚠️ 临时诊断，CI 全绿之后就删（连同 pytest 那一步里的 `tee`）。
+        # 理由同前端那条：job 日志端点需要认证，而 `::error::` 注解匿名可读。
+        #
+        # 条件从"pytest 红了"放宽成"job 红了"：P4 的 `dump_openapi.py --check`
+        # 也在同一个 job 里，只盯 pytest 会在它红的时候看不到现场。
+        #
+        # 特意打印"真实库在不在"：2026-09-15 那次 pytest 红，根因就是
+        # `backend/data/` 整个不入版本控制 → runner 上没有真库 → 一条
+        # 依赖真库的 CLI 用例必然失败。这一行能让同类问题**一眼**定位。
+        if: failure()
         run: |
           python3 - <<'PY'
           import os
           import platform
-          text = open('/tmp/pytest.log', encoding='utf-8', errors='replace').read()
-          def esc(s):
+
+          def esc(s: str) -> str:
               return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          lines = [ln for ln in text.splitlines() if ln.strip()]
-          body = '\n'.join(lines[-45:])
-          print('::error title=pytest 尾部（共 %d 行）::%s' % (len(lines), esc(body)[:7000]))
-          env = 'py=%s cwd=%s' % (platform.python_version(), os.getcwd())
-          print('::error title=pytest 环境::%s' % esc(env))
+
+          real_db = os.path.join('data', 'db', 'engramnote.db')
+          print('::error title=pytest 环境::%s' % esc(
+              'py=%s cwd=%s 真实库存在=%s' % (
+                  platform.python_version(), os.getcwd(), os.path.exists(real_db))))
+
+          if os.path.exists('/tmp/pytest.log'):
+              text = open('/tmp/pytest.log', encoding='utf-8', errors='replace').read()
+              lines = [ln for ln in text.splitlines() if ln.strip()]
+              print('::error title=pytest 尾部（共 %d 行）::%s' % (
+                  len(lines), esc('\n'.join(lines[-45:]))[:7000]))
           PY
 
-      # 检索质量评测（阶段 2.9）刻意**不**放在 CI 里：
-      #   - CI 上没有真实资料库（`backend/data/` 被 .gitignore 忽略），
-      #     评测集为空、脚本退出码 2，加了 `|| true` 又等于永不失败 ——
-      #     那种步骤只是装饰。
+      # 检索质量评测（阶段 2.9）的**绝对指标**刻意不放在 CI 里：
       #   - 绝对指标取决于真实资料内容，写成阈值门禁会在资料更新时误报，
       #     结果是这个评测被绕过，比没有更糟。
+      #   - 拿"脚本能跑起来"当门禁则是另一回事，它必须**到处**都能跑。
       # 它的守护放在 `tests/test_rag_retrieval.py::TestRetrievalEvalHarness`：
       # 锁判据行为（对无关内容 0 分、对包含内容满分、长度中立），
-      # 并在本机真实库上端到端跑一次 CLI。
+      # 在**合成库**上端到端跑一次 CLI（因此 CI 上也真的跑），
+      # 并在有真库的机器上额外在真库上跑一次（没有则跳过）。
       # 人工基线：`python scripts/eval_retrieval.py --corpus both`
 
   frontend:
@@ -168,14 +179,38 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # ⚠️ 必须是 22 —— 不是"随便挑个新版本"，而是**依赖自己的要求**：
+          #   - `jsdom@30` 的 engines 是 `^22.22.2 || ^24.15.0 || >=26.0.0`
+          #   - 它依赖的 `undici@8` 要求 `node >= 22.19.0`
+          # 本机（Node 22.22.3）一直是绿的，所以这一条在 2026-09-15 CI 第一次
+          # 真跑 vitest 之前**从未暴露**：runner 上是 Node 20，`npm ci` 只给出
+          # EBADENGINE **警告**（不阻断），于是 jsdom 在 Node 20 上 `require`
+          # 期就炸 —— 失败形态是每个测试文件的**环境初始化**都失败，
+          # vitest 汇总成一句极具误导性的 `Test Files  no tests`（看起来像
+          # "找不到测试文件"，与真实原因"Node 太旧"毫无关系）。
+          # 下一个步骤把这个坑单独钉出来，让它以后一眼可见。
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         # 用 npm ci 而非 npm install：仓库已有 package-lock.json，
         # ci 保证构建可复现（install 会忽略锁文件并可能升级依赖）。
+        #
+        # ⚠️ `npm ci` 对 engines 不匹配只**警告**（EBADENGINE），不失败 ——
+        # 所以"Node 版本对不对"必须另外守（见下一步）。
         run: npm ci
+
+      - name: jsdom 能在当前 Node 上加载（否则 vitest 会报 no tests）
+        # 这一条是为 2026-09-15 那个坑立的：Node 20 + jsdom 30 时，
+        # `require('jsdom')` 抛 `TypeError: webidl.util.markAsUncloneable
+        # is not a function`（undici 8 用到了新 Node 才有的内部 API），
+        # 而 vitest 把它吞成 `Test Files  no tests` + 退出码 1 ——
+        # 排查方向会被引到"是不是测试文件没被 git 跟踪"，与真实原因无关。
+        #
+        # 单独一步 = 失败时**步骤名自己就是诊断**。放在这里而不是塞进
+        # vitest 之前的一行 `&&`，是为了让红的那一步直接说出原因。
+        run: node -e "require('jsdom'); console.log('jsdom ok on', process.version)"
 
       - name: ESLint
         run: npm run lint
@@ -212,46 +247,18 @@ jobs:
         # 用例保持在纯前端范围内：所有 API 模块都被 vi.mock 掉，
         # 不发真实请求，因此不需要后端或数据库。
         #
-        # 输出同时落一份到 `/tmp/vitest.log`：下一步（临时诊断）要在失败时
-        # 把摘要变成注解 —— 因为 **job 日志端点需要认证**，而注解公开可读。
+        # 输出同时落一份到 `/tmp/vitest.log`：末尾那条（临时诊断）要在失败时
+        # 把日志尾部变成注解 —— 因为 **job 日志端点需要认证**，而注解公开可读。
         run: |
           set -o pipefail
           npm test 2>&1 | tee /tmp/vitest.log
 
-      - name: 诊断（临时）：把 vitest 失败摘要写成注解
-        # ⚠️ 这一条是**临时诊断**，拿到失败原因后就删。
-        #
-        # 为什么需要它：本机（Windows / Node 22）vitest 24 files / 295 tests 全绿，
-        # 而 runner（Linux / Node 20）上这一步红了；job 日志要认证才能下载，
-        # 但 `::error::` 注解可以匿名读（已实测：`/check-runs/{id}/annotations`）。
-        # 注解里按 GitHub 的转义规则编码换行（%25 / %0D / %0A）。
-        #
-        # 2026-09-15 第二版：第一次只筛关键词，结果只看到 "Test Files no tests" ——
-        # 所以改成**原样输出日志尾部**，再附一份"能看到哪些测试文件"的清单。
-        if: failure() && steps.vitest.outcome == 'failure'
-        run: |
-          {
-            echo "::group::环境与文件清单"
-            node --version
-            npx vitest --version
-            echo "test 文件数: $(find src -name '*.test.ts' -o -name '*.test.tsx' | wc -l)"
-            find src -name '*.test.ts' -o -name '*.test.tsx' | head -8
-            ls -la | head -12
-            echo "::endgroup::"
-          } || true
-          python3 - <<'PY'
-          import os, platform
-          text = open('/tmp/vitest.log', encoding='utf-8', errors='replace').read()
-          def esc(s: str) -> str:
-              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          tail = '\n'.join([ln for ln in text.splitlines() if ln.strip()][-60:])
-          print(f"::error title=vitest 日志尾部::{esc(tail)[:7000]}")
-          n = sum(1 for _ in os.walk('src'))
-          print(f"::error title=vitest 环境::node={platform.node()} py={platform.python_version()} cwd={os.getcwd()} 测试文件数={sum(1 for r,_,fs in os.walk('src') for f in fs if f.endswith(('.test.ts','.test.tsx')))}")
-          PY
-
       - name: TypeScript + build
-        run: npm run build
+        id: build
+        # 同样落盘一份给末尾的诊断步骤（理由同 vitest 那一步）。
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/build.log
 
       - name: Cache Playwright browsers
         # 只缓存 Chromium（见下一节）：Playwright 的浏览器是 ~430MB 的独立二进制，
@@ -291,7 +298,10 @@ jobs:
         # CI 里**不需要**另外起服务，也不能改成复用已存在的服务 ——
         # 复用会让"测的到底是哪份代码"不可知（见 playwright.config.ts 注释）。
         timeout-minutes: 10
-        run: npm run e2e
+        id: e2e
+        run: |
+          set -o pipefail
+          npm run e2e 2>&1 | tee /tmp/e2e.log
 
       - name: Playwright a11y audit (axe-core, advisory)
         # ── 为什么这一层是**建议性**的、而不是阻断性的 ────────────────────
@@ -320,7 +330,51 @@ jobs:
         # 本机实测约 21~24 秒。
         continue-on-error: true
         timeout-minutes: 10
-        run: npm run a11y
+        id: a11y
+        run: |
+          set -o pipefail
+          npm run a11y 2>&1 | tee /tmp/a11y.log
+
+      - name: 诊断（临时）：把失败步骤的日志尾部写成注解
+        # ⚠️ 这一条是**临时诊断**，CI 全绿之后就删（连同各步骤里的 `tee`）。
+        #
+        # 为什么需要它：job 日志要认证才能下载（403），但 `::error::` 注解可以
+        # 匿名读（实测 `/check-runs/{id}/annotations`）。本机（Windows / Node 22）
+        # 全绿而 runner 上红时，注解是**唯一**能看到现场的东西。
+        #
+        # 覆盖范围刻意是**所有**会失败的步骤：2026-09-15 修掉 Node 版本之后，
+        # `TypeScript + build` / Playwright 两层是**第一次**在 Linux 上真跑，
+        # 只盯 vitest 会在下一次红的时候再一次"看不到现场"。
+        # `steps.a11y.outcome` 单独判一次：a11y 是 `continue-on-error`，
+        # 它的红不会让 job 红，但仍然需要被看见（否则那一层等于没跑）。
+        if: failure() || steps.a11y.outcome == 'failure'
+        run: |
+          python3 - <<'PY'
+          import os
+          import platform
+
+          def esc(s: str) -> str:
+              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+          print('::error title=环境::%s' % esc(
+              'node=%s cwd=%s 测试文件数=%d' % (
+                  platform.python_version(), os.getcwd(),
+                  sum(1 for r, _, fs in os.walk('src')
+                      for f in fs if f.endswith(('.test.ts', '.test.tsx'))),
+              )))
+          # git 里的测试文件数：与磁盘对比即可排除"文件没被跟踪"这一类误判
+          tracked = os.popen("git ls-files 'src/**/*.test.ts' 'src/**/*.test.tsx' | wc -l").read().strip()
+          print('::error title=git 跟踪的测试文件数::%s' % esc(tracked))
+
+          for path in ('/tmp/vitest.log', '/tmp/build.log', '/tmp/e2e.log', '/tmp/a11y.log'):
+              if not os.path.exists(path):
+                  continue
+              text = open(path, encoding='utf-8', errors='replace').read()
+              lines = [ln for ln in text.splitlines() if ln.strip()]
+              body = '\n'.join(lines[-45:])
+              print('::error title=%s 尾部（共 %d 行）::%s' % (
+                  os.path.basename(path), len(lines), esc(body)[:7000]))
+          PY
 
   security-scan:
     name: Security scan (advisory)

@@ -101,23 +101,31 @@ def load_eval_set(db_path: str, limit: Optional[int] = None) -> List[Dict[str, A
 
     Returns:
         [{question, expected_text, card_id, note_id, card_title, card_content}, ...]
+
+    ## 为什么走 `_fetch_all` 而不是自己 connect
+
+    两者对"表不存在"的处理必须**一致**。语料侧（`load_card_corpus` /
+    `load_chunk_corpus`）把 `no such table` 当"没有数据"，交给调用方按
+    "语料为空"响亮失败；而评测集侧此前是自己 connect + execute，于是在一个
+    **刚 `alembic upgrade head`、还没写过数据的库**上会抛裸 traceback：
+
+        sqlite3.OperationalError: no such table: quiz_items
+
+    同一件事（库是空的）在两条路径上有两种表现，其中一种还看不出原因。
+    现在两条都收敛到"空 → 退出码 2 + 一句人话"（见 `main()` 里那条）。
     """
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        sql = """
-            SELECT qi.question, kc.source_text, qi.card_id, qi.note_id,
-                   kc.title, kc.content
-              FROM quiz_items qi
-              JOIN knowledge_cards kc ON kc.id = qi.card_id
-             WHERE qi.question IS NOT NULL AND TRIM(qi.question) <> ''
-               AND kc.source_text IS NOT NULL AND TRIM(kc.source_text) <> ''
-             ORDER BY qi.id
-        """
-        if limit:
-            sql += f" LIMIT {int(limit)}"
-        rows = con.execute(sql).fetchall()
-    finally:
-        con.close()
+    sql = """
+        SELECT qi.question, kc.source_text, qi.card_id, qi.note_id,
+               kc.title, kc.content
+          FROM quiz_items qi
+          JOIN knowledge_cards kc ON kc.id = qi.card_id
+         WHERE qi.question IS NOT NULL AND TRIM(qi.question) <> ''
+           AND kc.source_text IS NOT NULL AND TRIM(kc.source_text) <> ''
+         ORDER BY qi.id
+    """
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    rows = _fetch_all(db_path, sql)
 
     return [
         {
@@ -462,6 +470,66 @@ def _fail_empty_corpus(label: str, hint: str) -> int:
     return 2
 
 
+def _preflight_db(db_path: str) -> Optional[str]:
+    """`--db` 指向的库能不能读？不能则返回一句人话（None = 能读）
+
+    ## 为什么要有这一层（2026-09-15 CI 实测的教训）
+
+    真库 `backend/data/db/engramnote.db` **不入版本控制**（`git ls-files
+    backend/data` = 0 个文件），因此在新克隆上、在 CI 上，这个路径**根本
+    不存在**。此时 `sqlite3.connect("file:…?mode=ro")` 抛的是：
+
+        sqlite3.OperationalError: unable to open database file
+
+    一条**只说了"打不开"、没说"哪个文件、为什么、怎么办"**的信息，而且是以
+    裸 traceback + **退出码 1** 的形式出现 —— 与"评测跑完且发现质量差"在纸面上
+    完全无法区分（都是"红了、退出码非 0"）。本仓库对"工具自身空转"的口径是
+    **退出码 2**（见 `_fail_empty_corpus`），"库读不到"属于同一类。
+
+    ## 判据刻意只有一条：**只读打开成功**
+
+    刻意**不**在这里检查表在不在、有多少行 —— 那是"没有数据"，由下游
+    `_fetch_all`（表缺失 → 空语料）与 `main()`（评测集为空）分别响亮失败。
+    这里只管"根本读不到"：库不存在、路径写错、权限不足。两者必须是不同的
+    退出路径，否则"路径写错了"会被误读成"资料库是空的"。
+
+    也不把 `sqlite3.Error` 一律吞掉：`SQLITE_CORRUPT`（库损坏）也走这条清晰
+    出口，但消息里带上异常类型与原文 —— 真实故障不能被"人话"掩盖。
+    """
+    abs_path = os.path.abspath(db_path)
+    if not os.path.exists(abs_path):
+        return f"数据库不存在：{abs_path}"
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        return f"数据库打不开（{type(exc).__name__}: {exc}）：{abs_path}"
+    try:
+        # 只读探一下 sqlite_master：连接是惰性的，打不开要到第一次执行才暴露
+        con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
+    except sqlite3.Error as exc:
+        return f"数据库不可读（{type(exc).__name__}: {exc}）：{abs_path}"
+    finally:
+        con.close()
+    return None
+
+
+def _fail_db_unavailable(problem: str) -> int:
+    """库读不到时的响亮失败：退出码 2 + 一句可执行的人话
+
+    与 `_fail_empty_corpus` 对称：两者都是"这次评测什么都没测到"，
+    区别只在成因（读不到 vs 读到了但为空）。
+    """
+    print()
+    print("!" * 72)
+    print(f"[ERROR] {problem}")
+    print("        --db 默认指向 backend/data/db/engramnote.db，而真实资料库")
+    print("        **不入版本控制**（只存在于有资料的那台机器上），因此新克隆与")
+    print("        CI 上必须显式指定：python scripts/eval_retrieval.py --db <路径>")
+    print("        退出码 2 = 检查自身空转（0 才代表「跑完了」）。")
+    print("!" * 72)
+    return 2
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="检索质量离线评测（阶段 2.9）")
     ap.add_argument("--db", default=DEFAULT_DB, help="数据库路径（只读打开）")
@@ -472,11 +540,19 @@ def main() -> int:
     ap.add_argument("--show-missed", type=int, default=3, help="打印多少条未命中样例")
     args = ap.parse_args()
 
+    # 先验库、再 import 应用层：库读不到是最常见的失败（新克隆 / CI 上没有真库），
+    # 让它先于"配置是否齐备"暴露，报错信息才指向真正的原因。
+    problem = _preflight_db(args.db)
+    if problem:
+        return _fail_db_unavailable(problem)
+
     from app.services.rag_service import RAGService
 
     eval_set = load_eval_set(args.db, args.limit or None)
     if not eval_set:
         print("评测集为空：真库中没有可用的 (quiz.question, card.source_text) 组合。")
+        print("            （库能打开但读不到数据 —— 可能是刚建好还没写数据的库，")
+        print("              或 --db 指到了一个空库；这两种情况下本次评测什么都没测到。）")
         return 2
 
     print("=" * 70)
