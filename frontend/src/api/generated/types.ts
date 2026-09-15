@@ -4,7 +4,8 @@
  * ## 这个文件解决什么
  *
  * `schema.ts` 是 `npm run gen:api` 的产物（`openapi-typescript` 从
- * `backend/openapi.json` 生成：103 条路径 / 119 个操作 / 184 个组件 schema），
+ * `backend/openapi.json` 生成：103 条路径 / 119 个操作 / 185 个组件 schema
+ * —— 这三个数会随每次契约改动变化，**以 `dump_openapi.py` 的输出为准**），
  * 它是**契约的唯一来源**。但它的顶层导出是三个大接口（`paths` / `components` /
  * `operations`），直接用要写成 `components['schemas']['NoteResponse']` 这种两跳索引。
  *
@@ -45,7 +46,7 @@ import type { components, paths } from './schema';
 
 export type { components, paths, operations } from './schema';
 
-/** `components['schemas']`：全部组件 schema 的索引（184 个） */
+/** `components['schemas']`：全部组件 schema 的索引（**185 个**，随契约变动） */
 export type Schemas = components['schemas'];
 
 /**

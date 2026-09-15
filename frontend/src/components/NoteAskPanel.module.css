@@ -157,3 +157,12 @@
   margin-top: 10px;
   text-align: right;
 }
+
+/* 检索降级提示（`hybrid` / `bm25_only`）：与 QA 页同一句话，颜色沿用警告令牌。
+   刻意做成"留在页面上的一句话"，而不是几秒就消失的浮层 ——
+   用户需要据此判断"这次答案只靠关键词匹配"。 */
+.askAiRetrievalNotice {
+  color: var(--color-warning, #b8860b);
+  margin-top: 10px;
+  font-size: 0.75rem;
+}

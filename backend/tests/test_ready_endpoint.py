@@ -71,6 +71,41 @@ async def _seed_task_runs(session_factory, statuses) -> None:
         await session.commit()
 
 
+async def _seed_chunks(session_factory, *, embedded: int, pending: int) -> None:
+    """往 `chunks` 里写 `embedded` 条已嵌入 + `pending` 条未嵌入的行
+
+    需要先有 user + note（按依赖顺序显式插入，理由同 `test_chunks.py` 的同一手法）。
+    这个分母是这条测试的**核心**：只有"已嵌入的不算进积压"才能证明
+    `pending_embeddings` 数的是待补向量，而不是 chunk 总数。
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import insert
+
+    from app.models.chunk import Chunk
+    from app.models.note import Note, NoteStatus, SourceType
+    from app.models.user import User
+
+    uid = str(_uuid.uuid4())
+    nid = str(_uuid.uuid4())
+    async with session_factory() as db:
+        await db.execute(insert(User).values(
+            id=uid, email=f"{uid[:8]}@example.com", username=f"u{uid[:8]}",
+            hashed_password="x", is_active=True,
+        ))
+        await db.execute(insert(Note).values(
+            id=nid, user_id=uid, title=f"笔记 {nid[:6]}",
+            source_type=SourceType.pdf.value, status=NoteStatus.cleaned.value,
+        ))
+        for i in range(embedded + pending):
+            db.add(Chunk(
+                user_id=uid, note_id=nid, index=i, content=f"chunk {i}",
+                char_start=i, char_end=i + 1, line_start=i, line_end=i,
+                char_count=1, has_embedding=i < embedded,
+            ))
+        await db.commit()
+
+
 def _pin_broker(monkeypatch, tmp_path: Path, *, backend: str = "local") -> Path:
     """把 broker 目录钉到 `tmp_path`，并固定 broker 后端
 
@@ -153,6 +188,47 @@ class TestReadinessWithHealthyDatabase:
         assert body["queue"]["running"] == 0
         assert body["queue"]["pending"] == 0
 
+    async def test_index_backlog_shape_is_stable(self, test_db):
+        """索引积压必须**存在且形状固定**（看板靠字段名取值）"""
+        async with _client() as client:
+            body = (await client.get("/ready")).json()
+
+        index = body["index"]
+        assert set(index) == {"pending_embeddings", "source"}, index
+        assert isinstance(index["pending_embeddings"], int), "库已答话时必须是数字（空表即 0）"
+        assert isinstance(index["source"], str) and index["source"]
+
+    async def test_index_backlog_counts_only_unembedded_chunks(self, test_db):
+        """★ 积压数的是**待补向量**的行，不是 chunk 总数
+
+        这个指标的用处就在这个分母上：2026-09-14 的取证发现，新导入的笔记
+        在有人跑 `scripts/embed_chunks.py` 之前**只被 BM25 检索到**（附录 BN.4）。
+        3 条已嵌入 + 2 条未嵌入必须报 2。
+        """
+        await _seed_chunks(test_db, embedded=3, pending=2)
+
+        async with _client() as client:
+            body = (await client.get("/ready")).json()
+
+        assert body["index"]["pending_embeddings"] == 2, body["index"]
+        assert body["index"]["source"] == "chunks_table"
+
+    async def test_index_backlog_does_not_flip_readiness(self, test_db):
+        """★ 积压是**报告项**：有积压照样 200
+
+        与"深队列不翻转就绪"同一条判据（忙/积压 ≠ 坏）。若把它做成就绪判据，
+        任何一次"刚导入还没补向量"都会让实例被判为未就绪 —— 那是把
+        "检索质量暂时降级"错当成"这个实例不能干活"。
+        """
+        await _seed_chunks(test_db, embedded=0, pending=5)
+
+        async with _client() as client:
+            resp = await client.get("/ready")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "ready"
+        assert resp.json()["index"]["pending_embeddings"] == 5
+
 
 @pytest.mark.asyncio
 class TestNotReady:
@@ -173,6 +249,9 @@ class TestNotReady:
         # 库没答话 → 行数**未知**（None），不能填 0 冒充"没有任务"
         assert body["queue"]["running"] is None
         assert body["queue"]["pending"] is None
+        # 索引积压同一条原则：0 会让"没测"与"真的没有积压"长得一模一样
+        assert body["index"]["pending_embeddings"] is None
+        assert body["index"]["source"] == "database_unavailable"
 
     async def test_not_ready_when_schema_is_missing(self, test_db, tmp_path, monkeypatch):
         """★ 连得上、但表还没建 → 也是"不能干活"

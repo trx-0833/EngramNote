@@ -271,6 +271,18 @@ def _schema_endpoint_kwargs(cfg: Settings) -> dict[str, Any]:
 # (2) 若该判据被接到存活探针上，就是上面那种重启风暴。
 # 背压是另一个机制（限流/扩容），不该混进就绪判定。因此 `/ready` 只把
 # 深度**如实报出来**，状态码只由"能力"（数据库）决定。
+#
+# ## 索引积压为什么也只报告、不决定就绪（2026-09-14 加）
+#
+# "有多少 chunk 还没有向量"属于同一类信息：它说明**检索质量暂时降级**
+# （这些内容只被 BM25 检索到），不说明实例坏了。
+#
+# 这个数字是补上来的：2026-09-14 的全链路取证（附录 BN.4）发现，
+# 清洗路径**刻意不写向量**（B 半要加载 4.3GB 模型），补嵌入只有人工脚本
+# `scripts/embed_chunks.py`，而 Beat 调度表里没有这个任务 —— 于是"新导入的
+# 资料什么时候进向量通道"取决于**有没有人记得跑脚本**，界面上也看不出来。
+# 在决定要不要挂定时任务之前，先让它**可见**：一个恒为 0 的指标能证明"没有积压"，
+# 一个没人看得见的指标什么都证明不了。
 
 
 class DatabaseCheck(BaseModel):
@@ -306,6 +318,22 @@ class QueueDepth(BaseModel):
     source: str
 
 
+class IndexBacklog(BaseModel):
+    """`/ready` 的索引积压快照（阶段 5.1 的取证发现的缺口）
+
+    `pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：
+    这些内容**只被 BM25 检索到**，向量通道里还看不见它们
+    （清洗路径刻意不写向量，补嵌入是人工脚本，见本模块 `/ready` 上方说明）。
+
+    `None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`
+    同一条原则：0 会让"没测"与"真的没有积压"在监控面板上长得一模一样。
+    """
+
+    pending_embeddings: Optional[int] = None
+    #: 来源；测不到时是原因码（如 `chunks_unavailable`）
+    source: str
+
+
 class ReadinessResponse(BaseModel):
     """`GET /ready` 的响应（200 与 503 **共用同一形状**）
 
@@ -317,6 +345,7 @@ class ReadinessResponse(BaseModel):
     app: str
     database: DatabaseCheck
     queue: QueueDepth
+    index: IndexBacklog
 
 
 #: Celery 默认队列名。`tasks/celery_app.py` **没有**覆盖 `task_default_queue`
@@ -367,6 +396,35 @@ async def _task_status_counts() -> tuple[Optional[dict[str, int]], Optional[str]
         key = getattr(status, "value", None) or str(status)
         counts[key] = int(count)
     return counts, None
+
+
+async def _pending_embedding_count() -> tuple[Optional[int], str]:
+    """还没补嵌入的 chunk 数（`has_embedding = false`）；失败时返回 `(None, 原因码)`
+
+    ⚠️ 与 `_task_status_counts` 一样是**只读**查询：就绪探针会被高频调用，
+    探针绝不能成为数据变更的来源。失败**不**影响状态码 —— 它是报告项，
+    与队列深度同一条判据（忙/积压 ≠ 坏）。
+
+    Returns:
+        (待嵌入行数, 来源)；测不到时行数为 `None`、来源是原因码
+    """
+    from sqlalchemy import func, select
+
+    from .models.chunk import Chunk
+
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
+                )
+            ).scalar_one()
+    except Exception as exc:
+        # 细节只进日志：响应里回稳定原因码（与 DatabaseCheck 的说明同一口径）
+        logger.warning("就绪检查：chunk 待嵌入数查询失败 | %s: %s", type(exc).__name__, exc)
+        return None, "chunks_unavailable"
+    return int(total), "chunks_table"
 
 
 def _broker_queue_depth(cfg: Settings) -> tuple[Optional[int], str]:
@@ -634,6 +692,9 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         队列深度是**报告项**，不参与状态码：忙 ≠ 坏，详见上面
         "队列深度为什么只报告、不决定就绪"。
 
+        **索引积压**（`index.pending_embeddings`：还没补向量的 chunk 数）同样是报告项：
+        它说明检索质量暂时降级（这些内容只被 BM25 检索到），不说明实例坏了。
+
         不需要认证（探针不会带 Token），因此响应里只有稳定的状态与原因码，
         不含异常文本、库路径等内部信息。
         """
@@ -644,6 +705,10 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         counts, db_reason = await _task_status_counts()
         db_ok = counts is not None
         depth, depth_source = _broker_queue_depth(cfg_now)
+        # 库都没连上时给 `None` 而不是 0："没测到"与"真的没有积压"必须能分开
+        pending_embeddings, index_source = (
+            await _pending_embedding_count() if db_ok else (None, "database_unavailable")
+        )
 
         payload = ReadinessResponse(
             status="ready" if db_ok else "not_ready",
@@ -660,6 +725,10 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
                 running=None if not db_ok else counts.get("running", 0),
                 pending=None if not db_ok else counts.get("pending", 0),
                 source=depth_source,
+            ),
+            index=IndexBacklog(
+                pending_embeddings=pending_embeddings,
+                source=index_source,
             ),
         )
         return JSONResponse(

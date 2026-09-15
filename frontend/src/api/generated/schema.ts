@@ -3049,6 +3049,9 @@ export interface paths {
      *     队列深度是**报告项**，不参与状态码：忙 ≠ 坏，详见上面
      *     "队列深度为什么只报告、不决定就绪"。
      *
+     *     **索引积压**（`index.pending_embeddings`：还没补向量的 chunk 数）同样是报告项：
+     *     它说明检索质量暂时降级（这些内容只被 BM25 检索到），不说明实例坏了。
+     *
      *     不需要认证（探针不会带 Token），因此响应里只有稳定的状态与原因码，
      *     不含异常文本、库路径等内部信息。
      */
@@ -4699,6 +4702,23 @@ export interface components {
       status: string;
     };
     /**
+     * IndexBacklog
+     * @description `/ready` 的索引积压快照（阶段 5.1 的取证发现的缺口）
+     *
+     *     `pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：
+     *     这些内容**只被 BM25 检索到**，向量通道里还看不见它们
+     *     （清洗路径刻意不写向量，补嵌入是人工脚本，见本模块 `/ready` 上方说明）。
+     *
+     *     `None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`
+     *     同一条原则：0 会让"没测"与"真的没有积压"在监控面板上长得一模一样。
+     */
+    IndexBacklog: {
+      /** Pending Embeddings */
+      pending_embeddings?: number | null;
+      /** Source */
+      source: string;
+    };
+    /**
      * KnowledgeCardListResponse
      * @description 知识卡片列表响应
      */
@@ -6019,6 +6039,7 @@ export interface components {
       /** App */
       app: string;
       database: components['schemas']['DatabaseCheck'];
+      index: components['schemas']['IndexBacklog'];
       queue: components['schemas']['QueueDepth'];
       /** Status */
       status: string;

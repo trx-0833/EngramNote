@@ -28,25 +28,26 @@
  * 规范 §6 给了这条路：`import styles from './X.module.css'` 后用 `styles.foo`，
  * 测试环境下它返回真实类名（实测 `_askAiPanel_<hash>`）。
  */
-import { render } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import NoteAskPanel from './NoteAskPanel'
+import NoteAskPanel from './NoteAskPanel';
 // 面板根节点的类名（哈希后无法用字面量查询，理由见文件头）
-import styles from './NoteAskPanel.module.css'
-
+import styles from './NoteAskPanel.module.css';
+import { askNoteQuestionStream } from '../api/notes';
 // 组件顶层 import 了流式问答接口；本文件不提交任何问题，桩掉避免真实请求
-vi.mock('../api/notes', () => ({ askNoteQuestionStream: vi.fn() }))
+vi.mock('../api/notes', () => ({ askNoteQuestionStream: vi.fn() }));
 
-const DEFAULT_WIDTH = 1024
+const DEFAULT_WIDTH = 1024;
 
 function setViewportWidth(width: number) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
 }
 
 /** 渲染浮层并返回它的内联几何（left / width） */
 function renderPanelGeometry(viewportWidth: number, anchorX = 100) {
-  setViewportWidth(viewportWidth)
+  setViewportWidth(viewportWidth);
   render(
     <NoteAskPanel
       noteId="note-1"
@@ -59,40 +60,113 @@ function renderPanelGeometry(viewportWidth: number, anchorX = 100) {
       pos={{ x: anchorX, y: 300 }}
       onClose={vi.fn()}
     />,
-  )
-  const panel = document.querySelector(`.${styles.askAiPanel}`) as HTMLElement
+  );
+  const panel = document.querySelector(`.${styles.askAiPanel}`) as HTMLElement;
   return {
     left: Number.parseFloat(panel.style.left),
     width: Number.parseFloat(panel.style.width),
-  }
+  };
 }
 
 afterEach(() => {
-  setViewportWidth(DEFAULT_WIDTH)
-})
+  setViewportWidth(DEFAULT_WIDTH);
+});
 
 describe('AI 提问浮层：窄屏必须整体落在视口内', () => {
   it('★ 375px 视口（iPhone SE/8 逻辑宽度）：面板不越出左右边界', () => {
-    const { left, width } = renderPanelGeometry(375)
+    const { left, width } = renderPanelGeometry(375);
 
     // 面板宽度不能超过视口（留 12px 边距），否则再怎么做夹取也会溢出
-    expect(width).toBeLessThanOrEqual(375 - 24)
+    expect(width).toBeLessThanOrEqual(375 - 24);
     // translate(-50%) 之后的实际左右边缘
-    expect(left - width / 2).toBeGreaterThanOrEqual(0)
-    expect(left + width / 2).toBeLessThanOrEqual(375)
-  })
+    expect(left - width / 2).toBeGreaterThanOrEqual(0);
+    expect(left + width / 2).toBeLessThanOrEqual(375);
+  });
 
   it('★ 窄视口下锚点靠右时也不越界（选区常在正文右侧）', () => {
-    const { left, width } = renderPanelGeometry(360, 340)
+    const { left, width } = renderPanelGeometry(360, 340);
 
-    expect(left - width / 2).toBeGreaterThanOrEqual(0)
-    expect(left + width / 2).toBeLessThanOrEqual(360)
-  })
+    expect(left - width / 2).toBeGreaterThanOrEqual(0);
+    expect(left + width / 2).toBeLessThanOrEqual(360);
+  });
 
   it('★ 桌面端（1024px）行为逐像素不变：宽度仍为 480，锚点 100 被夹到 248', () => {
-    const { left, width } = renderPanelGeometry(DEFAULT_WIDTH)
+    const { left, width } = renderPanelGeometry(DEFAULT_WIDTH);
 
-    expect(width).toBe(480)
-    expect(left).toBe(248)
-  })
-})
+    expect(width).toBe(480);
+    expect(left).toBe(248);
+  });
+});
+
+/**
+ * ## 为什么还要测"降级提示"
+ *
+ * 契约里写明 `retrieval_status` 是"**供前端展示降级提示**"，
+ * 而这个组件此前**只从 `meta` 里取了 `provider`** —— 于是最容易发生的那种降级
+ * （`hybrid`：语料还没有向量，本次只用关键词检索；见 overhaul-plan 附录 BN.4）
+ * 在"笔记内提问"这条路径上**完全看不见**。
+ *
+ * 这条用例直接喂一段 SSE 给组件，钉住"`meta` 里的状态真的会被渲染出来"——
+ * 而不是只钉住那个纯函数（纯函数测过了，被忽略的是**接线**）。
+ */
+function sseStream(events: Array<[string, unknown]>): ReadableStream<Uint8Array> {
+  const text = events
+    .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+    .join('');
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+function renderPanel() {
+  render(
+    <NoteAskPanel
+      noteId="note-1"
+      noteTitle="浮充的定义"
+      initialText="蓄电池的一种运行方式"
+      contextBefore=""
+      contextAfter=""
+      viewMode="clean"
+      markdown="蓄电池的一种运行方式，端电压保持恒定。"
+      pos={{ x: 100, y: 300 }}
+      onClose={vi.fn()}
+    />,
+  );
+}
+
+describe('AI 提问浮层：检索降级提示', () => {
+  it('★ meta 里的 hybrid 会被渲染出来（此前这个字段被完全忽略）', async () => {
+    vi.mocked(askNoteQuestionStream).mockResolvedValue(
+      sseStream([
+        ['meta', { retrieval_status: 'hybrid', provider: 'deepseek' }],
+        ['token', { content: '答案是……' }],
+        ['done', {}],
+      ]),
+    );
+    renderPanel();
+
+    await userEvent.click(screen.getByRole('button', { name: '提问' }));
+
+    expect(await screen.findByText(/向量检索没有命中/)).toBeInTheDocument();
+  });
+
+  it('full_vector 不出现任何降级提示（正常路径不该有警告）', async () => {
+    vi.mocked(askNoteQuestionStream).mockResolvedValue(
+      sseStream([
+        ['meta', { retrieval_status: 'full_vector', provider: 'deepseek' }],
+        ['done', {}],
+      ]),
+    );
+    renderPanel();
+
+    await userEvent.click(screen.getByRole('button', { name: '提问' }));
+    // 等答案区真的渲染出来，再断言"没有提示" —— 否则可能是"还没渲染"造成的假通过
+    await screen.findByText(/由 DeepSeek 提供支持/);
+
+    expect(screen.queryByText(/关键词检索/)).toBeNull();
+  });
+});
