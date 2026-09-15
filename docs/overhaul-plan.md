@@ -11307,29 +11307,52 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 若某条在 CI 上失败，先分清"写着与当前代码不一致"（= 真忘了重新生成）
 与 import/配置类报错（= 环境问题）—— 两者都不许用 `|| true` 掩盖。
 
-### BO.4 推送的实际结果：**未完成 —— 被网络挡住**（诊断齐全）
+### BO.4 推送：**先被网络挡住，重试后成功**
 
-`git push origin main` 连续三次失败，逐层诊断如下（都是本轮实测）：
+第一次 `git push origin main` 连续三次失败，逐层诊断如下（都是本轮实测）：
 
 | 目标 | 结果 | 说明 |
 |---|---|---|
-| `github.com:443`（HTTPS，push 走它） | ❌ **不通** | TCP 测试 False；`curl` 8 秒超时（`000`）；`git push` 报 `Failed to connect to github.com port 443 after 21092 ms` 与 `Recv failure: Connection was reset` |
-| `github.com` 的 DNS 解析 | ✅ **正确** | `140.82.112.3`（真实 GitHub IP）——**不是 DNS 污染**；用 `--resolve` 直连该 IP 同样超时，所以是**到该主机的连通性/SNI 层封锁** |
-| `api.github.com` / `codeload.github.com` / `raw.githubusercontent.com` | ✅ 正常 | 分别返回 200 / 301 / 301（**只有 `github.com` 本身不通**） |
-| `github.com:22`（SSH） / `ssh.github.com:443` | ✅ TCP 可达 | 但 `ssh -T git@github.com` 报 `Permission denied (publickey)` —— 本机 `~/.ssh` 里**只有 `known_hosts`，没有密钥** |
-| 代理 | ❌ 无 | git 未配 `http.proxy`；`HTTP(S)_PROXY`/`ALL_PROXY` 均未设置；常见本地代理端口（7890 / 7897 / 10809 / 1080 / 8080 / 20171）**都不在监听** |
-| `gh` CLI | ❌ 未安装 | — |
+| `github.com:443`（HTTPS，push 走它） | ❌ 三次失败 | `Recv failure: Connection was reset` 与 `Failed to connect to github.com port 443 after 21092 ms`；同时段 TCP 测试 False、`curl` 8 秒超时（`000`） |
+| `github.com` 的 DNS 解析 | ✅ **正确** | `140.82.112.3`（真实 GitHub IP）——**不是 DNS 污染**；`--resolve` 直连该 IP 同样超时，所以是**到该主机的连通性/SNI 层封锁** |
+| `api.github.com` / `codeload.github.com` / `raw.githubusercontent.com` | ✅ 同时段正常 | 200 / 301 / 301（**只有 `github.com` 本身不通**） |
+| `github.com:22`（SSH） / `ssh.github.com:443` | ✅ TCP 可达 | 但 `ssh -T git@github.com` 报 `Permission denied (publickey)`：本机 `~/.ssh` 只有 `known_hosts`、没有密钥 |
+| 代理 / `gh` CLI | ❌ 无 | git 未配 `http.proxy`，`HTTP(S)_PROXY`/`ALL_PROXY` 未设置，常见本地代理端口都不在监听；`gh` 未安装 |
 
-**结论**：本地 **109 个提交已就绪**（工作区干净、构建与测试全绿），缺的只是**一条能到 `github.com` 的通路或一份凭据**。
-可行的三条解封路径（按代价从低到高）：
+> **重试即通**：随后再跑一次 `git push origin main` → **退出码 0**，
+> `c951eb1..9afcfed  main -> main`。也就是说那次失败是**瞬时封锁**，
+> 而不是配置问题 —— 本机 HTTPS 凭据一直在（凭据管理器里有 `git:https://github.com`）。
+> 独立核对（第二次联网往返）：`git ls-remote origin refs/heads/main`
+> 返回 `9afcfedb77afecb7a24acdc9a07e361c12a6c947`，`git status -sb` 显示与 `origin/main` **无领先/落后**。
 
-1. **SSH 密钥**（推荐）：本机生成一对 ed25519，你把公钥加到 GitHub 的 SSH keys；
-   端口 22 与 `ssh.github.com:443` **都通**，之后 `origin` 换成 SSH 即可长期使用；
-2. **代理 / VPN**：启动后告诉我端口，我用 `git -c http.proxy=… push origin main` 重试；
-3. **token + GitHub API**（`api.github.com` 通）：用 Git Data API **逐提交重放**（保留 109 条的
-   提交信息与历史），代价是要把 token 交给本会话、请求数约 700+。
+**教训（值得记）**：遇到 `Connection was reset` 时，"再试一次"不是偷懒 ——
+本机到 `github.com` 的通路是**时通时断**的：同一分钟里，TCP 测试有 4/6 个 IP 可达，
+而前一次尝试恰好撞上不可达的那一段。判据要按**多次尝试的成功率**看，
+不要按单次失败下"这条路不通"的结论（我第一次的结论就下早了）。
 
-### BO.5 悬着的小事（本轮之后）
+### BO.5 CI：第一次带着本轮新关卡真实执行
+
+推送触发了 CI（`CI` workflow，run **#6**，sha `9afcfed`），随后用 GitHub 公开 API
+轮询到结论 —— 这是四条新关卡第一次在 GitHub runner 上跑：
+
+| 关卡 | 本机实测 | runner 实测 |
+|---|---|---|
+| `python scripts/dump_openapi.py --check` | 退出 0 | 见 BO.5.1 |
+| `npm run gen:api` + `git diff --exit-code -- src/api/generated/schema.ts` | 退出 0（幂等） | 见 BO.5.1 |
+| `frontend/Dockerfile` 两条守卫（`COPY … package-lock.json` / `RUN npm ci`） | 当前文件 OK、旧形态 FAIL | 见 BO.5.1 |
+| `nginx.conf` 两条守卫（既有） | 未改动 | 见 BO.5.1 |
+
+历史对照：上一轮 CI（run **#5**，sha `c951eb1`，2026-09-11）**成功** ——
+说明这套工作流在本项目上是能跑绿的，本轮的失败（如果有）应当先怀疑**新加的那几条**，
+而不是怀疑环境。
+
+#### BO.5.1 runner 上的逐 job / 逐 step 结果
+
+**（结论见下方"CI 结果"一栏；本节在拿到结论后回填）**
+
+CI 结果：见下一节 BO.6（拿到 runner 结论后写入）。
+
+### BO.6 悬着的小事（本轮之后）
 
 | # | 事项 | 状态 |
 |---|---|---|

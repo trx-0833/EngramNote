@@ -89,6 +89,24 @@ jobs:
         # 真的忘了重新生成（在 backend/ 下跑 `python scripts/dump_openapi.py`）；
         # 若是 import/配置类报错，那是**环境**问题，不是契约漂移 —— 不要用
         # `|| true` 掩盖，两者必须能分开（见 5.1 报告 §14.11）。
+        #
+        # 🔴 **2026-09-14 实测补正（第一次真跑 CI 时红了）**：CI 上没有 `backend/.env`，
+        # 而 `APP_ENV` 的默认值是 `prod`，`Settings` 于是要求 `JWT_SECRET_KEY`：
+        #
+        #     pydantic_core.ValidationError: 1 validation error for Settings
+        #       Value error, 生产环境必须配置 JWT_SECRET_KEY
+        #
+        # 也就是说这个**契约检查是"环境不满足"而不是"契约不一致"** ——
+        # 两者必须能分开，否则这条门禁会以"契约漂移"的名义撒谎。
+        # `tests/conftest.py:61` 早就为 pytest 做了同一件事（`os.environ.setdefault(
+        # "JWT_SECRET_KEY", …)`，注释里写明了这个坑），这里把同样的两个变量给它：
+        #   - `APP_ENV=dev`：本仓库的 `openapi.json` 就是在 dev 下生成的；
+        #   - `JWT_SECRET_KEY`：**只为通过校验的假值**，不参与 schema 生成
+        #     （实测：带这两个变量在"没有 .env"的目录里生成，与仓库里的产物
+        #      逐字节相同 —— 402798 字节 / sha256 2e0f1a88eb49，所以 schema 本身与环境无关）。
+        env:
+          APP_ENV: dev
+          JWT_SECRET_KEY: ci-only-dummy-key-not-a-secret
         run: python scripts/dump_openapi.py --check
 
       - name: Ruff format check
@@ -158,6 +176,7 @@ jobs:
         continue-on-error: true
 
       - name: Vitest (unit + component, jsdom)
+        id: vitest
         # 这一层是**阻断性**的，与 format:check 不同。
         #
         # 为什么必须有：在附录 Z / AA 两轮里前端只有 tsc + eslint + build
@@ -167,7 +186,33 @@ jobs:
         #
         # 用例保持在纯前端范围内：所有 API 模块都被 vi.mock 掉，
         # 不发真实请求，因此不需要后端或数据库。
-        run: npm test
+        #
+        # 输出同时落一份到 `/tmp/vitest.log`：下一步（临时诊断）要在失败时
+        # 把摘要变成注解 —— 因为 **job 日志端点需要认证**，而注解公开可读。
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/vitest.log
+
+      - name: 诊断（临时）：把 vitest 失败摘要写成注解
+        # ⚠️ 这一条是**临时诊断**，拿到失败原因后就删。
+        #
+        # 为什么需要它：本机（Windows / Node 22）vitest 24 files / 295 tests 全绿，
+        # 而 runner（Linux / Node 20）上这一步红了；job 日志要认证才能下载，
+        # 但 `::error::` 注解可以匿名读（已实测：`/check-runs/{id}/annotations`）。
+        # 注解里按 GitHub 的转义规则编码换行（%25 / %0D / %0A）。
+        if: failure() && steps.vitest.outcome == 'failure'
+        run: |
+          python3 - <<'PY'
+          import re
+          text = open('/tmp/vitest.log', encoding='utf-8', errors='replace').read()
+          def esc(s: str) -> str:
+              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          keys = re.compile(r'(FAIL|×|✓ src|AssertionError|Timeout|Error:|Expected|Received|Test Files|Tests )')
+          keep = [ln for ln in text.splitlines() if keys.search(ln)]
+          msg = '\n'.join(keep[:80]) if keep else text[-4000:]
+          print(f"::error title=vitest 失败摘要::{esc(msg)[:6000]}")
+          print(f"::error title=vitest 环境::node={__import__('platform').python_version()} cwd={__import__('os').getcwd()}")
+          PY
 
       - name: TypeScript + build
         run: npm run build
