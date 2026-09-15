@@ -7330,7 +7330,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "description": "用户登录接口\n\n使用邮箱和密码进行认证，成功后签发一对令牌（访问 + 刷新）。\n每次登录开一条**新的轮换链**：因此\"在另一台设备登录\"不会影响本设备，\n\"在另一台设备登出\"也不会影响本设备（除非显式要求 all_devices）。\n\nArgs:\n    req: 登录请求体，包含 email 和 password\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 包含 access_token、refresh_token 和用户信息的响应\n\nRaises:\n    HTTPException 401: 邮箱或密码错误",
+        "description": "用户登录接口\n\n使用邮箱和密码进行认证，成功后签发一对令牌（访问 + 刷新）。\n每次登录开一条**新的轮换链**：因此\"在另一台设备登录\"不会影响本设备，\n\"在另一台设备登出\"也不会影响本设备（除非显式要求 all_devices）。\n\nArgs:\n    req: 登录请求体，包含 email 和 password\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 包含 access_token、refresh_token 和用户信息的响应\n\nRaises:\n    AppError: 邮箱或密码错误（AUTH_INVALID_CREDENTIALS → 401）",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -7440,7 +7440,7 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "刷新令牌接口（阶段 6.3）：轮换并返回新的一对令牌\n\n请求体携带刷新令牌（不是 `Authorization` 头）：\n\n- 用 `Authorization` 头会把两种令牌混在同一个位置，而\"哪个头能放哪种令牌\"\n  正是类型混淆最容易发生的地方；放在 body 里，接口契约（OpenAPI）也明确\n  显示本接口不需要 Bearer 认证，而是由 body 里的刷新令牌自证身份。\n- 本接口**刻意不要求**有效的访问令牌：访问令牌过期正是来刷新的主要场景。\n\n成功时：签发新的访问令牌 + 新的刷新令牌，并把提交的那一枚标记为\n\"已撤销 + replaced_by_jti=新令牌\"。客户端**必须**用新刷新令牌替换旧的。\n\n失败一律 401（不区分原因，避免把\"这枚令牌存在过\"变成可探测信息）：\n类型不符 / 签名错 / 已过期 / 查无此 jti / **重放已撤销的令牌**。\n最后一种情况服务端会撤销整条轮换链（盗用信号，见 refresh_token_service）。\n\nArgs:\n    req: 含 refresh_token 的请求体\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 新的 access_token / refresh_token 与用户信息\n\nRaises:\n    HTTPException 401: 刷新令牌无效、已过期或已被撤销（重放）",
+        "description": "刷新令牌接口（阶段 6.3）：轮换并返回新的一对令牌\n\n请求体携带刷新令牌（不是 `Authorization` 头）：\n\n- 用 `Authorization` 头会把两种令牌混在同一个位置，而\"哪个头能放哪种令牌\"\n  正是类型混淆最容易发生的地方；放在 body 里，接口契约（OpenAPI）也明确\n  显示本接口不需要 Bearer 认证，而是由 body 里的刷新令牌自证身份。\n- 本接口**刻意不要求**有效的访问令牌：访问令牌过期正是来刷新的主要场景。\n\n成功时：签发新的访问令牌 + 新的刷新令牌，并把提交的那一枚标记为\n\"已撤销 + replaced_by_jti=新令牌\"。客户端**必须**用新刷新令牌替换旧的。\n\n失败一律 401（不区分原因，避免把\"这枚令牌存在过\"变成可探测信息）：\n类型不符 / 签名错 / 已过期 / 查无此 jti / **重放已撤销的令牌**。\n最后一种情况服务端会撤销整条轮换链（盗用信号，见 refresh_token_service）。\n\nArgs:\n    req: 含 refresh_token 的请求体\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 新的 access_token / refresh_token 与用户信息\n\nRaises:\n    HTTPException: 刷新令牌无效、已过期或已被撤销（401；豁免：必须带 WWW-Authenticate，见紧邻的 error-contract: exempt）",
         "operationId": "refresh_api_auth_refresh_post",
         "requestBody": {
           "content": {
@@ -7482,7 +7482,7 @@
     },
     "/api/auth/register": {
       "post": {
-        "description": "用户注册接口\n\n注册成功后自动签发访问令牌与刷新令牌，用户无需再次登录即可使用系统。\n如果邮箱或用户名已被占用，返回 400 错误。\n\nArgs:\n    req: 注册请求体，包含 email、username、password\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 包含 access_token、refresh_token 和用户信息的响应\n\nRaises:\n    HTTPException 400: 邮箱或用户名已被注册",
+        "description": "用户注册接口\n\n注册成功后自动签发访问令牌与刷新令牌，用户无需再次登录即可使用系统。\n如果邮箱或用户名已被占用，返回 400 错误。\n\nArgs:\n    req: 注册请求体，包含 email、username、password\n    db: 异步数据库会话\n\nReturns:\n    TokenResponse: 包含 access_token、refresh_token 和用户信息的响应\n\nRaises:\n    AppError: 邮箱或用户名已被注册（AUTH_REGISTRATION_REJECTED → 400）",
         "operationId": "register_api_auth_register_post",
         "requestBody": {
           "content": {
@@ -8004,7 +8004,7 @@
     },
     "/api/folders/{folder_id}": {
       "delete": {
-        "description": "删除文件夹\n\n仅允许删除空文件夹（不包含任何笔记的文件夹）。\n\nArgs:\n    folder_id: 文件夹 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果，包含 message 字段\n\nRaises:\n    HTTPException 404: 文件夹不存在或不属于当前用户\n    HTTPException 400: 文件夹非空，不允许删除",
+        "description": "删除文件夹\n\n仅允许删除空文件夹（不包含任何笔记的文件夹）。\n\nArgs:\n    folder_id: 文件夹 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果，包含 message 字段\n\nRaises:\n    AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）\n    AppError: 文件夹非空，不允许删除（FOLDER_NOT_EMPTY → 400）",
         "operationId": "delete_folder_api_folders__folder_id__delete",
         "parameters": [
           {
@@ -8050,7 +8050,7 @@
         ]
       },
       "get": {
-        "description": "获取文件夹详情\n\n返回文件夹信息及其包含的笔记列表。\n\nArgs:\n    folder_id: 文件夹 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    FolderDetailResponse: 文件夹详情，包含笔记列表\n\nRaises:\n    HTTPException 404: 文件夹不存在或不属于当前用户",
+        "description": "获取文件夹详情\n\n返回文件夹信息及其包含的笔记列表。\n\nArgs:\n    folder_id: 文件夹 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    FolderDetailResponse: 文件夹详情，包含笔记列表\n\nRaises:\n    AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）",
         "operationId": "get_folder_api_folders__folder_id__get",
         "parameters": [
           {
@@ -8096,7 +8096,7 @@
         ]
       },
       "patch": {
-        "description": "更新文件夹信息（当前仅支持重命名）\n\nArgs:\n    folder_id: 文件夹 ID\n    req: 更新请求，包含可选的 name 字段\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    FolderResponse: 更新后的文件夹信息\n\nRaises:\n    HTTPException 404: 文件夹不存在或不属于当前用户",
+        "description": "更新文件夹信息（当前仅支持重命名）\n\nArgs:\n    folder_id: 文件夹 ID\n    req: 更新请求，包含可选的 name 字段\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    FolderResponse: 更新后的文件夹信息\n\nRaises:\n    AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）",
         "operationId": "update_folder_api_folders__folder_id__patch",
         "parameters": [
           {
@@ -8209,7 +8209,7 @@
         ]
       },
       "post": {
-        "description": "创建学习目标\n\n每用户最多 5 个活跃目标，超过上限时返回 400 错误。\n\nArgs:\n    req: 创建请求体，包含 name / type / scope_notes / scope_folders /\n         target_mastery / deadline\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 新创建的目标信息\n\nRaises:\n    HTTPException 400: 活跃目标数已达上限（5 个）",
+        "description": "创建学习目标\n\n每用户最多 5 个活跃目标，超过上限时返回 400 错误。\n\nArgs:\n    req: 创建请求体，包含 name / type / scope_notes / scope_folders /\n         target_mastery / deadline\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 新创建的目标信息\n\nRaises:\n    AppError: 活跃目标数已达上限（GOAL_ACTIVE_LIMIT_REACHED → 400）",
         "operationId": "create_goal_api_goals_post",
         "requestBody": {
           "content": {
@@ -8256,7 +8256,7 @@
     },
     "/api/goals/daily-plan": {
       "get": {
-        "description": "获取今日推荐任务\n\n若今日已有计划则直接返回，否则基于活跃目标的 scope_notes 生成新计划。\n任务分为三类：薄弱点（weak_points）、到期复习（review）、新资料（new_materials）。\n\n注意：该路由必须定义在 /{goal_id} 之前，否则 \"daily-plan\" 会被当作 goal_id 匹配。\n\nArgs:\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    DailyPlanResponse: 今日计划，包含推荐任务和完成进度\n\nRaises:\n    HTTPException 400: 用户无活跃目标，需先创建目标",
+        "description": "获取今日推荐任务\n\n若今日已有计划则直接返回，否则基于活跃目标的 scope_notes 生成新计划。\n任务分为三类：薄弱点（weak_points）、到期复习（review）、新资料（new_materials）。\n\n注意：该路由必须定义在 /{goal_id} 之前，否则 \"daily-plan\" 会被当作 goal_id 匹配。\n\nArgs:\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    DailyPlanResponse: 今日计划，包含推荐任务和完成进度\n\nRaises:\n    AppError: 用户无活跃目标，需先创建目标（GOAL_NONE_ACTIVE → 400）",
         "operationId": "get_daily_plan_api_goals_daily_plan_get",
         "responses": {
           "200": {
@@ -8283,7 +8283,7 @@
     },
     "/api/goals/{goal_id}": {
       "delete": {
-        "description": "软删除学习目标\n\n将目标状态置为 DELETED，不物理删除记录。\n软删除后目标在列表查询中默认不可见，但仍可通过 status=deleted 过滤参数访问。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nRaises:\n    HTTPException 404: 目标不存在或不属于当前用户",
+        "description": "软删除学习目标\n\n将目标状态置为 DELETED，不物理删除记录。\n软删除后目标在列表查询中默认不可见，但仍可通过 status=deleted 过滤参数访问。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nRaises:\n    AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）",
         "operationId": "delete_goal_api_goals__goal_id__delete",
         "parameters": [
           {
@@ -8322,7 +8322,7 @@
         ]
       },
       "get": {
-        "description": "获取学习目标详情（含实时进度）\n\n返回目标基本信息以及计算得出的 progress_percentage（0-100）。\n进度计算基于范围内卡片的平均掌握度 / 目标掌握度。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 目标详情，含 progress_percentage 字段\n\nRaises:\n    HTTPException 404: 目标不存在或不属于当前用户",
+        "description": "获取学习目标详情（含实时进度）\n\n返回目标基本信息以及计算得出的 progress_percentage（0-100）。\n进度计算基于范围内卡片的平均掌握度 / 目标掌握度。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 目标详情，含 progress_percentage 字段\n\nRaises:\n    AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）",
         "operationId": "get_goal_api_goals__goal_id__get",
         "parameters": [
           {
@@ -8368,7 +8368,7 @@
         ]
       },
       "patch": {
-        "description": "更新学习目标\n\n所有字段均为可选更新，仅更新请求中显式提供的字段。\n\nArgs:\n    goal_id: 目标 ID\n    req: 更新请求体，含可选字段 name / type / scope_notes / scope_folders /\n         target_mastery / deadline / status\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 更新后的目标信息\n\nRaises:\n    HTTPException 404: 目标不存在或不属于当前用户",
+        "description": "更新学习目标\n\n所有字段均为可选更新，仅更新请求中显式提供的字段。\n\nArgs:\n    goal_id: 目标 ID\n    req: 更新请求体，含可选字段 name / type / scope_notes / scope_folders /\n         target_mastery / deadline / status\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 更新后的目标信息\n\nRaises:\n    AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）\n    AppError: 目标范围引用了不存在或无权访问的笔记（GOAL_SCOPE_NOTE_INVALID → 400）\n    AppError: 目标范围引用了不存在或无权访问的文件夹（GOAL_SCOPE_FOLDER_INVALID → 400）",
         "operationId": "update_goal_api_goals__goal_id__patch",
         "parameters": [
           {
@@ -8426,7 +8426,7 @@
     },
     "/api/goals/{goal_id}/archive": {
       "post": {
-        "description": "归档学习目标\n\n将目标状态置为 ARCHIVED，归档后目标不再参与每日计划生成和进度刷新。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 更新后的目标信息\n\nRaises:\n    HTTPException 404: 目标不存在或不属于当前用户",
+        "description": "归档学习目标\n\n将目标状态置为 ARCHIVED，归档后目标不再参与每日计划生成和进度刷新。\n\nArgs:\n    goal_id: 目标 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    GoalResponse: 更新后的目标信息\n\nRaises:\n    AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）",
         "operationId": "archive_goal_api_goals__goal_id__archive_post",
         "parameters": [
           {
@@ -9105,7 +9105,7 @@
     },
     "/api/knowledge/cards/{card_id}/generate-extension": {
       "post": {
-        "description": "基于已掌握的父卡片生成进阶拓展知识点\n\n调用 generate_extension 服务：校验父卡片归属与掌握度阈值（>=80），\n调用 LLM 生成拓展卡片并持久化。\n\nRaises:\n    HTTPException 400: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）",
+        "description": "基于已掌握的父卡片生成进阶拓展知识点\n\n调用 generate_extension 服务：校验父卡片归属与掌握度阈值（>=80），\n调用 LLM 生成拓展卡片并持久化。\n\nRaises:\n    AppError: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）（EXTENSION_GENERATE_FAILED → 400）",
         "operationId": "generate_extension_endpoint_api_knowledge_cards__card_id__generate_extension_post",
         "parameters": [
           {
@@ -9163,7 +9163,7 @@
     },
     "/api/knowledge/cards/{card_id}/generate-questions": {
       "post": {
-        "description": "为拓展卡片立即触发出题任务（Q9 提示后的确认动作）\n\n仅允许 card_category == extension 的卡片调用此端点。\n触发 Celery generate_questions_task，定向生成拓展类难题。\n\nRaises:\n    HTTPException 404: 卡片不存在或无权访问\n    HTTPException 400: 非拓展卡片不允许使用此端点",
+        "description": "为拓展卡片立即触发出题任务（Q9 提示后的确认动作）\n\n仅允许 card_category == extension 的卡片调用此端点。\n触发 Celery generate_questions_task，定向生成拓展类难题。\n\nRaises:\n    AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）\n    AppError: 非拓展卡片不允许使用此端点（CARD_NOT_EXTENSION → 400）",
         "operationId": "generate_questions_for_extension_api_knowledge_cards__card_id__generate_questions_post",
         "parameters": [
           {
@@ -9211,7 +9211,7 @@
     },
     "/api/knowledge/cards/{card_id}/mark": {
       "patch": {
-        "description": "标记卡片为重点 / 难点\n\n仅更新请求中提供的字段（非 None 才更新）。\n\nRaises:\n    HTTPException 404: 卡片不存在或无权访问",
+        "description": "标记卡片为重点 / 难点\n\n仅更新请求中提供的字段（非 None 才更新）。\n\nRaises:\n    AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）",
         "operationId": "mark_card_api_knowledge_cards__card_id__mark_patch",
         "parameters": [
           {
@@ -9269,7 +9269,7 @@
     },
     "/api/knowledge/links/{link_id}/extract-combined": {
       "post": {
-        "description": "手动触发笔记-资料联合分析\n\n调用 extract_combined 服务：内部会校验 link 归属（user_id），\n命中缓存则返回已有统计，否则重新提取常规知识点与盲点。\n\nRaises:\n    HTTPException 400: 联合分析失败（如关联不存在、内容为空等）",
+        "description": "手动触发笔记-资料联合分析\n\n调用 extract_combined 服务：内部会校验 link 归属（user_id），\n命中缓存则返回已有统计，否则重新提取常规知识点与盲点。\n\nRaises:\n    AppError: 联合分析失败（如关联不存在、内容为空等）（COMBINED_EXTRACT_FAILED → 400）",
         "operationId": "extract_combined_endpoint_api_knowledge_links__link_id__extract_combined_post",
         "parameters": [
           {
@@ -9769,7 +9769,7 @@
     },
     "/api/notes/{note_id}": {
       "delete": {
-        "description": "移入回收站（软删除）\n\n笔记及其全部子内容（卡片/题目/复习记录/版本/批注/关系/双链）作为\n原子包整体进回收站：仅标记 trashed_at，所有关系记录原地不动；\n物理文件搬至 {user_id}/trash/{note_id}/ 隔离目录。\n可随时通过回收站恢复或彻底删除。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    无返回内容（204 No Content）\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户",
+        "description": "移入回收站（软删除）\n\n笔记及其全部子内容（卡片/题目/复习记录/版本/批注/关系/双链）作为\n原子包整体进回收站：仅标记 trashed_at，所有关系记录原地不动；\n物理文件搬至 {user_id}/trash/{note_id}/ 隔离目录。\n可随时通过回收站恢复或彻底删除。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    无返回内容（204 No Content）\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）",
         "operationId": "delete_note_api_api_notes__note_id__delete",
         "parameters": [
           {
@@ -9805,7 +9805,7 @@
         "summary": "Delete Note Api"
       },
       "get": {
-        "description": "获取笔记详情\n\n返回笔记的基本信息和 Markdown 内容（包括原始转换结果和清洗后结果）。\nMarkdown 内容从对象存储中实时读取，不存储在数据库中。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteDetailResponse: 包含笔记详情和 Markdown 内容的响应\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户",
+        "description": "获取笔记详情\n\n返回笔记的基本信息和 Markdown 内容（包括原始转换结果和清洗后结果）。\nMarkdown 内容从对象存储中实时读取，不存储在数据库中。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteDetailResponse: 包含笔记详情和 Markdown 内容的响应\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）",
         "operationId": "get_note_api_notes__note_id__get",
         "parameters": [
           {
@@ -9848,7 +9848,7 @@
         "summary": "Get Note"
       },
       "put": {
-        "description": "更新笔记\n\n目前仅支持修改笔记标题。后续可扩展支持更多字段的更新。\n\nArgs:\n    note_id: 笔记 ID\n    req: 更新请求体，包含需要修改的字段\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 更新后的笔记信息\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户",
+        "description": "更新笔记\n\n目前仅支持修改笔记标题。后续可扩展支持更多字段的更新。\n\nArgs:\n    note_id: 笔记 ID\n    req: 更新请求体，包含需要修改的字段\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 更新后的笔记信息\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）",
         "operationId": "update_note_api_api_notes__note_id__put",
         "parameters": [
           {
@@ -10326,7 +10326,7 @@
     },
     "/api/notes/{note_id}/purge": {
       "delete": {
-        "description": "彻底删除笔记（物理删除，悬挂引用策略）\n\n关系记录（CardRelation / NoteMaterialLink）被删端置 NULL 悬挂保留，\n绝不级联删除；可选将核心卡片提升为独立节点（保留其关系/题目/复习进度）。\n\nArgs:\n    note_id: 笔记 ID\n    promote_key_cards: 提升核心卡片为独立节点（图谱中保留）\n\nRaises:\n    HTTPException 404: 笔记不存在",
+        "description": "彻底删除笔记（物理删除，悬挂引用策略）\n\n关系记录（CardRelation / NoteMaterialLink）被删端置 NULL 悬挂保留，\n绝不级联删除；可选将核心卡片提升为独立节点（保留其关系/题目/复习进度）。\n\nArgs:\n    note_id: 笔记 ID\n    promote_key_cards: 提升核心卡片为独立节点（图谱中保留）\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）",
         "operationId": "purge_note_api_api_notes__note_id__purge_delete",
         "parameters": [
           {
@@ -10376,7 +10376,7 @@
     },
     "/api/notes/{note_id}/restore": {
       "post": {
-        "description": "从回收站恢复笔记\n\n原子包整体还原：关系/卡片/题目/复习记录自动复原，文件搬回 inbox 原位。\n若原位置已有同名新文件，自动加序号后缀（base-1、base-2…），\n响应含 renamed_to 用于前端提示。\n\nRaises:\n    HTTPException 404: 笔记不存在\n    HTTPException 400: 笔记不在回收站中\n    HTTPException 409: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复",
+        "description": "从回收站恢复笔记\n\n原子包整体还原：关系/卡片/题目/复习记录自动复原，文件搬回 inbox 原位。\n若原位置已有同名新文件，自动加序号后缀（base-1、base-2…），\n响应含 renamed_to 用于前端提示。\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）\n    AppError: 笔记不在回收站中（NOTE_NOT_TRASHED → 400）\n    AppError: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复（NOTE_RESTORE_CONFLICT → 409）",
         "operationId": "restore_note_api_api_notes__note_id__restore_post",
         "parameters": [
           {
@@ -10421,7 +10421,7 @@
     },
     "/api/notes/{note_id}/role": {
       "patch": {
-        "description": "更新笔记角色\n\n允许在 material（学习资料）和 personal_note（我的笔记）之间切换。\n\nArgs:\n    note_id: 笔记 ID\n    note_role: 新的笔记角色值\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 更新后的笔记信息\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户\n    HTTPException 400: note_role 值无效",
+        "description": "更新笔记角色\n\n允许在 material（学习资料）和 personal_note（我的笔记）之间切换。\n\nArgs:\n    note_id: 笔记 ID\n    note_role: 新的笔记角色值\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 更新后的笔记信息\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）\n    AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）",
         "operationId": "update_note_role_api_notes__note_id__role_patch",
         "parameters": [
           {
@@ -10522,7 +10522,7 @@
     },
     "/api/notes/{note_id}/versions": {
       "get": {
-        "description": "获取笔记的版本历史列表\n\n返回指定笔记的所有版本快照，按版本号倒序排列（最新版本在前）。\n调用前会先校验笔记归属权，确保用户只能查询自己笔记的版本历史。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionListResponse: 包含版本列表和总数的响应\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户",
+        "description": "获取笔记的版本历史列表\n\n返回指定笔记的所有版本快照，按版本号倒序排列（最新版本在前）。\n调用前会先校验笔记归属权，确保用户只能查询自己笔记的版本历史。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionListResponse: 包含版本列表和总数的响应\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）",
         "operationId": "list_note_versions_api_notes__note_id__versions_get",
         "parameters": [
           {
@@ -10567,7 +10567,7 @@
     },
     "/api/notes/{note_id}/versions/diff": {
       "get": {
-        "description": "对比两个版本的行级 diff\n\n使用 difflib.ndiff 生成差异，将每行标注为 added / removed / unchanged。\n注意：该路由必须注册在 /{version_number} 路由之前，否则 \"diff\" 会被\nFastAPI 当作 version_number 进行匹配。\n\nArgs:\n    note_id: 笔记 ID\n    v1: 旧版本号\n    v2: 新版本号\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionDiffResponse: 包含两版本号和 diff 行列表的响应\n\nRaises:\n    HTTPException 404: 笔记不存在或任一版本不存在",
+        "description": "对比两个版本的行级 diff\n\n使用 difflib.ndiff 生成差异，将每行标注为 added / removed / unchanged。\n注意：该路由必须注册在 /{version_number} 路由之前，否则 \"diff\" 会被\nFastAPI 当作 version_number 进行匹配。\n\nArgs:\n    note_id: 笔记 ID\n    v1: 旧版本号\n    v2: 新版本号\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionDiffResponse: 包含两版本号和 diff 行列表的响应\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）\n    AppError: 任一版本不存在（VERSION_NOT_FOUND → 404）\n    AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）",
         "operationId": "diff_note_versions_api_notes__note_id__versions_diff_get",
         "parameters": [
           {
@@ -10634,7 +10634,7 @@
     },
     "/api/notes/{note_id}/versions/{version_number}": {
       "get": {
-        "description": "预览指定版本的 Markdown 内容\n\n从对象存储中读取指定版本的 Markdown 文本内容。\n该路由注册在 /diff 之后，避免 \"diff\" 被当作 version_number 匹配。\n\nArgs:\n    note_id: 笔记 ID\n    version_number: 版本号\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    dict: 包含 content（Markdown 文本）和 version_number 的响应\n\nRaises:\n    HTTPException 404: 笔记不存在或版本不存在",
+        "description": "预览指定版本的 Markdown 内容\n\n从对象存储中读取指定版本的 Markdown 文本内容。\n该路由注册在 /diff 之后，避免 \"diff\" 被当作 version_number 匹配。\n\nArgs:\n    note_id: 笔记 ID\n    version_number: 版本号\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    dict: 包含 content（Markdown 文本）和 version_number 的响应\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）\n    AppError: 版本不存在（VERSION_NOT_FOUND → 404）\n    AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）",
         "operationId": "get_note_version_content_api_notes__note_id__versions__version_number__get",
         "parameters": [
           {
@@ -10688,7 +10688,7 @@
     },
     "/api/notes/{note_id}/versions/{version_number}/restore": {
       "post": {
-        "description": "恢复指定历史版本为当前内容\n\n流程：\n1. 先为笔记当前内容创建一个新版本快照（USER_EDIT 来源）\n2. 用目标版本内容覆盖当前 Markdown 文件\n3. 返回新创建的快照版本信息\n\nArgs:\n    note_id: 笔记 ID\n    version_number: 要恢复的目标版本号\n    req: 恢复请求体（含可选的 confirm 字段，预留用于二次确认）\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionResponse: 恢复前为当前内容创建的新版本快照信息\n\nRaises:\n    HTTPException 404: 笔记或目标版本不存在\n    HTTPException 400: 笔记无可写入的 Markdown 路径",
+        "description": "恢复指定历史版本为当前内容\n\n流程：\n1. 先为笔记当前内容创建一个新版本快照（USER_EDIT 来源）\n2. 用目标版本内容覆盖当前 Markdown 文件\n3. 返回新创建的快照版本信息\n\nArgs:\n    note_id: 笔记 ID\n    version_number: 要恢复的目标版本号\n    req: 恢复请求体（含可选的 confirm 字段，预留用于二次确认）\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteVersionResponse: 恢复前为当前内容创建的新版本快照信息\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）\n    AppError: 目标版本不存在（VERSION_NOT_FOUND → 404）\n    AppError: 恢复被拒（笔记不存在 / 无可写 Markdown 路径 / 当前内容读取失败）（NOTE_VERSION_RESTORE_REJECTED → 400）",
         "operationId": "restore_note_version_api_notes__note_id__versions__version_number__restore_post",
         "parameters": [
           {
@@ -10751,7 +10751,7 @@
     },
     "/api/notes/{note_id}/video": {
       "get": {
-        "description": "流式传输视频文件\n\n支持视频进度条拖拽（HTTP Range 请求）。\nMinIO 模式下重定向到预签名 URL，本地模式下流式返回文件内容。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n    request: 原始 HTTP 请求（用于读取 Range 头）\n\nReturns:\n    StreamingResponse 或 RedirectResponse\n\nRaises:\n    HTTPException 404: 笔记不存在\n    HTTPException 400: 笔记不是视频类型\n    HTTPException 404: 视频文件不存在",
+        "description": "流式传输视频文件\n\n支持视频进度条拖拽（HTTP Range 请求）。\nMinIO 模式下重定向到预签名 URL，本地模式下流式返回文件内容。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n    request: 原始 HTTP 请求（用于读取 Range 头）\n\nReturns:\n    StreamingResponse 或 RedirectResponse\n\nRaises:\n    AppError: 笔记不存在（NOTE_NOT_FOUND → 404）\n    AppError: 笔记不是视频类型（NOTE_NOT_VIDEO → 400）\n    AppError: 视频文件不存在（NOTE_VIDEO_FILE_MISSING → 404）",
         "operationId": "stream_video_api_notes__note_id__video_get",
         "parameters": [
           {
@@ -10872,7 +10872,7 @@
     },
     "/api/projects/{project_id}": {
       "delete": {
-        "description": "删除项目（只删标签）\n\n删除项目本身及其笔记标签关联；笔记与物理文件全部保留。\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果\n\nRaises:\n    HTTPException: 项目不存在或无权访问",
+        "description": "删除项目（只删标签）\n\n删除项目本身及其笔记标签关联；笔记与物理文件全部保留。\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果\n\nRaises:\n    AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 400）",
         "operationId": "delete_project_api_projects__project_id__delete",
         "parameters": [
           {
@@ -10918,7 +10918,7 @@
         ]
       },
       "get": {
-        "description": "获取项目详情（包含笔记列表）\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ProjectDetailResponse: 项目详情\n\nRaises:\n    HTTPException: 项目不存在或无权访问",
+        "description": "获取项目详情（包含笔记列表）\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ProjectDetailResponse: 项目详情\n\nRaises:\n    AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）",
         "operationId": "get_project_api_projects__project_id__get",
         "parameters": [
           {
@@ -10964,7 +10964,7 @@
         ]
       },
       "patch": {
-        "description": "更新项目信息（标签化后名称/描述可改，不影响物理路径）\n\nArgs:\n    project_id: 项目 ID\n    req: 项目更新请求\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ProjectResponse: 更新后的项目信息\n\nRaises:\n    HTTPException: 项目不存在或无权访问",
+        "description": "更新项目信息（标签化后名称/描述可改，不影响物理路径）\n\nArgs:\n    project_id: 项目 ID\n    req: 项目更新请求\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ProjectResponse: 更新后的项目信息\n\nRaises:\n    AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）",
         "operationId": "update_project_api_projects__project_id__patch",
         "parameters": [
           {
@@ -11022,7 +11022,7 @@
     },
     "/api/projects/{project_id}/notes": {
       "post": {
-        "description": "将笔记批量添加到项目（打标签）\n\n为属于当前用户且 id 在 req.note_ids 中的笔记插入 note_projects 关联行；\n一篇笔记可属于多个项目（多对多标签），已存在的标签自动跳过。\n\nArgs:\n    project_id: 项目 ID\n    req: 请求体，包含要添加的笔记 ID 列表\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 添加结果统计（project_id / added / not_found）\n\nRaises:\n    HTTPException: 项目不存在或无权访问",
+        "description": "将笔记批量添加到项目（打标签）\n\n为属于当前用户且 id 在 req.note_ids 中的笔记插入 note_projects 关联行；\n一篇笔记可属于多个项目（多对多标签），已存在的标签自动跳过。\n\nArgs:\n    project_id: 项目 ID\n    req: 请求体，包含要添加的笔记 ID 列表\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 添加结果统计（project_id / added / not_found）\n\nRaises:\n    AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）",
         "operationId": "add_notes_api_projects__project_id__notes_post",
         "parameters": [
           {
@@ -11080,7 +11080,7 @@
     },
     "/api/projects/{project_id}/notes/{note_id}": {
       "delete": {
-        "description": "将笔记从项目中移出（移除标签）\n\n删除 note_projects 关联行；笔记与物理文件全部保留。\n\nArgs:\n    project_id: 项目 ID\n    note_id: 要移出的笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果（message / note_id）\n\nRaises:\n    HTTPException: 项目不存在、无权访问或笔记不在该项目中",
+        "description": "将笔记从项目中移出（移除标签）\n\n删除 note_projects 关联行；笔记与物理文件全部保留。\n\nArgs:\n    project_id: 项目 ID\n    note_id: 要移出的笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    Dict: 操作结果（message / note_id）\n\nRaises:\n    AppError: 项目不存在、无权访问或笔记不在该项目中（PROJECT_NOTE_LINK_NOT_FOUND → 404）",
         "operationId": "remove_note_api_projects__project_id__notes__note_id__delete",
         "parameters": [
           {
@@ -11137,7 +11137,7 @@
     },
     "/api/projects/{project_id}/scan": {
       "post": {
-        "description": "扫描导入：将手动放入收件箱 source/ 目录的新文件识别为笔记并打上项目标签\n\n项目为纯标签后不再拥有独立目录，所有文件统一落在 {user_id}/inbox/source/。\n用户可把文件直接拷贝到该目录后调用本接口批量导入（每个文件创建一条笔记\n并打上当前项目标签、触发转换任务）。已导入过的文件会被自动跳过。\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ScanImportResponse: 扫描结果统计\n\nRaises:\n    HTTPException: 项目不存在或无权访问",
+        "description": "扫描导入：将手动放入收件箱 source/ 目录的新文件识别为笔记并打上项目标签\n\n项目为纯标签后不再拥有独立目录，所有文件统一落在 {user_id}/inbox/source/。\n用户可把文件直接拷贝到该目录后调用本接口批量导入（每个文件创建一条笔记\n并打上当前项目标签、触发转换任务）。已导入过的文件会被自动跳过。\n\nArgs:\n    project_id: 项目 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    ScanImportResponse: 扫描结果统计\n\nRaises:\n    AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）",
         "operationId": "scan_project_source_api_projects__project_id__scan_post",
         "parameters": [
           {
@@ -12762,7 +12762,7 @@
     },
     "/api/upload": {
       "post": {
-        "description": "上传文件并触发异步转换（单次直传，兼容路径）\n\n完整流程：\n1. 校验文件扩展名是否在允许列表中\n2. 流式读取文件内容，校验大小与内容签名（魔术字节），计算 SHA-256\n3. 复用 _do_upload 完成入库、保存到对象存储并触发异步转换\n\nArgs:\n    file: 上传的文件对象\n    backend: 解析后端选择（可选），如 \"pipeline\"（本地）或 \"vlm-http-client\"（云端），\n             为 None 时使用 config.py 中的 mineru_backend 默认值\n    folder_id: 所属文件夹 ID（可选），上传文件归入指定文件夹\n    project_ids: 项目标签 ID 数组的 JSON 字符串（可选），上传文件打上多个项目标签；\n                留空时不归属任何项目，物理前缀统一为 inbox\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 新创建的笔记信息\n\nRaises:\n    HTTPException 400: 文件名为空、文件格式不支持、文件大小超限、内容签名不匹配\n    HTTPException 500: 文件上传到对象存储失败",
+        "description": "上传文件并触发异步转换（单次直传，兼容路径）\n\n完整流程：\n1. 校验文件扩展名是否在允许列表中\n2. 流式读取文件内容，校验大小与内容签名（魔术字节），计算 SHA-256\n3. 复用 _do_upload 完成入库、保存到对象存储并触发异步转换\n\nArgs:\n    file: 上传的文件对象\n    backend: 解析后端选择（可选），如 \"pipeline\"（本地）或 \"vlm-http-client\"（云端），\n             为 None 时使用 config.py 中的 mineru_backend 默认值\n    folder_id: 所属文件夹 ID（可选），上传文件归入指定文件夹\n    project_ids: 项目标签 ID 数组的 JSON 字符串（可选），上传文件打上多个项目标签；\n                留空时不归属任何项目，物理前缀统一为 inbox\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 新创建的笔记信息\n\nRaises:\n    AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）\n    AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）\n    AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）\n    AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）\n    AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）\n    AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）\n    AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）\n    AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）\n    AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）\n    AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）",
         "operationId": "upload_document_api_upload_post",
         "requestBody": {
           "content": {
@@ -12809,7 +12809,7 @@
     },
     "/api/upload/commit": {
       "post": {
-        "description": "两阶段上传阶段 2：消费临时文件，可选按页裁剪 PDF，然后入库并触发转换\n\n流程：\n1. 按 temp_id 定位临时目录（严格校验 UUID 格式，防止路径穿越）\n2. 若为 PDF 且提供了 crop_page_range：解析页范围并裁剪出新的 PDF\n3. 复用 _do_upload 完成入库、保存到对象存储并触发异步转换\n4. 无论成功失败，finally 清理临时目录\n\n说明：filename 用于重命名上传后的笔记/存储文件。只允许修改文件名主干，\n扩展名必须与真实文件类型一致（避免类型伪装）；不传则沿用原文件名。\n\nArgs:\n    temp_id: prepare 阶段返回的临时上传标识\n    filename: 重命名后的文件名（可选），扩展名需与原文件一致\n    crop_page_range: 页码范围表达式（如 \"1-20,25,30-32\"），仅 PDF 支持\n    backend: 解析后端选择（可选）\n    folder_id: 所属文件夹 ID（可选）\n    project_ids: 项目标签 ID 数组的 JSON 字符串（可选），支持多标签\n    note_role: 笔记角色（默认 material）\n    linked_material_ids: 关联资料 ID JSON 字符串（可选）\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 新创建的笔记信息\n\nRaises:\n    HTTPException 400: temp_id 无效或已过期、文件名不合法/扩展名不一致、\n                       页范围非法、非 PDF 却指定裁剪\n    HTTPException 404: 项目不存在",
+        "description": "两阶段上传阶段 2：消费临时文件，可选按页裁剪 PDF，然后入库并触发转换\n\n流程：\n1. 按 temp_id 定位临时目录（严格校验 UUID 格式，防止路径穿越）\n2. 若为 PDF 且提供了 crop_page_range：解析页范围并裁剪出新的 PDF\n3. 复用 _do_upload 完成入库、保存到对象存储并触发异步转换\n4. 无论成功失败，finally 清理临时目录\n\n说明：filename 用于重命名上传后的笔记/存储文件。只允许修改文件名主干，\n扩展名必须与真实文件类型一致（避免类型伪装）；不传则沿用原文件名。\n\nArgs:\n    temp_id: prepare 阶段返回的临时上传标识\n    filename: 重命名后的文件名（可选），扩展名需与原文件一致\n    crop_page_range: 页码范围表达式（如 \"1-20,25,30-32\"），仅 PDF 支持\n    backend: 解析后端选择（可选）\n    folder_id: 所属文件夹 ID（可选）\n    project_ids: 项目标签 ID 数组的 JSON 字符串（可选），支持多标签\n    note_role: 笔记角色（默认 material）\n    linked_material_ids: 关联资料 ID JSON 字符串（可选）\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteResponse: 新创建的笔记信息\n\nRaises:\n    AppError: temp_id 无效（UPLOAD_TEMP_ID_INVALID → 400）\n    AppError: 临时上传已失效（UPLOAD_TEMP_EXPIRED → 400）\n    AppError: 临时上传数据异常（UPLOAD_TEMP_DATA_INVALID → 400）\n    AppError: 临时文件格式不受支持（UPLOAD_FORMAT_UNSUPPORTED → 400）\n    AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）\n    AppError: 文件名过长（UPLOAD_FILE_NAME_TOO_LONG → 400）\n    AppError: 扩展名与真实文件类型不一致（UPLOAD_EXTENSION_MISMATCH → 400）\n    AppError: 非 PDF 却指定裁剪（UPLOAD_CROP_UNSUPPORTED_TYPE → 400）\n    AppError: PDF 裁剪失败，页范围非法或文件损坏（UPLOAD_PDF_CROP_FAILED → 400）\n    AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）\n    AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）\n    AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）\n    AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）\n    AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）",
         "operationId": "commit_upload_api_upload_commit_post",
         "requestBody": {
           "content": {
@@ -12856,7 +12856,7 @@
     },
     "/api/upload/prepare": {
       "post": {
-        "description": "两阶段上传阶段 1：接收文件并暂存，返回页数等信息\n\n文件落盘到临时目录 data/tmp/upload/{uuid}/{原文件名}，等待 commit 消费。\n本阶段只做基础校验（扩展名/大小/内容签名），配额校验在 commit 阶段完成。\n\nArgs:\n    file: 上传的文件对象\n    current_user: 当前认证用户\n\nReturns:\n    dict: {\"temp_id\", \"filename\", \"source_type\", \"page_count\"}\n          PDF 返回 page_count，其他格式返回 null\n\nRaises:\n    HTTPException 400: 文件名不合法、格式不支持、大小超限、内容签名不匹配、PDF 解析失败",
+        "description": "两阶段上传阶段 1：接收文件并暂存，返回页数等信息\n\n文件落盘到临时目录 data/tmp/upload/{uuid}/{原文件名}，等待 commit 消费。\n本阶段只做基础校验（扩展名/大小/内容签名），配额校验在 commit 阶段完成。\n\nArgs:\n    file: 上传的文件对象\n    current_user: 当前认证用户\n\nReturns:\n    dict: {\"temp_id\", \"filename\", \"source_type\", \"page_count\"}\n          PDF 返回 page_count，其他格式返回 null\n\nRaises:\n    AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）\n    AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）\n    AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）\n    AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）\n    AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）\n    AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）\n    AppError: Office 压缩包安全检查未通过（UPLOAD_ARCHIVE_REJECTED → 400）\n    AppError: PDF 页数解析失败（UPLOAD_PDF_PARSE_FAILED → 400）\n    AppError: PDF 页数超过上限（UPLOAD_PDF_TOO_MANY_PAGES → 400）",
         "operationId": "prepare_upload_api_upload_prepare_post",
         "requestBody": {
           "content": {
@@ -12903,7 +12903,7 @@
     },
     "/api/upload/{note_id}/retry": {
       "post": {
-        "description": "重试转换失败的笔记\n\n当笔记转换失败时（status 为 failed），前端可调用此接口重新触发转换。\n会清除之前的错误信息，将状态重置为 converting，并重新提交 Celery 任务。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteStatusResponse: 重试后的笔记状态\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户\n    HTTPException 400: 笔记状态不允许重试（非 failed 状态）",
+        "description": "重试转换失败的笔记\n\n当笔记转换失败时（status 为 failed），前端可调用此接口重新触发转换。\n会清除之前的错误信息，将状态重置为 converting，并重新提交 Celery 任务。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteStatusResponse: 重试后的笔记状态\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）\n    AppError: 笔记状态不允许重试，非 failed 状态（NOTE_STATUS_INVALID → 400）",
         "operationId": "retry_convert_api_upload__note_id__retry_post",
         "parameters": [
           {
@@ -12951,7 +12951,7 @@
     },
     "/api/upload/{note_id}/status": {
       "get": {
-        "description": "查询文件转换状态\n\n前端可通过此接口轮询笔记的处理状态，了解转换进度。\n当状态为 failed 时，error_message 中包含失败原因。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteStatusResponse: 包含笔记 ID、当前状态和错误信息的响应\n\nRaises:\n    HTTPException 404: 笔记不存在或不属于当前用户",
+        "description": "查询文件转换状态\n\n前端可通过此接口轮询笔记的处理状态，了解转换进度。\n当状态为 failed 时，error_message 中包含失败原因。\n\nArgs:\n    note_id: 笔记 ID\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    NoteStatusResponse: 包含笔记 ID、当前状态和错误信息的响应\n\nRaises:\n    AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）",
         "operationId": "get_upload_status_api_upload__note_id__status_get",
         "parameters": [
           {

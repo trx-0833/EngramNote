@@ -132,7 +132,9 @@ class GoalService:
             LearningGoal: 新创建的目标
 
         Raises:
-            HTTPException(400): 活跃目标数已达上限
+            AppError: 活跃目标数已达上限（GOAL_ACTIVE_LIMIT_REACHED → 400）
+            AppError: 目标范围引用了不存在或无权访问的笔记（GOAL_SCOPE_NOTE_INVALID → 400）
+            AppError: 目标范围引用了不存在或无权访问的文件夹（GOAL_SCOPE_FOLDER_INVALID → 400）
         """
         # 统计当前活跃目标数
         count_result = await db.execute(
@@ -236,7 +238,7 @@ class GoalService:
             LearningGoal: 目标对象
 
         Raises:
-            HTTPException(404): 目标不存在或不属于该用户
+            AppError: 目标不存在或不属于该用户（GOAL_NOT_FOUND → 404）
         """
         result = await db.execute(
             select(LearningGoal).where(
@@ -390,7 +392,7 @@ class GoalService:
             DailyPlan: 每日计划
 
         Raises:
-            HTTPException(400): 用户无活跃目标
+            AppError: 用户无活跃目标（GOAL_NONE_ACTIVE → 400）
         """
         now = datetime.now(timezone.utc)
         # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）

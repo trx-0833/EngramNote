@@ -153,7 +153,7 @@ async def get_folder(
         FolderDetailResponse: 文件夹详情，包含笔记列表
 
     Raises:
-        HTTPException 404: 文件夹不存在或不属于当前用户
+        AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
     """
     detail = await svc_get_folder_detail(
         folder_id=folder_id,
@@ -195,7 +195,7 @@ async def update_folder(
         FolderResponse: 更新后的文件夹信息
 
     Raises:
-        HTTPException 404: 文件夹不存在或不属于当前用户
+        AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
     """
     try:
         updated = await svc_update_folder(
@@ -230,8 +230,8 @@ async def delete_folder(
         Dict: 操作结果，包含 message 字段
 
     Raises:
-        HTTPException 404: 文件夹不存在或不属于当前用户
-        HTTPException 400: 文件夹非空，不允许删除
+        AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
+        AppError: 文件夹非空，不允许删除（FOLDER_NOT_EMPTY → 400）
     """
     try:
         result = await svc_delete_folder(

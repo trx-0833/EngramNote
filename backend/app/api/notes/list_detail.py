@@ -163,7 +163,7 @@ async def get_note(
         NoteDetailResponse: 包含笔记详情和 Markdown 内容的响应
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
@@ -205,7 +205,7 @@ async def update_note_api(
         NoteResponse: 更新后的笔记信息
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
@@ -353,8 +353,8 @@ async def update_note_role(
         NoteResponse: 更新后的笔记信息
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
-        HTTPException 400: note_role 值无效
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
+        AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
     """
     # 验证 note_role 值是否合法
     valid_roles = [e.value for e in NoteRole]
@@ -403,9 +403,9 @@ async def stream_video(
         StreamingResponse 或 RedirectResponse
 
     Raises:
-        HTTPException 404: 笔记不存在
-        HTTPException 400: 笔记不是视频类型
-        HTTPException 404: 视频文件不存在
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+        AppError: 笔记不是视频类型（NOTE_NOT_VIDEO → 400）
+        AppError: 视频文件不存在（NOTE_VIDEO_FILE_MISSING → 404）
     """
     # 1. 验证笔记归属和类型
     result = await db.execute(

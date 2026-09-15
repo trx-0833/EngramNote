@@ -199,7 +199,7 @@ async def _stream_upload(
         tuple: (total_size, sha256_hex, head_bytes)
 
     Raises:
-        AppError 400 UPLOAD_FILE_TOO_LARGE: 文件大小超过限制
+        AppError: 文件大小超过限制（UPLOAD_FILE_TOO_LARGE → 400）
     """
     sha256 = hashlib.sha256()
     head = b""
@@ -325,7 +325,11 @@ async def _do_upload(
         NoteResponse: 新创建的笔记信息
 
     Raises:
-        HTTPException 400/404/500: 见各子步骤说明
+        AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）
+        AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）
+        AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）
+        AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
+        AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
     """
     ext = os.path.splitext(filename)[1].lower()
     total_size = os.path.getsize(tmp_path)
@@ -548,8 +552,16 @@ async def upload_document(
         NoteResponse: 新创建的笔记信息
 
     Raises:
-        HTTPException 400: 文件名为空、文件格式不支持、文件大小超限、内容签名不匹配
-        HTTPException 500: 文件上传到对象存储失败
+        AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）
+        AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+        AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）
+        AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）
+        AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）
+        AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）
+        AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）
+        AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）
+        AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
+        AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
     """
     # 1. 校验文件扩展名
     if not file.filename:
@@ -622,7 +634,15 @@ async def prepare_upload(
               PDF 返回 page_count，其他格式返回 null
 
     Raises:
-        HTTPException 400: 文件名不合法、格式不支持、大小超限、内容签名不匹配、PDF 解析失败
+        AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）
+        AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）
+        AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+        AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）
+        AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）
+        AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）
+        AppError: Office 压缩包安全检查未通过（UPLOAD_ARCHIVE_REJECTED → 400）
+        AppError: PDF 页数解析失败（UPLOAD_PDF_PARSE_FAILED → 400）
+        AppError: PDF 页数超过上限（UPLOAD_PDF_TOO_MANY_PAGES → 400）
     """
     if not file.filename:
         raise AppError(UPLOAD_FILE_NAME_EMPTY, "文件名不能为空", 400)
@@ -765,9 +785,20 @@ async def commit_upload(
         NoteResponse: 新创建的笔记信息
 
     Raises:
-        HTTPException 400: temp_id 无效或已过期、文件名不合法/扩展名不一致、
-                           页范围非法、非 PDF 却指定裁剪
-        HTTPException 404: 项目不存在
+        AppError: temp_id 无效（UPLOAD_TEMP_ID_INVALID → 400）
+        AppError: 临时上传已失效（UPLOAD_TEMP_EXPIRED → 400）
+        AppError: 临时上传数据异常（UPLOAD_TEMP_DATA_INVALID → 400）
+        AppError: 临时文件格式不受支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+        AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）
+        AppError: 文件名过长（UPLOAD_FILE_NAME_TOO_LONG → 400）
+        AppError: 扩展名与真实文件类型不一致（UPLOAD_EXTENSION_MISMATCH → 400）
+        AppError: 非 PDF 却指定裁剪（UPLOAD_CROP_UNSUPPORTED_TYPE → 400）
+        AppError: PDF 裁剪失败，页范围非法或文件损坏（UPLOAD_PDF_CROP_FAILED → 400）
+        AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）
+        AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）
+        AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）
+        AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
+        AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
     """
     # 1. 严格校验 temp_id 为 UUID，防止路径穿越
     if not _TEMP_ID_RE.fullmatch(temp_id):
@@ -880,7 +911,7 @@ async def get_upload_status(
         NoteStatusResponse: 包含笔记 ID、当前状态和错误信息的响应
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
     result = await db.execute(
         select(Note).where(Note.id == note_id, Note.user_id == current_user.id)
@@ -917,8 +948,8 @@ async def retry_convert(
         NoteStatusResponse: 重试后的笔记状态
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
-        HTTPException 400: 笔记状态不允许重试（非 failed 状态）
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
+        AppError: 笔记状态不允许重试，非 failed 状态（NOTE_STATUS_INVALID → 400）
     """
     result = await db.execute(
         select(Note).where(Note.id == note_id, Note.user_id == current_user.id)

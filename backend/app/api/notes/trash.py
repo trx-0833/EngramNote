@@ -105,7 +105,7 @@ async def delete_note_api(
         无返回内容（204 No Content）
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
@@ -148,9 +148,9 @@ async def restore_note_api(
     响应含 renamed_to 用于前端提示。
 
     Raises:
-        HTTPException 404: 笔记不存在
-        HTTPException 400: 笔记不在回收站中
-        HTTPException 409: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+        AppError: 笔记不在回收站中（NOTE_NOT_TRASHED → 400）
+        AppError: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复（NOTE_RESTORE_CONFLICT → 409）
     """
     note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
     if not note:
@@ -186,7 +186,7 @@ async def purge_note_api(
         promote_key_cards: 提升核心卡片为独立节点（图谱中保留）
 
     Raises:
-        HTTPException 404: 笔记不存在
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
     """
     note = await get_note_detail(db, note_id, current_user.id, include_trashed=True)
     if not note:

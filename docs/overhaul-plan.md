@@ -2933,7 +2933,7 @@ vault_files  ★ 新（P1 文件系统降级为派生索引）
 | 0.10 | **`/ready` 端点 + 队列深度**；`/docs`、`/openapi.json` 生产关闭或加保护 | E-7 | 可判断服务是否可用 | ✅ **已落地（2026-09-14，本条由此收口）**：生产姿态下 `/docs`、`/openapi.json`、`/redoc` **根本不注册**（FastAPI 原生三个 `None`，404 与未知路径不可区分），判据**沿用既有的** `cfg.is_dev`（没有第二套"是不是生产"）；新增 **`/ready`**（200/503、两种状态**同一响应体形状**）。此前记的是"⏸ **未做**。`app/main.py` 全仓只有 `/health`（`:292`，返回 `{status, app}`）；`FastAPI(...)`（`:194-199`）**没有设 `docs_url` / `openapi_url` / `redoc_url`**，因此 `/docs`、`/openapi.json`、`/redoc` 在任何环境（含生产）都是**公开**的；没有任何队列深度端点"——**这段已过期**（旧句要点保留对照）。落地要点：`_schema_endpoint_kwargs()`（`main.py:239-245`）、模块级 `app` 改为工厂 `create_app(config=None)`（`main.py:486`，**此前根本没有工厂**）、`dump_openapi.py` 走**进程内** `app.openapi()` 因此在生产姿态下照旧可用；`/ready` 的判据**只有数据库**（一次**只读聚合查询**，不是 `SELECT 1`），队列深度**只报告、不决定状态码**，`/health` 保持**零依赖**（DB 挂 ⇒ `/health` 200 + `/ready` 503；`main.py:548-616`）。★ 改掉设计的那次实测：`task_runs` 的行是 **worker 接手时**才建的（只数 DB 的"pending"几乎恒为 0，是**假指标**），真实积压在 broker ⇒ 按 `*.{queue}.msg` 文件数计（与 kombu `Channel._size` 同口径，**排除** `*.pidbox.msg`），测不到时 `depth=None`（不是 0）。完整记录见**附录 BK.2** |
 | 0.11 | **统一错误契约**：引入 `AppError(code, http_status, message)`，前端改按 `error_code` 分支（不再匹配中文，见 F-19）；停止用 `str(e)` 回传内部异常（H5） | E-10 | 后端改文案不破坏前端 | ✅ **后端侧已落地（2026-09-14，采用面 2/154 → 151/154）**：全仓 `raise HTTPException` **152 → 3**、`raise AppError` **2 → 151**（**AST** 实测）。**3 处存活的都是书面豁免**，全在 `app/api/auth.py`（`:103` / `:115` / `:227`），理由统一：必须带 `WWW-Authenticate: Bearer`，而 `ErrorHandlerMiddleware._error_response()` **不接受也不转发 `headers=`**（`middleware/error_handler.py:52-63`；路由层 `HTTPException` 走的是 `main.py:454` 转发了 `exc.headers` 的那个处理器）—— 豁免语法是紧邻 raise 的 `# error-contract: exempt — <理由>`。**错误码 80 个**（`core/app_error.py:40-212`，name == value、0 重复、0 未使用），**粒度规则**也写在表里（同一个 code 只要在"一个端点内"可区分即可，`app_error.py:53-56`）。守卫 `tests/test_error_contract_adoption.py`（516 行 / **16** 用例 / AST）实测账目：`app/api` **24** 个文件 / **3** 处 raise / **0** 违规 / **3** 条豁免；反空转有**合成源码**与**真源**两道证明；另有一个 diff 脚本对 **149** 个已迁移出口比对 `(status, message)` 多重集 ⇒ **零状态/文案漂移**。此前记的是"🟡 **契约设施已落地，采用面很窄** … `raise AppError` **只有 2 处**（`version_service.py:208/226`），而 `raise HTTPException` **有 152 处** … 所以"后端改文案不破坏前端"这条验收**尚未成立**"——**采用面那半已过期**（旧句要点保留对照）。⚠️ **仍未收口的一半是前端**：HEAD 上 `frontend/src/pages/TodayLearn.tsx:146` 与 `pages/Review.tsx:126` **仍是** `message.includes('每日上限')`；本轮把结构化的码交给了前端（`api/client.ts:314` 的 `ApiError.code`），两个页面的分流切换见**附录 BK.3 / BK.7** |
 | 0.12 | **修 nginx 生产配置**：`client_max_body_size 500m`（当前默认 1MB → **所有 >1MB 上传必然 413**）、`proxy_buffering off`（当前 SSE 被缓冲 → 流式失效）、`gzip_vary on`、静态资源缓存头 + `index.html no-cache`、安全响应头 | F-1 / F-21 | Docker 部署下上传与流式可用 | ⛔ **按既定路线不适用**（容器化已放弃，见 `README.md:265-276` 的"Docker 部署未经验证"横幅与 `docs/sqlite-single-writer.md`）。⚠️ **但文件是真的、内容是对的**：`frontend/nginx.conf:11` `client_max_body_size 500m`、`:50` `proxy_buffering off`、`:71` `gzip_vary on`、`:24-33` 静态资源 `immutable` + `index.html no-cache`、`:74-76` 安全头，且 CI 有回归守卫（`.github/workflows/ci.yml:351-366`）。**验收条件"Docker 部署下可用"无法在本项目的运行路径上验证**（这一轮也没有验证过）—— 所以这条是"不适用"，不是"已验证" |
-| 0.13 | **加 `frontend/.dockerignore`**（`node_modules`、`dist`）；`Dockerfile` 改 `npm ci` | F-4 | 镜像可在 Linux/CI 上构建 | ⛔ **按既定路线不适用**，且**前半已落地、后半未做**：`frontend/.dockerignore` 存在（22 行，排除 `node_modules` / `dist` / `.git` / `*.log` 等），CI 有守卫（`ci.yml:368-374`）；但 `frontend/Dockerfile:16` **仍是 `RUN npm install`**，不是计划要的 `npm ci`。整体判 ⛔ 是因为"镜像可在 Linux/CI 上构建"这条验收**在本项目的实际部署路径下不被检验** |
+| 0.13 | **加 `frontend/.dockerignore`**（`node_modules`、`dist`）；`Dockerfile` 改 `npm ci` | F-4 | 镜像可在 Linux/CI 上构建 | ⛔ **按既定路线不适用**（容器化已放弃），但**两半现在都落地了**：`frontend/.dockerignore` 存在（22 行，排除 `node_modules` / `dist` / `.git` / `*.log` 等，CI 有守卫）；`Dockerfile` 已于 **2026-09-14** 改成"`COPY package.json package-lock.json ./` + `RUN npm ci`"（**这两处是一对**：只改 `ci` 不补锁文件会让它直接失败，实测 EUSAGE 退出 1；补上后 `added 371 packages` 退出 0），CI 也加了守卫（`ci.yml` 的 docker-nginx-config job）。整体仍判 ⛔ 的理由不变：**"镜像可在 Linux/CI 上构建"这条验收在本项目的实际部署路径下不被检验**（本机无 Docker） |
 | 0.14 | **加 ErrorBoundary**（`main.tsx` 全局 + 路由级 `key={pathname}`）；`renderMarkdown` 调用包 `useMemo` 与 try/catch 兜底 | F-2 | 单条坏数据不再整站白屏 | ✅ **已落地**：全局 `main.tsx:49-55`；路由级 `App.tsx:116-150` 用 `<ErrorBoundary resetKey={location.pathname}>`（`key` 语义的等价实现）；`utils/markdown.ts:265-288` 的 `renderMarkdown` 整体 try/catch，失败降级为**转义后的纯文本**；流式两处（`NoteAskPanel.tsx:71`、`QA.tsx` + `hooks/useStreamAnswer.ts`）已用 `useMemo` / 节流。⚠️ **未完全覆盖**：`LearningAssessment.tsx`（`:486/498/508/598/621/627/646`）与 `NoteDetail.tsx:160/163` **仍在渲染体里直接调用** `renderMarkdown(...)`（每渲染一次即重算）。有 try/catch 兜底，所以 F-2 的"整站白屏"验收成立；但"包 `useMemo`"这一半**没有全覆盖** |
 | 0.15 | **`QuestionSets` 分页循环加硬上限**：`page <= MAX_PAGES` + `if (data.items.length === 0) break` | F-3 | 不再无限请求后端 | ✅ **已落地**：`pages/QuestionSets.tsx:75` `MAX_PAGES = 100`、`:82` `while (page <= MAX_PAGES)`、`:89` 空页即停、`:91` 取够 `total` 即停，`:96-101` 截断时 `console.warn` 并如实改 `total` |
 | 0.16 | **`DailyMaterials` 轮询加清理**（`pollTimerRef` + effect cleanup 的 `cancelled` 标志） | F-5 | 卸载后不再发请求 | ✅ **已落地**：`pages/DailyMaterials.tsx:144` `pollTimerRef`、`:146` `unmountedRef`（即计划写的 `cancelled` 标志）、`:149-154` `stopPolling()`、`:156-162` 卸载 effect 同时置标志并清定时器（`Upload.tsx:90-96` 早已是同款实现） |
@@ -11110,7 +11110,7 @@ M1 那行里最值得记的是：**报错项（`unknownQueryParams`）始终是 
 | # | 事项 | 现状 / 下一步 |
 |---|---|---|
 | 1 | **S5（5.2 / 5.3）** | 计划已出、**未动手**；等 BM.6 的四个决定 |
-| 2 | ~~P3：`POST /api/auth/logout` 的 body 是否真的可选~~ | ✅ **已收口**（复核发现 5.1 那轮就改完了）：签名 `req: LogoutRequest = None`，schema 是干净的 `requestBody?: $ref`（无 `| null` 分支），运行时不变；理由写在 `app/api/auth.py` 的 logout docstring（见 5.1 行的补记） |
+| 2 | ~~P3：`POST /api/auth/logout` 的 body 是否真的可选~~ | ✅ **已收口**（复核发现 5.1 那轮就改完了）：签名 `req: LogoutRequest = None`，schema 是干净的 `requestBody?: $ref`（无 `\| null` 分支），运行时不变；理由写在 `app/api/auth.py` 的 logout docstring（见 5.1 行的补记） |
 | 3 | `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 是否统一 | 未动（行为变更，需单独决策） |
 | 4 | 清空字段的服务层语义 | 未动（`project_service.py:196-199` / `understanding.py:465-468` / `knowledge.py:180-183` 三处 `if x is not None`） |
 | 5 | RAG 向量通道 `hybrid` 的成因 | 未定论；判定方法见 BL.8 第 6 条 |
@@ -11140,8 +11140,8 @@ M1 那行里最值得记的是：**报错项（`unknownQueryParams`）始终是 
 | **P3：`logout` 的 body 是否可选** | 前端总是发 body，后端接受 | 只在想改后端声明时 |
 | **0.7 的"登录失败计数与锁定"** 🟡 | 单机没有爆破面；IP 级限流（10/min）已在 | 一旦暴露到公网/多用户 |
 | **6.7 的阈值门禁与镜像扫描** 🟡 | 扫描已跑、结果已归档，只是不阻断合并 | 想让它当合并门禁时 |
-| **57 处 docstring 的 `Raises:`** | 纯注释，运行期无关 | 与 `openapi.json` 再生**同批**做（否则又是"改一句、过期一个产物"） |
-| **`frontend/Dockerfile:16` 仍是 `npm install`** | 容器化路径本项目不用（`README.md` 有"未经验证"横幅） | 真要用 Docker 部署时 |
+| ~~**57 处 docstring 的 `Raises:`**~~ → **已修（2026-09-14）** | 实测是 **68 处 / 14 个文件**：**43 处写着 `HTTPException`**（0.11 之后早就不成立）→ 41 处改成 `AppError: 条件（CODE → 状态码）`、2 处是**书面豁免**（`auth.py` 的 `WWW-Authenticate`）；5 处原本就写 `AppError` 但格式不合冻结样式，一并统一；19 处内建异常核对后不变、1 处补上漏掉的密码策略分支。**顺带改正 4 处"文档在说谎"**（漏写了真实存在的错误码，如 `diff_note_versions` 漏 `VERSION_CONTENT_UNAVAILABLE`、`update_goal` 漏两条 scope 400、`delete_project` 的同码不同状态）。产物随之再生（见 BL.4 的补记）| 与 `openapi.json` / `schema.ts` 的再生**同批**做（已完成） |
+| ~~**`frontend/Dockerfile:16` 仍是 `npm install`**~~ → **已修（2026-09-14）** | 改成"复制锁文件 + `npm ci`"。⚠️ 这两处是**一对**：只把 `install` 改成 `ci`、不补锁文件的 `COPY` 会让 `npm ci` 直接失败（实测：只给 `package.json` → EUSAGE 退出 1；补上锁文件 → `added 371 packages` 退出 0）。CI 已加回归守卫。**仍未验证的是镜像本身能不能构建**（本机无 Docker） | 真要用 Docker 部署时（届时第一次 `docker build` 才是这条的验收） |
 | **`backend/alembic.ini` 仍指向 PG** | 手写迁移才是当前唯一通道，且工作正常 | 若重启 1.3（Alembic 重建） |
 | **`backend/data/chroma/` 114 个子目录** | 向量已搬进 `chunks` 表，这些目录不参与检索 | 想清理磁盘时（纯家务） |
 | **阶段 1 的 1.1–1.5 / 2.2 / 2.5** ⛔ | 无 PG / Redis / Docker，SQLite 单写者路线自洽（`docs/sqlite-single-writer.md`） | 路线变更时（当前不在路线内） |
@@ -11220,9 +11220,47 @@ BN.4 定论之后，"补嵌入没有自动路径"这件事有两种修法：挂�
 ⚠️ 这一轮**没有**做的是"自动补向量"（挂 Beat 或随清洗触发）—— 它需要先定
 频率与内存策略，且要先有这个指标作为判断依据。
 
+### BN.7 docstring 的 `Raises:` 批量更正（68 处 / 14 个文件）
+
+阶段 0.11 把错误契约从 `raise HTTPException` 换成了 `raise AppError(code, msg, status)`，
+但 docstring 里的 `Raises:` 段没跟上 —— 而它们**会被 FastAPI 抄进 OpenAPI 描述**
+（也就是会进 `openapi.json` 与前端生成类型），所以这批"文档在说谎"是会外泄的。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| 站点总数 | **68 处**（比计划文档里记的 57 处多 11 处 —— 那是当时只数了 `app/api/**`） |
+| 提到 `HTTPException` 的 | **43 → 2**（41 处改成 `AppError`，2 处是 `auth.py` 的书面豁免：必须带 `WWW-Authenticate`） |
+| 原本就写 `AppError` 的 | 5 处（码是对的、格式不合冻结样式）→ 全部统一成 `AppError: 条件（CODE → 状态码）` |
+| 内建异常 / `LLMQuotaExceeded` | 19 处核对后不变，1 处**补**（`auth_service` 漏了"密码不满足策略"那一支） |
+| 整段删除的 | **0 处**（68 处都有真实 raise 可写，所以没有一处需要写"无"） |
+| 顺带改正的"文档在说谎" | 4 处：`diff_note_versions` 漏 `VERSION_CONTENT_UNAVAILABLE`、`update_goal` 漏两条 scope 400、`delete_project` 同一 code 但状态是 **400**（没"顺手改成 404"）、`_do_upload` 原文写"见各子步骤说明"（等于没写）→ 展开成 5 条真实码 |
+| 产物 | `openapi.json` → **402 798 字节 / 103 / 119 / 185 / `2e0f1a88eb49`**（描述文本变长）；`schema.ts` 同步再生；漂移**逐项不变**（`pathMatched 111 / identical 105 / 54 / 22 / bodyChecked 34 / unconsumed 9`） |
+
+**独立校验（不依赖执行者的报告）**：另写了一个校验器做三件事 ——
+① 剥掉 docstring 后比对 HEAD 与工作区的 AST（证明**没有一行代码被改**）；
+② 剥掉 `Raises:` 段后比对 docstring 其余文字（证明**只动了这一段**）；
+③ 用 `ast` 抽出全部 `raise AppError(...)` 的 (码, 状态) 实测集合，
+核对文档里声称的 **45 个码**是否真实存在且状态一致。最终 **0 条问题**。
+
+> ⚠️ **校验器自己也有两个 bug，且都是靠"数字荒谬"发现的**：
+> 第一版只认字符串字面量，而本项目的 raise 点写的是**常量名**
+> （`raise AppError(NOTE_NOT_FOUND, …)`）→ 读出"25 个码从未 raise"；
+> 第二版把 `status.HTTP_404_NOT_FOUND` 这种**属性访问**当成缺失 →
+> 读出"3 处状态码不符"。两次都是工具的 bug，不是被检查对象的 bug ——
+> **"我用工具验过了"这句话的前提是工具本身被验证过**。
+
 ---
 
-**文档版本**：v5.11（**2026-09-14 把"待补向量"变可见**：BN.4 定论之后没有直接去挂
+**文档版本**：v5.12（**2026-09-14 docstring 的 `Raises:` 批量更正**：实测 **68 处 / 14 个文件**
+（计划里记的 57 处只数了 `app/api/**`），其中 **43 处写着早已不成立的 `HTTPException`**
+→ 41 处改成冻结格式 `AppError: 条件（CODE → 状态码）`、2 处是 `auth.py` 的书面豁免；
+顺带改正 **4 处"文档在说谎"**（漏写真实存在的错误码/同码不同状态）。
+产物再生：`openapi.json` → **402 798 字节 / 103 / 119 / 185 / `2e0f1a88eb49`**，
+漂移逐项不变。**另写独立校验器**（AST 证明没有一行代码被改、剥掉 `Raises:` 段后
+证明其余文字一字未动、`ast` 抽出实测 (码,状态) 核对 45 个声称的码）——
+它自己先有两个 bug（常量名 raise / `status.HTTP_404_*` 属性访问），
+"我用工具验过了"的前提是工具被验证过，见**附录 BN.7**）；
+v5.11 —— **2026-09-14 把"待补向量"变可见**：BN.4 定论之后没有直接去挂
 定时任务，而是先补可见性 —— 后端 `GET /ready` 新增 `index.pending_embeddings`
 （只报告、不阻断，与队列深度同判据；库不可用时 `None` 而不是 0），
 测试 16 → 19（含"只数未嵌入的行"与"有积压仍 200"）；

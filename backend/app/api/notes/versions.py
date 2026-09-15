@@ -51,7 +51,7 @@ async def list_note_versions(
         NoteVersionListResponse: 包含版本列表和总数的响应
 
     Raises:
-        HTTPException 404: 笔记不存在或不属于当前用户
+        AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
@@ -92,7 +92,9 @@ async def diff_note_versions(
         NoteVersionDiffResponse: 包含两版本号和 diff 行列表的响应
 
     Raises:
-        HTTPException 404: 笔记不存在或任一版本不存在
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+        AppError: 任一版本不存在（VERSION_NOT_FOUND → 404）
+        AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）
     """
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
@@ -140,7 +142,9 @@ async def get_note_version_content(
         dict: 包含 content（Markdown 文本）和 version_number 的响应
 
     Raises:
-        HTTPException 404: 笔记不存在或版本不存在
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+        AppError: 版本不存在（VERSION_NOT_FOUND → 404）
+        AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）
     """
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)
@@ -186,8 +190,9 @@ async def restore_note_version(
         NoteVersionResponse: 恢复前为当前内容创建的新版本快照信息
 
     Raises:
-        HTTPException 404: 笔记或目标版本不存在
-        HTTPException 400: 笔记无可写入的 Markdown 路径
+        AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+        AppError: 目标版本不存在（VERSION_NOT_FOUND → 404）
+        AppError: 恢复被拒（笔记不存在 / 无可写 Markdown 路径 / 当前内容读取失败）（NOTE_VERSION_RESTORE_REJECTED → 400）
     """
     # 校验笔记归属权
     note = await get_note_detail(db, note_id, current_user.id)

@@ -109,7 +109,7 @@ export interface paths {
      *         TokenResponse: 包含 access_token、refresh_token 和用户信息的响应
      *
      *     Raises:
-     *         HTTPException 401: 邮箱或密码错误
+     *         AppError: 邮箱或密码错误（AUTH_INVALID_CREDENTIALS → 401）
      */
     post: operations['login_api_auth_login_post'];
     delete?: never;
@@ -248,7 +248,7 @@ export interface paths {
      *         TokenResponse: 新的 access_token / refresh_token 与用户信息
      *
      *     Raises:
-     *         HTTPException 401: 刷新令牌无效、已过期或已被撤销（重放）
+     *         HTTPException: 刷新令牌无效、已过期或已被撤销（401；豁免：必须带 WWW-Authenticate，见紧邻的 error-contract: exempt）
      */
     post: operations['refresh_api_auth_refresh_post'];
     delete?: never;
@@ -281,7 +281,7 @@ export interface paths {
      *         TokenResponse: 包含 access_token、refresh_token 和用户信息的响应
      *
      *     Raises:
-     *         HTTPException 400: 邮箱或用户名已被注册
+     *         AppError: 邮箱或用户名已被注册（AUTH_REGISTRATION_REJECTED → 400）
      */
     post: operations['register_api_auth_register_post'];
     delete?: never;
@@ -575,7 +575,7 @@ export interface paths {
      *         FolderDetailResponse: 文件夹详情，包含笔记列表
      *
      *     Raises:
-     *         HTTPException 404: 文件夹不存在或不属于当前用户
+     *         AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
      */
     get: operations['get_folder_api_folders__folder_id__get'];
     put?: never;
@@ -595,8 +595,8 @@ export interface paths {
      *         Dict: 操作结果，包含 message 字段
      *
      *     Raises:
-     *         HTTPException 404: 文件夹不存在或不属于当前用户
-     *         HTTPException 400: 文件夹非空，不允许删除
+     *         AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
+     *         AppError: 文件夹非空，不允许删除（FOLDER_NOT_EMPTY → 400）
      */
     delete: operations['delete_folder_api_folders__folder_id__delete'];
     options?: never;
@@ -615,7 +615,7 @@ export interface paths {
      *         FolderResponse: 更新后的文件夹信息
      *
      *     Raises:
-     *         HTTPException 404: 文件夹不存在或不属于当前用户
+     *         AppError: 文件夹不存在或不属于当前用户（FOLDER_NOT_FOUND → 404）
      */
     patch: operations['update_folder_api_folders__folder_id__patch'];
     trace?: never;
@@ -659,7 +659,7 @@ export interface paths {
      *         GoalResponse: 新创建的目标信息
      *
      *     Raises:
-     *         HTTPException 400: 活跃目标数已达上限（5 个）
+     *         AppError: 活跃目标数已达上限（GOAL_ACTIVE_LIMIT_REACHED → 400）
      */
     post: operations['create_goal_api_goals_post'];
     delete?: never;
@@ -692,7 +692,7 @@ export interface paths {
      *         DailyPlanResponse: 今日计划，包含推荐任务和完成进度
      *
      *     Raises:
-     *         HTTPException 400: 用户无活跃目标，需先创建目标
+     *         AppError: 用户无活跃目标，需先创建目标（GOAL_NONE_ACTIVE → 400）
      */
     get: operations['get_daily_plan_api_goals_daily_plan_get'];
     put?: never;
@@ -726,7 +726,7 @@ export interface paths {
      *         GoalResponse: 目标详情，含 progress_percentage 字段
      *
      *     Raises:
-     *         HTTPException 404: 目标不存在或不属于当前用户
+     *         AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
      */
     get: operations['get_goal_api_goals__goal_id__get'];
     put?: never;
@@ -744,7 +744,7 @@ export interface paths {
      *         db: 异步数据库会话
      *
      *     Raises:
-     *         HTTPException 404: 目标不存在或不属于当前用户
+     *         AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
      */
     delete: operations['delete_goal_api_goals__goal_id__delete'];
     options?: never;
@@ -766,7 +766,9 @@ export interface paths {
      *         GoalResponse: 更新后的目标信息
      *
      *     Raises:
-     *         HTTPException 404: 目标不存在或不属于当前用户
+     *         AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
+     *         AppError: 目标范围引用了不存在或无权访问的笔记（GOAL_SCOPE_NOTE_INVALID → 400）
+     *         AppError: 目标范围引用了不存在或无权访问的文件夹（GOAL_SCOPE_FOLDER_INVALID → 400）
      */
     patch: operations['update_goal_api_goals__goal_id__patch'];
     trace?: never;
@@ -795,7 +797,7 @@ export interface paths {
      *         GoalResponse: 更新后的目标信息
      *
      *     Raises:
-     *         HTTPException 404: 目标不存在或不属于当前用户
+     *         AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
      */
     post: operations['archive_goal_api_goals__goal_id__archive_post'];
     delete?: never;
@@ -1139,7 +1141,7 @@ export interface paths {
      *     调用 LLM 生成拓展卡片并持久化。
      *
      *     Raises:
-     *         HTTPException 400: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）
+     *         AppError: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）（EXTENSION_GENERATE_FAILED → 400）
      */
     post: operations['generate_extension_endpoint_api_knowledge_cards__card_id__generate_extension_post'];
     delete?: never;
@@ -1165,8 +1167,8 @@ export interface paths {
      *     触发 Celery generate_questions_task，定向生成拓展类难题。
      *
      *     Raises:
-     *         HTTPException 404: 卡片不存在或无权访问
-     *         HTTPException 400: 非拓展卡片不允许使用此端点
+     *         AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）
+     *         AppError: 非拓展卡片不允许使用此端点（CARD_NOT_EXTENSION → 400）
      */
     post: operations['generate_questions_for_extension_api_knowledge_cards__card_id__generate_questions_post'];
     delete?: never;
@@ -1195,7 +1197,7 @@ export interface paths {
      *     仅更新请求中提供的字段（非 None 才更新）。
      *
      *     Raises:
-     *         HTTPException 404: 卡片不存在或无权访问
+     *         AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）
      */
     patch: operations['mark_card_api_knowledge_cards__card_id__mark_patch'];
     trace?: never;
@@ -1217,7 +1219,7 @@ export interface paths {
      *     命中缓存则返回已有统计，否则重新提取常规知识点与盲点。
      *
      *     Raises:
-     *         HTTPException 400: 联合分析失败（如关联不存在、内容为空等）
+     *         AppError: 联合分析失败（如关联不存在、内容为空等）（COMBINED_EXTRACT_FAILED → 400）
      */
     post: operations['extract_combined_endpoint_api_knowledge_links__link_id__extract_combined_post'];
     delete?: never;
@@ -1432,7 +1434,7 @@ export interface paths {
      *         NoteDetailResponse: 包含笔记详情和 Markdown 内容的响应
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
      */
     get: operations['get_note_api_notes__note_id__get'];
     /**
@@ -1451,7 +1453,7 @@ export interface paths {
      *         NoteResponse: 更新后的笔记信息
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
      */
     put: operations['update_note_api_api_notes__note_id__put'];
     post?: never;
@@ -1473,7 +1475,7 @@ export interface paths {
      *         无返回内容（204 No Content）
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
      */
     delete: operations['delete_note_api_api_notes__note_id__delete'];
     options?: never;
@@ -1653,7 +1655,7 @@ export interface paths {
      *         promote_key_cards: 提升核心卡片为独立节点（图谱中保留）
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
      */
     delete: operations['purge_note_api_api_notes__note_id__purge_delete'];
     options?: never;
@@ -1679,9 +1681,9 @@ export interface paths {
      *     响应含 renamed_to 用于前端提示。
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在
-     *         HTTPException 400: 笔记不在回收站中
-     *         HTTPException 409: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+     *         AppError: 笔记不在回收站中（NOTE_NOT_TRASHED → 400）
+     *         AppError: inbox 同名文件冲突，1~999 改名序号被占用，无法恢复（NOTE_RESTORE_CONFLICT → 409）
      */
     post: operations['restore_note_api_api_notes__note_id__restore_post'];
     delete?: never;
@@ -1719,8 +1721,8 @@ export interface paths {
      *         NoteResponse: 更新后的笔记信息
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
-     *         HTTPException 400: note_role 值无效
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
+     *         AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
      */
     patch: operations['update_note_role_api_notes__note_id__role_patch'];
     trace?: never;
@@ -1771,7 +1773,7 @@ export interface paths {
      *         NoteVersionListResponse: 包含版本列表和总数的响应
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
      */
     get: operations['list_note_versions_api_notes__note_id__versions_get'];
     put?: never;
@@ -1808,7 +1810,9 @@ export interface paths {
      *         NoteVersionDiffResponse: 包含两版本号和 diff 行列表的响应
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或任一版本不存在
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+     *         AppError: 任一版本不存在（VERSION_NOT_FOUND → 404）
+     *         AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）
      */
     get: operations['diff_note_versions_api_notes__note_id__versions_diff_get'];
     put?: never;
@@ -1843,7 +1847,9 @@ export interface paths {
      *         dict: 包含 content（Markdown 文本）和 version_number 的响应
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或版本不存在
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+     *         AppError: 版本不存在（VERSION_NOT_FOUND → 404）
+     *         AppError: 版本内容解码失败，读不出来（VERSION_CONTENT_UNAVAILABLE → 404）
      */
     get: operations['get_note_version_content_api_notes__note_id__versions__version_number__get'];
     put?: never;
@@ -1883,8 +1889,9 @@ export interface paths {
      *         NoteVersionResponse: 恢复前为当前内容创建的新版本快照信息
      *
      *     Raises:
-     *         HTTPException 404: 笔记或目标版本不存在
-     *         HTTPException 400: 笔记无可写入的 Markdown 路径
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+     *         AppError: 目标版本不存在（VERSION_NOT_FOUND → 404）
+     *         AppError: 恢复被拒（笔记不存在 / 无可写 Markdown 路径 / 当前内容读取失败）（NOTE_VERSION_RESTORE_REJECTED → 400）
      */
     post: operations['restore_note_version_api_notes__note_id__versions__version_number__restore_post'];
     delete?: never;
@@ -1917,9 +1924,9 @@ export interface paths {
      *         StreamingResponse 或 RedirectResponse
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在
-     *         HTTPException 400: 笔记不是视频类型
-     *         HTTPException 404: 视频文件不存在
+     *         AppError: 笔记不存在（NOTE_NOT_FOUND → 404）
+     *         AppError: 笔记不是视频类型（NOTE_NOT_VIDEO → 400）
+     *         AppError: 视频文件不存在（NOTE_VIDEO_FILE_MISSING → 404）
      */
     get: operations['stream_video_api_notes__note_id__video_get'];
     put?: never;
@@ -1991,7 +1998,7 @@ export interface paths {
      *         ProjectDetailResponse: 项目详情
      *
      *     Raises:
-     *         HTTPException: 项目不存在或无权访问
+     *         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
      */
     get: operations['get_project_api_projects__project_id__get'];
     put?: never;
@@ -2011,7 +2018,7 @@ export interface paths {
      *         Dict: 操作结果
      *
      *     Raises:
-     *         HTTPException: 项目不存在或无权访问
+     *         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 400）
      */
     delete: operations['delete_project_api_projects__project_id__delete'];
     options?: never;
@@ -2030,7 +2037,7 @@ export interface paths {
      *         ProjectResponse: 更新后的项目信息
      *
      *     Raises:
-     *         HTTPException: 项目不存在或无权访问
+     *         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
      */
     patch: operations['update_project_api_projects__project_id__patch'];
     trace?: never;
@@ -2061,7 +2068,7 @@ export interface paths {
      *         Dict: 添加结果统计（project_id / added / not_found）
      *
      *     Raises:
-     *         HTTPException: 项目不存在或无权访问
+     *         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
      */
     post: operations['add_notes_api_projects__project_id__notes_post'];
     delete?: never;
@@ -2096,7 +2103,7 @@ export interface paths {
      *         Dict: 操作结果（message / note_id）
      *
      *     Raises:
-     *         HTTPException: 项目不存在、无权访问或笔记不在该项目中
+     *         AppError: 项目不存在、无权访问或笔记不在该项目中（PROJECT_NOTE_LINK_NOT_FOUND → 404）
      */
     delete: operations['remove_note_api_projects__project_id__notes__note_id__delete'];
     options?: never;
@@ -2130,7 +2137,7 @@ export interface paths {
      *         ScanImportResponse: 扫描结果统计
      *
      *     Raises:
-     *         HTTPException: 项目不存在或无权访问
+     *         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
      */
     post: operations['scan_project_source_api_projects__project_id__scan_post'];
     delete?: never;
@@ -2840,8 +2847,16 @@ export interface paths {
      *         NoteResponse: 新创建的笔记信息
      *
      *     Raises:
-     *         HTTPException 400: 文件名为空、文件格式不支持、文件大小超限、内容签名不匹配
-     *         HTTPException 500: 文件上传到对象存储失败
+     *         AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）
+     *         AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+     *         AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）
+     *         AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）
+     *         AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）
+     *         AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）
+     *         AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）
+     *         AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）
+     *         AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
+     *         AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
      */
     post: operations['upload_document_api_upload_post'];
     delete?: never;
@@ -2888,9 +2903,20 @@ export interface paths {
      *         NoteResponse: 新创建的笔记信息
      *
      *     Raises:
-     *         HTTPException 400: temp_id 无效或已过期、文件名不合法/扩展名不一致、
-     *                            页范围非法、非 PDF 却指定裁剪
-     *         HTTPException 404: 项目不存在
+     *         AppError: temp_id 无效（UPLOAD_TEMP_ID_INVALID → 400）
+     *         AppError: 临时上传已失效（UPLOAD_TEMP_EXPIRED → 400）
+     *         AppError: 临时上传数据异常（UPLOAD_TEMP_DATA_INVALID → 400）
+     *         AppError: 临时文件格式不受支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+     *         AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）
+     *         AppError: 文件名过长（UPLOAD_FILE_NAME_TOO_LONG → 400）
+     *         AppError: 扩展名与真实文件类型不一致（UPLOAD_EXTENSION_MISMATCH → 400）
+     *         AppError: 非 PDF 却指定裁剪（UPLOAD_CROP_UNSUPPORTED_TYPE → 400）
+     *         AppError: PDF 裁剪失败，页范围非法或文件损坏（UPLOAD_PDF_CROP_FAILED → 400）
+     *         AppError: 超出每用户存储配额（UPLOAD_STORAGE_QUOTA_EXCEEDED → 400）
+     *         AppError: 超出每用户笔记数上限（UPLOAD_NOTE_COUNT_LIMIT_REACHED → 400）
+     *         AppError: 文件夹不存在或无权访问（FOLDER_NOT_FOUND → 400）
+     *         AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
+     *         AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
      */
     post: operations['commit_upload_api_upload_commit_post'];
     delete?: never;
@@ -2924,7 +2950,15 @@ export interface paths {
      *               PDF 返回 page_count，其他格式返回 null
      *
      *     Raises:
-     *         HTTPException 400: 文件名不合法、格式不支持、大小超限、内容签名不匹配、PDF 解析失败
+     *         AppError: 文件名为空（UPLOAD_FILE_NAME_EMPTY → 400）
+     *         AppError: 文件名不合法，含路径分隔符（UPLOAD_FILE_NAME_INVALID → 400）
+     *         AppError: 文件格式不支持（UPLOAD_FORMAT_UNSUPPORTED → 400）
+     *         AppError: 文件大小超限（UPLOAD_FILE_TOO_LARGE → 400）
+     *         AppError: 内容签名不匹配（UPLOAD_CONTENT_MISMATCH → 400）
+     *         AppError: .md 嗅探到脚本注入内容（UPLOAD_SCRIPT_CONTENT_REJECTED → 400）
+     *         AppError: Office 压缩包安全检查未通过（UPLOAD_ARCHIVE_REJECTED → 400）
+     *         AppError: PDF 页数解析失败（UPLOAD_PDF_PARSE_FAILED → 400）
+     *         AppError: PDF 页数超过上限（UPLOAD_PDF_TOO_MANY_PAGES → 400）
      */
     post: operations['prepare_upload_api_upload_prepare_post'];
     delete?: never;
@@ -2958,8 +2992,8 @@ export interface paths {
      *         NoteStatusResponse: 重试后的笔记状态
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
-     *         HTTPException 400: 笔记状态不允许重试（非 failed 状态）
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
+     *         AppError: 笔记状态不允许重试，非 failed 状态（NOTE_STATUS_INVALID → 400）
      */
     post: operations['retry_convert_api_upload__note_id__retry_post'];
     delete?: never;
@@ -2991,7 +3025,7 @@ export interface paths {
      *         NoteStatusResponse: 包含笔记 ID、当前状态和错误信息的响应
      *
      *     Raises:
-     *         HTTPException 404: 笔记不存在或不属于当前用户
+     *         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
      */
     get: operations['get_upload_status_api_upload__note_id__status_get'];
     put?: never;

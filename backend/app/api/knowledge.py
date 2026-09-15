@@ -74,7 +74,7 @@ async def extract_combined_endpoint(
     命中缓存则返回已有统计，否则重新提取常规知识点与盲点。
 
     Raises:
-        HTTPException 400: 联合分析失败（如关联不存在、内容为空等）
+        AppError: 联合分析失败（如关联不存在、内容为空等）（COMBINED_EXTRACT_FAILED → 400）
     """
     result = await extract_combined(link_id, current_user.id, db)
     if isinstance(result, dict) and "error" in result:
@@ -96,7 +96,7 @@ async def generate_extension_endpoint(
     调用 LLM 生成拓展卡片并持久化。
 
     Raises:
-        HTTPException 400: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）
+        AppError: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）（EXTENSION_GENERATE_FAILED → 400）
     """
     result = await generate_extension(
         card_id, current_user.id, db, material_note_id=req.material_note_id
@@ -119,8 +119,8 @@ async def generate_questions_for_extension(
     触发 Celery generate_questions_task，定向生成拓展类难题。
 
     Raises:
-        HTTPException 404: 卡片不存在或无权访问
-        HTTPException 400: 非拓展卡片不允许使用此端点
+        AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）
+        AppError: 非拓展卡片不允许使用此端点（CARD_NOT_EXTENSION → 400）
     """
     # 查询卡片并校验归属
     result = await db.execute(
@@ -165,7 +165,7 @@ async def mark_card(
     仅更新请求中提供的字段（非 None 才更新）。
 
     Raises:
-        HTTPException 404: 卡片不存在或无权访问
+        AppError: 卡片不存在或无权访问（CARD_NOT_FOUND → 404）
     """
     result = await db.execute(
         select(KnowledgeCard).where(

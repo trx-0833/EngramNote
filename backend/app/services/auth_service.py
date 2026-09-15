@@ -340,7 +340,7 @@ async def register_user(db: AsyncSession, req: UserRegisterRequest) -> User:
         User: 新创建的用户对象
 
     Raises:
-        ValueError: 邮箱或用户名已被占用（不区分哪一个）
+        ValueError: 邮箱或用户名已被占用（不区分哪一个），或密码不满足策略
     """
     # 邮箱归一化（小写 + 去空白），避免大小写撞库，见 docs/decisions.md#F-21b
     email = (req.email or "").strip().lower()

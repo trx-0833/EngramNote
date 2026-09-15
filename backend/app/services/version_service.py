@@ -201,7 +201,7 @@ class VersionService:
             str: 版本 Markdown 文本内容
 
         Raises:
-            AppError: 版本记录不存在或版本内容文件缺失（code=VERSION_NOT_FOUND）
+            AppError: 版本记录不存在或版本内容文件缺失（VERSION_NOT_FOUND → 404）
         """
         version = await self._get_version(note_id, version_number, user_id, db)
         if version is None:
@@ -262,7 +262,7 @@ class VersionService:
             }
 
         Raises:
-            AppError: 任一版本记录不存在（code=VERSION_NOT_FOUND）
+            AppError: 任一版本记录不存在（VERSION_NOT_FOUND → 404）
         """
         v1_content = await self.get_version_content(note_id, v1, user_id, db)
         v2_content = await self.get_version_content(note_id, v2, user_id, db)
@@ -323,7 +323,7 @@ class VersionService:
 
         Raises:
             ValueError: 笔记不存在或笔记无可写入的 Markdown 路径
-            AppError: 目标版本不存在（code=VERSION_NOT_FOUND，来自 get_version_content）
+            AppError: 目标版本不存在，来自 get_version_content（VERSION_NOT_FOUND → 404）
         """
         # 获取笔记
         result = await db.execute(

@@ -111,7 +111,7 @@ async def get_project(
         ProjectDetailResponse: 项目详情
 
     Raises:
-        HTTPException: 项目不存在或无权访问
+        AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
     """
     detail = await project_service.get_project(db, project_id, current_user.id)
     if not detail:
@@ -139,7 +139,7 @@ async def update_project(
         ProjectResponse: 更新后的项目信息
 
     Raises:
-        HTTPException: 项目不存在或无权访问
+        AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
     """
     try:
         return await project_service.update_project(
@@ -169,7 +169,7 @@ async def delete_project(
         Dict: 操作结果
 
     Raises:
-        HTTPException: 项目不存在或无权访问
+        AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 400）
     """
     try:
         return await project_service.delete_project(db, project_id, current_user.id)
@@ -200,7 +200,7 @@ async def scan_project_source(
         ScanImportResponse: 扫描结果统计
 
     Raises:
-        HTTPException: 项目不存在或无权访问
+        AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
     """
     result = await db.execute(
         select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
@@ -235,7 +235,7 @@ async def add_notes(
         Dict: 添加结果统计（project_id / added / not_found）
 
     Raises:
-        HTTPException: 项目不存在或无权访问
+        AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
     """
     try:
         return await project_service.add_notes_to_project(
@@ -267,7 +267,7 @@ async def remove_note(
         Dict: 操作结果（message / note_id）
 
     Raises:
-        HTTPException: 项目不存在、无权访问或笔记不在该项目中
+        AppError: 项目不存在、无权访问或笔记不在该项目中（PROJECT_NOTE_LINK_NOT_FOUND → 404）
     """
     try:
         return await project_service.remove_note_from_project(

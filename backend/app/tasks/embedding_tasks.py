@@ -86,7 +86,7 @@ def _cached_encode(text_hash: str) -> Tuple[List[float]]:
             （使用元组包装以确保可哈希和 lru_cache 兼容）
 
     Raises:
-        KeyError: 当 text_hash 未在注册表中注册时
+        KeyError: text_hash 未在注册表中注册时
     """
     text = _hash_to_text_registry.get(text_hash)
     if text is None:

@@ -84,7 +84,7 @@ async def create_goal(
         GoalResponse: 新创建的目标信息
 
     Raises:
-        HTTPException 400: 活跃目标数已达上限（5 个）
+        AppError: 活跃目标数已达上限（GOAL_ACTIVE_LIMIT_REACHED → 400）
     """
     # goal_service.create_goal 内部会在活跃目标数超限时抛出
     # AppError(GOAL_ACTIVE_LIMIT_REACHED, http_status=400)
@@ -141,7 +141,7 @@ async def get_daily_plan(
         DailyPlanResponse: 今日计划，包含推荐任务和完成进度
 
     Raises:
-        HTTPException 400: 用户无活跃目标，需先创建目标
+        AppError: 用户无活跃目标，需先创建目标（GOAL_NONE_ACTIVE → 400）
     """
     # generate_daily_plan 内部会在用户无活跃目标时抛出
     # AppError(GOAL_NONE_ACTIVE, http_status=400)
@@ -170,7 +170,7 @@ async def get_goal(
         GoalResponse: 目标详情，含 progress_percentage 字段
 
     Raises:
-        HTTPException 404: 目标不存在或不属于当前用户
+        AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
     """
     # get_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
@@ -201,7 +201,9 @@ async def update_goal(
         GoalResponse: 更新后的目标信息
 
     Raises:
-        HTTPException 404: 目标不存在或不属于当前用户
+        AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
+        AppError: 目标范围引用了不存在或无权访问的笔记（GOAL_SCOPE_NOTE_INVALID → 400）
+        AppError: 目标范围引用了不存在或无权访问的文件夹（GOAL_SCOPE_FOLDER_INVALID → 400）
     """
     # get_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.get_goal(goal_id, current_user.id, db)
@@ -259,7 +261,7 @@ async def archive_goal(
         GoalResponse: 更新后的目标信息
 
     Raises:
-        HTTPException 404: 目标不存在或不属于当前用户
+        AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
     """
     # archive_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     goal = await goal_service.archive_goal(goal_id, current_user.id, db)
@@ -284,7 +286,7 @@ async def delete_goal(
         db: 异步数据库会话
 
     Raises:
-        HTTPException 404: 目标不存在或不属于当前用户
+        AppError: 目标不存在或不属于当前用户（GOAL_NOT_FOUND → 404）
     """
     # delete_goal 内部会在目标不存在时抛出 AppError(GOAL_NOT_FOUND, http_status=404)
     await goal_service.delete_goal(goal_id, current_user.id, db)

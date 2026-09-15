@@ -102,7 +102,7 @@ def _require_owner(run: Optional[TaskRun], user: User) -> TaskRun:
     """校验任务归属；不存在或不属于当前用户时一律 404（不泄露存在性）
 
     Raises:
-        AppError 404 TASK_NOT_FOUND: 任务不存在或不属于当前用户
+        AppError: 任务不存在或不属于当前用户（TASK_NOT_FOUND → 404）
     """
     if run is None or (run.user_id is not None and run.user_id != user.id):
         raise AppError(TASK_NOT_FOUND, "任务不存在", status.HTTP_404_NOT_FOUND)

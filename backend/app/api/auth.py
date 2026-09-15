@@ -91,7 +91,7 @@ async def get_current_user_dependency(
         User: 当前认证用户对象
 
     Raises:
-        HTTPException 401: 未提供 Token、Token 无效/过期、用户不存在或已禁用
+        HTTPException: Token 未提供、无效/过期，或用户不存在/已禁用（401；豁免：必须带 WWW-Authenticate，见紧邻的 error-contract: exempt）
     """
     token = credentials.credentials
     # 解码 JWT，获取 user_id
@@ -136,7 +136,7 @@ async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db))
         TokenResponse: 包含 access_token、refresh_token 和用户信息的响应
 
     Raises:
-        HTTPException 400: 邮箱或用户名已被注册
+        AppError: 邮箱或用户名已被注册（AUTH_REGISTRATION_REJECTED → 400）
     """
     try:
         user = await register_user(db, req)
@@ -173,7 +173,7 @@ async def login(req: UserLoginRequest, db: AsyncSession = Depends(get_db)):
         TokenResponse: 包含 access_token、refresh_token 和用户信息的响应
 
     Raises:
-        HTTPException 401: 邮箱或密码错误
+        AppError: 邮箱或密码错误（AUTH_INVALID_CREDENTIALS → 401）
     """
     user = await authenticate_user(db, req.email, req.password)
     if not user:
@@ -219,7 +219,7 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
         TokenResponse: 新的 access_token / refresh_token 与用户信息
 
     Raises:
-        HTTPException 401: 刷新令牌无效、已过期或已被撤销（重放）
+        HTTPException: 刷新令牌无效、已过期或已被撤销（401；豁免：必须带 WWW-Authenticate，见紧邻的 error-contract: exempt）
     """
     rotated = await rotate_refresh_token(db, req.refresh_token)
     if rotated is None:
