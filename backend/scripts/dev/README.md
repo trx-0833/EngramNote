@@ -63,18 +63,23 @@
    同时确认：`backend/scripts/**` 里没有其它 `/docs`｜`/openapi.json`｜`/redoc`
    的探针（`dump_openapi.py` 只在注释里提到它们，它走进程内 `app.openapi()`）。
 
-## 遗留（**没有**在本次搬迁中处理，留给人工决定）
+## 遗留
 
-1. **`.gitignore` 没跟着改**：`.gitignore:63-69` 用 `backend/test_*.py` /
-   `backend/verify_*.py` / `backend/reset_*.py` / `backend/restore_*.py` /
-   `backend/test.py` 精确匹配**根目录**。文件挪到 `backend/scripts/dev/` 后
-   这些规则**不再命中** —— 这 14 个文件现在会以未跟踪文件的形式出现在
-   `git status` 里。是提交它们（推荐：归档脚本本就该入库）、还是补一条
-   `backend/scripts/dev/` 的忽略规则，属于人工决定，本次**未**改 `.gitignore`。
-2. **`backend/e2e_cleanup.py` 是唯一被 git 跟踪的文件**：它的移动在
-   `git status` 里表现为"删除 + 新增未跟踪文件"，而不是 rename ——
-   本次**没有**动 git 索引（不提交、不 `git add`），由人工决定何时提交。
-3. **仍然指向旧路径的引用（本次未改，因为不在允许改动的文件范围内）**：
+> **2026-09-14 复核：下面第 1、2 条已经收口，第 3、4 条仍未处理。**
+> 第 1 条的结论是"**不改 `.gitignore`**"：搬迁提交 `b73ebfd` 已把这 15 个脚本
+> （含本 README）全部入库，`git status` 在该目录下**没有任何未跟踪文件**；
+> 而那六条根目录规则**刻意保留**为"将来有人往 `backend/` 根丢草稿"的闸门 ——
+> 把它们延伸到 `backend/scripts/dev/` 会静默忽略**将来新增**的同名文件
+> （完整理由与实测写在 `.gitignore:63-93`，并由
+> `backend/tests/test_gitignore_scope.py` 钉住"不许改写成无路径前缀"）。
+
+1. ~~**`.gitignore` 没跟着改**~~ → **已决定不改**（理由见上方引用块）。
+   搬迁后的实测状态：`git ls-files backend/scripts/dev` 列出全部 16 个文件，
+   该目录下未跟踪文件为 0。
+2. ~~**`backend/e2e_cleanup.py` 是唯一被 git 跟踪的文件**~~ → **已随 `b73ebfd` 入库**；
+   它在历史里表现为"删除 + 新增"（而不是 rename），这是当时**预期**的结果，
+   不是遗漏。
+3. **仍然指向旧路径的引用（未处理）**：
    - `backend/tests/test_full_e2e.py:753,762`（注释与用户可见提示串里的
      `backend/e2e_cleanup.py`；`backend/tests/**` 本次只许改缺陷 1 的那一行）
    - `backend/tests/测试账号信息.md:35,45`（`python e2e_cleanup.py`）
