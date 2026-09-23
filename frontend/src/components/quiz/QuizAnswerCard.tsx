@@ -373,24 +373,32 @@ export default function QuizAnswerCard({
               <p style={{ fontWeight: 600, color: verdictColor }}>AI 判分：{verdictLabel}</p>
               {detail.reason && <p style={{ marginTop: 'var(--space-xs)' }}>{detail.reason}</p>}
               {missingPoints.length > 0 && (
-                <p style={{ marginTop: 'var(--space-xs)' }}>
+                // `<ul>` **不能是 `<p>` 的后代**：HTML 规范里 `<p>` 只收短语内容。
+                // React 用 `createElement` 建树，会**照建**这棵非法 DOM、只在 DEV
+                // 打一条 `validateDOMNesting` 警告 —— 所以它此前一直没被发现
+                // （而真被 HTML 解析器处理时，`<ul>` 会被"顶"出 `<p>` 之外，
+                // 结构就变了）。换成 `<div>`：div 装列表是合法的。
+                // 显式补回 `<p>` 原本的 1em 下外边距 —— 全局样式表没有重置
+                // `p` 的 margin，不补就会少 14.4px（此处 font-size 是 0.9rem）。
+                <div style={{ marginTop: 'var(--space-xs)', marginBottom: '1em' }}>
                   <strong>遗漏：</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
                     {missingPoints.map((point, i) => (
                       <li key={i}>{point}</li>
                     ))}
                   </ul>
-                </p>
+                </div>
               )}
               {misconceptions.length > 0 && (
-                <p style={{ marginTop: 'var(--space-xs)' }}>
+                // 同上：`<ul>` 不能住进 `<p>` 里
+                <div style={{ marginTop: 'var(--space-xs)', marginBottom: '1em' }}>
                   <strong>误解：</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
                     {misconceptions.map((point, i) => (
                       <li key={i}>{point}</li>
                     ))}
                   </ul>
-                </p>
+                </div>
               )}
               {missingPoints.length === 0 && misconceptions.length === 0 && (
                 <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}>
