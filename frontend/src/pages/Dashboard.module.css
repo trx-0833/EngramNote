@@ -31,7 +31,57 @@
  * （`Dashboard.tsx` 原来是内联 `gridTemplateColumns: '1fr 1fr'`，
  * 内联样式赢不了媒体查询，手机上永远两列）。
  * 断点值沿用全局的 768px，不另造断点。
+ *
+ * ## 批次 E1（逐页精修 · Dashboard）在本文件改了什么
+ *
+ * 依据 `docs/visual-symbol-research.md` §C3 的 Dashboard 行 +
+ * `frontend/docs/visual-design-spec.md` §1（R1：层次用浓度，不用渐变）：
+ *
+ * 1. **统计卡一横排**：网格定义从 `Dashboard.tsx` 的内联 `style` 搬进本文件
+ *    （`.statRow`），并把列宽下限从 140px 提到 160px —— 实测 800px 视口下
+ *    旧值排出的是"3 + 1"（第 4 张被挤到第二行），新值排成端正的"2 + 2"。
+ *    仍然**只有内在尺寸、不新增断点**（全局只有 768 / 480 两档）。
+ * 2. **柱状图去渐变**：`.trendBar` 的 `--gradient-primary` 与
+ *    `.trendBarWarning` 的两端色渐变都改成实色。前者两端色差只有
+ *    **1.365:1**（`base.css:67`），当背景等于实色；后者被收成一档琥珀，
+ *    顺带让图例（`Dashboard.tsx`）与柱子同色。
+ *
+ * ⚠️ **本页仍有一处"看不出效果的渐变"，本批刻意不动**：今日学习目标卡里那条
+ * 「平均进度」用的是全局 `.progress-bar-fill`（`styles/dashboard.css:45`），
+ * 它有 **5 个页面**在用（Dashboard / LearningGoals / TodayLearn / TaskProgress /
+ * ReviewProgress），且两个单测按 `.progress-bar-fill` 查询
+ * （`css-convention.md` §4 第 2 条）。改它等于同时改 5 个页面 ——
+ * 那是另一批的边界，不是"仪表盘精修"该顺手带走的东西。
  */
+
+/* ── 今日学习报告的统计卡：一横排 ──
+ *
+ * 借鉴表 §C3 的 Dashboard 行："把'今日到期 / 连续天数 / 掌握度'做成
+ * **一横排卡片**，每卡只讲一个数"。
+ *
+ * 列数由**容器宽度**自己算（`auto-fit` + `minmax`），所以宽屏是一行 4 张、
+ * 窄屏自动折成 2 张 —— **不需要新的媒体查询**：全局只有 768 / 480 两档断点，
+ * 而 768px 档已经被上面那两条（两栏 → 一列）占用了（`css-convention.md` §3 雷区 2）。
+ * `min(160px, 100%)` 与规范 §6.3 的网格阈值同形（`minmax(min(320px, 100%), 1fr)`）：
+ * 容器比 160px 还窄时不许横向溢出。
+ *
+ * 下限为什么是 160px 而不是原来的 140px（E1 实测，同一把尺子：
+ * `getComputedStyle(row).gridTemplateColumns` + 四张卡的 `getBoundingClientRect().top`）：
+ *
+ * | 视口 | 网格容器 | 140px（改前） | 160px（改后） |
+ * |---|---|---|---|
+ * | 1440 | 1136px | 4 列一行 | 4 列一行 |
+ * | 800 | 496px | **3 列 + 第 4 张换行**（top 差 136.5px） | 2 + 2 |
+ * | 375 | 359px | 2 + 2 | 2 + 2 |
+ *
+ * 也就是说 140px 会在中等宽度排出一个参差的"3 + 1"，而它既不是"一横排"、
+ * 也不是一个整齐的块。160px 把这一档变成"2 + 2"，宽屏那一档一行 4 张不变。
+ */
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: var(--space-md);
+}
 
 /* ── 两栏区块（今日目标 + 每日任务、待复习 + 薄弱点）── */
 
@@ -58,7 +108,14 @@
 }
 
 /* ── 7 天趋势柱状图 ──
-   高度由 tsx 的内联 `height` 给（按当天复习量算），宽度与配色在这里。 */
+   高度由 tsx 的内联 `height` 给（按当天复习量算），宽度与配色在这里。
+
+   配色（批次 E1）：原来是 `--gradient-primary`。它两端 `#1a1a2e → #0f3460`
+   的色差只有 **1.365:1**（`base.css:67` 登记在案），而这根柱子最宽 40px、
+   高不过 80px —— 当背景**等于实色**，看不出任何过渡（规范 §1 的 R1：
+   层次用墨阶，不用渐变）。实色取这个渐变的**终点** `--color-primary`。
+   ⚠️ 柱子自己不带文字（数量标签在它上方、日期在它下方，都压在卡片白底上），
+   所以这条不涉及任何对比度判定。 */
 
 .trendBar {
   width: 100%;
@@ -66,13 +123,20 @@
   border-radius: 6px 6px 0 0;
   transition: all 0.3s var(--ease-out-expo);
   position: relative;
-  background: var(--gradient-primary);
+  background: var(--color-primary);
 }
 
 /* 正确率 < 60% 的那天换成琥珀色。必须排在 `.trendBar` **之后** ——
-   两者权重相同，先后决定谁生效（原 dashboard.css 也是这个顺序）。 */
+   两者权重相同，先后决定谁生效（原 dashboard.css 也是这个顺序）。
+
+   E1：`linear-gradient(180deg, #f59e0b, #d97706)` → 实色 `#f59e0b`（渐变的亮端）。
+   保留字面量而不改用 `--color-warning`：那个令牌是 `#936408`，它是为
+   **12.8px 状态文字的 4.5:1** 压深出来的（`base.css:47-59`），拿来涂一根
+   没有文字的柱子会变成褐色，与它旁边的图例（同一个值的色块）也不再是一眼可辨的
+   琥珀。这里是"一个色值"，不是"又一次定义警告色"。 */
+
 .trendBarWarning {
-  background: linear-gradient(180deg, #f59e0b, #d97706);
+  background: #f59e0b;
 }
 
 .trendBar:hover {

@@ -29,6 +29,37 @@
  * 本文件（改成 `.statNumber`）。留在原处的话，类名哈希后那条选择器
  * **选不中任何东西** —— 规则还在、永不生效，正是本批要消灭的形态。
  * 断点沿用 480px，值一字未改。
+ *
+ * ---
+ *
+ * ## 批次 E1（逐页精修 · Dashboard）改了什么 —— 三件事，全在本文件
+ *
+ * 依据：`docs/visual-symbol-research.md` §C3 的 Dashboard 行
+ * （"参考：本项目 StatCard + Linear ｜ 具体抄：衬线大数字 + 灰字标签；
+ * 把今日到期 / 连续天数 / 掌握度做成一横排卡片，**每卡只讲一个数** ｜
+ * **不要抄**：Linear 的深色优先；**卡片加渐变**"）
+ * + `frontend/docs/visual-design-spec.md` §1（墨分五色取代渐变）与 §3.3（标题/数字层规则）。
+ *
+ * 1. **衬线大数字固化为一等规则**（规范 §3.3 的"统计大数字"行）：
+ *    `--font-serif` + `--text-2xl` + `700` + `-0.01em`。原来没有字距声明、
+ *    字号是 1.75rem（本批唯一一处**字号变化**，理由见 `.statNumber`）。
+ * 2. **数字改成焦墨实色**：原来那串是 `--gradient-primary` 的**渐变文字**
+ *    （`background-clip: text` + `-webkit-text-fill-color: transparent`）。
+ *    而那个渐变两端 `#1a1a2e → #0f3460` 只有 **1.365:1** 的色差
+ *    （`base.css:67` 登记在案），当文字底根本看不出过渡；代价却是规范 §1
+ *    点名的那笔（"付出的是 `-webkit-text-fill-color: transparent` 的代价，
+ *    打印 / 高对比度模式下有不可见风险"）—— 本项目 6 处渐变文字里就有这一处。
+ *    实色取 `--color-text`（焦墨，**正好等于那个渐变的起点色** `#1a1a2e`），
+ *    所以数字的深浅一处都没动，去掉的只是看不见的过渡与那段透明文字。
+ * 3. **四条顶部色条去渐变、改实色**：借鉴表"不要抄"一栏的原话是
+ *    "**卡片加渐变**（会与米白底打架，`base.css` 的 5 条渐变建议**只在 Auth/Hero 用**）"。
+ *    色条本身只有 3px 高，渐变在这个高度里既看不出方向、也看不出层次。
+ *
+ * ⚠️ 第 2、3 条**会同时作用于今日学习页**（`TodayLearn.tsx:403-407` 用同一个
+ * 组件）—— 共享组件改一处就是改两页，这是抽组件时已经接受的代价
+ * （见上面"为什么先抽组件"，以及 `css-migration-plan.md` §4.8.3）。
+ * 本批只对**仪表盘**做前后对照；`/today` 的那份随它自己所属的那一批核
+ * （阶段 E 的页组划分见 `visual-refactor-plan.md` §6），本批只登记这条影响面。
  */
 
 /* ── 卡片本体 ── */
@@ -58,22 +89,34 @@
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
-/* ── 配色变体（对应组件 props 的 variant）── */
+/* ── 配色变体（对应组件 props 的 variant）──
+ *
+ * 四条色条在批次 E1 全部改成**实色**（依据见文件头第 3 条）。
+ * 实色取各自渐变里最"实"的那一端，所以观感只少了那层看不见的过渡：
+ *
+ * | 变体 | 原渐变 | 现实色 | 取的是 |
+ * |---|---|---|---|
+ * | blue | `--gradient-primary`（#1a1a2e → #0f3460） | `--color-primary` | 终点 |
+ * | green | `--color-success` → `#34d399` | `--color-success` | 起点 |
+ * | gold | `--gradient-gold`（#c9a959 → #d4b76a → #b8943e） | `--color-accent` | 起点/中点 |
+ * | purple | `#6d28d9` → `#a78bfa` | `#6d28d9` | 起点 |
+ *
+ * ⚠️ purple 的实色**仍是字面量**，这是有意的：`--color-*` 里没有紫档，
+ * 而"加新令牌"的判据是同一个语义在项目里**手写 ≥3 处**（`css-convention.md` §2）——
+ * 紫色只在这一处，进令牌层等于把写死换个地方。留下来的这条比原来的两条少一条。
+ */
 
 .statCardBlue::before {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
 }
-/* 统计卡顶部的装饰色条（4px 高，不承载语义）：
-   起点改用令牌（原为压深前的 #2d8a56）；终点的 #34d399 是同一色系更亮的一档，
-   没有对应令牌、也不必进令牌层 —— 它是渐变的亮端，不是"成功色"的另一个定义。 */
 .statCardGreen::before {
-  background: linear-gradient(135deg, var(--color-success), #34d399);
+  background: var(--color-success);
 }
 .statCardGold::before {
-  background: var(--gradient-gold);
+  background: var(--color-accent);
 }
 .statCardPurple::before {
-  background: linear-gradient(135deg, #6d28d9, #a78bfa);
+  background: #6d28d9;
 }
 
 .statCard:hover {
@@ -81,20 +124,45 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* ── 数字与说明 ── */
+/* ── 数字与说明 ──
+ *
+ * ## 「每卡只讲一个数」是这两条规则的执行方式
+ *
+ * `StatCard` 的 `value` 是**一个**数、`label` 是**一句**说明
+ * （`StatCard.tsx` 的 props）。规范 §3.3 把"统计大数字"单列一行，正是因为
+ * 它是这张卡的**视觉重心**：一张卡里堆两个数，两个都不再是重心。
+ * 实测仪表盘 4 张卡各只有 1 个数（`Dashboard.tsx:347-354` 的四次 `<StatCard />`
+ * 各给一个 `value` + 一个 `label`），所以本批**没有需要拆开的卡**；
+ * 将来若要塞第二个数，正确的做法是**再加一张卡**（`auto-fit` 网格自己会排），
+ * 不是往这张里挤。
+ */
 
 .statNumber {
-  font-size: 1.75rem;
-  font-weight: 700;
   font-family: var(--font-serif);
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  /* 规范 §3.3「统计大数字」：衬线 / `--text-2xl` / 700 / `-0.01em`。
+     1.75rem → 2rem 是本批唯一一处字号变化：数字要**成为视觉重心**，
+     与标签（0.85rem）拉开两档以上才立得住；32px 也正是令牌注释里
+     "现状 5 处（统计大数字）"指的那一档。 */
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  /* 字距：规范给"统计大数字"的就是 `-0.01em`。
+     ⚠️ 它与"中文标题字距必须归零"（规范 §3.3 的警示、批次 A3 已把 h1/h2/h3
+     归零）**不是**同一件事：统计数字以阿拉伯数字为主，`-0.01em` 是大号数字的
+     排版惯例；本页唯一含中文的那张卡（复习时长："9分钟"）在这个字号下
+     只挤 0.32px/字，肉眼不可分。A3 判死的是"给中文标题一律套 `-0.01em`"。 */
+  letter-spacing: -0.01em;
+  /* 继承来的 1.6 是正文行高：在 32px 下会撑出 51px 的行盒，数字与标签就散了 */
+  line-height: 1.1;
+  /* 焦墨实色（规范 §2.1：`--color-text` 的用途里有"关键数字"一条）。
+     这里原来没有任何 `color` 声明 —— 可见颜色全部来自那段渐变。 */
+  color: var(--color-text);
 }
 
 .statLabel {
-  font-size: 0.85rem;
+  /* 值一字未改（0.85rem），只是改走令牌。`base.css` 把这一档标为
+     「存量专用，勿新增」—— 本批不动它的值："标签小且灰"已经成立，
+     让它显得更小的正确做法是把数字放大（上面那条），不是把说明缩小。 */
+  font-size: var(--text-sm-alt);
   color: var(--color-text-secondary);
   margin-top: var(--space-xs);
 }
@@ -104,6 +172,6 @@
 
 @media (max-width: 480px) {
   .statNumber {
-    font-size: 1.5rem;
+    font-size: var(--text-xl);
   }
 }

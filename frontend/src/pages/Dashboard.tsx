@@ -336,13 +336,14 @@ export default function Dashboard() {
           >
             今日学习报告 ({dailyReport.date})
           </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: 'var(--space-md)',
-            }}
-          >
+          {/* 统计卡**一横排**（批次 E1，依据借鉴表 §C3 的 Dashboard 行：
+              "把…做成一横排卡片，每卡只讲一个数"）。
+              网格定义搬进了 `Dashboard.module.css` 的 `.statRow`：列数由
+              **容器宽度**自己算（`auto-fit` + `minmax`），所以宽屏一行 4 张、
+              窄屏折成 2 张 —— 不新增断点（全局只有 768 / 480 两档）。
+              这 4 张卡各只有**一个**数（`<StatCard>` 的 value + label），
+              本批**没有需要拆开的卡**；`value` 里的 '%' / '分钟' 是同一个数的单位。 */}
+          <div className={styles.statRow}>
             <StatCard variant="blue" value={dailyReport.new_mastered} label="新掌握" />
             <StatCard variant="green" value={dailyReport.total_reviews} label="复习次数" />
             <StatCard variant="gold" value={`${dailyReport.today_accuracy}%`} label="正确率" />
@@ -559,7 +560,13 @@ export default function Dashboard() {
                     width: 10,
                     height: 10,
                     borderRadius: 2,
-                    background: '#ff9800',
+                    // 与柱子同色（批次 E1）：柱子已从
+                    // `linear-gradient(180deg, #f59e0b, #d97706)` 收成实色 `#f59e0b`
+                    // （见 Dashboard.module.css 的 .trendBarWarning），而图例原来
+                    // 写的是另一个橙 `#ff9800` —— 图例存在的意义就是解释柱子的颜色，
+                    // 两处不同色等于图例在说另一个东西。色值本身仍是字面量：
+                    // 与柱子同源，不是第二处"琥珀色的定义"。
+                    background: '#f59e0b',
                     marginRight: 4,
                   }}
                 />

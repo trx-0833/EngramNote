@@ -64,9 +64,18 @@
   /* ── 渐变 ── */
   --gradient-primary: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
   /* `--gradient-accent`（金）与 `--gradient-warm`（紫蓝三色）于 A2 删除：全项目 var() 零引用。
-     ⚠️ 留下的 `--gradient-primary` 有 **17 处使用者**，但它两端色差只有 **1.37:1** ——
-     用作背景时**根本看不出渐变**（"墨韵"的设计意图没兑现）。批次 A3 处理其中最刺眼的两处
-     （透明文字的标题、主按钮），其余 15 处登记在案，随阶段 E 逐页精修时一并收敛。 */
+     ⚠️ 留下的 `--gradient-primary` 两端色差只有 **1.365:1** ——
+     用作背景时**根本看不出渐变**（"墨韵"的设计意图没兑现）。批次 A3 处理了其中最刺眼的两处
+     （透明文字的标题、主按钮）；**批次 E1（Dashboard 精修）又收敛 3 处**，
+     都改成实色/墨阶：`StatCard.module.css` 的统计卡大数字（原来是 `background-clip: text`
+     的渐变文字）、同一文件的蓝变体色条、`Dashboard.module.css` 的趋势柱。
+     **实测（E1 收尾时 `git grep "var(--gradient-primary)"`，注释不计）还剩 9 处**：
+     `Sidebar.module.css` 1 / `graph/Graph.module.css` 2 / `Auth.module.css` 2 /
+     `QA.module.css` 1 / `components.css` 的 `.btn-ghost::after` 1 /
+     `dashboard.css` 的 `.progress-bar-fill` 1 / `learning.css` 1。
+     收敛方向不变（随阶段 E 逐页精修一并处理），但**每收敛一处都要同步这个数字**：
+     A2 当时写的"17 处"到 E1 开始时实测只剩 12 处（A3 之后又零星减过几次），
+     一条没人维护的计数比没有计数更容易误导下一个人。 */
   --gradient-gold: linear-gradient(135deg, #c9a959 0%, #d4b76a 50%, #b8943e 100%);
   --gradient-hero: linear-gradient(160deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a5e 100%);
 
