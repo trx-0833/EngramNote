@@ -89,6 +89,21 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   /** 用户取消（点取消 / Esc / 点遮罩三条路都走它）：什么都不做，只关对话框 */
   onCancel: () => void;
+  /**
+   * 用户确认后的**关闭**动作，默认就是 `onCancel`。
+   *
+   * 为什么需要把"确认后的关闭"和"取消"分开：D3 前半的 7 个调用点是组件，
+   * `onCancel` 对它们而言就是"把 open 置 false"，确认后的关闭走同一条路毫无问题
+   * （`handleConfirm` 里那句 `onCancel()` 就是这个用途）。
+   *
+   * 但 `ConfirmProvider`（D3 后半）把确认框 Promise 化了，对它来说
+   * **"关闭"与"取消"是两件事**：点「确认」时必须结 `true`，而 `onCancel`
+   * 的语义是结 `false`。把两者混在一起的结果是点确认拿到 `false`
+   * —— 调用方静默走取消分支（详见 `ConfirmProvider.tsx` 文件头）。
+   *
+   * 不传时行为与迁移前**逐字相同**（走 `onCancel`）。
+   */
+  onConfirmClose?: () => void;
 }
 
 /**
@@ -123,6 +138,7 @@ export function ConfirmDialog({
   confirmText = '确认',
   cancelText = '取消',
   danger = false,
+  onConfirmClose,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -135,11 +151,16 @@ export function ConfirmDialog({
    * 点完的对话框里，而 `Dialog` 的焦点陷阱正把焦点困在里面（期间连 Esc 都
    * 只是再关一次）。原来的 `window.confirm` 是同步的：用户点完，弹窗**立刻**
    * 消失、背后的按钮才进入 loading —— "先关后执行"才是逐字保留原行为。
+   *
+   * "关闭"这一步走 `onConfirmClose`（不传时退回 `onCancel`）—— 对 Promise 化的
+   * 调用方（`ConfirmProvider`）来说关框与取消必须分开，理由见那个 prop 的说明。
    */
   const handleConfirm = useCallback(() => {
-    onCancel();
+    // 关框走 `onConfirmClose`（默认退回 `onCancel`，即 D3 前半那 7 个调用点的行为）；
+    // 确认与取消是两条不同的结账路径，见 `onConfirmClose` 的说明。
+    (onConfirmClose ?? onCancel)();
     onConfirm();
-  }, [onCancel, onConfirm]);
+  }, [onConfirmClose, onCancel, onConfirm]);
 
   return (
     <Dialog

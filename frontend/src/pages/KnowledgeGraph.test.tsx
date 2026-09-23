@@ -52,6 +52,7 @@ import {
 
 import type { GraphData, GraphNode, GraphStats, SuggestedRelation } from '../api/client';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { ConfirmProvider } from '../components/ConfirmProvider';
 import type { ForceGraphLink, ForceGraphNode } from '../components/graph/types';
 // 图谱的类名归模块所有（overhaul-plan 5.6 序 10）：字面量 `.graph-panel` 之流
 // 在产物里是哈希过的，必然查不到。这里改不动语义查询的几处（面板/建议卡片/
@@ -327,12 +328,16 @@ function deferred<T>() {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/graph']}>
-      {/* 与 App.tsx 一致：页面被路由级错误边界包住 */}
-      <ErrorBoundary resetKey="/graph">
-        <KnowledgeGraph />
-      </ErrorBoundary>
-    </MemoryRouter>,
+    // 批次 D3 后半：`useGraphMutations` 的两次确认改走 `useConfirm()`，
+    // 渲染树里必须有这个宿主（层级与 main.tsx 一致）
+    <ConfirmProvider>
+      <MemoryRouter initialEntries={['/graph']}>
+        {/* 与 App.tsx 一致：页面被路由级错误边界包住 */}
+        <ErrorBoundary resetKey="/graph">
+          <KnowledgeGraph />
+        </ErrorBoundary>
+      </MemoryRouter>
+    </ConfirmProvider>,
   );
 }
 

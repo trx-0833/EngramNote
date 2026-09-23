@@ -15,6 +15,7 @@ import {
   type NoteContentTarget,
   type NoteDetail,
 } from '../../api/client';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { useToast } from '../../components/Toast';
 import type { EditMode, ViewMode } from './types';
 
@@ -45,6 +46,7 @@ export function useNoteActions({
   navigate,
 }: UseNoteActionsOptions) {
   const toast = useToast();
+  const confirm = useConfirm();
 
   /** 编辑模式相关 state（edit 为实时分屏预览：左侧编辑、右侧即时渲染） */
   const [editContent, setEditContent] = useState('');
@@ -67,10 +69,15 @@ export function useNoteActions({
           if (impact.review_logs > 0) parts.push(`${impact.review_logs} 条复习记录`);
           if (impact.relations > 0) parts.push(`${impact.relations} 条图谱关系`);
         }
-        const detail = parts.length > 0 ? `\n\n将删除：${parts.join('、')}` : '';
-        const ok = confirm(
-          `此笔记已归档，重新学习将清空其现有学习成果。${detail}\n\n此操作不可恢复，确定继续？`,
-        );
+        // 批次 D3 后半：原文案的文字一个字符都没增删，只是按 ConfirmDialog 的
+        // 两段重新分了一次段 —— "不可恢复、确定继续"那句原来跟在影响清单后面，
+        // 现在与第一句合成 title，清单整体挪进 message。
+        const ok = await confirm({
+          title: '此笔记已归档，重新学习将清空其现有学习成果。此操作不可恢复，确定继续？',
+          message: parts.length > 0 ? `将删除：${parts.join('、')}` : undefined,
+          confirmText: '继续',
+          danger: true,
+        });
         if (!ok) return;
         await startUnderstanding(note.id, true);
         onStatusChange();
@@ -141,10 +148,21 @@ export function useNoteActions({
     }
   }
 
-  /** 取消编辑（有未保存修改时确认） */
-  function handleCancelEdit() {
+  /**
+   * 取消编辑（有未保存修改时确认）
+   *
+   * 批次 D3 后半：`confirm` 从同步变异步，于是这个函数**变成 async**。
+   * "确认之后才退出编辑"的语义与原来一致 —— 原来 `window.confirm` 同步阻塞，
+   * 用户点完才往下走；现在那个"等用户点完"由 `await` 承担。
+   * 调用方是按钮的 `onClick`，React 会忽略返回的 Promise。
+   */
+  async function handleCancelEdit() {
     const original = note?.clean_md_content || '';
-    if (editContent !== original && !confirm('放弃当前编辑的修改？')) return;
+    if (editContent !== original) {
+      // 放弃编辑可以重来（内容还在后端），所以不给 danger
+      const ok = await confirm({ title: '放弃当前编辑的修改？', confirmText: '放弃' });
+      if (!ok) return;
+    }
     setEditContent('');
     setEditMode('view');
   }

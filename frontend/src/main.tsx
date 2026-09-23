@@ -42,15 +42,20 @@ import './styles/refinements.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './components/ConfirmProvider';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 最外层错误边界：即使路由层或布局层抛错也不会白屏 */}
     <ErrorBoundary>
       <ToastProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        {/* 确认框宿主（批次 D3 后半）：给自定义 hook 里的确认提供 useConfirm()。
+            必须在 App 之外 —— 用到它的 hook 分布在多个页面里 */}
+        <ConfirmProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ConfirmProvider>
       </ToastProvider>
     </ErrorBoundary>
   </React.StrictMode>,

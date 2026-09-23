@@ -14,6 +14,7 @@ import {
   type Annotation,
   type NoteDetail,
 } from '../../api/client';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { useToast } from '../../components/Toast';
 import { computeAnnotationContext, computeSelectionContext } from './selection';
 import {
@@ -51,6 +52,7 @@ export function useNoteAnnotations({
   markdownRef,
 }: UseNoteAnnotationsOptions) {
   const toast = useToast();
+  const confirm = useConfirm();
 
   /** 批注相关 state */
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -84,7 +86,12 @@ export function useNoteAnnotations({
   const handleDeleteAnnotation = useCallback(
     async (annotationId: string) => {
       if (!note) return;
-      if (!confirm('确定删除此批注？')) return;
+      const ok = await confirm({
+        title: '确定删除此批注？',
+        confirmText: '删除',
+        danger: true,
+      });
+      if (!ok) return;
 
       try {
         await deleteAnnotation(note.id, annotationId);
@@ -97,8 +104,10 @@ export function useNoteAnnotations({
       }
     },
     // toast 有意不入依赖：与拆分前一致，删除失败提示用当时闭包里的 toast 即可
+    // confirm 入依赖是安全的：ConfirmProvider 给的是 useMemo 过的稳定引用，
+    // 不会让这个 useCallback 每次渲染都失效
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [note, markdownRef],
+    [note, markdownRef, confirm],
   );
 
   // 批注恢复：DOM 渲染后应用批注到对应文本节点

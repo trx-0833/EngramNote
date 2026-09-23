@@ -72,6 +72,40 @@ function isInside(container: HTMLElement, node: EventTarget | null): boolean {
   return node instanceof Node && container.contains(node);
 }
 
+/** 不靠 `tabindex` 就能被 `focus()` 聚焦的标签 */
+const NATIVELY_FOCUSABLE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY']);
+
+/**
+ * 这个元素**此刻**能不能真的吃到焦点
+ *
+ * 光看"在不在 DOM 里"不够 —— `focus()` 对下面这些元素是**静默 no-op**：
+ * disabled 的表单控件、`inert` 子树里的任何东西。调用方看不见失败，
+ * 只看到焦点莫名掉到了 `body` 上（按 Tab 会从页首重新开始）。
+ */
+function canRestoreFocus(el: HTMLElement): boolean {
+  if (!el.isConnected) return false;
+  if (el.matches(':disabled')) return false;
+  if (el.closest('[inert]')) return false;
+  // 带 `tabindex` 的（含 `-1`）可以被主动聚焦
+  if (el.hasAttribute('tabindex')) return true;
+  if (el.tagName === 'A') return el.hasAttribute('href');
+  return NATIVELY_FOCUSABLE.has(el.tagName);
+}
+
+/**
+ * 从 `el` 起向上找第一个能吃到焦点的元素（含自身）
+ *
+ * 向上找是因为触发元素常常是"某个容器里的一枚按钮"：按钮自己被禁用了，
+ * 但它所在的工具栏 / 列表项还在，把焦点交给那一层比丢给 `body` 有用得多
+ * （用户接着按 Tab 会从那个位置继续，而不是整页重来）。
+ */
+function findRestoreTarget(el: HTMLElement | null): HTMLElement | null {
+  for (let node = el; node; node = node.parentElement) {
+    if (canRestoreFocus(node)) return node;
+  }
+  return null;
+}
+
 interface DialogProps {
   /** 是否打开。`false` 时**完全不渲染**（连遮罩都不留） */
   open: boolean;
@@ -180,18 +214,25 @@ export function Dialog({
    * 紧接着初始焦点 effect 才会把焦点搬进对话框。顺序反了记到的就是对话框自己。
    *
    * 归位放在清理函数里，于是与滚动锁同理：卸载也会归位。
-   * `isConnected` 判断是必要的 —— 触发元素可能已经被移出 DOM
-   * （例如"删除"按钮所在的整行被删掉），对游离节点调 `focus()` 什么也不会发生，
-   * 但显式跳过能让意图可读。
+   *
+   * ⚠️ **触发元素还在 DOM 里、但已经不可聚焦**是一条真实路径（批次 D3 后半
+   * 修的就是它）：确认删除之后，那一帧里「关框」与「按钮进入 loading/disabled」
+   * 是同一批 state 更新，等这个清理函数跑到时按钮已经 `disabled` 了。
+   * 而 `focus()` 对 disabled 元素是**静默 no-op** —— 焦点于是掉到 `body` 上，
+   * 用户按 Tab 会从页首重新开始，看起来像"焦点丢了"。
+   * 所以这里不直接对触发元素调 `focus()`，先向上找一个真的能收焦点的落点。
    */
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => {
-      const target = restoreFocusRef.current;
+      const origin = restoreFocusRef.current;
       restoreFocusRef.current = null;
-      if (target?.isConnected) target.focus();
+      // 找不到（触发元素及其祖先链都不可聚焦）：什么都不做，焦点由浏览器放在
+      // `body` 上。这是基座层的边界 —— 要精确到"被删掉的下一行"，
+      // 得由调用方给出锚点，那属于调用方的语义，基座不该猜。
+      findRestoreTarget(origin)?.focus();
     };
   }, [open]);
 

@@ -31,11 +31,12 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Note, NoteInFolder, Project } from '../api/client';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { ToastProvider } from '../components/Toast';
+import { ConfirmProvider } from '../components/ConfirmProvider';
 import { resetContractDriftNotices } from './contractDrift';
 // 源码原文（`?raw`，由 vite/client 声明类型）：确认"写法是否统一"只能在源码层面断言
 import graphMutationsSource from './knowledgegraph/useGraphMutations.ts?raw';
@@ -166,20 +167,25 @@ function renderPage(initialEntry = '/projects') {
     // 真实 ToastProvider（与 main.tsx 一致）：契约漂移提示就走这条全局出口，
     // 因此"提示出现了没有"可以在真实 DOM 上断言，而不是靠替身自说自话
     <ToastProvider>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route
-            path="/projects"
-            element={
-              // 与 App.tsx 一致：页面被路由级错误边界包住
-              <ErrorBoundary resetKey="/projects">
-                <Projects />
-              </ErrorBoundary>
-            }
-          />
-          <Route path="/notes/:noteId" element={<NoteDetailStub />} />
-        </Routes>
-      </MemoryRouter>
+      {/* 批次 D3 后半：`useProjects` 的两次二次确认改走 `useConfirm()`，
+          渲染树里必须有这个宿主（层级与 main.tsx 一致）。确认框本身是真实的，
+          所以"点确认 / 点取消"都在真实 DOM 上操作，不再靠 confirm 间谍 */}
+      <ConfirmProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route
+              path="/projects"
+              element={
+                // 与 App.tsx 一致：页面被路由级错误边界包住
+                <ErrorBoundary resetKey="/projects">
+                  <Projects />
+                </ErrorBoundary>
+              }
+            />
+            <Route path="/notes/:noteId" element={<NoteDetailStub />} />
+          </Routes>
+        </MemoryRouter>
+      </ConfirmProvider>
     </ToastProvider>,
   );
 }
@@ -200,13 +206,9 @@ async function expandProject(name = 'Transformer 论文精读') {
   await userEvent.click(screen.getAllByRole('button', { name: /查看笔记/ })[0]);
 }
 
-let confirmSpy: MockInstance;
-
 beforeEach(() => {
   // 失败路径上页面会 console.error 记录原因；静音以免淹没测试输出（断言照做）
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  // 破坏性操作都要二次确认：默认"用户点了确定"，需要取消的用例自己改
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
   // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
   // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
   resetContractDriftNotices();
@@ -361,20 +363,28 @@ describe('项目的新建 / 重命名 / 删除', () => {
   });
 
   it('★ 删除项目必须先确认：取消不调接口，确认后才删除并刷新', async () => {
-    confirmSpy.mockReturnValue(false);
     renderPage();
     await screen.findByText('Transformer 论文精读');
 
+    // ① 点删除只弹框，一个请求都不发
     await userEvent.click(screen.getByRole('button', { name: '删除' }));
-
+    const dialog = await screen.findByRole('dialog');
     expect(mockedDelete).not.toHaveBeenCalled();
-    expect(confirmSpy).toHaveBeenCalled();
     // 确认文案要说清楚"只删标签、笔记与文件保留"
-    expect(String(confirmSpy.mock.calls[0][0])).toContain('Transformer 论文精读');
-    expect(String(confirmSpy.mock.calls[0][0])).toContain('笔记与文件都会保留');
+    expect(within(dialog).getByText(/Transformer 论文精读/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/笔记与文件都会保留/)).toBeInTheDocument();
 
-    confirmSpy.mockReturnValue(true);
+    // ② 点取消：框关掉，仍然没有请求
+    await userEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mockedDelete).not.toHaveBeenCalled();
+
+    // ③ 再来一次并点确认，这次才发请求。
+    //    ⚠️ 确认按钮的文案与页面上那枚都是「删除」，所以必须 within(dialog) 限定，
+    //    否则 getByRole 会因为匹配到两个而抛错。
     await userEvent.click(screen.getByRole('button', { name: '删除' }));
+    const dialog2 = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog2).getByRole('button', { name: '删除' }));
 
     await waitFor(() => expect(mockedDelete).toHaveBeenCalledWith('p-1'));
     await waitFor(() => expect(mockedProjects).toHaveBeenCalledTimes(2));
@@ -529,10 +539,13 @@ describe('项目下的笔记', () => {
     const row = screen.getByText('BERT 预训练').closest('.note-select-card') as HTMLElement;
 
     // 「移出」按钮必须阻止冒泡，否则用户想去掉归属却被弹到笔记页
-    confirmSpy.mockReturnValue(false);
     await userEvent.click(within(row).getByRole('button', { name: '移出' }));
-    expect(mockedRemoveNote).not.toHaveBeenCalled();
+    // 弹出的是确认框，而**不是**跳转到笔记详情（冒泡确实被拦住了）
+    const dialog = await screen.findByRole('dialog');
     expect(screen.queryByText('笔记详情页:n-2')).not.toBeInTheDocument();
+    // 点取消：不发请求
+    await userEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(mockedRemoveNote).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByText('BERT 预训练'));
     expect(await screen.findByText('笔记详情页:n-2')).toBeInTheDocument();
@@ -550,7 +563,10 @@ describe('项目下的笔记', () => {
     const row = screen.getByText('BERT 预训练').closest('.note-select-card') as HTMLElement;
     await userEvent.click(within(row).getByRole('button', { name: '移出' }));
 
-    expect(String(confirmSpy.mock.calls[0][0])).toContain('BERT 预训练');
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/BERT 预训练/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: '移出' }));
+
     await waitFor(() => expect(mockedRemoveNote).toHaveBeenCalledWith('p-1', 'n-2'));
     await waitFor(() => expect(mockedProjects).toHaveBeenCalledTimes(2));
     // 展开状态下的笔记列表要跟着刷新，否则被移出的笔记还挂在页面上
@@ -779,8 +795,11 @@ describe('页面级失败与重命名校验各自独立', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
     await screen.findByText('项目名称不能为空');
 
-    // 删除后重拉列表：这一次后端不通 → 页面级失败
+    // 删除后重拉列表：这一次后端不通 → 页面级失败。
+    // 批次 D3 后半起确认框是真实的，所以要真的点一次「删除」才走得到删除路径。
     await userEvent.click(screen.getByRole('button', { name: '删除' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: '删除' }));
     await screen.findByText('加载项目列表失败，请稍后重试');
   }
 
@@ -821,12 +840,21 @@ describe('页面级失败与重命名校验各自独立', () => {
  * 「删除项目必须先确认」「移出笔记要先确认」两条用例各自钉住，这条只管写法一致。
  */
 describe('破坏性操作的确认写法统一', () => {
-  it('两个页面的确认调用都用裸 confirm（全站多数写法），且确认没有被删掉', () => {
-    const joined = [useProjectsSource, graphMutationsSource].join('\n');
+  it('两个页面的确认一律走 useConfirm()，且两次二次确认都没有被删掉', () => {
+    // 去掉块注释再断言：`ConfirmDialog` / `Toast` 的文件头里举例提到过 confirm()，
+    // 那是文档不是调用点。（只剥块注释 —— 行注释里的 `//` 会误伤 URL，得不偿失。）
+    const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '');
+    const joined = strip([useProjectsSource, graphMutationsSource].join('\n'));
 
     expect(joined).not.toContain('window.confirm(');
-    expect(useProjectsSource).toContain('if (!confirm('); // useProjects 的两次二次确认仍在
-    expect(graphMutationsSource).toContain('if (!confirm('); // useGraphMutations 的两处也仍是裸 confirm
+    // 旧的同步调用形态是 `confirm('文案')` / confirm(`文案`) —— 参数直接是字符串。
+    // 新的走 useConfirm()，参数是对象（`await confirm({ … })`），所以判据必须
+    // 落在"紧跟引号"上：光看 `confirm(` 会把新写法自己也命中。
+    expect(joined).not.toMatch(/confirm\(['"`]/);
+
+    // 反向断言：确认本身不能被顺手删掉（"没确认"比"写法不统一"严重得多）
+    expect(useProjectsSource).toContain('await confirm({'); // 删除项目 / 移出笔记
+    expect(graphMutationsSource).toContain('await confirm({'); // 批量拒绝 / 删除关系
   });
 });
 

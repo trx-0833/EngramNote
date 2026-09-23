@@ -26,6 +26,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ConfirmProvider } from '../components/ConfirmProvider';
 import NoteDetail from './NoteDetail';
 
 // ── mock 掉整条 API 层：本文件测的是页面行为，不是接口契约 ──
@@ -119,11 +120,15 @@ function emptyLinks() {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/notes/note-1']}>
-      <Routes>
-        <Route path="/notes/:noteId" element={<NoteDetail />} />
-      </Routes>
-    </MemoryRouter>,
+    // 批次 D3 后半：`useNoteActions` / `useNoteAnnotations` 的确认改走 `useConfirm()`，
+    // 渲染树里必须有这个宿主（层级与 main.tsx 一致）
+    <ConfirmProvider>
+      <MemoryRouter initialEntries={['/notes/note-1']}>
+        <Routes>
+          <Route path="/notes/:noteId" element={<NoteDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </ConfirmProvider>,
   );
 }
 
@@ -230,33 +235,40 @@ describe('删除与重新理解', () => {
       requires_confirm: true,
       impact: { cards: 3, quizzes: 0, review_logs: 0, relations: 0 },
     } as never);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage();
     await screen.findByText('锂离子电池的浮充与均充');
 
     await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }));
+
+    // 第一次探测影响时**只**弹确认框，第二次请求还没发出去
+    await screen.findByRole('dialog');
+    expect(mockedUnderstand).toHaveBeenCalledTimes(1);
+    // 而且必须先让用户看到"将删除什么"
+    expect(screen.getByText(/将删除：3 张知识卡片/)).toBeInTheDocument();
+
+    // 用户点了确认，才真的清空并重跑
+    await userEvent.click(screen.getByRole('button', { name: '继续' }));
 
     await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(2));
     // 第一次探测影响（不带 confirm），第二次才是真的清空并重跑
     expect(mockedUnderstand.mock.calls[0][1]).toBe(false);
     expect(mockedUnderstand.mock.calls[1][1]).toBe(true);
-    // 而且必须先让用户看到"将删除什么"
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(String(confirmSpy.mock.calls[0][0])).toContain('3 张知识卡片');
-    confirmSpy.mockRestore();
   });
 
   it('用户在二次确认里点"取消"时不发第二次请求（不可撤销的操作不能默认执行）', async () => {
     mockedGetNote.mockResolvedValue(makeNote({ status: 'archived' }));
     mockedUnderstand.mockResolvedValue({ requires_confirm: true, impact: { cards: 1 } } as never);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPage();
     await screen.findByText('锂离子电池的浮充与均充');
 
     await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }));
 
-    await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(1));
+    // 真实的确认框：点"取消"（不是靠 confirm 间谍返回 false）
+    await screen.findByRole('dialog');
+    await userEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mockedUnderstand).toHaveBeenCalledTimes(1);
     expect(mockedUnderstand.mock.calls[0][1]).toBe(false);
-    confirmSpy.mockRestore();
   });
 });

@@ -29,10 +29,12 @@ import {
   type ProjectDetail,
   type ScanImportResponse,
 } from '../../api/client';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { useContractDriftNotice } from '../contractDrift';
 import { unwrapProjects } from './helpers';
 
 export function useProjects() {
+  const confirm = useConfirm();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   /** 页面级失败（加载/删除/扫描/重命名请求失败…）：与重命名校验分开，各报各的 */
@@ -129,9 +131,14 @@ export function useProjects() {
 
   /** 删除项目（只删标签，笔记与文件保留） */
   async function handleDelete(p: Project) {
-    if (!confirm(`确定删除项目「${p.name}」？删除仅移除该项目标签，关联笔记与文件都会保留。`)) {
-      return;
-    }
+    const ok = await confirm({
+      // 原文案一字未删，只是按 ConfirmDialog 的两段拆开
+      title: `确定删除项目「${p.name}」？`,
+      message: '删除仅移除该项目标签，关联笔记与文件都会保留。',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await deleteProject(p.id);
       await loadProjects();
@@ -196,9 +203,13 @@ export function useProjects() {
 
   /** 将笔记移出项目（破坏性操作：先 confirm，取消则不发请求） */
   async function handleRemoveNote(p: Project, n: NoteInFolder) {
-    if (!confirm(`确定将笔记「${n.title}」移出项目「${p.name}」？`)) {
-      return;
-    }
+    // 「移出项目」刻意**不加** danger：笔记还能再加回来，红色留给不可恢复的操作
+    // （批次 D2 收尾定的规矩 —— 红色一旦到处都是就不再承载语义）
+    const ok = await confirm({
+      title: `确定将笔记「${n.title}」移出项目「${p.name}」？`,
+      confirmText: '移出',
+    });
+    if (!ok) return;
     try {
       await removeNoteFromProject(p.id, n.id);
       await loadProjects();

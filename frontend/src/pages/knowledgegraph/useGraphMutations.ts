@@ -37,6 +37,7 @@ import {
   type SuggestedRelation,
 } from '../../api/client';
 import type { ForceGraphNode } from '../../components/graph/types';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { useToast } from '../../components/Toast';
 import { normalizeStats, normalizeSuggestions } from './normalize';
 
@@ -71,6 +72,7 @@ export function useGraphMutations({
   exitCreateMode,
 }: UseGraphMutationsOptions) {
   const toast = useToast();
+  const confirm = useConfirm();
 
   /** 操作中状态 */
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -156,7 +158,12 @@ export function useGraphMutations({
   /** 批量拒绝 */
   async function handleBatchReject() {
     if (selectedSuggestions.size === 0) return;
-    if (!confirm(`确定要拒绝 ${selectedSuggestions.size} 条建议关系吗？`)) return;
+    // 「拒绝建议」不加 danger：拒绝的是尚未采纳的建议，不是已存在的数据
+    const ok = await confirm({
+      title: `确定要拒绝 ${selectedSuggestions.size} 条建议关系吗？`,
+      confirmText: '拒绝',
+    });
+    if (!ok) return;
     setBatchLoading(true);
     try {
       await batchRejectRelations(Array.from(selectedSuggestions));
@@ -192,7 +199,12 @@ export function useGraphMutations({
 
   /** 删除已确认的关系 */
   async function handleDeleteRelation(relationId: string) {
-    if (!confirm('确定要删除此关系吗？')) return;
+    const ok = await confirm({
+      title: '确定要删除此关系吗？',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     setActionLoading(relationId);
     try {
       await deleteRelation(relationId);

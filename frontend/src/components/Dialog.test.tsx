@@ -337,6 +337,91 @@ describe('Dialog：初始焦点', () => {
 });
 
 describe('Dialog：焦点归位', () => {
+  /**
+   * 批次 D3 后半修的那条回退：**触发元素还在 DOM 里，但关闭时已经 disabled**。
+   *
+   * 真实路径是"点删除 → 确认 → 那一帧里关框与按钮进 loading 是同一批 state 更新"，
+   * 等归位的清理函数跑到时按钮已经不可聚焦了。而 `focus()` 对 disabled 元素是
+   * **静默 no-op** —— 焦点会掉到 `body` 上，用户接着按 Tab 就从页首重新开始。
+   */
+  it('★ 关闭时触发按钮已 disabled：焦点交给还能收焦点的祖先，而不是掉到 body', async () => {
+    function Page() {
+      const [open, setOpen] = useState(false);
+      const [busy, setBusy] = useState(false);
+      /** 关框与禁用按钮**同一批更新** —— 这正是真实调用点的形状 */
+      const closeAndBusy = () => {
+        setOpen(false);
+        setBusy(true);
+      };
+      return (
+        <>
+          {/* tabIndex=-1：这条工具栏就是"还能收焦点的那一层" */}
+          <div data-testid="toolbar" tabIndex={-1}>
+            <button type="button" disabled={busy} onClick={() => setOpen(true)}>
+              删除
+            </button>
+          </div>
+          <Harness open={open} onClose={closeAndBusy} title="确定删除？">
+            <button type="button" onClick={closeAndBusy}>
+              确认
+            </button>
+          </Harness>
+        </>
+      );
+    }
+    render(<Page />);
+
+    const toolbar = screen.getByTestId('toolbar');
+    const trigger = screen.getByRole('button', { name: '删除' });
+
+    trigger.focus(); // 打开前拿着焦点的就是它
+    await userEvent.click(trigger);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '确认' }));
+
+    await userEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toBeDisabled(); // 前提成立：触发元素此时确实不可聚焦
+    expect(document.activeElement).toBe(toolbar); // 焦点落在能收它的那一层
+  });
+
+  it('触发元素及其祖先都不可聚焦时不抛错，焦点也不留在已关闭的框里', async () => {
+    function Page() {
+      const [open, setOpen] = useState(false);
+      const [busy, setBusy] = useState(false);
+      const closeAndBusy = () => {
+        setOpen(false);
+        setBusy(true);
+      };
+      return (
+        <>
+          {/* 这一层刻意**不带** tabIndex：整条祖先链都收不了焦点 */}
+          <div>
+            <button type="button" disabled={busy} onClick={() => setOpen(true)}>
+              删除
+            </button>
+          </div>
+          <Harness open={open} onClose={closeAndBusy} title="确定删除？">
+            <button type="button" onClick={closeAndBusy}>
+              确认
+            </button>
+          </Harness>
+        </>
+      );
+    }
+    render(<Page />);
+
+    const trigger = screen.getByRole('button', { name: '删除' });
+    trigger.focus();
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    // 没有落点就不强行 focus —— 焦点由浏览器放在 body 上。这是基座层的边界：
+    // 要精确到"被删掉的下一行"得由调用方给锚点，基座不该猜。
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect([document.body, document.documentElement]).toContain(document.activeElement);
+  });
+
   it('★ 关闭后焦点还给打开前的那个元素（用两个真实按钮做触发/归还）', async () => {
     function Page() {
       const [open, setOpen] = useState(false);
