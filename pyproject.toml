@@ -1,0 +1,126 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ============================================================
+# EngramNote 打包元数据（阶段 2.2）
+# ============================================================
+#
+# ## 这份文件解决什么
+#
+# 在此之前后端**不可安装**：没有 pyproject.toml / setup.py，因此
+#   - `pip install -e .` 失败（贡献者不能把项目当包用）
+#   - 没有 `requires-python`（"3.10+" 只写在 README 与 check_env.py 里）
+#   - 重量级可选依赖（torch / qwen-asr）没有正式分类，只能靠注释
+#
+# ## 为什么放在**仓库根**而不是 `backend/`
+#
+# setuptools 不允许 metadata 引用项目目录之外的文件，而 README 与 LICENSE
+# 都在仓库根。放这里之后 `pip install -e .`（仓库根）即可生效；
+# 包则通过 `package-dir` 映射到 `backend/app`。
+#
+# ## 与 requirements*.txt 的分工（避免"同一事实写两遍"）
+#
+#   requirements.txt            用户装的那一份：判据是"全新装完服务能跑"
+#   requirements-dev.txt        贡献者读的那一份：解释每个依赖为什么存在
+#   requirements-test.txt       CI 装的那一份：判据是"最新版本也能过"
+#   requirements-pdf-local.txt  MinerU 本地解析模式（可选）
+#   requirements-asr.txt        音视频转写（可选，GB 级）
+#
+# `dependencies` 与 `requirements.txt` 的主清单必须一致 —— 由
+# `backend/tests/test_packaging_metadata.py` 断言，漂移即红。
+#
+# ## 刻意不做的事
+#
+# 不把 ASR / 本地 PDF 的依赖写进主 `dependencies`：它们在模块顶层 import
+# （`asr_engine.py:11` / `mineru/intake.py:22`），但只被对应功能触发 ——
+# 放进 extras，不用 ASR 的人才不会白背 torch。
+
+[project]
+name = "engramnote"
+version = "0.1.0"
+description = "AI 驱动的学习笔记管理与知识库：资料清洗 → 知识提取 → 间隔重复的完整闭环"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "trx-0833" }]
+keywords = [
+    "note-taking", "spaced-repetition", "fsrs", "rag", "knowledge-base",
+    "fastapi", "learning", "self-hosted",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+# 基准运行依赖（与 backend/requirements.txt 对齐；版本策略见该文件头）
+dependencies = [
+    "fastapi~=0.115.0",
+    "uvicorn[standard]~=0.30.0",
+    "sqlalchemy[asyncio]~=2.0.0",
+    "aiosqlite~=0.20.0",
+    "pydantic~=2.0.0",
+    "pydantic-settings~=2.0.0",
+    "email-validator~=2.0.0",
+    "python-multipart~=0.0.9",
+    "python-jose[cryptography]~=3.3.0",
+    "bcrypt~=4.0.0",
+    "celery~=5.4.0",
+    "numpy~=1.24.0",
+    "httpx~=0.27.0",
+    "sentence-transformers~=2.2.0",
+    "pypdfium2~=4.30.0",
+    "Pillow~=10.0.0",
+    "psutil~=5.9.0",
+    "alembic~=1.13.0",
+    "openai~=1.0.0",
+    "soundfile~=0.12.0",
+]
+
+[project.optional-dependencies]
+# MinerU **本地**解析模式（云端 vlm-http-client 模式不需要它）
+pdf-local = ["pyyaml~=6.0.0", "requests~=2.32.0"]
+# 音视频转写（GB 级：torch 按平台选轮子）
+asr = ["torch>=2.0.0", "qwen-asr>=0.1.0"]
+# 贡献者：测试 + lint
+dev = [
+    "pytest~=8.0.0",
+    "pytest-asyncio~=0.23.0",
+    "ruff~=0.16.0",
+]
+
+[project.urls]
+Repository = "https://github.com/trx-0833/EngramNote"
+Issues = "https://github.com/trx-0833/EngramNote/issues"
+Changelog = "https://github.com/trx-0833/EngramNote/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/trx-0833/EngramNote/blob/main/docs/open-source-readiness.md"
+
+# ============================================================
+# setuptools：包映射
+# ============================================================
+
+[tool.setuptools]
+# `app` 包实际位于 backend/ 下，因此用 package-dir 映射，而不是把代码搬到根
+package-dir = { "" = "backend" }
+# 显式列举：tests/ 与 scripts/ 随仓库分发，但不是发行包内容
+packages = [
+    "app",
+    "app.api",
+    "app.api.notes",
+    "app.core",
+    "app.middleware",
+    "app.models",
+    "app.schemas",
+    "app.services",
+    "app.services.llm",
+    "app.services.mineru",
+    "app.services.asr",
+    "app.tasks",
+    "app.test_support",
+]

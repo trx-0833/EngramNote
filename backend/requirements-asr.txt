@@ -1,0 +1,21 @@
+# ============================================================
+# 音视频转写（可选，重量级）
+# ============================================================
+#
+# 什么时候需要：上传 mp4 / mp3 / wav 等音视频，走 Qwen3-ASR 转写。
+# 不需要它的场合：只处理 PDF / 图片 / Office / Markdown —— 那些功能完全不受影响。
+#
+# 用法：
+#     pip install -r requirements.txt -r requirements-asr.txt
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu   # 按平台选轮子
+#     python ../check_env.py --download-asr                                # 再下模型
+#
+# 为什么单独一份：torch 是 GB 级依赖，而它在 app/services/asr/asr_engine.py:11
+# 是**模块顶层** import —— 放进主依赖会让每个不用 ASR 的用户都背上它。
+#
+# 依赖位置参考：
+#   app/services/asr/asr_engine.py:11   → torch
+#   app/services/asr/asr_engine.py:13   → qwen_asr
+#   app/services/asr/audio_utils.py:11  → soundfile（已在主依赖里）
+torch>=2.0.0
+qwen-asr>=0.1.0

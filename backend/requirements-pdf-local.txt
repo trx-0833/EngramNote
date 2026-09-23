@@ -1,0 +1,21 @@
+# ============================================================
+# MinerU 本地解析模式（可选，约 7GB 模型之外的 pip 侧依赖）
+# ============================================================
+#
+# 什么时候需要：把 `MINERU_BACKEND` 设为 `pipeline`，用**本地模型**解析 PDF。
+# 不需要它的场合：`MINERU_BACKEND=vlm-http-client`（默认）走 MinerU 云端 API，
+# 只需 `MINERU_API_TOKEN`，**不用装这份** —— 这也是省下 7GB 磁盘的推荐路径。
+#
+# 用法：
+#     pip install -r requirements.txt -r requirements-pdf-local.txt
+#     python ../check_env.py --download-mineru     # 再下模型
+#
+# 为什么单独一份：这些依赖只在本地解析模式下被 import，
+# 而它们（连同模型）对大多数用户是纯负担。此前 `pyyaml` 只登记在测试依赖里，
+# 于是"本地 PDF 解析"在用户环境中直接 ModuleNotFoundError。
+#
+# 依赖位置参考：
+#   app/services/mineru/config_loader.py:14   → yaml
+#   app/services/mineru/converter.py          → requests（懒加载）
+pyyaml~=6.0.0
+requests~=2.32.0

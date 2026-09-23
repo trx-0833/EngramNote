@@ -1,0 +1,46 @@
+# ============================================================
+# EngramNote 开发/测试依赖（**贡献者装这一份**）
+# ============================================================
+#
+# 用法：
+#     pip install -r requirements.txt -r requirements-dev.txt
+#     python -m pytest -q                       # 离线；网络被 tests/conftest.py 挡住
+#     python -m ruff check app tests scripts
+#     python scripts/dump_openapi.py --check    # 契约：代码 → openapi.json
+#
+# ## 为什么与 requirements.txt 分开（2026-09-23 修正）
+#
+# 此前 pytest/pytest-asyncio 混在运行依赖里：用户装完服务就多背一套测试框架，
+# 而**真正缺的运行依赖**（pypdfium2 / Pillow / psutil）反而没人发现 ——
+# 因为"CI 能过"掩盖了"用户跑不了"。分开之后两份清单各有一个判据：
+#   requirements.txt      → 全新装完，服务能不能跑起来
+#   requirements-dev.txt  → 全新装完，门禁能不能跑起来
+#
+# ## 版本策略
+#
+# 刻意**不钉版本**：CI 的判据是"用最新可用版本也能过"，钉住反而会在上游换代时
+# 掩盖真实的兼容性问题。代价是本地与 CI 的版本可能不同 —— 这个差异用
+# `scripts/check_dependency_drift.py` 可见（只读、不联网）。
+
+# ---- 测试框架 ----
+pytest~=8.0.0
+pytest-asyncio~=0.23.0
+
+# ---- Lint / 格式 ----
+ruff~=0.16.0
+
+# ---- 测试实际会 import 到的运行期模块 ----
+# 说明：单元测试不加载模型（conftest 的离线守卫），因此不装
+# sentence-transformers 等 GB 级依赖。但下列模块在**模块顶层**被 import，
+# 缺任何一个都会让收集期就失败：
+#   app/services/mineru/config_loader.py:14  → yaml
+# 它属于"本地 PDF 解析模式"的运行依赖，因此**单一来源**是
+# `requirements-pdf-local.txt`；CI 与贡献者装那一份即可：
+#     pip install -r requirements.txt -r requirements-pdf-local.txt -r requirements-dev.txt
+#
+# 为什么不让本文件再写一遍：同一个包出现在两份清单里，升级时必然漏改一处 ——
+# 本仓库对"同一事实写两遍"的代价已经吃过很多次亏。
+#
+# workflow YAML 校验同理：tests/test_session_lifecycle.py 会显式断言 pyyaml 可用
+# （缺少时 fail 而不是静默跳过），因为本仓库的 CI 曾因 workflow YAML 语法错误
+# 完全没跑起来，而当时没有任何工具能发现。

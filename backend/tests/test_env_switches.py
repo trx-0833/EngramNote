@@ -328,12 +328,32 @@ class TestEnvExampleTemplateAgreesWithCode:
     判据是机械的两条：
 
     1. 每条**未注释**的赋值都必须是 `Settings` 的字段名（拼错即失败）；
-    2. 其值必须等于该字段在代码里的默认值。
+    2. 其值必须等于该字段在代码里的默认值 —— **除非**它被显式登记在
+       `INTENTIONAL_TEMPLATE_OVERRIDES` 里（每条都要写清为什么）。
 
     第 2 条背后的约定是：**模板等于默认值**。想改行为请写进自己的 `.env`，
     而不是改模板 —— 改模板等于改"新部署的默认行为"，而那种改动
     没有任何测试看得见（这正是 `DEBUG=true` 能潜伏这么久的原因）。
+
+    ## 为什么允许"登记过的偏离"（2026-09-23）
+
+    绝对相等会与另一件对的事冲突：**模板应当给出一个可运行的姿态**。
+    `cp .env.example .env` 之后直接启动就该能跑，否则新访客第一步就撞墙
+    （prod 姿态要求 `JWT_SECRET_KEY`，而模板里它是空的 —— 拒绝启动）。
+
+    于是允许偏离，但只允许**登记过的**偏离：每条都要写出"为什么模板不等于代码默认"。
+    白名单是常量、可审计；随手加一条就会被 review 看见。
     """
+
+    #: 有意让模板值 ≠ 代码默认值的项（键 → 理由）。新增必须写理由。
+    INTENTIONAL_TEMPLATE_OVERRIDES: dict[str, str] = {
+        "APP_ENV": (
+            "代码默认 prod（生产安全），但模板要让 `cp .env.example .env` 之后"
+            "**直接能启动**：prod 姿态下空的 JWT_SECRET_KEY 会拒绝启动，"
+            "新访客第一步就撞墙。dev 姿态则自动生成随机密钥并持久化。"
+            "生产部署仍应显式写 APP_ENV=prod。"
+        ),
+    }
 
     #: 形如 `KEY=value` 的赋值行（注释行在前面就被跳过了）
     _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
@@ -374,18 +394,39 @@ class TestEnvExampleTemplateAgreesWithCode:
         )
 
     def test_active_assignments_match_code_defaults(self):
-        """★ 这条断言就是本轮修的缺陷（模板写着 DEBUG=true，代码默认 False）"""
+        """★ 这条断言就是本轮修的缺陷（模板写着 DEBUG=true，代码默认 False）
+
+        例外仅限 `INTENTIONAL_TEMPLATE_OVERRIDES` 里登记过、且写明理由的项。
+        """
         mismatched = []
         for lineno, key, value in self._active_assignments():
             default = Settings.model_fields[key.lower()].default
-            if str(default).strip().lower() != value.lower():
-                mismatched.append(
-                    f"第 {lineno} 行 {key}={value}（代码默认 {default!r}）"
-                )
+            if str(default).strip().lower() == value.lower():
+                continue
+            if key in self.INTENTIONAL_TEMPLATE_OVERRIDES:
+                continue
+            mismatched.append(f"第 {lineno} 行 {key}={value}（代码默认 {default!r}）")
         assert not mismatched, (
             "`.env.example` 的激活项与代码默认值不一致 —— 照抄模板的人会得到"
             "与代码不同的行为：\n  " + "\n  ".join(mismatched)
+            + "\n\n若这是**有意**让模板给出可运行姿态，请登记到 "
+            "INTENTIONAL_TEMPLATE_OVERRIDES 并写明理由，而不要放宽这条断言。"
         )
+
+    def test_intentional_overrides_are_actually_deviating(self):
+        """白名单不得留"其实已经一致"的僵尸条目（否则它会掩盖未来的回归）
+
+        同时反查：模板里必须**真的有**这条激活赋值。
+        """
+        active = {key: value for _, key, value in self._active_assignments()}
+        for key in self.INTENTIONAL_TEMPLATE_OVERRIDES:
+            assert key in active, (
+                f"INTENTIONAL_TEMPLATE_OVERRIDES 登记了 {key}，但模板里没有它的激活赋值"
+            )
+            default = Settings.model_fields[key.lower()].default
+            assert str(default).strip().lower() != active[key].lower(), (
+                f"{key} 已与代码默认值一致，应从 INTENTIONAL_TEMPLATE_OVERRIDES 移除"
+            )
 
     def test_legacy_debug_is_not_enabled_by_the_template(self):
         """★ 模板不得再提供**激活**的 `DEBUG=true`（它是遗留开关，见附录 AK）"""

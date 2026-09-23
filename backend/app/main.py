@@ -164,6 +164,33 @@ def _log_security_posture() -> None:
             "请勿用于生产"
         )
 
+    # 缺 LLM Key 时**显式说明哪些功能不可用**（阶段 2.3 起）
+    #
+    # ## 为什么要在这里说，而不是等第一次调用失败
+    #
+    # 没有 Key 时 config 层不做拦截（这是对的：检索、清洗、复习、图谱的
+    # 非 LLM 部分都还能用），但用户第一次点"AI 理解"只会看到一句
+    # "API key not configured"，不知道**范围**有多大 —— 于是会以为整个应用坏了。
+    # 启动时把边界一次讲清楚，比在十几个入口各报一次错便宜得多。
+    configured = [name for name, key in (
+        ("DEEPSEEK_API_KEY", cfg.deepseek_api_key),
+        ("GLM_API_KEY", cfg.glm_api_key),
+    ) if (key or "").strip()]
+    if not configured:
+        logger.warning(
+            "未配置任何 LLM API Key（DEEPSEEK_API_KEY / GLM_API_KEY）："
+            "**AI 理解、自动出题、RAG 问答、图谱关系推断、选中文本提问**将不可用；"
+            "上传转换、规则清洗、检索（BM25/向量）、间隔重复复习、学习报告**不受影响**。"
+            "配置方法见 backend/.env.example。"
+        )
+    if not (cfg.mineru_api_token or "").strip():
+        logger.info(
+            "未配置 MINERU_API_TOKEN：PDF **云端解析**不可用"
+            "（MINERU_BACKEND=vlm-http-client 时需要它）；"
+            "改用本地 pipeline 模式需另装 requirements-pdf-local.txt 并下载约 7GB 模型。"
+            "Markdown / 图片 / Office 不受影响。"
+        )
+
 
 async def lifespan(app: FastAPI):
     """

@@ -367,13 +367,29 @@ def check_node():
         return False
 
     try:
-        # Windows 上 npm 是 .cmd 文件，需要 shell=True 才能找到
+        # ## 为什么不再用 shell=True（2026-09-23 修正）
+        #
+        # 旧写法是 `subprocess.run(["npm", "--version"], shell=True)`，注释说
+        # "Windows 上 npm 是 .cmd，需要 shell=True 才能找到"。它在 Windows 上
+        # 大致能用，但在 POSIX 上是**静默假通过**：
+        # `/bin/sh -c 'npm --version'` 只把 argv[0] 当命令串，`--version` 变成
+        # `$0` —— npm 于是打印用法说明，退出码为 0，而这里不看退出码，
+        # 直接把那段用法当版本号 `ok()` 掉（还会记一个 pass）。
+        #
+        # 现在：Windows 用 `npm.cmd`，其它平台用 `npm`；一律 shell=False，
+        # 并显式检查 returncode 与输出形状。
+        npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
         result = subprocess.run(
-            ["npm", "--version"],
+            [npm_cmd, "--version"],
             capture_output=True, text=True, timeout=10,
-            shell=True
+            shell=False,
         )
-        ok(f"npm v{result.stdout.strip()}")
+        version = (result.stdout or "").strip()
+        if result.returncode != 0 or not version or not version[0].isdigit():
+            fail(f"npm 无法执行（退出码 {result.returncode}，输出：{version[:60] or '空'}）")
+            record_fail()
+            return False
+        ok(f"npm v{version}")
         record_pass()
     except FileNotFoundError:
         fail("未检测到 npm")
@@ -396,11 +412,22 @@ REQUIRED_PACKAGES = {
     "celery": "celery",
     "numpy": "numpy",
     "sentence_transformers": "sentence-transformers",
-    "chromadb": "chromadb",
     "multipart": "python-multipart",
     "openai": "openai",
     "soundfile": "soundfile",
     "yaml": "pyyaml",
+    # PDF 路径的**模块级硬依赖**（app/services/mineru/intake.py:22-23 无条件 import）。
+    # 2026-09-23 补：它们此前只登记在 requirements-test.txt 里，
+    # 于是"CI 能过"掩盖了"用户装完跑不了 PDF" —— 而 PDF 是本产品的主入口。
+    "pypdfium2": "pypdfium2",
+    "PIL": "Pillow",
+    # 嵌入可用性探测（app/services/embedding_service.py:54）
+    "psutil": "psutil",
+    "httpx": "httpx",
+    "alembic": "alembic",
+    # ⚠️ chromadb 已于阶段 2.4 移除（向量改存 chunks 表、词法检索改 FTS5）。
+    #    此前它仍留在本清单里，`--fix` 甚至会把已废弃的依赖装回来 ——
+    #    这是"清单描述了一个不存在的架构"的典型形态，2026-09-23 删除。
     # torch 移入 OPTIONAL_PACKAGES（需从 pytorch.org 专用源安装）
 }
 
@@ -497,15 +524,18 @@ def check_frontend_deps(auto_fix=False):
 
     if auto_fix:
         info("正在安装前端依赖（使用淘宝 npm 源）...")
-        cmd = ["npm", "install", "--registry=https://registry.npmmirror.com"]
+        # 与版本探测同样的理由：POSIX 下 `shell=True` 会把参数吞成 `$0`，
+        # 命令实际执行的是"只带第一个参数"的形态。改为显式解释器/解释器名 + shell=False。
+        npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+        cmd = [npm_cmd, "install", "--registry=https://registry.npmmirror.com"]
         try:
-            subprocess.run(cmd, cwd=str(FRONTEND_DIR), check=True, shell=True)
+            subprocess.run(cmd, cwd=str(FRONTEND_DIR), check=True, shell=False)
             ok("前端依赖安装完成")
             record_fixed()
             return True
         except subprocess.CalledProcessError as e:
             fail(f"前端依赖安装失败：{e}")
-            info(f"请手动安装：cd frontend && npm install")
+            info("请手动安装：cd frontend && npm install")
             record_fail()
             return False
     else:

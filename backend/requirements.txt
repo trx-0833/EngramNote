@@ -1,12 +1,36 @@
-# 依赖版本策略：直接依赖用 ~= 锁定主次版本（允许补丁版本浮动）。
-# 精确 == 锁定留待部署环境 `pip freeze` 后再另立批次。
+# ============================================================
+# EngramNote 后端运行依赖（**用户装这一份**）
+# ============================================================
 #
-# ⚠ 这份清单描述的是"**全新安装**会得到什么"，不等于本机/CI **已经装好**的那套。
-#    两者已经差出好几个大版本（例如 fastapi 声明 ~=0.115.0 / 实际 0.141.1），
-#    而 `pip-audit -r requirements.txt` 扫的是前者 —— 于是"扫描显示没问题"
-#    可能在描述一个尚不存在的部署。差异用一条命令可见：
-#        python backend/scripts/check_dependency_drift.py
-#    （只读、不升级、不联网；漂移的处置是另一个决定，见 docs/security-scan.md）
+# 用法：
+#     pip install -r requirements.txt          # 跑起服务所需
+#     pip install -r requirements-dev.txt      # 另有测试/lint 依赖
+#
+# ## 这份清单的判据是"全新装完能不能跑"，不是"CI 能不能过"
+#
+# 2026-09-23 修正：此前测试依赖与运行依赖混在一起，同时**漏了 3 个模块级硬依赖**，
+# 后果是陌生访客照 README 装完，**PDF 上传路径直接 ModuleNotFoundError**
+# （PDF 恰恰是本产品最主要的入口）。漏掉的三个与它们的 import 位置：
+#     pypdfium2  app/services/mineru/intake.py:22   （模块顶层，无条件）
+#     Pillow     app/services/mineru/intake.py:23   （模块顶层，无条件）
+#     psutil     app/services/embedding_service.py:54（函数内，嵌入可用性探测）
+# 它们此前只登记在 requirements-test.txt 里，而那是"CI 能过"的清单。
+#
+# ## 版本策略
+#
+# 直接依赖用 `~=` 锁定主次版本（允许补丁浮动）。`pip freeze` 级别精确锁定是
+# 独立批次的事；声明与实际的差异用一条命令可见：
+#     python backend/scripts/check_dependency_drift.py
+# （只读、不升级、不联网；处置口径见 docs/security-scan.md）
+#
+# ## 刻意**不**在这里的东西
+#
+#   - pytest / ruff 等 → requirements-dev.txt（用户不需要它们才能跑服务）
+#   - torch / qwen-asr   → 重量级可选，见 requirements-asr.txt
+#   - pyyaml             → 仅 MinerU 本地 pipeline 模式需要，见 requirements-pdf-local.txt
+#   - asyncpg / minio / redis → 项目明确不引入的中间件（见 AGENTS.md 的已否决方向）
+
+# ---- Web / ORM / 配置 ----
 fastapi~=0.115.0
 uvicorn[standard]~=0.30.0
 sqlalchemy[asyncio]~=2.0.0
@@ -14,32 +38,39 @@ aiosqlite~=0.20.0
 pydantic~=2.0.0
 pydantic-settings~=2.0.0
 email-validator~=2.0.0
+python-multipart~=0.0.9
+
+# ---- 认证 ----
+# ⚠️ python-jose 3.3.x 命中 CVE-2024-33663 / CVE-2024-33664（见 docs/overhaul-plan.md
+#    的 6.7 记录）。升级到 >=3.4 或迁 PyJWT 是独立批次，需要单独验证。
 python-jose[cryptography]~=3.3.0
 bcrypt~=4.0.0
+
+# ---- 异步任务 ----
 celery~=5.4.0
-python-multipart~=0.0.9
+
+# ---- 数值 / HTTP ----
+# ⚠️ numpy 被 app/services/graph_service.py 与 asr/asr_engine.py 在**模块顶层** import，
+#    因此它是运行必需，不是"可选数值库"。
 numpy~=1.24.0
-sentence-transformers~=2.2.0
-# chromadb~=0.4.0   # 已移除（阶段 2.4 收尾，2026-09-11）：向量改存 chunks 表，
-#                     # 词法检索改用 FTS5，清洗去重不再经向量库
 httpx~=0.27.0
+
+# ---- 嵌入模型（本地推理）----
+sentence-transformers~=2.2.0
+# chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
+
+# ---- PDF 路径的模块级硬依赖（见文件头说明）----
+pypdfium2~=4.30.0
+Pillow~=10.0.0
+
+# ---- 运行期可观测性 ----
+psutil~=5.9.0
+
+# ---- 数据库迁移 ----
+# ⚠️ 启动路径**不调用** alembic（真实迁移靠 app/database.py 的 init_db +
+#    _migrate_sqlite）。保留它是为了历史对照与将来的重建基线，见 UPGRADING.md。
 alembic~=1.13.0
 
-# ---- 开发/测试依赖（F-35 补强：单元测试运行环境） ----
-pytest~=8.0.0
-pytest-asyncio~=0.23.0
-
-# ASR 语音转写（重量级依赖，仅使用 ASR 功能时需要）
+# ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
 openai~=1.0.0
 soundfile~=0.12.0
-# torch>=2.0.0          # 需单独安装：pip install torch --index-url https://download.pytorch.org/whl/cpu
-# qwen-asr>=0.1.0       # 需单独安装：pip install qwen-asr
-
-# 可选：PostgreSQL 支持（取消注释以启用）
-# asyncpg>=0.30.0
-
-# 可选：MinIO 支持（取消注释以启用）
-# minio>=7.2.0
-
-# 可选：Redis 支持（取消注释以启用）
-# redis>=5.0.0

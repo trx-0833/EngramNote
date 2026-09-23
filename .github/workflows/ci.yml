@@ -67,6 +67,25 @@ jobs:
         # 直接对真实数据动手的代码保持同等质量门槛。
         run: python -m ruff check scripts
 
+      - name: "`.env.example` 与 `app/config.py` 一致（阶段 2.3）"
+        # ── 这一条防的是什么 ────────────────────────────────────────────────
+        # `.env.example` 是访客唯一的配置入口，而它一度只登记了 60/102 个字段，
+        # 漏掉的恰恰是**会改变产品行为**的那些：REVIEW_SCHEDULER（FSRS 还是回退
+        # SM-2）、DAILY_REVIEW_LIMIT、LLM_DAILY_TOKEN_QUOTA、RAG_RRF_K、
+        # MAX_STORAGE_PER_USER_MB、BACKUP_KEEP……
+        #
+        # 后果不是"文档不好看"，而是访客**看不出**这个系统有配额、有调度器切换、
+        # 有备份保留策略 —— 他只会以为这是个没有边界的小玩具。
+        #
+        # Settings 有 101 个面向用户的字段且还在增长，靠人记得补模板必然漂移。
+        # 因此判据做成双向的机器检查（缺一个报错，多一个也报错）：
+        # 缺 → 访客不知道有这个开关；多 → 访客照着填一个代码里已不存在的开关。
+        #
+        # 注意它与 pytest 里的同名守卫（tests/test_env_example_consistency.py）
+        # 是**同一份逻辑的两个入口**：CI 里跑得快、失败信息直接进 job 摘要；
+        # pytest 里跑得到，本机贡献者不必记得单独执行脚本。
+        run: python scripts/gen_env_example.py --check
+
       - name: "OpenAPI schema 与代码一致（阶段 5.1 的 P4）"
         # ── 这一条防的是什么 ────────────────────────────────────────────────
         # 前端类型（`frontend/src/api/generated/schema.ts`）是从
