@@ -468,7 +468,7 @@ jobs:
 
       - name: Upload scan report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-scan-report
           # 两个文件都保留：JSON 供机器读，日志供人读（含"哪个扫描器没跑"的原因）
