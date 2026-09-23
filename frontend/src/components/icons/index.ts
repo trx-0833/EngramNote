@@ -9,7 +9,7 @@
  *
  * 写成 `const ICONS: Record<string, ComponentType> = {...}` 会把键宽化成 `string`，
  * 于是 `type IconName = keyof typeof ICONS` 变成 `string`，未知语义名就能漏到运行期
- * （渲染成空白，且不报错）。`satisfies` 只校验"每个值都是组件"，键保持 13 个字面量，
+ * （渲染成空白，且不报错）。`satisfies` 只校验"每个值都是组件"，键保持**字面量**，
  * `IconName` 因此是真正的联合类型 —— 拼错在**编译期**失败（见 `Icon.test.tsx` 的护栏用例）。
  *
  * 新增图标时的顺序：① 在 `icons/` 加图形文件 ② 在这里登记 ③ 在 `Icon.test.tsx`
@@ -31,6 +31,9 @@ import Cards from './cards';
 import Graph from './graph';
 import Qa from './qa';
 import Questions from './questions';
+// 批次 B2 新增：不在 §4.3 的导航表格里，是"退出"与"移动端汉堡"两个动作图标
+import Logout from './logout';
+import Menu from './menu';
 
 /** 全部图形：键是语义名，值是只画图形的组件 */
 export const ICONS = {
@@ -47,6 +50,8 @@ export const ICONS = {
   graph: Graph,
   qa: Qa,
   questions: Questions,
+  logout: Logout,
+  menu: Menu,
 } satisfies Record<string, ComponentType>;
 
 /** 全部合法语义名（联合类型：`Icon` 的 `name` 用它约束） */

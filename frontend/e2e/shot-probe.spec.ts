@@ -61,9 +61,12 @@ const STYLE_PROBES: StyleProbe[] = [
     props: ['max-width', 'padding-left', 'padding-right'],
   },
   {
+    // 批次 B2 起改为直接量 **svg 本身**（而不是它外面的 20×20 槽）：
+    // 换图标前这个槽里装的是 16px 的 Unicode 字符（靠 `font-size: 1rem` 撑），
+    // 换后是 `<Icon size={20}>` 渲染的 svg —— 要验的正是"尺寸与线宽由组件统一施加"。
     label: 'sidebar-icon',
-    selector: 'nav[aria-label="主导航"] [class*="sidebarItemIcon"]',
-    props: ['font-size', 'width', 'height'],
+    selector: 'nav[aria-label="主导航"] [class*="sidebarItemIcon"] svg',
+    props: ['width', 'height', 'stroke-width', 'color'],
   },
   {
     label: 'first-card',

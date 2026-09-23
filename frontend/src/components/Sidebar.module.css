@@ -247,6 +247,11 @@ body.sidebarOpenLock {
   font-weight: 600;
 }
 
+/* 图标槽：20×20 的定宽盒子，保证 13 行标签左边缘对齐。
+   批次 B2：这里原来还写着 `font-size: 1rem` —— 那是给 **Unicode 字符**用的
+   （16px 的字符塞进 20px 的盒子）。换成 `<Icon size={20} />` 之后尺寸由 svg 的
+   width/height 决定，`font-size` 对这一个格子不再有任何作用；
+   留着它只会让下一个读到这里的人以为图标大小还受字号影响。 */
 .sidebarItemIcon {
   display: flex;
   align-items: center;
@@ -254,7 +259,6 @@ body.sidebarOpenLock {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
-  font-size: 1rem;
 }
 
 .sidebarItemLabel {

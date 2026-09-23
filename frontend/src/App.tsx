@@ -16,6 +16,9 @@ import { lazy, Suspense, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Sidebar from './components/Sidebar';
+// 批次 B2：移动端汉堡改用 Icon —— 原来是 `\u2630` ☰，而**同一个码点**也被
+// 「笔记列表」用着（Sidebar.tsx），于是"菜单"和"笔记列表"在用户眼里是同一个符号。
+import Icon from './components/Icon';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSpinner from './components/LoadingSpinner';
 // 应用骨架的类名归模块所有（overhaul-plan 5.6 序 9）：`layout.css` 的
@@ -118,7 +121,7 @@ function AppRoutes() {
         aria-label="打开菜单"
         aria-expanded={mobileOpen}
       >
-        {'\u2630'}
+        <Icon name="menu" size={24} />
       </button>
       <div
         className={`${styles.appLayout}${sidebarCollapsed ? ` ${styles.appLayoutCollapsed}` : ''}`}

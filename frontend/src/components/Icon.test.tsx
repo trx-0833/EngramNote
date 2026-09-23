@@ -33,11 +33,15 @@ import Icon, { type IconName } from './Icon';
 import { ICONS } from './icons';
 
 /**
- * 导航 13 个语义名 —— **照 visual-design-spec §4.3 的表格手抄**，不从 `ICONS` 推导。
+ * 全部语义名 —— **照 visual-design-spec §4.3 的表格手抄**，不从 `ICONS` 推导。
  * 从实现推导的话，"某个名字被删掉"这件事会连同断言一起消失，测试永远绿。
  * 标注 `IconName[]` 还有一层作用：抄错字（如 `review-card`）在这一行就是编译错误。
+ *
+ * 前 13 个是侧边栏导航（§4.3 的表格）；`logout` 与 `menu` 是**批次 B2** 为
+ * 「退出」与「移动端汉堡」新增的两个 —— 它们不在导航表格里，但同样必须登记，
+ * 否则下面那条"注册表与清单严格一一对应"会红（那条断言正是为了这件事故意的）。
  */
-const NAV_ICON_NAMES: IconName[] = [
+const ICON_NAMES: IconName[] = [
   'dashboard',
   'today',
   'review-cards',
@@ -51,6 +55,8 @@ const NAV_ICON_NAMES: IconName[] = [
   'graph',
   'qa',
   'questions',
+  'logout',
+  'menu',
 ];
 
 /** 取渲染结果里的 `<svg>` 根（装饰性图标不在无障碍树里，只能用容器查询） */
@@ -63,7 +69,7 @@ function renderIcon(element: ReactElement) {
 
 describe('唯一出口：13 个导航图标都画得出来', () => {
   it('★ 13 个语义名全部能渲染出非空 <svg>', () => {
-    for (const name of NAV_ICON_NAMES) {
+    for (const name of ICON_NAMES) {
       const { container, unmount } = render(<Icon name={name} />);
       const svg = container.querySelector('svg');
       expect(svg, `语义名 ${name} 没有渲染出 <svg>`).not.toBeNull();
@@ -74,11 +80,11 @@ describe('唯一出口：13 个导航图标都画得出来', () => {
   });
 
   it('★ 注册表与清单严格一一对应（少登记一个 / 多出一个都要红）', () => {
-    expect(Object.keys(ICONS).sort()).toEqual([...NAV_ICON_NAMES].sort());
+    expect(Object.keys(ICONS).sort()).toEqual([...ICON_NAMES].sort());
   });
 
   it('★ 图标里不含任何文字（图形只由 path / rect / circle 组成）', () => {
-    for (const name of NAV_ICON_NAMES) {
+    for (const name of ICON_NAMES) {
       const svg = renderIcon(<Icon name={name} />);
       expect(svg.textContent, `语义名 ${name} 里混进了文字`).toBe('');
     }
@@ -145,7 +151,7 @@ describe('属性透传', () => {
 
 describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () => {
   it('★ 13 个图标一律 24 网格 / 线宽 1.5 / currentColor / fill:none / round 端点', () => {
-    for (const name of NAV_ICON_NAMES) {
+    for (const name of ICON_NAMES) {
       const svg = renderIcon(<Icon name={name} />);
       expect(svg.getAttribute('viewBox'), `${name} 的 viewBox`).toBe('0 0 24 24');
       expect(svg.getAttribute('stroke-width'), `${name} 的线宽`).toBe('1.5');
@@ -157,7 +163,7 @@ describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () 
   });
 
   it('★ 没有任何写死的颜色值（颜色只能来自 currentColor / CSS 变量）', () => {
-    for (const name of NAV_ICON_NAMES) {
+    for (const name of ICON_NAMES) {
       const { container, unmount } = render(<Icon name={name} />);
       expect(container.innerHTML, `语义名 ${name} 里出现了写死的颜色`).not.toMatch(
         /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i,

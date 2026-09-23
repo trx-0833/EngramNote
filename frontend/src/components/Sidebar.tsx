@@ -13,42 +13,61 @@
 import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+// 批次 B2：图标从 Unicode 码点改为 `Icon` 组件（唯一出口，见 visual-design-spec §4.2）
+import Icon, { type IconName } from './Icon';
 // 侧边栏（含移动端抽屉）的类名归模块所有（overhaul-plan 5.6 序 9）：
 // `layout.css` 的整节 + `responsive.css` 里命中同一批类名的窄屏规则一起搬了进来
 // —— 类名哈希后留在补丁层里的选择器会永远选不中，见 Sidebar.module.css 文件头
 import styles from './Sidebar.module.css';
 
-/** 导航分组定义 */
-const NAV_SECTIONS = [
+/** 一个导航项。`icon` 是**语义名**（`IconName` 联合类型 —— 拼错在编译期就报错） */
+interface NavItem {
+  path: string;
+  label: string;
+  icon: IconName;
+}
+
+/**
+ * 导航分组定义
+ *
+ * **批次 B2**：`icon` 原来是 Unicode 码点字面量（`\u2302` ⌂、`\u2618` ☘、
+ * `\u25B7` ▷、`\u25A3` ▣、`\u25C9` ◉、`\u25C8` ◈、`\u25CE` ◎ …）。
+ * 那串字符的问题不是"不好看"，而是**跨平台不可控**：
+ * `\u2753` ❓ 与 `\u2611` ☑ 在某些系统上渲染成**彩色 emoji**，与其余单色符号不同源；
+ * `▷ ▣ ◉ ◈ ◎` 五个几何图形在 16px 下彼此几乎分不清，语义完全靠旁边的文字兜；
+ * `\u2618` ☘ 是三叶草，与"今日学习"毫无关系。
+ * 现在换成自绘图标（24 网格 / 线宽 1.5 / currentColor），尺寸与基线由 `Icon` 统一保证。
+ */
+const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: '',
-    items: [{ path: '/', label: '仪表盘', icon: '\u2302' }],
+    items: [{ path: '/', label: '仪表盘', icon: 'dashboard' }],
   },
   {
     title: '学习',
     items: [
-      { path: '/today', label: '今日学习', icon: '\u2618' },
-      { path: '/review/cards', label: '卡片复习', icon: '\u21BB' },
-      { path: '/daily', label: '今日资料', icon: '\u25B7' },
-      { path: '/projects', label: '项目', icon: '\u25A3' },
-      { path: '/assessment', label: '学习评估', icon: '\u2713' },
-      { path: '/goals', label: '学习目标', icon: '\u25C9' },
+      { path: '/today', label: '今日学习', icon: 'today' },
+      { path: '/review/cards', label: '卡片复习', icon: 'review-cards' },
+      { path: '/daily', label: '今日资料', icon: 'daily' },
+      { path: '/projects', label: '项目', icon: 'projects' },
+      { path: '/assessment', label: '学习评估', icon: 'assessment' },
+      { path: '/goals', label: '学习目标', icon: 'goals' },
     ],
   },
   {
     title: '笔记',
     items: [
-      { path: '/notes', label: '笔记列表', icon: '\u2630' },
-      { path: '/trash', label: '回收站', icon: '\u2672' },
+      { path: '/notes', label: '笔记列表', icon: 'notes' },
+      { path: '/trash', label: '回收站', icon: 'trash' },
     ],
   },
   {
     title: '知识',
     items: [
-      { path: '/cards', label: '知识卡片', icon: '\u25C8' },
-      { path: '/graph', label: '知识图谱', icon: '\u25CE' },
-      { path: '/qa', label: '问答', icon: '\u2753' },
-      { path: '/questions', label: '问题集', icon: '\u2611' },
+      { path: '/cards', label: '知识卡片', icon: 'cards' },
+      { path: '/graph', label: '知识图谱', icon: 'graph' },
+      { path: '/qa', label: '问答', icon: 'qa' },
+      { path: '/questions', label: '问题集', icon: 'questions' },
     ],
   },
 ];
@@ -145,7 +164,9 @@ export default function Sidebar({
                     className={`${styles.sidebarItem}${isActive(item.path) ? ` ${styles.sidebarItemActive}` : ''}`}
                     onClick={() => handleNav(item.path)}
                   >
-                    <span className={styles.sidebarItemIcon}>{item.icon}</span>
+                    <span className={styles.sidebarItemIcon}>
+                      <Icon name={item.icon} size={20} />
+                    </span>
                     <span className={styles.sidebarItemLabel}>{item.label}</span>
                   </button>
                   {/* 上传快捷入口在笔记分组 */}
@@ -167,7 +188,9 @@ export default function Sidebar({
         {/* 底部：退出 */}
         <div className={styles.sidebarFooter}>
           <button className={styles.sidebarItem} onClick={logout}>
-            <span className={styles.sidebarItemIcon}>{'\u2190'}</span>
+            <span className={styles.sidebarItemIcon}>
+              <Icon name="logout" size={20} />
+            </span>
             <span className={styles.sidebarItemLabel}>退出</span>
           </button>
         </div>
