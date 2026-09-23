@@ -72,10 +72,12 @@ const SCAN_EXTS = new Set(['.css', '.tsx', '.ts']);
  * 这一条防的是"账还完了但登记没删"—— 没有它，这张表迟早变成一份没人看的豁免名单。
  */
 const PENDING_WIRING = {
-  // ── 图谱水墨令牌：canvas 绘制拿不到 CSS 变量 ──
-  '--graph-ink': '批次 A4 判定 canvas 用不了 var()，字面量保留在 graph/types.ts；接线待 E4',
-  '--graph-ink-faint': '同上，待 E4',
-  '--graph-paper-deep': '同上，待 E4',
+  // （`--graph-ink` / `--graph-ink-faint` / `--graph-paper-deep` 曾登记在这里：
+  //   它们原来零引用，批次 E4 已接线 —— canvas 侧读 `getComputedStyle`
+  //   （`components/graph/types.ts` 的 `getGraphCanvasTokens`），
+  //   CSS 侧写 `var()`（`Graph.module.css` 的 `.graphCanvas::before` /
+  //   `.graphControls` / `.graphMinimap` / 768px 档的抽屉阴影）。
+  //   所以按本表的规矩把这三行删掉了；过期自检当时会把它们报出来。）
   // ── 有明确负责批次的（做完那一批就该把这些行删掉，过期自检会提醒）──
   // （`--width-*` 与 `--shadow-focus` 曾登记在这里：前者已在批次 C2 接线、
   //   后者在 D4 落地时被实测判定不用并删除 —— 这条过期自检当时确实把它们报了出来）

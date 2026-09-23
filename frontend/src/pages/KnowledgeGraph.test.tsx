@@ -54,6 +54,11 @@ import type { GraphData, GraphNode, GraphStats, SuggestedRelation } from '../api
 import ErrorBoundary from '../components/ErrorBoundary';
 import { ConfirmProvider } from '../components/ConfirmProvider';
 import type { ForceGraphLink, ForceGraphNode } from '../components/graph/types';
+import {
+  GRAPH_CANVAS_TOKEN_FALLBACKS,
+  getRelationDash,
+  resetGraphCanvasTokensCache,
+} from '../components/graph/types';
 // 图谱的类名归模块所有（overhaul-plan 5.6 序 10）：字面量 `.graph-panel` 之流
 // 在产物里是哈希过的，必然查不到。这里改不动语义查询的几处（面板/建议卡片/
 // 结果项都是纯展示 div，没有角色可查，为测试加 role 属于产品改动），
@@ -72,6 +77,8 @@ interface ForceGraphMockProps {
   onLinkClick: (link: ForceGraphLink) => void;
   onLinkHover: (link: ForceGraphLink | null) => void;
   onBackgroundClick: () => void;
+  /** 批次 E4：箭头长度改成"按类型/状态取值"的函数（相关/对比与待审边不画箭头） */
+  linkDirectionalArrowLength: number | ((link: ForceGraphLink) => number);
 }
 
 const fg = vi.hoisted(() => ({
@@ -361,9 +368,40 @@ function canvasProps(): ForceGraphMockProps {
   return fg.props;
 }
 
+/** 画布区域（批次 E4：可聚焦 + `role="application"`，键盘切换当前节点的入口） */
+function canvasRegion(): HTMLElement {
+  return screen.getByRole('application', { name: '知识图谱画布' });
+}
+
+/**
+ * 键盘切换的可读反馈行（`aria-live`）。
+ *
+ * 为什么按这个属性找而不是按文本：canvas 里没有 DOM 语义，节点名**只**出现在
+ * 这一行与详情面板里；用 `getByText(/当前节点/)` 会把画布的用法说明也匹配进来。
+ */
+function graphStatusLine(): HTMLElement {
+  const el = document.querySelector('[aria-live="polite"][aria-atomic="true"]');
+  if (!el) throw new Error('页面上没有 aria-live 状态行：键盘切换的播报丢了');
+  return el as HTMLElement;
+}
+
+/** 节点详情面板（与既有用例同一取法） */
+function nodeDetailPanel(): HTMLElement {
+  return screen.getByText('节点详情').closest(`.${graphStyles.graphPanel}`) as HTMLElement;
+}
+
+/** 一次绘制里出现过的 `setLineDash` 图案（顺序即调用顺序） */
+function dashPatterns(ctx: FakeCtx): unknown[] {
+  const spy = ctx.setLineDash as unknown as MockInstance;
+  return spy.mock.calls.map((call: unknown[]) => call[0]);
+}
+
 beforeEach(() => {
   fg.props = null;
   lastCanvasCtx = null;
+  // canvas 的水墨令牌是"读一次并缓存"的模块级状态：不清的话，前面用例读到的
+  // 回退值会漏给后面那些要模拟"读得到令牌"的用例（批次 E4）
+  resetGraphCanvasTokensCache();
   // 每个用例都从宽屏开始：侧边栏的默认开合取决于视口宽度，残留的窄屏值会让
   // 后面的用例莫名其妙地"少了统计面板"。窄屏用例自己改，改完由这里复位。
   setViewportWidth(DEFAULT_VIEWPORT_WIDTH);
@@ -1257,5 +1295,225 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
     expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2');
     expect(screen.getByText(/2 节点/).textContent).toContain('2 节点');
     expectNoCrash();
+  });
+});
+
+/**
+ * 批次 E4：关系类型改用线型区分
+ *
+ * `docs/visual-design-spec.md` §6.4 / `visual-refactor-plan.md` §6 的 E4 行。
+ * 这里钉的是"画布真的按类型画线型"，图例与表的正确性在
+ * `components/graph/types.test.ts`。
+ */
+describe('关系类型的线型（批次 E4）', () => {
+  /** 画一条边，返回这次绘制的假上下文（供断言 setLineDash / strokeStyle） */
+  function drawEdge(props: ForceGraphMockProps, over: Partial<ForceGraphLink>): FakeCtx {
+    const ctx = makeCtx();
+    props.linkCanvasObject(
+      {
+        id: 'e-x',
+        source: makeForce({ id: 'c-1', x: 0, y: 0 }),
+        target: makeForce({ id: 'c-2', x: 40, y: 0 }),
+        relation_type: 'related',
+        status: 'confirmed',
+        similarity_score: null,
+        ...over,
+      },
+      ctx as unknown as CanvasRenderingContext2D,
+      1,
+    );
+    return ctx;
+  }
+
+  it('★ 四类关系各画各的线型：实线 / 长虚线 / 虚线 / 点线', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+    const props = canvasProps();
+
+    for (const type of ['prerequisite', 'subsequent', 'related', 'contrast']) {
+      expect(dashPatterns(drawEdge(props, { relation_type: type }))).toContainEqual(
+        getRelationDash(type, 1),
+      );
+    }
+
+    // 前提是实线：整笔绘制里不允许出现任何非空图案
+    expect(dashPatterns(drawEdge(props, { relation_type: 'prerequisite' })).flat()).toEqual([]);
+  });
+
+  it('★ 线型只讲类型：待审与否画的线型一字不差，状态改用"更淡 + 无箭头"', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+    const props = canvasProps();
+
+    const confirmed = drawEdge(props, { relation_type: 'related', status: 'confirmed' });
+    const suggested = drawEdge(props, { relation_type: 'related', status: 'suggested' });
+
+    // 同一类关系，待审与已确认的图案完全一致（线型已经被类型占用）
+    expect(dashPatterns(suggested)).toEqual(dashPatterns(confirmed));
+    expect(dashPatterns(suggested)).toContainEqual(getRelationDash('related', 1));
+
+    // 状态通道：待审更淡（已确认 A8 ≈ 66%，待审 88 ≈ 53%）
+    expect(String(confirmed.strokeStyle)).toMatch(/A8$/);
+    expect(String(suggested.strokeStyle)).toMatch(/88$/);
+
+    // 箭头通道：有向的两类才画，且待审一律不画
+    const arrowLength = props.linkDirectionalArrowLength;
+    expect(typeof arrowLength).toBe('function');
+    const arrow = arrowLength as (link: ForceGraphLink) => number;
+    const link = (relation_type: string, status: string) =>
+      ({
+        id: 'e',
+        source: 'c-1',
+        target: 'c-2',
+        relation_type,
+        status,
+        similarity_score: null,
+      }) as ForceGraphLink;
+
+    expect(arrow(link('prerequisite', 'confirmed'))).toBe(3);
+    expect(arrow(link('subsequent', 'confirmed'))).toBe(3);
+    expect(arrow(link('related', 'confirmed'))).toBe(0);
+    expect(arrow(link('contrast', 'confirmed'))).toBe(0);
+    expect(arrow(link('prerequisite', 'suggested'))).toBe(0);
+  });
+
+  it('★ canvas 颜色从 --graph-* 令牌取值；读不到令牌时退回与 base.css 同源的字面量', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+    const props = canvasProps();
+    const node = makeForce({ x: 5, y: 5 });
+
+    // ① 真实浏览器：`:root` 上有令牌 → 节点描边用的就是它
+    resetGraphCanvasTokensCache();
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: (name: string) => (name === '--graph-ink-faint' ? 'rgb(1, 2, 3)' : ''),
+    }));
+    const withTokens = makeCtx();
+    props.nodeCanvasObject(node, withTokens as unknown as CanvasRenderingContext2D, 1);
+    expect(withTokens.strokeStyle).toBe('rgb(1, 2, 3)');
+
+    // ② jsdom / 令牌被删：回退值必须是**有效颜色**（空串会被 canvas 静默忽略，
+    //    于是描边沿用上一笔的颜色 —— 风险登记表 §9 第 5 条就是这件事）
+    vi.unstubAllGlobals();
+    resetGraphCanvasTokensCache();
+    const fallback = makeCtx();
+    props.nodeCanvasObject(node, fallback as unknown as CanvasRenderingContext2D, 1);
+    expect(fallback.strokeStyle).toBe(GRAPH_CANVAS_TOKEN_FALLBACKS.inkFaint);
+    expect(String(fallback.strokeStyle)).not.toBe('');
+  });
+});
+
+/**
+ * 批次 E4：当前节点支持键盘上下切换
+ *
+ * `docs/visual-symbol-research.md` §C3 的「知识图谱」行。
+ * 两条硬要求：① 上下键**真的**换节点；② 画布是 canvas、节点没有 DOM 语义，
+ * 所以详情面板 + `aria-live` 播报必须跟着走（读屏用户不能失去"当前是哪个"）。
+ */
+describe('键盘上下切换当前节点（批次 E4）', () => {
+  it('★ 画布是可聚焦的区域，用法说明挂在 aria-describedby 上', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    const region = canvasRegion();
+    expect(region).toHaveAttribute('tabindex', '0');
+
+    const hintId = region.getAttribute('aria-describedby');
+    expect(hintId).toBeTruthy();
+    // 说明文字必须真的存在且指出按键（否则读屏用户只知道"这里是一块画布"）
+    expect(document.getElementById(hintId as string)?.textContent).toContain('上下方向键');
+  });
+
+  it('★ 上下方向键真的换节点：视口跟着走，详情面板与播报一起更新', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    // 画布节点在 jsdom 里没有坐标（力导向布局不会跑），这里补上坐标，
+    // 好断言"键盘换节点时视口会跟过去"
+    const nodes = canvasProps().graphData.nodes;
+    nodes[0].x = 10;
+    nodes[0].y = 20;
+
+    expect(graphStatusLine().textContent).toBe('');
+
+    const region = canvasRegion();
+    await userEvent.click(region); // 键盘用户先 Tab/点到这块区域上
+    expect(region).toHaveFocus();
+
+    // 还没有当前节点时，第一次按「下」从第一个开始（而不是"按了没反应"）
+    await userEvent.keyboard('{ArrowDown}');
+    expect(within(nodeDetailPanel()).getByText('浮充的定义')).toBeInTheDocument();
+    expect(graphStatusLine()).toHaveTextContent('当前节点：浮充的定义（第 1 / 4 个）');
+    expect(fg.api.centerAt).toHaveBeenCalledWith(10, 20, 400);
+
+    // 继续向下 / 向上
+    await userEvent.keyboard('{ArrowDown}');
+    expect(within(nodeDetailPanel()).getByText('均充的定义')).toBeInTheDocument();
+    expect(graphStatusLine()).toHaveTextContent('当前节点：均充的定义（第 2 / 4 个）');
+
+    await userEvent.keyboard('{ArrowUp}');
+    expect(within(nodeDetailPanel()).getByText('浮充的定义')).toBeInTheDocument();
+
+    // 循环：在第一个上按「上」回到最后一个
+    await userEvent.keyboard('{ArrowUp}');
+    expect(within(nodeDetailPanel()).getByText('浮充与均充的区别')).toBeInTheDocument();
+    expect(graphStatusLine()).toHaveTextContent('（第 4 / 4 个）');
+  });
+
+  it('焦点在缩放按钮上时方向键不换节点（不抢子控件的按键）', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    screen.getByRole('button', { name: '放大' }).focus();
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(screen.queryByText('节点详情')).not.toBeInTheDocument();
+    expect(graphStatusLine().textContent).toBe('');
+  });
+
+  it('鼠标点节点同样会播报当前节点（状态行不是键盘专用）', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    await userEvent.click(screen.getByTestId('fg-node-c-2'));
+
+    expect(graphStatusLine()).toHaveTextContent('当前节点：均充的定义（第 2 / 4 个）');
+  });
+});
+
+/**
+ * 批次 E4：图例改为"线型 → 类型"
+ *
+ * ⚠️ 可访问名必须仍是关系类型名（'相关' …）：`e2e/a11y.spec.ts` 的键盘走查
+ * 用 `getByRole('button', { name: '相关' })` 找它 —— 线型色块是装饰，
+ * 所以它是 `aria-hidden` 的 span，不进可访问名。
+ */
+describe('图例：线型 → 类型（批次 E4）', () => {
+  it('★ 四个关系类型各画各的线型，色块本身不进可访问名', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    const lineClassOf = (name: string) => {
+      const button = screen.getByRole('button', { name });
+      const swatch = button.querySelector('[aria-hidden="true"]');
+      expect(swatch).not.toBeNull();
+      return swatch as HTMLElement;
+    };
+
+    expect(lineClassOf('前置').className).toContain(graphStyles.graphRelationLineSolid);
+    expect(lineClassOf('后续').className).toContain(graphStyles.graphRelationLineLongDash);
+    expect(lineClassOf('相关').className).toContain(graphStyles.graphRelationLineDashed);
+    expect(lineClassOf('对比').className).toContain(graphStyles.graphRelationLineDotted);
+
+    // 可访问名仍是关系类型名（键盘走查按名字找）
+    expect(screen.getByRole('button', { name: '相关' })).toHaveAccessibleName('相关');
+  });
+
+  it('待审那句不再冒充某种线型（线型已被关系类型占用）', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    expect(screen.getByText('待审建议（淡色 · 无箭头）')).toBeInTheDocument();
+    expect(screen.queryByText('建议关系')).not.toBeInTheDocument();
   });
 });

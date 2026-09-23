@@ -8,12 +8,28 @@ import styles from './Graph.module.css';
 import {
   type ForceGraphNode,
   type ForceGraphLink,
+  type RelationLineStyle,
   type SidebarPanel,
   RELATION_TYPE_LABELS,
   RELATION_TYPE_COLORS,
   FALLBACK_RELATION_COLOR,
   RELATION_TYPE_OPTIONS,
+  getRelationLineStyle,
 } from './types';
+
+/**
+ * 线型 → 图例线段的类名（批次 E4）
+ *
+ * 键与 `types.ts` 的 `RELATION_LINE_DASHES` 同一套取值；四个类名**互相替代**
+ * （同一个元素上只出现其中一个），图案值与画布的 `setLineDash` 一一对应 ——
+ * 图例画出来的必须就是画布上那条线。
+ */
+const RELATION_LINE_CLASSES: Record<RelationLineStyle, string> = {
+  solid: styles.graphRelationLineSolid,
+  dashed: styles.graphRelationLineDashed,
+  longDash: styles.graphRelationLineLongDash,
+  dotted: styles.graphRelationLineDotted,
+};
 
 interface GraphSidebarProps {
   stats: GraphStats | null;
@@ -593,7 +609,7 @@ function CreateRelationPanel({
   );
 }
 
-/** 关系类型图例 */
+/** 关系类型图例（批次 E4：**线型 → 类型**，颜色降为辅助） */
 function RelationLegend({
   highlightedRelationType,
   setHighlightedRelationType,
@@ -610,7 +626,10 @@ function RelationLegend({
             （它不模拟 Tab），是 F-37 的键盘扫描报出来的。
             现在是真 `<button aria-pressed>`：Enter 与 Space 都生效，
             读屏也会念出"按钮 + 是否按下"。外观靠 `.graphLegendItem` 那条类 +
-            下面这几个"复位按钮 UA 外观"的属性，视觉与改动前一致。 */}
+            下面这几个"复位按钮 UA 外观"的属性，视觉与改动前一致。
+            ⚠️ 批次 E4：线段从"纯色实线"改成"该类型在画布上的**线型**"——
+            这一块是"线型 → 类型"的说明，颜色只是辅助（可访问名仍是关系类型名，
+            `e2e/a11y.spec.ts` 用 `getByRole('button', { name: '相关' })` 找它）。 */}
         {Object.entries(RELATION_TYPE_LABELS).map(([type, label]) => (
           <button
             key={type}
@@ -629,23 +648,22 @@ function RelationLegend({
             onClick={() => setHighlightedRelationType((prev) => (prev === type ? null : type))}
           >
             <span
-              className={styles.graphRelationLine}
-              style={{ background: RELATION_TYPE_COLORS[type] }}
+              className={`${styles.graphRelationLine} ${RELATION_LINE_CLASSES[getRelationLineStyle(type)]}`}
+              style={{ color: RELATION_TYPE_COLORS[type] }}
               aria-hidden="true"
             />
             {label}
           </button>
         ))}
+        {/* 待审建议：线型已经让给关系类型，状态改用"淡色 + 无箭头"两条通道 ——
+            图例里画不出"四种线型各自变淡"，所以用一条淡色实线代表"淡"这一层，
+            文字补上"无箭头"。 */}
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px' }}>
           <span
-            style={{
-              width: 20,
-              height: 0,
-              borderTop: '2px dashed var(--color-text-tertiary)',
-              display: 'inline-block',
-            }}
+            className={`${styles.graphRelationLine} ${styles.graphRelationLinePending}`}
+            aria-hidden="true"
           />
-          建议关系
+          待审建议（淡色 · 无箭头）
         </span>
       </div>
     </div>

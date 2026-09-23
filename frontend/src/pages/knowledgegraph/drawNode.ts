@@ -15,6 +15,7 @@ import {
   CARD_TYPE_SHAPES,
   CARD_TYPE_INITIALS,
   drawNodeShapePath,
+  getGraphCanvasTokens,
   getNodeSize,
 } from '../../components/graph/types';
 import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
@@ -108,9 +109,11 @@ export function drawGraphNode(
   ctx.fillStyle = glassGrad;
   ctx.fill();
 
-  // 玻璃珠深色边缘（轮廓）
+  // 玻璃珠深色边缘（轮廓）—— 批次 E4：改读 `--graph-ink-faint`（淡墨）。
+  // 原值是 `rgba(0, 0, 0, 0.14)`：alpha 与令牌**逐字相同**，只是色相从纯黑
+  // 换成墨阶的 `rgba(26, 26, 46, …)`（同一枚令牌也用在 minimap 的连线上）。
   drawNodeShapePath(ctx, shape, node.x!, node.y!, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.14)';
+  ctx.strokeStyle = getGraphCanvasTokens().inkFaint;
   ctx.lineWidth = 1 / globalScale;
   ctx.stroke();
 

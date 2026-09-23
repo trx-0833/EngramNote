@@ -9,7 +9,7 @@
  * jsdom 里 `getContext` 返回 null，页面据此提前返回，不画任何东西。
  */
 import type { GraphData } from '../../api/client';
-import type { ForceGraphNode } from '../../components/graph/types';
+import { type ForceGraphNode, getGraphCanvasTokens } from '../../components/graph/types';
 import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 
 /** 当前视口信息（由 GraphCanvas 的 onZoom 写入） */
@@ -72,10 +72,14 @@ export function renderMinimap(
   const my = (y: number) => (y - minY) * scale + offsetY;
 
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(245, 240, 228, 0.75)'; // 宣纸底（原: rgba(250, 249, 247, 0.6)）
+  // 宣纸底 / 淡墨连线：批次 E4 起读 `--graph-paper` 与 `--graph-ink-faint`
+  // （原来是与令牌同源的手写字面量 `rgba(245, 240, 228, 0.75)` / `rgba(154, 154, 176, 0.4)`，
+  //  读不到令牌时的回退值就是它们，见 `graph/types.ts` 的 `GRAPH_CANVAS_TOKEN_FALLBACKS`）
+  const tokens = getGraphCanvasTokens();
+  ctx.fillStyle = tokens.paper;
   ctx.fillRect(0, 0, W, H);
 
-  ctx.strokeStyle = 'rgba(154, 154, 176, 0.4)';
+  ctx.strokeStyle = tokens.inkFaint;
   ctx.lineWidth = 0.5;
   graphData.edges.forEach((e) => {
     const src = nodes.find((n) => n.id === e.source);

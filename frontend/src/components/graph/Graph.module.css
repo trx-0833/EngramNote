@@ -70,6 +70,28 @@
   min-height: 0;
 }
 
+/* 只在无障碍树里存在的文本（批次 E4 新增）
+ *
+ * 两处用它：画布的用法说明（`GraphCanvas` 的 `aria-describedby` 目标）与
+ * "当前节点：…"的 aria-live 播报（`pages/KnowledgeGraph.tsx`）。
+ * canvas 里只有位图，节点没有 DOM 语义 —— 读屏用户按上下方向键换了节点之后，
+ * 唯一能知道"现在是谁"的途径就是后者。
+ *
+ * ⚠️ 不要改成 `display: none` / `visibility: hidden`：那两者会把内容从
+ * 无障碍树里一并摘掉，等于什么也不播报（视觉上"看不见"与"读屏读不到"
+ * 是两件事，这里要的只有前者）。 */
+.graphA11yStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* 图谱侧边栏：桌面固定 320px（原为 GraphSidebar.tsx 的内联样式，
    同样为了让 480px 以下能改成贴底抽屉而搬到这里） */
 .graphSidebar {
@@ -83,14 +105,19 @@
 
 /* 图谱容器：水墨丹青视觉重构 —— 宣纸底 + 四角墨色晕染 + 装裱画框
    原: .graphCanvas { background: radial-gradient(ellipse at center, rgba(15, 52, 96, 0.04) 0%, transparent 70%), linear-gradient(rgba(15, 52, 96, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 52, 96, 0.03) 1px, transparent 1px), var(--color-bg); background-size: 100% 100%, 24px 24px, 24px 24px, auto; border: 1px solid var(--color-border-light); border-radius: var(--radius-md); overflow: hidden; position: relative; } */
+/* 批次 E4：中央那层墨晕搬去 `::before`，于是它可以写成 `var(--graph-ink)`。
+   原来手写的 `rgba(26, 26, 46, 0.045)` 正是 `--graph-ink`（rgba(26,26,46,0.55)）
+   的 8% —— 令牌的 alpha 是固定的，`var()` 又没法乘系数，所以用**元素自身的
+   `opacity: 0.08`** 来还原那个系数（0.55 × 0.08 = 0.044 ≈ 0.045，肉眼无差）。
+   这是本文件里唯一一处"用 opacity 拼 alpha"的地方，别扩散：
+   它替换掉的是一枚**零引用的令牌**（审计 §2.6 的"图谱与令牌层的连接是断的"），
+   而能被 `var()` 直接表达的地方一律直接写 `var()`。 */
 .graphCanvas {
   background:
     radial-gradient(ellipse at 18% 12%, rgba(45, 138, 86, 0.07) 0%, transparent 55%),
     /* 青绿晕染（左上，远山） */
     radial-gradient(ellipse at 86% 84%, rgba(192, 57, 43, 0.055) 0%, transparent 55%),
-    /* 赭石晕染（右下，印章余韵） */
-    radial-gradient(ellipse at 50% 46%, rgba(26, 26, 46, 0.045) 0%, transparent 62%),
-    /* 中央墨晕 */ var(--graph-paper); /* 宣纸底 */
+    /* 赭石晕染（右下，印章余韵） */ var(--graph-paper); /* 宣纸底 */
   border: 1px solid var(--graph-frame);
   border-radius: var(--radius-md);
   box-shadow:
@@ -98,6 +125,16 @@
     var(--shadow-md); /* 装裱双层画框 */
   overflow: hidden;
   position: relative;
+}
+
+.graphCanvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* 只染色不挡交互：画布要能被拖拽/缩放 */
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 46%, var(--graph-ink) 0%, transparent 62%);
+  opacity: 0.08;
 }
 
 /* 工具栏 */
@@ -273,12 +310,52 @@
   border-color: var(--color-accent);
 }
 
-/* 关系类型图例线 */
+/* 关系类型图例的线段（批次 E4：**线型 → 类型**）
+ *
+ * ## 为什么线型是主通道
+ *
+ * `docs/visual-design-spec.md` §6.4：实线 = 前提、虚线 = 相关、点线 = 对比
+ * （第四类"后续"见 `components/graph/types.ts` 的注释，拿长虚线）——
+ * 色觉障碍用户不该依赖颜色才能读出"这是哪种关系"。这里是图例侧，
+ * **画布侧**的图案在 `RELATION_LINE_DASHES`（`ctx.setLineDash`），两边必须同值：
+ *   dashed 5/9 · longDash 10/16 · dotted 1.5/5（周期，px）
+ *
+ * ## 为什么基础类里没有 `background`
+ *
+ * 四条线型互为**替代**（同一个元素上只出现其中一条）。若把 `background`
+ * 留在基础类里，就会造出"基础类 × 修饰类、同权重、同文件、靠先后"的竞争 ——
+ * 那正是 `css-convention.md` §7 要求登记 `ORDER_PAIRS` 的一类（抽屉那条就是）。
+ * 几何 vs 图案分开写，就不存在这种竞争。 */
 .graphRelationLine {
-  width: 20px;
+  width: 28px;
   height: 2px;
   display: inline-block;
   border-radius: 1px;
+  /* 线在窄栏里不该被压扁（图例条目是 flex 行） */
+  flex-shrink: 0;
+}
+
+.graphRelationLineSolid {
+  background: currentColor;
+}
+
+.graphRelationLineDashed {
+  background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px);
+}
+
+.graphRelationLineLongDash {
+  background: repeating-linear-gradient(90deg, currentColor 0 10px, transparent 10px 16px);
+}
+
+.graphRelationLineDotted {
+  background: repeating-linear-gradient(90deg, currentColor 0 1.5px, transparent 1.5px 5px);
+}
+
+/* 待审建议：线型已被关系类型占用，状态改用"淡色 + 无箭头"（箭头见 GraphCanvas） */
+.graphRelationLinePending {
+  background: currentColor;
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
 }
 
 /* 缩放控件容器（水墨重构：宣纸底 + 装裱色边）
@@ -290,7 +367,10 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: rgba(245, 240, 228, 0.92);
+  /* 批次 E4：原为手写的 `rgba(245, 240, 228, 0.92)`（审计 §2.6 点名"图谱与令牌层
+     的连接是断的"）→ 改走 `--graph-paper-deep`「宣纸深一档」：
+     控件面板比画布深一档，读起来像装裱的内衬。 */
+  background: var(--graph-paper-deep);
   border: 1px solid var(--graph-frame);
   border-radius: var(--radius-sm);
   padding: 4px;
@@ -336,7 +416,8 @@
   left: 12px;
   width: 140px;
   height: 90px;
-  background: rgba(245, 240, 228, 0.92);
+  /* 批次 E4：同 `.graphControls` —— 手写的宣纸值改走 `--graph-paper-deep` */
+  background: var(--graph-paper-deep);
   border: 1px solid var(--graph-frame);
   border-radius: var(--radius-sm);
   box-shadow:
@@ -702,7 +783,9 @@
     background: var(--color-bg);
     border-top: 1px solid var(--color-border);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    box-shadow: 0 -8px 24px rgba(26, 26, 46, 0.12);
+    /* 批次 E4：原为手写的 `rgba(26, 26, 46, 0.12)` —— 与 `--graph-ink-faint`
+       （rgba(26,26,46,0.14)）是同一个墨色，只差 0.02 alpha（阴影上不可见） */
+    box-shadow: 0 -8px 24px var(--graph-ink-faint);
     z-index: 90;
     overscroll-behavior: contain;
   }

@@ -23,6 +23,7 @@ import { renderMinimap } from './knowledgegraph/renderMinimap';
 import { useCanvasObjects } from './knowledgegraph/useCanvasObjects';
 import { useGraphData } from './knowledgegraph/useGraphData';
 import { useGraphInteraction } from './knowledgegraph/useGraphInteraction';
+import { useGraphKeyboardNav } from './knowledgegraph/useGraphKeyboardNav';
 import { useGraphMutations } from './knowledgegraph/useGraphMutations';
 import { useGraphSearch } from './knowledgegraph/useGraphSearch';
 import { useSubgraph } from './knowledgegraph/useSubgraph';
@@ -129,6 +130,33 @@ export default function KnowledgeGraph() {
     highlightedRelationType: interaction.highlightedRelationType,
   });
 
+  /**
+   * 键盘切换当前节点（批次 E4）
+   *
+   * 与点击节点走**同一条状态路径**（节点详情面板 + 展开侧边栏），差别只有两处：
+   * ① 把视口平移到它上面 —— 键盘用户看不到"下一个"在哪，不居中的话连按几次
+   *    可能全在屏幕外（这里刻意**不动缩放**：逐个浏览时缩放级别该由用户自己定，
+   *    搜索结果那条路会把缩放拉到 3 倍，那是"定位到一个已知目标"的语义）；
+   * ② 播报由下面的 aria-live 状态行承担（canvas 里没有 DOM 语义，
+   *    读屏读不到节点，只有详情面板会变是不够的）。
+   */
+  function selectNodeByKeyboard(node: ForceGraphNode) {
+    const fg = graphRef.current;
+    if (fg && node.x != null && node.y != null) {
+      fg.centerAt(node.x, node.y, 400);
+    }
+    interaction.setSelectedNode(node);
+    interaction.setSelectedLink(null);
+    interaction.setActivePanel('nodeDetail');
+    interaction.setSidebarOpen(true);
+  }
+
+  const keyboardNav = useGraphKeyboardNav({
+    nodes: forceGraphData.nodes,
+    selectedNodeId: interaction.selectedNode?.id ?? null,
+    onSelect: selectNodeByKeyboard,
+  });
+
   if (graph.loading) {
     return <LoadingSpinner text="加载知识图谱..." />;
   }
@@ -153,6 +181,18 @@ export default function KnowledgeGraph() {
   const nodeCount = forceGraphData.nodes.length;
   const edgeCount = forceGraphData.links.length;
   const suggestedCount = forceGraphData.links.filter((e) => e.status === 'suggested').length;
+
+  // 当前节点在**键盘顺序**里的位置（1 起；未选中或它已不在画布上时为 0）。
+  // 按 id 找而不是按对象身份：换过滤条件时 `buildForceGraphData` 会重新浅拷贝节点，
+  // 旧的对象身份会失效，id 不会。
+  const selectedNode = interaction.selectedNode;
+  const currentOrdinal = selectedNode
+    ? forceGraphData.nodes.findIndex((n) => n.id === selectedNode.id) + 1
+    : 0;
+  const canvasStatusText =
+    selectedNode && currentOrdinal > 0
+      ? `当前节点：${selectedNode.title}（第 ${currentOrdinal} / ${forceGraphData.nodes.length} 个）`
+      : '';
 
   return (
     <div className={`page-enter ${styles.graphPage}`}>
@@ -207,7 +247,18 @@ export default function KnowledgeGraph() {
           onLinkClick={interaction.handleLinkClick}
           onLinkHover={interaction.handleLinkHover}
           onBackgroundClick={interaction.handleBackgroundClick}
+          onCanvasKeyDown={keyboardNav.handleCanvasKeyDown}
         />
+
+        {/* 键盘切换当前节点的**可读反馈**（批次 E4）。
+            canvas 里只有位图，节点没有 DOM 语义 —— 读屏用户按上下键之后
+            唯一能知道"现在选中的是哪个"的途径就是这一行。
+            `aria-live` 而不是 `role="status"`：与 Toast.tsx 的既有写法一致，
+            也避免给一个纯文本行加不必要的角色（axe 的 aria-allowed-role 关注点）。
+            视觉上不可见（`.graphA11yStatus`），但留在无障碍树里。 */}
+        <div className={styles.graphA11yStatus} aria-live="polite" aria-atomic="true">
+          {canvasStatusText}
+        </div>
 
         {/* 侧边栏 */}
         {interaction.sidebarOpen && (
