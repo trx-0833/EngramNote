@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import Icon, { type IconName } from './Icon';
+
 /**
  * 全局提示层（toast）
  *
@@ -58,23 +60,32 @@ const ERROR_DURATION_MS = 7000;
  * 改成了 `#936408`）。这里一并跟上，免得哪天变量真的缺失时得到一对
  * 与令牌不一致的旧色值。`border` 只用于 3px 的图标边框（非文字），
  * 不参与 4.5:1 的判据，所以只保证"与令牌一致"，不额外挑值。
+ *
+ * 批次 B3：`icon` 由**字符**改成**语义名**（`IconName`）。
+ * 此前这一槽里是 `✓` / `✕` / `i` / `!` 四个字体字符 —— 前两个是 Unicode 符号
+ * （同一种"关闭/成功"在别的文件里还各有一个不同字形），后两个干脆是裸字母，
+ * 于是同一个视觉槽里混着两种画法。改名成语义名之后，拼错在**编译期**就报错。
  */
-const KIND_STYLE: Record<ToastKind, { bg: string; border: string; icon: string }> = {
+const KIND_STYLE: Record<ToastKind, { bg: string; border: string; icon: IconName }> = {
   success: {
     bg: 'var(--color-success-bg, #eaf7ef)',
     border: 'var(--color-success, #25714a)',
-    icon: '✓',
+    icon: 'success',
   },
-  error: { bg: 'var(--color-error-bg, #fdecea)', border: 'var(--color-error, #c0392b)', icon: '✕' },
+  error: {
+    bg: 'var(--color-error-bg, #fdecea)',
+    border: 'var(--color-error, #c0392b)',
+    icon: 'error',
+  },
   info: {
     bg: 'var(--color-bg-subtle, #f5f6f8)',
     border: 'var(--color-primary, #0f3460)',
-    icon: 'i',
+    icon: 'info',
   },
   warning: {
     bg: 'var(--color-warning-bg, #fdf6e3)',
     border: 'var(--color-warning, #936408)',
-    icon: '!',
+    icon: 'warning',
   },
 };
 
@@ -149,7 +160,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         }}
       >
         {items.map((item) => {
-          const style = KIND_STYLE[item.kind];
+          const { bg, border, icon } = KIND_STYLE[item.kind];
           return (
             <div
               key={item.id}
@@ -161,20 +172,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 alignItems: 'flex-start',
                 padding: '10px 12px',
                 borderRadius: 10,
-                borderLeft: `4px solid ${style.border}`,
-                background: style.bg,
+                borderLeft: `4px solid ${border}`,
+                background: bg,
                 boxShadow: '0 4px 16px rgba(15, 52, 96, 0.12)',
                 fontSize: '0.875rem',
                 lineHeight: 1.55,
                 color: 'var(--color-text, #1a1a1a)',
               }}
             >
-              <span
-                aria-hidden="true"
-                style={{ flexShrink: 0, fontWeight: 700, color: style.border }}
-              >
-                {style.icon}
-              </span>
+              {/* 提示的图形槽（批次 B3）：四种语气共用同一个槽，颜色取该语气的令牌。
+                  装饰性 —— 语气由 `role=alert/status` 与文字承担，读屏不必再念一次图标。 */}
+              <Icon name={icon} size={16} style={{ flexShrink: 0, color: border }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ wordBreak: 'break-word' }}>{item.message}</div>
                 {item.detail && (
@@ -196,16 +204,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 aria-label="关闭提示"
                 style={{
                   flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  fontSize: '1rem',
                   lineHeight: 1,
                   color: 'var(--color-text-tertiary, #777)',
                   padding: 2,
                 }}
               >
-                ×
+                {/* 批次 B3：`\u00D7` × → `<Icon name="close" />`。
+                    此前**同一个文件里**这个按钮用 ×、上面 `KIND_STYLE` 用 ✕ ——
+                    同一语义两个字形，正是这一批要收敛的东西。 */}
+                <Icon name="close" size={16} />
               </button>
             </div>
           );

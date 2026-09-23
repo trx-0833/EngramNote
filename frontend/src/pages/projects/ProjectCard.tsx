@@ -19,6 +19,7 @@ import type {
   ProjectDetail,
   ScanImportResponse,
 } from '../../api/client';
+import Icon from '../../components/Icon';
 import AddNotesPanel from './AddNotesPanel';
 import ProjectNotesList from './ProjectNotesList';
 import ProjectRenameForm from './ProjectRenameForm';
@@ -170,6 +171,8 @@ export default function ProjectCard({
             onClick={onOpenAddPanel}
             style={{ fontSize: '0.8rem', padding: '4px 10px' }}
           >
+            {/* 批次 B3：「添加」此前是全站纯文字按钮 —— 补一枚加号图标 */}
+            <Icon name="add" size={16} />
             添加笔记
           </button>
           <button
@@ -247,7 +250,10 @@ export default function ProjectCard({
           style={{ fontSize: '0.8rem', padding: '4px 8px' }}
           onClick={onToggleExpand}
         >
-          <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>▶</span>
+          {/* 批次 B3：`▶` 换 `<Icon name="chevron" />`，旋转过渡仍由 `.collapse-arrow` 提供 */}
+          <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>
+            <Icon name="chevron" size={16} />
+          </span>
           {isExpanded ? '收起笔记' : `查看笔记（${p.note_count ?? 0}）`}
         </button>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -263,6 +269,9 @@ export default function ProjectCard({
             style={{ fontSize: '0.8rem', padding: '4px 8px', color: 'var(--color-error)' }}
             onClick={onDelete}
           >
+            {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete`（带叉的浅桶，动作）
+                而不是 `trash`（回收站，位置）。两者怎么区分见 icons/delete.tsx 文件头。 */}
+            <Icon name="delete" size={16} />
             删除
           </button>
         </div>

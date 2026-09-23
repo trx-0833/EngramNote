@@ -456,6 +456,9 @@
 .graphSearchInput {
   width: 180px;
   padding: 5px 10px;
+  /* 批次 B3：左侧让出 18px 给放大镜（图标 16px + 左 6px - 与文字留 4px 的余量）。
+     长写在简写之后 —— 顺序就是行为，别调换（`verify-built-css.mjs` 有登记项钉着）。 */
+  padding-left: 28px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 1rem;
@@ -465,6 +468,17 @@
   transition:
     border-color 0.2s,
     width 0.2s;
+}
+
+/* 搜索框里的放大镜（批次 B3）：`.graphSearchBox` 已经是定位上下文，
+   这里与 `.graphSearchSpinner` 一左一右，两者互不重叠 */
+.graphSearchIcon {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
 }
 
 .graphSearchInput:focus {

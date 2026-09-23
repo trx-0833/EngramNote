@@ -10,6 +10,7 @@
  */
 import { useState } from 'react';
 import { createProject } from '../../api/client';
+import Icon from '../../components/Icon';
 
 interface NewProjectFormProps {
   /** 创建成功后刷新项目列表（`loadProjects`） */
@@ -74,7 +75,10 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
             </p>
           </div>
           <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-            ＋ 新建项目
+            {/* 批次 B3：全角 `\uFF0B` ＋ 换 `<Icon name="add" />` ——
+                此前全站"+ / ＋"两种写法并存，且都跟正文用同一套字体度量 */}
+            <Icon name="add" size={16} />
+            新建项目
           </button>
         </div>
       ) : (

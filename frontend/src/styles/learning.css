@@ -170,12 +170,21 @@
   }
 }
 
-/* ── 折叠箭头 ── */
+/* ── 折叠箭头 ──
+   批次 B3：4 个调用点（KnowledgeCards / QuestionSets / projects/ProjectCard /
+   DailyMaterials）里的 `\u25B6` ▶ 全部换成 `<Icon name="chevron">` 之后，
+   这个容器里装的不再是一个 12px 的字体字符，而是一枚 16px 的 `<svg>`。
+   于是 `display` 由 `inline-block` 改 `inline-flex` + `align-items: center`：
+   inline 元素会带着基线以下的空隙撑高行盒，而 inline-flex 让容器**恰好**等于图标高度，
+   四处折叠头因此不会各多出几像素。`font-size: 0.75rem` 随之删除 ——
+   它唯一的作用是缩那个字符，现在没有字符了（留着会让后来人以为它还在生效）。
+   `user-select` 与旋转过渡逐字保留：`.collapse-arrow-open` 的 rotate(90deg)
+   作用在容器上，所以对 svg 一样有效，四处共用同一条 0.3s 曲线。 */
 
 .collapse-arrow {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   transition: transform 0.3s var(--ease-out-expo);
-  font-size: 0.75rem;
   user-select: none;
 }
 

@@ -3,6 +3,7 @@
  * @description 自 `pages/Projects.tsx` 的 `renderCard` 拆分（overhaul-plan 5.5），
  * **只搬不改**：搜索框、候选列表（带状态徽章）、勾选、`添加（N）` 按钮的
  * 禁用条件（`adding || selectedNoteIds.length === 0`）与文案、取消/✕ 关闭均逐字保留。
+ * （批次 B3 起 `✕` 与「添加（N）」各补了一个 `<Icon>`，按钮文案仍逐字未动。）
  *
  * 候选过滤里的 `(n.title ?? '')` 是白屏护栏：`title` 可能为 null（后端/历史数据），
  * 原来直接 `null.toLowerCase()` 一输入搜索词就崩。缺失标题按空串处理 ——
@@ -12,6 +13,7 @@
  * 交给全局的 `input { font-size: 1rem }`。理由写在该输入框上方。
  */
 import type { Note } from '../../api/client';
+import Icon from '../../components/Icon';
 import { statusClass } from '../../utils/labels';
 
 interface AddNotesPanelProps {
@@ -67,10 +69,18 @@ export default function AddNotesPanel({
       >
         <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>添加笔记</span>
         <button
-          style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-tertiary)',
+          }}
           onClick={onClose}
+          aria-label="关闭添加笔记面板"
         >
-          ✕
+          {/* 批次 B3：`\u2715` ✕ 换 `<Icon name="close" />`。原来按钮的可见文字就是
+              无障碍名（"✕"），读屏念的是一个符号名 —— 现在给它一个真名字。 */}
+          <Icon name="close" size={16} />
         </button>
       </div>
       <input
@@ -142,6 +152,9 @@ export default function AddNotesPanel({
           onClick={onConfirm}
           disabled={adding || selectedNoteIds.length === 0}
         >
+          {/* 批次 B3：「添加」此前是全站纯文字按钮 —— 补一枚加号图标。
+              `.btn` 本来就是 `inline-flex` + `gap`，图标与文字无需额外对齐样式。 */}
+          <Icon name="add" size={16} />
           {adding ? '添加中…' : `添加（${selectedNoteIds.length}）`}
         </button>
         <button

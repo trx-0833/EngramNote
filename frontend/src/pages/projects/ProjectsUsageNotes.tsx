@@ -1,7 +1,10 @@
 /**
  * @file 项目页底部的使用说明（常驻，不随列表状态消失）
  * @description 自 `pages/Projects.tsx` 拆分（overhaul-plan 5.5），**只搬不改**。
+ * （批次 B3：`\u{1F4D6}` 📖 换成 `<Icon name="book" />`，正文逐字未动。）
  */
+import Icon from '../../components/Icon';
+
 export default function ProjectsUsageNotes() {
   return (
     <div
@@ -15,7 +18,17 @@ export default function ProjectsUsageNotes() {
         lineHeight: 1.8,
       }}
     >
-      <strong style={{ color: 'var(--color-text)' }}>📖 使用说明</strong>
+      <strong
+        style={{
+          color: 'var(--color-text)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <Icon name="book" size={16} />
+        使用说明
+      </strong>
       <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
         <li>项目是纯标签：一篇笔记可打上多个项目标签，创建项目不会生成物理文件夹。</li>
         <li>

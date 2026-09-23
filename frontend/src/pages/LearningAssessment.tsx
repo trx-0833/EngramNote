@@ -17,6 +17,7 @@ import {
   type Note,
   type NoteLinksResponse,
 } from '../api/client';
+import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 // 页面标题（visual-refactor-plan 批次 C1）：原先借全局 `.assessment-title`
@@ -603,8 +604,21 @@ export default function LearningAssessment() {
                 <div className={styles.knowledgePointsGrid}>
                   {(result.scores?.covered_points?.length ?? 0) > 0 && (
                     <div className={styles.knowledgePointsSection}>
-                      <h3 style={{ color: 'var(--color-success)', fontSize: '1rem' }}>
-                        <span>✓</span> 已覆盖知识点
+                      {/* 批次 B3：`\u2713` ✓ 换 `<Icon name="success" />` ——
+                          它与右栏的 `\u2717` ✗ 在中文字体里宽度不同，
+                          两栏并排时两个记号大小不一。`inline-flex` + `gap`
+                          让图标与标题文字对齐（此前是裸 `<span>` 靠基线）。 */}
+                      <h3
+                        style={{
+                          color: 'var(--color-success)',
+                          fontSize: '1rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <Icon name="success" size={16} />
+                        已覆盖知识点
                       </h3>
                       <ul>
                         {result.scores?.covered_points?.map((p: string, i: number) => (
@@ -617,8 +631,19 @@ export default function LearningAssessment() {
                   )}
                   {(result.scores?.uncovered_points?.length ?? 0) > 0 && (
                     <div className={styles.knowledgePointsSection}>
-                      <h3 style={{ color: 'var(--color-error)', fontSize: '1rem' }}>
-                        <span>✗</span> 未覆盖知识点
+                      {/* 批次 B3：`\u2717` ✗ 换 `<Icon name="error" />` ——
+                          与左栏的 `success` 同一档外环（r=8.5），两栏记号因此一样大 */}
+                      <h3
+                        style={{
+                          color: 'var(--color-error)',
+                          fontSize: '1rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <Icon name="error" size={16} />
+                        未覆盖知识点
                       </h3>
                       <ul>
                         {result.scores?.uncovered_points?.map((p: string, i: number) => (

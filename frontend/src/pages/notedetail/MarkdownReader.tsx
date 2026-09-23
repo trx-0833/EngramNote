@@ -7,6 +7,8 @@
  */
 import type { RefObject } from 'react';
 
+import Icon from '../../components/Icon';
+
 interface MarkdownReaderProps {
   /** 渲染好的正文 HTML */
   htmlContent: string;
@@ -54,8 +56,19 @@ export default function MarkdownReader({
           {adhdReaderEnabled ? '关闭 ADHD Reader' : '开启 ADHD Reader'}
         </button>
         {adhdReaderEnabled && (
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-            🖱 鼠标跟随 · 移动鼠标高亮所在行
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.8rem',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            {/* 批次 B3：`\u{1F5B1}` 🖱 换 `<Icon name="mouse" />` —— emoji 自带颜色，
+                在这一行灰字提示里是唯一的彩色字形 */}
+            <Icon name="mouse" size={16} />
+            鼠标跟随 · 移动鼠标高亮所在行
           </span>
         )}
       </div>
@@ -71,7 +84,20 @@ export default function MarkdownReader({
             gap: 'var(--space-sm)',
           }}
         >
-          <span style={{ flexShrink: 0, fontWeight: 600 }}>📖 正在阅读</span>
+          {/* 批次 B3：`\u{1F4D6}` 📖 换 `<Icon name="book" />`（摊开的书）——
+              与 `notes`（合着的册页）刻意区分：那个的语义是"一篇笔记" */}
+          <span
+            style={{
+              flexShrink: 0,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Icon name="book" size={16} />
+            正在阅读
+          </span>
           <span
             style={{
               color: 'var(--color-text)',

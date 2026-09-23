@@ -32,6 +32,7 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 import ReminderBanner from '../components/ReminderBanner';
 // 页面标题（visual-refactor-plan 批次 C1）：本页原先是内联写的
 // `<h1 style={{ fontSize: '2rem' }}>`，统一进组件后是 1.5rem —— 见 PageHeader.tsx
@@ -167,6 +168,8 @@ export default function Dashboard() {
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={() => navigate('/upload')}>
+            {/* 批次 B3：上传按钮补 `upload` 图标（托盘 + 向上箭头） */}
+            <Icon name="upload" size={16} />
             上传新资料
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/today')}>
@@ -595,6 +598,8 @@ export default function Dashboard() {
             description="上传你的第一份学习资料"
             action={
               <button className="btn btn-primary" onClick={() => navigate('/upload')}>
+                {/* 批次 B3：空状态里的上传入口同样补 `upload` 图标 */}
+                <Icon name="upload" size={16} />
                 上传资料
               </button>
             }

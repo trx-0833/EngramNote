@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { getNoteTrashInfo, type Note, type TrashInfoResponse } from '../api/client';
+import Icon from './Icon';
 
 /** 弹窗遮罩 + 卡片容器的公共 inline 样式（与 NoteDetail 关联资料弹窗保持一致） */
 const overlayStyle: React.CSSProperties = {
@@ -146,6 +147,11 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
             取消
           </button>
           <button className="btn btn-primary" onClick={onConfirm}>
+            {/* 批次 B3：两枚确认按钮各补图标，正好演示 `trash` 与 `delete` 的分工 ——
+                "移入回收站"是**位置**（`trash`，与侧边栏那一行同一个语义），
+                "彻底删除"是**动作**（`delete`，见 icons/delete.tsx 文件头）。
+                两个图标都是装饰性的（aria-hidden），按钮的可访问名仍是可见文字。 */}
+            <Icon name="trash" size={16} />
             确认移入
           </button>
         </div>
@@ -234,6 +240,7 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
             style={{ background: 'var(--color-error)', color: '#fff' }}
             onClick={() => onConfirm(promote)}
           >
+            <Icon name="delete" size={16} />
             彻底删除
           </button>
         </div>

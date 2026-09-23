@@ -14,6 +14,7 @@ import {
 } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
 // （卡片自己的名字），字号本就 1.5rem，用 <PageHeader> 只是让它与全站
 // 页面标题共用同一把量尺 —— 见下方调用点的说明
@@ -138,10 +139,13 @@ export default function CardDetail() {
               </>
             ) : (
               <>
+                {/* 批次 B3：「编辑 / 删除」此前是全站纯文字按钮 —— 各补一枚图标 */}
                 <button className="btn btn-secondary" onClick={() => setEditing(true)}>
+                  <Icon name="edit" size={16} />
                   编辑
                 </button>
                 <button className="btn btn-danger" onClick={handleDelete}>
+                  <Icon name="delete" size={16} />
                   删除
                 </button>
               </>

@@ -207,9 +207,9 @@ body.sidebarOpenLock {
   position: relative;
 }
 
-/* 带快捷操作的那一行，给标签留出 + 的位置：
-   38px = 8px(按钮自身右内边距) + 22px(+ 的宽度) + 8px(原来是 flex gap)，
-   与「+ 嵌在按钮里」时标签可用宽度完全相同，长标签不会滑到 + 底下。
+/* 带快捷操作的那一行，给快捷按钮留出位置：
+   38px = 8px(按钮自身右内边距) + 22px(按钮宽度) + 8px(原来是 flex gap)，
+   与「+ 嵌在按钮里」时标签可用宽度完全相同，长标签不会滑到它底下。
    ⚠️ `:has()` 里的类名也必须一起改成 camelCase —— 它是同一个模块的类。 */
 .sidebarItemRow:has(.sidebarItemAction) .sidebarItem {
   padding-right: 38px;
@@ -278,7 +278,11 @@ body.sidebarOpenLock {
 .sidebarItemAction {
   /* 与导航按钮是兄弟节点（见 .sidebarItemRow）：绝对定位钉在行的右端，
      几何位置与"曾经嵌在按钮里"时一致 —— 右边缘距行尾 8px（= 原来的右内边距），
-     垂直居中（原来是 flex 的 align-items: center）。 */
+     垂直居中（原来是 flex 的 align-items: center）。
+     批次 B3：里面的 ASCII `+` 换成了 `<Icon name="upload" size={16} />`
+     （按钮的动作本来就是「上传资料」，见它的 aria-label；`+` 只是"加东西"的
+     权宜字形），所以 `font-size: 1.1rem` 随之删除 —— 它唯一的作用是放大那个字符。
+     22px 的盒子与 `justify-content: center` 原样保留，图标仍然居中。 */
   position: absolute;
   right: var(--space-sm);
   top: 50%;
@@ -289,7 +293,6 @@ body.sidebarOpenLock {
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  font-size: 1.1rem;
   color: var(--color-text-tertiary);
   transition: all 0.15s ease;
   border: none;

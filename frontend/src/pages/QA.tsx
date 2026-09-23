@@ -12,6 +12,7 @@ import { parseSSEStream } from '../utils/sse';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
 import EmptyState from '../components/EmptyState';
+import Icon from '../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变。
 // 导航名「问答」与页内标题「智能问答」的不一致属于产品语义，本批只登记不改
 import PageHeader from '../components/PageHeader';
@@ -354,8 +355,13 @@ export default function QA() {
                         fontSize: '0.75rem',
                         color: 'var(--color-text-secondary)',
                         marginBottom: 'var(--space-xs)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
                       }}
                     >
+                      {/* 批次 B3：引用来源补 `quote` 图标（一对上引号） */}
+                      <Icon name="quote" size={16} />
                       引用来源:
                     </p>
                     {record.sources.map((source, sIdx) => {
@@ -401,7 +407,16 @@ export default function QA() {
                             marginBottom: '2px',
                           }}
                         >
-                          [{sIdx + 1}] 📄 {source.note_title}
+                          {/* 批次 B3：`\u{1F4C4}` 📄 换 `<Icon name="file" />` ——
+                              emoji 是彩色的，夹在 `[1] 笔记标题` 这样一行 0.8rem 的
+                              引用里比标题还抢眼。
+                              `verticalAlign: middle`：图标**内联**在原来那个 emoji 的位置，
+                              整行的 `display: block` 与后续 `heading_path` / 「（无定位）」
+                              的拼接方式一字未改（改成 flex 会把这些文本节点拆成多个 flex 项，
+                              中间凭空多出 gap）。 */}
+                          [{sIdx + 1}]{' '}
+                          <Icon name="file" size={16} style={{ verticalAlign: 'middle' }} />{' '}
+                          {source.note_title}
                           {source.heading_path
                             ? ` > ${source.heading_path}`
                             : source.chapter_title

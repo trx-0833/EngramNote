@@ -21,6 +21,7 @@ import {
 import styles from './Upload.module.css';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
+import Icon from '../components/Icon';
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -428,6 +429,18 @@ export default function Upload() {
           cursor: uploading ? 'wait' : 'pointer',
         }}
       >
+        <span
+          style={{
+            display: 'block',
+            marginBottom: 'var(--space-sm)',
+            color: uploading ? 'var(--color-text-secondary)' : 'var(--color-primary)',
+          }}
+        >
+          {/* 批次 B3：拖拽区补图标 —— 平时是 `upload`（托盘 + 向上箭头），
+              上传中换成 `processing`（静止的 300° 进度环，**不是动画**：
+              这一页的"在动"由文案与 `cursor: wait` 表达，再来一个转圈会打架）。 */}
+          <Icon name={uploading ? 'processing' : 'upload'} size={24} />
+        </span>
         <span
           style={{
             display: 'block',

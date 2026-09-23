@@ -1,5 +1,6 @@
 import type { RefObject, MutableRefObject } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
+import Icon from '../Icon';
 import Minimap from './Minimap';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from './Graph.module.css';
@@ -123,7 +124,10 @@ export default function GraphCanvas({
       {/* Minimap */}
       <Minimap minimapRef={minimapRef} />
 
-      {/* 缩放控件 */}
+      {/* 缩放控件 —— 批次 B3：三个按钮原先各走一路字形
+          （ASCII `+`、`\u2212` −、`\u2922` ⤢），同一排里视觉重量完全不同；
+          现在三枚都是 `<Icon>`（`zoom-in` / `zoom-out` / `fit-screen`），
+          尺寸与线宽由 `Icon.tsx` 统一施加。`aria-label` / `title` 逐字保留。 */}
       <div className={styles.graphControls}>
         <button
           className={styles.graphControlBtn}
@@ -134,7 +138,7 @@ export default function GraphCanvas({
           aria-label="放大"
           title="放大"
         >
-          +
+          <Icon name="zoom-in" size={16} />
         </button>
         <button
           className={styles.graphControlBtn}
@@ -145,7 +149,7 @@ export default function GraphCanvas({
           aria-label="缩小"
           title="缩小"
         >
-          −
+          <Icon name="zoom-out" size={16} />
         </button>
         <button
           className={styles.graphControlBtn}
@@ -155,9 +159,8 @@ export default function GraphCanvas({
           }}
           aria-label="适应屏幕"
           title="适应屏幕"
-          style={{ fontSize: '0.85rem' }}
         >
-          ⤢
+          <Icon name="fit-screen" size={16} />
         </button>
       </div>
     </div>

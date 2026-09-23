@@ -4,13 +4,20 @@
  * 加载/重命名/删除/扫描/移出笔记的失败都报在这一条上，文案由调用方原样传入。
  * 组件对"报的是哪一类失败"无感，因此同一形状可以同时出现两条（页面级失败 / 重命名校验），
  * 各自独立关闭 —— 这正是原来共用一个 error 槽位时做不到的（BB.8 第 5 条）。
+ *
+ * 批次 B3 的两处改动（形状与文案未动）：
+ * 1. 关闭按钮的 `\u2715` ✕ 换成 `<Icon name="close" />`（全站关闭字形统一到一枚图形）；
+ * 2. 因此按钮**不再有可见文字**，无障碍名必须显式给：`dismissLabel ?? '关闭'`。
+ *    此前无名时的名字来自那个 ✕ 字符本身，读屏念的是一个符号名。
  */
+import Icon from '../../components/Icon';
+
 interface ProjectsErrorBannerProps {
   error: string;
-  /** 点 ✕ 关闭（清空 error，页面骨架不动） */
+  /** 点关闭按钮（清空 error，页面骨架不动） */
   onDismiss: () => void;
   /**
-   * 关闭按钮的无障碍名。默认就是可见的 ✕ —— 只有页面上同时出现两条提示
+   * 关闭按钮的无障碍名。不传时用「关闭」—— 只有页面上同时出现两条提示
    * （页面级失败 + 重命名校验）时才需要区分，否则读屏与测试都分不清点的是哪一条。
    */
   dismissLabel?: string;
@@ -35,11 +42,16 @@ export default function ProjectsErrorBanner({
     >
       {error}
       <button
-        aria-label={dismissLabel}
-        style={{ float: 'right', color: 'var(--color-error)', fontSize: '0.8rem' }}
+        aria-label={dismissLabel ?? '关闭'}
+        style={{
+          float: 'right',
+          display: 'flex',
+          alignItems: 'center',
+          color: 'var(--color-error)',
+        }}
         onClick={onDismiss}
       >
-        ✕
+        <Icon name="close" size={16} />
       </button>
     </div>
   );

@@ -6,6 +6,7 @@
  * 「创建关系 / 建议 / 收起-展开」三个按钮的类名与文案均逐字保留。
  */
 import type { GraphSearchNode } from '../../api/client';
+import Icon from '../../components/Icon';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from '../../components/graph/Graph.module.css';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变。
@@ -69,8 +70,9 @@ export default function GraphToolbar({
           {nodeCount} 节点 · {edgeCount} 边{suggestedCount > 0 && ` · ${suggestedCount} 待审`}
         </span>
 
-        {/* 搜索框 */}
+        {/* 搜索框 —— 批次 B3：补放大镜（此前只有 NotesList 那一处有图形） */}
         <div className={styles.graphSearchBox}>
+          <Icon name="search" size={16} className={styles.graphSearchIcon} />
           <input
             type="text"
             className={styles.graphSearchInput}

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client';
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
+import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -168,18 +169,10 @@ export default function NotesList() {
         }}
       >
         <div className={styles.searchInputWrapper}>
-          <svg
-            className={styles.searchInputIcon}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+          {/* 批次 B3：这一处原本是全站**唯一**的放大镜（内联 `<svg>`，24 网格、
+              线宽 2）；迁进唯一出口后线宽收到 1.5，`.searchInputIcon` 的
+              定位规则与类名原样保留（`verify-built-css.mjs` 的切片标记里有它）。 */}
+          <Icon name="search" size={16} className={styles.searchInputIcon} />
           <input
             type="search"
             placeholder="搜索笔记标题..."
@@ -260,6 +253,8 @@ export default function NotesList() {
           action={
             !keyword ? (
               <button className="btn btn-primary" onClick={() => navigate('/upload')}>
+                {/* 批次 B3：空状态里的上传入口补 `upload` 图标 */}
+                <Icon name="upload" size={16} />
                 上传资料
               </button>
             ) : undefined
@@ -378,6 +373,8 @@ export default function NotesList() {
                   onClick={() => handleDelete(note)}
                   aria-label={`删除 ${note.title}`}
                 >
+                  {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
+                  <Icon name="delete" size={16} />
                   删除
                 </button>
                 <span

@@ -13,6 +13,7 @@
  * 归 `pages/projects/` 下的组件。拆分是**纯提取**：`renderCard(p, index)` 的 JSX、
  * 加载/空列表两种状态的文案、以及破坏性操作的确认逻辑都一字未动。
  */
+import Icon from '../components/Icon';
 import NewProjectForm from './projects/NewProjectForm';
 import ProjectCard from './projects/ProjectCard';
 import ProjectsErrorBanner from './projects/ProjectsErrorBanner';
@@ -79,8 +80,12 @@ export default function Projects() {
         </div>
       ) : projects.length === 0 ? (
         <div className="state-container">
-          <div className="state-icon" style={{ fontSize: 40 }}>
-            📂
+          {/* 批次 B3：`\u{1F4C2}` 📂 换 `<Icon name="folder" />`。
+              原来靠内联 `fontSize: 40` 把 emoji 撑到"插画尺寸"，
+              而图标只允许 16 / 20 / 24 三档 —— 这里取最大档 24。
+              `.state-icon` 自带 `opacity: 0.7`，那一条不动。 */}
+          <div className="state-icon">
+            <Icon name="folder" size={24} />
           </div>
           <p className="state-message">还没有项目</p>
           <p className="state-description">

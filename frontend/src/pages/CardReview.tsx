@@ -48,6 +48,7 @@ import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 import ScheduleFeedback from './cardreview/ScheduleFeedback';
 import CardReviewSummary from './cardreview/CardReviewSummary';
 import CardFace from './cardreview/CardFace';
@@ -150,7 +151,16 @@ export default function CardReview() {
         label={
           <>
             第 {currentIndex + 1} / {cards.length} 张
-            {totalDue > cards.length && <> · 到期共 {totalDue} 张</>}
+            {totalDue > cards.length && (
+              <>
+                {' · '}
+                {/* 批次 B3：复习到期补 `due` 图标（沙漏）—— "到期共 N 张"是
+                    全站唯一把这个数字说成"到期"的地方，正是这个语义的落点。
+                    `verticalAlign: middle`：这一行是内联计数，图标按行内元素排。 */}
+                <Icon name="due" size={16} style={{ verticalAlign: 'middle' }} /> 到期共 {totalDue}{' '}
+                张
+              </>
+            )}
           </>
         }
       />

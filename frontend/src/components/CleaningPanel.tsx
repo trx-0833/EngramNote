@@ -14,6 +14,7 @@ import {
   deleteBlock,
   type NoteDetail,
 } from '../api/client';
+import Icon from './Icon';
 import TaskProgress from './TaskProgress';
 // 清洗面板样式（overhaul-plan 5.6）：原 src/styles/cleaning.css 整表迁到这里
 import styles from './CleaningPanel.module.css';
@@ -295,6 +296,8 @@ export default function CleaningPanel({
                           onClick={() => handleDelete(dup.block_index)}
                           disabled={loading}
                         >
+                          {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
+                          <Icon name="delete" size={16} />
                           删除
                         </button>
                       </div>

@@ -1629,7 +1629,9 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         await expect(page.getByText('掌握度').first()).toBeVisible();
         // 两张卡片都写了同一个章节名 → 用 first()（严格模式会报 2 个元素）
         await expect(page.getByText('章节: 第一章 蓄电池').first()).toBeVisible();
-        await expect(page.getByText('✨ 建议生成拓展知识点')).toBeVisible();
+        // 批次 B3：按钮里的 `\u2728` ✨ 换成了 `<Icon name="ai" />`（装饰性、
+        // aria-hidden），所以可见文字与可访问名里都不再有那个 emoji
+        await expect(page.getByText('建议生成拓展知识点')).toBeVisible();
       },
       // 实测 191
       minNodes: 135,
@@ -1637,6 +1639,7 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     // ── 键盘走查（F-37 的第二半）：这一页此前有**三处**键盘到不了的地方 ──
     // 分组头是 `div[onClick]`、卡片本体是 `div[onClick]`、
     // 「✨ 建议生成拓展知识点」是 `div[onClick]`；axe 三处全绿。
+    // （批次 B3：那个 ✨ 已换成装饰性的 `<Icon name="ai" />`，按钮名不再带 emoji。）
     await expectReachableByTab(
       page,
       page.getByRole('button', { name: '锂离子电池的浮充与均充' }),
@@ -1649,7 +1652,7 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     );
     await expectReachableByTab(
       page,
-      page.getByRole('button', { name: '✨ 建议生成拓展知识点' }),
+      page.getByRole('button', { name: '建议生成拓展知识点' }),
       '知识卡片：「建议生成拓展知识点」',
     );
   });

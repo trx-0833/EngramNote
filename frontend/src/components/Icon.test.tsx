@@ -40,6 +40,13 @@ import { ICONS } from './icons';
  * 前 13 个是侧边栏导航（§4.3 的表格）；`logout` 与 `menu` 是**批次 B2** 为
  * 「退出」与「移动端汉堡」新增的两个 —— 它们不在导航表格里，但同样必须登记，
  * 否则下面那条"注册表与清单严格一一对应"会红（那条断言正是为了这件事故意的）。
+ *
+ * **批次 B3** 又从 15 个补到 46 个，分两段：
+ * - `upload` … `seal`：任务表点名的 17 个（动作 / 状态 / 内容）；
+ * - `chevron` … `relation`：17 个之外**必须补**的 14 个 —— B3 的替换清单点了名
+ *   （`▶` `⋯` `⭐` `🖱` `📖` `+` `−` `⤢` `↔`、认证页三枚内联 SVG、创建模式 `●`、
+ *   `Toast` 的提示槽），却没有任何一个现成图形可用。理由逐个写在 `icons/index.ts`
+ *   那段注释与各图形文件的文件头里。
  */
 const ICON_NAMES: IconName[] = [
   'dashboard',
@@ -57,6 +64,39 @@ const ICON_NAMES: IconName[] = [
   'questions',
   'logout',
   'menu',
+  // ── 批次 B3（一）：任务表点名的 17 个 ──
+  'upload',
+  'delete',
+  'edit',
+  'search',
+  'add',
+  'close',
+  'filter',
+  'due',
+  'processing',
+  'ai',
+  'success',
+  'warning',
+  'error',
+  'quote',
+  'file',
+  'folder',
+  'seal',
+  // ── 批次 B3（二）：17 个之外必须补的 14 个 ──
+  'chevron',
+  'more',
+  'star',
+  'mouse',
+  'book',
+  'zoom-in',
+  'zoom-out',
+  'fit-screen',
+  'mail',
+  'lock',
+  'user',
+  'dot',
+  'info',
+  'relation',
 ];
 
 /** 取渲染结果里的 `<svg>` 根（装饰性图标不在无障碍树里，只能用容器查询） */
@@ -67,8 +107,8 @@ function renderIcon(element: ReactElement) {
   return svg;
 }
 
-describe('唯一出口：13 个导航图标都画得出来', () => {
-  it('★ 13 个语义名全部能渲染出非空 <svg>', () => {
+describe('唯一出口：46 个图标都画得出来', () => {
+  it('★ 46 个语义名全部能渲染出非空 <svg>', () => {
     for (const name of ICON_NAMES) {
       const { container, unmount } = render(<Icon name={name} />);
       const svg = container.querySelector('svg');
@@ -150,7 +190,7 @@ describe('属性透传', () => {
 });
 
 describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () => {
-  it('★ 13 个图标一律 24 网格 / 线宽 1.5 / currentColor / fill:none / round 端点', () => {
+  it('★ 46 个图标一律 24 网格 / 线宽 1.5 / currentColor / fill:none / round 端点', () => {
     for (const name of ICON_NAMES) {
       const svg = renderIcon(<Icon name={name} />);
       expect(svg.getAttribute('viewBox'), `${name} 的 viewBox`).toBe('0 0 24 24');
@@ -174,7 +214,7 @@ describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () 
 });
 
 describe('编译期护栏：未知语义名进不来', () => {
-  it('★ name 不是 string，而是 13 个字的联合类型（拼错必须让 tsc 失败）', () => {
+  it('★ name 不是 string，而是 46 个字的联合类型（拼错必须让 tsc 失败）', () => {
     // 这条用例的价值几乎全在**编译期**：@ts-expect-error 在"没有错误"时自己会报错，
     // 所以它同时钉住两件事 —— ① 联合类型没有被放宽成 string；② 名字写错必须报错。
     // 运行期不做渲染：ICONS['not-an-icon'] 是 undefined，渲染必然抛

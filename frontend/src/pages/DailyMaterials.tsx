@@ -24,6 +24,7 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
 // 页头那一行（标题 + 新建文件夹按钮）交给组件，窄屏换行随之进模块
@@ -550,18 +551,21 @@ export default function DailyMaterials() {
                             cursor: 'pointer',
                           }}
                         >
-                          {/* 展开/折叠箭头（装饰：状态由 aria-expanded 表达） */}
+                          {/* 展开/折叠箭头（装饰：状态由 aria-expanded 表达）。
+                              批次 B3：`▶` 换 `<Icon name="chevron" />`，并且**挂上
+                              `.collapse-arrow` 共享类** —— 这一处此前是一份内联的
+                              死箭头（`transition: transform 0.2s` + 手写 rotate），
+                              与另外三处（KnowledgeCards / QuestionSets / ProjectCard）
+                              各写一遍，旋转时长还不一样（0.2s vs 0.3s / 同一条曲线）。
+                              现在四处共用 `learning.css` 的一条过渡。 */}
                           <span
+                            className={`collapse-arrow ${
+                              expandedFolderId === folder.id ? 'collapse-arrow-open' : ''
+                            }`}
                             aria-hidden="true"
-                            style={{
-                              transition: 'transform 0.2s',
-                              transform:
-                                expandedFolderId === folder.id ? 'rotate(90deg)' : 'rotate(0deg)',
-                              color: 'var(--color-text-secondary)',
-                              fontSize: '0.75rem',
-                            }}
+                            style={{ color: 'var(--color-text-secondary)' }}
                           >
-                            ▶
+                            <Icon name="chevron" size={16} />
                           </span>
                           <span>{folder.name}</span>
                         </button>
@@ -622,6 +626,8 @@ export default function DailyMaterials() {
                           onClick={(e) => handleDeleteFolder(folder.id, e)}
                           aria-label="删除文件夹"
                         >
+                          {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
+                          <Icon name="delete" size={16} />
                           删除
                         </button>
                       )}
@@ -661,6 +667,8 @@ export default function DailyMaterials() {
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploading}
                           >
+                            {/* 批次 B3：上传按钮补 `upload` 图标（托盘 + 向上箭头） */}
+                            <Icon name="upload" size={16} />
                             {uploading ? '上传中...' : '上传文件'}
                           </button>
                           <input

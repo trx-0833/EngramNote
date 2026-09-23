@@ -6,6 +6,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getQuestions, type QuizItem } from '../api/client';
+import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -173,8 +174,22 @@ export default function QuestionSets() {
         }
       />
 
-      {/* 搜索栏 */}
-      <div style={{ marginBottom: 'var(--space-md)' }}>
+      {/* 搜索栏 —— 批次 B3：补放大镜（此前只有 NotesList 那一处有图形） */}
+      <div style={{ position: 'relative', marginBottom: 'var(--space-md)' }}>
+        {/* 放大镜把左内边距吃掉 34px：图标 16px + 左 10px + 与文字留 8px。
+            绝对定位 + `pointer-events: none`，所以它不会挡住输入框的点击 */}
+        <Icon
+          name="search"
+          size={16}
+          style={{
+            position: 'absolute',
+            left: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--color-text-tertiary)',
+            pointerEvents: 'none',
+          }}
+        />
         <input
           type="text"
           placeholder="搜索题目内容..."
@@ -182,6 +197,7 @@ export default function QuestionSets() {
           style={{
             width: '100%',
             padding: '8px 12px',
+            paddingLeft: 34,
             border: '1px solid var(--color-border)',
             borderRadius: '8px',
             fontSize: '0.875rem',
@@ -199,8 +215,16 @@ export default function QuestionSets() {
           gap: 'var(--space-sm)',
           marginBottom: 'var(--space-lg)',
           flexWrap: 'wrap',
+          alignItems: 'center',
         }}
       >
+        {/* 批次 B3：筛选区补漏斗图标 —— 这一栏此前是两串纯文字药丸，
+            没有任何"这是在筛选"的视觉线索 */}
+        <Icon
+          name="filter"
+          size={16}
+          style={{ color: 'var(--color-text-secondary)', flexShrink: 0 }}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>题型：</span>
           {[
@@ -274,12 +298,14 @@ export default function QuestionSets() {
                       aria-expanded={expandedNotes.has(group.note_id)}
                       style={groupToggleStyle}
                     >
-                      {/* 箭头只表达外观：展开状态由 `aria-expanded` 承担 */}
+                      {/* 箭头只表达外观：展开状态由 `aria-expanded` 承担。
+                          批次 B3：`▶` 换 `<Icon name="chevron" />`，旋转过渡仍由
+                          `.collapse-arrow` / `.collapse-arrow-open` 提供 */}
                       <span
                         className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}
                         aria-hidden="true"
                       >
-                        ▶
+                        <Icon name="chevron" size={16} />
                       </span>
                       <strong>{group.note_title}</strong>
                     </button>

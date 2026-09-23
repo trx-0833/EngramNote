@@ -15,6 +15,7 @@ import {
   type TrashNoteItem,
 } from '../api/client';
 import { PurgeNoteDialog } from '../components/DeleteNoteDialog';
+import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -127,6 +128,8 @@ export default function Trash() {
               style={{ background: 'var(--color-error)', color: '#fff' }}
               onClick={() => setShowPurgeAll(true)}
             >
+              {/* 批次 B3：「删除」类按钮此前全是纯文字 —— 补 `delete` 图标 */}
+              <Icon name="delete" size={16} />
               清空回收站
             </button>
           ) : undefined
@@ -226,6 +229,7 @@ export default function Trash() {
                     disabled={operatingId === item.note.id}
                     onClick={() => setNoteToPurge(item)}
                   >
+                    <Icon name="delete" size={16} />
                     彻底删除
                   </button>
                 </div>

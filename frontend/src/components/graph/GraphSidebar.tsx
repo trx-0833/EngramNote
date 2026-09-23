@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction, RefObject } from 'react';
 import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 import type { GraphStats, GraphData, NodeSubgraph, SuggestedRelation } from '../../api/client';
+import Icon from '../Icon';
 import NodeInspector from './NodeInspector';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from './Graph.module.css';
@@ -435,7 +436,20 @@ function SuggestionsPanel({
                 <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => toggleSuggestion(s.id)}>
                   <div style={{ marginBottom: '4px', fontSize: '0.8rem' }}>
                     <strong>{s.card_1_title}</strong>
-                    <span style={{ color: 'var(--color-text-secondary)', margin: '0 4px' }}>↔</span>
+                    {/* 批次 B3：`\u2194` ↔ 换 `<Icon name="relation" />` ——
+                        这一行是"建议关联"卡片的关系主体（关系两端就是这两个标题），
+                        `↔` 承担的是"存在关联"这个语义，不是句读。
+                        图标与两侧标题的对齐交给 `inlineFlex` 包装（原来是裸字符）。 */}
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        verticalAlign: 'middle',
+                        margin: '0 4px',
+                        color: 'var(--color-text-secondary)',
+                      }}
+                    >
+                      <Icon name="relation" size={16} />
+                    </span>
                     <strong>{s.card_2_title}</strong>
                   </div>
                   <div

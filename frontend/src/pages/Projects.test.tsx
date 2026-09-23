@@ -277,7 +277,10 @@ describe('加载与状态展示', () => {
     expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
     expect(screen.getByText(/项目作为标签归属笔记/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '✕' }));
+    // 批次 B3：关闭按钮的 `\u2715` ✕ 换成了 `<Icon name="close" />`，
+    // 于是按钮**不再有可见文字**，无障碍名改由 `dismissLabel ?? '关闭'` 提供
+    // （此前那个名字来自 ✕ 字符本身，读屏念的是一个符号名）。
+    await userEvent.click(screen.getByRole('button', { name: '关闭' }));
 
     expect(screen.queryByText('加载项目列表失败，请稍后重试')).not.toBeInTheDocument();
   });
@@ -786,14 +789,16 @@ describe('页面级失败与重命名校验各自独立', () => {
 
     expect(screen.getByText('项目名称不能为空')).toBeInTheDocument();
     expect(screen.getByText('加载项目列表失败，请稍后重试')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '✕' })).toBeInTheDocument();
+    // 两条提示各有一个关闭按钮：页面级那条用默认名「关闭」（见 ProjectsErrorBanner），
+    // 重命名那条由调用方传 `dismissLabel`
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '关闭重命名提示' })).toBeInTheDocument();
   });
 
   it('★ 关掉"加载失败"不会顺手清掉"名称不能为空"', async () => {
     await showBothErrors();
 
-    await userEvent.click(screen.getByRole('button', { name: '✕' }));
+    await userEvent.click(screen.getByRole('button', { name: '关闭' }));
 
     expect(screen.queryByText('加载项目列表失败，请稍后重试')).not.toBeInTheDocument();
     expect(screen.getByText('项目名称不能为空')).toBeInTheDocument();

@@ -6,6 +6,7 @@
  */
 import type { CSSProperties } from 'react';
 import { updateNoteRole, type NoteDetail, type RetryConvertOutcome } from '../../api/client';
+import Icon from '../../components/Icon';
 import { useToast } from '../../components/Toast';
 // 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
 // （笔记自己的名字，长度不可控），所以只把量尺换成 <PageHeader>，
@@ -125,6 +126,7 @@ export default function NoteDetailHeader({
                     : '编辑笔记内容'
               }
             >
+              <Icon name="edit" size={16} />
               编辑
             </button>
           )}
@@ -173,6 +175,7 @@ export default function NoteDetailHeader({
             </button>
           )}
           <button className="btn btn-danger" onClick={onDelete}>
+            <Icon name="delete" size={16} />
             删除
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/notes')}>

@@ -152,13 +152,14 @@ export default function Sidebar({
             <div key={section.title || 'home'} className={styles.sidebarSection}>
               {section.title && <div className={styles.sidebarSectionTitle}>{section.title}</div>}
               {section.items.map((item) => (
-                /* 每行包一层 div：行内快捷操作（笔记分组的「+ 上传资料」）
+                /* 每行包一层 div：行内快捷操作（笔记分组的「上传资料」）
                    必须是导航按钮的**兄弟**节点 —— 把一个 <button> 嵌进
                    另一个 <button> 是非法 HTML（React 会报 validateDOMNesting），
                    键盘 Tab 也只会落在外层那颗按钮上。
-                   行本身是定位上下文，+ 的位置由模块里的
+                   行本身是定位上下文，快捷按钮的位置由模块里的
                    .sidebarItemAction 绝对定位钉在右端，视觉与嵌套时一致；
-                   两者不再是父子，点击也就不需要 stopPropagation 了。 */
+                   两者不再是父子，点击也就不需要 stopPropagation 了。
+                   （批次 B3：那颗按钮里的 `+` 换成了 `upload` 图标。） */
                 <div key={item.path} className={styles.sidebarItemRow}>
                   <button
                     className={`${styles.sidebarItem}${isActive(item.path) ? ` ${styles.sidebarItemActive}` : ''}`}
@@ -176,7 +177,11 @@ export default function Sidebar({
                       onClick={() => handleNav('/upload')}
                       aria-label="上传资料"
                     >
-                      +
+                      {/* 批次 B3：ASCII `+` 换 `<Icon name="upload" />` ——
+                          这个按钮的动作是「上传资料」（它就是 aria-label），
+                          `+` 只是"加东西"的权宜字形；语义名按动作取，
+                          所以不并到 `add`（那是"新建一条记录"）。 */}
+                      <Icon name="upload" size={16} />
                     </button>
                   )}
                 </div>

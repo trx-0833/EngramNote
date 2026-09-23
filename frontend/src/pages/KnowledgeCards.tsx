@@ -7,6 +7,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getKnowledgeCards, type KnowledgeCard } from '../api/client';
 import { generateExtension, generateExtensionQuestions, markCard } from '../api/knowledge';
+import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -239,8 +240,22 @@ export default function KnowledgeCards() {
         ))}
       </div>
 
-      {/* 搜索栏 */}
-      <div style={{ marginBottom: 'var(--space-lg)' }}>
+      {/* 搜索栏 —— 批次 B3：补放大镜（此前只有 NotesList 那一处有图形） */}
+      <div style={{ position: 'relative', marginBottom: 'var(--space-lg)' }}>
+        {/* 放大镜把左内边距吃掉 34px：图标 16px + 左 10px + 与文字留 8px。
+            绝对定位 + `pointer-events: none`，所以它不会挡住输入框的点击 */}
+        <Icon
+          name="search"
+          size={16}
+          style={{
+            position: 'absolute',
+            left: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--color-text-tertiary)',
+            pointerEvents: 'none',
+          }}
+        />
         <input
           type="text"
           placeholder="搜索卡片标题或内容..."
@@ -248,6 +263,7 @@ export default function KnowledgeCards() {
           style={{
             width: '100%',
             padding: '8px 12px',
+            paddingLeft: 34,
             border: '1px solid var(--color-border)',
             borderRadius: '8px',
             fontSize: '0.875rem',
@@ -294,7 +310,9 @@ export default function KnowledgeCards() {
                       大纲变成 h1 → h2（来源笔记）→ h3（卡片），**层级是完整的**，
                       而且没有新起任何名字、没有多任何一行文字。
                       字号/字重显式钉住（与 `<strong>` 的默认外观一致），
-                      所以视觉不变 —— 与 F-14/F-15/F-18 的做法相同。 */}
+                      所以视觉不变 —— 与 F-14/F-15/F-18 的做法相同。
+                      批次 B3：`▶` 换 `<Icon name="chevron" />`（`▶` 是媒体播放符号，
+                      且只活在字体里）；`.collapse-arrow` 的旋转过渡照旧由它承担。 */}
                   <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
                     <button
                       type="button"
@@ -306,7 +324,7 @@ export default function KnowledgeCards() {
                         className={`collapse-arrow ${expandedNotes.has(group.note_id) ? 'collapse-arrow-open' : ''}`}
                         aria-hidden="true"
                       >
-                        ▶
+                        <Icon name="chevron" size={16} />
                       </span>
                       <span>{group.note_title}</span>
                     </button>
@@ -370,14 +388,15 @@ export default function KnowledgeCards() {
                           }}
                         >
                           {card.is_key_point && (
-                            <span title="重点" style={{ fontSize: '0.85rem', color: '#c9a959' }}>
-                              ⭐
-                            </span>
+                            <Icon name="star" size={16} title="重点" style={{ color: '#c9a959' }} />
                           )}
                           {card.is_difficulty && (
-                            <span title="难点" style={{ fontSize: '0.85rem', color: '#c0392b' }}>
-                              ⚠
-                            </span>
+                            <Icon
+                              name="warning"
+                              size={16}
+                              title="难点"
+                              style={{ color: '#c0392b' }}
+                            />
                           )}
                           <span
                             style={{
@@ -479,7 +498,10 @@ export default function KnowledgeCards() {
                               onClick={(e) => handleGenerateExtension(e, card)}
                               style={extensionHintStyle}
                             >
-                              ✨ 建议生成拓展知识点
+                              {/* 批次 B3：`✨` 换 `<Icon name="ai" />` —— emoji 自带颜色，
+                                  不受 `currentColor` 控制，在 0.7rem 的提示文字里比文字还重 */}
+                              <Icon name="ai" size={16} />
+                              建议生成拓展知识点
                             </button>
                           )}
                         </div>
@@ -508,7 +530,7 @@ export default function KnowledgeCards() {
                           }}
                           title="更多操作"
                         >
-                          {actionLoadingCardId === card.id ? '...' : '⋯'}
+                          {actionLoadingCardId === card.id ? '...' : <Icon name="more" size={16} />}
                         </button>
                         {openMenuCardId === card.id && (
                           <div
@@ -608,15 +630,21 @@ const groupToggleStyle: React.CSSProperties = {
 };
 
 /**
- * 「✨ 建议生成拓展知识点」那个按钮的外观复位（同上，逐项对应原来的 div）。
+ * 「建议生成拓展知识点」那个按钮的外观复位（同上，逐项对应原来的 div）。
  *
  * `#8f7020` 是**修过的色值**，不要改回 `#c9a959`（`--color-accent`）：
  * 它在白底只有 2.26:1，而这里是一行 0.7rem 的提示文字（要求 4.5:1）——
  * 与 a11y-audit 的 F-19/F-33 是同一个"金色压浅底"的洞，`#8f7020`
  * 是同色相压深一档（白底 4.66:1）。
+ *
+ * 批次 B3：`display` 由 `block` 改 `flex` —— 按钮里多了一个 16px 的 `ai` 图标，
+ * 需要 `alignItems` + `gap` 把图标与文字对齐。`flex` 仍是**块级**容器，
+ * 所以"单独占一行 + `marginTop: 4px`"这两条布局行为逐字保留（不是 `inline-flex`）。
  */
 const extensionHintStyle: React.CSSProperties = {
-  display: 'block',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
   marginTop: '4px',
   fontFamily: 'inherit',
   fontSize: '0.7rem',

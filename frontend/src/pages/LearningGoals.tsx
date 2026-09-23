@@ -11,6 +11,7 @@ import { getGoals, createGoal, archiveGoal, deleteGoal, type LearningGoal } from
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：本页原先内联写 2rem，
 // 统一进组件后是 1.5rem；页头那一行（标题 + 按钮、窄屏换行）也由它承担
 import PageHeader from '../components/PageHeader';
@@ -274,6 +275,9 @@ export default function LearningGoals() {
                         onClick={(e) => handleDelete(goal.id, e)}
                         aria-label={`删除 ${goal.name}`}
                       >
+                        {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标
+                            （`aria-label` 保留，图标本身是装饰性的 aria-hidden） */}
+                        <Icon name="delete" size={16} />
                         删除
                       </button>
                     </div>
@@ -555,6 +559,8 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
           onClick={onDelete}
           aria-label={`删除 ${goal.name}`}
         >
+          {/* 批次 B3：同上一处（已归档目标的删除按钮） */}
+          <Icon name="delete" size={16} />
           删除
         </button>
       </div>

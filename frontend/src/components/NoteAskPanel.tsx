@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { askNoteQuestionStream } from '../api/notes';
 import type { AnswerSource } from '../api/client';
+import Icon from './Icon';
 import { renderMarkdown } from '../utils/markdown';
 import { highlightCitation } from '../utils/citationJump';
 import { parseSSEStream } from '../utils/sse';
@@ -311,7 +312,9 @@ export default function NoteAskPanel({
       <div className={styles.askAiHeader} onMouseDown={handleDragStart} title="按住拖动窗口">
         <span className={styles.askAiTitle}>AI 提问</span>
         <button className={styles.askAiClose} onClick={handleClose} title="关闭">
-          ✕
+          {/* 批次 B3：`\u2715` ✕ 换 `<Icon name="close" />`。
+              按钮的 `title="关闭"` 仍是它的可访问名（title 在无内容文本时生效）。 */}
+          <Icon name="close" size={16} />
         </button>
       </div>
       <div className={styles.askAiBody}>
@@ -381,7 +384,12 @@ export default function NoteAskPanel({
                         }
                       }}
                     >
-                      [{i + 1}] 📄 {s.note_title}
+                      {/* 批次 B3：`\u{1F4C4}` 📄 换 `<Icon name="file" />`。
+                          这一处是内联 `<span>`（不是 block 容器），所以图标按普通行内
+                          元素排在原 emoji 的位置，`verticalAlign: middle` 让它与两侧
+                          文字对齐；后续 ` > heading_path` 的拼接方式一字未改。 */}
+                      [{i + 1}] <Icon name="file" size={16} style={{ verticalAlign: 'middle' }} />{' '}
+                      {s.note_title}
                       {s.heading_path
                         ? ` > ${s.heading_path}`
                         : s.chapter_title

@@ -150,12 +150,18 @@
   background: rgba(255, 255, 255, 0.8);
 }
 
+/* 左侧图标的落点。批次 B3：两页的字段图标由内联 `<svg>` 换成
+   `<Icon size={20}>`，所以这里的 18×18 同步收到**允许的三档**里的 20 ——
+   CSS 的宽高会盖掉 svg 元素上的 width/height 属性，留着 18 就等于
+   在组件之外私自开了一档尺寸（B1 的硬约束是"只允许 16/20/24"）。
+   `bottom` 由 11 改 10：图标高了 2px，往上挪 1px 才能让**中心**停在原处。
+   左边距 12 + 图标 20 = 32，仍小于输入框的 `padding-left: 40px`。 */
 .authInputIcon {
   position: absolute;
   left: 12px;
-  bottom: 11px;
-  width: 18px;
-  height: 18px;
+  bottom: 10px;
+  width: 20px;
+  height: 20px;
   color: var(--color-text-tertiary);
   pointer-events: none;
 }

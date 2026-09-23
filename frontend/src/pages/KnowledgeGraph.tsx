@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import Icon from '../components/Icon';
 import GraphCanvas from '../components/graph/GraphCanvas';
 import GraphSidebar from '../components/graph/GraphSidebar';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -178,7 +179,10 @@ export default function KnowledgeGraph() {
       {/* 创建模式提示 */}
       {interaction.createMode && (
         <div className={styles.graphCreateHint}>
-          <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>●</span>
+          {/* 批次 B3：`\u25CF` ● 换 `<Icon name="dot" />` —— `●` 是几何图形块，
+              大小与圆度都跟着字体走；`.graphCreateHint` 本来就是 flex 行，
+              图标与文字的对齐由它的 `align-items: center` 承担 */}
+          <Icon name="dot" size={16} style={{ color: 'var(--color-accent)' }} />
           {interaction.createFirstNode
             ? `已选择: ${interaction.createFirstNode.title}，请点击第二个节点`
             : '请点击第一个节点'}
