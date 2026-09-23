@@ -19,6 +19,9 @@ import {
 } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
+// 页面标题（visual-refactor-plan 批次 C1）：原先借全局 `.assessment-title`
+// （1.75rem + 渐变字），现在统一成 <PageHeader> 的 1.5rem —— 见下方调用点
+import PageHeader from '../components/PageHeader';
 import { renderMarkdown } from '../utils/markdown';
 import { useToast } from '../components/Toast';
 // 本页私有样式（overhaul-plan 5.6 序 5）：`.score-bar*` / `.quiz-question-*` /
@@ -344,11 +347,19 @@ export default function LearningAssessment() {
 
   return (
     <div className="page-enter" style={{ maxWidth: '960px', margin: '0 auto' }}>
-      {/* Header */}
-      <div className="assessment-header">
-        <h1 className="assessment-title">学习评估</h1>
-        <p className="assessment-subtitle">通过笔记比对或开放性问题，评估你对学习资料的掌握程度</p>
-      </div>
+      {/* 页头（批次 C1）：原来这一块靠 `src/styles/assessment.css` 的
+          `.assessment-header` / `.assessment-title` / `.assessment-subtitle`
+          三个**全局**类名（回看当时的判据：那两个页面都在用同一组类名，
+          所以不能塞进任一页面的模块 —— 不是"借了别家模块的类名"）。
+          整块交给 `<PageHeader>` 之后那三个全局类名一起退休，见 assessment.css。
+          影响面：1.75rem → 1.5rem（变小，有意为之）；
+          副标题 0.9rem → 0.875rem（`--text-base`，差 0.4px，肉眼不可分）；
+          `spacing="xl"` 保持原来 `.assessment-header` 的 `margin-bottom: --space-xl`。 */}
+      <PageHeader
+        title="学习评估"
+        subtitle="通过笔记比对或开放性问题，评估你对学习资料的掌握程度"
+        spacing="xl"
+      />
 
       {/* Mode selection */}
       <div className="segment-control" style={{ marginBottom: 'var(--space-lg)' }}>

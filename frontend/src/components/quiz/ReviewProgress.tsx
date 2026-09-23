@@ -17,6 +17,18 @@
  * 这不是随手写出来的差异 —— 把卡片页也压成一行会让它丢掉页面标题。
  * 差异由 `title` 是否存在表达，两种排版共用同一条进度条与同一个公式。
  *
+ * ## 带标题那一种排版在 visual-refactor-plan 批次 C1 换过实现
+ *
+ * 那个 `<h1 style={{ fontSize: '1.2rem' }}>` 是**全站唯一**脱离页面标题体系的
+ * 一处（1.2rem、无衬线、1.2 是五档字号之外的第 6 个值），C1 把它交给
+ * `<PageHeader>`：现在与其它 17 个页面同一个量尺（1.5rem 衬线 600）。
+ * `title` 的类型同时从 `ReactNode` 收窄成 `string` —— `PageHeader` 的标题必须
+ * 是字符串（它渲染成页面唯一的 `<h1>`），而两个调用点（`CardReview.tsx` 与
+ * `ReviewProgress.test.tsx`）本来就都传字符串字面量，`tsc` 会守住这条收窄。
+ * 计数（`label`）改走 `PageHeader` 的 `actions` 槽位，位置与原来一致：标题行右端。
+ * 标题行与进度条之间的间距由 `spacing="sm"`(`--space-sm` 8px) 给 ——
+ * 原先是手写的 `6`（无令牌可依，差 2px）。
+ *
  * ## 关于 `total = 0`
  *
  * 页面在无内容时都走空状态，不会渲染到这里。仍然兜一层：0 作除数会得到
@@ -24,6 +36,9 @@
  * 因为它看起来像渲染坏了。
  */
 import type { ReactNode } from 'react';
+// 页面标题（visual-refactor-plan 批次 C1）：带 `title` 的排版就是卡片复习页的
+// 页头，量尺统一交给它 —— 见文件头"带标题那一种排版"那一节
+import PageHeader from '../PageHeader';
 
 interface ReviewProgressProps {
   /** 当前项序号（0 起） */
@@ -36,8 +51,10 @@ interface ReviewProgressProps {
   label: ReactNode;
   /** 进度条右侧的补充计数（正确数 / 今日额度）；只有一行式排版有这个位置 */
   trailing?: ReactNode;
-  /** 页面标题：给了就切到"标题行 + 全宽条"排版（见文件头） */
-  title?: ReactNode;
+  /** 页面标题：给了就切到"标题行 + 全宽条"排版（见文件头）。
+      类型是 `string` 而不是 `ReactNode`：它渲染成 `<PageHeader>` 的 `<h1>`，
+      而页面标题必须是字符串（批次 C1 的收窄，两个调用点本来就都传字符串）。 */
+  title?: string;
 }
 
 /** 计数文案的统一样式（两侧计数此前是两处手写、值相同的内联样式） */
@@ -64,15 +81,18 @@ export default function ReviewProgress({
   if (title !== undefined) {
     return (
       <div style={{ marginBottom: 'var(--space-md)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          {/* `h1` 而不是 `h2`：`title` 存在就代表"这一块自带页面标题"
-              （本组件文件头里的两种排版），而当前唯一的调用方是卡片复习页
-              —— 那一页除此之外没有任何标题，axe 判 `page-has-heading-one`
-              （F-14/F-15）。改成 h1 之后它也成了页面上唯一的 h1，
-              顺带消掉"h2 出现在 h1 之前"的层级隐患。 */}
-          <h1 style={{ fontSize: '1.2rem' }}>{title}</h1>
-          <span style={counterStyle}>{label}</span>
-        </div>
+        {/* 页面标题（批次 C1）：原来是全站唯一一个 `1.2rem` 的 `<h1>`，
+            现在走统一的 `<PageHeader>`（1.5rem 衬线 600）。
+            它仍然必须是 `h1` 而不是 `h2`：`title` 存在就代表"这一块自带页面标题"
+            （本组件文件头里的两种排版），而当前唯一的调用方是卡片复习页
+            —— 那一页除此之外没有任何标题，axe 判 `page-has-heading-one`
+            （F-14/F-15）。`PageHeader` 渲染的就是 `<h1>`，这条语义未变。
+            `label` 走 `actions` 槽位，仍然在标题行右端。 */}
+        <PageHeader
+          title={title}
+          actions={<span style={counterStyle}>{label}</span>}
+          spacing="sm"
+        />
         {bar}
       </div>
     );

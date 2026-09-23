@@ -1,0 +1,113 @@
+/**
+ * 页面标题（visual-refactor-plan 批次 C1）
+ *
+ * ## 这个模块取代了什么
+ *
+ * 迁移前，18 个页面各自内联写 `<h1 style={{ fontSize: … }}>` 并各挂一两个
+ * 全局类（`heading-serif` / `gradient-text` / `assessment-title`），
+ * "页头那一行"（标题 + 右侧按钮）也各自手写一遍 flex 内联样式 +
+ * 全局类 `.page-header-row`。本文件把这**两件事**收成一处：
+ *
+ * | 原处 | 现在 |
+ * |---|---|
+ * | 内联 `fontSize`（五档） | 本文件 `.pageHeaderTitle` 的 `--text-xl` |
+ * | 全局 `.heading-serif`（`font-weight: 700`） | 本文件 `.pageHeaderTitle`（`600`，批次 C1 规定的统一值） |
+ * | 全局 `.gradient-text`（A3 后只剩 `color`） | 本文件 `.pageHeaderTitle` 的 `color` |
+ * | 全局 `.assessment-title`（`1.75rem` + 渐变字） | 本文件 `.pageHeaderTitle`（该全局类已随之删除） |
+ * | 全局 `.assessment-header` / `.assessment-subtitle` | 本文件的 `spacing="xl"` / `.pageHeaderSubtitle` |
+ * | 各页面页头的内联 `display:flex` / `justify-content` / `marginBottom` | `.pageHeader` + 6 个 `spacing` 档位类 |
+ * | 全局 `.page-header-row` 的 768px 档 | 本文件末尾的 768px 媒体块（值一字未改） |
+ *
+ * ## 统一后的排版（批次 C1 的规定值）
+ *
+ * `font-size: var(--text-xl)`(1.5rem) / `font-family: var(--font-serif)` /
+ * `font-weight: 600` / `letter-spacing: 0`。
+ *
+ * 字距那一档在批次 A3 已经由 `components.css` 的 `h1, h2, h3 { letter-spacing: 0 }`
+ * 归一过；这里再写一次是**故意的**：标题的量尺应当写在标题自己的模块里，
+ * 而不是依赖"元素选择器恰好也在管这件事"。模块类权重 (0,1,0) 稳胜过元素选择器 (0,0,1)。
+ *
+ * ## 窄屏（沿用全局断点 768px，不另造）
+ *
+ * 值逐字来自原 `components.css` 末尾 768px 档的 `.page-header-row`
+ * （`flex-wrap: wrap` + `row-gap: var(--space-sm)`）：窄屏上标题被压成两三行、
+ * 动作区挤到屏幕外，所以允许换行。搬进模块是必须的 —— 类名哈希之后，
+ * 写在全局样式表里的窄屏选择器会**永远选不中**（`css-convention.md` §3 雷区 2）。
+ *
+ * ⚠️ `.page-header-row` 这个全局类**没有**随之删除：`TodayLearn.tsx` 的
+ * "今日待复习"小节头仍在用它（那不是页面标题，不在本批范围内）。
+ */
+
+/* ── 骨架：标题块与动作区同一行两端对齐 ── */
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+/* 标题块。`min-width: 0` 是必需的：flex 项默认 `min-width: auto`，
+   实体标题（笔记 / 卡片的名字，长度不可控）会把动作区挤出容器。 */
+.pageHeaderText {
+  min-width: 0;
+}
+
+/* ── 标题本身（批次 C1 的唯一量尺）── */
+
+.pageHeaderTitle {
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--color-text);
+}
+
+/* 副标题：原 `.assessment-subtitle`（`0.9rem`）与本页 Trash 的内联 `0.875rem`
+   合并成一处。取 `--text-base`(0.875rem) —— `--text-base-alt`(0.9rem) 是
+   存量专用档，base.css 明令"勿新增"（差距 0.4px，肉眼不可分）。 */
+.pageHeaderSubtitle {
+  margin-top: var(--space-xs);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+}
+
+/* 动作区：`flex-shrink: 0` 让按钮永远保持原尺寸，被压缩的只能是标题 */
+.pageHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── 与下方内容的间距（6 档，逐页显式指定）──
+   18 个页面此前各写各的，本批的验收要求"其余 12 页观感不变"，
+   所以默认值之外必须留出逐页可指定的口子（见 PageHeader.tsx 的 SPACING_CLASS）。 */
+
+.pageHeaderSpaceNone {
+  margin-bottom: 0;
+}
+.pageHeaderSpaceXs {
+  margin-bottom: var(--space-xs);
+}
+.pageHeaderSpaceSm {
+  margin-bottom: var(--space-sm);
+}
+.pageHeaderSpaceMd {
+  margin-bottom: var(--space-md);
+}
+.pageHeaderSpaceLg {
+  margin-bottom: var(--space-lg);
+}
+.pageHeaderSpaceXl {
+  margin-bottom: var(--space-xl);
+}
+
+/* ── 窄屏（原 `.page-header-row` 的 768px 档，值一字未改）── */
+
+@media (max-width: 768px) {
+  .pageHeader {
+    flex-wrap: wrap;
+    row-gap: var(--space-sm);
+  }
+}

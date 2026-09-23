@@ -12,7 +12,7 @@
  * | `.quiz-question-*`（4 + 9 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
  * | `.score-summary-*`（3 + 4 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
  * | `.knowledge-points-*`（4 条 + responsive 的 1 条） | 只 `pages/LearningAssessment.tsx` | 本文件 |
- * | `.assessment-header` `.assessment-title` `.assessment-subtitle` | `LearningAssessment.tsx` **与** `pages/projects/ProjectsHeader.tsx` | **留全局**（两个不相邻功能） |
+ * | `.assessment-header` `.assessment-title` `.assessment-subtitle` | `LearningAssessment.tsx` **与** `pages/projects/ProjectsHeader.tsx` | ~~**留全局**（两个不相邻功能）~~ → **已删除**（visual-refactor-plan 批次 C1：两个页面都改用 `components/PageHeader.tsx`，墓碑注释留在 `src/styles/assessment.css`） |
  * | `.note-select-card` `.note-select-card-checked` `:hover` `.note-select-card input[type=checkbox]` | `LearningAssessment.tsx` **与** `pages/projects/ProjectNotesList.tsx`，另有 `Projects.test.tsx` 按类名查询 | **留全局** |
  * | `input[type="checkbox"]`（裸元素选择器） | 全项目兜底（修 `input{width:100%}` 撑满 checkbox） | **留全局**（规范 §4 第 1 条：重置/基础元素选择器） |
  *

@@ -9,6 +9,9 @@ import { getQuestions, type QuizItem } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
+// 页头那一行（标题 + 题量计数）交给组件，窄屏换行随之进模块
+import PageHeader from '../components/PageHeader';
 import {
   questionTypeLabels,
   questionTypeColors,
@@ -157,24 +160,18 @@ export default function QuestionSets() {
 
   return (
     <div className="page-enter">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-md)',
-          flexWrap: 'wrap',
-          gap: 'var(--space-sm)',
-        }}
-      >
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
-          问题集
-        </h1>
-        <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-          共 {total} 道题
-          {filterType !== 'all' || filterDifficulty !== 'all' ? `，筛选后 ${totalFiltered} 道` : ''}
-        </span>
-      </div>
+      <PageHeader
+        title="问题集"
+        spacing="md"
+        actions={
+          <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+            共 {total} 道题
+            {filterType !== 'all' || filterDifficulty !== 'all'
+              ? `，筛选后 ${totalFiltered} 道`
+              : ''}
+          </span>
+        }
+      />
 
       {/* 搜索栏 */}
       <div style={{ marginBottom: 'var(--space-md)' }}>

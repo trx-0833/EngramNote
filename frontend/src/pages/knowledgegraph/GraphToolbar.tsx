@@ -8,6 +8,10 @@
 import type { GraphSearchNode } from '../../api/client';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from '../../components/graph/Graph.module.css';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变。
+// `spacing="none"`：这一处标题不是页面级页头，而是工具栏左栏的第一个元素 ——
+// 与下方内容的间距由 `.graphToolbar` 自己的 `marginBottom` 决定，标题不参与
+import PageHeader from '../../components/PageHeader';
 import {
   cardTypeColors as CARD_TYPE_COLORS,
   cardTypeLabels as CARD_TYPE_LABELS,
@@ -57,9 +61,10 @@ export default function GraphToolbar({
   return (
     <div className={styles.graphToolbar} style={{ marginBottom: 'var(--space-md)' }}>
       <div className={styles.graphToolbarLeft}>
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
-          知识图谱
-        </h1>
+        {/* 页面标题（批次 C1）。计数是**并列的兄弟节点**而不是 `actions`：
+            这一行后面还跟着搜索框，计数夹在标题与搜索框之间，
+            原本就是三个 flex 项用 `.graphToolbarLeft` 的 gap 分开的。 */}
+        <PageHeader title="知识图谱" spacing="none" />
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
           {nodeCount} 节点 · {edgeCount} 边{suggestedCount > 0 && ` · ${suggestedCount} 待审`}
         </span>

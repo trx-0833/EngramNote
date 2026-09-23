@@ -19,6 +19,8 @@ import ErrorDisplay from '../components/ErrorDisplay';
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard';
 // 与卡片复习页共用的进度条与回车键约定（5.12）
 import ReviewProgress from '../components/quiz/ReviewProgress';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
+import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import { useSelfRating } from '../hooks/useSelfRating';
 import { useToast } from '../components/Toast';
@@ -277,13 +279,9 @@ export default function QuickReview() {
           词取自项目里已有的说法：`ReviewProgress` 的文件头把四条复习流程
           列成「答题复习 / **快速复习** / 今日学习 / 卡片复习」。
           同样刻意**不用** `ReviewProgress` 的 `title`：那会把进度条挤到第二行，
-          而答题侧的排版本来就是"标题在别处 + 一行式进度条"（见该组件文件头）。 */}
-      <h1
-        className="heading-serif gradient-text"
-        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
-      >
-        快速复习
-      </h1>
+          而答题侧的排版本来就是"标题在别处 + 一行式进度条"（见该组件文件头）。
+          批次 C1：量尺交给 `<PageHeader>`（字号本就 1.5rem，观感不变）。 */}
+      <PageHeader title="快速复习" />
 
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress

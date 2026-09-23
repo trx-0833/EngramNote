@@ -16,36 +16,54 @@
  *
  * | 类名 | 判据 |
  * |---|---|
- * | `.assessment-header` `.assessment-title` `.assessment-subtitle` | 被 `pages/LearningAssessment.tsx` **与** `pages/projects/ProjectsHeader.tsx` 共用（第 2 条：两个不相邻功能） |
  * | `.note-select-card` `.note-select-card-checked` `:hover` `.note-select-card input[type=checkbox]` | 被 `pages/LearningAssessment.tsx` **与** `pages/projects/ProjectNotesList.tsx` 共用，另有 `pages/Projects.test.tsx` 按 `.note-select-card` 查询（第 2 条 + 测试按类名查询） |
  * | `input[type="checkbox"]` | 兜底修正全局 `input{width:100%}` 把裸 checkbox 撑满 flex 容器的问题；没有"拥有者组件"（第 1 条：重置 / 基础元素选择器） |
  *
- * 这三组的**消费点**分布在两个不相邻的页面功能上，把类名塞进学习评估页的模块
+ * 这两组的**消费点**分布在两个不相邻的页面功能上，把类名塞进学习评估页的模块
  * 会逼 Projects 反向 import 另一个页面的模块 —— 第一批 `.stat-card` 的结论
  * （计划 §4.3）在这里同样成立。它们要等到"学习评估页与项目页共用一份卡片样式"
  * 被抽成真正的共享组件（像第三批抽 `StatCard` 那样）才可能搬走。
+ *
+ * ## `.assessment-header` / `.assessment-title` / `.assessment-subtitle` 已删除
+ * （visual-refactor-plan 批次 C1）
+ *
+ * 上面那张表原本还有第一行：这三个类名被学习评估页与项目页共用，
+ * 所以只能留全局。C1 把 18 个页面的标题统一进 `components/PageHeader.tsx` 之后，
+ * **两个页面都不再需要它们**（各自换成一次 `<PageHeader title=… subtitle=… />`），
+ * 于是整组删除，墓碑留在原地（见下）。
+ *
+ * 删除**不是**因为"它们不该是全局类"—— 当时的判据没错；是因为"页面标题"
+ * 这件事本身被抽成组件了，而组件一旦有了拥有者，样式就该随它进模块。
  */
 
-/* 页面头部（`.assessment-*`：学习评估页 + 项目页共用） */
-.assessment-header {
-  margin-bottom: var(--space-xl);
-}
-
-.assessment-title {
-  font-family: var(--font-serif);
-  font-size: 1.75rem;
-  font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: var(--space-xs);
-}
-
-.assessment-subtitle {
-  color: var(--color-text-secondary);
-  font-size: 0.9rem;
-}
+/* ════════════════════════════════════════════════════════════════
+ * 页头（`.assessment-*`）已于 visual-refactor-plan 批次 C1 删除。
+ *
+ * 这里原来是三条规则：`.assessment-header`（`margin-bottom: --space-xl`）、
+ * `.assessment-title`（`font-family: --font-serif` / `1.75rem` / `700` /
+ * 渐变字 + `background-clip: text` / `margin-bottom: --space-xs`）、
+ * `.assessment-subtitle`（`--color-text-secondary` / `0.9rem`）。
+ * 消费者只有两个页面，各自写着一模一样的"标题 + 副标题"两个节点：
+ * `pages/LearningAssessment.tsx` 与 `pages/projects/ProjectsHeader.tsx`。
+ *
+ * C1 把 18 个页面的标题统一成 `components/PageHeader.tsx` 之后，两个页面
+ * 都换成一次 `<PageHeader title=… subtitle=… spacing="xl" />`，这三条规则
+ * 的引用数归零 —— 删掉而不是留着。逐项去向：
+ *
+ *   - `.assessment-header`  → `PageHeader` 的 `spacing="xl"` 档
+ *     （`.pageHeaderSpaceXl`，值仍是 `--space-xl`）；
+ *   - `.assessment-title`   → `.pageHeaderTitle`（量尺换成批次 C1 的统一值：
+ *     `--text-xl` 1.5rem / `--font-serif` / `600`；**1.75rem → 1.5rem 是
+ *     那一批有意的影响面**，不是被谁压掉的）；
+ *   - `.assessment-subtitle` → `.pageHeaderSubtitle`（字号取 `--text-base`
+ *     0.875rem 而不是这里的 `0.9rem` —— `--text-base-alt` 是"存量专用、
+ *     勿新增"档，差 0.4px）。
+ *
+ * 为什么不留着当"备用"：`css-convention.md` §4 的反面例子就是"零引用的
+ * 预留类"（`link-modal` / `material-list-item` 等 5 个在 5.6 收尾轮被删）
+ * —— 它们既不能搬进模块（没有 tsx import 那个模块，Vite 不编译 ⇒ 规则
+ * 从产物里消失），也没有读者。
+ * ════════════════════════════════════════════════════════════════ */
 
 /* 笔记选择卡片（学习评估页 + 项目页共用；`Projects.test.tsx` 按它查询） */
 .note-select-card {

@@ -10,6 +10,9 @@ import { generateExtension, generateExtensionQuestions, markCard } from '../api/
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
+// 页头那一行（标题 + 卡片数 + 图谱按钮）交给组件，窄屏换行随之进模块
+import PageHeader from '../components/PageHeader';
 import {
   cardTypeLabels,
   cardTypeColors,
@@ -200,31 +203,23 @@ export default function KnowledgeCards() {
 
   return (
     <div className="page-enter">
-      <div
-        className="page-header-row"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-lg)',
-        }}
-      >
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
-          知识卡片
-        </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-            共 {total} 张卡片
-          </span>
-          <button
-            className="btn"
-            style={{ fontSize: '0.8rem', padding: '4px 12px' }}
-            onClick={() => navigate('/graph')}
-          >
-            图谱视图
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="知识卡片"
+        actions={
+          <>
+            <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+              共 {total} 张卡片
+            </span>
+            <button
+              className="btn"
+              style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+              onClick={() => navigate('/graph')}
+            >
+              图谱视图
+            </button>
+          </>
+        }
+      />
 
       {/* 分类筛选 tab —— 批次 C3：改用全局 `.filter-pill` / `.filter-pill-active`。
           这段原先是一份**手写的同款 pill**（padding / borderRadius / transition 各写一遍），

@@ -16,6 +16,8 @@ import {
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard';
 // 与卡片复习页共用的进度条与回车键约定（5.12）
 import ReviewProgress from '../components/quiz/ReviewProgress';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
+import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import { useSelfRating } from '../hooks/useSelfRating';
 import { useToast } from '../components/Toast';
@@ -316,13 +318,10 @@ export default function Review() {
           只是一直没写；传 `title` 会把进度条挤到第二行，那是改版式，
           不是修可访问性。
           标题用词取自项目里已有的说法：`CardReview.tsx` 里指到这一页的链接
-          文案就是「答题复习」（`ReviewProgress` 的文件头也这么称呼它）。 */}
-      <h1
-        className="heading-serif gradient-text"
-        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
-      >
-        答题复习
-      </h1>
+          文案就是「答题复习」（`ReviewProgress` 的文件头也这么称呼它）。
+          批次 C1：量尺交给 `<PageHeader>`（字号本就 1.5rem，观感不变），
+          上面那条"标题长在页面上、不借 `ReviewProgress` 的 `title`"的结论不变。 */}
+      <PageHeader title="答题复习" />
 
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress

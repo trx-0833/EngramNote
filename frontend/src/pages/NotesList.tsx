@@ -14,6 +14,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+// 页面标题（visual-refactor-plan 批次 C1）：1.25rem → 1.5rem
+import PageHeader from '../components/PageHeader';
 import { useToast } from '../components/Toast';
 // 本页私有样式（overhaul-plan 5.6 第三批 + 序 8）：`.search-input-*` 从 `src/styles/learning.css`
 // 拆出，`.list-toolbar` 的两条 480px 规则从 `src/styles/responsive.css` 一起搬进来
@@ -149,13 +151,11 @@ export default function NotesList() {
           axe 判 `page-has-heading-one`（F-18），屏幕阅读器也就没有
           "这是什么页"的答案。占位与搜索框同一行：这一页两行之间的空间
           本来就不宽裕，新起一行会把列表往下推，而标题与"共 N 条"是同一件事
-          （页面身份 + 结果计数），视觉上本来就在一起。 */}
-      <h1
-        className="heading-serif"
-        style={{ fontSize: '1.25rem', marginBottom: 'var(--space-sm)' }}
-      >
-        笔记
-      </h1>
+          （页面身份 + 结果计数），视觉上本来就在一起。
+          批次 C1：1.25rem → 1.5rem（**变大**，有意为之），量尺交给
+          `<PageHeader>`；`spacing="sm"` 保持与下方工具条原有的 8px。
+          导航名「笔记列表」与这里「笔记」的不一致属于产品语义，本批只登记不改。 */}
+      <PageHeader title="笔记" spacing="sm" />
 
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
       <div

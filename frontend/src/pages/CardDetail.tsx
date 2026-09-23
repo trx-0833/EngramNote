@@ -14,6 +14,10 @@ import {
 } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
+// 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
+// （卡片自己的名字），字号本就 1.5rem，用 <PageHeader> 只是让它与全站
+// 页面标题共用同一把量尺 —— 见下方调用点的说明
+import PageHeader from '../components/PageHeader';
 import { cardTypeLabels, difficultyLabels, questionTypeLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -113,44 +117,41 @@ export default function CardDetail() {
 
   return (
     <div className="page-enter">
-      {/* 标题 + 操作按钮行：窄屏换行（.page-header-row，见 responsive.css） */}
-      <div
-        className="page-header-row"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: 'var(--space-lg)',
-        }}
-      >
-        <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>
-          {card.title}
-        </h1>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-          {editing ? (
-            <>
-              <button className="btn btn-primary" onClick={handleSave}>
-                保存
-              </button>
-              <button className="btn btn-secondary" onClick={handleCancelEdit}>
-                取消
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-secondary" onClick={() => setEditing(true)}>
-                编辑
-              </button>
-              <button className="btn btn-danger" onClick={handleDelete}>
-                删除
-              </button>
-            </>
-          )}
-          <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
-            返回
-          </button>
-        </div>
-      </div>
+      {/* 标题 + 操作按钮行（批次 C1：统一进 <PageHeader>。
+          窄屏换行原由全局 `.page-header-row` 负责，现随组件进模块）。
+          ⚠️ 这里的标题是**实体标题** —— 显示的是这张知识卡片自己的名字，
+          不是页面名（页面名是列表页的「知识卡片」）。本批不改这个语义：
+          `card.title` 仍然是这一页的 `<h1>`，只是把量尺换成统一的那把
+          （原字号 1.5rem + 衬线，**观感不变**）。 */}
+      <PageHeader
+        title={card.title}
+        actions={
+          <>
+            {editing ? (
+              <>
+                <button className="btn btn-primary" onClick={handleSave}>
+                  保存
+                </button>
+                <button className="btn btn-secondary" onClick={handleCancelEdit}>
+                  取消
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-secondary" onClick={() => setEditing(true)}>
+                  编辑
+                </button>
+                <button className="btn btn-danger" onClick={handleDelete}>
+                  删除
+                </button>
+              </>
+            )}
+            <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
+              返回
+            </button>
+          </>
+        }
+      />
 
       {/* 来源笔记链接：独立卡片（提升后的核心卡片）显示徽章，悬挂引用显示灰色占位 */}
       {card.note_id ? (

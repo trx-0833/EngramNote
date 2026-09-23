@@ -25,6 +25,9 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
+// 页头那一行（标题 + 新建文件夹按钮）交给组件，窄屏换行随之进模块
+import PageHeader from '../components/PageHeader';
 import { useToast } from '../components/Toast';
 
 /** 允许上传的文件扩展名列表 */
@@ -441,23 +444,15 @@ export default function DailyMaterials() {
 
   return (
     <div className="page-enter">
-      {/* 页面标题和操作按钮 */}
-      <div
-        className="page-header-row"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-lg)',
-        }}
-      >
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
-          今日资料
-        </h1>
-        <button className="btn btn-primary" onClick={handleCreateFolder} disabled={creating}>
-          {creating ? '创建中...' : '新建文件夹'}
-        </button>
-      </div>
+      {/* 页面标题和操作按钮（批次 C1：统一进 <PageHeader>） */}
+      <PageHeader
+        title="今日资料"
+        actions={
+          <button className="btn btn-primary" onClick={handleCreateFolder} disabled={creating}>
+            {creating ? '创建中...' : '新建文件夹'}
+          </button>
+        }
+      />
 
       {/* 文件夹列表 */}
       {loading ? (

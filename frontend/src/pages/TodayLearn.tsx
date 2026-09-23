@@ -33,6 +33,8 @@ import { useToast } from '../components/Toast';
 // 统计卡片（overhaul-plan 5.6 第三批）：与 Dashboard 共用的 `.stat-card*` 已抽成
 // 组件、样式进模块 —— 本页不再需要 `dashboard.css` 里的全局类名
 import StatCard from '../components/StatCard';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
+import PageHeader from '../components/PageHeader';
 import { cardTypeLabels, weakPointBadge } from '../utils/labels';
 
 /** 单题答题状态 */
@@ -361,12 +363,8 @@ export default function TodayLearn() {
 
   return (
     <div className="page-enter">
-      <h1
-        className="heading-serif gradient-text"
-        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
-      >
-        今日学习
-      </h1>
+      {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
+      <PageHeader title="今日学习" />
 
       {error && <ErrorDisplay message={error} onRetry={loadData} />}
 

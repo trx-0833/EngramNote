@@ -12,6 +12,9 @@ import { parseSSEStream } from '../utils/sse';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
 import EmptyState from '../components/EmptyState';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变。
+// 导航名「问答」与页内标题「智能问答」的不一致属于产品语义，本批只登记不改
+import PageHeader from '../components/PageHeader';
 // 本页私有样式（overhaul-plan 5.6 第三批）：`.qa-*` 从 `src/styles/learning.css` 拆出，
 // 连同被哈希的 `@keyframes slideUp`（改名 `qaSlideUp`）—— 见 QA.module.css 文件头
 import styles from './QA.module.css';
@@ -233,12 +236,8 @@ export default function QA() {
 
   return (
     <div className="page-enter" style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <h1
-        className="heading-serif gradient-text"
-        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
-      >
-        智能问答
-      </h1>
+      {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
+      <PageHeader title="智能问答" />
 
       {/* 输入区域 */}
       <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>

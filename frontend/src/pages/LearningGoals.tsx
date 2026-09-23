@@ -11,6 +11,9 @@ import { getGoals, createGoal, archiveGoal, deleteGoal, type LearningGoal } from
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+// 页面标题（visual-refactor-plan 批次 C1）：本页原先内联写 2rem，
+// 统一进组件后是 1.5rem；页头那一行（标题 + 按钮、窄屏换行）也由它承担
+import PageHeader from '../components/PageHeader';
 import { useToast } from '../components/Toast';
 
 /** 目标类型：每日 / 每周 */
@@ -180,23 +183,16 @@ export default function LearningGoals() {
 
   return (
     <div className="page-enter">
-      {/* 页头：标题 + 新建按钮（窄屏换行，见 .page-header-row） */}
-      <div
-        className="page-header-row"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-lg)',
-        }}
-      >
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '2rem' }}>
-          学习目标
-        </h1>
-        <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
-          新建目标
-        </button>
-      </div>
+      {/* 页头：标题 + 新建按钮（批次 C1：2rem → 1.5rem；
+          窄屏换行原由全局 `.page-header-row` 负责，现随组件进模块） */}
+      <PageHeader
+        title="学习目标"
+        actions={
+          <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
+            新建目标
+          </button>
+        }
+      />
 
       {error && <ErrorDisplay message={error} onRetry={fetchGoals} />}
 

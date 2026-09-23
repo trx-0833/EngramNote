@@ -33,6 +33,9 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import ReminderBanner from '../components/ReminderBanner';
+// 页面标题（visual-refactor-plan 批次 C1）：本页原先是内联写的
+// `<h1 style={{ fontSize: '2rem' }}>`，统一进组件后是 1.5rem —— 见 PageHeader.tsx
+import PageHeader from '../components/PageHeader';
 // 统计卡片（overhaul-plan 5.6 第三批）：`.stat-card*` / `.stat-number` /
 // `.stat-label` 原是全局类名、被本页与 TodayLearn 以同一 DOM 结构共用，
 // 抽成组件后样式随组件进模块 —— 见 StatCard.module.css 文件头
@@ -152,12 +155,10 @@ export default function Dashboard() {
 
       {/* 欢迎区域 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1
-          className="heading-serif gradient-text"
-          style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}
-        >
-          欢迎使用 EngramNote
-        </h1>
+        {/* 页面标题（批次 C1）：2rem → 1.5rem。
+            导航名是「仪表盘」、页内标题是「欢迎使用 EngramNote」——
+            这一处不一致属于产品语义，本批**只登记不改**（见计划 C1 的"顺带修"第 ② 条）。 */}
+        <PageHeader title="欢迎使用 EngramNote" spacing="sm" />
         <p
           className="fade-in"
           style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}

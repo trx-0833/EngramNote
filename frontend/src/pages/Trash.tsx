@@ -20,6 +20,10 @@ import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import { sourceTypeLabels } from '../utils/labels';
 import { formatDateTime } from '../utils/datetime';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
+// 页头那一行（标题 + 副标题 + 清空按钮）整块交给组件 —— 副标题也一并进去，
+// 这样按钮仍然是对着"标题 + 副标题"整块垂直居中（与迁移前逐像素相同）
+import PageHeader from '../components/PageHeader';
 import { useToast } from '../components/Toast';
 
 export default function Trash() {
@@ -108,40 +112,26 @@ export default function Trash() {
 
   return (
     <div className="page-enter">
-      {/* 头部：标题 + 清空按钮（窄屏换行，见 .page-header-row） */}
-      <div
-        className="page-header-row"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-lg)',
-        }}
-      >
-        <div>
-          <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>
-            回收站
-          </h1>
-          <p
-            style={{
-              fontSize: '0.875rem',
-              color: 'var(--color-text-secondary)',
-              marginTop: 'var(--space-xs)',
-            }}
-          >
-            笔记及其全部内容（卡片、题目、复习记录、关系）作为整体保存，可随时整体恢复
-          </p>
-        </div>
-        {items.length > 0 && (
-          <button
-            className="btn"
-            style={{ background: 'var(--color-error)', color: '#fff' }}
-            onClick={() => setShowPurgeAll(true)}
-          >
-            清空回收站
-          </button>
-        )}
-      </div>
+      {/* 头部：标题 + 副标题 + 清空按钮（批次 C1：统一进 <PageHeader>；
+          窄屏换行原由全局 `.page-header-row` 负责，现随组件进模块） */}
+      <PageHeader
+        title="回收站"
+        subtitle="笔记及其全部内容（卡片、题目、复习记录、关系）作为整体保存，可随时整体恢复"
+        actions={
+          // `? :` 而不是 `&&`：回收站为空时动作区**必须真的不存在**。
+          // 传 `false` 会渲染出一个 0 宽的空容器，那在窄屏换行后会白占一行
+          // （`row-gap` 照算），而那正是"回收站本来就没有清空按钮"的场景。
+          items.length > 0 ? (
+            <button
+              className="btn"
+              style={{ background: 'var(--color-error)', color: '#fff' }}
+              onClick={() => setShowPurgeAll(true)}
+            >
+              清空回收站
+            </button>
+          ) : undefined
+        }
+      />
 
       {error && <ErrorDisplay message={error} onRetry={fetchTrash} />}
 

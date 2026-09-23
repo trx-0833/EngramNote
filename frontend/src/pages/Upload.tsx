@@ -19,6 +19,8 @@ import {
 // 本页私有样式（overhaul-plan 5.6 第三批）：`.upload-zone*` 从 `src/styles/learning.css`
 // 拆出，连同被哈希的 `@keyframes glowPulse`（改名 `uploadGlowPulse`）—— 见文件头
 import styles from './Upload.module.css';
+// 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
+import PageHeader from '../components/PageHeader';
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -396,12 +398,8 @@ export default function Upload() {
 
   return (
     <div className="page-enter" style={{ maxWidth: '640px', margin: '0 auto' }}>
-      <h1
-        className="heading-serif gradient-text"
-        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
-      >
-        上传学习资料
-      </h1>
+      {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
+      <PageHeader title="上传学习资料" />
 
       {/* 拖拽上传区：支持点击和拖拽两种方式。
           ⚠️ 原来这里整个容器是 `div[role="button"][tabIndex=0]` + 一个只认 `Enter`

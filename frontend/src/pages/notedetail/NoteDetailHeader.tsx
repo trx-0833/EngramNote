@@ -7,6 +7,10 @@
 import type { CSSProperties } from 'react';
 import { updateNoteRole, type NoteDetail, type RetryConvertOutcome } from '../../api/client';
 import { useToast } from '../../components/Toast';
+// 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
+// （笔记自己的名字，长度不可控），所以只把量尺换成 <PageHeader>，
+// 页头骨架与它那 5 条窄屏规则仍留在下面的组件模块里 —— 见调用点的说明
+import PageHeader from '../../components/PageHeader';
 import { formatDateTime } from '../../utils/datetime';
 import { statusClass, statusLabels } from '../../utils/labels';
 import RetryConvertButton from './RetryConvertButton';
@@ -94,9 +98,19 @@ export default function NoteDetailHeader({
           这两层骨架（以及窄屏那 3 条）已随组件搬进 NoteDetailHeader.module.css
           —— 类名哈希后写在 responsive.css 里的选择器会永远选不中（5.6 序 8）。 */}
       <div className={styles.noteDetailHeader}>
-        <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>
-          {note.title}
-        </h1>
+        {/* ⚠️ 这里**只换量尺、不换骨架**（visual-refactor-plan 批次 C1）：
+            这一页的 h1 是**实体标题** —— 显示的是笔记自己的名字，不是页面名；
+            而页头骨架（`.noteDetailHeader` / `.noteDetailActions` 以及它们的
+            768px"上下排列 + 按钮换行 + 按钮撑满"与 480px"一行两个"）承载的是
+            **8 个操作按钮的窄屏行为**，是 5.6 序 8 专门搬进模块、并且被
+            `verify-built-css.mjs` 的切片标记盯着的既有结论。
+            把整行换成 `<PageHeader actions={…}>` 会顺手把那一整套窄屏行为
+            改成 PageHeader 自己的"768px 换行"（按钮不再上下排列、
+            也不再按 50% 撑开）—— 那是 C1 范围之外的版式改动。
+            所以：`<PageHeader>` 在这里只负责"1.5rem 衬线 600"这一件事
+            （原字号本就 1.5rem，观感不变），`spacing="none"` 把与下方内容的
+            间距留给 `.noteDetailHeader` 自己的 `margin-bottom`。 */}
+        <PageHeader title={note.title} spacing="none" />
         <div className={styles.noteDetailActions}>
           {editMode === 'view' && (
             <button
