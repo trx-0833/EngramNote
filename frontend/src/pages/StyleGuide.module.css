@@ -1,0 +1,204 @@
+/**
+ * 设计样板间（`/styleguide`）的样式 —— 模块层（overhaul-plan 5.6 §1）
+ *
+ * 这一页**刻意只用自己的类名**：它展示的是令牌与规范，如果它自己也去借
+ * 全局类（`.card` / `.btn`），那"展示结果"就会被那些类的样式污染，
+ * 失去"看令牌本身"的意义。
+ */
+
+.lead {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  margin-bottom: var(--space-xl);
+  max-width: 62ch;
+}
+
+.section {
+  margin-bottom: var(--space-2xl);
+}
+
+.sectionTitle {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-bottom: var(--space-xs);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.note {
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  margin: var(--space-sm) 0 var(--space-md);
+}
+
+/* ── 色板 ── */
+
+.swatchGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: var(--space-md);
+}
+
+.swatch {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+.swatchChip {
+  width: 56px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.swatchMeta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tokenName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.tokenValue {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  word-break: break-all;
+}
+
+.usage {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+/* 清单里登记了、令牌层里却没有 —— 必须醒目 */
+.missing {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+/* ── 通用行布局 ── */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.typeRow {
+  display: grid;
+  grid-template-columns: 200px 1fr 80px;
+  gap: var(--space-md);
+  align-items: baseline;
+}
+
+.rowMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.typeSample {
+  font-family: var(--font-serif);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spaceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.spaceBar {
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  flex-shrink: 0;
+  min-width: 1px;
+}
+
+/* ── 圆角 / 阴影标本 ── */
+
+.inlineRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xl);
+}
+
+.specimen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  align-items: flex-start;
+}
+
+.radiusBox {
+  width: 72px;
+  height: 48px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.shadowBox {
+  width: 72px;
+  height: 48px;
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+}
+
+/* ── 待补清单 ── */
+
+.todoList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.todoList strong {
+  color: var(--color-text);
+}
+
+/* ── 窄屏（断点沿用全局的 768 / 480，见 css-convention §3 雷区 2）── */
+
+@media (max-width: 768px) {
+  .typeRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-xs);
+  }
+
+  .swatchChip {
+    width: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .inlineRow {
+    gap: var(--space-lg);
+  }
+
+  .radiusBox,
+  .shadowBox {
+    width: 56px;
+    height: 40px;
+  }
+}

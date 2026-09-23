@@ -46,6 +46,13 @@ const Projects = lazy(() => import('./pages/Projects'));
 const LearningAssessment = lazy(() => import('./pages/LearningAssessment'));
 const LearningGoals = lazy(() => import('./pages/LearningGoals'));
 
+// 设计样板间（`/styleguide`，visual-refactor-plan 批次 0.2）：
+// 只在**开发构建**里注册 —— 生产产物不该带一个纯验收页。
+// 注意 `import.meta.env.DEV` 包住的是整个 `lazy()` 调用，而不只是路由：
+// Vite 构建时会把条件替换成 `false`，这个动态 import 随之被 tree-shake 掉，
+// StyleGuide 根本不产生 chunk。若只包路由，chunk 仍会生成并被打进产物。
+const StyleGuide = import.meta.env.DEV ? lazy(() => import('./pages/StyleGuide')) : null;
+
 /** 路由级加载占位 */
 function RouteFallback() {
   return (
@@ -149,6 +156,8 @@ function AppRoutes() {
                 <Route path="/assessment" element={<LearningAssessment />} />
                 <Route path="/goals" element={<LearningGoals />} />
                 <Route path="/upload" element={<Upload />} />
+                {/* 设计样板间：开发期验收工具，不进导航、不进生产产物 */}
+                {StyleGuide && <Route path="/styleguide" element={<StyleGuide />} />}
                 {/* 真正的 404，而不是静默重定向 */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
