@@ -275,7 +275,7 @@ jobs:
         #
         # 缓存的是下载后的浏览器目录，**不包含** `playwright install` 的其他副作用，
         # 所以下一节的安装步骤无论缓存命中与否都必须执行（命中时它只是快速校验）。
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
