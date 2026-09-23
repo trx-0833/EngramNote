@@ -42,6 +42,17 @@
  *
  * `background` 必须是不透明的：否则正文会从按钮的缝隙里透出来，
  * 看起来像渲染坏了。
+ *
+ * ⚠️ **它取的是 `--color-surface`（卡片纸白 #ffffff），不是 `--color-bg`（页面米色 #faf9f7）**。
+ * 这一个字的差别是一条真实的 a11y 回归：四档标签的颜色是逐档字面量
+ * （`utils/labels.ts` 的 `selfRatingOptions[].color`，那份表按**白底**调到
+ * 「勉强想起」`#8f7020` = 4.66:1）。底栏换成米色底之后，同一个 `#8f7020`
+ * 压上去只有 **4.42:1**，掉到 AA 的 4.5:1 以下 —— `axe` 在
+ * `card-review-back` 场景里报 `color-contrast [serious]`。
+ *
+ * 而**取容器色本来就是对的**：这个底栏与 `CardFace` 是 `.card` 里的兄弟节点
+ * （`CardReview.tsx:168-178`），改动前它是透明的、背景就是卡片的白。
+ * 用 `--color-surface` 既复现了改动前的观感，也把对比度还给那份颜色表。
  */
 .selfRatingDock {
   position: sticky;
@@ -49,7 +60,7 @@
   z-index: var(--z-dropdown);
   margin-bottom: var(--space-md);
   padding: var(--space-sm) 0;
-  background: var(--color-bg);
+  background: var(--color-surface);
   border-top: 1px solid var(--color-border-light);
 }
 

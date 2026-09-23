@@ -157,8 +157,14 @@ describe('SelfRatingButtons 的布局（批次 E6：四档固定底部横排）'
     expect(css).toMatch(/\.selfRatingDock\s*\{[^}]*position:\s*sticky/);
     expect(css).toMatch(/\.selfRatingDock\s*\{[^}]*bottom:\s*0/);
     expect(css).not.toMatch(/\.selfRatingDock\s*\{[^}]*position:\s*fixed/);
-    // 不透明底是必须的：否则正文会从按钮的缝隙里透出来，看起来像渲染坏了
-    expect(css).toMatch(/\.selfRatingDock\s*\{[^}]*background:\s*var\(--color-bg\)/);
+    // 不透明底是必须的：否则正文会从按钮的缝隙里透出来，看起来像渲染坏了。
+    // ⚠️ 取的是 `--color-surface`（卡片纸白 #ffffff），**不是** `--color-bg`（页面米色 #faf9f7）。
+    // 四档标签的颜色是 `utils/labels.ts` 里的字面量、按**白底**调到 4.66:1；
+    // 换成米底后同一个 `#8f7020` 只有 4.42:1，跌破 AA 的 4.5:1 ——
+    // axe 在 `card-review-back` 场景里报过一次 `color-contrast [serious]`。
+    // 两条一起钉：正向确认用了对的令牌，反向拦住"改回米色"。
+    expect(css).toMatch(/\.selfRatingDock\s*\{[^}]*background:\s*var\(--color-surface\)/);
+    expect(css).not.toMatch(/\.selfRatingDock\s*\{[^}]*background:\s*var\(--color-bg\)/);
   });
 
   it('两条窄屏规则都还在（56 / 60 的触控目标下限，值一字未改）', () => {
@@ -170,7 +176,11 @@ describe('SelfRatingButtons 的布局（批次 E6：四档固定底部横排）'
 
   it('样式表里 0 处硬编码色值（颜色只能来自令牌或 currentColor）', () => {
     // 逐档的档位色刻意留在 tsx（值来自 utils/labels 的单一数据源），
-    // 所以样式表里不该出现任何字面色
-    expect(css.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+    // 所以样式表里不该出现任何字面色。
+    // ⚠️ **先剥注释再数**（本仓库的既有口径）：本项目按惯例在注释里大量引用
+    // 色值做说明 —— 比如本文件上面那条"底栏为什么用 --color-surface"就写了
+    // 三个 hex。不剥的话这条护栏会因为"注释写得太清楚"而变红，那是假红。
+    const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(code.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
   });
 });
