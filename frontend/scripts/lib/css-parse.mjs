@@ -234,10 +234,23 @@ export function readFromGit(absFile, rev = 'HEAD') {
  * 改成**按内容定位**：从 HEAD 往回走，第一个"还含有这批老类名"的修订
  * 就是迁移前。它与提交顺序、与期间有多少无关提交都无关。
  *
- * 代价是每个候选修订多一次 `git show`；`maxDepth` 40 对本地仓库是毫秒级。
+ * 代价是每个候选修订多一次 `git show`；`maxDepth` 对本地仓库是毫秒级。
  * 真超出深度会返回 null，让调用方报错 —— 绝不静默取一个错的修订。
+ *
+ * ## ⚠️ `maxDepth` 必须随仓库历史增长（批次 A0 实测）
+ *
+ * 原默认值是 **40**。仓库长到 159 个提交之后，最早的几条删除距今 **141 个提交**
+ * （`8cb3d42` 删掉 `gradientShift` 等），窗口够不到，于是
+ * `verify-built-css.mjs` 的"收尾轮死代码清理"三向自检报了 **12 条假的**
+ * "名字或来源样式表写错了" —— 这条检查整整失效了一段时间没人发现，
+ * 因为它**不在 CI 里**（README 的门禁清单没有它），只在人工跑。
+ *
+ * 教训与 `HEAD~N` 那次同型：**用固定窗口去覆盖一个会增长的历史，
+ * 迟早在某次无关提交之后静默失效**。所以默认值放到 500（远大于当前历史），
+ * 并且调用方那边的重复读取有进程内缓存兜着（`verify-built-css.mjs` 的
+ * `cleanupBlobCache`）—— 窗口放大不该以变慢为代价。
  */
-export function findRecentRev(matches, { maxDepth = 40 } = {}) {
+export function findRecentRev(matches, { maxDepth = 500 } = {}) {
   for (let i = 0; i < maxDepth; i += 1) {
     const rev = i === 0 ? 'HEAD' : `HEAD~${i}`;
     let ok;

@@ -1609,6 +1609,37 @@ if (CLEANUP_RETIREMENTS.length === 0) {
   console.log('   ✗ 登记表为空 —— 这套检查等于不存在');
 }
 const cleanupSourceCache = new Map();
+
+/**
+ * `readFromGit` 的**进程内缓存**（批次 A0 修复）。
+ *
+ * ## 为什么非有不可
+ *
+ * `CLEANUP_RETIREMENTS` 有 21 条登记项，其中 8 条指向同一个 `base.css`。
+ * 每一项都要 `findRecentRev` 从 HEAD 往回逐修订读一遍 —— 没有缓存时，
+ * 同样的 (样式表, 修订) 会被**重复读 8 遍**。
+ * 回溯窗口以前写死 40，重复代价还能忍；而 40 这个值已经**失效**：
+ * 仓库现有 159 个提交，最早的几条删除距今 141 个提交（`8cb3d42`），
+ * 窗口够不到，这套自检于是报出 12 条假的"名字或来源样式表写错了"。
+ *
+ * 窗口必须放大（见 `lib/css-parse.mjs` 的 `findRecentRev`），
+ * 而放大后重复读取会变成「项数 × 深度」量级 —— 缓存把它降到「样式表数 × 深度」。
+ *
+ * 只在进程内存活：git 历史在单次运行里不会变。**不缓存异常** ——
+ * "文件在该修订里不存在"是正常情况（新增文件），
+ * `findRecentRev` 靠这个异常继续往前找，吞掉它会让定位静默走偏。
+ */
+const cleanupBlobCache = new Map();
+
+/** 按 (样式表, 修订) 读一次并复用 */
+function readSheetAt(sheet, rev) {
+  const key = `${sheet}@${rev}`;
+  if (!cleanupBlobCache.has(key)) {
+    cleanupBlobCache.set(key, readFromGit(path.join(process.cwd(), sheet), rev));
+  }
+  return cleanupBlobCache.get(key);
+}
+
 /** 从 HEAD 往回找"这个文件里还有这个名字"的修订（按内容定位，见文件头 a 条） */
 function findCleanupRev(sheet, name, kind) {
   const cacheKey = `${sheet}::${kind}::${name}`;
@@ -1617,10 +1648,8 @@ function findCleanupRev(sheet, name, kind) {
     kind === 'keyframes'
       ? new RegExp(`@keyframes\\s+${name.replace(/[-]/g, '\\-')}\\s*\\{`)
       : new RegExp(`(\\.|--)?${name.replace(/[-]/g, '\\-')}(?![\\w-])`);
-  const rev = findRecentRev((candidate) =>
-    re.test(readFromGit(path.join(process.cwd(), sheet), candidate)),
-  );
-  const out = rev ? { rev, text: readFromGit(path.join(process.cwd(), sheet), rev) } : null;
+  const rev = findRecentRev((candidate) => re.test(readSheetAt(sheet, candidate)));
+  const out = rev ? { rev, text: readSheetAt(sheet, rev) } : null;
   cleanupSourceCache.set(cacheKey, out);
   return out;
 }
@@ -1632,7 +1661,7 @@ function findCleanupRev(sheet, name, kind) {
     const gitRev = findCleanupRev(item.sheet, item.name, item.kind);
     if (!gitRev) {
       problems.push(
-        '从 HEAD 往回 40 个提交里找不到"那个文件里还有它"的修订 ⇒ 名字或来源样式表写错了',
+        '从 HEAD 往回的回溯窗口里找不到"那个文件里还有它"的修订 ⇒ 名字或来源样式表写错了，或该删除已超出回溯窗口（见 lib/css-parse.mjs 的 maxDepth）',
       );
     }
     // b. 现在源码里确实没有它

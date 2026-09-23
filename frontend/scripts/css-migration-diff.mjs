@@ -2467,7 +2467,7 @@ for (const batch of BATCHES) {
     batch.rev || (groupsEmpty ? resolveBeforeRevByDecls() : resolveBeforeRev(batch, oldNames));
   if (!rev) {
     console.error(
-      `✗ ${batch.id}：从 HEAD 往回 40 个提交里找不到"迁移前"。` +
+      `✗ ${batch.id}：从 HEAD 往回的回溯窗口里找不到"迁移前"。` +
         `要么登记写错了，要么这个批次其实没迁移过 —— 两种情况都不该继续编差集。`,
     );
     process.exit(3);
@@ -2893,7 +2893,7 @@ const readKeyframeSource = (rel, name) => {
   const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(root, rel), candidate)));
   if (!rev) {
     console.error(
-      `✗ 从 HEAD 往回 40 个提交里找不到还含有 \`@keyframes ${name}\` 的 ${rel} —— ` +
+      `✗ 从 HEAD 往回的回溯窗口里找不到还含有 \`@keyframes ${name}\` 的 ${rel} —— ` +
         `登记写错了类名，或那个文件从来没有过这条动画。不能据此下"动画体一致"的结论。`,
     );
     process.exit(3);
