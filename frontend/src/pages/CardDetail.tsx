@@ -20,6 +20,7 @@ import Icon from '../components/Icon';
 // 页面标题共用同一把量尺 —— 见下方调用点的说明
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import MasteryRing from '../components/MasteryRing';
 import { cardTypeLabels, difficultyLabels, questionTypeLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -209,6 +210,11 @@ export default function CardDetail() {
           style={{
             display: 'flex',
             gap: 'var(--space-sm)',
+            /* 批次 E3：这一行多了一枚掌握度环，它是**固定 28px 高**的图形，
+               而徽章与「章节: …」是一行文字 —— 不显式居中的话默认的
+               `align-items: stretch` 会把环拉成一行的高度（环被纵向抻扁）。
+               对纯文字项来说这条无观感影响（它们的行盒本来就居中）。 */
+            alignItems: 'center',
             marginBottom: 'var(--space-md)',
             fontSize: '0.875rem',
             color: 'var(--color-text-secondary)',
@@ -216,6 +222,11 @@ export default function CardDetail() {
         >
           <span className="badge">{cardTypeLabels[card.card_type] || card.card_type}</span>
           {card.chapter_title && <span>章节: {card.chapter_title}</span>}
+          {/* 掌握度：与知识卡片列表**同一枚环**（批次 E3）。
+              详情页此前完全看不到掌握度 —— 而它正是"这张卡值不值得再花时间"的依据，
+              列表里那一枚点进来看不见是没有道理的。
+              沿用列表侧的判据：`> 0` 才渲染（未复习过的卡片不显示"掌握度 0%"）。 */}
+          {card.mastery_level > 0 && <MasteryRing level={card.mastery_level} />}
         </div>
         {editing ? (
           <div>

@@ -1,0 +1,51 @@
+/**
+ * 掌握度环形的样式（visual-refactor-plan 批次 E3）
+ *
+ * ## 这个文件里没有第二个颜色来源
+ *
+ * 环的唯一着色通道是 `currentColor`：`MasteryRing.tsx` 把
+ * `getMasteryColor(level)`（与 `difficultyColors` 逐值对齐的那套色阶）
+ * 写在行内 `color` 上。这里再写一个颜色就等于把"同一个程度两种颜色"
+ * 的老问题请回来（A4 收敛它花了一整批）。
+ *
+ * ## 为什么轨道色走 `--color-border`
+ *
+ * 环的底槽是**装饰性**的"剩余刻度"，不是文字也不是 UI 边界，
+ * 所以用已有的边框令牌而不是新造一个"掌握度轨道色"。
+ *
+ * ## 尺寸随宿主字号走
+ *
+ * 这里刻意**不写 `font-size`**：环的直径是固定的 28px（SVG 属性给定），
+ * 而右侧那行字跟随宿主 —— 卡片列表里宿主是 0.7rem 的元信息行、
+ * 卡片详情里是 0.875rem 的信息行。写死字号会让同一个组件在两页里
+ * 各自需要一份覆盖规则。
+ */
+
+.masteryRing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* 环是 flex 项：不许被压缩（字长变化时先挤文字，不挤图形） */
+.masteryRingSvg {
+  flex: none;
+}
+
+.masteryRingTrack {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 3.5;
+}
+
+.masteryRingValue {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.5;
+  /* 圆头端点：0% 附近不会退化成一个看不见的点，弧的起止也不会有硬角 */
+  stroke-linecap: round;
+}
+
+.masteryRingText {
+  color: var(--color-text-secondary);
+}

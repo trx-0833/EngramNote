@@ -1,0 +1,80 @@
+/**
+ * 卡面（卡片复习的正面 / 背面）样式 —— visual-refactor-plan 批次 E3
+ *
+ * ## 抄的是 Heptabase 的哪一点
+ *
+ * `docs/visual-symbol-research.md` §C3「知识卡片」行：**正面白底细边框、
+ * 背面转金色淡底**；抄的同时明确**不抄 3D 翻转**（在中文字体渲染下容易糊）。
+ * 所以这里没有 `rotateY` / `perspective`，翻面只用一次不超过 200ms 的淡入 + 底色切换：
+ * "换了一张面"这件事由**底色**（白转金）承担，而不是由三维运动承担。
+ *
+ * ## 雷区：动画名不能跨文件引用
+ *
+ * `@keyframes` 的名字会被 CSS Modules 一起哈希，引用一个定义在别处
+ * （`base.css` / 另一个模块）的动画名会得到"动画静静地不播"。
+ * 所以动画体写在本文件里、名字带组件前缀（`cardFaceReveal`），
+ * 与 `Dialog.module.css` / `NotesList.module.css` 的做法一致。
+ *
+ * ## 时长与 `prefers-reduced-motion`
+ *
+ * 时长取 `--duration-fast`（150ms，base.css 的"即时反馈"档）—— 批次要求不超过 200ms。
+ * 用户在系统里要求减少动效时，整条动画关掉（`animation: none`），
+ * 功能一模一样：卡面照样翻、底色照样变，只是不过渡。
+ * 这条媒体查询写在文件末尾（源序在基础规则之后），与
+ * `Dialog.module.css:151`、`NotesList.module.css:192` 同形。
+ *
+ * ## 属性形态刻意保持一致（`background` / `border` 简写，两边都简写）
+ *
+ * `.cardFace` 与 `.cardFaceBack` 会同时挂在一个元素上（`` `${styles.cardFace}
+ * ${styles.cardFaceBack}` ``）。若一边写 `border`（简写）、另一边写
+ * `border-color`（长写），`scripts/verify-built-css.mjs` 的
+ * `CROSS_CLASS_SHORTHAND_RULES` 会把它记成一条**未登记的跨类简写竞争**
+ * （那条检查是双向自检的：新竞争不登记就红）。写成同一种形态就是普通覆盖，
+ * 不产生竞争条目 —— 这是刻意选的写法，不是笔误。
+ */
+
+.cardFace {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  /* 翻面时这张面会被重新挂载（tsx 侧的 `key`），动画逐次重播 */
+  animation: cardFaceReveal var(--duration-fast) var(--ease-out-expo);
+}
+
+/* 背面：金色淡底。`--color-accent-light` 是 rgba(201,169,89,.12)，
+   压在白色卡面上呈 #f9f5eb —— 文字色仍用 `--color-text` /
+   `--color-text-secondary`（对 #f9f5eb 分别是 15.5:1 / 6.1:1，都达标）；
+   金色本身（`--color-accent`）在这块底上只有 2.07:1，**不许**当文字色用。 */
+.cardFaceBack {
+  background: var(--color-accent-light);
+  /* 边框与底色同源：背面是一块"软金底"，不再留一条深色硬边
+     （写 `border` 简写而不是 `border-color`，理由见文件头） */
+  border: 1px solid var(--color-accent-light);
+}
+
+/* 背面正文：只保留排版，不再自带底色。
+   这里原来是 `background: var(--color-bg)` 的浅色块（批次 E3 删除）——
+   整张面已经转成金色淡底，块内再叠一层米白会把金色压成灰调、两层底互相打架。 */
+.cardFaceContent {
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+@keyframes cardFaceReveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 用户要求减少动效时不播动画（卡面直接出现，功能一模一样） */
+@media (prefers-reduced-motion: reduce) {
+  .cardFace {
+    animation: none;
+  }
+}

@@ -15,13 +15,13 @@ import ErrorDisplay from '../components/ErrorDisplay';
 // 页头那一行（标题 + 卡片数 + 图谱按钮）交给组件，窄屏换行随之进模块
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import MasteryRing from '../components/MasteryRing';
 import {
   cardTypeLabels,
   cardTypeColors,
   cardCategoryLabels,
   cardCategoryColors,
   FALLBACK_CATEGORY_COLOR,
-  getMasteryColor,
 } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -45,7 +45,12 @@ const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
 /* `getMasteryColor` 已于 A4 移入 `utils/labels.ts`：它原来用的是 a11y 压深**之前**
    的旧值（`<70` 那档是 `#c9a959`，白底只有 2.25:1、不达标），
    而同一份代码库里的 `difficultyColors` 早就改了 ——
-   "难度"与"掌握度"表达的是同一种程度语义，色阶必须同源。 */
+   "难度"与"掌握度"表达的是同一种程度语义，色阶必须同源。
+
+   批次 E3：掌握度的**渲染**跟着搬进了 `components/MasteryRing.tsx`（环形），
+   本文件不再直接调用 `getMasteryColor` —— 色阶同源这条约定没有放宽，
+   只是从"每个调用点自己取色"变成"唯一出口取色"，两个页面（列表 / 详情）
+   共用同一枚环。 */
 
 /** 将卡片按所属笔记分组（纯函数，模块级便于复用与测试） */
 function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
@@ -472,39 +477,18 @@ export default function KnowledgeCards() {
                         </p>
                       )}
 
-                      {/* 掌握度进度条 */}
+                      {/* 掌握度：环形（批次 E3，借鉴表 §C2 第 6 行「环形 / 圆点，不用星星」）。
+                          这里原来是「标签 + 百分比 + 一条 6px 进度条」两行结构，
+                          本批次把进度条删掉、换成 `MasteryRing`：
+                          进度条读作"完成度"，而掌握度是会随遗忘**回落**的刻度；
+                          环也不占满整行宽度，卡片网格里少一条横线。
+                          保留下来的东西：`> 0` 才渲染（未复习过的卡片不显示"掌握度 0%"）、
+                          字号 0.7rem 的元信息量级、右侧那行可见文字（数值不靠图形表达）。
+                          `MasteryRing` 的环是 `aria-hidden` 装饰件，
+                          读屏用户听到的就是"掌握度 NN%"这一句，信息一点没少。 */}
                       {card.mastery_level > 0 && (
-                        <div style={{ marginTop: 'var(--space-sm)' }}>
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: '0.7rem',
-                              color: 'var(--color-text-secondary)',
-                              marginBottom: '2px',
-                            }}
-                          >
-                            <span>掌握度</span>
-                            <span>{Math.round(card.mastery_level)}%</span>
-                          </div>
-                          <div
-                            style={{
-                              width: '100%',
-                              height: '6px',
-                              background: 'var(--color-border)',
-                              borderRadius: '3px',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: `${Math.min(100, Math.max(0, card.mastery_level))}%`,
-                                height: '100%',
-                                background: getMasteryColor(card.mastery_level),
-                                transition: 'width 0.3s ease',
-                              }}
-                            />
-                          </div>
+                        <div style={{ marginTop: 'var(--space-sm)', fontSize: '0.7rem' }}>
+                          <MasteryRing level={card.mastery_level} />
                           {card.mastery_level >= 80 && (
                             /* 真 `<button>` 而不是 `div[onClick]`：这一行是"生成拓展知识点"的
                                入口，键盘必须到得了（原来它是个没有 role/tabIndex 的 div，

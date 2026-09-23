@@ -16,6 +16,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDueCards, submitCardReview, type DueCard } from '../api/review';
 import { selfRatingOptions } from '../utils/labels';
 import CardReview from './CardReview';
+// 卡面的类名从模块导出取（css-convention §6：类名是哈希的，测试按类名查时
+// 只能走 `styles` 导出，别写字面量）
+import cardFaceStyles from './cardreview/CardFace.module.css';
 
 vi.mock('../api/review', () => ({
   getDueCards: vi.fn(),
@@ -382,5 +385,57 @@ describe('CardReview 与答题复习共用的交互件（5.12）', () => {
     // 必须真的回到复习界面并重新拉队列，而不是停在一个空壳汇总页上
     await screen.findByText('浮充的定义');
     expect(mockedDue).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * 批次 E3：卡面有了"正面 / 背面"两种外观
+ * （借鉴 `docs/visual-symbol-research.md` §C3「知识卡片」行：正面白底细边框、
+ * 背面转金色淡底；不抄 3D 翻转）。
+ *
+ * 样式值本身（时长令牌、reduced-motion、颜色令牌）由
+ * `cardreview/CardFace.test.tsx` 从样式表源码守；这里守的是
+ * **DOM 上真的换了面**这件事 —— 两者缺一，改坏的路径都不响。
+ */
+describe('CardReview 的卡面：正面 / 背面（批次 E3）', () => {
+  beforeEach(() => {
+    mockedDue.mockReset();
+    mockedSubmit.mockReset();
+    mockedDue.mockResolvedValue({ items: [makeCard()], total: 1 });
+  });
+
+  /** `container` 里那张卡面；`back` 为 null 表示当前是正面 */
+  function findFace(container: HTMLElement) {
+    const face = container.querySelector(`.${cardFaceStyles.cardFace}`);
+    return {
+      face,
+      isBack: face ? face.classList.contains(cardFaceStyles.cardFaceBack) : false,
+    };
+  }
+
+  it('★ 未翻面时是正面：挂着 cardFace、不挂 cardFaceBack', async () => {
+    const { container } = renderPage();
+    await screen.findByText('浮充的定义');
+
+    const { face, isBack } = findFace(container);
+    expect(face, '卡面必须挂着模块里的 .cardFace').not.toBeNull();
+    expect(isBack).toBe(false);
+  });
+
+  it('★ 翻面后换成背面（金色淡底那一版），且标题仍在卡面之内', async () => {
+    const { container } = renderPage();
+    await screen.findByText('浮充的定义');
+    const before = findFace(container).face;
+
+    await userEvent.click(screen.getByRole('button', { name: '显示答案' }));
+
+    const { face, isBack } = findFace(container);
+    expect(face).not.toBeNull();
+    expect(isBack).toBe(true);
+    // 换 key ⇒ 重新挂载：CSS 动画只在元素插入时启动，
+    // 不换 key 的话 React 会复用同一个 DOM 节点，翻面动画只播第一次
+    expect(face).not.toBe(before);
+    // 翻面只换外观：标题依然在这张面里，层级与位置都没动
+    expect(face!.querySelector('h2')?.textContent).toBe('浮充的定义');
   });
 });
