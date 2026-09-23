@@ -512,3 +512,24 @@ Vitest 在 `test.css` 未开（本项目默认）时，`.module.css` 的默认�
 > `git worktree remove --force <worktree>`，最后断言工作区 `node_modules`
 > 的条目数 ≫ 0。**不要**改用 `git stash` 回退工作区 ——
 > 多个 agent 共享同一个工作区，stash 会把别人未提交的改动一起搅进来。
+
+---
+
+### 逐页精修（阶段 E）新增 / 删除的全局类
+
+> **登记规矩**：`src/styles/*.css` 的**全局类**，只要**新增或删除**，就要在这里留一条 ——
+> 写明批次、动作、按 §4 判据为什么它该留全局（**grep 出的文件数**，不是"感觉像公共件"）、
+> 以及与其它全局类的竞争结论（要不要进 `CASCADE_PAIRS` /
+> `CROSS_CLASS_SHORTHAND_RULES` / `ORDER_PAIRS`）。
+>
+> ⚠️ **这条约定没有任何脚本强制**：上面那张表里的注册表都只覆盖"**已有**规则之间"的
+> 竞争与删除（`CASCADE_PAIRS` 逐属性算得主、`CLEANUP_RETIREMENTS` 三向自检
+> "迁移前有 → 源码里没了 → 产物里没了"），**"多了一个类"这件事谁也不看**。
+> 漏登记不会变红，只会静默漂移 —— 所以它是人写的规矩，靠这一节留痕。
+> （删除的那一侧有 `CLEANUP_RETIREMENTS` 兜底：全局类真的删了却"忘了登记"，
+> 门禁会以"退休类名还在产物里 / 注册表为空"两种方式报出来。）
+
+| 批次 | 类名 | 动作 | 写入点（§4 第 2 条：数文件数） | 与全局层的竞争结论 |
+|---|---|---|---|---|
+| **E8** | `.btn-danger-outline` | **新增** —— `src/styles/components.css`，紧跟 `.btn-danger:hover` 之后 | 两个**不相邻**功能：`pages/Trash.tsx`（页头「清空回收站」+ 行内「彻底删除」）与 `pages/LearningGoals.tsx`（进行中卡片 + 已归档行内的「删除」）⇒ 留全局（塞进任一页面的模块都会逼另一个页面反向 import） | ① 与 `.btn` 并列使用（`className="btn btn-danger-outline"`）：逐属性核对 `.btn` 的 12 条声明（display / align-items / justify-content / gap / padding / border-radius / font-weight / font-size / transition / line-height / position / overflow）与本类三条（background / color / border）**没有同名属性** ⇒ **不进** `CASCADE_PAIRS`；两者的简写展开（`.btn` 的 padding / transition / font… 与本类的 `border-*`）也不交叠 ⇒ **不是** `CROSS_CLASS_SHORTHAND_RULES` 的候选。② 与 `.btn-danger`（实底那条）**从不同框**：描边是"打开确认框"的入口、实底是确认框里那一下（§C2 第 14 行），没有任何一处 `className` 同时挂着两者 ⇒ 加注册项反而会因"注册项空转"报红，**不要加**。 |
+| **E8** | 无删除 | —— | —— | 本批**没有删除**任何全局类 / `@keyframes` / 令牌，所以 `CLEANUP_RETIREMENTS` 不需要新增条目（E8 只改模块层与新增上面这一个全局类）。 |

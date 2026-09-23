@@ -25,6 +25,8 @@ import ProjectNotesList from './ProjectNotesList';
 import ProjectRenameForm from './ProjectRenameForm';
 import ScanResultPanel from './ScanResultPanel';
 import { unwrapProjectNotes } from './helpers';
+// 本卡片私有样式（visual-refactor-plan 批次 E8）：计数 chip 的两个颜色
+import styles from './ProjectCard.module.css';
 
 interface ProjectCardProps {
   project: Project;
@@ -96,13 +98,20 @@ export default function ProjectCard({
 
   return (
     <div
-      className={`card card-hover fade-in stagger-${(index % 5) + 1}`}
+      /* 批次 E8：色条从**顶部**挪到**左侧**（`docs/visual-symbol-research.md` §C3
+         的「项目卡左侧色条」，Trilium 的类型色条做法，与笔记列表 E2 的 3px 左色条同一套）。
+         原来是在这里写内联 `borderTop: '3px solid var(--color-primary)'` ——
+         内联样式压得过一切，也就等于把这条视觉规则钉死在 tsx 里（改不了 hover、
+         改不了窄屏）。改用**已有的**全局类 `.card-accent-left`（与 `.card` 的
+         `border` 简写竞争已经在 `verify-built-css.mjs` 的 `CROSS_CLASS_SHORTHAND_RULES`
+         里登记过，见 `card × card-accent-left`），与 Dashboard / TodayLearn /
+         ReminderBanner 四处完全同形。 */
+      className={`card card-hover card-accent-left fade-in stagger-${(index % 5) + 1}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
         padding: 20,
-        borderTop: '3px solid var(--color-primary)',
       }}
     >
       {/* 项目头：名称 + 笔记数 */}
@@ -155,10 +164,9 @@ export default function ProjectCard({
               color: 'var(--color-text-tertiary)',
             }}
           >
-            <span
-              className="badge"
-              style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}
-            >
+            {/* 计数 chip（批次 E8）：`.badge` 提供胶囊基线，本模块只补"浅墨底 + 墨蓝字"
+                两个颜色 —— 这两个属性 `.badge` 一个都没声明，所以没有同权重竞争。 */}
+            <span className={`badge ${styles.projectNoteCountChip}`}>
               {p.note_count ?? 0} 篇笔记
             </span>
           </div>

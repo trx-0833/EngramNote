@@ -398,7 +398,9 @@ export default function Upload() {
   }
 
   return (
-    <div className="page-enter" style={{ margin: '0 auto' }}>
+    /* 批次 E8：去掉了内联的 `margin: '0 auto'` —— 页宽三档（批次 C2）之后
+       居中由 `App.module.css` 的 `.main` 负责，这一条是 C2 之前自己居中的遗留。 */
+    <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
       <PageHeader title="上传学习资料" />
 
@@ -482,8 +484,8 @@ export default function Upload() {
 
       {/* 上传设置（prepare 完成后显示，可重命名文件；PDF 额外支持按页裁剪） */}
       {prepared && (
-        <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-          <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
+        <div className={`card ${styles.uploadPanel}`}>
+          <p className={styles.uploadPanelTitle}>
             上传设置{prepared.source_type === 'pdf' && `（共 ${prepared.page_count ?? '?'} 页）`}
           </p>
 
@@ -611,8 +613,8 @@ export default function Upload() {
       )}
 
       {/* 解析方式选择 */}
-      <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>解析方式</p>
+      <div className={`card ${styles.uploadPanel}`}>
+        <p className={styles.uploadPanelTitle}>解析方式</p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           {BACKEND_OPTIONS.map((option) => (
             <button
@@ -638,8 +640,8 @@ export default function Upload() {
       </div>
 
       {/* 项目标签选择（支持多选） */}
-      <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>所属项目（标签，可多选）</p>
+      <div className={`card ${styles.uploadPanel}`}>
+        <p className={styles.uploadPanelTitle}>所属项目（标签，可多选）</p>
         {projects.length > 0 ? (
           <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
             {projects.map((project) => {
@@ -678,8 +680,8 @@ export default function Upload() {
       </div>
 
       {/* 笔记角色选择 */}
-      <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-        <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>笔记类型</p>
+      <div className={`card ${styles.uploadPanel}`}>
+        <p className={styles.uploadPanelTitle}>笔记类型</p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           {NOTE_ROLE_OPTIONS.map((option) => (
             <button
@@ -696,8 +698,8 @@ export default function Upload() {
 
       {/* 关联学习资料（仅 personal_note 时显示） */}
       {noteRole === 'personal_note' && availableMaterials.length > 0 && (
-        <div className="card" style={{ marginTop: 'var(--space-md)' }}>
-          <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>关联学习资料（可选）</p>
+        <div className={`card ${styles.uploadPanel}`}>
+          <p className={styles.uploadPanelTitle}>关联学习资料（可选）</p>
           <div
             style={{
               display: 'flex',

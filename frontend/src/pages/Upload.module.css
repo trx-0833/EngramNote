@@ -18,12 +18,19 @@
  * 收尾轮的死代码清理已经把它连同 `scaleIn` / `cleaning-pulse` 一起删掉
  * （证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`）；
  * 本模块的 `uploadGlowPulse` 有引用者，**不动**。
+ *
+ * ## 批次 E8 补的三处（visual-refactor-plan §6 E8 行）
+ *
+ * | 改动 | 依据 |
+ * |---|---|
+ * | 拖拽区虚线改**墨蓝描边**（`--color-border` → `--color-primary`） | §C2 第 13 行「墨蓝描边虚线区」；顺带修掉一个真问题：`#e8e6e1` 与纸白底只有 **1.1:1**，而它是这个**控件**的唯一边界（WCAG 1.4.11 要求 ≥3:1，改后 12:1） |
+ * | `.uploadPanel` / `.uploadPanelTitle`：设置卡片的间距与小标题 | tsx 里逐字重复了 5 遍的内联 `marginTop` / `fontWeight + marginBottom`，值一个字没改 |
  */
 
 /* ── 拖拽上传区 ── */
 
 .uploadZone {
-  border: 2px dashed var(--color-border);
+  border: 2px dashed var(--color-primary);
   border-radius: var(--radius-lg);
   padding: var(--space-2xl);
   text-align: center;
@@ -35,7 +42,9 @@
 }
 
 .uploadZone:hover {
-  border-color: var(--color-primary);
+  /* 默认边框已经是主色，hover 改用深一档的墨（`--color-primary-hover`）+
+     淡墨底：两级都在令牌里，不新增色值。 */
+  border-color: var(--color-primary-hover);
   background: var(--color-primary-light);
 }
 
@@ -63,4 +72,32 @@
   50% {
     box-shadow: 0 0 20px rgba(201, 169, 89, 0.4);
   }
+}
+
+/* ── 设置卡片（批次 E8）── */
+
+/**
+ * 上传页正文由若干张 `.card` 组成："上传设置 / 解析方式 / 所属项目 / 笔记类型 /
+ * 关联学习资料"，迁移前每一张都写一遍内联 `style={{ marginTop: 'var(--space-md)' }}`。
+ *
+ * 与全局 `.card` 的竞争：`.card` 声明 background / border / border-radius /
+ * padding / box-shadow / transition，本类只声明 `margin-top` —— **没有同名属性**，
+ * 所以不需要登记 `CASCADE_PAIRS`，也不构成跨类简写竞争
+ * （判据与 `NotesList.module.css` 的 `.noteListItem` 逐字相同）。
+ */
+.uploadPanel {
+  margin-top: var(--space-md);
+}
+
+/**
+ * 卡片里的小标题。
+ *
+ * 仍然是 `<p>` 而不是 `<h2>`：本批只做视觉，把 `<p>` 提成标题会改文档大纲
+ * （axe 的 heading-order 那一路），属于"顺手的结构改动"，要带截图单独一轮
+ * （先例：a11y-audit 的 F-18 / F-31 都是单独一轮做的）。
+ * 取值逐字沿用内联的 `fontWeight: 500` + `marginBottom: var(--space-sm)`。
+ */
+.uploadPanelTitle {
+  font-weight: 500;
+  margin-bottom: var(--space-sm);
 }

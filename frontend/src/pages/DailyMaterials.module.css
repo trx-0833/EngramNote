@@ -1,0 +1,134 @@
+/**
+ * 今日资料页私有样式（visual-refactor-plan 批次 E8）
+ *
+ * 计划 §6 E8 行与 `docs/visual-symbol-research.md` §C3 的「每日材料」行：
+ * **极简单栏时间线；卡片之间用留白分隔而非边框；元数据收进 chip**。
+ *
+ * 迁移前的资料行是一条 `div.card.card-hover`（白底 + 1px 边框 + 阴影 + 内边距），
+ * 一屏七八条时"边框套边框"的噪音很大；Memos 的减法就是把这些边界撤掉，
+ * 只留**一条竖轨 + 每项一个圆点**（时间线）与项与项之间的留白。
+ *
+ * ## 类名判据（css-convention.md §4）
+ *
+ * grep 只命中 `pages/DailyMaterials.tsx` ⇒ 进模块。
+ * 本模块的类**都不与全局类并列**（资料行不再挂 `.card` / `.card-hover`），
+ * 所以没有同权重竞争，不需要 `CASCADE_PAIRS`；也不构成跨类简写竞争。
+ * 行内保留的 `badge badge-*` / `statusClass(...)` / `collapse-arrow` 都挂在
+ * **别的元素**上（来源徽章 / 状态文字 / 文件夹折叠箭头），与本文件的类无交集。
+ *
+ * ## 时间线的几何（两处必须对齐，所以写在一起）
+ *
+ * 圆点在项内 `left: 0`（宽 7 ⇒ 中心 3.5px），竖轨在容器内
+ * `left: calc(--space-lg + 3px)`（宽 1 ⇒ 中心 24 + 3.5px）——
+ * 项的左边界 = 容器的内容左边界 = 容器 padding-left（`--space-lg`）。
+ * 改任一侧都要改另一侧，这也是把两条规则放在同一段里的原因。
+ *
+ * 字号沿用迁移前的字面量（标题 0.9rem、元数据 0.8rem）：这一批只换承载结构。
+ */
+
+/* ── 时间线 ── */
+
+.materialsTimeline {
+  position: relative;
+  padding-left: var(--space-lg);
+}
+
+/* 竖轨：1px 淡墨线（`--color-border-light`，与卡片边框同色，但不围成框） */
+.materialsTimeline::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-lg) + 3px);
+  top: var(--space-sm);
+  bottom: var(--space-sm);
+  width: 1px;
+  background: var(--color-border-light);
+}
+
+.materialsTimelineItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-out-expo);
+}
+
+/* 项与项之间用**留白**分隔（`--space-xs`），不画分隔线 */
+.materialsTimelineItem + .materialsTimelineItem {
+  margin-top: var(--space-xs);
+}
+
+/* 悬停反馈：淡墨底，替代原来 `.card-hover` 的浮起 + 阴影
+   （卡片边界已经撤掉，浮起会显得那块"飘"在时间线外） */
+.materialsTimelineItem:hover {
+  background: var(--color-primary-light);
+}
+
+/* 时间线圆点 */
+.materialsTimelineItem::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: border-color var(--duration-fast) var(--ease-out-expo);
+}
+
+.materialsTimelineItem:hover::before {
+  border-color: var(--color-primary);
+}
+
+.materialsTimelineBody {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 资料名。`h3`：这一页的大纲是 h1「今日资料」→ h2（文件夹名）→ h3（资料），
+   与迁移前同级（批次 F-31 定的），只是字号/字重从内联搬到这里。 */
+.materialsNoteTitle {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: 0 0 var(--space-xs);
+}
+
+.materialsNoteLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 元数据行：来源徽章 + 状态 + 两枚 chip。
+   字号 0.8rem 挂在**行**上（迁移前是给状态/大小/时间三处各写一遍内联 fontSize），
+   徽章自带 0.75rem 不受影响 —— 三个元素的字号因此与迁移前逐字相同。 */
+.materialsMetaRow {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+
+/* 元数据 chip（§C3「元数据收进 chip」）：文件大小、上传时间。
+   来源类型仍是 `.badge`、处理状态仍是 `.status-*`（两者各自带语义色，不动）。 */
+.materialsMetaChip {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* 行尾的"去笔记详情"指示：批次 E8 把原来的 Unicode `→` 换成 `chevron` 图标
+   （图形本身就是朝右的折线，不需要旋转）。纯装饰 —— 真行为在标题的 `<Link>` 上。 */
+.materialsGoIcon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}

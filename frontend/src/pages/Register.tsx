@@ -1,6 +1,10 @@
 /**
  * @file 注册页面
  * @description 未认证分支的第二个入口（登录页之外唯一未认证页面）。
+ *
+ * ⚠️ 与登录页共用 `Auth.module.css`，包括那一处**刻意保留的渐变**
+ * （批次 A3 的边界／E8 行「登录注册（渐变只留这里）」）—— 删它属于产品级外观决策，
+ * 见该文件 `.authTitle` 上方的注释。
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -52,10 +56,7 @@ export default function Register() {
         <main>
           <h1 className={styles.authTitle}>注册 EngramNote</h1>
 
-          <form
-            onSubmit={handleSubmit}
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}
-          >
+          <form onSubmit={handleSubmit} className={styles.authForm}>
             <div className={styles.authInputGroup}>
               <label htmlFor="email">邮箱</label>
               {/* 批次 B3：内联 `<svg>` → `<Icon name="mail" />`（图形逐点未改，
@@ -106,10 +107,7 @@ export default function Register() {
             </div>
 
             {error && (
-              <p
-                role="alert"
-                style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}
-              >
+              <p role="alert" className={styles.authError}>
                 {error}
               </p>
             )}

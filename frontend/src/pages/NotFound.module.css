@@ -1,0 +1,36 @@
+/**
+ * 404 页私有样式（visual-refactor-plan 批次 E8）
+ *
+ * 从 `App.tsx` 的内联样式搬来（原本是 `style={{ textAlign: 'center', padding: '64px 16px' }}`
+ * 加两处逐元素的 margin）。类名判据：grep 只命中 `pages/NotFound.tsx` ⇒ 进模块（规范 §4）。
+ *
+ * ## 与全局层的竞争
+ *
+ * `.notFoundHomeLink` 与全局的 `.btn` / `.btn-primary` 并列在同一个 `<a>` 上
+ * （`className={`btn btn-primary ${styles.notFoundHomeLink}`}`）。
+ * 本类只声明 `text-decoration` —— 那两个全局类都**没有**声明它
+ * （`.btn` 管 display / padding / 圆角 / 字体 / 过渡，`.btn-primary` 管底色 / 字色 / 阴影），
+ * 所以既不需要 `CASCADE_PAIRS`，也不构成跨类简写竞争。
+ * 它压过的是 `base.css` 里给所有 `<a>` 的默认下划线（元素选择器，权重更低）。
+ */
+.notFoundPage {
+  text-align: center;
+  /* 上下 64 → --space-2xl(48px)：不留裸数字（大小差异在一屏居中的空页上不可分） */
+  padding: var(--space-2xl) var(--space-md);
+}
+
+.notFoundTitle {
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  margin-bottom: var(--space-sm);
+}
+
+.notFoundMessage {
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-md);
+}
+
+.notFoundHomeLink {
+  text-decoration: none;
+}

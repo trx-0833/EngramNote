@@ -1,0 +1,29 @@
+/**
+ * 单个项目卡片的私有样式（visual-refactor-plan 批次 E8）
+ *
+ * 本批只从 tsx 里搬出**一处**：计数 chip 的两个颜色。
+ * 原来它写在内联 `style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}`
+ * —— 值逐字未改，只是从"钉在 tsx 里"改成模块类（新写的样式该走样式表，
+ * 也要让 `.badge` 的胶囊基线与本条的颜色各自有唯一的定义处）。
+ *
+ * ## 为什么只有一个类
+ *
+ * 卡片上其余的排版（`display: flex` / `gap: 12` / `padding: 20`、
+ * 头尾两行按钮的 `flexWrap`）**刻意留在内联**：它们与卡片自身的高度/换行行为
+ * 绑在一起（`flexWrap` 是 5.10 移动端补丁，注释写在 tsx 里），
+ * 一次搬家会把"内联权重高于媒体查询"这个事实藏起来 ——
+ * 而本批的任务是色条 + 计数 chip，不是重排卡片。
+ *
+ * ## 与全局层的竞争
+ *
+ * `.projectNoteCountChip` 与 `.badge` 并列在同一个 `<span>` 上
+ * （`className={`badge ${styles.projectNoteCountChip}`}`）。
+ * 逐属性核对：`.badge` 声明的是 display / align-items / padding /
+ * border-radius / font-size / font-weight / letter-spacing，本类是
+ * background / color —— **没有同名属性**，所以不需要 `CASCADE_PAIRS`，
+ * 也不构成跨类简写竞争（`CROSS_CLASS_SHORTHAND_RULES` 只认简写表里的六族 + 若干）。
+ */
+.projectNoteCountChip {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}

@@ -1,0 +1,82 @@
+/**
+ * 学习目标页私有样式（visual-refactor-plan 批次 E8）
+ *
+ * 计划 §6 E8 行与 `docs/visual-symbol-research.md` §C3 的「学习目标」行：
+ * **目标卡 = 标题 + 横向进度条 + 右侧百分比**；§C2 第 11 行再补一条
+ * **「达成态加金色描边」**。
+ *
+ * ## 类名判据（css-convention.md §4）
+ *
+ * grep 只命中 `pages/LearningGoals.tsx` ⇒ 进模块。
+ *
+ * ## 与全局层的竞争：三处，两处无竞争、一处靠"伪元素"绕开
+ *
+ * | 本模块的类 | 与谁并列 | 有同名属性吗 |
+ * |---|---|---|
+ * | `.goalProgressBarTrack`（`flex: 1`） | 全局 `.progress-bar` | **没有** —— 后者只声明 height / background / border-radius / overflow |
+ * | `.goalProgressValue` | 无（自己的 span） | — |
+ * | `.goalCardAchieved`（`position: relative`） | 全局 `.card` / `.card-hover` | **没有** —— 两者都不声明 position |
+ *
+ * `css-convention.md` §3 雷区 5 的判据是"**同名属性**、同权重、跨文件"，
+ * 上表三行都不满足，所以不需要往 `CASCADE_PAIRS` 登记。
+ *
+ * ## 为什么"达成态的金色描边"用伪元素而不是 `border-color`
+ *
+ * `.card` 写的是 `border: 1px solid var(--color-border-light)`（**简写**）。
+ * 模块里若写 `border-color: var(--color-accent)`（长写），这一对
+ * （`card × _goalCardAchieved`）就会被 `verify-built-css.mjs` 的
+ * `CROSS_CLASS_SHORTHAND_RULES` 报成"未登记的跨类简写竞争" ——
+ * 而它确实是：同权重、同元素、谁赢只看先后。
+ *
+ * 用 `::after` 画一圈 1px 金环则**完全不参与**那个竞争：
+ *   - `::after` 上的 `border` / `inset` 是它自己的盒子，与 `.card` 的边框无关；
+ *   - 选择器带伪元素 ⇒ 不属于"单类规则"，跨类简写检查按定义不看它；
+ *   - 圆角与卡片同值（`--radius-md`），且在 `:hover`（`.card-hover:hover`
+ *     会把 `box-shadow` 换成更深的一档）时仍然在 —— 用 `box-shadow` 画环
+ *     会在 hover 时被整条替换掉。
+ */
+.goalProgressRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+/* 进度条本体：让出剩余宽度（`.progress-bar` 是 5 处共用的全局类，值不动） */
+.goalProgressBarTrack {
+  flex: 1;
+  min-width: 0;
+}
+
+/**
+ * 右侧百分比。
+ *
+ * 衬线 + 700 是本项目"数字用衬线"的既定规矩（设计规范 §1 R3、
+ * `StatCard.module.css` 的统计大数字同源）。`min-width` + 右对齐保证
+ * 0% → 100% 变化时数字不会把进度条推来推去。
+ */
+.goalProgressValue {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  min-width: 3.5ch;
+  text-align: right;
+  /* 数字用等宽字形：百分比跳动时宽度稳定 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 达成态：金色描边（§C2 第 11 行）── */
+
+.goalCardAchieved {
+  position: relative;
+}
+
+.goalCardAchieved::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}

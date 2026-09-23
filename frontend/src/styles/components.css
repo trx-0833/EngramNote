@@ -74,6 +74,57 @@ button {
   box-shadow: 0 4px 12px rgba(192, 57, 43, 0.3);
 }
 
+/**
+ * ── 描边危险按钮（visual-refactor-plan 批次 E8）──
+ *
+ * `docs/visual-symbol-research.md` §C2 第 14 行的规矩：
+ * **「危险按钮用描边而非实底，实底只留给最终确认」**。
+ *
+ * 所以红色分两级：
+ *
+ * | 层级 | 类名 | 用在哪 |
+ * |---|---|---|
+ * | 入口（可回头） | `.btn-danger-outline`（就是这一条） | 行内的「彻底删除」、页头的「清空回收站」、行内「删除」——它们点开的是一个**确认框**，还没删任何东西 |
+ * | 终局（不可恢复） | `.btn-danger`（实底，上面那条） | 只在确认框里那一下：对话框的确认按钮 |
+ *
+ * 这与批次 D2 收尾定的"红色的稀缺性"是同一条纪律的延伸：红色只出现在
+ * 真正不可恢复的路径上，而"打开确认框"不是那一步。
+ *
+ * ## 为什么是全局类（规范 §4 第 2 条：按 grep 出的文件数判）
+ *
+ * 写入点有**两个不相邻功能**：回收站（页头「清空回收站」+ 行内「彻底删除」）
+ * 与学习目标（进行中卡片 + 已归档行内的「删除」）。塞进任一页面的模块都会逼
+ * 另一个页面反向 import（第一批 `.stat-card` 的结论）。
+ * 登记见 `frontend/docs/css-convention.md` §7「E8 新增的全局类」。
+ *
+ * ## 为什么直接写 `border` / `background` 而不 `composes: btn`
+ *
+ * 它总是与 `.btn` **并列**使用（`className="btn btn-danger-outline"`），
+ * 不需要 compose：`button` 元素重置（本文件顶部）已经清掉 UA 的边框与底色，
+ * 这里只补"描边 + 危险色"两件事。逐属性核对过 `.btn` 的声明
+ * （display / align-items / justify-content / gap / padding / border-radius /
+ * font-weight / font-size / transition / line-height / position / overflow）
+ * 与这三条**没有同名属性**，所以不需要往 `CASCADE_PAIRS` 登记，
+ * 也不构成"跨类简写竞争"（`CROSS_CLASS_SHORTHAND_RULES`）。
+ *
+ * 对比度：`--color-error`(#c0392b) 白底 5.44:1、`--color-bg` 上 5.15:1，
+ * hover 底 `--color-error-light` 之上 4.9:1 —— 都过 AA 的 4.5:1。
+ */
+.btn-danger-outline {
+  background: transparent;
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+}
+
+.btn-danger-outline:hover {
+  background: var(--color-error-light);
+  transform: translateY(-1px);
+}
+
+.btn-danger-outline:active {
+  transform: translateY(0);
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--color-text-secondary);

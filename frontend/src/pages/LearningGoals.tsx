@@ -19,6 +19,8 @@ import ConfirmDialog from '../components/ConfirmDialog';
 // 对话框基座（visual-refactor-plan 批次 D2）：新建目标弹窗的遮罩 / 面板 / Esc 由它渲染
 import Dialog from '../components/Dialog';
 import { useToast } from '../components/Toast';
+// 本页私有样式（visual-refactor-plan 批次 E8）：进度条右侧的百分比 + 达成态金框
+import styles from './LearningGoals.module.css';
 
 /** 目标类型：每日 / 每周 */
 type GoalType = 'daily' | 'weekly';
@@ -279,7 +281,7 @@ export default function LearningGoals() {
                         </span>
                       </div>
                       <button
-                        className="btn btn-danger"
+                        className="btn btn-danger-outline"
                         style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                         onClick={(e) => handleDelete(goal.id, e)}
                         aria-label={`删除 ${goal.name}`}
@@ -458,6 +460,16 @@ interface GoalCardProps {
 function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
   // 进度百分比，后端可能不返回，默认为 0
   const progress = goal.progress_percentage ?? 0;
+  // 进度条的宽度是"钳过的"百分比：后端理论上会给 0-100，但脏数据不该把条顶出卡片
+  const clampedProgress = Math.min(Math.max(progress, 0), 100);
+  /**
+   * 是否达成。
+   *
+   * `target_mastery > 0` 是必要的守卫：后端的校验允许目标掌握度为 **0**
+   * （`LearningGoals.tsx` 的创建校验是 0-100），而 `progress >= 0` 恒真 ——
+   * 不守卫的话"目标 0%"的卡片一建出来就是金框。
+   */
+  const achieved = goal.target_mastery > 0 && progress >= goal.target_mastery;
   // 剩余天数（依赖 deadline 变化才重算；useMemo 内读时钟属"剩余天数"展示的合理非纯场景，
   // 每次 deadline 变化时重算即可，不追求渲染纯函数）
   const daysRemaining = useMemo(() => {
@@ -469,7 +481,10 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
   const noteCount = goal.scope_notes?.length ?? 0;
 
   return (
-    <article className="card card-hover" style={{ padding: 'var(--space-lg)' }}>
+    <article
+      className={`card card-hover${achieved ? ` ${styles.goalCardAchieved}` : ''}`}
+      style={{ padding: 'var(--space-lg)' }}
+    >
       {/* 顶部：名称 + 类型徽章 */}
       <div
         style={{
@@ -528,26 +543,25 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
         </div>
       </div>
 
-      {/* 进度条 */}
-      <div style={{ marginBottom: 'var(--space-md)' }}>
+      {/* 进度条 + 右侧百分比（批次 E8）。
+          原来是一行"学习进度 …… 80%"浮在进度条上方（两端对齐），数字与条子
+          不在同一条视线上；现在数字落在条的右侧，"进度到哪儿了"一眼读完。
+          数字不再只是装饰：`role="progressbar"` + `aria-valuenow` 把它交给读屏
+          （`aria-label` 是必需的 —— 缺名的 progressbar 会被 axe 的
+          `aria-progressbar-name` 判违规），原来那行"学习进度"文字因此不必再占一行。
+          `.progress-bar` / `.progress-bar-fill` 是 5 处共用的全局类，值一个字没动。 */}
+      <div className={styles.goalProgressRow}>
         <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            fontSize: '0.8rem',
-            color: 'var(--color-text-secondary)',
-            marginBottom: 'var(--space-xs)',
-          }}
+          className={`progress-bar ${styles.goalProgressBarTrack}`}
+          role="progressbar"
+          aria-label="学习进度"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={clampedProgress}
         >
-          <span>学习进度</span>
-          <span>{progress}%</span>
+          <div className="progress-bar-fill" style={{ width: `${clampedProgress}%` }} />
         </div>
-        <div className="progress-bar">
-          <div
-            className="progress-bar-fill"
-            style={{ width: `${Math.min(Math.max(progress, 0), 100)}%` }}
-          />
-        </div>
+        <span className={styles.goalProgressValue}>{progress}%</span>
       </div>
 
       {/* 操作按钮 */}
@@ -561,7 +575,7 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
           归档
         </button>
         <button
-          className="btn btn-danger"
+          className="btn btn-danger-outline"
           style={{ fontSize: '0.75rem', padding: '4px 8px' }}
           onClick={onDelete}
           aria-label={`删除 ${goal.name}`}

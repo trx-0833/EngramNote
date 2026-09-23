@@ -1,6 +1,11 @@
 /**
  * @file 登录页面
  * @description 品牌化登录页面，渐变背景 + 毛玻璃卡片
+ *
+ * ⚠️ 这一页（与注册页）是**全站唯一保留渐变**的地方（批次 A3 的边界，
+ * `visual-refactor-plan` §6 E8 行：「登录注册（渐变只留这里）」）。
+ * 页底的 `--gradient-hero` 与标题的 `--gradient-primary` 都**不要**顺手去掉，
+ * 理由与代价写在 `Auth.module.css` 的 `.authTitle` 注释里。
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -55,10 +60,7 @@ export default function Login() {
         <main>
           <h1 className={styles.authTitle}>登录 EngramNote</h1>
 
-          <form
-            onSubmit={handleSubmit}
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}
-          >
+          <form onSubmit={handleSubmit} className={styles.authForm}>
             <div className={styles.authInputGroup}>
               <label htmlFor="email">邮箱</label>
               {/* 批次 B3：这一处原来是内联 `<svg>`（24 网格、`strokeWidth=2`、
@@ -93,10 +95,7 @@ export default function Login() {
             </div>
 
             {error && (
-              <p
-                role="alert"
-                style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}
-              >
+              <p role="alert" className={styles.authError}>
                 {error}
               </p>
             )}

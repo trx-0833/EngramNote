@@ -87,6 +87,27 @@
 
 /* ── 评分条 ── */
 
+/**
+ * 区块小标签（批次 E8）。
+ *
+ * 这一段原先在 tsx 里**逐字重复了 5 遍**（「选择笔记」×2、「学习资料」×2、
+ * 「我的笔记」），每处都是一份相同的内联 style（0.8rem / 600 / 大写 / 0.05em /
+ * 三级文字色）。搬进来之后只有一处定义，改一次全部生效；
+ * 取值逐字沿用内联那一份，所以是**零视觉变化**的搬家。
+ *
+ * 它挂在 `<h2>` 上，而 `<h2>` 没有别的类名 ⇒ 不与任何全局类竞争
+ * （全局的 `h1, h2, h3 { color; letter-spacing }` 是**元素**选择器，
+ * 权重低于单类，与迁移前"内联压过元素规则"的胜负关系一致）。
+ */
+.assessmentSectionLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-sm);
+}
+
 .scoreBar {
   margin-bottom: var(--space-md);
 }
@@ -124,16 +145,36 @@
   position: relative;
 }
 
+/**
+ * 评分条填充色（visual-refactor-plan 批次 E8）。
+ *
+ * 原先是三条 `linear-gradient(90deg, <令牌>, <硬编码亮色>)`：
+ *
+ *   | 档位 | 迁移前 | 迁移后 |
+ *   |---|---|---|
+ *   | 高（≥80） | `--color-success` → `#34d399` | `--color-success` |
+ *   | 中（≥60） | `--color-warning` → `#f59e0b` | `--color-warning` |
+ *   | 低 | `--color-error` → `#ef4444` | `--color-error` |
+ *
+ * 三处问题，一次解决：
+ *   ① 三个亮色端**绕过令牌层**（`design-drift.mjs` 统计的硬编码色值里就有它们）；
+ *   ② 与设计规范 §1 R1「层次用浓度，不用渐变」相悖 —— 渐变只留给
+ *      Auth/Hero 背景与「AI 生成中」流光两处（`visual-design-spec.md:26`）；
+ *   ③ 亮色端在全站最浅的底（`--color-border-light` #f0eee9）之上只有 **1.4:1**，
+ *      也就是进度条"走到哪儿"在最右端反而看不清（WCAG 1.4.11 要求 ≥3:1）。
+ *
+ * 分档阈值不动（仍在 tsx 的 `renderScoreBar` 里）：80 / 60。
+ */
 .scoreBarFillHigh {
-  background: linear-gradient(90deg, var(--color-success), #34d399);
+  background: var(--color-success);
 }
 
 .scoreBarFillMid {
-  background: linear-gradient(90deg, var(--color-warning), #f59e0b);
+  background: var(--color-warning);
 }
 
 .scoreBarFillLow {
-  background: linear-gradient(90deg, var(--color-error), #ef4444);
+  background: var(--color-error);
 }
 
 /* ── 问题卡片（14 条冲突的战场，下面写的是**实测胜者**）── */

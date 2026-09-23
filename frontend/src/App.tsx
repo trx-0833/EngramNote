@@ -48,6 +48,11 @@ const DailyMaterials = lazy(() => import('./pages/DailyMaterials'));
 const Projects = lazy(() => import('./pages/Projects'));
 const LearningAssessment = lazy(() => import('./pages/LearningAssessment'));
 const LearningGoals = lazy(() => import('./pages/LearningGoals'));
+// 404（批次 E8）：原来是一个**内联在本文件里的局部函数**，现在抽成
+// `pages/NotFound.tsx`（计划 §6 E8 行点名的那一页）。与其余业务页一样懒加载 ——
+// 它只在 `path="*"` 命中时才需要。文案、DOM 语义、`href="/"` 的真实跳转都逐字未变
+// （`e2e/a11y.spec.ts` 的 `not-found` 场景按 heading/link 的名字断言它）。
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 // 设计样板间（`/styleguide`，visual-refactor-plan 批次 0.2）：
 // 只在**开发构建**里注册 —— 生产产物不该带一个纯验收页。
@@ -159,26 +164,6 @@ const WIDTH_CLASS: Record<PageWidth, string> = {
   standard: styles.mainStandard,
   full: styles.mainFull,
 };
-
-/** 未找到页面（原先 `*` 会静默重定向到 "/" 或登录页，链路失效时用户无从判断） */
-function NotFound() {
-  return (
-    <div style={{ textAlign: 'center', padding: '64px 16px' }}>
-      <h1 className="heading-serif" style={{ fontSize: '2rem', marginBottom: 8 }}>
-        404
-      </h1>
-      <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
-        页面不存在，可能是链接已失效。
-      </p>
-      {/* 按钮造型的链接：`base.css` 现在给所有 <a> 加了默认下划线
-          （正文链接必须能与正文区分，见 a11y-audit F-13/F-26），
-          这里显式关掉 —— 它长得是按钮，不是正文里的链接。 */}
-      <a className="btn btn-primary" href="/" style={{ textDecoration: 'none' }}>
-        返回首页
-      </a>
-    </div>
-  );
-}
 
 /**
  * 路由组件

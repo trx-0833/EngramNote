@@ -347,7 +347,10 @@ export default function LearningAssessment() {
   );
 
   return (
-    <div className="page-enter" style={{ margin: '0 auto' }}>
+    /* 批次 E8：去掉了内联的 `margin: '0 auto'` —— 页宽三档（批次 C2）之后
+       居中由 `App.module.css` 的 `.main` 负责，这一条是 C2 之前自己居中的遗留，
+       在行内还压过了 `.main` 的任何边距（内联权重最高），留着只会误导下一处要调宽度的人。 */
+    <div className="page-enter">
       {/* 页头（批次 C1）：原来这一块靠 `src/styles/assessment.css` 的
           `.assessment-header` / `.assessment-title` / `.assessment-subtitle`
           三个**全局**类名（回看当时的判据：那两个页面都在用同一组类名，
@@ -441,18 +444,9 @@ export default function LearningAssessment() {
                     （axe 的 heading-order）。字号/字重/字距都显式钉着，
                     所以**一个像素都没动**，做法与已修的 F-18（笔记列表卡片
                     h3→h2）、F-14/F-15（CardFace h3→h2）逐字相同。 */}
-                <h2
-                  style={{
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: 'var(--color-text-tertiary)',
-                    marginBottom: 'var(--space-sm)',
-                  }}
-                >
-                  选择笔记
-                </h2>
+                {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
+                    现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
+                <h2 className={styles.assessmentSectionLabel}>选择笔记</h2>
                 <div
                   style={{
                     display: 'grid',
@@ -515,18 +509,9 @@ export default function LearningAssessment() {
             >
               {/* Material notes */}
               <div className="card">
-                <h2
-                  style={{
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: 'var(--color-text-tertiary)',
-                    marginBottom: 'var(--space-sm)',
-                  }}
-                >
-                  学习资料
-                </h2>
+                {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
+                    现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
+                <h2 className={styles.assessmentSectionLabel}>学习资料</h2>
                 {materialNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                     暂无学习资料
@@ -543,18 +528,9 @@ export default function LearningAssessment() {
               </div>
               {/* Personal notes */}
               <div className="card">
-                <h2
-                  style={{
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: 'var(--color-text-tertiary)',
-                    marginBottom: 'var(--space-sm)',
-                  }}
-                >
-                  我的笔记
-                </h2>
+                {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
+                    现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
+                <h2 className={styles.assessmentSectionLabel}>我的笔记</h2>
                 {personalNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                     暂无个人笔记（请先上传并标记为"我的笔记"）
@@ -698,18 +674,8 @@ export default function LearningAssessment() {
           {/* Quiz mode - 已链接模式：选择 personal_note */}
           {mode === 'quiz' && useLinkedMode ? (
             <div style={{ marginBottom: 'var(--space-lg)' }}>
-              <h2
-                style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--color-text-tertiary)',
-                  marginBottom: 'var(--space-sm)',
-                }}
-              >
-                选择笔记
-              </h2>
+              {/* 区块小标签（批次 E8）：与 compare 模式那一处同源，见 `.assessmentSectionLabel` */}
+              <h2 className={styles.assessmentSectionLabel}>选择笔记</h2>
               {linkablePersonalNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                   暂无可选笔记
@@ -761,18 +727,8 @@ export default function LearningAssessment() {
           ) : (
             /* Quiz mode - 手动选择资料 */
             <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-              <h2
-                style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--color-text-tertiary)',
-                  marginBottom: 'var(--space-sm)',
-                }}
-              >
-                学习资料
-              </h2>
+              {/* 区块小标签（批次 E8）：同上 */}
+              <h2 className={styles.assessmentSectionLabel}>学习资料</h2>
               {materialNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                   暂无学习资料

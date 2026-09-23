@@ -6,9 +6,15 @@
  * 3. 展开文件夹查看内部文件
  * 4. 在文件夹内上传新文件
  * 5. 按状态筛选文件
+ *
+ * 批次 E8（visual-refactor-plan §6）的两处：
+ *   ① **时间线**：文件夹里的资料行从 `.card` 改成单栏时间线（留白分隔 + 元数据 chip），
+ *      见 `DailyMaterials.module.css`；
+ *   ② **返回时恢复滚动位置**：§C3「每日材料」行的最后一条（Memos 为此单开过一个 PR）。
+ *      实现只在**浏览器后退/前进**（react-router 的 `POP`）时生效，见下方 `pageMemory`。
  */
-import { useEffect, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { Link, useNavigationType } from 'react-router-dom';
 import {
   getFolders,
   getFolderDetail,
@@ -31,6 +37,8 @@ import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
+// 本页私有样式（visual-refactor-plan 批次 E8）：时间线与元数据 chip
+import styles from './DailyMaterials.module.css';
 
 /** 允许上传的文件扩展名列表 */
 const ALLOWED_EXTENSIONS = [
@@ -96,6 +104,24 @@ function getStatusCategory(status: string): string {
 }
 
 /**
+ * 会话内的"上次离开这一页时的样子"（visual-refactor-plan 批次 E8）。
+ *
+ * ## 为什么放在模块作用域，而不是 sessionStorage
+ *
+ * 页面组件是一个**懒加载 chunk 里的组件**：离开 `/daily` 时它被卸载，但模块本身
+ * 留在内存里 —— 所以模块作用域的变量正好覆盖"这一趟会话里去过哪儿"，
+ * 而整页刷新（F5）后它自然清零。写 sessionStorage 反而多两种要处理的情况：
+ * 另一个标签页写脏、以及刷新后"恢复"到一个用户早就不记得的滚动位置。
+ *
+ * ## 只记两件事
+ *
+ * `folderId`：离开时**展开着**的文件夹（没有就是 `null`）。
+ * `scrollY`：离开时的窗口滚动位置。这个页面由**窗口**滚动
+ * （`App.module.css` 的 `.main` 只是居中 + 内边距，没有内层滚动容器）。
+ */
+let pageMemory: { folderId: string | null; scrollY: number } | null = null;
+
+/**
  * 今日资料页面组件
  *
  * 数据流：
@@ -113,6 +139,23 @@ function getStatusCategory(status: string): string {
  */
 export default function DailyMaterials() {
   const toast = useToast();
+  /**
+   * 这次渲染是"怎么来的"。
+   *
+   * `POP` = 浏览器后退/前进（也包括首屏进入）；`PUSH` = 点了站内链接过来。
+   * 恢复滚动位置**只对 POP 做**：从侧栏点「今日资料」进来时用户期待的是页面顶部，
+   * 而"上一次停在半截"是另一回事（那是 Memos 那个 PR 要解决的具体场景：
+   * 点开一条资料看详情，再退回来，列表还在原处）。
+   */
+  const navigationType = useNavigationType();
+  /** 本次挂载要不要恢复（POP 且有记忆才恢复）—— 只在首次渲染取值，之后不再看它 */
+  const restoreRef = useRef(navigationType === 'POP' ? pageMemory : null);
+  /** 恢复只做一次（`loading` / `folders` 变化会重复触发下面那条 effect） */
+  const restoredRef = useRef(false);
+  /** 展开态的最新值：卸载时的清理函数读它，不能闭包捕获第一次渲染的 `null` */
+  const expandedRef = useRef<string | null>(null);
+  /** 待应用的滚动位置（详情渲染完才滚，见下面那条 `useLayoutEffect`） */
+  const pendingScrollRef = useRef<number | null>(null);
   /** 文件夹列表 */
   const [folders, setFolders] = useState<Folder[]>([]);
   /** 当前展开的文件夹 ID */
@@ -184,6 +227,31 @@ export default function DailyMaterials() {
   }, []);
 
   /**
+   * 记住展开态（批次 E8）。
+   *
+   * 卸载时的清理函数要写 `pageMemory.folderId`，而它**不能闭包捕获**
+   * `expandedFolderId` —— 那个闭包是首次渲染的，永远是 `null`（一个典型的
+   * "记忆永远是空的"事故：症状是"恢复位置偶尔不生效"，很难查）。
+   */
+  useEffect(() => {
+    expandedRef.current = expandedFolderId;
+  }, [expandedFolderId]);
+
+  /**
+   * 卸载时把"展开的是哪个文件夹 + 此刻滚到哪儿"存进会话记忆（批次 E8）。
+   *
+   * 为什么在**卸载**时才读 `window.scrollY`：路由切换时浏览器不会自动把窗口
+   * 滚回顶部（本项目没有装 `ScrollRestoration`），所以这一刻读到的就是用户
+   * 离开时的位置。
+   */
+  useEffect(
+    () => () => {
+      pageMemory = { folderId: expandedRef.current, scrollY: window.scrollY };
+    },
+    [],
+  );
+
+  /**
    * 获取文件夹列表
    */
   async function fetchFolders() {
@@ -206,6 +274,71 @@ export default function DailyMaterials() {
   }, []);
 
   /**
+   * 从浏览器后退/前进回到本页时，把上次的展开态接回去（批次 E8）。
+   *
+   * 依赖 `loading` 与 `folders`：展开的是**列表里的一行**，列表没到位就无从展开；
+   * `restoredRef` 保证只做一次（这两个依赖会变好几次）。
+   *
+   * 只恢复"还在最近 7 天列表里的那个文件夹"：不在列表里（隔天/被删）就只滚位置，
+   * 免得对一个已经不存在的 id 发请求、再把"加载详情失败"糊到用户脸上。
+   */
+  useEffect(() => {
+    if (loading || restoredRef.current) return;
+    restoredRef.current = true;
+    const memory = restoreRef.current;
+    if (!memory) return;
+    const folder = memory.folderId ? folders.find((f) => f.id === memory.folderId) : undefined;
+    if (folder) {
+      // 与上面那条 `fetchFolders` 的区别：这里的 setState 发生在 async 函数内部
+      // （`await` 之前），编译器规则不把它算作"effect 里的同步 setState"，
+      // 所以不需要 `react-hooks/set-state-in-effect` 的豁免 —— 实测多写一条
+      // 豁免注释会被 eslint 判为"未使用的 disable 指令"（0 error / 1 warning）。
+      void loadFolderDetail(folder.id, memory.scrollY);
+    } else {
+      window.scrollTo({ top: memory.scrollY });
+    }
+  }, [loading, folders]);
+
+  /**
+   * 详情渲染完再把窗口滚回原位（批次 E8）。
+   *
+   * 用 `useLayoutEffect` 而不是 `useEffect`：前者在**浏览器绘制之前**跑，
+   * 用户不会先看到顶部闪一下再跳下去。
+   * 判据是"详情已经不在加载中"——那时 `<div className={styles.materialsTimeline}>`
+   * 已经在 DOM 里，滚到目标位置不会被截断（内容不够高时浏览器自己会夹住）。
+   */
+  useLayoutEffect(() => {
+    const target = pendingScrollRef.current;
+    if (target === null || detailLoading) return;
+    pendingScrollRef.current = null;
+    window.scrollTo({ top: target });
+  }, [detailLoading, folderDetail]);
+
+  /**
+   * 加载某个文件夹的详情并展开它。
+   *
+   * @param folderId - 要展开的文件夹
+   * @param restoreScrollY - 传了就是"恢复路径"：详情渲染完后滚到这个位置
+   *   （展开路径不传，保持原来的行为——点开文件夹不滚动）
+   */
+  async function loadFolderDetail(folderId: string, restoreScrollY?: number) {
+    setExpandedFolderId(folderId);
+    setDetailLoading(true);
+    setDetailError('');
+    setStatusFilter('all');
+
+    try {
+      const detail = await getFolderDetail(folderId);
+      setFolderDetail(detail);
+      if (restoreScrollY !== undefined) pendingScrollRef.current = restoreScrollY;
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : '加载详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  /**
    * 展开/折叠文件夹
    * 点击已展开的文件夹则折叠，点击新的文件夹则加载其详情。
    *
@@ -218,19 +351,7 @@ export default function DailyMaterials() {
       return;
     }
 
-    setExpandedFolderId(folderId);
-    setDetailLoading(true);
-    setDetailError('');
-    setStatusFilter('all');
-
-    try {
-      const detail = await getFolderDetail(folderId);
-      setFolderDetail(detail);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : '加载详情失败');
-    } finally {
-      setDetailLoading(false);
-    }
+    await loadFolderDetail(folderId);
   }
 
   /**
@@ -714,7 +835,11 @@ export default function DailyMaterials() {
                         </div>
                       </div>
 
-                      {/* 笔记列表 */}
+                      {/* 笔记列表（批次 E8：时间线）。
+                          原来每条是 `div.card.card-hover`（白底 + 边框 + 阴影），
+                          一屏七八条时边框噪音很大；§C3「每日材料」行要的是
+                          **单栏时间线 + 留白分隔 + 元数据收进 chip**（Memos 的减法）。
+                          结构与几何见 `DailyMaterials.module.css`。 */}
                       {filteredNotes.length === 0 ? (
                         <EmptyState
                           message={statusFilter !== 'all' ? '没有符合筛选条件的文件' : '文件夹为空'}
@@ -723,7 +848,7 @@ export default function DailyMaterials() {
                           }
                         />
                       ) : (
-                        <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
+                        <div className={styles.materialsTimeline}>
                           {filteredNotes.map((note) => (
                             /* ⚠️ 这一行原来是 `div.card.card-hover[role="button"][tabIndex=0]`
                                + 一个只认 `Enter` 的 `onKeyDown` —— axe **报不出来**
@@ -731,71 +856,37 @@ export default function DailyMaterials() {
                                但 Tab 会停在一个"不是按钮的按钮"上，而且 Space 不生效。
                                改法与同一页的文件夹头（F-30）逐字同形：外层回到"盒子"，
                                行为落在**真链接**上（标题）—— 进笔记是导航，链接比按钮更准
-                               （可右键、可新标签页、Tab 一次即达）。 */
-                            <div
-                              key={note.id}
-                              className="card card-hover"
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                padding: 'var(--space-sm) var(--space-md)',
-                              }}
-                            >
-                              <div style={{ flex: 1 }}>
+                               （可右键、可新标签页、Tab 一次即达）。
+                               批次 E8 只换了"盒子"的样式（卡片 → 时间线项），
+                               控件与键盘行为一个字没动。 */
+                            <div key={note.id} className={styles.materialsTimelineItem}>
+                              <div className={styles.materialsTimelineBody}>
                                 {/* `h3` 而不是 `h4`：这一页的大纲是 h1「今日资料」→
                                     h2（文件夹名，见上）→ h3（文件夹里的资料），
                                     `h4` 会让 h2 与 h4 之间缺一级。字号 0.9rem/字重 500
-                                    本来就显式钉着，所以**一个像素都没动**。 */}
-                                <h3
-                                  style={{
-                                    fontWeight: 500,
-                                    marginBottom: 'var(--space-xs)',
-                                    fontSize: '0.9rem',
-                                  }}
-                                >
+                                    本来就显式钉着（现在钉在模块里），所以**一个像素都没动**。 */}
+                                <h3 className={styles.materialsNoteTitle}>
                                   <Link
                                     to={`/notes/${note.id}`}
-                                    style={{ color: 'inherit', textDecoration: 'none' }}
+                                    className={styles.materialsNoteLink}
                                   >
                                     {note.title}
                                   </Link>
                                 </h3>
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    gap: 'var(--space-sm)',
-                                    alignItems: 'center',
-                                    flexWrap: 'wrap',
-                                  }}
-                                >
+                                <div className={styles.materialsMetaRow}>
                                   {/* 来源类型标签 */}
                                   <span className={`badge badge-${note.source_type}`}>
                                     {sourceTypeLabels[note.source_type] || note.source_type}
                                   </span>
                                   {/* 处理状态标签 */}
-                                  <span
-                                    className={statusClass(note.status)}
-                                    style={{ fontSize: '0.8rem' }}
-                                  >
+                                  <span className={statusClass(note.status)}>
                                     {statusLabels[note.status] || note.status}
                                   </span>
-                                  {/* 文件大小 */}
-                                  <span
-                                    style={{
-                                      fontSize: '0.8rem',
-                                      color: 'var(--color-text-secondary)',
-                                    }}
-                                  >
+                                  {/* 文件大小 / 上传时间（批次 E8：收进 chip） */}
+                                  <span className={styles.materialsMetaChip}>
                                     {formatFileSize(note.file_size)}
                                   </span>
-                                  {/* 上传时间 */}
-                                  <span
-                                    style={{
-                                      fontSize: '0.8rem',
-                                      color: 'var(--color-text-secondary)',
-                                    }}
-                                  >
+                                  <span className={styles.materialsMetaChip}>
                                     {new Date(note.created_at).toLocaleTimeString('zh-CN', {
                                       hour: '2-digit',
                                       minute: '2-digit',
@@ -803,11 +894,11 @@ export default function DailyMaterials() {
                                   </span>
                                 </div>
                               </div>
-                              <span
-                                style={{ color: 'var(--color-text-secondary)' }}
-                                aria-hidden="true"
-                              >
-                                →
+                              {/* 批次 E8：行尾的 `→`（Unicode U+2192）换成自绘 `chevron`
+                                  —— 那个字符在中文字体里宽度随字号变、基线还偏低；
+                                  图标是 aria-hidden 的纯装饰（真链接在标题上）。 */}
+                              <span className={styles.materialsGoIcon} aria-hidden="true">
+                                <Icon name="chevron" size={16} />
                               </span>
                             </div>
                           ))}

@@ -1,0 +1,134 @@
+/**
+ * 回收站页私有样式（visual-refactor-plan 批次 E8）
+ *
+ * ## 为什么这一批把卡片列表换成真表格
+ *
+ * 计划 §6 E8 行与 `docs/visual-symbol-research.md` §C3 的「回收站」行是同一句话：
+ * **表格化、行内"恢复 / 彻底删除"**。原来每条笔记是一张 `.card`（标题 + 元信息
+ * + 5 枚统计 chip + 2 个按钮），用户想横向比"哪条删得最久"时没有任何列可对齐。
+ *
+ * 用的是真 `<table>`（`<thead>` + `<th scope="col">`）而不是 div 拼格子 ——
+ * 读屏用户靠表格语义得到"第 3 行第 2 列是删除时间"这类信息，div 拼的没有。
+ * 因此这里**不能**用 `display: grid` / `display: flex` 之类改掉表格或其行的
+ * 显示类型：那会让 `table` / `row` / `cell` 三个角色从无障碍树里消失
+ * （axe 判不出来，属于静默降级）。
+ *
+ * ## 类名判据（css-convention.md §4）
+ *
+ * grep 只命中 `pages/Trash.tsx` ⇒ 进模块。
+ * 表格里唯一的全局类是按钮（`.btn` / `.btn-primary` / `.btn-danger-outline`），
+ * 它们与这里的模块类**挂在不同元素上**：模块类管 td/th 的内边距/边框/字号、
+ * 标题与 chip 的排版、以及动作区的 flex 布局（作用在按钮的**父元素**上）。
+ * 按钮自身只由全局类管 ⇒ 没有同权重竞争，不需要往 `CASCADE_PAIRS` 登记。
+ *
+ * 字号一律沿用迁移前的字面量（标题 1rem、元信息 0.8125rem、chip 0.75rem）：
+ * 这一批只换承载结构，不顺手改字号（存量字号收敛到 `--text-*` 是另一轮的事，
+ * 见 base.css 字号段与计划 §5.1）。
+ */
+
+/* ── 表格外框 ── */
+
+.trashTableScroll {
+  /* 窄屏（≤768px）时整表横向滚动，而不是把列压成两三个字宽 */
+  overflow-x: auto;
+}
+
+.trashTable {
+  width: 100%;
+  /* `separate` + `border-spacing: 0`：`collapse` 下单元格底色会盖住圆角，
+     换成 separate 之后 `overflow: hidden` 才能真正裁出圆角（否则表格边框
+     是圆角、表头底色是直角，四个角看着像被啃掉一块）。 */
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.trashTable th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.05em;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  white-space: nowrap;
+}
+
+.trashTable td {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: top;
+}
+
+/* 最后一行不画底线：表格外框已经有边框，再来一条会看着像"下面还有一行" */
+.trashTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── 单元格内容 ── */
+
+/**
+ * 笔记标题（渲染成 `<h2>`）。
+ *
+ * 刻意**不用**衬线：它是表格里的行标签，与旁边的元信息、chip 同处一行，
+ * 衬线会把它从表格的等宽节奏里拽出来。字号与字重逐字沿用迁移前的行内值
+ * （1rem / 600），所以标题的观感只有"换行方式"变了。
+ */
+.trashTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  /* 长标题/长英文在这里换行，而不是把列顶宽。
+     迁移前是 `nowrap + ellipsis`（卡片只有一张时那样省地方），
+     表格里换行才对：否则"哪条笔记"这一列永远只显示半行。 */
+  overflow-wrap: anywhere;
+}
+
+.trashTitleCell {
+  min-width: 200px;
+}
+
+.trashMeta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.trashChips {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* 附属统计 chip：与迁移前逐字同形（浅墨底、6px 圆角、2px 8px 内边距） */
+.trashChip {
+  padding: 2px 8px;
+  background: var(--color-primary-light);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.trashActions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .trashTable th,
+  .trashTable td {
+    padding: var(--space-sm);
+  }
+
+  /* 窄屏下"删除于 …"允许折行：nowrap 在这里会把整表的最小宽度再顶大一截 */
+  .trashMeta {
+    white-space: normal;
+  }
+}

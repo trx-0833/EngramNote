@@ -112,6 +112,45 @@
   z-index: 1;
 }
 
+/* ── 表单（批次 E8：从 tsx 的内联 style 搬进来）──
+   两个页面原来是逐字相同的两份内联 `display/flexDirection/gap`，取值一字未改。
+   它是**模块里自己的类**（`<form>` 上没有全局类），所以没有同权重竞争。 */
+.authForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* 失败提示（批次 E8：同样从两页的内联 style 搬进来，取值一字未改） */
+.authError {
+  color: var(--color-error);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/**
+ * ── ⚠️ 这里的渐变是**刻意保留**的，不要"顺手统一"掉（批次 A3 的边界）──
+ *
+ * 批次 A3 把全站的渐变都收敛成墨阶（标题、主按钮、统计数字……），
+ * 只留了这一处 —— `visual-refactor-plan` §6 的 E8 行写得很明确：
+ * **「登录注册（渐变只留这里）」**，`docs/visual-symbol-research.md` §C2 的
+ * 「登录 / 注册」行也是同一条：把 `--gradient-hero`（页面底）与衬线标题
+ * 集中用在这里，作为"书卷气"的第一印象，但**不要扩散到内页**。
+ *
+ * 所以：
+ *   - `.authBg` 的 `--gradient-hero` 是"这一页的底"，保留；
+ *   - `.authTitle` 的 `--gradient-primary` 文字渐变是"这一页的标题"，保留。
+ *
+ * 两条已知的代价（写明，免得下一个人以为没人发现）：
+ *   ① `--gradient-primary` 两端只有 **1.365:1** 的色差（`base.css:65` 的注释里
+ *      记着这件事），所以标题看起来接近**焦墨实色** —— 渐变几乎看不出来；
+ *   ② `-webkit-text-fill-color: transparent` 在**打印**与 Windows **强制高对比度**
+ *      模式下有不可见风险（这正是 A3 改掉其余 7 处渐变文字的原始理由）。
+ * 要处理它得单开一轮：要么把标题改成 `--color-text`（与 A3 一致、但这一页会失去
+ * "第一印象"的意图），要么换成不依赖 `text-fill-color` 的画法 —— 两者都动外观，
+ * 都需要你的点头与截图对比，不属于 E8。
+ */
+
 .authTitle {
   font-family: var(--font-serif);
   font-size: 1.75rem;
