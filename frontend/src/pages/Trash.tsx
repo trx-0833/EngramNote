@@ -251,14 +251,15 @@ export default function Trash() {
       )}
 
       {/* 清空回收站确认弹窗（批次 D2：遮罩 / 面板 / 层级 / 圆角 / 阴影 / 内边距
-          全部交给 `<Dialog>` 基座；原来这里是手写内联遮罩 + `className="card"` 面板，
-          标题还是红字 `<h3>` —— 基座的 `.dialogTitle` 统一标题色，危险语义由正文的
-          「不可恢复」与红底确认按钮承担）。
+          全部交给 `<Dialog>` 基座；原来这里是手写内联遮罩 + `className="card"` 面板。
+          标题原来是红字 `<h3>` —— D2 迁移时被基座的统一标题色抹掉，本批由
+          `titleTone="danger"` 补回，与正文的「不可恢复」、红底确认按钮一起承载危险语义）。
           ⚠️ 不再需要 `showPurgeAll &&` 包一层：`open={false}` 时基座连遮罩都不渲染。 */}
       <Dialog
         open={showPurgeAll}
         onClose={() => setShowPurgeAll(false)}
         title="清空回收站"
+        titleTone="danger"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setShowPurgeAll(false)}>

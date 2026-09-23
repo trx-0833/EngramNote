@@ -23,8 +23,10 @@
  *
  * ## 关于类名（css-convention.md §6）
  *
- * 需要按类名查的只有两处：遮罩（`styles.dialogOverlay`，它没有 ARIA 角色）、
- * 滚动锁（`styles.dialogScrollLock`，挂在 `body` 上）。
+ * 需要按类名查的只有三处：遮罩（`styles.dialogOverlay`，它没有 ARIA 角色）、
+ * 滚动锁（`styles.dialogScrollLock`，挂在 `body` 上）、标题危险色
+ * （`styles.dialogTitleDanger` —— "红不红"是纯外观，两种语气下
+ * `getByRole('heading')` 拿到的元素与可访问名**完全一样**，语义查询看不见它）。
  * 其余一律语义查询（`getByRole('dialog')` / `getByRole('button', { name })`）。
  */
 import { useRef, useState } from 'react';
@@ -56,6 +58,7 @@ interface HarnessProps {
   onClose?: () => void;
   title?: string;
   labelledBy?: string;
+  titleTone?: 'default' | 'danger';
   closeOnOverlayClick?: boolean;
   closeOnEsc?: boolean;
   initialFocusRef?: React.RefObject<HTMLElement | null>;
@@ -67,6 +70,7 @@ function Harness({
   onClose = () => {},
   title,
   labelledBy,
+  titleTone,
   closeOnOverlayClick,
   closeOnEsc,
   initialFocusRef,
@@ -78,6 +82,7 @@ function Harness({
       onClose={onClose}
       title={title}
       labelledBy={labelledBy}
+      titleTone={titleTone}
       closeOnOverlayClick={closeOnOverlayClick}
       closeOnEsc={closeOnEsc}
       initialFocusRef={initialFocusRef}
@@ -169,6 +174,26 @@ describe('Dialog：结构与可访问性三件套', () => {
     );
 
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-labelledby', 'external-title');
+  });
+});
+
+describe('Dialog：标题语气（titleTone，批次 D2 收尾）', () => {
+  it('★ 不传 titleTone 时标题不带危险色类；titleTone="danger" 时才带上', () => {
+    // 同一个用例里 render 两次之前必须卸掉前一个：两个对话框同时在文档里，
+    // 下面所有 getByRole 都会撞上 "found multiple elements"
+    const plainRender = openDialog();
+
+    const plainTitle = screen.getByRole('heading', { name: '测试对话框' });
+    expect(plainTitle).toHaveClass(styles.dialogTitle);
+    expect(plainTitle).not.toHaveClass(styles.dialogTitleDanger);
+    plainRender.unmount();
+
+    openDialog({ titleTone: 'danger' });
+
+    const dangerTitle = screen.getByRole('heading', { name: '测试对话框' });
+    // danger 只**追加**一个改色类，基础类不能被替换掉（否则字重/间距全丢）
+    expect(dangerTitle).toHaveClass(styles.dialogTitle);
+    expect(dangerTitle).toHaveClass(styles.dialogTitleDanger);
   });
 });
 

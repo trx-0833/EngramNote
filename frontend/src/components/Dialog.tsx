@@ -81,6 +81,18 @@ interface DialogProps {
   title?: string;
   /** 调用方自己给标题元素 `id`（与 `title` 二选一；给了就优先用它） */
   labelledBy?: string;
+  /**
+   * 标题语气，默认 `'default'`（墨色标题）。
+   *
+   * `'danger'` 只做一件事：给标题加 `.dialogTitleDanger`，把颜色换成
+   * `--color-error`（批次 D2 收尾，见 `Dialog.module.css` 那条的注释）。
+   *
+   * ⚠️ **留给真正不可恢复的操作**。迁移前只有两处红字标题
+   * （`DeleteNoteDialog.tsx` 的「彻底删除」、`Trash.tsx` 的「清空回收站」），
+   * 而 `DeleteNoteDialog.tsx` 的「移入回收站」**不是** —— 软删除可恢复。
+   * 红色一旦到处都是就不再承载语义，加之前先问"这一步能不能撤销"。
+   */
+  titleTone?: 'default' | 'danger';
   /** 点遮罩是否关闭，默认 `true` */
   closeOnOverlayClick?: boolean;
   /** Esc 是否关闭，默认 `true` */
@@ -113,12 +125,17 @@ interface DialogProps {
  *
  * 面板的外形（最大宽度 / 内边距 / 圆角 / 阴影）由模块里的 `.dialogPanel` 给，
  * 调用方**不要**再传内联几何样式 —— 那是旧实现里 8 套 modal 各自长歪的原因。
+ *
+ * 调用方能改的**只有标题语气**这一个开关（`titleTone`，批次 D2 收尾）：它是
+ * "危险/不可恢复"这一层语义的载体，红的稀缺性是它成立的前提。其余一律按基座来
+ * —— 想加第二个外观 prop 之前，先看 `Dialog.module.css` 文件头的规矩。
  */
 export function Dialog({
   open,
   onClose,
   title,
   labelledBy,
+  titleTone = 'default',
   closeOnOverlayClick = true,
   closeOnEsc = true,
   initialFocusRef,
@@ -290,7 +307,16 @@ export function Dialog({
         onClick={(event) => event.stopPropagation()}
       >
         {title ? (
-          <h2 id={titleId} className={styles.dialogTitle}>
+          <h2
+            id={titleId}
+            // 基础的 `.dialogTitle` 恒定在，`'danger'` 只**追加**一个改色类
+            // （与 `GraphToolbar.tsx:142` 组合模块类名同一套写法）。
+            // ⚠️ 不传 `titleTone` 时拼接结果必须与迁移前**逐字相同** ——
+            // 那 5 套 modal 里只有 2 处该是红字标题。
+            className={`${styles.dialogTitle}${
+              titleTone === 'danger' ? ` ${styles.dialogTitleDanger}` : ''
+            }`}
+          >
             {title}
           </h2>
         ) : null}

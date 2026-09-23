@@ -64,6 +64,24 @@
   color: var(--color-text);
 }
 
+/* ── 危险标题语气（`titleTone="danger"`，批次 D2 收尾）──
+
+   批次 D2 把 5 套 modal 迁到基座时丢了一处语义：`DeleteNoteDialog` 的
+   「彻底删除」与 `Trash` 的「清空回收站」原来是红字标题
+   （`<h3 style={{ color: 'var(--color-error)' }}>`），迁移后标题色被
+   `.dialogTitle` 统一成墨色。这一条把那层语义补回来 —— 色值走既有令牌，
+   **不新增颜色字面量**。
+
+   ⚠️ **顺序是行为**：这两条权重同为 (0,1,0)、又并列在同一个 `<h2>` 上
+   （`Dialog.tsx` 的 `className` 组合），得主**只看本文件里的先后**。
+   所以它必须排在 `.dialogTitle` **之后** —— 反了就是一条永不生效的规则，
+   而规则清单、冲突统计、`verify-built-css.mjs` 都不会响（与 `css-convention.md`
+   §3 雷区 2 是同一类静默事故）。`Dialog.test.tsx` 钉的是"类名有没有挂上"，
+   钉不住这条顺序，改这里时请连顺序一起看。 */
+.dialogTitleDanger {
+  color: var(--color-error);
+}
+
 /* 底部操作区（批次 D3 加入：`ConfirmDialog` 的「取消 / 确认」两枚按钮）。
    右对齐 + 顶部间距；按钮之间的水平间距由 `.btn` 自己的 `gap` 管不着
    （那是按钮**内部**图标与文字的间距），所以在这里显式给。 */

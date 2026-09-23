@@ -174,9 +174,12 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
       open
       onClose={onClose}
       title="彻底删除"
-      // ⚠️ 原来这一处标题是 `<h3 style={{ color: 'var(--color-error)' }}>` 的红字，
-      // 迁到基座后标题由 `Dialog.module.css` 的 `.dialogTitle` 统一给色 ——
-      // 危险语义改由下面红底的说明段与红底确认按钮承担（见批次 D2 报告）。
+      // ⚠️ 原来这一处标题是 `<h3 style={{ color: 'var(--color-error)' }}>` 的红字。
+      // 批次 D2 迁到基座时被 `.dialogTitle` 的统一标题色抹掉了，本批由
+      // `titleTone="danger"` 补回（基座侧见 `Dialog.module.css` 的 `.dialogTitleDanger`）。
+      // 危险语义仍然同时由下面的红底说明段与红底确认按钮承担 —— 这一条是补第三层，
+      // 不是替换任何一层。
+      titleTone="danger"
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>
