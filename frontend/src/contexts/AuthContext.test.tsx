@@ -17,20 +17,20 @@
  * | 令牌过期事件把状态切成未登录 | `收到令牌过期事件后切到未登录` |
  */
 
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 只 mock 网络层：令牌存取、事件派发等真实实现必须走真实代码
 vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
   return {
     ...actual,
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
-  }
-})
+  };
+});
 
 import {
   TOKEN_EXPIRED_EVENT,
@@ -40,21 +40,21 @@ import {
   login as apiLogin,
   logout as apiLogout,
   setTokens,
-} from '../api/client'
-import { AuthProvider, useAuth } from './AuthContext'
+} from '../api/client';
+import { AuthProvider, useAuth } from './AuthContext';
 
-const mockLogin = vi.mocked(apiLogin)
-const mockLogout = vi.mocked(apiLogout)
+const mockLogin = vi.mocked(apiLogin);
+const mockLogout = vi.mocked(apiLogout);
 
 function Probe() {
-  const { isAuthenticated, login, logout } = useAuth()
+  const { isAuthenticated, login, logout } = useAuth();
   return (
     <div>
       <span data-testid="state">{isAuthenticated ? 'in' : 'out'}</span>
       <button onClick={() => void login('a@b.c', 'pw')}>do-login</button>
       <button onClick={() => void logout()}>do-logout</button>
     </div>
-  )
+  );
 }
 
 function renderProbe() {
@@ -62,15 +62,15 @@ function renderProbe() {
     <AuthProvider>
       <Probe />
     </AuthProvider>,
-  )
+  );
 }
 
 describe('AuthContext 令牌生命周期', () => {
   beforeEach(() => {
-    localStorage.clear()
-    clearTokens()
-    vi.clearAllMocks()
-  })
+    localStorage.clear();
+    clearTokens();
+    vi.clearAllMocks();
+  });
 
   it('登录后同时保存访问令牌与刷新令牌', async () => {
     mockLogin.mockResolvedValue({
@@ -78,52 +78,56 @@ describe('AuthContext 令牌生命周期', () => {
       refresh_token: 'r-1',
       token_type: 'bearer',
       user: {
-        id: 'u-1', email: 'a@b.c', username: 'ab', is_active: true, created_at: '2026-01-01',
+        id: 'u-1',
+        email: 'a@b.c',
+        username: 'ab',
+        is_active: true,
+        created_at: '2026-01-01',
       },
-    })
-    renderProbe()
-    await userEvent.click(screen.getByRole('button', { name: 'do-login' }))
+    });
+    renderProbe();
+    await userEvent.click(screen.getByRole('button', { name: 'do-login' }));
 
-    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('in'))
-    expect(getToken()).toBe('a-1')
-    expect(getRefreshToken()).toBe('r-1')
-  })
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('in'));
+    expect(getToken()).toBe('a-1');
+    expect(getRefreshToken()).toBe('r-1');
+  });
 
   it('登出会把刷新令牌交给服务端撤销', async () => {
-    setTokens('a-1', 'r-1')
-    mockLogout.mockResolvedValue({ revoked: 1 })
-    renderProbe()
+    setTokens('a-1', 'r-1');
+    mockLogout.mockResolvedValue({ revoked: 1 });
+    renderProbe();
 
-    await userEvent.click(screen.getByRole('button', { name: 'do-logout' }))
+    await userEvent.click(screen.getByRole('button', { name: 'do-logout' }));
 
-    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'))
-    expect(mockLogout).toHaveBeenCalledWith('r-1')
-    expect(getToken()).toBeNull()
-    expect(getRefreshToken()).toBeNull()
-  })
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'));
+    expect(mockLogout).toHaveBeenCalledWith('r-1');
+    expect(getToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+  });
 
   it('★ 服务端撤销失败也必须清干净本地状态（登出不能被网络故障挡住）', async () => {
-    setTokens('a-1', 'r-1')
-    mockLogout.mockRejectedValue(new Error('网络不通'))
-    renderProbe()
+    setTokens('a-1', 'r-1');
+    mockLogout.mockRejectedValue(new Error('网络不通'));
+    renderProbe();
 
-    await userEvent.click(screen.getByRole('button', { name: 'do-logout' }))
+    await userEvent.click(screen.getByRole('button', { name: 'do-logout' }));
 
-    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'))
-    expect(getToken()).toBeNull()
-    expect(getRefreshToken()).toBeNull()
-  })
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'));
+    expect(getToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+  });
 
   it('收到令牌过期事件后切到未登录', async () => {
-    setTokens('a-1', 'r-1')
-    renderProbe()
-    expect(screen.getByTestId('state')).toHaveTextContent('in')
+    setTokens('a-1', 'r-1');
+    renderProbe();
+    expect(screen.getByTestId('state')).toHaveTextContent('in');
 
     // 刷新失败时 client.ts 派发的正是这个事件
-    const { notifyTokenExpired } = await import('../api/client')
-    notifyTokenExpired()
+    const { notifyTokenExpired } = await import('../api/client');
+    notifyTokenExpired();
 
-    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'))
-    expect(TOKEN_EXPIRED_EVENT).toBe('token-expired')
-  })
-})
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('out'));
+    expect(TOKEN_EXPIRED_EVENT).toBe('token-expired');
+  });
+});

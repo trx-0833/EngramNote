@@ -17,45 +17,50 @@
  * 本文件只保留：路由参数、ADHD Reader 接线、状态变化后的整体刷新、
  * 各子模块之间的组装。拆分只做搬运，未改变任何行为。
  */
-import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import 'highlight.js/styles/github-dark.css'
-import 'katex/dist/katex.min.css'
-import { renderMarkdown } from '../utils/markdown'
-import CleaningPanel from '../components/CleaningPanel'
-import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
-import LoadingSpinner from '../components/LoadingSpinner'
-import VersionHistory from '../components/VersionHistory'
-import { useAdhdReader } from '../hooks/useAdhdReader'
-import NoteDetailHeader from './notedetail/NoteDetailHeader'
-import RelatedLinksSection, { shouldShowRelatedLinks } from './notedetail/RelatedLinksSection'
-import CitingNotesSection, { shouldShowCitingNotes } from './notedetail/CitingNotesSection'
-import LinkManagerModal from './notedetail/LinkManagerModal'
-import VideoPlayer from './notedetail/VideoPlayer'
-import ContentArea from './notedetail/ContentArea'
-import SelectionMenu from './notedetail/SelectionMenu'
-import AnnotationAskPanel from './notedetail/AnnotationAskPanel'
-import RelatedCardsSection from './notedetail/RelatedCardsSection'
-import LoadErrorView from './notedetail/LoadErrorView'
-import { useNoteAnnotations } from './notedetail/useNoteAnnotations'
-import { useNoteLinks } from './notedetail/useNoteLinks'
-import { useNoteActions } from './notedetail/useNoteActions'
-import { useNoteDetailData } from './notedetail/useNoteDetailData'
-import { canShowClean, canShowDiff, computeMdContent, parseCitationJump } from './notedetail/viewMode'
-import type { EditMode } from './notedetail/types'
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import 'highlight.js/styles/github-dark.css';
+import 'katex/dist/katex.min.css';
+import { renderMarkdown } from '../utils/markdown';
+import CleaningPanel from '../components/CleaningPanel';
+import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
+import LoadingSpinner from '../components/LoadingSpinner';
+import VersionHistory from '../components/VersionHistory';
+import { useAdhdReader } from '../hooks/useAdhdReader';
+import NoteDetailHeader from './notedetail/NoteDetailHeader';
+import RelatedLinksSection, { shouldShowRelatedLinks } from './notedetail/RelatedLinksSection';
+import CitingNotesSection, { shouldShowCitingNotes } from './notedetail/CitingNotesSection';
+import LinkManagerModal from './notedetail/LinkManagerModal';
+import VideoPlayer from './notedetail/VideoPlayer';
+import ContentArea from './notedetail/ContentArea';
+import SelectionMenu from './notedetail/SelectionMenu';
+import AnnotationAskPanel from './notedetail/AnnotationAskPanel';
+import RelatedCardsSection from './notedetail/RelatedCardsSection';
+import LoadErrorView from './notedetail/LoadErrorView';
+import { useNoteAnnotations } from './notedetail/useNoteAnnotations';
+import { useNoteLinks } from './notedetail/useNoteLinks';
+import { useNoteActions } from './notedetail/useNoteActions';
+import { useNoteDetailData } from './notedetail/useNoteDetailData';
+import {
+  canShowClean,
+  canShowDiff,
+  computeMdContent,
+  parseCitationJump,
+} from './notedetail/viewMode';
+import type { EditMode } from './notedetail/types';
 
 /**
  * 笔记详情页面组件
  */
 export default function NoteDetail() {
-  const { noteId } = useParams<{ noteId: string }>()
-  const navigate = useNavigate()
+  const { noteId } = useParams<{ noteId: string }>();
+  const navigate = useNavigate();
 
   /** 引用回跳参数（阶段 2.7）：`?view=clean&cs=<char_start>&ce=<char_end>` */
-  const [searchParams, setSearchParams] = useSearchParams()
-  const jump = parseCitationJump(searchParams)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const jump = parseCitationJump(searchParams);
 
-  const markdownRef = useRef<HTMLElement>(null)
+  const markdownRef = useRef<HTMLElement>(null);
 
   /** 笔记数据：加载、清洗/学习轮询、引用回跳、视频 blob */
   const {
@@ -74,12 +79,12 @@ export default function NoteDetail() {
     videoUrl,
     mutatingRef,
     fetchNote,
-  } = useNoteDetailData({ noteId, markdownRef, jump, searchParams, setSearchParams })
+  } = useNoteDetailData({ noteId, markdownRef, jump, searchParams, setSearchParams });
 
   /** 编辑模式相关 state（edit 为实时分屏预览：左侧编辑、右侧即时渲染） */
-  const [editMode, setEditMode] = useState<EditMode>('view')
+  const [editMode, setEditMode] = useState<EditMode>('view');
   /** 版本历史面板显示状态 */
-  const [showVersionHistory, setShowVersionHistory] = useState(false)
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
 
   /** ADHD Reader 专注阅读模式（鼠标遮罩/显示文本） */
   const {
@@ -87,13 +92,13 @@ export default function NoteDetail() {
     currentLineText: adhdCurrentLineText,
     toggle: toggleAdhdReader,
     disable: disableAdhdReader,
-  } = useAdhdReader(markdownRef)
+  } = useAdhdReader(markdownRef);
 
   /** 清洗/学习状态变化后刷新笔记数据 */
   function handleStatusChange() {
-    setLoading(true)
-    setDiffData(null) // 清除 diff 缓存
-    fetchNote()
+    setLoading(true);
+    setDiffData(null); // 清除 diff 缓存
+    fetchNote();
   }
 
   /** 链接关系（关联资料 / 被引用） */
@@ -107,7 +112,7 @@ export default function NoteDetail() {
     handleManageLinks,
     handleSaveLinks,
     handleCleanDanglingLinks,
-  } = useNoteLinks({ noteId, noteRole: note?.note_role })
+  } = useNoteLinks({ noteId, noteRole: note?.note_role });
 
   /** 批注 + 选区浮层（高亮/下划线、AI 提问） */
   const {
@@ -118,7 +123,7 @@ export default function NoteDetail() {
     handleMouseUp,
     handleOpenAskAI,
     handleApplyAnnotation,
-  } = useNoteAnnotations({ note, viewMode, editMode, markdownRef })
+  } = useNoteAnnotations({ note, viewMode, editMode, markdownRef });
 
   /** 页面级动作：AI 预处理 / 删除 / 审阅 / 编辑保存 */
   const {
@@ -134,37 +139,44 @@ export default function NoteDetail() {
     handleEnterEdit,
     handleSaveContent,
     handleCancelEdit,
-  } = useNoteActions({ note, viewMode, setEditMode, fetchNote, onStatusChange: handleStatusChange, navigate })
+  } = useNoteActions({
+    note,
+    viewMode,
+    setEditMode,
+    fetchNote,
+    onStatusChange: handleStatusChange,
+    navigate,
+  });
 
   // 离开纯阅读视图（编辑/对比）时自动关闭 ADHD Reader
   useEffect(() => {
     if ((editMode !== 'view' || viewMode === 'diff') && adhdReaderEnabled) {
-      disableAdhdReader()
+      disableAdhdReader();
     }
-  }, [editMode, viewMode, adhdReaderEnabled, disableAdhdReader])
+  }, [editMode, viewMode, adhdReaderEnabled, disableAdhdReader]);
 
   // 加载中状态
   if (loading) {
-    return <LoadingSpinner />
+    return <LoadingSpinner />;
   }
 
   // 错误或笔记不存在状态
   if (error || !note) {
-    return <LoadErrorView error={error} onBack={() => navigate('/notes')} />
+    return <LoadErrorView error={error} onBack={() => navigate('/notes')} />;
   }
 
   /** 选择要显示的 Markdown 内容 */
-  const mdContent = computeMdContent(note, viewMode)
+  const mdContent = computeMdContent(note, viewMode);
 
   // 将 Markdown 文本解析为 HTML
-  const htmlContent = renderMarkdown(mdContent)
+  const htmlContent = renderMarkdown(mdContent);
 
   // 编辑预览的 HTML
-  const editPreviewHtml = renderMarkdown(editContent)
+  const editPreviewHtml = renderMarkdown(editContent);
 
   // 是否可以显示清洗版 / diff（cleaned/archived/learning_failed 状态都可以查看）
-  const showClean = canShowClean(note)
-  const showDiff = canShowDiff(note)
+  const showClean = canShowClean(note);
+  const showDiff = canShowDiff(note);
 
   return (
     <div className="page-enter">
@@ -184,25 +196,41 @@ export default function NoteDetail() {
         onDelete={handleDelete}
         onOpenVersionHistory={() => setShowVersionHistory(true)}
         onManageLinks={handleManageLinks}
-        onRoleUpdated={(noteRole) => setNote((prev) => prev ? { ...prev, note_role: noteRole } : prev)}
-        onRetryConverted={(result) => setNote((prev) => prev ? { ...prev, status: result.status, error_message: result.error_message } : prev)}
+        onRoleUpdated={(noteRole) =>
+          setNote((prev) => (prev ? { ...prev, note_role: noteRole } : prev))
+        }
+        onRetryConverted={(result) =>
+          setNote((prev) =>
+            prev ? { ...prev, status: result.status, error_message: result.error_message } : prev,
+          )
+        }
         navigate={navigate}
       />
 
       {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
-      {(note.status === 'converted' || note.status === 'cleaning' || note.status === 'cleaning_failed' || note.status === 'cleaned') && (
-        <CleaningPanel note={note} onStatusChange={handleStatusChange} onMutatingChange={(mutating) => { mutatingRef.current = mutating }} />
+      {(note.status === 'converted' ||
+        note.status === 'cleaning' ||
+        note.status === 'cleaning_failed' ||
+        note.status === 'cleaned') && (
+        <CleaningPanel
+          note={note}
+          onStatusChange={handleStatusChange}
+          onMutatingChange={(mutating) => {
+            mutatingRef.current = mutating;
+          }}
+        />
       )}
 
       {/* 关联的学习资料列表（字段缺失时整块不显示，而不是整页崩掉） */}
       {shouldShowRelatedLinks(noteLinks) && (
-        <RelatedLinksSection noteLinks={noteLinks} onCleanDanglingLinks={handleCleanDanglingLinks} />
+        <RelatedLinksSection
+          noteLinks={noteLinks}
+          onCleanDanglingLinks={handleCleanDanglingLinks}
+        />
       )}
 
       {/* 被引用笔记列表 */}
-      {shouldShowCitingNotes(noteLinks) && (
-        <CitingNotesSection noteLinks={noteLinks} />
-      )}
+      {shouldShowCitingNotes(noteLinks) && <CitingNotesSection noteLinks={noteLinks} />}
 
       {/* 视频播放器（仅视频类型笔记显示） */}
       {note.source_type === 'video' && videoUrl && <VideoPlayer videoUrl={videoUrl} />}
@@ -286,5 +314,5 @@ export default function NoteDetail() {
         <RelatedCardsSection relatedCards={relatedCards} noteId={noteId} navigate={navigate} />
       )}
     </div>
-  )
+  );
 }

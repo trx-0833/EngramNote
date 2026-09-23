@@ -12,15 +12,15 @@
  * 5.10 移动端补丁：`sidebarOpen` 的**初始值**改为窄屏感知（宽屏仍是默认展开，
  * 与拆分前逐字一致），理由见该 state 上的注释。
  */
-import { useCallback, useRef, useState } from 'react'
-import type { ForceGraphLink, ForceGraphNode, SidebarPanel } from '../../components/graph/types'
+import { useCallback, useRef, useState } from 'react';
+import type { ForceGraphLink, ForceGraphNode, SidebarPanel } from '../../components/graph/types';
 
 /**
  * 窄屏断点：与 responsive.css 的 `@media (max-width: 768px)` 一致。
  * 两处必须同值 —— 不一致会出现"CSS 已经把它当手机（底部抽屉），JS 还当桌面（默认展开）"，
  * 首屏就有一张盖住半张画布的抽屉。
  */
-const NARROW_SCREEN_MAX_WIDTH = 768
+const NARROW_SCREEN_MAX_WIDTH = 768;
 
 export function useGraphInteraction() {
   /**
@@ -31,24 +31,24 @@ export function useGraphInteraction() {
    * 只在首次挂载时判定：之后窗口尺寸变化不重置用户的选择（手机上转屏不该把用户
    * 手动收起的侧栏又弹开）。
    */
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > NARROW_SCREEN_MAX_WIDTH)
-  const [activePanel, setActivePanel] = useState<SidebarPanel>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > NARROW_SCREEN_MAX_WIDTH);
+  const [activePanel, setActivePanel] = useState<SidebarPanel>(null);
 
   /** 选中的节点 */
-  const [selectedNode, setSelectedNode] = useState<ForceGraphNode | null>(null)
+  const [selectedNode, setSelectedNode] = useState<ForceGraphNode | null>(null);
   /** 选中的边 */
-  const [selectedLink, setSelectedLink] = useState<ForceGraphLink | null>(null)
+  const [selectedLink, setSelectedLink] = useState<ForceGraphLink | null>(null);
 
   /** 创建关系模式 */
-  const [createMode, setCreateMode] = useState(false)
-  const [createFirstNode, setCreateFirstNode] = useState<ForceGraphNode | null>(null)
-  const [createSecondNode, setCreateSecondNode] = useState<ForceGraphNode | null>(null)
-  const [createRelationType, setCreateRelationType] = useState('related')
+  const [createMode, setCreateMode] = useState(false);
+  const [createFirstNode, setCreateFirstNode] = useState<ForceGraphNode | null>(null);
+  const [createSecondNode, setCreateSecondNode] = useState<ForceGraphNode | null>(null);
+  const [createRelationType, setCreateRelationType] = useState('related');
 
   /** 悬停节点 */
-  const [hoverNode, setHoverNode] = useState<ForceGraphNode | null>(null)
+  const [hoverNode, setHoverNode] = useState<ForceGraphNode | null>(null);
   /** 悬停边 */
-  const [hoverLink, setHoverLink] = useState<ForceGraphLink | null>(null)
+  const [hoverLink, setHoverLink] = useState<ForceGraphLink | null>(null);
 
   // 最近一次已提交的悬停 id。
   // react-force-graph 的 onNodeHover 在**指针移动过程中高频触发**，
@@ -56,91 +56,91 @@ export function useGraphInteraction() {
   // 于是每次鼠标移动都会让这个近千行的页面整体重渲，并因为
   // nodeCanvasObject 的 useCallback 依赖含 hoverNode 而**重绘整张画布**。
   // 这里只在"指向的节点真的变了"时才提交状态（§2.8 F-8）。
-  const lastHoverNodeIdRef = useRef<string | null>(null)
-  const lastHoverLinkIdRef = useRef<string | null>(null)
+  const lastHoverNodeIdRef = useRef<string | null>(null);
+  const lastHoverLinkIdRef = useRef<string | null>(null);
 
   const handleNodeHover = useCallback((node: ForceGraphNode | null) => {
-    const id = node?.id ?? null
-    if (lastHoverNodeIdRef.current === id) return
-    lastHoverNodeIdRef.current = id
-    setHoverNode(node)
-  }, [])
+    const id = node?.id ?? null;
+    if (lastHoverNodeIdRef.current === id) return;
+    lastHoverNodeIdRef.current = id;
+    setHoverNode(node);
+  }, []);
 
   const handleLinkHover = useCallback((link: ForceGraphLink | null) => {
-    const id = link ? `${link.source}-${link.target}` : null
-    if (lastHoverLinkIdRef.current === id) return
-    lastHoverLinkIdRef.current = id
-    setHoverLink(link)
-  }, [])
+    const id = link ? `${link.source}-${link.target}` : null;
+    if (lastHoverLinkIdRef.current === id) return;
+    lastHoverLinkIdRef.current = id;
+    setHoverLink(link);
+  }, []);
   /** 高亮的关系类型 */
-  const [highlightedRelationType, setHighlightedRelationType] = useState<string | null>(null)
+  const [highlightedRelationType, setHighlightedRelationType] = useState<string | null>(null);
 
   /** 节点点击 */
   function handleNodeClick(node: ForceGraphNode) {
     if (createMode) {
       if (!createFirstNode) {
-        setCreateFirstNode(node)
+        setCreateFirstNode(node);
       } else if (!createSecondNode && node.id !== createFirstNode.id) {
-        setCreateSecondNode(node)
-        setActivePanel('createRelation')
+        setCreateSecondNode(node);
+        setActivePanel('createRelation');
       }
-      return
+      return;
     }
 
-    setSelectedNode(node)
-    setSelectedLink(null)
-    setActivePanel('nodeDetail')
-    setSidebarOpen(true)
+    setSelectedNode(node);
+    setSelectedLink(null);
+    setActivePanel('nodeDetail');
+    setSidebarOpen(true);
   }
 
   /** 边点击 */
   function handleLinkClick(link: ForceGraphLink) {
-    if (createMode) return
-    setSelectedLink(link)
-    setSelectedNode(null)
-    setSidebarOpen(true)
+    if (createMode) return;
+    setSelectedLink(link);
+    setSelectedNode(null);
+    setSidebarOpen(true);
     // 边详情（关系详情面板）随 selectedLink 渲染，待审/已确认边都无需切换面板
-    setActivePanel(null)
+    setActivePanel(null);
   }
 
   /** 背景点击取消选中 */
   function handleBackgroundClick() {
-    setSelectedNode(null)
-    setSelectedLink(null)
+    setSelectedNode(null);
+    setSelectedLink(null);
     if (!createMode) {
-      setActivePanel(null)
+      setActivePanel(null);
     }
   }
 
   /** 退出创建模式 */
   function cancelCreateMode() {
-    setCreateMode(false)
-    setCreateFirstNode(null)
-    setCreateSecondNode(null)
-    setCreateRelationType('related')
-    setActivePanel(null)
+    setCreateMode(false);
+    setCreateFirstNode(null);
+    setCreateSecondNode(null);
+    setCreateRelationType('related');
+    setActivePanel(null);
   }
 
   /** 工具栏「创建关系 / 取消」按钮：进入时打开创建面板并展开侧边栏 */
   function toggleCreateMode() {
     if (createMode) {
-      cancelCreateMode()
+      cancelCreateMode();
     } else {
-      setCreateMode(true)
-      setActivePanel('createRelation')
-      setSidebarOpen(true)
+      setCreateMode(true);
+      setActivePanel('createRelation');
+      setSidebarOpen(true);
     }
   }
 
   /** 工具栏「建议」按钮：开合建议面板（总是展开侧边栏） */
   function toggleSuggestionsPanel() {
-    setActivePanel(activePanel === 'suggestions' ? null : 'suggestions')
-    setSidebarOpen(true)
+    setActivePanel(activePanel === 'suggestions' ? null : 'suggestions');
+    setSidebarOpen(true);
   }
 
   /** 工具栏「收起 / 展开」按钮 */
   function toggleSidebar() {
-    setSidebarOpen(!sidebarOpen)
+    setSidebarOpen(!sidebarOpen);
   }
 
   return {
@@ -170,5 +170,5 @@ export function useGraphInteraction() {
     toggleCreateMode,
     toggleSuggestionsPanel,
     toggleSidebar,
-  }
+  };
 }

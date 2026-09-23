@@ -16,21 +16,21 @@
  * 反而会让"哪条流程显示什么"变得看不出。共用的部分（四档自评控件本身）
  * 已经收在 `components/quiz/SelfRatingButtons.tsx`。
  */
-import type { CardReviewSubmitResponse } from '../../api/review'
-import { selfRatingLabel } from '../../components/quiz/SelfRatingButtons'
+import type { CardReviewSubmitResponse } from '../../api/review';
+import { selfRatingLabel } from '../../components/quiz/SelfRatingButtons';
 
 interface ScheduleFeedbackProps {
-  result: CardReviewSubmitResponse
+  result: CardReviewSubmitResponse;
   /** 复习**前**的掌握度（0-100）：面板要展示 "掌握度 57 → 63" 的变化 */
-  previousMastery: number
+  previousMastery: number;
 }
 
 /** 格式化到"月日"（本地时区）；空值与非法值都给占位，不显示 NaN */
 function formatDue(value: string | null | undefined): string {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return `${d.getMonth() + 1}月${d.getDate()}日`
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 export default function ScheduleFeedback({ result, previousMastery }: ScheduleFeedbackProps) {
@@ -54,12 +54,10 @@ export default function ScheduleFeedback({ result, previousMastery }: ScheduleFe
         下次复习: <strong>{result.interval_days} 天后</strong>
         {result.next_review_at && <> （{formatDue(result.next_review_at)}）</>}
       </p>
-      {typeof result.predicted_retention === 'number'
-        && result.predicted_retention < 0.999 && (
+      {typeof result.predicted_retention === 'number' && result.predicted_retention < 0.999 && (
         <p>
-          复习前模型认为你还能想起:
-          {' '}<strong>{Math.round(result.predicted_retention * 100)}%</strong>
-          {' '}—— 越接近遗忘，这次答对后间隔涨得越多
+          复习前模型认为你还能想起: <strong>{Math.round(result.predicted_retention * 100)}%</strong>{' '}
+          —— 越接近遗忘，这次答对后间隔涨得越多
         </p>
       )}
       {(result.stability != null || result.difficulty != null) && (
@@ -72,5 +70,5 @@ export default function ScheduleFeedback({ result, previousMastery }: ScheduleFe
         </p>
       )}
     </div>
-  )
+  );
 }

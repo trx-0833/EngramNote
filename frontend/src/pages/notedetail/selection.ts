@@ -4,7 +4,7 @@
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 计算逻辑（含 50 字符窗口、`slice` 方向、`trim` 位置）与拆分前逐字一致。
  */
-import type { SelectionContext } from './types'
+import type { SelectionContext } from './types';
 
 /**
  * 计算选区上下文：选中文本及其前后各 windowChars 字符（用于 AI 提问参考）
@@ -16,18 +16,18 @@ export function computeSelectionContext(
   range: Range,
   windowChars: number,
 ): SelectionContext {
-  if (!container) return { text: '', contextBefore: '', contextAfter: '' }
-  const text = range.toString().trim()
+  if (!container) return { text: '', contextBefore: '', contextAfter: '' };
+  const text = range.toString().trim();
   // 获取选区前后的文本作为上下文
-  const beforeNode = document.createRange()
-  beforeNode.selectNodeContents(container)
-  beforeNode.setEnd(range.startContainer, range.startOffset)
-  const contextBefore = beforeNode.toString().slice(-windowChars)
-  const afterNode = document.createRange()
-  afterNode.selectNodeContents(container)
-  afterNode.setStart(range.endContainer, range.endOffset)
-  const contextAfter = afterNode.toString().slice(0, windowChars)
-  return { text, contextBefore, contextAfter }
+  const beforeNode = document.createRange();
+  beforeNode.selectNodeContents(container);
+  beforeNode.setEnd(range.startContainer, range.startOffset);
+  const contextBefore = beforeNode.toString().slice(-windowChars);
+  const afterNode = document.createRange();
+  afterNode.selectNodeContents(container);
+  afterNode.setStart(range.endContainer, range.endOffset);
+  const contextAfter = afterNode.toString().slice(0, windowChars);
+  return { text, contextBefore, contextAfter };
 }
 
 /**
@@ -40,18 +40,18 @@ export function computeAnnotationContext(
   container: HTMLElement | null,
   range: Range,
 ): { contextBefore: string; contextAfter: string } | null {
-  if (!container) return null
+  if (!container) return null;
 
   // 获取选区前后的文本作为上下文
-  const beforeNode = document.createRange()
-  beforeNode.selectNodeContents(container)
-  beforeNode.setEnd(range.startContainer, range.startOffset)
-  const contextBefore = beforeNode.toString().slice(-50)
+  const beforeNode = document.createRange();
+  beforeNode.selectNodeContents(container);
+  beforeNode.setEnd(range.startContainer, range.startOffset);
+  const contextBefore = beforeNode.toString().slice(-50);
 
-  const afterNode = document.createRange()
-  afterNode.selectNodeContents(container)
-  afterNode.setStart(range.endContainer, range.endOffset)
-  const contextAfter = afterNode.toString().slice(0, 50)
+  const afterNode = document.createRange();
+  afterNode.selectNodeContents(container);
+  afterNode.setStart(range.endContainer, range.endOffset);
+  const contextAfter = afterNode.toString().slice(0, 50);
 
-  return { contextBefore, contextAfter }
+  return { contextBefore, contextAfter };
 }

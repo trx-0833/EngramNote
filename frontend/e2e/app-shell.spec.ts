@@ -16,40 +16,40 @@
  * 这两条用例**只**证明"外壳能起来、样式真的作用到了元素上"。
  * 业务逻辑、接口契约、交互流程都不在这里 —— 那些是 Vitest 与后端测试的职责。
  */
-import { expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test';
 
-import { blockThirdParty, collectPageErrors } from './support'
+import { blockThirdParty, collectPageErrors } from './support';
 
 test.describe('应用外壳（真浏览器）', () => {
   test('首屏：HTML 外壳返回 200、React 挂载成功、无未捕获异常', async ({ page }) => {
-    const errors = collectPageErrors(page)
-    await blockThirdParty(page)
+    const errors = collectPageErrors(page);
+    await blockThirdParty(page);
 
-    const response = await page.goto('/', { waitUntil: 'domcontentloaded' })
+    const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // 1. 开发服务器真的把 index.html 发出来了
-    expect(response?.status()).toBe(200)
-    expect(await page.title()).toBe('EngramNote - AI 学习笔记管理')
+    expect(response?.status()).toBe(200);
+    expect(await page.title()).toBe('EngramNote - AI 学习笔记管理');
 
     // 2. React 真的挂载了。判据刻意选"只有 React 才渲染得出来"的元素：
     //    h1「登录 EngramNote」住在 Login.tsx 里，静态 HTML 里不存在。
     //    只断言 `#root` 非空是不够的 —— 一个报错的 React 也会往里面塞东西。
-    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible();
 
     // 3. 整个加载过程没有未捕获异常
-    expect(errors).toEqual([])
-  })
+    expect(errors).toEqual([]);
+  });
 
   test('样式真的生效：全局令牌层 + CSS Module 层都作用到了元素上', async ({ page }) => {
-    await blockThirdParty(page)
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible()
+    await blockThirdParty(page);
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible();
 
     // ── 全局层（src/styles/base.css 的 :root 令牌）──
     const primaryToken = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim(),
-    )
-    expect(primaryToken).toBe('#0f3460')
+    );
+    expect(primaryToken).toBe('#0f3460');
 
     // ── CSS Module 层（src/pages/Auth.module.css）──
     // 判据用**计算后的布局值**而不是类名：模块类名会被哈希，
@@ -78,28 +78,28 @@ test.describe('应用外壳（真浏览器）', () => {
     const minHeight = await page
       .getByRole('heading', { name: '登录 EngramNote' })
       .evaluate((h1) => {
-        const viewportHeight = `${window.innerHeight}px`
-        let cur: Element | null = h1.parentElement
+        const viewportHeight = `${window.innerHeight}px`;
+        let cur: Element | null = h1.parentElement;
         while (cur && cur !== document.body && cur !== document.documentElement) {
-          const value = getComputedStyle(cur).minHeight
-          if (value === viewportHeight) return value
-          cur = cur.parentElement
+          const value = getComputedStyle(cur).minHeight;
+          if (value === viewportHeight) return value;
+          cur = cur.parentElement;
         }
-        return `（没有任何祖先的 min-height 等于视口高 ${viewportHeight} —— Auth.module.css 的 min-height:100vh 不生效了）`
-      })
-    expect(minHeight).toBe('720px') // 视口高度，见 playwright.config.ts 的 viewport
+        return `（没有任何祖先的 min-height 等于视口高 ${viewportHeight} —— Auth.module.css 的 min-height:100vh 不生效了）`;
+      });
+    expect(minHeight).toBe('720px'); // 视口高度，见 playwright.config.ts 的 viewport
 
     // 样式表确实被解析了（不是"文件在但没生效"）
     const ruleCount = await page.evaluate(() =>
       Array.from(document.styleSheets).reduce((total, sheet) => {
         try {
-          return total + sheet.cssRules.length
+          return total + sheet.cssRules.length;
         } catch {
           // 跨源样式表读不到 cssRules；本用例阻断外链后应不存在，计入 0
-          return total
+          return total;
         }
       }, 0),
-    )
-    expect(ruleCount).toBeGreaterThan(50)
-  })
-})
+    );
+    expect(ruleCount).toBeGreaterThan(50);
+  });
+});

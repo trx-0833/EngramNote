@@ -11,9 +11,9 @@
  * 它们从哪来；后端测试一律显式 `import pytest` 的那套写法在这里也适用。
  * 代价是每个文件多一行 import，换来的是"这个 API 属于谁"一眼可见。
  */
-import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
 
 /**
  * jsdom 不实现滚动相关的 DOM API
@@ -28,9 +28,9 @@ import { afterEach, vi } from 'vitest'
  * 的缺陷污染产品代码。
  */
 if (!Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = vi.fn()
+  Element.prototype.scrollIntoView = vi.fn();
 }
 
 afterEach(() => {
-  cleanup()
-})
+  cleanup();
+});

@@ -9,7 +9,7 @@
  * diff 数据来自后端 NoteVersionDiffResponse，与 DiffView 组件的 DiffBlock 不同，
  * 这里使用扁平的 NoteVersionDiffLine[] 结构。
  */
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react';
 import {
   listVersions,
   getVersion,
@@ -17,7 +17,7 @@ import {
   restoreVersion,
   type NoteVersion,
   type NoteVersionDiffResponse,
-} from '../api/client'
+} from '../api/client';
 
 interface VersionHistoryProps {
   /** 笔记 ID */
@@ -33,185 +33,250 @@ function getSourceBadge(source: string): { label: string; bg: string } {
   switch (source) {
     case 'user_edit':
       // 手动编辑：主色（蓝色）
-      return { label: '手动编辑', bg: 'var(--color-primary)' }
+      return { label: '手动编辑', bg: 'var(--color-primary)' };
     case 'auto_clean':
       // 自动清洗：次要文字色（灰色）
-      return { label: '自动清洗', bg: 'var(--color-text-secondary)' }
+      return { label: '自动清洗', bg: 'var(--color-text-secondary)' };
     case 'system':
       // 系统：成功色（绿色）
-      return { label: '系统', bg: 'var(--color-success)' }
+      return { label: '系统', bg: 'var(--color-success)' };
     default:
-      return { label: source, bg: 'var(--color-text-secondary)' }
+      return { label: source, bg: 'var(--color-text-secondary)' };
   }
 }
 
 /** 格式化 ISO 时间为 YYYY-MM-DD HH:mm */
 function formatDate(isoStr: string): string {
-  const d = new Date(isoStr)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const d = new Date(isoStr);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** 格式化字节数为 KB 字符串 */
 function formatSize(size: number): string {
-  return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024).toFixed(1)} KB`;
 }
 
 export default function VersionHistory({ noteId, onClose, onRestored }: VersionHistoryProps) {
-  const [versions, setVersions] = useState<NoteVersion[]>([])
+  const [versions, setVersions] = useState<NoteVersion[]>([]);
   /** 选中的两个版本号（用于 diff），null 表示未选 */
-  const [selectedVersions, setSelectedVersions] = useState<[number | null, number | null]>([null, null])
-  const [diffResult, setDiffResult] = useState<NoteVersionDiffResponse | null>(null)
-  const [previewContent, setPreviewContent] = useState<{ version_number: number; content: string } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [restoring, setRestoring] = useState(false)
+  const [selectedVersions, setSelectedVersions] = useState<[number | null, number | null]>([
+    null,
+    null,
+  ]);
+  const [diffResult, setDiffResult] = useState<NoteVersionDiffResponse | null>(null);
+  const [previewContent, setPreviewContent] = useState<{
+    version_number: number;
+    content: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [restoring, setRestoring] = useState(false);
 
   /** 加载版本列表 */
   const loadVersions = useCallback(async () => {
-    setLoading(true)
-    setError('')
+    setLoading(true);
+    setError('');
     try {
-      const data = await listVersions(noteId)
+      const data = await listVersions(noteId);
       // 按版本号倒序排列
-      const sorted = [...(data.versions || [])].sort((a, b) => b.version_number - a.version_number)
-      setVersions(sorted)
+      const sorted = [...(data.versions || [])].sort((a, b) => b.version_number - a.version_number);
+      setVersions(sorted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载版本列表失败')
+      setError(err instanceof Error ? err.message : '加载版本列表失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [noteId])
+  }, [noteId]);
 
   // 组件挂载时加载版本列表（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadVersions()
-  }, [loadVersions])
+    loadVersions();
+  }, [loadVersions]);
 
   /** 切换版本选中状态（最多选 2 个用于 diff） */
   function handleSelectVersion(versionNumber: number) {
-    setSelectedVersions(prev => {
-      const [a, b] = prev
+    setSelectedVersions((prev) => {
+      const [a, b] = prev;
       // 已选中则取消
-      if (a === versionNumber) return [null, b]
-      if (b === versionNumber) return [a, null]
+      if (a === versionNumber) return [null, b];
+      if (b === versionNumber) return [a, null];
       // 优先填第一个空位
-      if (a === null) return [versionNumber, b]
-      if (b === null) return [a, versionNumber]
+      if (a === null) return [versionNumber, b];
+      if (b === null) return [a, versionNumber];
       // 两个都满了，替换第二个
-      return [a, versionNumber]
-    })
+      return [a, versionNumber];
+    });
     // 切换选择时清除旧的 diff 结果
-    setDiffResult(null)
+    setDiffResult(null);
   }
 
   // 两个版本都选中时自动加载 diff（条件重置派生状态，同步 setState 豁免）
   useEffect(() => {
-    const [v1, v2] = selectedVersions
+    const [v1, v2] = selectedVersions;
     if (v1 === null || v2 === null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDiffResult(null)
-      return
+      setDiffResult(null);
+      return;
     }
     // 保证 v1 < v2，传给后端的参数顺序一致
-    const [a, b] = v1 < v2 ? [v1, v2] : [v2, v1]
-    let cancelled = false
+    const [a, b] = v1 < v2 ? [v1, v2] : [v2, v1];
+    let cancelled = false;
     diffVersions(noteId, a, b)
-      .then(res => {
-        if (!cancelled) setDiffResult(res)
+      .then((res) => {
+        if (!cancelled) setDiffResult(res);
       })
-      .catch(err => {
+      .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : '加载对比失败')
+          setError(err instanceof Error ? err.message : '加载对比失败');
         }
-      })
+      });
     return () => {
-      cancelled = true
-    }
-  }, [selectedVersions, noteId])
+      cancelled = true;
+    };
+  }, [selectedVersions, noteId]);
 
   /** 预览指定版本的原始内容 */
   async function handlePreview(versionNumber: number) {
-    setError('')
+    setError('');
     try {
-      const data = await getVersion(noteId, versionNumber)
-      setPreviewContent({ version_number: data.version_number, content: data.content })
+      const data = await getVersion(noteId, versionNumber);
+      setPreviewContent({ version_number: data.version_number, content: data.content });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载版本内容失败')
+      setError(err instanceof Error ? err.message : '加载版本内容失败');
     }
   }
 
   /** 恢复到指定历史版本（先确认，再调用接口） */
   async function handleRestore(versionNumber: number) {
-    if (!window.confirm('确定恢复到此版本吗？当前内容将被保存为新版本。')) return
-    setRestoring(true)
-    setError('')
+    if (!window.confirm('确定恢复到此版本吗？当前内容将被保存为新版本。')) return;
+    setRestoring(true);
+    setError('');
     try {
-      await restoreVersion(noteId, versionNumber)
+      await restoreVersion(noteId, versionNumber);
       // 恢复成功后通知父组件刷新笔记详情，并关闭版本历史面板
-      onRestored()
-      onClose()
+      onRestored();
+      onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复版本失败')
+      setError(err instanceof Error ? err.message : '恢复版本失败');
     } finally {
-      setRestoring(false)
+      setRestoring(false);
     }
   }
 
   /** 已选中的版本数量 */
-  const selectedCount = selectedVersions.filter(v => v !== null).length
+  const selectedCount = selectedVersions.filter((v) => v !== null).length;
 
   return (
     // 模态浮层：半透明遮罩 + 居中卡片
     <div
       style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.5)',
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
       onClick={onClose}
     >
       <div
         className="card"
         style={{
-          maxWidth: '900px', width: '90%', maxHeight: '85vh', overflowY: 'auto',
+          maxWidth: '900px',
+          width: '90%',
+          maxHeight: '85vh',
+          overflowY: 'auto',
           padding: '1.5rem',
         }}
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* 头部：标题 + 关闭按钮 */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-          <h2 className="heading-serif" style={{ fontSize: '1.25rem', margin: 0 }}>版本历史</h2>
-          <button className="btn btn-secondary" onClick={onClose} disabled={restoring}>关闭</button>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 'var(--space-md)',
+          }}
+        >
+          <h2 className="heading-serif" style={{ fontSize: '1.25rem', margin: 0 }}>
+            版本历史
+          </h2>
+          <button className="btn btn-secondary" onClick={onClose} disabled={restoring}>
+            关闭
+          </button>
         </div>
 
         {error && (
-          <p style={{ color: 'var(--color-error)', marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>{error}</p>
+          <p
+            style={{
+              color: 'var(--color-error)',
+              marginBottom: 'var(--space-sm)',
+              fontSize: '0.875rem',
+            }}
+          >
+            {error}
+          </p>
         )}
 
         {loading ? (
-          <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: 'var(--space-lg)' }}>加载中...</p>
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              textAlign: 'center',
+              padding: 'var(--space-lg)',
+            }}
+          >
+            加载中...
+          </p>
         ) : versions.length === 0 ? (
-          <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: 'var(--space-lg)' }}>暂无版本历史</p>
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              textAlign: 'center',
+              padding: 'var(--space-lg)',
+            }}
+          >
+            暂无版本历史
+          </p>
         ) : (
           <>
             {/* 版本列表 */}
             <div style={{ marginBottom: 'var(--space-md)' }}>
-              <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)' }}>
+              <p
+                style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-xs)',
+                }}
+              >
                 选择两个版本进行对比（已选 {selectedCount}/2）
               </p>
-              {versions.map(v => {
-                const badge = getSourceBadge(v.source)
-                const isSelected = selectedVersions[0] === v.version_number || selectedVersions[1] === v.version_number
+              {versions.map((v) => {
+                const badge = getSourceBadge(v.source);
+                const isSelected =
+                  selectedVersions[0] === v.version_number ||
+                  selectedVersions[1] === v.version_number;
                 return (
                   <div
                     key={v.id}
                     className="card"
                     style={{
-                      padding: '0.75rem 1rem', marginBottom: '0.5rem',
-                      border: isSelected ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
-                      display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+                      padding: '0.75rem 1rem',
+                      marginBottom: '0.5rem',
+                      border: isSelected
+                        ? '1px solid var(--color-primary)'
+                        : '1px solid var(--color-border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap',
                     }}
                   >
                     {/* 选择复选框 */}
@@ -224,16 +289,36 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                     {/* 版本号 */}
                     <span style={{ fontWeight: 600, minWidth: '40px' }}>v{v.version_number}</span>
                     {/* 来源徽章 */}
-                    <span style={{ background: badge.bg, color: 'white', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '9999px', whiteSpace: 'nowrap' }}>
+                    <span
+                      style={{
+                        background: badge.bg,
+                        color: 'white',
+                        fontSize: '0.7rem',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {badge.label}
                     </span>
                     {/* 创建时间 */}
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{formatDate(v.created_at)}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                      {formatDate(v.created_at)}
+                    </span>
                     {/* 内容大小 */}
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{formatSize(v.content_size)}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                      {formatSize(v.content_size)}
+                    </span>
                     {/* 变更摘要 */}
                     {v.change_summary && (
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', flex: 1, minWidth: '120px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.8rem',
+                          color: 'var(--color-text-secondary)',
+                          flex: 1,
+                          minWidth: '120px',
+                        }}
+                      >
                         {v.change_summary}
                       </span>
                     )}
@@ -257,7 +342,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                       </button>
                     </div>
                   </div>
-                )
+                );
               })}
             </div>
 
@@ -268,30 +353,46 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                   版本对比: v{diffResult.v1_number} → v{diffResult.v2_number}
                 </h3>
                 {diffResult.diff_lines.length === 0 ? (
-                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>两个版本完全相同，没有差异。</p>
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+                    两个版本完全相同，没有差异。
+                  </p>
                 ) : (
                   <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
                     {diffResult.diff_lines.map((line, idx) => {
                       // 行前缀：added=+, removed=-, unchanged=空格
-                      const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '
+                      const prefix =
+                        line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
                       // 行背景色：added=绿，removed=红，unchanged=透明
-                      const bg = line.type === 'added'
-                        ? 'rgba(34, 197, 94, 0.15)'
-                        : line.type === 'removed'
-                          ? 'rgba(239, 68, 68, 0.15)'
-                          : 'transparent'
+                      const bg =
+                        line.type === 'added'
+                          ? 'rgba(34, 197, 94, 0.15)'
+                          : line.type === 'removed'
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : 'transparent';
                       // 行文字色
-                      const color = line.type === 'added'
-                        ? 'var(--color-success)'
-                        : line.type === 'removed'
-                          ? 'var(--color-error)'
-                          : 'var(--color-text)'
+                      const color =
+                        line.type === 'added'
+                          ? 'var(--color-success)'
+                          : line.type === 'removed'
+                            ? 'var(--color-error)'
+                            : 'var(--color-text)';
                       return (
-                        <div key={idx} style={{ background: bg, color, padding: '1px 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          <span style={{ marginRight: '0.5rem', userSelect: 'none' }}>{prefix}</span>
+                        <div
+                          key={idx}
+                          style={{
+                            background: bg,
+                            color,
+                            padding: '1px 8px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          <span style={{ marginRight: '0.5rem', userSelect: 'none' }}>
+                            {prefix}
+                          </span>
                           {line.content}
                         </div>
-                      )
+                      );
                     })}
                   </div>
                 )}
@@ -301,8 +402,17 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
             {/* 预览面板：点击预览后显示 */}
             {previewContent && (
               <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1rem', margin: 0 }}>版本内容预览 (v{previewContent.version_number})</h3>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '0.5rem',
+                  }}
+                >
+                  <h3 style={{ fontSize: '1rem', margin: 0 }}>
+                    版本内容预览 (v{previewContent.version_number})
+                  </h3>
                   <button
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '4px 10px' }}
@@ -311,7 +421,17 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                     关闭预览
                   </button>
                 </div>
-                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.85rem', lineHeight: 1.6, margin: 0, maxHeight: '400px', overflowY: 'auto' }}>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: '0.85rem',
+                    lineHeight: 1.6,
+                    margin: 0,
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                  }}
+                >
                   {previewContent.content}
                 </pre>
               </div>
@@ -320,5 +440,5 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
         )}
       </div>
     </div>
-  )
+  );
 }

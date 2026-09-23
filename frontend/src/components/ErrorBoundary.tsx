@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 /**
  * 全局错误边界
@@ -17,47 +17,47 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
  */
 
 interface Props {
-  children: ReactNode
+  children: ReactNode;
   /** 变化时自动重置错误状态（通常传 location.pathname） */
-  resetKey?: string
+  resetKey?: string;
   /** 自定义兜底 UI；不传则用默认界面 */
-  fallback?: (error: Error, reset: () => void) => ReactNode
+  fallback?: (error: Error, reset: () => void) => ReactNode;
 }
 
 interface State {
-  error: Error | null
-  errorInfo: ErrorInfo | null
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, errorInfo: null }
+  state: State = { error: null, errorInfo: null };
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { error }
+    return { error };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    this.setState({ errorInfo })
+    this.setState({ errorInfo });
     // 保留完整堆栈到控制台：兜底 UI 只给用户看摘要，排查仍需堆栈
-    console.error('[ErrorBoundary] 渲染异常已捕获:', error, errorInfo)
+    console.error('[ErrorBoundary] 渲染异常已捕获:', error, errorInfo);
   }
 
   componentDidUpdate(prevProps: Props): void {
     // 路由变化或外部要求重置时清空错误 —— 让"坏数据卡死整页"变成一次性故障
     if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
-      this.reset()
+      this.reset();
     }
   }
 
   reset = (): void => {
-    this.setState({ error: null, errorInfo: null })
-  }
+    this.setState({ error: null, errorInfo: null });
+  };
 
   render(): ReactNode {
-    const { error, errorInfo } = this.state
-    if (!error) return this.props.children
+    const { error, errorInfo } = this.state;
+    if (!error) return this.props.children;
 
-    if (this.props.fallback) return this.props.fallback(error, this.reset)
+    if (this.props.fallback) return this.props.fallback(error, this.reset);
 
     return (
       <div
@@ -75,8 +75,8 @@ export class ErrorBoundary extends Component<Props, State> {
       >
         <h2 style={{ margin: '0 0 8px', fontSize: '1.25rem' }}>这个页面出错了</h2>
         <p style={{ margin: '0 0 16px', color: 'var(--color-text-secondary, #666)' }}>
-          页面渲染时发生异常，已被错误边界拦截（应用其余部分仍可正常使用）。
-          常见原因是笔记内容里的 Markdown/公式语法异常。
+          页面渲染时发生异常，已被错误边界拦截（应用其余部分仍可正常使用）。 常见原因是笔记内容里的
+          Markdown/公式语法异常。
         </p>
 
         <pre
@@ -128,8 +128,8 @@ export class ErrorBoundary extends Component<Props, State> {
           </button>
         </div>
       </div>
-    )
+    );
   }
 }
 
-export default ErrorBoundary
+export default ErrorBoundary;

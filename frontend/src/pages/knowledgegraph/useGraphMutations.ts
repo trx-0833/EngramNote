@@ -20,7 +20,7 @@
  * 同一组判据（包装对象拆包后照常渲染，真正缺失/非数组才降级），而不是散落 `?.`。
  * `setGraphData` 不在此列：`useGraphData` 用 memo 统一过 `normalizeGraphData`，这里写回原始响应即可。
  */
-import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import {
   batchConfirmRelations,
   batchRejectRelations,
@@ -35,27 +35,27 @@ import {
   type GraphData,
   type GraphStats,
   type SuggestedRelation,
-} from '../../api/client'
-import type { ForceGraphNode } from '../../components/graph/types'
-import { useToast } from '../../components/Toast'
-import { normalizeStats, normalizeSuggestions } from './normalize'
+} from '../../api/client';
+import type { ForceGraphNode } from '../../components/graph/types';
+import { useToast } from '../../components/Toast';
+import { normalizeStats, normalizeSuggestions } from './normalize';
 
 interface UseGraphMutationsOptions {
-  setGraphData: Dispatch<SetStateAction<GraphData | null>>
-  setStats: Dispatch<SetStateAction<GraphStats | null>>
-  setSuggestions: Dispatch<SetStateAction<SuggestedRelation[]>>
+  setGraphData: Dispatch<SetStateAction<GraphData | null>>;
+  setStats: Dispatch<SetStateAction<GraphStats | null>>;
+  setSuggestions: Dispatch<SetStateAction<SuggestedRelation[]>>;
   /** 已勾选的建议 ID：批量确认/拒绝读它，提交后按它过滤列表 */
-  selectedSuggestions: Set<string>
+  selectedSuggestions: Set<string>;
   /** 清空勾选（与拆分前的 `setSelectedSuggestions(new Set())` 等价） */
-  clearSelectedSuggestions: () => void
+  clearSelectedSuggestions: () => void;
   /** 清除选中的边：确认/拒绝/删除后详情面板不能残留旧状态 */
-  clearSelectedLink: () => void
+  clearSelectedLink: () => void;
   /** 创建关系表单：两个端点与关系类型 */
-  createFirstNode: ForceGraphNode | null
-  createSecondNode: ForceGraphNode | null
-  createRelationType: string
+  createFirstNode: ForceGraphNode | null;
+  createSecondNode: ForceGraphNode | null;
+  createRelationType: string;
   /** 创建成功后退出创建模式（与「取消」按钮同一组状态重置） */
-  exitCreateMode: () => void
+  exitCreateMode: () => void;
 }
 
 export function useGraphMutations({
@@ -70,17 +70,17 @@ export function useGraphMutations({
   createRelationType,
   exitCreateMode,
 }: UseGraphMutationsOptions) {
-  const toast = useToast()
+  const toast = useToast();
 
   /** 操作中状态 */
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [batchLoading, setBatchLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
   /** 手动生成相关建议中 */
-  const [suggesting, setSuggesting] = useState(false)
+  const [suggesting, setSuggesting] = useState(false);
   /** 手动生成相关建议的错误提示 */
-  const [suggestError, setSuggestError] = useState('')
+  const [suggestError, setSuggestError] = useState('');
   /** 创建关系提交中 */
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState(false);
 
   /**
    * 写操作后"重新拉取图谱 + 统计"的唯一出口
@@ -96,127 +96,127 @@ export function useGraphMutations({
    */
   async function refetchGraphAndStats(mode: 'parallel' | 'sequential') {
     if (mode === 'parallel') {
-      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()])
-      setGraphData(data)
-      setStats(normalizeStats(statsData))
-      return
+      const [data, statsData] = await Promise.all([getGraphData(), getGraphStats()]);
+      setGraphData(data);
+      setStats(normalizeStats(statsData));
+      return;
     }
-    const data = await getGraphData()
-    setGraphData(data)
-    const statsData = await getGraphStats()
-    setStats(normalizeStats(statsData))
+    const data = await getGraphData();
+    setGraphData(data);
+    const statsData = await getGraphStats();
+    setStats(normalizeStats(statsData));
   }
 
   /** 确认建议关系 */
   async function handleConfirm(relationId: string) {
-    setActionLoading(relationId)
+    setActionLoading(relationId);
     try {
-      await confirmRelation(relationId)
-      setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
-      clearSelectedLink() // 清除选中的待审边，避免详情面板残留旧状态
-      await refetchGraphAndStats('sequential')
+      await confirmRelation(relationId);
+      setSuggestions((prev) => prev.filter((s) => s.id !== relationId));
+      clearSelectedLink(); // 清除选中的待审边，避免详情面板残留旧状态
+      await refetchGraphAndStats('sequential');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败');
     } finally {
-      setActionLoading(null)
+      setActionLoading(null);
     }
   }
 
   /** 拒绝建议关系 */
   async function handleReject(relationId: string) {
-    setActionLoading(relationId)
+    setActionLoading(relationId);
     try {
-      await rejectRelation(relationId)
-      setSuggestions((prev) => prev.filter((s) => s.id !== relationId))
-      clearSelectedLink() // 清除选中的待审边，避免详情面板残留旧状态
-      await refetchGraphAndStats('sequential')
+      await rejectRelation(relationId);
+      setSuggestions((prev) => prev.filter((s) => s.id !== relationId));
+      clearSelectedLink(); // 清除选中的待审边，避免详情面板残留旧状态
+      await refetchGraphAndStats('sequential');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败');
     } finally {
-      setActionLoading(null)
+      setActionLoading(null);
     }
   }
 
   /** 批量确认 */
   async function handleBatchConfirm() {
-    if (selectedSuggestions.size === 0) return
-    setBatchLoading(true)
+    if (selectedSuggestions.size === 0) return;
+    setBatchLoading(true);
     try {
-      await batchConfirmRelations(Array.from(selectedSuggestions))
-      setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)))
-      clearSelectedSuggestions()
-      await refetchGraphAndStats('parallel')
+      await batchConfirmRelations(Array.from(selectedSuggestions));
+      setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)));
+      clearSelectedSuggestions();
+      await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '批量操作失败')
+      toast.error(err instanceof Error ? err.message : '批量操作失败');
     } finally {
-      setBatchLoading(false)
+      setBatchLoading(false);
     }
   }
 
   /** 批量拒绝 */
   async function handleBatchReject() {
-    if (selectedSuggestions.size === 0) return
-    if (!confirm(`确定要拒绝 ${selectedSuggestions.size} 条建议关系吗？`)) return
-    setBatchLoading(true)
+    if (selectedSuggestions.size === 0) return;
+    if (!confirm(`确定要拒绝 ${selectedSuggestions.size} 条建议关系吗？`)) return;
+    setBatchLoading(true);
     try {
-      await batchRejectRelations(Array.from(selectedSuggestions))
-      setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)))
-      clearSelectedSuggestions()
-      await refetchGraphAndStats('parallel')
+      await batchRejectRelations(Array.from(selectedSuggestions));
+      setSuggestions((prev) => prev.filter((s) => !selectedSuggestions.has(s.id)));
+      clearSelectedSuggestions();
+      await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '批量操作失败')
+      toast.error(err instanceof Error ? err.message : '批量操作失败');
     } finally {
-      setBatchLoading(false)
+      setBatchLoading(false);
     }
   }
 
   /** 手动生成相关建议（可能耗时数十秒，需显式触发，避免阻塞页面加载） */
   async function handleGenerateSuggestions() {
-    setSuggesting(true)
-    setSuggestError('')
+    setSuggesting(true);
+    setSuggestError('');
     try {
-      const result = await suggestRelations()
-      const sug = await getSuggestions()
+      const result = await suggestRelations();
+      const sug = await getSuggestions();
       // 与 fetchData 同一道判据：{items:[…]} 拆包后照常渲染（建议其实在，不能说成"暂无"），
       // 真正缺失/非数组才归一成空列表
-      setSuggestions(normalizeSuggestions(sug))
+      setSuggestions(normalizeSuggestions(sug));
       if (result.new_count > 0) {
-        await refetchGraphAndStats('parallel')
+        await refetchGraphAndStats('parallel');
       }
     } catch (err) {
-      setSuggestError(err instanceof Error ? err.message : '生成建议失败')
+      setSuggestError(err instanceof Error ? err.message : '生成建议失败');
     } finally {
-      setSuggesting(false)
+      setSuggesting(false);
     }
   }
 
   /** 删除已确认的关系 */
   async function handleDeleteRelation(relationId: string) {
-    if (!confirm('确定要删除此关系吗？')) return
-    setActionLoading(relationId)
+    if (!confirm('确定要删除此关系吗？')) return;
+    setActionLoading(relationId);
     try {
-      await deleteRelation(relationId)
-      clearSelectedLink()
-      await refetchGraphAndStats('parallel')
+      await deleteRelation(relationId);
+      clearSelectedLink();
+      await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '删除失败')
+      toast.error(err instanceof Error ? err.message : '删除失败');
     } finally {
-      setActionLoading(null)
+      setActionLoading(null);
     }
   }
 
   /** 提交创建关系 */
   async function handleCreateRelation() {
-    if (!createFirstNode || !createSecondNode) return
-    setCreating(true)
+    if (!createFirstNode || !createSecondNode) return;
+    setCreating(true);
     try {
-      await createRelation(createFirstNode.id, createSecondNode.id, createRelationType)
-      exitCreateMode()
-      await refetchGraphAndStats('parallel')
+      await createRelation(createFirstNode.id, createSecondNode.id, createRelationType);
+      exitCreateMode();
+      await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '创建失败')
+      toast.error(err instanceof Error ? err.message : '创建失败');
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
   }
 
@@ -233,5 +233,5 @@ export function useGraphMutations({
     handleGenerateSuggestions,
     handleDeleteRelation,
     handleCreateRelation,
-  }
+  };
 }

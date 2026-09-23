@@ -84,8 +84,12 @@
 
 /* 定义与引用同在本文件（全局层）：不像模块那样会被哈希，所以不需要搬 */
 @keyframes citation-flash {
-  0% { background-color: #fbbf24; }
-  100% { background-color: #ffd166; }
+  0% {
+    background-color: #fbbf24;
+  }
+  100% {
+    background-color: #ffd166;
+  }
 }
 
 .markdown-body .annotation-mark {

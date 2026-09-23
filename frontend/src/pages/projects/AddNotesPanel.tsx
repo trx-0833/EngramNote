@@ -11,21 +11,21 @@
  * 5.10 移动端补丁：搜索框不再内联 `font-size: 0.8rem`（< 16px 会让 iOS 聚焦时放大整页），
  * 交给全局的 `input { font-size: 1rem }`。理由写在该输入框上方。
  */
-import type { Note } from '../../api/client'
-import { statusClass } from '../../utils/labels'
+import type { Note } from '../../api/client';
+import { statusClass } from '../../utils/labels';
 
 interface AddNotesPanelProps {
   /** 未过滤的候选笔记（打开面板时已剔除已归属本项目的） */
-  candidates: Note[]
-  search: string
+  candidates: Note[];
+  search: string;
   /** 加载/添加失败的提示（面板内展示，不静默吞掉） */
-  error: string
-  adding: boolean
-  selectedNoteIds: string[]
-  onChangeSearch: (value: string) => void
-  onToggleSelect: (id: string) => void
-  onConfirm: () => void
-  onClose: () => void
+  error: string;
+  adding: boolean;
+  selectedNoteIds: string[];
+  onChangeSearch: (value: string) => void;
+  onToggleSelect: (id: string) => void;
+  onConfirm: () => void;
+  onClose: () => void;
 }
 
 export default function AddNotesPanel({
@@ -39,12 +39,12 @@ export default function AddNotesPanel({
   onConfirm,
   onClose,
 }: AddNotesPanelProps) {
-  const addKeyword = search.trim().toLowerCase()
+  const addKeyword = search.trim().toLowerCase();
   const filteredCandidates = candidates.filter(
     // title 可能为 null（后端/历史数据）：原来直接 `null.toLowerCase()` 一输入搜索词就崩，
     // 缺失标题按空串处理 —— 只在搜索关键词为空时留在候选里，其余情况不参与匹配。
-    (n) => !addKeyword || (n.title ?? '').toLowerCase().includes(addKeyword)
-  )
+    (n) => !addKeyword || (n.title ?? '').toLowerCase().includes(addKeyword),
+  );
 
   return (
     <div
@@ -56,9 +56,20 @@ export default function AddNotesPanel({
         fontSize: '0.8rem',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
         <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>添加笔记</span>
-        <button style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }} onClick={onClose}>
+        <button
+          style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}
+          onClick={onClose}
+        >
           ✕
         </button>
       </div>
@@ -71,7 +82,11 @@ export default function AddNotesPanel({
         // 用户得手动缩小才能继续操作（面板其余文字仍按 0.8rem，不受影响）。
         style={{ width: '100%', marginBottom: 8 }}
       />
-      {error && <div style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginBottom: 8 }}>{error}</div>}
+      {error && (
+        <div style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginBottom: 8 }}>
+          {error}
+        </div>
+      )}
       <div
         style={{
           maxHeight: 220,
@@ -83,12 +98,17 @@ export default function AddNotesPanel({
         }}
       >
         {filteredCandidates.length === 0 ? (
-          <div style={{ color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '12px 0' }}>
+          <div
+            style={{ color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '12px 0' }}
+          >
             暂无可添加的笔记
           </div>
         ) : (
           filteredCandidates.map((n) => (
-            <label key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <label
+              key={n.id}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+            >
               <input
                 type="checkbox"
                 checked={selectedNoteIds.includes(n.id)}
@@ -124,10 +144,14 @@ export default function AddNotesPanel({
         >
           {adding ? '添加中…' : `添加（${selectedNoteIds.length}）`}
         </button>
-        <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '4px 12px' }} onClick={onClose}>
+        <button
+          className="btn btn-secondary"
+          style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+          onClick={onClose}
+        >
           取消
         </button>
       </div>
     </div>
-  )
+  );
 }

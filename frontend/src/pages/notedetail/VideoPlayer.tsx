@@ -7,20 +7,16 @@
  */
 interface VideoPlayerProps {
   /** 携带 JWT 拉取后生成的 blob URL */
-  videoUrl: string
+  videoUrl: string;
 }
 
 /** 视频播放器（仅视频类型笔记显示） */
 export default function VideoPlayer({ videoUrl }: VideoPlayerProps) {
   return (
     <div style={{ marginBottom: '1.5rem' }}>
-      <video
-        controls
-        style={{ width: '100%', borderRadius: '0.5rem' }}
-        src={videoUrl}
-      >
+      <video controls style={{ width: '100%', borderRadius: '0.5rem' }} src={videoUrl}>
         您的浏览器不支持视频播放
       </video>
     </div>
-  )
+  );
 }

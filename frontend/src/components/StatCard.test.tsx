@@ -19,45 +19,45 @@
  * ⚠️ 反过来说：**不要**对 `styles` 做枚举（`Object.keys(styles)` 是空数组）。
  * 所以下面判定"4 个变体互不相同"时比较的是渲染出来的字符串，不是键集合。
  */
-import { render } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { render } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
-import StatCard, { type StatCardVariant } from './StatCard'
-import styles from './StatCard.module.css'
+import StatCard, { type StatCardVariant } from './StatCard';
+import styles from './StatCard.module.css';
 
 /** 4 个变体（顺序无关，但要全覆盖：漏一个就会让那条色条静默变透明） */
-const VARIANTS: StatCardVariant[] = ['blue', 'green', 'gold', 'purple']
+const VARIANTS: StatCardVariant[] = ['blue', 'green', 'gold', 'purple'];
 
 describe('StatCard：从 dashboard.css 抽出的统计卡片', () => {
   it('★ 结构与迁移前逐字一致：卡片 > 数字 div + 说明 div', () => {
-    const { container } = render(<StatCard variant="blue" value={12} label="新掌握" />)
+    const { container } = render(<StatCard variant="blue" value={12} label="新掌握" />);
 
-    const card = container.firstElementChild as HTMLElement
-    expect(card.tagName, '外层必须是 div（迁移前就是 div.stat-card）').toBe('DIV')
-    expect(card.className).toContain(styles.statCard)
-    expect(card.className).toContain(styles.statCardBlue)
-    expect(card.children, '只允许两个子节点：数字 + 说明').toHaveLength(2)
+    const card = container.firstElementChild as HTMLElement;
+    expect(card.tagName, '外层必须是 div（迁移前就是 div.stat-card）').toBe('DIV');
+    expect(card.className).toContain(styles.statCard);
+    expect(card.className).toContain(styles.statCardBlue);
+    expect(card.children, '只允许两个子节点：数字 + 说明').toHaveLength(2);
 
-    expect(card.children[0].className).toBe(styles.statNumber)
-    expect(card.children[0].textContent).toBe('12')
-    expect(card.children[1].className).toBe(styles.statLabel)
-    expect(card.children[1].textContent).toBe('新掌握')
-  })
+    expect(card.children[0].className).toBe(styles.statNumber);
+    expect(card.children[0].textContent).toBe('12');
+    expect(card.children[1].className).toBe(styles.statLabel);
+    expect(card.children[1].textContent).toBe('新掌握');
+  });
 
   it('★ 4 个变体渲染出 4 个互不相同的类名组合', () => {
     const rendered = VARIANTS.map((variant) => {
-      const { container } = render(<StatCard variant={variant} value={1} label="x" />)
-      return (container.firstElementChild as HTMLElement).className
-    })
+      const { container } = render(<StatCard variant={variant} value={1} label="x" />);
+      return (container.firstElementChild as HTMLElement).className;
+    });
 
-    expect(new Set(rendered).size, '有变体共用了同一个类名：色条会一起变色').toBe(4)
-    for (const className of rendered) expect(className).toContain(styles.statCard)
-  })
+    expect(new Set(rendered).size, '有变体共用了同一个类名：色条会一起变色').toBe(4);
+    for (const className of rendered) expect(className).toContain(styles.statCard);
+  });
 
   it('value 支持字符串（正确率带 %、时长是格式化后的文本）', () => {
-    const { container } = render(<StatCard variant="gold" value="85%" label="正确率" />)
+    const { container } = render(<StatCard variant="gold" value="85%" label="正确率" />);
 
-    expect(container.querySelector(`.${styles.statNumber}`)?.textContent).toBe('85%')
-    expect(container.querySelector(`.${styles.statLabel}`)?.textContent).toBe('正确率')
-  })
-})
+    expect(container.querySelector(`.${styles.statNumber}`)?.textContent).toBe('85%');
+    expect(container.querySelector(`.${styles.statLabel}`)?.textContent).toBe('正确率');
+  });
+});

@@ -16,9 +16,9 @@
 
 export interface SSEHandlers {
   /** 收到一个事件（event 名 + 已解析的 JSON 数据） */
-  onEvent: (eventType: string, data: unknown) => void
+  onEvent: (eventType: string, data: unknown) => void;
   /** 遇到无法解析的事件时回调（默认仅告警，不中断流） */
-  onParseError?: (raw: string, error: unknown) => void
+  onParseError?: (raw: string, error: unknown) => void;
 }
 
 /**
@@ -51,42 +51,42 @@ export async function parseSSEStream(
 ): Promise<void> {
   // `read` 只在读取器上有：据此区分"传进来的是流"还是"已经取好的读取器"，
   // 后者**不能**再取一次（会抛上面那个 locked 错误）。
-  const ownsReader = !('read' in body)
+  const ownsReader = !('read' in body);
   const reader = ownsReader
     ? (body as ReadableStream<Uint8Array>).getReader()
-    : (body as ReadableStreamDefaultReader<Uint8Array>)
-  const decoder = new TextDecoder()
-  let buffer = ''
+    : (body as ReadableStreamDefaultReader<Uint8Array>);
+  const decoder = new TextDecoder();
+  let buffer = '';
 
   try {
     while (true) {
       if (signal?.aborted) {
-        const err = new Error('Aborted')
-        err.name = 'AbortError'
-        throw err
+        const err = new Error('Aborted');
+        err.name = 'AbortError';
+        throw err;
       }
 
-      const { done, value } = await reader.read()
-      if (done) break
+      const { done, value } = await reader.read();
+      if (done) break;
 
       // stream: true 表示可能还有后续 chunk，避免多字节字符被截断
-      buffer += decoder.decode(value, { stream: true })
+      buffer += decoder.decode(value, { stream: true });
 
       // 事件之间以空行分隔。先统一换行符，兼容 \r\n 与 \r
-      buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      const blocks = buffer.split('\n\n')
+      const blocks = buffer.split('\n\n');
       // 最后一个可能不完整，保留到下一次循环
-      buffer = blocks.pop() || ''
+      buffer = blocks.pop() || '';
 
       for (const block of blocks) {
-        dispatchEventBlock(block, handlers)
+        dispatchEventBlock(block, handlers);
       }
     }
 
     // 流结束时若缓冲区还有内容（某些实现不发送结尾空行），补发一次
     if (buffer.trim()) {
-      dispatchEventBlock(buffer, handlers)
+      dispatchEventBlock(buffer, handlers);
     }
   } finally {
     // 只释放**自己取的**那把锁：调用方传进来的读取器由调用方负责
@@ -94,7 +94,7 @@ export async function parseSSEStream(
     //  而 `releaseLock()` 会把读取器与流解绑，之后的 cancel 只会抛 TypeError）。
     if (ownsReader) {
       try {
-        reader.releaseLock()
+        reader.releaseLock();
       } catch {
         /* 忽略：锁可能已被释放 */
       }
@@ -104,36 +104,36 @@ export async function parseSSEStream(
 
 /** 解析单个事件块并回调 */
 function dispatchEventBlock(block: string, handlers: SSEHandlers): void {
-  let eventType = ''
-  const dataLines: string[] = []
+  let eventType = '';
+  const dataLines: string[] = [];
 
   for (const rawLine of block.split('\n')) {
-    const line = rawLine
-    if (line.startsWith(':')) continue // 注释/心跳行
+    const line = rawLine;
+    if (line.startsWith(':')) continue; // 注释/心跳行
     if (line.startsWith('event:')) {
-      eventType = line.slice(6).trim()
+      eventType = line.slice(6).trim();
     } else if (line.startsWith('data:')) {
       // 规范：去掉冒号后可选的一个空格，其余原样保留
-      dataLines.push(line.slice(5).replace(/^ /, ''))
+      dataLines.push(line.slice(5).replace(/^ /, ''));
     }
     // id: / retry: 当前不需要，显式忽略
   }
 
   // 规范：无 event 字段时默认事件名为 "message"
-  if (!eventType) eventType = 'message'
+  if (!eventType) eventType = 'message';
   // 多行 data 按 \n 拼接（这是原实现漏掉的关键行为）
-  const dataStr = dataLines.join('\n')
+  const dataStr = dataLines.join('\n');
 
-  if (!dataStr) return
+  if (!dataStr) return;
 
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(dataStr)
+    parsed = JSON.parse(dataStr);
   } catch (error) {
     // 关键：坏事件**跳过而不是抛错**，否则一个截断分片会终结整个回答
-    handlers.onParseError?.(dataStr, error)
-    return
+    handlers.onParseError?.(dataStr, error);
+    return;
   }
 
-  handlers.onEvent(eventType, parsed)
+  handlers.onEvent(eventType, parsed);
 }

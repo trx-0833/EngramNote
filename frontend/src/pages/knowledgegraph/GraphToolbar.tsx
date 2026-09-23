@@ -5,34 +5,34 @@
  * 与统计面板一致）、搜索框与结果下拉、类型过滤下拉、卡片类型图例、
  * 「创建关系 / 建议 / 收起-展开」三个按钮的类名与文案均逐字保留。
  */
-import type { GraphSearchNode } from '../../api/client'
+import type { GraphSearchNode } from '../../api/client';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
-import styles from '../../components/graph/Graph.module.css'
+import styles from '../../components/graph/Graph.module.css';
 import {
   cardTypeColors as CARD_TYPE_COLORS,
   cardTypeLabels as CARD_TYPE_LABELS,
-} from '../../utils/labels'
+} from '../../utils/labels';
 
 interface GraphToolbarProps {
   /** 画布实际渲染的节点/边数（已过滤回收站与类型过滤） */
-  nodeCount: number
-  edgeCount: number
-  suggestedCount: number
-  searchKeyword: string
-  onSearchKeywordChange: (value: string) => void
-  searching: boolean
-  searchResults: GraphSearchNode[]
+  nodeCount: number;
+  edgeCount: number;
+  suggestedCount: number;
+  searchKeyword: string;
+  onSearchKeywordChange: (value: string) => void;
+  searching: boolean;
+  searchResults: GraphSearchNode[];
   /** 点击搜索结果：聚焦到该节点（居中 + 缩放 + 打开节点详情） */
-  onFocusNode: (nodeId: string) => void
-  filterCardType: string | null
-  onFilterCardTypeChange: (value: string | null) => void
-  createMode: boolean
-  onToggleCreateMode: () => void
+  onFocusNode: (nodeId: string) => void;
+  filterCardType: string | null;
+  onFilterCardTypeChange: (value: string | null) => void;
+  createMode: boolean;
+  onToggleCreateMode: () => void;
   /** 待审建议数（按钮徽标） */
-  suggestionsCount: number
-  onToggleSuggestions: () => void
-  sidebarOpen: boolean
-  onToggleSidebar: () => void
+  suggestionsCount: number;
+  onToggleSuggestions: () => void;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
 }
 
 export default function GraphToolbar({
@@ -60,8 +60,7 @@ export default function GraphToolbar({
           知识图谱
         </h1>
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-          {nodeCount} 节点 · {edgeCount} 边
-          {suggestedCount > 0 && ` · ${suggestedCount} 待审`}
+          {nodeCount} 节点 · {edgeCount} 边{suggestedCount > 0 && ` · ${suggestedCount} 待审`}
         </span>
 
         {/* 搜索框 */}
@@ -111,7 +110,9 @@ export default function GraphToolbar({
         >
           <option value="">全部类型</option>
           {Object.entries(CARD_TYPE_LABELS).map(([type, label]) => (
-            <option key={type} value={type}>{label}</option>
+            <option key={type} value={type}>
+              {label}
+            </option>
           ))}
         </select>
 
@@ -137,24 +138,16 @@ export default function GraphToolbar({
         </button>
 
         {/* 建议按钮 */}
-        <button
-          className={styles.graphBtn}
-          onClick={onToggleSuggestions}
-        >
+        <button className={styles.graphBtn} onClick={onToggleSuggestions}>
           建议
-          {suggestionsCount > 0 && (
-            <span className={styles.graphBadge}>{suggestionsCount}</span>
-          )}
+          {suggestionsCount > 0 && <span className={styles.graphBadge}>{suggestionsCount}</span>}
         </button>
 
         {/* 侧边栏切换 */}
-        <button
-          className={styles.graphBtn}
-          onClick={onToggleSidebar}
-        >
+        <button className={styles.graphBtn} onClick={onToggleSidebar}>
           {sidebarOpen ? '收起' : '展开'}
         </button>
       </div>
     </div>
-  )
+  );
 }

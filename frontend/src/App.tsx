@@ -12,39 +12,39 @@
  * 后果是"只想看仪表盘"的用户也要先下载并解析整个图谱引擎与高亮引擎。
  * 现改为按路由 React.lazy 懒加载；首屏只保留登录/仪表盘所需的代码。
  */
-import { lazy, Suspense, useState } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { AuthProvider, useAuth } from './contexts/AuthContext'
-import Sidebar from './components/Sidebar'
-import ErrorBoundary from './components/ErrorBoundary'
-import LoadingSpinner from './components/LoadingSpinner'
+import { lazy, Suspense, useState } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import Sidebar from './components/Sidebar';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSpinner from './components/LoadingSpinner';
 // 应用骨架的类名归模块所有（overhaul-plan 5.6 序 9）：`layout.css` 的
 // `.app-layout*` / `.sidebar-mobile-toggle` + `responsive.css` 里同一批窄屏规则
-import styles from './App.module.css'
+import styles from './App.module.css';
 
 // ── 登录前页面（首屏必需，保持静态导入以最快呈现登录框） ──
-import Login from './pages/Login'
-import Register from './pages/Register'
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 // ── 登录后页面：全部懒加载 ──
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const NotesList = lazy(() => import('./pages/NotesList'))
-const NoteDetail = lazy(() => import('./pages/NoteDetail'))
-const Trash = lazy(() => import('./pages/Trash'))
-const Upload = lazy(() => import('./pages/Upload'))
-const KnowledgeCards = lazy(() => import('./pages/KnowledgeCards'))
-const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
-const CardDetail = lazy(() => import('./pages/CardDetail'))
-const QA = lazy(() => import('./pages/QA'))
-const Review = lazy(() => import('./pages/Review'))
-const QuestionSets = lazy(() => import('./pages/QuestionSets'))
-const TodayLearn = lazy(() => import('./pages/TodayLearn'))
-const QuickReview = lazy(() => import('./pages/QuickReview'))
-const CardReview = lazy(() => import('./pages/CardReview'))
-const DailyMaterials = lazy(() => import('./pages/DailyMaterials'))
-const Projects = lazy(() => import('./pages/Projects'))
-const LearningAssessment = lazy(() => import('./pages/LearningAssessment'))
-const LearningGoals = lazy(() => import('./pages/LearningGoals'))
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const NotesList = lazy(() => import('./pages/NotesList'));
+const NoteDetail = lazy(() => import('./pages/NoteDetail'));
+const Trash = lazy(() => import('./pages/Trash'));
+const Upload = lazy(() => import('./pages/Upload'));
+const KnowledgeCards = lazy(() => import('./pages/KnowledgeCards'));
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
+const CardDetail = lazy(() => import('./pages/CardDetail'));
+const QA = lazy(() => import('./pages/QA'));
+const Review = lazy(() => import('./pages/Review'));
+const QuestionSets = lazy(() => import('./pages/QuestionSets'));
+const TodayLearn = lazy(() => import('./pages/TodayLearn'));
+const QuickReview = lazy(() => import('./pages/QuickReview'));
+const CardReview = lazy(() => import('./pages/CardReview'));
+const DailyMaterials = lazy(() => import('./pages/DailyMaterials'));
+const Projects = lazy(() => import('./pages/Projects'));
+const LearningAssessment = lazy(() => import('./pages/LearningAssessment'));
+const LearningGoals = lazy(() => import('./pages/LearningGoals'));
 
 /** 路由级加载占位 */
 function RouteFallback() {
@@ -52,23 +52,27 @@ function RouteFallback() {
     <div style={{ display: 'flex', justifyContent: 'center', padding: '64px 0' }}>
       <LoadingSpinner />
     </div>
-  )
+  );
 }
 
 /** 未找到页面（原先 `*` 会静默重定向到 "/" 或登录页，链路失效时用户无从判断） */
 function NotFound() {
   return (
     <div style={{ textAlign: 'center', padding: '64px 16px' }}>
-      <h1 className="heading-serif" style={{ fontSize: '2rem', marginBottom: 8 }}>404</h1>
+      <h1 className="heading-serif" style={{ fontSize: '2rem', marginBottom: 8 }}>
+        404
+      </h1>
       <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
         页面不存在，可能是链接已失效。
       </p>
       {/* 按钮造型的链接：`base.css` 现在给所有 <a> 加了默认下划线
           （正文链接必须能与正文区分，见 a11y-audit F-13/F-26），
           这里显式关掉 —— 它长得是按钮，不是正文里的链接。 */}
-      <a className="btn btn-primary" href="/" style={{ textDecoration: 'none' }}>返回首页</a>
+      <a className="btn btn-primary" href="/" style={{ textDecoration: 'none' }}>
+        返回首页
+      </a>
     </div>
-  )
+  );
 }
 
 /**
@@ -76,10 +80,10 @@ function NotFound() {
  * 根据认证状态渲染不同路由
  */
 function AppRoutes() {
-  const { isAuthenticated } = useAuth()
-  const location = useLocation()
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   if (!isAuthenticated) {
     return (
@@ -89,14 +93,14 @@ function AppRoutes() {
         {/* 未登录访问其它路径时才回到登录页 */}
         <Route path="*" element={<Login />} />
       </Routes>
-    )
+    );
   }
 
   return (
     <>
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
@@ -109,7 +113,9 @@ function AppRoutes() {
       >
         {'\u2630'}
       </button>
-      <div className={`${styles.appLayout}${sidebarCollapsed ? ` ${styles.appLayoutCollapsed}` : ''}`}>
+      <div
+        className={`${styles.appLayout}${sidebarCollapsed ? ` ${styles.appLayoutCollapsed}` : ''}`}
+      >
         <main className="container page-enter">
           {/* 按路由重置的错误边界：某条数据触发渲染异常后，
               切换到别的页面即可自动恢复，不必刷新（§2.8 F-2） */}
@@ -151,7 +157,7 @@ function AppRoutes() {
         </main>
       </div>
     </>
-  )
+  );
 }
 
 function App() {
@@ -159,7 +165,7 @@ function App() {
     <AuthProvider>
       <AppRoutes />
     </AuthProvider>
-  )
+  );
 }
 
-export default App
+export default App;

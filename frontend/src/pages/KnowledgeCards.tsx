@@ -3,24 +3,29 @@
  * @description 展示当前用户所有知识卡片，按所属笔记分组，每组可折叠/展开
  *              支持按卡片分类（常规/盲点/拓展）筛选、重点难点标记、掌握度进度条与拓展知识点生成
  */
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { getKnowledgeCards, type KnowledgeCard } from '../api/client'
-import { generateExtension, generateExtensionQuestions, markCard } from '../api/knowledge'
-import LoadingSpinner from '../components/LoadingSpinner'
-import EmptyState from '../components/EmptyState'
-import ErrorDisplay from '../components/ErrorDisplay'
-import { cardTypeLabels, cardTypeColors, cardCategoryLabels, cardCategoryColors } from '../utils/labels'
-import { useToast } from '../components/Toast'
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { getKnowledgeCards, type KnowledgeCard } from '../api/client';
+import { generateExtension, generateExtensionQuestions, markCard } from '../api/knowledge';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
+import ErrorDisplay from '../components/ErrorDisplay';
+import {
+  cardTypeLabels,
+  cardTypeColors,
+  cardCategoryLabels,
+  cardCategoryColors,
+} from '../utils/labels';
+import { useToast } from '../components/Toast';
 
 interface NoteGroup {
-  note_id: string
-  note_title: string
-  cards: KnowledgeCard[]
+  note_id: string;
+  note_title: string;
+  cards: KnowledgeCard[];
 }
 
 /** 卡片分类筛选 tab 类型 */
-type CategoryFilter = 'all' | 'regular' | 'blind_spot' | 'extension'
+type CategoryFilter = 'all' | 'regular' | 'blind_spot' | 'extension';
 
 /** 筛选选项配置 */
 const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
@@ -28,22 +33,22 @@ const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
   { value: 'regular', label: '常规' },
   { value: 'blind_spot', label: '盲点' },
   { value: 'extension', label: '拓展' },
-]
+];
 
 /** 根据掌握度返回进度条颜色 */
 function getMasteryColor(level: number): string {
-  if (level < 40) return '#c0392b'
-  if (level < 70) return '#c9a959'
-  return '#2d8a56'
+  if (level < 40) return '#c0392b';
+  if (level < 70) return '#c9a959';
+  return '#2d8a56';
 }
 
 /** 将卡片按所属笔记分组（纯函数，模块级便于复用与测试） */
 function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
-  const map = new Map<string, KnowledgeCard[]>()
+  const map = new Map<string, KnowledgeCard[]>();
   for (const card of cards) {
-    const list = map.get(card.note_id) || []
-    list.push(card)
-    map.set(card.note_id, list)
+    const list = map.get(card.note_id) || [];
+    list.push(card);
+    map.set(card.note_id, list);
   }
   return Array.from(map.entries())
     .map(([noteId, cards]) => ({
@@ -52,144 +57,165 @@ function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
       cards,
     }))
     .sort((a, b) => {
-      const aTime = a.cards[0]?.created_at ?? ''
-      const bTime = b.cards[0]?.created_at ?? ''
-      return bTime.localeCompare(aTime)
-    })
+      const aTime = a.cards[0]?.created_at ?? '';
+      const bTime = b.cards[0]?.created_at ?? '';
+      return bTime.localeCompare(aTime);
+    });
 }
 
 export default function KnowledgeCards() {
-  const toast = useToast()
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const [groups, setGroups] = useState<NoteGroup[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set())
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [filterTab, setFilterTab] = useState<CategoryFilter>('all')
-  const [openMenuCardId, setOpenMenuCardId] = useState<string | null>(null)
-  const [actionLoadingCardId, setActionLoadingCardId] = useState<string | null>(null)
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const noteId = searchParams.get('note_id') || undefined
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [groups, setGroups] = useState<NoteGroup[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [filterTab, setFilterTab] = useState<CategoryFilter>('all');
+  const [openMenuCardId, setOpenMenuCardId] = useState<string | null>(null);
+  const [actionLoadingCardId, setActionLoadingCardId] = useState<string | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteId = searchParams.get('note_id') || undefined;
 
-  const fetchCards = useCallback(async (keyword?: string) => {
-    setLoading(true)
-    try {
-      const data = await getKnowledgeCards(1, 999, noteId, keyword)
-      const grouped = groupByNote(data.items)
-      setGroups(grouped)
-      setTotal(data.total)
-      setExpandedNotes(new Set(grouped.map(g => g.note_id)))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [noteId])
+  const fetchCards = useCallback(
+    async (keyword?: string) => {
+      setLoading(true);
+      try {
+        const data = await getKnowledgeCards(1, 999, noteId, keyword);
+        const grouped = groupByNote(data.items);
+        setGroups(grouped);
+        setTotal(data.total);
+        setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载失败');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [noteId],
+  );
 
   // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchCards(searchKeyword || undefined)
-  }, [noteId, fetchCards, searchKeyword])
+    fetchCards(searchKeyword || undefined);
+  }, [noteId, fetchCards, searchKeyword]);
 
   // 点击页面任意位置时关闭操作菜单
   useEffect(() => {
-    if (!openMenuCardId) return
+    if (!openMenuCardId) return;
     function handleDocumentClick() {
-      setOpenMenuCardId(null)
+      setOpenMenuCardId(null);
     }
-    document.addEventListener('click', handleDocumentClick)
-    return () => document.removeEventListener('click', handleDocumentClick)
-  }, [openMenuCardId])
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, [openMenuCardId]);
 
   function handleSearchChange(value: string) {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      setSearchKeyword(value)
-    }, 300)
+      setSearchKeyword(value);
+    }, 300);
   }
 
   function toggleGroup(noteId: string) {
-    setExpandedNotes(prev => {
-      const next = new Set(prev)
+    setExpandedNotes((prev) => {
+      const next = new Set(prev);
       if (next.has(noteId)) {
-        next.delete(noteId)
+        next.delete(noteId);
       } else {
-        next.add(noteId)
+        next.add(noteId);
       }
-      return next
-    })
+      return next;
+    });
   }
 
   /** 根据当前筛选 tab 在前端过滤分组 */
   function getFilteredGroups(): NoteGroup[] {
-    if (filterTab === 'all') return groups
+    if (filterTab === 'all') return groups;
     return groups
-      .map(g => ({ ...g, cards: g.cards.filter(c => c.card_category === filterTab) }))
-      .filter(g => g.cards.length > 0)
+      .map((g) => ({ ...g, cards: g.cards.filter((c) => c.card_category === filterTab) }))
+      .filter((g) => g.cards.length > 0);
   }
 
   /** 切换操作菜单显示状态 */
   function toggleMenu(e: React.MouseEvent, cardId: string) {
-    e.stopPropagation()
-    setOpenMenuCardId(prev => (prev === cardId ? null : cardId))
+    e.stopPropagation();
+    setOpenMenuCardId((prev) => (prev === cardId ? null : cardId));
   }
 
   /** 标记/取消标记重点或难点 */
-  async function handleMark(e: React.MouseEvent, card: KnowledgeCard, field: 'is_key_point' | 'is_difficulty') {
-    e.stopPropagation()
-    const newValue = !card[field]
-    setOpenMenuCardId(null)
-    setActionLoadingCardId(card.id)
+  async function handleMark(
+    e: React.MouseEvent,
+    card: KnowledgeCard,
+    field: 'is_key_point' | 'is_difficulty',
+  ) {
+    e.stopPropagation();
+    const newValue = !card[field];
+    setOpenMenuCardId(null);
+    setActionLoadingCardId(card.id);
     try {
-      const updated = await markCard(card.id, { [field]: newValue })
-      setGroups(prev => prev.map(g => ({
-        ...g,
-        cards: g.cards.map(c => (c.id === card.id ? { ...c, ...updated } : c)),
-      })))
+      const updated = await markCard(card.id, { [field]: newValue });
+      setGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          cards: g.cards.map((c) => (c.id === card.id ? { ...c, ...updated } : c)),
+        })),
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败')
+      toast.error(err instanceof Error ? err.message : '操作失败');
     } finally {
-      setActionLoadingCardId(null)
+      setActionLoadingCardId(null);
     }
   }
 
   /** 生成拓展知识点，成功后询问是否立即出题 */
   async function handleGenerateExtension(e: React.MouseEvent, card: KnowledgeCard) {
-    e.stopPropagation()
-    if (card.mastery_level < 80) return
-    setOpenMenuCardId(null)
-    setActionLoadingCardId(card.id)
+    e.stopPropagation();
+    if (card.mastery_level < 80) return;
+    setOpenMenuCardId(null);
+    setActionLoadingCardId(card.id);
     try {
-      const result = await generateExtension(card.id)
-      const confirmed = window.confirm('拓展知识点已生成！是否立即为拓展知识点出题？')
+      const result = await generateExtension(card.id);
+      const confirmed = window.confirm('拓展知识点已生成！是否立即为拓展知识点出题？');
       if (confirmed) {
         try {
-          await generateExtensionQuestions(result.parent_card_id)
+          await generateExtensionQuestions(result.parent_card_id);
         } catch (err) {
           // 出题失败不阻断流程，仅提示
-          toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败')
+          toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败');
         }
       }
-      await fetchCards(searchKeyword || undefined)
+      await fetchCards(searchKeyword || undefined);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '生成拓展知识点失败')
+      toast.error(err instanceof Error ? err.message : '生成拓展知识点失败');
     } finally {
-      setActionLoadingCardId(null)
+      setActionLoadingCardId(null);
     }
   }
 
-  const filteredGroups = getFilteredGroups()
+  const filteredGroups = getFilteredGroups();
 
   return (
     <div className="page-enter">
-      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
-        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>知识卡片</h1>
+      <div
+        className="page-header-row"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 'var(--space-lg)',
+        }}
+      >
+        <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem' }}>
+          知识卡片
+        </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>共 {total} 张卡片</span>
+          <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+            共 {total} 张卡片
+          </span>
           <button
             className="btn"
             style={{ fontSize: '0.8rem', padding: '4px 12px' }}
@@ -202,7 +228,7 @@ export default function KnowledgeCards() {
 
       {/* 分类筛选 tab */}
       <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-md)' }}>
-        {FILTER_TABS.map(tab => (
+        {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setFilterTab(tab.value)}
@@ -227,7 +253,7 @@ export default function KnowledgeCards() {
         <input
           type="text"
           placeholder="搜索卡片标题或内容..."
-          onChange={e => handleSearchChange(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           style={{
             width: '100%',
             padding: '8px 12px',
@@ -249,7 +275,7 @@ export default function KnowledgeCards() {
         <EmptyState message="暂无知识卡片" description="请先上传笔记并触发理解管道" />
       ) : (
         <div>
-          {filteredGroups.map(group => (
+          {filteredGroups.map((group) => (
             <div key={group.note_id} style={{ marginBottom: 'var(--space-md)' }}>
               {/* 分组头：折叠/展开是**一个真控件**。
                   ⚠️ 这里原来是 `div.card[onClick]` —— 没有 `role`、没有 `tabIndex`，
@@ -301,21 +327,36 @@ export default function KnowledgeCards() {
               </div>
 
               {expandedNotes.has(group.note_id) && (
-                <div style={{
-                  display: 'grid',
-                  // min(320px, 100%)：窄屏（可用宽度 <320px）不再撑出横向滚动
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))',
-                  gap: 'var(--space-md)',
-                }}>
-                  {group.cards.map(card => (
-                    <div
-                      key={card.id}
-                      className="card card-hover"
-                      style={{ position: 'relative' }}
-                    >
+                <div
+                  style={{
+                    display: 'grid',
+                    // min(320px, 100%)：窄屏（可用宽度 <320px）不再撑出横向滚动
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))',
+                    gap: 'var(--space-md)',
+                  }}
+                >
+                  {group.cards.map((card) => (
+                    <div key={card.id} className="card card-hover" style={{ position: 'relative' }}>
                       {/* 标题与徽章区 */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-sm)' }}>
-                        <h3 style={{ fontSize: '1rem', fontWeight: 600, flex: 1, marginRight: 'var(--space-sm)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 'var(--space-sm)',
+                        }}
+                      >
+                        <h3
+                          style={{
+                            fontSize: '1rem',
+                            fontWeight: 600,
+                            flex: 1,
+                            marginRight: 'var(--space-sm)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
                           {/* 卡片标题是**真链接**（可右键、可新标签页、Tab 一次即达），
                               而不是"整张卡片 onClick" —— 原来外层是 `div.card[onClick]`，
                               键盘到不了。与 F-17（笔记列表卡片）/ Dashboard 的笔记卡片同形：
@@ -329,12 +370,23 @@ export default function KnowledgeCards() {
                             {card.title}
                           </Link>
                         </h3>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            flexShrink: 0,
+                          }}
+                        >
                           {card.is_key_point && (
-                            <span title="重点" style={{ fontSize: '0.85rem', color: '#c9a959' }}>⭐</span>
+                            <span title="重点" style={{ fontSize: '0.85rem', color: '#c9a959' }}>
+                              ⭐
+                            </span>
                           )}
                           {card.is_difficulty && (
-                            <span title="难点" style={{ fontSize: '0.85rem', color: '#c0392b' }}>⚠</span>
+                            <span title="难点" style={{ fontSize: '0.85rem', color: '#c0392b' }}>
+                              ⚠
+                            </span>
                           )}
                           <span
                             style={{
@@ -364,13 +416,29 @@ export default function KnowledgeCards() {
                       </div>
 
                       {/* 卡片内容 */}
-                      <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      <p
+                        style={{
+                          fontSize: '0.875rem',
+                          color: 'var(--color-text-secondary)',
+                          lineHeight: 1.5,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
                         {card.content}
                       </p>
 
                       {/* 章节信息 */}
                       {card.chapter_title && (
-                        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-sm)' }}>
+                        <p
+                          style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--color-text-secondary)',
+                            marginTop: 'var(--space-sm)',
+                          }}
+                        >
                           章节: {card.chapter_title}
                         </p>
                       )}
@@ -378,11 +446,27 @@ export default function KnowledgeCards() {
                       {/* 掌握度进度条 */}
                       {card.mastery_level > 0 && (
                         <div style={{ marginTop: 'var(--space-sm)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginBottom: '2px' }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              fontSize: '0.7rem',
+                              color: 'var(--color-text-secondary)',
+                              marginBottom: '2px',
+                            }}
+                          >
                             <span>掌握度</span>
                             <span>{Math.round(card.mastery_level)}%</span>
                           </div>
-                          <div style={{ width: '100%', height: '6px', background: 'var(--color-border)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '6px',
+                              background: 'var(--color-border)',
+                              borderRadius: '3px',
+                              overflow: 'hidden',
+                            }}
+                          >
                             <div
                               style={{
                                 width: `${Math.min(100, Math.max(0, card.mastery_level))}%`,
@@ -400,7 +484,7 @@ export default function KnowledgeCards() {
                                否则这里会长出按钮的默认外观。 */
                             <button
                               type="button"
-                              onClick={e => handleGenerateExtension(e, card)}
+                              onClick={(e) => handleGenerateExtension(e, card)}
                               style={extensionHintStyle}
                             >
                               ✨ 建议生成拓展知识点
@@ -410,9 +494,15 @@ export default function KnowledgeCards() {
                       )}
 
                       {/* 操作菜单 */}
-                      <div style={{ position: 'absolute', bottom: 'var(--space-sm)', right: 'var(--space-sm)' }}>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 'var(--space-sm)',
+                          right: 'var(--space-sm)',
+                        }}
+                      >
                         <button
-                          onClick={e => toggleMenu(e, card.id)}
+                          onClick={(e) => toggleMenu(e, card.id)}
                           disabled={actionLoadingCardId === card.id}
                           style={{
                             border: '1px solid var(--color-border)',
@@ -430,7 +520,7 @@ export default function KnowledgeCards() {
                         </button>
                         {openMenuCardId === card.id && (
                           <div
-                            onClick={e => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
                             style={{
                               position: 'absolute',
                               bottom: '100%',
@@ -446,24 +536,27 @@ export default function KnowledgeCards() {
                             }}
                           >
                             <button
-                              onClick={e => handleMark(e, card, 'is_key_point')}
+                              onClick={(e) => handleMark(e, card, 'is_key_point')}
                               style={menuItemStyle}
                             >
                               {card.is_key_point ? '取消重点' : '标记重点'}
                             </button>
                             <button
-                              onClick={e => handleMark(e, card, 'is_difficulty')}
+                              onClick={(e) => handleMark(e, card, 'is_difficulty')}
                               style={menuItemStyle}
                             >
                               {card.is_difficulty ? '取消难点' : '标记难点'}
                             </button>
                             <button
-                              onClick={e => handleGenerateExtension(e, card)}
+                              onClick={(e) => handleGenerateExtension(e, card)}
                               disabled={card.mastery_level < 80}
                               title={card.mastery_level < 80 ? '掌握度需达到 80' : ''}
                               style={{
                                 ...menuItemStyle,
-                                color: card.mastery_level < 80 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+                                color:
+                                  card.mastery_level < 80
+                                    ? 'var(--color-text-secondary)'
+                                    : 'var(--color-text)',
                                 cursor: card.mastery_level < 80 ? 'not-allowed' : 'pointer',
                                 opacity: card.mastery_level < 80 ? 0.5 : 1,
                               }}
@@ -482,7 +575,7 @@ export default function KnowledgeCards() {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /** 操作菜单条目的统一样式 */
@@ -497,7 +590,7 @@ const menuItemStyle: React.CSSProperties = {
   fontSize: '0.8rem',
   cursor: 'pointer',
   borderRadius: '4px',
-}
+};
 
 /**
  * 分组头里那个折叠按钮的外观复位。
@@ -520,7 +613,7 @@ const groupToggleStyle: React.CSSProperties = {
   color: 'inherit',
   textAlign: 'left',
   cursor: 'pointer',
-}
+};
 
 /**
  * 「✨ 建议生成拓展知识点」那个按钮的外观复位（同上，逐项对应原来的 div）。
@@ -542,4 +635,4 @@ const extensionHintStyle: React.CSSProperties = {
   padding: 0,
   textAlign: 'left',
   cursor: 'pointer',
-}
+};

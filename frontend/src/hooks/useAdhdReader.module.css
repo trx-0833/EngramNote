@@ -64,7 +64,9 @@
 
 /* 模糊度与透明度由 JS 按与阅读行的距离以渐变方式写入内联样式 */
 :global(.markdown-body).adhdReaderActive > .adhdBlock {
-  transition: filter 0.25s ease, opacity 0.25s ease;
+  transition:
+    filter 0.25s ease,
+    opacity 0.25s ease;
 }
 
 /* 当前阅读块：保持清晰（filter/opacity 由内联样式驱动），仅保留轻量描边提示 */
@@ -87,5 +89,8 @@
   height: 3px;
   background: linear-gradient(90deg, var(--color-accent), rgba(37, 99, 235, 0.2));
   border-radius: 2px;
-  transition: top 0.08s ease, left 0.08s ease, width 0.08s ease;
+  transition:
+    top 0.08s ease,
+    left 0.08s ease,
+    width 0.08s ease;
 }

@@ -4,168 +4,190 @@
  * 可立即复习该笔记关联的所有题目。支持选择题、填空题和简答题，
  * 逐题展示，提交后显示判分结果和解析，最终汇总统计。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
-  getQuickReview, submitQuickReviewAnswer,
-  type QuickQuiz, type SubmitAnswerResponse,
-} from '../api/client'
-import LoadingSpinner from '../components/LoadingSpinner'
-import EmptyState from '../components/EmptyState'
-import ErrorDisplay from '../components/ErrorDisplay'
+  getQuickReview,
+  submitQuickReviewAnswer,
+  type QuickQuiz,
+  type SubmitAnswerResponse,
+} from '../api/client';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
+import ErrorDisplay from '../components/ErrorDisplay';
 // 共享答题卡片组件（类型/难度标签与颜色由组件内部统一渲染）
-import QuizAnswerCard from '../components/quiz/QuizAnswerCard'
+import QuizAnswerCard from '../components/quiz/QuizAnswerCard';
 // 与卡片复习页共用的进度条与回车键约定（5.12）
-import ReviewProgress from '../components/quiz/ReviewProgress'
-import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
-import { useSelfRating } from '../hooks/useSelfRating'
-import { useToast } from '../components/Toast'
+import ReviewProgress from '../components/quiz/ReviewProgress';
+import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
+import { useSelfRating } from '../hooks/useSelfRating';
+import { useToast } from '../components/Toast';
 
 /** 单题答题状态 */
 interface QuizState {
-  quiz: QuickQuiz
-  userAnswer: string
-  submitted: boolean
-  result: SubmitAnswerResponse | null
-  startTime: number
+  quiz: QuickQuiz;
+  userAnswer: string;
+  submitted: boolean;
+  result: SubmitAnswerResponse | null;
+  startTime: number;
 }
 
 export default function QuickReview() {
-  const { noteId } = useParams<{ noteId: string }>()
-  const navigate = useNavigate()
-  const toast = useToast()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const { noteId } = useParams<{ noteId: string }>();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // 答题状态
-  const [quizzes, setQuizzes] = useState<QuizState[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [sessionCorrect, setSessionCorrect] = useState(0)
-  const [sessionTotal, setSessionTotal] = useState(0)
-  const [completed, setCompleted] = useState(false)
+  const [quizzes, setQuizzes] = useState<QuizState[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionTotal, setSessionTotal] = useState(0);
+  const [completed, setCompleted] = useState(false);
   // 语义判分开关（阶段 3.5）：状态由页面持有，回车提交才能用上它
-  const [semanticGrading, setSemanticGrading] = useState(false)
+  const [semanticGrading, setSemanticGrading] = useState(false);
   /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
-  const submittingRef = useRef(false)
+  const submittingRef = useRef(false);
 
   // 四档自评：补完简答题的占位记录并推进 SM-2 调度
-  const onRated = useCallback((result: SubmitAnswerResponse) => {
-    setQuizzes(prev => prev.map(q =>
-      q.quiz.id === result.quiz_id ? { ...q, result } : q,
-    ))
-    if (result.is_correct) setSessionCorrect(prev => prev + 1)
-    setSessionTotal(prev => prev + 1)
-    toast.success('自评已记录，复习进度已更新')
-  }, [toast])
-  const onRateError = useCallback((message: string) => {
-    setError(message)
-    toast.error(message)
-  }, [toast])
-  const { submitRating, submitting: ratingSubmitting, isRated, skipRating } = useSelfRating({
+  const onRated = useCallback(
+    (result: SubmitAnswerResponse) => {
+      setQuizzes((prev) => prev.map((q) => (q.quiz.id === result.quiz_id ? { ...q, result } : q)));
+      if (result.is_correct) setSessionCorrect((prev) => prev + 1);
+      setSessionTotal((prev) => prev + 1);
+      toast.success('自评已记录，复习进度已更新');
+    },
+    [toast],
+  );
+  const onRateError = useCallback(
+    (message: string) => {
+      setError(message);
+      toast.error(message);
+    },
+    [toast],
+  );
+  const {
+    submitRating,
+    submitting: ratingSubmitting,
+    isRated,
+    skipRating,
+  } = useSelfRating({
     // 快速复习走独立入口（不受每日上限约束），自评也必须走同一入口
     submit: (quizId, userAnswer, timeSpentMs, selfRating) =>
       submitQuickReviewAnswer(noteId ?? '', quizId, userAnswer, timeSpentMs, selfRating),
     onRated,
     onError: onRateError,
-  })
+  });
 
   const loadQuizzes = useCallback(async () => {
-    if (!noteId) return
-    setLoading(true)
-    setError('')
+    if (!noteId) return;
+    setLoading(true);
+    setError('');
     try {
-      const data = await getQuickReview(noteId)
+      const data = await getQuickReview(noteId);
       if (data.items.length === 0) {
-        setQuizzes([])
+        setQuizzes([]);
       } else {
-        setQuizzes(data.items.map(q => ({
-          quiz: q, userAnswer: '', submitted: false, result: null, startTime: Date.now(),
-        })))
+        setQuizzes(
+          data.items.map((q) => ({
+            quiz: q,
+            userAnswer: '',
+            submitted: false,
+            result: null,
+            startTime: Date.now(),
+          })),
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载题目失败')
+      setError(err instanceof Error ? err.message : '加载题目失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [noteId])
+  }, [noteId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadQuizzes()
-  }, [noteId, loadQuizzes])
+    loadQuizzes();
+  }, [noteId, loadQuizzes]);
 
   async function handleSubmit() {
     // in-flight 锁，防止双击/连按回车重复提交，见 docs/decisions.md#F-23
-    if (submittingRef.current) return
-    const current = quizzes[currentIndex]
-    if (!current || current.submitted || !current.userAnswer.trim()) return
-    if (!noteId) return
+    if (submittingRef.current) return;
+    const current = quizzes[currentIndex];
+    if (!current || current.submitted || !current.userAnswer.trim()) return;
+    if (!noteId) return;
 
-    submittingRef.current = true
-    const timeSpent = Date.now() - current.startTime
+    submittingRef.current = true;
+    const timeSpent = Date.now() - current.startTime;
     try {
       // 语义判分只在首次提交时按用户的勾选请求（带自评的那次后端会直接跳过 LLM）
       const result = await submitQuickReviewAnswer(
-        noteId, current.quiz.id, current.userAnswer, timeSpent, undefined, semanticGrading,
-      )
-      const newQuizzes = [...quizzes]
-      newQuizzes[currentIndex] = { ...current, submitted: true, result }
-      setQuizzes(newQuizzes)
+        noteId,
+        current.quiz.id,
+        current.userAnswer,
+        timeSpent,
+        undefined,
+        semanticGrading,
+      );
+      const newQuizzes = [...quizzes];
+      newQuizzes[currentIndex] = { ...current, submitted: true, result };
+      setQuizzes(newQuizzes);
       // 只有真正推进了调度的提交才计入本次统计；简答题的占位提交
       // （grading_method='ungraded'，尚未自评）不算一次"已答"。
       if (result.grading_method !== 'ungraded') {
-        if (result.is_correct) setSessionCorrect(prev => prev + 1)
-        setSessionTotal(prev => prev + 1)
+        if (result.is_correct) setSessionCorrect((prev) => prev + 1);
+        setSessionTotal((prev) => prev + 1);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '提交失败')
+      setError(e instanceof Error ? e.message : '提交失败');
     } finally {
-      submittingRef.current = false
+      submittingRef.current = false;
     }
   }
 
   /** 四档自评：补完占位记录并推进 SM-2 调度 */
   const handleSelfRate = useCallback(
     async (quality: number) => {
-      const current = quizzes[currentIndex]
-      if (!current || !noteId || isRated(current.quiz.id)) return
-      const timeSpent = Date.now() - current.startTime
-      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality)
+      const current = quizzes[currentIndex];
+      if (!current || !noteId || isRated(current.quiz.id)) return;
+      const timeSpent = Date.now() - current.startTime;
+      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality);
     },
     [quizzes, currentIndex, noteId, isRated, submitRating],
-  )
+  );
 
   function handleNext() {
-    const current = quizzes[currentIndex]
+    const current = quizzes[currentIndex];
     // 等待自评时不允许跳到下一题：此刻调度尚未推进，
     // 放行会让这道题永远停在"答了但结不了账"的状态。
-    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return
+    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
     if (currentIndex < quizzes.length - 1) {
-      const nextIndex = currentIndex + 1
-      setCurrentIndex(nextIndex)
-      const newQuizzes = [...quizzes]
-      newQuizzes[nextIndex] = { ...newQuizzes[nextIndex], startTime: Date.now() }
-      setQuizzes(newQuizzes)
+      const nextIndex = currentIndex + 1;
+      setCurrentIndex(nextIndex);
+      const newQuizzes = [...quizzes];
+      newQuizzes[nextIndex] = { ...newQuizzes[nextIndex], startTime: Date.now() };
+      setQuizzes(newQuizzes);
     } else {
-      setCompleted(true)
+      setCompleted(true);
     }
   }
 
   /** 回车 = 推进当前这一步：已提交则下一题，否则提交答案（与卡片复习页同一约定） */
   function handleEnter() {
-    const current = quizzes[currentIndex]
-    if (current?.submitted) handleNext()
-    else void handleSubmit()
+    const current = quizzes[currentIndex];
+    if (current?.submitted) handleNext();
+    else void handleSubmit();
   }
 
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
-  const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter })
+  const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
   // --- 加载中 ---
-  if (loading) return <LoadingSpinner text="加载复习题目..." />
+  if (loading) return <LoadingSpinner text="加载复习题目..." />;
 
   // --- 错误 ---
-  if (error && quizzes.length === 0) return <ErrorDisplay message={error} onRetry={loadQuizzes} />
+  if (error && quizzes.length === 0) return <ErrorDisplay message={error} onRetry={loadQuizzes} />;
 
   // --- 无题目 ---
   if (!loading && quizzes.length === 0) {
@@ -181,12 +203,12 @@ export default function QuickReview() {
           }
         />
       </div>
-    )
+    );
   }
 
   // --- 答题完成汇总 ---
   if (completed) {
-    const accuracy = sessionTotal > 0 ? Math.round(sessionCorrect / sessionTotal * 100) : 0
+    const accuracy = sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0;
     return (
       <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
         <h2 style={{ marginBottom: 'var(--space-lg)' }}>复习完成</h2>
@@ -200,39 +222,48 @@ export default function QuickReview() {
           <button className="btn btn-primary" onClick={() => navigate(`/notes/${noteId}`)}>
             返回笔记
           </button>
-          <button className="btn btn-secondary" onClick={async () => {
-            // 重新从 API 获取题目，避免重复走 SM-2 调度
-            if (!noteId) return
-            setLoading(true)
-            try {
-              const data = await getQuickReview(noteId)
-              if (data.items.length === 0) {
-                setQuizzes([])
-              } else {
-                setQuizzes(data.items.map(q => ({
-                  quiz: q, userAnswer: '', submitted: false, result: null, startTime: Date.now(),
-                })))
-                setCurrentIndex(0)
-                setSessionCorrect(0)
-                setSessionTotal(0)
-                setCompleted(false)
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              // 重新从 API 获取题目，避免重复走 SM-2 调度
+              if (!noteId) return;
+              setLoading(true);
+              try {
+                const data = await getQuickReview(noteId);
+                if (data.items.length === 0) {
+                  setQuizzes([]);
+                } else {
+                  setQuizzes(
+                    data.items.map((q) => ({
+                      quiz: q,
+                      userAnswer: '',
+                      submitted: false,
+                      result: null,
+                      startTime: Date.now(),
+                    })),
+                  );
+                  setCurrentIndex(0);
+                  setSessionCorrect(0);
+                  setSessionTotal(0);
+                  setCompleted(false);
+                }
+              } catch (err) {
+                setError(err instanceof Error ? err.message : '加载题目失败');
+              } finally {
+                setLoading(false);
               }
-            } catch (err) {
-              setError(err instanceof Error ? err.message : '加载题目失败')
-            } finally {
-              setLoading(false)
-            }
-          }}>
+            }}
+          >
             再来一次
           </button>
         </div>
       </div>
-    )
+    );
   }
 
   // --- 答题中 ---
-  const current = quizzes[currentIndex]
-  const quiz = current.quiz
+  const current = quizzes[currentIndex];
+  const quiz = current.quiz;
 
   return (
     <div
@@ -247,7 +278,10 @@ export default function QuickReview() {
           列成「答题复习 / **快速复习** / 今日学习 / 卡片复习」。
           同样刻意**不用** `ReviewProgress` 的 `title`：那会把进度条挤到第二行，
           而答题侧的排版本来就是"标题在别处 + 一行式进度条"（见该组件文件头）。 */}
-      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>
+      <h1
+        className="heading-serif gradient-text"
+        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
+      >
         快速复习
       </h1>
 
@@ -256,8 +290,16 @@ export default function QuickReview() {
         index={currentIndex}
         total={quizzes.length}
         done={current.submitted}
-        label={<>{currentIndex + 1} / {quizzes.length}</>}
-        trailing={<>{sessionCorrect}/{sessionTotal} 正确</>}
+        label={
+          <>
+            {currentIndex + 1} / {quizzes.length}
+          </>
+        }
+        trailing={
+          <>
+            {sessionCorrect}/{sessionTotal} 正确
+          </>
+        }
       />
       {/* 题目卡片（共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
       <QuizAnswerCard
@@ -276,9 +318,9 @@ export default function QuickReview() {
         selfRated={isRated(quiz.id)}
         selfRatingSubmitting={ratingSubmitting}
         onSelectAnswer={(answer) => {
-          const newQuizzes = [...quizzes]
-          newQuizzes[currentIndex] = { ...current, userAnswer: answer }
-          setQuizzes(newQuizzes)
+          const newQuizzes = [...quizzes];
+          newQuizzes[currentIndex] = { ...current, userAnswer: answer };
+          setQuizzes(newQuizzes);
         }}
         onSubmit={handleSubmit}
         onSelfRate={handleSelfRate}
@@ -286,8 +328,10 @@ export default function QuickReview() {
         onNext={handleNext}
       />
       <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
-        <button className="btn btn-secondary" onClick={() => navigate(`/notes/${noteId}`)}>返回笔记</button>
+        <button className="btn btn-secondary" onClick={() => navigate(`/notes/${noteId}`)}>
+          返回笔记
+        </button>
       </div>
     </div>
-  )
+  );
 }

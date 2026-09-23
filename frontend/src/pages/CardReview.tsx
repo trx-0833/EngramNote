@@ -39,47 +39,60 @@
  * - **调度依据面板**：这里展示 S / D 与掌握度变化，答题侧展示间隔 / 档位 /
  *   判分方式 —— 字段集合不同，见 `cardreview/ScheduleFeedback.tsx` 的说明。
  */
-import { useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import SourceContext from '../components/quiz/SourceContext'
-import SelfRatingButtons from '../components/quiz/SelfRatingButtons'
-import ReviewProgress from '../components/quiz/ReviewProgress'
-import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard'
-import LoadingSpinner from '../components/LoadingSpinner'
-import EmptyState from '../components/EmptyState'
-import ErrorDisplay from '../components/ErrorDisplay'
-import ScheduleFeedback from './cardreview/ScheduleFeedback'
-import CardReviewSummary from './cardreview/CardReviewSummary'
-import CardFace from './cardreview/CardFace'
-import { useCardReviewSession } from './cardreview/useCardReviewSession'
+import { useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import SourceContext from '../components/quiz/SourceContext';
+import SelfRatingButtons from '../components/quiz/SelfRatingButtons';
+import ReviewProgress from '../components/quiz/ReviewProgress';
+import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
+import ErrorDisplay from '../components/ErrorDisplay';
+import ScheduleFeedback from './cardreview/ScheduleFeedback';
+import CardReviewSummary from './cardreview/CardReviewSummary';
+import CardFace from './cardreview/CardFace';
+import { useCardReviewSession } from './cardreview/useCardReviewSession';
 
 export default function CardReview() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   const {
-    loading, error, cards, totalDue, currentIndex, submitting, completed,
-    sessionCount, sessionPassed, current, phase,
-    reload, restart, handleReveal, handleRate, handleNext,
-  } = useCardReviewSession()
+    loading,
+    error,
+    cards,
+    totalDue,
+    currentIndex,
+    submitting,
+    completed,
+    sessionCount,
+    sessionPassed,
+    current,
+    phase,
+    reload,
+    restart,
+    handleReveal,
+    handleRate,
+    handleNext,
+  } = useCardReviewSession();
 
   /** 回车 = 推进当前这一步：未翻面则翻面，已自评则下一张（与答题复习同一约定） */
   const handleEnter = useCallback(() => {
-    if (!current) return
-    if (current.result) handleNext()
-    else if (!current.revealed) handleReveal()
-  }, [current, handleNext, handleReveal])
+    if (!current) return;
+    if (current.result) handleNext();
+    else if (!current.revealed) handleReveal();
+  }, [current, handleNext, handleReveal]);
 
   // 这一页没有任何输入控件，焦点必须由容器自己接住：点完按钮焦点落到 body 后，
   // 键盘事件再也冒泡不到容器，回车键会"时灵时不灵"（附录 AA.7）。见 hook 的说明。
   const { containerRef, handleKeyDown } = useReviewKeyboard({
     onEnter: handleEnter,
     refocusKey: `${currentIndex}:${phase}`,
-  })
+  });
 
   // --- 加载中 ---
-  if (loading) return <LoadingSpinner text="加载到期卡片..." />
+  if (loading) return <LoadingSpinner text="加载到期卡片..." />;
 
   // --- 错误 ---
-  if (error && cards.length === 0) return <ErrorDisplay message={error} onRetry={reload} />
+  if (error && cards.length === 0) return <ErrorDisplay message={error} onRetry={reload} />;
 
   // --- 无到期卡片 ---
   if (!loading && cards.length === 0) {
@@ -88,9 +101,9 @@ export default function CardReview() {
         <EmptyState
           message="没有到期的卡片"
           description={
-            '卡片复习只包含「已进入复习计划」的卡片。'
-            + '刚导入的卡片会在你第一次复习它们时加入计划；'
-            + '若刚重建过数据，可能需要先运行一次复习状态迁移。'
+            '卡片复习只包含「已进入复习计划」的卡片。' +
+            '刚导入的卡片会在你第一次复习它们时加入计划；' +
+            '若刚重建过数据，可能需要先运行一次复习状态迁移。'
           }
           action={
             <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
@@ -99,7 +112,7 @@ export default function CardReview() {
           }
         />
       </div>
-    )
+    );
   }
 
   // --- 本次完成汇总 ---
@@ -113,12 +126,12 @@ export default function CardReview() {
         onRestart={restart}
         onBack={() => navigate('/today')}
       />
-    )
+    );
   }
 
-  if (!current) return null
+  if (!current) return null;
 
-  const { card, revealed, result } = current
+  const { card, revealed, result } = current;
 
   return (
     <div
@@ -155,7 +168,7 @@ export default function CardReview() {
               <SelfRatingButtons
                 prompt="刚才想得起来吗？"
                 submitting={submitting}
-                onRate={quality => void handleRate(quality)}
+                onRate={(quality) => void handleRate(quality)}
               />
             )}
 
@@ -180,9 +193,9 @@ export default function CardReview() {
       </div>
 
       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', textAlign: 'center' }}>
-        卡片复习是轻量回顾，不占用每日答题限额。
-        {' '}想复习带题目的内容请到 <Link to="/review">答题复习</Link>。
+        卡片复习是轻量回顾，不占用每日答题限额。 想复习带题目的内容请到{' '}
+        <Link to="/review">答题复习</Link>。
       </p>
     </div>
-  )
+  );
 }

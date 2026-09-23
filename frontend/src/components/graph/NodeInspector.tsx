@@ -1,20 +1,28 @@
-import { cardTypeColors as CARD_TYPE_COLORS, cardTypeLabels as CARD_TYPE_LABELS } from '../../utils/labels'
-import type { ForceGraphNode } from './types'
+import {
+  cardTypeColors as CARD_TYPE_COLORS,
+  cardTypeLabels as CARD_TYPE_LABELS,
+} from '../../utils/labels';
+import type { ForceGraphNode } from './types';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
-import styles from './Graph.module.css'
+import styles from './Graph.module.css';
 
 interface NodeInspectorProps {
-  node: ForceGraphNode
-  navigate: (to: string) => void
-  onViewSubgraph: (nodeId: string) => void
-  loadingSubgraph: boolean
+  node: ForceGraphNode;
+  navigate: (to: string) => void;
+  onViewSubgraph: (nodeId: string) => void;
+  loadingSubgraph: boolean;
 }
 
 /** 节点详情面板 */
-export default function NodeInspector({ node, navigate, onViewSubgraph, loadingSubgraph }: NodeInspectorProps) {
+export default function NodeInspector({
+  node,
+  navigate,
+  onViewSubgraph,
+  loadingSubgraph,
+}: NodeInspectorProps) {
   // 契约漂移：`note_id` 缺失时原来直接 `undefined.slice(0, 8)`，点击节点即整页崩。
   // 缺失时给出可读占位并去掉跳转（没有目标可去），其余详情照常显示。
-  const noteId = node.note_id
+  const noteId = node.note_id;
   return (
     <div
       className={styles.graphPanel}
@@ -47,19 +55,32 @@ export default function NodeInspector({ node, navigate, onViewSubgraph, loadingS
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>关联数</span>
-          <span style={{ marginLeft: 'var(--space-sm)', fontWeight: 600 }}>{node.relation_count}</span>
+          <span style={{ marginLeft: 'var(--space-sm)', fontWeight: 600 }}>
+            {node.relation_count}
+          </span>
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
           <span style={{ color: 'var(--color-text-secondary)' }}>来源笔记</span>
           {noteId ? (
             <span
-              style={{ cursor: 'pointer', color: 'var(--color-primary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}
+              style={{
+                cursor: 'pointer',
+                color: 'var(--color-primary)',
+                marginLeft: 'var(--space-sm)',
+                fontSize: '0.8rem',
+              }}
               onClick={() => navigate(`/notes/${noteId}`)}
             >
               {noteId.slice(0, 8)}...
             </span>
           ) : (
-            <span style={{ color: 'var(--color-text-tertiary)', marginLeft: 'var(--space-sm)', fontSize: '0.8rem' }}>
+            <span
+              style={{
+                color: 'var(--color-text-tertiary)',
+                marginLeft: 'var(--space-sm)',
+                fontSize: '0.8rem',
+              }}
+            >
               未知来源
             </span>
           )}
@@ -85,5 +106,5 @@ export default function NodeInspector({ node, navigate, onViewSubgraph, loadingS
         </button>
       </div>
     </div>
-  )
+  );
 }

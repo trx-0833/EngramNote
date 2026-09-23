@@ -12,44 +12,50 @@
  * 改不到它们 —— 320px 视口下五个按钮会把卡片撑出横向滚动。补的是 `flexWrap: 'wrap'`
  * （四处：头部行、头部按钮组、底部行、底部按钮组；宽屏无溢出可换，像素不变）。
  */
-import type { Note, NoteInFolder, Project, ProjectDetail, ScanImportResponse } from '../../api/client'
-import AddNotesPanel from './AddNotesPanel'
-import ProjectNotesList from './ProjectNotesList'
-import ProjectRenameForm from './ProjectRenameForm'
-import ScanResultPanel from './ScanResultPanel'
-import { unwrapProjectNotes } from './helpers'
+import type {
+  Note,
+  NoteInFolder,
+  Project,
+  ProjectDetail,
+  ScanImportResponse,
+} from '../../api/client';
+import AddNotesPanel from './AddNotesPanel';
+import ProjectNotesList from './ProjectNotesList';
+import ProjectRenameForm from './ProjectRenameForm';
+import ScanResultPanel from './ScanResultPanel';
+import { unwrapProjectNotes } from './helpers';
 
 interface ProjectCardProps {
-  project: Project
+  project: Project;
   /** 列表下标，仅用于入场动画的 stagger 类 */
-  index: number
+  index: number;
   /** 行内重命名草稿（存在即处于重命名态） */
-  rename: { name: string; description: string } | undefined
+  rename: { name: string; description: string } | undefined;
   /** 展开后的项目详情（未展开为 undefined） */
-  detail: ProjectDetail | null | undefined
-  isScanning: boolean
-  scanResult: ScanImportResponse | null | undefined
+  detail: ProjectDetail | null | undefined;
+  isScanning: boolean;
+  scanResult: ScanImportResponse | null | undefined;
   /** 添加笔记面板是否开在本卡片上（同时只开一个） */
-  addPanelOpen: boolean
-  candidateNotes: Note[]
-  addSearch: string
-  addError: string
-  adding: boolean
-  selectedNoteIds: string[]
-  onStartRename: () => void
-  onChangeRenameName: (value: string) => void
-  onChangeRenameDescription: (value: string) => void
-  onSaveRename: () => void
-  onCancelRename: () => void
-  onDelete: () => void
-  onScan: () => void
-  onToggleExpand: () => void
-  onOpenAddPanel: () => void
-  onChangeAddSearch: (value: string) => void
-  onToggleSelectNote: (id: string) => void
-  onConfirmAdd: () => void
-  onCloseAddPanel: () => void
-  onRemoveNote: (note: NoteInFolder) => void
+  addPanelOpen: boolean;
+  candidateNotes: Note[];
+  addSearch: string;
+  addError: string;
+  adding: boolean;
+  selectedNoteIds: string[];
+  onStartRename: () => void;
+  onChangeRenameName: (value: string) => void;
+  onChangeRenameDescription: (value: string) => void;
+  onSaveRename: () => void;
+  onCancelRename: () => void;
+  onDelete: () => void;
+  onScan: () => void;
+  onToggleExpand: () => void;
+  onOpenAddPanel: () => void;
+  onChangeAddSearch: (value: string) => void;
+  onToggleSelectNote: (id: string) => void;
+  onConfirmAdd: () => void;
+  onCloseAddPanel: () => void;
+  onRemoveNote: (note: NoteInFolder) => void;
 }
 
 export default function ProjectCard({
@@ -80,12 +86,12 @@ export default function ProjectCard({
   onCloseAddPanel,
   onRemoveNote,
 }: ProjectCardProps) {
-  const isRenaming = !!rename
-  const isExpanded = !!detail
+  const isRenaming = !!rename;
+  const isExpanded = !!detail;
   // 详情里的 notes 与 `/projects` 走同一道拆包判据：缺字段/包装对象都不该让 `notes.map` 白屏。
   // 但"还没展开"必须排除在判据之外：没有详情就是没有笔记列表，把 `undefined` 喂给
   // unwrapProjectNotes 会把每一次列表渲染都报成契约漂移。
-  const notes: NoteInFolder[] = detail ? unwrapProjectNotes(detail.notes) : []
+  const notes: NoteInFolder[] = detail ? unwrapProjectNotes(detail.notes) : [];
 
   return (
     <div
@@ -100,7 +106,15 @@ export default function ProjectCard({
     >
       {/* 项目头：名称 + 笔记数 */}
       {/* flexWrap：窄屏（~320px）时右侧两个按钮整组换到第二行，而不是把卡片撑出横向滚动 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}
+      >
         <div style={{ flex: 1, minWidth: 0 }}>
           {isRenaming ? (
             <input
@@ -130,8 +144,20 @@ export default function ProjectCard({
               {p.name}
             </h2>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-            <span className="badge" style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 6,
+              fontSize: '0.75rem',
+              color: 'var(--color-text-tertiary)',
+            }}
+          >
+            <span
+              className="badge"
+              style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}
+            >
               {p.note_count ?? 0} 篇笔记
             </span>
           </div>
@@ -160,7 +186,14 @@ export default function ProjectCard({
 
       {/* 描述 */}
       {!isRenaming && p.description && (
-        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', margin: 0, lineHeight: 1.6 }}>
+        <p
+          style={{
+            fontSize: '0.85rem',
+            color: 'var(--color-text-secondary)',
+            margin: 0,
+            lineHeight: 1.6,
+          }}
+        >
           {p.description}
         </p>
       )}
@@ -197,7 +230,18 @@ export default function ProjectCard({
 
       {/* 底部操作行：这行没有类名（样式全在内联），所以窄屏的换行也只能在这里加。
           不加 flexWrap 时 320px 视口上「查看笔记（N）＋重命名＋删除」会横向溢出卡片 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid var(--color-border-light)', paddingTop: 10, marginTop: 'auto' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          borderTop: '1px solid var(--color-border-light)',
+          paddingTop: 10,
+          marginTop: 'auto',
+        }}
+      >
         <button
           className="btn btn-ghost"
           style={{ fontSize: '0.8rem', padding: '4px 8px' }}
@@ -227,5 +271,5 @@ export default function ProjectCard({
       {/* 笔记列表 */}
       {isExpanded && <ProjectNotesList notes={notes} onRemoveNote={onRemoveNote} />}
     </div>
-  )
+  );
 }

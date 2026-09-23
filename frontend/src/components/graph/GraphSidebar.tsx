@@ -1,14 +1,9 @@
-import type { Dispatch, SetStateAction, RefObject } from 'react'
-import { cardTypeColors as CARD_TYPE_COLORS } from '../../utils/labels'
-import type {
-  GraphStats,
-  GraphData,
-  NodeSubgraph,
-  SuggestedRelation,
-} from '../../api/client'
-import NodeInspector from './NodeInspector'
+import type { Dispatch, SetStateAction, RefObject } from 'react';
+import { cardTypeColors as CARD_TYPE_COLORS } from '../../utils/labels';
+import type { GraphStats, GraphData, NodeSubgraph, SuggestedRelation } from '../../api/client';
+import NodeInspector from './NodeInspector';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
-import styles from './Graph.module.css'
+import styles from './Graph.module.css';
 import {
   type ForceGraphNode,
   type ForceGraphLink,
@@ -16,55 +11,55 @@ import {
   RELATION_TYPE_LABELS,
   RELATION_TYPE_COLORS,
   RELATION_TYPE_OPTIONS,
-} from './types'
+} from './types';
 
 interface GraphSidebarProps {
-  stats: GraphStats | null
-  activePanel: SidebarPanel
-  selectedNode: ForceGraphNode | null
-  selectedLink: ForceGraphLink | null
-  subgraphData: NodeSubgraph | null
-  loadingSubgraph: boolean
-  graphData: GraphData | null
-  focusNode: (nodeId: string) => void
-  navigate: (to: string) => void
-  loadSubgraph: (nodeId: string) => void
-  actionLoading: string | null
-  handleConfirm: (relationId: string) => void
-  handleReject: (relationId: string) => void
-  handleDeleteRelation: (relationId: string) => void
-  suggestions: SuggestedRelation[]
-  selectedSuggestions: Set<string>
-  allSuggestionsSelected: boolean
-  selectAllRef: RefObject<HTMLInputElement>
-  toggleSelectAll: () => void
-  batchLoading: boolean
-  handleBatchConfirm: () => void
-  handleBatchReject: () => void
-  suggesting: boolean
-  suggestError: string
-  handleGenerateSuggestions: () => void
-  toggleSuggestion: (id: string) => void
-  createMode: boolean
-  createFirstNode: ForceGraphNode | null
-  createSecondNode: ForceGraphNode | null
-  createRelationType: string
-  setCreateRelationType: Dispatch<SetStateAction<string>>
-  handleCreateRelation: () => void
-  creating: boolean
-  cancelCreateMode: () => void
-  highlightedRelationType: string | null
-  setHighlightedRelationType: Dispatch<SetStateAction<string | null>>
-  setActivePanel: Dispatch<SetStateAction<SidebarPanel>>
-  setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>
+  stats: GraphStats | null;
+  activePanel: SidebarPanel;
+  selectedNode: ForceGraphNode | null;
+  selectedLink: ForceGraphLink | null;
+  subgraphData: NodeSubgraph | null;
+  loadingSubgraph: boolean;
+  graphData: GraphData | null;
+  focusNode: (nodeId: string) => void;
+  navigate: (to: string) => void;
+  loadSubgraph: (nodeId: string) => void;
+  actionLoading: string | null;
+  handleConfirm: (relationId: string) => void;
+  handleReject: (relationId: string) => void;
+  handleDeleteRelation: (relationId: string) => void;
+  suggestions: SuggestedRelation[];
+  selectedSuggestions: Set<string>;
+  allSuggestionsSelected: boolean;
+  selectAllRef: RefObject<HTMLInputElement>;
+  toggleSelectAll: () => void;
+  batchLoading: boolean;
+  handleBatchConfirm: () => void;
+  handleBatchReject: () => void;
+  suggesting: boolean;
+  suggestError: string;
+  handleGenerateSuggestions: () => void;
+  toggleSuggestion: (id: string) => void;
+  createMode: boolean;
+  createFirstNode: ForceGraphNode | null;
+  createSecondNode: ForceGraphNode | null;
+  createRelationType: string;
+  setCreateRelationType: Dispatch<SetStateAction<string>>;
+  handleCreateRelation: () => void;
+  creating: boolean;
+  cancelCreateMode: () => void;
+  highlightedRelationType: string | null;
+  setHighlightedRelationType: Dispatch<SetStateAction<string | null>>;
+  setActivePanel: Dispatch<SetStateAction<SidebarPanel>>;
+  setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>;
 }
 
 /** 图谱统计面板 */
 function StatsPanel({ stats }: { stats: GraphStats }) {
   // `relation_type_distribution` 是接口的可选尾巴：缺失时只少一段条形图。
   // 这里原来直接读 `.length`，字段一缺就抛在渲染中 → 整个图谱页被错误边界接走。
-  const distribution = stats.relation_type_distribution ?? []
-  const maxCount = Math.max(1, ...distribution.map((x) => x.count))
+  const distribution = stats.relation_type_distribution ?? [];
+  const maxCount = Math.max(1, ...distribution.map((x) => x.count));
 
   return (
     <div className={styles.graphPanel}>
@@ -113,7 +108,7 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /** 子图面板 */
@@ -125,22 +120,37 @@ function SubgraphPanel({
   setSubgraphData,
 }: {
   /** 调用方已归一化：`center_node` 必定存在（缺失时整块不渲染），邻居/边必定是数组 */
-  subgraphData: NodeSubgraph
-  graphData: GraphData | null
-  focusNode: (nodeId: string) => void
-  setActivePanel: Dispatch<SetStateAction<SidebarPanel>>
-  setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>
+  subgraphData: NodeSubgraph;
+  graphData: GraphData | null;
+  focusNode: (nodeId: string) => void;
+  setActivePanel: Dispatch<SetStateAction<SidebarPanel>>;
+  setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>;
 }) {
-  const neighbors = subgraphData.neighbor_nodes ?? []
-  const subgraphEdges = subgraphData.edges ?? []
+  const neighbors = subgraphData.neighbor_nodes ?? [];
+  const subgraphEdges = subgraphData.edges ?? [];
 
   return (
-    <div className={styles.graphPanel} style={{ borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}` }}>
+    <div
+      className={styles.graphPanel}
+      style={{
+        borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}`,
+      }}
+    >
       <div className={styles.graphPanelTitle}>
         关联节点
         <button
-          style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-primary)' }}
-          onClick={() => { setActivePanel(null); setSubgraphData(null) }}
+          style={{
+            marginLeft: 'auto',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.75rem',
+            color: 'var(--color-primary)',
+          }}
+          onClick={() => {
+            setActivePanel(null);
+            setSubgraphData(null);
+          }}
         >
           关闭
         </button>
@@ -154,16 +164,17 @@ function SubgraphPanel({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {neighbors.map((n) => {
           const edge = subgraphEdges.find(
-            (e) => (e.source === n.id && e.target === subgraphData.center_node.id) ||
-                   (e.target === n.id && e.source === subgraphData.center_node.id)
-          )
+            (e) =>
+              (e.source === n.id && e.target === subgraphData.center_node.id) ||
+              (e.target === n.id && e.source === subgraphData.center_node.id),
+          );
           return (
             <div
               key={n.id}
               className={styles.graphNeighborItem}
               onClick={() => {
-                const fn = graphData?.nodes.find((gn) => gn.id === n.id) as ForceGraphNode
-                if (fn) focusNode(n.id)
+                const fn = graphData?.nodes.find((gn) => gn.id === n.id) as ForceGraphNode;
+                if (fn) focusNode(n.id);
               }}
             >
               <span
@@ -180,14 +191,16 @@ function SubgraphPanel({
               </div>
               <span className={styles.graphNeighborCount}>{n.relation_count}</span>
             </div>
-          )
+          );
         })}
         {neighbors.length === 0 && (
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该节点暂无关联节点</p>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
+            该节点暂无关联节点
+          </p>
         )}
       </div>
     </div>
-  )
+  );
 }
 
 /** 关系详情面板 */
@@ -198,11 +211,11 @@ function LinkDetailPanel({
   onReject,
   onDelete,
 }: {
-  selectedLink: ForceGraphLink
-  actionLoading: string | null
-  onConfirm: (relationId: string) => void
-  onReject: (relationId: string) => void
-  onDelete: (relationId: string) => void
+  selectedLink: ForceGraphLink;
+  actionLoading: string | null;
+  onConfirm: (relationId: string) => void;
+  onReject: (relationId: string) => void;
+  onDelete: (relationId: string) => void;
 }) {
   return (
     <div className={styles.graphPanel}>
@@ -214,13 +227,21 @@ function LinkDetailPanel({
         </div>
         <div>
           <span style={{ color: 'var(--color-text-secondary)' }}>状态：</span>
-          <span style={{
-            fontSize: '0.75rem',
-            padding: '2px 8px',
-            borderRadius: '9999px',
-            background: selectedLink.status === 'suggested' ? 'var(--color-warning-light)' : 'var(--color-success-light)',
-            color: selectedLink.status === 'suggested' ? 'var(--color-warning)' : 'var(--color-success)',
-          }}>
+          <span
+            style={{
+              fontSize: '0.75rem',
+              padding: '2px 8px',
+              borderRadius: '9999px',
+              background:
+                selectedLink.status === 'suggested'
+                  ? 'var(--color-warning-light)'
+                  : 'var(--color-success-light)',
+              color:
+                selectedLink.status === 'suggested'
+                  ? 'var(--color-warning)'
+                  : 'var(--color-success)',
+            }}
+          >
             {selectedLink.status === 'suggested' ? '建议' : '已确认'}
           </span>
         </div>
@@ -273,7 +294,7 @@ function LinkDetailPanel({
         </button>
       )}
     </div>
-  )
+  );
 }
 
 /** 建议关系面板（含批量操作） */
@@ -294,21 +315,21 @@ function SuggestionsPanel({
   onConfirm,
   onReject,
 }: {
-  suggestions: SuggestedRelation[]
-  selectedSuggestions: Set<string>
-  allSuggestionsSelected: boolean
-  selectAllRef: RefObject<HTMLInputElement>
-  toggleSelectAll: () => void
-  batchLoading: boolean
-  onBatchConfirm: () => void
-  onBatchReject: () => void
-  suggesting: boolean
-  suggestError: string
-  onGenerate: () => void
-  toggleSuggestion: (id: string) => void
-  actionLoading: string | null
-  onConfirm: (relationId: string) => void
-  onReject: (relationId: string) => void
+  suggestions: SuggestedRelation[];
+  selectedSuggestions: Set<string>;
+  allSuggestionsSelected: boolean;
+  selectAllRef: RefObject<HTMLInputElement>;
+  toggleSelectAll: () => void;
+  batchLoading: boolean;
+  onBatchConfirm: () => void;
+  onBatchReject: () => void;
+  suggesting: boolean;
+  suggestError: string;
+  onGenerate: () => void;
+  toggleSuggestion: (id: string) => void;
+  actionLoading: string | null;
+  onConfirm: (relationId: string) => void;
+  onReject: (relationId: string) => void;
 }) {
   return (
     <div className={styles.graphPanel}>
@@ -367,7 +388,13 @@ function SuggestionsPanel({
 
       {suggestions.length === 0 ? (
         <div>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
+          <p
+            style={{
+              fontSize: '0.875rem',
+              color: 'var(--color-text-secondary)',
+              marginBottom: 'var(--space-sm)',
+            }}
+          >
             暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联
           </p>
           <button
@@ -379,7 +406,14 @@ function SuggestionsPanel({
             {suggesting ? '生成中，卡片较多时可能需要数十秒...' : '生成相关建议'}
           </button>
           {suggestError && (
-            <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginTop: 'var(--space-sm)' }}>
+            <p
+              role="alert"
+              style={{
+                color: 'var(--color-error)',
+                fontSize: '0.8rem',
+                marginTop: 'var(--space-sm)',
+              }}
+            >
               {suggestError}
             </p>
           )}
@@ -403,7 +437,13 @@ function SuggestionsPanel({
                     <span style={{ color: 'var(--color-text-secondary)', margin: '0 4px' }}>↔</span>
                     <strong>{s.card_2_title}</strong>
                   </div>
-                  <div style={{ color: 'var(--color-text-secondary)', marginBottom: '6px', fontSize: '0.75rem' }}>
+                  <div
+                    style={{
+                      color: 'var(--color-text-secondary)',
+                      marginBottom: '6px',
+                      fontSize: '0.75rem',
+                    }}
+                  >
                     相似度: {s.similarity_score != null ? s.similarity_score.toFixed(2) : '—'}
                     {s.similarity_score != null && (
                       <div className={styles.graphSuggestionScoreBar}>
@@ -419,8 +459,8 @@ function SuggestionsPanel({
                       className="btn btn-primary"
                       style={{ fontSize: '0.75rem', padding: '2px 8px', flex: 1 }}
                       onClick={(e) => {
-                        e.stopPropagation() // 点击按钮不触发行选择
-                        onConfirm(s.id)
+                        e.stopPropagation(); // 点击按钮不触发行选择
+                        onConfirm(s.id);
                       }}
                       disabled={actionLoading === s.id}
                     >
@@ -436,8 +476,8 @@ function SuggestionsPanel({
                         borderColor: 'var(--color-error)',
                       }}
                       onClick={(e) => {
-                        e.stopPropagation() // 点击按钮不触发行选择
-                        onReject(s.id)
+                        e.stopPropagation(); // 点击按钮不触发行选择
+                        onReject(s.id);
                       }}
                       disabled={actionLoading === s.id}
                     >
@@ -451,7 +491,7 @@ function SuggestionsPanel({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /** 创建关系面板 */
@@ -464,13 +504,13 @@ function CreateRelationPanel({
   creating,
   onCancel,
 }: {
-  createFirstNode: ForceGraphNode | null
-  createSecondNode: ForceGraphNode | null
-  createRelationType: string
-  setCreateRelationType: Dispatch<SetStateAction<string>>
-  onSubmit: () => void
-  creating: boolean
-  onCancel: () => void
+  createFirstNode: ForceGraphNode | null;
+  createSecondNode: ForceGraphNode | null;
+  createRelationType: string;
+  setCreateRelationType: Dispatch<SetStateAction<string>>;
+  onSubmit: () => void;
+  creating: boolean;
+  onCancel: () => void;
 }) {
   return (
     <div className={styles.graphPanel}>
@@ -485,30 +525,57 @@ function CreateRelationPanel({
           {createSecondNode?.title || '请在图谱中点击选择'}
         </div>
         <div style={{ marginTop: 'var(--space-sm)' }}>
-          <label style={{ display: 'block', color: 'var(--color-text-secondary)', marginBottom: '4px', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <label
+            style={{
+              display: 'block',
+              color: 'var(--color-text-secondary)',
+              marginBottom: '4px',
+              fontSize: '0.75rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}
+          >
             关系类型
           </label>
           <select
             value={createRelationType}
             onChange={(e) => setCreateRelationType(e.target.value)}
-            style={{ width: '100%', padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', fontSize: '0.875rem', background: 'var(--color-bg)' }}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--color-border)',
+              fontSize: '0.875rem',
+              background: 'var(--color-bg)',
+            }}
           >
             {RELATION_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
           </select>
         </div>
         {createFirstNode && createSecondNode && (
-          <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.875rem' }} onClick={onSubmit} disabled={creating}>
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.875rem' }}
+            onClick={onSubmit}
+            disabled={creating}
+          >
             {creating ? '创建中...' : '确认创建'}
           </button>
         )}
-        <button className="btn" style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.875rem' }} onClick={onCancel}>
+        <button
+          className="btn"
+          style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.875rem' }}
+          onClick={onCancel}
+        >
           取消
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 /** 关系类型图例 */
@@ -516,8 +583,8 @@ function RelationLegend({
   highlightedRelationType,
   setHighlightedRelationType,
 }: {
-  highlightedRelationType: string | null
-  setHighlightedRelationType: Dispatch<SetStateAction<string | null>>
+  highlightedRelationType: string | null;
+  setHighlightedRelationType: Dispatch<SetStateAction<string | null>>;
 }) {
   return (
     <div className={styles.graphPanel}>
@@ -555,12 +622,19 @@ function RelationLegend({
           </button>
         ))}
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px' }}>
-          <span style={{ width: 20, height: 0, borderTop: '2px dashed var(--color-text-tertiary)', display: 'inline-block' }} />
+          <span
+            style={{
+              width: 20,
+              height: 0,
+              borderTop: '2px dashed var(--color-text-tertiary)',
+              display: 'inline-block',
+            }}
+          />
           建议关系
         </span>
       </div>
     </div>
-  )
+  );
 }
 
 /** 图谱侧边栏：统计 / 节点详情 / 子图 / 关系详情 / 建议 / 创建关系 / 图例 */
@@ -604,7 +678,7 @@ export default function GraphSidebar(props: GraphSidebarProps) {
     setHighlightedRelationType,
     setActivePanel,
     setSubgraphData,
-  } = props
+  } = props;
 
   return (
     <div className={styles.graphSidebar}>
@@ -683,5 +757,5 @@ export default function GraphSidebar(props: GraphSidebarProps) {
         setHighlightedRelationType={setHighlightedRelationType}
       />
     </div>
-  )
+  );
 }

@@ -10,5 +10,5 @@ export default function ProjectsHeader() {
         项目作为标签归属笔记，一篇笔记可属于多个项目；所有文件统一存放在收件箱（inbox）。
       </p>
     </div>
-  )
+  );
 }

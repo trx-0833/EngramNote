@@ -137,7 +137,8 @@ button {
 
 /* ── 输入框 ── */
 
-input, textarea {
+input,
+textarea {
   font-family: inherit;
   font-size: 1rem;
   padding: var(--space-sm) var(--space-md);
@@ -149,13 +150,17 @@ input, textarea {
   transition: all 0.25s var(--ease-out-expo);
 }
 
-input:focus, textarea:focus {
+input:focus,
+textarea:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-light), 0 2px 8px rgba(15, 52, 96, 0.08);
+  box-shadow:
+    0 0 0 3px var(--color-primary-light),
+    0 2px 8px rgba(15, 52, 96, 0.08);
 }
 
-input::placeholder, textarea::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--color-text-tertiary);
 }
 
@@ -175,7 +180,10 @@ input::placeholder, textarea::placeholder {
   border-radius: var(--radius-md);
   padding: var(--space-lg);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s ease, border-color 0.3s ease;
+  transition:
+    transform 0.3s var(--ease-out-expo),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
 }
 
 /* ── 卡片悬停（overhaul-plan 5.6 序 12：从 `refinements.css` 收回本文件）──
@@ -193,7 +201,10 @@ input::placeholder, textarea::placeholder {
  * `.card` 的 `transition`，两者权重相同、同在产物 `index.css` 里）。
  * `verify-built-css.mjs` 的 `CASCADE_PAIRS` 钉住了这一条。 */
 .card-hover {
-  transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo);
+  transition:
+    transform 0.3s var(--ease-out-expo),
+    box-shadow 0.3s var(--ease-out-expo),
+    border-color 0.3s var(--ease-out-expo);
 }
 
 .card-hover:hover {
@@ -238,14 +249,38 @@ input::placeholder, textarea::placeholder {
   letter-spacing: 0.02em;
 }
 
-.badge-pdf { background: #fef3c7; color: #92400e; }
-.badge-image { background: #dbeafe; color: #1e40af; }
-.badge-docx { background: #e0e7ff; color: #3730a3; }
-.badge-pptx { background: #fce7f3; color: #9d174d; }
-.badge-xlsx { background: #d1fae5; color: #065f46; }
-.badge-audio { background: #f3e8ff; color: #6b21a8; }
-.badge-video { background: #ffe4e6; color: #9f1239; }
-.badge-markdown { background: #e0f2fe; color: #075985; }
+.badge-pdf {
+  background: #fef3c7;
+  color: #92400e;
+}
+.badge-image {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.badge-docx {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+.badge-pptx {
+  background: #fce7f3;
+  color: #9d174d;
+}
+.badge-xlsx {
+  background: #d1fae5;
+  color: #065f46;
+}
+.badge-audio {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+.badge-video {
+  background: #ffe4e6;
+  color: #9f1239;
+}
+.badge-markdown {
+  background: #e0f2fe;
+  color: #075985;
+}
 
 /* ── 状态标签 ──
    类名由 utils/labels.ts 的 statusClass() 统一产出（单一数据源）。
@@ -253,19 +288,42 @@ input::placeholder, textarea::placeholder {
    四个页面会把这三个状态渲染成**无样式裸文本**（见 overhaul-plan §2.8 F-13）。
    命名统一用下划线形态（与后端枚举值一致），不再混用连字符。 */
 
-.status-uploading { color: var(--color-text-tertiary); }
-.status-converting { color: var(--color-warning); }
-.status-converted { color: var(--color-success); }
-.status-cleaning { color: var(--color-warning); }
-.status-cleaned { color: var(--color-success); }
-.status-cleaning-failed { color: var(--color-error); }
-.status-learning { color: var(--color-primary); }
-.status-learning-failed { color: var(--color-error); }
-.status-archived { color: var(--color-success); font-weight: 500; }
-.status-failed { color: var(--color-error); }
+.status-uploading {
+  color: var(--color-text-tertiary);
+}
+.status-converting {
+  color: var(--color-warning);
+}
+.status-converted {
+  color: var(--color-success);
+}
+.status-cleaning {
+  color: var(--color-warning);
+}
+.status-cleaned {
+  color: var(--color-success);
+}
+.status-cleaning-failed {
+  color: var(--color-error);
+}
+.status-learning {
+  color: var(--color-primary);
+}
+.status-learning-failed {
+  color: var(--color-error);
+}
+.status-archived {
+  color: var(--color-success);
+  font-weight: 500;
+}
+.status-failed {
+  color: var(--color-error);
+}
 
 /* 未知/空状态的显式兜底，避免拼不出类名时完全没有样式 */
-.status-unknown { color: var(--color-text-secondary); }
+.status-unknown {
+  color: var(--color-text-secondary);
+}
 
 /* ── 页面级布局挂点（已整组搬进模块，overhaul-plan 5.6 序 8）──
    这一段原本是 5 条"页面级布局挂点"（只描述这一行/这一块怎么排，不含业务样式，
@@ -315,11 +373,21 @@ input::placeholder, textarea::placeholder {
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.stagger-1 { animation-delay: 0.05s; }
-.stagger-2 { animation-delay: 0.1s; }
-.stagger-3 { animation-delay: 0.15s; }
-.stagger-4 { animation-delay: 0.2s; }
-.stagger-5 { animation-delay: 0.25s; }
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+.stagger-2 {
+  animation-delay: 0.1s;
+}
+.stagger-3 {
+  animation-delay: 0.15s;
+}
+.stagger-4 {
+  animation-delay: 0.2s;
+}
+.stagger-5 {
+  animation-delay: 0.25s;
+}
 
 .slide-up {
   animation: slideUp 0.5s var(--ease-out-expo) both;
@@ -331,7 +399,9 @@ input::placeholder, textarea::placeholder {
 
 /* ── 标题排版 ── */
 
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   color: var(--color-text);
   letter-spacing: -0.01em;
 }
@@ -391,7 +461,7 @@ h1, h2, h3 {
      被拉成 40px 高会把整行撑开。原规则是裸元素选择器（没有类名可搬），
      它属于规范 §4 第 1 条的"重置 / 基础元素选择器"，所以只能留在全局层。 */
   select,
-  input:not([type="checkbox"]):not([type="radio"]),
+  input:not([type='checkbox']):not([type='radio']),
   textarea {
     min-height: 40px;
   }

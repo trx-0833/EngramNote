@@ -32,25 +32,25 @@
  * 另外 toast 自身会把"同种类 + 同文案"的消息合并，所以同一接口的多个字段同时漂移
  * （如 `/graph` 的 `nodes` 与 `edges`）在屏幕上仍是一条。
  */
-import { useEffect, useRef } from 'react'
-import { useToast } from '../components/Toast'
+import { useEffect, useRef } from 'react';
+import { useToast } from '../components/Toast';
 
 /** 形状漂移的两种形态：本该是数组却收到包装对象 / 收到的根本不是数组 */
-export type ContractDriftKind = 'wrapper' | 'non-array'
+export type ContractDriftKind = 'wrapper' | 'non-array';
 
 export interface ContractDriftEvent {
   /** 出问题的接口（含路径，如 `GET /graph/suggestions`）：提示里直接报给后端就能定位 */
-  source: string
-  kind: ContractDriftKind
+  source: string;
+  kind: ContractDriftKind;
   /** 出问题的字段名；顶层数组契约不填（问题就在响应体本身） */
-  field?: string
+  field?: string;
 }
 
-type ContractDriftListener = (event: ContractDriftEvent) => void
+type ContractDriftListener = (event: ContractDriftEvent) => void;
 
 /** 已上报过的去重键（模块生命周期 = 一次页面会话） */
-const reported = new Set<string>()
-const listeners = new Set<ContractDriftListener>()
+const reported = new Set<string>();
+const listeners = new Set<ContractDriftListener>();
 /**
  * 订阅者出现之前发生的漂移先存这里
  *
@@ -58,18 +58,18 @@ const listeners = new Set<ContractDriftListener>()
  * （`useMemo` 里的 `normalizeGraphData` 甚至可能在首次渲染期间就跑完）。
  * 丢掉这些事件等于"漂移恰好没被看见"，与不做提示没区别。
  */
-const pending: ContractDriftEvent[] = []
+const pending: ContractDriftEvent[] = [];
 
 /** 判据的唯一出口：非预期形状在这里被记下并广播（同一处漂移只报一次） */
 function reportDrift(event: ContractDriftEvent): void {
-  const key = `${event.source}|${event.field ?? ''}|${event.kind}`
-  if (reported.has(key)) return
-  reported.add(key)
+  const key = `${event.source}|${event.field ?? ''}|${event.kind}`;
+  if (reported.has(key)) return;
+  reported.add(key);
   if (listeners.size === 0) {
-    pending.push(event)
-    return
+    pending.push(event);
+    return;
   }
-  listeners.forEach((listener) => listener(event))
+  listeners.forEach((listener) => listener(event));
 }
 
 /**
@@ -78,14 +78,14 @@ function reportDrift(event: ContractDriftEvent): void {
  * （不能因为形状不对就丢掉数据，那会让用户看到"一个都没有"）；其余归一成空数组并上报。
  */
 export function coerceArrayPayload<T>(payload: unknown, source: string): T[] {
-  if (Array.isArray(payload)) return payload as T[]
-  const wrapped = (payload as { items?: unknown } | null | undefined)?.items
+  if (Array.isArray(payload)) return payload as T[];
+  const wrapped = (payload as { items?: unknown } | null | undefined)?.items;
   if (Array.isArray(wrapped)) {
-    reportDrift({ source, kind: 'wrapper' })
-    return wrapped as T[]
+    reportDrift({ source, kind: 'wrapper' });
+    return wrapped as T[];
   }
-  reportDrift({ source, kind: 'non-array' })
-  return []
+  reportDrift({ source, kind: 'non-array' });
+  return [];
 }
 
 /**
@@ -94,10 +94,10 @@ export function coerceArrayPayload<T>(payload: unknown, source: string): T[] {
  * 把它当包装对象上报会把每一条正常的分页响应都报成漂移。
  */
 export function unwrapPageItems<T>(payload: unknown, source: string): T[] {
-  const items = (payload as { items?: unknown } | null | undefined)?.items
-  if (Array.isArray(items)) return items as T[]
-  reportDrift({ source, kind: 'non-array', field: 'items' })
-  return []
+  const items = (payload as { items?: unknown } | null | undefined)?.items;
+  if (Array.isArray(items)) return items as T[];
+  reportDrift({ source, kind: 'non-array', field: 'items' });
+  return [];
 }
 
 /**
@@ -105,20 +105,20 @@ export function unwrapPageItems<T>(payload: unknown, source: string): T[] {
  * 字段缺失或类型不对都归一到空数组并上报 —— 消费方（渲染、统计面板）只读归一后的值。
  */
 export function coerceArrayField<T>(value: unknown, source: string, field: string): T[] {
-  if (Array.isArray(value)) return value as T[]
-  reportDrift({ source, kind: 'non-array', field })
-  return []
+  if (Array.isArray(value)) return value as T[];
+  reportDrift({ source, kind: 'non-array', field });
+  return [];
 }
 
 /** 订阅漂移事件；返回取消订阅函数（订阅时把此前积压的事件补投一次） */
 export function subscribeContractDrift(listener: ContractDriftListener): () => void {
-  listeners.add(listener)
+  listeners.add(listener);
   if (pending.length > 0) {
-    pending.splice(0).forEach((event) => listener(event))
+    pending.splice(0).forEach((event) => listener(event));
   }
   return () => {
-    listeners.delete(listener)
-  }
+    listeners.delete(listener);
+  };
 }
 
 /**
@@ -129,23 +129,23 @@ export function subscribeContractDrift(listener: ContractDriftListener): () => v
  * 每个用例都从"这次会话还没报过任何漂移"开始。
  */
 export function resetContractDriftNotices(): void {
-  reported.clear()
-  pending.length = 0
+  reported.clear();
+  pending.length = 0;
 }
 
 /** 提示文案：说清"哪个接口、哪里不对、系统怎么处理了"，用户和后端都能据此行动 */
 function noticeText(event: ContractDriftEvent): { message: string; detail: string } {
-  const where = event.field ? `${event.field} 字段` : '响应体'
+  const where = event.field ? `${event.field} 字段` : '响应体';
   if (event.kind === 'wrapper') {
     return {
       message: `${event.source} 的响应结构与约定不符`,
       detail: '期望纯数组，实际是 items 包装；已拆包正常渲染，后端应改为直接返回数组',
-    }
+    };
   }
   return {
     message: `${event.source} 的响应结构与约定不符`,
     detail: `${where}不是数组，已按空列表处理（页面不崩，但数据可能不完整）`,
-  }
+  };
 }
 
 /**
@@ -157,17 +157,17 @@ function noticeText(event: ContractDriftEvent): { message: string; detail: strin
  * 每次渲染都返回新对象，用它当依赖会反复订阅/退订。
  */
 export function useContractDriftNotice(): void {
-  const toast = useToast()
-  const toastRef = useRef(toast)
+  const toast = useToast();
+  const toastRef = useRef(toast);
   useEffect(() => {
-    toastRef.current = toast
-  })
+    toastRef.current = toast;
+  });
   useEffect(
     () =>
       subscribeContractDrift((event) => {
-        const { message, detail } = noticeText(event)
-        toastRef.current.warning(message, detail)
+        const { message, detail } = noticeText(event);
+        toastRef.current.warning(message, detail);
       }),
     [],
-  )
+  );
 }

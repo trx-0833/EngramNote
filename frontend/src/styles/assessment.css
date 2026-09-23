@@ -77,14 +77,14 @@
    把同行的标题/文本挤成 0 宽（见 Projects 添加笔记面板候选列表）。
    此处统一回归 checkbox 固有尺寸；specificity 更高的具体规则（如
    .note-select-card / modal 内 16px）仍按自身定义生效。 */
-input[type="checkbox"] {
+input[type='checkbox'] {
   width: auto;
   margin: 0;
   padding: 0;
   flex-shrink: 0;
 }
 
-.note-select-card input[type="checkbox"] {
+.note-select-card input[type='checkbox'] {
   width: auto;
   margin: 0;
   accent-color: var(--color-primary);

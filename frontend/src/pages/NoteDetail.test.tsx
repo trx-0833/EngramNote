@@ -21,16 +21,16 @@
  * 这些断言刻意是**行为级**的（点哪个按钮 → 调哪个接口），不锁 DOM 结构，
  * 这样重构可以自由改结构而测试不必跟着改。
  */
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import NoteDetail from './NoteDetail'
+import NoteDetail from './NoteDetail';
 
 // ── mock 掉整条 API 层：本文件测的是页面行为，不是接口契约 ──
 vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
   return {
     ...actual,
     getNote: vi.fn(),
@@ -50,20 +50,22 @@ vi.mock('../api/client', async () => {
     stopCleaning: vi.fn(),
     restoreBlock: vi.fn(),
     deleteBlock: vi.fn(),
-  }
-})
+  };
+});
 
 vi.mock('../components/Toast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
-}))
+}));
 // 子组件按需请求数据；本文件只关心页面本体，把它们换成桩
-vi.mock('../components/NoteAskPanel', () => ({ default: () => <div data-testid="ask-panel" /> }))
-vi.mock('../components/VersionHistory', () => ({ default: () => <div data-testid="version-history" /> }))
-vi.mock('../components/DiffView', () => ({ default: () => <div data-testid="diff-view" /> }))
+vi.mock('../components/NoteAskPanel', () => ({ default: () => <div data-testid="ask-panel" /> }));
+vi.mock('../components/VersionHistory', () => ({
+  default: () => <div data-testid="version-history" />,
+}));
+vi.mock('../components/DiffView', () => ({ default: () => <div data-testid="diff-view" /> }));
 vi.mock('../api/tasks', async () => {
-  const actual = await vi.importActual<typeof import('../api/tasks')>('../api/tasks')
-  return { ...actual, listNoteTasks: vi.fn().mockResolvedValue({ items: [], total: 0 }) }
-})
+  const actual = await vi.importActual<typeof import('../api/tasks')>('../api/tasks');
+  return { ...actual, listNoteTasks: vi.fn().mockResolvedValue({ items: [], total: 0 }) };
+});
 
 import {
   deleteNote,
@@ -75,16 +77,16 @@ import {
   startUnderstanding,
   updateNoteContent,
   type NoteDetail as NoteDetailType,
-} from '../api/client'
+} from '../api/client';
 
-const mockedGetNote = vi.mocked(getNote)
-const mockedCards = vi.mocked(getKnowledgeCards)
-const mockedQuestions = vi.mocked(getQuestions)
-const mockedAnnotations = vi.mocked(getAnnotations)
-const mockedLinks = vi.mocked(getNoteLinks)
-const mockedDelete = vi.mocked(deleteNote)
-const mockedUnderstand = vi.mocked(startUnderstanding)
-const mockedUpdateContent = vi.mocked(updateNoteContent)
+const mockedGetNote = vi.mocked(getNote);
+const mockedCards = vi.mocked(getKnowledgeCards);
+const mockedQuestions = vi.mocked(getQuestions);
+const mockedAnnotations = vi.mocked(getAnnotations);
+const mockedLinks = vi.mocked(getNoteLinks);
+const mockedDelete = vi.mocked(deleteNote);
+const mockedUnderstand = vi.mocked(startUnderstanding);
+const mockedUpdateContent = vi.mocked(updateNoteContent);
 
 function makeNote(over: Partial<NoteDetailType> = {}): NoteDetailType {
   return {
@@ -103,7 +105,7 @@ function makeNote(over: Partial<NoteDetailType> = {}): NoteDetailType {
     created_at: '2026-09-01T10:00:00Z',
     updated_at: '2026-09-02T10:00:00Z',
     ...over,
-  } as NoteDetailType
+  } as NoteDetailType;
 }
 
 /** 与 `NoteLinksResponse` 契约一致的响应（少一个字段会让页面整体崩掉，见文件末尾说明） */
@@ -112,7 +114,7 @@ function emptyLinks() {
     linked_materials: [],
     linked_personal_notes: [],
     dangling_links: [],
-  } as never
+  } as never;
 }
 
 function renderPage() {
@@ -122,139 +124,139 @@ function renderPage() {
         <Route path="/notes/:noteId" element={<NoteDetail />} />
       </Routes>
     </MemoryRouter>,
-  )
+  );
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  mockedCards.mockResolvedValue({ items: [], total: 0 } as never)
-  mockedQuestions.mockResolvedValue({ items: [], total: 0 } as never)
-  mockedAnnotations.mockResolvedValue([] as never)
-  mockedLinks.mockResolvedValue(emptyLinks())
-  mockedDelete.mockResolvedValue(undefined as never)
-  mockedUpdateContent.mockResolvedValue({} as never)
-})
+  vi.clearAllMocks();
+  mockedCards.mockResolvedValue({ items: [], total: 0 } as never);
+  mockedQuestions.mockResolvedValue({ items: [], total: 0 } as never);
+  mockedAnnotations.mockResolvedValue([] as never);
+  mockedLinks.mockResolvedValue(emptyLinks());
+  mockedDelete.mockResolvedValue(undefined as never);
+  mockedUpdateContent.mockResolvedValue({} as never);
+});
 
 describe('加载与状态展示', () => {
   it('加载成功后显示笔记标题', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
-    renderPage()
-    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument()
-  })
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
+    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument();
+  });
 
   it('★ 已清洗的笔记默认显示清洗版（原始版只是其中一个视图）', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
-    renderPage()
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
     // 清洗版正文出现，原始版正文不出现 —— 用户上次看到的就是清洗结果
-    expect(await screen.findByText(/浮充：恒压运行方式/)).toBeInTheDocument()
-    expect(screen.queryByText(/浮充是蓄电池的一种运行方式/)).not.toBeInTheDocument()
-  })
+    expect(await screen.findByText(/浮充：恒压运行方式/)).toBeInTheDocument();
+    expect(screen.queryByText(/浮充是蓄电池的一种运行方式/)).not.toBeInTheDocument();
+  });
 
   it('加载失败时显示错误与重试入口，而不是白屏', async () => {
-    mockedGetNote.mockRejectedValue(new Error('笔记不存在'))
-    renderPage()
-    expect(await screen.findByText(/笔记不存在/)).toBeInTheDocument()
-  })
+    mockedGetNote.mockRejectedValue(new Error('笔记不存在'));
+    renderPage();
+    expect(await screen.findByText(/笔记不存在/)).toBeInTheDocument();
+  });
 
   it('★ 转换中的笔记显示任务进度组件（阶段 5.11 的成果，不能被拆回静态文案）', async () => {
-    mockedGetNote.mockResolvedValue(makeNote({ status: 'converting', clean_md_content: null }))
-    renderPage()
+    mockedGetNote.mockResolvedValue(makeNote({ status: 'converting', clean_md_content: null }));
+    renderPage();
     // 没有 task_runs 记录 → 组件退回静态兜底文案
-    expect(await screen.findByTestId('task-progress-fallback')).toHaveTextContent('正在转换中')
-  })
-})
+    expect(await screen.findByTestId('task-progress-fallback')).toHaveTextContent('正在转换中');
+  });
+});
 
 describe('编辑与保存', () => {
   it('★ 进入编辑、修改、保存走的是 updateNoteContent', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
-    renderPage()
-    await screen.findByText('锂离子电池的浮充与均充')
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
 
-    await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
-    const textarea = await screen.findByRole('textbox')
-    await userEvent.clear(textarea)
-    await userEvent.type(textarea, '改过的内容')
-    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await userEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    const textarea = await screen.findByRole('textbox');
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, '改过的内容');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
-    await waitFor(() => expect(mockedUpdateContent).toHaveBeenCalled())
-    const [noteId, content] = mockedUpdateContent.mock.calls[0]
-    expect(noteId).toBe('note-1')
-    expect(content).toContain('改过的内容')
-  })
+    await waitFor(() => expect(mockedUpdateContent).toHaveBeenCalled());
+    const [noteId, content] = mockedUpdateContent.mock.calls[0];
+    expect(noteId).toBe('note-1');
+    expect(content).toContain('改过的内容');
+  });
 
   it('取消编辑不调用保存接口（改了又反悔不该留下痕迹）', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
-    renderPage()
-    await screen.findByText('锂离子电池的浮充与均充')
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
 
-    await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
-    await screen.findByRole('textbox')
-    await userEvent.click(screen.getByRole('button', { name: '取消' }))
+    await userEvent.click(screen.getByRole('button', { name: /编辑/ }));
+    await screen.findByRole('textbox');
+    await userEvent.click(screen.getByRole('button', { name: '取消' }));
 
-    expect(mockedUpdateContent).not.toHaveBeenCalled()
-    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument()
-  })
-})
+    expect(mockedUpdateContent).not.toHaveBeenCalled();
+    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument();
+  });
+});
 
 describe('契约漂移时的健壮性', () => {
   it('★ 关联资料响应缺字段时不整页崩掉（本轮实测过：undefined.length = 白屏）', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
+    mockedGetNote.mockResolvedValue(makeNote());
     // 模拟"后端少返回一个数组字段"（契约漂移 / 缓存里的旧结构）
-    mockedLinks.mockResolvedValue({ linked_materials: [] } as never)
-    renderPage()
+    mockedLinks.mockResolvedValue({ linked_materials: [] } as never);
+    renderPage();
 
     // 页面主体必须照常渲染：字段缺失最坏只能是"这一块不显示"
-    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument()
-    expect(screen.queryByText('被以下笔记引用')).not.toBeInTheDocument()
-    expect(screen.queryByText('关联的学习资料')).not.toBeInTheDocument()
-  })
-})
+    expect(await screen.findByText('锂离子电池的浮充与均充')).toBeInTheDocument();
+    expect(screen.queryByText('被以下笔记引用')).not.toBeInTheDocument();
+    expect(screen.queryByText('关联的学习资料')).not.toBeInTheDocument();
+  });
+});
 
 describe('删除与重新理解', () => {
   it('★ 删除必须先确认：点"删除"只弹窗、不调接口', async () => {
-    mockedGetNote.mockResolvedValue(makeNote())
-    renderPage()
-    await screen.findByText('锂离子电池的浮充与均充')
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
 
     // 按钮文案是"删除"，"移入回收站"是弹窗标题
-    await userEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(mockedDelete).not.toHaveBeenCalled()
-    expect(await screen.findByText('移入回收站')).toBeInTheDocument()
-  })
+    await userEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(mockedDelete).not.toHaveBeenCalled();
+    expect(await screen.findByText('移入回收站')).toBeInTheDocument();
+  });
 
   it('★ archived 笔记重新学习要二次确认：第一次不带 confirm，确认后才带 confirm=true', async () => {
-    mockedGetNote.mockResolvedValue(makeNote({ status: 'archived' }))
+    mockedGetNote.mockResolvedValue(makeNote({ status: 'archived' }));
     mockedUnderstand.mockResolvedValue({
       requires_confirm: true,
       impact: { cards: 3, quizzes: 0, review_logs: 0, relations: 0 },
-    } as never)
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    renderPage()
-    await screen.findByText('锂离子电池的浮充与均充')
+    } as never);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
 
-    await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }))
+    await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }));
 
-    await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(2));
     // 第一次探测影响（不带 confirm），第二次才是真的清空并重跑
-    expect(mockedUnderstand.mock.calls[0][1]).toBe(false)
-    expect(mockedUnderstand.mock.calls[1][1]).toBe(true)
+    expect(mockedUnderstand.mock.calls[0][1]).toBe(false);
+    expect(mockedUnderstand.mock.calls[1][1]).toBe(true);
     // 而且必须先让用户看到"将删除什么"
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(String(confirmSpy.mock.calls[0][0])).toContain('3 张知识卡片')
-    confirmSpy.mockRestore()
-  })
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(String(confirmSpy.mock.calls[0][0])).toContain('3 张知识卡片');
+    confirmSpy.mockRestore();
+  });
 
   it('用户在二次确认里点"取消"时不发第二次请求（不可撤销的操作不能默认执行）', async () => {
-    mockedGetNote.mockResolvedValue(makeNote({ status: 'archived' }))
-    mockedUnderstand.mockResolvedValue({ requires_confirm: true, impact: { cards: 1 } } as never)
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    renderPage()
-    await screen.findByText('锂离子电池的浮充与均充')
+    mockedGetNote.mockResolvedValue(makeNote({ status: 'archived' }));
+    mockedUnderstand.mockResolvedValue({ requires_confirm: true, impact: { cards: 1 } } as never);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
 
-    await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }))
+    await userEvent.click(screen.getByRole('button', { name: 'AI预处理' }));
 
-    await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(1))
-    expect(mockedUnderstand.mock.calls[0][1]).toBe(false)
-    confirmSpy.mockRestore()
-  })
-})
+    await waitFor(() => expect(mockedUnderstand).toHaveBeenCalledTimes(1));
+    expect(mockedUnderstand.mock.calls[0][1]).toBe(false);
+    confirmSpy.mockRestore();
+  });
+});

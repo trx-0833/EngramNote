@@ -6,16 +6,16 @@
  */
 
 /** 视图模式 */
-export type ViewMode = 'original' | 'clean' | 'diff'
+export type ViewMode = 'original' | 'clean' | 'diff';
 
 /** 编辑模式：view=阅读（可批注/选中），edit=实时分屏编辑 */
-export type EditMode = 'view' | 'edit'
+export type EditMode = 'view' | 'edit';
 
 /** 选中文本及其前后上下文（用于批注落库与 AI 提问参考） */
 export interface SelectionContext {
-  text: string
-  contextBefore: string
-  contextAfter: string
+  text: string;
+  contextBefore: string;
+  contextAfter: string;
 }
 
 /**
@@ -23,8 +23,8 @@ export interface SelectionContext {
  * （`null` 表示浮层关闭）
  */
 export interface AskAIState {
-  text: string
-  contextBefore: string
-  contextAfter: string
-  pos: { x: number; y: number }
+  text: string;
+  contextBefore: string;
+  contextAfter: string;
+  pos: { x: number; y: number };
 }

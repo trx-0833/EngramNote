@@ -11,11 +11,11 @@
  * 与每个声明值都和迁移前逐字一致；两个页面的调用点只是把原来的三段 JSX
  * 换成一次 `<StatCard />`。
  */
-import type { ReactNode } from 'react'
-import styles from './StatCard.module.css'
+import type { ReactNode } from 'react';
+import styles from './StatCard.module.css';
 
 /** 顶部色条的配色变体（对应 `.statCardBlue/Green/Gold/Purple`） */
-export type StatCardVariant = 'blue' | 'green' | 'gold' | 'purple'
+export type StatCardVariant = 'blue' | 'green' | 'gold' | 'purple';
 
 /**
  * 变体 → 模块类名的**显式查表**。
@@ -32,15 +32,15 @@ const VARIANT_CLASS: Record<StatCardVariant, string> = {
   green: styles.statCardGreen,
   gold: styles.statCardGold,
   purple: styles.statCardPurple,
-}
+};
 
 interface StatCardProps {
   /** 顶部色条配色 */
-  variant: StatCardVariant
+  variant: StatCardVariant;
   /** 主数字 / 主文案（原 `.stat-number` 的内容） */
-  value: ReactNode
+  value: ReactNode;
   /** 数字下方的一行说明（原 `.stat-label` 的内容） */
-  label: string
+  label: string;
 }
 
 export default function StatCard({ variant, value, label }: StatCardProps) {
@@ -49,5 +49,5 @@ export default function StatCard({ variant, value, label }: StatCardProps) {
       <div className={styles.statNumber}>{value}</div>
       <div className={styles.statLabel}>{label}</div>
     </div>
-  )
+  );
 }

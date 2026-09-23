@@ -56,6 +56,11 @@
 
 /* 逐字复制自 `base.css` 的 `@keyframes glowPulse`，只改名（见文件头） */
 @keyframes uploadGlowPulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(201, 169, 89, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(201, 169, 89, 0.4); }
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(201, 169, 89, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(201, 169, 89, 0.4);
+  }
 }

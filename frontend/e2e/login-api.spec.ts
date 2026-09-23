@@ -30,69 +30,69 @@
  * 从 `/login` 走完整条链路，收敛到同一个仪表盘。
  * 缺陷记录见 `frontend/docs/e2e.md` §5。
  */
-import { expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test';
 
-import { blockThirdParty, collectPageErrors, stubApi } from './support'
+import { blockThirdParty, collectPageErrors, stubApi } from './support';
 
 /** 读 localStorage 里的一对令牌 */
 async function readTokens(page: import('@playwright/test').Page) {
   return page.evaluate(() => ({
     access: localStorage.getItem('engramnote_token'),
     refresh: localStorage.getItem('engramnote_refresh_token'),
-  }))
+  }));
 }
 
 test.describe('登录（桩 API）', () => {
   test('凭据正确：令牌成对落盘 → 路由切到已登录外壳 → 仪表盘渲染', async ({ page }) => {
-    const errors = collectPageErrors(page)
-    await stubApi(page, 'ok')
-    await blockThirdParty(page)
+    const errors = collectPageErrors(page);
+    await stubApi(page, 'ok');
+    await blockThirdParty(page);
 
     // 未登录时 `/` 由 `path="*"` 渲染登录页（App.tsx），这正是真实用户
     // 打开应用时的入口 —— 所以从 `/` 开始才是被支持的路径。
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.locator('#email').fill('e2e@example.com')
-    await page.locator('#password').fill('secret123')
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#email').fill('e2e@example.com');
+    await page.locator('#password').fill('secret123');
+    await page.getByRole('button', { name: '登录' }).click();
 
     // 1. 进入已登录外壳：侧边栏出现（未登录时它整棵都不渲染）
-    await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
 
     // 2. 一对令牌都落盘。只存访问令牌是 6.3 明确修掉的缺陷
     //    （会话无法续期、也无法撤销），这里把它钉住。
     expect(await readTokens(page)).toEqual({
       access: 'e2e-access-token',
       refresh: 'e2e-refresh-token',
-    })
+    });
 
     // 3. 默认路由真的渲染了 Dashboard（桩返回空列表 → 空态而不是错误态）
-    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible();
 
-    expect(errors).toEqual([])
-  })
+    expect(errors).toEqual([]);
+  });
 
   test('凭据错误（401）：显示统一文案、不写令牌、留在登录页', async ({ page }) => {
-    const errors = collectPageErrors(page)
-    await stubApi(page, 'unauthorized')
-    await blockThirdParty(page)
+    const errors = collectPageErrors(page);
+    await stubApi(page, 'unauthorized');
+    await blockThirdParty(page);
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.locator('#email').fill('e2e@example.com')
-    await page.locator('#password').fill('wrong-password')
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#email').fill('e2e@example.com');
+    await page.locator('#password').fill('wrong-password');
+    await page.getByRole('button', { name: '登录' }).click();
 
     // 凭据类接口的 401 文案是固定的「邮箱或密码错误」，
     // 不是后端 detail（避免把"账号是否存在"泄露给调用方，见 6.2）
-    await expect(page.getByRole('alert')).toHaveText('邮箱或密码错误')
+    await expect(page.getByRole('alert')).toHaveText('邮箱或密码错误');
 
     // 失败不能留下半个会话
-    expect(await readTokens(page)).toEqual({ access: null, refresh: null })
-    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible()
-    await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0)
+    expect(await readTokens(page)).toEqual({ access: null, refresh: null });
+    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
 
-    expect(errors).toEqual([])
-  })
+    expect(errors).toEqual([]);
+  });
 
   /**
    * 回归守卫：**从 `/login` 登录**成功后会落到 404（本轮 E2E 发现的产品缺陷）
@@ -114,31 +114,31 @@ test.describe('登录（桩 API）', () => {
    * 地址栏真的变成 `/` 才是用户看到的样子。
    */
   test('从 /login 登录成功：跳到 /（仪表盘），而不是停在 404 页', async ({ page }) => {
-    const errors = collectPageErrors(page)
-    await stubApi(page, 'ok')
-    await blockThirdParty(page)
+    const errors = collectPageErrors(page);
+    await stubApi(page, 'ok');
+    await blockThirdParty(page);
 
-    await page.goto('/login', { waitUntil: 'domcontentloaded' })
-    await page.locator('#email').fill('e2e@example.com')
-    await page.locator('#password').fill('secret123')
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
+    await page.locator('#email').fill('e2e@example.com');
+    await page.locator('#password').fill('secret123');
+    await page.getByRole('button', { name: '登录' }).click();
 
     // 1. 地址栏不再停在 /login
-    await expect(page).toHaveURL(/\/$/)
+    await expect(page).toHaveURL(/\/$/);
 
     // 2. 仪表盘真的渲染了（不是 `path="*"` 的 404）
-    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '404' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '404' })).toHaveCount(0);
 
     // 3. 令牌照旧成对落盘（跳转不能把登录结果弄丢）
     expect(await readTokens(page)).toEqual({
       access: 'e2e-access-token',
       refresh: 'e2e-refresh-token',
-    })
+    });
 
-    expect(errors).toEqual([])
-  })
+    expect(errors).toEqual([]);
+  });
 
   /**
    * 已登录时认证入口必须"无害"（与上一条是同一个洞的两个入口）
@@ -150,26 +150,26 @@ test.describe('登录（桩 API）', () => {
    * 而是"带着已登录令牌直接请求这个地址"）。
    */
   test('已登录后直接访问 /login 与 /register：重定向到 /，不出现 404', async ({ page }) => {
-    const errors = collectPageErrors(page)
-    await stubApi(page, 'ok')
-    await blockThirdParty(page)
+    const errors = collectPageErrors(page);
+    await stubApi(page, 'ok');
+    await blockThirdParty(page);
 
     // 先真的登录一次让令牌落盘（不往 localStorage 直接塞令牌 —— 那会绕过
     // AuthContext 的初始化，测不到"重新打开这个地址时仍是已登录"这个真实情形）
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.locator('#email').fill('e2e@example.com')
-    await page.locator('#password').fill('secret123')
-    await page.getByRole('button', { name: '登录' }).click()
-    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.locator('#email').fill('e2e@example.com');
+    await page.locator('#password').fill('secret123');
+    await page.getByRole('button', { name: '登录' }).click();
+    await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
 
     for (const path of ['/login', '/register']) {
-      await page.goto(path, { waitUntil: 'domcontentloaded' })
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
 
-      await expect(page, `${path} 已登录时应重定向到 /`).toHaveURL(/\/$/)
-      await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
-      await expect(page.getByRole('heading', { name: '404' })).toHaveCount(0)
+      await expect(page, `${path} 已登录时应重定向到 /`).toHaveURL(/\/$/);
+      await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '404' })).toHaveCount(0);
     }
 
-    expect(errors).toEqual([])
-  })
-})
+    expect(errors).toEqual([]);
+  });
+});

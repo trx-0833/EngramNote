@@ -5,12 +5,12 @@
  * 绑同一份草稿）、保存/取消两个按钮的类名与文案均逐字保留。
  */
 interface ProjectRenameFormProps {
-  name: string
-  description: string
-  onChangeName: (value: string) => void
-  onChangeDescription: (value: string) => void
-  onSave: () => void
-  onCancel: () => void
+  name: string;
+  description: string;
+  onChangeName: (value: string) => void;
+  onChangeDescription: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
 }
 
 export default function ProjectRenameForm({
@@ -23,11 +23,7 @@ export default function ProjectRenameForm({
 }: ProjectRenameFormProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <input
-        value={name}
-        onChange={(e) => onChangeName(e.target.value)}
-        placeholder="项目名称"
-      />
+      <input value={name} onChange={(e) => onChangeName(e.target.value)} placeholder="项目名称" />
       <textarea
         value={description}
         onChange={(e) => onChangeDescription(e.target.value)}
@@ -36,13 +32,21 @@ export default function ProjectRenameForm({
         style={{ resize: 'vertical' }}
       />
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '6px 14px' }} onClick={onSave}>
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+          onClick={onSave}
+        >
           保存
         </button>
-        <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '6px 14px' }} onClick={onCancel}>
+        <button
+          className="btn btn-secondary"
+          style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+          onClick={onCancel}
+        >
           取消
         </button>
       </div>
     </div>
-  )
+  );
 }

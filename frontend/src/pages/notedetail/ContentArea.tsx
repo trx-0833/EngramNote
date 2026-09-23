@@ -10,49 +10,49 @@
  * 4. 有正文 → Markdown 渲染
  * 5. 其余 → "暂无内容"
  */
-import type { RefObject } from 'react'
-import type { CleaningDiffResponse } from '../../api/client'
-import DiffPanel from './DiffPanel'
-import EditSplitView from './EditSplitView'
-import MarkdownReader from './MarkdownReader'
-import ProcessingPanel from './ProcessingPanel'
-import type { EditMode, ViewMode } from './types'
+import type { RefObject } from 'react';
+import type { CleaningDiffResponse } from '../../api/client';
+import DiffPanel from './DiffPanel';
+import EditSplitView from './EditSplitView';
+import MarkdownReader from './MarkdownReader';
+import ProcessingPanel from './ProcessingPanel';
+import type { EditMode, ViewMode } from './types';
 
 interface ContentAreaProps {
   /** 笔记 ID */
-  noteId: string | undefined
+  noteId: string | undefined;
   /** 笔记状态（决定是否显示进度面板） */
-  status: string
+  status: string;
   /** 当前视图模式 */
-  viewMode: ViewMode
+  viewMode: ViewMode;
   /** 当前编辑模式 */
-  editMode: EditMode
+  editMode: EditMode;
   /** 当前应显示的 Markdown 原文 */
-  mdContent: string
+  mdContent: string;
   /** 正文渲染出的 HTML */
-  htmlContent: string
+  htmlContent: string;
   /** 编辑预览渲染出的 HTML */
-  editPreviewHtml: string
+  editPreviewHtml: string;
   /** diff 数据 */
-  diffData: CleaningDiffResponse | null
+  diffData: CleaningDiffResponse | null;
   /** diff 是否加载中 */
-  diffLoading: boolean
+  diffLoading: boolean;
   /** 正文容器 ref */
-  markdownRef: RefObject<HTMLElement>
+  markdownRef: RefObject<HTMLElement>;
   /** 选中文本后弹出批注浮层 */
-  onMouseUp: () => void
+  onMouseUp: () => void;
   /** 取消任务后刷新笔记数据 */
-  onRefresh: () => void
+  onRefresh: () => void;
   /** ADHD Reader 状态与控制 */
-  adhdReaderEnabled: boolean
-  adhdCurrentLineText: string
-  onToggleAdhdReader: () => void
+  adhdReaderEnabled: boolean;
+  adhdCurrentLineText: string;
+  onToggleAdhdReader: () => void;
   /** 编辑态内容与控制 */
-  editContent: string
-  onEditContentChange: (value: string) => void
-  saving: boolean
-  onSave: () => void
-  onCancelEdit: () => void
+  editContent: string;
+  onEditContentChange: (value: string) => void;
+  saving: boolean;
+  onSave: () => void;
+  onCancelEdit: () => void;
 }
 
 /** 内容区域 */
@@ -79,7 +79,7 @@ export default function ContentArea({
   onCancelEdit,
 }: ContentAreaProps) {
   if ((status === 'converting' || status === 'uploading') && noteId) {
-    return <ProcessingPanel noteId={noteId} status={status} onCancelled={onRefresh} />
+    return <ProcessingPanel noteId={noteId} status={status} onCancelled={onRefresh} />;
   }
 
   if (editMode === 'edit') {
@@ -92,11 +92,11 @@ export default function ContentArea({
         onCancel={onCancelEdit}
         previewHtml={editPreviewHtml}
       />
-    )
+    );
   }
 
   if (viewMode === 'diff') {
-    return <DiffPanel diffData={diffData} diffLoading={diffLoading} />
+    return <DiffPanel diffData={diffData} diffLoading={diffLoading} />;
   }
 
   if (mdContent) {
@@ -109,12 +109,12 @@ export default function ContentArea({
         adhdCurrentLineText={adhdCurrentLineText}
         onToggleAdhdReader={onToggleAdhdReader}
       />
-    )
+    );
   }
 
   return (
     <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
       <p style={{ color: 'var(--color-text-secondary)' }}>暂无内容</p>
     </div>
-  )
+  );
 }

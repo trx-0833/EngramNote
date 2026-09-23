@@ -13,13 +13,13 @@
  * 归 `pages/projects/` 下的组件。拆分是**纯提取**：`renderCard(p, index)` 的 JSX、
  * 加载/空列表两种状态的文案、以及破坏性操作的确认逻辑都一字未动。
  */
-import NewProjectForm from './projects/NewProjectForm'
-import ProjectCard from './projects/ProjectCard'
-import ProjectsErrorBanner from './projects/ProjectsErrorBanner'
-import ProjectsHeader from './projects/ProjectsHeader'
-import ProjectsUsageNotes from './projects/ProjectsUsageNotes'
-import { useAddNotesPanel } from './projects/useAddNotesPanel'
-import { useProjects } from './projects/useProjects'
+import NewProjectForm from './projects/NewProjectForm';
+import ProjectCard from './projects/ProjectCard';
+import ProjectsErrorBanner from './projects/ProjectsErrorBanner';
+import ProjectsHeader from './projects/ProjectsHeader';
+import ProjectsUsageNotes from './projects/ProjectsUsageNotes';
+import { useAddNotesPanel } from './projects/useAddNotesPanel';
+import { useProjects } from './projects/useProjects';
 
 export default function Projects() {
   const {
@@ -43,13 +43,13 @@ export default function Projects() {
     handleScan,
     refreshExpandedDetail,
     handleRemoveNote,
-  } = useProjects()
+  } = useProjects();
 
   // 添加笔记面板（候选笔记 / 勾选 / 提交）
   const addNotes = useAddNotesPanel({
     loadProjects,
     refreshExpandedDetail,
-  })
+  });
 
   return (
     <div className="page-enter">
@@ -79,9 +79,13 @@ export default function Projects() {
         </div>
       ) : projects.length === 0 ? (
         <div className="state-container">
-          <div className="state-icon" style={{ fontSize: 40 }}>📂</div>
+          <div className="state-icon" style={{ fontSize: 40 }}>
+            📂
+          </div>
           <p className="state-message">还没有项目</p>
-          <p className="state-description">点击上方「新建项目」创建第一个项目（纯标签，不生成文件夹）。</p>
+          <p className="state-description">
+            点击上方「新建项目」创建第一个项目（纯标签，不生成文件夹）。
+          </p>
         </div>
       ) : (
         <div
@@ -131,5 +135,5 @@ export default function Projects() {
       {/* 使用说明 */}
       <ProjectsUsageNotes />
     </div>
-  )
+  );
 }

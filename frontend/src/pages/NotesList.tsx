@@ -6,21 +6,21 @@
  * 3. 删除笔记（带确认提示）
  * 4. 点击笔记卡片跳转到详情页
  */
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client'
-import { DeleteNoteDialog } from '../components/DeleteNoteDialog'
-import LoadingSpinner from '../components/LoadingSpinner'
-import EmptyState from '../components/EmptyState'
-import ErrorDisplay from '../components/ErrorDisplay'
-import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels'
-import { useToast } from '../components/Toast'
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client';
+import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
+import ErrorDisplay from '../components/ErrorDisplay';
+import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+import { useToast } from '../components/Toast';
 // 本页私有样式（overhaul-plan 5.6 第三批 + 序 8）：`.search-input-*` 从 `src/styles/learning.css`
 // 拆出，`.list-toolbar` 的两条 480px 规则从 `src/styles/responsive.css` 一起搬进来
 // （类名哈希后写在全局补丁层里的选择器会永远选不中）；序 8 再把
 // `.note-list-item` / `.note-list-actions`（含 768px 档 3 条）从
 // `components.css` + `responsive.css` 搬进来 —— 见 NotesList.module.css 文件头
-import styles from './NotesList.module.css'
+import styles from './NotesList.module.css';
 
 /**
  * 笔记列表页面组件
@@ -38,56 +38,56 @@ import styles from './NotesList.module.css'
  * - loading: 数据加载状态
  */
 export default function NotesList() {
-  const toast = useToast()
-  const navigate = useNavigate()
+  const toast = useToast();
+  const navigate = useNavigate();
   /** 当前页的笔记列表 */
-  const [notes, setNotes] = useState<Note[]>([])
+  const [notes, setNotes] = useState<Note[]>([]);
   /** 笔记总数，用于计算总页数 */
-  const [total, setTotal] = useState(0)
+  const [total, setTotal] = useState(0);
   /** 当前页码（从 1 开始） */
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(1);
   /** 搜索关键词 */
-  const [keyword, setKeyword] = useState('')
+  const [keyword, setKeyword] = useState('');
   /** 当前笔记角色筛选：material=学习资料，personal_note=我的笔记 */
-  const [noteRole, setNoteRole] = useState<'material' | 'personal_note'>('material')
+  const [noteRole, setNoteRole] = useState<'material' | 'personal_note'>('material');
   /** 各角色下是否只显示已审阅笔记，保持两个 Tab 下已审阅筛选独立 */
   const [archivedByRole, setArchivedByRole] = useState<Record<string, boolean>>({
     material: false,
     personal_note: false,
-  })
+  });
   /** 数据加载状态 */
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true);
   /** 错误信息 */
-  const [error, setError] = useState('')
+  const [error, setError] = useState('');
   /** 待移入回收站的笔记（打开删除确认弹窗） */
-  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null)
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
 
   /** 每页显示条数，固定为 20 */
-  const pageSize = 20
+  const pageSize = 20;
 
   // 当页码或关键词或筛选条件变化时重新获取笔记列表
-  const showArchived = archivedByRole[noteRole]
+  const showArchived = archivedByRole[noteRole];
   const fetchNotes = useCallback(async () => {
-    setLoading(true)
-    setError('')
+    setLoading(true);
+    setError('');
     try {
       const res = showArchived
         ? await getArchivedNotes(page, pageSize, noteRole)
-        : await getNotes(page, pageSize, keyword || undefined, noteRole)
-      setNotes(res.items)
-      setTotal(res.total)
+        : await getNotes(page, pageSize, keyword || undefined, noteRole);
+      setNotes(res.items);
+      setTotal(res.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : '加载失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [page, keyword, noteRole, showArchived])
+  }, [page, keyword, noteRole, showArchived]);
 
   // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchNotes()
-  }, [page, keyword, noteRole, showArchived, fetchNotes])
+    fetchNotes();
+  }, [page, keyword, noteRole, showArchived, fetchNotes]);
 
   /**
    * 处理删除笔记（移入回收站）
@@ -100,21 +100,21 @@ export default function NotesList() {
    * @param note - 要移入回收站的笔记
    */
   function handleDelete(note: Note) {
-    setNoteToDelete(note)
+    setNoteToDelete(note);
   }
 
   /** 确认移入回收站：调用软删除 API，乐观更新本地列表 */
   async function confirmDelete() {
-    if (!noteToDelete) return
+    if (!noteToDelete) return;
     try {
-      await deleteNote(noteToDelete.id)
+      await deleteNote(noteToDelete.id);
       // 乐观更新：从本地状态中移除已删除的笔记，无需重新请求列表
-      setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id))
-      setTotal((prev) => prev - 1)
+      setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id));
+      setTotal((prev) => prev - 1);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '移入回收站失败')
+      toast.error(err instanceof Error ? err.message : '移入回收站失败');
     } finally {
-      setNoteToDelete(null)
+      setNoteToDelete(null);
     }
   }
 
@@ -126,21 +126,21 @@ export default function NotesList() {
    */
   async function handleRetry(noteId: string) {
     try {
-      const result = await retryConvert(noteId)
+      const result = await retryConvert(noteId);
       setNotes((prev) =>
         prev.map((n) =>
           n.id === noteId
             ? { ...n, status: result.status, error_message: result.error_message }
-            : n
-        )
-      )
+            : n,
+        ),
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '重试失败')
+      toast.error(err instanceof Error ? err.message : '重试失败');
     }
   }
 
   /** 计算总页数，用于分页控件 */
-  const totalPages = Math.ceil(total / pageSize)
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div className="page-enter">
@@ -158,9 +158,25 @@ export default function NotesList() {
       </h1>
 
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
-      <div className={styles.listToolbar} style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
+      <div
+        className={styles.listToolbar}
+        style={{
+          display: 'flex',
+          gap: 'var(--space-md)',
+          marginBottom: 'var(--space-lg)',
+          alignItems: 'center',
+        }}
+      >
         <div className={styles.searchInputWrapper}>
-          <svg className={styles.searchInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            className={styles.searchInputIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
@@ -168,7 +184,10 @@ export default function NotesList() {
             type="search"
             placeholder="搜索笔记标题..."
             value={keyword}
-            onChange={(e) => { setKeyword(e.target.value); setPage(1) }}
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
             aria-label="搜索笔记"
           />
         </div>
@@ -178,16 +197,29 @@ export default function NotesList() {
       </div>
 
       {/* 笔记角色 Tab 切换：学习资料 / 我的笔记 */}
-      <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)', flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--space-sm)',
+          marginBottom: 'var(--space-md)',
+          flexWrap: 'wrap',
+        }}
+      >
         <button
           className={`filter-pill ${noteRole === 'material' ? 'filter-pill-active' : ''}`}
-          onClick={() => { setNoteRole('material'); setPage(1) }}
+          onClick={() => {
+            setNoteRole('material');
+            setPage(1);
+          }}
         >
           学习资料
         </button>
         <button
           className={`filter-pill ${noteRole === 'personal_note' ? 'filter-pill-active' : ''}`}
-          onClick={() => { setNoteRole('personal_note'); setPage(1) }}
+          onClick={() => {
+            setNoteRole('personal_note');
+            setPage(1);
+          }}
         >
           我的笔记
         </button>
@@ -198,8 +230,8 @@ export default function NotesList() {
         <button
           className={`filter-pill ${!archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setArchivedByRole(prev => ({ ...prev, [noteRole]: false }))
-            setPage(1)
+            setArchivedByRole((prev) => ({ ...prev, [noteRole]: false }));
+            setPage(1);
           }}
         >
           全部
@@ -207,8 +239,8 @@ export default function NotesList() {
         <button
           className={`filter-pill ${archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setArchivedByRole(prev => ({ ...prev, [noteRole]: true }))
-            setPage(1)
+            setArchivedByRole((prev) => ({ ...prev, [noteRole]: true }));
+            setPage(1);
           }}
         >
           已审阅
@@ -225,7 +257,13 @@ export default function NotesList() {
         <EmptyState
           message={keyword ? '没有找到匹配的笔记' : '还没有笔记'}
           description={keyword ? undefined : '上传你的第一份学习资料'}
-          action={!keyword ? <button className="btn btn-primary" onClick={() => navigate('/upload')}>上传资料</button> : undefined}
+          action={
+            !keyword ? (
+              <button className="btn btn-primary" onClick={() => navigate('/upload')}>
+                上传资料
+              </button>
+            ) : undefined
+          }
         />
       ) : (
         /* 笔记卡片列表 */
@@ -244,7 +282,9 @@ export default function NotesList() {
                     （这正是补上 h1 之后必须一起做的事：F-18 修好、不能反手
                     多出一条层级违规）。字号本来就是显式写的，
                     改级别**不改外观**。 */}
-                <h2 style={{ fontSize: '1.17rem', fontWeight: 500, marginBottom: 'var(--space-xs)' }}>
+                <h2
+                  style={{ fontSize: '1.17rem', fontWeight: 500, marginBottom: 'var(--space-xs)' }}
+                >
                   {/* 下划线显式关掉：`base.css` 现在给所有 <a> 默认下划线
                       （正文链接必须与正文可区分，F-13/F-26），而这里链接的
                       文本就是整张卡片的标题 —— 标题带下划线不是这个页面的观感，
@@ -256,7 +296,14 @@ export default function NotesList() {
                     {note.title}
                   </Link>
                 </h2>
-                <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 'var(--space-sm)',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                  }}
+                >
                   {/* 来源类型标签 */}
                   <span className={`badge badge-${note.source_type}`}>
                     {sourceTypeLabels[note.source_type] || note.source_type}
@@ -268,7 +315,14 @@ export default function NotesList() {
                       12px 小字压在 4.5 的门槛线上（a11y-audit F-25 的第三种成因）。
                       改用同色系的 #1b4fbf（5.49:1），色相不变、余量足够。 */}
                   {note.project_names?.map((name) => (
-                    <span key={name} className="badge" style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: '#1b4fbf' }}>
+                    <span
+                      key={name}
+                      className="badge"
+                      style={{
+                        backgroundColor: 'var(--color-primary-soft, #eef2ff)',
+                        color: '#1b4fbf',
+                      }}
+                    >
                       {name}
                     </span>
                   ))}
@@ -293,7 +347,13 @@ export default function NotesList() {
                 </div>
                 {/* 错误信息，仅 status 为 failed 时显示 */}
                 {note.error_message && (
-                  <p style={{ color: 'var(--color-error)', fontSize: '0.8rem', marginTop: 'var(--space-xs)' }}>
+                  <p
+                    style={{
+                      color: 'var(--color-error)',
+                      fontSize: '0.8rem',
+                      marginTop: 'var(--space-xs)',
+                    }}
+                  >
                     {note.error_message}
                   </p>
                 )}
@@ -320,7 +380,12 @@ export default function NotesList() {
                 >
                   删除
                 </button>
-                <span style={{ color: 'var(--color-text-secondary)', alignSelf: 'center' }} aria-hidden="true">→</span>
+                <span
+                  style={{ color: 'var(--color-text-secondary)', alignSelf: 'center' }}
+                  aria-hidden="true"
+                >
+                  →
+                </span>
               </div>
             </article>
           ))}
@@ -329,7 +394,15 @@ export default function NotesList() {
 
       {/* 分页控件：仅在总页数大于 1 时显示 */}
       {totalPages > 1 && (
-        <nav style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-sm)', marginTop: 'var(--space-lg)' }} aria-label="分页">
+        <nav
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 'var(--space-sm)',
+            marginTop: 'var(--space-lg)',
+          }}
+          aria-label="分页"
+        >
           <button
             className="btn btn-secondary"
             disabled={page <= 1}
@@ -337,7 +410,13 @@ export default function NotesList() {
           >
             上一页
           </button>
-          <span style={{ alignSelf: 'center', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+          <span
+            style={{
+              alignSelf: 'center',
+              fontSize: '0.875rem',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
             {page} / {totalPages}
           </span>
           <button
@@ -359,5 +438,5 @@ export default function NotesList() {
         />
       )}
     </div>
-  )
+  );
 }

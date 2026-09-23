@@ -40,7 +40,9 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border-light);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s ease;
+  transition:
+    transform 0.3s var(--ease-out-expo),
+    box-shadow 0.3s ease;
   position: relative;
   overflow: hidden;
 }
@@ -58,10 +60,18 @@
 
 /* ── 配色变体（对应组件 props 的 variant）── */
 
-.statCardBlue::before { background: var(--gradient-primary); }
-.statCardGreen::before { background: linear-gradient(135deg, #2d8a56, #34d399); }
-.statCardGold::before { background: var(--gradient-gold); }
-.statCardPurple::before { background: linear-gradient(135deg, #6d28d9, #a78bfa); }
+.statCardBlue::before {
+  background: var(--gradient-primary);
+}
+.statCardGreen::before {
+  background: linear-gradient(135deg, #2d8a56, #34d399);
+}
+.statCardGold::before {
+  background: var(--gradient-gold);
+}
+.statCardPurple::before {
+  background: linear-gradient(135deg, #6d28d9, #a78bfa);
+}
 
 .statCard:hover {
   transform: translateY(-2px);

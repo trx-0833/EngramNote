@@ -6,17 +6,21 @@
  * 各自独立关闭 —— 这正是原来共用一个 error 槽位时做不到的（BB.8 第 5 条）。
  */
 interface ProjectsErrorBannerProps {
-  error: string
+  error: string;
   /** 点 ✕ 关闭（清空 error，页面骨架不动） */
-  onDismiss: () => void
+  onDismiss: () => void;
   /**
    * 关闭按钮的无障碍名。默认就是可见的 ✕ —— 只有页面上同时出现两条提示
    * （页面级失败 + 重命名校验）时才需要区分，否则读屏与测试都分不清点的是哪一条。
    */
-  dismissLabel?: string
+  dismissLabel?: string;
 }
 
-export default function ProjectsErrorBanner({ error, onDismiss, dismissLabel }: ProjectsErrorBannerProps) {
+export default function ProjectsErrorBanner({
+  error,
+  onDismiss,
+  dismissLabel,
+}: ProjectsErrorBannerProps) {
   return (
     <div
       className="card"
@@ -38,5 +42,5 @@ export default function ProjectsErrorBanner({ error, onDismiss, dismissLabel }: 
         ✕
       </button>
     </div>
-  )
+  );
 }

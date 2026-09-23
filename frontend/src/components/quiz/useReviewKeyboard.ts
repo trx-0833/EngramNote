@@ -33,43 +33,46 @@
  * ⚠️ 这个 hook 放在 `components/quiz/` 而不是 `src/hooks/`：本轮的改动范围
  * 限定在 `pages/**` 与 `components/**`，而它服务的正是这一组答题/复习组件。
  */
-import { useCallback, useEffect, useRef, type KeyboardEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type KeyboardEvent, type RefObject } from 'react';
 
 interface UseReviewKeyboardOptions {
   /** 回车时要推进的那一步（语义由页面决定） */
-  onEnter: () => void
+  onEnter: () => void;
   /**
    * 变化时把焦点收回容器；不传则完全不接管焦点（见文件头）。
    * 传一个随"当前项 / 当前阶段"变化的字符串即可。
    */
-  refocusKey?: string
+  refocusKey?: string;
 }
 
 interface UseReviewKeyboardResult {
   /** 挂到外层容器上的 ref（配合 `tabIndex={-1}` 使用） */
-  containerRef: RefObject<HTMLDivElement>
+  containerRef: RefObject<HTMLDivElement>;
   /** 挂到同一个容器的 `onKeyDown` */
-  handleKeyDown: (e: KeyboardEvent<HTMLElement>) => void
+  handleKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
 }
 
 export function useReviewKeyboard({
   onEnter,
   refocusKey,
 }: UseReviewKeyboardOptions): UseReviewKeyboardResult {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (refocusKey === undefined) return
-    containerRef.current?.focus()
-  }, [refocusKey])
+    if (refocusKey === undefined) return;
+    containerRef.current?.focus();
+  }, [refocusKey]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey) return
-    // 焦点在按钮上时放行：让按钮走自己的原生回车激活（见文件头）
-    if (e.target instanceof HTMLButtonElement) return
-    e.preventDefault()
-    onEnter()
-  }, [onEnter])
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLElement>) => {
+      if (e.key !== 'Enter' || e.shiftKey) return;
+      // 焦点在按钮上时放行：让按钮走自己的原生回车激活（见文件头）
+      if (e.target instanceof HTMLButtonElement) return;
+      e.preventDefault();
+      onEnter();
+    },
+    [onEnter],
+  );
 
-  return { containerRef, handleKeyDown }
+  return { containerRef, handleKeyDown };
 }

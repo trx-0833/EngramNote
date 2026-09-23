@@ -6,8 +6,8 @@
  * 2. PurgeNoteDialog —— 彻底删除确认弹窗：警示不可恢复，说明悬挂引用
  *    策略，高级选项支持"将核心卡片提升为独立节点"。
  */
-import { useEffect, useState } from 'react'
-import { getNoteTrashInfo, type Note, type TrashInfoResponse } from '../api/client'
+import { useEffect, useState } from 'react';
+import { getNoteTrashInfo, type Note, type TrashInfoResponse } from '../api/client';
 
 /** 弹窗遮罩 + 卡片容器的公共 inline 样式（与 NoteDetail 关联资料弹窗保持一致） */
 const overlayStyle: React.CSSProperties = {
@@ -21,20 +21,20 @@ const overlayStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   zIndex: 1000,
-}
+};
 
 const cardStyle: React.CSSProperties = {
   width: '100%',
   maxWidth: 520,
   maxHeight: '80vh',
   overflowY: 'auto',
-}
+};
 
 const statRowStyle: React.CSSProperties = {
   display: 'flex',
   gap: 'var(--space-md)',
   marginBottom: 'var(--space-md)',
-}
+};
 
 const statItemStyle: React.CSSProperties = {
   flex: 1,
@@ -42,22 +42,22 @@ const statItemStyle: React.CSSProperties = {
   padding: 'var(--space-sm) var(--space-xs)',
   background: 'var(--color-primary-light)',
   borderRadius: 'var(--radius-md)',
-}
+};
 
 const footerStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
   gap: 'var(--space-sm)',
   marginTop: 'var(--space-lg)',
-}
+};
 
 interface DeleteNoteDialogProps {
   /** 要移入回收站的笔记 */
-  note: Note
+  note: Note;
   /** 关闭弹窗（不执行任何操作） */
-  onClose: () => void
+  onClose: () => void;
   /** 确认移入回收站 */
-  onConfirm: () => void
+  onConfirm: () => void;
 }
 
 /**
@@ -68,34 +68,32 @@ interface DeleteNoteDialogProps {
  * - "关联暂不可见，但可在回收站中整体恢复"的说明
  */
 export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogProps) {
-  const [info, setInfo] = useState<TrashInfoResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [info, setInfo] = useState<TrashInfoResponse | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     getNoteTrashInfo(note.id)
       .then((res) => {
-        if (!cancelled) setInfo(res)
+        if (!cancelled) setInfo(res);
       })
       .catch(() => {
         // 统计加载失败不阻塞删除流程，仅展示基础提示
-        if (!cancelled) setInfo(null)
+        if (!cancelled) setInfo(null);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
-  }, [note.id])
+      cancelled = true;
+    };
+  }, [note.id]);
 
   return (
     <div style={overlayStyle} onClick={onClose}>
       <div className="card" style={cardStyle} onClick={(e) => e.stopPropagation()}>
         <h3>移入回收站</h3>
-        <p style={{ marginBottom: 'var(--space-md)' }}>
-          确定将「{note.title}」移入回收站吗？
-        </p>
+        <p style={{ marginBottom: 'var(--space-md)' }}>确定将「{note.title}」移入回收站吗？</p>
 
         {loading && <p style={{ color: 'var(--color-text-secondary)' }}>正在统计关联内容…</p>}
 
@@ -104,15 +102,21 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
             <div style={statRowStyle}>
               <div style={statItemStyle}>
                 <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.card_count}</div>
-                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>知识卡片</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                  知识卡片
+                </div>
               </div>
               <div style={statItemStyle}>
                 <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.key_card_count}</div>
-                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>核心卡片</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                  核心卡片
+                </div>
               </div>
               <div style={statItemStyle}>
                 <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.link_count}</div>
-                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>双向链接</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                  双向链接
+                </div>
               </div>
             </div>
             <p
@@ -147,20 +151,20 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 interface PurgeNoteDialogProps {
   /** 要彻底删除的笔记 */
-  note: Note
+  note: Note;
   /** 关闭弹窗（不执行任何操作） */
-  onClose: () => void
+  onClose: () => void;
   /**
    * 确认彻底删除
    *
    * @param promoteKeyCards - 是否将核心卡片提升为独立节点（图谱中保留）
    */
-  onConfirm: (promoteKeyCards: boolean) => void
+  onConfirm: (promoteKeyCards: boolean) => void;
 }
 
 /**
@@ -170,7 +174,7 @@ interface PurgeNoteDialogProps {
  * 笔记删除后，勾选的核心卡片在知识图谱中依然存活，不会成为信息孤岛。
  */
 export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogProps) {
-  const [promote, setPromote] = useState(false)
+  const [promote, setPromote] = useState(false);
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -235,5 +239,5 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
         </div>
       </div>
     </div>
-  )
+  );
 }

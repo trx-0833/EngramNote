@@ -47,12 +47,18 @@
  * 用法：node scripts/css-migration-diff.mjs
  *   前置：npm run build（侧别 B 取自 dist 产物）
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { execFileSync } from 'node:child_process'
-import { parseRules, classesOf, findRecentRev, readFromGit, splitSelectors } from './lib/css-parse.mjs'
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  parseRules,
+  classesOf,
+  findRecentRev,
+  readFromGit,
+  splitSelectors,
+} from './lib/css-parse.mjs';
 
-const root = process.cwd()
+const root = process.cwd();
 
 /**
  * 批次声明。加一批就在这里追加一项，不要改上面的逻辑。
@@ -253,7 +259,8 @@ const BATCHES = [
         note:
           '5.9 收尾轮（F-09）删除：这张卡片从 `div[role="button"]` 改成"盒子 + 真按钮"之后，' +
           '可点的只有那个按钮 —— 卡片上的手型光标会让鼠标用户以为整张卡能点（"看起来能点、点了没反应"）。',
-        winner: '不适用 —— 不是冲突输赢，是无障碍修复主动删掉的"假可点信号"（真按钮自带 cursor: pointer）',
+        winner:
+          '不适用 —— 不是冲突输赢，是无障碍修复主动删掉的"假可点信号"（真按钮自带 cursor: pointer）',
         evidence:
           'commit 0986102 的 diff（`pages/Dashboard.module.css`：`-  cursor: pointer;`）' +
           '与原地留下的注释（"⚠️ 这里**刻意没有** `cursor: pointer`：F-09 …"）；',
@@ -446,8 +453,7 @@ const BATCHES = [
         prop: 'margin-bottom',
         value: 'var(--space-md)',
         winner: 'refinements.css 的 `margin-bottom: 16px`',
-        evidence:
-          'computed margin-bottom = 16px；两侧**数值相同**（--space-md = 16px），同上',
+        evidence: 'computed margin-bottom = 16px；两侧**数值相同**（--space-md = 16px），同上',
       },
       {
         sheet: 'src/styles/assessment.css',
@@ -455,7 +461,8 @@ const BATCHES = [
         prop: 'box-shadow',
         value: 'var(--shadow-sm)',
         winner: 'refinements.css 的 `box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06)`',
-        evidence: 'computed box-shadow = rgba(15,52,96,.06) 0 2px 8px（不是 --shadow-sm 的双层阴影）',
+        evidence:
+          'computed box-shadow = rgba(15,52,96,.06) 0 2px 8px（不是 --shadow-sm 的双层阴影）',
       },
       {
         sheet: 'src/styles/assessment.css',
@@ -496,7 +503,8 @@ const BATCHES = [
         prop: 'background',
         value: 'var(--gradient-primary)',
         winner: 'refinements.css 的 `background: var(--color-accent-light)`',
-        evidence: 'computed background-image = none、background-color = rgba(201,169,89,.12)（金色淡底）',
+        evidence:
+          'computed background-image = none、background-color = rgba(201,169,89,.12)（金色淡底）',
       },
       {
         sheet: 'src/styles/assessment.css',
@@ -545,7 +553,8 @@ const BATCHES = [
         selector: '.score-summary-number',
         prop: 'font-size',
         value: '2.5rem',
-        winner: 'refinements.css 的 `.score-summary-card .score-summary-number { font-size: 2rem }`（权重 (0,2,0)）',
+        winner:
+          'refinements.css 的 `.score-summary-card .score-summary-number { font-size: 2rem }`（权重 (0,2,0)）',
         evidence: 'computed font-size = 32px（2rem），不是 40px',
       },
       {
@@ -707,12 +716,24 @@ const BATCHES = [
      */
     relocations: [
       {
-        from: { sheet: 'src/styles/responsive.css', context: '', selector: ':root', prop: '--page-pad-y-top', value: '64px' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '',
+          selector: ':root',
+          prop: '--page-pad-y-top',
+          value: '64px',
+        },
         to: { file: 'src/App.module.css', context: '', selector: '.appLayout' },
         why: '`:root` 里没有类名 → 差集看不见；随 `.appLayout` 收进模块（值不变）',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '', selector: ':root', prop: '--page-pad-y-bottom', value: 'var(--space-md)' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '',
+          selector: ':root',
+          prop: '--page-pad-y-bottom',
+          value: 'var(--space-md)',
+        },
         to: { file: 'src/App.module.css', context: '', selector: '.appLayout' },
         why: '同上',
       },
@@ -724,7 +745,11 @@ const BATCHES = [
           prop: '--page-pad-y-top',
           value: '60px',
         },
-        to: { file: 'src/App.module.css', context: '@media (max-width: 480px)', selector: '.appLayout' },
+        to: {
+          file: 'src/App.module.css',
+          context: '@media (max-width: 480px)',
+          selector: '.appLayout',
+        },
         why: '窄屏覆盖值随同一条规则搬（480px 档）',
       },
       {
@@ -735,7 +760,11 @@ const BATCHES = [
           prop: '--page-pad-y-bottom',
           value: 'var(--space-sm)',
         },
-        to: { file: 'src/App.module.css', context: '@media (max-width: 480px)', selector: '.appLayout' },
+        to: {
+          file: 'src/App.module.css',
+          context: '@media (max-width: 480px)',
+          selector: '.appLayout',
+        },
         why: '同上',
       },
     ],
@@ -869,7 +898,11 @@ const BATCHES = [
           prop: 'padding-left',
           value: 'var(--space-md)',
         },
-        to: { file: 'src/components/graph/Graph.module.css', context: '@media (max-width: 768px)', selector: '.graphBtn' },
+        to: {
+          file: 'src/components/graph/Graph.module.css',
+          context: '@media (max-width: 768px)',
+          selector: '.graphBtn',
+        },
         why: '同上（选择器组拆开，值不变）',
       },
       {
@@ -880,7 +913,11 @@ const BATCHES = [
           prop: 'padding-right',
           value: 'var(--space-md)',
         },
-        to: { file: 'src/components/graph/Graph.module.css', context: '@media (max-width: 768px)', selector: '.graphBtn' },
+        to: {
+          file: 'src/components/graph/Graph.module.css',
+          context: '@media (max-width: 768px)',
+          selector: '.graphBtn',
+        },
         why: '同上（选择器组拆开，值不变）',
       },
     ],
@@ -915,234 +952,382 @@ const BATCHES = [
       { prop: 'transform', value: 'none' },
       { prop: 'box-shadow', value: 'none' },
       { prop: 'pointer-events', value: 'auto' },
-    ].map((d) => ({
-      from: {
-        sheet: 'src/styles/refinements.css',
-        context: '',
-        selector: '.btn:disabled, .btn[disabled]',
-        prop: d.prop,
-        value: d.value,
-      },
-      to: { file: 'src/styles/components.css', context: '', selector: '.btn:disabled, .btn[disabled]' },
-      why: '全局公共件 `.btn` 的禁用态回家；与 `.btn-*-hover` 同权重 ⇒ 必须排在它们之后（本文件里就在后面）',
-    })).concat([
-      {
+    ]
+      .map((d) => ({
         from: {
           sheet: 'src/styles/refinements.css',
           context: '',
-          selector: '.btn-primary:disabled, .btn-danger:disabled',
-          prop: 'opacity',
-          value: '0.6',
+          selector: '.btn:disabled, .btn[disabled]',
+          prop: d.prop,
+          value: d.value,
         },
         to: {
           file: 'src/styles/components.css',
           context: '',
-          selector: '.btn-primary:disabled, .btn-danger:disabled',
+          selector: '.btn:disabled, .btn[disabled]',
         },
-        why: '同上',
-      },
-      // ── `.card-hover`：序 5 裁决出来的**胜者**搬回全局卡片定义处 ──
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.card-hover',
-          prop: 'transition',
-          value:
-            'transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo)',
+        why: '全局公共件 `.btn` 的禁用态回家；与 `.btn-*-hover` 同权重 ⇒ 必须排在它们之后（本文件里就在后面）',
+      }))
+      .concat([
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.btn-primary:disabled, .btn-danger:disabled',
+            prop: 'opacity',
+            value: '0.6',
+          },
+          to: {
+            file: 'src/styles/components.css',
+            context: '',
+            selector: '.btn-primary:disabled, .btn-danger:disabled',
+          },
+          why: '同上',
         },
-        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover' },
-        why: '序 5 的裁决结论：胜者在补丁层 ⇒ 拆补丁层时把值搬回 `.card` 旁边（现在只有一个定义处）',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.card-hover:hover',
-          prop: 'transform',
-          value: 'translateY(-2px)',
+        // ── `.card-hover`：序 5 裁决出来的**胜者**搬回全局卡片定义处 ──
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.card-hover',
+            prop: 'transition',
+            value:
+              'transform 0.3s var(--ease-out-expo), box-shadow 0.3s var(--ease-out-expo), border-color 0.3s var(--ease-out-expo)',
+          },
+          to: { file: 'src/styles/components.css', context: '', selector: '.card-hover' },
+          why: '序 5 的裁决结论：胜者在补丁层 ⇒ 拆补丁层时把值搬回 `.card` 旁边（现在只有一个定义处）',
         },
-        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
-        why: '序 5 实测胜者（hover 时 computed transform = matrix(1,0,0,1,0,-2)）',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.card-hover:hover',
-          prop: 'box-shadow',
-          value: 'var(--shadow-lg)',
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.card-hover:hover',
+            prop: 'transform',
+            value: 'translateY(-2px)',
+          },
+          to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+          why: '序 5 实测胜者（hover 时 computed transform = matrix(1,0,0,1,0,-2)）',
         },
-        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
-        why: '序 5 实测胜者（hover 时 computed box-shadow = --shadow-lg 的值）',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.card-hover:hover',
-          prop: 'border-color',
-          value: 'var(--color-border)',
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.card-hover:hover',
+            prop: 'box-shadow',
+            value: 'var(--shadow-lg)',
+          },
+          to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+          why: '序 5 实测胜者（hover 时 computed box-shadow = --shadow-lg 的值）',
         },
-        to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
-        why: '这一条两边本来就同值（序 5 只删了输的两条），一起收口到同一个定义处',
-      },
-      // ── `.card` 的窄屏内边距 → components.css 的 768 块 ──
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '@media (max-width: 768px)',
-          selector: '.card',
-          prop: 'padding',
-          value: 'var(--space-md)',
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.card-hover:hover',
+            prop: 'border-color',
+            value: 'var(--color-border)',
+          },
+          to: { file: 'src/styles/components.css', context: '', selector: '.card-hover:hover' },
+          why: '这一条两边本来就同值（序 5 只删了输的两条），一起收口到同一个定义处',
         },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.card' },
-        why: '压的是同文件的 `.card { padding: var(--space-lg) }`，媒体块在文件末尾 ⇒ 胜负关系不变',
-      },
-      // ── `.filter-pill` / `.segment-btn` 的指示线 → learning.css（定义它们的地方）──
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill', prop: 'position', value: 'relative' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill' },
-        why: '两个类名的定义在 learning.css（4 个页面 / 2 个功能在用 ⇒ 留全局）',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'content', value: "''" },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '金色指示线随类名回家',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'position', value: 'absolute' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'bottom', value: '-2px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'left', value: '50%' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'width', value: '0' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'height', value: '2px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'background', value: 'var(--gradient-gold)' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'border-radius', value: '1px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill::after', prop: 'transform', value: 'translateX(-50%)' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.filter-pill::after',
-          prop: 'transition',
-          value: 'width 0.25s var(--ease-out-expo)',
+        // ── `.card` 的窄屏内边距 → components.css 的 768 块 ──
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '@media (max-width: 768px)',
+            selector: '.card',
+            prop: 'padding',
+            value: 'var(--space-md)',
+          },
+          to: {
+            file: 'src/styles/components.css',
+            context: '@media (max-width: 768px)',
+            selector: '.card',
+          },
+          why: '压的是同文件的 `.card { padding: var(--space-lg) }`，媒体块在文件末尾 ⇒ 胜负关系不变',
         },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.filter-pill-active::after', prop: 'width', value: '60%' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill-active::after' },
-        why: '激活态；必须排在 `.filter-pill::after` 之后（同权重）',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn', prop: 'position', value: 'relative' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn' },
-        why: '同上（`.segment-btn` 的定义也在 learning.css）',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'content', value: "''" },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'position', value: 'absolute' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'bottom', value: '1px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'left', value: '20%' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'width', value: '0' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'height', value: '2px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'background', value: 'var(--color-accent)' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn::after', prop: 'border-radius', value: '1px' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '',
-          selector: '.segment-btn::after',
-          prop: 'transition',
-          value: 'width 0.25s var(--ease-out-expo)',
+        // ── `.filter-pill` / `.segment-btn` 的指示线 → learning.css（定义它们的地方）──
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill',
+            prop: 'position',
+            value: 'relative',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill' },
+          why: '两个类名的定义在 learning.css（4 个页面 / 2 个功能在用 ⇒ 留全局）',
         },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/refinements.css', context: '', selector: '.segment-btn-active::after', prop: 'width', value: '60%' },
-        to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn-active::after' },
-        why: '同上',
-      },
-      {
-        from: {
-          sheet: 'src/styles/refinements.css',
-          context: '@media (max-width: 768px)',
-          selector: '.filter-pill',
-          prop: 'padding',
-          value: 'var(--space-xs) var(--space-sm)',
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'content',
+            value: "''",
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '金色指示线随类名回家',
         },
-        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill' },
-        why:
-          '跨属性竞争（计划 §5 雷区 12）：它是简写，压掉 `responsive.css` 那条 ' +
-          '`padding-left/right: var(--space-md)`（序 13 搬进 learning.css 时保持"长写在前、简写在后"）',
-      },
-      // ── 5 个零引用的**预留语义化类**：序 12 逐字搬进 components.css，
-      //    收尾轮（死代码清理）**整条删除** —— 见本批 `resolvedConflicts` 末尾那 6 条 ──
-    ]),
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'position',
+            value: 'absolute',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'bottom',
+            value: '-2px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'left',
+            value: '50%',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'width',
+            value: '0',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'height',
+            value: '2px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'background',
+            value: 'var(--gradient-gold)',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'border-radius',
+            value: '1px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'transform',
+            value: 'translateX(-50%)',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill::after',
+            prop: 'transition',
+            value: 'width 0.25s var(--ease-out-expo)',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.filter-pill::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.filter-pill-active::after',
+            prop: 'width',
+            value: '60%',
+          },
+          to: {
+            file: 'src/styles/learning.css',
+            context: '',
+            selector: '.filter-pill-active::after',
+          },
+          why: '激活态；必须排在 `.filter-pill::after` 之后（同权重）',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn',
+            prop: 'position',
+            value: 'relative',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn' },
+          why: '同上（`.segment-btn` 的定义也在 learning.css）',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'content',
+            value: "''",
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'position',
+            value: 'absolute',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'bottom',
+            value: '1px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'left',
+            value: '20%',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'width',
+            value: '0',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'height',
+            value: '2px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'background',
+            value: 'var(--color-accent)',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'border-radius',
+            value: '1px',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn::after',
+            prop: 'transition',
+            value: 'width 0.25s var(--ease-out-expo)',
+          },
+          to: { file: 'src/styles/learning.css', context: '', selector: '.segment-btn::after' },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '',
+            selector: '.segment-btn-active::after',
+            prop: 'width',
+            value: '60%',
+          },
+          to: {
+            file: 'src/styles/learning.css',
+            context: '',
+            selector: '.segment-btn-active::after',
+          },
+          why: '同上',
+        },
+        {
+          from: {
+            sheet: 'src/styles/refinements.css',
+            context: '@media (max-width: 768px)',
+            selector: '.filter-pill',
+            prop: 'padding',
+            value: 'var(--space-xs) var(--space-sm)',
+          },
+          to: {
+            file: 'src/styles/learning.css',
+            context: '@media (max-width: 768px)',
+            selector: '.filter-pill',
+          },
+          why:
+            '跨属性竞争（计划 §5 雷区 12）：它是简写，压掉 `responsive.css` 那条 ' +
+            '`padding-left/right: var(--space-md)`（序 13 搬进 learning.css 时保持"长写在前、简写在后"）',
+        },
+        // ── 5 个零引用的**预留语义化类**：序 12 逐字搬进 components.css，
+        //    收尾轮（死代码清理）**整条删除** —— 见本批 `resolvedConflicts` 末尾那 6 条 ──
+      ]),
     /**
      * `[style*="rgba(0,0,0,0.5)"] …` 那 12 条 —— **整条规则删除**，
      * 依据是真 Chromium 实测：该属性选择器命中 **0** 个元素
@@ -1306,8 +1491,18 @@ const BATCHES = [
     relocations: [
       // ── 768px：通用触控目标 / 溢出保护 → components.css ──
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn', prop: 'min-height', value: '40px' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn',
+          prop: 'min-height',
+          value: '40px',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn',
+        },
         why: '`.btn` 是全局公共件（45 处引用）⇒ 留在 components.css 的媒体块里',
       },
       {
@@ -1318,7 +1513,11 @@ const BATCHES = [
           prop: 'min-height',
           value: '40px',
         },
-        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        to: {
+          file: 'src/styles/learning.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn',
+        },
         why:
           '⚠️ 与序 10 登记的是**同一条** `from` 声明：四个选择器组里 ' +
           '`.graph-btn` / `.graph-control-btn` 那半随组件进了图谱模块（序 10 登记），' +
@@ -1333,7 +1532,11 @@ const BATCHES = [
           prop: 'padding-left',
           value: 'var(--space-md)',
         },
-        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        to: {
+          file: 'src/styles/learning.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn',
+        },
         why: '同上（注意它被 refinements 那条 `padding` 简写压掉，见序 12 的登记）',
       },
       {
@@ -1344,7 +1547,11 @@ const BATCHES = [
           prop: 'padding-right',
           value: 'var(--space-md)',
         },
-        to: { file: 'src/styles/learning.css', context: '@media (max-width: 768px)', selector: '.filter-pill, .segment-btn' },
+        to: {
+          file: 'src/styles/learning.css',
+          context: '@media (max-width: 768px)',
+          selector: '.filter-pill, .segment-btn',
+        },
         why: '同上',
       },
       {
@@ -1363,84 +1570,216 @@ const BATCHES = [
         why: '裸元素重置（规范 §4 第 1 条）：没有"拥有者组件"，只能留在全局层',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn-ghost', prop: 'padding', value: 'var(--space-xs) var(--space-sm)' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn-ghost' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn-ghost',
+          prop: 'padding',
+          value: 'var(--space-xs) var(--space-sm)',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn-ghost',
+        },
         why: '`.btn-ghost` 定义在 components.css',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.btn-ghost', prop: 'font-size', value: '0.8rem' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.btn-ghost' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.card', prop: 'overflow-wrap', value: 'anywhere' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.card' },
-        why: '`.card` 是全局公共件',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.page-header-row', prop: 'flex-wrap', value: 'wrap' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.page-header-row' },
-        why: '5 个页面在用的页头挂点（规范 §4 第 2 条）；类名原来**只定义在 responsive.css**，现在回到 components.css 的页面级挂点区',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.page-header-row', prop: 'row-gap', value: 'var(--space-sm)' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 768px)', selector: '.page-header-row' },
-        why: '同上',
-      },
-      // ── 768px：`.markdown-body` 一整组 → markdown.css（拥有它的样式表）──
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body', prop: 'font-size', value: '1rem' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body' },
-        why: '类名留全局（三个不相邻功能在用 + `marked` 生成的 DOM）⇒ 回到 markdown.css',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body', prop: 'line-height', value: '1.85' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h1', prop: 'font-size', value: '1.35rem' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h1' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h2', prop: 'font-size', value: '1.2rem' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h2' },
-        why: '同上',
-      },
-      {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body h3', prop: 'font-size', value: '1.05rem' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body h3' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn-ghost',
+          prop: 'font-size',
+          value: '0.8rem',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.btn-ghost',
+        },
         why: '同上',
       },
       {
         from: {
           sheet: 'src/styles/responsive.css',
           context: '@media (max-width: 768px)',
-          selector: '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
+          selector: '.card',
+          prop: 'overflow-wrap',
+          value: 'anywhere',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.card',
+        },
+        why: '`.card` 是全局公共件',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.page-header-row',
+          prop: 'flex-wrap',
+          value: 'wrap',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.page-header-row',
+        },
+        why: '5 个页面在用的页头挂点（规范 §4 第 2 条）；类名原来**只定义在 responsive.css**，现在回到 components.css 的页面级挂点区',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.page-header-row',
+          prop: 'row-gap',
+          value: 'var(--space-sm)',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 768px)',
+          selector: '.page-header-row',
+        },
+        why: '同上',
+      },
+      // ── 768px：`.markdown-body` 一整组 → markdown.css（拥有它的样式表）──
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body',
+          prop: 'font-size',
+          value: '1rem',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body',
+        },
+        why: '类名留全局（三个不相邻功能在用 + `marked` 生成的 DOM）⇒ 回到 markdown.css',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body',
+          prop: 'line-height',
+          value: '1.85',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body',
+        },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h1',
+          prop: 'font-size',
+          value: '1.35rem',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h1',
+        },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h2',
+          prop: 'font-size',
+          value: '1.2rem',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h2',
+        },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h3',
+          prop: 'font-size',
+          value: '1.05rem',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body h3',
+        },
+        why: '同上',
+      },
+      {
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector:
+            '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
           prop: 'overflow-wrap',
           value: 'anywhere',
         },
         to: {
           file: 'src/styles/markdown.css',
           context: '@media (max-width: 768px)',
-          selector: '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
+          selector:
+            '.markdown-body p, .markdown-body li, .markdown-body blockquote, .markdown-body :not(pre) > code',
         },
         why: '长英文/URL/行内代码必须能断行（选择器组原样保留）',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'display', value: 'block' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+          prop: 'display',
+          value: 'block',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+        },
         why: '宽表格自身成为横向滚动容器',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'max-width', value: '100%' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+          prop: 'max-width',
+          value: '100%',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+        },
         why: '同上',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body table', prop: 'overflow-x', value: 'auto' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+          prop: 'overflow-x',
+          value: 'auto',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+        },
         why: '同上',
       },
       {
@@ -1451,7 +1790,11 @@ const BATCHES = [
           prop: '-webkit-overflow-scrolling',
           value: 'touch',
         },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body table' },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body table',
+        },
         why: '同上',
       },
       {
@@ -1462,7 +1805,11 @@ const BATCHES = [
           prop: 'padding',
           value: 'var(--space-xs) var(--space-sm)',
         },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body th, .markdown-body td' },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body th, .markdown-body td',
+        },
         why: '同上（选择器组原样保留）',
       },
       {
@@ -1473,7 +1820,11 @@ const BATCHES = [
           prop: 'white-space',
           value: 'normal',
         },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body th, .markdown-body td' },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body th, .markdown-body td',
+        },
         why: '同上',
       },
       {
@@ -1507,26 +1858,66 @@ const BATCHES = [
         why: '同上',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body .katex', prop: 'font-size', value: '1em' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body .katex' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex',
+          prop: 'font-size',
+          value: '1em',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body .katex',
+        },
         why:
           '这条**从未生效**（被 markdown-extras.css 顶层同权重的 1.1em 压掉，计划 §4.7）；' +
           '搬进 markdown.css 后它仍在 markdown-extras.css 之前 ⇒ 胜负关系逐字不变',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 768px)', selector: '.markdown-body pre', prop: 'font-size', value: '0.85rem' },
-        to: { file: 'src/styles/markdown.css', context: '@media (max-width: 768px)', selector: '.markdown-body pre' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body pre',
+          prop: 'font-size',
+          value: '0.85rem',
+        },
+        to: {
+          file: 'src/styles/markdown.css',
+          context: '@media (max-width: 768px)',
+          selector: '.markdown-body pre',
+        },
         why: '代码块只收字号',
       },
       // ── 480px ──
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 480px)', selector: '.btn', prop: 'min-height', value: '44px' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 480px)', selector: '.btn' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 480px)',
+          selector: '.btn',
+          prop: 'min-height',
+          value: '44px',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 480px)',
+          selector: '.btn',
+        },
         why: '48px 档的触控目标下限（Apple HIG / WCAG 2.5.5）',
       },
       {
-        from: { sheet: 'src/styles/responsive.css', context: '@media (max-width: 480px)', selector: '.heading-serif', prop: 'overflow-wrap', value: 'anywhere' },
-        to: { file: 'src/styles/components.css', context: '@media (max-width: 480px)', selector: '.heading-serif' },
+        from: {
+          sheet: 'src/styles/responsive.css',
+          context: '@media (max-width: 480px)',
+          selector: '.heading-serif',
+          prop: 'overflow-wrap',
+          value: 'anywhere',
+        },
+        to: {
+          file: 'src/styles/components.css',
+          context: '@media (max-width: 480px)',
+          selector: '.heading-serif',
+        },
         why: '`.heading-serif` 定义在 components.css',
       },
     ],
@@ -1578,7 +1969,7 @@ const BATCHES = [
     hardened: {},
     keyframes: [],
   },
-]
+];
 
 // ── 归一化 ──
 /**
@@ -1610,29 +2001,30 @@ const BATCHES = [
  */
 const TOKEN_EQUIV = {
   'var(--color-primary-light)': 'rgba(15,52,96,.08)',
-}
+};
 
 /** 8 位十六进制化：`#abc` / `#abcc` / `#aabbcc` / `#aabbccdd` 一律补成 `#aabbccdd` */
 function expandHex(s) {
   return s.replace(/#([0-9a-f]{3,8})(?![\w-])/gi, (m, h) => {
-    let x = h.toLowerCase()
+    let x = h.toLowerCase();
     // 3 位 / 4 位是缩写形式（4 位那档带 alpha，如 `#fffc` = `#ffffffcc`）
-    if (x.length === 3 || x.length === 4) x = x.split('').map((c) => c + c).join('')
-    if (x.length === 6) x += 'ff'
-    return x.length === 8 ? `#${x}` : m
-  })
+    if (x.length === 3 || x.length === 4)
+      x = x
+        .split('')
+        .map((c) => c + c)
+        .join('');
+    if (x.length === 6) x += 'ff';
+    return x.length === 8 ? `#${x}` : m;
+  });
 }
 
 /** `rgba(r,g,b,a)` → `#rrggbbaa`（alpha 四舍五入到 8 位，与压缩器一致） */
 function rgbaToHex8(s) {
-  return s.replace(
-    /rgba\((\d{1,3}),(\d{1,3}),(\d{1,3}),(1|0|\.\d+|0\.\d+)\)/g,
-    (m, r, g, b, a) => {
-      const av = a === '1' ? 255 : a === '0' ? 0 : Math.round(Number.parseFloat(a) * 255)
-      const hex = (n) => Number(n).toString(16).padStart(2, '0')
-      return `#${hex(r)}${hex(g)}${hex(b)}${hex(av)}`
-    },
-  )
+  return s.replace(/rgba\((\d{1,3}),(\d{1,3}),(\d{1,3}),(1|0|\.\d+|0\.\d+)\)/g, (m, r, g, b, a) => {
+    const av = a === '1' ? 255 : a === '0' ? 0 : Math.round(Number.parseFloat(a) * 255);
+    const hex = (n) => Number(n).toString(16).padStart(2, '0');
+    return `#${hex(r)}${hex(g)}${hex(b)}${hex(av)}`;
+  });
 }
 
 function canonValue(v) {
@@ -1645,11 +2037,11 @@ function canonValue(v) {
     .replace(/"/g, "'") // content: "" → content: ''
     .replace(/\bwhite\b/g, '#ffffff') // 命名色 → 十六进制
     .replace(/\s+/g, '')
-    .toLowerCase()
+    .toLowerCase();
   for (const [token, literal] of Object.entries(TOKEN_EQUIV)) {
-    s = s.split(token).join(literal)
+    s = s.split(token).join(literal);
   }
-  return expandHex(rgbaToHex8(s))
+  return expandHex(rgbaToHex8(s));
 }
 
 /**
@@ -1666,10 +2058,10 @@ function canonValue(v) {
  * 不做任何猜测。
  */
 function canonRadius(v) {
-  if (/[/()]/.test(v)) return v
-  const parts = v.trim().split(/\s+/)
-  if (parts.length === 4 && parts[3] === parts[1]) return parts.slice(0, 3).join(' ')
-  return v
+  if (/[/()]/.test(v)) return v;
+  const parts = v.trim().split(/\s+/);
+  if (parts.length === 4 && parts[3] === parts[1]) return parts.slice(0, 3).join(' ');
+  return v;
 }
 
 /**
@@ -1687,17 +2079,17 @@ function canonRadius(v) {
  * 宁可留着一条可疑差异，也不猜。
  */
 function expandInset(v) {
-  const parts = v.trim().split(/\s+/)
-  if (parts.length < 1 || parts.length > 4) return null
-  if (parts.some((p) => /[(),/]/.test(p))) return null
+  const parts = v.trim().split(/\s+/);
+  if (parts.length < 1 || parts.length > 4) return null;
+  if (parts.some((p) => /[(),/]/.test(p))) return null;
   // 简写展开规则：1 值→四边；2 值→上下 / 左右；3 值→上 / 左右 / 下；4 值→上右下左
-  const [t, r = t, b = t, l = r] = parts
+  const [t, r = t, b = t, l = r] = parts;
   return [
     ['top', t],
     ['right', r],
     ['bottom', b],
     ['left', l],
-  ]
+  ];
 }
 
 /**
@@ -1713,22 +2105,22 @@ function expandInset(v) {
  * 传进来的已经只是值（`feedbackScaleIn 0.3s …`），不含属性名，永远匹配不上。
  */
 function canonDecls(decls) {
-  const out = []
+  const out = [];
   for (const [p, v] of decls) {
-    const prop = p.trim().toLowerCase()
+    const prop = p.trim().toLowerCase();
     if (prop === 'animation' || prop === 'animation-name') {
-      out.push(`${prop}:NAME`)
-      continue
+      out.push(`${prop}:NAME`);
+      continue;
     }
     // `inset` 简写被构建器降级成四条长写 → 两侧都展开成同样的四个键再比
-    const inset = prop === 'inset' ? expandInset(v) : null
+    const inset = prop === 'inset' ? expandInset(v) : null;
     if (inset) {
-      for (const [longhand, value] of inset) out.push(`${longhand}:${canonValue(value)}`)
-      continue
+      for (const [longhand, value] of inset) out.push(`${longhand}:${canonValue(value)}`);
+      continue;
     }
-    out.push(`${prop}:${canonValue(prop === 'border-radius' ? canonRadius(v) : v)}`)
+    out.push(`${prop}:${canonValue(prop === 'border-radius' ? canonRadius(v) : v)}`);
   }
-  return out.sort()
+  return out.sort();
 }
 
 /**
@@ -1738,10 +2130,10 @@ function canonDecls(decls) {
  * 别名替换后的名字也啃掉一截，剩下一个孤零零的下划线，
  * 让两侧看起来"值不同"（试点轮踩过，两条 animation 报了假警报）。
  */
-const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '')
+const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '');
 
 /** `auth-input-group` → `authInputGroup`（本项目模块类名的唯一推导规则） */
-const kebabToCamel = (name) => name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())
+const kebabToCamel = (name) => name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
 
 /**
  * 定位"迁移前"的修订：从 HEAD 往回找第一个**还含有本批老类名**的修订。
@@ -1753,14 +2145,14 @@ const kebabToCamel = (name) => name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperC
 function resolveBeforeRev(batch, oldNames) {
   return findRecentRev((rev) =>
     batch.beforeSheets.some((rel) => {
-      const abs = path.join(root, rel)
-      const css = readFromGit(abs, rev)
-      return parseRules(css).some((r) => classesOf(r.selector).some((c) => oldNames.has(c)))
+      const abs = path.join(root, rel);
+      const css = readFromGit(abs, rev);
+      return parseRules(css).some((r) => classesOf(r.selector).some((c) => oldNames.has(c)));
     }),
-  )
+  );
 }
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * 自检：推导出来的新类名必须真的写在它声称的模块文件里。
@@ -1769,22 +2161,22 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  * 而分叉的表现是"规则全丢"这种吓人的假警报。
  */
 function checkRenames(batch) {
-  const problems = []
+  const problems = [];
   for (const g of batch.groups) {
-    const abs = path.join(root, g.module)
+    const abs = path.join(root, g.module);
     if (!fs.existsSync(abs)) {
-      problems.push(`${g.module} 不存在`)
-      continue
+      problems.push(`${g.module} 不存在`);
+      continue;
     }
-    const css = fs.readFileSync(abs, 'utf8')
+    const css = fs.readFileSync(abs, 'utf8');
     for (const old of g.classes) {
-      const camel = kebabToCamel(old)
+      const camel = kebabToCamel(old);
       if (!new RegExp(`\\.${camel}(?![\\w-])`).test(css)) {
-        problems.push(`${g.module} 里找不到 .${camel}（由 .${old} 推导而来）`)
+        problems.push(`${g.module} 里找不到 .${camel}（由 .${old} 推导而来）`);
       }
     }
   }
-  return problems
+  return problems;
 }
 
 /**
@@ -1816,7 +2208,7 @@ function checkRenames(batch) {
  * 登记的声明会从"迁移前"一侧摘掉（否则会被报成丢失），并从摘要里单独成节。
  */
 function relocationMatches(entry, sheet, context, selector, prop, value) {
-  const f = entry.from
+  const f = entry.from;
   return (
     f.sheet === sheet &&
     (f.context || '') === context &&
@@ -1824,7 +2216,7 @@ function relocationMatches(entry, sheet, context, selector, prop, value) {
     (f.prop.trim() === '*' ||
       (f.prop.trim().toLowerCase() === prop.trim().toLowerCase() &&
         canonValue(f.value) === canonValue(value)))
-  )
+  );
 }
 
 /**
@@ -1838,51 +2230,54 @@ function relocationMatches(entry, sheet, context, selector, prop, value) {
  * （13 条属性选择器 + 6 条预留类都用 `prop: '*'`）—— 两份登记共用一个写法。
  */
 function isWildcardRelocation(entry) {
-  return entry.from.prop.trim() === '*'
+  return entry.from.prop.trim() === '*';
 }
 
 /** 从某条规则的声明里摘掉"已登记的搬家"，并记账（命中次数） */
 function applyRelocations(batch, rel, context, selector, decls, hitCounts) {
-  const entries = batch.relocations || []
-  if (entries.length === 0) return decls
-  const kept = []
+  const entries = batch.relocations || [];
+  if (entries.length === 0) return decls;
+  const kept = [];
   for (const [p, v] of decls) {
-    const idx = entries.findIndex((e) => relocationMatches(e, rel, context, selector, p, v))
+    const idx = entries.findIndex((e) => relocationMatches(e, rel, context, selector, p, v));
     if (idx >= 0) {
-      hitCounts[idx] += 1
-      continue
+      hitCounts[idx] += 1;
+      continue;
     }
-    kept.push([p, v])
+    kept.push([p, v]);
   }
-  return kept
+  return kept;
 }
 
 /** 目标文件里有没有这条声明（`to.selector` 可以是某个选择器组里的一员） */
 function relocationLands(entry, droppedDecls = 0) {
-  const abs = path.join(root, entry.to.file)
-  if (!fs.existsSync(abs)) return false
-  const wildcard = isWildcardRelocation(entry)
-  const want = wildcard ? '' : entry.from.prop.trim().toLowerCase()
-  const wantVal = wildcard ? '' : canonValue(entry.from.value)
+  const abs = path.join(root, entry.to.file);
+  if (!fs.existsSync(abs)) return false;
+  const wildcard = isWildcardRelocation(entry);
+  const want = wildcard ? '' : entry.from.prop.trim().toLowerCase();
+  const wantVal = wildcard ? '' : canonValue(entry.from.value);
   for (const r of parseRules(fs.readFileSync(abs, 'utf8'))) {
-    if (entry.to.context !== undefined && entry.to.context !== r.context) continue
+    if (entry.to.context !== undefined && entry.to.context !== r.context) continue;
     // `to.selector` 可以写成**整个选择器组**（`.a, .b`）或组里的一员：
     // 两种都接受 —— 组在产物/源码里可能跨行，所以先归一空白再比。
-    const norm = (s) => s.replace(/\s+/g, ' ').trim()
-    const members = splitSelectors(r.selector).map(norm)
-    if (!members.includes(norm(entry.to.selector)) && norm(r.selector) !== norm(entry.to.selector)) {
-      continue
+    const norm = (s) => s.replace(/\s+/g, ' ').trim();
+    const members = splitSelectors(r.selector).map(norm);
+    if (
+      !members.includes(norm(entry.to.selector)) &&
+      norm(r.selector) !== norm(entry.to.selector)
+    ) {
+      continue;
     }
     if (wildcard) {
       // 整条搬家：目标那条规则至少要装下搬走的这么多声明
-      if (r.decls.length >= droppedDecls) return true
-      continue
+      if (r.decls.length >= droppedDecls) return true;
+      continue;
     }
     if (r.decls.some(([p, v]) => p.trim().toLowerCase() === want && canonValue(v) === wantVal)) {
-      return true
+      return true;
     }
   }
-  return false
+  return false;
 }
 
 /**
@@ -1900,9 +2295,9 @@ function relocationLands(entry, droppedDecls = 0) {
  * 自检不变 —— 该规则必须真的存在，否则报"一条都没命中"。
  */
 function applyResolvedDrops(batch, rel, context, selector, decls, hitCounts) {
-  const drops = batch.resolvedConflicts || []
-  if (drops.length === 0) return decls
-  const kept = []
+  const drops = batch.resolvedConflicts || [];
+  if (drops.length === 0) return decls;
+  const kept = [];
   for (const [p, v] of decls) {
     const hitIdx = drops.findIndex(
       (d) =>
@@ -1912,40 +2307,40 @@ function applyResolvedDrops(batch, rel, context, selector, decls, hitCounts) {
         (d.prop.trim() === '*' ||
           (d.prop.trim().toLowerCase() === p.trim().toLowerCase() &&
             canonValue(d.value) === canonValue(v))),
-    )
+    );
     if (hitIdx >= 0) {
       // 通配条目吃掉整条规则的全部声明；精确条目只吃第一条（原来就是这样）
       if (drops[hitIdx].prop.trim() === '*') {
-        hitCounts[hitIdx] += 1
-        continue
+        hitCounts[hitIdx] += 1;
+        continue;
       }
       if (!hitCounts[hitIdx]) {
-        hitCounts[hitIdx] = 1
-        continue
+        hitCounts[hitIdx] = 1;
+        continue;
       }
     }
-    kept.push([p, v])
+    kept.push([p, v]);
   }
-  return kept
+  return kept;
 }
 
 /** 批次 → 归一化选择器所需的映射表（老名 → 新名 / 占位符） */
 function batchMaps(batch) {
-  const remap = [] // [oldName, newName, placeholder]
-  const all = batch.groups.flatMap((g) => g.classes)
+  const remap = []; // [oldName, newName, placeholder]
+  const all = batch.groups.flatMap((g) => g.classes);
   // 占位符按名字排序分配，两批之间互不干扰、批内稳定
-  const sorted = [...all].sort()
-  const placeholderOf = new Map(sorted.map((n, i) => [n, `.C${i}`]))
+  const sorted = [...all].sort();
+  const placeholderOf = new Map(sorted.map((n, i) => [n, `.C${i}`]));
   for (const g of batch.groups) {
     for (const old of g.classes) {
-      remap.push([old, kebabToCamel(old), placeholderOf.get(old)])
+      remap.push([old, kebabToCamel(old), placeholderOf.get(old)]);
     }
   }
   // ⚠️ 替换顺序必须"长名优先"，否则 `.diffLine` 会先命中
   // `.diffLinePrefix` 的前缀（不过 `(?![\w-])` 边界已经挡住了这种情形，
   // 两道保险都留着）。
-  remap.sort((a, b) => b[1].length - a[1].length)
-  return remap
+  remap.sort((a, b) => b[1].length - a[1].length);
+  return remap;
 }
 
 /**
@@ -1960,10 +2355,10 @@ function batchMaps(batch) {
  * 所以 `\.` 后面要允许 `_?`，否则一条都对不上。
  */
 function neutralSelector(sel, remap) {
-  let s = stripHash(sel)
+  let s = stripHash(sel);
   for (const [oldName, newName, ph] of remap) {
-    s = s.replace(new RegExp(`\\._?${escapeRe(newName)}(?![\\w-])`, 'g'), ph)
-    s = s.replace(new RegExp(`\\._?${escapeRe(oldName)}(?![\\w-])`, 'g'), ph)
+    s = s.replace(new RegExp(`\\._?${escapeRe(newName)}(?![\\w-])`, 'g'), ph);
+    s = s.replace(new RegExp(`\\._?${escapeRe(oldName)}(?![\\w-])`, 'g'), ph);
   }
   // 压缩器把 `::before` / `::after` 压成 `:before` / `:after`（同义写法）。
   // 不归一化的话，四条带伪元素的规则会被报成"丢失 + 新增"。
@@ -1974,72 +2369,74 @@ function neutralSelector(sel, remap) {
   // 不归一化就会把三条"选择器组"规则（`.sidebar, .sidebar-collapsed` 的 768/480
   // 两档 + `.app-layout, .app-layout-collapsed`）全报成丢失 —— 而它们逐字都在产物里。
   // 逗号两侧的空格在 CSS 里没有语义，归一化不会抹平任何真实差异。
-  return s
-    .replace(/::/g, ':')
-    .replace(/\s*,\s*/g, ',')
-    // 压缩器还会**压掉组合器两侧的空白**：源码
-    // `.markdown-body.adhd-reader-active > .adhd-block`
-    // 在产物里是 `.markdown-body._adhdReaderActive_h>._adhdBlock_h`
-    // （序 6 收尾轮第一次出现带子组合器的迁移规则）。组合器两侧的空白在 CSS 里
-    // 没有语义，不归一化就会把这类规则整条报成"丢失" —— 而它逐字（含组合器）都在产物里。
-    // ⚠️ `~` 要避开属性选择器的 `~=`（"包含"运算符）：用 `(?!=)` 把它排除。
-    .replace(/\s*([>+])\s*/g, '$1')
-    .replace(/\s*~\s*(?!=)/g, '~')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return (
+    s
+      .replace(/::/g, ':')
+      .replace(/\s*,\s*/g, ',')
+      // 压缩器还会**压掉组合器两侧的空白**：源码
+      // `.markdown-body.adhd-reader-active > .adhd-block`
+      // 在产物里是 `.markdown-body._adhdReaderActive_h>._adhdBlock_h`
+      // （序 6 收尾轮第一次出现带子组合器的迁移规则）。组合器两侧的空白在 CSS 里
+      // 没有语义，不归一化就会把这类规则整条报成"丢失" —— 而它逐字（含组合器）都在产物里。
+      // ⚠️ `~` 要避开属性选择器的 `~=`（"包含"运算符）：用 `(?!=)` 把它排除。
+      .replace(/\s*([>+])\s*/g, '$1')
+      .replace(/\s*~\s*(?!=)/g, '~')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 // ── 产物新鲜度（拿旧产物下结论是这类脚本最危险的失败方式）──
-const assetsDir = path.join(root, 'dist/assets')
+const assetsDir = path.join(root, 'dist/assets');
 if (!fs.existsSync(assetsDir)) {
-  console.error('✗ 没有 dist/assets：先跑 npm run build')
-  process.exit(2)
+  console.error('✗ 没有 dist/assets：先跑 npm run build');
+  process.exit(2);
 }
-const distSheets = fs.readdirSync(assetsDir).filter((x) => x.endsWith('.css'))
-const distMtime = Math.max(...distSheets.map((f) => fs.statSync(path.join(assetsDir, f)).mtimeMs))
+const distSheets = fs.readdirSync(assetsDir).filter((x) => x.endsWith('.css'));
+const distMtime = Math.max(...distSheets.map((f) => fs.statSync(path.join(assetsDir, f)).mtimeMs));
 const newestSrc = Math.max(
   ...fs
     .readdirSync(path.join(root, 'src/styles'))
     .filter((f) => f.endsWith('.css'))
     .map((f) => fs.statSync(path.join(root, 'src/styles', f)).mtimeMs),
-)
+);
 if (newestSrc > distMtime) {
-  console.error('✗ 产物比源码旧：先跑 npm run build，否则结论基于旧产物')
-  process.exit(2)
+  console.error('✗ 产物比源码旧：先跑 npm run build，否则结论基于旧产物');
+  process.exit(2);
 }
 
-let failed = false
+let failed = false;
 
 for (const batch of BATCHES) {
-  console.log(`\n════════ 迁移前后规则清单差集：${batch.id} ════════`)
+  console.log(`\n════════ 迁移前后规则清单差集：${batch.id} ════════`);
 
-  const renameProblems = checkRenames(batch)
+  const renameProblems = checkRenames(batch);
   if (renameProblems.length) {
-    console.error('✗ 类名推导自检失败（先修这个，否则下面全是假警报）：')
-    for (const p of renameProblems) console.error(`   - ${p}`)
-    process.exit(3)
+    console.error('✗ 类名推导自检失败（先修这个，否则下面全是假警报）：');
+    for (const p of renameProblems) console.error(`   - ${p}`);
+    process.exit(3);
   }
 
-  const remap = batchMaps(batch)
-  const oldNames = new Set(remap.map((r) => r[0]))
-  const newNames = [...new Set(remap.map((r) => r[1]))]
-  const key = (r) => `${r.context} ${neutralSelector(r.selector, remap)}`
+  const remap = batchMaps(batch);
+  const oldNames = new Set(remap.map((r) => r[0]));
+  const newNames = [...new Set(remap.map((r) => r[1]))];
+  const key = (r) => `${r.context} ${neutralSelector(r.selector, remap)}`;
 
   // ── 侧别 A：迁移前（git 修订里的源码） ──
-  const beforeRules = []
+  const beforeRules = [];
   // 已裁决的"输家声明"命中计数：batch.resolvedConflicts 里每条都必须命中一次，
   // 否则说明这条声明是凭空写的（类名/值对不上），要报错而不是静默放过。
-  const dropHitCounts = new Array((batch.resolvedConflicts || []).length).fill(0)
+  const dropHitCounts = new Array((batch.resolvedConflicts || []).length).fill(0);
   // 已登记的"搬家"命中计数：同样每条都必须命中（否则就是一条永远绿灯的空声明）
-  const relocEntries = batch.relocations || []
-  const relocHitCounts = new Array(relocEntries.length).fill(0)
+  const relocEntries = batch.relocations || [];
+  const relocHitCounts = new Array(relocEntries.length).fill(0);
   /**
    * 有些批次**没有任何类名进模块**（序 13 只是把 `responsive.css` 的规则
    * 按归属搬去别的全局样式表 / 模块），于是"按类名定位迁移前的修订"这条路走不通
    * （`oldNames` 是空集）。这时按**声明**定位：从 HEAD 往回找第一个
    * "这一批登记的每一条 `from` 声明都还在"的修订。与类名定位同样与提交顺序解耦。
    */
-  const groupsEmpty = (batch.groups || []).length === 0
+  const groupsEmpty = (batch.groups || []).length === 0;
   const resolveBeforeRevByDecls = () =>
     findRecentRev((candidate) => {
       const wanted = [
@@ -2051,7 +2448,7 @@ for (const batch of BATCHES) {
           prop: d.prop,
           value: d.value,
         })),
-      ]
+      ];
       return wanted.every((f) =>
         parseRules(readFromGit(path.join(root, f.sheet), candidate)).some(
           (r) =>
@@ -2064,36 +2461,51 @@ for (const batch of BATCHES) {
                   canonValue(v) === canonValue(f.value),
               )),
         ),
-      )
-    })
-  const rev = batch.rev || (groupsEmpty ? resolveBeforeRevByDecls() : resolveBeforeRev(batch, oldNames))
+      );
+    });
+  const rev =
+    batch.rev || (groupsEmpty ? resolveBeforeRevByDecls() : resolveBeforeRev(batch, oldNames));
   if (!rev) {
     console.error(
       `✗ ${batch.id}：从 HEAD 往回 40 个提交里找不到"迁移前"。` +
         `要么登记写错了，要么这个批次其实没迁移过 —— 两种情况都不该继续编差集。`,
-    )
-    process.exit(3)
+    );
+    process.exit(3);
   }
   /** 没有任何声明被"搬家"或"裁决删除"吃掉的规则（用于空批次的自检） */
-  const leftoverRules = []
-  let leftoverDeclCount = 0
+  const leftoverRules = [];
+  let leftoverDeclCount = 0;
   for (const rel of batch.beforeSheets) {
-    const abs = path.join(root, rel)
+    const abs = path.join(root, rel);
     // 侧别 A 用 git 读，这样"迁移前"是那个修订的真实内容，
     // 而不是某个人手工留存、可能已经过期的快照文件
-    const repoRel = path.relative(path.join(root, '..'), abs).replace(/\\/g, '/')
-    const css = execFileSync('git', ['show', `${rev}:${repoRel}`], { encoding: 'utf8' })
+    const repoRel = path.relative(path.join(root, '..'), abs).replace(/\\/g, '/');
+    const css = execFileSync('git', ['show', `${rev}:${repoRel}`], { encoding: 'utf8' });
     for (const r of parseRules(css)) {
       // 已登记的搬家 / 已裁决的删除：先从这条规则的声明里摘掉（记账），
       // 摘空了就整条不再参与比对。这一步要在"类名过滤"**之前**做，因为有些被搬的
       // 声明所在的选择器根本没有类名（`:root`、`[style*=…]`），它们从来就不在 beforeRules 里。
-      const afterReloc = applyRelocations(batch, rel, r.context, r.selector, r.decls, relocHitCounts)
-      const afterDrops = applyResolvedDrops(batch, rel, r.context, r.selector, afterReloc, dropHitCounts)
+      const afterReloc = applyRelocations(
+        batch,
+        rel,
+        r.context,
+        r.selector,
+        r.decls,
+        relocHitCounts,
+      );
+      const afterDrops = applyResolvedDrops(
+        batch,
+        rel,
+        r.context,
+        r.selector,
+        afterReloc,
+        dropHitCounts,
+      );
       if (afterDrops.length === r.decls.length && r.decls.length > 0) {
-        leftoverRules.push(`${rel} ${r.context || '(顶层)'} \`${r.selector}\``)
-        leftoverDeclCount += r.decls.length
+        leftoverRules.push(`${rel} ${r.context || '(顶层)'} \`${r.selector}\``);
+        leftoverDeclCount += r.decls.length;
       }
-      if (afterDrops.length === 0 && r.decls.length > 0) continue
+      if (afterDrops.length === 0 && r.decls.length > 0) continue;
       if (classesOf(r.selector).some((c) => oldNames.has(c))) {
         beforeRules.push({
           side: `${rel}@${rev}`,
@@ -2101,7 +2513,7 @@ for (const batch of BATCHES) {
           context: r.context,
           selector: r.selector,
           decls: canonDecls(afterDrops),
-        })
+        });
       }
     }
   }
@@ -2109,45 +2521,47 @@ for (const batch of BATCHES) {
   // ① 已登记的搬家必须在"迁移前"找得到（找不到 = 类名/值/来源样式表写错了）
   const missedRelocs = relocEntries
     .map((e, i) => ({ e, i }))
-    .filter(({ i }) => relocHitCounts[i] === 0)
+    .filter(({ i }) => relocHitCounts[i] === 0);
   if (missedRelocs.length) {
     console.error(
       `✗ ${batch.id}：relocations 里有 ${missedRelocs.length} 条声明在"迁移前"**一条都没命中**` +
         `（sheet / context / selector / prop / value 有一样对不上）。直接报错，` +
         `否则它会变成一条永远绿灯的空登记：`,
-    )
+    );
     for (const { e } of missedRelocs) {
-      console.error(`   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`)
+      console.error(
+        `   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`,
+      );
     }
-    process.exit(3)
+    process.exit(3);
   }
   // ② 每一条都必须真的落在目标文件里（搬丢了要在这里炸，而不是静默"搬家成功"）
-  const lostRelocs = relocEntries.filter((e, i) => !relocationLands(e, relocHitCounts[i]))
+  const lostRelocs = relocEntries.filter((e, i) => !relocationLands(e, relocHitCounts[i]));
   if (lostRelocs.length) {
     console.error(
       `✗ ${batch.id}：relocations 里有 ${lostRelocs.length} 条**在目标文件里找不到**` +
         `（选择器不在那条规则里，或值不同）。搬家没落地就不能从"迁移前"一侧摘掉它：`,
-    )
+    );
     for (const e of lostRelocs) {
-      console.error(`   - → ${e.to.file} \`${e.to.selector}\` 应有 { ${e.from.prop}: ${e.from.value} }`)
+      console.error(
+        `   - → ${e.to.file} \`${e.to.selector}\` 应有 { ${e.from.prop}: ${e.from.value} }`,
+      );
     }
-    process.exit(3)
+    process.exit(3);
   }
 
-  const declaredDrops = batch.resolvedConflicts || []
-  const missedDrops = declaredDrops
-    .map((d, i) => ({ d, i }))
-    .filter(({ i }) => !dropHitCounts[i])
+  const declaredDrops = batch.resolvedConflicts || [];
+  const missedDrops = declaredDrops.map((d, i) => ({ d, i })).filter(({ i }) => !dropHitCounts[i]);
   if (missedDrops.length) {
     console.error(
       `✗ ${batch.id}：resolvedConflicts 里有 ${missedDrops.length} 条声明**一条都没命中**` +
         `（类名/值/来源样式表对不上）。这种"声明了却什么也没删"的条目会让差集看起来更干净，` +
         `所以直接报错：`,
-    )
+    );
     for (const { d } of missedDrops) {
-      console.error(`   - ${d.sheet} ${d.selector} { ${d.prop}: ${d.value} }`)
+      console.error(`   - ${d.sheet} ${d.selector} { ${d.prop}: ${d.value} }`);
     }
-    process.exit(3)
+    process.exit(3);
   }
 
   /**
@@ -2159,64 +2573,68 @@ for (const batch of BATCHES) {
    * 两条都过才算这一批做完；任何一条遗留都会在这里点名。
    */
   if (groupsEmpty) {
-    console.log(`迁移前（git ${rev} 源码）：${batch.beforeSheets.join(', ')}`)
-    console.log(`本批没有任何类名进模块（规则只是换了归属）⇒ 证据是"完整性"而不是"逐条保留"\n`)
-    const notEmpty = []
+    console.log(`迁移前（git ${rev} 源码）：${batch.beforeSheets.join(', ')}`);
+    console.log(`本批没有任何类名进模块（规则只是换了归属）⇒ 证据是"完整性"而不是"逐条保留"\n`);
+    const notEmpty = [];
     for (const rel of batch.beforeSheets) {
-      const left = parseRules(fs.readFileSync(path.join(root, rel), 'utf8'))
-      if (left.length) notEmpty.push(`${rel} 还剩 ${left.length} 条规则`)
+      const left = parseRules(fs.readFileSync(path.join(root, rel), 'utf8'));
+      if (left.length) notEmpty.push(`${rel} 还剩 ${left.length} 条规则`);
     }
     if (notEmpty.length) {
-      console.error('✗ 这一批声称"清空"，但工作区里还有规则：')
-      for (const r of notEmpty) console.error(`   - ${r}`)
-      process.exit(1)
+      console.error('✗ 这一批声称"清空"，但工作区里还有规则：');
+      for (const r of notEmpty) console.error(`   - ${r}`);
+      process.exit(1);
     }
     console.log(
       `✓ 本批登记的 ${relocEntries.length} 条声明搬家全部双向自检通过、` +
         `${(batch.resolvedConflicts || []).length} 条"确认从未生效"的规则已删除`,
-    )
-    console.log(`✓ 工作区里的样式表已只剩注释（解析出 0 条规则）：${batch.beforeSheets.join(', ')}`)
+    );
+    console.log(
+      `✓ 工作区里的样式表已只剩注释（解析出 0 条规则）：${batch.beforeSheets.join(', ')}`,
+    );
     console.log(
       `·  这**一张**表里另有 ${leftoverRules.length} 条规则（${leftoverDeclCount} 条声明）` +
         `不归本批：它们由试点 / 第一 / 第三 / 序 5 / 序 8 / 序 9 / 序 10 各自登记并验证过 ——`,
-    )
+    );
     console.log(
       `   跨批次的合并审计是一次性脚本（输出收在 docs/migration-evidence/5.6-10-empty-patch-layers.md），` +
         `本脚本只保证"本批登记的双向自检 + 工作区里那张表真的空了"。`,
-    )
-    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────')
+    );
+    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────');
     for (const e of relocEntries) {
       console.log(
         `   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`,
-      )
-      console.log(`       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``)
-      if (e.why) console.log(`       理由：${e.why}`)
+      );
+      console.log(
+        `       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``,
+      );
+      if (e.why) console.log(`       理由：${e.why}`);
     }
-    console.log('\n──── 已裁决的删除（实测选择器命中 0 个元素，迁移前就从未生效）────')
+    console.log('\n──── 已裁决的删除（实测选择器命中 0 个元素，迁移前就从未生效）────');
     for (const d of batch.resolvedConflicts || []) {
-      console.log(`   - ${d.sheet} ${d.context || '(顶层)'} \`${d.selector}\` { ${d.prop} }`)
-      console.log(`       依据：${d.evidence}`)
+      console.log(`   - ${d.sheet} ${d.context || '(顶层)'} \`${d.selector}\` { ${d.prop} }`);
+      console.log(`       依据：${d.evidence}`);
     }
-    continue
+    continue;
   }
 
   // ── 侧别 B：迁移后（dist 产物） ──
-  const afterRules = []
+  const afterRules = [];
   for (const f of distSheets) {
-    const css = fs.readFileSync(path.join(assetsDir, f), 'utf8')
+    const css = fs.readFileSync(path.join(assetsDir, f), 'utf8');
     for (const r of parseRules(css)) {
-      const bare = stripHash(r.selector)
+      const bare = stripHash(r.selector);
       // 先按"声明的选择器强化"把前缀摘掉，再判定这条规则属不属于本批
-      let probe = bare
+      let probe = bare;
       for (const [old, prefix] of Object.entries(batch.hardened || {})) {
-        const camel = kebabToCamel(old)
+        const camel = kebabToCamel(old);
         probe = probe.replace(
           new RegExp(`^${escapeRe(prefix)}\\._?${escapeRe(camel)}(?![\\w-])`),
           `.${camel}`,
-        )
+        );
       }
-      if (!newNames.some((w) => new RegExp(`\\._?${w}(?![\\w-])`).test(probe))) continue
-      afterRules.push({ side: f, context: r.context, selector: probe, decls: canonDecls(r.decls) })
+      if (!newNames.some((w) => new RegExp(`\\._?${w}(?![\\w-])`).test(probe))) continue;
+      afterRules.push({ side: f, context: r.context, selector: probe, decls: canonDecls(r.decls) });
     }
   }
 
@@ -2224,40 +2642,40 @@ for (const batch of BATCHES) {
     console.error(
       `✗ 解析结果异常：迁移前 ${beforeRules.length} 条 / 迁移后 ${afterRules.length} 条。` +
         `任何一侧为 0 都说明解析或路径有问题，不能据此下"没丢"的结论。`,
-    )
-    process.exit(3)
+    );
+    process.exit(3);
   }
 
-  const afterByKey = new Map()
+  const afterByKey = new Map();
   for (const r of afterRules) {
-    if (!afterByKey.has(key(r))) afterByKey.set(key(r), [])
-    afterByKey.get(key(r)).push(r)
+    if (!afterByKey.has(key(r))) afterByKey.set(key(r), []);
+    afterByKey.get(key(r)).push(r);
   }
 
-  console.log(`迁移前（git ${rev} 源码）：${beforeRules.length} 条`)
-  console.log(`迁移后（dist 产物）：${afterRules.length} 条`)
-  console.log(`迁移前来源：${[...new Set(beforeRules.map((r) => r.side))].join(', ')}`)
-  console.log(`迁移后来源：${[...new Set(afterRules.map((r) => r.side))].join(', ')}\n`)
+  console.log(`迁移前（git ${rev} 源码）：${beforeRules.length} 条`);
+  console.log(`迁移后（dist 产物）：${afterRules.length} 条`);
+  console.log(`迁移前来源：${[...new Set(beforeRules.map((r) => r.side))].join(', ')}`);
+  console.log(`迁移后来源：${[...new Set(afterRules.map((r) => r.side))].join(', ')}\n`);
 
-  let exact = 0
-  let changed = 0
-  let lost = 0
+  let exact = 0;
+  let changed = 0;
+  let lost = 0;
   /** 产物"多出来的"声明：只可能是构建器注入（如 esbuild 补 `-webkit-user-select`），
       属于加法而非丢失。单独统计、逐条列出，但不当作失败 —— 否则真变化会被噪音淹掉。 */
-  const extraDecls = []
+  const extraDecls = [];
 
   /** "prop:val" 数组 → Map(prop → val) */
   const toMap = (arr) => {
-    const m = new Map()
+    const m = new Map();
     for (const d of arr) {
-      const i = d.indexOf(':')
-      m.set(d.slice(0, i), d.slice(i + 1))
+      const i = d.indexOf(':');
+      m.set(d.slice(0, i), d.slice(i + 1));
     }
-    return m
-  }
+    return m;
+  };
 
   for (const b of beforeRules) {
-    let cands = afterByKey.get(key(b)) || []
+    let cands = afterByKey.get(key(b)) || [];
     /**
      * 压缩器会把**相邻、且声明逐字相同**的规则合并成一个选择器组。
      * 第七批（序 10）实测：`Graph.module.css` 里
@@ -2274,26 +2692,26 @@ for (const batch of BATCHES) {
      * 声明逐字相同。三个条件缺一不可，任何真的丢声明都仍然会走到"丢失"分支。
      * 命中时单独注明"被压缩器合并"，不让它悄悄混进"逐字保留"。
      */
-    let mergedInto = null
+    let mergedInto = null;
     if (cands.length === 0 && b.decls.length > 0) {
-      const members = (sel) => splitSelectors(sel).map((s) => neutralSelector(s, remap).trim())
-      const mine = members(b.selector)
+      const members = (sel) => splitSelectors(sel).map((s) => neutralSelector(s, remap).trim());
+      const mine = members(b.selector);
       const hit = afterRules.find(
         (a) =>
           a.context === b.context &&
           a.decls.join(';') === b.decls.join(';') &&
           mine.every((m) => members(a.selector).includes(m)),
-      )
+      );
       if (hit) {
-        cands = [hit]
-        mergedInto = hit.selector
+        cands = [hit];
+        mergedInto = hit.selector;
       }
     }
     if (cands.length === 0) {
-      lost++
-      console.log(`✗ 丢失：${key(b)}`)
-      console.log(`     原声明：${b.decls.join('; ')}`)
-      continue
+      lost++;
+      console.log(`✗ 丢失：${key(b)}`);
+      console.log(`     原声明：${b.decls.join('; ')}`);
+      continue;
     }
     /**
      * 这条规则来自哪个样式表、哪些属性已被"裁决"过。
@@ -2305,116 +2723,118 @@ for (const batch of BATCHES) {
       (batch.resolvedConflicts || [])
         .filter((d) => d.sheet === b.sheet && d.selector === b.selector.trim())
         .map((d) => d.prop.trim().toLowerCase()),
-    )
-    const bm = toMap(b.decls)
-    let best = null
+    );
+    const bm = toMap(b.decls);
+    let best = null;
     for (const c of cands) {
-      const cm = toMap(c.decls)
-      const missing = [...bm.keys()].filter((k) => !cm.has(k))
-      const diff = [...bm.keys()].filter((k) => cm.has(k) && cm.get(k) !== bm.get(k))
+      const cm = toMap(c.decls);
+      const missing = [...bm.keys()].filter((k) => !cm.has(k));
+      const diff = [...bm.keys()].filter((k) => cm.has(k) && cm.get(k) !== bm.get(k));
       if (missing.length === 0 && diff.length === 0) {
         best = {
           c,
           extra: [...cm.keys()]
             .filter((k) => !bm.has(k) && !resolvedProps.has(k))
             .map((k) => `${k}:${cm.get(k)}`),
-        }
-        break
+        };
+        break;
       }
-      if (!best) best = { c, missing, diff, extra: [] }
+      if (!best) best = { c, missing, diff, extra: [] };
     }
     if (!best || best.missing?.length || best.diff?.length) {
-      lost++
-      console.log(`✗ 丢失：${key(b)}`)
-      console.log(`     原声明：${b.decls.join('; ')}`)
-      if (best?.missing?.length) console.log(`     产物缺：${best.missing.join(', ')}`)
-      continue
+      lost++;
+      console.log(`✗ 丢失：${key(b)}`);
+      console.log(`     原声明：${b.decls.join('; ')}`);
+      if (best?.missing?.length) console.log(`     产物缺：${best.missing.join(', ')}`);
+      continue;
     }
-    if (best.extra.length) extraDecls.push({ key: key(b), extra: best.extra })
-    exact++
+    if (best.extra.length) extraDecls.push({ key: key(b), extra: best.extra });
+    exact++;
     console.log(
       mergedInto
         ? `✓ 逐字保留（压缩器合并了选择器组，产物里是 ${mergedInto}）：${key(b)}`
         : `✓ 逐字保留：${key(b)}`,
-    )
+    );
     if (best.extra.length) {
       console.log(
         `     ※ 产物多出：${best.extra.join('; ')}` +
           `（构建器注入，或同一选择器下由"已裁决的胜者"补上的声明 —— 见下面那一节）`,
-      )
+      );
     }
   }
 
-  console.log('\n──── 新增的规则（产物有、迁移前无）────')
-  const beforeKeys = new Set(beforeRules.map(key))
-  const added = afterRules.filter((r) => !beforeKeys.has(key(r)))
-  if (added.length === 0) console.log('（无）')
-  for (const a of added) console.log(`+ ${key(a)} { ${a.decls.join('; ')} }`)
+  console.log('\n──── 新增的规则（产物有、迁移前无）────');
+  const beforeKeys = new Set(beforeRules.map(key));
+  const added = afterRules.filter((r) => !beforeKeys.has(key(r)));
+  if (added.length === 0) console.log('（无）');
+  for (const a of added) console.log(`+ ${key(a)} { ${a.decls.join('; ')} }`);
 
   if (extraDecls.length) {
-    console.log('\n──── 产物多出的声明（加法，不是丢失；来源是构建器或胜者补上的声明）────')
-    console.log(`   共 ${extraDecls.length} 条规则出现多余声明：`)
-    for (const e of extraDecls) console.log(`   ${e.key} → ${e.extra.join('; ')}`)
+    console.log('\n──── 产物多出的声明（加法，不是丢失；来源是构建器或胜者补上的声明）────');
+    console.log(`   共 ${extraDecls.length} 条规则出现多余声明：`);
+    for (const e of extraDecls) console.log(`   ${e.key} → ${e.extra.join('; ')}`);
   }
 
   // 从"迁移前"一侧摘掉、单独成节的**删除**：它们既不是"丢失"也不是"值有变化"。
   // 现在有两类，靠 `note` 区分：
   //   ① 序 5 的冲突裁决：按**实测胜者**删掉的输家声明（真 Chromium 的 computed style）；
   //   ② 收尾轮的死代码清理：零引用的类 / 声明（grep + 运行时拼类名扫描的证据）。
-  const dropHits = declaredDrops.filter((_, i) => dropHitCounts[i])
+  const dropHits = declaredDrops.filter((_, i) => dropHitCounts[i]);
   if (dropHits.length) {
-    console.log('\n──── 从"迁移前"一侧删除的声明（逐条可查）────')
+    console.log('\n──── 从"迁移前"一侧删除的声明（逐条可查）────');
     console.log(
       `   共 ${dropHits.length} 条。分两类：① 序 5 那批是**实测胜者**裁决出来的输家声明` +
         `（一次性探针走真实渲染路径，用完已删；配方见计划 §5 雷区 3）；` +
         `② 带"死代码清理"字样的那几条是**零引用**的声明（收尾轮删的），` +
         `依据是 grep + 运行时拼类名扫描，证据 ` +
         '`docs/migration-evidence/5.6-13-dead-css-cleanup.md`：',
-    )
+    );
     for (const d of dropHits) {
-      console.log(`   - ${d.sheet} \`${d.selector}\` { ${d.prop}: ${d.value} }`)
-      if (d.note) console.log(`       说明：${d.note}`)
-      console.log(`       胜者：${d.winner}`)
-      console.log(`       实测：${d.evidence}`)
+      console.log(`   - ${d.sheet} \`${d.selector}\` { ${d.prop}: ${d.value} }`);
+      if (d.note) console.log(`       说明：${d.note}`);
+      console.log(`       胜者：${d.winner}`);
+      console.log(`       实测：${d.evidence}`);
     }
   }
 
   // 已登记的"搬家"：单独成节 —— 它们既不是丢失也不是值变化，
   // 而是"同一条声明换了个地方，值一个字没改"（含多选择器组被拆开的情形）。
   if (relocEntries.length) {
-    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────')
-    console.log(`   共 ${relocEntries.length} 条。两个方向都自检过：`)
-    console.log('   ① 在"迁移前"的源文本里真的存在；② 在目标文件里真的落在声明的选择器上。')
+    console.log('\n──── 已登记的搬家：同一条声明从 A 到 B（值不变，逐条可查）────');
+    console.log(`   共 ${relocEntries.length} 条。两个方向都自检过：`);
+    console.log('   ① 在"迁移前"的源文本里真的存在；② 在目标文件里真的落在声明的选择器上。');
     for (const e of relocEntries) {
       console.log(
         `   - ${e.from.sheet} ${e.from.context || '(顶层)'} \`${e.from.selector}\` { ${e.from.prop}: ${e.from.value} }`,
-      )
-      console.log(`       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``)
-      if (e.why) console.log(`       理由：${e.why}`)
+      );
+      console.log(
+        `       → ${e.to.file}${e.to.context ? ` ${e.to.context}` : ''} \`${e.to.selector}\``,
+      );
+      if (e.why) console.log(`       理由：${e.why}`);
     }
   }
 
   // 选择器强化是"声明过的差异"，单独说清楚：它改了选择器文本，
   // 但按定义**不改变任何属性的取值**（权重只升不降）。
-  const hardenedUsed = Object.entries(batch.hardened || {})
+  const hardenedUsed = Object.entries(batch.hardened || {});
   if (hardenedUsed.length) {
-    console.log('\n──── 声明过的选择器强化（权重提高，属性值不变）────')
+    console.log('\n──── 声明过的选择器强化（权重提高，属性值不变）────');
     for (const [old, prefix] of hardenedUsed) {
-      const camel = kebabToCamel(old)
+      const camel = kebabToCamel(old);
       const hits = afterRules.filter((r) =>
         new RegExp(`\\._?${escapeRe(camel)}(?![\\w-])`).test(r.selector),
-      ).length
+      ).length;
       console.log(
         `   ${old} → 模块里写作 \`:global(${prefix}).${camel}\`，产物里是 \`${prefix}.${camel}\`（匹配 ${hits} 条）`,
-      )
+      );
     }
   }
 
   console.log(
     `\n批次汇总：逐字保留 ${exact} / 值有变化 ${changed} / 丢失 ${lost}` +
       (dropHits.length ? ` / 已声明删除 ${dropHits.length}（逐条见上）` : ''),
-  )
-  if (lost > 0) failed = true
+  );
+  if (lost > 0) failed = true;
 }
 
 // ── 动画绑定检查：引用的动画必须与定义在同一个产物文件里 ──
@@ -2422,34 +2842,36 @@ for (const batch of BATCHES) {
 // `_scaleIn_<hash>`，而该 @keyframes 定义在**另一个**产物文件（index.css）里
 // —— 名字对不上，动画静默消失。所以判据不是"文本像不像"，
 // 而是"引用的名字在自己这个文件里有没有定义"。
-console.log('\n──── 动画绑定检查（引用的动画名必须在同一产物文件内有定义）────')
+console.log('\n──── 动画绑定检查（引用的动画名必须在同一产物文件内有定义）────');
 const NOT_A_NAME =
-  /^(none|infinite|linear|ease|ease-in|ease-out|ease-in-out|alternate|alternate-reverse|reverse|forwards|backwards|both|normal|running|paused|initial|inherit|unset|revert|steps)$/
-let bindingOk = true
+  /^(none|infinite|linear|ease|ease-in|ease-out|ease-in-out|alternate|alternate-reverse|reverse|forwards|backwards|both|normal|running|paused|initial|inherit|unset|revert|steps)$/;
+let bindingOk = true;
 for (const f of distSheets) {
-  const css = fs.readFileSync(path.join(assetsDir, f), 'utf8')
-  const defined = new Set([...css.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]))
-  const used = new Set()
+  const css = fs.readFileSync(path.join(assetsDir, f), 'utf8');
+  const defined = new Set([...css.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]));
+  const used = new Set();
   for (const m of css.matchAll(/animation(?:-name)?\s*:\s*([^;{}]+)/g)) {
     for (const group of m[1].split(',')) {
       for (const tok of group.trim().split(/\s+/)) {
-        if (!tok || /^[\d.]/.test(tok) || NOT_A_NAME.test(tok)) continue
-        if (!/^[A-Za-z_-][\w-]*$/.test(tok)) continue
-        used.add(tok)
+        if (!tok || /^[\d.]/.test(tok) || NOT_A_NAME.test(tok)) continue;
+        if (!/^[A-Za-z_-][\w-]*$/.test(tok)) continue;
+        used.add(tok);
       }
     }
   }
-  const dangling = [...used].filter((u) => !defined.has(u))
+  const dangling = [...used].filter((u) => !defined.has(u));
   if (dangling.length) {
-    bindingOk = false
-    console.log(`✗ ${f}: 引用但未定义 → ${dangling.join(', ')}`)
+    bindingOk = false;
+    console.log(`✗ ${f}: 引用但未定义 → ${dangling.join(', ')}`);
   } else if (used.size) {
-    console.log(`✓ ${f}: 引用 ${used.size} 个动画，全部在本文件内有定义（${[...used].join(', ')}）`)
+    console.log(
+      `✓ ${f}: 引用 ${used.size} 个动画，全部在本文件内有定义（${[...used].join(', ')}）`,
+    );
   }
 }
 
 // ── 动画体比对：改名不算丢，动画体必须一字不差 ──
-console.log('\n──── 动画体比对（模块内改名后的动画，动画体必须与全局原版一致）────')
+console.log('\n──── 动画体比对（模块内改名后的动画，动画体必须与全局原版一致）────');
 /**
  * ⚠️ 原版从**按内容定位的修订**里读，而不是写死 `HEAD`（收尾轮改的）。
  *
@@ -2463,35 +2885,35 @@ console.log('\n──── 动画体比对（模块内改名后的动画，动�
  * `findRecentRev` 同一套办法解决：从 HEAD 往回找**第一个还含有这个
  * `@keyframes`** 的修订。与提交顺序、与后来删掉原版的提交都解耦。
  */
-const keyframeSourceCache = new Map()
+const keyframeSourceCache = new Map();
 const readKeyframeSource = (rel, name) => {
-  const cacheKey = `${rel}::${name}`
-  if (keyframeSourceCache.has(cacheKey)) return keyframeSourceCache.get(cacheKey)
-  const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i')
-  const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(root, rel), candidate)))
+  const cacheKey = `${rel}::${name}`;
+  if (keyframeSourceCache.has(cacheKey)) return keyframeSourceCache.get(cacheKey);
+  const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i');
+  const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(root, rel), candidate)));
   if (!rev) {
     console.error(
       `✗ 从 HEAD 往回 40 个提交里找不到还含有 \`@keyframes ${name}\` 的 ${rel} —— ` +
         `登记写错了类名，或那个文件从来没有过这条动画。不能据此下"动画体一致"的结论。`,
-    )
-    process.exit(3)
+    );
+    process.exit(3);
   }
-  const text = readFromGit(path.join(root, rel), rev)
-  keyframeSourceCache.set(cacheKey, { rev, text })
-  return keyframeSourceCache.get(cacheKey)
-}
+  const text = readFromGit(path.join(root, rel), rev);
+  keyframeSourceCache.set(cacheKey, { rev, text });
+  return keyframeSourceCache.get(cacheKey);
+};
 const normKeyframes = (css, name) => {
-  const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i')
-  const i = css.search(re)
-  if (i < 0) return null
-  let depth = 0
-  let j = css.indexOf('{', i)
-  const start = j
+  const re = new RegExp(`@keyframes\\s+${escapeRe(name)}\\s*\\{`, 'i');
+  const i = css.search(re);
+  if (i < 0) return null;
+  let depth = 0;
+  let j = css.indexOf('{', i);
+  const start = j;
   for (; j < css.length; j++) {
-    if (css[j] === '{') depth++
+    if (css[j] === '{') depth++;
     else if (css[j] === '}') {
-      depth--
-      if (depth === 0) break
+      depth--;
+      if (depth === 0) break;
     }
   }
   return css
@@ -2503,41 +2925,41 @@ const normKeyframes = (css, name) => {
     .replace(/\s*,\s*/g, ',')
     .replace(/^;|;$/g, '')
     .trim()
-    .toLowerCase()
-}
-let animOk = true
-let keyframeChecks = 0
+    .toLowerCase();
+};
+let animOk = true;
+let keyframeChecks = 0;
 for (const batch of BATCHES) {
   for (const kf of batch.keyframes) {
-    keyframeChecks += 1
-    const src = readKeyframeSource(kf.fromSheet, kf.orig)
-    const a = normKeyframes(src.text, kf.orig)
-    const moduleText = fs.readFileSync(path.join(root, kf.module), 'utf8')
-    const b = normKeyframes(moduleText, kf.renamed)
+    keyframeChecks += 1;
+    const src = readKeyframeSource(kf.fromSheet, kf.orig);
+    const a = normKeyframes(src.text, kf.orig);
+    const moduleText = fs.readFileSync(path.join(root, kf.module), 'utf8');
+    const b = normKeyframes(moduleText, kf.renamed);
     // `retired: true`（收尾轮新增）：这条动画在"死代码清理"里删掉了 ——
     // 断言**模块里也没有了**，而不是"和原版一致"。
-    const same = kf.retired ? a !== null && b === null : a !== null && a === b
-    if (!same) animOk = false
+    const same = kf.retired ? a !== null && b === null : a !== null && a === b;
+    if (!same) animOk = false;
     console.log(
       `${same ? '✓' : '✗'} @keyframes ${kf.orig}（${kf.fromSheet}@${src.rev}）→ ` +
         `${kf.renamed}（${kf.module}）${kf.retired ? '【收尾轮已随死代码清理删除】' : ''}`,
-    )
+    );
     if (!same) {
-      console.log(`     全局原版：${a}`)
-      console.log(`     模块现状：${b}${kf.retired ? '（期望 null：清理后不该再有）' : ''}`)
+      console.log(`     全局原版：${a}`);
+      console.log(`     模块现状：${b}${kf.retired ? '（期望 null：清理后不该再有）' : ''}`);
     }
   }
 }
 if (keyframeChecks === 0) {
-  console.error('✗ 一条 @keyframes 比对都没有 —— 登记表空了，这项检查等于不存在')
-  process.exit(3)
+  console.error('✗ 一条 @keyframes 比对都没有 —— 登记表空了，这项检查等于不存在');
+  process.exit(3);
 }
 
 console.log(
   `\n════════ 汇总：丢失 ${failed ? '有' : '0'} / ` +
     `动画绑定 ${bindingOk ? '全部自洽' : '有悬空'} / 动画体一致 ${animOk ? '是' : '否'} ════════`,
-)
+);
 
 // 动画被**有意**改名并搬进模块，所以"新增 feedbackScaleIn/cleaningPulse…"不算事故；
 // 其余新增都值得看一眼，但不阻断（可能是有意的补充规则）。
-process.exit(failed || !animOk || !bindingOk ? 1 : 0)
+process.exit(failed || !animOk || !bindingOk ? 1 : 0);

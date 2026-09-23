@@ -4,35 +4,50 @@
  * 上传后自动轮询后端转换状态，转换完成后自动跳转到笔记详情页。
  * 支持的文件格式：PDF、图片、Office 文档、音视频文件。
  */
-import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  prepareUpload, commitUpload,
-  getUploadStatus, getNotes, getProjects,
-  type Note, type Project, type PreparedUpload,
-} from '../api/client'
+  prepareUpload,
+  commitUpload,
+  getUploadStatus,
+  getNotes,
+  getProjects,
+  type Note,
+  type Project,
+  type PreparedUpload,
+} from '../api/client';
 // 本页私有样式（overhaul-plan 5.6 第三批）：`.upload-zone*` 从 `src/styles/learning.css`
 // 拆出，连同被哈希的 `@keyframes glowPulse`（改名 `uploadGlowPulse`）—— 见文件头
-import styles from './Upload.module.css'
+import styles from './Upload.module.css';
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
-  '.pdf', '.png', '.jpg', '.jpeg', '.docx', '.pptx', '.xlsx',
-  '.mp4', '.mp3', '.wav', '.m4a', '.md',
-]
+  '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.mp4',
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.md',
+];
 
 /** 解析后端选项 */
 const BACKEND_OPTIONS = [
   { value: '', label: '自动', description: '使用后端默认配置' },
   { value: 'pipeline', label: '本地解析', description: '使用本地模型解析（需要本地环境支持）' },
   { value: 'vlm-http-client', label: '云端解析', description: '使用云端API解析（需要API Token）' },
-] as const
+] as const;
 
 /** 笔记角色选项 */
 const NOTE_ROLE_OPTIONS = [
   { value: 'material', label: '学习资料' },
   { value: 'personal_note', label: '我的笔记' },
-] as const
+] as const;
 
 /**
  * 上传页面组件
@@ -51,84 +66,84 @@ const NOTE_ROLE_OPTIONS = [
  * - status: 当前处理状态文本，用于界面展示
  */
 export default function Upload() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   /** 隐藏的文件输入框引用，用于点击上传区域时触发文件选择 */
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** 拖拽区域是否激活，用于高亮显示拖拽反馈 */
-  const [dragActive, setDragActive] = useState(false)
+  const [dragActive, setDragActive] = useState(false);
   /** 是否正在上传/转换中，控制按钮禁用和界面状态 */
-  const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading] = useState(false);
   /** 错误提示信息 */
-  const [error, setError] = useState('')
+  const [error, setError] = useState('');
   /** 上传成功后返回的笔记 ID，用于轮询状态和跳转 */
-  const [noteId, setNoteId] = useState<string | null>(null)
+  const [noteId, setNoteId] = useState<string | null>(null);
   /** 当前处理状态文本，展示给用户 */
-  const [status, setStatus] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null);
   /** 解析后端选择，空字符串表示使用后端默认配置 */
-  const [parseBackend, setParseBackend] = useState('')
+  const [parseBackend, setParseBackend] = useState('');
   /** 笔记角色选择，默认为学习资料 */
-  const [noteRole, setNoteRole] = useState('material')
+  const [noteRole, setNoteRole] = useState('material');
   /** 项目列表 */
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projects, setProjects] = useState<Project[]>([]);
   /** 选中的项目标签 ID 数组（空表示不归属任何项目） */
-  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   /** 可关联的学习资料列表（仅 personal_note 时加载） */
-  const [availableMaterials, setAvailableMaterials] = useState<Note[]>([])
+  const [availableMaterials, setAvailableMaterials] = useState<Note[]>([]);
   /** 已选中的关联资料 ID 列表 */
-  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   /** 两阶段上传阶段 1 的暂存结果（prepare 成功后的临时文件信息） */
-  const [prepared, setPrepared] = useState<PreparedUpload | null>(null)
+  const [prepared, setPrepared] = useState<PreparedUpload | null>(null);
   /** 重命名后的文件名输入 */
-  const [renameName, setRenameName] = useState('')
+  const [renameName, setRenameName] = useState('');
   /** 重命名输入的内联校验提示 */
-  const [renameError, setRenameError] = useState('')
+  const [renameError, setRenameError] = useState('');
   /** 裁剪页码范围输入 */
-  const [cropPageRange, setCropPageRange] = useState('')
+  const [cropPageRange, setCropPageRange] = useState('');
   /** 裁剪输入的内联校验提示 */
-  const [cropError, setCropError] = useState('')
+  const [cropError, setCropError] = useState('');
   /** 轮询定时器引用，组件卸载时清理，见 docs/decisions.md#F-15 */
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 卸载时清理轮询定时器，避免卸载后 setState/导航，见 docs/decisions.md#F-15
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current)
+        clearTimeout(pollTimerRef.current);
       }
-    }
-  }, [])
+    };
+  }, []);
 
   // 加载项目列表，默认不选择项目（留空则不归属任何项目）
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const data = await getProjects()
-        setProjects(data)
-        setSelectedProjectIds([])
+        const data = await getProjects();
+        setProjects(data);
+        setSelectedProjectIds([]);
       } catch (err) {
-        console.error('加载项目列表失败:', err)
+        console.error('加载项目列表失败:', err);
       }
-    }
-    loadProjects()
-  }, [])
+    };
+    loadProjects();
+  }, []);
 
   // 当选择"我的笔记"角色时加载可关联的学习资料（派生状态重置豁免）
   useEffect(() => {
     if (noteRole === 'personal_note') {
       const loadMaterials = async () => {
         try {
-          const data = await getNotes(1, 100, undefined, 'material')
-          setAvailableMaterials(data.items || [])
+          const data = await getNotes(1, 100, undefined, 'material');
+          setAvailableMaterials(data.items || []);
         } catch (err) {
-          console.error('加载资料列表失败:', err)
+          console.error('加载资料列表失败:', err);
         }
-      }
-      loadMaterials()
+      };
+      loadMaterials();
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedMaterialIds([])
+      setSelectedMaterialIds([]);
     }
-  }, [noteRole])
+  }, [noteRole]);
 
   /**
    * 处理文件选择（两阶段上传阶段 1：prepare）
@@ -139,32 +154,32 @@ export default function Upload() {
    */
   async function handleUpload(file: File) {
     // 提取文件扩展名并校验格式
-    const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setError(`不支持的文件格式: ${ext}`)
-      return
+      setError(`不支持的文件格式: ${ext}`);
+      return;
     }
 
-    setError('')
-    setRenameError('')
-    setCropError('')
-    setRenameName('')
-    setCropPageRange('')
-    setPrepared(null)
-    setUploading(true)
-    setStatus('上传中...')
+    setError('');
+    setRenameError('');
+    setCropError('');
+    setRenameName('');
+    setCropPageRange('');
+    setPrepared(null);
+    setUploading(true);
+    setStatus('上传中...');
 
     try {
       // 阶段 1：暂存文件，获取页数等信息
-      const result = await prepareUpload(file)
+      const result = await prepareUpload(file);
       // 统一进入上传设置步骤（可重命名文件；PDF 额外支持按页裁剪）
-      setRenameName(result.filename)
-      setPrepared(result)
-      setUploading(false)
-      setStatus(null)
+      setRenameName(result.filename);
+      setPrepared(result);
+      setUploading(false);
+      setStatus(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败')
-      setUploading(false)
+      setError(err instanceof Error ? err.message : '上传失败');
+      setUploading(false);
     }
   }
 
@@ -176,23 +191,24 @@ export default function Upload() {
    * @returns 空字符串表示合法，否则返回错误提示
    */
   function validatePageSpec(spec: string, pageCount: number): string {
-    const trimmed = spec.trim()
-    if (!trimmed) return '页码范围不能为空'
-    const items = trimmed.split(',')
-    const pageRangeRe = /^(\d+)(?:-(\d+))?$/
-    const pages: number[] = []
+    const trimmed = spec.trim();
+    if (!trimmed) return '页码范围不能为空';
+    const items = trimmed.split(',');
+    const pageRangeRe = /^(\d+)(?:-(\d+))?$/;
+    const pages: number[] = [];
     for (const item of items) {
-      const match = pageRangeRe.exec(item.trim())
-      if (!match) return `无效的页码范围: ${item.trim()}`
-      const start = parseInt(match[1], 10)
-      const end = match[2] !== undefined ? parseInt(match[2], 10) : start
-      if (start < 1 || end < 1) return `页码必须从 1 开始: ${item.trim()}`
-      if (start > pageCount || end > pageCount) return `页码超出范围（文档共 ${pageCount} 页）: ${item.trim()}`
-      if (start > end) return `区间起始页不能大于结束页: ${item.trim()}`
-      for (let p = start; p <= end; p++) pages.push(p)
+      const match = pageRangeRe.exec(item.trim());
+      if (!match) return `无效的页码范围: ${item.trim()}`;
+      const start = parseInt(match[1], 10);
+      const end = match[2] !== undefined ? parseInt(match[2], 10) : start;
+      if (start < 1 || end < 1) return `页码必须从 1 开始: ${item.trim()}`;
+      if (start > pageCount || end > pageCount)
+        return `页码超出范围（文档共 ${pageCount} 页）: ${item.trim()}`;
+      if (start > end) return `区间起始页不能大于结束页: ${item.trim()}`;
+      for (let p = start; p <= end; p++) pages.push(p);
     }
-    if (pages.length === 0) return '页码范围不能为空'
-    return ''
+    if (pages.length === 0) return '页码范围不能为空';
+    return '';
   }
 
   /**
@@ -205,17 +221,16 @@ export default function Upload() {
    * @returns 空字符串表示合法并返回最终文件名；否则返回错误提示
    */
   function validateRename(name: string, originalFilename: string): { name: string; error: string } {
-    const trimmed = name.trim()
-    if (!trimmed) return { name: '', error: '文件名不能为空' }
+    const trimmed = name.trim();
+    if (!trimmed) return { name: '', error: '文件名不能为空' };
     if (trimmed.includes('/') || trimmed.includes('\\')) {
-      return { name: '', error: '文件名不能包含路径分隔符' }
+      return { name: '', error: '文件名不能包含路径分隔符' };
     }
-    const dotIndex = originalFilename.lastIndexOf('.')
-    const ext = dotIndex >= 0 ? originalFilename.slice(dotIndex) : ''
-    const finalName = ext && !trimmed.toLowerCase().endsWith(ext.toLowerCase())
-      ? `${trimmed}${ext}`
-      : trimmed
-    return { name: finalName, error: '' }
+    const dotIndex = originalFilename.lastIndexOf('.');
+    const ext = dotIndex >= 0 ? originalFilename.slice(dotIndex) : '';
+    const finalName =
+      ext && !trimmed.toLowerCase().endsWith(ext.toLowerCase()) ? `${trimmed}${ext}` : trimmed;
+    return { name: finalName, error: '' };
   }
 
   /**
@@ -225,21 +240,21 @@ export default function Upload() {
    * @param cropRange - 页码范围表达式（可选，仅 PDF；undefined 表示不裁剪）
    */
   function confirmUpload(cropRange: string | undefined) {
-    if (!prepared) return
-    const { name, error: renameErr } = validateRename(renameName, prepared.filename)
+    if (!prepared) return;
+    const { name, error: renameErr } = validateRename(renameName, prepared.filename);
     if (renameErr) {
-      setRenameError(renameErr)
-      return
+      setRenameError(renameErr);
+      return;
     }
     if (prepared.source_type === 'pdf' && cropRange !== undefined) {
-      const pageCount = prepared.page_count ?? 0
-      const cropErr = validatePageSpec(cropRange, pageCount)
+      const pageCount = prepared.page_count ?? 0;
+      const cropErr = validatePageSpec(cropRange, pageCount);
       if (cropErr) {
-        setCropError(cropErr)
-        return
+        setCropError(cropErr);
+        return;
       }
     }
-    commitPrepared(prepared.temp_id, cropRange, name)
+    commitPrepared(prepared.temp_id, cropRange, name);
   }
 
   /**
@@ -251,9 +266,9 @@ export default function Upload() {
    * @param finalName - 最终文件名（重命名后的，含扩展名）
    */
   async function commitPrepared(tempId: string, cropRange: string | undefined, finalName: string) {
-    setError('')
-    setUploading(true)
-    setStatus('上传中...')
+    setError('');
+    setUploading(true);
+    setStatus('上传中...');
 
     try {
       const note = await commitUpload(tempId, {
@@ -263,16 +278,16 @@ export default function Upload() {
         project_ids: selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
         linked_material_ids: selectedMaterialIds,
         crop_page_range: cropRange,
-      })
-      setNoteId(note.id)
-      setPrepared(null)
-      setStatus('文件已上传，正在转换...')
+      });
+      setNoteId(note.id);
+      setPrepared(null);
+      setStatus('文件已上传，正在转换...');
 
       // 开始轮询转换状态
-      pollStatus(note.id)
+      pollStatus(note.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败')
-      setUploading(false)
+      setError(err instanceof Error ? err.message : '上传失败');
+      setUploading(false);
     }
   }
 
@@ -287,50 +302,54 @@ export default function Upload() {
    * @param id - 笔记 ID
    */
   async function pollStatus(id: string) {
-    const maxAttempts = 120 // 最多轮询 120 次（约 10 分钟）
-    let attempts = 0
-    let checking = false // 在途请求互斥
+    const maxAttempts = 120; // 最多轮询 120 次（约 10 分钟）
+    let attempts = 0;
+    let checking = false; // 在途请求互斥
 
     const check = async () => {
-      if (checking) return
-      checking = true
-      attempts++
-      let isTerminal = false
+      if (checking) return;
+      checking = true;
+      attempts++;
+      let isTerminal = false;
       try {
-        const res = await getUploadStatus(id)
-        setStatus(`状态: ${res.status}`)
+        const res = await getUploadStatus(id);
+        setStatus(`状态: ${res.status}`);
 
         // 成功终态
         if (res.status === 'converted' || res.status === 'cleaned' || res.status === 'archived') {
-          isTerminal = true
-          setUploading(false)
-          setStatus('转换完成！')
+          isTerminal = true;
+          setUploading(false);
+          setStatus('转换完成！');
           // 延迟 1 秒后自动跳转到笔记详情页
-          setTimeout(() => navigate(`/notes/${id}`), 1000)
-        } else if (res.status === 'failed' || res.status === 'cleaning_failed' || res.status === 'learning_failed') {
+          setTimeout(() => navigate(`/notes/${id}`), 1000);
+        } else if (
+          res.status === 'failed' ||
+          res.status === 'cleaning_failed' ||
+          res.status === 'learning_failed'
+        ) {
           // 补全失败终态（旧实现漏掉 cleaning_failed/learning_failed，会空转到超时），见 docs/decisions.md#F-15
-          isTerminal = true
-          setUploading(false)
-          setError(res.error_message || `处理失败（${res.status}）`)
+          isTerminal = true;
+          setUploading(false);
+          setError(res.error_message || `处理失败（${res.status}）`);
         }
       } catch {
         // 轮询过程中的网络错误，继续尝试
       } finally {
-        checking = false
+        checking = false;
       }
 
-      if (isTerminal) return
+      if (isTerminal) return;
       if (attempts >= maxAttempts) {
         // 超时处理
-        setUploading(false)
-        setError('处理超时，请稍后在笔记列表中查看')
-        return
+        setUploading(false);
+        setError('处理超时，请稍后在笔记列表中查看');
+        return;
       }
       // 递归调度下一次（等本次完成后再计时，避免重叠）
-      pollTimerRef.current = setTimeout(check, 5000)
-    }
+      pollTimerRef.current = setTimeout(check, 5000);
+    };
 
-    check()
+    check();
   }
 
   /**
@@ -338,12 +357,12 @@ export default function Upload() {
    * 获取拖放的第一个文件并触发上传。
    */
   function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    setDragActive(false)
+    e.preventDefault();
+    setDragActive(false);
 
-    const files = e.dataTransfer.files
+    const files = e.dataTransfer.files;
     if (files.length > 0) {
-      handleUpload(files[0])
+      handleUpload(files[0]);
     }
   }
 
@@ -352,8 +371,8 @@ export default function Upload() {
    * 阻止默认行为并激活拖拽高亮。
    */
   function handleDragOver(e: React.DragEvent) {
-    e.preventDefault()
-    setDragActive(true)
+    e.preventDefault();
+    setDragActive(true);
   }
 
   /**
@@ -361,7 +380,7 @@ export default function Upload() {
    * 取消拖拽高亮状态。
    */
   function handleDragLeave() {
-    setDragActive(false)
+    setDragActive(false);
   }
 
   /**
@@ -369,15 +388,18 @@ export default function Upload() {
    * 获取选择的第一个文件并触发上传。
    */
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files
+    const files = e.target.files;
     if (files && files.length > 0) {
-      handleUpload(files[0])
+      handleUpload(files[0]);
     }
   }
 
   return (
     <div className="page-enter" style={{ maxWidth: '640px', margin: '0 auto' }}>
-      <h1 className="heading-serif gradient-text" style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}>
+      <h1
+        className="heading-serif gradient-text"
+        style={{ fontSize: '1.5rem', marginBottom: 'var(--space-lg)' }}
+      >
         上传学习资料
       </h1>
 
@@ -408,14 +430,30 @@ export default function Upload() {
           cursor: uploading ? 'wait' : 'pointer',
         }}
       >
-        <span style={{ display: 'block', fontSize: '1.125rem', fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: '1.125rem',
+            fontWeight: 500,
+            marginBottom: 'var(--space-sm)',
+          }}
+        >
           {uploading ? '处理中...' : '点击或拖拽文件到此处'}
         </span>
-        <span style={{ display: 'block', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+        <span
+          style={{ display: 'block', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}
+        >
           支持 PDF、图片、Office 文档、音视频、Markdown 文件
         </span>
         {/* 显示所有支持的文件扩展名 */}
-        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-secondary)',
+            marginTop: 'var(--space-xs)',
+          }}
+        >
           {ALLOWED_EXTENSIONS.join(' ')}
         </span>
       </button>
@@ -439,23 +477,41 @@ export default function Upload() {
           </p>
 
           {/* 文件名（可修改） */}
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)' }}>
+          <p
+            style={{
+              fontSize: '0.75rem',
+              color: 'var(--color-text-secondary)',
+              marginBottom: 'var(--space-xs)',
+            }}
+          >
             文件名
           </p>
           <input
             type="text"
             value={renameName}
-            onChange={(e) => { setRenameName(e.target.value); setRenameError('') }}
+            onChange={(e) => {
+              setRenameName(e.target.value);
+              setRenameError('');
+            }}
             disabled={uploading}
             style={{
-              width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)',
+              width: '100%',
+              padding: 'var(--space-sm)',
+              borderRadius: 'var(--radius-sm)',
               border: `1px solid ${renameError ? 'var(--color-error)' : 'var(--color-border)'}`,
               marginBottom: 'var(--space-xs)',
             }}
             aria-label="文件名"
           />
           {renameError && (
-            <p style={{ fontSize: '0.75rem', color: 'var(--color-error)', marginBottom: 'var(--space-xs)' }} role="alert">
+            <p
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-error)',
+                marginBottom: 'var(--space-xs)',
+              }}
+              role="alert"
+            >
               {renameError}
             </p>
           )}
@@ -463,30 +519,56 @@ export default function Upload() {
           {/* PDF 按页裁剪配置（仅 PDF 显示） */}
           {prepared.source_type === 'pdf' && (
             <>
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
+              <p
+                style={{
+                  fontSize: '0.75rem',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-xs)',
+                  marginTop: 'var(--space-sm)',
+                }}
+              >
                 按页裁剪（可选）：只保留需要的页码范围，其余页面在上传处理前剔除。
               </p>
               <input
                 type="text"
                 value={cropPageRange}
-                onChange={(e) => { setCropPageRange(e.target.value); setCropError('') }}
+                onChange={(e) => {
+                  setCropPageRange(e.target.value);
+                  setCropError('');
+                }}
                 placeholder="如 1-20,25,30-32"
                 disabled={uploading}
                 style={{
-                  width: '100%', padding: 'var(--space-sm)', borderRadius: 'var(--radius-sm)',
+                  width: '100%',
+                  padding: 'var(--space-sm)',
+                  borderRadius: 'var(--radius-sm)',
                   border: `1px solid ${cropError ? 'var(--color-error)' : 'var(--color-border)'}`,
                 }}
                 aria-label="页码范围"
               />
               {cropError && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--color-error)', marginBottom: 'var(--space-xs)' }} role="alert">
+                <p
+                  style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--color-error)',
+                    marginBottom: 'var(--space-xs)',
+                  }}
+                  role="alert"
+                >
                   {cropError}
                 </p>
               )}
             </>
           )}
 
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginTop: 'var(--space-md)' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-sm)',
+              flexWrap: 'wrap',
+              marginTop: 'var(--space-md)',
+            }}
+          >
             {prepared.source_type === 'pdf' ? (
               <>
                 <button
@@ -533,7 +615,13 @@ export default function Upload() {
             </button>
           ))}
         </div>
-        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+        <p
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-text-secondary)',
+            marginTop: 'var(--space-xs)',
+          }}
+        >
           {BACKEND_OPTIONS.find((o) => o.value === parseBackend)?.description}
         </p>
       </div>
@@ -544,7 +632,7 @@ export default function Upload() {
         {projects.length > 0 ? (
           <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
             {projects.map((project) => {
-              const checked = selectedProjectIds.includes(project.id)
+              const checked = selectedProjectIds.includes(project.id);
               return (
                 <button
                   key={project.id}
@@ -553,19 +641,27 @@ export default function Upload() {
                   onClick={() => {
                     setSelectedProjectIds((prev) =>
                       checked ? prev.filter((id) => id !== project.id) : [...prev, project.id],
-                    )
+                    );
                   }}
                   disabled={uploading}
                 >
                   {project.name}
                 </button>
-              )
+              );
             })}
           </div>
         ) : (
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>暂无项目，可先不选择或稍后创建。</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+            暂无项目，可先不选择或稍后创建。
+          </p>
         )}
-        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+        <p
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-text-secondary)',
+            marginTop: 'var(--space-xs)',
+          }}
+        >
           一篇笔记可归属多个项目（标签）；不选择则稍后可在「项目」页面添加。
         </p>
       </div>
@@ -591,16 +687,32 @@ export default function Upload() {
       {noteRole === 'personal_note' && availableMaterials.length > 0 && (
         <div className="card" style={{ marginTop: 'var(--space-md)' }}>
           <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>关联学习资料（可选）</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: '200px', overflowY: 'auto' }}>
-            {availableMaterials.map(m => (
-              <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', cursor: 'pointer' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-xs)',
+              maxHeight: '200px',
+              overflowY: 'auto',
+            }}
+          >
+            {availableMaterials.map((m) => (
+              <label
+                key={m.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-xs)',
+                  cursor: 'pointer',
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={selectedMaterialIds.includes(m.id)}
                   onChange={(e) => {
-                    setSelectedMaterialIds(prev =>
-                      e.target.checked ? [...prev, m.id] : prev.filter(id => id !== m.id)
-                    )
+                    setSelectedMaterialIds((prev) =>
+                      e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id),
+                    );
                   }}
                   disabled={uploading}
                   // 覆盖全局 input{width:100%}，否则 checkbox 撑满整行、标题被挤成 0 宽
@@ -623,7 +735,9 @@ export default function Upload() {
       {/* 错误提示 */}
       {error && (
         <div className="card" style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
-          <p role="alert" style={{ color: 'var(--color-error)' }}>{error}</p>
+          <p role="alert" style={{ color: 'var(--color-error)' }}>
+            {error}
+          </p>
         </div>
       )}
 
@@ -636,5 +750,5 @@ export default function Upload() {
         </div>
       )}
     </div>
-  )
+  );
 }

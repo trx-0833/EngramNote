@@ -111,15 +111,17 @@
   --sidebar-section-title: var(--color-text-tertiary);
 
   /* ── 知识图谱（水墨丹青视觉重构）── */
-  --graph-paper: #f5f0e4;          /* 宣纸底 */
-  --graph-paper-deep: #efe8d8;     /* 宣纸深一档 */
-  --graph-ink: rgba(26, 26, 46, 0.55);       /* 墨色 */
+  --graph-paper: #f5f0e4; /* 宣纸底 */
+  --graph-paper-deep: #efe8d8; /* 宣纸深一档 */
+  --graph-ink: rgba(26, 26, 46, 0.55); /* 墨色 */
   --graph-ink-faint: rgba(26, 26, 46, 0.14); /* 淡墨 */
-  --graph-frame: #d8d0be;          /* 装裱画框外线 */
-  --graph-frame-inner: #e6dfcd;    /* 装裱画框内线 */
+  --graph-frame: #d8d0be; /* 装裱画框外线 */
+  --graph-frame-inner: #e6dfcd; /* 装裱画框内线 */
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -203,28 +205,55 @@ a:hover {
  */
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-4px); }
-  40% { transform: translateX(4px); }
-  60% { transform: translateX(-3px); }
-  80% { transform: translateX(3px); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
 }

@@ -23,25 +23,25 @@
  * `NaN%`，那会渲染成一条"宽度无效"的进度条 —— 比"0% 进度"糟得多，
  * 因为它看起来像渲染坏了。
  */
-import type { ReactNode } from 'react'
+import type { ReactNode } from 'react';
 
 interface ReviewProgressProps {
   /** 当前项序号（0 起） */
-  index: number
+  index: number;
   /** 本次会话的项数 */
-  total: number
+  total: number;
   /** 当前项是否已结账（已提交 / 已自评）—— 已结账的这一张要计入进度 */
-  done: boolean
+  done: boolean;
   /** 计数文案：无标题时在进度条左侧，有标题时在标题行右侧 */
-  label: ReactNode
+  label: ReactNode;
   /** 进度条右侧的补充计数（正确数 / 今日额度）；只有一行式排版有这个位置 */
-  trailing?: ReactNode
+  trailing?: ReactNode;
   /** 页面标题：给了就切到"标题行 + 全宽条"排版（见文件头） */
-  title?: ReactNode
+  title?: ReactNode;
 }
 
 /** 计数文案的统一样式（两侧计数此前是两处手写、值相同的内联样式） */
-const counterStyle = { fontSize: '0.9rem', color: 'var(--color-text-secondary)' } as const
+const counterStyle = { fontSize: '0.9rem', color: 'var(--color-text-secondary)' } as const;
 
 export default function ReviewProgress({
   index,
@@ -51,7 +51,7 @@ export default function ReviewProgress({
   trailing,
   title,
 }: ReviewProgressProps) {
-  const percent = total > 0 ? ((index + (done ? 1 : 0)) / total) * 100 : 0
+  const percent = total > 0 ? ((index + (done ? 1 : 0)) / total) * 100 : 0;
 
   // 块级父元素下 `flex: 1` 无效果（全宽条）；flex 行里则占满剩余宽度（一行式）。
   // 一份标记同时服务两种排版，避免又出现两条会各自漂移的进度条。
@@ -59,7 +59,7 @@ export default function ReviewProgress({
     <div className="progress-bar" style={{ flex: 1 }}>
       <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
     </div>
-  )
+  );
 
   if (title !== undefined) {
     return (
@@ -75,19 +75,21 @@ export default function ReviewProgress({
         </div>
         {bar}
       </div>
-    )
+    );
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 'var(--space-sm)',
-      marginBottom: 'var(--space-lg)',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-sm)',
+        marginBottom: 'var(--space-lg)',
+      }}
+    >
       <span style={counterStyle}>{label}</span>
       {bar}
       {trailing && <span style={counterStyle}>{trailing}</span>}
     </div>
-  )
+  );
 }

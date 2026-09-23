@@ -31,35 +31,35 @@
 declare module 'node:fs' {
   /** 文件信息（只声明用到的两个字段） */
   export interface Stats {
-    size: number
-    mtimeMs: number
+    size: number;
+    mtimeMs: number;
   }
   /** 取文件信息；文件不存在时**抛异常**（调用方自己 try/catch） */
-  export function statSync(path: string): Stats
+  export function statSync(path: string): Stats;
   /** 路径是否存在 */
-  export function existsSync(path: string): boolean
+  export function existsSync(path: string): boolean;
   /** 递归建目录 */
-  export function mkdirSync(path: string, options?: { recursive?: boolean }): void
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
   /** 写文本文件（用于落证据 JSON 与测试资料） */
-  export function writeFileSync(path: string, data: string, encoding?: string): void
+  export function writeFileSync(path: string, data: string, encoding?: string): void;
   /** 读文本文件 */
-  export function readFileSync(path: string, encoding?: string): string
+  export function readFileSync(path: string, encoding?: string): string;
   /** 列目录条目名（用于"真实数据目录里有没有新增条目"这条判据） */
-  export function readdirSync(path: string): string[]
+  export function readdirSync(path: string): string[];
 }
 
 declare module 'node:path' {
-  export function join(...parts: string[]): string
-  export function resolve(...parts: string[]): string
-  export function dirname(path: string): string
+  export function join(...parts: string[]): string;
+  export function resolve(...parts: string[]): string;
+  export function dirname(path: string): string;
 }
 
 declare module 'node:url' {
-  export function fileURLToPath(url: string): string
+  export function fileURLToPath(url: string): string;
 }
 
 /** Playwright 的 Node 运行环境里本来就有的全局 */
 declare const process: {
-  env: Record<string, string | undefined>
-  platform: string
-}
+  env: Record<string, string | undefined>;
+  platform: string;
+};

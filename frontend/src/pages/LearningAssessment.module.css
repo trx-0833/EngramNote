@@ -147,7 +147,9 @@
   padding: 24px;
   margin-bottom: 16px;
   box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06);
-  transition: border-color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
+  transition:
+    border-color 0.25s var(--ease-out-expo),
+    box-shadow 0.25s var(--ease-out-expo);
 }
 
 .quizQuestionCard:hover {
@@ -210,7 +212,9 @@
   font-family: inherit;
   font-size: 0.95rem;
   line-height: 1.6;
-  transition: border-color 0.2s var(--ease-out-expo), box-shadow 0.2s var(--ease-out-expo);
+  transition:
+    border-color 0.2s var(--ease-out-expo),
+    box-shadow 0.2s var(--ease-out-expo);
   resize: vertical;
 }
 

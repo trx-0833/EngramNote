@@ -2,8 +2,8 @@
  * @file 上传 API
  * @description 单次上传、两阶段上传、上传状态查询、转换重试与文件夹内上传。
  */
-import { request, uploadRequest, type Note } from './client'
-import type { Schema } from './generated/types'
+import { request, uploadRequest, type Note } from './client';
+import type { Schema } from './generated/types';
 
 /**
  * 上传文件
@@ -15,12 +15,19 @@ import type { Schema } from './generated/types'
  *                  不传则使用后端默认配置
  * @returns 新创建的笔记记录（状态为 uploading）
  */
-export async function uploadFile(file: File, backend?: string, noteRole?: string, linkedMaterialIds?: string[], projectIds?: string[]): Promise<Note> {
+export async function uploadFile(
+  file: File,
+  backend?: string,
+  noteRole?: string,
+  linkedMaterialIds?: string[],
+  projectIds?: string[],
+): Promise<Note> {
   const formData = new FormData();
   formData.append('file', file);
   if (backend) formData.append('backend', backend);
   if (noteRole) formData.append('note_role', noteRole);
-  if (projectIds && projectIds.length > 0) formData.append('project_ids', JSON.stringify(projectIds));
+  if (projectIds && projectIds.length > 0)
+    formData.append('project_ids', JSON.stringify(projectIds));
   if (linkedMaterialIds && linkedMaterialIds.length > 0) {
     formData.append('linked_material_ids', JSON.stringify(linkedMaterialIds));
   }
@@ -86,7 +93,8 @@ export async function commitUpload(tempId: string, opts: CommitUploadOptions = {
   if (opts.filename && opts.filename.trim()) formData.append('filename', opts.filename.trim());
   if (opts.backend) formData.append('backend', opts.backend);
   if (opts.note_role) formData.append('note_role', opts.note_role);
-  if (opts.project_ids && opts.project_ids.length > 0) formData.append('project_ids', JSON.stringify(opts.project_ids));
+  if (opts.project_ids && opts.project_ids.length > 0)
+    formData.append('project_ids', JSON.stringify(opts.project_ids));
   if (opts.crop_page_range && opts.crop_page_range.trim()) {
     formData.append('crop_page_range', opts.crop_page_range.trim());
   }
@@ -147,12 +155,18 @@ export async function retryConvert(noteId: string): Promise<NoteStatusResponse> 
  * @param backend - 解析后端选择（可选）
  * @returns 新创建的笔记记录
  */
-export async function uploadFileToFolder(file: File, folderId: string, backend?: string, projectIds?: string[]): Promise<Note> {
+export async function uploadFileToFolder(
+  file: File,
+  folderId: string,
+  backend?: string,
+  projectIds?: string[],
+): Promise<Note> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('folder_id', folderId);
   if (backend) formData.append('backend', backend);
-  if (projectIds && projectIds.length > 0) formData.append('project_ids', JSON.stringify(projectIds));
+  if (projectIds && projectIds.length > 0)
+    formData.append('project_ids', JSON.stringify(projectIds));
 
   // 统一走 uploadRequest，见 docs/decisions.md#F-22
   return uploadRequest<Note>('/upload', formData);

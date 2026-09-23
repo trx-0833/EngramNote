@@ -6,13 +6,13 @@
  * 本文件只声明"每个接口期望什么形状 + 报给用户时叫什么名字"。容忍度与返回值一字未变：
  * 数组原样、`{items:[…]}` 拆包照常渲染、真正缺失/非数组才退化成空列表。
  */
-import type { Note, NoteInFolder, Project } from '../../api/client'
-import { coerceArrayPayload, unwrapPageItems } from '../contractDrift'
+import type { Note, NoteInFolder, Project } from '../../api/client';
+import { coerceArrayPayload, unwrapPageItems } from '../contractDrift';
 
 // 提示文案里的接口名：用户看到的"哪个接口不对"必须能直接拿去和后端对账
-const SOURCE_PROJECTS = 'GET /projects'
-const SOURCE_PROJECT_DETAIL = 'GET /projects/{id}'
-const SOURCE_NOTES = 'GET /notes'
+const SOURCE_PROJECTS = 'GET /projects';
+const SOURCE_PROJECT_DETAIL = 'GET /projects/{id}';
+const SOURCE_NOTES = 'GET /notes';
 
 /** 来源类型徽章样式映射（与全局 .badge-* 对应） */
 export const TYPE_BADGE: Record<string, string> = {
@@ -24,7 +24,7 @@ export const TYPE_BADGE: Record<string, string> = {
   audio: 'badge-audio',
   video: 'badge-video',
   markdown: 'badge-markdown',
-}
+};
 
 // 状态样式统一走 utils/labels.ts 的 statusClass()（单一数据源）。
 // 本页面此前因"全局缺少 .status-learning-failed / .status-archived"
@@ -42,10 +42,10 @@ export const TYPE_BADGE: Record<string, string> = {
  * `NaN` / 负数），0 及以上一律给出真实大小。
  */
 export function formatSize(bytes: number | null | undefined): string {
-  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /**
@@ -56,7 +56,7 @@ export function formatSize(bytes: number | null | undefined): string {
  * 形状不对会走 `pages/contractDrift.ts` 的提示（宽容解析不等于默默容忍）。
  */
 export function unwrapProjects(data: unknown): Project[] {
-  return coerceArrayPayload<Project>(data, SOURCE_PROJECTS)
+  return coerceArrayPayload<Project>(data, SOURCE_PROJECTS);
 }
 
 /**
@@ -71,7 +71,7 @@ export function unwrapProjects(data: unknown): Project[] {
  * 没有详情就是没有笔记列表，见 `ProjectCard` 的 `detail ? … : []`。
  */
 export function unwrapProjectNotes(data: unknown): NoteInFolder[] {
-  return coerceArrayPayload<NoteInFolder>(data, SOURCE_PROJECT_DETAIL)
+  return coerceArrayPayload<NoteInFolder>(data, SOURCE_PROJECT_DETAIL);
 }
 
 /**
@@ -82,5 +82,5 @@ export function unwrapProjectNotes(data: unknown): NoteInFolder[] {
  * 与"接口形状不对"混为一谈。
  */
 export function unwrapCandidateNotes(data: unknown): Note[] {
-  return unwrapPageItems<Note>(data, SOURCE_NOTES)
+  return unwrapPageItems<Note>(data, SOURCE_NOTES);
 }

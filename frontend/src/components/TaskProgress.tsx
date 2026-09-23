@@ -20,18 +20,18 @@
  *    后端如实返回 `terminated=false`，界面也必须如实说
  *    "已请求取消，任务会在下一个阶段边界退出"，而不是显示"已取消"。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { cancelTask, isTerminal, listNoteTasks, type TaskRun } from '../api/tasks'
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { cancelTask, isTerminal, listNoteTasks, type TaskRun } from '../api/tasks';
 
 /** 轮询间隔：进度条不需要更实时，2 秒足够让用户看到"在动" */
-const POLL_INTERVAL_MS = 2000
+const POLL_INTERVAL_MS = 2000;
 
 interface Props {
-  noteId: string
+  noteId: string;
   /** 静态兜底文案（接口不可用、或还没有任务记录时显示） */
-  fallbackText?: string
+  fallbackText?: string;
   /** 取消成功后的回调（父组件可据此重新拉取笔记状态） */
-  onCancelled?: () => void
+  onCancelled?: () => void;
   /**
    * 是否提供"取消任务"按钮（默认 true）
    *
@@ -39,7 +39,7 @@ interface Props {
    * 它的语义是把笔记标记为 cleaning_failed、与"取消 Celery 任务"并不相同）
    * 应当传 false：两个功能不同但看起来一样的按钮，用户无法判断该点哪个。
    */
-  allowCancel?: boolean
+  allowCancel?: boolean;
 }
 
 export default function TaskProgress({
@@ -48,68 +48,68 @@ export default function TaskProgress({
   onCancelled,
   allowCancel = true,
 }: Props) {
-  const [run, setRun] = useState<TaskRun | null>(null)
-  const [unavailable, setUnavailable] = useState(false)
-  const [cancelNotice, setCancelNotice] = useState<string | null>(null)
-  const [cancelling, setCancelling] = useState(false)
+  const [run, setRun] = useState<TaskRun | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   // 用 ref 保存定时器与"是否已卸载"，避免卸载后 setState
-  const timerRef = useRef<number | null>(null)
-  const aliveRef = useRef(true)
+  const timerRef = useRef<number | null>(null);
+  const aliveRef = useRef(true);
 
   const poll = useCallback(async () => {
     try {
-      const data = await listNoteTasks(noteId, 5)
-      if (!aliveRef.current) return
-      setUnavailable(false)
+      const data = await listNoteTasks(noteId, 5);
+      if (!aliveRef.current) return;
+      setUnavailable(false);
       // 取最新的一条：列表已按最新在前排序
-      const latest = data.items[0] ?? null
-      setRun(latest)
-      return latest
+      const latest = data.items[0] ?? null;
+      setRun(latest);
+      return latest;
     } catch {
       // 进度是辅助信息：失败就退回静态文案，不向用户报错
-      if (aliveRef.current) setUnavailable(true)
-      return null
+      if (aliveRef.current) setUnavailable(true);
+      return null;
     }
-  }, [noteId])
+  }, [noteId]);
 
   useEffect(() => {
-    aliveRef.current = true
-    let stopped = false
+    aliveRef.current = true;
+    let stopped = false;
 
     const tick = async () => {
-      const latest = await poll()
-      if (stopped) return
+      const latest = await poll();
+      if (stopped) return;
       // 终态或查不到任务：停止轮询（页面主数据由父组件自己的轮询负责）
       if (latest && !isTerminal(latest.status)) {
-        timerRef.current = window.setTimeout(tick, POLL_INTERVAL_MS)
+        timerRef.current = window.setTimeout(tick, POLL_INTERVAL_MS);
       }
-    }
-    void tick()
+    };
+    void tick();
 
     return () => {
-      stopped = true
-      aliveRef.current = false
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
-    }
-  }, [poll])
+      stopped = true;
+      aliveRef.current = false;
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, [poll]);
 
   const handleCancel = async () => {
-    if (!run || cancelling) return
-    setCancelling(true)
+    if (!run || cancelling) return;
+    setCancelling(true);
     try {
-      const result = await cancelTask(run.task_id)
+      const result = await cancelTask(run.task_id);
       setCancelNotice(
         result.terminated
           ? '已取消。'
           : '已请求取消：任务会在下一个阶段边界退出（正在进行的这一步不会中断）。',
-      )
-      onCancelled?.()
+      );
+      onCancelled?.();
     } catch (err) {
-      setCancelNotice(err instanceof Error ? `取消失败：${err.message}` : '取消失败，请重试。')
+      setCancelNotice(err instanceof Error ? `取消失败：${err.message}` : '取消失败，请重试。');
     } finally {
-      setCancelling(false)
+      setCancelling(false);
     }
-  }
+  };
 
   // 接口不可用、或还没有任何任务记录 → 静态文案（绝不因此让页面报错）
   if (unavailable || !run) {
@@ -117,12 +117,12 @@ export default function TaskProgress({
       <p style={{ color: 'var(--color-warning)', margin: 0 }} data-testid="task-progress-fallback">
         {fallbackText}
       </p>
-    )
+    );
   }
 
-  const percent = Math.round(Math.max(0, Math.min(1, run.progress)) * 100)
-  const terminal = isTerminal(run.status)
-  const stageText = run.stage || (terminal ? '已结束' : '处理中')
+  const percent = Math.round(Math.max(0, Math.min(1, run.progress)) * 100);
+  const terminal = isTerminal(run.status);
+  const stageText = run.stage || (terminal ? '已结束' : '处理中');
 
   return (
     <div data-testid="task-progress" style={{ textAlign: 'left' }}>
@@ -135,7 +135,13 @@ export default function TaskProgress({
         </span>
       </div>
 
-      <div className="progress-bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+      <div
+        className="progress-bar"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
       </div>
 
@@ -156,10 +162,13 @@ export default function TaskProgress({
       </div>
 
       {cancelNotice && (
-        <p style={{ color: 'var(--color-text-secondary)', marginTop: 8, fontSize: '0.9rem' }} data-testid="task-cancel-notice">
+        <p
+          style={{ color: 'var(--color-text-secondary)', marginTop: 8, fontSize: '0.9rem' }}
+          data-testid="task-cancel-notice"
+        >
           {cancelNotice}
         </p>
       )}
     </div>
-  )
+  );
 }

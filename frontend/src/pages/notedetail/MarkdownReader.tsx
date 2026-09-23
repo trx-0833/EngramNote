@@ -5,21 +5,21 @@
  * 工具条文案、按钮类名、行级文本展示结构、正文容器的
  * `ref`/`dangerouslySetInnerHTML`/`onMouseUp` 均与拆分前一致。
  */
-import type { RefObject } from 'react'
+import type { RefObject } from 'react';
 
 interface MarkdownReaderProps {
   /** 渲染好的正文 HTML */
-  htmlContent: string
+  htmlContent: string;
   /** 正文容器（批注包裹与选区判定都基于它，由页面持有） */
-  markdownRef: RefObject<HTMLElement>
+  markdownRef: RefObject<HTMLElement>;
   /** 选中文本后弹出批注浮层 */
-  onMouseUp: () => void
+  onMouseUp: () => void;
   /** ADHD Reader 是否开启 */
-  adhdReaderEnabled: boolean
+  adhdReaderEnabled: boolean;
   /** ADHD Reader 当前鼠标所在行的文本 */
-  adhdCurrentLineText: string
+  adhdCurrentLineText: string;
   /** 切换 ADHD Reader */
-  onToggleAdhdReader: () => void
+  onToggleAdhdReader: () => void;
 }
 
 /** Markdown 渲染区 + ADHD Reader 工具条 */
@@ -33,11 +33,23 @@ export default function MarkdownReader({
 }: MarkdownReaderProps) {
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)', flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          marginBottom: 'var(--space-sm)',
+          flexWrap: 'wrap',
+        }}
+      >
         <button
           className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
           onClick={onToggleAdhdReader}
-          title={adhdReaderEnabled ? '关闭 ADHD 专注阅读模式' : '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）'}
+          title={
+            adhdReaderEnabled
+              ? '关闭 ADHD 专注阅读模式'
+              : '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）'
+          }
         >
           {adhdReaderEnabled ? '关闭 ADHD Reader' : '开启 ADHD Reader'}
         </button>
@@ -49,9 +61,25 @@ export default function MarkdownReader({
       </div>
       {/* 行级文本捕捉：实时展示鼠标所在的那一行文字 */}
       {adhdReaderEnabled && adhdCurrentLineText && (
-        <div style={{ marginBottom: 'var(--space-sm)', fontSize: '0.85rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+        <div
+          style={{
+            marginBottom: 'var(--space-sm)',
+            fontSize: '0.85rem',
+            color: 'var(--color-text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-sm)',
+          }}
+        >
           <span style={{ flexShrink: 0, fontWeight: 600 }}>📖 正在阅读</span>
-          <span style={{ color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              color: 'var(--color-text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             “{adhdCurrentLineText}”
           </span>
         </div>
@@ -63,5 +91,5 @@ export default function MarkdownReader({
         onMouseUp={onMouseUp}
       />
     </>
-  )
+  );
 }

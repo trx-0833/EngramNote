@@ -23,56 +23,58 @@
  * 2. in-flight 锁（`submittingRef`）：防双击/连按回车重复提交，
  *    重复提交会写两条 ReviewLog 并把间隔叠加两次（见 docs/decisions.md#F-23）。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getDueCards,
   submitCardReview,
   type CardReviewListResponse,
   type CardReviewSubmitResponse,
   type DueCard,
-} from '../../api/review'
-import { useToast } from '../../components/Toast'
+} from '../../api/review';
+import { useToast } from '../../components/Toast';
 
 /** 一张卡片的会话状态 */
 export interface CardState {
-  card: DueCard
+  card: DueCard;
   /** 是否已翻面（显示正文） */
-  revealed: boolean
+  revealed: boolean;
   /** 自评结果；null = 尚未自评 */
-  result: CardReviewSubmitResponse | null
-  startTime: number
+  result: CardReviewSubmitResponse | null;
+  startTime: number;
 }
 
 /** 一次加载多少张（到期总数可能上千，见附录 AA.5） */
-const PAGE_SIZE = 20
+const PAGE_SIZE = 20;
 
 export function useCardReviewSession(pageSize: number = PAGE_SIZE) {
-  const toast = useToast()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [cards, setCards] = useState<CardState[]>([])
-  const [totalDue, setTotalDue] = useState(0)
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [submitting, setSubmitting] = useState(false)
-  const [completed, setCompleted] = useState(false)
-  const [sessionCount, setSessionCount] = useState(0)
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [cards, setCards] = useState<CardState[]>([]);
+  const [totalDue, setTotalDue] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [sessionCount, setSessionCount] = useState(0);
   /** 本次会话里"想起来了"（自评 >= 3，后端折算为 is_correct）的张数 */
-  const [sessionPassed, setSessionPassed] = useState(0)
-  const submittingRef = useRef(false)
+  const [sessionPassed, setSessionPassed] = useState(0);
+  const submittingRef = useRef(false);
 
   /** 把一次成功的加载结果落到状态里（初始加载与"再复习一轮"共用） */
   const applyLoaded = useCallback((data: CardReviewListResponse) => {
-    setCards(data.items.map(card => ({
-      card,
-      revealed: false,
-      result: null,
-      startTime: Date.now(),
-    })))
-    setTotalDue(data.total)
-    setCurrentIndex(0)
-    setCompleted(data.items.length === 0)
-    setError('')
-  }, [])
+    setCards(
+      data.items.map((card) => ({
+        card,
+        revealed: false,
+        result: null,
+        startTime: Date.now(),
+      })),
+    );
+    setTotalDue(data.total);
+    setCurrentIndex(0);
+    setCompleted(data.items.length === 0);
+    setError('');
+  }, []);
 
   /**
    * 拉取到期卡片并落地；失败时只置错误，不抛（调用方不必各自 try/catch）
@@ -84,90 +86,109 @@ export function useCardReviewSession(pageSize: number = PAGE_SIZE) {
    * 静态分析也能看出 setState 不在同步路径上。
    */
   const fetchCards = useCallback(
-    () => getDueCards(pageSize).then(applyLoaded).catch(() => setError('加载到期卡片失败')),
+    () =>
+      getDueCards(pageSize)
+        .then(applyLoaded)
+        .catch(() => setError('加载到期卡片失败')),
     [pageSize, applyLoaded],
-  )
+  );
 
   useEffect(() => {
-    void fetchCards().finally(() => setLoading(false))
-  }, [fetchCards])
+    void fetchCards().finally(() => setLoading(false));
+  }, [fetchCards]);
 
   /** 重新加载（首次之外的入口：错误重试、"再复习一轮"） */
   const reload = useCallback(() => {
-    setLoading(true)
-    setError('')
-    void fetchCards().finally(() => setLoading(false))
-  }, [fetchCards])
+    setLoading(true);
+    setError('');
+    void fetchCards().finally(() => setLoading(false));
+  }, [fetchCards]);
 
   /** 再复习一轮：清空本次统计后重新拉取到期队列 */
   const restart = useCallback(() => {
-    setSessionCount(0)
-    setSessionPassed(0)
-    setCompleted(false)
-    reload()
-  }, [reload])
+    setSessionCount(0);
+    setSessionPassed(0);
+    setCompleted(false);
+    reload();
+  }, [reload]);
 
-  const current = cards[currentIndex]
-  const phase = current?.result ? 'rated' : current?.revealed ? 'revealed' : 'front'
+  const current = cards[currentIndex];
+  const phase = current?.result ? 'rated' : current?.revealed ? 'revealed' : 'front';
 
   const handleReveal = useCallback(() => {
-    setCards(prev => {
-      const next = [...prev]
-      if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], revealed: true }
-      return next
-    })
-  }, [currentIndex])
+    setCards((prev) => {
+      const next = [...prev];
+      if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], revealed: true };
+      return next;
+    });
+  }, [currentIndex]);
 
-  const handleRate = useCallback(async (quality: number) => {
-    if (submittingRef.current) return
-    const target = cards[currentIndex]
-    if (!target || target.result) return
+  const handleRate = useCallback(
+    async (quality: number) => {
+      if (submittingRef.current) return;
+      const target = cards[currentIndex];
+      if (!target || target.result) return;
 
-    submittingRef.current = true
-    setSubmitting(true)
-    try {
-      const result = await submitCardReview(
-        target.card.card_id,
-        quality,
-        '',
-        Date.now() - target.startTime,
-      )
-      setCards(prev => {
-        const next = [...prev]
-        if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], result }
-        return next
-      })
-      setSessionCount(prev => prev + 1)
-      if (result.is_correct) setSessionPassed(prev => prev + 1)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '提交失败')
-    } finally {
-      submittingRef.current = false
-      setSubmitting(false)
-    }
-  }, [cards, currentIndex, toast])
+      submittingRef.current = true;
+      setSubmitting(true);
+      try {
+        const result = await submitCardReview(
+          target.card.card_id,
+          quality,
+          '',
+          Date.now() - target.startTime,
+        );
+        setCards((prev) => {
+          const next = [...prev];
+          if (next[currentIndex]) next[currentIndex] = { ...next[currentIndex], result };
+          return next;
+        });
+        setSessionCount((prev) => prev + 1);
+        if (result.is_correct) setSessionPassed((prev) => prev + 1);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : '提交失败');
+      } finally {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
+    },
+    [cards, currentIndex, toast],
+  );
 
   const handleNext = useCallback(() => {
-    const target = cards[currentIndex]
+    const target = cards[currentIndex];
     // 未自评不许跳过：此刻调度尚未推进，放行会让这张卡停在
     // "看了但没结账"的状态，而界面上看不出来。
-    if (target && !target.result) return
+    if (target && !target.result) return;
     if (currentIndex < cards.length - 1) {
-      const nextIndex = currentIndex + 1
-      setCurrentIndex(nextIndex)
-      setCards(prev => {
-        const next = [...prev]
-        next[nextIndex] = { ...next[nextIndex], startTime: Date.now() }
-        return next
-      })
+      const nextIndex = currentIndex + 1;
+      setCurrentIndex(nextIndex);
+      setCards((prev) => {
+        const next = [...prev];
+        next[nextIndex] = { ...next[nextIndex], startTime: Date.now() };
+        return next;
+      });
     } else {
-      setCompleted(true)
+      setCompleted(true);
     }
-  }, [cards, currentIndex])
+  }, [cards, currentIndex]);
 
   return {
-    loading, error, cards, totalDue, currentIndex, submitting, completed,
-    sessionCount, sessionPassed, current, phase,
-    reload, restart, handleReveal, handleRate, handleNext,
-  }
+    loading,
+    error,
+    cards,
+    totalDue,
+    currentIndex,
+    submitting,
+    completed,
+    sessionCount,
+    sessionPassed,
+    current,
+    phase,
+    reload,
+    restart,
+    handleReveal,
+    handleRate,
+    handleNext,
+  };
 }

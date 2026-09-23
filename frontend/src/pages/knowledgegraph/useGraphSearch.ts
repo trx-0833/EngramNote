@@ -9,56 +9,56 @@
  * 因此漂移会被报出来，而不是静默容忍。退化行为不变：非数组 → 空列表，
  * 消费侧（`GraphToolbar` 的 `searchResults.length > 0`）照旧兜底。
  */
-import { useEffect, useRef, useState } from 'react'
-import { searchGraphNodes, type GraphSearchNode } from '../../api/client'
-import { unwrapPageItems } from '../contractDrift'
+import { useEffect, useRef, useState } from 'react';
+import { searchGraphNodes, type GraphSearchNode } from '../../api/client';
+import { unwrapPageItems } from '../contractDrift';
 
 /** 提示文案里的接口名：与后端对账时直接用 */
-const SOURCE_GRAPH_SEARCH = 'GET /graph/search'
+const SOURCE_GRAPH_SEARCH = 'GET /graph/search';
 
 export function useGraphSearch() {
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [searchResults, setSearchResults] = useState<GraphSearchNode[]>([])
-  const [searching, setSearching] = useState(false)
-  const searchTimerRef = useRef<number | null>(null)
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState<GraphSearchNode[]>([]);
+  const [searching, setSearching] = useState(false);
+  const searchTimerRef = useRef<number | null>(null);
 
   // handleSearch 声明在 effect 之前：函数声明本身会被提升、**运行时与拆分前完全一致**
   // （拆分前它写在 effect 之后），但放在前面可避免 react-hooks 的
   // "Cannot access variable before it is declared" 诊断（v7 对拆分后的 hook 文件生效）。
   async function handleSearch(keyword: string) {
-    setSearching(true)
+    setSearching(true);
     try {
-      const result = await searchGraphNodes(keyword, 15)
-      setSearchResults(unwrapPageItems<GraphSearchNode>(result, SOURCE_GRAPH_SEARCH))
+      const result = await searchGraphNodes(keyword, 15);
+      setSearchResults(unwrapPageItems<GraphSearchNode>(result, SOURCE_GRAPH_SEARCH));
     } catch {
-      setSearchResults([])
+      setSearchResults([]);
     } finally {
-      setSearching(false)
+      setSearching(false);
     }
   }
 
   // 搜索防抖（关键词清空时同步清空结果列表，派生状态重置豁免）
   useEffect(() => {
     if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current)
+      clearTimeout(searchTimerRef.current);
     }
     if (!searchKeyword.trim()) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSearchResults([])
-      return
+      setSearchResults([]);
+      return;
     }
     searchTimerRef.current = window.setTimeout(() => {
-      handleSearch(searchKeyword.trim())
-    }, 300)
+      handleSearch(searchKeyword.trim());
+    }, 300);
     return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
-    }
-  }, [searchKeyword])
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [searchKeyword]);
 
   return {
     searchKeyword,
     setSearchKeyword,
     searchResults,
     searching,
-  }
+  };
 }

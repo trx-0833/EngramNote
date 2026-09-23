@@ -29,11 +29,11 @@
  *    提示是判分横幅里的"请对照答案，给自己的回忆程度打分"，因为它同时
  *    承担"简答题无法自动判分"的解释，与这里的一行提示不是同一件事。
  */
-import type { ReactNode } from 'react'
-import { selfRatingOptions } from '../../utils/labels'
+import type { ReactNode } from 'react';
+import { selfRatingOptions } from '../../utils/labels';
 // 自评按钮的触控目标（含 768/480 两条窄屏规则）已搬进本模块，
 // 见 SelfRatingButtons.module.css 文件头"为什么同时装桌面值与响应式值"
-import styles from './SelfRatingButtons.module.css'
+import styles from './SelfRatingButtons.module.css';
 
 /**
  * 把 SM-2 quality 分翻译成用户看到的档位名
@@ -43,18 +43,18 @@ import styles from './SelfRatingButtons.module.css'
  * 迟早会有一页忘记写。
  */
 export function selfRatingLabel(quality: number): string {
-  return selfRatingOptions.find(o => o.quality === quality)?.label ?? `quality=${quality}`
+  return selfRatingOptions.find((o) => o.quality === quality)?.label ?? `quality=${quality}`;
 }
 
 interface SelfRatingButtonsProps {
   /** 用户点选四档之一；quality 为 SM-2 分值 0/3/4/5 */
-  onRate: (quality: number) => void
+  onRate: (quality: number) => void;
   /** 提交中：禁用全部按钮，防连点重复推进调度 */
-  submitting?: boolean
+  submitting?: boolean;
   /** 四档上方的提示语（可选，见文件头"刻意保留的差异"） */
-  prompt?: ReactNode
+  prompt?: ReactNode;
   /** 跳过自评的逃生口（可选，只有答题复习能传，见文件头） */
-  onSkip?: () => void
+  onSkip?: () => void;
 }
 
 export default function SelfRatingButtons({
@@ -65,16 +65,16 @@ export default function SelfRatingButtons({
 }: SelfRatingButtonsProps) {
   return (
     <div style={{ marginBottom: 'var(--space-md)' }}>
-      {prompt && (
-        <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>{prompt}</p>
-      )}
+      {prompt && <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>{prompt}</p>}
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-        gap: 'var(--space-sm)',
-      }}>
-        {selfRatingOptions.map(opt => (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        {selfRatingOptions.map((opt) => (
           <button
             key={opt.quality}
             className={`btn ${styles.selfRatingBtn}`}
@@ -104,7 +104,13 @@ export default function SelfRatingButtons({
       </div>
 
       {submitting && (
-        <p style={{ marginTop: 'var(--space-xs)', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+        <p
+          style={{
+            marginTop: 'var(--space-xs)',
+            fontSize: '0.85rem',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
           正在记录自评...
         </p>
       )}
@@ -115,9 +121,13 @@ export default function SelfRatingButtons({
             className="btn btn-link"
             onClick={onSkip}
             style={{
-              background: 'none', border: 'none', padding: 0,
-              color: 'var(--color-text-secondary)', cursor: 'pointer',
-              fontSize: '0.85rem', textDecoration: 'underline',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              textDecoration: 'underline',
             }}
           >
             跳过自评，先做下一题
@@ -125,5 +135,5 @@ export default function SelfRatingButtons({
         </p>
       )}
     </div>
-  )
+  );
 }

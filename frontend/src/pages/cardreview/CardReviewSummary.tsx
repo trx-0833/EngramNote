@@ -12,17 +12,17 @@
  */
 interface CardReviewSummaryProps {
   /** 本次会话已自评的张数 */
-  sessionCount: number
+  sessionCount: number;
   /** 其中"想起来了"（自评 >= 3）的张数 */
-  sessionPassed: number
+  sessionPassed: number;
   /** 本次加载到的张数 */
-  loadedCount: number
+  loadedCount: number;
   /** 真正到期的总数（后端计数，不是本页条数） */
-  totalDue: number
+  totalDue: number;
   /** 再复习一轮（重新拉取到期队列） */
-  onRestart: () => void
+  onRestart: () => void;
   /** 回到今日学习 */
-  onBack: () => void
+  onBack: () => void;
 }
 
 export default function CardReviewSummary({
@@ -40,7 +40,13 @@ export default function CardReviewSummary({
         <h3 style={{ marginBottom: 'var(--space-sm)' }}>本次统计</h3>
         <p>复习卡片: {sessionCount} 张</p>
         <p>想起来了: {sessionPassed} 张</p>
-        <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginTop: 'var(--space-sm)' }}>
+        <p
+          style={{
+            color: 'var(--color-text-secondary)',
+            fontSize: '0.9rem',
+            marginTop: 'var(--space-sm)',
+          }}
+        >
           {totalDue > loadedCount
             ? `本次加载了 ${loadedCount} 张，全部到期共 ${totalDue} 张 —— 可以再来一轮。`
             : '到期队列已经清空。'}
@@ -55,5 +61,5 @@ export default function CardReviewSummary({
         </button>
       </div>
     </div>
-  )
+  );
 }

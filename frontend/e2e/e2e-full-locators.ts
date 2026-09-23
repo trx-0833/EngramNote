@@ -35,7 +35,7 @@
  * 结论写进代码而不是只写在文档里：**读文本前必须先 `expect(card).toBeVisible()`
  * （有上限）再 `innerText()`**，定位式本身由免后端的探针守护。
  */
-import { type Page } from '@playwright/test'
+import { type Page } from '@playwright/test';
 
 /**
  * 取"这一轮回答的卡片"的文本
@@ -65,37 +65,37 @@ export async function readAnswerText(
   const read = async (): Promise<string | null> =>
     page
       .evaluate((q) => {
-        const divs = Array.from(document.querySelectorAll('div'))
+        const divs = Array.from(document.querySelectorAll('div'));
         const bubble = divs.find((el) => {
-          let direct = ''
+          let direct = '';
           for (const node of el.childNodes) {
-            if (node.nodeType === Node.TEXT_NODE) direct += node.textContent ?? ''
+            if (node.nodeType === Node.TEXT_NODE) direct += node.textContent ?? '';
           }
-          return direct.trim() === q
-        })
-        if (!bubble) return null
-        const record = bubble.parentElement?.parentElement
-        const card = record?.querySelector('div.card')
-        return card ? (card as HTMLElement).innerText : null
+          return direct.trim() === q;
+        });
+        if (!bubble) return null;
+        const record = bubble.parentElement?.parentElement;
+        const card = record?.querySelector('div.card');
+        return card ? (card as HTMLElement).innerText : null;
       }, question)
-      .catch(() => null)
+      .catch(() => null);
 
-  const deadline = Date.now() + timeoutMs
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const text = await read()
-    if (text !== null) return text
-    if (Date.now() > deadline) return null
-    await page.waitForTimeout(200)
+    const text = await read();
+    if (text !== null) return text;
+    if (Date.now() > deadline) return null;
+    await page.waitForTimeout(200);
   }
 }
 
 /** 断言这轮记录已经出现在页面上（失败信息带现场），返回卡片文本 */
 export async function expectAnswerCardText(page: Page, question: string): Promise<string> {
-  const text = await readAnswerText(page, question)
+  const text = await readAnswerText(page, question);
   if (text === null) {
-    throw new Error(`问答记录没有出现在页面上。现场：${await describeQaDom(page, question)}`)
+    throw new Error(`问答记录没有出现在页面上。现场：${await describeQaDom(page, question)}`);
   }
-  return text
+  return text;
 }
 
 /**
@@ -105,15 +105,20 @@ export async function expectAnswerCardText(page: Page, question: string): Promis
  * 就是因为报错只说"0 字"，没说"页面上其实有什么"。
  */
 export async function describeQaDom(page: Page, question: string): Promise<string> {
-  const cards = await page.locator('div.card').count()
-  const exact = await page.getByText(question, { exact: true }).count()
-  const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ')
+  const cards = await page.locator('div.card').count();
+  const exact = await page.getByText(question, { exact: true }).count();
+  const body = (
+    await page
+      .locator('body')
+      .innerText()
+      .catch(() => '')
+  ).replace(/\s+/g, ' ');
   return [
     `url=${page.url()}`,
     `div.card=${cards}`,
     `问题精确命中=${exact}`,
     `正文前 300 字=${body.slice(0, 300)}`,
-  ].join(' | ')
+  ].join(' | ');
 }
 
 /**
@@ -128,5 +133,5 @@ export function cleanAnswerText(raw: string, question: string): string {
     .replace(/AI 正在思考\.\.\./g, '')
     .replace(/由 (DeepSeek|GLM) 提供支持/g, '')
     .replace(/引用来源:[\s\S]*$/, '')
-    .trim()
+    .trim();
 }

@@ -71,7 +71,9 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   resize: vertical;
-  transition: border-color 0.2s var(--ease-out-expo), box-shadow 0.2s var(--ease-out-expo);
+  transition:
+    border-color 0.2s var(--ease-out-expo),
+    box-shadow 0.2s var(--ease-out-expo);
 }
 
 .markdownEditor:focus {

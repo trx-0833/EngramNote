@@ -7,15 +7,15 @@
  */
 // 浮层样式（overhaul-plan 5.6）：原 src/styles/markdown-extras.css 的
 // `.selection-menu` 3 条搬到这里
-import styles from './SelectionMenu.module.css'
+import styles from './SelectionMenu.module.css';
 
 interface SelectionMenuProps {
   /** 浮层锚点（选区中心的视口坐标） */
-  pos: { x: number; y: number }
+  pos: { x: number; y: number };
   /** 应用高亮批注 */
-  onApplyAnnotation: (type: 'highlight' | 'underline') => void
+  onApplyAnnotation: (type: 'highlight' | 'underline') => void;
   /** 打开 AI 提问浮层 */
-  onOpenAskAI: () => void
+  onOpenAskAI: () => void;
 }
 
 /** 选中文本后显示的批注操作浮层 */
@@ -31,9 +31,15 @@ export default function SelectionMenu({ pos, onApplyAnnotation, onOpenAskAI }: S
         zIndex: 1000,
       }}
     >
-      <button onClick={() => onApplyAnnotation('highlight')} title="高亮">高亮</button>
-      <button onClick={() => onApplyAnnotation('underline')} title="下划线">下划线</button>
-      <button onClick={onOpenAskAI} title="选中文本调用 AI 提问">AI 提问</button>
+      <button onClick={() => onApplyAnnotation('highlight')} title="高亮">
+        高亮
+      </button>
+      <button onClick={() => onApplyAnnotation('underline')} title="下划线">
+        下划线
+      </button>
+      <button onClick={onOpenAskAI} title="选中文本调用 AI 提问">
+        AI 提问
+      </button>
     </div>
-  )
+  );
 }

@@ -6,15 +6,15 @@
 
 /** 完整日期时间：2026/8/13 13:00:00 GMT+8 */
 export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('zh-CN', { timeZoneName: 'short' })
+  return new Date(iso).toLocaleString('zh-CN', { timeZoneName: 'short' });
 }
 
 /** 日期：2026/8/13 */
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('zh-CN')
+  return new Date(iso).toLocaleDateString('zh-CN');
 }
 
 /** 时间：13:00 */
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }

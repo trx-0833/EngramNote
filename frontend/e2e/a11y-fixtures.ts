@@ -24,13 +24,13 @@
  * 与 `support.ts` 一样：本层证明的是**前端在真实浏览器里的渲染结果**，
  * 不证明后端会这样响应。接口契约由 `backend/tests/` 负责。
  */
-import type { Page } from '@playwright/test'
+import type { Page } from '@playwright/test';
 
-import { blockThirdParty, collectPageErrors, isApiUrl } from './support'
+import { blockThirdParty, collectPageErrors, isApiUrl } from './support';
 
 // ── 固定的时间戳：让渲染结果与"今天"无关，审计可重复 ──
-const T0 = '2026-01-05T08:00:00Z'
-const T1 = '2026-01-06T09:30:00Z'
+const T0 = '2026-01-05T08:00:00Z';
+const T1 = '2026-01-06T09:30:00Z';
 
 /** 笔记列表里的一条（`GET /notes`） */
 function note(over: Record<string, unknown> = {}) {
@@ -50,7 +50,7 @@ function note(over: Record<string, unknown> = {}) {
     created_at: T0,
     updated_at: T1,
     ...over,
-  }
+  };
 }
 
 /** 笔记详情（`GET /notes/{id}`） */
@@ -68,7 +68,7 @@ function noteDetail() {
     '',
     '详见 [相关说明](https://example.com/battery) 与 `float_voltage` 参数。',
     '',
-  ].join('\n')
+  ].join('\n');
   return {
     ...note(),
     original_md_content: `# 原始内容\n\n${clean}`,
@@ -77,7 +77,7 @@ function noteDetail() {
     original_file_path: '/u/note-1.pdf',
     original_md_path: '/u/note-1.md',
     clean_md_path: '/u/note-1.clean.md',
-  }
+  };
 }
 
 /**
@@ -89,7 +89,7 @@ function noteDetail() {
  * 用覆盖而不是改默认值，等于把"新状态的可见性"与"已扫场景的基线"解耦。
  */
 export function notesList(items: Record<string, unknown>[]): Record<string, unknown> {
-  return { items, total: items.length, page: 1, page_size: 20 }
+  return { items, total: items.length, page: 1, page_size: 20 };
 }
 
 /**
@@ -124,7 +124,7 @@ export const PROCESSING_NOTES = [
     status: 'cleaning',
     project_names: [],
   }),
-]
+];
 
 /** 到期卡片（`GET /review/cards/due`） */
 const DUE_CARDS = [
@@ -160,7 +160,7 @@ const DUE_CARDS = [
     review_count: 1,
     lapses: 0,
   },
-]
+];
 
 /**
  * 到期**题目**（`GET /review/due`）—— 答题复习页（`Review`）的输入。
@@ -208,7 +208,7 @@ const DUE_QUIZZES = [
     interval: 2,
     easiness_factor: 2.36,
   },
-]
+];
 
 /**
  * 每日推荐任务（`GET /goals/daily-plan`）—— 今日学习页与仪表盘共用这个接口。
@@ -227,13 +227,34 @@ export const DAILY_PLAN: Record<string, unknown> = {
   goal_id: 'goal-1',
   plan_date: '2026-01-06',
   recommended_tasks: [
-    { task_type: 'weak_point', quiz_id: 'quiz-2', card_id: 'c-2', note_id: null, priority: 1, title: '复习「均充的适用场景」' },
-    { task_type: 'review', quiz_id: 'quiz-1', card_id: 'c-1', note_id: null, priority: 2, title: '复习「浮充的定义」' },
-    { task_type: 'new_material', quiz_id: null, card_id: null, note_id: 'note-2', priority: 3, title: '阅读新资料「铅酸电池的硫化机理」' },
+    {
+      task_type: 'weak_point',
+      quiz_id: 'quiz-2',
+      card_id: 'c-2',
+      note_id: null,
+      priority: 1,
+      title: '复习「均充的适用场景」',
+    },
+    {
+      task_type: 'review',
+      quiz_id: 'quiz-1',
+      card_id: 'c-1',
+      note_id: null,
+      priority: 2,
+      title: '复习「浮充的定义」',
+    },
+    {
+      task_type: 'new_material',
+      quiz_id: null,
+      card_id: null,
+      note_id: 'note-2',
+      priority: 3,
+      title: '阅读新资料「铅酸电池的硫化机理」',
+    },
   ],
   completed_count: 1,
   total_count: 3,
-}
+};
 
 /**
  * 薄弱点（`GET /report/weak-points`）—— **契约形状**（`WeakPoint` 的字段名）。
@@ -274,7 +295,7 @@ export const WEAK_POINTS: Record<string, unknown> = {
     },
   ],
   total: 2,
-}
+};
 
 /** 图谱节点（`GET /graph`）—— 有节点才画得出 SVG/canvas，也才有工具栏与统计 */
 const GRAPH_NODES = [
@@ -282,7 +303,7 @@ const GRAPH_NODES = [
   { id: 'c-2', title: '均充的定义', card_type: 'concept', note_id: 'note-1', relation_count: 1 },
   { id: 'c-3', title: '浮充电压公式', card_type: 'formula', note_id: 'note-1', relation_count: 1 },
   { id: 'c-4', title: '浮充与均充的区别', card_type: 'qa', note_id: 'note-1', relation_count: 0 },
-]
+];
 
 const GRAPH_EDGES = [
   {
@@ -301,7 +322,7 @@ const GRAPH_EDGES = [
     status: 'confirmed',
     similarity_score: 0.55,
   },
-]
+];
 
 /**
  * 知识卡片（`KnowledgeCard` 契约，见 api/qa.ts:8-36）。
@@ -342,7 +363,7 @@ function knowledgeCard(over: Record<string, unknown> = {}) {
     created_at: T0,
     updated_at: T1,
     ...over,
-  }
+  };
 }
 
 const KNOWLEDGE_CARDS = [
@@ -383,7 +404,7 @@ const KNOWLEDGE_CARDS = [
     is_key_point: false,
     mastery_level: 12.5,
   }),
-]
+];
 
 /**
  * 题目（`QuizItem` 契约，见 api/qa.ts:39-62）—— `QuestionSets`（整个列表）
@@ -434,7 +455,7 @@ const QUIZ_ITEMS = [
     created_at: T1,
     updated_at: T1,
   },
-]
+];
 
 /** 回收站里的一条（`TrashNoteItem` 契约，见 api/notes.ts:118-137） */
 const TRASH_ITEMS = [
@@ -456,7 +477,7 @@ const TRASH_ITEMS = [
     version_count: 5,
     link_count: 1,
   },
-]
+];
 
 /**
  * 快速复习的一道题（`QuickReviewResponse` = `{ items: QuickQuiz[]; total }`，
@@ -486,7 +507,7 @@ const QUICK_QUIZZES = [
     interval: 4,
     easiness_factor: 2.5,
   },
-]
+];
 
 /**
  * 学习目标（`GoalListResponse` 契约，见 api/goals.ts:7-29）。
@@ -517,7 +538,7 @@ const ACTIVE_GOALS = [
     created_at: T0,
     updated_at: T1,
   },
-]
+];
 
 const ARCHIVED_GOALS = [
   {
@@ -530,7 +551,7 @@ const ARCHIVED_GOALS = [
     status: 'archived',
     progress_percentage: 100,
   },
-]
+];
 
 /**
  * 问答流的一次回答（`POST /understanding/ask/stream` 的 SSE 响应体）。
@@ -582,19 +603,20 @@ export const QA_ANSWER_SSE = [
   'data: {}',
   '',
   '',
-].join('\n')
+].join('\n');
 
-/** 项目（`GET /projects`）—— 后端这个接口回的是**裸数组**（见 api/projects.ts） */const PROJECTS = [
-  {
-    id: 'proj-1',
-    user_id: 'e2e-user',
-    name: '蓄电池基础',
-    description: '浮充、均充与寿命相关资料的合集',
-    note_count: 3,
-    created_at: T0,
-    updated_at: T1,
-  },
-]
+/** 项目（`GET /projects`）—— 后端这个接口回的是**裸数组**（见 api/projects.ts） */ const PROJECTS =
+  [
+    {
+      id: 'proj-1',
+      user_id: 'e2e-user',
+      name: '蓄电池基础',
+      description: '浮充、均充与寿命相关资料的合集',
+      note_count: 3,
+      created_at: T0,
+      updated_at: T1,
+    },
+  ];
 
 /**
  * 文件夹（`GET /folders`）—— 今日资料页（`DailyMaterials`）的列表。
@@ -618,7 +640,7 @@ const FOLDERS = [
     created_at: T0,
     note_count: 3,
   },
-]
+];
 
 /**
  * 文件夹详情（`GET /folders/{id}`）—— 展开文件夹后渲染的那份笔记列表。
@@ -656,7 +678,7 @@ const FOLDER_DETAIL = {
       created_at: T1,
     },
   ],
-}
+};
 
 /**
  * 审计用到的 `/api` 桩：按**路径**匹配，忽略查询串
@@ -836,7 +858,12 @@ function apiFixtures(): Record<string, unknown> {
     // "不能扫，因为桩是列表形状" —— 真实原因其实是**路径写错了**，
     // 于是请求落到 501 上、页面渲染成加载失败页。正确路径的桩补上之后，
     // 卡片详情页（`card-detail`）才第一次有真实内容。
-    '/api/understanding/cards': { items: KNOWLEDGE_CARDS, total: KNOWLEDGE_CARDS.length, page: 1, page_size: 999 },
+    '/api/understanding/cards': {
+      items: KNOWLEDGE_CARDS,
+      total: KNOWLEDGE_CARDS.length,
+      page: 1,
+      page_size: 999,
+    },
     // ── 卡片详情（`CardDetail`，路由 /cards/:cardId）──
     // 响应体是**单个对象**（不是列表形状）：`CardDetail.tsx:30` 直接 setCard(res)。
     '/api/understanding/cards/card-1': KNOWLEDGE_CARDS[0],
@@ -876,7 +903,7 @@ function apiFixtures(): Record<string, unknown> {
     // ── 智能问答的流式回答（`QA`，路由 /qa）──
     // 页面挂载时不发任何请求，只有真的提问才有内容 —— 见 rawBody 与 QA_ANSWER_SSE。
     '/api/understanding/ask/stream': rawBody(QA_ANSWER_SSE),
-  }
+  };
 }
 
 /**
@@ -892,7 +919,7 @@ function apiFixtures(): Record<string, unknown> {
  * 解析器是 `utils/sse.ts`（`event:` + `data:`，事件间空行分隔）。
  */
 export function rawBody(body: string, contentType = 'text/event-stream') {
-  return { __raw: { body, contentType } }
+  return { __raw: { body, contentType } };
 }
 
 /**
@@ -909,7 +936,7 @@ export function rawBody(body: string, contentType = 'text/event-stream') {
 export const GOAL_STUBS: Record<string, unknown> = {
   '/api/goals?status=active': { goals: ACTIVE_GOALS, total: ACTIVE_GOALS.length },
   '/api/goals?status=archived': { goals: ARCHIVED_GOALS, total: ARCHIVED_GOALS.length },
-}
+};
 
 /**
  * 学习评估页（`learning-assessment` 场景）用的 `/api/notes` 覆盖。
@@ -935,12 +962,12 @@ export const ASSESSMENT_NOTES = notesList([
     project_names: [],
     page_count: null,
   }),
-])
+]);
 
 /** 审计期间观察到的网络事实（按引用读取，随页面活动增长） */
 export interface A11yStubLog {
   /** 页面未捕获异常（`pageerror`） */
-  pageErrors: string[]
+  pageErrors: string[];
   /**
    * 桩没有定义、因而被回 501 的 `/api` 路径。
    *
@@ -949,11 +976,11 @@ export interface A11yStubLog {
    * 继续渲染 —— 审计照样绿，但扫的不是完整页面。把它断言为空，
    * 才能保证"审计覆盖了这些区域"这句话是真的。
    */
-  unmatched: string[]
+  unmatched: string[];
   /** 桩处理过的每个 `/api` 请求（路径 + 回的状态码），用于排查"页面卡在加载中" */
-  served: string[]
+  served: string[];
   /** 浏览器控制台的 error/warning（排查渲染卡住时的第一手线索） */
-  consoleErrors: string[]
+  consoleErrors: string[];
 }
 
 /**
@@ -967,7 +994,7 @@ export interface A11yStubLog {
  * `lib` 只有 ES2020 + DOM —— 没有 `@types/node`，写 `process` 会让
  * `npm run build`（= `tsc`）报 TS2580。为一行排查代码去加一个类型依赖不划算。
  */
-const TRACE = false
+const TRACE = false;
 
 /**
  * 把查询串规范化成"可作 key"的形式：参数按名字排序，值原样保留。
@@ -981,9 +1008,11 @@ const TRACE = false
  * **看起来扫过了、其实扫的不是那一块**。排序是为了让键与参数书写顺序无关。
  */
 function queryKey(search: string): string {
-  if (!search || search === '?') return ''
-  const params = [...new URLSearchParams(search).entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return `?${params.map(([k, v]) => `${k}=${v}`).join('&')}`
+  if (!search || search === '?') return '';
+  const params = [...new URLSearchParams(search).entries()].sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return `?${params.map(([k, v]) => `${k}=${v}`).join('&')}`;
 }
 
 /**
@@ -1005,70 +1034,71 @@ export async function installA11yStubs(
     unmatched: [],
     served: [],
     consoleErrors: [],
-  }
-  const fixtures = { ...apiFixtures(), ...overrides }
+  };
+  const fixtures = { ...apiFixtures(), ...overrides };
 
   page.on('console', (message) => {
     if (message.type() === 'error' || message.type() === 'warning') {
-      log.consoleErrors.push(`[${message.type()}] ${message.text()}`)
+      log.consoleErrors.push(`[${message.type()}] ${message.text()}`);
     }
-  })
+  });
 
   // 外链一律 abort：`index.html` 的 Google Fonts 会阻塞首屏渲染，
   // 断网时表现为"元素一直不出来"，与真实原因无关（support.ts 文件头）
-  await blockThirdParty(page)
+  await blockThirdParty(page);
 
   await page.route(
     (url) => isApiUrl(url),
     async (route) => {
-      const { pathname, search } = new URL(route.request().url())
+      const { pathname, search } = new URL(route.request().url());
       // 先试"路径 + 规范化查询串"，再退回"只按路径"（见 queryKey 的说明）：
       // 既有的桩键全部只有路径，行为与以前逐字相同。
-      const body = fixtures[`${pathname}${queryKey(search)}`] ?? fixtures[pathname]
+      const body = fixtures[`${pathname}${queryKey(search)}`] ?? fixtures[pathname];
 
       if (body === undefined) {
         // 见文件头：未知路径显式失败，不静默兜空。
         // 记的是**带查询串**的完整路径：同一个 pathname 配不同查询串时，
         // 只记 pathname 反而看不出少的是哪一份（例如 /goals?status=archived）。
-        const missing = `${pathname}${search}`
-        log.unmatched.push(missing)
-        log.served.push(`501 ${missing}`)
-        if (TRACE) console.log(`   [stub] 501 ${missing}（未定义）`)
+        const missing = `${pathname}${search}`;
+        log.unmatched.push(missing);
+        log.served.push(`501 ${missing}`);
+        if (TRACE) console.log(`   [stub] 501 ${missing}（未定义）`);
         await route.fulfill({
           status: 501,
           contentType: 'application/json',
           body: JSON.stringify({
             detail: `e2e a11y 桩没有为 ${missing} 定义响应（请补进 e2e/a11y-fixtures.ts）`,
           }),
-        })
-        return
+        });
+        return;
       }
 
       // 原样回文本（SSE）：见 rawBody 的说明
       if (typeof body === 'object' && body !== null && '__raw' in body) {
-        const raw = (body as { __raw: { body: string; contentType: string } }).__raw
-        log.served.push(`200 ${pathname}`)
-        if (TRACE) console.log(`   [stub] 200 ${pathname}（原样 ${raw.contentType}）`)
-        await route.fulfill({ status: 200, contentType: raw.contentType, body: raw.body })
-        return
+        const raw = (body as { __raw: { body: string; contentType: string } }).__raw;
+        log.served.push(`200 ${pathname}`);
+        if (TRACE) console.log(`   [stub] 200 ${pathname}（原样 ${raw.contentType}）`);
+        await route.fulfill({ status: 200, contentType: raw.contentType, body: raw.body });
+        return;
       }
 
-      const status = typeof body === 'object' && body !== null && '__status' in body
-        ? Number((body as { __status: number }).__status)
-        : 200
+      const status =
+        typeof body === 'object' && body !== null && '__status' in body
+          ? Number((body as { __status: number }).__status)
+          : 200;
 
-      log.served.push(`${status} ${pathname}`)
-      if (TRACE) console.log(`   [stub] ${status} ${pathname}`)
+      log.served.push(`${status} ${pathname}`);
+      if (TRACE) console.log(`   [stub] ${status} ${pathname}`);
 
       await route.fulfill({
         status,
         contentType: 'application/json',
         body: JSON.stringify(body),
-      })
+      });
     },
-  )
+  );
 
-  return log
+  return log;
 }
 
 /**
@@ -1088,18 +1118,18 @@ export async function installA11yStubs(
  * 但那不是"用户点进来"的路径）。
  */
 export async function loginAs(page: Page, path = '/'): Promise<void> {
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.locator('#email').fill('e2e@example.com')
-  await page.locator('#password').fill('secret123')
-  await page.getByRole('button', { name: '登录' }).click()
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.locator('#email').fill('e2e@example.com');
+  await page.locator('#password').fill('secret123');
+  await page.getByRole('button', { name: '登录' }).click();
   // 侧边栏只在已登录分支渲染：它是"登录真的成功了"的判据
-  await page.getByRole('navigation', { name: '主导航' }).waitFor({ state: 'visible' })
+  await page.getByRole('navigation', { name: '主导航' }).waitFor({ state: 'visible' });
 
   if (path !== '/') {
     await page.evaluate((to) => {
-      window.history.pushState({}, '', to)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    }, path)
-    await page.waitForURL((url) => url.pathname === path)
+      window.history.pushState({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+    await page.waitForURL((url) => url.pathname === path);
   }
 }

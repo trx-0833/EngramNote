@@ -64,13 +64,23 @@
  * 而问题变多一定失败。代价是它不会告诉你"某条已经被修好了" ——
  * 那件事由 `docs/a11y-audit.md` 的表格（人工过一遍）负责。
  */
-import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { installA11yStubs, loginAs, notesList, ASSESSMENT_NOTES, DAILY_PLAN, GOAL_STUBS, PROCESSING_NOTES, WEAK_POINTS, type A11yStubLog } from './a11y-fixtures'
-import { isApiUrl } from './support'
+import {
+  installA11yStubs,
+  loginAs,
+  notesList,
+  ASSESSMENT_NOTES,
+  DAILY_PLAN,
+  GOAL_STUBS,
+  PROCESSING_NOTES,
+  WEAK_POINTS,
+  type A11yStubLog,
+} from './a11y-fixtures';
+import { isApiUrl } from './support';
 
-const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'];
 
 /**
  * 并发模式与超时。
@@ -90,15 +100,15 @@ const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']
  * 分析 + 证据收集，90 秒是"明显异常"与"确实需要这么久"之间的分界
  * （实测单场景 3~6 秒）。
  */
-test.describe.configure({ mode: 'parallel', timeout: 90_000 })
+test.describe.configure({ mode: 'parallel', timeout: 90_000 });
 
 /** axe 的影响等级，从轻到重（用于"不得比登记时更严重"的判定） */
-const IMPACT_ORDER = ['minor', 'moderate', 'serious', 'critical'] as const
-type Impact = (typeof IMPACT_ORDER)[number]
+const IMPACT_ORDER = ['minor', 'moderate', 'serious', 'critical'] as const;
+type Impact = (typeof IMPACT_ORDER)[number];
 
 function impactRank(impact: string): number {
-  const index = IMPACT_ORDER.indexOf(impact as Impact)
-  return index === -1 ? 0 : index
+  const index = IMPACT_ORDER.indexOf(impact as Impact);
+  return index === -1 ? 0 : index;
 }
 
 /**
@@ -124,16 +134,16 @@ function impactRank(impact: string): number {
  */
 interface RegisteredRule {
   /** 与 docs/a11y-audit.md §3 的编号一致 */
-  id: string
-  rule: string
+  id: string;
+  rule: string;
   /** 出现在哪个扫描场景（与用例里的 `scene` 一致） */
-  scene: string
+  scene: string;
   /** 登记时的影响等级：实测等级**高于**它 → 失败 */
-  impact: Impact
+  impact: Impact;
   /** 登记时该规则命中的节点数：实测**多于**它 → 失败 */
-  nodes: number
+  nodes: number;
   /** 是什么问题、命中哪些元素、归属哪个工作流 */
-  reason: string
+  reason: string;
 }
 
 /**
@@ -266,7 +276,7 @@ interface RegisteredRule {
  * projects 的 F-20、daily-materials 的 F-31 是同一件事的另外两处。
  * ────────────────────────────────────────────────────────────────────────
  */
-const REGISTRY: RegisteredRule[] = []
+const REGISTRY: RegisteredRule[] = [];
 
 /**
  * ────────────────────────────────────────────────────────────────────────
@@ -287,7 +297,7 @@ const REGISTRY: RegisteredRule[] = []
  * ────────────────────────────────────────────────────────────────────────
  */
 
-const ACTIVE_REGISTRY = REGISTRY
+const ACTIVE_REGISTRY = REGISTRY;
 
 /**
  * 该登记项是否覆盖这个场景。
@@ -296,7 +306,7 @@ const ACTIVE_REGISTRY = REGISTRY
  * 别名会让一条规则在一个场景里命中两条登记项，匹配随即失效（静默放行）。
  */
 function coversScene(entry: RegisteredRule, scene: string): boolean {
-  return entry.scene === scene
+  return entry.scene === scene;
 }
 
 /**
@@ -312,90 +322,106 @@ function reconcile(
   result: AuditResult,
   scene: string,
 ): { unregistered: string[]; grew: string[]; upgraded: string[]; flaky: string[]; seen: string[] } {
-  const unregistered: string[] = []
-  const grew: string[] = []
-  const upgraded: string[] = []
-  const seen: string[] = []
+  const unregistered: string[] = [];
+  const grew: string[] = [];
+  const upgraded: string[] = [];
+  const seen: string[] = [];
 
   // ── 登记表自身的一致性：同一（场景，规则）只能有一条 ──
   // 两条以上时，`find` 永远只命中第一条，其余形同虚设 ——
   // 那是"看起来登记了、实际在放行"，必须当场报出来（而不是等它某天漏掉一个回归）。
-  const flaky: string[] = []
-  const byRule = new Map<string, RegisteredRule[]>()
+  const flaky: string[] = [];
+  const byRule = new Map<string, RegisteredRule[]>();
   for (const entry of ACTIVE_REGISTRY.filter((r) => coversScene(r, scene))) {
-    byRule.set(entry.rule, [...(byRule.get(entry.rule) ?? []), entry])
+    byRule.set(entry.rule, [...(byRule.get(entry.rule) ?? []), entry]);
   }
   for (const [rule, entries] of byRule) {
     if (entries.length > 1 && result.violations.some((v) => v.rule === rule)) {
-      flaky.push(`${scene} / ${rule}：有 ${entries.length} 条登记项（${entries.map((e) => e.id).join('、')}），匹配会有歧义 —— 合并成一条`)
+      flaky.push(
+        `${scene} / ${rule}：有 ${entries.length} 条登记项（${entries.map((e) => e.id).join('、')}），匹配会有歧义 —— 合并成一条`,
+      );
     }
   }
 
   // ── 逐条对账 ──
   for (const violation of result.violations) {
-    const entry = ACTIVE_REGISTRY.find((r) => r.rule === violation.rule && coversScene(r, scene))
+    const entry = ACTIVE_REGISTRY.find((r) => r.rule === violation.rule && coversScene(r, scene));
 
     if (!entry) {
-      const targets = violation.targets.map((t) => `${t.selector} :: ${t.summary}`).join('\n        ')
-      unregistered.push(`${violation.rule} [${violation.impact}] ×${violation.nodes}\n        ${targets}`)
-      continue
+      const targets = violation.targets
+        .map((t) => `${t.selector} :: ${t.summary}`)
+        .join('\n        ');
+      unregistered.push(
+        `${violation.rule} [${violation.impact}] ×${violation.nodes}\n        ${targets}`,
+      );
+      continue;
     }
 
-    seen.push(entry.id)
+    seen.push(entry.id);
     if (violation.nodes > entry.nodes) {
       grew.push(
         `${entry.id} ${violation.rule}：登记上限 ${entry.nodes} 个节点，实测 ${violation.nodes} 个（${violation.targets.map((t) => t.selector).join('、')}）`,
-      )
+      );
     }
     if (impactRank(violation.impact) > impactRank(entry.impact)) {
-      upgraded.push(`${entry.id} ${violation.rule}：等级由 ${entry.impact} 升为 ${violation.impact}`)
+      upgraded.push(
+        `${entry.id} ${violation.rule}：等级由 ${entry.impact} 升为 ${violation.impact}`,
+      );
     }
   }
 
-  return { unregistered, grew, upgraded, flaky, seen }
+  return { unregistered, grew, upgraded, flaky, seen };
 }
 
 /** 一条违规的**证据**（进文档表格、进终端输出、进 JSON 附件） */
 interface ViolationRecord {
-  rule: string
-  impact: string
+  rule: string;
+  impact: string;
   /** axe 的 helpUrl，便于复核规则定义 */
-  helpUrl: string
+  helpUrl: string;
   /** 受影响节点数 */
-  nodes: number
+  nodes: number;
   /** 每个节点的目标选择器 + 失败摘要 + HTML 片段 */
-  targets: { selector: string; summary: string; snippet: string }[]
+  targets: { selector: string; summary: string; snippet: string }[];
 }
 
 interface AuditResult {
-  label: string
-  url: string
+  label: string;
+  url: string;
   /** DOM 元素总数（防空过的证据之一） */
-  nodeCount: number
-  engine: string
-  passes: number
-  inapplicable: number
-  violations: ViolationRecord[]
+  nodeCount: number;
+  engine: string;
+  passes: number;
+  inapplicable: number;
+  violations: ViolationRecord[];
   /** axe 评估过的规则总数（pass + incomplete + inapplicable + violations） */
-  rulesEvaluated: number
+  rulesEvaluated: number;
   /**
    * axe **不敢下结论**的节点（`incomplete`）：绝大多数是"背景是渐变/图片，
    * 对比度算不出来"。它们不是违规，但也**不是通过** —— 是人工复核清单。
    */
-  manualChecks: { rule: string; selector: string; summary: string }[]
+  manualChecks: { rule: string; selector: string; summary: string }[];
 }
 
-type AxeResults = Awaited<ReturnType<AxeBuilder['analyze']>>
+type AxeResults = Awaited<ReturnType<AxeBuilder['analyze']>>;
 
 /** axe 结果 → 精简记录（只留复核需要的字段） */
-function summarize(label: string, url: string, nodeCount: number, results: AxeResults): AuditResult {
+function summarize(
+  label: string,
+  url: string,
+  nodeCount: number,
+  results: AxeResults,
+): AuditResult {
   const manualChecks = (results.incomplete ?? []).flatMap((rule) =>
     (rule.nodes ?? []).map((n) => ({
       rule: rule.id,
       selector: String(n.target[0]),
-      summary: String(n.failureSummary ?? '').split('\n').filter(Boolean)[0] ?? '',
+      summary:
+        String(n.failureSummary ?? '')
+          .split('\n')
+          .filter(Boolean)[0] ?? '',
     })),
-  )
+  );
 
   return {
     label,
@@ -405,7 +431,10 @@ function summarize(label: string, url: string, nodeCount: number, results: AxeRe
     passes: results.passes.length,
     inapplicable: results.inapplicable.length,
     rulesEvaluated:
-      results.passes.length + results.incomplete.length + results.inapplicable.length + results.violations.length,
+      results.passes.length +
+      results.incomplete.length +
+      results.inapplicable.length +
+      results.violations.length,
     violations: results.violations.map((v) => ({
       rule: v.id,
       impact: v.impact ?? 'unknown',
@@ -414,50 +443,58 @@ function summarize(label: string, url: string, nodeCount: number, results: AxeRe
       targets: v.nodes.map((n) => ({
         // target 是选择器数组（frame 路径）；本项目没有 iframe，取第一段即可
         selector: String(n.target[0]),
-        summary: String(n.failureSummary ?? '').split('\n').map((s) => s.trim()).filter(Boolean).join(' '),
-        snippet: String(n.html ?? '').replace(/\s+/g, ' ').slice(0, 200),
+        summary: String(n.failureSummary ?? '')
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join(' '),
+        snippet: String(n.html ?? '')
+          .replace(/\s+/g, ' ')
+          .slice(0, 200),
       })),
     })),
     manualChecks,
-  }
+  };
 }
 
 /** 打印成人能读的一段（Playwright 的 list reporter 会把它带到终端） */
 function printAudit(result: AuditResult): void {
-  const violationNodes = result.violations.reduce((sum, v) => sum + v.nodes, 0)
+  const violationNodes = result.violations.reduce((sum, v) => sum + v.nodes, 0);
   const lines: string[] = [
     '',
     `── a11y 扫描：${result.label} ─────────────────────────────`,
     `   URL        ${result.url}`,
     `   DOM 元素    ${result.nodeCount}   （${result.engine}，tags: ${AXE_TAGS.join(', ')}）`,
     `   规则        共 ${result.rulesEvaluated}：通过 ${result.passes} / 违规 ${result.violations.length}（${violationNodes} 节点）/ 需人工确认 ${result.manualChecks.length} / 不适用 ${result.inapplicable}`,
-  ]
+  ];
   if (result.violations.length === 0) {
-    lines.push('   违规详情    无')
+    lines.push('   违规详情    无');
   } else {
-    lines.push(`   违规详情    ${result.violations.length} 条规则 / ${violationNodes} 个节点`)
+    lines.push(`   违规详情    ${result.violations.length} 条规则 / ${violationNodes} 个节点`);
     for (const v of result.violations) {
-      lines.push(`     • [${v.impact}] ${v.rule} ×${v.nodes}   ${v.helpUrl}`)
+      lines.push(`     • [${v.impact}] ${v.rule} ×${v.nodes}   ${v.helpUrl}`);
       for (const t of v.targets.slice(0, 4)) {
-        lines.push(`         ${t.selector}`)
-        lines.push(`           ${t.summary}`)
+        lines.push(`         ${t.selector}`);
+        lines.push(`           ${t.summary}`);
       }
-      if (v.targets.length > 4) lines.push(`         …另有 ${v.targets.length - 4} 个节点`)
+      if (v.targets.length > 4) lines.push(`         …另有 ${v.targets.length - 4} 个节点`);
     }
   }
   if (result.manualChecks.length > 0) {
     // 这些**不是**通过：axe 判不了（典型是背景是渐变/图片，对比度算不出来）。
     // 打进终端是为了让"还有多少东西要人眼看"这件事在每次运行时都可见 ——
     // 否则 §4 的人工清单会慢慢被当成"已经覆盖了"。
-    lines.push(`   需人工确认  ${result.manualChecks.length} 个节点（axe 判不了）：`)
+    lines.push(`   需人工确认  ${result.manualChecks.length} 个节点（axe 判不了）：`);
     for (const check of result.manualChecks.slice(0, 6)) {
-      lines.push(`     ? ${check.rule} @ ${check.selector}`)
+      lines.push(`     ? ${check.rule} @ ${check.selector}`);
     }
     if (result.manualChecks.length > 6) {
-      lines.push(`     ? …另有 ${result.manualChecks.length - 6} 个（完整清单见本次运行的 JSON 附件）`)
+      lines.push(
+        `     ? …另有 ${result.manualChecks.length - 6} 个（完整清单见本次运行的 JSON 附件）`,
+      );
     }
   }
-  console.log(lines.join('\n'))
+  console.log(lines.join('\n'));
 }
 
 /**
@@ -467,22 +504,22 @@ function printAudit(result: AuditResult): void {
  */
 interface ContrastMeasurement {
   /** 命中的元素（tag + id + class） */
-  target: string
+  target: string;
   /** 元素文本（用于人核对量的是哪一个徽章） */
-  text: string
+  text: string;
   /** 计算后的前景色 */
-  color: string
+  color: string;
   /** 逐层合成后的**有效**背景色 */
-  background: string
+  background: string;
   /** 那个背景来自哪一层（谁真正决定了对比度） */
-  backgroundFrom: string
-  fontSize: string
-  fontWeight: string
+  backgroundFrom: string;
+  fontSize: string;
+  fontWeight: string;
   /** 该字号/字重下 WCAG AA 的门槛（大文本 3，正文 4.5） */
-  required: number
+  required: number;
   /** 实测对比度 */
-  ratio: number
-  passesAA: boolean
+  ratio: number;
+  passesAA: boolean;
 }
 
 /**
@@ -518,92 +555,94 @@ interface ContrastMeasurement {
 async function measureContrast(locator: Locator): Promise<ContrastMeasurement[]> {
   return locator.evaluateAll((elements) => {
     interface Rgba {
-      r: number
-      g: number
-      b: number
-      a: number
+      r: number;
+      g: number;
+      b: number;
+      a: number;
     }
 
     const parse = (value: string): Rgba | null => {
-      const match = value.match(/rgba?\(([^)]+)\)/)
-      if (!match) return null
-      const parts = match[1].split(',').map((part) => Number.parseFloat(part.trim()))
-      if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return null
-      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 }
-    }
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(',').map((part) => Number.parseFloat(part.trim()));
+      if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return null;
+      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+    };
 
     const channel = (value: number): number => {
-      const c = value / 255
-      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-    }
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
     const luminance = (c: Rgba): number =>
-      0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+      0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
     const ratio = (a: Rgba, b: Rgba): number => {
-      const la = luminance(a)
-      const lb = luminance(b)
-      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
-    }
+      const la = luminance(a);
+      const lb = luminance(b);
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    };
 
     /** 元素的可读描述（够人找到它就行，不追求唯一） */
     const describe = (el: Element): string => {
-      const id = el.id ? `#${el.id}` : ''
+      const id = el.id ? `#${el.id}` : '';
       const cls =
         typeof el.className === 'string' && el.className.trim()
           ? `.${el.className.trim().split(/\s+/).join('.')}`
-          : ''
-      return `${el.tagName.toLowerCase()}${id}${cls}`
-    }
-    const format = (c: Rgba): string => `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`
+          : '';
+      return `${el.tagName.toLowerCase()}${id}${cls}`;
+    };
+    const format = (c: Rgba): string =>
+      `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`;
 
     return elements.map((el) => {
-      const style = getComputedStyle(el)
-      const fg = parse(style.color) ?? { r: 0, g: 0, b: 0, a: 1 }
+      const style = getComputedStyle(el);
+      const fg = parse(style.color) ?? { r: 0, g: 0, b: 0, a: 1 };
 
       // 从元素自己往上收集有颜色的背景层，遇到第一个不透明层为止
-      const layers: { color: Rgba; from: string }[] = []
-      let node: Element | null = el
+      const layers: { color: Rgba; from: string }[] = [];
+      let node: Element | null = el;
       while (node) {
-        const bg = parse(getComputedStyle(node).backgroundColor)
+        const bg = parse(getComputedStyle(node).backgroundColor);
         if (bg && bg.a > 0) {
-          layers.push({ color: bg, from: describe(node) })
-          if (bg.a >= 1) break
+          layers.push({ color: bg, from: describe(node) });
+          if (bg.a >= 1) break;
         }
-        node = node.parentElement
+        node = node.parentElement;
       }
 
       // 从最底层往上合成（半透明层压在祖先色上，不是压在白底上）
-      let composed: Rgba = { r: 255, g: 255, b: 255, a: 1 }
+      let composed: Rgba = { r: 255, g: 255, b: 255, a: 1 };
       for (const layer of layers.reverse()) {
-        const a = layer.color.a
+        const a = layer.color.a;
         composed = {
           r: layer.color.r * a + composed.r * (1 - a),
           g: layer.color.g * a + composed.g * (1 - a),
           b: layer.color.b * a + composed.b * (1 - a),
           a: 1,
-        }
+        };
       }
 
-      const size = Number.parseFloat(style.fontSize)
-      const weight = Number.parseInt(style.fontWeight, 10) || 400
+      const size = Number.parseFloat(style.fontSize);
+      const weight = Number.parseInt(style.fontWeight, 10) || 400;
       // WCAG 1.4.3 的"大文本"豁免：≥24px，或 ≥18.66px 且粗体
-      const large = size >= 24 || (size >= 18.66 && weight >= 700)
-      const required = large ? 3 : 4.5
-      const value = ratio(fg, composed)
+      const large = size >= 24 || (size >= 18.66 && weight >= 700);
+      const required = large ? 3 : 4.5;
+      const value = ratio(fg, composed);
 
       return {
         target: describe(el),
         text: (el.textContent ?? '').trim(),
         color: format(fg),
         background: format(composed),
-        backgroundFrom: layers.length > 0 ? layers[layers.length - 1].from : '（没有找到任何背景层，按白底算）',
+        backgroundFrom:
+          layers.length > 0 ? layers[layers.length - 1].from : '（没有找到任何背景层，按白底算）',
         fontSize: style.fontSize,
         fontWeight: style.fontWeight,
         required,
         ratio: Math.round(value * 100) / 100,
         passesAA: value >= required,
-      }
-    })
-  })
+      };
+    });
+  });
 }
 
 /**
@@ -652,27 +691,27 @@ async function findFakeAffordances(page: Page): Promise<string[]> {
       const cls =
         typeof el.className === 'string' && el.className.trim()
           ? `.${el.className.trim().split(/\s+/).join('.')}`
-          : ''
-      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24)
-      return `${el.tagName.toLowerCase()}${cls}${text ? `「${text}」` : ''}`
-    }
+          : '';
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 24);
+      return `${el.tagName.toLowerCase()}${cls}${text ? `「${text}」` : ''}`;
+    };
     /** 真的占了版面（`display:none` / 祖先隐藏的元素不参与判定） */
-    const isVisible = (el: Element): boolean => el.getClientRects().length > 0
+    const isVisible = (el: Element): boolean => el.getClientRects().length > 0;
     /**
      * 浏览器**能**把焦点交给它吗（≈ 会不会出现在 Tab 序列里）。
      * `tabindex="-1"` 刻意不算：它能被 `focus()` 主动聚焦，但 Tab 到不了 ——
      * 这一轮修的所有东西要的正是"Tab 到得了"。
      */
     const isTabbable = (el: Element): boolean => {
-      if (!isVisible(el)) return false
-      if (el.hasAttribute('disabled')) return false
-      const tabindex = el.getAttribute('tabindex')
-      if (tabindex !== null) return Number(tabindex) >= 0
-      const tag = el.tagName.toLowerCase()
-      if (tag === 'a' || tag === 'area') return el.hasAttribute('href')
-      return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea'
-    }
-    const NATIVE_INTERACTIVE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary'])
+      if (!isVisible(el)) return false;
+      if (el.hasAttribute('disabled')) return false;
+      const tabindex = el.getAttribute('tabindex');
+      if (tabindex !== null) return Number(tabindex) >= 0;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'a' || tag === 'area') return el.hasAttribute('href');
+      return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea';
+    };
+    const NATIVE_INTERACTIVE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary']);
 
     /**
      * "手型区域"的最外层根。
@@ -685,35 +724,35 @@ async function findFakeAffordances(page: Page): Promise<string[]> {
      * 有没有可 Tab 的控件 —— 一个区域只报一次。
      */
     const pointerRegionRoot = (el: Element): Element => {
-      let root = el
-      let node = el.parentElement
+      let root = el;
+      let node = el.parentElement;
       while (node && getComputedStyle(node).cursor === 'pointer') {
-        root = node
-        node = node.parentElement
+        root = node;
+        node = node.parentElement;
       }
-      return root
-    }
+      return root;
+    };
 
-    const findings: string[] = []
-    const reportedRegions = new Set<Element>()
+    const findings: string[] = [];
+    const reportedRegions = new Set<Element>();
     for (const el of Array.from(document.querySelectorAll('*'))) {
-      if (!isVisible(el)) continue
-      const tag = el.tagName.toLowerCase()
-      const role = el.getAttribute('role')
-      const tabindex = el.getAttribute('tabindex')
-      const ownTabIndex = tabindex !== null && Number(tabindex) >= 0
-      const nativeInteractive = NATIVE_INTERACTIVE.has(tag)
+      if (!isVisible(el)) continue;
+      const tag = el.tagName.toLowerCase();
+      const role = el.getAttribute('role');
+      const tabindex = el.getAttribute('tabindex');
+      const ownTabIndex = tabindex !== null && Number(tabindex) >= 0;
+      const nativeInteractive = NATIVE_INTERACTIVE.has(tag);
 
       // ① 手型区域里没有任何可 Tab 的控件（自己 / 区域根 / 区域内部都没有）
       if (getComputedStyle(el).cursor === 'pointer') {
-        const root = pointerRegionRoot(el)
+        const root = pointerRegionRoot(el);
         if (!reportedRegions.has(root) && !isTabbable(root)) {
-          const regionHasTabbable = Array.from(root.querySelectorAll('*')).some(isTabbable)
+          const regionHasTabbable = Array.from(root.querySelectorAll('*')).some(isTabbable);
           if (!regionHasTabbable) {
-            reportedRegions.add(root)
+            reportedRegions.add(root);
             findings.push(
               `① 手型光标（cursor:pointer）但整个区域里没有可 Tab 的控件：${describe(root)}`,
-            )
+            );
           }
         }
         // 注意：这里**不** `continue` —— 区域根自己可能还是 ②/③ 的命中对象
@@ -721,18 +760,18 @@ async function findFakeAffordances(page: Page): Promise<string[]> {
 
       // ② tabindex 挂在非控件上（Tab 停在"不是控件的东西"上）
       if (ownTabIndex && !nativeInteractive && !role) {
-        findings.push(`② tabindex 挂在非控件上（Tab 会停在它上面，但它不是控件）：${describe(el)}`)
-        continue
+        findings.push(`② tabindex 挂在非控件上（Tab 会停在它上面，但它不是控件）：${describe(el)}`);
+        continue;
       }
 
       // ③ role=button / role=link 挂在非原生元素上（"不是按钮的按钮"）
       if ((role === 'button' || role === 'link') && !nativeInteractive) {
-        findings.push(`③ 假控件角色（role="${role}" 挂在 <${tag}> 上）：${describe(el)}`)
-        continue
+        findings.push(`③ 假控件角色（role="${role}" 挂在 <${tag}> 上）：${describe(el)}`);
+        continue;
       }
     }
-    return findings
-  })
+    return findings;
+  });
 }
 
 /**
@@ -756,41 +795,46 @@ async function findFakeAffordances(page: Page): Promise<string[]> {
  * ⚠️ 弹窗场景（`learning-goals-create`）**不能**用这个锚点：遮罩盖住了 h1，
  * 点击会被拦截。那一条改用"弹窗自己承诺的东西"（`role`/`aria-modal`/Esc）来测。
  */
-async function expectReachableByTab(page: Page, target: Locator, label: string, maxTabs = 80): Promise<void> {
-  const handle = await target.first().elementHandle()
-  expect(handle, `${label}：目标元素不在 DOM 里，键盘门禁不成立`).not.toBeNull()
+async function expectReachableByTab(
+  page: Page,
+  target: Locator,
+  label: string,
+  maxTabs = 80,
+): Promise<void> {
+  const handle = await target.first().elementHandle();
+  expect(handle, `${label}：目标元素不在 DOM 里，键盘门禁不成立`).not.toBeNull();
 
   // 起点：页面标题（不可聚焦）—— 见上面的说明
-  await page.locator('main h1').first().click()
+  await page.locator('main h1').first().click();
 
-  let tabs = 0
+  let tabs = 0;
   for (let i = 1; i <= maxTabs; i++) {
-    await page.keyboard.press('Tab')
-    tabs = i
-    if (await handle!.evaluate((el) => el === document.activeElement)) break
+    await page.keyboard.press('Tab');
+    tabs = i;
+    if (await handle!.evaluate((el) => el === document.activeElement)) break;
   }
 
-  const landedOnTarget = await handle!.evaluate((el) => el === document.activeElement)
+  const landedOnTarget = await handle!.evaluate((el) => el === document.activeElement);
   const landed = landedOnTarget
     ? ''
     : await page.evaluate(() => {
-        const el = document.activeElement as HTMLElement | null
-        if (!el) return '（焦点已经不在页面里）'
+        const el = document.activeElement as HTMLElement | null;
+        if (!el) return '（焦点已经不在页面里）';
         const cls =
           typeof el.className === 'string' && el.className.trim()
             ? `.${el.className.trim().split(/\s+/).join('.')}`
-            : ''
-        return `${el.tagName.toLowerCase()}${cls}`
-      })
+            : '';
+        return `${el.tagName.toLowerCase()}${cls}`;
+      });
 
   expect(
     landedOnTarget,
     `${label}：从页面标题起按了 ${tabs} 次 Tab，焦点都没有落到它上面（最后停在 ${landed}）` +
       ' —— 也就是说**键盘到不了它**。修法是把它换成真控件（button / Link），' +
       '而不是给它加 role + tabIndex（本项目四处先例：F-09/F-17/F-30/F-34）。',
-  ).toBe(true)
+  ).toBe(true);
 
-  console.log(`   [键盘] ${label}：第 ${tabs} 次 Tab 落到它上面`)
+  console.log(`   [键盘] ${label}：第 ${tabs} 次 Tab 落到它上面`);
 }
 
 /**
@@ -823,41 +867,41 @@ async function expectFontSizeUnchanged(
   previousLevel: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6',
 ): Promise<void> {
   /** UA 样式表里的 `font-size`（相对父元素的 em） */
-  const UA_EM: Record<string, number> = { h1: 2, h2: 1.5, h3: 1.17, h4: 1, h5: 0.83, h6: 0.67 }
+  const UA_EM: Record<string, number> = { h1: 2, h2: 1.5, h3: 1.17, h4: 1, h5: 0.83, h6: 0.67 };
   const measured = await target.evaluate((el, ratio) => {
-    const parent = el.parentElement
-    const parentSize = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : 16
+    const parent = el.parentElement;
+    const parentSize = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : 16;
     return {
       actual: Number.parseFloat(getComputedStyle(el).fontSize),
       expected: Math.round(parentSize * ratio * 100) / 100,
       parentSize,
       level: el.tagName.toLowerCase(),
-    }
-  }, UA_EM[previousLevel])
+    };
+  }, UA_EM[previousLevel]);
 
   console.log(
     `   [字号] ${label}：<${measured.level}> 实测 ${measured.actual}px，` +
       `改动前的 <${previousLevel}> 在同一个父元素（${measured.parentSize}px）下是 ${measured.expected}px`,
-  )
+  );
   expect(
     measured.actual,
     `${label}：改了标题级别之后字号跟着变了（实测 ${measured.actual}px，` +
       `改动前的 <${previousLevel}> 是 ${measured.expected}px）—— ` +
       '标题级别与视觉大小是两件事，改级别时必须把字号显式钉住' +
       '（本项目的先例：F-18 的 `fontSize: 1.17rem`、card-detail 的 `1rem`…）。',
-  ).toBeCloseTo(measured.expected, 1)
+  ).toBeCloseTo(measured.expected, 1);
 }
 
 /** 场景参数 */
 interface SceneOptions {
-  scene: string
+  scene: string;
   /** 该页**独有**的渲染标记：它出现才算"页面真的渲染出来了" */
-  ready: () => Promise<void>
+  ready: () => Promise<void>;
   /**
    * DOM 元素数下限。取值依据：实测值往下留约 30% 余量（写死实测值会让
    * 无关的样式调整把测试弄红；留太多则失去"页面没渲染出来"的保护）。
    */
-  minNodes: number
+  minNodes: number;
 }
 
 /**
@@ -866,53 +910,66 @@ interface SceneOptions {
  * @returns 精简后的审计结果（调用方可以再断言别的）
  */
 async function auditScene(page: Page, log: A11yStubLog, opts: SceneOptions): Promise<AuditResult> {
-  await opts.ready()
+  await opts.ready();
 
   // 数据回来后常还有一次重排（列表、统计、力导向图）。
   // 刻意**不**用 `waitForLoadState('networkidle')`：Vite 的 HMR 常驻连接会让它永不成立。
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(500);
 
-  const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
-  const nodeCount = await page.evaluate(() => document.querySelectorAll('*').length)
-  const result = summarize(opts.scene, page.url(), nodeCount, results)
+  const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
+  const nodeCount = await page.evaluate(() => document.querySelectorAll('*').length);
+  const result = summarize(opts.scene, page.url(), nodeCount, results);
 
   await test.info().attach(`a11y-${opts.scene}.json`, {
     body: JSON.stringify(result, null, 2),
     contentType: 'application/json',
-  })
-  printAudit(result)
+  });
+  printAudit(result);
 
   // ── 防空过 ──
   expect(
     nodeCount,
     `${opts.scene}: DOM 元素太少（${nodeCount} < ${opts.minNodes}），页面可能没渲染出来 —— 此时"0 违规"没有意义`,
-  ).toBeGreaterThanOrEqual(opts.minNodes)
-  expect(result.passes, `${opts.scene}: axe 一条规则都没通过 —— 扫描对象可能是空的，结果不可信`).toBeGreaterThan(0)
-  expect(result.rulesEvaluated, `${opts.scene}: axe 评估的规则数异常偏少`).toBeGreaterThan(20)
-  expect(log.unmatched, `${opts.scene}: 有接口没桩（见 e2e/a11y-fixtures.ts），该区域没有被审计到`).toEqual([])
-  expect(log.pageErrors, `${opts.scene}: 页面出现未捕获异常，渲染结果不完整`).toEqual([])
+  ).toBeGreaterThanOrEqual(opts.minNodes);
+  expect(
+    result.passes,
+    `${opts.scene}: axe 一条规则都没通过 —— 扫描对象可能是空的，结果不可信`,
+  ).toBeGreaterThan(0);
+  expect(result.rulesEvaluated, `${opts.scene}: axe 评估的规则数异常偏少`).toBeGreaterThan(20);
+  expect(
+    log.unmatched,
+    `${opts.scene}: 有接口没桩（见 e2e/a11y-fixtures.ts），该区域没有被审计到`,
+  ).toEqual([]);
+  expect(log.pageErrors, `${opts.scene}: 页面出现未捕获异常，渲染结果不完整`).toEqual([]);
 
   // ── 与登记表对账 ──
-  const { unregistered, grew, upgraded, flaky, seen } = reconcile(result, opts.scene)
+  const { unregistered, grew, upgraded, flaky, seen } = reconcile(result, opts.scene);
 
   if (seen.length > 0) {
-    console.log(`   [已登记] ${[...new Set(seen)].sort().join(', ')} —— 逐条理由见 docs/a11y-audit.md §3`)
+    console.log(
+      `   [已登记] ${[...new Set(seen)].sort().join(', ')} —— 逐条理由见 docs/a11y-audit.md §3`,
+    );
   }
 
-  expect(flaky, `${opts.scene}: 登记表在（场景，规则）粒度上不唯一，匹配会失效`).toEqual([])
-  expect(unregistered, `${opts.scene}: 出现**未登记**的违规（新回归，或需要补进 REGISTRY 并写明理由）`).toEqual([])
-  expect(grew, `${opts.scene}: 已登记违规的**影响面扩大**了（同一规则命中更多元素）`).toEqual([])
-  expect(upgraded, `${opts.scene}: 已登记违规的**严重度上升**了`).toEqual([])
+  expect(flaky, `${opts.scene}: 登记表在（场景，规则）粒度上不唯一，匹配会失效`).toEqual([]);
+  expect(
+    unregistered,
+    `${opts.scene}: 出现**未登记**的违规（新回归，或需要补进 REGISTRY 并写明理由）`,
+  ).toEqual([]);
+  expect(grew, `${opts.scene}: 已登记违规的**影响面扩大**了（同一规则命中更多元素）`).toEqual([]);
+  expect(upgraded, `${opts.scene}: 已登记违规的**严重度上升**了`).toEqual([]);
 
   // ── F-37：键盘可达性扫描（**每个场景都跑**，与 axe 无关）──
   //
   // 放在每个场景里而不是"只在我改过的那几页"：判据来自 `frontend/src/**`
   // 的写法，不来自某个页面。这一轮就是靠它在本轮之前**没有任何场景覆盖**的
   // 页面上又找出 4 处同类问题（见 findFakeAffordances 的说明）。
-  const fakeAffordances = await findFakeAffordances(page)
+  const fakeAffordances = await findFakeAffordances(page);
   if (fakeAffordances.length > 0) {
-    console.log(`   [键盘] ${opts.scene}: 命中 ${fakeAffordances.length} 处"看起来能点、键盘到不了"`)
-    for (const item of fakeAffordances) console.log(`        ${item}`)
+    console.log(
+      `   [键盘] ${opts.scene}: 命中 ${fakeAffordances.length} 处"看起来能点、键盘到不了"`,
+    );
+    for (const item of fakeAffordances) console.log(`        ${item}`);
   }
   expect(
     fakeAffordances,
@@ -920,9 +977,9 @@ async function auditScene(page: Page, log: A11yStubLog, opts: SceneOptions): Pro
       'axe 结构上报不出这一类（它不模拟 Tab），所以只有这条扫描守着。' +
       '修法是换成真控件（button / Link）或把行为移到真控件上，' +
       '**不要**给 div 加 role + tabIndex。',
-  ).toEqual([])
+  ).toEqual([]);
 
-  return result
+  return result;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -937,39 +994,39 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 属于另一个渲染分支 —— 只扫初始态等于没扫过失败态。
    */
   test('登录页：初始态与登录失败态', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
 
     await auditScene(page, log, {
       scene: 'login',
       ready: async () => {
-        await page.goto('/', { waitUntil: 'domcontentloaded' })
-        await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible()
+        await page.goto('/', { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible();
       },
       // 实测 48（表单很小，这是真实值，不是渲染失败）
       minNodes: 35,
-    })
+    });
 
     // 失败态需要**真的**拿到 401：页面上那个 `role="alert"` 只在凭据被拒时渲染。
     // 桩必须在这里换成 401（默认桩为了能进到应用里，给的是成功响应）——
     // 否则这条用例会停在"alert 一直不出现"，而失败信息不会告诉你原因。
-    await page.unroute((url) => isApiUrl(url))
+    await page.unroute((url) => isApiUrl(url));
     const errorLog = await installA11yStubs(page, {
       '/api/auth/login': { __status: 401, detail: 'Incorrect email or password' },
-    })
+    });
 
     await auditScene(page, errorLog, {
       scene: 'login-error',
       ready: async () => {
         // 真实交互走到失败态：空表单会被浏览器原生约束拦下（见 login-form.spec.ts），
         // 所以必须填非法凭据才会真的发出请求、拿到 401
-        await page.locator('#email').fill('e2e@example.com')
-        await page.locator('#password').fill('wrong-password')
-        await page.getByRole('button', { name: '登录' }).click()
-        await expect(page.getByRole('alert')).toBeVisible()
+        await page.locator('#email').fill('e2e@example.com');
+        await page.locator('#password').fill('wrong-password');
+        await page.getByRole('button', { name: '登录' }).click();
+        await expect(page.getByRole('alert')).toBeVisible();
       },
       minNodes: 35,
-    })
-  })
+    });
+  });
 
   /**
    * 已登录外壳 + 仪表盘：侧边栏（导航）、欢迎区、统计卡、最近笔记、趋势图。
@@ -986,72 +1043,92 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    *    与 `div[onClick]`（根本没有 role/tabIndex）—— **axe 两处都没报过**。
    */
   test('已登录外壳与仪表盘', async ({ page }) => {
-    const log = await installA11yStubs(page, { '/api/goals/daily-plan': DAILY_PLAN })
+    const log = await installA11yStubs(page, { '/api/goals/daily-plan': DAILY_PLAN });
     await auditScene(page, log, {
       scene: 'dashboard',
       ready: async () => {
-        await loginAs(page, '/')
-        await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible()
+        await loginAs(page, '/');
+        await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '最近笔记' })).toBeVisible();
         // 推荐任务整块：只在 `total_count > 0` 时渲染（本轮才第一次出现）
-        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible()
-        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible()
+        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible();
+        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible();
       },
       // 实测 208（旧基线）→ 231（加上推荐任务整块之后）
       minNodes: 140,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）──
-    await expectReachableByTab(page, page.getByRole('link', { name: '今日学习目标' }), '仪表盘：卡片标题「今日学习目标」')
-    await expectReachableByTab(page, page.getByRole('link', { name: '均充的适用场景' }), '仪表盘：薄弱点第一行')
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '今日学习目标' }),
+      '仪表盘：卡片标题「今日学习目标」',
+    );
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '均充的适用场景' }),
+      '仪表盘：薄弱点第一行',
+    );
     await expectReachableByTab(
       page,
       page.getByRole('button', { name: '复习「均充的适用场景」' }),
       '仪表盘：每日推荐任务里可点的那一行',
-    )
+    );
 
     // ── 「改级别不改外观」：这四张卡片的标题由 h3 提升为 h2（F-07）──
     // 字号在 tsx 里显式钉成 `1.17em`（= UA 的 `h3` 字号），这条断言守着它。
-    await expectFontSizeUnchanged(page.getByRole('heading', { name: '今日学习目标' }), '仪表盘「今日学习目标」', 'h3')
-    await expectFontSizeUnchanged(page.getByRole('heading', { name: '每日推荐任务' }), '仪表盘「每日推荐任务」', 'h3')
+    await expectFontSizeUnchanged(
+      page.getByRole('heading', { name: '今日学习目标' }),
+      '仪表盘「今日学习目标」',
+      'h3',
+    );
+    await expectFontSizeUnchanged(
+      page.getByRole('heading', { name: '每日推荐任务' }),
+      '仪表盘「每日推荐任务」',
+      'h3',
+    );
     await expectFontSizeUnchanged(
       page.getByRole('heading', { name: /^今日待复习/ }),
       '仪表盘「今日待复习: N 题」',
       'h3',
-    )
-    await expectFontSizeUnchanged(page.getByRole('heading', { name: '薄弱点', exact: true }), '仪表盘「薄弱点」', 'h3')
-  })
+    );
+    await expectFontSizeUnchanged(
+      page.getByRole('heading', { name: '薄弱点', exact: true }),
+      '仪表盘「薄弱点」',
+      'h3',
+    );
+  });
 
   /** 笔记列表：搜索框、角色 Tab、筛选标签、笔记卡片（含 `role="button"` 的卡片本身） */
   test('笔记列表', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'notes-list',
       ready: async () => {
-        await loginAs(page, '/notes')
+        await loginAs(page, '/notes');
         // 空态的页面结构完全不同：必须等到"共 N 条"与非空列表一起出现，
         // 否则扫的是空状态，卡片上的问题一个都扫不到
-        await expect(page.getByText('共 2 条')).toBeVisible()
-        await expect(page.getByText('锂离子电池的浮充与均充')).toBeVisible()
+        await expect(page.getByText('共 2 条')).toBeVisible();
+        await expect(page.getByText('锂离子电池的浮充与均充')).toBeVisible();
       },
       // 实测 143
       minNodes: 90,
-    })
-  })
+    });
+  });
 
   /** 笔记详情：Markdown 渲染结果（标题层级、链接、代码）、元信息栏、关联区 */
   test('笔记详情', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'note-detail',
       ready: async () => {
-        await loginAs(page, '/notes/note-1')
-        await expect(page.getByRole('heading', { name: /浮充与均充/ }).first()).toBeVisible()
+        await loginAs(page, '/notes/note-1');
+        await expect(page.getByRole('heading', { name: /浮充与均充/ }).first()).toBeVisible();
       },
       // 实测 158
       minNodes: 110,
-    })
-  })
+    });
+  });
 
   /**
    * 卡片复习：正面（未翻面）与背面（已翻面 + 自评按钮 + 调度反馈）。
@@ -1060,44 +1137,44 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * —— 而那正是这一页最需要键盘与屏幕阅读器可用的一段。
    */
   test('卡片复习：正面与背面', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
 
     await auditScene(page, log, {
       scene: 'card-review-front',
       ready: async () => {
-        await loginAs(page, '/review/cards')
-        await expect(page.getByRole('button', { name: '显示答案' })).toBeVisible()
+        await loginAs(page, '/review/cards');
+        await expect(page.getByRole('button', { name: '显示答案' })).toBeVisible();
       },
       // 实测 123
       minNodes: 85,
-    })
+    });
 
     await auditScene(page, log, {
       scene: 'card-review-back',
       ready: async () => {
-        await page.getByRole('button', { name: '显示答案' }).click()
-        await expect(page.getByText('刚才想得起来吗？')).toBeVisible()
+        await page.getByRole('button', { name: '显示答案' }).click();
+        await expect(page.getByText('刚才想得起来吗？')).toBeVisible();
       },
       // 实测 140
       minNodes: 85,
-    })
-  })
+    });
+  });
 
   /** 知识图谱：工具栏、搜索框、过滤器、侧栏统计（力导向图本体是 canvas，见文档 §4） */
   test('知识图谱', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'knowledge-graph',
       ready: async () => {
-        await loginAs(page, '/graph')
-        await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible()
+        await loginAs(page, '/graph');
+        await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible();
         // 桩给了 4 个节点 → 工具栏的计数文案必须体现出来，
         // 否则说明图谱数据没进页面（canvas 空转，审计等于扫了个空壳）
-        await expect(page.getByText(/4 节点/)).toBeVisible()
+        await expect(page.getByText(/4 节点/)).toBeVisible();
       },
       // 实测 183
       minNodes: 130,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：「关系类型（点击高亮）」图例 ──
     // 原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**。
@@ -1107,23 +1184,23 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('button', { name: '相关' }),
       '知识图谱：关系类型图例（点击高亮）',
-    )
-  })
+    );
+  });
 
   /** 项目页：标题、新建表单、项目卡片、说明区 */
   test('项目页', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'projects',
       ready: async () => {
-        await loginAs(page, '/projects')
-        await expect(page.getByRole('heading', { name: '项目', exact: true })).toBeVisible()
-        await expect(page.getByText('蓄电池基础')).toBeVisible()
+        await loginAs(page, '/projects');
+        await expect(page.getByRole('heading', { name: '项目', exact: true })).toBeVisible();
+        await expect(page.getByText('蓄电池基础')).toBeVisible();
       },
       // 实测 139
       minNodes: 100,
-    })
-  })
+    });
+  });
 
   // ────────────────────────────────────────────────────────────────────────
   // 覆盖轮（见 docs/a11y-audit.md §9）：把"从没被渲染过"的状态与页面补进来
@@ -1146,22 +1223,22 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * `expandedFolderId === folder.id` 分支里 —— 只扫折叠态等于只扫了文件夹头。
    */
   test('今日资料：文件夹列表与展开后的资料', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'daily-materials',
       ready: async () => {
-        await loginAs(page, '/daily')
-        await expect(page.getByRole('heading', { name: '今日资料' })).toBeVisible()
+        await loginAs(page, '/daily');
+        await expect(page.getByRole('heading', { name: '今日资料' })).toBeVisible();
         // 文件夹头是 `div[role="button"]`（它里面还有真按钮 —— 见登记表）
-        await page.getByRole('button', { name: /2026-01-05 学习资料/ }).click()
+        await page.getByRole('button', { name: /2026-01-05 学习资料/ }).click();
         // 展开后才会请求 /api/folders/folder-1：这三个标记都来自那一份数据
-        await expect(page.getByText('浮充与均充的讲义.pdf')).toBeVisible()
-        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible()
-        await expect(page.getByRole('button', { name: '上传文件' })).toBeVisible()
+        await expect(page.getByText('浮充与均充的讲义.pdf')).toBeVisible();
+        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible();
+        await expect(page.getByRole('button', { name: '上传文件' })).toBeVisible();
       },
       // 实测 157
       minNodes: 110,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）──
     // 资料行原来是 `div.card[role="button"][tabIndex=0]` + 只认 `Enter` 的
@@ -1171,13 +1248,13 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('link', { name: '浮充与均充的讲义.pdf' }),
       '今日资料：展开后的资料行',
-    )
+    );
     // 文件夹头（F-30 那一次修的）也一起守着 —— 它是这一页的第一个真控件
     await expectReachableByTab(
       page,
       page.getByRole('button', { name: /2026-01-05 学习资料/ }),
       '今日资料：文件夹头（折叠/展开）',
-    )
+    );
 
     // ── 「改级别不改外观」：文件夹名由 h3 提升为 h2（F-31）──
     // 字号同样显式钉成 `1.17em`；文件夹里的资料名由 h4 提升为 h3（0.9rem 本来就显式写着）
@@ -1185,8 +1262,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page.getByRole('heading', { name: '2026-01-05 学习资料' }),
       '今日资料「文件夹名」',
       'h3',
-    )
-  })
+    );
+  });
 
   /**
    * 今日学习（`TodayLearn`）入口页。
@@ -1201,25 +1278,25 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     const log = await installA11yStubs(page, {
       '/api/goals/daily-plan': DAILY_PLAN,
       '/api/report/weak-points': WEAK_POINTS,
-    })
+    });
     await auditScene(page, log, {
       scene: 'today-learn',
       ready: async () => {
-        await loginAs(page, '/today')
-        await expect(page.getByRole('heading', { name: '今日学习' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible()
-        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible()
-        await expect(page.getByRole('heading', { name: '今日报告 (2026-01-06)' })).toBeVisible()
+        await loginAs(page, '/today');
+        await expect(page.getByRole('heading', { name: '今日学习' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible();
+        await expect(page.getByText('复习「均充的适用场景」')).toBeVisible();
+        await expect(page.getByRole('heading', { name: '今日报告 (2026-01-06)' })).toBeVisible();
         // 待复习卡片的计数来自 /api/review/stats（12）：0 的话整块换成空状态
-        await expect(page.getByText('今日待复习: 12 题')).toBeVisible()
+        await expect(page.getByText('今日待复习: 12 题')).toBeVisible();
         // `exact: true`：推荐任务的类别卡片里也有一个叫「薄弱点」的 h3
         // （"薄弱点共 1 项"），不写 exact 会被 Playwright 判成 strict 冲突
-        await expect(page.getByRole('heading', { name: '薄弱点', exact: true })).toBeVisible()
-        await expect(page.getByText('错3次 | 0.4%')).toBeVisible()
+        await expect(page.getByRole('heading', { name: '薄弱点', exact: true })).toBeVisible();
+        await expect(page.getByText('错3次 | 0.4%')).toBeVisible();
       },
       // 实测 171
       minNodes: 120,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：这一页此前有两处键盘到不了的地方 ──
     // 薄弱点每一行是 `div[onClick]`；推荐任务的每一行是
@@ -1228,8 +1305,12 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('button', { name: '复习「均充的适用场景」' }),
       '今日学习：推荐任务里可点的那一行',
-    )
-    await expectReachableByTab(page, page.getByRole('link', { name: '均充的适用场景' }), '今日学习：薄弱点第一行')
+    );
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '均充的适用场景' }),
+      '今日学习：薄弱点第一行',
+    );
 
     // ── 量出三个优先级徽章（高/中/低）的真实色值与比值，并**把阈值钉成门禁** ──
     //
@@ -1239,15 +1320,13 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
     // （没有 violation 就没有可登记的条目，连"上限"都写不出来）。
     // 这一条**只有实测守得住**，所以修色值与加断言必须同时交付：
     // 否则"3.68 → 5.44"这件事没有任何一层能验证，修好与没修在报告上长得一样。
-    const priorityBadges = await measureContrast(
-      page.locator('.card').getByText(/^[高中低]$/),
-    )
+    const priorityBadges = await measureContrast(page.locator('.card').getByText(/^[高中低]$/));
     expect(
       priorityBadges.map((m) => m.text),
       '三个优先级徽章没量全，本场景的证据不成立',
-    ).toEqual(['高', '中', '低'])
+    ).toEqual(['高', '中', '低']);
     for (const m of priorityBadges) {
-      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true)
+      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true);
       // ★ 断言的是**阈值**（`measureContrast` 按字号/字重算出的 WCAG AA 门槛，
       //   这里是 4.5:1），不是"当前值等于多少"。
       //   写成"现在是 3.68"会给下一轮修好它的人埋一个必红的测试；
@@ -1257,7 +1336,7 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         `${m.text}（优先级徽章）：实测 ${m.ratio}:1 < 要求 ${m.required}:1。` +
           `色值来自 TodayLearn.tsx 的 priorityMeta（白字压色块），` +
           `axe **结构上**判不了单字符文本，所以只有这条断言守着它。`,
-      ).toBeGreaterThanOrEqual(m.required)
+      ).toBeGreaterThanOrEqual(m.required);
     }
 
     console.log(
@@ -1271,7 +1350,7 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         ),
         '   来源：TodayLearn.tsx 的 priorityMeta（#f44336 / #ff9800 / #10b981）+ 白字',
       ].join('\n'),
-    )
+    );
 
     await test.info().attach('a11y-today-learn-badges.json', {
       body: JSON.stringify(
@@ -1286,27 +1365,27 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         2,
       ),
       contentType: 'application/json',
-    })
-  })
+    });
+  });
 
   /** 上传页（`Upload`）：拖拽区（`role="button"` + `aria-label`）、解析方式、项目标签、笔记类型 */
   test('上传页：拖拽上传区与三个设置卡片', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'upload',
       ready: async () => {
-        await loginAs(page, '/upload')
-        await expect(page.getByRole('heading', { name: '上传学习资料' })).toBeVisible()
+        await loginAs(page, '/upload');
+        await expect(page.getByRole('heading', { name: '上传学习资料' })).toBeVisible();
         // 这一页的主控件就是那个拖拽区（本轮从 `div[role="button"]`
         // 换成**真 `<button>`**：Enter 与 Space 都生效，见下面键盘走查）
-        await expect(page.getByRole('button', { name: '点击或拖拽文件上传' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '点击或拖拽文件上传' })).toBeVisible();
         // 项目标签来自 /api/projects：桩回空数组时这里只剩一句"暂无项目"
-        await expect(page.getByRole('button', { name: '蓄电池基础' })).toBeVisible()
-        await expect(page.getByRole('button', { name: '云端解析' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '蓄电池基础' })).toBeVisible();
+        await expect(page.getByRole('button', { name: '云端解析' })).toBeVisible();
       },
       // 实测 128
       minNodes: 90,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：拖拽区原来是 `div[role="button"][tabIndex=0]`
     // + 只认 `Enter` 的 `onKeyDown`（axe 报不出来：里面没有可聚焦后代）。
@@ -1315,8 +1394,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('button', { name: '点击或拖拽文件上传' }),
       '上传页：拖拽上传区',
-    )
-  })
+    );
+  });
 
   /**
    * 答题复习（`Review`）：选择题 + 难度徽章。
@@ -1326,20 +1405,22 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 本轮把它变成场景 —— 探针结论与门禁结论的区别就在这里。
    */
   test('答题复习：选择题（含难度徽章）', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'review',
       ready: async () => {
-        await loginAs(page, '/review')
-        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
-        await expect(page.getByRole('button', { name: '浮充长期恒压补偿自放电，均充短时升压校正' })).toBeVisible()
+        await loginAs(page, '/review');
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible();
+        await expect(
+          page.getByRole('button', { name: '浮充长期恒压补偿自放电，均充短时升压校正' }),
+        ).toBeVisible();
         // 复习元信息（已复习次数 / 间隔）来自 /api/review/due 的字段
-        await expect(page.getByText('已复习 3 次 | 间隔 6 天')).toBeVisible()
+        await expect(page.getByText('已复习 3 次 | 间隔 6 天')).toBeVisible();
       },
       // 实测 126
       minNodes: 85,
-    })
-  })
+    });
+  });
 
   /**
    * 笔记状态：`converting` / `cleaning`（= `.status-converting` / `.status-cleaning`）。
@@ -1351,31 +1432,33 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 让下一轮修它的人有一个可以对照的数字，而不是一句"大概不够"。
    */
   test('笔记状态：转换中 / 清洗中（.status-converting / .status-cleaning）', async ({ page }) => {
-    const log = await installA11yStubs(page, { '/api/notes': notesList(PROCESSING_NOTES) })
+    const log = await installA11yStubs(page, { '/api/notes': notesList(PROCESSING_NOTES) });
     await auditScene(page, log, {
       scene: 'notes-status-processing',
       ready: async () => {
-        await loginAs(page, '/notes')
-        await expect(page.getByText('共 2 条')).toBeVisible()
-        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible()
-        await expect(page.getByText('待清洗：浮充与均充对照表.pdf')).toBeVisible()
+        await loginAs(page, '/notes');
+        await expect(page.getByText('共 2 条')).toBeVisible();
+        await expect(page.getByText('待转换：蓄电池巡检记录.docx')).toBeVisible();
+        await expect(page.getByText('待清洗：浮充与均充对照表.pdf')).toBeVisible();
         // 这两个类名是**本场景存在的全部理由**：等到它们真的挂上 DOM
-        await expect(page.locator('.status-converting')).toHaveCount(1)
-        await expect(page.locator('.status-cleaning')).toHaveCount(1)
+        await expect(page.locator('.status-converting')).toHaveCount(1);
+        await expect(page.locator('.status-cleaning')).toHaveCount(1);
       },
       // 实测 145
       minNodes: 100,
-    })
+    });
 
     // ── 把色值与比值量出来（真 Chromium 的 computed style）──
     // 断言只覆盖"量到了"：两个徽章都在、比值是有限数；值本身进附件与终端输出。
-    const measurements = await measureContrast(page.locator('.status-converting, .status-cleaning'))
-    expect(measurements.map((m) => m.text), '两个状态徽章都没量到，本场景的证据不成立').toEqual([
-      '转换中',
-      '清洗中',
-    ])
+    const measurements = await measureContrast(
+      page.locator('.status-converting, .status-cleaning'),
+    );
+    expect(
+      measurements.map((m) => m.text),
+      '两个状态徽章都没量到，本场景的证据不成立',
+    ).toEqual(['转换中', '清洗中']);
     for (const m of measurements) {
-      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true)
+      expect(Number.isFinite(m.ratio), `${m.target}: 对比度没算出来`).toBe(true);
     }
 
     console.log(
@@ -1388,7 +1471,7 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
             ` = ${m.ratio}:1，${m.fontSize}/${m.fontWeight} 要求 ${m.required}:1 → ${m.passesAA ? '达标' : '不足'}`,
         ),
       ].join('\n'),
-    )
+    );
 
     await test.info().attach('a11y-notes-status-contrast.json', {
       body: JSON.stringify(
@@ -1402,8 +1485,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         2,
       ),
       contentType: 'application/json',
-    })
-  })
+    });
+  });
 
   /**
    * 移动端视口（375×667）下的仪表盘 —— **不是**为了再扫一遍违规，
@@ -1416,34 +1499,34 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * —— 那是本层明确做不到的事，不假装做到了。
    */
   test('移动端视口（375×667）：记录 axe 在移动端也判不出触控尺寸', async ({ page }) => {
-    const log = await installA11yStubs(page)
-    await page.setViewportSize({ width: 375, height: 667 })
+    const log = await installA11yStubs(page);
+    await page.setViewportSize({ width: 375, height: 667 });
 
-    const width = await page.evaluate(() => window.innerWidth)
-    expect(width, '视口没被设成移动端宽度').toBe(375)
+    const width = await page.evaluate(() => window.innerWidth);
+    expect(width, '视口没被设成移动端宽度').toBe(375);
 
     const result = await auditScene(page, log, {
       scene: 'dashboard-mobile',
       ready: async () => {
-        await loginAs(page, '/')
-        await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible()
+        await loginAs(page, '/');
+        await expect(page.getByRole('heading', { name: '欢迎使用 EngramNote' })).toBeVisible();
         // 移动端专属控件：桌面由 CSS 隐藏（见 App.tsx / layout.css）
-        await expect(page.getByRole('button', { name: '打开菜单' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '打开菜单' })).toBeVisible();
       },
       minNodes: 140,
-    })
+    });
 
     // 明确记录：本场景 0 条"触控尺寸"类违规 —— 不是因为尺寸没问题，
     // 而是因为 axe 没有这条规则。想守住它必须另外写几何断言（见文档 §4）。
-    const touchRules = result.violations.filter((v) => /target|touch/i.test(v.rule))
-    expect(touchRules, 'axe 里没有触控尺寸规则（本条断言就是在钉住这个事实）').toEqual([])
+    const touchRules = result.violations.filter((v) => /target|touch/i.test(v.rule));
+    expect(touchRules, 'axe 里没有触控尺寸规则（本条断言就是在钉住这个事实）').toEqual([]);
 
     // 顺带量一个**真实**的触控尺寸事实，供文档 §4 的清单引用：
     // 侧边栏抽屉里的导航项高度（px）。它不进断言的上限，只进附件。
     const navBox = await page
       .getByRole('button', { name: /仪表盘/ })
       .first()
-      .boundingBox()
+      .boundingBox();
     await test.info().attach('a11y-dashboard-mobile-touch.json', {
       body: JSON.stringify(
         {
@@ -1455,8 +1538,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         2,
       ),
       contentType: 'application/json',
-    })
-  })
+    });
+  });
 
   // ────────────────────────────────────────────────────────────────────────
   // 覆盖轮（第二轮）：把最后 10 个页面接进来
@@ -1491,24 +1574,26 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * "已经渲染出来了"的判据是假的。
    */
   test('智能问答：一次真实提问后的回答与引用来源', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'qa',
       ready: async () => {
-        await loginAs(page, '/qa')
-        await expect(page.getByRole('heading', { name: '智能问答' })).toBeVisible()
+        await loginAs(page, '/qa');
+        await expect(page.getByRole('heading', { name: '智能问答' })).toBeVisible();
         await page
           .getByPlaceholder('输入你的问题，AI 将基于你的笔记内容回答...')
-          .fill('浮充和均充有什么区别？')
-        await page.getByRole('button', { name: '提问' }).click()
+          .fill('浮充和均充有什么区别？');
+        await page.getByRole('button', { name: '提问' }).click();
         // **流结束**的标记是引用来源与页脚，不是"AI 正在思考..."（见上）
-        await expect(page.getByText('引用来源:')).toBeVisible()
-        await expect(page.getByText('浮充是长期恒压运行，用于补偿自放电；均充是短时升压校正。')).toBeVisible()
-        await expect(page.getByText('由 DeepSeek 提供支持')).toBeVisible()
+        await expect(page.getByText('引用来源:')).toBeVisible();
+        await expect(
+          page.getByText('浮充是长期恒压运行，用于补偿自放电；均充是短时升压校正。'),
+        ).toBeVisible();
+        await expect(page.getByText('由 DeepSeek 提供支持')).toBeVisible();
       },
       // 实测 121
       minNodes: 90,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：引用来源那一行原来是 `div[onClick]` ──
     // （没有 role/tabIndex，键盘到不了），现在是真 `<Link>`。
@@ -1517,8 +1602,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('link', { name: /引用|锂离子电池的浮充与均充/ }).first(),
       '智能问答：引用来源那一行',
-    )
-  })
+    );
+  });
 
   /**
    * 知识卡片（`KnowledgeCards`）：按来源笔记分组 + 卡片单元。
@@ -1531,24 +1616,24 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 并由下面的 `expectReachableByTab` 真的按 Tab 守着。）
    */
   test('知识卡片：按笔记分组与卡片单元', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'knowledge-cards',
       ready: async () => {
-        await loginAs(page, '/cards')
-        await expect(page.getByRole('heading', { name: '知识卡片' })).toBeVisible()
-        await expect(page.getByText('(4 张卡片)')).toBeVisible()
+        await loginAs(page, '/cards');
+        await expect(page.getByRole('heading', { name: '知识卡片' })).toBeVisible();
+        await expect(page.getByText('(4 张卡片)')).toBeVisible();
         // 四张卡片真实渲染：标题、掌握度、以及 ≥80 分那张多出来的金色提示
-        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '硫化的定义' })).toBeVisible()
-        await expect(page.getByText('掌握度').first()).toBeVisible()
+        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '硫化的定义' })).toBeVisible();
+        await expect(page.getByText('掌握度').first()).toBeVisible();
         // 两张卡片都写了同一个章节名 → 用 first()（严格模式会报 2 个元素）
-        await expect(page.getByText('章节: 第一章 蓄电池').first()).toBeVisible()
-        await expect(page.getByText('✨ 建议生成拓展知识点')).toBeVisible()
+        await expect(page.getByText('章节: 第一章 蓄电池').first()).toBeVisible();
+        await expect(page.getByText('✨ 建议生成拓展知识点')).toBeVisible();
       },
       // 实测 191
       minNodes: 135,
-    })
+    });
     // ── 键盘走查（F-37 的第二半）：这一页此前有**三处**键盘到不了的地方 ──
     // 分组头是 `div[onClick]`、卡片本体是 `div[onClick]`、
     // 「✨ 建议生成拓展知识点」是 `div[onClick]`；axe 三处全绿。
@@ -1556,14 +1641,18 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('button', { name: '锂离子电池的浮充与均充' }),
       '知识卡片：分组头（折叠/展开）',
-    )
-    await expectReachableByTab(page, page.getByRole('link', { name: '浮充的定义' }), '知识卡片：卡片标题链接')
+    );
+    await expectReachableByTab(
+      page,
+      page.getByRole('link', { name: '浮充的定义' }),
+      '知识卡片：卡片标题链接',
+    );
     await expectReachableByTab(
       page,
       page.getByRole('button', { name: '✨ 建议生成拓展知识点' }),
       '知识卡片：「建议生成拓展知识点」',
-    )
-  })
+    );
+  });
 
   /**
    * 卡片详情（`CardDetail`）：标题 + 来源笔记 + 章节摘要 + 原始出处 + 关联题目。
@@ -1578,22 +1667,24 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 而答案那行的颜色（`var(--color-success)`）是**只有点开才存在**的 DOM。
    */
   test('卡片详情：章节摘要 / 原始出处 / 关联题目', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'card-detail',
       ready: async () => {
-        await loginAs(page, '/cards/card-1')
-        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible()
-        await expect(page.getByText('来源笔记：')).toBeVisible()
-        await expect(page.getByRole('heading', { name: '章节摘要' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '原始出处' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '关联题目 (1)' })).toBeVisible()
-        await page.getByRole('button', { name: '显示答案' }).click()
-        await expect(page.getByText('答案: 浮充长期恒压补偿自放电，均充短时升压校正')).toBeVisible()
+        await loginAs(page, '/cards/card-1');
+        await expect(page.getByRole('heading', { name: '浮充的定义' })).toBeVisible();
+        await expect(page.getByText('来源笔记：')).toBeVisible();
+        await expect(page.getByRole('heading', { name: '章节摘要' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '原始出处' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '关联题目 (1)' })).toBeVisible();
+        await page.getByRole('button', { name: '显示答案' }).click();
+        await expect(
+          page.getByText('答案: 浮充长期恒压补偿自放电，均充短时升压校正'),
+        ).toBeVisible();
       },
       // 实测 139
       minNodes: 100,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：「来源笔记」原来是 `span[onClick]` ──
     // （没有 role/tabIndex，键盘到不了），现在是真 `<Link>`；它就在一行文字里
@@ -1603,8 +1694,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('link', { name: '锂离子电池的浮充与均充' }),
       '卡片详情：「来源笔记」链接',
-    )
-  })
+    );
+  });
 
   /**
    * 学习评估（`LearningAssessment`）：默认的"已链接对比"模式。
@@ -1619,33 +1710,33 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 选中一张笔记之后才会渲染"将比对以下资料与该笔记"，所以那一步要真的点。
    */
   test('学习评估：已链接对比模式（选中笔记与关联资料）', async ({ page }) => {
-    const log = await installA11yStubs(page, { '/api/notes': ASSESSMENT_NOTES })
+    const log = await installA11yStubs(page, { '/api/notes': ASSESSMENT_NOTES });
     await auditScene(page, log, {
       scene: 'learning-assessment',
       ready: async () => {
-        await loginAs(page, '/assessment')
-        await expect(page.getByRole('heading', { name: '学习评估' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '选择笔记' })).toBeVisible()
+        await loginAs(page, '/assessment');
+        await expect(page.getByRole('heading', { name: '学习评估' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '选择笔记' })).toBeVisible();
         // 「关联资料: — 篇」是**有数据才有**的标记（空状态时整块不渲染）
-        await expect(page.getByText('关联资料: — 篇')).toBeVisible()
+        await expect(page.getByText('关联资料: — 篇')).toBeVisible();
         // 选中的是**真控件**（本轮之前是 `div[onClick]`，键盘到不了）：
         // 点击的位置从"整张卡片"变成"标题按钮"
-        await page.getByRole('button', { name: '复盘：浮充的三个月' }).click()
-        await expect(page.getByText('将比对以下资料与该笔记：')).toBeVisible()
-        await expect(page.getByText('• 锂离子电池的浮充与均充')).toBeVisible()
-        await expect(page.getByRole('button', { name: '开始评估' })).toBeVisible()
+        await page.getByRole('button', { name: '复盘：浮充的三个月' }).click();
+        await expect(page.getByText('将比对以下资料与该笔记：')).toBeVisible();
+        await expect(page.getByText('• 锂离子电池的浮充与均充')).toBeVisible();
+        await expect(page.getByRole('button', { name: '开始评估' })).toBeVisible();
       },
       // 实测 126
       minNodes: 90,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：笔记选择卡片原来是 `div[onClick]` ──
     await expectReachableByTab(
       page,
       page.getByRole('button', { name: '复盘：浮充的三个月' }),
       '学习评估：笔记选择卡片',
-    )
-  })
+    );
+  });
 
   /**
    * 学习目标（`LearningGoals`）：进行中的目标 + 展开后的已归档目标。
@@ -1656,23 +1747,23 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 页面照常渲染、断言照常绿，而那一块从未被真正判过（见 fixtures 的说明）。
    */
   test('学习目标：进行中的目标与展开后的已归档目标', async ({ page }) => {
-    const log = await installA11yStubs(page, GOAL_STUBS)
+    const log = await installA11yStubs(page, GOAL_STUBS);
     await auditScene(page, log, {
       scene: 'learning-goals',
       ready: async () => {
-        await loginAs(page, '/goals')
-        await expect(page.getByRole('heading', { name: '学习目标' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '进行中的目标' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '掌握蓄电池基础概念' })).toBeVisible()
-        await expect(page.getByText('目标 80%')).toBeVisible()
-        await page.getByRole('button', { name: '展开已归档目标 (1)' }).click()
-        await expect(page.getByText('读完《蓄电池维护手册》')).toBeVisible()
-        await expect(page.getByText('每周 · 目标 60%')).toBeVisible()
+        await loginAs(page, '/goals');
+        await expect(page.getByRole('heading', { name: '学习目标' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '进行中的目标' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '掌握蓄电池基础概念' })).toBeVisible();
+        await expect(page.getByText('目标 80%')).toBeVisible();
+        await page.getByRole('button', { name: '展开已归档目标 (1)' }).click();
+        await expect(page.getByText('读完《蓄电池维护手册》')).toBeVisible();
+        await expect(page.getByText('每周 · 目标 60%')).toBeVisible();
       },
       // 实测 138
       minNodes: 100,
-    })
-  })
+    });
+  });
 
   /**
    * 学习目标：**新建目标弹窗**（`LearningGoals` 的第二个渲染分支）。
@@ -1696,62 +1787,64 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 3. **Esc 退出** —— 此前完全没有键盘退路（只有"点遮罩"和"点取消"）。
    */
   test('学习目标：新建目标弹窗（role/aria-modal/Esc/htmlFor）', async ({ page }) => {
-    const log = await installA11yStubs(page, GOAL_STUBS)
+    const log = await installA11yStubs(page, GOAL_STUBS);
     await auditScene(page, log, {
       scene: 'learning-goals-create',
       ready: async () => {
-        await loginAs(page, '/goals')
-        await page.getByRole('button', { name: '新建目标' }).click()
-        await expect(page.getByRole('dialog')).toBeVisible()
+        await loginAs(page, '/goals');
+        await page.getByRole('button', { name: '新建目标' }).click();
+        await expect(page.getByRole('dialog')).toBeVisible();
         // 四个控件都真的拿到了名字 —— `getByLabel` 走的就是"标签与控件的关联"
         // （aria-label / aria-labelledby / label[for] / 包裹式 label），
         // 所以这四行**就是** `htmlFor`/`id` 生效的证据。
-        await expect(page.getByLabel('目标名称')).toBeVisible()
-        await expect(page.getByLabel('目标类型')).toBeVisible()
-        await expect(page.getByLabel('目标掌握度 (%)')).toBeVisible()
-        await expect(page.getByLabel('截止日期（可选）')).toBeVisible()
+        await expect(page.getByLabel('目标名称')).toBeVisible();
+        await expect(page.getByLabel('目标类型')).toBeVisible();
+        await expect(page.getByLabel('目标掌握度 (%)')).toBeVisible();
+        await expect(page.getByLabel('截止日期（可选）')).toBeVisible();
       },
       // 实测 151（列表页 138 + 弹窗的十来个元素）
       minNodes: 105,
-    })
+    });
 
     // ── 结构：role / aria-modal / 可访问名（axe 只判得到最后一项）──
-    const dialog = page.getByRole('dialog')
+    const dialog = page.getByRole('dialog');
     await expect(dialog, '弹窗必须是 aria-modal：底下的内容此刻不参与交互').toHaveAttribute(
       'aria-modal',
       'true',
-    )
+    );
     await expect(dialog, '对话框必须有可访问名，且名字来自它自己的标题').toHaveAccessibleName(
       '新建学习目标',
-    )
+    );
 
     // ── Esc 关掉弹窗（此前没有键盘退路）──
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('dialog'), 'Esc 没有关掉弹窗').toHaveCount(0)
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog'), 'Esc 没有关掉弹窗').toHaveCount(0);
     // 关掉之后回到列表态（「新建目标」按钮又在了），而不是把整页也带走
-    await expect(page.getByRole('button', { name: '新建目标' })).toBeVisible()
-  })
+    await expect(page.getByRole('button', { name: '新建目标' })).toBeVisible();
+  });
 
   /** 回收站（`Trash`）：非空的已删除笔记（标题 + 删除时间 + 五项附属统计 + 恢复/彻底删除） */
   test('回收站：一条已删除的笔记', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'trash',
       ready: async () => {
-        await loginAs(page, '/trash')
-        await expect(page.getByRole('heading', { name: '回收站' })).toBeVisible()
-        await expect(page.getByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' })).toBeVisible()
-        await expect(page.getByText('删除于')).toBeVisible()
-        await expect(page.getByText('4 张卡片')).toBeVisible()
+        await loginAs(page, '/trash');
+        await expect(page.getByRole('heading', { name: '回收站' })).toBeVisible();
+        await expect(
+          page.getByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' }),
+        ).toBeVisible();
+        await expect(page.getByText('删除于')).toBeVisible();
+        await expect(page.getByText('4 张卡片')).toBeVisible();
         // 「清空回收站」只在 items 非空时渲染 —— 它同时是"列表真的有内容"的标记
-        await expect(page.getByRole('button', { name: '清空回收站' })).toBeVisible()
-        await expect(page.getByRole('button', { name: '恢复' })).toBeVisible()
-        await expect(page.getByRole('button', { name: '彻底删除' })).toBeVisible()
+        await expect(page.getByRole('button', { name: '清空回收站' })).toBeVisible();
+        await expect(page.getByRole('button', { name: '恢复' })).toBeVisible();
+        await expect(page.getByRole('button', { name: '彻底删除' })).toBeVisible();
       },
       // 实测 126
       minNodes: 90,
-    })
-  })
+    });
+  });
 
   /**
    * 快速复习（`QuickReview`）：`/review/quick/:noteId` 的答题态。
@@ -1764,25 +1857,25 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * —— 就是 F-33 报出来的那一个取值。
    */
   test('快速复习：共用答题卡片的答题态', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'quick-review',
       ready: async () => {
-        await loginAs(page, '/review/quick/note-1')
-        await expect(page.getByRole('heading', { name: '快速复习' })).toBeVisible()
-        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
+        await loginAs(page, '/review/quick/note-1');
+        await expect(page.getByRole('heading', { name: '快速复习' })).toBeVisible();
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible();
         // 难度徽章（白字压 difficultyColors.medium）与题型徽章
-        await expect(page.getByText('中等')).toBeVisible()
-        await expect(page.getByText('选择题')).toBeVisible()
+        await expect(page.getByText('中等')).toBeVisible();
+        await expect(page.getByText('选择题')).toBeVisible();
         await expect(
           page.getByRole('button', { name: '浮充长期恒压补偿自放电，均充短时升压校正' }),
-        ).toBeVisible()
-        await expect(page.getByRole('button', { name: '返回笔记' })).toBeVisible()
+        ).toBeVisible();
+        await expect(page.getByRole('button', { name: '返回笔记' })).toBeVisible();
       },
       // 实测 129
       minNodes: 95,
-    })
-  })
+    });
+  });
 
   /**
    * 考试/问题集（`QuestionSets`）：按笔记分组的题目 + 展开后的答案。
@@ -1795,21 +1888,23 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * **只有点开才渲染** —— 不点开就等于没判过它。
    */
   test('问题集：按笔记分组的题目与展开后的答案', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'question-sets',
       ready: async () => {
-        await loginAs(page, '/questions')
-        await expect(page.getByRole('heading', { name: '问题集' })).toBeVisible()
-        await expect(page.getByText('(2 道题)')).toBeVisible()
-        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible()
-        await expect(page.getByRole('button', { name: '查看笔记' })).toBeVisible()
-        await page.getByRole('button', { name: '显示答案' }).first().click()
-        await expect(page.getByText('答案：浮充长期恒压补偿自放电，均充短时升压校正')).toBeVisible()
+        await loginAs(page, '/questions');
+        await expect(page.getByRole('heading', { name: '问题集' })).toBeVisible();
+        await expect(page.getByText('(2 道题)')).toBeVisible();
+        await expect(page.getByText('浮充与均充的主要区别是什么？')).toBeVisible();
+        await expect(page.getByRole('button', { name: '查看笔记' })).toBeVisible();
+        await page.getByRole('button', { name: '显示答案' }).first().click();
+        await expect(
+          page.getByText('答案：浮充长期恒压补偿自放电，均充短时升压校正'),
+        ).toBeVisible();
       },
       // 实测 158
       minNodes: 115,
-    })
+    });
 
     // ── 键盘走查（F-37 的第二半）：分组头原来是 `div[onClick]` ──
     // （没有 role/tabIndex），里面还嵌着「查看笔记」真按钮；
@@ -1818,8 +1913,8 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       page,
       page.getByRole('button', { name: '锂离子电池的浮充与均充' }),
       '问题集：分组头（折叠/展开）',
-    )
-  })
+    );
+  });
 
   /**
    * 注册页（`Register`）：**未登录**分支的第二个入口（登录页之外的唯一未认证页面）。
@@ -1829,23 +1924,23 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 所以这里不走 `loginAs`，直接 `goto`（页面挂载时也不发任何请求）。
    */
   test('注册页：未登录入口', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'register',
       ready: async () => {
-        await page.goto('/register', { waitUntil: 'domcontentloaded' })
-        await expect(page.getByRole('heading', { name: '注册 EngramNote' })).toBeVisible()
-        await expect(page.getByLabel('邮箱')).toBeVisible()
-        await expect(page.getByLabel('用户名')).toBeVisible()
-        await expect(page.getByLabel('密码')).toBeVisible()
-        await expect(page.getByRole('button', { name: '注册' })).toBeVisible()
+        await page.goto('/register', { waitUntil: 'domcontentloaded' });
+        await expect(page.getByRole('heading', { name: '注册 EngramNote' })).toBeVisible();
+        await expect(page.getByLabel('邮箱')).toBeVisible();
+        await expect(page.getByLabel('用户名')).toBeVisible();
+        await expect(page.getByLabel('密码')).toBeVisible();
+        await expect(page.getByRole('button', { name: '注册' })).toBeVisible();
         // 反向自检：**没有**登录（侧边栏不在），否则扫的就不是这一页
-        await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0)
+        await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
       },
       // 实测 56（未登录，没有侧边栏 —— 这一页本来就小）
       minNodes: 40,
-    })
-  })
+    });
+  });
 
   /**
    * 404 页（`App.tsx` 的 `path="*"`）。
@@ -1855,20 +1950,20 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
    * 否则扫到的是登录页，而"0 违规"会显得像 404 页没问题。
    */
   test('404 页：已登录时的未知路径', async ({ page }) => {
-    const log = await installA11yStubs(page)
+    const log = await installA11yStubs(page);
     await auditScene(page, log, {
       scene: 'not-found',
       ready: async () => {
-        await loginAs(page, '/no-such-page')
-        await expect(page.getByRole('heading', { name: '404' })).toBeVisible()
-        await expect(page.getByText('页面不存在，可能是链接已失效。')).toBeVisible()
-        await expect(page.getByRole('link', { name: '返回首页' })).toBeVisible()
+        await loginAs(page, '/no-such-page');
+        await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+        await expect(page.getByText('页面不存在，可能是链接已失效。')).toBeVisible();
+        await expect(page.getByRole('link', { name: '返回首页' })).toBeVisible();
       },
       // 实测 109
       minNodes: 85,
-    })
-  })
-})
+    });
+  });
+});
 
 /**
  * 自检：审计真的在扫东西吗？
@@ -1880,30 +1975,30 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
  */
 test.describe('审计自检', () => {
   test('注入一个必然违规的元素时，axe 必须报出来', async ({ page }) => {
-    const log = await installA11yStubs(page)
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible()
+    const log = await installA11yStubs(page);
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: '登录 EngramNote' })).toBeVisible();
 
     const injected = await page.evaluate(() => {
-      const img = document.createElement('img')
+      const img = document.createElement('img');
       // 没有 alt 的 img：`image-alt` 是 axe 里最稳定的一条违规。
       // 用 1x1 的 data URI 而不是站点内的图片：本自检验的是 axe 的判定链路，
       // 不该依赖任何网络请求成不成功（请求失败也照样是"没有 alt 的 img"，
       // 但那样就多了一个与被测性质无关的变量）。
-      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-      img.id = 'a11y-self-check'
-      document.body.appendChild(img)
-      return document.querySelectorAll('#a11y-self-check').length
-    })
-    expect(injected, '自检元素没能注入 DOM').toBe(1)
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+      img.id = 'a11y-self-check';
+      document.body.appendChild(img);
+      return document.querySelectorAll('#a11y-self-check').length;
+    });
+    expect(injected, '自检元素没能注入 DOM').toBe(1);
 
-    const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
-    const ids = results.violations.map((v) => v.id)
-    expect(ids, 'axe 没有报出注入的 image-alt —— 扫描链路本身失效了').toContain('image-alt')
+    const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
+    const ids = results.violations.map((v) => v.id);
+    expect(ids, 'axe 没有报出注入的 image-alt —— 扫描链路本身失效了').toContain('image-alt');
 
-    await page.evaluate(() => document.querySelector('#a11y-self-check')?.remove())
-    expect(log.pageErrors).toEqual([])
-  })
+    await page.evaluate(() => document.querySelector('#a11y-self-check')?.remove());
+    expect(log.pageErrors).toEqual([]);
+  });
 
   test('登记表里每个（场景，规则）组合都唯一，且场景名拼写正确', () => {
     // 场景名写错（如 'dashbord'）的后果是：那条豁免永远匹配不到，
@@ -1942,17 +2037,23 @@ test.describe('审计自检', () => {
       'question-sets',
       'register',
       'not-found',
-    ])
+    ]);
 
-    const unknown = ACTIVE_REGISTRY.filter((entry) => !knownScenes.has(entry.scene))
-    expect(unknown.map((entry) => `${entry.id}:${entry.scene}`), '登记表里有未知场景名').toEqual([])
+    const unknown = ACTIVE_REGISTRY.filter((entry) => !knownScenes.has(entry.scene));
+    expect(
+      unknown.map((entry) => `${entry.id}:${entry.scene}`),
+      '登记表里有未知场景名',
+    ).toEqual([]);
 
-    const pairs = ACTIVE_REGISTRY.map((entry) => `${entry.scene}/${entry.rule}`)
-    const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index)
-    expect(duplicates, '登记表里有重复的（场景，规则）组合').toEqual([])
+    const pairs = ACTIVE_REGISTRY.map((entry) => `${entry.scene}/${entry.rule}`);
+    const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index);
+    expect(duplicates, '登记表里有重复的（场景，规则）组合').toEqual([]);
 
     // 每条豁免都必须写明归属，否则它就不是"已接受的风险"而是"忘了修"
-    const noOwner = ACTIVE_REGISTRY.filter((entry) => !entry.reason.includes('归属：'))
-    expect(noOwner.map((entry) => entry.id), '登记表里有没写归属的条目').toEqual([])
-  })
-})
+    const noOwner = ACTIVE_REGISTRY.filter((entry) => !entry.reason.includes('归属：'));
+    expect(
+      noOwner.map((entry) => entry.id),
+      '登记表里有没写归属的条目',
+    ).toEqual([]);
+  });
+});

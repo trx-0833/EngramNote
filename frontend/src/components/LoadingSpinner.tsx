@@ -6,7 +6,9 @@ export default function LoadingSpinner({ text = '加载中...' }: { text?: strin
   return (
     <div className="state-container">
       <div className="spinner" />
-      <p className="state-message" style={{ marginTop: 'var(--space-md)' }}>{text}</p>
+      <p className="state-message" style={{ marginTop: 'var(--space-md)' }}>
+        {text}
+      </p>
     </div>
-  )
+  );
 }

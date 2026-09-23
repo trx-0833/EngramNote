@@ -1,6 +1,6 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 
 /**
  * ⚠️ 这段导入顺序**有语义，不要重排**（overhaul-plan 5.6）。
@@ -23,25 +23,25 @@ import { BrowserRouter } from 'react-router-dom'
  * （`markdown-extras.css` 必须在 `responsive.css` 之后，否则 `.ask-ai-input`
  * 的窄屏兜底会被压掉）。改这里的顺序 = 改那条断言的前提。
  */
-import './styles/base.css'
-import './styles/components.css'
-import './styles/markdown.css'
-import './styles/diff.css'
-import './styles/cleaning.css'
-import './styles/auth.css'
-import './styles/layout.css'
-import './styles/dashboard.css'
-import './styles/learning.css'
-import './styles/graph.css'
-import './styles/assessment.css'
-import './styles/responsive.css'
-import './styles/markdown-extras.css'
-import './styles/refinements.css'
+import './styles/base.css';
+import './styles/components.css';
+import './styles/markdown.css';
+import './styles/diff.css';
+import './styles/cleaning.css';
+import './styles/auth.css';
+import './styles/layout.css';
+import './styles/dashboard.css';
+import './styles/learning.css';
+import './styles/graph.css';
+import './styles/assessment.css';
+import './styles/responsive.css';
+import './styles/markdown-extras.css';
+import './styles/refinements.css';
 
 // ── 应用代码放在样式表**之后**：理由见上面的注释 ──
-import App from './App'
-import ErrorBoundary from './components/ErrorBoundary'
-import { ToastProvider } from './components/Toast'
+import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -54,4 +54,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       </ToastProvider>
     </ErrorBoundary>
   </React.StrictMode>,
-)
+);

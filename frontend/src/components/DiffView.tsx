@@ -9,17 +9,17 @@
  * 3. 行号对齐
  * 4. 响应式设计
  */
-import { type DiffBlock, type DiffLine } from '../api/client'
+import { type DiffBlock, type DiffLine } from '../api/client';
 // diff 视图样式（overhaul-plan 5.6）：原 src/styles/diff.css 整表迁到这里
-import styles from './DiffView.module.css'
+import styles from './DiffView.module.css';
 
 interface DiffViewProps {
   /** diff 块数据 */
-  blocks: DiffBlock[]
+  blocks: DiffBlock[];
   /** 原始版总行数 */
-  originalLines: number
+  originalLines: number;
   /** 清洗版总行数 */
-  cleanLines: number
+  cleanLines: number;
 }
 
 /**
@@ -34,31 +34,29 @@ const LINE_TYPE_CLASS: Record<DiffLine['type'], string> = {
   added: styles.diffLineAdded,
   removed: styles.diffLineRemoved,
   unchanged: styles.diffLineUnchanged,
-}
+};
 
 /**
  * 渲染单行 diff 内容
  */
 function DiffLineRow({ line }: { line: DiffLine }) {
-  const className = `${styles.diffLine} ${LINE_TYPE_CLASS[line.type]}`
-  const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '
+  const className = `${styles.diffLine} ${LINE_TYPE_CLASS[line.type]}`;
+  const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
 
   return (
     <div className={className}>
       <span className={styles.diffLinePrefix}>{prefix}</span>
       <span className={styles.diffLineNumber}>
         {line.type === 'removed' || line.type === 'unchanged'
-          ? line.line_number_original ?? ''
+          ? (line.line_number_original ?? '')
           : ''}
       </span>
       <span className={styles.diffLineNumber}>
-        {line.type === 'added' || line.type === 'unchanged'
-          ? line.line_number_clean ?? ''
-          : ''}
+        {line.type === 'added' || line.type === 'unchanged' ? (line.line_number_clean ?? '') : ''}
       </span>
       <span className={styles.diffLineContent}>{line.content}</span>
     </div>
-  )
+  );
 }
 
 /**
@@ -71,11 +69,17 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
   if (!blocks || blocks.length === 0) {
     return (
       <div className={styles.diffContainer}>
-        <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', padding: 'var(--space-md)' }}>
+        <p
+          style={{
+            color: 'var(--color-text-secondary)',
+            textAlign: 'center',
+            padding: 'var(--space-md)',
+          }}
+        >
           两个版本完全相同，没有差异。
         </p>
       </div>
-    )
+    );
   }
 
   return (
@@ -105,5 +109,5 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
         ))}
       </div>
     </div>
-  )
+  );
 }

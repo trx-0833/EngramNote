@@ -5,16 +5,16 @@
  * 查找/包裹/还原的顺序、`surroundContents` 的 try-catch 吞错、
  * 点击包裹元素即删除的行为均与拆分前一致。
  */
-import type { Annotation } from '../../api/client'
+import type { Annotation } from '../../api/client';
 
 /** 批注类型 → 包裹标签（高亮用 mark，下划线用 u） */
 function wrapperTagFor(type: Annotation['type']): 'mark' | 'u' {
-  return type === 'highlight' ? 'mark' : 'u'
+  return type === 'highlight' ? 'mark' : 'u';
 }
 
 /** 批注类型 → CSS 类名 */
 function wrapperClassFor(type: Annotation['type']): string {
-  return type === 'highlight' ? 'annotation-mark' : 'annotation-underline'
+  return type === 'highlight' ? 'annotation-mark' : 'annotation-underline';
 }
 
 /**
@@ -28,14 +28,14 @@ export function createAnnotationWrapper(
   type: Annotation['type'],
   onDelete: (annotationId: string) => void,
 ): HTMLElement {
-  const wrapper = document.createElement(wrapperTagFor(type))
-  wrapper.className = wrapperClassFor(type)
-  wrapper.dataset.annotationId = id
+  const wrapper = document.createElement(wrapperTagFor(type));
+  wrapper.className = wrapperClassFor(type);
+  wrapper.dataset.annotationId = id;
   wrapper.addEventListener('click', (e) => {
-    e.stopPropagation()
-    onDelete(id)
-  })
-  return wrapper
+    e.stopPropagation();
+    onDelete(id);
+  });
+  return wrapper;
 }
 
 /**
@@ -52,41 +52,44 @@ function applyAnnotationToDom(
   ann: Annotation,
   onDelete: (annotationId: string) => void,
 ): boolean {
-  if (!container) return false
+  if (!container) return false;
 
   // 跳过已应用的批注，避免重复包裹 DOM
-  if (container.querySelector(`[data-annotation-id="${ann.id}"]`)) return false
+  if (container.querySelector(`[data-annotation-id="${ann.id}"]`)) return false;
 
   // 在 DOM 中查找匹配的文本
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null)
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
 
   while (walker.nextNode()) {
-    const node = walker.currentNode as Text
-    const text = node.textContent || ''
-    const idx = text.indexOf(ann.text_content)
+    const node = walker.currentNode as Text;
+    const text = node.textContent || '';
+    const idx = text.indexOf(ann.text_content);
     if (idx >= 0) {
       // 验证上下文（可选，简单验证）
-      const before = text.substring(Math.max(0, idx - 50), idx)
-      const after = text.substring(idx + ann.text_content.length, idx + ann.text_content.length + 50)
-      if (ann.context_before && !before.endsWith(ann.context_before)) continue
-      if (ann.context_after && !after.startsWith(ann.context_after)) continue
+      const before = text.substring(Math.max(0, idx - 50), idx);
+      const after = text.substring(
+        idx + ann.text_content.length,
+        idx + ann.text_content.length + 50,
+      );
+      if (ann.context_before && !before.endsWith(ann.context_before)) continue;
+      if (ann.context_after && !after.startsWith(ann.context_after)) continue;
 
       // 创建包裹元素
-      const range = document.createRange()
-      range.setStart(node, idx)
-      range.setEnd(node, idx + ann.text_content.length)
+      const range = document.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + ann.text_content.length);
 
-      const wrapper = createAnnotationWrapper(ann.id, ann.type, onDelete)
+      const wrapper = createAnnotationWrapper(ann.id, ann.type, onDelete);
 
       try {
-        range.surroundContents(wrapper)
+        range.surroundContents(wrapper);
       } catch {
         // surroundContents 可能跨节点失败，跳过
       }
-      return true
+      return true;
     }
   }
-  return false
+  return false;
 }
 
 /**
@@ -101,11 +104,11 @@ export function applyAnnotationsToDom(
   viewMode: string,
   onDelete: (annotationId: string) => void,
 ): void {
-  if (!container) return
+  if (!container) return;
   annotations.forEach((ann) => {
-    if (ann.view_mode !== viewMode) return
-    applyAnnotationToDom(container, ann, onDelete)
-  })
+    if (ann.view_mode !== viewMode) return;
+    applyAnnotationToDom(container, ann, onDelete);
+  });
 }
 
 /**
@@ -113,16 +116,13 @@ export function applyAnnotationsToDom(
  * 并 `normalize()` 合并相邻文本节点（否则连续的文本会被切成多个节点，
  * 影响下一次按文本查找批注）。
  */
-export function unwrapAnnotationFromDom(
-  container: HTMLElement | null,
-  annotationId: string,
-): void {
-  const elem = container?.querySelector(`[data-annotation-id="${annotationId}"]`)
-  if (!elem) return
-  const parent = elem.parentNode
+export function unwrapAnnotationFromDom(container: HTMLElement | null, annotationId: string): void {
+  const elem = container?.querySelector(`[data-annotation-id="${annotationId}"]`);
+  if (!elem) return;
+  const parent = elem.parentNode;
   while (elem.firstChild) {
-    parent?.insertBefore(elem.firstChild, elem)
+    parent?.insertBefore(elem.firstChild, elem);
   }
-  parent?.removeChild(elem)
-  parent?.normalize() // 合并相邻文本节点
+  parent?.removeChild(elem);
+  parent?.normalize(); // 合并相邻文本节点
 }

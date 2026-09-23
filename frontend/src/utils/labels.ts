@@ -5,20 +5,37 @@
 
 /** 来源类型到中文标签的映射 */
 export const sourceTypeLabels: Record<string, string> = {
-  pdf: 'PDF', image: '图片', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', audio: '音频', video: '视频', markdown: 'Markdown',
-}
+  pdf: 'PDF',
+  image: '图片',
+  docx: 'Word',
+  pptx: 'PPT',
+  xlsx: 'Excel',
+  audio: '音频',
+  video: '视频',
+  markdown: 'Markdown',
+};
 
 /** 笔记状态到中文标签的映射 */
 export const statusLabels: Record<string, string> = {
-  uploading: '上传中', converting: '转换中', converted: '已完成',
-  cleaning: '清洗中', cleaned: '已清洗', cleaning_failed: '清洗失败',
-  learning: '学习中', learning_failed: '学习失败', archived: '已审阅', failed: '失败',
-}
+  uploading: '上传中',
+  converting: '转换中',
+  converted: '已完成',
+  cleaning: '清洗中',
+  cleaned: '已清洗',
+  cleaning_failed: '清洗失败',
+  learning: '学习中',
+  learning_failed: '学习失败',
+  archived: '已审阅',
+  failed: '失败',
+};
 
 /** 知识卡片类型到中文标签的映射 */
 export const cardTypeLabels: Record<string, string> = {
-  concept: '概念', formula: '公式', qa: '问答', definition: '定义',
-}
+  concept: '概念',
+  formula: '公式',
+  qa: '问答',
+  definition: '定义',
+};
 
 /**
  * ── 颜色表的取值口径（a11y 修复轮：见 docs/a11y-audit.md 的 F-33）──
@@ -53,23 +70,32 @@ export const cardTypeLabels: Record<string, string> = {
 
 /** 知识卡片类型到颜色的映射（白字压色块，见上面的取值口径） */
 export const cardTypeColors: Record<string, string> = {
-  concept: '#0f3460', formula: '#6d28d9', qa: '#25714a', definition: '#8f7020',
-}
+  concept: '#0f3460',
+  formula: '#6d28d9',
+  qa: '#25714a',
+  definition: '#8f7020',
+};
 
 /** 题目类型到中文标签的映射 */
 export const questionTypeLabels: Record<string, string> = {
-  choice: '选择题', fill_blank: '填空题', short_answer: '简答题',
-}
+  choice: '选择题',
+  fill_blank: '填空题',
+  short_answer: '简答题',
+};
 
 /** 题目类型到颜色的映射（白字压色块，见上面的取值口径） */
 export const questionTypeColors: Record<string, string> = {
-  choice: '#0f3460', fill_blank: '#6d28d9', short_answer: '#25714a',
-}
+  choice: '#0f3460',
+  fill_blank: '#6d28d9',
+  short_answer: '#25714a',
+};
 
 /** 难度到中文标签的映射 */
 export const difficultyLabels: Record<string, string> = {
-  easy: '简单', medium: '中等', hard: '困难',
-}
+  easy: '简单',
+  medium: '中等',
+  hard: '困难',
+};
 
 /**
  * 难度到颜色的映射（白字压色块，见上面的取值口径）
@@ -78,18 +104,24 @@ export const difficultyLabels: Record<string, string> = {
  * 上一轮修 `selfRatingOptions` 时漏掉了它，直到答题复习页被扫才报出来。
  */
 export const difficultyColors: Record<string, string> = {
-  easy: '#25714a', medium: '#8f7020', hard: '#c0392b',
-}
+  easy: '#25714a',
+  medium: '#8f7020',
+  hard: '#c0392b',
+};
 
 /** 知识卡片分类到中文标签的映射 */
 export const cardCategoryLabels: Record<string, string> = {
-  regular: '常规', blind_spot: '盲点', extension: '拓展',
-}
+  regular: '常规',
+  blind_spot: '盲点',
+  extension: '拓展',
+};
 
 /** 知识卡片分类到颜色的映射（白字压色块，见上面的取值口径） */
 export const cardCategoryColors: Record<string, string> = {
-  regular: '#6b7280', blind_spot: '#c0392b', extension: '#25714a',
-}
+  regular: '#6b7280',
+  blind_spot: '#c0392b',
+  extension: '#25714a',
+};
 
 /**
  * 笔记状态到 CSS 类名的映射（单一数据源）
@@ -114,11 +146,11 @@ const STATUS_CLASS_MAP: Record<string, string> = {
   learning_failed: 'status-learning-failed',
   archived: 'status-archived',
   failed: 'status-failed',
-}
+};
 
 export function statusClass(status: string | null | undefined): string {
-  if (!status) return 'status-unknown'
-  return STATUS_CLASS_MAP[status] || 'status-unknown'
+  if (!status) return 'status-unknown';
+  return STATUS_CLASS_MAP[status] || 'status-unknown';
 }
 
 /**
@@ -156,13 +188,13 @@ export function statusClass(status: string | null | undefined): string {
  */
 export interface SelfRatingOption {
   /** SM-2 quality 分值（0-5） */
-  quality: number
+  quality: number;
   /** 按钮主文案 */
-  label: string
+  label: string;
   /** 补充说明，帮助用户区分档位 */
-  hint: string
+  hint: string;
   /** 按钮强调色 */
-  color: string
+  color: string;
 }
 
 export const selfRatingOptions: SelfRatingOption[] = [
@@ -170,7 +202,7 @@ export const selfRatingOptions: SelfRatingOption[] = [
   { quality: 3, label: '勉强想起', hint: '很吃力，答得不完整', color: '#8f7020' },
   { quality: 4, label: '想起来了', hint: '稍作回忆就答对了', color: '#25714a' },
   { quality: 5, label: '轻松想起', hint: '脱口而出，毫不费力', color: '#0f3460' },
-]
+];
 
 /** 判分方式到中文标签的映射（用于向用户解释这一次的分数是怎么来的） */
 export const gradingMethodLabels: Record<string, string> = {
@@ -179,7 +211,7 @@ export const gradingMethodLabels: Record<string, string> = {
   self_rating: '你的自评',
   ungraded: '待你自评（尚未计入复习进度）',
   legacy: '历史记录',
-}
+};
 
 /**
  * FSRS 评分档位（1-4）到中文标签的映射
@@ -194,7 +226,7 @@ export const ratingLabels: Record<number, string> = {
   2: '勉强想起',
   3: '想起来了',
   4: '轻松想起',
-}
+};
 
 /**
  * 语义判分的三档结论（用于缺失点/误解点区块的标题与配色）
@@ -221,7 +253,7 @@ export const verdictLabels: Record<string, { label: string; color: string }> = {
   correct: { label: '回答正确', color: '#25714a' },
   partial: { label: '答对了部分', color: '#7d6417' },
   incorrect: { label: '回答错误', color: '#c0392b' },
-}
+};
 
 /**
  * 「薄弱点」列表里那块**卡片类型徽章**的配色（今日学习页与仪表盘共用一份）
@@ -254,4 +286,4 @@ export const verdictLabels: Record<string, { label: string; color: string }> = {
 export const weakPointBadge = {
   background: '#c0392b1a',
   color: '#c0392b',
-} as const
+} as const;

@@ -10,21 +10,19 @@
  * 2. 打开时锁住页面滚动 —— 否则在遮罩上滑动会把背后的页面滚走，
  *    关掉抽屉后用户会发现自己被带到别处了。
  */
-import { useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 // 侧边栏（含移动端抽屉）的类名归模块所有（overhaul-plan 5.6 序 9）：
 // `layout.css` 的整节 + `responsive.css` 里命中同一批类名的窄屏规则一起搬了进来
 // —— 类名哈希后留在补丁层里的选择器会永远选不中，见 Sidebar.module.css 文件头
-import styles from './Sidebar.module.css'
+import styles from './Sidebar.module.css';
 
 /** 导航分组定义 */
 const NAV_SECTIONS = [
   {
     title: '',
-    items: [
-      { path: '/', label: '仪表盘', icon: '\u2302' },
-    ],
+    items: [{ path: '/', label: '仪表盘', icon: '\u2302' }],
   },
   {
     title: '学习',
@@ -53,19 +51,24 @@ const NAV_SECTIONS = [
       { path: '/questions', label: '问题集', icon: '\u2611' },
     ],
   },
-]
+];
 
 interface SidebarProps {
-  collapsed: boolean
-  onToggleCollapse: () => void
-  mobileOpen: boolean
-  onMobileClose: () => void
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
-export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMobileClose }: SidebarProps) {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const { logout } = useAuth()
+export default function Sidebar({
+  collapsed,
+  onToggleCollapse,
+  mobileOpen,
+  onMobileClose,
+}: SidebarProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { logout } = useAuth();
 
   // 抽屉打开期间锁住 body 滚动（样式见 Sidebar.module.css 的 `body.sidebarOpenLock`）。
   // 放在 effect 里而不是渲染期，是为了让"打开/关闭/卸载"三种路径都必然解绑 ——
@@ -73,25 +76,25 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMob
   // 类名从模块取（哈希后是 `_sidebarOpenLock_hash`）：样式表侧的 `body.sidebarOpenLock`
   // 用的是同一个模块类名，两边不可能分叉。
   useEffect(() => {
-    if (!mobileOpen) return
-    document.body.classList.add(styles.sidebarOpenLock)
-    return () => document.body.classList.remove(styles.sidebarOpenLock)
-  }, [mobileOpen])
+    if (!mobileOpen) return;
+    document.body.classList.add(styles.sidebarOpenLock);
+    return () => document.body.classList.remove(styles.sidebarOpenLock);
+  }, [mobileOpen]);
 
   function handleNav(path: string) {
-    navigate(path)
-    onMobileClose()
+    navigate(path);
+    onMobileClose();
   }
 
   function isActive(path: string) {
-    if (path === '/') return location.pathname === '/'
-    return location.pathname.startsWith(path)
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
   }
 
   const sidebarClass =
     `${styles.sidebar}` +
     `${collapsed ? ` ${styles.sidebarCollapsed}` : ''}` +
-    `${mobileOpen ? ` ${styles.sidebarMobileOpen}` : ''}`
+    `${mobileOpen ? ` ${styles.sidebarMobileOpen}` : ''}`;
 
   return (
     <>
@@ -104,13 +107,21 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMob
           <button className={styles.sidebarLogo} onClick={() => handleNav('/')}>
             {collapsed ? 'E' : 'EngramNote'}
           </button>
-          <button className={styles.sidebarCollapseBtn} onClick={onToggleCollapse} aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}>
+          <button
+            className={styles.sidebarCollapseBtn}
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
             {collapsed ? '\u00BB' : '\u00AB'}
           </button>
           {/* 仅移动端抽屉打开时出现：手机上抽屉占 86vw，手指够不到遮罩边缘时
               需要一个明确的关闭入口（显示/隐藏由 mobileOpen 决定，见本文件顶部说明） */}
           {mobileOpen && (
-            <button className={styles.sidebarMobileClose} onClick={onMobileClose} aria-label="关闭菜单">
+            <button
+              className={styles.sidebarMobileClose}
+              onClick={onMobileClose}
+              aria-label="关闭菜单"
+            >
               {'\u2715'}
             </button>
           )}
@@ -118,12 +129,10 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMob
 
         {/* 导航分组 */}
         <div className={styles.sidebarBody}>
-          {NAV_SECTIONS.map(section => (
+          {NAV_SECTIONS.map((section) => (
             <div key={section.title || 'home'} className={styles.sidebarSection}>
-              {section.title && (
-                <div className={styles.sidebarSectionTitle}>{section.title}</div>
-              )}
-              {section.items.map(item => (
+              {section.title && <div className={styles.sidebarSectionTitle}>{section.title}</div>}
+              {section.items.map((item) => (
                 /* 每行包一层 div：行内快捷操作（笔记分组的「+ 上传资料」）
                    必须是导航按钮的**兄弟**节点 —— 把一个 <button> 嵌进
                    另一个 <button> 是非法 HTML（React 会报 validateDOMNesting），
@@ -164,5 +173,5 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onMob
         </div>
       </nav>
     </>
-  )
+  );
 }

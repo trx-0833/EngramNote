@@ -2,37 +2,37 @@
  * @file 注册页面
  * @description 未认证分支的第二个入口（登录页之外唯一未认证页面）。
  */
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
-import styles from './Auth.module.css'
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import styles from './Auth.module.css';
 
 export default function Register() {
-  const navigate = useNavigate()
-  const { register } = useAuth()
-  const [email, setEmail] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate();
+  const { register } = useAuth();
+  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
+    e.preventDefault();
+    setError('');
 
     if (!/^[a-zA-Z0-9]+$/.test(username)) {
-      setError('用户名只能包含英文字母和数字')
-      return
+      setError('用户名只能包含英文字母和数字');
+      return;
     }
 
-    setLoading(true)
+    setLoading(true);
     try {
-      await register(email, username, password)
-      navigate('/')
+      await register(email, username, password);
+      navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败')
+      setError(err instanceof Error ? err.message : '注册失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -51,10 +51,21 @@ export default function Register() {
         <main>
           <h1 className={styles.authTitle}>注册 EngramNote</h1>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+          <form
+            onSubmit={handleSubmit}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}
+          >
             <div className={styles.authInputGroup}>
               <label htmlFor="email">邮箱</label>
-              <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                className={styles.authInputIcon}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
               </svg>
@@ -71,7 +82,15 @@ export default function Register() {
 
             <div className={styles.authInputGroup}>
               <label htmlFor="username">用户名</label>
-              <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                className={styles.authInputIcon}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
@@ -90,7 +109,15 @@ export default function Register() {
 
             <div className={styles.authInputGroup}>
               <label htmlFor="password">密码</label>
-              <svg className={styles.authInputIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                className={styles.authInputIcon}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
@@ -107,7 +134,10 @@ export default function Register() {
             </div>
 
             {error && (
-              <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}>
+              <p
+                role="alert"
+                style={{ color: 'var(--color-error)', fontSize: '0.875rem', textAlign: 'center' }}
+              >
                 {error}
               </p>
             )}
@@ -119,12 +149,18 @@ export default function Register() {
 
           <p className={styles.authFooter}>
             已有账号？{' '}
-            <a href="/login" onClick={(e) => { e.preventDefault(); navigate('/login') }}>
+            <a
+              href="/login"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/login');
+              }}
+            >
               登录
             </a>
           </p>
         </main>
       </div>
     </div>
-  )
+  );
 }

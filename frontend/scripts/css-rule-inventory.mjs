@@ -27,11 +27,11 @@
  *   # 全部规则
  *   node scripts/css-rule-inventory.mjs src/styles/learning.css
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { parseRules, classesOf, readFromGit, findRecentRev } from './lib/css-parse.mjs'
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseRules, classesOf, readFromGit, findRecentRev } from './lib/css-parse.mjs';
 
-const argv = process.argv.slice(2)
+const argv = process.argv.slice(2);
 
 // ── 归一化 ──
 // 目的：让"只改了排版"不被当成规则变化。
@@ -47,75 +47,79 @@ function normalize(s) {
     .replace(/;\s*$/, '')
     .replace(/,\s*/g, ', ')
     .replace(/\s+/g, ' ')
-    .trim()
+    .trim();
 }
 
 function formatRule(r) {
-  const decls = r.decls.map(([p, v]) => `${p}: ${normalize(v)}`).join('; ')
-  return `${r.context ? r.context + ' ' : ''}${normalize(r.selector)} { ${decls} }`
+  const decls = r.decls.map(([p, v]) => `${p}: ${normalize(v)}`).join('; ');
+  return `${r.context ? r.context + ' ' : ''}${normalize(r.selector)} { ${decls} }`;
 }
 
-const file = argv[0]
+const file = argv[0];
 if (!file) {
   console.error(
     '用法: node scripts/css-rule-inventory.mjs <css文件> [--prefix a,b] [--class a,b] [--from-git] [--rev R]',
-  )
-  process.exit(2)
+  );
+  process.exit(2);
 }
 
-const prefixArg = argv.indexOf('--prefix')
+const prefixArg = argv.indexOf('--prefix');
 const prefixes =
-  prefixArg >= 0 && argv[prefixArg + 1] ? argv[prefixArg + 1].split(',').filter(Boolean) : null
-const classArg = argv.indexOf('--class')
+  prefixArg >= 0 && argv[prefixArg + 1] ? argv[prefixArg + 1].split(',').filter(Boolean) : null;
+const classArg = argv.indexOf('--class');
 const exactClasses =
-  classArg >= 0 && argv[classArg + 1] ? new Set(argv[classArg + 1].split(',').filter(Boolean)) : null
-const fromGit = argv.includes('--from-git')
+  classArg >= 0 && argv[classArg + 1]
+    ? new Set(argv[classArg + 1].split(',').filter(Boolean))
+    : null;
+const fromGit = argv.includes('--from-git');
 // `--rev` 默认**按内容自动定位**：从 HEAD 往回找第一个还含有 `--class` 里那些
 // 类名的修订，那个才是"迁移前"。写死 `HEAD~N` 会被并行的无关提交打乱 ——
 // 第二批期间另一个 agent 提交了一个后端改动，所有相对计数就集体错位了。
 // 没给 `--class` 时无从判断，退回 HEAD。
-const revArg = argv.indexOf('--rev')
-const explicitRev = revArg >= 0 && argv[revArg + 1] ? argv[revArg + 1] : null
+const revArg = argv.indexOf('--rev');
+const explicitRev = revArg >= 0 && argv[revArg + 1] ? argv[revArg + 1] : null;
 
-let rev = explicitRev
+let rev = explicitRev;
 if (fromGit && !rev) {
   if (!exactClasses || exactClasses.size === 0) {
-    rev = 'HEAD'
+    rev = 'HEAD';
   } else {
-    const abs = path.resolve(file)
+    const abs = path.resolve(file);
     rev = findRecentRev((r) =>
       parseRules(readFromGit(abs, r)).some((rule) =>
         classesOf(rule.selector).some((c) => exactClasses.has(c)),
       ),
-    )
+    );
     if (!rev) {
       console.error(
         `✗ 从 HEAD 往回找不到含有 ${[...exactClasses].join('|')} 的修订：` +
           `类名写错了，或者这些规则从来没在那个文件里 —— 两种情况都不该继续。`,
-      )
-      process.exit(3)
+      );
+      process.exit(3);
     }
   }
 }
 
-const css = fromGit ? readFromGit(path.resolve(file), rev) : fs.readFileSync(file, 'utf8')
-let rules = parseRules(css)
+const css = fromGit ? readFromGit(path.resolve(file), rev) : fs.readFileSync(file, 'utf8');
+let rules = parseRules(css);
 // 自检：解析出 0 条规则几乎一定是解析器或路径/修订出了问题，
 // 而不是"这个文件真的没有规则"。静默返回空清单会让差集看起来"没丢东西"。
 if (rules.length === 0) {
-  console.error(`✗ 从 ${file} 解析出 0 条规则：检查路径/解析器/修订，不要把它当成"文件是空的"`)
-  process.exit(3)
+  console.error(`✗ 从 ${file} 解析出 0 条规则：检查路径/解析器/修订，不要把它当成"文件是空的"`);
+  process.exit(3);
 }
 if (prefixes) {
-  rules = rules.filter((r) => prefixes.some((p) => classesOf(r.selector).some((c) => c.startsWith(p))))
+  rules = rules.filter((r) =>
+    prefixes.some((p) => classesOf(r.selector).some((c) => c.startsWith(p))),
+  );
 }
 if (exactClasses) {
-  rules = rules.filter((r) => classesOf(r.selector).some((c) => exactClasses.has(c)))
+  rules = rules.filter((r) => classesOf(r.selector).some((c) => exactClasses.has(c)));
 }
 
 console.log(
   `# ${path.basename(file)}${fromGit ? ` @${rev}` : ''}` +
     `${prefixes ? ` prefix=${prefixes.join('|')}` : ''}` +
     `${exactClasses ? ` classes=${[...exactClasses].join('|')}` : ''} —— ${rules.length} 条规则`,
-)
-for (const r of rules) console.log(formatRule(r))
+);
+for (const r of rules) console.log(formatRule(r));

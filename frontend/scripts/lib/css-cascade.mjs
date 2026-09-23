@@ -25,13 +25,13 @@
  *
  * ⚠️ 这里**不**重复实现 CSS 解析：规则切分一律走 `lib/css-parse.mjs`。
  */
-import { parseRules, splitSelectors } from './css-parse.mjs'
+import { parseRules, splitSelectors } from './css-parse.mjs';
 
 /** 剥掉 CSS Modules 的哈希后缀：`_qaAiCard_1lr0k_43` → `_qaAiCard`（同 verify-built-css） */
-export const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '')
+export const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '');
 
 /** 选择器 / 值的空白归一（只用于比较，不用于展示原值） */
-export const normText = (s) => s.replace(/\s+/g, ' ').trim()
+export const normText = (s) => s.replace(/\s+/g, ' ').trim();
 
 /**
  * 极简权重计算：只处理本项目用到的形态
@@ -43,18 +43,18 @@ export const normText = (s) => s.replace(/\s+/g, ' ').trim()
  * 不追求覆盖 `:is()` / `:where()` 之外的现代选择器。
  */
 export function specificity(sel) {
-  const s = sel.replace(/:where\([^)]*\)/g, '') // :where() 权重为 0
-  const ids = (s.match(/#[\w-]+/g) || []).length
+  const s = sel.replace(/:where\([^)]*\)/g, ''); // :where() 权重为 0
+  const ids = (s.match(/#[\w-]+/g) || []).length;
   const classes =
     (s.match(/\.[\w-]+/g) || []).length +
     (s.match(/\[[^\]]*\]/g) || []).length +
-    (s.match(/:(?!:)[\w-]+/g) || []).length
-  const pseudoEls = (s.match(/::[\w-]+/g) || []).length
-  const types = (s.match(/(^|[\s>+~(,])([a-zA-Z][\w-]*)/g) || []).length + pseudoEls
-  return [ids, classes, types]
+    (s.match(/:(?!:)[\w-]+/g) || []).length;
+  const pseudoEls = (s.match(/::[\w-]+/g) || []).length;
+  const types = (s.match(/(^|[\s>+~(,])([a-zA-Z][\w-]*)/g) || []).length + pseudoEls;
+  return [ids, classes, types];
 }
 
-export const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+export const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 /**
  * 简写属性 → 它**会写的长写属性**清单。
@@ -76,13 +76,37 @@ export const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
  */
 export const SHORTHAND_TOUCHES = {
   border: [
-    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
-    'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
-    'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+    'border-top-width',
+    'border-right-width',
+    'border-bottom-width',
+    'border-left-width',
+    'border-top-style',
+    'border-right-style',
+    'border-bottom-style',
+    'border-left-style',
+    'border-top-color',
+    'border-right-color',
+    'border-bottom-color',
+    'border-left-color',
   ],
-  'border-width': ['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'],
-  'border-style': ['border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style'],
-  'border-color': ['border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'],
+  'border-width': [
+    'border-top-width',
+    'border-right-width',
+    'border-bottom-width',
+    'border-left-width',
+  ],
+  'border-style': [
+    'border-top-style',
+    'border-right-style',
+    'border-bottom-style',
+    'border-left-style',
+  ],
+  'border-color': [
+    'border-top-color',
+    'border-right-color',
+    'border-bottom-color',
+    'border-left-color',
+  ],
   'border-top': ['border-top-width', 'border-top-style', 'border-top-color'],
   'border-right': ['border-right-width', 'border-right-style', 'border-right-color'],
   'border-bottom': ['border-bottom-width', 'border-bottom-style', 'border-bottom-color'],
@@ -91,43 +115,66 @@ export const SHORTHAND_TOUCHES = {
   margin: ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
   inset: ['top', 'right', 'bottom', 'left'],
   background: [
-    'background-color', 'background-image', 'background-repeat', 'background-position',
-    'background-size', 'background-attachment', 'background-clip', 'background-origin',
+    'background-color',
+    'background-image',
+    'background-repeat',
+    'background-position',
+    'background-size',
+    'background-attachment',
+    'background-clip',
+    'background-origin',
   ],
   font: [
-    'font-style', 'font-variant', 'font-weight', 'font-stretch', 'font-size',
-    'line-height', 'font-family',
+    'font-style',
+    'font-variant',
+    'font-weight',
+    'font-stretch',
+    'font-size',
+    'line-height',
+    'font-family',
   ],
   'border-radius': [
-    'border-top-left-radius', 'border-top-right-radius',
-    'border-bottom-right-radius', 'border-bottom-left-radius',
+    'border-top-left-radius',
+    'border-top-right-radius',
+    'border-bottom-right-radius',
+    'border-bottom-left-radius',
   ],
   gap: ['row-gap', 'column-gap'],
   flex: ['flex-grow', 'flex-shrink', 'flex-basis'],
   overflow: ['overflow-x', 'overflow-y'],
-  transition: ['transition-property', 'transition-duration', 'transition-timing-function', 'transition-delay'],
-  'text-decoration': ['text-decoration-line', 'text-decoration-style', 'text-decoration-color', 'text-decoration-thickness'],
+  transition: [
+    'transition-property',
+    'transition-duration',
+    'transition-timing-function',
+    'transition-delay',
+  ],
+  'text-decoration': [
+    'text-decoration-line',
+    'text-decoration-style',
+    'text-decoration-color',
+    'text-decoration-thickness',
+  ],
   'list-style': ['list-style-type', 'list-style-position', 'list-style-image'],
   outline: ['outline-width', 'outline-style', 'outline-color'],
-}
+};
 
 /** 所有"长写"属性 → 它属于哪几族简写（`border-left-width` → `['border', 'border-width', 'border-left']`） */
-const LONGHAND_FAMILIES = new Map()
+const LONGHAND_FAMILIES = new Map();
 for (const [short, longs] of Object.entries(SHORTHAND_TOUCHES)) {
   for (const l of longs) {
-    if (!LONGHAND_FAMILIES.has(l)) LONGHAND_FAMILIES.set(l, [])
-    LONGHAND_FAMILIES.get(l).push(short)
+    if (!LONGHAND_FAMILIES.has(l)) LONGHAND_FAMILIES.set(l, []);
+    LONGHAND_FAMILIES.get(l).push(short);
   }
 }
 
 /** 这个属性是不是"简写"（表里有）；是则返回它会写的长写清单，否则 null */
 export function touchedLonghands(prop) {
-  return SHORTHAND_TOUCHES[prop.trim().toLowerCase()] || null
+  return SHORTHAND_TOUCHES[prop.trim().toLowerCase()] || null;
 }
 
 /** 这个属性是不是"长写"（会被某族简写覆盖）；是则返回覆盖它的简写清单，否则 null */
 export function coveringShorthands(prop) {
-  return LONGHAND_FAMILIES.get(prop.trim().toLowerCase()) || null
+  return LONGHAND_FAMILIES.get(prop.trim().toLowerCase()) || null;
 }
 
 /**
@@ -150,13 +197,13 @@ export function coveringShorthands(prop) {
  * @returns {{longhands: string[], shortDecl: object, longDecl: object} | null}
  */
 export function shorthandClash(a, b) {
-  if (a.prop === b.prop) return null
-  const setA = new Set(touchedLonghands(a.prop) || [a.prop])
-  const setB = new Set(touchedLonghands(b.prop) || [b.prop])
-  const longhands = [...setA].filter((p) => setB.has(p))
-  if (longhands.length === 0) return null
-  const [shortDecl, longDecl] = setA.size >= setB.size ? [a, b] : [b, a]
-  return { longhands, longhand: longhands.join('/'), shortDecl, longDecl }
+  if (a.prop === b.prop) return null;
+  const setA = new Set(touchedLonghands(a.prop) || [a.prop]);
+  const setB = new Set(touchedLonghands(b.prop) || [b.prop]);
+  const longhands = [...setA].filter((p) => setB.has(p));
+  if (longhands.length === 0) return null;
+  const [shortDecl, longDecl] = setA.size >= setB.size ? [a, b] : [b, a];
+  return { longhands, longhand: longhands.join('/'), shortDecl, longDecl };
 }
 
 /**
@@ -178,7 +225,7 @@ export function shorthandClash(a, b) {
  *     这里返回 `null`（调用方必须把它当作"判不了"报出来，不能猜）。
  */
 export function fileRank(fileName) {
-  return /^index[-.]/.test(fileName) ? 0 : 1
+  return /^index[-.]/.test(fileName) ? 0 : 1;
 }
 
 /**
@@ -186,13 +233,13 @@ export function fileRank(fileName) {
  * @returns {'a'|'b'|'unknown'} a/b = 哪条声明赢；unknown = 权重与源序都不足以判定
  */
 export function pickWinner(a, b) {
-  const sp = cmpSpec(specificity(a.sel), specificity(b.sel))
-  if (sp !== 0) return sp > 0 ? 'a' : 'b'
-  const ra = fileRank(a.file)
-  const rb = fileRank(b.file)
-  if (ra !== rb) return ra > rb ? 'a' : 'b' // index.css 在前 ⇒ chunk 赢
-  if (a.file !== b.file) return 'unknown' // 两个懒加载 chunk：静态判不了
-  return a.order > b.order ? 'a' : 'b' // 同文件：源序后者胜
+  const sp = cmpSpec(specificity(a.sel), specificity(b.sel));
+  if (sp !== 0) return sp > 0 ? 'a' : 'b';
+  const ra = fileRank(a.file);
+  const rb = fileRank(b.file);
+  if (ra !== rb) return ra > rb ? 'a' : 'b'; // index.css 在前 ⇒ chunk 赢
+  if (a.file !== b.file) return 'unknown'; // 两个懒加载 chunk：静态判不了
+  return a.order > b.order ? 'a' : 'b'; // 同文件：源序后者胜
 }
 
 /**
@@ -201,15 +248,15 @@ export function pickWinner(a, b) {
  * @returns {{file:string, order:number, context:string, sel:string, prop:string, val:string}[]}
  */
 export function collectCascadeDecls(sheets) {
-  const out = []
+  const out = [];
   for (const s of sheets) {
-    let order = 0
+    let order = 0;
     for (const r of parseRules(s.css)) {
       // at-rule（`@font-face` / `@keyframes`）不是选择器
-      if (r.selector.trim().startsWith('@')) continue
+      if (r.selector.trim().startsWith('@')) continue;
       for (const sel of splitSelectors(r.selector)) {
-        if (sel.trim().startsWith('@')) continue
-        order += 1
+        if (sel.trim().startsWith('@')) continue;
+        order += 1;
         for (const [p, v] of r.decls) {
           out.push({
             file: s.name,
@@ -218,12 +265,12 @@ export function collectCascadeDecls(sheets) {
             sel: normText(stripHash(sel)),
             prop: p.trim().toLowerCase(),
             val: normText(v),
-          })
+          });
         }
       }
     }
   }
-  return out
+  return out;
 }
 
 /**
@@ -237,50 +284,50 @@ export function collectCascadeDecls(sheets) {
  * 这条限制写在 `css-convention.md` §7 的盲区里。
  */
 export function isSingleClassSelector(sel) {
-  return /^\._?[A-Za-z][\w-]*$/.test(normText(sel))
+  return /^\._?[A-Za-z][\w-]*$/.test(normText(sel));
 }
 
 /** 从 TSX 源码里抽"同一个元素上并列了哪几个类名"（跨选择器竞争的证据来源） */
 export function coAppliedClassGroups(tsxSources) {
-  const groups = []
+  const groups = [];
   for (const { file, text } of tsxSources) {
     for (const m of text.matchAll(/className\s*=/g)) {
-      const start = m.index + m[0].length
-      const expr = readJsxAttributeValue(text, start)
-      if (!expr) continue
-      const refs = extractClassRefs(expr.value)
+      const start = m.index + m[0].length;
+      const expr = readJsxAttributeValue(text, start);
+      if (!expr) continue;
+      const refs = extractClassRefs(expr.value);
       if (refs.length >= 2) {
         groups.push({
           file,
           line: text.slice(0, start).split('\n').length,
           snippet: normText(expr.value).slice(0, 120),
           refs,
-        })
+        });
       }
     }
   }
-  return groups
+  return groups;
 }
 
 /** 从 `className=` 之后读出属性值（`"..."` / `'...'` / `{ ... }` 括号配对） */
 function readJsxAttributeValue(text, i) {
-  while (i < text.length && /\s/.test(text[i])) i++
-  const q = text[i]
+  while (i < text.length && /\s/.test(text[i])) i++;
+  const q = text[i];
   if (q === '"' || q === "'") {
-    const end = text.indexOf(q, i + 1)
-    if (end < 0) return null
-    return { value: text.slice(i, end + 1) }
+    const end = text.indexOf(q, i + 1);
+    if (end < 0) return null;
+    return { value: text.slice(i, end + 1) };
   }
-  if (q !== '{') return null
-  let depth = 0
+  if (q !== '{') return null;
+  let depth = 0;
   for (let j = i; j < text.length; j++) {
-    if (text[j] === '{') depth++
+    if (text[j] === '{') depth++;
     else if (text[j] === '}') {
-      depth--
-      if (depth === 0) return { value: text.slice(i, j + 1) }
+      depth--;
+      if (depth === 0) return { value: text.slice(i, j + 1) };
     }
   }
-  return null
+  return null;
 }
 
 /**
@@ -300,55 +347,55 @@ function readJsxAttributeValue(text, i) {
  * 就留，不存在（如 `badge-`）就丢。宁可漏报也不误报。
  */
 export function extractClassRefs(expr) {
-  const refs = [] // { kind: 'global'|'module', name: string, partial: boolean }
+  const refs = []; // { kind: 'global'|'module', name: string, partial: boolean }
 
   // ① 引号字符串字面量：`className="btn btn-primary"`、`' card'`、
   //    以及三元分支里的 `' filter-pill-active'`（在 `${}` 里面也要认出来）
   for (const m of expr.matchAll(/'([^'\\]*)'|"([^"\\]*)"/g)) {
-    const text = m[1] !== undefined ? m[1] : m[2]
-    for (const t of tokensOf(text)) refs.push({ kind: 'global', name: t, partial: false })
+    const text = m[1] !== undefined ? m[1] : m[2];
+    for (const t of tokensOf(text)) refs.push({ kind: 'global', name: t, partial: false });
   }
 
   // ② 模板字符串：`${}` **之外**的原文段按"有没有紧贴 `${` / `}`"标可疑；
   //    `${}` 里面的引号字面量已由 ① 覆盖，`styles.x` 引用单独抽。
   for (const m of expr.matchAll(/`([\s\S]*?)`/g)) {
-    const body = m[1]
-    const parts = body.split(/\$\{[^}]*\}/)
-    const dynamicCount = (body.match(/\$\{[^}]*\}/g) || []).length
+    const body = m[1];
+    const parts = body.split(/\$\{[^}]*\}/);
+    const dynamicCount = (body.match(/\$\{[^}]*\}/g) || []).length;
     parts.forEach((part, idx) => {
-      const toks = tokensOf(part)
+      const toks = tokensOf(part);
       toks.forEach((t, ti) => {
-        const isFirst = ti === 0
-        const isLast = ti === toks.length - 1
+        const isFirst = ti === 0;
+        const isLast = ti === toks.length - 1;
         // 左边紧贴 `${…}` 的结束、或右边紧贴 `${` 开始（且段尾无空白）⇒ 半截 token
-        const gluedLeft = isFirst && idx > 0 && !/^\s/.test(part)
-        const gluedRight = isLast && idx < dynamicCount && !/\s$/.test(part)
-        refs.push({ kind: 'global', name: t, partial: gluedLeft || gluedRight })
-      })
-    })
+        const gluedLeft = isFirst && idx > 0 && !/^\s/.test(part);
+        const gluedRight = isLast && idx < dynamicCount && !/\s$/.test(part);
+        refs.push({ kind: 'global', name: t, partial: gluedLeft || gluedRight });
+      });
+    });
   }
 
   // ③ `styles.x` / `styles['x']` 之外的一切模块类名引用
   for (const m of expr.matchAll(/styles\.([A-Za-z_$][\w$]*)/g)) {
-    refs.push({ kind: 'module', name: m[1], partial: false })
+    refs.push({ kind: 'module', name: m[1], partial: false });
   }
 
   // 去重：同名以"确定"的那一次为准（partial 只是"待核对"）
-  const byKey = new Map()
+  const byKey = new Map();
   for (const r of refs) {
-    const k = `${r.kind}:${r.name}`
-    const prev = byKey.get(k)
-    if (!prev || (prev.partial && !r.partial)) byKey.set(k, r)
+    const k = `${r.kind}:${r.name}`;
+    const prev = byKey.get(k);
+    if (!prev || (prev.partial && !r.partial)) byKey.set(k, r);
   }
-  return [...byKey.values()]
+  return [...byKey.values()];
 }
 
-const CLASS_TOKEN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
+const CLASS_TOKEN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 function tokensOf(text) {
   return text
     .split(/[\s,]+/)
     .map((t) => t.trim())
-    .filter((t) => t && CLASS_TOKEN.test(t))
+    .filter((t) => t && CLASS_TOKEN.test(t));
 }
 
 /**
@@ -366,24 +413,24 @@ function tokensOf(text) {
  *   为 0 说明这项检查**没起到作用**（调用方必须报错，不能当成"没问题"）。
  */
 export function findMediaWars(decls) {
-  const byKey = new Map()
+  const byKey = new Map();
   for (const d of decls) {
-    const k = `${d.sel} :: ${d.prop}`
-    if (!byKey.has(k)) byKey.set(k, [])
-    byKey.get(k).push(d)
+    const k = `${d.sel} :: ${d.prop}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(d);
   }
-  let candidates = 0
-  const findings = []
+  let candidates = 0;
+  const findings = [];
   for (const [key, list] of byKey) {
-    const tops = list.filter((d) => d.context === '')
-    const medias = list.filter((d) => d.context !== '')
-    if (!tops.length || !medias.length) continue
+    const tops = list.filter((d) => d.context === '');
+    const medias = list.filter((d) => d.context !== '');
+    if (!tops.length || !medias.length) continue;
     for (const m of medias) {
       for (const t of tops) {
-        if (m.val === t.val) continue // 值一样就没有"谁赢"的问题
-        candidates += 1
-        const w = pickWinner(m, t) // 'a' = 媒体查询那条
-        if (w === 'a') continue // 媒体查询那条靠源序取胜 —— 这正是它该有的样子
+        if (m.val === t.val) continue; // 值一样就没有"谁赢"的问题
+        candidates += 1;
+        const w = pickWinner(m, t); // 'a' = 媒体查询那条
+        if (w === 'a') continue; // 媒体查询那条靠源序取胜 —— 这正是它该有的样子
         findings.push({
           key,
           sel: m.sel,
@@ -391,11 +438,11 @@ export function findMediaWars(decls) {
           media: { context: m.context, val: m.val, file: m.file, order: m.order },
           top: { val: t.val, file: t.file, order: t.order },
           winner: w === 'b' ? 'top' : 'unknown',
-        })
+        });
       }
     }
   }
-  return { candidates, findings }
+  return { candidates, findings };
 }
 
 /**
@@ -414,35 +461,45 @@ export function findMediaWars(decls) {
  * @returns {{candidates:number, findings:object[]}}
  */
 export function findShorthandClashes(decls) {
-  const byKey = new Map()
+  const byKey = new Map();
   for (const d of decls) {
-    const k = `${d.sel} :: ${d.context}`
-    if (!byKey.has(k)) byKey.set(k, [])
-    byKey.get(k).push(d)
+    const k = `${d.sel} :: ${d.context}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(d);
   }
-  let candidates = 0
-  const findings = []
+  let candidates = 0;
+  const findings = [];
   for (const [key, list] of byKey) {
     for (let i = 0; i < list.length; i += 1) {
       for (let j = i + 1; j < list.length; j += 1) {
-        const clash = shorthandClash(list[i], list[j])
-        if (!clash) continue
-        candidates += 1
-        const { shortDecl, longDecl, longhand } = clash
-        const w = pickWinner(shortDecl, longDecl)
+        const clash = shorthandClash(list[i], list[j]);
+        if (!clash) continue;
+        candidates += 1;
+        const { shortDecl, longDecl, longhand } = clash;
+        const w = pickWinner(shortDecl, longDecl);
         findings.push({
           key,
           sel: shortDecl.sel,
           context: shortDecl.context,
           longhand,
-          shorthand: { prop: shortDecl.prop, val: shortDecl.val, file: shortDecl.file, order: shortDecl.order },
-          long: { prop: longDecl.prop, val: longDecl.val, file: longDecl.file, order: longDecl.order },
+          shorthand: {
+            prop: shortDecl.prop,
+            val: shortDecl.val,
+            file: shortDecl.file,
+            order: shortDecl.order,
+          },
+          long: {
+            prop: longDecl.prop,
+            val: longDecl.val,
+            file: longDecl.file,
+            order: longDecl.order,
+          },
           winner: w === 'a' ? 'shorthand' : w === 'b' ? 'longhand' : 'unknown',
-        })
+        });
       }
     }
   }
-  return { candidates, findings }
+  return { candidates, findings };
 }
 
 /**
@@ -464,48 +521,60 @@ export function findShorthandClashes(decls) {
  *   返回 null = 产物里没有这个单类规则（半截 token 就靠这一步被丢掉）
  */
 export function findCrossClassShorthandClashes(decls, coGroups, lookup) {
-  const byClass = new Map()
+  const byClass = new Map();
   for (const d of decls) {
-    if (d.context !== '' || !isSingleClassSelector(d.sel)) continue
-    const key = d.sel.replace(/^\./, '')
-    if (!byClass.has(key)) byClass.set(key, [])
-    byClass.get(key).push(d)
+    if (d.context !== '' || !isSingleClassSelector(d.sel)) continue;
+    const key = d.sel.replace(/^\./, '');
+    if (!byClass.has(key)) byClass.set(key, []);
+    byClass.get(key).push(d);
   }
-  let candidates = 0
-  const findings = []
+  let candidates = 0;
+  const findings = [];
   for (const g of coGroups) {
     const resolved = g.refs
       .map((ref) => {
-        const key = lookup(ref)
-        if (!key || !byClass.has(key)) return null
-        return { ref, key, decls: byClass.get(key) }
+        const key = lookup(ref);
+        if (!key || !byClass.has(key)) return null;
+        return { ref, key, decls: byClass.get(key) };
       })
-      .filter(Boolean)
+      .filter(Boolean);
     for (let i = 0; i < resolved.length; i += 1) {
       for (let j = i + 1; j < resolved.length; j += 1) {
-        const A = resolved[i]
-        const B = resolved[j]
+        const A = resolved[i];
+        const B = resolved[j];
         for (const a of A.decls) {
           for (const b of B.decls) {
-            const clash = shorthandClash(a, b)
-            if (!clash) continue
-            candidates += 1
-            const { shortDecl, longDecl, longhand } = clash
-            const w = pickWinner(shortDecl, longDecl)
+            const clash = shorthandClash(a, b);
+            if (!clash) continue;
+            candidates += 1;
+            const { shortDecl, longDecl, longhand } = clash;
+            const w = pickWinner(shortDecl, longDecl);
             findings.push({
               key: `${A.key} × ${B.key} :: ${longhand}`,
               where: `${g.file}:${g.line}`,
               snippet: g.snippet,
               classes: [A.key, B.key],
               longhand,
-              shorthand: { prop: shortDecl.prop, val: shortDecl.val, sel: shortDecl.sel, file: shortDecl.file, order: shortDecl.order },
-              long: { prop: longDecl.prop, val: longDecl.val, sel: longDecl.sel, file: longDecl.file, order: longDecl.order },
+              shorthand: {
+                prop: shortDecl.prop,
+                val: shortDecl.val,
+                sel: shortDecl.sel,
+                file: shortDecl.file,
+                order: shortDecl.order,
+              },
+              long: {
+                prop: longDecl.prop,
+                val: longDecl.val,
+                sel: longDecl.sel,
+                file: longDecl.file,
+                order: longDecl.order,
+              },
               winner: w === 'a' ? 'shorthand' : w === 'b' ? 'longhand' : 'unknown',
-            })
+            });
           }
         }
       }
     }
   }
-  return { candidates, findings }
+  return { candidates, findings };
 }

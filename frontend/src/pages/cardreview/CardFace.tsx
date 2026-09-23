@@ -13,35 +13,42 @@
  * 把它独立出来，是为了让"默认隐藏"这条约束有一个明确的归属和测试落点 ——
  * 它是这一页存在意义的全部，而它只是 `revealed` 一个布尔值。
  */
-import type { DueCard } from '../../api/review'
-import { cardTypeLabels } from '../../utils/labels'
+import type { DueCard } from '../../api/review';
+import { cardTypeLabels } from '../../utils/labels';
 
 interface CardFaceProps {
-  card: DueCard
+  card: DueCard;
   /** 是否已翻面；false 时只渲染提示语与"显示答案" */
-  revealed: boolean
-  onReveal: () => void
+  revealed: boolean;
+  onReveal: () => void;
 }
 
 export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
-  const typeLabel = cardTypeLabels[card.card_type] || card.card_type
+  const typeLabel = cardTypeLabels[card.card_type] || card.card_type;
 
   return (
     <>
       {/* 卡片头部：类型 / 章节 / 复习元信息 */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 'var(--space-md)',
-        gap: 'var(--space-sm)',
-        flexWrap: 'wrap',
-      }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 'var(--space-md)',
+          gap: 'var(--space-sm)',
+          flexWrap: 'wrap',
+        }}
+      >
         <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
-          <span style={{
-            padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem',
-            background: 'var(--color-primary)', color: '#fff',
-          }}>
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: '0.8rem',
+              background: 'var(--color-primary)',
+              color: '#fff',
+            }}
+          >
             {typeLabel}
           </span>
           {card.chapter_title && (
@@ -68,9 +75,14 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
 
       {!revealed ? (
         <>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: 'var(--space-md)' }}>
-            先在心里把这张卡的内容讲一遍，再看答案 —— 直接翻面等于看答案，
-            这次自评就不准了。
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              fontSize: '0.9rem',
+              marginBottom: 'var(--space-md)',
+            }}
+          >
+            先在心里把这张卡的内容讲一遍，再看答案 —— 直接翻面等于看答案， 这次自评就不准了。
           </p>
           <div style={{ textAlign: 'right' }}>
             <button className="btn btn-primary" onClick={onReveal}>
@@ -94,16 +106,18 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
             {card.content}
           </div>
           {card.summary && (
-            <p style={{
-              fontSize: '0.9rem',
-              color: 'var(--color-text-secondary)',
-              marginBottom: 'var(--space-md)',
-            }}>
+            <p
+              style={{
+                fontSize: '0.9rem',
+                color: 'var(--color-text-secondary)',
+                marginBottom: 'var(--space-md)',
+              }}
+            >
               <strong>摘要:</strong> {card.summary}
             </p>
           )}
         </>
       )}
     </>
-  )
+  );
 }

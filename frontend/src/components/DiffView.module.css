@@ -67,9 +67,19 @@
   flex-shrink: 0;
 }
 
-.diffColLabel:nth-child(1) { width: 50px; text-align: right; }
-.diffColLabel:nth-child(2) { width: 50px; text-align: right; margin-left: var(--space-sm); }
-.diffColLabel:nth-child(3) { flex: 1; margin-left: var(--space-sm); }
+.diffColLabel:nth-child(1) {
+  width: 50px;
+  text-align: right;
+}
+.diffColLabel:nth-child(2) {
+  width: 50px;
+  text-align: right;
+  margin-left: var(--space-sm);
+}
+.diffColLabel:nth-child(3) {
+  flex: 1;
+  margin-left: var(--space-sm);
+}
 
 /* ── 正文 ── */
 

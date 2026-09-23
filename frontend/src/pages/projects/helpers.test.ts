@@ -11,15 +11,15 @@
  *    （报错了就等于每次打开"添加笔记"面板都弹一条无用提示）。
  * 3. `formatSize(0)`：0 字节是**真实大小**，`—` 只能留给"没有值/不是有效数字"。
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Note, NoteInFolder, Project } from '../../api/client'
+import type { Note, NoteInFolder, Project } from '../../api/client';
 import {
   resetContractDriftNotices,
   subscribeContractDrift,
   type ContractDriftEvent,
-} from '../contractDrift'
-import { formatSize, unwrapCandidateNotes, unwrapProjectNotes, unwrapProjects } from './helpers'
+} from '../contractDrift';
+import { formatSize, unwrapCandidateNotes, unwrapProjectNotes, unwrapProjects } from './helpers';
 
 function makeProject(over: Partial<Project> = {}): Project {
   return {
@@ -31,7 +31,7 @@ function makeProject(over: Partial<Project> = {}): Project {
     created_at: '2026-09-01T10:00:00Z',
     updated_at: '2026-09-02T10:00:00Z',
     ...over,
-  }
+  };
 }
 
 function makeNoteInFolder(over: Partial<NoteInFolder> = {}): NoteInFolder {
@@ -43,7 +43,7 @@ function makeNoteInFolder(over: Partial<NoteInFolder> = {}): NoteInFolder {
     file_size: 2048,
     created_at: '2026-09-01T10:00:00Z',
     ...over,
-  }
+  };
 }
 
 function makeNote(over: Partial<Note> = {}): Note {
@@ -64,133 +64,133 @@ function makeNote(over: Partial<Note> = {}): Note {
     project_ids: [],
     project_names: [],
     ...over,
-  }
+  };
 }
 
 // ── 漂移事件的收集：订阅是唯一的观察点 ──
-let drifts: ContractDriftEvent[] = []
-let unsubscribe: (() => void) | null = null
+let drifts: ContractDriftEvent[] = [];
+let unsubscribe: (() => void) | null = null;
 
 beforeEach(() => {
   // 去重键是模块级状态，会跨用例存活：不清就会让后面的用例"提示没出现"假红
-  resetContractDriftNotices()
-  drifts = []
-  unsubscribe = subscribeContractDrift((event) => drifts.push(event))
-})
+  resetContractDriftNotices();
+  drifts = [];
+  unsubscribe = subscribeContractDrift((event) => drifts.push(event));
+});
 
 afterEach(() => {
-  unsubscribe?.()
-  unsubscribe = null
-})
+  unsubscribe?.();
+  unsubscribe = null;
+});
 
 describe('unwrapProjects', () => {
   it('(a) 包装载荷：拆包后照常返回项目，并报出 wrapper 漂移', () => {
-    const project = makeProject()
+    const project = makeProject();
 
-    expect(unwrapProjects({ items: [project] })).toEqual([project])
-    expect(drifts).toHaveLength(1)
-    expect(drifts[0]).toMatchObject({ kind: 'wrapper', source: 'GET /projects' })
-  })
+    expect(unwrapProjects({ items: [project] })).toEqual([project]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({ kind: 'wrapper', source: 'GET /projects' });
+  });
 
   it('(b) 非数组载荷：归一成空列表，并报出 non-array 漂移', () => {
-    expect(unwrapProjects({})).toEqual([])
-    expect(drifts).toHaveLength(1)
-    expect(drifts[0]).toMatchObject({ kind: 'non-array', source: 'GET /projects' })
-  })
+    expect(unwrapProjects({})).toEqual([]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({ kind: 'non-array', source: 'GET /projects' });
+  });
 
   it('(b) 204/空响应体（undefined）同样算非数组，不能当成"正常的空列表"', () => {
-    expect(unwrapProjects(undefined)).toEqual([])
-    expect(drifts).toHaveLength(1)
-    expect(drifts[0].kind).toBe('non-array')
-  })
+    expect(unwrapProjects(undefined)).toEqual([]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0].kind).toBe('non-array');
+  });
 
   it('(c) 正常数组：原样返回，一条漂移都不报', () => {
-    const project = makeProject()
+    const project = makeProject();
 
-    expect(unwrapProjects([project])).toEqual([project])
-    expect(drifts).toEqual([])
-  })
+    expect(unwrapProjects([project])).toEqual([project]);
+    expect(drifts).toEqual([]);
+  });
 
   it('(c) 正常的空数组（真的没有项目）不报 —— "空"不是漂移', () => {
-    expect(unwrapProjects([])).toEqual([])
-    expect(drifts).toEqual([])
-  })
+    expect(unwrapProjects([])).toEqual([]);
+    expect(drifts).toEqual([]);
+  });
 
   it('去重：列表被反复重拉（每次写操作后都会重拉）也只上报一次', () => {
     for (let i = 0; i < 6; i += 1) {
-      unwrapProjects({ items: [] })
+      unwrapProjects({ items: [] });
     }
 
-    expect(drifts).toHaveLength(1)
-  })
-})
+    expect(drifts).toHaveLength(1);
+  });
+});
 
 describe('unwrapProjectNotes', () => {
   it('(a) 包装载荷：拆包后照常返回笔记，并报出 wrapper 漂移', () => {
-    const note = makeNoteInFolder()
+    const note = makeNoteInFolder();
 
-    expect(unwrapProjectNotes({ items: [note] })).toEqual([note])
-    expect(drifts).toHaveLength(1)
-    expect(drifts[0]).toMatchObject({ kind: 'wrapper', source: 'GET /projects/{id}' })
-  })
+    expect(unwrapProjectNotes({ items: [note] })).toEqual([note]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toMatchObject({ kind: 'wrapper', source: 'GET /projects/{id}' });
+  });
 
   it('(b) notes 字段缺失（undefined）时归一成空列表并报出非数组', () => {
-    expect(unwrapProjectNotes(undefined)).toEqual([])
-    expect(drifts).toHaveLength(1)
-    expect(drifts[0].kind).toBe('non-array')
-  })
+    expect(unwrapProjectNotes(undefined)).toEqual([]);
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0].kind).toBe('non-array');
+  });
 
   it('(c) 正常数组：原样返回，一条漂移都不报', () => {
-    const note = makeNoteInFolder()
+    const note = makeNoteInFolder();
 
-    expect(unwrapProjectNotes([note])).toEqual([note])
-    expect(drifts).toEqual([])
-  })
-})
+    expect(unwrapProjectNotes([note])).toEqual([note]);
+    expect(drifts).toEqual([]);
+  });
+});
 
 describe('unwrapCandidateNotes（/notes 是分页对象，items 是约定字段）', () => {
   it('(c) 正常分页响应**不是**漂移：items 就在约定位置，一条都不报', () => {
-    const note = makeNote()
+    const note = makeNote();
 
-    const result = unwrapCandidateNotes({ items: [note], total: 1, page: 1, page_size: 999 })
+    const result = unwrapCandidateNotes({ items: [note], total: 1, page: 1, page_size: 999 });
 
-    expect(result).toEqual([note])
-    expect(drifts).toEqual([])
-  })
+    expect(result).toEqual([note]);
+    expect(drifts).toEqual([]);
+  });
 
   it('(b) items 缺失/类型不对：归一成空候选并报出 items 字段（原来会抛错）', () => {
-    expect(unwrapCandidateNotes({ total: 0 })).toEqual([])
-    expect(unwrapCandidateNotes({ items: {} })).toEqual([])
-    expect(unwrapCandidateNotes(undefined)).toEqual([])
+    expect(unwrapCandidateNotes({ total: 0 })).toEqual([]);
+    expect(unwrapCandidateNotes({ items: {} })).toEqual([]);
+    expect(unwrapCandidateNotes(undefined)).toEqual([]);
 
-    expect(drifts).toHaveLength(1) // 同一处漂移只报一次
-    expect(drifts[0]).toMatchObject({ kind: 'non-array', source: 'GET /notes', field: 'items' })
-  })
-})
+    expect(drifts).toHaveLength(1); // 同一处漂移只报一次
+    expect(drifts[0]).toMatchObject({ kind: 'non-array', source: 'GET /notes', field: 'items' });
+  });
+});
 
 describe('formatSize', () => {
   it('0 字节是真实大小，不是"未知大小"', () => {
-    expect(formatSize(0)).toBe('0 B')
-  })
+    expect(formatSize(0)).toBe('0 B');
+  });
 
   it('B / KB / MB 三个档位的换算不变', () => {
-    expect(formatSize(1)).toBe('1 B')
-    expect(formatSize(1023)).toBe('1023 B')
-    expect(formatSize(1024)).toBe('1.0 KB')
-    expect(formatSize(2048)).toBe('2.0 KB')
-    expect(formatSize(3 * 1024 * 1024)).toBe('3.0 MB')
-  })
+    expect(formatSize(1)).toBe('1 B');
+    expect(formatSize(1023)).toBe('1023 B');
+    expect(formatSize(1024)).toBe('1.0 KB');
+    expect(formatSize(2048)).toBe('2.0 KB');
+    expect(formatSize(3 * 1024 * 1024)).toBe('3.0 MB');
+  });
 
   it('只有"没有值 / 不是有效数字"才显示 —', () => {
-    expect(formatSize(null)).toBe('—')
-    expect(formatSize(undefined)).toBe('—')
-    expect(formatSize(Number.NaN)).toBe('—')
-  })
+    expect(formatSize(null)).toBe('—');
+    expect(formatSize(undefined)).toBe('—');
+    expect(formatSize(Number.NaN)).toBe('—');
+  });
 
   it('负数（不可能的大小）按未知处理，而不是把脏数据当事实显示', () => {
     // 文件大小非负：真出现负数说明后端那个字段算错了。显示 "-5 B" 会让用户以为这是真的，
     // 与"字段缺失"共用 "—" 才诚实 —— 两者对用户的意义相同：这个大小不可信。
-    expect(formatSize(-5)).toBe('—')
-    expect(formatSize(-1)).toBe('—')
-  })
-})
+    expect(formatSize(-5)).toBe('—');
+    expect(formatSize(-1)).toBe('—');
+  });
+});

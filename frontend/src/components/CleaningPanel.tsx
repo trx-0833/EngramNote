@@ -6,35 +6,35 @@
  * 3. 重复块列表与操作（恢复/删除）
  * 4. 清洗统计摘要
  */
-import { useState } from 'react'
+import { useState } from 'react';
 import {
   startCleaning,
   stopCleaning,
   restoreBlock,
   deleteBlock,
   type NoteDetail,
-} from '../api/client'
-import TaskProgress from './TaskProgress'
+} from '../api/client';
+import TaskProgress from './TaskProgress';
 // 清洗面板样式（overhaul-plan 5.6）：原 src/styles/cleaning.css 整表迁到这里
-import styles from './CleaningPanel.module.css'
+import styles from './CleaningPanel.module.css';
 
 interface DuplicateBlock {
-  block_index: number
-  duplicate_of: number
-  similarity: number
+  block_index: number;
+  duplicate_of: number;
+  similarity: number;
   /** 重复块文本内容（旧版本清洗可能缺失，重新清洗后补齐） */
-  content?: string
+  content?: string;
   /** 被重复的保留块文本内容（旧版本清洗可能缺失） */
-  original_content?: string
+  original_content?: string;
 }
 
 interface CleaningPanelProps {
   /** 笔记详情 */
-  note: NoteDetail
+  note: NoteDetail;
   /** 清洗状态变化后的回调（刷新笔记数据） */
-  onStatusChange: () => void
+  onStatusChange: () => void;
   /** 块操作（恢复/删除）进行中回调（true=开始，false=结束），供父组件 suspend 状态轮询 */
-  onMutatingChange?: (mutating: boolean) => void
+  onMutatingChange?: (mutating: boolean) => void;
 }
 
 /**
@@ -45,86 +45,97 @@ interface CleaningPanelProps {
  * - cleaning：显示清洗进度提示
  * - cleaned：显示重复块列表和操作按钮
  */
-export default function CleaningPanel({ note, onStatusChange, onMutatingChange }: CleaningPanelProps) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+export default function CleaningPanel({
+  note,
+  onStatusChange,
+  onMutatingChange,
+}: CleaningPanelProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   /** 当前展开内容对比的重复块索引（null 表示全部收起） */
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   /** 触发清洗 */
   async function handleStartCleaning() {
-    setLoading(true)
-    setError('')
+    setLoading(true);
+    setError('');
     try {
-      await startCleaning(note.id)
-      onStatusChange()
+      await startCleaning(note.id);
+      onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '触发清洗失败')
+      setError(err instanceof Error ? err.message : '触发清洗失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   /** 停止清洗 */
   async function handleStopCleaning() {
-    if (!confirm('确定停止清洗？当前进度将丢失。')) return
-    setLoading(true)
-    setError('')
+    if (!confirm('确定停止清洗？当前进度将丢失。')) return;
+    setLoading(true);
+    setError('');
     try {
-      await stopCleaning(note.id)
-      onStatusChange()
+      await stopCleaning(note.id);
+      onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '停止清洗失败')
+      setError(err instanceof Error ? err.message : '停止清洗失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   /** 恢复重复块 */
   async function handleRestore(blockIndex: number) {
-    onMutatingChange?.(true)
-    setLoading(true)
-    setError('')
+    onMutatingChange?.(true);
+    setLoading(true);
+    setError('');
     try {
-      await restoreBlock(note.id, blockIndex)
-      onStatusChange()
+      await restoreBlock(note.id, blockIndex);
+      onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复失败')
+      setError(err instanceof Error ? err.message : '恢复失败');
     } finally {
-      setLoading(false)
-      onMutatingChange?.(false)
+      setLoading(false);
+      onMutatingChange?.(false);
     }
   }
 
   /** 删除重复块 */
   async function handleDelete(blockIndex: number) {
-    if (!confirm(`确定删除块 ${blockIndex}？此操作不可恢复。`)) return
-    onMutatingChange?.(true)
-    setLoading(true)
-    setError('')
+    if (!confirm(`确定删除块 ${blockIndex}？此操作不可恢复。`)) return;
+    onMutatingChange?.(true);
+    setLoading(true);
+    setError('');
     try {
-      await deleteBlock(note.id, blockIndex)
-      onStatusChange()
+      await deleteBlock(note.id, blockIndex);
+      onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(err instanceof Error ? err.message : '删除失败');
     } finally {
-      setLoading(false)
-      onMutatingChange?.(false)
+      setLoading(false);
+      onMutatingChange?.(false);
     }
   }
 
   // 从元数据中提取重复块信息
-  const metadata = note.metadata_ as Record<string, unknown> | null
-  const duplicatesDetail = (metadata?.duplicates_detail as DuplicateBlock[]) || []
-  const duplicateBlocks = (metadata?.duplicate_blocks as number) || 0
-  const totalChunks = (metadata?.total_chunks as number) || 0
-  const cleanStats = metadata?.clean_stats as Record<string, number> | null
+  const metadata = note.metadata_ as Record<string, unknown> | null;
+  const duplicatesDetail = (metadata?.duplicates_detail as DuplicateBlock[]) || [];
+  const duplicateBlocks = (metadata?.duplicate_blocks as number) || 0;
+  const totalChunks = (metadata?.total_chunks as number) || 0;
+  const cleanStats = metadata?.clean_stats as Record<string, number> | null;
 
   return (
     <div className={styles.cleaningPanel}>
       {/* 错误提示 */}
       {error && (
-        <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', marginBottom: 'var(--space-sm)' }}>
+        <p
+          role="alert"
+          style={{
+            color: 'var(--color-error)',
+            fontSize: '0.875rem',
+            marginBottom: 'var(--space-sm)',
+          }}
+        >
           {error}
         </p>
       )}
@@ -132,14 +143,16 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
       {/* converted 状态：显示"开始清洗"按钮 */}
       {note.status === 'converted' && (
         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-          <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)', fontSize: '0.875rem' }}>
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              marginBottom: 'var(--space-md)',
+              fontSize: '0.875rem',
+            }}
+          >
             笔记已转换完成，可以开始 AI 清洗
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={handleStartCleaning}
-            disabled={loading}
-          >
+          <button className="btn btn-primary" onClick={handleStartCleaning} disabled={loading}>
             {loading ? '正在触发...' : '开始清洗'}
           </button>
         </div>
@@ -174,14 +187,16 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
       {/* cleaning_failed 状态：显示错误信息 + 重新清洗按钮 */}
       {note.status === 'cleaning_failed' && (
         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-          <p style={{ color: 'var(--color-error)', marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
+          <p
+            style={{
+              color: 'var(--color-error)',
+              marginBottom: 'var(--space-sm)',
+              fontSize: '0.875rem',
+            }}
+          >
             清洗失败{note.error_message ? `：${note.error_message}` : ''}
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={handleStartCleaning}
-            disabled={loading}
-          >
+          <button className="btn btn-primary" onClick={handleStartCleaning} disabled={loading}>
             {loading ? '正在触发...' : '重新清洗'}
           </button>
         </div>
@@ -200,8 +215,17 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
                 见 docs/a11y-audit.md 里对 F-08 成因的更正）。
                 字号 0.875rem / 字重 600 本来就显式钉着，所以**一个像素都没动**
                 （与 F-18 / F-14/F-15 / trash / card-detail 的做法逐字相同）。 */}
-            <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>清洗统计</h2>
-            <div style={{ display: 'flex', gap: 'var(--space-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+            <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+              清洗统计
+            </h2>
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--space-md)',
+                fontSize: '0.8rem',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
               <span>总分块: {totalChunks}</span>
               <span>重复块: {duplicateBlocks}</span>
               {cleanStats && (
@@ -231,12 +255,14 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
             <div className={styles.duplicateBlocks}>
               {/* 与「清洗统计」同级的第二个区块 → 同为 `h2`（同一个 F-08 修复的
                   第二条渲染路径；它们只在重复块非空时渲染）。字数/字重不变。 */}
-              <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+              <h2
+                style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}
+              >
                 重复块（{duplicatesDetail.length} 个）
               </h2>
               {duplicatesDetail.map((dup) => {
-                const expanded = expandedIndex === dup.block_index
-                const hasContent = !!dup.content || !!dup.original_content
+                const expanded = expandedIndex === dup.block_index;
+                const hasContent = !!dup.content || !!dup.original_content;
                 return (
                   <div key={dup.block_index} className={styles.duplicateBlock}>
                     <div className={styles.duplicateBlockHeader}>
@@ -308,18 +334,24 @@ export default function CleaningPanel({ note, onStatusChange, onMutatingChange }
                       </div>
                     )}
                   </div>
-                )
+                );
               })}
             </div>
           )}
 
           {duplicatesDetail.length === 0 && (
-            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem', textAlign: 'center' }}>
+            <p
+              style={{
+                color: 'var(--color-text-secondary)',
+                fontSize: '0.8rem',
+                textAlign: 'center',
+              }}
+            >
               未检测到重复内容
             </p>
           )}
         </>
       )}
     </div>
-  )
+  );
 }

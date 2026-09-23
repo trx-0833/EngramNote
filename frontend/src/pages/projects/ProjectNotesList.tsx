@@ -9,25 +9,31 @@
  * `div[onClick]`（没有 role/tabIndex），键盘到不了"打开这篇笔记"
  * （详见行内注释）。
  */
-import { Link } from 'react-router-dom'
-import type { NoteInFolder } from '../../api/client'
-import { statusClass } from '../../utils/labels'
-import { TYPE_BADGE, formatSize } from './helpers'
+import { Link } from 'react-router-dom';
+import type { NoteInFolder } from '../../api/client';
+import { statusClass } from '../../utils/labels';
+import { TYPE_BADGE, formatSize } from './helpers';
 
 interface ProjectNotesListProps {
-  notes: NoteInFolder[]
+  notes: NoteInFolder[];
   /** 移出笔记（调用方负责二次确认与刷新） */
-  onRemoveNote: (note: NoteInFolder) => void
+  onRemoveNote: (note: NoteInFolder) => void;
 }
 
 export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesListProps) {
   return (
     <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 10 }}>
       {notes.length === 0 ? (
-        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '16px 0' }}>
+        <div
+          style={{
+            fontSize: '0.85rem',
+            color: 'var(--color-text-tertiary)',
+            textAlign: 'center',
+            padding: '16px 0',
+          }}
+        >
           项目暂无笔记。可把文件放入收件箱{' '}
-          <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
-          后点击「扫描导入」。
+          <code style={{ color: 'var(--color-primary)' }}>source/</code> 后点击「扫描导入」。
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -38,11 +44,7 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
                **卡片是盒子，控件在标题上**（标题是真 `<Link>`，可右键、可新标签页）。
                「移出」保持独立按钮，是它的**兄弟**（`stopPropagation` 留着：
                外层已经没有 onClick 了，但那个 handler 同时对"点空白处"这类调用有意义）。 */
-            <div
-              key={n.id}
-              className="note-select-card"
-              style={{ marginBottom: 0 }}
-            >
+            <div key={n.id} className="note-select-card" style={{ marginBottom: 0 }}>
               <span
                 className={`badge ${TYPE_BADGE[n.source_type] ?? 'badge-markdown'}`}
                 style={{ flexShrink: 0, width: 56, justifyContent: 'center' }}
@@ -66,10 +68,15 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
               >
                 {n.title}
               </Link>
-              <span className={statusClass(n.status)} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
+              <span
+                className={statusClass(n.status)}
+                style={{ fontSize: '0.75rem', flexShrink: 0 }}
+              >
                 {n.status}
               </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}>
+              <span
+                style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}
+              >
                 {formatSize(n.file_size)}
               </span>
               <button
@@ -77,8 +84,8 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
                 title="将笔记移出该项目"
                 style={{ fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0 }}
                 onClick={(e) => {
-                  e.stopPropagation() // 避免触发整行跳转到笔记详情
-                  onRemoveNote(n)
+                  e.stopPropagation(); // 避免触发整行跳转到笔记详情
+                  onRemoveNote(n);
                 }}
               >
                 移出
@@ -88,5 +95,5 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
         </div>
       )}
     </div>
-  )
+  );
 }

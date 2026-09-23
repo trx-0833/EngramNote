@@ -4,17 +4,17 @@
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 按钮顺序、类名拼接、禁用条件均与拆分前一致。
  */
-import type { ViewMode } from './types'
+import type { ViewMode } from './types';
 
 interface ViewModeTabsProps {
   /** 当前视图模式 */
-  viewMode: ViewMode
+  viewMode: ViewMode;
   /** 切换视图模式 */
-  onViewModeChange: (mode: ViewMode) => void
+  onViewModeChange: (mode: ViewMode) => void;
   /** 是否可切换到清洗版（无清洗内容时禁用） */
-  canShowClean: boolean
+  canShowClean: boolean;
   /** 是否可切换到对比视图（未清洗状态禁用） */
-  canShowDiff: boolean
+  canShowDiff: boolean;
 }
 
 /** 视图模式切换按钮 */
@@ -47,5 +47,5 @@ export default function ViewModeTabs({
         对比视图
       </button>
     </div>
-  )
+  );
 }

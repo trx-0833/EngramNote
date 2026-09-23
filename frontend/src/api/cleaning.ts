@@ -2,8 +2,8 @@
  * @file 清洗 API
  * @description 笔记清洗触发、停止、状态查询、diff 对比与重复块操作。
  */
-import { request } from './client'
-import type { Schema } from './generated/types'
+import { request } from './client';
+import type { Schema } from './generated/types';
 
 // --- 清洗相关类型（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 
@@ -100,7 +100,10 @@ export async function getCleaningDiff(noteId: string): Promise<CleaningDiffRespo
  * @param blockIndex - 要恢复的块序号
  * @returns 操作结果
  */
-export async function restoreBlock(noteId: string, blockIndex: number): Promise<BlockOperationResponse> {
+export async function restoreBlock(
+  noteId: string,
+  blockIndex: number,
+): Promise<BlockOperationResponse> {
   return request<BlockOperationResponse>(`/cleaning/${noteId}/restore/${blockIndex}`, {
     method: 'POST',
   });
@@ -114,7 +117,10 @@ export async function restoreBlock(noteId: string, blockIndex: number): Promise<
  * @param blockIndex - 要删除的块序号
  * @returns 操作结果
  */
-export async function deleteBlock(noteId: string, blockIndex: number): Promise<BlockOperationResponse> {
+export async function deleteBlock(
+  noteId: string,
+  blockIndex: number,
+): Promise<BlockOperationResponse> {
   return request<BlockOperationResponse>(`/cleaning/${noteId}/block/${blockIndex}`, {
     method: 'DELETE',
   });

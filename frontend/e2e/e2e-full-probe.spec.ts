@@ -31,11 +31,16 @@
  *
  *     npm run e2e:full:probe        # 需要 ENGRAMNOTE_E2E_FULL=1，但不启动后端/不调 LLM
  */
-import { expect, test } from '@playwright/test'
-import { cleanAnswerText, describeQaDom, expectAnswerCardText, readAnswerText } from './e2e-full-locators'
+import { expect, test } from '@playwright/test';
+import {
+  cleanAnswerText,
+  describeQaDom,
+  expectAnswerCardText,
+  readAnswerText,
+} from './e2e-full-locators';
 
-const QUESTION = '主变压器顶层油温的正常运行上限是多少？超过多少必须降低负荷？'
-const ANSWER = '根据参考资料：顶层油温正常运行上限是 85 摄氏度，达到 95 摄氏度时必须降低负荷。'
+const QUESTION = '主变压器顶层油温的正常运行上限是多少？超过多少必须降低负荷？';
+const ANSWER = '根据参考资料：顶层油温正常运行上限是 85 摄氏度，达到 95 摄氏度时必须降低负荷。';
 
 /**
  * 与 `QA.tsx` 的问答历史渲染**结构一致**的最小 HTML
@@ -54,7 +59,7 @@ const ANSWER = '根据参考资料：顶层油温正常运行上限是 85 摄氏
 function qaDom(question: string, answer: string, thinking: boolean, withHistory = true): string {
   const cardBody = thinking
     ? '<div style="font-style:italic">AI 正在思考...</div>'
-    : `<div style="white-space:pre-wrap">${answer}</div>`
+    : `<div style="white-space:pre-wrap">${answer}</div>`;
   const history = withHistory
     ? `
       <div>
@@ -68,7 +73,7 @@ function qaDom(question: string, answer: string, thinking: boolean, withHistory 
           <p>由 DeepSeek 提供支持</p>
         </div>
       </div>`
-    : ''
+    : '';
   return `
     <div class="page-enter">
       <h1>智能问答</h1>
@@ -78,33 +83,33 @@ function qaDom(question: string, answer: string, thinking: boolean, withHistory 
       </div>
       ${history}
     </div>
-  `
+  `;
 }
 
 test.describe('全链路探针：答案定位式（不需要后端）', () => {
   test('① 读到的文本是答案，而且**不含**输入卡片里的"提问"', async ({ page }) => {
-    await page.setContent(qaDom(QUESTION, ANSWER, false))
+    await page.setContent(qaDom(QUESTION, ANSWER, false));
 
-    const text = await expectAnswerCardText(page, QUESTION)
-    expect(text, '取到的是答案文本').toContain(ANSWER)
+    const text = await expectAnswerCardText(page, QUESTION);
+    expect(text, '取到的是答案文本').toContain(ANSWER);
     // 反向自检 1：读到的不是问题气泡（第一版就是这样错的）
-    expect(text, '答案卡片里不该只有问题本身').not.toBe(QUESTION)
+    expect(text, '答案卡片里不该只有问题本身').not.toBe(QUESTION);
     // 反向自检 2：读到的**不是页面上那个"提问"输入卡片**
     // （`filter({ has })` 的祖先匹配问题：实测取到过 `"提问"`）
-    expect(text, '不该取到输入卡片').not.toBe('提问')
-    expect(text.length).toBeGreaterThan(ANSWER.length)
-  })
+    expect(text, '不该取到输入卡片').not.toBe('提问');
+    expect(text.length).toBeGreaterThan(ANSWER.length);
+  });
 
   test('② 首字之前（"AI 正在思考..."）也能读到卡片', async ({ page }) => {
-    await page.setContent(qaDom(QUESTION, '', true))
-    const text = await expectAnswerCardText(page, QUESTION)
-    expect(text).toContain('AI 正在思考')
-  })
+    await page.setContent(qaDom(QUESTION, '', true));
+    const text = await expectAnswerCardText(page, QUESTION);
+    expect(text).toContain('AI 正在思考');
+  });
 
   test('③ 有多轮问答时只认领**直接文本等于问题**的那一条记录', async ({ page }) => {
     // 另一轮的问题把本节问题作为**前缀**（`hasText` 之类的包容匹配会误认领），
     // 且它排在本节问题**前面**（`QA.tsx` 是 `[新记录, ...旧记录]`）。
-    const other = `${QUESTION}（补充提问，请只答冷却方式）`
+    const other = `${QUESTION}（补充提问，请只答冷却方式）`;
     await page.setContent(`
       <div>
         <div><div>${other}</div></div>
@@ -114,42 +119,42 @@ test.describe('全链路探针：答案定位式（不需要后端）', () => {
         <div><div>${QUESTION}</div></div>
         <div class="card"><div>${ANSWER}</div></div>
       </div>
-    `)
-    const text = await expectAnswerCardText(page, QUESTION)
-    expect(text).toContain(ANSWER)
-    expect(text, '不该读到上一轮的答案').not.toContain('强迫油循环风冷')
-  })
+    `);
+    const text = await expectAnswerCardText(page, QUESTION);
+    expect(text).toContain(ANSWER);
+    expect(text, '不该读到上一轮的答案').not.toContain('强迫油循环风冷');
+  });
 
   test('④ 还没有这轮记录时：`readAnswerText` 返回 null（**不挂住**）', async ({ page }) => {
-    await page.setContent(qaDom(QUESTION, '', true, false))
-    const started = Date.now()
-    const text = await readAnswerText(page, QUESTION, 1_000)
-    const elapsed = Date.now() - started
-    expect(text).toBeNull()
+    await page.setContent(qaDom(QUESTION, '', true, false));
+    const started = Date.now();
+    const text = await readAnswerText(page, QUESTION, 1_000);
+    const elapsed = Date.now() - started;
+    expect(text).toBeNull();
     // 关键是"有上限"：上一版这里会等满 25 分钟的用例超时
-    expect(elapsed, `应约 1 秒返回，实际 ${elapsed}ms`).toBeLessThan(10_000)
-  })
+    expect(elapsed, `应约 1 秒返回，实际 ${elapsed}ms`).toBeLessThan(10_000);
+  });
 
   test('⑤ 定位失败时给出**带现场**的失败信息（不是只有"0 字"）', async ({ page }) => {
-    await page.setContent(qaDom(QUESTION, '', true, false))
-    const detail = await describeQaDom(page, QUESTION)
+    await page.setContent(qaDom(QUESTION, '', true, false));
+    const detail = await describeQaDom(page, QUESTION);
     // 现场里必须带上"页面上到底有什么"，否则失败信息会把排查引向产品代码
-    expect(detail).toContain('div.card=')
-    expect(detail).toContain('正文前 300 字=')
-    expect(detail).toContain('智能问答')
-  })
+    expect(detail).toContain('div.card=');
+    expect(detail).toContain('正文前 300 字=');
+    expect(detail).toContain('智能问答');
+  });
 
   test('⑥ `cleanAnswerText` 把卡片文本削成"只有答案"', async ({ page }) => {
-    await page.setContent(qaDom(QUESTION, ANSWER, false))
-    const cleaned = cleanAnswerText(await expectAnswerCardText(page, QUESTION), QUESTION)
+    await page.setContent(qaDom(QUESTION, ANSWER, false));
+    const cleaned = cleanAnswerText(await expectAnswerCardText(page, QUESTION), QUESTION);
 
-    expect(cleaned).toContain(ANSWER.slice(0, 20))
+    expect(cleaned).toContain(ANSWER.slice(0, 20));
     // 问题气泡、provider、引用来源整段都要削掉 —— 引用来源在卡片**内部**，
     // 只 replace 标题会留下 "[1] 📄 …" 这类行，让"界面答案 == 流文本"的比对失败
-    expect(cleaned, '问题气泡要削掉').not.toContain(QUESTION)
-    expect(cleaned, 'provider 行要削掉').not.toContain('提供支持')
-    expect(cleaned, '引用来源整段要削掉').not.toContain('引用来源')
-    expect(cleaned, '引用条目也要削掉').not.toContain('变压器运行技术标准')
-    expect(cleaned).toBe(ANSWER)
-  })
-})
+    expect(cleaned, '问题气泡要削掉').not.toContain(QUESTION);
+    expect(cleaned, 'provider 行要削掉').not.toContain('提供支持');
+    expect(cleaned, '引用来源整段要削掉').not.toContain('引用来源');
+    expect(cleaned, '引用条目也要削掉').not.toContain('变压器运行技术标准');
+    expect(cleaned).toBe(ANSWER);
+  });
+});

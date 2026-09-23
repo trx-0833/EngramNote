@@ -6,14 +6,14 @@
  * 行为差异通过 props 参数化；提交/下一题的竞态锁由页面 handleSubmit 内实现
  * （submittingRef），本组件仅透传 submitting 禁用状态，见 docs/decisions.md#F-23。
  */
-import { type ReactNode } from 'react'
-import type { SubmitAnswerResponse } from '../../api/client'
-import SourceContext from './SourceContext'
+import { type ReactNode } from 'react';
+import type { SubmitAnswerResponse } from '../../api/client';
+import SourceContext from './SourceContext';
 // 四档自评控件与卡片复习页共用（5.12：两条复习流程的统一件）
-import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons'
+import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons';
 // 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
 // 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
-import styles from './QuizAnswerCard.module.css'
+import styles from './QuizAnswerCard.module.css';
 import {
   questionTypeLabels,
   difficultyLabels,
@@ -21,45 +21,45 @@ import {
   gradingMethodLabels,
   ratingLabels,
   verdictLabels,
-} from '../../utils/labels'
+} from '../../utils/labels';
 
 /** 答题卡片所需的最小题目结构 */
 export interface QuizCardQuestion {
-  question_type: string
-  question: string
-  difficulty?: string
-  options?: string | string[] | null
+  question_type: string;
+  question: string;
+  difficulty?: string;
+  options?: string | string[] | null;
   /** 复习元信息（Review 页展示） */
-  review_count?: number
-  interval?: number
+  review_count?: number;
+  interval?: number;
   /** 卡片与笔记 ID：用于"原文语境"（阶段 3.13） */
-  card_id?: string
-  note_id?: string
+  card_id?: string;
+  note_id?: string;
 }
 
 interface QuizAnswerCardProps {
-  quiz: QuizCardQuestion
-  userAnswer: string
-  submitted: boolean
-  result: SubmitAnswerResponse | null
+  quiz: QuizCardQuestion;
+  userAnswer: string;
+  submitted: boolean;
+  result: SubmitAnswerResponse | null;
   /** 是否正在提交（提交中禁用按钮，见 docs/decisions.md#F-23） */
-  submitting?: boolean
+  submitting?: boolean;
   /** 是否展示 SM-2 调度信息（Review 有，快速复习无） */
-  showSm2Info?: boolean
+  showSm2Info?: boolean;
   /** 是否展示复习次数/间隔（Review 有） */
-  showReviewMeta?: boolean
+  showReviewMeta?: boolean;
   /** 填空题是否自动聚焦 */
-  fillAutoFocus?: boolean
+  fillAutoFocus?: boolean;
   /** 头部额外信息（如统计） */
-  headerExtra?: ReactNode
+  headerExtra?: ReactNode;
   /** 是否最后一题（决定"下一题/完成"文案） */
-  isLast: boolean
+  isLast: boolean;
   /** 下一题按钮文案（默认 下一题/完成复习） */
-  nextButtonText?: string
+  nextButtonText?: string;
   /** 本次是否已提交自评（提交后禁用四档按钮，防重复自评） */
-  selfRated?: boolean
+  selfRated?: boolean;
   /** 是否正在提交自评 */
-  selfRatingSubmitting?: boolean
+  selfRatingSubmitting?: boolean;
   /**
    * 语义判分开关的当前值（阶段 3.5，仅简答题有意义）
    *
@@ -67,15 +67,15 @@ interface QuizAnswerCardProps {
    * （`onKeyDown` → `handleSubmit`），若开关只在卡片内部，用户勾了框再按回车
    * 就会静默按"不判分"提交 —— "选了但没生效"是最难被发现的一类不一致。
    */
-  semanticGrading?: boolean
-  onToggleSemanticGrading?: (enabled: boolean) => void
-  onSelectAnswer: (answer: string) => void
-  onSubmit: () => void
+  semanticGrading?: boolean;
+  onToggleSemanticGrading?: (enabled: boolean) => void;
+  onSelectAnswer: (answer: string) => void;
+  onSubmit: () => void;
   /** 用户点击四档自评之一；quality 为 SM-2 分值 0/3/4/5 */
-  onSelfRate?: (quality: number) => void
+  onSelfRate?: (quality: number) => void;
   /** 跳过自评（逃生口，见 hooks/useSelfRating.ts 的 skipRating 说明） */
-  onSkipSelfRate?: () => void
-  onNext: () => void
+  onSkipSelfRate?: () => void;
+  onNext: () => void;
 }
 
 export default function QuizAnswerCard({
@@ -101,60 +101,72 @@ export default function QuizAnswerCard({
   onNext,
 }: QuizAnswerCardProps) {
   // 解析选择题选项
-  let options: string[] = []
+  let options: string[] = [];
   if (Array.isArray(quiz.options)) {
-    options = quiz.options
+    options = quiz.options;
   } else if (typeof quiz.options === 'string' && quiz.options) {
     try {
-      const parsed = JSON.parse(quiz.options)
-      options = Array.isArray(parsed) ? parsed : []
+      const parsed = JSON.parse(quiz.options);
+      options = Array.isArray(parsed) ? parsed : [];
     } catch {
-      options = []
+      options = [];
     }
   }
 
-  const typeLabel = questionTypeLabels[quiz.question_type] || quiz.question_type
-  const diffLabel = difficultyLabels[quiz.difficulty || ''] || quiz.difficulty || ''
+  const typeLabel = questionTypeLabels[quiz.question_type] || quiz.question_type;
+  const diffLabel = difficultyLabels[quiz.difficulty || ''] || quiz.difficulty || '';
 
   // 是否仍需要用户自评：后端明确要求，且本次会话尚未给出自评。
   // 注意不要用 result.is_correct 之类推断——简答题的占位判分恒为"错误"。
-  const needsSelfAssessment = !!result?.needs_self_assessment && !selfRated
+  const needsSelfAssessment = !!result?.needs_self_assessment && !selfRated;
 
   // 语义判分明细：null 表示"本次没有判分"，与"判分过但没发现问题"是两回事
-  const detail = result?.grading_detail ?? null
-  const missingPoints = detail?.missing_points ?? []
-  const misconceptions = detail?.misconceptions ?? []
-  const verdictMeta = detail ? verdictLabels[detail.verdict] : undefined
-  const verdictLabel = verdictMeta?.label ?? '已判分'
-  const verdictColor = verdictMeta?.color ?? 'var(--color-primary)'
+  const detail = result?.grading_detail ?? null;
+  const missingPoints = detail?.missing_points ?? [];
+  const misconceptions = detail?.misconceptions ?? [];
+  const verdictMeta = detail ? verdictLabels[detail.verdict] : undefined;
+  const verdictLabel = verdictMeta?.label ?? '已判分';
+  const verdictColor = verdictMeta?.color ?? 'var(--color-primary)';
 
-  const ratingLabel = result?.sm2?.rating ? ratingLabels[result.sm2.rating] : ''
+  const ratingLabel = result?.sm2?.rating ? ratingLabels[result.sm2.rating] : '';
   // 首次复习的 predicted_retention 恒为 1（"从未复习过，必然想得起来"），
   // 显示成"预测还能想起 100%"没有信息量，反而像在敷衍。只在 <1 时展示。
-  const rawRetention = result?.sm2?.predicted_retention
-  const showRetention = typeof rawRetention === 'number' && rawRetention < 0.999
+  const rawRetention = result?.sm2?.predicted_retention;
+  const showRetention = typeof rawRetention === 'number' && rawRetention < 0.999;
 
   return (
     <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
       {/* 题目头部 */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 'var(--space-md)',
-      }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 'var(--space-md)',
+        }}
+      >
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-          <span style={{
-            padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem',
-            background: 'var(--color-primary)', color: '#fff',
-          }}>
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: '0.8rem',
+              background: 'var(--color-primary)',
+              color: '#fff',
+            }}
+          >
             {typeLabel}
           </span>
           {diffLabel && (
-            <span style={{
-              padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem',
-              background: difficultyColors[quiz.difficulty || ''] || '#999', color: '#fff',
-            }}>
+            <span
+              style={{
+                padding: '2px 8px',
+                borderRadius: 4,
+                fontSize: '0.8rem',
+                background: difficultyColors[quiz.difficulty || ''] || '#999',
+                color: '#fff',
+              }}
+            >
               {diffLabel}
             </span>
           )}
@@ -197,7 +209,7 @@ export default function QuizAnswerCard({
             <input
               type="text"
               value={userAnswer}
-              onChange={e => onSelectAnswer(e.target.value)}
+              onChange={(e) => onSelectAnswer(e.target.value)}
               placeholder="请输入答案..."
               autoFocus={fillAutoFocus}
               style={{
@@ -214,7 +226,7 @@ export default function QuizAnswerCard({
           {quiz.question_type === 'short_answer' && (
             <textarea
               value={userAnswer}
-              onChange={e => onSelectAnswer(e.target.value)}
+              onChange={(e) => onSelectAnswer(e.target.value)}
               placeholder="请输入你的回答..."
               rows={4}
               style={{
@@ -248,7 +260,7 @@ export default function QuizAnswerCard({
               <input
                 type="checkbox"
                 checked={semanticGrading}
-                onChange={e => onToggleSemanticGrading(e.target.checked)}
+                onChange={(e) => onToggleSemanticGrading(e.target.checked)}
                 disabled={submitting}
                 style={{ marginTop: 3 }}
               />
@@ -296,7 +308,13 @@ export default function QuizAnswerCard({
               }}
             >
               <p style={{ fontWeight: 600 }}>请对照答案，给自己的回忆程度打分</p>
-              <p style={{ marginTop: 'var(--space-xs)', fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+              <p
+                style={{
+                  marginTop: 'var(--space-xs)',
+                  fontSize: '0.9rem',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
                 简答题无法自动判分，需要你自评后才会计入复习进度。
               </p>
             </div>
@@ -305,7 +323,12 @@ export default function QuizAnswerCard({
               className={result?.is_correct ? styles.feedbackCorrect : styles.feedbackIncorrect}
               style={{ marginBottom: 'var(--space-md)' }}
             >
-              <p style={{ fontWeight: 600, color: result?.is_correct ? 'var(--color-success)' : 'var(--color-error)' }}>
+              <p
+                style={{
+                  fontWeight: 600,
+                  color: result?.is_correct ? 'var(--color-success)' : 'var(--color-error)',
+                }}
+              >
                 {result?.is_correct ? '回答正确!' : '回答错误'}
               </p>
               {!result?.is_correct && (
@@ -346,17 +369,15 @@ export default function QuizAnswerCard({
                 fontSize: '0.9rem',
               }}
             >
-              <p style={{ fontWeight: 600, color: verdictColor }}>
-                AI 判分：{verdictLabel}
-              </p>
-              {detail.reason && (
-                <p style={{ marginTop: 'var(--space-xs)' }}>{detail.reason}</p>
-              )}
+              <p style={{ fontWeight: 600, color: verdictColor }}>AI 判分：{verdictLabel}</p>
+              {detail.reason && <p style={{ marginTop: 'var(--space-xs)' }}>{detail.reason}</p>}
               {missingPoints.length > 0 && (
                 <p style={{ marginTop: 'var(--space-xs)' }}>
                   <strong>遗漏：</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
-                    {missingPoints.map((point, i) => <li key={i}>{point}</li>)}
+                    {missingPoints.map((point, i) => (
+                      <li key={i}>{point}</li>
+                    ))}
                   </ul>
                 </p>
               )}
@@ -364,7 +385,9 @@ export default function QuizAnswerCard({
                 <p style={{ marginTop: 'var(--space-xs)' }}>
                   <strong>误解：</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
-                    {misconceptions.map((point, i) => <li key={i}>{point}</li>)}
+                    {misconceptions.map((point, i) => (
+                      <li key={i}>{point}</li>
+                    ))}
                   </ul>
                 </p>
               )}
@@ -389,7 +412,7 @@ export default function QuizAnswerCard({
               库中已有占位记录），卡片复习没有（那里的自评就是提交本身）。 */}
           {needsSelfAssessment && (
             <SelfRatingButtons
-              onRate={quality => onSelfRate?.(quality)}
+              onRate={(quality) => onSelfRate?.(quality)}
               submitting={selfRatingSubmitting}
               onSkip={onSkipSelfRate}
             />
@@ -416,14 +439,16 @@ export default function QuizAnswerCard({
               不再参与调度（现在由难度 D 桥接而来）。改为展示真正决定
               间隔的两个量：**复习前预测的回忆概率**与**评分档位**。 */}
           {showSm2Info && result?.sm2 && !needsSelfAssessment && (
-            <div style={{
-              fontSize: '0.85rem',
-              color: 'var(--color-text-secondary)',
-              padding: 'var(--space-sm)',
-              background: 'var(--color-bg)',
-              borderRadius: 4,
-              marginBottom: 'var(--space-md)',
-            }}>
+            <div
+              style={{
+                fontSize: '0.85rem',
+                color: 'var(--color-text-secondary)',
+                padding: 'var(--space-sm)',
+                background: 'var(--color-bg)',
+                borderRadius: 4,
+                marginBottom: 'var(--space-md)',
+              }}
+            >
               下次复习: {result.sm2.interval} 天后 | 评分: {result.quality}
               {ratingLabel && <> | 档位: {ratingLabel}</>}
               {showRetention && (
@@ -433,7 +458,10 @@ export default function QuizAnswerCard({
                 </>
               )}
               {result.grading_method && (
-                <> | 判分方式: {gradingMethodLabels[result.grading_method] ?? result.grading_method}</>
+                <>
+                  {' '}
+                  | 判分方式: {gradingMethodLabels[result.grading_method] ?? result.grading_method}
+                </>
               )}
             </div>
           )}
@@ -454,5 +482,5 @@ export default function QuizAnswerCard({
         </>
       )}
     </div>
-  )
+  );
 }

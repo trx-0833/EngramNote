@@ -21,49 +21,49 @@
  * 加载失败**不静默**：显示错误与重试按钮。一个永远转圈的折叠区
  * 比没有这个功能更糟 —— 用户会以为原文不存在。
  */
-import { useCallback, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { getKnowledgeCard } from '../../api/qa'
+import { useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { getKnowledgeCard } from '../../api/qa';
 
 interface SourceContextProps {
   /** 卡片 ID（`source_text` 存在卡片上） */
-  cardId?: string | null
+  cardId?: string | null;
   /** 来源笔记 ID；有值时提供"在笔记中查看原文"链接 */
-  noteId?: string | null
+  noteId?: string | null;
 }
 
 export default function SourceContext({ cardId, noteId }: SourceContextProps) {
-  const [expanded, setExpanded] = useState(false)
-  const [sourceText, setSourceText] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState(false);
+  const [sourceText, setSourceText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    if (!cardId) return
-    setLoading(true)
-    setError('')
+    if (!cardId) return;
+    setLoading(true);
+    setError('');
     try {
-      const card = await getKnowledgeCard(cardId)
-      setSourceText((card.source_text || '').trim())
+      const card = await getKnowledgeCard(cardId);
+      setSourceText((card.source_text || '').trim());
     } catch (e) {
-      setError(e instanceof Error ? e.message : '原文加载失败')
+      setError(e instanceof Error ? e.message : '原文加载失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [cardId])
+  }, [cardId]);
 
   // 加载由**点击**触发，而不是放在 effect 里同步 setState ——
   // 后者会引发级联渲染（eslint 的 react-hooks/set-state-in-effect 正是查这个），
   // 而且这里本来就只有"用户展开"这一个触发点，没有必要用 effect 去观察状态。
   const toggle = useCallback(() => {
-    setExpanded(prev => {
-      const next = !prev
-      if (next && sourceText === null && !loading) void load()
-      return next
-    })
-  }, [sourceText, loading, load])
+    setExpanded((prev) => {
+      const next = !prev;
+      if (next && sourceText === null && !loading) void load();
+      return next;
+    });
+  }, [sourceText, loading, load]);
 
-  if (!cardId) return null
+  if (!cardId) return null;
 
   return (
     <div style={{ marginBottom: 'var(--space-md)' }}>
@@ -96,9 +96,7 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
             lineHeight: 1.7,
           }}
         >
-          {loading && (
-            <span style={{ color: 'var(--color-text-secondary)' }}>正在读取原文...</span>
-          )}
+          {loading && <span style={{ color: 'var(--color-text-secondary)' }}>正在读取原文...</span>}
           {!loading && error && (
             <div>
               {/* `var(--color-error)` 而不是字面量 `#f44336`：后者白底 3.68:1，
@@ -126,5 +124,5 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
         </div>
       )}
     </div>
-  )
+  );
 }

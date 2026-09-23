@@ -6,56 +6,56 @@
  * 3. 彻底删除单条笔记（PurgeNoteDialog，悬挂引用策略 + 可选提升核心卡片）
  * 4. 清空回收站（物理删除全部，二次确认）
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 import {
   getTrashedNotes,
   restoreNote,
   purgeNote,
   purgeAllTrash,
   type TrashNoteItem,
-} from '../api/client'
-import { PurgeNoteDialog } from '../components/DeleteNoteDialog'
-import LoadingSpinner from '../components/LoadingSpinner'
-import EmptyState from '../components/EmptyState'
-import ErrorDisplay from '../components/ErrorDisplay'
-import { sourceTypeLabels } from '../utils/labels'
-import { formatDateTime } from '../utils/datetime'
-import { useToast } from '../components/Toast'
+} from '../api/client';
+import { PurgeNoteDialog } from '../components/DeleteNoteDialog';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
+import ErrorDisplay from '../components/ErrorDisplay';
+import { sourceTypeLabels } from '../utils/labels';
+import { formatDateTime } from '../utils/datetime';
+import { useToast } from '../components/Toast';
 
 export default function Trash() {
-  const toast = useToast()
+  const toast = useToast();
   /** 回收站列表 */
-  const [items, setItems] = useState<TrashNoteItem[]>([])
+  const [items, setItems] = useState<TrashNoteItem[]>([]);
   /** 数据加载状态 */
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true);
   /** 错误信息 */
-  const [error, setError] = useState('')
+  const [error, setError] = useState('');
   /** 操作进行中的笔记 ID（恢复/彻底删除），用于按钮禁用 */
-  const [operatingId, setOperatingId] = useState<string | null>(null)
+  const [operatingId, setOperatingId] = useState<string | null>(null);
   /** 待彻底删除的笔记（打开 PurgeNoteDialog） */
-  const [noteToPurge, setNoteToPurge] = useState<TrashNoteItem | null>(null)
+  const [noteToPurge, setNoteToPurge] = useState<TrashNoteItem | null>(null);
   /** 清空回收站确认弹窗 */
-  const [showPurgeAll, setShowPurgeAll] = useState(false)
+  const [showPurgeAll, setShowPurgeAll] = useState(false);
 
   /** 加载回收站列表 */
   async function fetchTrash() {
-    setLoading(true)
-    setError('')
+    setLoading(true);
+    setError('');
     try {
-      const res = await getTrashedNotes()
-      setItems(res.items)
+      const res = await getTrashedNotes();
+      setItems(res.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(err instanceof Error ? err.message : '加载失败');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTrash()
-  }, [])
+    fetchTrash();
+  }, []);
 
   /**
    * 恢复笔记
@@ -63,56 +63,72 @@ export default function Trash() {
    * 此处以 alert 提示 renamed_to。
    */
   async function handleRestore(item: TrashNoteItem) {
-    setOperatingId(item.note.id)
+    setOperatingId(item.note.id);
     try {
-      const res = await restoreNote(item.note.id)
+      const res = await restoreNote(item.note.id);
       if (res.renamed_to) {
-        toast.info(`原位置已存在同名文件，恢复后已自动重命名为「${res.renamed_to}」`)
+        toast.info(`原位置已存在同名文件，恢复后已自动重命名为「${res.renamed_to}」`);
       }
-      setItems((prev) => prev.filter((it) => it.note.id !== item.note.id))
+      setItems((prev) => prev.filter((it) => it.note.id !== item.note.id));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '恢复失败')
+      toast.error(err instanceof Error ? err.message : '恢复失败');
     } finally {
-      setOperatingId(null)
+      setOperatingId(null);
     }
   }
 
   /** 确认彻底删除单条笔记 */
   async function confirmPurge(promoteKeyCards: boolean) {
-    if (!noteToPurge) return
-    setOperatingId(noteToPurge.note.id)
+    if (!noteToPurge) return;
+    setOperatingId(noteToPurge.note.id);
     try {
-      await purgeNote(noteToPurge.note.id, promoteKeyCards)
-      setItems((prev) => prev.filter((it) => it.note.id !== noteToPurge.note.id))
-      setNoteToPurge(null)
+      await purgeNote(noteToPurge.note.id, promoteKeyCards);
+      setItems((prev) => prev.filter((it) => it.note.id !== noteToPurge.note.id));
+      setNoteToPurge(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '彻底删除失败')
+      toast.error(err instanceof Error ? err.message : '彻底删除失败');
     } finally {
-      setOperatingId(null)
+      setOperatingId(null);
     }
   }
 
   /** 确认清空回收站 */
   async function confirmPurgeAll() {
     try {
-      const res = await purgeAllTrash()
-      setShowPurgeAll(false)
-      setItems([])
+      const res = await purgeAllTrash();
+      setShowPurgeAll(false);
+      setItems([]);
       if (res.failed > 0) {
-        toast.success(`已彻底删除 ${res.purged} 条，${res.failed} 条删除失败，请重试`)
+        toast.success(`已彻底删除 ${res.purged} 条，${res.failed} 条删除失败，请重试`);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '清空回收站失败')
+      toast.error(err instanceof Error ? err.message : '清空回收站失败');
     }
   }
 
   return (
     <div className="page-enter">
       {/* 头部：标题 + 清空按钮（窄屏换行，见 .page-header-row） */}
-      <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      <div
+        className="page-header-row"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 'var(--space-lg)',
+        }}
+      >
         <div>
-          <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>回收站</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
+          <h1 className="heading-serif" style={{ fontSize: '1.5rem' }}>
+            回收站
+          </h1>
+          <p
+            style={{
+              fontSize: '0.875rem',
+              color: 'var(--color-text-secondary)',
+              marginTop: 'var(--space-xs)',
+            }}
+          >
             笔记及其全部内容（卡片、题目、复习记录、关系）作为整体保存，可随时整体恢复
           </p>
         </div>
@@ -132,15 +148,19 @@ export default function Trash() {
       {loading ? (
         <LoadingSpinner />
       ) : items.length === 0 ? (
-        <EmptyState
-          message="回收站是空的"
-          description="被删除的笔记会在这里保留，随时可以恢复"
-        />
+        <EmptyState message="回收站是空的" description="被删除的笔记会在这里保留，随时可以恢复" />
       ) : (
         <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
           {items.map((item) => (
             <article key={item.note.id} className="card" style={{ padding: 'var(--space-md)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: 'var(--space-md)',
+                }}
+              >
                 {/* 左侧：标题 + 元信息 + 附属统计 */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {/* `h2` 而不是 `h3`：这一页的大纲是 h1「回收站」→ 每张卡片，
@@ -149,16 +169,38 @@ export default function Trash() {
                       （`fontSize: '1rem'` / `fontWeight: 600`），所以改级别
                       **一个像素都没动**，做法与已修的 F-18（笔记列表卡片
                       h3→h2）逐字相同。 */}
-                  <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-xs)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <h2
+                    style={{
+                      fontSize: '1rem',
+                      fontWeight: 600,
+                      marginBottom: 'var(--space-xs)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {item.note.title}
                   </h2>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)' }}>
+                  <div
+                    style={{
+                      fontSize: '0.8125rem',
+                      color: 'var(--color-text-secondary)',
+                      marginBottom: 'var(--space-sm)',
+                    }}
+                  >
                     {sourceTypeLabels[item.note.source_type] || item.note.source_type}
                     {' · '}
                     删除于 {item.note.trashed_at ? formatDateTime(item.note.trashed_at) : '—'}
                   </div>
                   {/* 附属统计：恢复时可还原的内容 */}
-                  <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', fontSize: '0.75rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 'var(--space-sm)',
+                      flexWrap: 'wrap',
+                      fontSize: '0.75rem',
+                    }}
+                  >
                     {[
                       `${item.card_count} 张卡片`,
                       `${item.quiz_count} 道题目`,
@@ -229,7 +271,11 @@ export default function Trash() {
           }}
           onClick={() => setShowPurgeAll(false)}
         >
-          <div className="card" style={{ maxWidth: 460, width: '100%', padding: 24 }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="card"
+            style={{ maxWidth: 460, width: '100%', padding: 24 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 style={{ color: 'var(--color-error)' }}>清空回收站</h3>
             <p style={{ marginBottom: 'var(--space-md)' }}>
               确定彻底删除回收站中的全部 {items.length} 条笔记吗？此操作<strong>不可恢复</strong>。
@@ -237,7 +283,14 @@ export default function Trash() {
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
               其他笔记对这些笔记的引用将以「[已删除的笔记]」占位符保留，不会影响其他笔记的内容。
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-sm)', marginTop: 'var(--space-lg)' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 'var(--space-sm)',
+                marginTop: 'var(--space-lg)',
+              }}
+            >
               <button className="btn btn-secondary" onClick={() => setShowPurgeAll(false)}>
                 取消
               </button>
@@ -253,5 +306,5 @@ export default function Trash() {
         </div>
       )}
     </div>
-  )
+  );
 }

@@ -32,14 +32,14 @@
  *    才 `import styles from ...` 用**模块导出的类名**——这与实现绑定得紧一些，
  *    但比"把类名留在全局只为让测试能查"好：后者会让响应式规则永远无法随组件搬走。
  */
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it, vi } from 'vitest';
 
-import App from './App'
+import App from './App';
 // 遮罩 / 滚动锁的类名（哈希后只在模块里对得上）—— 见文件头
-import sidebarStyles from './components/Sidebar.module.css'
+import sidebarStyles from './components/Sidebar.module.css';
 
 // 已登录 + AuthProvider 透传：本文件不测认证
 vi.mock('./contexts/AuthContext', () => ({
@@ -52,88 +52,88 @@ vi.mock('./contexts/AuthContext', () => ({
     logout: vi.fn(),
     refreshUser: vi.fn(),
   }),
-}))
+}));
 
 // 懒加载页面换成桩：本文件只关心导航抽屉
-vi.mock('./pages/Dashboard', () => ({ default: () => <div data-testid="page-dashboard" /> }))
-vi.mock('./pages/NotesList', () => ({ default: () => <div data-testid="page-notes" /> }))
+vi.mock('./pages/Dashboard', () => ({ default: () => <div data-testid="page-dashboard" /> }));
+vi.mock('./pages/NotesList', () => ({ default: () => <div data-testid="page-notes" /> }));
 
 function renderApp() {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <App />
     </MemoryRouter>,
-  )
+  );
 }
 
 /** 抽屉（`<nav role="navigation">`）当前的类名 */
 function sidebarNav() {
-  return screen.getByRole('navigation', { name: '主导航' })
+  return screen.getByRole('navigation', { name: '主导航' });
 }
 
 /** 遮罩（纯装饰 div，没有角色可查 → 用模块导出的类名） */
 function overlay() {
-  return document.querySelector(`.${sidebarStyles.sidebarOverlay}`)
+  return document.querySelector(`.${sidebarStyles.sidebarOverlay}`);
 }
 
 /** 汉堡按钮：抽屉开合状态的语义出口（与抽屉同一个 state 渲染） */
 function menuToggle() {
-  return screen.getByRole('button', { name: '打开菜单' })
+  return screen.getByRole('button', { name: '打开菜单' });
 }
 
 describe('移动端汉堡菜单', () => {
   it('★ 点汉堡按钮打开抽屉：抽屉带 mobile-open 类、出现遮罩、并锁住页面滚动', async () => {
-    renderApp()
-    await screen.findByTestId('page-dashboard')
+    renderApp();
+    await screen.findByTestId('page-dashboard');
 
-    const toggle = menuToggle()
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen)
-    expect(overlay()).toBeNull()
+    const toggle = menuToggle();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen);
+    expect(overlay()).toBeNull();
 
-    await userEvent.click(toggle)
+    await userEvent.click(toggle);
 
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(sidebarNav().className).toContain(sidebarStyles.sidebarMobileOpen)
-    expect(overlay()).not.toBeNull()
-    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(true)
-  })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(sidebarNav().className).toContain(sidebarStyles.sidebarMobileOpen);
+    expect(overlay()).not.toBeNull();
+    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(true);
+  });
 
   it('★ 点导航项：跳转成功，且抽屉自动收起（否则新页面被抽屉挡着）', async () => {
-    renderApp()
-    await screen.findByTestId('page-dashboard')
+    renderApp();
+    await screen.findByTestId('page-dashboard');
 
-    await userEvent.click(menuToggle())
-    await userEvent.click(screen.getByRole('button', { name: /笔记列表/ }))
+    await userEvent.click(menuToggle());
+    await userEvent.click(screen.getByRole('button', { name: /笔记列表/ }));
 
-    expect(await screen.findByTestId('page-notes')).toBeInTheDocument()
-    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false')
-    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen)
-    expect(overlay()).toBeNull()
-    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false)
-  })
+    expect(await screen.findByTestId('page-notes')).toBeInTheDocument();
+    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen);
+    expect(overlay()).toBeNull();
+    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false);
+  });
 
   it('★ 点遮罩：抽屉收起、解锁滚动', async () => {
-    renderApp()
-    await screen.findByTestId('page-dashboard')
+    renderApp();
+    await screen.findByTestId('page-dashboard');
 
-    await userEvent.click(menuToggle())
-    await userEvent.click(overlay() as HTMLElement)
+    await userEvent.click(menuToggle());
+    await userEvent.click(overlay() as HTMLElement);
 
-    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false')
-    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen)
-    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false)
-  })
+    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen);
+    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false);
+  });
 
   it('抽屉里的关闭按钮同样能收起抽屉', async () => {
-    renderApp()
-    await screen.findByTestId('page-dashboard')
+    renderApp();
+    await screen.findByTestId('page-dashboard');
 
-    await userEvent.click(menuToggle())
-    await userEvent.click(screen.getByRole('button', { name: '关闭菜单' }))
+    await userEvent.click(menuToggle());
+    await userEvent.click(screen.getByRole('button', { name: '关闭菜单' }));
 
-    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false')
-    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen)
-    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false)
-  })
-})
+    expect(menuToggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(sidebarNav().className).not.toContain(sidebarStyles.sidebarMobileOpen);
+    expect(document.body.classList.contains(sidebarStyles.sidebarOpenLock)).toBe(false);
+  });
+});

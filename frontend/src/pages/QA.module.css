@@ -68,6 +68,12 @@
 
 /* 逐字复制自 `base.css` 的 `@keyframes slideUp`，只改名（见文件头） */
 @keyframes qaSlideUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

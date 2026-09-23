@@ -17,9 +17,9 @@
  * 空邮箱/空密码的请求真的发到后端。这里用"是否发出 `/api` 请求"
  * 把这件事钉死：**校验没通过时，一个请求都不该发出去**。
  */
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test';
 
-import { blockThirdParty, isApiUrl } from './support'
+import { blockThirdParty, isApiUrl } from './support';
 
 /**
  * 记录页面发出的所有后端请求（用于断言"没提交"）。
@@ -30,54 +30,54 @@ import { blockThirdParty, isApiUrl } from './support'
  * （本文件第一版就是这么错的，实测把 `expect([])` 打成了 12 条）。
  */
 function trackApiRequests(page: Page): string[] {
-  const requests: string[] = []
+  const requests: string[] = [];
   page.on('request', (request) => {
-    const url = new URL(request.url())
-    if (isApiUrl(url)) requests.push(url.pathname)
-  })
-  return requests
+    const url = new URL(request.url());
+    if (isApiUrl(url)) requests.push(url.pathname);
+  });
+  return requests;
 }
 
 test.describe('登录表单的原生校验', () => {
   test('空表单提交被浏览器拦下：输入框进入 :invalid，且不发出任何 /api 请求', async ({ page }) => {
-    const apiRequests = trackApiRequests(page)
-    await blockThirdParty(page)
-    await page.goto('/login', { waitUntil: 'domcontentloaded' })
+    const apiRequests = trackApiRequests(page);
+    await blockThirdParty(page);
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
 
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.getByRole('button', { name: '登录' }).click();
 
     // 原生校验失败：两个 required 输入框都处于 :invalid
-    await expect(page.locator('#email')).toHaveJSProperty('validity.valid', false)
-    await expect(page.locator('#password')).toHaveJSProperty('validity.valid', false)
+    await expect(page.locator('#email')).toHaveJSProperty('validity.valid', false);
+    await expect(page.locator('#password')).toHaveJSProperty('validity.valid', false);
 
     const message = await page
       .locator('#email')
-      .evaluate((el) => (el as HTMLInputElement).validationMessage)
-    expect(message.length, '浏览器应给出非空的校验提示文案').toBeGreaterThan(0)
+      .evaluate((el) => (el as HTMLInputElement).validationMessage);
+    expect(message.length, '浏览器应给出非空的校验提示文案').toBeGreaterThan(0);
 
     // 产品自己的错误提示（role=alert）**不该**出现：这一步根本没到发请求
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('alert')).toHaveCount(0);
 
     // 核心断言：校验没过，就没有请求
-    expect(apiRequests).toEqual([])
-  })
+    expect(apiRequests).toEqual([]);
+  });
 
   test('邮箱格式非法被拦下（type=email 生效），密码非空仍不放行', async ({ page }) => {
-    const apiRequests = trackApiRequests(page)
-    await blockThirdParty(page)
-    await page.goto('/login', { waitUntil: 'domcontentloaded' })
+    const apiRequests = trackApiRequests(page);
+    await blockThirdParty(page);
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
 
-    await page.locator('#email').fill('not-an-email')
-    await page.locator('#password').fill('secret123')
-    await page.getByRole('button', { name: '登录' }).click()
+    await page.locator('#email').fill('not-an-email');
+    await page.locator('#password').fill('secret123');
+    await page.getByRole('button', { name: '登录' }).click();
 
     // type=email 的格式校验：`not-an-email` 没有 @，必然非法
-    await expect(page.locator('#email')).toHaveJSProperty('validity.typeMismatch', true)
-    expect(await page.locator('#email').evaluate((el) => el.matches(':invalid'))).toBe(true)
+    await expect(page.locator('#email')).toHaveJSProperty('validity.typeMismatch', true);
+    expect(await page.locator('#email').evaluate((el) => el.matches(':invalid'))).toBe(true);
 
     // 密码本身合法（只判了 required），所以"没有提交"这件事只能是邮箱拦下来的
-    await expect(page.locator('#password')).toHaveJSProperty('validity.valid', true)
+    await expect(page.locator('#password')).toHaveJSProperty('validity.valid', true);
 
-    expect(apiRequests).toEqual([])
-  })
-})
+    expect(apiRequests).toEqual([]);
+  });
+});
