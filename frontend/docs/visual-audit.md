@@ -175,6 +175,8 @@
 > ⚠️ **复核修正（批次 C1 执行时）**：本行原文写的是"借用别家**模块**的类名"，实测不成立 —— `.assessment-title` 定义在**全局** `styles/assessment.css:34`，两个页面各用一次。以代码为准。
 **没有"页面标题"组件**，每页内联写 `<h1 style={{fontSize}}>`；带 `gradient-text` 的 7 处、不带的 3 处。
 
+> ⚠️ **复核更新（2026-09-23，批次 C1 执行后）**：已新建 `components/PageHeader.tsx`，**18/18 个页面的 h1 全部改用它**，统一为 `--text-xl`(1.5rem) + 衬线 + 600 + 字距 0；探针实测 18 个业务页的 `main h1` 全部 `font-size=24px`。顺带删掉了 `.assessment-header` / `.assessment-title` / `.assessment-subtitle` 三个全局类（后者曾是页面上**最后一处真渐变标题**）。
+
 ### 4.3 8 套对话框各写各的，焦点陷阱零实现
 
 | # | 位置 | 遮罩 | z-index | `role="dialog"` |
@@ -193,6 +195,21 @@
 - **`window.confirm()` 残留 14 处**（破坏性二次确认）：`CardDetail.tsx:71`、`CleaningPanel.tsx:74,105`、`VersionHistory.tsx:153`、`KnowledgeCards.tsx:182`、`DailyMaterials.tsx:248`、`LearningGoals.tsx:145`、`useNoteActions.ts:71,147`、`useNoteAnnotations.ts:87`、`useProjects.ts:132,199`、`useGraphMutations.ts:159,195`。
   > ⚠️ `Projects.test.tsx:822-824` **把 `window.confirm(` 的存在写成了断言** —— 即当前状态是"有意保留"的，改造时必须同步改测试。
 - `alert()` / `prompt()` 已清零（只剩 `Toast.tsx:16` 的历史注释）。
+
+> ### ⚠️ 复核更新（2026-09-23，批次 D2 / D3 前半执行后）
+>
+> 上面这一节是本审计**当时**的记录，其中多条已被整改批次改掉。**以代码为准**：
+>
+> | 项 | 审计时 | 现在 |
+> |---|---|---|
+> | 表格第 1–5 套 modal | 5 套各写各的（遮罩 `.5`/`.4`、z-index 手写 `1000`） | **全部迁到 `<Dialog>` 基座**（批次 D2）：遮罩统一 `.5`、层级 `--z-modal`、面板几何统一 560px/85vh，并获得焦点陷阱 / Esc / 遮罩关闭 / aria 三件套 / 滚动锁 / 焦点归位 |
+> | 第 6–8 套（`SelectionMenu` / `NoteAskPanel` / `Toast`） | popover 与提示层 | **刻意不迁**（形态不同，强行统一会破坏定位逻辑）；迁移后 `src/**` 里唯一还活着的 `zIndex: 1000` 就是 `SelectionMenu.tsx:31` |
+> | 焦点陷阱 | `grep` 0 命中 | 基座内置（Tab / Shift+Tab 循环），24 条 `Dialog.test.tsx` 用例覆盖 |
+> | `role="dialog"` | 全站 **1 处** | 基座统一提供 |
+> | Esc 关闭 | 2/8 处 | 基座统一提供；`LearningGoals` 自己那份 document 级监听已删除（原位留墓碑） |
+> | `window.confirm()` | **14 处** | **7 处**，只剩 4 个 hook 文件（`useNoteActions` ×2 / `useGraphMutations` ×2 / `useProjects` ×2 / `useNoteAnnotations` ×1）——组件内 7 处已在批次 D3 前半换成 `ConfirmDialog` |
+> | `Projects.test.tsx:822-824` 那条警告 | 说它把 `window.confirm(` 的存在写成了断言 | **已过期**：BB.8 收尾时那两处已改成裸 `confirm`，该测试断言的是 hook 而非组件（D3 前半实测，35 条测试全绿） |
+> | 额外补回的一处语义 | — | D2 迁移时基座的 `title` 只吃 string，丢了「彻底删除」「清空回收站」的红字标题；已由 D2 收尾批加可选 `titleTone='danger'` 补回，**且只给这 2 处用**（软删除的「移入回收站」刻意不加） |
 
 ### 4.4 分页几乎不存在，但全量数据进了内存
 
