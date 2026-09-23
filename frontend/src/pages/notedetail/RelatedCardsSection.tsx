@@ -7,7 +7,7 @@
  * 显示条件（`relatedCards.length > 0`）由页面侧判断。
  */
 import type { KnowledgeCard } from '../../api/client';
-import { cardTypeColors, cardTypeLabels } from '../../utils/labels';
+import { cardTypeColors, cardTypeLabels, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 
 /** 首页最多展示的卡片数，超出时提供"查看全部"入口 */
 const MAX_VISIBLE_CARDS = 6;
@@ -62,7 +62,7 @@ export default function RelatedCardsSection({
                   padding: '1px 6px',
                   borderRadius: '9999px',
                   // 卡片类型颜色/标签统一从 utils/labels.ts 读取，见 docs/decisions.md#F-28
-                  background: cardTypeColors[card.card_type] || '#6b7280',
+                  background: cardTypeColors[card.card_type] || FALLBACK_CATEGORY_COLOR,
                   color: 'white',
                   whiteSpace: 'nowrap',
                 }}

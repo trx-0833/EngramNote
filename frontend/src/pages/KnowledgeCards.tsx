@@ -15,6 +15,8 @@ import {
   cardTypeColors,
   cardCategoryLabels,
   cardCategoryColors,
+  FALLBACK_CATEGORY_COLOR,
+  getMasteryColor,
 } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -35,12 +37,10 @@ const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
   { value: 'extension', label: '拓展' },
 ];
 
-/** 根据掌握度返回进度条颜色 */
-function getMasteryColor(level: number): string {
-  if (level < 40) return '#c0392b';
-  if (level < 70) return '#c9a959';
-  return '#2d8a56';
-}
+/* `getMasteryColor` 已于 A4 移入 `utils/labels.ts`：它原来用的是 a11y 压深**之前**
+   的旧值（`<70` 那档是 `#c9a959`，白底只有 2.25:1、不达标），
+   而同一份代码库里的 `difficultyColors` 早就改了 ——
+   "难度"与"掌握度"表达的是同一种程度语义，色阶必须同源。 */
 
 /** 将卡片按所属笔记分组（纯函数，模块级便于复用与测试） */
 function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
@@ -393,7 +393,8 @@ export default function KnowledgeCards() {
                               fontSize: '0.7rem',
                               padding: '2px 6px',
                               borderRadius: '9999px',
-                              background: cardCategoryColors[card.card_category] || '#6b7280',
+                              background:
+                                cardCategoryColors[card.card_category] || FALLBACK_CATEGORY_COLOR,
                               color: 'white',
                               whiteSpace: 'nowrap',
                             }}
@@ -405,7 +406,7 @@ export default function KnowledgeCards() {
                               fontSize: '0.7rem',
                               padding: '2px 6px',
                               borderRadius: '9999px',
-                              background: cardTypeColors[card.card_type] || '#6b7280',
+                              background: cardTypeColors[card.card_type] || FALLBACK_CATEGORY_COLOR,
                               color: 'white',
                               whiteSpace: 'nowrap',
                             }}

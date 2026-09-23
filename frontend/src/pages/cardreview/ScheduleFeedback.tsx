@@ -39,7 +39,10 @@ export default function ScheduleFeedback({ result, previousMastery }: ScheduleFe
       style={{
         padding: 'var(--space-md)',
         background: 'var(--color-bg)',
-        borderLeft: `3px solid ${result.is_correct ? '#2d8a56' : '#c0392b'}`,
+        // A4：改用令牌。原来这里的绿是 a11y 压深**之前**的 #2d8a56，
+        // 与 --color-success(#25714a) 并不是同一个颜色 —— 而这条竖条
+        // 与卡片里的成功文案表达的是同一件事，不该有两个绿。
+        borderLeft: `3px solid var(${result.is_correct ? '--color-success' : '--color-error'})`,
         borderRadius: 4,
         marginBottom: 'var(--space-md)',
         fontSize: '0.9rem',

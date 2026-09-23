@@ -13,6 +13,7 @@ import {
   type ForceGraphNode,
   RELATION_TYPE_LABELS,
   RELATION_TYPE_COLORS,
+  FALLBACK_RELATION_COLOR,
   getLinkWidth,
 } from '../../components/graph/types';
 
@@ -47,7 +48,7 @@ export function drawGraphLink(
   const isSuggested = link.status === 'suggested';
   const isSelected = selectedLink?.id === link.id;
   const isHovered = hoverLink?.id === link.id;
-  const relationColor = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0';
+  const relationColor = RELATION_TYPE_COLORS[link.relation_type] || FALLBACK_RELATION_COLOR;
 
   const isDimmed =
     highlightedRelationType != null && link.relation_type !== highlightedRelationType;

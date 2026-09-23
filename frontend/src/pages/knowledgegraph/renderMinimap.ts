@@ -10,7 +10,7 @@
  */
 import type { GraphData } from '../../api/client';
 import type { ForceGraphNode } from '../../components/graph/types';
-import { cardTypeColors as CARD_TYPE_COLORS } from '../../utils/labels';
+import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 
 /** 当前视口信息（由 GraphCanvas 的 onZoom 写入） */
 export interface GraphViewport {
@@ -88,7 +88,7 @@ export function renderMinimap(
   });
 
   nodes.forEach((n) => {
-    const color = CARD_TYPE_COLORS[n.card_type] || '#6b7280';
+    const color = CARD_TYPE_COLORS[n.card_type] || FALLBACK_CATEGORY_COLOR;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(mx(n.x || 0), my(n.y || 0), 1.5, 0, 2 * Math.PI);

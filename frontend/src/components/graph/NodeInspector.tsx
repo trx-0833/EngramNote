@@ -1,6 +1,7 @@
 import {
   cardTypeColors as CARD_TYPE_COLORS,
   cardTypeLabels as CARD_TYPE_LABELS,
+  FALLBACK_CATEGORY_COLOR,
 } from '../../utils/labels';
 import type { ForceGraphNode } from './types';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
@@ -27,7 +28,7 @@ export default function NodeInspector({
     <div
       className={styles.graphPanel}
       style={{
-        borderTop: `4px solid ${CARD_TYPE_COLORS[node.card_type] || '#6b7280'}`,
+        borderTop: `4px solid ${CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR}`,
       }}
     >
       <div className={styles.graphPanelTitle}>节点详情</div>
@@ -44,7 +45,7 @@ export default function NodeInspector({
                 fontSize: '0.75rem',
                 padding: '2px 8px',
                 borderRadius: '9999px',
-                background: CARD_TYPE_COLORS[node.card_type] || '#6b7280',
+                background: CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR,
                 color: 'white',
                 fontWeight: 500,
               }}

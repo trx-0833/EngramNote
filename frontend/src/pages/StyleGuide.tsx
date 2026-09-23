@@ -58,7 +58,12 @@ const COLORS: TokenSpec[] = [
 const TYPE_SCALE: TokenSpec[] = [
   { token: '--text-2xs', label: '11.2px', usage: '徽章 / 极小标注', planned: true },
   { token: '--text-xs', label: '12px', usage: '元信息 / 次要文字', planned: true },
-  { token: '--text-sm', label: '12.8px', usage: 'UI 主体 / 按钮 / 表单（现状 104 处）', planned: true },
+  {
+    token: '--text-sm',
+    label: '12.8px',
+    usage: 'UI 主体 / 按钮 / 表单（现状 104 处）',
+    planned: true,
+  },
   { token: '--text-sm-alt', label: '13.6px', usage: '⚠️ 存量专用，勿新增', planned: true },
   { token: '--text-base', label: '14px', usage: '列表正文', planned: true },
   { token: '--text-base-alt', label: '14.4px', usage: '⚠️ 存量专用，勿新增', planned: true },
@@ -143,8 +148,9 @@ export default function StyleGuide() {
         设计样板间
       </h1>
       <p className={styles.lead}>
-        这一页不进导航、不进生产产物。它的作用是<strong>一眼验收</strong>：改一个令牌，这里立刻跟着变。
-        标记「未定义」的是本计划要新增、尚未落地的令牌 —— 它们的出现与消失本身就是检查。
+        这一页不进导航、不进生产产物。它的作用是<strong>一眼验收</strong>
+        ：改一个令牌，这里立刻跟着变。 标记「未定义」的是本计划要新增、尚未落地的令牌 ——
+        它们的出现与消失本身就是检查。
       </p>
 
       {/* ── 色彩 ── */}
@@ -185,10 +191,7 @@ export default function StyleGuide() {
                 <code className={styles.tokenValue}>{spec.token}</code>
                 <span className={styles.usage}>{spec.usage}</span>
               </span>
-              <span
-                className={styles.typeSample}
-                style={{ fontSize: `var(${spec.token})` }}
-              >
+              <span className={styles.typeSample} style={{ fontSize: `var(${spec.token})` }}>
                 永久记忆的印迹 Engram
               </span>
               <span className={isMissing(spec.token) ? styles.missing : styles.tokenValue}>

@@ -17,7 +17,7 @@ import {
   drawNodeShapePath,
   getNodeSize,
 } from '../../components/graph/types';
-import { cardTypeColors as CARD_TYPE_COLORS } from '../../utils/labels';
+import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 
 /** 节点绘制依赖的页面状态（选中/悬停/创建目标/搜索命中） */
 export interface NodeDrawState {
@@ -44,7 +44,7 @@ export function drawGraphNode(
     return;
   }
   const size = getNodeSize(node);
-  const color = CARD_TYPE_COLORS[node.card_type] || '#6b7280';
+  const color = CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR;
   const shape = CARD_TYPE_SHAPES[node.card_type] || 'circle';
   const initial = CARD_TYPE_INITIALS[node.card_type] || '';
 

@@ -63,8 +63,11 @@
 .statCardBlue::before {
   background: var(--gradient-primary);
 }
+/* 统计卡顶部的装饰色条（4px 高，不承载语义）：
+   起点改用令牌（原为压深前的 #2d8a56）；终点的 #34d399 是同一色系更亮的一档，
+   没有对应令牌、也不必进令牌层 —— 它是渐变的亮端，不是"成功色"的另一个定义。 */
 .statCardGreen::before {
-  background: linear-gradient(135deg, #2d8a56, #34d399);
+  background: linear-gradient(135deg, var(--color-success), #34d399);
 }
 .statCardGold::before {
   background: var(--gradient-gold);

@@ -11,6 +11,7 @@ import styles from '../../components/graph/Graph.module.css';
 import {
   cardTypeColors as CARD_TYPE_COLORS,
   cardTypeLabels as CARD_TYPE_LABELS,
+  FALLBACK_CATEGORY_COLOR,
 } from '../../utils/labels';
 
 interface GraphToolbarProps {
@@ -83,7 +84,7 @@ export default function GraphToolbar({
                 >
                   <span
                     className={styles.graphSearchResultDot}
-                    style={{ background: CARD_TYPE_COLORS[r.card_type] || '#6b7280' }}
+                    style={{ background: CARD_TYPE_COLORS[r.card_type] || FALLBACK_CATEGORY_COLOR }}
                   />
                   <span className={styles.graphSearchResultTitle}>{r.title}</span>
                   <span className={styles.graphSearchResultType}>

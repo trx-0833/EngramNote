@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction, RefObject } from 'react';
-import { cardTypeColors as CARD_TYPE_COLORS } from '../../utils/labels';
+import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 import type { GraphStats, GraphData, NodeSubgraph, SuggestedRelation } from '../../api/client';
 import NodeInspector from './NodeInspector';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
@@ -10,6 +10,7 @@ import {
   type SidebarPanel,
   RELATION_TYPE_LABELS,
   RELATION_TYPE_COLORS,
+  FALLBACK_RELATION_COLOR,
   RELATION_TYPE_OPTIONS,
 } from './types';
 
@@ -98,7 +99,7 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
                   className={styles.graphStatsBarFill}
                   style={{
                     width: `${Math.min(100, (d.count / maxCount) * 100)}%`,
-                    background: RELATION_TYPE_COLORS[d.relation_type] || '#9a9ab0',
+                    background: RELATION_TYPE_COLORS[d.relation_type] || FALLBACK_RELATION_COLOR,
                   }}
                 />
               </div>
@@ -133,7 +134,7 @@ function SubgraphPanel({
     <div
       className={styles.graphPanel}
       style={{
-        borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || '#6b7280'}`,
+        borderTop: `4px solid ${CARD_TYPE_COLORS[subgraphData.center_node.card_type] || FALLBACK_CATEGORY_COLOR}`,
       }}
     >
       <div className={styles.graphPanelTitle}>
@@ -179,7 +180,7 @@ function SubgraphPanel({
             >
               <span
                 className={styles.graphNeighborDot}
-                style={{ background: CARD_TYPE_COLORS[n.card_type] || '#6b7280' }}
+                style={{ background: CARD_TYPE_COLORS[n.card_type] || FALLBACK_CATEGORY_COLOR }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className={styles.graphNeighborTitle}>{n.title}</div>

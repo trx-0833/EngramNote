@@ -13,13 +13,35 @@ export const RELATION_TYPE_LABELS: Record<string, string> = {
   contrast: '对比',
 };
 
-/** 关系类型 → 边颜色（学术主题色板） */
+/**
+ * 关系类型 → 边颜色（学术主题色板）
+ *
+ * ⚠️ **A4 修正**：`related` 与 `subsequent` 用的曾是 a11y 压深**之前**的旧值
+ * （`#9a9ab0` 三级文字只有 2.75:1、`#2d8a56` 成功色只有 4.30:1）。
+ * 全局令牌在那一轮改了，但**这两张 ts 侧色表没有跟上** ——
+ * 于是图谱的边色与界面其它地方的同义色并不是同一个颜色。
+ * 现值与令牌对齐：`#6f6f8a` = `--color-text-tertiary`、`#25714a` = `--color-success`。
+ *
+ * 为什么这里保留字面量而不是 `var(--…)`：canvas 绘制拿不到 CSS 变量
+ * （每帧 `getComputedStyle` 不划算）。所以它是**与令牌同源**的字面量 ——
+ * 批次 F2 会加一条检查，把这种"手工同步"钉住，不让它再漂移。
+ */
 export const RELATION_TYPE_COLORS: Record<string, string> = {
-  related: '#9a9ab0', // 暖灰
-  prerequisite: '#0f3460', // 深海蓝
-  subsequent: '#2d8a56', // 墨绿
-  contrast: '#c0392b', // 朱红
+  related: '#6f6f8a', // 淡墨（= --color-text-tertiary）
+  prerequisite: '#0f3460', // 深海蓝（= --color-primary）
+  subsequent: '#25714a', // 墨绿（= --color-success）
+  contrast: '#c0392b', // 朱红（= --color-error）
 };
+
+/**
+ * 未知关系类型时的兜底边色（= `--color-text-tertiary` 的淡墨）。
+ *
+ * A4 之前这个字面量 `#9a9ab0` 在 4 个文件里各写了一遍
+ * （`drawLink.ts` / `GraphCanvas.tsx` ×2 / `GraphSidebar.tsx`），
+ * 而且和上面那张表用的是**同一支被淘汰的旧灰**。
+ * 收敛到一处之后，"改一次、四处跟着变"才成立。
+ */
+export const FALLBACK_RELATION_COLOR = '#6f6f8a';
 
 /** 节点形状类型 */
 export type NodeShape = 'circle' | 'diamond' | 'rounded' | 'hexagon';

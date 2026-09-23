@@ -116,12 +116,40 @@ export const cardCategoryLabels: Record<string, string> = {
   extension: '拓展',
 };
 
+/**
+ * 未知分类值时的兜底色（Tailwind gray-500；白底 4.83:1，达标）。
+ *
+ * A4 收敛：这个字面量此前在 **12 处**各写了一遍，形态全是 `表[值] || '#6b7280'` ——
+ * `KnowledgeCards` ×2、`QuestionSets` ×2、`RelatedCardsSection`、`drawNode`、
+ * `renderMinimap`、`GraphToolbar`、`NodeInspector` ×2、`GraphSidebar` ×2。
+ * 值本身没错（它是达标色），错的是"同一个兜底色有十一份副本"：
+ * 想调整它，得先把它们找全。
+ */
+export const FALLBACK_CATEGORY_COLOR = '#6b7280';
+
 /** 知识卡片分类到颜色的映射（白字压色块，见上面的取值口径） */
 export const cardCategoryColors: Record<string, string> = {
-  regular: '#6b7280',
+  regular: FALLBACK_CATEGORY_COLOR,
   blind_spot: '#c0392b',
   extension: '#25714a',
 };
+
+/**
+ * 掌握度（0–100）→ 进度条颜色。
+ *
+ * **A4 收敛**：这个函数原先私有在 `pages/KnowledgeCards.tsx` 里，而且用的是
+ * a11y 压深**之前**的旧值 —— `<40` 红、`<70` **`#c9a959`（白底只有 2.25:1，不达标）**、
+ * 否则 `#2d8a56`（4.30:1）。而本文件的 `difficultyColors` 早就改成
+ * `#c0392b / #8f7020 / #25714a` 了 —— "难度"与"掌握度"表达的是同一种
+ * "程度"语义，色阶却各走各的，于是同一张卡片在卡片页与题目页显示两种颜色。
+ *
+ * 现在与 `difficultyColors` **逐值对齐**：它们本来就该是同一套。
+ */
+export function getMasteryColor(level: number): string {
+  if (level < 40) return '#c0392b';
+  if (level < 70) return '#8f7020';
+  return '#25714a';
+}
 
 /**
  * 笔记状态到 CSS 类名的映射（单一数据源）

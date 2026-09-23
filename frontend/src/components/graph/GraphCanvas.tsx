@@ -9,6 +9,7 @@ import {
   type GraphForceRef,
   type ForceGraphViewData,
   RELATION_TYPE_COLORS,
+  FALLBACK_RELATION_COLOR,
   getNodeSize,
   getLinkWidth,
 } from './types';
@@ -100,7 +101,7 @@ export default function GraphCanvas({
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
         linkColor={(link: ForceGraphLink) => {
-          const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0';
+          const color = RELATION_TYPE_COLORS[link.relation_type] || FALLBACK_RELATION_COLOR;
           return link.status === 'suggested' ? `${color}88` : color;
         }}
         // 连线流光粒子：能量沿墨线缓慢流动（水墨丹青动效）
@@ -110,7 +111,7 @@ export default function GraphCanvas({
         linkDirectionalParticleWidth={2.2}
         linkDirectionalParticleSpeed={0.004}
         linkDirectionalParticleColor={(link: ForceGraphLink) => {
-          const color = RELATION_TYPE_COLORS[link.relation_type] || '#9a9ab0';
+          const color = RELATION_TYPE_COLORS[link.relation_type] || FALLBACK_RELATION_COLOR;
           return link.status === 'suggested' ? '#c9a959' : color;
         }}
         cooldownTicks={100}

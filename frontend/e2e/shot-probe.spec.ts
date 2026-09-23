@@ -214,7 +214,10 @@ test.describe('现状截图与样式快照（移动端 375×667）', () => {
     await loginAs(page, '/');
     await waitForRendered(page, '91-mobile-nav-open');
     // 汉堡按钮：移动端侧栏是抽屉，先让它打开 —— 这是手机上唯一的导航形态
-    await page.getByRole('button', { name: /菜单|导航/ }).first().click();
+    await page
+      .getByRole('button', { name: /菜单|导航/ })
+      .first()
+      .click();
     await page.waitForTimeout(900);
     await printStyleSnapshot(page, '91-mobile-nav-open');
     await page.screenshot({ path: `${OUT}/91-mobile-nav-open.png` });

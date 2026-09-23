@@ -14,6 +14,7 @@ import {
   questionTypeColors,
   difficultyLabels,
   difficultyColors,
+  FALLBACK_CATEGORY_COLOR,
 } from '../utils/labels';
 
 function parseOptions(optionsStr: string | null): string[] {
@@ -327,7 +328,8 @@ export default function QuestionSets() {
                                 fontSize: '0.75rem',
                                 padding: '2px 8px',
                                 borderRadius: '9999px',
-                                background: questionTypeColors[q.question_type] || '#6b7280',
+                                background:
+                                  questionTypeColors[q.question_type] || FALLBACK_CATEGORY_COLOR,
                                 color: 'white',
                                 whiteSpace: 'nowrap',
                               }}
@@ -339,7 +341,8 @@ export default function QuestionSets() {
                                 fontSize: '0.75rem',
                                 padding: '2px 8px',
                                 borderRadius: '9999px',
-                                background: difficultyColors[q.difficulty] || '#6b7280',
+                                background:
+                                  difficultyColors[q.difficulty] || FALLBACK_CATEGORY_COLOR,
                                 color: 'white',
                                 whiteSpace: 'nowrap',
                               }}
