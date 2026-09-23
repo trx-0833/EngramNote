@@ -1,0 +1,128 @@
+/**
+ * @file 对话框基座的样式（visual-refactor-plan 批次 D1）
+ *
+ * ## 本模块的规矩（css-convention.md §3）
+ *
+ * 1. 类名 `camelCase`，与 `Dialog.tsx` 同目录（模块文件**绝不放** `src/styles/`）；
+ * 2. 圆角 `--radius-lg`、阴影 `--shadow-lg`、层级 `--z-modal`、间距 `--space-*`
+ *    一律走令牌 —— 全是 `base.css` 里既有的，本批次**不新增任何令牌**；
+ * 3. 遮罩底色 `rgba(0, 0, 0, 0.5)` 是本文件**唯一**允许的字面量。它的语义是
+ *    "全站遮罩以后只有这一个深度"：现状里 `DeleteNoteDialog.tsx:19` 写 `0.5`、
+ *    `LearningGoals.tsx:309` 写 `0.4`，两个值并存 ⇒ 批次 D2 迁移时以这里为准。
+ *    它**不进令牌层**：`css-convention.md` §2 的判据是"同一语义手写 ≥3 处"才算，
+ *    而这里的做法恰恰是"从 2 处收敛到 1 处"，收进令牌只是把写死换个地方。
+ * 4. 窄屏沿用全局断点 `768px` / `480px`，不另造断点（§3 雷区 2）。
+ *
+ * ## 两个 `@keyframes` 为什么定义在**本模块内**
+ *
+ * §3 雷区 1（实测踩过）：模块里写 `animation: fadeIn …`（`fadeIn` 定义在
+ * `base.css`）会被 CSS Modules 改写成 `animation:_fadeIn_<hash> …`，
+ * 而产物里**没有**那个 `@keyframes` ⇒ 动画静默消失，源码与规则清单都看不出来。
+ * 所以动画体在下面**逐字复制并改名**（`dialogFadeIn` / `dialogScaleIn`）。
+ * 又因为 `Dialog.tsx` 目前还没有被任何页面引入（D1 只建基座），这两个定义
+ * 眼下也不在 `dist` 里 —— 等 D2 迁移完第一套 modal 才会进产物，
+ * 届时 `scripts/verify-built-css.mjs` 的"死动画"检查会一并覆盖它们。
+ */
+
+.dialogOverlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* ⚠️ 全站遮罩的唯一深度（见文件头第 3 条） */
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--z-modal);
+  /* 时长/曲线走令牌；动画名是模块本地的（会被哈希），与下面的定义同源 */
+  animation: dialogFadeIn var(--duration-fast) ease both;
+}
+
+.dialogPanel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  /* 内滚动到边界时不要把手势传给背后的页面（与抽屉同一个处理） */
+  overscroll-behavior: contain;
+  /* 窄屏下不出血：屏幕比 560px 窄时左右各留 16px（见下面的 768/480 两档） */
+  margin: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: dialogScaleIn var(--duration-base) var(--ease-out-expo) both;
+}
+
+.dialogTitle {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ── 滚动锁：类名由 Dialog 组件挂到 body 上 ──
+   选择器是"元素 + 模块类"（`body.dialogScrollLock` ⇒ 产物 `body._dialogScrollLock_hash`），
+   与 `Sidebar.module.css:169` 的 `body.sidebarOpenLock` 同形。
+
+   ⚠️ **不要**写成 `body:global(.dialogScrollLock)`（本文件的第一版就是这么写的，
+   构建产物实测打脸）：`postcss-modules-local-by-default` 对 `:global(...)` 里的类名
+   是**直接原样输出**的 —— 产物里是 `body.dialogScrollLock`（无哈希），
+   而 `Dialog.tsx` 通过 `styles.dialogScrollLock` 加给 body 的是 `_dialogScrollLock_hash`。
+   两者对不上 ⇒ 这条规则**永不生效**，而单测查的是"类名有没有加到 body 上"，
+   照样全绿 —— 正是 css-convention.md §3 雷区 2 那类"规则还在、永不生效"的静默事故。
+   写模块类名时不要给它套 `:global()`：局部类就该让它被哈希。 */
+body.dialogScrollLock {
+  overflow: hidden;
+}
+
+/* 动画体逐字复制自 `base.css` 的 `@keyframes fadeIn`，只改名（见文件头） */
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 动画体逐字复制自 `base.css` 的 `@keyframes slideUp`，只改名 + 位移收窄到 8px
+   （对话框从"弹出"变成"落下一点"；`slideUp` 的 16px 是页面级入场用的） */
+@keyframes dialogScaleIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 窄屏（沿用全局断点，不另造）── */
+
+@media (max-width: 768px) {
+  .dialogPanel {
+    margin: var(--space-sm);
+    padding: var(--space-md);
+  }
+}
+
+@media (max-width: 480px) {
+  .dialogPanel {
+    /* 手机上左右只剩 12px：内边距再收一档，把宽度让给内容 */
+    margin: var(--space-xs);
+    padding: var(--space-md) var(--space-sm);
+  }
+}
+
+/* 用户要求减少动效时不播动画（对话框直接出现，功能一模一样） */
+@media (prefers-reduced-motion: reduce) {
+  .dialogOverlay,
+  .dialogPanel {
+    animation: none;
+  }
+}
