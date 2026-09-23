@@ -137,10 +137,13 @@
   --shadow-lg: 0 8px 24px rgba(26, 26, 46, 0.08), 0 4px 8px rgba(26, 26, 46, 0.04);
   --shadow-xl: 0 16px 48px rgba(26, 26, 46, 0.1), 0 8px 16px rgba(26, 26, 46, 0.06);
   --shadow-glow: 0 0 20px rgba(201, 169, 89, 0.15);
-  /* 统一的聚焦光环（A1 新增）：现状 `:focus-visible` 样式散落在各模块、没有单一来源。
-     用主色低透明度而不是 `outline` —— 与纸感底更协调，且不改变盒模型。
-     批次 D4 把各处焦点样式收敛到这一个令牌。 */
-  --shadow-focus: 0 0 0 3px rgba(15, 52, 96, 0.16);
+  /* `--shadow-focus` 于批次 D4 删除（A1 加的定义、D4 落地时实测后没有采用）。
+     原设计是"用主色低透明度的 box-shadow 做焦点光环"，D4 改用 outline，两条实测理由：
+     ① box-shadow 是**单值属性**，会整条替换元素自己的阴影（按钮 / 卡片 / 对话框都有），
+        焦点态反而丢掉层次；
+     ② outline 在 Windows 强制高对比度模式（forced-colors）下会自动换成系统色仍然可见，
+        而 box-shadow 在该模式下被丢弃 —— 那恰恰是最需要焦点提示的场景。
+     现行做法见 components.css 的 `:focus-visible` 全局规则。 */
 
   /* ── 动画曲线 ── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);

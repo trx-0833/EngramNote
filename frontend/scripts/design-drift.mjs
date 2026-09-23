@@ -77,13 +77,11 @@ const PENDING_WIRING = {
   '--graph-ink-faint': '同上，待 E4',
   '--graph-paper-deep': '同上，待 E4',
   // ── 有明确负责批次的（做完那一批就该把这些行删掉，过期自检会提醒）──
-  '--shadow-focus': '批次 D4（:focus-visible 统一光环）接线',
-  '--width-reading': '批次 C2（页宽三档）接线',
-  '--width-standard': '同上，待 C2',
-  '--width-full': '同上，待 C2',
-  '--z-base': '批次 D2（迁移 5 套 modal）接线；--z-modal 已由 Dialog.module.css 使用',
-  '--z-dropdown': '同上，待 D2',
-  '--z-drawer': '同上，待 D2',
+  // （`--width-*` 与 `--shadow-focus` 曾登记在这里：前者已在批次 C2 接线、
+  //   后者在 D4 落地时被实测判定不用并删除 —— 这条过期自检当时确实把它们报了出来）
+  '--z-base': 'D2 的迁移只用到 --z-modal；这四个留待真有「元素需要显式层级」时使用',
+  '--z-dropdown': '同上',
+  '--z-drawer': '同上',
   '--z-toast': '同上，待 D2',
   // ── 规范预留（**不是欠账**，是刻意留给新代码的命名）──
   '--space-2xs':
