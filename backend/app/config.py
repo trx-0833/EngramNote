@@ -41,6 +41,31 @@ TMP_UPLOAD_DIR = DATA_DIR / "tmp" / "upload"
 # 开发模式自动生成 JWT 密钥的持久化文件（debug=True 且未配置时写入并复用）
 JWT_SECRET_FILE = DATA_DIR / ".jwt-secret"
 
+# 已知不可用的 JWT 密钥值（小写比较）：**公开出现过的占位值**
+#
+# ## 为什么需要这张表
+#
+# `_validate_production_secrets` 原来只判"密钥是否为空"，于是漏掉一类真实风险：
+# 值**非空、但来自公开文档**。本仓库的历史教程
+# （`docs/archive/新手教学.md:3454`）曾经手把手示范
+# `JWT_SECRET_KEY=engramnote-dev-secret-change-in-production`，
+# 照着教程部署的人拿到的就是一个全世界都知道的签名密钥。
+#
+# 配合 HS256 + 24h 无状态访问令牌（登出/撤销后已泄露令牌仍可用，
+# 见 `jwt_expire_minutes` 的注释），这意味着任何拿到仓库的人都能为任意
+# user_id 伪造有效令牌。这类值与"空值"同样不可接受，必须拦下。
+#
+# ⚠️ 新增条目时只放"曾经公开示范过/通用弱值"，不要放真实密钥。
+KNOWN_INSECURE_JWT_SECRETS = frozenset({
+    "engramnote-dev-secret-change-in-production",
+    "your-random-secret-key",
+    "changeme",
+    "change-me",
+    "secret",
+    "test",
+    "dev",
+})
+
 logger = logging.getLogger(__name__)
 
 
@@ -560,12 +585,39 @@ class Settings(BaseSettings):
         防止使用可预测/空密钥导致 Token 可被伪造。
         开发模式允许空密钥零配置启动，但空密钥不再用于签发：
         此时自动生成随机密钥并持久化到 data/.jwt-secret，重启后复用。
+
+        ## 为什么还要拦"非空但已公开"的值（2026-09-23 补）
+
+        只判"是否为空"漏掉了一类真实风险：**值来自公开文档**。
+        本仓库的历史教程（`docs/archive/新手教学.md:3454`）曾经示范
+        `JWT_SECRET_KEY=engramnote-dev-secret-change-in-production`，
+        照着填的人拿到的就是一个全世界都知道的签名密钥 ——
+        HS256 + 24h 无状态访问令牌（登出不可撤销）意味着任何人都能为
+        任意 user_id 伪造有效令牌。
+
+        这类值与"空值"同样不可接受，因此一并拦下：prod 拒绝启动，
+        dev 视为未配置（自动生成随机密钥并持久化）。
         """
-        if not self.is_dev and not self.jwt_secret_key:
-            raise ValueError(
-                "生产环境必须配置 JWT_SECRET_KEY（生成方法："
-                "python -c \"import secrets; print(secrets.token_hex(32))\"）"
+        secret = (self.jwt_secret_key or "").strip()
+        is_known_placeholder = secret.lower() in KNOWN_INSECURE_JWT_SECRETS
+
+        if not self.is_dev and (not secret or is_known_placeholder):
+            reason = (
+                "配置的是**已公开的占位值**（历史文档里的示范密钥，任何人都知道）"
+                if is_known_placeholder
+                else "未配置"
             )
+            raise ValueError(
+                f"生产环境必须配置 JWT_SECRET_KEY，当前{reason}。"
+                '生成方法：python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+
+        if is_known_placeholder:
+            logger.warning(
+                "JWT_SECRET_KEY 是历史文档里的公开占位值，开发模式下将改用随机密钥"
+            )
+            self.jwt_secret_key = ""
+
         if self.is_dev and not self.jwt_secret_key:
             self.jwt_secret_key = self._load_or_generate_jwt_secret()
         return self

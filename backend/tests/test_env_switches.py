@@ -132,6 +132,57 @@ class TestValidation:
         assert "JWT_SECRET_KEY" in str(exc.value)
 
 
+class TestJwtSecretMustNotBeAPublicPlaceholder:
+    """密钥**非空**也可能等于没配 —— 值来自公开文档时同样拦下
+
+    ## 为什么单开一项
+
+    原来的校验只问"是否为空"，于是放过了一类真实风险：本仓库历史教程
+    （`docs/archive/新手教学.md:3454`）手把手示范过
+    `JWT_SECRET_KEY=engramnote-dev-secret-change-in-production`。
+    照着填的人以为配好了，实际拿到的是**全世界都知道**的签名密钥 ——
+    HS256 + 24h 无状态令牌（登出不可撤销）意味着任何拿到仓库的人
+    都能为任意 user_id 伪造有效令牌。
+
+    因此：prod 视为"未配置"直接拒绝启动；dev 视为"未配置"自动换随机密钥。
+    """
+
+    PLACEHOLDER = "engramnote-dev-secret-change-in-production"
+
+    def test_production_rejects_the_documented_placeholder(self):
+        with pytest.raises(Exception) as exc:
+            Settings(
+                app_env="prod", jwt_secret_key=self.PLACEHOLDER,
+                deepseek_api_key="k", glm_api_key="k",
+            )
+        message = str(exc.value)
+        assert "JWT_SECRET_KEY" in message
+        assert "占位值" in message, f"错误信息应说明这是公开占位值，实际：{message}"
+
+    def test_placeholder_detection_is_case_insensitive(self):
+        with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
+            Settings(
+                app_env="prod", jwt_secret_key=self.PLACEHOLDER.upper(),
+                deepseek_api_key="k", glm_api_key="k",
+            )
+
+    def test_dev_replaces_placeholder_with_a_random_secret(self, tmp_path, monkeypatch):
+        """dev 下占位值被丢弃，改为生成随机密钥（且落到临时文件，不碰真实 data/）"""
+        from app import config as config_mod
+
+        monkeypatch.setattr(config_mod, "JWT_SECRET_FILE", tmp_path / ".jwt-secret")
+        s = _settings(app_env="dev", jwt_secret_key=self.PLACEHOLDER)
+
+        assert s.jwt_secret_key != self.PLACEHOLDER, "占位值不得用于签发"
+        assert len(s.jwt_secret_key) == 64, "应为 token_hex(32) 生成的 64 位十六进制"
+        assert (tmp_path / ".jwt-secret").exists(), "生成的密钥应被持久化以便重启复用"
+
+    def test_a_real_secret_is_left_alone(self):
+        """反例：正常密钥不得被误伤（否则会把所有人的会话踢掉）"""
+        s = _settings(app_env="prod", jwt_secret_key="a-real-secret-that-nobody-published")
+        assert s.jwt_secret_key == "a-real-secret-that-nobody-published"
+
+
 class TestWiring:
     """三个开关必须真的接在它们该管的地方（而不是只存在于配置里）"""
 
