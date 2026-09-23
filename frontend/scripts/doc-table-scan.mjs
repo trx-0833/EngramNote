@@ -28,7 +28,8 @@
  * 默认扫 `docs/overhaul-plan.md` 与 `frontend/docs/*.md`。
  * 有缺陷 → 退出码 1（打印文件、行号、表头列数、该行列数、原始行）。
  */
-/* global console, process */
+// 运行环境（console/process 等）由 eslint.config.js 的 NODE_GLOBALS 声明，
+// 不再需要文件级 `/* global ... */`（两者同时存在会触发 no-redeclare）。
 import fs from 'node:fs';
 import path from 'node:path';
 

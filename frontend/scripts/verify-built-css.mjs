@@ -29,9 +29,15 @@
  *
  * 用法：node scripts/verify-built-css.mjs [dist目录]
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { parseRules, splitSelectors, stripComments, findRecentRev, readFromGit } from './lib/css-parse.mjs'
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  parseRules,
+  splitSelectors,
+  stripComments,
+  findRecentRev,
+  readFromGit,
+} from './lib/css-parse.mjs';
 import {
   collectCascadeDecls,
   findMediaWars,
@@ -40,10 +46,10 @@ import {
   coAppliedClassGroups,
   fileRank,
   isSingleClassSelector,
-} from './lib/css-cascade.mjs'
+} from './lib/css-cascade.mjs';
 
 /** 去掉注释（保留一个短别名，读起来比到处写 stripComments 顺） */
-const clean = stripComments
+const clean = stripComments;
 
 /**
  * 剥掉 CSS Modules 的哈希后缀：`_authSubmit_1hcab_41` → `_authSubmit`。
@@ -53,23 +59,23 @@ const clean = stripComments
  * 所以 `\._?authSubmit(?![\w-])` 一条都匹配不上 —— 这个 bug 让
  * "级联次序"这一项第一次跑起来时报的是"两侧没有同属性竞争"（假通过）。
  */
-const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '')
+const stripHash = (s) => s.replace(/_([0-9a-z]{5})_\d+(?![0-9a-z])/g, '');
 
-const distDir = process.argv[2] || 'dist'
-const assetsDir = path.join(distDir, 'assets')
+const distDir = process.argv[2] || 'dist';
+const assetsDir = path.join(distDir, 'assets');
 
-const cssFiles = fs.readdirSync(assetsDir).filter((f) => f.endsWith('.css'))
+const cssFiles = fs.readdirSync(assetsDir).filter((f) => f.endsWith('.css'));
 if (cssFiles.length === 0) {
-  console.error(`✗ ${assetsDir} 下没有 CSS：先跑 npm run build`)
-  process.exit(2)
+  console.error(`✗ ${assetsDir} 下没有 CSS：先跑 npm run build`);
+  process.exit(2);
 }
 
 const sheets = cssFiles.map((f) => ({
   name: f,
   css: fs.readFileSync(path.join(assetsDir, f), 'utf8'),
   mtime: fs.statSync(path.join(assetsDir, f)).mtimeMs,
-}))
-const all = sheets.map((s) => s.css).join('\n')
+}));
+const all = sheets.map((s) => s.css).join('\n');
 
 /**
  * 级联求解用的扁平表（收尾轮新增的两项检查：跨媒体查询覆盖战 / 简写 vs 长写）。
@@ -83,77 +89,79 @@ const all = sheets.map((s) => s.css).join('\n')
  */
 const sheetsInCascadeOrder = [...sheets].sort(
   (a, b) => fileRank(a.name) - fileRank(b.name) || a.name.localeCompare(b.name),
-)
-const cascadeDecls = collectCascadeDecls(sheetsInCascadeOrder)
+);
+const cascadeDecls = collectCascadeDecls(sheetsInCascadeOrder);
 
-let failed = false
+let failed = false;
 
 // ── 0. 产物新鲜度 ──
-const distMtime = Math.max(...sheets.map((s) => s.mtime))
-const srcCssFiles = []
-;(function walk(dir) {
+const distMtime = Math.max(...sheets.map((s) => s.mtime));
+const srcCssFiles = [];
+(function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) walk(p)
-    else if (e.name.endsWith('.css')) srcCssFiles.push(p)
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.name.endsWith('.css')) srcCssFiles.push(p);
   }
-})(path.join(process.cwd(), 'src'))
-const newestSrc = Math.max(...srcCssFiles.map((f) => fs.statSync(f).mtimeMs))
+})(path.join(process.cwd(), 'src'));
+const newestSrc = Math.max(...srcCssFiles.map((f) => fs.statSync(f).mtimeMs));
 if (newestSrc > distMtime) {
-  failed = true
+  failed = true;
   console.log(
     `✗ 产物比源码旧（源码最新 ${new Date(newestSrc).toISOString()} > 产物 ${new Date(distMtime).toISOString()}）：` +
       `先重新构建，否则下面的结论是拿旧产物得出的`,
-  )
+  );
 } else {
-  console.log('✓ 产物比 src 下所有 CSS 都新（不是陈旧产物）')
+  console.log('✓ 产物比 src 下所有 CSS 都新（不是陈旧产物）');
 }
 
 // ── 1. @keyframes 定义 vs 动画引用（**逐文件**比，不跨文件）──
 const NOT_A_NAME =
-  /^(none|infinite|linear|ease|ease-in|ease-out|ease-in-out|alternate|alternate-reverse|reverse|forwards|backwards|both|normal|running|paused|initial|inherit|unset|revert|steps|linear\(.*\)|cubic-bezier\(.*\))$/
+  /^(none|infinite|linear|ease|ease-in|ease-out|ease-in-out|alternate|alternate-reverse|reverse|forwards|backwards|both|normal|running|paused|initial|inherit|unset|revert|steps|linear\(.*\)|cubic-bezier\(.*\))$/;
 
 /** 从 animation 简写里挑出动画名：跳过时长/曲线/计数/关键字等非标识符位置 */
 function animationNamesFrom(value) {
-  const names = []
+  const names = [];
   for (const group of value.split(',')) {
     for (const tok of group.trim().split(/\s+/)) {
-      if (!tok) continue
-      if (/^[\d.]/.test(tok)) continue // 时长、延迟（0.3s / 200ms / 0）
-      if (NOT_A_NAME.test(tok)) continue
-      if (!/^[A-Za-z_-][\w-]*$/.test(tok)) continue
-      names.push(tok)
+      if (!tok) continue;
+      if (/^[\d.]/.test(tok)) continue; // 时长、延迟（0.3s / 200ms / 0）
+      if (NOT_A_NAME.test(tok)) continue;
+      if (!/^[A-Za-z_-][\w-]*$/.test(tok)) continue;
+      names.push(tok);
     }
   }
-  return names
+  return names;
 }
 
-let danglingTotal = 0
-const definedKeyframesAll = new Set()
-console.log('\n动画引用 vs 定义（逐个产物文件核对）：')
+let danglingTotal = 0;
+const definedKeyframesAll = new Set();
+console.log('\n动画引用 vs 定义（逐个产物文件核对）：');
 for (const s of sheets) {
-  const defined = new Set([...clean(s.css).matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]))
-  for (const n of defined) definedKeyframesAll.add(n)
-  const used = new Set()
+  const defined = new Set([...clean(s.css).matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]));
+  for (const n of defined) definedKeyframesAll.add(n);
+  const used = new Set();
   for (const m of clean(s.css).matchAll(/(?:^|[;{])\s*animation(?:-name)?\s*:\s*([^;{}]+)/g)) {
-    for (const name of animationNamesFrom(m[1])) used.add(name)
+    for (const name of animationNamesFrom(m[1])) used.add(name);
   }
-  const dangling = [...used].filter((n) => !defined.has(n))
-  danglingTotal += dangling.length
+  const dangling = [...used].filter((n) => !defined.has(n));
+  danglingTotal += dangling.length;
   if (dangling.length) {
-    failed = true
-    console.log(`   ✗ ${s.name}: 引用了本文件里没有的 @keyframes → ${dangling.join(', ')}`)
+    failed = true;
+    console.log(`   ✗ ${s.name}: 引用了本文件里没有的 @keyframes → ${dangling.join(', ')}`);
   } else if (used.size) {
-    console.log(`   ✓ ${s.name}: 引用 ${used.size} 个动画，全部在本文件内有定义（${[...used].join(', ')}）`)
+    console.log(
+      `   ✓ ${s.name}: 引用 ${used.size} 个动画，全部在本文件内有定义（${[...used].join(', ')}）`,
+    );
   } else {
-    console.log(`   · ${s.name}: 没有动画引用`)
+    console.log(`   · ${s.name}: 没有动画引用`);
   }
 }
 console.log(
   danglingTotal === 0
     ? `✓ 悬空动画引用 0 条（全部产物内 @keyframes 定义 ${definedKeyframesAll.size} 个）`
     : `✗ 悬空动画引用 ${danglingTotal} 条`,
-)
+);
 
 // ── 2. 真正打架的重复定义（同上下文 + 同选择器 + 同属性、值不同）──
 // 解析统一走 lib/css-parse.mjs：这里原本自己写了一份 parseRules + splitSelectors，
@@ -162,32 +170,32 @@ console.log(
 
 /** 把声明列表转成 属性 -> 值 */
 function declsOf(rule) {
-  const m = new Map()
-  for (const [p, v] of rule.decls) m.set(p.trim().toLowerCase(), v.replace(/\s+/g, ' ').trim())
-  return m
+  const m = new Map();
+  for (const [p, v] of rule.decls) m.set(p.trim().toLowerCase(), v.replace(/\s+/g, ' ').trim());
+  return m;
 }
 
 // key = 上下文 + 选择器 + 属性  → 第一次出现的 {值, 文件}
-const propSeen = new Map()
-const clashes = []
+const propSeen = new Map();
+const clashes = [];
 for (const s of sheets) {
   for (const r of parseRules(s.css)) {
     // at-rule 不是选择器：`@font-face` 被解析器当成一条"规则"，而多个
     // `@font-face` 块的 `src` / `font-family` 天然不同 —— 不排除的话
     // 会稳定产出 49 条"冲突"，把真正的冲突淹掉（试点轮的产物校验里就有这个噪音）。
-    if (r.selector.trim().startsWith('@')) continue
-    const dm = declsOf(r)
+    if (r.selector.trim().startsWith('@')) continue;
+    const dm = declsOf(r);
     for (const sel of splitSelectors(r.selector)) {
-      if (sel.trim().startsWith('@')) continue
+      if (sel.trim().startsWith('@')) continue;
       for (const [prop, val] of dm) {
-        const key = `${r.context} ${sel} :: ${prop}`
+        const key = `${r.context} ${sel} :: ${prop}`;
         if (propSeen.has(key)) {
-          const prev = propSeen.get(key)
+          const prev = propSeen.get(key);
           if (prev.val !== val) {
-            clashes.push({ key, a: prev, b: { val, file: s.name } })
+            clashes.push({ key, a: prev, b: { val, file: s.name } });
           }
         } else {
-          propSeen.set(key, { val, file: s.name })
+          propSeen.set(key, { val, file: s.name });
         }
       }
     }
@@ -203,18 +211,18 @@ for (const s of sheets) {
 const srcSheets = srcCssFiles.map((abs) => ({
   name: path.relative(path.join(process.cwd(), 'src'), abs).replace(/\\/g, '/'),
   rules: parseRules(fs.readFileSync(abs, 'utf8')),
-}))
+}));
 
 /** 某选择器（去掉上下文）出现在哪些源样式表里；同文件出现多次也算多次 */
 function sourceFilesFor(selectorText) {
-  const bare = selectorText.trim()
-  const hits = []
+  const bare = selectorText.trim();
+  const hits = [];
   for (const sh of srcSheets) {
     for (const r of sh.rules) {
-      if (splitSelectors(r.selector).some((x) => x.trim() === bare)) hits.push(sh.name)
+      if (splitSelectors(r.selector).some((x) => x.trim() === bare)) hits.push(sh.name);
     }
   }
-  return hits
+  return hits;
 }
 
 // 有意覆盖 vs 需要交代的冲突，靠**同一文件内**判断：
@@ -281,51 +289,53 @@ const TOUCHED_BY_THIS_MIGRATION = new Set([
   // 登记进来 = "本文件里剩下的冲突都必须在本轮解决"。
   'styles/markdown.css',
   'hooks/useAdhdReader.module.css',
-])
+]);
 
 const annotated = clashes.map((c) => {
-  const sel = c.key.split(' :: ')[0].trim()
+  const sel = c.key.split(' :: ')[0].trim();
   // key 形如 `@media (max-width: 768px) .foo`：上下文与选择器之间只有一个空格，
   // 而上下文自身的 `)` 也带空格，所以不能用贪婪的 `^@media.*\)\s*` 去切
   // （那会把选择器一起吃掉，导致既匹配不到源文件、也漏掉"未归因"的统计）。
   // 这里改成"从第一个不在括号内的空格处切"。
-  const selOnly = stripMediaContext(sel)
-  return { ...c, sources: sourceFilesFor(selOnly), selOnly }
-})
+  const selOnly = stripMediaContext(sel);
+  return { ...c, sources: sourceFilesFor(selOnly), selOnly };
+});
 
 /** 去掉 `@media (...) ` 前缀，返回纯选择器 */
 function stripMediaContext(s) {
-  if (!s.startsWith('@')) return s
-  let depth = 0
+  if (!s.startsWith('@')) return s;
+  let depth = 0;
   for (let i = 0; i < s.length; i++) {
-    const ch = s[i]
-    if (ch === '(') depth++
+    const ch = s[i];
+    if (ch === '(') depth++;
     else if (ch === ')') {
-      depth--
-      if (depth === 0) return s.slice(i + 1).trim()
+      depth--;
+      if (depth === 0) return s.slice(i + 1).trim();
     }
   }
-  return s
+  return s;
 }
 
-const unattributed = annotated.filter((c) => c.sources.length === 0)
+const unattributed = annotated.filter((c) => c.sources.length === 0);
 const preExisting = annotated.filter(
   (c) => c.sources.length > 0 && !c.sources.some((s) => TOUCHED_BY_THIS_MIGRATION.has(s)),
-)
-const migratedSlice = annotated.filter((c) => c.sources.some((s) => TOUCHED_BY_THIS_MIGRATION.has(s)))
+);
+const migratedSlice = annotated.filter((c) =>
+  c.sources.some((s) => TOUCHED_BY_THIS_MIGRATION.has(s)),
+);
 
 console.log(
   `\n同选择器同属性不同值共 ${annotated.length} 条。按**源文件**归因：` +
     `落在本轮改动范围内 ${migratedSlice.length} 条、` +
     `迁移前既有 ${preExisting.length} 条、未能归因 ${unattributed.length} 条`,
-)
+);
 
 if (migratedSlice.length) {
-  failed = true
-  console.log(`\n✗ 落在本轮改动范围内的冲突 ${migratedSlice.length} 条（必须处理）：`)
+  failed = true;
+  console.log(`\n✗ 落在本轮改动范围内的冲突 ${migratedSlice.length} 条（必须处理）：`);
   for (const c of migratedSlice.slice(0, 20)) {
-    console.log(`   - ${c.key}   [${c.sources.join(', ')}]`)
-    console.log(`       ${c.a.val}  →  ${c.b.val}`)
+    console.log(`   - ${c.key}   [${c.sources.join(', ')}]`);
+    console.log(`       ${c.a.val}  →  ${c.b.val}`);
   }
 }
 
@@ -334,25 +344,27 @@ if (unattributed.length) {
   // 所以列出选择器，让人能一眼看出是不是自己刚改的那批。
   console.log(
     `\n⚠ 未能归因到源文件 ${unattributed.length} 条（多为属性选择器/自定义属性等写法）：`,
-  )
-  const sels = [...new Set(unattributed.map((c) => c.selOnly))]
-  console.log(`   ${sels.slice(0, 12).join(' / ')}${sels.length > 12 ? ` …(+${sels.length - 12})` : ''}`)
+  );
+  const sels = [...new Set(unattributed.map((c) => c.selOnly))];
+  console.log(
+    `   ${sels.slice(0, 12).join(' / ')}${sels.length > 12 ? ` …(+${sels.length - 12})` : ''}`,
+  );
 }
 
 if (preExisting.length) {
-  console.log(`\n⚠ 迁移前既有的冲突 ${preExisting.length} 条（本轮不处理，下一轮排雷用）：`)
-  const bySources = new Map()
+  console.log(`\n⚠ 迁移前既有的冲突 ${preExisting.length} 条（本轮不处理，下一轮排雷用）：`);
+  const bySources = new Map();
   for (const c of preExisting) {
-    const k = c.sources.join(' + ')
-    if (!bySources.has(k)) bySources.set(k, [])
-    bySources.get(k).push(c)
+    const k = c.sources.join(' + ');
+    if (!bySources.has(k)) bySources.set(k, []);
+    bySources.get(k).push(c);
   }
   for (const [pair, list] of [...bySources].sort((a, b) => b[1].length - a[1].length)) {
-    const sels = [...new Set(list.map((c) => c.key.split(' :: ')[0].trim()))]
-    console.log(`   - ${pair}：${list.length} 条属性冲突`)
+    const sels = [...new Set(list.map((c) => c.key.split(' :: ')[0].trim()))];
+    console.log(`   - ${pair}：${list.length} 条属性冲突`);
     console.log(
       `       选择器：${sels.slice(0, 10).join(' / ')}${sels.length > 10 ? ` …(+${sels.length - 10})` : ''}`,
-    )
+    );
   }
 }
 
@@ -393,7 +405,7 @@ const CASCADE_PAIRS = [
       '谁赢决定按钮是高是矮。踩过一次反转（模块排在全局之前），' +
       '改 main.tsx 顺序才修好 —— 这条一旦红，先看 main.tsx 的导入顺序',
   },
-]
+];
 
 /**
  * 极简权重计算：只处理本项目用到的形态
@@ -401,31 +413,31 @@ const CASCADE_PAIRS = [
  * 返回 [id, class, type] 三元组，逐个比大小。
  */
 function specificity(sel) {
-  const s = sel.replace(/:where\([^)]*\)/g, '') // :where() 权重为 0，本项目未用，留着以防万一
-  const ids = (s.match(/#[\w-]+/g) || []).length
+  const s = sel.replace(/:where\([^)]*\)/g, ''); // :where() 权重为 0，本项目未用，留着以防万一
+  const ids = (s.match(/#[\w-]+/g) || []).length;
   const classes =
     (s.match(/\.[\w-]+/g) || []).length +
     (s.match(/\[[^\]]*\]/g) || []).length +
-    (s.match(/:(?!:)[\w-]+/g) || []).length
-  const pseudoEls = (s.match(/::[\w-]+/g) || []).length
-  const types = (s.match(/(^|[\s>+~(,])([a-zA-Z][\w-]*)/g) || []).length + pseudoEls
-  return [ids, classes, types]
+    (s.match(/:(?!:)[\w-]+/g) || []).length;
+  const pseudoEls = (s.match(/::[\w-]+/g) || []).length;
+  const types = (s.match(/(^|[\s>+~(,])([a-zA-Z][\w-]*)/g) || []).length + pseudoEls;
+  return [ids, classes, types];
 }
-const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+const cmpSpec = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
-console.log('\n级联次序（同元素上全局类 × 模块类的竞争）：')
+console.log('\n级联次序（同元素上全局类 × 模块类的竞争）：');
 for (const pair of CASCADE_PAIRS) {
   const collect = (predicate) => {
-    const out = []
+    const out = [];
     for (const s of sheets) {
-      let idx = 0
+      let idx = 0;
       for (const r of parseRules(s.css)) {
-        if (r.context) continue // 只比顶层，媒体查询里的规则不参与
+        if (r.context) continue; // 只比顶层，媒体查询里的规则不参与
         for (const sel of splitSelectors(r.selector)) {
-          idx++
+          idx++;
           // 比对前先剥哈希，两侧才能用同一套写法描述（见 stripHash 的注释）
-          const bare = stripHash(sel)
-          if (!predicate(bare)) continue
+          const bare = stripHash(sel);
+          if (!predicate(bare)) continue;
           for (const [prop, val] of r.decls) {
             out.push({
               sel: bare,
@@ -433,58 +445,66 @@ for (const pair of CASCADE_PAIRS) {
               val: val.replace(/\s+/g, ' ').trim(),
               order: idx,
               file: s.name,
-            })
+            });
           }
         }
       }
     }
-    return out
-  }
+    return out;
+  };
   // 全局侧：选择器**恰好**是 `.btn`（不带伪类、不带其它类）
-  const globalDecls = collect((sel) => sel.trim() === pair.globalClass)
+  const globalDecls = collect((sel) => sel.trim() === pair.globalClass);
   // 模块侧：选择器里含模块类名，且不含任何 `:`（排除 :hover / ::after 等）
   const moduleDecls = collect(
     (sel) => new RegExp(`\\._?${pair.moduleClass}(?![\\w-])`).test(sel) && !sel.includes(':'),
-  )
-  const compared = []
-  let bad = 0
+  );
+  const compared = [];
+  let bad = 0;
   for (const g of globalDecls) {
     for (const mm of moduleDecls.filter((x) => x.prop === g.prop)) {
-      if (g.val === mm.val) continue // 值相同就不存在"谁赢"的问题
-      const sp = cmpSpec(specificity(mm.sel), specificity(g.sel))
-      let winner
-      if (sp !== 0) winner = sp > 0 ? 'module' : 'global'
-      else if (mm.file === g.file) winner = mm.order > g.order ? 'module' : 'global'
+      if (g.val === mm.val) continue; // 值相同就不存在"谁赢"的问题
+      const sp = cmpSpec(specificity(mm.sel), specificity(g.sel));
+      let winner;
+      if (sp !== 0) winner = sp > 0 ? 'module' : 'global';
+      else if (mm.file === g.file) winner = mm.order > g.order ? 'module' : 'global';
       // 同权重 + 不同产物文件 ⇒ 胜负取决于加载顺序，这里判不了，
       // 必须显式报出来（"+ 用选择器强化消除歧义"正是修法）
-      else winner = 'unknown'
-      compared.push({ prop: g.prop, moduleVal: mm.val, globalVal: g.val, winner, moduleSel: mm.sel })
-      if (winner !== pair.expect) bad++
+      else winner = 'unknown';
+      compared.push({
+        prop: g.prop,
+        moduleVal: mm.val,
+        globalVal: g.val,
+        winner,
+        moduleSel: mm.sel,
+      });
+      if (winner !== pair.expect) bad++;
     }
   }
   if (bad) {
-    failed = true
-    console.log(`   ✗ ${pair.label}：${bad} 个属性的得主**不是**期望的 ${pair.expect}`)
+    failed = true;
+    console.log(`   ✗ ${pair.label}：${bad} 个属性的得主**不是**期望的 ${pair.expect}`);
     for (const c of compared.filter((x) => x.winner !== pair.expect)) {
       console.log(
         `      - ${c.prop}: 得主 ${c.winner}（模块 ${c.moduleVal} / 全局 ${c.globalVal}，选择器 ${c.moduleSel}）`,
-      )
+      );
     }
-    if (pair.why) console.log(`      为什么钉这条：${pair.why}`)
+    if (pair.why) console.log(`      为什么钉这条：${pair.why}`);
   } else if (compared.length === 0) {
-    failed = true
+    failed = true;
     console.log(
       `   ✗ ${pair.label}：两侧没有同属性竞争 —— 这项检查**没起到作用**。` +
         `多半是选择器改名了或那条规则被删了；确认后请更新/删除 CASCADE_PAIRS 里这一项，` +
         `不要留一条永远绿灯的空检查。`,
-    )
+    );
   } else {
-    const bySpec = compared.some((c) => specificity(c.moduleSel)[1] !== specificity(pair.globalClass)[1])
+    const bySpec = compared.some(
+      (c) => specificity(c.moduleSel)[1] !== specificity(pair.globalClass)[1],
+    );
     console.log(
       `   ✓ ${pair.label}：${compared.length} 个同名属性全部由 ${pair.expect} 生效` +
         `（${compared.map((c) => c.prop).join(', ')}；` +
         `取胜依据=${bySpec ? '权重更高' : '权重相同、同文件靠源序'}）`,
-    )
+    );
   }
 }
 
@@ -536,53 +556,68 @@ const ORDER_PAIRS = [
       '两条都命中"创建关系"按钮的按下态时得主只看先后 —— 顺序反了，' +
       '激活态会退回普通 hover 的墨蓝字/淡底，看起来像按钮没被激活。',
   },
-]
+];
 
-console.log('\n同文件内同权重的模块规则先后（顺序就是行为）：')
+console.log('\n同文件内同权重的模块规则先后（顺序就是行为）：');
 for (const pair of ORDER_PAIRS) {
-  const decls = []
+  const decls = [];
   for (const s of sheets) {
-    let idx = 0
+    let idx = 0;
     for (const r of parseRules(s.css)) {
-      if (r.context !== pair.context) continue
+      if (r.context !== pair.context) continue;
       for (const sel of splitSelectors(r.selector)) {
-        idx++
-        const bare = stripHash(sel)
-        const names = [pair.winner, ...pair.losers]
-        const hit = names.find((n) => new RegExp(`\\._?${n}(?![\\w-])`).test(bare))
-        if (!hit) continue
+        idx++;
+        const bare = stripHash(sel);
+        const names = [pair.winner, ...pair.losers];
+        const hit = names.find((n) => new RegExp(`\\._?${n}(?![\\w-])`).test(bare));
+        if (!hit) continue;
         for (const [prop, val] of r.decls) {
-          if (prop.trim().toLowerCase() !== pair.prop) continue
-          decls.push({ cls: hit, sel: bare, val: val.replace(/\s+/g, ' ').trim(), order: idx, file: s.name })
+          if (prop.trim().toLowerCase() !== pair.prop) continue;
+          decls.push({
+            cls: hit,
+            sel: bare,
+            val: val.replace(/\s+/g, ' ').trim(),
+            order: idx,
+            file: s.name,
+          });
         }
       }
     }
   }
-  const present = new Set(decls.map((d) => d.cls))
-  const missing = [pair.winner, ...pair.losers].filter((n) => !present.has(n))
+  const present = new Set(decls.map((d) => d.cls));
+  const missing = [pair.winner, ...pair.losers].filter((n) => !present.has(n));
   if (missing.length) {
-    failed = true
-    console.log(`   ✗ ${pair.label}：产物里找不到 ${missing.join(', ')} 的 ${pair.prop} 声明 —— 这项检查没起作用`)
-    continue
+    failed = true;
+    console.log(
+      `   ✗ ${pair.label}：产物里找不到 ${missing.join(', ')} 的 ${pair.prop} 声明 —— 这项检查没起作用`,
+    );
+    continue;
   }
   // 得主 = 权重最高者；权重相同则同文件内**更靠后**者
   const winnerOf = decls.reduce((best, d) => {
-    const sp = cmpSpec(specificity(d.sel), specificity(best.sel))
-    if (sp > 0) return d
-    if (sp < 0) return best
-    if (d.file === best.file) return d.order > best.order ? d : best
-    return best
-  })
+    const sp = cmpSpec(specificity(d.sel), specificity(best.sel));
+    if (sp > 0) return d;
+    if (sp < 0) return best;
+    if (d.file === best.file) return d.order > best.order ? d : best;
+    return best;
+  });
   if (winnerOf.cls !== pair.winner) {
-    failed = true
-    console.log(`   ✗ ${pair.label}`)
-    console.log(`      实际得主是 ${winnerOf.sel}（${winnerOf.file} @${winnerOf.order}，值 ${winnerOf.val}）`)
-    if (pair.why) console.log(`      为什么钉这条：${pair.why}`)
+    failed = true;
+    console.log(`   ✗ ${pair.label}`);
+    console.log(
+      `      实际得主是 ${winnerOf.sel}（${winnerOf.file} @${winnerOf.order}，值 ${winnerOf.val}）`,
+    );
+    if (pair.why) console.log(`      为什么钉这条：${pair.why}`);
   } else {
     console.log(
       `   ✓ ${pair.label}：得主 = ${winnerOf.sel}（${winnerOf.file}，值 ${winnerOf.val}，` +
-        `压过 ${decls.filter((d) => d !== winnerOf).map((d) => d.sel).join(', ') || '（无同属性对手）'}）`,
-    )
+        `压过 ${
+          decls
+            .filter((d) => d !== winnerOf)
+            .map((d) => d.sel)
+            .join(', ') || '（无同属性对手）'
+        }）`,
+    );
   }
 }
 
@@ -623,50 +658,55 @@ const MEDIA_WAR_RULES = [
       '**不要顺手"修好"它**：让它生效是改外观，得单开一轮带截图对比。' +
       '登记在这里的意思是"已量过、已知、故意留着"。',
   },
-]
+];
 
-console.log('\n跨媒体查询覆盖战（同选择器 + 同属性，`@media` 里那条被顶层压掉）：')
-const mediaWar = findMediaWars(cascadeDecls)
+console.log('\n跨媒体查询覆盖战（同选择器 + 同属性，`@media` 里那条被顶层压掉）：');
+const mediaWar = findMediaWars(cascadeDecls);
 if (mediaWar.candidates === 0) {
-  failed = true
+  failed = true;
   console.log(
     '   ✗ 候选对 0 条 —— 这项检查**没在扫描任何东西**。产物里应当存在大量' +
       '"同选择器同属性、一条在 @media 里一条在顶层"的对（今天的实测是几十对）；' +
       '为 0 说明解析或采集坏了，不能当成"没有覆盖战"。',
-  )
+  );
 } else {
   console.log(
     `   · 候选 ${mediaWar.candidates} 对（同选择器 + 同属性、两侧值不同、一条在 @media 里）；` +
       `其中媒体查询那条**在源序上输掉**的 ${mediaWar.findings.length} 条`,
-  )
+  );
 }
 for (const f of mediaWar.findings) {
-  console.log(`   ${MEDIA_WAR_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.sel} { ${f.prop} }`)
+  console.log(`   ${MEDIA_WAR_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.sel} { ${f.prop} }`);
   console.log(
     `       @media 那条：${f.media.context} 值 ${f.media.val}（${f.media.file} @${f.media.order}）`,
-  )
+  );
   console.log(
     `       顶层那条  ：值 ${f.top.val}（${f.top.file} @${f.top.order}）  ⇒ 得主 ${f.winner}` +
       (f.winner === 'unknown' ? '（两个懒加载 chunk 之间静态判不了先后）' : ''),
-  )
+  );
 }
 {
-  const matched = new Set()
+  const matched = new Set();
   for (const rule of MEDIA_WAR_RULES) {
-    const hits = mediaWar.findings.filter(rule.match)
+    const hits = mediaWar.findings.filter(rule.match);
     if (hits.length === 0) {
-      failed = true
-      console.log(`   ✗ 注册的「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`)
-      continue
+      failed = true;
+      console.log(
+        `   ✗ 注册的「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`,
+      );
+      continue;
     }
-    hits.forEach((h) => matched.add(h))
-    console.log(`   ✓ 已登记：${rule.id}（命中 ${hits.length} 条）—— ${rule.why}`)
+    hits.forEach((h) => matched.add(h));
+    console.log(`   ✓ 已登记：${rule.id}（命中 ${hits.length} 条）—— ${rule.why}`);
   }
-  const unregistered = mediaWar.findings.filter((f) => !matched.has(f))
+  const unregistered = mediaWar.findings.filter((f) => !matched.has(f));
   if (unregistered.length) {
-    failed = true
-    console.log(`   ✗ 未登记的覆盖战 ${unregistered.length} 条（**新的**，必须有人决定是修还是登记）：`)
-    for (const f of unregistered) console.log(`      - ${f.sel} { ${f.prop} }：${f.media.val} → ${f.top.val}`)
+    failed = true;
+    console.log(
+      `   ✗ 未登记的覆盖战 ${unregistered.length} 条（**新的**，必须有人决定是修还是登记）：`,
+    );
+    for (const f of unregistered)
+      console.log(`      - ${f.sel} { ${f.prop} }：${f.media.val} → ${f.top.val}`);
   }
 }
 
@@ -701,7 +741,10 @@ for (const f of mediaWar.findings) {
 const SHORTHAND_CLASH_RULES = [
   {
     id: '渐变文字三件套：`background` 简写 + `background-clip: text`',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-clip',
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'background' &&
+      f.long.prop === 'background-clip',
     why:
       '`background` 简写会把 `background-clip` 重置回 `border-box`，所以"渐变文字"必须写成' +
       '`background` 在前、`background-clip: text` 在后（本项目 6 处 + KaTeX/评分卡各 1 处）。' +
@@ -709,17 +752,24 @@ const SHORTHAND_CLASH_RULES = [
   },
   {
     id: '渐变文字配 `background-color: transparent`',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-color',
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'background' &&
+      f.long.prop === 'background-color',
     why: '同上那套写法（`-webkit-text-fill-color: transparent` 的兜底），顺序同样不能反。',
   },
   {
     id: '进度条流光：`background` 简写 + `background-size`',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'background' && f.long.prop === 'background-size',
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'background' &&
+      f.long.prop === 'background-size',
     why: '`shimmer` 动画靠 `background-size: 200% 100%` 移动渐变；被简写重置就没有流光。',
   },
   {
     id: '先给简写、再单独改一边（padding）',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'longhand',
+    match: (f) =>
+      f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'longhand',
     why:
       '`padding: …` 之后紧跟一条 `padding-top` / `padding-left` / `padding-bottom` 覆盖某一边 ——' +
       '同一规则内声明顺序固定，长写在后面赢。这是**有意**的写法（`.markdown-body blockquote` /' +
@@ -727,7 +777,8 @@ const SHORTHAND_CLASH_RULES = [
   },
   {
     id: '窄屏 `padding` 简写压掉 `padding-left/right` 长写（赢家是简写）',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'shorthand',
+    match: (f) =>
+      f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'shorthand',
     why:
       '`learning.css` 的 768px 档里，`responsive.css` 搬来的 `padding-left/right: var(--space-md)`' +
       '在前、`refinements.css` 搬来的 `padding: var(--space-xs) var(--space-sm)` 在后 ⇒ **简写赢**。' +
@@ -735,7 +786,10 @@ const SHORTHAND_CLASH_RULES = [
   },
   {
     id: 'Loader 转圈：`border` 简写 + 某一边的 `border-*-color` 长写',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'border' && /^border-.*-color$/.test(f.long.prop),
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'border' &&
+      /^border-.*-color$/.test(f.long.prop),
     why: '转圈的"缺口"就是靠事后改一边的颜色做出来的（`.spinner` / `._graphSearchSpinner`）。',
   },
   {
@@ -755,15 +809,19 @@ const SHORTHAND_CLASH_RULES = [
   },
   {
     id: '`border-color` 简写 + `border-left-color` 长写（hover 态）',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'border-color' && f.long.prop === 'border-left-color',
+    match: (f) =>
+      f.kind === 'same-selector' &&
+      f.short.prop === 'border-color' &&
+      f.long.prop === 'border-left-color',
     why: '答案卡 hover 只改左边框颜色，长写在简写之后。',
   },
   {
     id: 'KaTeX 自己的 `font` 简写 + `line-height`',
-    match: (f) => f.kind === 'same-selector' && f.short.prop === 'font' && f.long.prop === 'line-height',
+    match: (f) =>
+      f.kind === 'same-selector' && f.short.prop === 'font' && f.long.prop === 'line-height',
     why: '第三方（KaTeX 的 CSS）就是这么写的；它不在我们的改动范围里，登记是为了"已知"。',
   },
-]
+];
 
 const CROSS_CLASS_SHORTHAND_RULES = [
   {
@@ -771,9 +829,21 @@ const CROSS_CLASS_SHORTHAND_RULES = [
     match: (f) => pairIs(f, 'card', 'card-accent-gold'),
     why: '金色左边框要压掉 `.card` 的 1px 全边框；`card-accent-*` 在 `components.css` 里排在 `.card` 之后 ⇒ 长写赢。',
   },
-  { id: 'card × card-accent-left', match: (f) => pairIs(f, 'card', 'card-accent-left'), why: '同上。' },
-  { id: 'card × card-accent-error', match: (f) => pairIs(f, 'card', 'card-accent-error'), why: '同上。' },
-  { id: 'card × card-accent-warning', match: (f) => pairIs(f, 'card', 'card-accent-warning'), why: '同上。' },
+  {
+    id: 'card × card-accent-left',
+    match: (f) => pairIs(f, 'card', 'card-accent-left'),
+    why: '同上。',
+  },
+  {
+    id: 'card × card-accent-error',
+    match: (f) => pairIs(f, 'card', 'card-accent-error'),
+    why: '同上。',
+  },
+  {
+    id: 'card × card-accent-warning',
+    match: (f) => pairIs(f, 'card', 'card-accent-warning'),
+    why: '同上。',
+  },
   {
     id: 'card × _qaAiCard（雷区 12 的原始实例）',
     match: (f) => pairIs(f, 'card', '_qaAiCard'),
@@ -808,49 +878,55 @@ const CROSS_CLASS_SHORTHAND_RULES = [
     match: (f) => pairIs(f, '_uploadZone', '_uploadZoneActive'),
     why: '拖拽悬停态换成强调色虚线；模块内 active 排在后。',
   },
-]
+];
 
 /**
  * 注册表的双向自检：每个注册项至少命中一条发现，每条发现至少被一个注册项命中。
  * 两个方向都要报错 —— 只查一个方向的话，"注册表写空"或"新竞争悄悄出现"都能溜过去。
  */
 function checkClashRegistry(label, findings, rules) {
-  const matched = new Set()
-  let stale = 0
+  const matched = new Set();
+  let stale = 0;
   for (const rule of rules) {
-    const hits = findings.filter(rule.match)
+    const hits = findings.filter(rule.match);
     if (hits.length === 0) {
-      stale += 1
-      failed = true
-      console.log(`   ✗ ${label}「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`)
-      continue
+      stale += 1;
+      failed = true;
+      console.log(
+        `   ✗ ${label}「${rule.id}」一条都没命中 —— 空注册（判据写错，或那条规则已经改了）`,
+      );
+      continue;
     }
-    hits.forEach((h) => matched.add(h))
+    hits.forEach((h) => matched.add(h));
   }
-  const unregistered = findings.filter((f) => !matched.has(f))
+  const unregistered = findings.filter((f) => !matched.has(f));
   if (unregistered.length) {
-    failed = true
-    console.log(`   ✗ ${label}未登记 ${unregistered.length} 条（**新的**竞争，必须有人决定是修还是登记）：`)
+    failed = true;
+    console.log(
+      `   ✗ ${label}未登记 ${unregistered.length} 条（**新的**竞争，必须有人决定是修还是登记）：`,
+    );
     for (const f of unregistered) {
       console.log(
         `      - ${f.subject}${f.context ? ` ${f.context}` : ''}：${f.short.prop}（简写）vs ${f.long.prop}（长写）` +
           ` → 得主 ${f.winner}`,
-      )
+      );
     }
   }
   if (!stale && !unregistered.length) {
-    console.log(`   ✓ ${label}${rules.length} 条注册全部命中，今天的 ${findings.length} 条发现全部已登记（双向自检通过）`)
+    console.log(
+      `   ✓ ${label}${rules.length} 条注册全部命中，今天的 ${findings.length} 条发现全部已登记（双向自检通过）`,
+    );
   }
-  return matched.size
+  return matched.size;
 }
 
 /** 跨选择器的发现按（类名对 + 交叠 + 两侧属性 + 得主）去重，只保留出现位置清单 */
 function dedupeShorthandFindings(findings) {
-  const byKey = new Map()
+  const byKey = new Map();
   for (const f of findings) {
-    const kind = f.classes ? 'cross-class' : 'same-selector'
-    const subject = f.classes ? f.classes.join(' × ') : f.sel
-    const key = `${kind}|${subject}|${f.context || ''}|${f.longhand}|${f.shorthand.prop}|${f.long.prop}|${f.winner}`
+    const kind = f.classes ? 'cross-class' : 'same-selector';
+    const subject = f.classes ? f.classes.join(' × ') : f.sel;
+    const key = `${kind}|${subject}|${f.context || ''}|${f.longhand}|${f.shorthand.prop}|${f.long.prop}|${f.winner}`;
     if (!byKey.has(key)) {
       byKey.set(key, {
         kind,
@@ -862,11 +938,11 @@ function dedupeShorthandFindings(findings) {
         long: f.long,
         winner: f.winner,
         wheres: [],
-      })
+      });
     }
-    if (f.where) byKey.get(key).wheres.push(f.where)
+    if (f.where) byKey.get(key).wheres.push(f.where);
   }
-  return [...byKey.values()]
+  return [...byKey.values()];
 }
 
 /**
@@ -874,87 +950,99 @@ function dedupeShorthandFindings(findings) {
  * 而"注册表写反了顺序就永远绿灯"正是那种最难发现的空检查。
  */
 const pairIs = (f, a, b) =>
-  Array.isArray(f.classes) && [...f.classes].sort().join('|') === [a, b].sort().join('|')
+  Array.isArray(f.classes) && [...f.classes].sort().join('|') === [a, b].sort().join('|');
 
 // ── 3d-1. 同选择器 ──
-console.log('\n简写 vs 长写（同选择器 + 同上下文，顺序即行为）：')
-const sameSelectorClashes = findShorthandClashes(cascadeDecls)
+console.log('\n简写 vs 长写（同选择器 + 同上下文，顺序即行为）：');
+const sameSelectorClashes = findShorthandClashes(cascadeDecls);
 if (sameSelectorClashes.candidates === 0) {
-  failed = true
-  console.log('   ✗ 候选对 0 条 —— 这项检查**没在扫描任何东西**（今天的产物里就有二十几对），不能当成"没有竞争"。')
+  failed = true;
+  console.log(
+    '   ✗ 候选对 0 条 —— 这项检查**没在扫描任何东西**（今天的产物里就有二十几对），不能当成"没有竞争"。',
+  );
 } else {
-  const deduped = dedupeShorthandFindings(sameSelectorClashes.findings)
+  const deduped = dedupeShorthandFindings(sameSelectorClashes.findings);
   console.log(
     `   · 候选 ${sameSelectorClashes.candidates} 对（同选择器同上下文里"简写与长写落在同一批长写属性上"）；` +
       `去重后 ${deduped.length} 条`,
-  )
+  );
   for (const f of deduped) {
     console.log(
       `   ${SHORTHAND_CLASH_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.subject} ${f.context || '(顶层)'}` +
         ` :: ${f.overlap}`,
-    )
+    );
     console.log(
       `       简写 ${f.short.prop}: ${f.short.val}（${f.short.file} @${f.short.order}）` +
         `  vs  长写 ${f.long.prop}: ${f.long.val}（${f.long.file} @${f.long.order}）  ⇒ 得主 ${f.winner}`,
-    )
+    );
   }
-  checkClashRegistry('同选择器注册表：', deduped, SHORTHAND_CLASH_RULES)
+  checkClashRegistry('同选择器注册表：', deduped, SHORTHAND_CLASH_RULES);
 }
 
 // ── 3d-2. 跨选择器（证据来自 TSX 的 className）──
-console.log('\n简写 vs 长写（跨选择器：TSX 证明两个类名并列在同一个元素上）：')
-;(function crossClassCheck() {
-  const srcTsx = []
-  ;(function walk(dir) {
+console.log('\n简写 vs 长写（跨选择器：TSX 证明两个类名并列在同一个元素上）：');
+(function crossClassCheck() {
+  const srcTsx = [];
+  (function walk(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name)
-      if (e.isDirectory()) walk(p)
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
       else if (e.name.endsWith('.tsx')) {
-        srcTsx.push({ file: path.relative(process.cwd(), p).replace(/\\/g, '/'), text: fs.readFileSync(p, 'utf8') })
+        srcTsx.push({
+          file: path.relative(process.cwd(), p).replace(/\\/g, '/'),
+          text: fs.readFileSync(p, 'utf8'),
+        });
       }
     }
-  })(path.join(process.cwd(), 'src'))
-  const coGroups = coAppliedClassGroups(srcTsx)
+  })(path.join(process.cwd(), 'src'));
+  const coGroups = coAppliedClassGroups(srcTsx);
   if (coGroups.length === 0) {
-    failed = true
-    console.log('   ✗ TSX 里一个"并列 ≥2 个类名"的 className 都没抽到 —— 抽取器失明，这项检查等于不存在。')
-    return
+    failed = true;
+    console.log(
+      '   ✗ TSX 里一个"并列 ≥2 个类名"的 className 都没抽到 —— 抽取器失明，这项检查等于不存在。',
+    );
+    return;
   }
   const singleClassKeys = new Set(
-    cascadeDecls.filter((d) => d.context === '' && isSingleClassSelector(d.sel)).map((d) => d.sel.replace(/^\./, '')),
-  )
+    cascadeDecls
+      .filter((d) => d.context === '' && isSingleClassSelector(d.sel))
+      .map((d) => d.sel.replace(/^\./, '')),
+  );
   if (singleClassKeys.size === 0) {
-    failed = true
-    console.log('   ✗ 产物里一个"单类规则"都没有 —— 类名表是空的，这项检查等于不存在。')
-    return
+    failed = true;
+    console.log('   ✗ 产物里一个"单类规则"都没有 —— 类名表是空的，这项检查等于不存在。');
+    return;
   }
   const lookup = (ref) => {
-    const key = ref.kind === 'module' ? `_${ref.name}` : ref.name
-    return singleClassKeys.has(key) ? key : null
-  }
-  const cross = findCrossClassShorthandClashes(cascadeDecls, coGroups, lookup)
-  const deduped = dedupeShorthandFindings(cross.findings)
+    const key = ref.kind === 'module' ? `_${ref.name}` : ref.name;
+    return singleClassKeys.has(key) ? key : null;
+  };
+  const cross = findCrossClassShorthandClashes(cascadeDecls, coGroups, lookup);
+  const deduped = dedupeShorthandFindings(cross.findings);
   console.log(
     `   · TSX 里并列 ≥2 个类名的 className ${coGroups.length} 处；` +
       `两侧都是"单类规则"且落在同一批长写属性上的候选 ${cross.candidates} 对；去重后 ${deduped.length} 条`,
-  )
+  );
   for (const f of deduped) {
-    console.log(`   ${CROSS_CLASS_SHORTHAND_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.subject} :: ${f.overlap}`)
+    console.log(
+      `   ${CROSS_CLASS_SHORTHAND_RULES.some((r) => r.match(f)) ? '·' : '✗'} ${f.subject} :: ${f.overlap}`,
+    );
     console.log(
       `       简写 ${f.short.prop}: ${f.short.val}（${f.short.file} @${f.short.order}）` +
         `  vs  长写 ${f.long.prop}: ${f.long.val}（${f.long.file} @${f.long.order}）  ⇒ 得主 ${f.winner}`,
-    )
-    if (f.wheres.length) console.log(`       出现位置：${[...new Set(f.wheres)].slice(0, 4).join(' / ')}`)
+    );
+    if (f.wheres.length)
+      console.log(`       出现位置：${[...new Set(f.wheres)].slice(0, 4).join(' / ')}`);
   }
   if (deduped.length === 0) {
-    failed = true
+    failed = true;
     console.log(
       '   ✗ 跨选择器的候选 0 条 —— 今天产物里至少有 `card × _qaAiCard`（雷区 12 的实例）等十来对，' +
         '为 0 说明"TSX 抽取 → 产物类名解析"这条链断了，不能当成"没有竞争"。',
-    )
+    );
   }
-  checkClashRegistry('跨选择器注册表：', deduped, CROSS_CLASS_SHORTHAND_RULES)
-})()
+  checkClashRegistry('跨选择器注册表：', deduped, CROSS_CLASS_SHORTHAND_RULES);
+})();
 
 // ── 4. 迁移切片是否真的进产物 ──
 // 按批次列：类名（哈希后仍保留原名）与动画名。任何一个 0 次命中都说明
@@ -1157,12 +1245,12 @@ const SLICE_MARKERS = [
   'adhdBlock',
   'adhdCurrentBlock',
   'adhdLineMarker',
-]
-console.log('\n迁移切片类名/动画在产物中的出现次数：')
+];
+console.log('\n迁移切片类名/动画在产物中的出现次数：');
 for (const marker of SLICE_MARKERS) {
-  const n = (all.match(new RegExp(marker, 'g')) || []).length
-  if (n === 0) failed = true
-  console.log(`   ${n === 0 ? '✗' : '✓'} ${marker}: ${n}`)
+  const n = (all.match(new RegExp(marker, 'g')) || []).length;
+  if (n === 0) failed = true;
+  console.log(`   ${n === 0 ? '✗' : '✓'} ${marker}: ${n}`);
 }
 
 // ── 5. 退休的全局类名不得再出现在产物 CSS 里 ──
@@ -1366,23 +1454,23 @@ const RETIRED = [
   'adhd-block',
   'adhd-current-block',
   'adhd-line-marker',
-]
-console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：')
-let retiredHits = 0
+];
+console.log('\n已退休的全局类名（在产物 CSS 里应当彻底消失）：');
+let retiredHits = 0;
 for (const r of RETIRED) {
   // 用边界匹配，避免把 `.quiz-option-editor` 之类误判
-  const hits = [...all.matchAll(new RegExp(`\\.${r.replace(/-/g, '\\-')}(?![\\w-])`, 'g'))].length
+  const hits = [...all.matchAll(new RegExp(`\\.${r.replace(/-/g, '\\-')}(?![\\w-])`, 'g'))].length;
   if (hits > 0) {
-    retiredHits++
-    failed = true
-    console.log(`   ✗ .${r}: ${hits}`)
+    retiredHits++;
+    failed = true;
+    console.log(`   ✗ .${r}: ${hits}`);
   }
 }
 console.log(
   retiredHits === 0
     ? `   ✓ ${RETIRED.length} 个退休类名在产物中全部为 0 次`
     : `   ✗ ${retiredHits} 个退休类名仍然出现在产物里`,
-)
+);
 
 // ════════════════════════════════════════════════════════════════════
 // ── 6. 收尾轮：死代码清理的**常设护栏** ──
@@ -1415,9 +1503,19 @@ const CLEANUP_RETIREMENTS = [
     sheet: 'src/styles/layout.css',
     why: '旧顶部导航栏：TSX/TS 里 0 处引用、运行时拼类名 0 处；迁移前 `.navbar{display:none}` 就已经把它藏掉了',
   },
-  { kind: 'class', name: 'navbar-logo', sheet: 'src/styles/layout.css', why: '同上（`.navbar-logo:hover` 与它共用类名）' },
+  {
+    kind: 'class',
+    name: 'navbar-logo',
+    sheet: 'src/styles/layout.css',
+    why: '同上（`.navbar-logo:hover` 与它共用类名）',
+  },
   { kind: 'class', name: 'navbar-links', sheet: 'src/styles/layout.css', why: '同上' },
-  { kind: 'class', name: 'navbar-logout', sheet: 'src/styles/layout.css', why: '同上（`.navbar-logout:hover` 与它共用类名）' },
+  {
+    kind: 'class',
+    name: 'navbar-logout',
+    sheet: 'src/styles/layout.css',
+    why: '同上（`.navbar-logout:hover` 与它共用类名）',
+  },
   {
     kind: 'token',
     name: '--navbar-height',
@@ -1431,8 +1529,18 @@ const CLEANUP_RETIREMENTS = [
     sheet: 'src/styles/refinements.css',
     why: '零引用预留类（`LinkManagerModal.tsx` 用的是内联 style，一个类名都没挂）',
   },
-  { kind: 'class', name: 'material-list-item', sheet: 'src/styles/refinements.css', why: '同上（`:hover` 变体共用类名）' },
-  { kind: 'class', name: 'material-list-item-selected', sheet: 'src/styles/refinements.css', why: '同上' },
+  {
+    kind: 'class',
+    name: 'material-list-item',
+    sheet: 'src/styles/refinements.css',
+    why: '同上（`:hover` 变体共用类名）',
+  },
+  {
+    kind: 'class',
+    name: 'material-list-item-selected',
+    sheet: 'src/styles/refinements.css',
+    why: '同上',
+  },
   { kind: 'class', name: 'type-badge', sheet: 'src/styles/refinements.css', why: '同上' },
   { kind: 'class', name: 'type-badge-material', sheet: 'src/styles/refinements.css', why: '同上' },
   // ── 没有用户的 @keyframes（收尾轮 · 第 3 组）──
@@ -1461,7 +1569,12 @@ const CLEANUP_RETIREMENTS = [
     why: '从来没有过用户（全项目 grep 只命中定义本身）',
   },
   { kind: 'keyframes', name: 'pulse', sheet: 'src/styles/base.css', why: '同上' },
-  { kind: 'keyframes', name: 'float', sheet: 'src/styles/base.css', why: '同上（`ProjectsErrorBanner.tsx` 里的 `float` 是 CSS 属性，不是动画）' },
+  {
+    kind: 'keyframes',
+    name: 'float',
+    sheet: 'src/styles/base.css',
+    why: '同上（`ProjectsErrorBanner.tsx` 里的 `float` 是 CSS 属性，不是动画）',
+  },
   { kind: 'keyframes', name: 'gradientShift', sheet: 'src/styles/base.css', why: '同上' },
   {
     kind: 'keyframes',
@@ -1488,68 +1601,75 @@ const CLEANUP_RETIREMENTS = [
     sheet: 'src/components/CleaningPanel.module.css',
     why: '只被 `.cleaningProgressBar` 引用；那条规则删了它就没有用户',
   },
-]
+];
 
-console.log('\n收尾轮死代码清理（三个方向逐条自检：迁移前有 → 源码里没了 → 产物里没了）：')
+console.log('\n收尾轮死代码清理（三个方向逐条自检：迁移前有 → 源码里没了 → 产物里没了）：');
 if (CLEANUP_RETIREMENTS.length === 0) {
-  failed = true
-  console.log('   ✗ 登记表为空 —— 这套检查等于不存在')
+  failed = true;
+  console.log('   ✗ 登记表为空 —— 这套检查等于不存在');
 }
-const cleanupSourceCache = new Map()
+const cleanupSourceCache = new Map();
 /** 从 HEAD 往回找"这个文件里还有这个名字"的修订（按内容定位，见文件头 a 条） */
 function findCleanupRev(sheet, name, kind) {
-  const cacheKey = `${sheet}::${kind}::${name}`
-  if (cleanupSourceCache.has(cacheKey)) return cleanupSourceCache.get(cacheKey)
+  const cacheKey = `${sheet}::${kind}::${name}`;
+  if (cleanupSourceCache.has(cacheKey)) return cleanupSourceCache.get(cacheKey);
   const re =
-    kind === 'keyframes' ? new RegExp(`@keyframes\\s+${name.replace(/[-]/g, '\\-')}\\s*\\{`) : new RegExp(`(\\.|--)?${name.replace(/[-]/g, '\\-')}(?![\\w-])`)
-  const rev = findRecentRev((candidate) => re.test(readFromGit(path.join(process.cwd(), sheet), candidate)))
-  const out = rev ? { rev, text: readFromGit(path.join(process.cwd(), sheet), rev) } : null
-  cleanupSourceCache.set(cacheKey, out)
-  return out
+    kind === 'keyframes'
+      ? new RegExp(`@keyframes\\s+${name.replace(/[-]/g, '\\-')}\\s*\\{`)
+      : new RegExp(`(\\.|--)?${name.replace(/[-]/g, '\\-')}(?![\\w-])`);
+  const rev = findRecentRev((candidate) =>
+    re.test(readFromGit(path.join(process.cwd(), sheet), candidate)),
+  );
+  const out = rev ? { rev, text: readFromGit(path.join(process.cwd(), sheet), rev) } : null;
+  cleanupSourceCache.set(cacheKey, out);
+  return out;
 }
 {
-  let okCount = 0
+  let okCount = 0;
   for (const item of CLEANUP_RETIREMENTS) {
-    const srcAbs = path.join(process.cwd(), item.sheet)
-    const problems = []
+    const problems = [];
     // a. 迁移前确实有它
-    const gitRev = findCleanupRev(item.sheet, item.name, item.kind)
+    const gitRev = findCleanupRev(item.sheet, item.name, item.kind);
     if (!gitRev) {
-      problems.push('从 HEAD 往回 40 个提交里找不到"那个文件里还有它"的修订 ⇒ 名字或来源样式表写错了')
+      problems.push(
+        '从 HEAD 往回 40 个提交里找不到"那个文件里还有它"的修订 ⇒ 名字或来源样式表写错了',
+      );
     }
     // b. 现在源码里确实没有它
     //    ⚠️ 比较前**必须剥注释**：这几条删除都在原处留了墓碑注释
     //    （写明"删了什么、凭什么"），注释里出现类名不是"还有人用它"。
     //    不剥的话这套自检会对自己的文档报红 —— 而"给删除留注释"正是本项目
     //    的既有做法（`auth.css` / `responsive.css` / `refinements.css` 都是）。
-    const srcHits = []
+    const srcHits = [];
     for (const abs of srcCssFiles) {
-      const text = stripComments(fs.readFileSync(abs, 'utf8'))
+      const text = stripComments(fs.readFileSync(abs, 'utf8'));
       const re =
         item.kind === 'keyframes'
           ? new RegExp(`@keyframes\\s+${item.name.replace(/[-]/g, '\\-')}\\s*\\{`, 'g')
-          : new RegExp(`(\\.|--)?${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
-      if (re.test(text)) srcHits.push(path.relative(process.cwd(), abs).replace(/\\/g, '/'))
+          : new RegExp(`(\\.|--)?${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g');
+      if (re.test(text)) srcHits.push(path.relative(process.cwd(), abs).replace(/\\/g, '/'));
     }
-    if (srcHits.length) problems.push(`源码里还有：${[...new Set(srcHits)].join(', ')}`)
+    if (srcHits.length) problems.push(`源码里还有：${[...new Set(srcHits)].join(', ')}`);
     // c. 产物里确实没有它
     const distRe =
       item.kind === 'keyframes'
         ? new RegExp(`@keyframes\\s+${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
         : item.kind === 'token'
           ? new RegExp(`--${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
-          : new RegExp(`\\.${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g')
-    const distHits = (all.match(distRe) || []).length
-    if (distHits) problems.push(`产物里还有 ${distHits} 次`)
+          : new RegExp(`\\.${item.name.replace(/[-]/g, '\\-')}(?![\\w-])`, 'g');
+    const distHits = (all.match(distRe) || []).length;
+    if (distHits) problems.push(`产物里还有 ${distHits} 次`);
     if (problems.length) {
-      failed = true
-      console.log(`   ✗ ${item.kind} \`${item.name}\`（${item.sheet}）：${problems.join('；')}`)
+      failed = true;
+      console.log(`   ✗ ${item.kind} \`${item.name}\`（${item.sheet}）：${problems.join('；')}`);
     } else {
-      okCount += 1
-      console.log(`   ✓ ${item.kind} \`${item.name}\`：迁移前在 ${item.sheet}（${gitRev.rev}）有，源码与产物都没有了 —— ${item.why}`)
+      okCount += 1;
+      console.log(
+        `   ✓ ${item.kind} \`${item.name}\`：迁移前在 ${item.sheet}（${gitRev.rev}）有，源码与产物都没有了 —— ${item.why}`,
+      );
     }
   }
-  console.log(`   ${okCount}/${CLEANUP_RETIREMENTS.length} 条通过三个方向的自检`)
+  console.log(`   ${okCount}/${CLEANUP_RETIREMENTS.length} 条通过三个方向的自检`);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1570,58 +1690,64 @@ function findCleanupRev(sheet, name, kind) {
 const INLINE_ONLY_KEYFRAMES = [
   {
     name: 'shake',
-    where: 'components/ErrorDisplay.tsx:12 的 style={{ animation: \'shake 0.4s ease, fadeIn …\' }}',
+    where: "components/ErrorDisplay.tsx:12 的 style={{ animation: 'shake 0.4s ease, fadeIn …' }}",
     why: '错误卡片的抖动只写在行内样式里；行内样式不过 CSS Modules，所以产物 CSS 里看不到引用者',
   },
-]
-console.log('\n产物里"定义了但样式表没人引用"的 @keyframes：')
+];
+console.log('\n产物里"定义了但样式表没人引用"的 @keyframes：');
 {
-  const definedAll = new Map() // name → [file]
-  const usedAll = new Map() // name → [file]
+  const definedAll = new Map(); // name → [file]
+  const usedAll = new Map(); // name → [file]
   for (const s of sheets) {
-    const css = clean(s.css)
+    const css = clean(s.css);
     for (const m of css.matchAll(/@keyframes\s+([\w-]+)/g)) {
-      if (!definedAll.has(m[1])) definedAll.set(m[1], [])
-      definedAll.get(m[1]).push(s.name)
+      if (!definedAll.has(m[1])) definedAll.set(m[1], []);
+      definedAll.get(m[1]).push(s.name);
     }
     for (const m of css.matchAll(/(?:^|[;{])\s*animation(?:-name)?\s*:\s*([^;{}]+)/g)) {
       for (const name of animationNamesFrom(m[1])) {
-        if (!usedAll.has(name)) usedAll.set(name, [])
-        usedAll.get(name).push(s.name)
+        if (!usedAll.has(name)) usedAll.set(name, []);
+        usedAll.get(name).push(s.name);
       }
     }
   }
   if (definedAll.size === 0) {
-    failed = true
-    console.log('   ✗ 产物里一个 @keyframes 都没有 —— 解析坏了，不能据此说"没有死动画"')
+    failed = true;
+    console.log('   ✗ 产物里一个 @keyframes 都没有 —— 解析坏了，不能据此说"没有死动画"');
   }
-  const inlineOnly = new Map(INLINE_ONLY_KEYFRAMES.map((k) => [k.name, k]))
-  const dead = [...definedAll.keys()].filter((n) => !usedAll.has(n) && !inlineOnly.has(n))
+  const inlineOnly = new Map(INLINE_ONLY_KEYFRAMES.map((k) => [k.name, k]));
+  const dead = [...definedAll.keys()].filter((n) => !usedAll.has(n) && !inlineOnly.has(n));
   for (const n of dead) {
-    failed = true
-    console.log(`   ✗ ${n}（定义在 ${definedAll.get(n).join(', ')}）：没有任何 animation 引用它 —— 死动画`)
+    failed = true;
+    console.log(
+      `   ✗ ${n}（定义在 ${definedAll.get(n).join(', ')}）：没有任何 animation 引用它 —— 死动画`,
+    );
   }
   for (const k of INLINE_ONLY_KEYFRAMES) {
-    const definedIn = definedAll.get(k.name)
+    const definedIn = definedAll.get(k.name);
     if (!definedIn) {
-      failed = true
-      console.log(`   ✗ 登记的"只有行内用户"的动画 \`${k.name}\` 在产物里没有定义 —— 登记项过期或写错了`)
-      continue
+      failed = true;
+      console.log(
+        `   ✗ 登记的"只有行内用户"的动画 \`${k.name}\` 在产物里没有定义 —— 登记项过期或写错了`,
+      );
+      continue;
     }
     if (usedAll.has(k.name)) {
-      failed = true
+      failed = true;
       console.log(
         `   ✗ 登记的"只有行内用户"的动画 \`${k.name}\` 现在**有样式表引用**了（${usedAll.get(k.name).join(', ')}）` +
           ` —— 登记项过期，请把它从 INLINE_ONLY_KEYFRAMES 里删掉`,
-      )
-      continue
+      );
+      continue;
     }
-    console.log(`   ✓ ${k.name}：产物里有定义（${definedIn.join(', ')}）、样式表里 0 引用，属登记的"仅行内使用"—— ${k.why}`)
+    console.log(
+      `   ✓ ${k.name}：产物里有定义（${definedIn.join(', ')}）、样式表里 0 引用，属登记的"仅行内使用"—— ${k.why}`,
+    );
   }
   console.log(
     `   ${dead.length === 0 ? '✓' : '✗'} 产物内 ${definedAll.size} 个 @keyframes：` +
       `${usedAll.size} 个有样式表引用 + ${INLINE_ONLY_KEYFRAMES.length} 个登记的"仅行内使用"，死动画 ${dead.length} 个`,
-  )
+  );
 }
 
-process.exit(failed ? 1 : 0)
+process.exit(failed ? 1 : 0);

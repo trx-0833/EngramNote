@@ -30,14 +30,14 @@
  * 用法：node scripts/gen-migration-evidence.mjs
  *   前置：已跑过 npm run build（差集与产物校验都取自 dist 产物）
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { execFileSync } from 'node:child_process'
-import { parseRules, splitSelectors, findRecentRev, readFromGit } from './lib/css-parse.mjs'
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { parseRules, splitSelectors, findRecentRev, readFromGit } from './lib/css-parse.mjs';
 
-const root = process.cwd()
-const outDir = path.join(root, 'docs/migration-evidence')
-fs.mkdirSync(outDir, { recursive: true })
+const root = process.cwd();
+const outDir = path.join(root, 'docs/migration-evidence');
+fs.mkdirSync(outDir, { recursive: true });
 
 function run(script, args = []) {
   try {
@@ -48,31 +48,35 @@ function run(script, args = []) {
         encoding: 'utf8',
         maxBuffer: 32 * 1024 * 1024,
       }),
-    }
+    };
   } catch (e) {
     // 退出码非 0 也要把输出留下来：失败信息本身就是证据
-    return { code: e.status ?? 1, out: (e.stdout || '') + (e.stderr || '') }
+    return { code: e.status ?? 1, out: (e.stdout || '') + (e.stderr || '') };
   }
 }
 
-const files = []
+const files = [];
 
 function write(name, title, body) {
-  const text = `<!-- 由 scripts/gen-migration-evidence.mjs 生成，请勿手改 -->\n\n# ${title}\n\n${body}\n`
+  const text = `<!-- 由 scripts/gen-migration-evidence.mjs 生成，请勿手改 -->\n\n# ${title}\n\n${body}\n`;
   // 断言无 BOM：这是本项目踩过两次的坑，留一道自检
-  const buf = Buffer.from(text, 'utf8')
+  const buf = Buffer.from(text, 'utf8');
   if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    throw new Error(`${name} 写出来带了 BOM`)
+    throw new Error(`${name} 写出来带了 BOM`);
   }
-  fs.writeFileSync(path.join(outDir, name), text, 'utf8')
-  files.push({ name, bytes: buf.length })
+  fs.writeFileSync(path.join(outDir, name), text, 'utf8');
+  files.push({ name, bytes: buf.length });
 }
 
 /** 跑一次清单并把结果写成一个证据文件（修订按内容自动定位，不写死） */
 function inventoryEvidence({ name, title, sheet, classes }) {
-  const r = run('css-rule-inventory.mjs', [sheet, '--class', classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${sheet}）：${r.out}`)
-  write(name, title, `取自 \`git show <rev>:frontend/${sheet}\`，修订按内容自动定位。\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [sheet, '--class', classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${sheet}）：${r.out}`);
+  write(
+    name,
+    title,
+    `取自 \`git show <rev>:frontend/${sheet}\`，修订按内容自动定位。\n\n\`\`\`\n${r.out.trim()}\n\`\`\``,
+  );
 }
 
 // ── 1. 试点（quiz 切片）迁移前清单 ──
@@ -81,39 +85,64 @@ inventoryEvidence({
   title: '5.6 迁移前：learning.css 中属于答题卡片切片的规则',
   sheet: 'src/styles/learning.css',
   classes: ['quiz-option', 'quiz-option-selected', 'feedback-correct', 'feedback-incorrect'],
-})
+});
 inventoryEvidence({
   name: '5.6-01-before-responsive-css.md',
   title: '5.6 迁移前：responsive.css 中 .self-rating-btn 的规则',
   sheet: 'src/styles/responsive.css',
   classes: ['self-rating-btn'],
-})
+});
 
 // ── 2. 第一批（auth → cleaning → diff → dashboard）迁移前清单：尚未提交，故从 HEAD 取 ──
 const batch1Sheets = [
   {
     sheet: 'src/styles/auth.css',
     classes: [
-      'auth-bg', 'auth-card', 'auth-title', 'auth-input-group',
-      'auth-input-icon', 'auth-submit', 'auth-footer',
+      'auth-bg',
+      'auth-card',
+      'auth-title',
+      'auth-input-group',
+      'auth-input-icon',
+      'auth-submit',
+      'auth-footer',
     ],
   },
   {
     sheet: 'src/styles/cleaning.css',
     classes: [
-      'cleaning-panel', 'cleaning-stats', 'cleaning-progress', 'cleaning-progress-bar',
-      'duplicate-blocks', 'duplicate-block', 'duplicate-block-header', 'duplicate-block-info',
-      'duplicate-block-index', 'duplicate-block-similarity', 'duplicate-block-actions',
-      'duplicate-block-compare', 'duplicate-block-text-label', 'duplicate-block-text-content',
+      'cleaning-panel',
+      'cleaning-stats',
+      'cleaning-progress',
+      'cleaning-progress-bar',
+      'duplicate-blocks',
+      'duplicate-block',
+      'duplicate-block-header',
+      'duplicate-block-info',
+      'duplicate-block-index',
+      'duplicate-block-similarity',
+      'duplicate-block-actions',
+      'duplicate-block-compare',
+      'duplicate-block-text-label',
+      'duplicate-block-text-content',
       'duplicate-block-text-empty',
     ],
   },
   {
     sheet: 'src/styles/diff.css',
     classes: [
-      'diff-container', 'diff-summary', 'diff-header', 'diff-col-label', 'diff-body',
-      'diff-block', 'diff-line', 'diff-line-prefix', 'diff-line-number', 'diff-line-content',
-      'diff-line-removed', 'diff-line-added', 'diff-line-unchanged',
+      'diff-container',
+      'diff-summary',
+      'diff-header',
+      'diff-col-label',
+      'diff-body',
+      'diff-block',
+      'diff-line',
+      'diff-line-prefix',
+      'diff-line-number',
+      'diff-line-content',
+      'diff-line-removed',
+      'diff-line-added',
+      'diff-line-unchanged',
     ],
   },
   {
@@ -124,15 +153,15 @@ const batch1Sheets = [
     sheet: 'src/styles/responsive.css',
     classes: ['dashboard-two-col', 'dashboard-review-card'],
   },
-]
-const parts = []
+];
+const parts = [];
 for (const s of batch1Sheets) {
   // 不给 --rev：清单脚本会**按内容**自动定位"迁移前"（从 HEAD 往回找第一个
   // 还含有这些类名的修订）。写死 HEAD~N 会被并行的无关提交打乱 —— 第二批
   // 期间另一个 agent 提交了一个后端改动，相对计数就集体错位了。
-  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+  parts.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
 }
 write(
   '5.6-04-before-batch1.md',
@@ -142,25 +171,35 @@ write(
     '修订由 `css-rule-inventory.mjs` **按内容自动定位**（第一个还含有这些类名的\n' +
     '提交），所以清单头部的 `@HEAD~N` 会随提交数变化，规则内容不会。\n\n' +
     parts.join('\n\n'),
-)
+);
 
 // ── 3. 第二批（markdown-extras）迁移前清单 ──
 const batch2Sheets = [
   {
     sheet: 'src/styles/markdown-extras.css',
     classes: [
-      'ask-ai-panel', 'ask-ai-header', 'ask-ai-title', 'ask-ai-close', 'ask-ai-body',
-      'ask-ai-input', 'ask-ai-selected-hint', 'ask-ai-actions', 'ask-ai-question',
-      'ask-ai-thinking', 'ask-ai-answer', 'ask-ai-error', 'ask-ai-provider',
+      'ask-ai-panel',
+      'ask-ai-header',
+      'ask-ai-title',
+      'ask-ai-close',
+      'ask-ai-body',
+      'ask-ai-input',
+      'ask-ai-selected-hint',
+      'ask-ai-actions',
+      'ask-ai-question',
+      'ask-ai-thinking',
+      'ask-ai-answer',
+      'ask-ai-error',
+      'ask-ai-provider',
       'selection-menu',
     ],
   },
-]
-const parts2 = []
+];
+const parts2 = [];
 for (const s of batch2Sheets) {
-  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts2.push(`## ${s.sheet} @HEAD\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+  parts2.push(`## ${s.sheet} @HEAD\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
 }
 write(
   '5.6-05-before-batch2.md',
@@ -171,7 +210,7 @@ write(
     '不在清单里：它们作用在 `marked` / KaTeX 生成的 HTML 字符串上，没有组件可挂类名。\n' +
     '取自 `git show HEAD:frontend/...`（第二批尚未提交）。\n\n' +
     parts2.join('\n\n'),
-)
+);
 
 // ── 4. 第三批（learning 按归属拆分 + dashboard 余下）迁移前清单 ──
 const batch3Sheets = [
@@ -181,9 +220,12 @@ const batch3Sheets = [
     // `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner`）不在清单里。
     sheet: 'src/styles/learning.css',
     classes: [
-      'qa-user-bubble', 'qa-ai-card',
-      'upload-zone', 'upload-zone-active',
-      'search-input-wrapper', 'search-input-icon',
+      'qa-user-bubble',
+      'qa-ai-card',
+      'upload-zone',
+      'upload-zone-active',
+      'search-input-wrapper',
+      'search-input-icon',
     ],
   },
   {
@@ -197,16 +239,21 @@ const batch3Sheets = [
     // dashboard.css 余下的 9 条：先抽 `components/StatCard.tsx`，样式随组件进模块
     sheet: 'src/styles/dashboard.css',
     classes: [
-      'stat-card', 'stat-card-blue', 'stat-card-green', 'stat-card-gold',
-      'stat-card-purple', 'stat-number', 'stat-label',
+      'stat-card',
+      'stat-card-blue',
+      'stat-card-green',
+      'stat-card-gold',
+      'stat-card-purple',
+      'stat-number',
+      'stat-label',
     ],
   },
-]
-const parts3 = []
+];
+const parts3 = [];
 for (const s of batch3Sheets) {
-  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts3.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+  parts3.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
 }
 write(
   '5.6-06-before-batch3.md',
@@ -218,7 +265,7 @@ write(
     '`.filter-pill*` / `.segment-*` / `.collapse-arrow*` / `.state-*` / `.spinner`\n' +
     '**留全局**，不在清单里 —— 判据（grep 出的文件数）写在两个样式表的文件头。\n\n' +
     parts3.join('\n\n'),
-)
+);
 
 // ── 6. 第四批（序 5）：assessment.css 按归属拆分 + 冲突裁决 ──
 const batch4Sheets = [
@@ -229,13 +276,25 @@ const batch4Sheets = [
     // `.note-select-card*` 不在清单里（学习评估页 + 项目页共用，规范 §4 第 2 条）。
     sheet: 'src/styles/assessment.css',
     classes: [
-      'score-bar', 'score-bar-header', 'score-bar-label', 'score-bar-value',
-      'score-bar-track', 'score-bar-fill', 'score-bar-fill-high',
-      'score-bar-fill-mid', 'score-bar-fill-low',
-      'quiz-question-card', 'quiz-question-card-active', 'quiz-question-number',
+      'score-bar',
+      'score-bar-header',
+      'score-bar-label',
+      'score-bar-value',
+      'score-bar-track',
+      'score-bar-fill',
+      'score-bar-fill-high',
+      'score-bar-fill-mid',
+      'score-bar-fill-low',
+      'quiz-question-card',
+      'quiz-question-card-active',
+      'quiz-question-number',
       'quiz-question-text',
-      'score-summary-card', 'score-summary-number', 'score-summary-label', 'score-value',
-      'knowledge-points-grid', 'knowledge-points-section',
+      'score-summary-card',
+      'score-summary-number',
+      'score-summary-label',
+      'score-value',
+      'knowledge-points-grid',
+      'knowledge-points-section',
     ],
   },
   {
@@ -243,9 +302,14 @@ const batch4Sheets = [
     // （权重相同、本文件在 `main.tsx` 里更靠后），逐字进模块。
     sheet: 'src/styles/refinements.css',
     classes: [
-      'quiz-question-card', 'quiz-question-card-active', 'quiz-question-number',
+      'quiz-question-card',
+      'quiz-question-card-active',
+      'quiz-question-number',
       'quiz-question-text',
-      'score-summary-card', 'score-summary-number', 'score-summary-label', 'score-value',
+      'score-summary-card',
+      'score-summary-number',
+      'score-summary-label',
+      'score-value',
       'score-bar-value',
     ],
   },
@@ -255,12 +319,12 @@ const batch4Sheets = [
     sheet: 'src/styles/responsive.css',
     classes: ['knowledge-points-grid'],
   },
-]
-const parts4 = []
+];
+const parts4 = [];
 for (const s of batch4Sheets) {
-  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts4.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+  parts4.push(`## ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
 }
 write(
   '5.6-08-before-batch4.md',
@@ -274,7 +338,7 @@ write(
     '与 `.note-select-card*`（+ `ProjectNotesList.tsx`、`Projects.test.tsx`）不在清单里 ——\n' +
     '判据（grep 出的文件数）写在 `src/styles/assessment.css` 文件头。\n\n' +
     parts4.join('\n\n'),
-)
+);
 
 // 第四批的**冲突裁决表**：16 条（14 + 2）属性的实测胜者。
 // 这不是"迁移前清单"，而是"哪个值真的在浏览器里生效"的实测记录 ——
@@ -413,7 +477,7 @@ write(
     '中间值（274.7px / 130px，而正确值是 370px = 420 − 2×8 容器内边距 − 2×16 卡片内边距 − 2 边框）。',
     '那种"差异"全是测量竞态，与迁移无关 —— 这也是为什么要用 worktree 把两侧测法统一后再比。',
   ].join('\n'),
-)
+);
 
 // ── 5. 第三批的"停"：markdown.css 的 `.adhd-*` 留全局（留一份可核对的清单）──
 // 这不是"迁移前"清单，而是"核对后决定不动"的清单：把 5 条规则的原文留下来，
@@ -423,8 +487,8 @@ const adhd = run('css-rule-inventory.mjs', [
   '--class',
   'adhd-reader-active,adhd-block,adhd-current-block,adhd-line-marker',
   '--from-git',
-])
-if (adhd.code !== 0) throw new Error(`清单生成失败（markdown.css）：${adhd.out}`)
+]);
+if (adhd.code !== 0) throw new Error(`清单生成失败（markdown.css）：${adhd.out}`);
 write(
   '5.6-07-markdown-adhd-stayed-global.md',
   '5.6 第三批：markdown.css 的 `.adhd-*` 规则 —— 逐处核对写入点后**留全局**',
@@ -453,7 +517,7 @@ write(
     '⚠️ 硬塞进模块只能写成 `:global(.adhd-block)` 之类，那等于一个字符都没被\n' +
     '作用域化，却把"这些类名是全项目约定"藏进一个页面模块里（规范 §4 末尾的"半搬"）。\n\n' +
     `\`\`\`\n${adhd.out.trim()}\n\`\`\``,
-)
+);
 
 // ── 11. 序 6 收尾：第三批那个"停"被收掉了 —— `.adhd-*` 进 hook 模块 ──
 // 迁移**前**的清单仍然从 git 读（提交之后 `findRecentRev` 会按内容自动往回收一格）。
@@ -462,8 +526,8 @@ const adhdMoved = run('css-rule-inventory.mjs', [
   '--class',
   'adhd-reader-active,adhd-block,adhd-current-block,adhd-line-marker',
   '--from-git',
-])
-if (adhdMoved.code !== 0) throw new Error(`清单生成失败（markdown.css，序 6）：${adhdMoved.out}`)
+]);
+if (adhdMoved.code !== 0) throw new Error(`清单生成失败（markdown.css，序 6）：${adhdMoved.out}`);
 write(
   '5.6-14-adhd-moved-to-module.md',
   '5.6 序 6 收尾：markdown.css 的 5 条 `.adhd-*` 规则进 `src/hooks/useAdhdReader.module.css`',
@@ -473,12 +537,12 @@ write(
     '`src/hooks/useAdhdReader.ts`。逐处清单与改法：\n\n' +
     '| 改前（行号是改之前的） | 操作 | 改后 |\n' +
     '|---|---|---|\n' +
-    '| `:36` `classList.contains(\'adhd-line-marker\')` | 读（判断该元素是不是标记条） | `styles.adhdLineMarker` |\n' +
-    '| `:165` `marker.className = \'adhd-line-marker\'` | 整体赋值 | `styles.adhdLineMarker` |\n' +
-    '| `:216` / `:274` `classList.remove(\'adhd-current-block\')` | 移除当前块 | `styles.adhdCurrentBlock` |\n' +
-    '| `:217` `classList.add(\'adhd-current-block\')` | 换行时切换当前块 | `styles.adhdCurrentBlock` |\n' +
-    '| `:266` `classList.add(\'adhd-block\')` | 给每个 `marked` 顶层块加 | `styles.adhdBlock` |\n' +
-    '| `:269` / `:272` `classList.add/remove(\'adhd-reader-active\')` | 开关阅读模式 | `styles.adhdReaderActive` |\n\n' +
+    "| `:36` `classList.contains('adhd-line-marker')` | 读（判断该元素是不是标记条） | `styles.adhdLineMarker` |\n" +
+    "| `:165` `marker.className = 'adhd-line-marker'` | 整体赋值 | `styles.adhdLineMarker` |\n" +
+    "| `:216` / `:274` `classList.remove('adhd-current-block')` | 移除当前块 | `styles.adhdCurrentBlock` |\n" +
+    "| `:217` `classList.add('adhd-current-block')` | 换行时切换当前块 | `styles.adhdCurrentBlock` |\n" +
+    "| `:266` `classList.add('adhd-block')` | 给每个 `marked` 顶层块加 | `styles.adhdBlock` |\n" +
+    "| `:269` / `:272` `classList.add/remove('adhd-reader-active')` | 开关阅读模式 | `styles.adhdReaderActive` |\n\n" +
     '改后这 8 处的行号是 `:47` / `:176` / `:227` / `:228` / `:277` / `:280` / `:283` / `:285`；\n' +
     '`src/` 下这四个类名的**字面量命中 0 处**（`markdown.css` 里只剩墓碑注释，注释不算声明）。\n' +
     '`utils/markdown.ts` **再次核实 0 命中**（计划里那个"可能"两次都被排除）；\n' +
@@ -521,15 +585,33 @@ write(
     '   而本项目没有 `@types/node`）—— 这条与计划 §5 雷区 18 记的是同一批坑。\n\n' +
     '## 4. 迁移前的那 5 条规则原文\n\n' +
     `\`\`\`\n${adhdMoved.out.trim()}\n\`\`\``,
-)
+);
 
 // ── 7. 序 8 / 9 / 10 的迁移前清单（第五、六、七批） ──
 const batch789Sheets = [
   {
     title: '序 8：components.css 的页面级布局挂点（+ responsive.css 同批窄屏规则）',
     sheets: [
-      { sheet: 'src/styles/components.css', classes: ['note-detail-header', 'note-detail-actions', 'note-list-item', 'note-list-actions', 'edit-split'] },
-      { sheet: 'src/styles/responsive.css', classes: ['note-detail-header', 'note-detail-actions', 'note-list-item', 'note-list-actions', 'edit-split'] },
+      {
+        sheet: 'src/styles/components.css',
+        classes: [
+          'note-detail-header',
+          'note-detail-actions',
+          'note-list-item',
+          'note-list-actions',
+          'edit-split',
+        ],
+      },
+      {
+        sheet: 'src/styles/responsive.css',
+        classes: [
+          'note-detail-header',
+          'note-detail-actions',
+          'note-list-item',
+          'note-list-actions',
+          'edit-split',
+        ],
+      },
     ],
   },
   {
@@ -538,15 +620,45 @@ const batch789Sheets = [
       {
         sheet: 'src/styles/layout.css',
         classes: [
-          'sidebar', 'sidebar-collapsed', 'sidebar-mobile-open', 'sidebar-header', 'sidebar-logo',
-          'sidebar-collapse-btn', 'sidebar-mobile-close', 'sidebar-body', 'sidebar-open-lock',
-          'sidebar-section', 'sidebar-section-title', 'sidebar-item-row', 'sidebar-item',
-          'sidebar-item-active', 'sidebar-item-icon', 'sidebar-item-label', 'sidebar-item-action',
-          'sidebar-divider', 'sidebar-footer', 'sidebar-overlay',
-          'app-layout', 'app-layout-collapsed', 'sidebar-mobile-toggle',
+          'sidebar',
+          'sidebar-collapsed',
+          'sidebar-mobile-open',
+          'sidebar-header',
+          'sidebar-logo',
+          'sidebar-collapse-btn',
+          'sidebar-mobile-close',
+          'sidebar-body',
+          'sidebar-open-lock',
+          'sidebar-section',
+          'sidebar-section-title',
+          'sidebar-item-row',
+          'sidebar-item',
+          'sidebar-item-active',
+          'sidebar-item-icon',
+          'sidebar-item-label',
+          'sidebar-item-action',
+          'sidebar-divider',
+          'sidebar-footer',
+          'sidebar-overlay',
+          'app-layout',
+          'app-layout-collapsed',
+          'sidebar-mobile-toggle',
         ],
       },
-      { sheet: 'src/styles/responsive.css', classes: ['sidebar', 'sidebar-mobile-open', 'app-layout', 'sidebar-mobile-toggle', 'sidebar-item', 'sidebar-item-action', 'sidebar-section-title', 'sidebar-collapse-btn', 'sidebar-mobile-close'] },
+      {
+        sheet: 'src/styles/responsive.css',
+        classes: [
+          'sidebar',
+          'sidebar-mobile-open',
+          'app-layout',
+          'sidebar-mobile-toggle',
+          'sidebar-item',
+          'sidebar-item-action',
+          'sidebar-section-title',
+          'sidebar-collapse-btn',
+          'sidebar-mobile-close',
+        ],
+      },
     ],
   },
   {
@@ -555,34 +667,89 @@ const batch789Sheets = [
       {
         sheet: 'src/styles/graph.css',
         classes: [
-          'graph-page', 'graph-page-main', 'graph-sidebar', 'graph-canvas', 'graph-toolbar',
-          'graph-toolbar-left', 'graph-toolbar-right', 'graph-legend', 'graph-legend-item',
-          'graph-legend-item-active', 'graph-legend-dot', 'graph-btn', 'graph-btn-active',
-          'graph-badge', 'graph-create-hint', 'graph-panel', 'graph-panel-title',
-          'graph-suggestion-card', 'graph-relation-line', 'graph-controls', 'graph-control-btn',
-          'graph-minimap', 'graph-suggestion-score-bar', 'graph-suggestion-score-bar-fill',
-          'graph-stats-grid', 'graph-stat-item', 'graph-stat-value', 'graph-stat-label',
-          'graph-stats-bar-row', 'graph-stats-bar-label', 'graph-stats-bar-track',
-          'graph-stats-bar-fill', 'graph-stats-bar-count', 'graph-search-box',
-          'graph-search-input', 'graph-search-spinner', 'graph-search-results',
-          'graph-search-result-item', 'graph-search-result-dot', 'graph-search-result-title',
-          'graph-search-result-type', 'graph-filter-select', 'graph-neighbor-item',
-          'graph-neighbor-dot', 'graph-neighbor-title', 'graph-neighbor-rel', 'graph-neighbor-count',
+          'graph-page',
+          'graph-page-main',
+          'graph-sidebar',
+          'graph-canvas',
+          'graph-toolbar',
+          'graph-toolbar-left',
+          'graph-toolbar-right',
+          'graph-legend',
+          'graph-legend-item',
+          'graph-legend-item-active',
+          'graph-legend-dot',
+          'graph-btn',
+          'graph-btn-active',
+          'graph-badge',
+          'graph-create-hint',
+          'graph-panel',
+          'graph-panel-title',
+          'graph-suggestion-card',
+          'graph-relation-line',
+          'graph-controls',
+          'graph-control-btn',
+          'graph-minimap',
+          'graph-suggestion-score-bar',
+          'graph-suggestion-score-bar-fill',
+          'graph-stats-grid',
+          'graph-stat-item',
+          'graph-stat-value',
+          'graph-stat-label',
+          'graph-stats-bar-row',
+          'graph-stats-bar-label',
+          'graph-stats-bar-track',
+          'graph-stats-bar-fill',
+          'graph-stats-bar-count',
+          'graph-search-box',
+          'graph-search-input',
+          'graph-search-spinner',
+          'graph-search-results',
+          'graph-search-result-item',
+          'graph-search-result-dot',
+          'graph-search-result-title',
+          'graph-search-result-type',
+          'graph-filter-select',
+          'graph-neighbor-item',
+          'graph-neighbor-dot',
+          'graph-neighbor-title',
+          'graph-neighbor-rel',
+          'graph-neighbor-count',
         ],
       },
-      { sheet: 'src/styles/responsive.css', classes: ['graph-page', 'graph-toolbar', 'graph-toolbar-left', 'graph-toolbar-right', 'graph-search-box', 'graph-search-input', 'graph-sidebar', 'graph-minimap', 'graph-controls', 'graph-control-btn', 'graph-filter-select', 'graph-btn'] },
+      {
+        sheet: 'src/styles/responsive.css',
+        classes: [
+          'graph-page',
+          'graph-toolbar',
+          'graph-toolbar-left',
+          'graph-toolbar-right',
+          'graph-search-box',
+          'graph-search-input',
+          'graph-sidebar',
+          'graph-minimap',
+          'graph-controls',
+          'graph-control-btn',
+          'graph-filter-select',
+          'graph-btn',
+        ],
+      },
     ],
   },
-]
-const parts789 = []
+];
+const parts789 = [];
 for (const group of batch789Sheets) {
-  const blocks = []
+  const blocks = [];
   for (const s of group.sheets) {
-    const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-    if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-    blocks.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+    const r = run('css-rule-inventory.mjs', [
+      s.sheet,
+      '--class',
+      s.classes.join(','),
+      '--from-git',
+    ]);
+    if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+    blocks.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
   }
-  parts789.push(`## ${group.title}\n\n${blocks.join('\n\n')}`)
+  parts789.push(`## ${group.title}\n\n${blocks.join('\n\n')}`);
 }
 write(
   '5.6-10-before-batches-8-9-10.md',
@@ -596,31 +763,48 @@ write(
     '（动画体早已逐字复制成模块里的 `graphSpin`）都已删除 —— 见计划 §7.0 第 2 条与\n' +
     '`docs/migration-evidence/5.6-13-dead-css-cleanup.md`。\n\n' +
     parts789.join('\n\n'),
-)
+);
 
 // ── 8. 序 12 / 13 的迁移前清单 + **两张补丁层清空的逐条去向审计** ──
 const batch1213Sheets = [
   {
     sheet: 'src/styles/refinements.css',
     classes: [
-      'markdown-editor', 'edit-toolbar', 'btn', 'card-hover', 'filter-pill', 'filter-pill-active',
-      'segment-btn', 'segment-btn-active', 'card', 'link-modal', 'material-list-item',
-      'material-list-item-selected', 'type-badge', 'type-badge-material',
+      'markdown-editor',
+      'edit-toolbar',
+      'btn',
+      'card-hover',
+      'filter-pill',
+      'filter-pill-active',
+      'segment-btn',
+      'segment-btn-active',
+      'card',
+      'link-modal',
+      'material-list-item',
+      'material-list-item-selected',
+      'type-badge',
+      'type-badge-material',
     ],
   },
   {
     sheet: 'src/styles/responsive.css',
     classes: [
-      'btn', 'filter-pill', 'segment-btn', 'btn-ghost', 'card', 'page-header-row',
-      'markdown-body', 'heading-serif',
+      'btn',
+      'filter-pill',
+      'segment-btn',
+      'btn-ghost',
+      'card',
+      'page-header-row',
+      'markdown-body',
+      'heading-serif',
     ],
   },
-]
-const parts1213 = []
+];
+const parts1213 = [];
 for (const s of batch1213Sheets) {
-  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git'])
-  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`)
-  parts1213.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``)
+  const r = run('css-rule-inventory.mjs', [s.sheet, '--class', s.classes.join(','), '--from-git']);
+  if (r.code !== 0) throw new Error(`清单生成失败（${s.sheet}）：${r.out}`);
+  parts1213.push(`### ${s.sheet}\n\n\`\`\`\n${r.out.trim()}\n\`\`\``);
 }
 
 /**
@@ -656,30 +840,32 @@ const EMPTY_SHEET_EXCEPTIONS = [
       '登记在 `css-migration-diff.mjs` 第八批的 `resolvedConflicts` 与 ' +
       '`verify-built-css.mjs` 的 `CLEANUP_RETIREMENTS`；证据 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`',
   },
-]
+];
 
 function normalizedSelector(sel) {
-  return sel
-    // `:global(.container)` → `.container`（模块里保住全局类名的写法，产物里就是 `.container`）
-    .replace(/:global\(([^)]*)\)/g, '$1')
-    .replace(/\s+/g, ' ')
-    .replace(/\.([a-z][\w-]*)/gi, (_, name) => `.${name.replace(/-([a-z0-9])/g, (m, c) => c.toUpperCase()).toLowerCase()}`)
-    .trim()
+  return (
+    sel
+      // `:global(.container)` → `.container`（模块里保住全局类名的写法，产物里就是 `.container`）
+      .replace(/:global\(([^)]*)\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .replace(
+        /\.([a-z][\w-]*)/gi,
+        (_, name) => `.${name.replace(/-([a-z0-9])/g, (m, c) => c.toUpperCase()).toLowerCase()}`,
+      )
+      .trim()
+  );
 }
 function declList(decls) {
-  return decls.map(([p, v]) => `${p.trim().toLowerCase()}:${v.replace(/\s+/g, ' ').trim()}`)
-}
-function normalizedDecls(decls) {
-  return declList(decls).sort().join(';')
+  return decls.map(([p, v]) => `${p.trim().toLowerCase()}:${v.replace(/\s+/g, ' ').trim()}`);
 }
 
-const workspaceSheets = []
-;(function walk(dir) {
+const workspaceSheets = [];
+(function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.isDirectory()) walk(path.join(dir, e.name))
-    else if (e.name.endsWith('.css')) workspaceSheets.push(path.join(dir, e.name))
+    if (e.isDirectory()) walk(path.join(dir, e.name));
+    else if (e.name.endsWith('.css')) workspaceSheets.push(path.join(dir, e.name));
   }
-})(path.join(root, 'src'))
+})(path.join(root, 'src'));
 const workspaceRules = workspaceSheets.flatMap((abs) =>
   parseRules(fs.readFileSync(abs, 'utf8')).map((r) => ({
     file: path.relative(root, abs).replace(/\\/g, '/'),
@@ -687,7 +873,7 @@ const workspaceRules = workspaceSheets.flatMap((abs) =>
     members: splitSelectors(r.selector).map(normalizedSelector),
     decls: declList(r.decls),
   })),
-)
+);
 
 /**
  * 一条规则算"找到了"的判据（三条缺一不可）：
@@ -698,33 +884,42 @@ const workspaceRules = workspaceSheets.flatMap((abs) =>
  *   3. 找不到就落进显式例外表，否则计入"静默丢失"并让脚本失败。
  */
 function findRule(rule) {
-  const members = splitSelectors(rule.selector).map(normalizedSelector)
-  const decls = declList(rule.decls)
+  const members = splitSelectors(rule.selector).map(normalizedSelector);
+  const decls = declList(rule.decls);
   return members.every((m) =>
-    workspaceRules.some((w) => w.context === rule.context && w.members.includes(m) && decls.every((d) => w.decls.includes(d))),
-  )
+    workspaceRules.some(
+      (w) =>
+        w.context === rule.context &&
+        w.members.includes(m) &&
+        decls.every((d) => w.decls.includes(d)),
+    ),
+  );
 }
 
-const auditLines = []
-let auditFailed = false
+const auditLines = [];
+let auditFailed = false;
 for (const sheet of ['src/styles/responsive.css', 'src/styles/refinements.css']) {
-  const rev = findRecentRev((candidate) => parseRules(readFromGit(path.join(root, sheet), candidate)).length > 5)
-  if (!rev) throw new Error(`审计：找不到 ${sheet} 还有内容的修订`)
-  const rules = parseRules(readFromGit(path.join(root, sheet), rev))
-  let inPlace = 0
-  const excepted = []
-  const missing = []
+  const rev = findRecentRev(
+    (candidate) => parseRules(readFromGit(path.join(root, sheet), candidate)).length > 5,
+  );
+  if (!rev) throw new Error(`审计：找不到 ${sheet} 还有内容的修订`);
+  const rules = parseRules(readFromGit(path.join(root, sheet), rev));
+  let inPlace = 0;
+  const excepted = [];
+  const missing = [];
   for (const r of rules) {
     if (findRule(r)) {
-      inPlace += 1
-      continue
+      inPlace += 1;
+      continue;
     }
-    const ex = EMPTY_SHEET_EXCEPTIONS.find((e) => e.match(r.selector.trim()))
+    const ex = EMPTY_SHEET_EXCEPTIONS.find((e) => e.match(r.selector.trim()));
     if (ex) {
-      excepted.push(`${r.context || '(顶层)'} \`${r.selector}\` —— ${ex.why}`)
-      continue
+      excepted.push(`${r.context || '(顶层)'} \`${r.selector}\` —— ${ex.why}`);
+      continue;
     }
-    missing.push(`${r.context || '(顶层)'} \`${r.selector}\` { ${r.decls.map(([p]) => p).join(', ')} }`)
+    missing.push(
+      `${r.context || '(顶层)'} \`${r.selector}\` { ${r.decls.map(([p]) => p).join(', ')} }`,
+    );
   }
   auditLines.push(
     `### ${sheet}（迁移前 ${rev} 有 ${rules.length} 条规则）`,
@@ -735,15 +930,15 @@ for (const sheet of ['src/styles/responsive.css', 'src/styles/refinements.css'])
     `- **既找不到也没有例外（= 静默丢失）**：${missing.length} 条`,
     ...missing.map((x) => `    - ✗ ${x}`),
     '',
-  )
-  if (missing.length) auditFailed = true
+  );
+  if (missing.length) auditFailed = true;
 }
 
 write(
   '5.6-11-before-batches-12-13-and-empty-patch-layers.md',
   '5.6 迁移前：序 12 / 序 13（两张补丁层清空）的规则清单 + 逐条去向审计',
   '`refinements.css` 与 `responsive.css` 是两层"后加载覆盖前面"的补丁，' +
-  '**清空它们**（而不是删文件 —— `mobile-input-font-size.test.ts` 断言每个\n' +
+    '**清空它们**（而不是删文件 —— `mobile-input-font-size.test.ts` 断言每个\n' +
     '`src/styles/*.css` 都被 `main.tsx` 引入）是 5.6 的最后两步。\n' +
     '这一批的证据不是"逐条保留"（规则只是换了归属），而是**去向审计**：\n' +
     '迁移前那份样式表里的每一条规则，都能在工作区的某个 CSS 里找到\n' +
@@ -763,7 +958,7 @@ write(
     auditLines.join('\n') +
     '\n## 迁移前清单（按类名分组）\n\n' +
     parts1213.join('\n\n'),
-)
+);
 
 // ── 9. 序 8~13 的"渲染没变"实测（真 Chromium 探针，迁移前后各跑一次） ──
 // 探针是一次性的（`e2e/zz-cssprobe-*.spec.ts` + 临时 worktree），用完已删 ——
@@ -779,7 +974,7 @@ write(
     '   在该工作树里起独立 dev server（4321）。',
     '   ⚠️ 必须给 worktree 一个**独立的 vite 缓存目录**（`cacheDir`）：与工作区共用一个',
     '   `node_modules/.vite` 时两边会互相覆盖预打包产物，症状是图谱页崩到错误边界',
-    '   （`Cannot read properties of null (reading \'useRef\')` —— react-force-graph 拿不到 React）。',
+    "   （`Cannot read properties of null (reading 'useRef')` —— react-force-graph 拿不到 React）。",
     '2. **录制**：10 个场景（`/notes` 桌面/窄屏/抽屉打开/hover 卡片、`/notes/note-1` 桌面/窄屏/编辑态/',
     '   关联资料弹窗、`/graph` 桌面/窄屏），每个场景等"就绪元素可见"再等 400ms 排版稳定，',
     '   读 **54 条 computed 属性**；hover 场景等 700ms 让过渡结束（不等会读到中间值）。',
@@ -842,11 +1037,11 @@ write(
     '   （`[class~="a"]` 或 `[class*="b_"] .btn`），第一个会把容器 div 自己匹配走 ——',
     '   于是 `actionButton` 对照的是"容器 vs 按钮"，26 条属性差异全是假的。',
     '   `:is([class~="a"],[class*="b_"]) .btn` 才是"a 或 b 里面的 .btn"。',
-    '2. **`page.waitForEvent(\'download\')` 必须在触发之前注册**：下载事件可能在',
+    "2. **`page.waitForEvent('download')` 必须在触发之前注册**：下载事件可能在",
     '   `page.evaluate` 期间就发出，后注册会一直等到超时（第一次跑 9 个场景全卡在 90s 超时）。',
     '   另外用 Blob URL 而不是 `data:` URL 更稳。',
   ].join('\n'),
-)
+);
 
 // ── 10. 收尾轮：死代码清理的证据 ──
 // 这一轮的删除**不能靠"看起来没人用"**：每一条都要有"TSX/TS grep 0 处 +
@@ -960,10 +1155,10 @@ write(
     '- 删掉的类名/动画名**不许悄悄回来**：`CLEANUP_RETIREMENTS` 与',
     '  "产物里没有死动画"两项检查一起兜住。',
   ].join('\n'),
-)
+);
 
 // ── 10. 差集（核心证据，含所有批次） ──
-const diff = run('css-migration-diff.mjs')
+const diff = run('css-migration-diff.mjs');
 write(
   '5.6-02-rule-diff.md',
   '5.6 规则清单差集：迁移前(git 源码) vs 迁移后(dist 产物)',
@@ -974,10 +1169,10 @@ write(
     '产物顺序 = ①令牌 → ②全局 → ③模块）并把选择器还原成单类，\n' +
     '所以不再有任何选择器文本变化。\n\n' +
     `运行退出码：${diff.code}（0 = 没有丢失、动画绑定自洽、动画体一致）\n\n\`\`\`\n${diff.out.trim()}\n\`\`\``,
-)
+);
 
 // ── 5. 产物校验（含所有批次） ──
-const verify = run('verify-built-css.mjs')
+const verify = run('verify-built-css.mjs');
 write(
   '5.6-03-built-css.md',
   '5.6 产物 CSS 校验：动画绑定 / 冲突归因 / 级联次序 / 切片与退休类名',
@@ -987,15 +1182,15 @@ write(
     '`.authSubmit` 现在**靠源序**取胜（权重相同、同文件后者胜），不再依赖提权。\n' +
     '反向验证过：把 `main.tsx` 的顺序改回去，这项立刻报 4 个属性得主是 global。\n\n' +
     `运行退出码：${verify.code}（0 = 无悬空动画、改动范围内无冲突、级联得主正确、退休类名已消失）\n\n\`\`\`\n${verify.out.trim()}\n\`\`\``,
-)
+);
 
-console.log('已生成：')
-for (const f of files) console.log(`  docs/migration-evidence/${f.name}  (${f.bytes} B)`)
-console.log('\n退出码：差集=' + diff.code + ' 产物校验=' + verify.code)
+console.log('已生成：');
+for (const f of files) console.log(`  docs/migration-evidence/${f.name}  (${f.bytes} B)`);
+console.log('\n退出码：差集=' + diff.code + ' 产物校验=' + verify.code);
 if (auditFailed) {
   console.error(
     '✗ 去向审计里有"既找不到也没有例外"的规则 —— 那是**静默丢失**，' +
       '要么把它找回来，要么在 EMPTY_SHEET_EXCEPTIONS 里写明依据。',
-  )
+  );
 }
-if (diff.code !== 0 || verify.code !== 0 || auditFailed) process.exit(1)
+if (diff.code !== 0 || verify.code !== 0 || auditFailed) process.exit(1);

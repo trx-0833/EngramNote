@@ -25,13 +25,13 @@
  * 本项目的样式表不用这些；真用上了这里会解析错，所以调用方都带自检
  * （比如"见到 0 条规则"时应当报错而不是当作"没有差异"）。
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 /** 去掉注释（注释里的示例写法不该被当成真规则） */
 export function stripComments(css) {
-  return css.replace(/\/\*[\s\S]*?\*\//g, '')
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 /**
@@ -64,57 +64,57 @@ export function stripComments(css) {
  * 天然就是完整前导。删掉拼接逻辑后就没有出错的地方了。
  */
 export function parseRules(css) {
-  const src = stripComments(css)
-  const out = []
-  const stack = []
-  let buf = ''
-  let i = 0
+  const src = stripComments(css);
+  const out = [];
+  const stack = [];
+  let buf = '';
+  let i = 0;
 
   while (i < src.length) {
-    const ch = src[i]
+    const ch = src[i];
 
     if (ch === '{') {
       // 括号配对找块尾（CSS 块不会嵌套字符串里的花括号，本项目样式表也没有）
-      let depth = 1
-      let j = i + 1
+      let depth = 1;
+      let j = i + 1;
       while (j < src.length && depth > 0) {
-        if (src[j] === '{') depth++
-        else if (src[j] === '}') depth--
-        j++
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}') depth--;
+        j++;
       }
-      const inner = src.slice(i + 1, j - 1)
-      const head = buf.replace(/\s+/g, ' ').trim()
-      buf = ''
+      const inner = src.slice(i + 1, j - 1);
+      const head = buf.replace(/\s+/g, ' ').trim();
+      buf = '';
 
       if (head.startsWith('@')) {
         if (/^@(media|supports|layer|container)\b/.test(head)) {
           // 条件块：把前导入栈，块内继续按规则解析
-          stack.push(head)
-          parseInto(inner, [...stack], out)
-          stack.pop()
+          stack.push(head);
+          parseInto(inner, [...stack], out);
+          stack.pop();
         } else {
           // @keyframes / @font-face 之类：整体当作一条记录
-          out.push({ context: stack.join(' '), selector: head, decls: parseDecls(inner) })
+          out.push({ context: stack.join(' '), selector: head, decls: parseDecls(inner) });
         }
       } else if (head) {
-        out.push({ context: stack.join(' '), selector: head, decls: parseDecls(inner) })
+        out.push({ context: stack.join(' '), selector: head, decls: parseDecls(inner) });
       }
 
-      i = j
-      continue
+      i = j;
+      continue;
     }
 
     if (ch === '}') {
-      stack.pop()
-      buf = ''
-      i++
-      continue
+      stack.pop();
+      buf = '';
+      i++;
+      continue;
     }
 
-    buf += ch
-    i++
+    buf += ch;
+    i++;
   }
-  return out
+  return out;
 }
 
 /**
@@ -123,54 +123,54 @@ export function parseRules(css) {
  * "条件块递归"这条路只有一处实现，不必再维护跨片段拼接。
  */
 function parseInto(src, context, out) {
-  let buf = ''
-  let i = 0
+  let buf = '';
+  let i = 0;
   while (i < src.length) {
-    const ch = src[i]
+    const ch = src[i];
     if (ch === '{') {
-      let depth = 1
-      let j = i + 1
+      let depth = 1;
+      let j = i + 1;
       while (j < src.length && depth > 0) {
-        if (src[j] === '{') depth++
-        else if (src[j] === '}') depth--
-        j++
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}') depth--;
+        j++;
       }
-      const inner = src.slice(i + 1, j - 1)
-      const head = buf.replace(/\s+/g, ' ').trim()
-      buf = ''
+      const inner = src.slice(i + 1, j - 1);
+      const head = buf.replace(/\s+/g, ' ').trim();
+      buf = '';
       if (head.startsWith('@')) {
         if (/^@(media|supports|layer|container)\b/.test(head)) {
-          parseInto(inner, [...context, head], out)
+          parseInto(inner, [...context, head], out);
         } else {
-          out.push({ context: context.join(' '), selector: head, decls: parseDecls(inner) })
+          out.push({ context: context.join(' '), selector: head, decls: parseDecls(inner) });
         }
       } else if (head) {
-        out.push({ context: context.join(' '), selector: head, decls: parseDecls(inner) })
+        out.push({ context: context.join(' '), selector: head, decls: parseDecls(inner) });
       }
-      i = j
-      continue
+      i = j;
+      continue;
     }
     if (ch === '}') {
-      buf = ''
-      i++
-      continue
+      buf = '';
+      i++;
+      continue;
     }
-    buf += ch
-    i++
+    buf += ch;
+    i++;
   }
 }
 
 /** 声明块 → [属性, 值] 列表（保留原始大小写与空白差异，由调用方归一化） */
 export function parseDecls(body) {
-  const out = []
+  const out = [];
   for (const part of body.split(';')) {
-    const idx = part.indexOf(':')
-    if (idx < 0) continue
-    const prop = part.slice(0, idx).trim()
-    const val = part.slice(idx + 1).trim()
-    if (prop) out.push([prop, val])
+    const idx = part.indexOf(':');
+    if (idx < 0) continue;
+    const prop = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    if (prop) out.push([prop, val]);
   }
-  return out
+  return out;
 }
 
 /**
@@ -179,26 +179,26 @@ export function parseDecls(body) {
  * 造出 `[style*="rgba(0` 这种假选择器（本项目 refinements.css 真有这种写法）。
  */
 export function splitSelectors(selector) {
-  const out = []
-  let depth = 0
-  let cur = ''
+  const out = [];
+  let depth = 0;
+  let cur = '';
   for (const ch of selector) {
-    if (ch === '(' || ch === '[') depth++
-    else if (ch === ')' || ch === ']') depth--
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
     if (ch === ',' && depth === 0) {
-      out.push(cur.trim())
-      cur = ''
+      out.push(cur.trim());
+      cur = '';
     } else {
-      cur += ch
+      cur += ch;
     }
   }
-  if (cur.trim()) out.push(cur.trim())
-  return out
+  if (cur.trim()) out.push(cur.trim());
+  return out;
 }
 
 /** 从选择器里取所有类名 */
 export function classesOf(selector) {
-  return [...selector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((m) => m[1])
+  return [...selector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map((m) => m[1]);
 }
 
 /**
@@ -206,17 +206,17 @@ export function classesOf(selector) {
  * 往上找 `.git` 定位仓库根，而不是写死目录层级 —— 写死会在挪目录时静默读错。
  */
 export function readFromGit(absFile, rev = 'HEAD') {
-  let dir = path.resolve(path.dirname(absFile))
+  let dir = path.resolve(path.dirname(absFile));
   while (!fs.existsSync(path.join(dir, '.git'))) {
-    const parent = path.dirname(dir)
-    if (parent === dir) throw new Error(`往上找不到 .git（起点 ${absFile}）`)
-    dir = parent
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`往上找不到 .git（起点 ${absFile}）`);
+    dir = parent;
   }
-  const rel = path.relative(dir, path.resolve(absFile)).replace(/\\/g, '/')
+  const rel = path.relative(dir, path.resolve(absFile)).replace(/\\/g, '/');
   return execFileSync('git', ['show', `${rev}:${rel}`], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
-  })
+  });
 }
 
 /**
@@ -239,15 +239,15 @@ export function readFromGit(absFile, rev = 'HEAD') {
  */
 export function findRecentRev(matches, { maxDepth = 40 } = {}) {
   for (let i = 0; i < maxDepth; i += 1) {
-    const rev = i === 0 ? 'HEAD' : `HEAD~${i}`
-    let ok = false
+    const rev = i === 0 ? 'HEAD' : `HEAD~${i}`;
+    let ok;
     try {
-      ok = matches(rev)
+      ok = matches(rev);
     } catch {
       // 该修订里文件还不存在（新增文件）→ 不满足条件，继续往前找
-      ok = false
+      ok = false;
     }
-    if (ok) return rev
+    if (ok) return rev;
   }
-  return null
+  return null;
 }

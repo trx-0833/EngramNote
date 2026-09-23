@@ -25,7 +25,8 @@
  * 退出码：有反向指标或分母变动 → 1；`--allow-regression` 可以只报告不失败
  * （用于"我知道有一项会变坏，先看看差多少"的场合，报告里必须写明为什么）。
  */
-/* global console, process */
+// 运行环境（console/process 等）由 eslint.config.js 的 NODE_GLOBALS 声明，
+// 不再需要文件级 `/* global ... */`（两者同时存在会触发 no-redeclare）。
 import fs from 'node:fs';
 
 /* ------------------------------------------------------------------ *
@@ -144,7 +145,6 @@ for (const key of keys) {
   rows.push({ key, a, b, delta, dir, mark });
 }
 
-const w = Math.max(...rows.map((r) => r.key.length));
 console.log(`# 漂移对照\n`);
 console.log(`before: ${beforePath}`);
 console.log(`after : ${afterPath}\n`);

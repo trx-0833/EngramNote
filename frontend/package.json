@@ -3,12 +3,23 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "EngramNote 前端（React + TypeScript + Vite）：资料清洗对比、知识图谱、复习与问答界面",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trx-0833/EngramNote.git",
+    "directory": "frontend"
+  },
+  "homepage": "https://github.com/trx-0833/EngramNote#readme",
+  "bugs": {
+    "url": "https://github.com/trx-0833/EngramNote/issues"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "eslint src/ e2e/ scripts/",
+    "lint:fix": "eslint src/ e2e/ scripts/ --fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test --project=chromium",
@@ -19,8 +30,8 @@
     "e2e:full:probe": "playwright test --project=e2e-full-probe",
     "a11y": "playwright test --project=a11y",
     "a11y:headed": "playwright test --project=a11y --workers=1 --headed",
-    "format": "prettier --write src/",
-    "format:check": "prettier --check src/",
+    "format": "prettier --write src/ e2e/ scripts/",
+    "format:check": "prettier --check src/ e2e/ scripts/",
     "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/generated/schema.ts && prettier --write src/api/generated/schema.ts",
     "gen:api:drift": "node src/api/generated/openapi-drift.mjs",
     "gen:api:drift:delta": "node scripts/drift-delta.mjs",

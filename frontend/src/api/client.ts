@@ -7,8 +7,27 @@
 
 import type { BodyOf, Schema } from './generated/types';
 
-/** API 基础路径，所有请求都会在此路径前缀下发起 */
-export const API_BASE = '/api';
+/**
+ * API 基础路径，所有请求都会在此路径前缀下发起
+ *
+ * ## 为什么可配置（2026-09-23，批次 4.3）
+ *
+ * 以前这里是硬编码的 `'/api'`：默认形态（同源反代）没问题，但一旦把
+ * `dist/` 部署到静态托管、后端在另一台机器/另一个域名上，**只能改源码重建**。
+ * 对自托管用户来说这是"装上了却用不起来"的典型形态。
+ *
+ * ## 三种取值
+ *
+ * - 不设 `VITE_API_BASE_URL`（默认）：`'/api'` —— 同源反代，
+ *   开发时由 `vite.config.ts` 的 proxy 转给后端（`VITE_API_TARGET` 可改后端地址）。
+ * - 构建期设置：`VITE_API_BASE_URL=https://api.example.com/api npm run build`
+ * - 跨域时必须同时把该来源写进后端 `CORS_ORIGINS`。
+ *
+ * ⚠️ 刻意**不**在运行时读 `window.location` 或全局变量：构建期注入才能让
+ * "这个产物指向哪个后端"变成可审计的事实，而不是运行时才显形的魔法。
+ */
+export const API_BASE: string =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '') || '/api';
 
 // --- 通用类型定义（阶段 5.1 / S2：来源已改为 OpenAPI 生成类型）---
 //

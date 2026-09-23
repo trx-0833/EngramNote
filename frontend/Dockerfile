@@ -10,8 +10,19 @@
 # 差着三个大版本只会把同一个坑留给下一次。
 FROM node:22-alpine AS builder
 
-# 使用淘宝 npm 镜像加速
-RUN npm config set registry https://registry.npmmirror.com
+# ## 为什么不在这里写死镜像源（2026-09-23 移除）
+#
+# 原先这里是 `RUN npm config set registry https://registry.npmmirror.com`。
+# 问题不在"用镜像"本身，而在**它绕过了锁文件里已经写死的主机名**：
+# 锁文件里 371 条 `resolved` 曾经全部指向 `registry.npmmirror.com`，
+# 于是海外/企业网络下 `npm ci` 是**直接失败**而不是回落到官方源 ——
+# 而本文件与 CI 都宣称"锁文件保证可复现"，那份可复现性实际上把一个镜像站的
+# 可用性也算进去了。
+#
+# 现在锁文件回归官方源；需要加速请在**构建时**显式传入，而不是改这个文件：
+#     docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com ...
+ARG NPM_REGISTRY=""
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
 
 WORKDIR /app
 
