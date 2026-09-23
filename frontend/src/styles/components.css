@@ -354,7 +354,10 @@ textarea::placeholder {
 /* ── 工具类 ── */
 
 .page-enter {
-  animation: fadeIn 0.4s var(--ease-out-expo);
+  /* 批次 A1 加了 --duration-slow 却没人用它（F2 的设计冗余检查当场报出来），
+     这里接上：0.4s 与 --duration-slow 是同一个值，所以是**零视觉变化**的接线 ——
+     只是把"页面进入用多久"这件事从字面量收进令牌层。 */
+  animation: fadeIn var(--duration-slow) var(--ease-out-expo);
 }
 
 /**
