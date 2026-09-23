@@ -30,6 +30,7 @@
     "e2e:full:probe": "playwright test --project=e2e-full-probe",
     "a11y": "playwright test --project=a11y",
     "a11y:headed": "playwright test --project=a11y --workers=1 --headed",
+    "shots": "playwright test --project=shots",
     "format": "prettier --write src/ e2e/ scripts/",
     "format:check": "prettier --check src/ e2e/ scripts/",
     "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/generated/schema.ts && prettier --write src/api/generated/schema.ts",

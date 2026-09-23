@@ -28,6 +28,44 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    /**
+     * 让 dev server **不要监听测试与审计产物目录**（visual-refactor-plan 批次 0.1 实测）。
+     *
+     * ## 不加这一条会发生什么
+     *
+     * Playwright 把 trace / 截图 / 录像写进这些目录，而它们就在项目里 ——
+     * Vite 默认 watch 整个项目根，于是**每写一个产物文件，就给正在被测的页面
+     * 推一次 reload**。webServer 日志里能直接看到：
+     *
+     *     [vite] page reload test-results-shots/.playwright-artifacts-1/traces/resources/….html
+     *
+     * 后果不是"测试挂掉" —— `a11y` / `e2e` 有 `expect` 轮询兜着，所以一直"能过"；
+     * 真正的问题是**被测页面在测量时正在重载**：那两层因此变慢、偶发不稳，
+     * 而新增的截图探针（固定时长等待、没有断言）直接读到了路由 fallback ——
+     * 22 个场景里 19 个的 `main` 只剩 6 个字符、`h1` 数量为 0。
+     *
+     * ## 为什么必须把 Vite 的默认值抄一遍
+     *
+     * `server.watch` 是**整体传给 chokidar** 的：一旦提供 `ignored`，
+     * Vite 自己的默认值就不再生效。漏掉 `node_modules` 会让 dev server
+     * 去监听整棵依赖树 —— 那是比原问题严重得多的性能事故。
+     *
+     * `.gitignore` 管的是"别提交"，与"别让 dev server 监听"是两件事：
+     * 这几个目录本来就在 `.gitignore` 里，却照样触发了 reload。
+     */
+    watch: {
+      ignored: [
+        '**/.git/**',
+        '**/node_modules/**',
+        '**/test-results/**',
+        '**/coverage/**',
+        // 本项目自己新增的产物目录（Vite 的默认忽略列表里没有它们）
+        '**/test-results-*/**',
+        '**/shots*/**',
+        '**/playwright-report/**',
+        '**/blob-report/**',
+      ],
+    },
     proxy: {
       '/api': {
         // 后端地址可用环境变量覆盖，避免切换本地/远程后端时必须改源码

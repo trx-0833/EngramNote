@@ -163,6 +163,18 @@ const FUNCTIONAL_SPEC = '**/!(*a11y).spec.ts'
 const A11Y_SPEC = '**/a11y.spec.ts'
 
 /**
+ * 现状基线探针的匹配式（visual-refactor-plan 批次 0.1）。
+ *
+ * 与 `A11Y_SPEC` 同一个道理：它有自己的意图，该由 project 表达。
+ * 它**只截图 + 打印 computed style，不做任何断言** —— 因此绝不能留在
+ * `chromium` 那个阻断层里：顶层的 `FUNCTIONAL_SPEC`（"除 a11y 之外全部"
+ * 的取反匹配）会把 `shot-probe.spec.ts` 收进去，`npm run e2e` 于是从
+ * 10 条用例变成 32 条、多跑约 40 秒，而那一层的"通过"毫无意义
+ * （探针没有断言，永远不会红）。
+ */
+const SHOT_PROBE_SPEC = '**/shot-probe.spec.ts'
+
+/**
  * 全链路层的匹配式（5.13 后半段）。
  *
  * 命名刻意用 `e2e-full.spec.ts` 而不是 `full.spec.ts`：功能层的匹配式
@@ -246,7 +258,24 @@ export default defineConfig({
        */
       name: 'chromium',
       testMatch: FUNCTIONAL_SPEC,
-      testIgnore: ['**/e2e-full.spec.ts', '**/e2e-full-probe.spec.ts'],
+      testIgnore: ['**/e2e-full.spec.ts', '**/e2e-full-probe.spec.ts', SHOT_PROBE_SPEC],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      /**
+       * 现状基线探针（`npm run shots`）：截图 + computed style 快照，无断言。
+       *
+       * 用途只有一个 —— 给"改外观前后逐页对比"提供同一把尺子。
+       * 截图落在 `frontend/shots-current/`（不入库），
+       * computed style 快照打到 stdout（供无法看图的人逐批核对）。
+       */
+      name: 'shots',
+      testMatch: SHOT_PROBE_SPEC,
+      // 4 个 worker：22 个场景各自要等懒加载路由 + 桩请求 + 过渡结束，
+      // 8 个并发会把 Vite 的按需转换拖到 10 秒以上（与 a11y 同一个理由）
+      workers: 4,
+      // 独立产物目录：避免与本层其它运行互相清空（同 e2e-full 的 outputDir 说明）
+      outputDir: './test-results-shots',
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -419,6 +448,7 @@ export default defineConfig({
 
 export {
   A11Y_SPEC,
+  SHOT_PROBE_SPEC,
   E2E_BASE_URL,
   E2E_FULL_BASE_URL,
   E2E_FULL_ENABLED,
