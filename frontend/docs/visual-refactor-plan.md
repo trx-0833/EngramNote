@@ -31,7 +31,7 @@
 | | C3 | 列表形态与筛选控件统一 | **有** | ✅ |
 | **D 基座** | D1 | `<Dialog>` 基座 + `--z-*` 令牌 | 无 | ✅ |
 | | D2 | 迁移 5 套 modal | **有** | ✅ |
-| | D3 | 替换 14 处 `window.confirm`（**拆两半**：组件内 7 处 → hook 内 7 处） | **有** | 🟡 |
+| | D3 | 替换 14 处 `window.confirm`（**拆两半**：组件内 7 处 → hook 内 7 处） | **有** | ✅ |
 | | D4 | `:focus-visible` 统一光环 | **有** | ✅ |
 | **E 逐页** | E1–E8 | 8 个页组精修（E2 完成，E3 进行中） | **有** | 🟡 |
 | **F 收口** | F1 | `/styleguide` 补全 | 无 | ⏸ |
@@ -378,6 +378,7 @@ npx vite preview --outDir <快照目录>
 | D2 收尾 | （紧随 `954534b`） | 2026-09-23 | 7 条门禁全绿；测试 337 → **338** | 补回被 D2 削弱的危险语义：`Dialog` 加可选 `titleTone='danger'`，**只有 2 处**真正不可恢复的操作用它（彻底删除 / 清空回收站）；软删除的「移入回收站」刻意不加 —— 让红色保持稀缺。证据：7 个 `<Dialog>` 调用点的扫描表 + 组件行号区间 |
 | D3 前半 | `604a266` | 2026-09-23 | 七条门禁全绿；live `confirm(` 只剩 4 个 hook 文件的 7 处 | 组件内 7 处已换；`Dialog` 加了可选 `footer`；⚠️ 新引入一条回退：触发元素 disabled ⇒ 关闭后焦点归位落到 body，留待后半一并修 |
 | D4 | `8becd93` | 2026-09-23 | 七条门禁全绿 | 补全站唯一缺失的那一处键盘焦点光环：`styles/components.css` 加全局 `:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px }`；同时删掉零引用的 `--shadow-focus`（两个理由：`box-shadow` 会盖掉元素自身的阴影；`outline` 在 `forced-colors` 高对比模式下仍在，`box-shadow` 会没）。**边界**：没有把已有的 `:focus` 改成 `:focus-visible` —— 那是行为改动，见 §11 |
+| D3 后半 | `d7440fe` | 2026-09-23 | 七条门禁全绿；测试 338 → **369**；grep 实测 hook 里的同步 `confirm('…')` 已清零 | 新增 `ConfirmProvider` + `useConfirm()`，7 处调用点写成 `if (!(await confirm({…}))) return`（形状与原来的同步 `if (!confirm(…)) return` 一致）。⚠️ **本批最险的一处**：`ConfirmDialog.handleConfirm` 是**先 `onCancel()` 关框、再 `onConfirm()`**，若把 Promise 的结账挂在 `onCancel` 上，点确认会先结出一个 `false` —— 调用方永远走取消分支、而框看起来是正常关闭的（**静默吃掉用户操作**）。为此给 `ConfirmDialog` 加了可选 `onConfirmClose`（不传时行为逐字不变）把"确认后的关闭"与"取消"解耦，并有一条专门用例钉住它。顺带修掉 D3 前半登记的焦点回退：`Dialog` 原来只判 `isConnected`，触发元素还在 DOM 但已 `disabled` 时 `focus()` 是静默 no-op ⇒ 焦点掉到 body；现在向上找第一个真正能收焦点的元素（非 disabled、不在 inert 子树、原生可聚焦或带 tabindex），整条链都不行时不强行 focus。`useNoteActions.handleCancelEdit` 由同步函数变为 async |
 | E1 | `e28a2cb` | 2026-09-23 | 7 条门禁全绿（含 4 条钉住 Dashboard 卡片标题字号的 a11y 守卫） | 衬线数字固化为一等规则；数字从**渐变文字**改为焦墨实色（实色＝原渐变起点色，深浅一处未动）；四条色条去渐变。⚠️ StatCard 为两页共用，`/today` 受影响、待它所属页组核 |
 | E2 | `07dd3e0` | 2026-09-23 | 七条门禁全绿，a11y **26 passed**；8 个文件 +588/-196 | 列表项左侧 3px 来源类型色条（Trilium 做法）+ 操作按钮 hover 才出；详情页元信息收进 220px 窄竖轨（新组件 `NotePropertyRail`，`<aside aria-label="笔记元信息">`，逐项搬迁、文案与可访问名一字未变）；视图切换 tab 提到页头；对比度修正：项目标签 4.62:1 → 5.49:1、角色下拉底 3.68:1 → 4.78:1；⚠️ 角色下拉的 `outline: none` 从**内联样式**移入样式表 —— 内联权重高于任何选择器，留着会让样式表的 `:focus-visible` 焦点环永远不生效；两栏用 `minmax(0, 1fr)`，正文里的长代码块 / 长 URL 不再顶开整页 |
 | E3–E8 | | | | |
