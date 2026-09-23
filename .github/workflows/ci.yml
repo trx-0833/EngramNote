@@ -128,7 +128,21 @@ jobs:
           JWT_SECRET_KEY: ci-only-dummy-key-not-a-secret
         run: python scripts/dump_openapi.py --check
 
-      - name: Ruff format check
+      - name: Ruff format check（建议性，理由见下）
+        # 保持 `continue-on-error: true` —— 这是**有意**的，不是遗漏。
+        #
+        # 2026-09-23 实测：`ruff format --check app tests scripts` 要动
+        # **211 / 251** 个文件（app 132、tests 79、scripts 40）。
+        # `backend/ruff.toml` 里已写明历史测试脚本属 grandfathered 范围；
+        # 把 250 个文件的重排混进一轮修复里，代价是审阅者无法分辨
+        # "哪一处是真修复、哪一处只是排版"。
+        #
+        # 因此处置分两步（本轮只做第一步）：
+        #   1. 本轮：把**新的**漂移堵住 —— prettier 侧已升级为阻断（见上），
+        #      它在同一批文件上覆盖面更广、且当前漂移为零；
+        #   2. 后续：单独开一轮"ruff format 全量重排"，作为**纯格式提交**
+        #      （与本次 `style(frontend)` 同样的做法：格式单独一个提交，
+        #      让 diff 可审计），完成后即可把这里改成阻断。
         run: python -m ruff format --check app tests
         continue-on-error: true
 
@@ -220,9 +234,24 @@ jobs:
           npm run gen:api
           git diff --exit-code -- src/api/generated/schema.ts
 
-      - name: Prettier check
+      - name: Prettier check (blocking)
+        # ── 为什么现在是阻断性的（2026-09-23 升级） ────────────────────────
+        #
+        # 它此前是 `continue-on-error: true`，后果不是"少一道检查"，而是
+        # **一整套风格漂移在无人察觉的情况下累积**：本次核查把范围从
+        # `src/` 扩到 `src/ e2e/ scripts/` 后，prettier 报 **165 个文件**
+        # 不符合风格，其中 162 个在 `src/` —— 也就是说这道门禁"在守却从不拦"。
+        #
+        # 现在它被强制执行：漂移已经清零（`prettier --check src/ e2e/ scripts/`
+        # 退出 0），且格式与业务逻辑无关、修复成本为零，正是升级门槛的最佳时机。
+        #
+        # ⚠️ 与它相邻的两处**仍然保持建议性**，且理由是分开的：
+        #   - `ruff format --check`：要动 211/251 个文件，属项目长期有意的
+        #     grandfathered 范围（`backend/ruff.toml` 有说明）。把 250 个文件的
+        #     重排混进本轮修复，会让审阅者分不清"哪一处是真修复"。
+        #   - `security-scan`：见该 job 内的说明（上游不修 + 声明路径与实际
+        #     环境不一致），升级路径是先把两类发现处置掉再设阈值。
         run: npm run format:check
-        continue-on-error: true
 
       - name: Vitest (unit + component, jsdom)
         # 这一层是**阻断性**的，与 format:check 不同。
