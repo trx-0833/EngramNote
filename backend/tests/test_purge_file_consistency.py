@@ -39,7 +39,6 @@
 `test_transient_delete_failure_is_retried`。
 """
 
-import shutil
 import uuid
 from pathlib import Path
 
@@ -103,33 +102,61 @@ def _settings():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_storage():
-    """把测试写入的存储目录在用例结束后清理掉
+def _isolate_storage(tmp_path):
+    """把本文件的落盘重定向到临时 Vault，**永不触碰真实存储目录**
 
-    ## 为什么需要（本轮实测）
+    ## 为什么必须重定向（而不是"事后清理"）
 
-    这些用例会真实调用 `storage_service` 落盘（本地后端写
-    `backend/data/storage/`）。第一版没有清理，跑一轮就在真实存储目录里
-    留下 **26 个以随机 user_id 命名的目录** —— 与用户真实数据混在一起，
-    只能靠创建时间人工分辨。真实用户目录（如 `7775422b`）是不可再生的，
-    一旦误删就是数据损失。
+    这些用例会真实调用 `storage_service` 落盘，并用 `audit_vault()` 扫盘比对
+    "DB 记录的对象名"与"磁盘枚举到的对象名" —— 磁盘侧读的是
+    `storage_service._get_storage_root()`。也就是说：**只要用例确实落盘、
+    校验器确实扫盘，写入就发生在真实 Vault 里。**
 
-    ## 做法
+    本文件第一版用的是"记录进入时的顶层目录，退出时删掉新增的"，
+    同一仓库的 `tests/test_vault_audit.py:70-75` 已经实测判定这种做法
+    **根本不起作用**：清理只是事后补救，而它依赖两个脆弱假设 ——
 
-    记录用例开始前**已存在**的顶层目录，结束后只删除新增的那些。
-    这样即使存储目录里本来就有真实用户数据，也不会被碰到。
+    1. 运行期间**没有别人**（用户本人、另一个工具）往存储根写入新目录 ——
+       否则用户刚放进来的真实目录会被当作"测试新增"删掉；
+    2. 断言路径本身不出错，`delete_file` 也不碰到既有目录。
+
+    真实用户目录（如 `7775422b`）不可再生，一旦误删就是数据损失。
+
+    ## 重定向机制（与 `test_vault_audit.py` 一致）
+
+    `Settings.vault_dir` 从环境变量 `VAULT_DIR` 读取（无 env 前缀），
+    `get_vault_dir()` 的优先级是 `vault_dir > storage_dir > 默认`。
+    因此：设 `VAULT_DIR` → 清 settings 缓存 → 重建 settings →
+    把 `storage_service` 的模块级 `settings` 重新指向新实例。
+
+    ⚠️ 必须重绑 `storage_service.settings`：它是**模块级冻结引用**
+    （`settings = get_settings()` 在 import 时求值），
+    `conftest._refresh_module_settings()` 的刷新名单里没有它；
+    只清缓存不重绑，`_get_storage_root()` 会继续读旧实例、继续写真 Vault。
     """
-    from app.services.storage_service import _get_storage_root
+    import os
 
-    root = _get_storage_root()
-    root.mkdir(parents=True, exist_ok=True)
-    before = {p.name for p in root.iterdir() if p.is_dir()}
+    from app.config import get_settings
+    from app.services import storage_service
+
+    tmp_vault = tmp_path / "vault"
+    tmp_vault.mkdir(parents=True, exist_ok=True)
+
+    old_env = os.environ.get("VAULT_DIR")
+    old_settings = storage_service.settings
+
+    os.environ["VAULT_DIR"] = str(tmp_vault)
+    get_settings.cache_clear()
+    storage_service.settings = get_settings()
 
     yield
 
-    for entry in list(root.iterdir()):
-        if entry.is_dir() and entry.name not in before:
-            shutil.rmtree(entry, ignore_errors=True)
+    if old_env is None:
+        os.environ.pop("VAULT_DIR", None)
+    else:
+        os.environ["VAULT_DIR"] = old_env
+    get_settings.cache_clear()
+    storage_service.settings = old_settings
 
 
 @pytest.mark.asyncio

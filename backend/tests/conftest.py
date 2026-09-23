@@ -105,6 +105,58 @@ def _cleanup_session_db() -> None:
 atexit.register(_cleanup_session_db)
 
 
+# ---------------------------------------------------------------------------
+# 存储安全网：整个测试会话的 Vault 一律重定向到临时目录
+#
+# ## 为什么必须有（与上面的会话临时库同一个道理）
+#
+# `storage_service._get_storage_root()` 的默认值是**真实**的
+# `backend/data/storage/`。只要有用例真的落盘（`test_purge_file_consistency.py`
+# 这类"DB 与磁盘一致性"用例必然会），写入就发生在真实 Vault 里。
+#
+# 本仓库已经踩过这个坑：`tests/test_vault_audit.py:70-75` 记录了"事后删掉新增
+# 顶层目录"的做法**根本不起作用** —— 磁盘侧枚举的是真实 Vault，清理只是补救。
+# 更危险的是它依赖"运行期间没人往存储根写新目录"这个假设：用户本人往
+# `data/storage/` 放一个新目录，跑一次测试就会被当成"测试新增"删掉。
+#
+# 因此这里做成**会话级**：不管哪个测试文件、有没有自己的 fixture，
+# 本进程内 `get_vault_dir()` 永远指向临时目录。
+# 真实用户数据（不可再生）不参与测试，这一点不能靠"每个文件自觉"。
+#
+# ## 与文件级重定向的关系
+#
+# `test_vault_audit.py` / `test_purge_file_consistency.py` 自己也会设
+# `VAULT_DIR` 并重绑 `storage_service.settings`（更细的粒度：每个用例一个
+# 干净 Vault）。它们保存/恢复的是**本 fixture 设下的值**，因此：
+#   - fixture 顺序：本 fixture 先设（autouse + 更早实例化），文件级后设；
+#   - 恢复时回到本会话的临时 Vault，而不是真实 Vault。
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _redirect_vault_to_tmp(tmp_path_factory):
+    """把会话内所有落盘重定向到临时 Vault，绝不写 `backend/data/storage/`"""
+    from app.config import get_settings
+    from app.services import storage_service
+
+    tmp_vault = tmp_path_factory.mktemp("vault")
+    old_env = os.environ.get("VAULT_DIR")
+    old_settings = storage_service.settings
+
+    os.environ["VAULT_DIR"] = str(tmp_vault)
+    get_settings.cache_clear()
+    storage_service.settings = get_settings()
+
+    yield tmp_vault
+
+    if old_env is None:
+        os.environ.pop("VAULT_DIR", None)
+    else:
+        os.environ["VAULT_DIR"] = old_env
+    get_settings.cache_clear()
+    storage_service.settings = old_settings
+
+
 def _init_session_db() -> None:
     """在会话临时库上建表（`pytest_configure` 调用一次）
 
