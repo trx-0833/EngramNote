@@ -1,0 +1,48 @@
+/**
+ * 笔记详情页的私有样式（批次 E2 新增）
+ *
+ * 借鉴表 `docs/visual-symbol-research.md` §C3「笔记详情」行的
+ * **Memos property rail**：元信息收进一条窄竖轨（组件在
+ * `pages/notedetail/NotePropertyRail.tsx`），**主内容区保持纯净**。
+ *
+ * ## 为什么骨架放在页面这一层，而不是塞进页头组件
+ *
+ * 这条轨要与**正文并列**（正文从它右边开始），而页头（标题 + 8 个操作按钮
+ * + 顶部 tab 条）是横跨整页的。页头组件管不到正文里的东西，所以两栏骨架
+ * 只能由同时渲染"页头"和"正文"的 `NoteDetail.tsx` 来搭。
+ * 页头自己的骨架（`.noteDetailHeader` / `.noteDetailActions` 与那 5 条窄屏规则）
+ * 仍在 `noteDetail/NoteDetailHeader.module.css` 里，本批**一个字没动**。
+ *
+ * ## 220px 这个宽度
+ *
+ * 轨里最长的一项是 `创建于 2026/1/5 08:00:00 GMT+8`（`formatDateTime`），
+ * 12.8px 字号下约 190px；220px 给它留了余量又不会把正文挤窄。
+ * 页宽在这一页是全宽档（`App.tsx`：`/notes/:noteId` → `full`），
+ * 所以这两栏是在 100% 宽里分的，不涉及任何最大宽度上限。
+ */
+
+.detailBody {
+  display: grid;
+  /* `minmax(0, 1fr)` 而不是 `1fr`：网格子项的默认 `min-width: auto` 会被
+     正文里的长代码块 / 长 URL 顶开，整页跟着横向滚动。 */
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.detailMain {
+  /* 同上：显式写出来，让"这一列可以被压窄"是代码里的约定而不是巧合 */
+  min-width: 0;
+}
+
+/* ── 窄屏（沿用全局的 768px，不另造断点）──
+ *
+ * 两栏收成一栏：竖轨变成正文上方的一横排（方向与分隔线的调整在
+ * `NotePropertyRail.module.css` 的同名档里），正文恢复整幅宽度。
+ */
+@media (max-width: 768px) {
+  .detailBody {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-md);
+  }
+}

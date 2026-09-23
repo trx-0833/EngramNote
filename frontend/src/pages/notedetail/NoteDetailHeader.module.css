@@ -1,70 +1,40 @@
 /**
- * 笔记详情页头部的私有样式（本轮为修 a11y-audit F-11 而新增）
+ * 笔记详情页头部的私有样式
  *
- * ## 为什么只搬了「笔记角色」下拉框这一个控件的样式
+ * ## 本文件里现在有三块东西
  *
- * 它是本页唯一一个**会改数据**的原生表单控件（`updateNoteRole`），
- * 而它此前把全部外观写在 tsx 的 `style={{...}}` 里 ——
- * 其中包括 `outline: 'none'`（见 a11y-audit §4.1：axe 不检查焦点可见性）。
+ * | 块 | 来源 | 状态 |
+ * |---|---|---|
+ * | `.viewTabs`（+ 两条 `:global(.segment-*)` 后代规则） | 批次 E2 新增 | 顶部 tab 条 |
+ * | `.noteDetailHeader` / `.noteDetailActions`（含 768 / 480 两条窄屏档） | 5.6 序 8 | **骨架，逐字未动** |
+ * | `.roleSelect` | 本轮 a11y 修复 F-11 | **已搬走**（见下） |
  *
- * 焦点环必须写在样式表里，内联样式里写不出来：
- *   - `:focus-visible` 是伪类，内联样式无法表达；
- *   - 而内联样式的权重高于任何选择器 —— 只要 tsx 里还留着
- *     `outline: 'none'` / `boxShadow: 'none'`，样式表里的焦点规则就**永远不生效**
- *     （"规则还在、永不生效"是本仓库 css-convention.md §3 里记过多次的事故类型）。
+ * ## `.roleSelect` 去哪了（批次 E2）
  *
- * 所以这里把外观整体搬进来，"随数据变化的那一项"（角色对应的底色）
- * 改由 CSS 自定义属性 `--note-role-bg` 从 tsx 传入 —— 两个颜色仍是
- * 角色语义的一部分，留在 tsx 里看得见；几何与焦点表现归样式表。
+ * 「笔记角色」下拉是随**元信息标签行**一起走的：整行搬进了主内容左侧那条
+ * 窄竖轨（`pages/notedetail/NotePropertyRail.tsx`），控件的全部外观（含
+ * "白内圈 + 墨色外圈"两层焦点环）也一起搬到了 `NotePropertyRail.module.css`，
+ * 连同原来写在这里的那段论证（为什么焦点环必须写在样式表里、为什么用
+ * `box-shadow` 而不是 `outline-offset`）。**值一个字没改**。
  *
- * ## 焦点环为什么是「白内圈 + 墨色外圈」两层
+ * ⚠️ 不要在这里"顺手"补一条 `.roleSelect`：类名已经不挂在任何元素上，
+ * 留着只会让下一个人以为焦点环还在生效。
  *
- * 下拉框的底色随角色在白底页面上是 #316fd8 / #6d28d9 两种，都是蓝色系。
- * 单色焦点环总有至少一种底色会撞色：
- *   - 白色内圈：对两种底色都 ≥ 4.7:1（#316fd8 上 4.78:1、#6d28d9 上 7.10:1），
- *     且紧贴控件边缘，是"焦点在这个控件上"最直接的提示；
- *   - 深墨色外圈（--color-primary-hover #16213e，白底 15.89:1）：
- *     白内圈在页面白底上对比度只有 1.0:1，单靠它控件"边界"仍然看不清；
- *     外圈负责把控件从背景里划出来（WCAG 2.4.11 要求焦点指示 ≥ 3:1）。
+ * ## 批次 E2：顶部 tab 条（借鉴表 §C3「笔记详情」行 · Obsidian 侧栏标签页）
  *
- * 用 `box-shadow` 而不是 `outline` + `outline-offset`：
- * 这一行元信息是 `display:flex; align-items:center`，`outline-offset` 画到
- * 控件外面的那两圈会被相邻兄弟元素压住，看起来像被裁掉一角；
- * `box-shadow` 不参与布局、也完全不改变控件几何（不会让这一行发生位移）。
+ * `segment-control` / `segment-btn` 两个类名**都留全局**（学习评估页与
+ * 笔记详情的视图切换两个不相邻功能在用，判据见 `styles/learning.css` 文件头），
+ * 所以这里**不改它们**，只用后代选择器把**本页这一处**改成 tab 条：
+ * 透明底、无边框、一条底线；选中态仍交给既有的金色指示线
+ * （`learning.css` 的 `.segment-btn::after`，R2：金色是"当前选中"）。
  *
- * ## 兼容保留：`.roleSelect` 的基础值
+ * ⚠️ **两条规则的先后就是行为**：`.viewTabs :global(.segment-btn)::after`
+ * 与 `.viewTabs :global(.segment-btn-active)::after` 权重同为 (0,2,1)，
+ * 而前者把 `width` 压成 0（为了让未选中的 tab 没有线）—— 它会同权重压掉
+ * `learning.css` 里那条 (0,1,0) 的 `.segment-btn-active::after { width: 60% }`。
+ * 所以激活态那条必须排在**后面**，否则三个 tab 都永远不会出指示线。
  *
- * `--note-role-bg` 的兜底值写在基础规则里（= `material` 学习资料的蓝）。
- * tsx 始终会传值，兜底只用于"变量没传进来"这种不存在的情况 ——
- * 没有兜底的话 `background: var(--note-role-bg)` 会解析失败、
- * 控件变成透明底 + 白字（比原来更难看清），那是比原问题更糟的失败方式。
- */
-
-.roleSelect {
-  /* 学习资料的角色色。原来这里是 #3b82f6，白底上白字只有 3.68:1
-     （12px 小字要求 4.5:1，即 a11y-audit 的 F-12 三元成因之一）；
-     压深到同一个蓝色家族的 #316fd8 后是 4.78:1 —— 色相不变，只是深了一档。 */
-  --note-role-bg: #316fd8;
-
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--note-role-bg);
-  color: #fff;
-  cursor: pointer;
-}
-
-/* 焦点可见：键盘用户看得出焦点在这个下拉框上（axe 不检查这一条，
-   见 a11y-audit §4.1 —— 它靠人看、靠这一行代码守）。 */
-.roleSelect:focus-visible {
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px var(--color-primary-hover);
-}
-
-/* ════════════════════════════════════════════════════════════════
- * 页头骨架（overhaul-plan 5.6 序 8）
+ * ## 页头骨架（overhaul-plan 5.6 序 8）
  *
  * 从 `src/styles/components.css` 搬来 2 条（`.note-detail-header` /
  * `.note-detail-actions`），并从 `src/styles/responsive.css` 的 768px 档搬来
@@ -85,6 +55,49 @@
  * 写成 `:global(.btn)` 后产物是 `._noteDetailActions_hash .btn`，权重与原来逐字相同。
  * 480px 档那条 `flex: 1 1 calc(50% - var(--space-sm))` 必须排在 768px 档**之后**
  * （两条都命中时后者胜），顺序与它们在 `responsive.css` 里的先后一致。
+ */
+
+/* ── 顶部视图切换 tab（批次 E2）── */
+
+.viewTabs {
+  margin-bottom: var(--space-md);
+}
+
+/* 分段控件 → tab 条：透明底、去掉外框，只留一条底线 */
+.viewTabs :global(.segment-control) {
+  gap: var(--space-lg);
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+}
+
+/* tab 本体：左右不留内边距（宽度由文字决定，间距交给 gap），圆角归零 */
+.viewTabs :global(.segment-btn) {
+  padding: var(--space-sm) 0;
+  border-radius: 0;
+  font-size: 0.875rem;
+  background: transparent;
+}
+
+/* 金色指示线改成**整条 tab 宽**的底线。
+   ⚠️ 这一条会压掉 learning.css 里 (0,1,0) 的 `.segment-btn-active::after { width: 60% }`
+   （权重 (0,2,1) 更高），所以下面必须紧跟一条同权重的激活态规则，顺序不能反。 */
+.viewTabs :global(.segment-btn)::after {
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.viewTabs :global(.segment-btn-active)::after {
+  width: 100%;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 页头骨架（overhaul-plan 5.6 序 8）
  * ════════════════════════════════════════════════════════════════ */
 
 .noteDetailHeader {

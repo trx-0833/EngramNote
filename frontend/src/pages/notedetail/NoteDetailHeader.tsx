@@ -1,28 +1,47 @@
 /**
- * @file 笔记详情页头部：标题与操作按钮、元信息标签、错误提示、视图切换
+ * @file 笔记详情页头部：顶部视图切换 tab、标题与操作按钮、错误提示
  * @description
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 标签顺序、禁用/显示条件、`title` 提示文案、inline 样式均与拆分前一致。
+ *
+ * ## 批次 E2（visual-refactor-plan §6 · 借鉴表 §C3「笔记详情」行）
+ *
+ * 本文件在两处**原位**调整，页头骨架（`.noteDetailHeader` /
+ * `.noteDetailActions` 与它们那 5 条窄屏规则）**一个字没动**：
+ *
+ * 1. `<ViewModeTabs>` 从页头**末尾**提到页头**最前面**，并加一层
+ *    `.viewTabs` 包装把它从"分段控件"改成顶部 tab 条（Obsidian 的侧栏标签页
+ *    思路）。tab 的取值、顺序、禁用条件、文案仍由 `ViewModeTabs.tsx` +
+ *    `NoteDetail` 的 `viewMode` state 驱动 —— 只换了位置与外观。
+ * 2. 「笔记元信息标签行」（来源类型徽章 / 项目标签 / 状态 / 笔记角色下拉 /
+ *    页数 / 大小 / 创建时间）**整体搬到 `NotePropertyRail.tsx`**，
+ *    成为主内容左侧那条窄竖轨。搬走的是这一整块 + 它唯一的控件
+ *    （角色下拉）与 `onRoleUpdated` 这一个回调；搬法逐字照抄，
+ *    连 `aria-label="笔记角色"` 与 `--note-role-bg` 的传值方式都没变。
+ *    角色下拉的样式（含那一圈两层焦点环）随之搬到
+ *    `NotePropertyRail.module.css`，原处留了墓碑注释。
  */
-import type { CSSProperties } from 'react';
-import { updateNoteRole, type NoteDetail, type RetryConvertOutcome } from '../../api/client';
+import type { NoteDetail, RetryConvertOutcome } from '../../api/client';
 import Icon from '../../components/Icon';
-import { useToast } from '../../components/Toast';
 // 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
 // （笔记自己的名字，长度不可控），所以只把量尺换成 <PageHeader>，
 // 页头骨架与它那 5 条窄屏规则仍留在下面的组件模块里 —— 见调用点的说明
 import PageHeader from '../../components/PageHeader';
-import { formatDateTime } from '../../utils/datetime';
-import { statusClass, statusLabels } from '../../utils/labels';
 import RetryConvertButton from './RetryConvertButton';
 import ViewModeTabs from './ViewModeTabs';
-// 「笔记角色」下拉框的样式（含 axe 看不见的焦点环）—— 见模块文件头
 import styles from './NoteDetailHeader.module.css';
 import type { EditMode, ViewMode } from './types';
 
 /** 处理中（不可编辑）的笔记状态 */
 const PROCESSING_STATUSES = ['uploading', 'converting', 'cleaning', 'learning'];
 
+/**
+ * 页头 props。
+ *
+ * ⚠️ 批次 E2 之后这里**不再有** `onRoleUpdated`：「笔记角色」下拉整块搬进了
+ * `NotePropertyRail.tsx`，回调随之改由它接 —— 数据流方向没变，仍然是
+ * `NoteDetail` → 子组件的 `onRoleUpdated` → `setNote` 局部合并。
+ */
 interface NoteDetailHeaderProps {
   /** 笔记详情 */
   note: NoteDetail;
@@ -53,13 +72,6 @@ interface NoteDetailHeaderProps {
   /** 打开关联资料管理弹窗 */
   onManageLinks: () => void;
   /**
-   * 局部合并角色更新结果
-   *
-   * 阶段 5.1 / S2：`note_role` 在契约里**带默认值**（`material`）→ 生成类型里
-   * 是必填 `string`，"可能是 undefined"这个假设不成立，因此去掉 `| undefined`。
-   */
-  onRoleUpdated: (noteRole: string) => void;
-  /**
    * 局部合并重试转换结果
    *
    * 阶段 5.1 / S2：与 `RetryConvertButton` 共用 `retryConvert` 的生成返回类型，
@@ -86,15 +98,28 @@ export default function NoteDetailHeader({
   onDelete,
   onOpenVersionHistory,
   onManageLinks,
-  onRoleUpdated,
   onRetryConverted,
   navigate,
 }: NoteDetailHeaderProps) {
-  const toast = useToast();
   const isProcessing = PROCESSING_STATUSES.includes(note.status);
 
   return (
     <header style={{ marginBottom: 'var(--space-lg)' }}>
+      {/* 顶部视图切换 tab（批次 E2）——位置与外观变了，**行为与文案没变**：
+          仍是 ViewModeTabs 的「原始版 / 清洗版 / 对比视图」三个按钮、
+          同样的禁用条件、同样由 NoteDetail 的 viewMode 驱动。
+          `.viewTabs` 只改这一处的观感（透明底 + 底线 + 金色指示线），
+          `segment-control` / `segment-btn` 两个全局类本身一字未改，
+          学习评估页仍在用它们原来的样子。 */}
+      <div className={styles.viewTabs}>
+        <ViewModeTabs
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
+          canShowClean={canShowClean}
+          canShowDiff={canShowDiff}
+        />
+      </div>
+
       {/* 标题 + 操作按钮组：窄屏下改为上下排列、按钮换行。
           这两层骨架（以及窄屏那 3 条）已随组件搬进 NoteDetailHeader.module.css
           —— 类名哈希后写在 responsive.css 里的选择器会永远选不中（5.6 序 8）。 */}
@@ -110,7 +135,8 @@ export default function NoteDetailHeader({
             也不再按 50% 撑开）—— 那是 C1 范围之外的版式改动。
             所以：`<PageHeader>` 在这里只负责"1.5rem 衬线 600"这一件事
             （原字号本就 1.5rem，观感不变），`spacing="none"` 把与下方内容的
-            间距留给 `.noteDetailHeader` 自己的 `margin-bottom`。 */}
+            间距留给 `.noteDetailHeader` 自己的 `margin-bottom`。
+            批次 E2 也不动它：8 个操作按钮仍在这一层里。 */}
         <PageHeader title={note.title} spacing="none" />
         <div className={styles.noteDetailActions}>
           {editMode === 'view' && (
@@ -184,68 +210,15 @@ export default function NoteDetailHeader({
         </div>
       </div>
 
-      {/* 笔记元信息标签行 */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--space-md)',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          fontSize: '0.875rem',
-          color: 'var(--color-text-secondary)',
-        }}
-      >
-        <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
-        {/* 所属项目标签：色值与 NotesList 的同一枚标签保持一致
-            （`--color-primary-soft` 在本项目未定义，实际落到兜底 #eef2ff；
-            而兜底前景 #2563eb 与它只有 4.62:1，12px 小字压在门槛线上 ——
-            改用同色系的 #1b4fbf，5.49:1。两处必须一起改，否则同一枚标签
-            在两个页面上是两个颜色）。 */}
-        {note.project_names?.map((name) => (
-          <span
-            key={name}
-            className="badge"
-            style={{ backgroundColor: 'var(--color-primary-soft, #eef2ff)', color: '#1b4fbf' }}
-          >
-            {name}
-          </span>
-        ))}
-        <span className={statusClass(note.status)}>{statusLabels[note.status] || note.status}</span>
-        {/* 笔记角色：本页唯一会写数据的原生控件。
-            - 可访问名用 `aria-label`（这一行是 flex 排布的元信息标签，
-              插一个可见 <label> 会改变排版）；
-            - 外观搬进 NoteDetailHeader.module.css：内联样式的权重高于任何
-              选择器，`outline: 'none'` 留在 tsx 里的话，样式表中的
-              `:focus-visible` 焦点环**永远不会生效**（文件头有完整说明）；
-            - 底色随角色变，通过 `--note-role-bg` 传进去，两个色值仍在 tsx 里可见。 */}
-        <select
-          className={styles.roleSelect}
-          aria-label="笔记角色"
-          value={note.note_role || 'material'}
-          onChange={async (e) => {
-            try {
-              const updated = await updateNoteRole(note.id, e.target.value);
-              onRoleUpdated(updated.note_role);
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : '更新角色失败');
-            }
-          }}
-          style={
-            {
-              // #316fd8 白底白字 4.78:1、#6d28d9 为 7.10:1（原先 #3b82f6 只有 3.68:1）
-              '--note-role-bg': note.note_role === 'personal_note' ? '#6d28d9' : '#316fd8',
-            } as CSSProperties
-          }
-        >
-          <option value="material">学习资料</option>
-          <option value="personal_note">我的笔记</option>
-        </select>
-        {note.page_count && <span>{note.page_count} 页</span>}
-        <span>{(note.file_size / 1024).toFixed(0)} KB</span>
-        <span>创建于 {formatDateTime(note.created_at)}</span>
-      </div>
+      {/* 元信息标签行**整块搬到 `NotePropertyRail.tsx`**（批次 E2）：
+          它原本横在标题与正文之间，现在收进主内容左侧那条窄竖轨。
+          DOM 上它从 `<header>` 的第二个子块变成了 `<aside aria-label="笔记元信息">`
+          的内容 —— 里面每一项的类名、文案、顺序、可访问名逐字未变
+          （唯一的原生控件「笔记角色」下拉仍是 `aria-label="笔记角色"`，
+          仍是 `combobox`）。 */}
 
-      {/* 错误信息提示 + 重试按钮 */}
+      {/* 错误信息提示 + 重试按钮。⚠️ 留在页头：它是"这一页现在出问题了"，
+          与"这条笔记是什么"（竖轨里的元信息）不是一类信息。 */}
       {note.error_message && (
         <div
           style={{
@@ -263,14 +236,6 @@ export default function NoteDetailHeader({
           )}
         </div>
       )}
-
-      {/* 视图模式切换按钮 */}
-      <ViewModeTabs
-        viewMode={viewMode}
-        onViewModeChange={onViewModeChange}
-        canShowClean={canShowClean}
-        canShowDiff={canShowDiff}
-      />
     </header>
   );
 }

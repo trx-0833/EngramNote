@@ -271,14 +271,28 @@ export default function NotesList() {
                标题现在就是真链接（可右键、可新标签页、Tab 一次即达），
                删除/重试是各自独立的按钮，靠 flex + `.note-list-actions` 仍排在右侧。 */
             <article key={note.id} className={`card card-hover ${styles.noteListItem}`}>
+              {/* 批次 E2：左侧 3px 类型色条（借鉴表 §C3「笔记列表」行 · Trilium）。
+                  色值**不在这里写**：它挂 `badge badge-<source_type>`，取的是
+                  `components.css` 既有徽章色表里这一类型的前景色
+                  （`background: currentColor`，见 NotesList.module.css）。
+                  纯装饰、无文本，`aria-hidden` 把它排除在无障碍树之外 ——
+                  "这是什么类型"仍由同一行的来源类型徽章对读屏用户交代。 */}
+              <span
+                className={`badge badge-${note.source_type} ${styles.noteTypeBar}`}
+                aria-hidden="true"
+              />
               <div style={{ flex: 1, minWidth: 0 }}>
                 {/* `h2` 而不是 `h3`：这一页的顶层标题是上面的 h1「笔记」，
                     中间没有任何层级 —— h1 → h3 是跳级，axe 判 `heading-order`
                     （这正是补上 h1 之后必须一起做的事：F-18 修好、不能反手
                     多出一条层级违规）。字号本来就是显式写的，
-                    改级别**不改外观**。 */}
+                    改级别**不改外观**。
+                    批次 E2：`fontWeight` 500 → 600、并挂上 `.noteTitle`
+                    （衬线）—— visual-design-spec §3.3 的卡片标题是"衬线 600"；
+                    `fontSize: 1.17rem` 一字不动（它钉的是"级别 ≠ 大小"）。 */}
                 <h2
-                  style={{ fontSize: '1.17rem', fontWeight: 500, marginBottom: 'var(--space-xs)' }}
+                  className={styles.noteTitle}
+                  style={{ fontSize: '1.17rem', fontWeight: 600, marginBottom: 'var(--space-xs)' }}
                 >
                   {/* 下划线显式关掉：`base.css` 现在给所有 <a> 默认下划线
                       （正文链接必须与正文可区分，F-13/F-26），而这里链接的
@@ -291,7 +305,12 @@ export default function NotesList() {
                     {note.title}
                   </Link>
                 </h2>
+                {/* 批次 E2：这一行是"来源类型 · 状态 · 时间"的**一行元信息**。
+                    项与项之间的 `·` 由 `.noteMeta > * + *::before` 生成
+                    （CSS `content`，不往无障碍树里插文本），顺序与文案一项未动。
+                    项目标签仍是胶囊，`.` 不会落进胶囊里。 */}
                 <div
+                  className={styles.noteMeta}
                   style={{
                     display: 'flex',
                     gap: 'var(--space-sm)',
@@ -335,9 +354,13 @@ export default function NotesList() {
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                     {(note.file_size / 1024).toFixed(0)} KB
                   </span>
-                  {/* 创建日期 */}
+                  {/* 批次 E2：这一项从 `created_at` 改为 `updated_at`
+                      （借鉴表 §C3「笔记列表」行点名的是"更新时间"）——
+                      展示的字段换了、格式与位置一字未改，也没有新增文案
+                      （这一项本来就没有标签）。字段缺失时回落到创建时间，
+                      避免契约漂移时渲染出 "Invalid Date"。 */}
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                    {new Date(note.created_at).toLocaleDateString('zh-CN')}
+                    {new Date(note.updated_at || note.created_at).toLocaleDateString('zh-CN')}
                   </span>
                 </div>
                 {/* 错误信息，仅 status 为 failed 时显示 */}

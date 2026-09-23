@@ -28,6 +28,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import VersionHistory from '../components/VersionHistory';
 import { useAdhdReader } from '../hooks/useAdhdReader';
 import NoteDetailHeader from './notedetail/NoteDetailHeader';
+import NotePropertyRail from './notedetail/NotePropertyRail';
 import RelatedLinksSection, { shouldShowRelatedLinks } from './notedetail/RelatedLinksSection';
 import CitingNotesSection, { shouldShowCitingNotes } from './notedetail/CitingNotesSection';
 import LinkManagerModal from './notedetail/LinkManagerModal';
@@ -48,6 +49,8 @@ import {
   parseCitationJump,
 } from './notedetail/viewMode';
 import type { EditMode } from './notedetail/types';
+// 批次 E2 新增：元信息竖轨 + 正文的两栏骨架（页头骨架仍留在 notedetail/ 里）
+import styles from './NoteDetail.module.css';
 
 /**
  * 笔记详情页面组件
@@ -180,7 +183,10 @@ export default function NoteDetail() {
 
   return (
     <div className="page-enter">
-      {/* 头部信息区域 */}
+      {/* 头部信息区域。
+          批次 E2：`onRoleUpdated` 不再传给它 —— 「笔记角色」下拉随元信息
+          整块搬进了下面那条竖轨，回调改由 `NotePropertyRail` 接
+          （数据流方向与合并逻辑一字未改）。 */}
       <NoteDetailHeader
         note={note}
         noteId={noteId}
@@ -196,9 +202,6 @@ export default function NoteDetail() {
         onDelete={handleDelete}
         onOpenVersionHistory={() => setShowVersionHistory(true)}
         onManageLinks={handleManageLinks}
-        onRoleUpdated={(noteRole) =>
-          setNote((prev) => (prev ? { ...prev, note_role: noteRole } : prev))
-        }
         onRetryConverted={(result) =>
           setNote((prev) =>
             prev ? { ...prev, status: result.status, error_message: result.error_message } : prev,
@@ -207,57 +210,71 @@ export default function NoteDetail() {
         navigate={navigate}
       />
 
-      {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
-      {(note.status === 'converted' ||
-        note.status === 'cleaning' ||
-        note.status === 'cleaning_failed' ||
-        note.status === 'cleaned') && (
-        <CleaningPanel
+      {/* 批次 E2：两条栏 —— 左侧「元信息竖轨」，右侧是纯净的主内容区。
+          ⚠️ 这一层只加包装：里面每一个子块（清洗面板 / 关联资料 / 被引用 /
+          视频 / 正文）连同它们的 props、显示条件、顺序都留在原位。 */}
+      <div className={styles.detailBody}>
+        <NotePropertyRail
           note={note}
-          onStatusChange={handleStatusChange}
-          onMutatingChange={(mutating) => {
-            mutatingRef.current = mutating;
-          }}
+          onRoleUpdated={(noteRole) =>
+            setNote((prev) => (prev ? { ...prev, note_role: noteRole } : prev))
+          }
         />
-      )}
 
-      {/* 关联的学习资料列表（字段缺失时整块不显示，而不是整页崩掉） */}
-      {shouldShowRelatedLinks(noteLinks) && (
-        <RelatedLinksSection
-          noteLinks={noteLinks}
-          onCleanDanglingLinks={handleCleanDanglingLinks}
-        />
-      )}
+        <div className={styles.detailMain}>
+          {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
+          {(note.status === 'converted' ||
+            note.status === 'cleaning' ||
+            note.status === 'cleaning_failed' ||
+            note.status === 'cleaned') && (
+            <CleaningPanel
+              note={note}
+              onStatusChange={handleStatusChange}
+              onMutatingChange={(mutating) => {
+                mutatingRef.current = mutating;
+              }}
+            />
+          )}
 
-      {/* 被引用笔记列表 */}
-      {shouldShowCitingNotes(noteLinks) && <CitingNotesSection noteLinks={noteLinks} />}
+          {/* 关联的学习资料列表（字段缺失时整块不显示，而不是整页崩掉） */}
+          {shouldShowRelatedLinks(noteLinks) && (
+            <RelatedLinksSection
+              noteLinks={noteLinks}
+              onCleanDanglingLinks={handleCleanDanglingLinks}
+            />
+          )}
 
-      {/* 视频播放器（仅视频类型笔记显示） */}
-      {note.source_type === 'video' && videoUrl && <VideoPlayer videoUrl={videoUrl} />}
+          {/* 被引用笔记列表 */}
+          {shouldShowCitingNotes(noteLinks) && <CitingNotesSection noteLinks={noteLinks} />}
 
-      {/* 内容区域 */}
-      <ContentArea
-        noteId={noteId}
-        status={note.status}
-        viewMode={viewMode}
-        editMode={editMode}
-        mdContent={mdContent}
-        htmlContent={htmlContent}
-        editPreviewHtml={editPreviewHtml}
-        diffData={diffData}
-        diffLoading={diffLoading}
-        markdownRef={markdownRef}
-        onMouseUp={handleMouseUp}
-        onRefresh={fetchNote}
-        adhdReaderEnabled={adhdReaderEnabled}
-        adhdCurrentLineText={adhdCurrentLineText}
-        onToggleAdhdReader={toggleAdhdReader}
-        editContent={editContent}
-        onEditContentChange={setEditContent}
-        saving={saving}
-        onSave={handleSaveContent}
-        onCancelEdit={handleCancelEdit}
-      />
+          {/* 视频播放器（仅视频类型笔记显示） */}
+          {note.source_type === 'video' && videoUrl && <VideoPlayer videoUrl={videoUrl} />}
+
+          {/* 内容区域 */}
+          <ContentArea
+            noteId={noteId}
+            status={note.status}
+            viewMode={viewMode}
+            editMode={editMode}
+            mdContent={mdContent}
+            htmlContent={htmlContent}
+            editPreviewHtml={editPreviewHtml}
+            diffData={diffData}
+            diffLoading={diffLoading}
+            markdownRef={markdownRef}
+            onMouseUp={handleMouseUp}
+            onRefresh={fetchNote}
+            adhdReaderEnabled={adhdReaderEnabled}
+            adhdCurrentLineText={adhdCurrentLineText}
+            onToggleAdhdReader={toggleAdhdReader}
+            editContent={editContent}
+            onEditContentChange={setEditContent}
+            saving={saving}
+            onSave={handleSaveContent}
+            onCancelEdit={handleCancelEdit}
+          />
+        </div>
+      </div>
 
       {/* 批注操作浮层：选中文本后显示高亮/下划线/ AI 提问按钮 */}
       {showAnnotationMenu && editMode === 'view' && (

@@ -1,0 +1,118 @@
+/**
+ * 笔记详情页「元信息竖轨」的私有样式（批次 E2）
+ *
+ * 借鉴表 `docs/visual-symbol-research.md` §C3「笔记详情」行的
+ * **Memos property rail**：元信息收进一条窄竖轨，主内容区保持纯净。
+ *
+ * ## 它为什么是"窄"的、为什么是竖的
+ *
+ * 这一块原本横在页头与正文之间（一行 flex、`gap: --space-md`），
+ * 单条笔记要交代 7 项信息，横排就得占满整行、把正文往下推；
+ * 竖排之后它只占 220px 宽，与正文**并列**——正文的起始位置不再随
+ * "这条笔记有几个项目标签"左右晃动（这正是 Memos/Linear 那条 rail 的动机）。
+ *
+ * 页宽在这一页是**全宽档**（`App.tsx` 的 `PAGE_WIDTH_ROUTES`：
+ * `/notes/:noteId` → `full`，编辑态要分屏），所以让出 220px 不会挤压正文。
+ *
+ * ## `.roleSelect`（从 `NoteDetailHeader.module.css` 整体搬来，值一字未改）
+ *
+ * 它是本页唯一一个**会改数据**的原生表单控件（`updateNoteRole`），
+ * 而它此前把全部外观写在 tsx 的 `style={{...}}` 里 ——
+ * 其中包括 `outline: 'none'`（见 a11y-audit §4.1：axe 不检查焦点可见性）。
+ *
+ * 焦点环必须写在样式表里，内联样式里写不出来：
+ *   - `:focus-visible` 是伪类，内联样式无法表达；
+ *   - 而内联样式的权重高于任何选择器 —— 只要 tsx 里还留着
+ *     `outline: 'none'` / `boxShadow: 'none'`，样式表里的焦点规则就**永远不生效**
+ *     （"规则还在、永不生效"是本仓库 css-convention.md §3 里记过多次的事故类型）。
+ *
+ * 所以这里把外观整体搬进来，"随数据变化的那一项"（角色对应的底色）
+ * 改由 CSS 自定义属性 `--note-role-bg` 从 tsx 传入 —— 两个颜色仍是
+ * 角色语义的一部分，留在 tsx 里看得见；几何与焦点表现归样式表。
+ *
+ * ### 焦点环为什么是「白内圈 + 墨色外圈」两层
+ *
+ * 下拉框的底色随角色在白底页面上是 #316fd8 / #6d28d9 两种，都是蓝色系。
+ * 单色焦点环总有至少一种底色会撞色：
+ *   - 白色内圈：对两种底色都 ≥ 4.7:1（#316fd8 上 4.78:1、#6d28d9 上 7.10:1），
+ *     且紧贴控件边缘，是"焦点在这个控件上"最直接的提示；
+ *   - 深墨色外圈（--color-primary-hover #16213e，白底 15.89:1）：
+ *     白内圈在页面白底上对比度只有 1.0:1，单靠它控件"边界"仍然看不清；
+ *     外圈负责把控件从背景里划出来（WCAG 2.4.11 要求焦点指示 ≥ 3:1）。
+ *
+ * 用 `box-shadow` 而不是 `outline` + `outline-offset`：
+ * 这一列是 `display:flex; flex-direction:column`，`outline-offset` 画到
+ * 控件外面的那两圈会被相邻兄弟元素压住，看起来像被裁掉一角；
+ * `box-shadow` 不参与布局、也完全不改变控件几何（不会让这一列发生位移）。
+ *
+ * ### 兼容保留：`.roleSelect` 的基础值
+ *
+ * `--note-role-bg` 的兜底值写在基础规则里（= `material` 学习资料的蓝）。
+ * tsx 始终会传值，兜底只用于"变量没传进来"这种不存在的情况 ——
+ * 没有兜底的话 `background: var(--note-role-bg)` 会解析失败、
+ * 控件变成透明底 + 白字（比原来更难看清），那是比原问题更糟的失败方式。
+ */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  /* ⚠️ 必须是 flex-start：列方向的默认 `stretch` 会把每一枚徽章拉成
+      整轨宽（胶囊变成横条），而它们应该各自只有文字的宽度。 */
+  align-items: flex-start;
+  gap: var(--space-sm);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  /* 与正文之间只留一条发丝线：这条轨是"页边的注"，不是第二个内容块 */
+  padding-right: var(--space-lg);
+  border-right: 1px solid var(--color-border-light);
+  /* 长内容（如"创建于 … GMT+8"）在窄轨里换行，而不是把轨道撑宽 */
+  overflow-wrap: anywhere;
+  /* 轨道跟着滚动（正文很长时元信息仍可读）；`align-self` 让它在网格
+     单元格里不被拉伸，`sticky` 才有可移动的余量。 */
+  align-self: start;
+  position: sticky;
+  top: var(--space-md);
+}
+
+.roleSelect {
+  /* 学习资料的角色色。原来这里是 #3b82f6，白底上白字只有 3.68:1
+     （12px 小字要求 4.5:1，即 a11y-audit 的 F-12 三元成因之一）；
+     压深到同一个蓝色家族的 #316fd8 后是 4.78:1 —— 色相不变，只是深了一档。 */
+  --note-role-bg: #316fd8;
+
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--note-role-bg);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* 焦点可见：键盘用户看得出焦点在这个下拉框上（axe 不检查这一条，
+   见 a11y-audit §4.1 —— 它靠人看、靠这一行代码守）。 */
+.roleSelect:focus-visible {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--color-primary-hover);
+}
+
+/* ── 窄屏（沿用全局的 768px，不另造断点）──
+ *
+ * 两栏骨架在 ≤768px 收成单栏（见 `NoteDetail.module.css`），
+ * 于是这条轨从"左侧竖轨"变成"正文上方的一横排"：
+ * 竖排 → 横排换行，发丝线从右边挪到下边，sticky 取消（横条吸顶会挡住正文）。
+ */
+@media (max-width: 768px) {
+  .rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    padding-right: 0;
+    padding-bottom: var(--space-md);
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-light);
+    position: static;
+  }
+}
