@@ -50,7 +50,12 @@
 /* ── 用户提问气泡（右对齐，深色胶囊）── */
 
 .qaUserBubble {
-  background: var(--gradient-primary);
+  /* 批次 E7：原为 `var(--gradient-primary)`。那个渐变两端是 #1a1a2e → #0f3460、
+     相对亮度比只有 1.365:1，**用作背景时根本看不出渐变**（"墨韵"的意图没兑现），
+     所以按既定的收敛方向换成实色 `--color-primary`。
+     同时把 `base.css` 里那条"还剩 9 处"的账目改成 8 处 —— 那份账目明文要求
+     "每收敛一处都要同步这个数字"。 */
+  background: var(--color-primary);
   color: white;
   padding: var(--space-sm) var(--space-md);
   border-radius: 16px 16px 4px 16px;
@@ -75,5 +80,75 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ── 两栏骨架（批次 E7）：左侧对话流 + 右侧常驻引用栏 ──
+ *
+ * 借鉴表 §C3「问答」行引的是 Khoj 的 **Reference Panel**：引用来源做成
+ * **常驻右栏**，而不是"点一下展开"的折叠角标。理由是这一页除了提问之外
+ * 唯一的操作就是"顺着引用跳原文"，把入口藏在一次点击之后等于把它降级成
+ * 彩蛋；而折叠角标还多一个状态要维护（展开过没有、切轮次要不要收起）。
+ *
+ * 右栏只显示**最新一轮**的来源 —— 多轮对话里每一轮的引用属于那一轮，
+ * 所以卡片内那份**原样保留**（既不重复也不丢信息：右栏是"不用滚动就能看到
+ * 当前引用"的增强，不是替代；窄屏没有右栏时，卡片内那份是唯一的来源入口）。
+ */
+
+.qaLayout {
+  display: grid;
+  /* `minmax(0, 1fr)` 而不是 `1fr`：网格子项默认 `min-width: auto`，
+     会被长 URL / 长标题顶开，整页跟着横向滚动 */
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.qaMain {
+  min-width: 0;
+}
+
+.qaRail {
+  /* sticky：跟着滚但不滚出视野，滚到底就停在原位（与本项目自评四档同一套做法） */
+  position: sticky;
+  top: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.qaRailTitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.qaRailEmpty {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--color-text-tertiary);
+}
+
+.qaRailList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* ── 窄屏（断点沿用全局的 768 / 480，见 css-convention §3 雷区 2）── */
+
+@media (max-width: 768px) {
+  /* 收成一栏，右栏落到对话流**下方** —— 这是自然堆叠，不是折叠：
+     来源始终在页面上，只是不再占一条竖栏（300px 的竖栏在 375px 屏上放不下） */
+  .qaLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qaRail {
+    position: static;
   }
 }

@@ -69,9 +69,11 @@
      （透明文字的标题、主按钮）；**批次 E1（Dashboard 精修）又收敛 3 处**，
      都改成实色/墨阶：`StatCard.module.css` 的统计卡大数字（原来是 `background-clip: text`
      的渐变文字）、同一文件的蓝变体色条、`Dashboard.module.css` 的趋势柱。
-     **实测（E1 收尾时 `git grep "var(--gradient-primary)"`，注释不计）还剩 9 处**：
+     **实测（E1 收尾时 `git grep "var(--gradient-primary)"`，注释不计）还剩 9 处**；
+     **批次 E7 收敛掉 `QA.module.css` 那 1 处**（用户提问气泡 → `--color-primary`），
+     所以现在是 **8 处**：
      `Sidebar.module.css` 1 / `graph/Graph.module.css` 2 / `Auth.module.css` 2 /
-     `QA.module.css` 1 / `components.css` 的 `.btn-ghost::after` 1 /
+     `components.css` 的 `.btn-ghost::after` 1 /
      `dashboard.css` 的 `.progress-bar-fill` 1 / `learning.css` 1。
      收敛方向不变（随阶段 E 逐页精修一并处理），但**每收敛一处都要同步这个数字**：
      A2 当时写的"17 处"到 E1 开始时实测只剩 12 处（A3 之后又零星减过几次），
