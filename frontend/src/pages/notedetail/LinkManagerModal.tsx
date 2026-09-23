@@ -26,14 +26,20 @@
  *    删除的逐条证据（`src/**` grep 0 处 + 运行时拼类名 0 处 + 产物 0 次）
  *    见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。
  *
- * 所以本组件两轮都**只改文档、不改 DOM**：弹窗仍然用内联样式渲染，
+ * 所以 5.6 那两轮都**只改文档、不改 DOM**：弹窗当时仍然用内联样式渲染，
  * 外观逐属性不变（探针 `notedetail-link-modal` 场景对账过 computed style）。
  *
- * 将来要收口的话，正确的一轮是："把内联样式改成类 + 给遮罩一个真类名 +
- * 重新设计那几个类的样式"，那是**改外观**的改动，必须带截图对比 ——
- * 而不是混在"证明什么都没丢"的迁移批里（规范 §3 雷区 4）。
+ * ## 批次 D2：内联遮罩 + 面板整体换成 `<Dialog>` 基座
+ *
+ * 上面说的"将来要收口的那一轮"就是本批，做法是**只换外壳**：
+ * 全屏遮罩 div + 居中面板 div + 内联几何样式 →
+ * `<Dialog open onClose title="管理关联资料">`。遮罩色、层级（`--z-modal`）、
+ * 圆角、阴影、内边距从此只有 `Dialog.module.css` 一个来源；
+ * 勾选逻辑（`onLinkMaterialIdsChange`）、按钮文案与 `onClick`、空列表文案
+ * 一个都没改。本组件现在仍然**没有** `*.module.css` —— 它一个类名都不需要。
  */
 import type { Note } from '../../api/client';
+import Dialog from '../../components/Dialog';
 
 interface LinkManagerModalProps {
   /** 可关联的学习资料列表 */
@@ -57,72 +63,51 @@ export default function LinkManagerModal({
   onSave,
 }: LinkManagerModalProps) {
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0,0,0,0.5)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="card"
-        style={{
-          maxWidth: '500px',
-          width: '90%',
-          maxHeight: '70vh',
-          overflowY: 'auto',
-          padding: '1.5rem',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ marginBottom: '1rem' }}>管理关联资料</h3>
-        {availableMaterials.length === 0 ? (
-          <p style={{ color: 'var(--color-text-secondary)' }}>暂无可关联的资料</p>
-        ) : (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem',
-              marginBottom: '1rem',
-            }}
-          >
-            {availableMaterials.map((m) => (
-              <label
-                key={m.id}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={linkMaterialIds.includes(m.id)}
-                  onChange={(e) => {
-                    onLinkMaterialIdsChange((prev) =>
-                      e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id),
-                    );
-                  }}
-                />
-                <span>{m.title}</span>
-              </label>
-            ))}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+    <Dialog
+      open
+      onClose={onClose}
+      title="管理关联资料"
+      footer={
+        <>
           <button className="btn btn-secondary" onClick={onClose}>
             取消
           </button>
           <button className="btn btn-primary" onClick={onSave}>
             保存
           </button>
+        </>
+      }
+    >
+      {availableMaterials.length === 0 ? (
+        <p style={{ color: 'var(--color-text-secondary)' }}>暂无可关联的资料</p>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            marginBottom: '1rem',
+          }}
+        >
+          {availableMaterials.map((m) => (
+            <label
+              key={m.id}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={linkMaterialIds.includes(m.id)}
+                onChange={(e) => {
+                  onLinkMaterialIdsChange((prev) =>
+                    e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id),
+                  );
+                }}
+              />
+              <span>{m.title}</span>
+            </label>
+          ))}
         </div>
-      </div>
-    </div>
+      )}
+    </Dialog>
   );
 }

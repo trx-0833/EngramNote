@@ -16,6 +16,8 @@ import Icon from '../components/Icon';
 // 统一进组件后是 1.5rem；页头那一行（标题 + 按钮、窄屏换行）也由它承担
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+// 对话框基座（visual-refactor-plan 批次 D2）：新建目标弹窗的遮罩 / 面板 / Esc 由它渲染
+import Dialog from '../components/Dialog';
 import { useToast } from '../components/Toast';
 
 /** 目标类型：每日 / 每周 */
@@ -178,24 +180,16 @@ export default function LearningGoals() {
   }, []);
 
   /**
-   * Esc 关闭新建弹窗（a11y-audit 的键盘可达性一轮）。
+   * ⚠️ 墓碑（批次 D2）：这里原来挂着**一份 document 级的 Esc 监听**
+   * （a11y-audit 的键盘可达性一轮补的：`useEffect` + `document.addEventListener
+   * ('keydown', …)` 调 `handleCancelCreate`）。弹窗外壳换成 `<Dialog>` 基座后
+   * **整段已删除** —— Esc 由基座在遮罩的 `onKeyDown` 里统一处理。
    *
-   * 原来这个弹窗**没有任何键盘退路**：只有"点遮罩"与"点取消"两条路，
-   * 而 `role="dialog"` / `aria-modal` 也都没有 —— 屏幕阅读器不会把
-   * 它念成一个对话框。
-   *
-   * 监听挂在 `document` 而不是弹窗容器上：挂在容器上要求 keydown 从容器内部
-   * 冒泡上来（`autoFocus` 落在名称输入框上时成立，但焦点一旦回到 `body`
-   * 就静默失效 —— 那种"看起来做了、实际不生效"最糟）。
+   * **不要加回来**：同一个 Esc 有两套来源时，"哪一套先生效"取决于事件路径
+   * （基座挂在遮罩上、这份挂在 `document` 上），不一致时的症状只在真实浏览器里
+   * 才看得见 —— 理由与 `Dialog.tsx` 文件头"为什么焦点陷阱是一个 `onKeyDown`
+   * 而不是 document 上的监听器"逐字相同。
    */
-  useEffect(() => {
-    if (!showCreateForm) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') handleCancelCreate();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [showCreateForm, handleCancelCreate]);
 
   return (
     <div className="page-enter">
@@ -304,151 +298,132 @@ export default function LearningGoals() {
         </>
       )}
 
-      {/* 新建目标弹窗。
+      {/* 新建目标弹窗（批次 D2：遮罩 / 面板 / `role="dialog"` + `aria-modal` +
+          `aria-labelledby` / Esc / 焦点陷阱 / body 滚动锁全部交给 `<Dialog>` 基座）。
           ── a11y-audit 的键盘可达性一轮（这一处此前**没有任何场景**覆盖，
              所以先补 `learning-goals-create` 场景再改，见 e2e/a11y.spec.ts）──
-          补的四件事：
-            1. `role="dialog"` —— 屏幕阅读器把这一块念成对话框；
-            2. `aria-modal="true"` —— 明确"底下的内容此刻不参与交互"；
-            3. `aria-labelledby` 指到标题上 —— 对话框有可访问名（axe 的
-               `aria-dialog-name` 要求它，没有名字的对话框读屏只会念"对话框"）；
-            4. 四个 `<label>` 与输入框用 `htmlFor`/`id` **真的关联起来** ——
-               原来 label 只是视觉上的兄弟，点标签不会聚焦输入框，
-               读屏也报不出这些控件的名字（axe 的 `label` 规则第一次扫到就会报）。
-          `autoFocus` 本来就在名称输入框上（打开即聚焦），保持不变。 */}
-      {showCreateForm && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
-          onClick={handleCancelCreate}
-        >
-          <div
-            className="card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="learning-goal-create-title"
-            style={{ width: '90%', maxWidth: 480, padding: 'var(--space-lg)' }}
-            onClick={(e) => e.stopPropagation()}
+          那时补的四件事现在的归属：
+            1. `role="dialog"` —— 基座给；
+            2. `aria-modal="true"` —— 基座给；
+            3. 对话框的可访问名 —— 基座给：`title="新建学习目标"` 渲染成面板顶部的
+               `h2`，并用 `useId()` 生成 `id` 接到 `aria-labelledby` 上，
+               所以原来写死的 `id="learning-goal-create-title"` 连同那枚 `<h3>`
+               一起删掉了（信息一个字没少，`<h2>` 与 `<h3>` 都不跳级）；
+            4. 四个 `<label>` 与输入框的 `htmlFor`/`id` —— **本文件保留**，逐字未动：
+               那是内容层的标签关联，与弹窗外壳无关。
+          `autoFocus` 本来就在名称输入框上（打开即聚焦），保持不变 ——
+          基座的初始焦点取面板里第一个可聚焦元素，也正好是它。 */}
+      <Dialog
+        open={showCreateForm}
+        onClose={handleCancelCreate}
+        title="新建学习目标"
+        footer={
+          <>
+            <button
+              className="btn btn-secondary"
+              onClick={handleCancelCreate}
+              disabled={submitting}
+            >
+              取消
+            </button>
+            <button className="btn btn-primary" onClick={handleCreate} disabled={submitting}>
+              {submitting ? '创建中...' : '创建'}
+            </button>
+          </>
+        }
+      >
+        {/* 名称输入 */}
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <label
+            htmlFor="learning-goal-create-name"
+            style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
           >
-            <h3 id="learning-goal-create-title" style={{ marginBottom: 'var(--space-md)' }}>
-              新建学习目标
-            </h3>
-
-            {/* 名称输入 */}
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label
-                htmlFor="learning-goal-create-name"
-                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
-              >
-                目标名称
-              </label>
-              <input
-                id="learning-goal-create-name"
-                type="text"
-                className="input"
-                placeholder="例如：掌握第一章核心概念"
-                value={createForm.name}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
-                maxLength={200}
-                autoFocus
-              />
-            </div>
-
-            {/* 类型选择 */}
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label
-                htmlFor="learning-goal-create-type"
-                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
-              >
-                目标类型
-              </label>
-              <select
-                id="learning-goal-create-type"
-                className="input"
-                value={createForm.type}
-                onChange={(e) =>
-                  setCreateForm((prev) => ({ ...prev, type: e.target.value as GoalType }))
-                }
-              >
-                <option value="daily">每日目标</option>
-                <option value="weekly">每周目标</option>
-              </select>
-            </div>
-
-            {/* 目标掌握度 */}
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label
-                htmlFor="learning-goal-create-mastery"
-                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
-              >
-                目标掌握度 (%)
-              </label>
-              <input
-                id="learning-goal-create-mastery"
-                type="number"
-                className="input"
-                min={0}
-                max={100}
-                value={createForm.target_mastery}
-                onChange={(e) =>
-                  setCreateForm((prev) => ({ ...prev, target_mastery: Number(e.target.value) }))
-                }
-              />
-            </div>
-
-            {/* 截止日期 */}
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <label
-                htmlFor="learning-goal-create-deadline"
-                style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
-              >
-                截止日期（可选）
-              </label>
-              <input
-                id="learning-goal-create-deadline"
-                type="date"
-                className="input"
-                value={createForm.deadline}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, deadline: e.target.value }))}
-              />
-            </div>
-
-            {/* 表单错误提示 */}
-            {formError && (
-              <p
-                style={{
-                  color: 'var(--color-error)',
-                  fontSize: '0.875rem',
-                  marginBottom: 'var(--space-sm)',
-                }}
-              >
-                {formError}
-              </p>
-            )}
-
-            {/* 操作按钮 */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-sm)' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={handleCancelCreate}
-                disabled={submitting}
-              >
-                取消
-              </button>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={submitting}>
-                {submitting ? '创建中...' : '创建'}
-              </button>
-            </div>
-          </div>
+            目标名称
+          </label>
+          <input
+            id="learning-goal-create-name"
+            type="text"
+            className="input"
+            placeholder="例如：掌握第一章核心概念"
+            value={createForm.name}
+            onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
+            maxLength={200}
+            autoFocus
+          />
         </div>
-      )}
+
+        {/* 类型选择 */}
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <label
+            htmlFor="learning-goal-create-type"
+            style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+          >
+            目标类型
+          </label>
+          <select
+            id="learning-goal-create-type"
+            className="input"
+            value={createForm.type}
+            onChange={(e) =>
+              setCreateForm((prev) => ({ ...prev, type: e.target.value as GoalType }))
+            }
+          >
+            <option value="daily">每日目标</option>
+            <option value="weekly">每周目标</option>
+          </select>
+        </div>
+
+        {/* 目标掌握度 */}
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <label
+            htmlFor="learning-goal-create-mastery"
+            style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+          >
+            目标掌握度 (%)
+          </label>
+          <input
+            id="learning-goal-create-mastery"
+            type="number"
+            className="input"
+            min={0}
+            max={100}
+            value={createForm.target_mastery}
+            onChange={(e) =>
+              setCreateForm((prev) => ({ ...prev, target_mastery: Number(e.target.value) }))
+            }
+          />
+        </div>
+
+        {/* 截止日期 */}
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <label
+            htmlFor="learning-goal-create-deadline"
+            style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
+          >
+            截止日期（可选）
+          </label>
+          <input
+            id="learning-goal-create-deadline"
+            type="date"
+            className="input"
+            value={createForm.deadline}
+            onChange={(e) => setCreateForm((prev) => ({ ...prev, deadline: e.target.value }))}
+          />
+        </div>
+
+        {/* 表单错误提示 */}
+        {formError && (
+          <p
+            style={{
+              color: 'var(--color-error)',
+              fontSize: '0.875rem',
+              marginBottom: 'var(--space-sm)',
+            }}
+          >
+            {formError}
+          </p>
+        )}
+      </Dialog>
 
       {/* 删除目标的确认框（批次 D3）：文案逐字保留原来的 `confirm()` 参数。
           `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消什么都不做。 */}

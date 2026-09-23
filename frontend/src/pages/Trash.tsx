@@ -15,6 +15,8 @@ import {
   type TrashNoteItem,
 } from '../api/client';
 import { PurgeNoteDialog } from '../components/DeleteNoteDialog';
+// 对话框基座（visual-refactor-plan 批次 D2）：清空确认弹窗的遮罩 / 面板改由它渲染
+import Dialog from '../components/Dialog';
 import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -248,57 +250,37 @@ export default function Trash() {
         />
       )}
 
-      {/* 清空回收站确认弹窗 */}
-      {showPurgeAll && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
-          onClick={() => setShowPurgeAll(false)}
-        >
-          <div
-            className="card"
-            style={{ maxWidth: 460, width: '100%', padding: 24 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ color: 'var(--color-error)' }}>清空回收站</h3>
-            <p style={{ marginBottom: 'var(--space-md)' }}>
-              确定彻底删除回收站中的全部 {items.length} 条笔记吗？此操作<strong>不可恢复</strong>。
-            </p>
-            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-              其他笔记对这些笔记的引用将以「[已删除的笔记]」占位符保留，不会影响其他笔记的内容。
-            </p>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 'var(--space-sm)',
-                marginTop: 'var(--space-lg)',
-              }}
+      {/* 清空回收站确认弹窗（批次 D2：遮罩 / 面板 / 层级 / 圆角 / 阴影 / 内边距
+          全部交给 `<Dialog>` 基座；原来这里是手写内联遮罩 + `className="card"` 面板，
+          标题还是红字 `<h3>` —— 基座的 `.dialogTitle` 统一标题色，危险语义由正文的
+          「不可恢复」与红底确认按钮承担）。
+          ⚠️ 不再需要 `showPurgeAll &&` 包一层：`open={false}` 时基座连遮罩都不渲染。 */}
+      <Dialog
+        open={showPurgeAll}
+        onClose={() => setShowPurgeAll(false)}
+        title="清空回收站"
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setShowPurgeAll(false)}>
+              取消
+            </button>
+            <button
+              className="btn"
+              style={{ background: 'var(--color-error)', color: '#fff' }}
+              onClick={confirmPurgeAll}
             >
-              <button className="btn btn-secondary" onClick={() => setShowPurgeAll(false)}>
-                取消
-              </button>
-              <button
-                className="btn"
-                style={{ background: 'var(--color-error)', color: '#fff' }}
-                onClick={confirmPurgeAll}
-              >
-                清空
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              清空
+            </button>
+          </>
+        }
+      >
+        <p style={{ marginBottom: 'var(--space-md)' }}>
+          确定彻底删除回收站中的全部 {items.length} 条笔记吗？此操作<strong>不可恢复</strong>。
+        </p>
+        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+          其他笔记对这些笔记的引用将以「[已删除的笔记]」占位符保留，不会影响其他笔记的内容。
+        </p>
+      </Dialog>
     </div>
   );
 }

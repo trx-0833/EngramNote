@@ -20,6 +20,8 @@ import {
 } from '../api/client';
 // 统一确认框（批次 D3）：恢复版本前的二次确认原来是 window.confirm
 import ConfirmDialog from './ConfirmDialog';
+// 对话框基座（批次 D2）：版本历史面板的遮罩 / 面板 / Esc / 焦点陷阱由它渲染
+import Dialog from './Dialog';
 
 interface VersionHistoryProps {
   /** 笔记 ID */
@@ -188,286 +190,255 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
 
   return (
     <>
-      {/* 模态浮层：半透明遮罩 + 居中卡片。
-          ⚠️ 外层这个 div 的 `onClick={onClose}` 是**整个面板**的点击处理器，
-          确认框（批次 D3）刻意渲染在它**外面**：React 合成事件按组件树冒泡，
-          嵌进去的话确认框里任何一次点击都会冒到 `onClose`，
-          把版本历史面板一起关掉。 */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          zIndex: 1000,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        onClick={onClose}
+      {/* 模态浮层（批次 D2）：遮罩 / 面板 / 层级 / 圆角 / 阴影 / 内边距全部交给
+          `<Dialog>` 基座。原标题「版本历史」改成基座的 `title`（渲染成面板顶部的
+          `h2` 并自动接上 `aria-labelledby`），「关闭」按钮移进基座的 `footer`
+          操作区（文案 / className / onClick / disabled 逐字保留）。
+
+          ⚠️ 确认框（批次 D3）仍渲染在 `<Dialog>` **外面**（同一个 fragment 的
+          兄弟节点）：两个 `Dialog` 嵌套会争同一把 body 滚动锁（内层关闭时把锁
+          卸掉，外层还开着页面却又能滚），外层的焦点陷阱也会把内层的 Tab 循环
+          接管掉。本组件由父级条件渲染，所以 `open` 恒为 true。 */}
+      <Dialog
+        open
+        onClose={onClose}
+        title="版本历史"
+        footer={
+          <button className="btn btn-secondary" onClick={onClose} disabled={restoring}>
+            关闭
+          </button>
+        }
       >
-        <div
-          className="card"
-          style={{
-            maxWidth: '900px',
-            width: '90%',
-            maxHeight: '85vh',
-            overflowY: 'auto',
-            padding: '1.5rem',
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* 头部：标题 + 关闭按钮 */}
-          <div
+        {error && (
+          <p
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 'var(--space-md)',
+              color: 'var(--color-error)',
+              marginBottom: 'var(--space-sm)',
+              fontSize: '0.875rem',
             }}
           >
-            <h2 className="heading-serif" style={{ fontSize: '1.25rem', margin: 0 }}>
-              版本历史
-            </h2>
-            <button className="btn btn-secondary" onClick={onClose} disabled={restoring}>
-              关闭
-            </button>
-          </div>
+            {error}
+          </p>
+        )}
 
-          {error && (
-            <p
-              style={{
-                color: 'var(--color-error)',
-                marginBottom: 'var(--space-sm)',
-                fontSize: '0.875rem',
-              }}
-            >
-              {error}
-            </p>
-          )}
-
-          {loading ? (
-            <p
-              style={{
-                color: 'var(--color-text-secondary)',
-                textAlign: 'center',
-                padding: 'var(--space-lg)',
-              }}
-            >
-              加载中...
-            </p>
-          ) : versions.length === 0 ? (
-            <p
-              style={{
-                color: 'var(--color-text-secondary)',
-                textAlign: 'center',
-                padding: 'var(--space-lg)',
-              }}
-            >
-              暂无版本历史
-            </p>
-          ) : (
-            <>
-              {/* 版本列表 */}
-              <div style={{ marginBottom: 'var(--space-md)' }}>
-                <p
-                  style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--color-text-secondary)',
-                    marginBottom: 'var(--space-xs)',
-                  }}
-                >
-                  选择两个版本进行对比（已选 {selectedCount}/2）
-                </p>
-                {versions.map((v) => {
-                  const badge = getSourceBadge(v.source);
-                  const isSelected =
-                    selectedVersions[0] === v.version_number ||
-                    selectedVersions[1] === v.version_number;
-                  return (
-                    <div
-                      key={v.id}
-                      className="card"
+        {loading ? (
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              textAlign: 'center',
+              padding: 'var(--space-lg)',
+            }}
+          >
+            加载中...
+          </p>
+        ) : versions.length === 0 ? (
+          <p
+            style={{
+              color: 'var(--color-text-secondary)',
+              textAlign: 'center',
+              padding: 'var(--space-lg)',
+            }}
+          >
+            暂无版本历史
+          </p>
+        ) : (
+          <>
+            {/* 版本列表 */}
+            <div style={{ marginBottom: 'var(--space-md)' }}>
+              <p
+                style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-xs)',
+                }}
+              >
+                选择两个版本进行对比（已选 {selectedCount}/2）
+              </p>
+              {versions.map((v) => {
+                const badge = getSourceBadge(v.source);
+                const isSelected =
+                  selectedVersions[0] === v.version_number ||
+                  selectedVersions[1] === v.version_number;
+                return (
+                  <div
+                    key={v.id}
+                    className="card"
+                    style={{
+                      padding: '0.75rem 1rem',
+                      marginBottom: '0.5rem',
+                      border: isSelected
+                        ? '1px solid var(--color-primary)'
+                        : '1px solid var(--color-border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    {/* 选择复选框 */}
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => handleSelectVersion(v.version_number)}
+                      disabled={restoring}
+                    />
+                    {/* 版本号 */}
+                    <span style={{ fontWeight: 600, minWidth: '40px' }}>v{v.version_number}</span>
+                    {/* 来源徽章 */}
+                    <span
                       style={{
-                        padding: '0.75rem 1rem',
-                        marginBottom: '0.5rem',
-                        border: isSelected
-                          ? '1px solid var(--color-primary)'
-                          : '1px solid var(--color-border)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.75rem',
-                        flexWrap: 'wrap',
+                        background: badge.bg,
+                        color: 'white',
+                        fontSize: '0.7rem',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      {/* 选择复选框 */}
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleSelectVersion(v.version_number)}
-                        disabled={restoring}
-                      />
-                      {/* 版本号 */}
-                      <span style={{ fontWeight: 600, minWidth: '40px' }}>v{v.version_number}</span>
-                      {/* 来源徽章 */}
+                      {badge.label}
+                    </span>
+                    {/* 创建时间 */}
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                      {formatDate(v.created_at)}
+                    </span>
+                    {/* 内容大小 */}
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                      {formatSize(v.content_size)}
+                    </span>
+                    {/* 变更摘要 */}
+                    {v.change_summary && (
                       <span
                         style={{
-                          background: badge.bg,
-                          color: 'white',
-                          fontSize: '0.7rem',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          whiteSpace: 'nowrap',
+                          fontSize: '0.8rem',
+                          color: 'var(--color-text-secondary)',
+                          flex: 1,
+                          minWidth: '120px',
                         }}
                       >
-                        {badge.label}
+                        {v.change_summary}
                       </span>
-                      {/* 创建时间 */}
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {formatDate(v.created_at)}
-                      </span>
-                      {/* 内容大小 */}
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {formatSize(v.content_size)}
-                      </span>
-                      {/* 变更摘要 */}
-                      {v.change_summary && (
-                        <span
+                    )}
+                    {/* 操作按钮 */}
+                    <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                        onClick={() => handlePreview(v.version_number)}
+                        disabled={restoring}
+                      >
+                        预览
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                        onClick={() => handleRestore(v.version_number)}
+                        disabled={restoring}
+                      >
+                        恢复此版本
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 对比面板：两个版本都选中时显示 */}
+            {diffResult && (
+              <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
+                  版本对比: v{diffResult.v1_number} → v{diffResult.v2_number}
+                </h3>
+                {diffResult.diff_lines.length === 0 ? (
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+                    两个版本完全相同，没有差异。
+                  </p>
+                ) : (
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                    {diffResult.diff_lines.map((line, idx) => {
+                      // 行前缀：added=+, removed=-, unchanged=空格
+                      const prefix =
+                        line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+                      // 行背景色：added=绿，removed=红，unchanged=透明
+                      const bg =
+                        line.type === 'added'
+                          ? 'rgba(34, 197, 94, 0.15)'
+                          : line.type === 'removed'
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : 'transparent';
+                      // 行文字色
+                      const color =
+                        line.type === 'added'
+                          ? 'var(--color-success)'
+                          : line.type === 'removed'
+                            ? 'var(--color-error)'
+                            : 'var(--color-text)';
+                      return (
+                        <div
+                          key={idx}
                           style={{
-                            fontSize: '0.8rem',
-                            color: 'var(--color-text-secondary)',
-                            flex: 1,
-                            minWidth: '120px',
+                            background: bg,
+                            color,
+                            padding: '1px 8px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
                           }}
                         >
-                          {v.change_summary}
-                        </span>
-                      )}
-                      {/* 操作按钮 */}
-                      <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto' }}>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                          onClick={() => handlePreview(v.version_number)}
-                          disabled={restoring}
-                        >
-                          预览
-                        </button>
-                        <button
-                          className="btn btn-primary"
-                          style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                          onClick={() => handleRestore(v.version_number)}
-                          disabled={restoring}
-                        >
-                          恢复此版本
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 对比面板：两个版本都选中时显示 */}
-              {diffResult && (
-                <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
-                  <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
-                    版本对比: v{diffResult.v1_number} → v{diffResult.v2_number}
-                  </h3>
-                  {diffResult.diff_lines.length === 0 ? (
-                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-                      两个版本完全相同，没有差异。
-                    </p>
-                  ) : (
-                    <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                      {diffResult.diff_lines.map((line, idx) => {
-                        // 行前缀：added=+, removed=-, unchanged=空格
-                        const prefix =
-                          line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
-                        // 行背景色：added=绿，removed=红，unchanged=透明
-                        const bg =
-                          line.type === 'added'
-                            ? 'rgba(34, 197, 94, 0.15)'
-                            : line.type === 'removed'
-                              ? 'rgba(239, 68, 68, 0.15)'
-                              : 'transparent';
-                        // 行文字色
-                        const color =
-                          line.type === 'added'
-                            ? 'var(--color-success)'
-                            : line.type === 'removed'
-                              ? 'var(--color-error)'
-                              : 'var(--color-text)';
-                        return (
-                          <div
-                            key={idx}
-                            style={{
-                              background: bg,
-                              color,
-                              padding: '1px 8px',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                            }}
-                          >
-                            <span style={{ marginRight: '0.5rem', userSelect: 'none' }}>
-                              {prefix}
-                            </span>
-                            {line.content}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 预览面板：点击预览后显示 */}
-              {previewContent && (
-                <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '0.5rem',
-                    }}
-                  >
-                    <h3 style={{ fontSize: '1rem', margin: 0 }}>
-                      版本内容预览 (v{previewContent.version_number})
-                    </h3>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                      onClick={() => setPreviewContent(null)}
-                    >
-                      关闭预览
-                    </button>
+                          <span style={{ marginRight: '0.5rem', userSelect: 'none' }}>
+                            {prefix}
+                          </span>
+                          {line.content}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <pre
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      fontSize: '0.85rem',
-                      lineHeight: 1.6,
-                      margin: 0,
-                      maxHeight: '400px',
-                      overflowY: 'auto',
-                    }}
+                )}
+              </div>
+            )}
+
+            {/* 预览面板：点击预览后显示 */}
+            {previewContent && (
+              <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '0.5rem',
+                  }}
+                >
+                  <h3 style={{ fontSize: '1rem', margin: 0 }}>
+                    版本内容预览 (v{previewContent.version_number})
+                  </h3>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                    onClick={() => setPreviewContent(null)}
                   >
-                    {previewContent.content}
-                  </pre>
+                    关闭预览
+                  </button>
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: '0.85rem',
+                    lineHeight: 1.6,
+                    margin: 0,
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {previewContent.content}
+                </pre>
+              </div>
+            )}
+          </>
+        )}
+      </Dialog>
 
       {/* 恢复版本的确认框（批次 D3）：文案逐字保留原来的 `window.confirm` 参数。
-          ⚠️ 它在遮罩那个 div **外面**：那层的 `onClick={onClose}` 是整面板的
-          点击处理器，嵌进去的话框里任何点击都会顺手关掉版本历史（React 合成
-          事件按组件树冒泡）。
+          ⚠️ 它在 `<Dialog>` **外面**（同一个 fragment 的兄弟节点，理由见上面那段
+          注释）：嵌进基座里，两层弹窗会争同一把 body 滚动锁。
           `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头）；取消什么都不做。 */}
       <ConfirmDialog
         open={confirmRestoreVersion !== null}
