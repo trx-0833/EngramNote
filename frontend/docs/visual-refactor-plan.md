@@ -33,7 +33,7 @@
 | | D2 | 迁移 5 套 modal | **有** | ✅ |
 | | D3 | 替换 14 处 `window.confirm`（**拆两半**：组件内 7 处 → hook 内 7 处） | **有** | ✅ |
 | | D4 | `:focus-visible` 统一光环 | **有** | ✅ |
-| **E 逐页** | E1–E8 | 8 个页组精修（E2 完成，E3 进行中） | **有** | 🟡 |
+| **E 逐页** | E1–E8 | 8 个页组精修（E3 完成，E4/E5/E8 进行中，E6/E7 待做） | **有** | 🟡 |
 | **F 收口** | F1 | `/styleguide` 补全 | 无 | ✅ |
 | | F2 | 设计冗余门禁（工具已就位，基线留到 A–E 完成后设） | 无 | 🟡 |
 
@@ -381,7 +381,8 @@ npx vite preview --outDir <快照目录>
 | D3 后半 | `d7440fe` | 2026-09-23 | 七条门禁全绿；测试 338 → **369**；grep 实测 hook 里的同步 `confirm('…')` 已清零 | 新增 `ConfirmProvider` + `useConfirm()`，7 处调用点写成 `if (!(await confirm({…}))) return`（形状与原来的同步 `if (!confirm(…)) return` 一致）。⚠️ **本批最险的一处**：`ConfirmDialog.handleConfirm` 是**先 `onCancel()` 关框、再 `onConfirm()`**，若把 Promise 的结账挂在 `onCancel` 上，点确认会先结出一个 `false` —— 调用方永远走取消分支、而框看起来是正常关闭的（**静默吃掉用户操作**）。为此给 `ConfirmDialog` 加了可选 `onConfirmClose`（不传时行为逐字不变）把"确认后的关闭"与"取消"解耦，并有一条专门用例钉住它。顺带修掉 D3 前半登记的焦点回退：`Dialog` 原来只判 `isConnected`，触发元素还在 DOM 但已 `disabled` 时 `focus()` 是静默 no-op ⇒ 焦点掉到 body；现在向上找第一个真正能收焦点的元素（非 disabled、不在 inert 子树、原生可聚焦或带 tabindex），整条链都不行时不强行 focus。`useNoteActions.handleCancelEdit` 由同步函数变为 async |
 | E1 | `e28a2cb` | 2026-09-23 | 7 条门禁全绿（含 4 条钉住 Dashboard 卡片标题字号的 a11y 守卫） | 衬线数字固化为一等规则；数字从**渐变文字**改为焦墨实色（实色＝原渐变起点色，深浅一处未动）；四条色条去渐变。⚠️ StatCard 为两页共用，`/today` 受影响、待它所属页组核 |
 | E2 | `07dd3e0` | 2026-09-23 | 七条门禁全绿，a11y **26 passed**；8 个文件 +588/-196 | 列表项左侧 3px 来源类型色条（Trilium 做法）+ 操作按钮 hover 才出；详情页元信息收进 220px 窄竖轨（新组件 `NotePropertyRail`，`<aside aria-label="笔记元信息">`，逐项搬迁、文案与可访问名一字未变）；视图切换 tab 提到页头；对比度修正：项目标签 4.62:1 → 5.49:1、角色下拉底 3.68:1 → 4.78:1；⚠️ 角色下拉的 `outline: none` 从**内联样式**移入样式表 —— 内联权重高于任何选择器，留着会让样式表的 `:focus-visible` 焦点环永远不生效；两栏用 `minmax(0, 1fr)`，正文里的长代码块 / 长 URL 不再顶开整页 |
-| E3–E8 | | | | |
+| E3 | `4c90e17` | 2026-09-23 | 七条门禁全绿（`build` / `verify-built-css` **21/21** / `e2e` 10 / `a11y` 26 都是我复跑的，subagent 按分工禁跑构建类门禁）；测试 348 → **376**（本批 +21 条，另 +7 来自同期的 F1） | 卡面白底细边框 + 背面 `--color-accent-light` 金色淡底；掌握度改**环形**（新组件 `MasteryRing` —— 列表与详情共用同一个出口，学 `StatCard` 的抽法；环色只走 `currentColor`，所以 A4 那条"难度与掌握度色阶必须同源"没有被放宽）；翻面用 `--duration-fast`（150ms）+ `prefers-reduced-motion`（全站第 3 处，另两处是 `Dialog`/`NotesList`）。三处判断值得记：① `.cardFace`/`.cardFaceBack` 两面都用 `border`/`background` **简写** —— 一边简写一边长写会被 `verify-built-css.mjs` 的 `CROSS_CLASS_SHORTHAND_RULES` 记成未登记的跨类简写竞争；② 卡面嵌在全局 `.card` 面板里、没把模块类挂到带 `.card` 的同一个元素上（后者要动注册表），代价是内容内缩 24→41px，这是有意的；③ 金色用法与 `visual-design-spec.md:27` 的 R2「金色是印章、不是装饰」有张力，按**较新的计划文档**执行，且只用 12% 淡底、不拿金色当文字色（`--color-accent` 压 `#f9f5eb` 只有 2.07:1）。`CardDetail` 此前完全看不到掌握度，本批带上了同一枚环 |
+| E4–E8 | | | | |
 | F1 | `64e2a99` | 2026-09-23 | lint / build / verify-built-css(21/21) 全绿；新增 7 条用例（46 个名字逐一在表里、没有未归组段、不再登记 `--shadow-focus`、展示的是真实令牌值而非 label、4 变体各 2 态共 8 枚按钮） | 四条"待补"全部落地：**图标表**（46 个按语义分 5 组，名字取自 `ICONS` 注册表 —— 为此给 `Icon.tsx` 加了 `ICON_NAMES` 导出，因为 `icons/index.ts` 的文件头明确写了"页面不要直接 import 那里"；没归组的单独列一段并标红，新增图标忘了归组当场可见）、**组件状态矩阵**（4 变体 × 默认/禁用；hover 与 focus-visible 由真实伪类承担，静态页里停不住它们）、**对话框演示**（可点开的真实 `Dialog` + "该试哪三件事"）、**动效预览**（读 `matchMedia` 把本机偏好显示出来，也是全站第三处 `prefers-reduced-motion` 守卫，另两处是 `Dialog` / `NotesList`）。顺带修掉两处"清单在说谎"：`--shadow-focus` 已在 D4 删除却还登记着（会永远显示"未定义"，把已做出的决定伪装成待修的漂移）、`planned` 字段在 A1 落地后已成死字段。删掉零引用的 `.todoList` 并留墓碑 |
 | F2 | `a7522ca` + `e598025` | 2026-09-23 | 工具就位；脚本实测 77 个令牌 / 76 个有引用者；**基线待设**（A–E 完成后用 `--snapshot` 生成） | 顺手接线 `--duration-slow`；提交时漏跑 lint，由 C1 的 subagent 发现并修复 |
 
