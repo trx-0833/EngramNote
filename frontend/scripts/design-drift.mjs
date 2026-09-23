@@ -161,7 +161,11 @@ function countHardcodedColors(files) {
   const fn = /\b(?:rgba?|hsla?)\s*\(/g;
   for (const { rel, text } of files) {
     for (const m of text.matchAll(hex)) hits.push(`${rel}:${m[0]}`);
-    for (const _ of text.matchAll(fn)) hits.push(`${rel}:rgb()`);
+    // 用 Array.from 的映射参数，而不是 `for (const _ of …)`：
+    // 后者虽然能跑，但会留下一个没被使用的循环变量，被
+    // `@typescript-eslint/no-unused-vars` 判红 —— F2 的首次提交正是这么栽的
+    // （提交时只验证了"脚本能跑通"，漏跑了 lint）。
+    hits.push(...Array.from(text.matchAll(fn), () => `${rel}:rgb()`));
   }
   return hits;
 }
