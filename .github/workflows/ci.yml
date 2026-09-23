@@ -27,7 +27,7 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -171,7 +171,7 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -361,7 +361,7 @@ jobs:
     # 门禁的**正确**升级路径是先把上面两类发现处理掉（或在脚本里显式豁免并
     # 写明理由），再把 `--fail-on` 换成具体阈值。在那之前不装作已经守住了。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -482,7 +482,7 @@ jobs:
     name: Docker build context sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: nginx config must set client_max_body_size
         # 回归守卫：nginx 默认 client_max_body_size 只有 1MB，
