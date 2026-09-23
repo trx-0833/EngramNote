@@ -31,7 +31,7 @@
 | | C3 | 列表形态与筛选控件统一 | **有** | ✅ |
 | **D 基座** | D1 | `<Dialog>` 基座 + `--z-*` 令牌 | 无 | ✅ |
 | | D2 | 迁移 5 套 modal | **有** | ⏸ |
-| | D3 | 替换 14 处 `window.confirm` | **有** | ⏸ |
+| | D3 | 替换 14 处 `window.confirm`（**拆两半**：组件内 7 处 → hook 内 7 处） | **有** | 🟡 |
 | | D4 | `:focus-visible` 统一光环 | **有** | ⏸ |
 | **E 逐页** | E1–E8 | 8 个页组精修 | **有** | ⏸ |
 | **F 收口** | F1 | `/styleguide` 补全 | 无 | ⏸ |
@@ -235,7 +235,7 @@
 |---|---|
 | 文件 | `CardDetail.tsx:71`／`CleaningPanel.tsx:74,105`／`VersionHistory.tsx:153`／`KnowledgeCards.tsx:182`／`DailyMaterials.tsx:248`／`LearningGoals.tsx:145`／`useNoteActions.ts:71,147`／`useNoteAnnotations.ts:87`／`useProjects.ts:132,199`／`useGraphMutations.ts:159,195` |
 | 新增 | `frontend/src/components/ConfirmDialog.tsx`（基于 D1） |
-| ⚠️ 必做 | **同步修改 `Projects.test.tsx:822-824`**——它把 `window.confirm(` 的**存在写成了断言**，不改它本批必红 |
+| ⚠️ 必做（**执行时已更正：本条过期**） | 原文写"同步修改 `Projects.test.tsx:822-824` —— 它把 `window.confirm(` 的存在写成了断言，不改必红"。**实测已过期**：BB.8 收尾时那两处已从 `window.confirm` 改成裸 `confirm`，该测试现在断言的是 hook 里的 `if (!confirm(`，与组件无关。D3 前半没动它，35 条测试全绿。**D3 后半（hook 那 7 处）仍要留意它** |
 | 视觉变化 | 有（原生 confirm → 样式化确认框） |
 | 验收 | `npm test`（14 处调用点的测试）／手动逐个核对：**确认逻辑、取消逻辑、异步等待、失败提示一字不变** |
 | 风险 | **中高**——这 14 处全是破坏性操作（删除、覆盖、清空、撤销），改错会丢数据。逐个核对是本批的主要工作量 |
@@ -375,7 +375,7 @@ npx vite preview --outDir <快照目录>
 | C3 | `55cd0f4` | 2026-09-23 | 门禁全过 | 网格阈值 340→320 + 手写 pill 归一为全局类 |
 | D1 | `6e899c8` | 2026-09-23 | 门禁全过；23 条用例 + 变异验证（注释掉 `focus()` → 2 条归位用例变红） | 抓到 `:global()` 不哈希的静默陷阱，D2 要照 Sidebar 写 |
 | D2 | | | | |
-| D3 | | | | |
+| D3 前半 | `604a266` | 2026-09-23 | 七条门禁全绿；live `confirm(` 只剩 4 个 hook 文件的 7 处 | 组件内 7 处已换；`Dialog` 加了可选 `footer`；⚠️ 新引入一条回退：触发元素 disabled ⇒ 关闭后焦点归位落到 body，留待后半一并修 |
 | D4 | | | | |
 | E1–E8 | | | | |
 | F1 | | | | |
