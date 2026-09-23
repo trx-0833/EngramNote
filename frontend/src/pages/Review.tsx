@@ -238,7 +238,7 @@ export default function Review() {
     const reachedDailyLimit = todayDone >= dailyLimit;
 
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ margin: '0 auto' }}>
         <h2>复习完成</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h3>本次复习统计</h3>
@@ -305,7 +305,7 @@ export default function Review() {
       className="page-enter"
       ref={containerRef}
       onKeyDown={handleKeyDown}
-      style={{ maxWidth: 700, margin: '0 auto' }}
+      style={{ margin: '0 auto' }}
     >
       {/* 页面标题（a11y-audit **F-32**：这一页此前 `<h1>`~`<h6>` 数量为 **0**，
           axe 判 page-has-heading-one）。

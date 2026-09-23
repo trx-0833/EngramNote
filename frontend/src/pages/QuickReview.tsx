@@ -194,7 +194,7 @@ export default function QuickReview() {
   // --- 无题目 ---
   if (!loading && quizzes.length === 0) {
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ margin: '0 auto' }}>
         <EmptyState
           message="暂无复习题目"
           description="该笔记还没有生成题目，请先完成理解流程"
@@ -212,7 +212,7 @@ export default function QuickReview() {
   if (completed) {
     const accuracy = sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0;
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ margin: '0 auto' }}>
         <h2 style={{ marginBottom: 'var(--space-lg)' }}>复习完成</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h3>本次统计</h3>
@@ -272,7 +272,7 @@ export default function QuickReview() {
       className="page-enter"
       ref={containerRef}
       onKeyDown={handleKeyDown}
-      style={{ maxWidth: 700, margin: '0 auto' }}
+      style={{ margin: '0 auto' }}
     >
       {/* 页面标题（与已修的 F-32「答题复习」同一处判据：这一页此前
           `<h1>`~`<h6>` 数量为 0，axe 判 page-has-heading-one）。

@@ -266,7 +266,7 @@ export default function TodayLearn() {
     const dailyLimit = stats?.daily_limit ?? 10;
     const todayDone = stats?.today_done ?? 0;
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ margin: '0 auto' }}>
         <h2 style={{ marginBottom: 'var(--space-lg)' }}>今日复习完成</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h3>本次统计</h3>
@@ -310,7 +310,7 @@ export default function TodayLearn() {
         className="page-enter"
         ref={containerRef}
         onKeyDown={handleKeyDown}
-        style={{ maxWidth: 700, margin: '0 auto' }}
+        style={{ margin: '0 auto' }}
       >
         {/* 进度条（与卡片复习页共用） */}
         <ReviewProgress

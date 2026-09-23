@@ -397,7 +397,7 @@ export default function Upload() {
   }
 
   return (
-    <div className="page-enter" style={{ maxWidth: '640px', margin: '0 auto' }}>
+    <div className="page-enter" style={{ margin: '0 auto' }}>
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
       <PageHeader title="上传学习资料" />
 

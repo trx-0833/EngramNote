@@ -34,7 +34,7 @@ export default function CardReviewSummary({
   onBack,
 }: CardReviewSummaryProps) {
   return (
-    <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div className="page-enter" style={{ margin: '0 auto' }}>
       <h2 style={{ marginBottom: 'var(--space-lg)' }}>本轮卡片复习完成</h2>
       <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
         <h3 style={{ marginBottom: 'var(--space-sm)' }}>本次统计</h3>

@@ -235,7 +235,7 @@ export default function QA() {
   }
 
   return (
-    <div className="page-enter" style={{ maxWidth: '800px', margin: '0 auto' }}>
+    <div className="page-enter" style={{ margin: '0 auto' }}>
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
       <PageHeader title="智能问答" />
 

@@ -97,7 +97,7 @@ export default function CardReview() {
   // --- 无到期卡片 ---
   if (!loading && cards.length === 0) {
     return (
-      <div className="page-enter" style={{ maxWidth: 600, margin: '0 auto' }}>
+      <div className="page-enter" style={{ margin: '0 auto' }}>
         <EmptyState
           message="没有到期的卡片"
           description={
@@ -139,7 +139,7 @@ export default function CardReview() {
       ref={containerRef}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      style={{ maxWidth: 760, margin: '0 auto', outline: 'none' }}
+      style={{ margin: '0 auto', outline: 'none' }}
     >
       {/* 进度与到期总量 */}
       <ReviewProgress

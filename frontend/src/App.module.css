@@ -12,35 +12,51 @@
  *
  * 类名按规范 §3 写成 camelCase（TSX 里是 `styles.appLayout`）。
  *
- * ## 两个必须说明的地方
+ * ## `responsive.css` 的 `--page-pad-y-*` 为什么在 `.appLayout` 上
  *
- * 1. **`.appLayout .container` 里的 `.container` 是全局类**（`<main className="container page-enter">`，
- *    见 `App.tsx`；`.container` 的定义留在 `components.css`）。所以模块里必须写
- *    `:global(.container)` —— 不写的话它会被一起哈希，产物里指向一个不存在的类名，
- *    整条规则失效。产物是 `._appLayout_hash .container`，权重仍是 (0,2,0)：
- *    它靠权重压过 `components.css` 的单类 `.container`，与源序无关（保持原样）。
- * 2. **`responsive.css` 的 `:root { --page-pad-y-top / --page-pad-y-bottom }`
- *    搬成了 `.appLayout` 上的自定义属性**（值一字未改：64px / var(--space-md)，
- *    480px 档 60px / var(--space-sm)）。这两个变量是"汉堡按钮占多高"的单一数据源，
- *    全项目只有两处读者：本文件的 `.appLayout .container` 与图谱模块的 `.graphPage`
- *    （算可用高度时减掉它们）。两处都在 `.appLayout` 的**子树**里，所以把定义从
- *    `:root` 收到 `.appLayout` 上，继承关系与计算值完全相同 ——
- *    而 `:root` 属于令牌层（`base.css`），补丁层不该定义全局令牌（规范 §2）。
- *    自定义属性名不参与 CSS Modules 哈希，所以变量名保持原样。
- *    （`:root` 的选择器里没有类名 ⇒ 规则清单差集看不见这条声明，
- *    所以它在 `css-migration-diff.mjs` 的 `relocations` 里逐条登记、双向自检。）
+ * 那两个自定义属性（值一字未改：64px / var(--space-md)，480px 档 60px / var(--space-sm)）
+ * 是"汉堡按钮占多高"的单一数据源，全项目只有两处读者：本文件的 `.main` 与
+ * 图谱模块的 `.graphPage`（算可用高度时减掉它们）。两处都在 `.appLayout` 的
+ * **子树**里，所以把定义从 `:root` 收到 `.appLayout` 上，继承关系与计算值完全相同 ——
+ * 而 `:root` 属于令牌层（`base.css`），补丁层不该定义全局令牌（规范 §2）。
+ * 自定义属性名不参与 CSS Modules 哈希，所以变量名保持原样。
+ * （`:root` 的选择器里没有类名 ⇒ 规则清单差集看不见这条声明，
+ * 所以它在 `css-migration-diff.mjs` 的 `relocations` 里逐条登记、双向自检。）
+ *
+ * ## 页宽三档（visual-refactor-plan 批次 C2）
+ *
+ * 迁移期这里曾有一条 `.appLayout :global(.container) { max-width: none }`，
+ * 它把全局 `components.css` 的 1200px 上限**去掉了**，页宽于是由 18 个页面的
+ * 内联 `maxWidth` 各写各的（实测 600 / 640 / 700 / 760 / 800 / 960 / 全宽六档，
+ * 同层级相差 2.5 倍）。C2 把六档收敛成三档：
+ *
+ * | 类 | 令牌 | 用于 |
+ * |---|---|---|
+ * | `.mainReading` | `--width-reading`（760px） | 阅读 / 答题 / 表单 / 评估 |
+ * | `.mainStandard` | `--width-standard`（1200px） | 其余全部（默认档） |
+ * | `.mainFull` | `--width-full`（100%） | 图谱 / 笔记详情（分屏编辑） |
+ *
+ * 三档由 `App.tsx` 的 `widthClassFor(pathname)` 按路由选定，页面内不再写内联宽度。
+ *
+ * ⚠️ **`<main>` 不再挂全局 `container` 类**，所以这里用的是**全模块类**写法。
+ * 原来的 `:global(.container)` 写法是"模块类去覆盖全局类"：产物里两条规则同权重、
+ * 分属两个 chunk，谁赢取决于加载顺序 —— `verify-built-css.mjs` 的
+ * `CASCADE_PAIRS` 会直接判"unknown"并报红。现在 main 上只有模块类，
+ * 不存在跨层竞争，也就不需要往 `CASCADE_PAIRS` 里登记。
+ * （全局 `.container` 因此变成零引用；删它属于死代码清理，另开一轮，
+ * 本批不动 `components.css`。）
  *
  * ## 窄屏两块的先后
  *
- * 480px 档的 `.appLayout :global(.container)` 压 768px 档的同名规则（同权重，后者在前），
- * 与原文件里的先后一致。`margin-left` / `min-height` 那几条没有竞争者。
+ * 480px 档的 `.main` 压 768px 档的同名规则（同权重，后者在前），与原文件里的先后一致。
+ * `margin-left` / `min-height` 那几条没有竞争者。
  */
 
 .appLayout {
   margin-left: var(--sidebar-width);
   min-height: 100vh;
   transition: margin-left 0.25s var(--ease-out-expo);
-  /* 汉堡按钮占的高度：唯一数据源（原 responsive.css 的 `:root`，见文件头第 2 条） */
+  /* 汉堡按钮占的高度：唯一数据源（原 responsive.css 的 `:root`，见文件头） */
   --page-pad-y-top: 64px;
   --page-pad-y-bottom: var(--space-md);
 }
@@ -49,11 +65,28 @@
   margin-left: var(--sidebar-collapsed-width);
 }
 
-/* `.container` 是全局类（App.tsx 的 `<main className="container page-enter">`），
-   必须写 `:global(...)` 保住它 —— 权重 (0,2,0)，与迁移前逐字相同。 */
-.appLayout :global(.container) {
-  max-width: none;
+/**
+ * 主内容区基础档：居中 + 内边距。
+ * 内边距沿用迁移前的值（桌面 `var(--space-xl)` = 32px），窄屏两档见本文件末尾的媒体块。
+ */
+.main {
+  margin: 0 auto;
   padding: var(--space-xl) var(--space-xl);
+}
+
+/* 阅读档：`/review` `/review/cards` `/review/quick/*` `/upload` `/assessment` `/qa` */
+.mainReading {
+  max-width: var(--width-reading);
+}
+
+/* 默认档：不在 `main` 上写 max-width 的其余全部路由（列表 / 卡片 / 管理页 / 404） */
+.mainStandard {
+  max-width: var(--width-standard);
+}
+
+/* 全宽档：`/graph`、`/notes/*`（笔记详情有分屏编辑，宽度必须交给窗口） */
+.mainFull {
+  max-width: var(--width-full);
 }
 
 .sidebarMobileToggle {
@@ -93,8 +126,11 @@
   }
 
   /* 原规则: .appLayout .container { padding: var(--space-xl) var(--space-xl); }
-     移动端顶部额外让出汉堡按钮，否则它会盖住每页第一行（标题/搜索框）。 */
-  .appLayout :global(.container) {
+     移动端顶部额外让出汉堡按钮，否则它会盖住每页第一行（标题/搜索框）。
+     等宽简写在这里会重置 `padding-top`，所以长写必须排在简写**之后** ——
+     这也是 `verify-built-css.mjs` 的「先给简写、再单独改一边（padding）」
+     那条注册项命中本文件的形态。 */
+  .main {
     padding: var(--page-pad-y-bottom) var(--space-md);
     padding-top: var(--page-pad-y-top);
   }
@@ -107,7 +143,7 @@
   }
 
   /* 原规则: .appLayout .container { padding: var(--space-md); padding-top: 64px } */
-  .appLayout :global(.container) {
+  .main {
     padding: var(--page-pad-y-bottom) var(--space-sm);
     padding-top: var(--page-pad-y-top);
   }

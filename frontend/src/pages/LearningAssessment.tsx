@@ -346,7 +346,7 @@ export default function LearningAssessment() {
   );
 
   return (
-    <div className="page-enter" style={{ maxWidth: '960px', margin: '0 auto' }}>
+    <div className="page-enter" style={{ margin: '0 auto' }}>
       {/* 页头（批次 C1）：原来这一块靠 `src/styles/assessment.css` 的
           `.assessment-header` / `.assessment-title` / `.assessment-subtitle`
           三个**全局**类名（回看当时的判据：那两个页面都在用同一组类名，

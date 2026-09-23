@@ -65,6 +65,101 @@ function RouteFallback() {
   );
 }
 
+/**
+ * 页宽三档（visual-refactor-plan 批次 C2）—— 收敛前是六档并存。
+ *
+ * 迁移期 `App.module.css` 有一条 `.appLayout :global(.container) { max-width: none }`，
+ * 把全局 `components.css` 的 1200px 上限去掉了；页宽于是完全由 18 个页面的内联
+ * `maxWidth` 决定，实测 600 / 640 / 700 / 760 / 800 / 960 六档 + 11 页全宽
+ * （1920 屏上同层级内容页有效宽从 700px 到 1616px，差 2.5 倍）。
+ *
+ * 现在由本表按路由选定，页面里不再写宽度。三档的**值**在
+ * `App.module.css` 的 `.mainReading` / `.mainStandard` / `.mainFull` 上，
+ * 令牌来自 `base.css` 的 `--width-reading` / `--width-standard` / `--width-full`。
+ */
+type PageWidth = 'reading' | 'standard' | 'full';
+
+/**
+ * 路由 → 档位。写成**显式查表**而不是一串 `if`：新增路由时漏登记会落到
+ * 兜底的 standard（1200px，安全档），而不是静默继承上一个 `if` 留下的大宽度。
+ *
+ * `pattern` 一律以 `/` 结尾，与 `${pathname}/` 比对 ⇒ 同时覆盖 `/review` 与
+ * `/review/`；`*` 表示"这一段之后还有东西"（用 `.+` 实现）。
+ *
+ * ⚠️ **表按序取首个命中**（`Array.prototype.find`），所以更具体的 pattern
+ * 必须排在更笼统的前面 —— 下面各档内部就是这么排的。三档之间没有重叠，
+ * 所以跨档的先后不影响结果。
+ */
+const PAGE_WIDTH_ROUTES: { pattern: RegExp; width: PageWidth; why: string }[] = [
+  // ── 全宽档（100%）：宽度必须交给窗口的页面 ──
+  {
+    pattern: /^\/graph\//,
+    width: 'full',
+    why: '图谱画布：可用高度与宽度都由容器算（`.graphPage` 减的是 `.appLayout` 上那对 --page-pad-y-*），封顶会挤压 canvas',
+  },
+  {
+    pattern: /^\/notes\/.+\//,
+    width: 'full',
+    why: '笔记详情 `/notes/:noteId`：编辑态是分屏（原文 | 编辑），两栏都要真实可用宽度',
+  },
+  // ── 阅读档（760px）：一次只做一件事的页面，注意力聚焦 ──
+  //    注意 `/review/quick/:noteId` 与 `/review/cards` 都命中上面的 `/^\/review\//`，
+  //    这里逐条列出是为了让"哪条路由属于哪档"在源码里可读；它们与笼统那条同档。
+  {
+    pattern: /^\/review\/quick\/.+\//,
+    width: 'reading',
+    why: '快速复习 `/review/quick/:noteId`：逐段过原文，行长必须受控',
+  },
+  {
+    pattern: /^\/review\/cards\//,
+    width: 'reading',
+    why: '卡片直接复习（阶段 3.12）：与答题复习并行的另一条复习路径，宽度保持一致',
+  },
+  {
+    pattern: /^\/review\//,
+    width: 'reading',
+    why: '答题复习 `/review`：一次一张卡，卡片不该被拉成 1200px 宽的一行字',
+  },
+  {
+    pattern: /^\/upload\//,
+    width: 'reading',
+    why: '上传表单：单列表单，宽了只是留白（收敛前 640px）',
+  },
+  {
+    pattern: /^\/assessment\//,
+    width: 'reading',
+    why: '学习评估：一题一屏的问答流（收敛前 960px）',
+  },
+  {
+    pattern: /^\/qa\//,
+    width: 'reading',
+    why: '智能问答：对话流是单列（收敛前 800px）',
+  },
+];
+
+/**
+ * 给定的 pathname 用哪一档。
+ *
+ * 兜底是 `standard`（1200px）—— 即 `visual-refactor-plan` 里的"其余全部"
+ * （`/` `/notes` `/trash` `/cards` `/cards/*` `/questions` `/today` `/daily`
+ * `/projects` `/goals` 与 404）。
+ *
+ * ⚠️ `/login` 与 `/register` **不在本表也不受影响**：未登录分支根本不渲染 `<main>`
+ * （见下方 `if (!isAuthenticated)`），它们的宽度由 `pages/Auth.module.css` 自己管。
+ */
+function widthClassFor(pathname: string): PageWidth {
+  const normalized = `${pathname}/`;
+  const hit = PAGE_WIDTH_ROUTES.find((r) => r.pattern.test(normalized));
+  return hit ? hit.width : 'standard';
+}
+
+/** 档位 → `App.module.css` 的类名（三档各自带 max-width） */
+const WIDTH_CLASS: Record<PageWidth, string> = {
+  reading: styles.mainReading,
+  standard: styles.mainStandard,
+  full: styles.mainFull,
+};
+
 /** 未找到页面（原先 `*` 会静默重定向到 "/" 或登录页，链路失效时用户无从判断） */
 function NotFound() {
   return (
@@ -126,7 +221,12 @@ function AppRoutes() {
       <div
         className={`${styles.appLayout}${sidebarCollapsed ? ` ${styles.appLayoutCollapsed}` : ''}`}
       >
-        <main className="container page-enter">
+        {/* 页宽三档由 `widthClassFor` 按路由决定（批次 C2）；`page-enter` 是全局动画类。
+            这里**不再挂全局 `container` 类** —— 那会把 1200px 上限与模块档位放在
+            同权重、跨 chunk 的竞争里（见 App.module.css 文件头）。 */}
+        <main
+          className={`${styles.main} ${WIDTH_CLASS[widthClassFor(location.pathname)]} page-enter`}
+        >
           {/* 按路由重置的错误边界：某条数据触发渲染异常后，
               切换到别的页面即可自动恢复，不必刷新（§2.8 F-2） */}
           <ErrorBoundary resetKey={location.pathname}>
