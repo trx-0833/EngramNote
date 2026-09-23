@@ -226,22 +226,18 @@ export default function KnowledgeCards() {
         </div>
       </div>
 
-      {/* 分类筛选 tab */}
+      {/* 分类筛选 tab —— 批次 C3：改用全局 `.filter-pill` / `.filter-pill-active`。
+          这段原先是一份**手写的同款 pill**（padding / borderRadius / transition 各写一遍），
+          而全站另有 4 个页面（NotesList / DailyMaterials / Upload / QuestionSets）用全局类。
+          同一语义两套实现的差别是肉眼级的（padding 14 vs 12、字重 400 vs 500、
+          全局版在激活态多一条金色指示线），但"改一处得记得改两处"是真实的维护成本。
+          全局类住在 `learning.css`，它的 `::after` 指示线与 768px 触控规则都在同一文件里。 */}
       <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-md)' }}>
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setFilterTab(tab.value)}
-            style={{
-              padding: '4px 14px',
-              fontSize: '0.8rem',
-              borderRadius: '9999px',
-              border: '1px solid var(--color-border)',
-              cursor: 'pointer',
-              background: filterTab === tab.value ? 'var(--color-primary)' : 'var(--color-bg)',
-              color: filterTab === tab.value ? 'white' : 'var(--color-text-secondary)',
-              transition: 'all 0.15s',
-            }}
+            className={`filter-pill${filterTab === tab.value ? ' filter-pill-active' : ''}`}
           >
             {tab.label}
           </button>

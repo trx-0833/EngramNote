@@ -91,9 +91,11 @@ export default function Projects() {
         <div
           style={{
             display: 'grid',
-            // min(340px, 100%)：可用宽度不足 340px 时（<356px 的窄屏）不再撑出横向滚动；
-            // 宽屏下 min() 取 340px，与改动前逐像素一致（overhaul-plan 5.10）
-            gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))',
+            // min(320px, 100%)：可用宽度不足 320px 时不再撑出横向滚动。
+            // 批次 C3：原为 340px —— 而知识卡片页（`KnowledgeCards.tsx`）用的是 320px，
+            // 两个"自适应卡片网格"的阈值不一致，同一类数据在相邻两页每行能放几张卡都不同。
+            // 统一到更窄的那档（320px），窄屏下更稳。
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))',
             gap: 16,
             alignItems: 'stretch',
           }}
