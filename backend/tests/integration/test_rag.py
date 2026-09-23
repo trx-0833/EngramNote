@@ -11,7 +11,7 @@ h = {"Authorization": "Bearer " + t}
 print("=== RAG 问答测试 ===")
 test_qs = [
     "劳动合同的期限是多久？",
-    "田润鑫的工资是多少？",
+    "张三的工资是多少？",
 ]
 for q in test_qs:
     r = c.post(BASE + "/understanding/ask", headers=h, json={"question": q}, timeout=120)

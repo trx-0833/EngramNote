@@ -1,7 +1,7 @@
 """
 第9-10周全流程端到端测试
 
-使用 TEST_PDF_PATH 环境变量指定的真实PDF文件（默认 D:\\test\\resources1\\劳动合同书-田润鑫.pdf） 跑完全流程：
+使用 TEST_PDF_PATH 环境变量指定的真实 PDF 文件跑完全流程
 1. 注册/登录
 2. 上传PDF文件
 3. 轮询转换状态直到完成
@@ -21,12 +21,23 @@
 import json
 import os
 import sys
+
+from app.test_support.corpus import real_pdf_path
 import time
 
+import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
+PDF_PATH = real_pdf_path()
+
+
+
+# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
+pytestmark = pytest.mark.skipif(
+    PDF_PATH is None,
+    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
+)
 
 client = httpx.Client(timeout=120.0)
 

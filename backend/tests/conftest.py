@@ -184,6 +184,8 @@ def _network_tests_allowed() -> bool:
     return os.environ.get("ENGRAMNOTE_ALLOW_NETWORK_TESTS", "").strip() in ("1", "true", "True")
 
 
+
+
 class NetworkAccessBlocked(RuntimeError):
     """测试试图访问外网时抛出（默认策略）"""
 

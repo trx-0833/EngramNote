@@ -16,15 +16,25 @@ Week5-6 全流程集成测试
 运行方式：cd backend && conda activate mineru_env && python tests/test_week5_6_integration.py
 """
 
-import os
 import time
 import sys
+
+from app.test_support.corpus import real_pdf_path
 from pathlib import Path
 
+import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
+PDF_PATH = real_pdf_path()
+
+
+
+# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
+pytestmark = pytest.mark.skipif(
+    PDF_PATH is None,
+    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
+)
 
 # 测试用户
 TEST_USER = {
@@ -108,7 +118,7 @@ def main():
             f"{BASE_URL}/upload",
             headers=headers,
             files={"file": (pdf_path.name, f, "application/pdf")},
-            data={"title": "劳动合同书-田润鑫"},
+            data={"title": "劳动合同书"},
             timeout=60.0,
         )
 
@@ -242,7 +252,7 @@ def main():
     print("\n[Step 13] RAG 问答测试")
     test_questions = [
         "劳动合同的期限是多久？",
-        "田润鑫的工资是多少？",
+        "张三的工资是多少？",
     ]
     for q in test_questions:
         resp = client.post(f"{BASE_URL}/understanding/ask", headers=headers, json={"question": q})

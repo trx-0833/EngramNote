@@ -40,7 +40,7 @@ c.execute("""
 """, (
     note_id,
     user_id,
-    "劳动合同书-田润鑫",
+    "劳动合同书",
     "pdf",
     f"{user_id}/default/source/{base}.pdf",
     original_md_path,
@@ -113,7 +113,7 @@ else:
 
 # 6. RAG 问答测试
 print("\n--- RAG 问答测试 ---")
-for question in ["劳动合同期限是多久？", "田润鑫的工作地点在哪里？", "试用期长度是多少？"]:
+for question in ["劳动合同期限是多久？", "张三的工作地点在哪里？", "试用期长度是多少？"]:
     ask_resp = requests.post(
         f"{BASE}/understanding/ask",
         headers=headers,

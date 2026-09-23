@@ -28,13 +28,14 @@ import sys
 import time
 import httpx
 import subprocess
+from app.test_support.corpus import require_pdf_path
 
 # ---------------------------------------------------------------------------
 # 配置
 # ---------------------------------------------------------------------------
 
 # 测试用的 PDF 文件路径
-PDF_FILE_PATH = r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf"
+PDF_FILE_PATH = require_pdf_path()
 
 # FastAPI 服务器地址
 API_BASE = "http://127.0.0.1:8765"
@@ -221,7 +222,7 @@ def upload_pdf(client: httpx.Client, token: str) -> dict:
     headers = {"Authorization": f"Bearer {token}"}
 
     with open(PDF_FILE_PATH, "rb") as f:
-        files = {"file": ("劳动合同书-田润鑫.pdf", f, "application/pdf")}
+        files = {"file": ("劳动合同书.pdf", f, "application/pdf")}
         resp = client.post(f"{API_BASE}/api/upload", headers=headers, files=files)
 
     if resp.status_code == 201:

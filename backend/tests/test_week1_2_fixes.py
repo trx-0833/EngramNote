@@ -16,6 +16,8 @@ import json
 import os
 import re
 import sys
+
+from app.test_support.corpus import real_pdf_path
 import tempfile
 import time
 from pathlib import Path
@@ -34,7 +36,15 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 # 测试用真实 PDF 文件路径
-REAL_PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
+REAL_PDF_PATH = real_pdf_path()
+
+
+
+# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
+pytestmark = pytest.mark.skipif(
+    REAL_PDF_PATH is None,
+    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
+)
 
 # .env 文件路径（包含 MINERU_API_TOKEN 等配置），使用项目内 backend/.env
 ENV_FILE = BACKEND_DIR / ".env"
@@ -508,7 +518,7 @@ class TestPageMarkerInsertion:
     def test_page_markers_with_real_pdf(self):
         """使用真实 PDF 文件通过云端 API 测试页码标签插入
 
-        调用 convert() 转换 劳动合同书-田润鑫.pdf（使用 vlm-http-client 云端后端），
+        调用 convert() 转换 劳动合同书.pdf（使用 vlm-http-client 云端后端），
         验证返回的 markdown_content 中包含 <!-- page=N --> 标签。
 
         此测试需要 MINERU_API_TOKEN 已配置（从 backend/.env 加载）。
@@ -577,7 +587,7 @@ class TestPageMarkerInsertion:
             )
 
         print("  真实 PDF 测试结果：")
-        print("  文件: 劳动合同书-田润鑫.pdf")
+        print("  文件: 劳动合同书.pdf")
         print("  后端: vlm-http-client（云端 API）")
         print(f"  页码标签数: {len(page_markers)}")
         print(f"  页码范围: {page_numbers[0]} ~ {page_numbers[-1]}")

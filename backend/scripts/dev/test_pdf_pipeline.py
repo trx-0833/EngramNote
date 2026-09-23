@@ -19,12 +19,13 @@ import sys
 import time
 import urllib.request
 import json
+from app.test_support.corpus import require_pdf_path
 
 # ============================================================
 # 配置
 # ============================================================
 BASE_URL = "http://localhost:8000"
-PDF_PATH = r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf"
+PDF_PATH = require_pdf_path()
 TEST_EMAIL = f"pipeline_test_{int(time.time())}@test.com"
 TEST_USERNAME = f"tester_{int(time.time())}"
 TEST_PASSWORD = "test123456"

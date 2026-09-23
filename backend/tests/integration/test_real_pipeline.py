@@ -1,8 +1,9 @@
 """全流程真实测试：上传 PDF → 转换 → 清洗 → 理解 → 题目生成"""
-import os
 import requests
 import time
 import sys
+
+from app.test_support.corpus import real_pdf_path
 
 BASE = "http://localhost:8001/api"
 
@@ -20,11 +21,11 @@ headers = {"Authorization": f"Bearer {token}"}
 print(f"Token: {token[:20]}...")
 
 # 2. 上传 PDF
-with open(os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf"), "rb") as f:
+with open(real_pdf_path(), "rb") as f:
     upload = requests.post(
         f"{BASE}/upload/",
         headers=headers,
-        files={"file": ("劳动合同书-田润鑫.pdf", f, "application/pdf")},
+        files={"file": ("劳动合同书.pdf", f, "application/pdf")},
     )
 print(f"Upload: {upload.status_code}")
 note_data = upload.json()
@@ -90,7 +91,7 @@ else:
 
 # 8. RAG 问答测试
 print("\n--- RAG 问答测试 ---")
-for question in ["劳动合同期限是多久？", "田润鑫的工作地点在哪里？", "试用期长度是多少？"]:
+for question in ["劳动合同期限是多久？", "张三的工作地点在哪里？", "试用期长度是多少？"]:
     ask_resp = requests.post(
         f"{BASE}/understanding/ask",
         headers=headers,

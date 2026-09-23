@@ -16,15 +16,25 @@
 """
 
 import json
-import os
 import time
 import sys
+
+from app.test_support.corpus import real_pdf_path
 from pathlib import Path
 
+import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = os.environ.get("TEST_PDF_PATH", r"D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf")
+PDF_PATH = real_pdf_path()
+
+
+
+# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
+pytestmark = pytest.mark.skipif(
+    PDF_PATH is None,
+    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
+)
 
 # 测试用户
 TEST_USER = {

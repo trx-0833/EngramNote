@@ -29,10 +29,9 @@ import httpx
 # 配置
 # ---------------------------------------------------------------------------
 API_BASE = os.environ.get("E2E_API_BASE", "http://127.0.0.1:8001")
-PDF_FILE = os.environ.get(
-    "E2E_PDF_FILE",
-    r"D:\engramnote\resource\电气\拉哇变电站主变运行技术标准.pdf",
-)
+# 真实语料路径只从环境变量取：仓库里不留任何个人/客户资料的路径
+# （历史上这里写死过一份真实资料路径，见 tests/test_no_personal_data.py 的守卫）
+PDF_FILE = os.environ.get("E2E_PDF_FILE") or os.environ.get("TEST_PDF_PATH")
 RUN_ID = time.strftime("%Y%m%d_%H%M%S")
 USERNAME = f"e2e{time.strftime('%m%d%H%M%S')}"
 EMAIL = f"{USERNAME}@example.com"

@@ -3,6 +3,7 @@ import requests
 import time
 import uuid
 import os
+from app.test_support.corpus import require_pdf_path
 
 BASE = 'http://localhost:8000/api'
 
@@ -15,7 +16,7 @@ headers = {'Authorization': f'Bearer {token}'}
 print('1. 注册登录成功')
 
 # 上传一个 PDF
-pdf_path = r'D:\engramnote\resource\tests\劳动合同书-田润鑫.pdf'
+pdf_path = require_pdf_path()
 if not os.path.exists(pdf_path):
     print(f'PDF 文件不存在: {pdf_path}')
     exit(1)
