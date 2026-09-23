@@ -12,7 +12,7 @@ EngramNote 全链路可靠性测试套件
 - backend/.env 已配置 DeepSeek(OpenCode GO) 与 MinerU API
 
 用法：
-    python tests/test_full_e2e.py
+    python scripts/dev/test_full_e2e.py
 输出：
     - 控制台逐步结果
     - tests/results/E2E_测试报告_<时间戳>.md（Markdown 报告）
@@ -39,7 +39,13 @@ PASSWORD = "Test@123456"
 USERNAME_B = f"e2eb{time.strftime('%m%d%H%M%S')}"
 EMAIL_B = f"{USERNAME_B}@example.com"
 
-RESULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+# 2026-09-23 从 backend/tests/ 搬到 backend/scripts/dev/ 后：若维持原写法（本文件旁边的
+# "results"），报告会落到 backend/scripts/dev/results/ —— 那个目录不在 .gitignore 里，
+# 会在 git status 里冒出来。因此显式指回 backend/tests/results/（已被 .gitignore 忽略，
+# 历史报告也都在那里，见本文件头部"输出"一节）。
+RESULT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "results")
+)
 os.makedirs(RESULT_DIR, exist_ok=True)
 REPORT_FILE = os.path.join(RESULT_DIR, f"E2E_测试报告_{RUN_ID}.md")
 

@@ -42,6 +42,46 @@ from ..core.app_error import AppError
 logger = logging.getLogger(__name__)
 
 
+# 无条件附加的安全响应头（2026-09-23 新增）
+#
+# ## 为什么放在模块级而不是类里
+#
+# `_error_response` 是 `@staticmethod`，它的异常分支直接 `return` 响应、
+# **不会**经过 `dispatch` 里那段统一补全（`call_next` 根本没被调用）。
+# 因此错误响应必须由它自己带头；而静态方法读不到类属性之外的实例状态，
+# 把常量放在模块级最直接，也让"错误路径"和"正常路径"共用同一份定义。
+#
+# ## 为什么放在这个中间件里（正常路径）
+#
+# 它是**最内层**的用户中间件，所有响应（成功 / 错误 / 由内层
+# ExceptionMiddleware 渲染的 4xx）都要穿过它 —— 放在这一层才能保证
+# "一个都不漏"。此前项目只有 CORS 与两个自定义中间件，
+# 没有任何安全响应头（`main.py` 的注册段可核）。
+#
+# ## 逐条依据
+#
+# - `X-Content-Type-Options: nosniff`：本项目会返回用户上传转换出的
+#   Markdown/HTML 片段，MIME 嗅探是这类内容变成 XSS 载体的经典路径。
+# - `X-Frame-Options: DENY` + CSP 的 `frame-ancestors 'none'`：
+#   禁止被 iframe 嵌套，防点击劫持（笔记应用里全是"删除/归档"这类按钮）。
+# - `Referrer-Policy`：笔记 URL 里可能含 note_id，跨站跳转时不外泄。
+# - `Content-Security-Policy` 只设 `frame-ancestors` 与 `base-uri`：
+#   本服务同时是 **API**（返回 JSON）与（dev 下的）/docs 页面宿主，
+#   加一整套 CSP 会连带影响 FastAPI 文档页与前端 dev server，
+#   属于"需要单独评估"的改动。这里只设**不依赖资源来源**的两条，
+#   它们是纯收益且无兼容风险。
+# - 刻意**不**设 `Strict-Transport-Security`：本项目默认以 http 本地
+#   运行（README 的快速开始就是 http://localhost:5173），
+#   HSTS 会把这个 http 站点在浏览器里锁成 https，等于让本地开发不可用。
+#   生产走 https 时应在**反代**（nginx）层加，那里才知道自己是不是 https。
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'self'",
+}
+
+
 class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     """
     全局异常处理中间件
@@ -57,7 +97,13 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     def _error_response(
         status_code: int, detail: str, error_code: str, data=None
     ) -> JSONResponse:
-        """构造统一错误响应（自动附带当前 request_id，可选附带 data）"""
+        """构造统一错误响应（自动附带当前 request_id，可选附带 data）
+
+        ⚠️ 这里必须**自己**附加安全响应头：异常分支是直接 `return` 出去的，
+        不会经过 `dispatch` 里那段统一的头部补全（`call_next` 根本没被调用）。
+        漏掉这一步的后果是"错误响应缺 X-Content-Type-Options / X-Frame-Options"，
+        而错误响应恰恰是最容易被诱导渲染的一类。
+        """
         content = {
             "detail": detail,
             "error_code": error_code,
@@ -65,7 +111,41 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         }
         if data is not None:
             content["data"] = data
-        return JSONResponse(status_code=status_code, content=content)
+        return JSONResponse(
+            status_code=status_code, content=content, headers=dict(SECURITY_HEADERS)
+        )
+
+    #: 无条件附加的安全响应头（2026-09-23 新增）
+    #:
+    #: ## 为什么放在这个中间件里
+    #:
+    #: 它是**最内层**的用户中间件，所有响应（成功 / 错误 / 由内层
+    #: ExceptionMiddleware 渲染的 4xx）都要穿过它 —— 放在这一层才能保证
+    #: "一个都不漏"。此前项目只有 CORS 与两个自定义中间件，
+    #: 没有任何安全响应头（`main.py` 的注册段可核）。
+    #:
+    #: ## 逐条依据
+    #:
+    #: - `X-Content-Type-Options: nosniff`：本项目会返回用户上传转换出的
+    #:   Markdown/HTML 片段，MIME 嗅探是这类内容变成 XSS 载体的经典路径。
+    #: - `X-Frame-Options: DENY` + CSP 的 `frame-ancestors 'none'`：
+    #:   禁止被 iframe 嵌套，防点击劫持（笔记应用里全是"删除/归档"这类按钮）。
+    #: - `Referrer-Policy`：笔记 URL 里可能含 note_id，跨站跳转时不外泄。
+    #: - `Content-Security-Policy` 只设 `frame-ancestors` 与 `base-uri`：
+    #:   本服务同时是 **API**（返回 JSON）与（dev 下的）/docs 页面宿主，
+    #:   加一整套 CSP 会连带影响 FastAPI 文档页与前端 dev server，
+    #:   属于"需要单独评估"的改动。这里只设**不依赖资源来源**的两条，
+    #:   它们是纯收益且无兼容风险。
+    #: - 刻意**不**设 `Strict-Transport-Security`：本项目默认以 http 本地
+    #:   运行（README 的快速开始就是 http://localhost:5173），
+    #:   HSTS 会把这个 http 站点在浏览器里锁成 https，等于让本地开发不可用。
+    #:   生产走 https 时应在**反代**（nginx）层加，那里才知道自己是不是 https。
+    SECURITY_HEADERS = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'self'",
+    }
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         try:
@@ -74,6 +154,8 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             # 内层 RequestContextMiddleware 已设置响应头，此处兜底）
             if response.status_code >= 400:
                 response.headers.setdefault("X-Request-ID", context.get_request_id() or "")
+            for header, value in self.SECURITY_HEADERS.items():
+                response.headers.setdefault(header, value)
             return response
         except HTTPException as exc:
             logger.warning(

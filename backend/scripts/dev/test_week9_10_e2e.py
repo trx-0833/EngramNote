@@ -15,29 +15,21 @@
 11. 验证全局异常处理（发送无效请求）
 12. 验证API认证校验（无Token请求应返回401）
 
-运行方式：cd backend && python tests/test_week9_10_e2e.py
+运行方式：cd backend && python scripts/dev/test_week9_10_e2e.py
 """
 
 import json
 import os
 import sys
 
-from app.test_support.corpus import real_pdf_path
+from app.test_support.corpus import require_pdf_path
 import time
 
-import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = real_pdf_path()
-
-
-
-# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
-pytestmark = pytest.mark.skipif(
-    PDF_PATH is None,
-    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
-)
+# 脚本不是 pytest 用例：缺语料时 require_pdf_path() 直接抛错，而不是 skip 掉自己。
+PDF_PATH = require_pdf_path()
 
 client = httpx.Client(timeout=120.0)
 
@@ -99,7 +91,7 @@ def main():
         resp = client.post(f"{BASE_URL}/auth/register", json=test_user)
         assert resp.status_code == 201, f"注册失败: {resp.text}"
         token = resp.json()["access_token"]
-        user_id = resp.json()["user"]["id"]
+        _user_id = resp.json()["user"]["id"]
         log_step("注册成功", True, f"用户: {test_user['username']}")
     except Exception as e:
         log_step("注册失败", False, str(e))
@@ -193,14 +185,14 @@ def main():
 
     # 等待题目生成完成（题目生成是异步的，在理解完成后自动触发）
     print("  等待题目生成...")
-    for wait in range(30):
+    for _wait in range(30):
         try:
             resp = client.get(f"{BASE_URL}/understanding/questions?note_id={note_id}&page=1&page_size=100", headers=headers)
             if resp.status_code == 200:
                 q_data = resp.json()
                 if q_data.get("total", 0) > 0:
                     break
-        except:
+        except Exception:
             pass
         time.sleep(10)
 
@@ -243,7 +235,7 @@ def main():
                     try:
                         options = json.loads(options_raw) if isinstance(options_raw, str) else options_raw
                         user_answer = options[0] if options else "A"
-                    except:
+                    except Exception:
                         user_answer = "A"
                 else:
                     user_answer = "A"

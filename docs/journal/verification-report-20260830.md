@@ -1,5 +1,7 @@
 # EngramNote 启动与功能验证报告
 
+> **状态：过程记录** ｜ 记录时间：2026-08-30 ｜ 权威性：不是现状依据
+
 > 日期：2026-08-30 · 依据：.trae/documents/engramnote-启动与功能验证计划.md（已批准）
 > 环境：mineru_env（Python 3.10.20）、Node v22、现有 data/（用户恢复数据：1183 卡片 / 22 笔记 / 3 项目）、.env（DEBUG=false，DeepSeek 网关 + GLM + MinerU token 齐全）
 > 原则：只验证不擅自修改；1 处启动级回归经用户授权最小修复。

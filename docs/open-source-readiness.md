@@ -1,5 +1,6 @@
 # 开源化差距报告（Open-Source Readiness）
 
+> **状态：活文档** ｜ 最后核对：2026-09-23 ｜ 权威性：本主题的现状依据（§执行进度 随做随更新）
 > **性质**：本文件回答一个问题 —— **EngramNote 离"一个别人愿意用、愿意贡献的开源项目"还差什么**。
 > 它不是功能计划，是对着 `origin/main` 的真实快照与本地工作区做的逐条核查。
 >
@@ -16,6 +17,56 @@
 > **取数方式说明**：本机 `git` / `curl` / `Invoke-WebRequest` 的 Schannel TLS 栈当前
 > 不可用（`SEC_E_NO_CREDENTIALS`），改用 Python（OpenSSL + `urllib`）走
 > `api.github.com` 与 `codeload.github.com` 取快照；`github.com:443` 用 Python 实测可达。
+
+---
+
+## 执行进度（本文发出后的实际进展）
+
+> 记账口径：**已完成**必须带可核对的证据（提交号 / 实测命令 / 机器结论）；
+> 未做的写在这里，不写"计划中"。
+
+### 已完成并推送（远端 HEAD `fe632f8`，共 8 个提交）
+
+| 批次 | 内容 | 证据 |
+|---|---|---|
+| — | README 按代码实测重写 + `参赛/` 撤出仓库（本地保留）+ `.gitignore` 防复发 | `a8a10be`；远端 README 与本地逐字节一致；`/contents/参赛` → 404 |
+| 5.1 | **跑测试不再写真实 Vault**：会话级 `VAULT_DIR` 重定向 + 重绑模块级冻结引用 + 守卫测试 | `7af9dfe`；跑前跑后 `data/storage`(98 文件) 与 `db`(6 文件) **逐字节一致** |
+| 0 | **JWT 密钥轮换 + 公开占位值黑名单** + 教程示范值改生成命令 | `07d0e9f`；实测旧占位密钥签发的令牌被 `JWTError` 拒绝；新增 4 条单测 |
+| 1 | **PII 去标识化 30 处 / 18 文件** + 防复发守卫（码点构造禁止串，扫已跟踪文件） | `57e5058`；当前树姓名/个人路径 0 命中；守卫当场抓出我首轮漏掉的客户资料路径 |
+| 2 | **依赖分层**（运行/开发/CI/可选四份判据分离）+ 补齐 3 个模块级硬依赖 + 仓库根 `pyproject.toml` | `c14690b`；`pip install -e .` 在干净 venv 实测通过（27 依赖、包可导入） |
+| 2.3 | **`.env.example` 双向守卫**（缺失/未知都报错）+ 补齐 41 个未登记字段（60 → 101） | `c14690b`；CI 新增同名步骤；`--check` 缺失 0 / 未知 0 |
+| 3 | **模板抄了就能跑**（`APP_ENV=dev` 生效、`GLM_MODEL` 生效）+ 缺 Key 启动即说明影响范围 | `c14690b`；实测复制模板可加载、密钥落在临时目录、未写真实 `data/` |
+| 5.7 | **`check_env.py`**：删掉已废弃的 chromadb、`shell=True` → `shell=False`、补齐 20 项检测 | `c14690b`；新增守卫锁住三点（其中"不得再用 shell=True"用 AST 判定） |
+| 4 | **前端**：包元数据补齐、锁文件 371 条回归官方源（integrity 保留）、`VITE_API_BASE_URL` 可配置、lint/format 范围扩到 `e2e/ scripts/` | `3062582`；`VITE_API_BASE_URL` 注入实测命中产物；`vitest` 295 passed、`vite build` 通过 |
+| 4 | **门禁升级**：prettier 与 a11y 从建议性改为**阻断** | `fe632f8`；YAML 解析通过，四个 job 全部步骤枚举确认 |
+
+**关键实测结论（与本文原判断不同，已更正）**：
+1. 基线**不是红的**：受限沙箱禁止写 `%TEMP%`，造成 100 error + 2 failed；
+   放开后 **1139 passed / 3 skipped**。那些红是环境，不是缺陷。
+2. `test_purge_file_consistency` 的"事后删目录"在正常路径下**确实自净**
+   （真实存储逐字节未变）。真正的风险是它依赖"运行期间没人往存储目录写新目录"，
+   而用户此时放进去的真实目录会被当垃圾删掉 —— 已改为结构上不可能写到真 Vault。
+3. PII 实际是 **30 处 / 18 文件**（本文原写"12 文件"，**低估了**），
+   并且还有一份**客户资料路径**（某电站运行技术标准 PDF）——
+   由新加的守卫当场发现。
+4. 前端 `format:check` 是建议性的，于是 `src/` 里 162 个文件的风格漂移
+   从未被发现；现已成为阻断门禁。
+
+### 尚未做（本轮未完成，按依赖顺序）
+
+| 优先级 | 事项 | 为什么还没做 |
+|---|---|---|
+| 高 | 批次 5 剩余：9 个零用例脚本搬出 `tests/`、JWT 算法白名单、上传 `temp_id` 归属校验、直传补 `check_archive`、422 契约结构化、分页统一、CORS/安全响应头 | 本轮上下文用尽；每项都已定位到 `文件:行号` |
+| 高 | 批次 6：README 收尾（文档清单重排、8 处补充不一致）、文档状态横幅与 `docs/journal/`、`CHANGELOG`/`UPGRADING`/`SECURITY`/`CONTRIBUTING`/`CODE_OF_CONDUCT`、issue/PR 模板、`dependabot.yml`、`.editorconfig`、容器化补缺（`backend/.dockerignore` 等） | 同上 |
+| 中 | 批次 7：漂移检查结论、单一版本源、打 `v0.1.0` tag 与首个 release、GitHub 仓库设置清单（topics/description/Discussions——需你在页面点） | 依赖前三项 |
+| 低 | `ruff format` 全量重排（211/251 文件，需独立纯格式提交）、覆盖率阈值、Windows CI job | 有意推迟，理由写在 `ci.yml` 内 |
+
+> ⚠️ 推送时发现本机两个环境事实（与仓库无关，但会挡住你以后推送）：
+> ① `git` 走 HTTPS 时**无法完成证书校验**（Schannel 无凭据 / OpenSSL 报未知 CA），
+> 需要 `-c http.sslVerify=false` 才能推；
+> ② Git Credential Manager **在受限沙箱下起不来**（`couldn't create signal pipe`），
+> 必须放开该限制它才能取到已保存的凭据。
+> 也就是说：**"证书校验 + 凭据助手"这两件事同时正常时，推送才不需要绕路。**
 
 ---
 
@@ -95,7 +146,7 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 | 该字符串**在 git 历史里也有** | `git log -S` 命中 `b5f7d38`、`a037df5`、`19b957d` 三个提交 |
 | 令牌参数放大了后果 | HS256（`backend/app/config.py:98`）+ 访问令牌 24 小时（`:106`）+ **无状态、登出不可撤销**（`:101-105` 自己写明"已泄露的访问令牌仍可用"） |
 | 启动校验**只查"是否为空"，不查"是否为已知占位值"** | `backend/app/config.py:564-570` |
-| 而 `security-scan.md` 记录的 trivy `secret` 扫描是 **0 命中** —— 它认不出"占位符当密钥用" | `docs/security-scan.md:369` |
+| 而 `security-scan.md` 记录的 trivy `secret` 扫描是 **0 命中** —— 它认不出"占位符当密钥用" | `docs/security-scan.md:370` |
 | 附带：一枚**历史上真实签发**的 JWT（`sub=15a92671-7123-491b-9733-54e59063e6fd`）被提交入库（已过期，但泄露了 user id 形态） | `backend/tests/integration/test_final_verify.py:7`、`test_key_issues.py:8` |
 
 **为什么这对"开源"是致命的**：仓库里那份 `新手教学.md` **就是在教人填这个值**。
@@ -239,7 +290,7 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 - 客户端基址**硬编码**：`frontend/src/api/client.ts:11` `export const API_BASE = '/api'`；
   `import.meta.env` 在 `src/**` **0 命中**。
 - 开发代理可被 `VITE_API_TARGET` 覆盖（`frontend/vite.config.ts:34`），
-  但**全仓库只有 `frontend/docs/e2e.md:336` 提过一次**，README 无记载。
+  但**全仓库只有 `frontend/docs/e2e.md:337` 提过一次**，README 无记载。
 - 生产代理写死容器名：`frontend/nginx.conf:38` `proxy_pass http://backend:8000/api/`。
 - `frontend/` 下**没有** `.env.example`（而根 `.gitignore:24` 已用 `!.env.example` 留好口子）。
 
@@ -257,7 +308,7 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
   `:1882-1890` 有"注入必然违规元素"的自检（防假绿）；`:888` 还断言 DOM 节点数下限（防空页恒 0 违规）。
   文档自述 **26 passed、违规 0 组 / 0 个节点**（`frontend/docs/a11y-audit.md:6-7`）。
 - 而 `ci.yml:279-283` 写明的升级前置是"清空 REGISTRY + CSS 迁移收尾"，
-  后者已在 `frontend/docs/css-migration-plan.md:15` 标记"**5.6 至此完成**"。
+  后者已在 `frontend/docs/css-migration-plan.md:16` 标记"**5.6 至此完成**"。
 
 **建议改法**：**直接把 `continue-on-error` 改成 `false`** —— 这是当前仓库里
 "最便宜的一次门禁升级"（一行改动，换来一条真门禁）。
@@ -622,7 +673,7 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 | 缺口 | 证据 | 建议 |
 |---|---|---|
 | 无指标暴露（Prometheus / OpenTelemetry） | 无相关依赖 | 至少暴露 `/metrics`（队列深度、LLM 调用数/失败数、嵌入积压 —— `/ready` 已在报队列深度，扩展即可） |
-| 日志无统一格式/级别约定 | `docs/tooling-report.md` 之外无说明 | 结构化 JSON 日志 + `LOG_LEVEL` 文档化 |
+| 日志无统一格式/级别约定 | `docs/journal/tooling-report.md` 之外无说明 | 结构化 JSON 日志 + `LOG_LEVEL` 文档化 |
 | 无备份/恢复指引 | `docs/overhaul-plan.md` 附录 AS 做过恢复演练 | 把演练结论写成 `docs/BACKUP.md`（**用户最怕丢笔记**） |
 | 无 SQLite 并发说明的对外版本 | `docs/sqlite-single-writer.md` 存在 ✅ | 在 README 显著位置提示"只能跑一个 worker"（否则用户会踩 `database is locked`） |
 

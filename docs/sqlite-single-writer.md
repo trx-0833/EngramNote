@@ -3,6 +3,12 @@
 > 本文是 `docs/overhaul-plan.md` 第六部分决策 **D1 / D2 / D5** 的落地说明。
 > 该表原本推荐 PostgreSQL + pgvector，但受"不使用 Docker（磁盘空间不足）"
 > 约束，实际执行路线为 **D1=B / D2=本地单用户 / D5=保留 Chroma**。
+> ⚠️ **D5 这一半已作废（2026-09-23 核对）**：Chroma 已在阶段 2.4 收尾时移除 ——
+> 向量与定位字段同存 `chunks` 表（`backend/app/models/chunk.py:89,154`）、
+> 词法检索改用 SQLite FTS5（`backend/app/models/chunk.py:142-149`），
+> 依赖也已摘掉（`backend/requirements.txt:60`；`backend/app/config.py` 的
+> `chroma_dir` 移除说明段，核对时为 `:283-292`）。
+> 本文其余部分（单写者约束）与 D5 无关，不受影响。
 > 本文把这条路线下**必须遵守的约束**写成可执行的规则，避免每次推进都重新争论。
 
 ## 决策
@@ -11,9 +17,9 @@
 |---|---|---|---|
 | **D1** 数据库 | PostgreSQL | **SQLite + WAL** | 无 Docker 环境，PG 无法部署 |
 | **D2** 部署形态 | 服务端多用户 | **本地单用户自托管** | 与 D1 一致；单用户下大量并发问题自然消失 |
-| **D3** 调度算法 | FSRS | **暂缓**（仍 SM-2 + 四档自评） | 复习记录不足以拟合参数（见下） |
+| **D3** 调度算法 | FSRS | **暂缓**（仍 SM-2 + 四档自评） | 复习记录不足以拟合参数（见下）→ **已作废**：阶段 3.6 已换 FSRS-5（公开默认参数，个人化拟合仍未做），`config.py` 的 `review_scheduler` 默认 `"fsrs"`（核对时为 `:448`）（2026-09-23 核对） |
 | **D4** 简答判分 | LLM 语义判分 | **用户四档自评**（已落地） | 自评是最准的信号，且零 token 成本 |
-| **D5** 向量库 | pgvector | **保留 Chroma**（已修相似度公式） | 无 PG；`sqlite-vec` 评估留待阶段 2 |
+| **D5** 向量库 | pgvector | **保留 Chroma**（已修相似度公式）→ **Chroma 已移除**（阶段 2.4 收尾）：向量改存 `chunks` 表、词法检索改 SQLite FTS5 | 无 PG；`sqlite-vec` 评估留待阶段 2（2026-09-23 核对） |
 | **D6** 前端框架 | 保留 React | **保留 React** | 问题在架构不在框架 |
 
 ## 约束：只允许一个写者
@@ -48,18 +54,27 @@ SQLite 全库只有一个写锁。WAL 模式允许"一写多读"并发，但**�
 
 ```bash
 # 正确：单进程（uvicorn 默认即 1，无需显式设置）
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 # 显式声明也可以
-WEB_CONCURRENCY=1 uvicorn app.main:app --port 8000
+WEB_CONCURRENCY=1 uvicorn app.main:app --port 8001
 
 # 错误：启动即失败
 uvicorn app.main:app --workers 4      # -> RuntimeError，附带修复指引
 ```
 
+> （2026-09-23 核对）上面的端口原先写作 **8000**，本项目实际是 **8001**
+> —— 见 `start.bat:16`、`start.sh:14`、`frontend/vite.config.ts:34`（proxy target）。
+
 Celery worker 侧同理：`celery worker -c 1`。
 （原因不只是单写者 —— 每个 worker 进程会各加载一份约 2.3GB 的嵌入模型，
-prefork 默认按 CPU 核数会直接 OOM。这一点在 `config.py:141` 已有注释。）
+prefork 默认按 CPU 核数会直接 OOM。这一点在 `config.py:228` 已有注释。）
+> （2026-09-23 核对：该注释原引 `config.py:141`，现实际在 `:228`。）
+> ⚠️ 同时核对出一个**脚本与要求的缺口**：`start.bat:167` 用 `--pool=solo`
+> （Windows 单进程，等效 1 个 worker），但 `start.sh:149` **没有**传 `-c 1`，
+> 走的是 prefork 默认池（= CPU 核数）—— 即这条"单写者"要求在 Linux 启动脚本上
+> 并未落实（`celery_app.py` 也未设置 `worker_concurrency`）。
+> 本文件不改启动脚本，仅记录该事实。
 
 ## 本路线下**接受**的取舍
 
@@ -98,5 +113,7 @@ prefork 默认按 CPU 核数会直接 OOM。这一点在 `config.py:141` 已有�
 
 迁移路径在 `overhaul-plan.md` 阶段 1（1.1–1.14）中已完整写明，包括
 "丢弃现有 10 个迁移、以模型为唯一源重建 Alembic 基线"这个关键决策 ——
+（2026-09-23 核对：该数字是计划写作时的口径（`overhaul-plan.md:101` 写 `001–010`）；
+`backend/alembic/versions/` 现存 **11** 份，001–011，多出 `011_refresh_tokens.py`。）
 **那条路径仍然有效**，本路线的所有应用层改动（自评闭环、任务追踪、
 备份、契约修复）在 PG 上同样成立。

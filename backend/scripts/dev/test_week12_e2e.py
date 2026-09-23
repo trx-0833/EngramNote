@@ -20,7 +20,7 @@
 14. 获取7天趋势和薄弱点
 15. 验证全局异常处理和认证校验
 
-运行方式：cd backend && C:\\Users\\admin\\anaconda3\\envs\\mineru_env\\python.exe tests/test_week12_e2e.py
+运行方式：cd backend && C:\\Users\\admin\\anaconda3\\envs\\mineru_env\\python.exe scripts/dev/test_week12_e2e.py
 """
 
 import json
@@ -28,23 +28,19 @@ import os
 import subprocess
 import sys
 
-from app.test_support.corpus import real_pdf_path
+from app.test_support.corpus import require_pdf_path
 import time
 
-import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = real_pdf_path()
+# 脚本不是 pytest 用例：缺语料时 require_pdf_path() 直接抛错，而不是 skip 掉自己。
+PDF_PATH = require_pdf_path()
 
-
-# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
-pytestmark = pytest.mark.skipif(
-    PDF_PATH is None,
-    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
-)
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+# 2026-09-23 从 backend/tests/ 搬到 backend/scripts/dev/ 后，上溯层级要加一级，
+# 否则 PROJECT_ROOT 会落到 backend/ 而不是仓库根 —— 而下面步骤 1~5 检查的
+# （git status、.gitignore、docker-compose.yml、启动脚本、README.md）全在仓库根。
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 client = httpx.Client(timeout=120.0)
 
@@ -261,12 +257,12 @@ def main():
 
     # 步骤11: 验证卡片和题目
     print("\n【步骤11】验证知识卡片和题目")
-    for wait in range(30):
+    for _wait in range(30):
         try:
             resp = client.get(f"{BASE_URL}/understanding/questions?note_id={note_id}&page=1&page_size=100", headers=headers)
             if resp.status_code == 200 and resp.json().get("total", 0) > 0:
                 break
-        except:
+        except Exception:
             pass
         time.sleep(10)
 
@@ -299,7 +295,7 @@ def main():
                     try:
                         options = json.loads(options_raw) if isinstance(options_raw, str) else options_raw
                         user_answer = options[0] if options else "A"
-                    except:
+                    except Exception:
                         user_answer = "A"
                 else:
                     user_answer = "A"

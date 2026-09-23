@@ -1,5 +1,7 @@
 # 工具链首轮检查报告(ruff + eslint + prettier)
 
+> **状态：过程记录** ｜ 记录时间：2025-06 ｜ 权威性：不是现状依据
+
 > 日期:2025-06 · 工具版本:ruff 0.16.4 / eslint 10 / prettier 3.9
 > 原则:本次**只检查、未修改任何业务代码**(33/39 个前端文件曾因误操作被 prettier 格式化,已全部 git restore 还原)。
 > 原始输出:`docs/ruff-report.txt`、`docs/eslint-report.txt`、`docs/prettier-report.txt`。

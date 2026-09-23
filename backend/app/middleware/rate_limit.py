@@ -33,6 +33,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from ..config import get_settings
 from ..core import context
 
 logger = logging.getLogger(__name__)
@@ -110,11 +111,48 @@ _COMPILED_RULES: Tuple[Tuple["re.Pattern[str]", int, str], ...] = tuple(
 )
 
 
+def _effective_client_ip(request: Request) -> str:
+    """取限流用的客户端 IP：可信反代之后取 `X-Forwarded-For` 的**最右一跳**
+
+    ## 为什么需要（2026-09-23）
+
+    未认证路径（登录 10/min、注册 5/min）只能按 IP 计数，而
+    `request.client.host` 在反代/容器后面**永远是反代自己的 IP** ——
+    后果不是"限流偏严"，而是**全站共用一个桶**：一个脚本就能让所有人
+    无法登录，爆破防护也失去区分度。本仓库自带的
+    `frontend/nginx.conf` 正是这种部署形态。
+
+    ## 安全边界（为什么默认不信任何代理）
+
+    `X-Forwarded-For` 由客户端任意伪造，只有在"直连对端确实是本机反代"时
+    才可以采信。因此：
+      - `TRUSTED_PROXIES` 为空（默认）→ 行为与改造前完全一致，只看 socket 对端；
+      - 配了可信代理，且 `request.client.host` 在名单里 → 取 XFF 的**最右**
+        非空项（最靠近我们的那一跳由可信代理写入，左侧都可能是伪造的）。
+    """
+    peer = request.client.host if request.client else "unknown"
+
+    settings = get_settings()
+    trusted = {
+        item.strip()
+        for item in (settings.trusted_proxies or "").split(",")
+        if item.strip()
+    }
+    if not trusted or peer not in trusted:
+        return peer
+
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if not forwarded:
+        return peer
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    return hops[-1] if hops else peer
+
+
 def _client_key(request: Request, rule: str) -> str:
     """构造限流键：优先用已认证用户，否则退回客户端 IP
 
     认证优先的理由：同一 NAT 后的多个用户不应互相拖累；
-    而登录/注册必然未认证，只能用 IP。
+    而登录/注册必然未认证，只能用 IP（见 `_effective_client_ip`）。
     """
     user_id: Optional[str] = None
     try:
@@ -123,8 +161,7 @@ def _client_key(request: Request, rule: str) -> str:
         user_id = None
     if user_id:
         return f"u:{user_id}:{rule}"
-    client = request.client.host if request.client else "unknown"
-    return f"ip:{client}:{rule}"
+    return f"ip:{_effective_client_ip(request)}:{rule}"
 
 
 class _SlidingWindow:

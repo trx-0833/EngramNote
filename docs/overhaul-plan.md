@@ -2368,6 +2368,11 @@ FastAPI/OpenAPI 规定 422 的 `detail` 是**结构化数组**
 **后果**（**待确认**，UUID4 不可枚举）：若 temp_id 经日志/浏览器历史泄漏，
 攻击者可将**受害者已暂存的文件** commit 进自己账号。
 
+✅ **已解决（2026-09-23 核对）**：临时区改为**归属旁载** ——
+`api/upload.py:97-119` 的 `_owner_file_for` 把创建者写进
+`data/tmp/upload/{temp_id}.owner`（`:699-700`），commit 阶段在**任何枚举/读取之前**
+校验归属（`:842-849`），失败与"不存在/已失效"同类报错，不泄露"该 temp_id 正被别人持有"。
+
 #### 🟡 S-14 依赖与安全响应头
 
 - `requirements.txt:14` `python-jose[cryptography]~=3.3.0`
@@ -2379,6 +2384,14 @@ FastAPI/OpenAPI 规定 422 的 `detail` 是**结构化数组**
   口令泄漏后用户**无法自助轮换**
 - `bcrypt` 只取**前 72 字节且静默截断**：`max_length=100` 的**中文字符**
   （3 字节/字）意味着**第 25 个字之后全部无效**，用户以为的长密码实际被截断
+  ✅ **已解决（2026-09-23 核对）**：注册路径改为**显式拒绝** > 72 字节的密码，
+  不再静默截断 —— `services/password_policy.py:36`（`BCRYPT_MAX_BYTES = 72`）、
+  `:79-85`（校验分支，文案说明"超出部分不会被校验"）、
+  `schemas/user.py:22-40`（接口层 `field_validator`，422 带具体理由；
+  `max_length=200` 是**刻意**放宽的：让策略给出具体提示而不是 pydantic 的长度错误）、
+  `services/auth_service.py:350-351`（服务层第二道，防绕过 schema 的调用方）。
+  ⚠️ 本条原文写的 `max_length=100` 与"仅 5 个端点"（`api/auth.py`，见上一行）
+  也已漂移：前者现为 200，后者现为 **7** 个端点。
 
 ---
 
@@ -11403,7 +11416,7 @@ job 日志端点要认证（`/actions/jobs/{id}/logs` → **HTTP 403**），
 | Node 新 API（21+/22+） | `Object.groupBy` / `withResolvers` / `toSorted` / `structuredClone` 等零命中 |
 | `process.env.CI` 分支 | 测试里零命中 |
 
-#### BO.5.2 前端 vitest 的根因（run #8 注解）：**Node 20 装得下 jsdom 30，却跑不动它**
+#### BO.5.2b 前端 vitest 的根因（run #8 注解）：**Node 20 装得下 jsdom 30，却跑不动它**
 
 第二版诊断按"原样输出日志尾部"交回来的第一批事实，直接推翻了我此前的两个假设：
 

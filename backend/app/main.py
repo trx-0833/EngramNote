@@ -511,7 +511,18 @@ def _broker_queue_depth(cfg: Settings) -> tuple[Optional[int], str]:
 # 因此在这里注册处理器，保证 4xx/5xx 响应体统一为
 # {"detail", "error_code", "request_id"} 格式，客户端可凭 request_id 定位日志。
 
-def _error_payload(status_code: int, detail: str, error_code: str) -> dict:
+def _error_payload(status_code: int, detail: "str | list", error_code: str) -> dict:
+    """统一错误信封
+
+    `detail` 的类型**随错误种类而不同**，这是刻意的：
+
+    - 业务错误（`AppError` / `HTTPException`）：`detail` 是**一句面向用户的中文说明**；
+    - 参数校验错误（422）：`detail` 是**数组**，与 `openapi.json` 里
+      `HTTPValidationError.detail: List[ValidationError]` 一致 —— 见
+      `validation_exception_handler` 的说明（按契约生成的客户端会当数组解析）。
+
+    调用方一律按 `error_code` 分流，不要依赖 `detail` 的形状或文案。
+    """
     return {
         "detail": detail,
         "error_code": error_code,
@@ -541,14 +552,37 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """参数校验错误 → 统一信封，且 `detail` 保持 FastAPI 的**数组**形状
+
+    ## 为什么 `detail` 必须是数组而不是一句 str（2026-09-23 修正）
+
+    `openapi.json` 按 FastAPI 规范把 422 声明为
+    `HTTPValidationError{ detail: List[ValidationError] }` —— 于是**任何**
+    按契约生成的客户端都会把 `detail` 当数组解析。而这里此前塞的是
+    `str(exc)`，形状与声明不符：生成的客户端在参数错误时会
+    **在解析响应体时抛异常**，把"422 参数错误"变成"未知错误"。
+
+    这也是"契约产物"的意义所在：`openapi.json` 是前端的类型来源，
+    后端手写一个不同形状的响应，等于让那份契约在错误路径上撒谎。
+    """
+    errors = [
+        {
+            "type": str(err.get("type", "value_error")),
+            "loc": [str(part) for part in err.get("loc", ())],
+            "msg": str(err.get("msg", "")),
+            # 刻意**不**回填 `input`：校验错误的输入里可能有口令、令牌、
+            # 私有笔记正文，而 422 会进前端错误提示与日志。
+        }
+        for err in exc.errors()
+    ]
     logger.warning(
-        "参数校验错误 | %s %s | detail=%s",
-        request.method, request.url.path,
-        str(exc).replace("\n", " ")[:500],
+        "参数校验错误 | %s %s | %d 处 | 首处=%s",
+        request.method, request.url.path, len(errors),
+        (errors[0]["loc"], errors[0]["msg"]) if errors else None,
     )
     return JSONResponse(
         status_code=422,
-        content=_error_payload(422, str(exc), "VALIDATION_ERROR"),
+        content=_error_payload(422, errors, "VALIDATION_ERROR"),
     )
 
 
@@ -667,7 +701,8 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cfg.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
-        allow_credentials=True,    # 允许携带 Cookie
+        # 默认 False：本项目不用 Cookie，认证走 Authorization 头（见 config.py 说明）
+        allow_credentials=cfg.cors_allow_credentials,
         allow_methods=["*"],       # 允许所有 HTTP 方法
         allow_headers=["*"],       # 允许所有请求头
     )

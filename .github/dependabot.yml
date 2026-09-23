@@ -1,0 +1,120 @@
+# Dependabot 配置
+# ================
+#
+# ## 为什么只有三个 ecosystem，以及为什么"每周一次"
+#
+# 本项目的依赖面只有三处（`pyproject.toml:22-28` 把分工写得很清楚）：
+#   - `pip`  目录 `/backend` —— 三份 requirements*.txt 都在这里
+#     （CI 装的是 `requirements-test.txt`，见 `.github/workflows/ci.yml:51`）
+#   - `npm`  目录 `/frontend` —— `package.json` + `package-lock.json`
+#     （CI 与前端 job 都用 `npm ci`，见 `ci.yml:205`）
+#   - `github-actions` 目录 `/` —— workflow 里 `uses:` 的 action 版本
+#     （`ci.yml` 用了 checkout / setup-python / setup-node / cache / upload-artifact）
+#
+# 每周一次、而不是每天：这是单人项目，PR 需要人来读；
+# 每天开 PR 的结果是积压 —— 而积压的依赖 PR 最后总是被批量关掉，
+# 那等于没开（这个仓库对"配置了却从未真正执行"的东西特别警惕，
+# 见 `docs/overhaul-plan.md:3320` 与 `docs/security-scan.md:494-495`）。
+#
+# ## 分组策略（groups）—— 为什么这么分
+#
+# **把 minor / patch 合并成一个 PR，把 major 留成独立 PR。**
+# 理由有两条，都来自本仓库的现状：
+#
+# 1. `backend/requirements.txt:19-24` 用 `~=` 锁**主次**版本，允许补丁浮动；
+#    同类小版本的依赖 PR 逐条开，只会得到一堆"改了 requirements.txt 一行"的 PR，
+#    而它们的验证方式完全相同（跑一遍门禁）。合并后一轮门禁就能覆盖一批。
+# 2. **major 不能混进来**：`docs/security-scan.md:403-409` 记着本项目对跨大版本升级的
+#    态度 —— vite 5→8、vitest 2→5、fastapi 升级都会改变应用行为或构建产物，
+#    必须单独验证。混进分组 PR 里，审阅者分不清"哪一处升级导致了失败"。
+#
+# 刻意**不**用 `dependency-type` 把 dev/prod 分开成更多组：
+# npm 侧 `npm ci` 装的是同一棵依赖树，CI 的 `npm test` / `npm run build` 会同时验证两者；
+# 分成两组只会让同一批门禁跑两遍。
+#
+# ## 与安全扫描的关系（别把两者搞混）
+#
+# Dependabot 负责"把版本提上去"；漏洞扫描（`pip-audit` + `npm audit`）负责"报告已知问题"，
+# 后者在 CI 里是**建议性**的（`ci.yml:340-362`，口径见 `docs/security-scan.md:490-532`）。
+# 合并依赖 PR 之前，请照常跑 `CONTRIBUTING.md` 第 4 节的门禁 ——
+# 依赖 PR **不是**免检通道。
+
+version: 2
+
+updates:
+  # ---- Python：backend/requirements*.txt ----
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "chore(deps)"
+    assignees:
+      - trx-0833
+    groups:
+      # 小版本与补丁合并成一个 PR（见文件头的分组策略）
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # ---- Node：frontend/package.json + package-lock.json ----
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - javascript
+    commit-message:
+      prefix: "chore(deps)"
+    assignees:
+      - trx-0833
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    # ⚠️ `frontend/package.json:73-75` 的 `engines.node` 是 jsdom@30 自己的要求
+    # （`^22.22.2 || ^24.15.0 || >=26.0.0`），升级 jsdom / vitest 时务必一起看
+    # 这一步会不会把 Node 下界抬高 —— `npm ci` 对 engines 不匹配**只警告不失败**
+    # （`ci.yml:203-204`），装得完但 `npm test` 会报一句与原因无关的 `Test Files  no tests`。
+
+  # ---- GitHub Actions：.github/workflows/ ----
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(ci)"
+    assignees:
+      - trx-0833
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

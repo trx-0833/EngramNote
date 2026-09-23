@@ -1,0 +1,99 @@
+# EngramNote 后端 Docker 构建上下文排除清单
+# ==========================================
+#
+# ## 为什么必须有这个文件
+#
+# `docker-compose.yml` 里三个服务（backend / celery-worker / celery-beat）都用
+# `context: ./backend`，而 **本仓库此前只有 `frontend/.dockerignore`**
+# （`docs/open-source-readiness.md:579-580` 把这条记为待补的缺口）。
+# 没有它，`docker build` 会把整个 `backend/` 目录**先打包发给 Docker daemon**
+# 再开始构建 —— 本机实测这一份是 **4,705.0 MB / 1131 个文件**
+# （`backend/data/`，2026-09-23 实测；`docs/open-source-readiness.md:580` 记的是同一数字）。
+#
+# ⚠️ 注意它**不改变镜像内容**：Dockerfile 只 `COPY app/` 等少数路径，
+# 这里排除的是"被送进构建上下文的东西"，收益是构建更快、更不容易把
+# 用户数据/密钥带进构建过程（例如误加一条 `COPY . .` 时的最后一道拦网）。
+#
+# ## 一句话规则
+#
+# 凡是"运行时产生、本机才有、可再生成"的东西，都不该进构建上下文。
+
+# ---- 运行时数据（最大的一项）----
+# SQLite 库、Vault（原始文件与 Markdown 副本）、模型缓存、日志、Celery broker/结果。
+# 实测 4,705.0 MB；而且里面有**真实用户笔记**，不该被送到 daemon。
+# 对应 `.gitignore:29-36`；容器里它是 `backend-data` 卷（`docker-compose.yml` 的 volumes）。
+data/
+
+# ---- 测试与测试产物 ----
+# 镜像里不需要它们：Dockerfile 只 COPY app/ + alembic 配置（无 tests/），
+# 而运行期（uvicorn / celery）也不 import 测试代码。
+# 实测这一项约 6.0 MB / 309 个文件。CI 跑测试用自己的 checkout，不用镜像。
+tests/
+.pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
+.coverage
+htmlcov/
+
+# ---- Python 字节码与缓存 ----
+# 平台相关、可再生成；带进上下文只会制造"镜像里的 .pyc 与源码不同步"这类怪问题。
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ---- 工具链缓存 ----
+# ruff / mypy 的缓存只对本机增量检查有意义，构建时会被重新计算。
+.ruff_cache/
+.mypy_cache/
+
+# ---- 本地虚拟环境 ----
+# 里面有宿主平台的二进制（Windows 上是 .exe/.pyd）。镜像内依赖由
+# `RUN pip install -r requirements.txt` 装（Linux 轮子），宿主的 venv
+# 一旦被复制进去就是"平台不匹配"，而且体积巨大。
+# 对应 `.gitignore:16-20` 与 `:192-195`（含复现 CI 用的 .venv-ci）。
+.venv/
+.venv*/
+venv/
+env/
+mineru_env/
+
+# ---- 环境变量与密钥 ----
+# ⚠️ 构建期**不需要**它：Dockerfile 从不 COPY .env，
+# `docker-compose.yml` 是在**运行时**用 bind mount 把宿主机的
+# `./backend/.env` 只读挂到 `/app/.env` 的（bind mount 与构建上下文是两回事，
+# 排除它不会影响那个挂载）。
+# 排除的实际收益：万一将来有人加了 `COPY . .`，密钥不会被烤进镜像层。
+# 对应 `.gitignore:22-27`。
+.env
+.env.*
+!.env.example
+
+# ---- 日志与 Celery 运行时残留 ----
+# 日志里可能含业务数据明文（尤其开过 LOG_SQL，见 SECURITY.md），
+# 且是运行时产物；control/ 是 Celery 的运行时控制目录，
+# celerybeat-schedule.* 是 Beat 的本地调度状态（都不该跨机器复制）。
+# 对应 `.gitignore:111-113`、`:164-165`。
+*.log
+control/
+celerybeat-schedule.*
+
+# ---- 数据库/模型的散落文件 ----
+# data/ 已整体排除，这里是保险：任何人往 backend/ 根丢一个 .db / 模型权重都不进上下文。
+*.db
+*.db-journal
+*.sqlite3
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+
+# ---- 编辑器 / 操作系统 / 版本控制 ----
+# 与镜像无关；.git 还可能很大。
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

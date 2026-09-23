@@ -1,0 +1,106 @@
+name: Bug 报告
+description: 报告一个可以复现的缺陷（不是安全漏洞 —— 那类请走私密渠道）
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 先说三件事
+
+        1. 🔒 **不要粘贴任何密钥或私人内容**：`DEEPSEEK_API_KEY` / `GLM_API_KEY` /
+           `MINERU_API_TOKEN` / `JWT_SECRET_KEY`、`backend/.env` 全文、真实笔记正文、
+           上传的 PDF/音视频、数据库文件 —— 都请不要贴。
+           需要贴配置时，请给**字段名**与"已配置 / 未配置"，不要给值。
+        2. 🐳 **容器化这条路本项目从未验证过**：`Dockerfile` / `docker-compose.yml`
+           保留在仓库里，但**从未构建或运行过**（`README.md:324-336`）。
+           用容器跑出来的问题，请在选择部署方式时如实标注。
+        3. 🔐 **安全漏洞不要走这里**：请按 `SECURITY.md` 走
+           GitHub Security Advisories（私密渠道）。
+
+        提交前请尽量先跑一遍离线测试套件，确认不是你本机环境的问题
+        （命令见 `CONTRIBUTING.md` 第 4 节）。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交号
+      description: 版本号写在 pyproject.toml 与 frontend/package.json 里（当前是 0.1.0）；如果你是从源码跑的，请给提交短哈希
+      placeholder: "0.1.0 / 提交 182ebbd"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 请给出实际输出，不要只写"最新版"
+      value: |
+        - 操作系统：
+        - Python 版本（`python --version`）：
+        - Node 版本（`node --version`，应与 frontend/.nvmrc 一致）：
+        - APP_ENV（dev / prod）：
+        - 部署方式（本地进程 / Docker —— 容器化未验证 / 其他）：
+        - 数据库与存储（默认 SQLite + 本地文件系统？是否改过 DATABASE_URL / VAULT_DIR？）：
+        - 是否设置过 TEST_PDF_PATH / ENGRAMNOTE_ALLOW_NETWORK_TESTS：
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请写到"另一个人照着做也能重现"的程度；涉及上传时请说明文件类型与大致大小（不要上传真实文件）
+      placeholder: |
+        1. 用 APP_ENV=dev 启动后端（8001）与前端（5173）
+        2. 打开 /upload，上传一个 …
+        3. 点击 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你以为会发生什么？依据是什么（README / 文档 / 接口契约）？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？如果是接口错误，请给出响应体里的 error_code 与 request_id（不要贴中文文案当依据 —— 前端按 error_code 分流，见 CONTRIBUTING.md 第 7 节）
+      placeholder: |
+        { "detail": "……", "error_code": "STABLE_MACHINE_CODE", "request_id": "…" }
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与截图
+      description: |
+        后端终端输出 / `backend/data/logs/` 里的相关片段（**请先删掉密钥、邮件地址、笔记正文**）。
+        ⚠️ 如果开过 LOG_SQL=true，日志里会含 bcrypt 哈希与知识卡片正文 —— 贴之前务必自己过一遍。
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 已尝试过的排查、相关 issue、是否只在特定数据下出现等（可选）
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已确认上面**没有**任何真实密钥、真实笔记内容或私人数据
+          required: true
+        - label: 这不是安全漏洞（安全漏洞请按 SECURITY.md 走私密渠道）
+          required: true

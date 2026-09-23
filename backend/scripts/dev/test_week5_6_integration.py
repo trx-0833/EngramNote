@@ -13,28 +13,20 @@ Week5-6 全流程集成测试
 9. 查看题目
 10. RAG 问答
 
-运行方式：cd backend && conda activate mineru_env && python tests/test_week5_6_integration.py
+运行方式：cd backend && conda activate mineru_env && python scripts/dev/test_week5_6_integration.py
 """
 
 import time
 import sys
 
-from app.test_support.corpus import real_pdf_path
+from app.test_support.corpus import require_pdf_path
 from pathlib import Path
 
-import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = real_pdf_path()
-
-
-
-# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
-pytestmark = pytest.mark.skipif(
-    PDF_PATH is None,
-    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
-)
+# 脚本不是 pytest 用例：缺语料时 require_pdf_path() 直接抛错，而不是 skip 掉自己。
+PDF_PATH = require_pdf_path()
 
 # 测试用户
 TEST_USER = {

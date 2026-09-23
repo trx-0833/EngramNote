@@ -13,14 +13,21 @@
 
 ## 为什么放在 `app/` 里而不是 `tests/`
 
-`tests/` **不是**包（无 `__init__.py`，且 pytest 只把 rootdir `backend/` 放进
-`sys.path`），所以：
-  - 顶层用例 `from conftest import ...` → `ModuleNotFoundError: conftest`
-  - `from _pdf_corpus import ...` → 同样失败
+**实测结论（2026-09-23，更正了本文件先前的一处错误说法）**：
+`python tests/_probe.py` 与 `python scripts/dev/_probe.py` **都会**报
+`ModuleNotFoundError: No module named 'app'` —— 因为项目未 `pip install`、
+`PYTHONPATH` 为空，而 `sys.path[0]` 是**脚本自身所在目录**，不是 `backend/`。
+（`backend/tests/__init__.py` 其实是存在的，所以"tests 不是包"这个理由也不准确；
+真正的门槛是 rootdir 不在 `sys.path` 上。）
 
-放进 `app.test_support` 后，两条路径都能用同一次导入：
-  - pytest 用例：`from app.test_support.corpus import real_pdf_path`（rootdir 在 path 上）
-  - `backend/scripts/dev/*.py` 手动脚本：`backend/` 在 path 上（脚本自己插入）
+要跑这些手动脚本，用下面任一方式：
+  - `python -m scripts.dev.test_e2e`（从 `backend/` 运行，cwd 进 path）
+  - `PYTHONPATH=backend python scripts/dev/test_e2e.py`
+
+**为什么仍然放在 `app.test_support`**：
+  - pytest 用例：`from app.test_support.corpus import real_pdf_path`
+    （pytest 会把 rootdir `backend/` 放进 `sys.path`，所以这条对用例成立）；
+  - 手动脚本：走上面两种方式之一即可，导入路径一致、不会出现两份实现。
 
 它不含任何测试框架依赖，因此放进 app 包不会把 pytest 带进生产依赖。
 """

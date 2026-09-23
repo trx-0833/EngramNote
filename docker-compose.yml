@@ -1,6 +1,50 @@
 # EngramNote Docker Compose 配置
-# 开发模式：仅 backend + frontend（使用 SQLite + 文件系统 broker）
-# 生产模式：包含 PostgreSQL + Redis + MinIO
+# ==============================
+#
+# ⚠️ **未验证：本项目从未构建或运行过这些容器。**
+#    项目实际以**本地进程**方式运行（后端 8001 / 前端 5173，见 `README.md:181`、`AGENTS.md:22`）；
+#    容器化在本仓库是**历史遗留**，且曾因磁盘空间与资源约束被**明确放弃**
+#    （`AGENTS.md:18`、`README.md:324-336`）。
+#    `.github/workflows/ci.yml` 里的 `docker-nginx-config` job（`:481-529`）只做**文本 grep 守卫**，
+#    它保证的只是"文件没被改坏"，**不代表这条路走得通**。
+#    要用请先自行验证 —— 不要把 `docker compose up -d` 当成可用部署路径。
+#
+# ## 这份文件里实际有什么（如实描述）
+#
+# 只有四个服务，全部基于 **SQLite + 文件系统 broker**（零外部中间件）：
+#
+#     backend        后端 API（容器内 8000，映射到宿主 8001）
+#     frontend       静态前端 + nginx（映射到宿主 80）
+#     celery-worker  异步任务 worker（转换 / 清洗 / 理解 / 嵌入）
+#     celery-beat    定时任务（目标刷新 / 复习提醒等）
+#
+# celery-worker 与 celery-beat **共用同一个数据卷**（SQLite 库、文件系统 broker、
+# 结果后端、Vault 都在里面），这不是可选项而是数据一致性的前提。
+#
+# ## 历史上那个 "生产模式：PostgreSQL + Redis + MinIO" 的注释去哪了
+#
+# 已删除。原先文件头写着"生产模式：包含 PostgreSQL + Redis + MinIO"，
+# 但那三个服务**全都是注释掉的**，而且项目已经明确放弃这些中间件：
+#   - `AGENTS.md:15`：更换数据库引擎、引入外部中间件（消息队列 / 缓存服务）**已否决**；
+#   - `backend/requirements.txt:31`：`asyncpg` / `minio` / `redis` 是"项目明确不引入的中间件"；
+#   - `README.md:118`：**无需安装** PostgreSQL、Redis、MinIO、独立向量库。
+# 留着那些注释服务块，等于在本文件里保留一条与现实不符的声明 —— 所以整块删掉，
+# 而不是"注释掉但看着像随时能启用"。要改这个方向，先改 `AGENTS.md` 里的既定路线。
+#
+# ## 使用前置条件（缺了会直接报错，不是可选项）
+#
+# `backend` 服务把宿主的 `./backend/.env` **只读**挂进容器。全新克隆里**没有**这个文件
+# （`.gitignore:22-27`），Compose 会因此直接报错（`docs/open-source-readiness.md:577`
+# 把这条记为"会当场失败的陷阱"）。请先：
+#
+#     cp backend/.env.example backend/.env    # 然后填 JWT_SECRET_KEY 等
+#
+# ⚠️ 且在容器里 **`APP_ENV` 默认是 `prod`**（`backend/app/config.py:563`），
+# prod 下 `JWT_SECRET_KEY` 为空会**拒绝启动**（`config.py:627-670`）。
+# 密钥怎么生成、`LOG_SQL` 为什么不能开：见 `SECURITY.md`。
+#
+# 镜像构建上下文的排除清单在 `backend/.dockerignore`（此前缺失，
+# 会让 4,705.0 MB 的 `backend/data/` 全部进入构建上下文）。
 
 services:
   # ---- 应用服务 ----
@@ -12,13 +56,17 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      # 持久化数据目录
+      # 持久化数据目录（SQLite 库 / Vault / 模型缓存 / 日志 / 文件系统 broker）
       - backend-data:/app/data
       # 挂载 .env 配置文件（包含 API 密钥等敏感信息）
+      # ⚠️ 这是**运行时** bind mount，与构建上下文无关；
+      #    该文件必须先在宿主上存在，否则 Compose 直接报错（见文件头"使用前置条件"）。
       - ./backend/.env:/app/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
     healthcheck:
+      # /health 是**零依赖**存活探针：只返回应用状态，刻意不检查数据库
+      #（DB 挂掉应由 /ready 以 503 表达，见 README.md:230-231）。
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
@@ -44,7 +92,9 @@ services:
       dockerfile: Dockerfile
     command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info
     volumes:
-      # 与 backend 共享同一数据卷（SQLite/broker/结果/chroma 一致）
+      # 与 backend 共享同一数据卷：SQLite 库、文件系统 broker、结果后端、Vault 必须一致。
+      # ⚠️ 本项目的 SQLite 路线**只允许一个 worker**，理由见 docs/sqlite-single-writer.md
+      #    （每多一个 worker 就多加载一份嵌入模型，这是"必须隔离在 worker 进程"的另一面）。
       - backend-data:/app/data
       - ./backend/.env:/app/.env:ro
     environment:
@@ -70,53 +120,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---- 生产基础设施（可选） ----
-  # 取消注释以下服务以使用 PostgreSQL + Redis + MinIO
-
-  # postgres:
-  #   image: postgres:16
-  #   environment:
-  #     POSTGRES_DB: engramnote
-  #     POSTGRES_USER: engram
-  #     POSTGRES_PASSWORD: engram123
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U engram -d engramnote"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 5
-
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 5
-
-  # minio:
-  #   image: minio/minio
-  #   command: server /data --console-address ":9001"
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   volumes:
-  #     - minio_data:/data
-  #   healthcheck:
-  #     test: ["CMD", "mc", "ready", "local"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 5
-
+# ---- 卷 ----
+# 只有一个数据卷：SQLite 库 + Vault + 模型缓存 + 文件系统 broker 全在这里。
+# 原先注释掉的 pgdata / minio_data 已随 PostgreSQL / MinIO 服务块一并删除（见文件头）。
 volumes:
   backend-data:
-  # pgdata:
-  # minio_data:

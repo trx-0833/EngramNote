@@ -27,6 +27,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, status
@@ -89,6 +90,35 @@ router = APIRouter()
 
 # 临时上传标识（temp_id）格式：标准 UUID 36 字符
 _TEMP_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+#: 归属旁载的后缀：与临时目录**同级**（不是目录内部 —— 见下方说明）
+_TEMP_OWNER_SUFFIX = ".owner"
+
+
+def _owner_file_for(temp_id: str) -> Path:
+    """临时上传的归属旁载路径
+
+    ## 为什么放在目录**外面**
+
+    `commit_upload` 会断言临时目录里**恰好有一个文件**
+    （`len(files) != 1` → `UPLOAD_TEMP_DATA_INVALID`）。把归属写进目录内部
+    会让那条断言把所有正常上传都判成"数据异常"。因此用同级旁载：
+    `data/tmp/upload/{temp_id}.owner` 记录创建者 user_id。
+
+    ## 为什么需要它（2026-09-23）
+
+    两阶段上传此前只校验 temp_id **是不是 UUID**，不校验**是不是你的**。
+    temp_id 是随机 UUID，靠猜不现实；但"不校验归属"意味着它一旦出现在日志、
+    截图、浏览器历史或分享出去的 curl 命令里，就是一个可用的句柄 ——
+    别人可以拿它把文件提交进自己的知识库（或反过来）。
+
+    ## 兼容性
+
+    旁载不存在时**不拒绝**：旧版本创建的临时目录、以及正常过期清理后的残骸
+    都不该因此变成"不可用"。真正兜底的是 temp 目录本身的过期清理。
+    """
+    return TMP_UPLOAD_DIR / f"{temp_id}{_TEMP_OWNER_SUFFIX}"
+
 
 # 文件扩展名到 SourceType 的映射，决定文件的处理方式
 # 单一来源为 vault_path.EXT_TO_SOURCE_TYPE（upload 与扫描导入共用）
@@ -667,6 +697,8 @@ async def prepare_upload(
     temp_id = str(uuid.uuid4())
     temp_dir = TMP_UPLOAD_DIR / temp_id
     temp_dir.mkdir(parents=True, exist_ok=True)
+    # 归属旁载：commit 阶段据此校验"这个 temp_id 是不是你创建的"
+    _owner_file_for(temp_id).write_text(current_user.id, encoding="utf-8")
     dest = temp_dir / filename
     max_size = settings.max_upload_size_mb * 1024 * 1024
     try:
@@ -687,6 +719,7 @@ async def prepare_upload(
             )
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        _owner_file_for(temp_id).unlink(missing_ok=True)
         raise
 
     # 阶段 6.4：Office 文档（docx/pptx/xlsx）都是 ZIP 容器，转换阶段会解压它。
@@ -806,6 +839,17 @@ async def commit_upload(
     temp_dir = TMP_UPLOAD_DIR / temp_id
     if not temp_dir.is_dir():
         raise AppError(UPLOAD_TEMP_EXPIRED, "临时上传已失效，请重新选择文件", 400)
+
+    # 归属校验必须发生在**任何**枚举/读取之前：temp_id 是可传递的句柄，
+    # 拿到它的人不该能提交别人的暂存数据。
+    # 旁载不存在时放行（旧版本残留、过期清理后的残骸）—— 见 _owner_file_for 的说明。
+    owner_file = _owner_file_for(temp_id)
+    if owner_file.is_file():
+        owner = owner_file.read_text(encoding="utf-8").strip()
+        if owner and owner != current_user.id:
+            # 刻意与"不存在/已失效"同类报错：不把"该 temp_id 现在正被别人持有"
+            # 变成可探测的信息
+            raise AppError(UPLOAD_TEMP_EXPIRED, "临时上传已失效，请重新选择文件", 400)
 
     files = [p for p in temp_dir.iterdir() if p.is_file()]
     if len(files) != 1:

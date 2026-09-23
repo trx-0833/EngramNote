@@ -61,6 +61,68 @@ class TestEnvExampleMatchesSettings:
         after = (BACKEND / ".env.example").read_text(encoding="utf-8")
         assert before == after, "已一致的情况下 --append 仍改动了模板"
 
+    def test_append_keeps_the_equals_sign_for_empty_defaults(self):
+        """★ 空默认值的行必须是 `KEY=` 而不是 `KEY`
+
+        ## 这条防的是一个**真实发生过**的 bug
+
+        生成器里写过 `.rstrip("=")`，于是默认值为空串的字段被写成
+        `# TRUSTED_PROXIES`（**没有 `=`**）。而识别"已登记"的正则要求
+        `KEY=` 的形状 —— 下一次 `--append` 就认为它缺失、**又追加一遍**，
+        模板里于是出现两条同名变量（一条还长得不像变量）。
+
+        判据：每条 `# KEY` 形式的注释都必须带 `=`。
+        """
+        import re
+
+        text = (BACKEND / ".env.example").read_text(encoding="utf-8")
+        offenders = [
+            line for line in text.splitlines()
+            if re.match(r"^#\s*[A-Z][A-Z0-9_]{2,}\s*$", line)
+        ]
+        assert not offenders, (
+            "模板里有形如 `# KEY`（缺 `=`）的行 —— 它们会被当成未登记，"
+            f"导致 --append 重复追加：{offenders[:5]}"
+        )
+
+    def test_no_variable_is_registered_twice(self):
+        """生成器追加的变量不得重复登记
+
+        ## 什么算"登记"
+
+        只认**行首**的 `KEY=` 或 `# KEY=`（允许 `# ` 后**最多一个**空格）。
+        这条边界很重要：模板里满是**散文式说明**，例如
+
+            #   APP_ENV=prod   → 为空**拒绝启动**（有意的安全姿态）
+            #    LOG_SQL=false 这些日志含 bcrypt 哈希…
+
+        那些是**缩进 4 空格的解释文字**，不是变量登记。第一版断言用
+        `^#?\\s*` 于是把它们全算成"重复"，一次报 4 个假阳性 ——
+        假阳性会让守卫被绕过，这比没有守卫更糟。
+        """
+        import re
+
+        text = (BACKEND / ".env.example").read_text(encoding="utf-8")
+        names = [
+            m.group(1)
+            for m in re.finditer(r"(?m)^#? ?([A-Z][A-Z0-9_]{2,})=", text)
+        ]
+        duplicated = sorted({n for n in names if names.count(n) > 1})
+        assert not duplicated, (
+            f"模板里重复登记的变量：{duplicated}\n"
+            "（`--append` 的 rstrip bug 会造成这种形态；同名写两遍还会让"
+            "『哪个值生效』取决于行序）"
+        )
+
+    def test_append_never_produces_an_indented_registration(self):
+        """生成器追加的行必须顶格（`# KEY=`），否则上面那条断言看不到它"""
+        import io
+
+        source = io.open(BACKEND / "scripts" / "gen_env_example.py", encoding="utf-8").read()
+        assert 'chunks.append(f"# {field.upper()}={value}")' in source, (
+            "生成器追加行的格式变了 —— 它必须顶格，且**不能**对空默认值 rstrip('=')"
+        )
+
 
 class TestTemplateIsUsableAsIs:
     """模板被逐字复制后必须能让后端**启动**（配合批次 3 的改动）"""

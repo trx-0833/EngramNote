@@ -12,29 +12,21 @@
 8. 验证复习历史
 9. 验证下次复习时间计算
 
-运行方式：cd backend && conda activate mineru_env && python tests/test_week8_review.py
+运行方式：cd backend && conda activate mineru_env && python scripts/dev/test_week8_review.py
 """
 
 import json
 import time
 import sys
 
-from app.test_support.corpus import real_pdf_path
+from app.test_support.corpus import require_pdf_path
 from pathlib import Path
 
-import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = real_pdf_path()
-
-
-
-# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
-pytestmark = pytest.mark.skipif(
-    PDF_PATH is None,
-    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
-)
+# 脚本不是 pytest 用例：缺语料时 require_pdf_path() 直接抛错，而不是 skip 掉自己。
+PDF_PATH = require_pdf_path()
 
 # 测试用户
 TEST_USER = {
@@ -107,7 +99,7 @@ def main():
             token = data["access_token"]
             log_step("用户已存在，已登录", True)
         else:
-            assert False, f"注册失败: {resp.text}"
+            raise AssertionError(f"注册失败: {resp.text}")
     except Exception as e:
         log_step("注册失败", False, str(e))
         sys.exit(1)
@@ -235,14 +227,14 @@ def main():
         if quiz.get("options"):
             try:
                 options = json.loads(quiz["options"]) if isinstance(quiz["options"], str) else quiz["options"]
-            except:
+            except Exception:
                 pass
 
         # 选择第一个选项作为答案
         user_answer = options[0] if options else "A"
 
         try:
-            start_time = time.time()
+            _start_time = time.time()
             resp = client.post(f"{BASE_URL}/review/submit", headers=headers, json={
                 "quiz_id": quiz_id,
                 "user_answer": user_answer,
@@ -387,7 +379,7 @@ def main():
             if quiz.get("options"):
                 try:
                     options = json.loads(quiz["options"]) if isinstance(quiz["options"], str) else quiz["options"]
-                except:
+                except Exception:
                     pass
 
             # 获取正确答案（从题目列表中查找）

@@ -1,0 +1,23 @@
+# Issue 模板选择页配置
+#
+# blank_issues_enabled: false —— 关闭"空白 issue"。
+# 理由：本项目的 issue 需要**环境、复现步骤、error_code/request_id** 这些结构化信息
+# 才能处理；空白 issue 拿到后必然要来回追问三轮，而维护者是单人。
+# 需要自由讨论的内容请走下面的文档链接或 Discussions（若仓库已开启）。
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 先读 README（功能、环境要求、配置、质量门禁）
+    url: https://github.com/trx-0833/EngramNote/blob/main/README.md
+    about: 环境怎么装、端口是多少、容器化到底能不能用，README 里都有答案。
+
+  - name: 🧭 贡献指南（门禁命令怎么跑、契约怎么改）
+    url: https://github.com/trx-0833/EngramNote/blob/main/CONTRIBUTING.md
+    about: 门禁命令照抄 CI；改了后端接口必须重跑 dump_openapi.py 与 npm run gen:api。
+
+  - name: 🔐 上报安全漏洞（请勿公开细节）
+    url: https://github.com/trx-0833/EngramNote/security/advisories/new
+    about: 走私密渠道，不要在公开 issue 里粘贴 PoC、密钥或真实笔记内容。详见 SECURITY.md。
+
+  - name: 🗂️ 未做事项总表（提建议前先看这里）
+    url: https://github.com/trx-0833/EngramNote/blob/main/docs/overhaul-plan.md
+    about: overhaul-plan 附录 BN 逐条列出"哪些不影响现在的使用"，以及为什么现在不做。

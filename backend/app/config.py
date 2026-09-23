@@ -21,7 +21,7 @@ EngramNote 配置管理模块
 import logging
 import secrets
 from pathlib import Path
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -65,6 +65,23 @@ KNOWN_INSECURE_JWT_SECRETS = frozenset({
     "test",
     "dev",
 })
+
+#: JWT 允许的签名算法白名单（2026-09-23）
+#
+# ## 为什么必须白名单，而不是"跟着环境变量走"
+#
+# `jwt_algorithm` 是可配置的，而它在验证侧被原样传给
+# `jose.jwt.decode(..., algorithms=[settings.jwt_algorithm])`
+# （`services/auth_service.py:209`、`middleware/request_context.py:76`）。
+# 这个参数**就是**验签算法白名单 —— 值被误配成 `none` 时，
+# `alg: none` 的**无签名令牌**会被接受，等于鉴权失效。
+#
+# 只在验证侧收敛还不够：签发侧（`auth_service.py:163/280`）用的是同一个值，
+# 让它在配置层就只能是白名单内的值，两侧才不会有分歧。
+#
+# ⚠️ 新增算法时请连**兼容性**一起考虑：换算法会让**所有既有令牌失效**
+#    （旧令牌由旧算法签发），这对自托管用户是一次强制重新登录。
+ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +521,36 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:5173"
     # CORS 允许来源（逗号分隔），默认本地前端开发服务器端口；生产环境改为实际前端域名
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    # CORS 是否允许携带凭据（Cookie / Authorization 的浏览器侧凭据）——默认 **False**
+    #
+    # ## 为什么默认关（2026-09-23 从硬编码 True 改成可配置）
+    #
+    # 本项目的认证走 **Authorization 头**（访问令牌）与请求体（刷新令牌），
+    # **不使用 Cookie**。而 `allow_credentials=True` 的作用是让浏览器
+    # 在跨域时携带凭据 —— 在不需要它的前提下一律开着，收益为零，
+    # 风险却是实打实的：它禁止 `allow_origins=["*"]`，一旦有人为了图快
+    # 把 CORS_ORIGINS 放宽，凭据策略就跟着一起松。
+    #
+    # ⚠️ 若将来改成 Cookie 会话，必须同时把它设为 true —— 那时
+    # 这条注释要一起更新，否则下一个人会以为"关着是有意的"。
+    cors_allow_credentials: bool = False
+    # 可信反向代理的 IP 列表（逗号分隔），用于取**真实客户端 IP**
+    #
+    # ## 为什么需要它
+    #
+    # 限流在未认证路径（登录 10/min、注册 5/min）上按客户端 IP 计数，
+    # 取的是 `request.client.host` —— 而在反代/Nginx/容器后面，
+    # 那**永远是反代自己的 IP**，于是全站共用同一个桶：
+    # 一个脚本就能让所有人无法登录，爆破防护也失去区分度。
+    #
+    # ## 为什么默认**空**（宁可保守）
+    #
+    # `X-Forwarded-For` 是客户端可伪造的头。只有在"直连对端确实是本机反代"
+    # 时，取它才安全 —— 因此默认谁都不信（行为与改造前一致），
+    # 由部署者显式列出自己的反代地址（如 `127.0.0.1,172.18.0.1`）。
+    # 取值规则见 `middleware/rate_limit.py::_effective_client_ip`：
+    # 只信**最右侧**那一跳（最靠近我们的那个由可信代理写入的地址）。
+    trusted_proxies: str = ""
     # ---- 环境与开关（阶段 4.10：把 debug 拆成三个互不相干的开关）----
     #
     # 改造前只有一个 `debug`，它同时决定四件事：SQL echo、FastAPI 的 debug
@@ -621,6 +668,25 @@ class Settings(BaseSettings):
         if self.is_dev and not self.jwt_secret_key:
             self.jwt_secret_key = self._load_or_generate_jwt_secret()
         return self
+
+    @field_validator("jwt_algorithm")
+    @classmethod
+    def _validate_jwt_algorithm(cls, value: str) -> str:
+        """JWT 算法必须是白名单内的值（见 `ALLOWED_JWT_ALGORITHMS` 的说明）
+
+        为什么在**配置层**拦而不是在 decode 处拦：`jwt_algorithm` 同时决定
+        签发与验证两侧的算法，任何一侧放宽都等于把鉴权交给一个环境变量。
+        误配 `none` 的后果是**无签名令牌被接受** —— 这不是"配置写错了会报错"，
+        而是"配置写错了静默失去鉴权"，因此必须拒绝启动。
+        """
+        normalized = (value or "").strip().upper()
+        if normalized not in ALLOWED_JWT_ALGORITHMS:
+            raise ValueError(
+                f"JWT_ALGORITHM 只允许 {'/'.join(sorted(ALLOWED_JWT_ALGORITHMS))}，"
+                f"当前为 '{value}'。"
+                "⚠️ 尤其是 'none'：它会让 alg=none 的无签名令牌被接受，等于关闭鉴权。"
+            )
+        return normalized
 
     def _load_or_generate_jwt_secret(self) -> str:
         """

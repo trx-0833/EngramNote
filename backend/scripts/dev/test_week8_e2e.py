@@ -13,7 +13,7 @@
 9. 验证连续正确答题后间隔递增
 10. 验证错误答题后间隔重置
 
-运行方式：cd backend && python tests/test_week8_e2e.py
+运行方式：cd backend && python scripts/dev/test_week8_e2e.py
 """
 
 import json
@@ -194,7 +194,7 @@ def main():
                  f"正确: {result['is_correct']}, quality: {result['quality']}, "
                  f"SM2 interval: {result['sm2']['interval']}天, EF: {result['sm2']['easiness_factor']}")
 
-        assert result["is_correct"] == True, "选择题答案正确但判为错误"
+        assert result["is_correct"], "选择题答案正确但判为错误"
         assert result["quality"] == 5, f"选择题正确应 quality=5，实际 {result['quality']}"
         assert result["sm2"]["interval"] == 1, f"首次正确 interval 应为1，实际 {result['sm2']['interval']}"
         assert result["sm2"]["repetition"] == 1, f"首次正确 repetition 应为1，实际 {result['sm2']['repetition']}"
@@ -222,7 +222,7 @@ def main():
                      f"正确: {result['is_correct']}, quality: {result['quality']}, "
                      f"SM2 interval: {result['sm2']['interval']}天")
 
-            assert result["is_correct"] == False, "错误答案被判为正确"
+            assert not result["is_correct"], "错误答案被判为正确"
             assert result["quality"] <= 1, f"选择题错误应 quality<=1，实际 {result['quality']}"
             assert result["sm2"]["interval"] == 1, f"错误答案后 interval 应为1，实际 {result['sm2']['interval']}"
             assert result["sm2"]["repetition"] == 0, f"错误答案后 repetition 应为0，实际 {result['sm2']['repetition']}"

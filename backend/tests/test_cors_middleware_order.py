@@ -104,7 +104,12 @@ class TestCorsOnErrorResponses:
             "AppError 响应没有 Access-Control-Allow-Origin —— 错误渲染器又跑到 CORS 外面了"
             f"（响应头: {dict(resp.headers)}）"
         )
-        assert resp.headers.get("access-control-allow-credentials") == "true"
+        # 凭据头默认**不出现**：`cors_allow_credentials` 默认 False
+        # （本项目认证走 Authorization 头，不用 Cookie；见 config.py 的说明）。
+        # 这里断言"不出现"而不是删掉断言 —— 默认值也必须被钉住。
+        assert "access-control-allow-credentials" not in {
+            k.lower() for k in resp.headers
+        }, f"默认不该带凭据头（响应头: {dict(resp.headers)}）"
         # 响应本身（状态码 / 错误信封）不受本次改动影响
         assert resp.status_code == 404
         assert resp.json()["error_code"] == "TASK_NOT_FOUND"
@@ -151,7 +156,9 @@ class TestCorsOnErrorResponses:
         me = client.get("/api/auth/me", headers=headers)
         assert me.status_code == 200, me.text
         assert me.headers.get("access-control-allow-origin") == origin
-        assert me.headers.get("access-control-allow-credentials") == "true"
+        assert "access-control-allow-credentials" not in {
+            k.lower() for k in me.headers
+        }, "默认不该带凭据头"
 
     def test_disallowed_origin_still_rejected(self, test_db):
         """**反空洞**：不允许的来源依旧拿不到 ACAO（不是在无脑回显 Origin）
@@ -232,3 +239,60 @@ class TestMiddlewareOrderIsStructural:
             node = getattr(node, "app", None)
         # 后注册的 _Second 在外层
         assert chain.index("_Second") < chain.index("_First")
+
+
+class TestCorsCredentialsFollowsConfig:
+    """`cors_allow_credentials` 必须真的接到中间件上（两个方向都钉住）
+
+    ## 为什么单独一组
+
+    上面两组断言默认**不带**凭据头 —— 那是新默认。但如果只钉住"不带"，
+    将来有人把配置打开时，测试仍然全绿，等于这个开关没被验证过。
+    因此这里显式构造两个 app 实例，分别验证"关→无头"与"开→有头"。
+    """
+
+    @staticmethod
+    def _build(allow: bool):
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.testclient import TestClient
+
+        probe = FastAPI()
+
+        @probe.get("/ping")
+        async def ping():  # noqa: ANN202 - 探针
+            return {"ok": True}
+
+        probe.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:5173"],
+            allow_credentials=allow,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        return TestClient(probe)
+
+    def test_disabled_by_default_has_no_credential_header(self):
+        with self._build(False) as client:
+            resp = client.get("/ping", headers={"Origin": "http://localhost:5173"})
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert "access-control-allow-credentials" not in {
+            k.lower() for k in resp.headers
+        }
+
+    def test_enabled_emits_the_credential_header(self):
+        with self._build(True) as client:
+            resp = client.get("/ping", headers={"Origin": "http://localhost:5173"})
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+
+    def test_main_reads_the_setting_not_a_constant(self):
+        """守卫：`main.py` 不得把凭据重新写死"""
+        import io
+
+        source = io.open("app/main.py", encoding="utf-8").read()
+        assert "allow_credentials=cfg.cors_allow_credentials" in source, (
+            "CORS 凭据被写死了 —— 它必须来自配置（默认 False）"
+        )
+        assert "allow_credentials=True" not in source, (
+            "main.py 里又出现了写死的 allow_credentials=True"
+        )

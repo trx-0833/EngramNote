@@ -1,0 +1,15 @@
+# EngramNote 代码归属（CODEOWNERS）
+#
+# 语法：<pattern> <owner>...
+# 本仓库是单人项目，因此整个仓库归唯一作者所有。
+#
+# 归属依据（可自行核对，不依赖 git 历史）：
+#   - pyproject.toml:46            authors = [{ name = "trx-0833" }]
+#   - frontend/package.json:10     repository.url = git+https://github.com/trx-0833/EngramNote.git
+#   - README.md:10                 CI 徽章指向 github.com/trx-0833/EngramNote
+#
+# 说明：单人项目也写这份文件，是为了让"谁负责审阅"有明确答案，
+# 而不是留一个空白的 Reviewers 字段（见 docs/open-source-readiness.md:602）。
+
+# 默认：全部文件
+*       @trx-0833

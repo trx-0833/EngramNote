@@ -1,5 +1,6 @@
 # 依赖与镜像扫描（overhaul-plan 阶段 6.7）
 
+> **状态：过程记录** ｜ 记录时间：2026-09-14 ｜ 权威性：不是现状依据（当次扫描快照；最新结果以重跑 backend/scripts/security_scan.py 为准）
 > 本轮扫描时间：**2026-09-14 12:57（+08:00）** ｜ 仓库 HEAD：`182ebbd`
 > 执行入口：`python backend/scripts/security_scan.py`
 > 本文件记录的是**一次真实运行的结果**，不是"以后应该怎么做"的设想。

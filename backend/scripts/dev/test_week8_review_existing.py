@@ -12,7 +12,7 @@
 8. 验证连续正确答题后间隔递增
 9. 验证错误答题后间隔重置
 
-运行方式：cd backend && python tests/test_week8_review_existing.py
+运行方式：cd backend && python scripts/dev/test_week8_review_existing.py
 """
 
 import json
@@ -65,7 +65,7 @@ def main():
         if resp.status_code == 200:
             token = resp.json()["access_token"]
             log_step("登录成功", True)
-    except:
+    except Exception:
         pass
 
     if not token:
@@ -107,7 +107,7 @@ def main():
             # 尝试获取所有题目
             resp2 = client.get(f"{BASE_URL}/understanding/questions?page=1&page_size=5", headers=headers)
             if resp2.status_code == 200:
-                all_q = resp2.json().get("items", [])
+                _all_q = resp2.json().get("items", [])
                 log_step("用户总题目数", True, f"{resp2.json().get('total', 0)} 道")
             print("\n  测试结束（无到期题目可测试）")
             return
@@ -136,7 +136,7 @@ def main():
         if quiz.get("options"):
             try:
                 options = json.loads(quiz["options"]) if isinstance(quiz["options"], str) else quiz["options"]
-            except:
+            except Exception:
                 pass
 
         user_answer = options[0] if options else "A"

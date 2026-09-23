@@ -116,7 +116,11 @@ def append_missing(missing: list[str]) -> int:
             value = defaults.get(field, "")
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]  # .env 里字符串不写引号
-            chunks.append((f"# {field.upper()}={value}").rstrip("="))
+            # ⚠️ 这里的 `=` 必须**总是**保留，即使默认值是空串：
+            # 解析器（本文件的 `_ENV_RE`）按 `KEY=` 的形状识别变量，
+            # 空默认值被 rstrip("=") 成 `# TRUSTED_PROXIES` 后就不再算"已登记"，
+            # 于是下一次 --append 会把它当缺失项**再追加一遍**（实测发生过）。
+            chunks.append(f"# {field.upper()}={value}")
         chunks.append("")
 
     with open(ENV_EXAMPLE, "a", encoding="utf-8") as fh:
@@ -157,12 +161,19 @@ def main() -> int:
         print(f"复查：缺失 {len(missing)}，未知 {len(unknown)}")
         return 0 if not missing and not unknown else 1
 
-    if args.check and (missing or unknown):
+    consistent = not missing and not unknown
+    if not consistent and args.check:
         print("\n❌ .env.example 与 app/config.py 不一致（见上方清单）")
         print("   补齐：python scripts/gen_env_example.py --append")
         return 1
 
-    print("\n✅ .env.example 与 app/config.py 一致")
+    # ⚠️ 这里曾经只判 `args.check and (...)`，于是**不带 --check** 时
+    # 缺失 1 项也会打印"✅ 一致" —— 一个会说谎的守卫比没有守卫更糟。
+    # 现在无论哪种调用方式，判定都取自 consistent。
+    if consistent:
+        print("\n✅ .env.example 与 app/config.py 一致")
+        return 0
+    print("\n⚠️ 存在未登记字段（未加 --check，故不返回非 0；补齐用 --append）")
     return 0
 
 

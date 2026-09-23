@@ -27,6 +27,12 @@
  *
  * 默认扫 `docs/overhaul-plan.md` 与 `frontend/docs/*.md`。
  * 有缺陷 → 退出码 1（打印文件、行号、表头列数、该行列数、原始行）。
+ *
+ * ## 清单存在性校验（2026-09-23 新增）
+ *
+ * 待扫清单里**任一路径不存在**时，脚本**以退出码 1 中止**并打印是哪一份缺失，
+ * 而不是跳过它继续扫 —— 默认清单是硬编码的，文档一旦被移动/改名，
+ * "少扫一份却仍然通过"的绿灯比红灯更危险（它与"全部扫过、0 缺陷"长得一模一样）。
  */
 // 运行环境（console/process 等）由 eslint.config.js 的 NODE_GLOBALS 声明，
 // 不再需要文件级 `/* global ... */`（两者同时存在会触发 no-redeclare）。
@@ -46,6 +52,21 @@ const DEFAULT_FILES = [
 const files = process.argv.slice(2).length
   ? process.argv.slice(2)
   : DEFAULT_FILES.map((f) => path.join(REPO_ROOT, f));
+
+// 清单存在性校验：缺文件就中止，绝不"少扫一份还报通过"。
+// 为什么放在扫描之前：跳过的文件不会进 totalTables/totalRows，
+// 汇总行与"全部扫过且 0 缺陷"完全同形 —— 那种绿灯没有任何信号。
+const missing = files.filter((f) => !fs.existsSync(f));
+if (missing.length) {
+  for (const f of missing) {
+    console.log(`[缺失] ${path.relative(REPO_ROOT, f)} —— 待扫清单里的这份文档不存在`);
+  }
+  console.log(
+    `\n扫描中止：清单里 ${missing.length} 份文档不存在（共 ${files.length} 份）。` +
+      '文件被移动/改名后请同步更新清单，不要让它静默少扫。',
+  );
+  process.exit(1);
+}
 
 /** 数一格里的竖线：忽略 `\|`（转义） */
 function countCells(line) {
@@ -69,6 +90,7 @@ const defects = [];
 
 for (const file of files) {
   if (!fs.existsSync(file)) {
+    // 兜底分支：上面已做过存在性校验（缺文件即中止），正常走不到这里。
     console.log(`· 跳过（不存在）：${path.relative(REPO_ROOT, file)}`);
     continue;
   }

@@ -1,0 +1,37 @@
+# EngramNote 编辑器统一配置
+# ==========================
+#
+# ## 这份文件解决什么
+#
+# 本仓库的中文注释（`.gitignore`、`.gitattributes`、各 `.md` 与代码注释）在本机
+# 用 GBK 解码的控制台/编辑器里会显示成「鏈湰椤圭洰」这类乱码 ——
+# **文件本身是合法 UTF-8**（用 UTF-8 读取一切正常），乱码来自读的一方按 GBK 解码。
+# 因此在编辑器侧显式声明编码，比让人去猜要省事：
+# 见 docs/open-source-readiness.md:263-266（同一条建议）。
+#
+# ## 换行符：与 .gitattributes 对齐，**不在这里另立一套**
+#
+# `.gitattributes:8` 规定 `*.sh` 一律 LF（CRLF 会让 Linux/macOS 报
+# "bad interpreter" / "$'\r': command not found"）；
+# `.gitattributes:11` 规定 `*.bat` 一律 CRLF（cmd 对 LF-only 批处理的多行 if 块解析异常）；
+# `.gitattributes:13-14` 对其余文本文件**不指定** eol，跟随 `core.autocrlf` 的默认行为。
+#
+# 所以这里只给 `*.sh` / `*.bat` 指定 `end_of_line`，**其余一律不指定** ——
+# 若是给 `[*]` 也写一个 eol 值，就等于在 .gitattributes 之外多出第二套规则，
+# 两者一旦不一致，谁生效取决于工具，这种"两处描述同一事实"的坑本仓库已经吃过很多次。
+
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+
+# 刻意**不**设 trim_trailing_whitespace：
+# Markdown 的"行尾两个空格 = 硬换行"是合法语法，本仓库有大量 .md，
+# 全局裁剪会把它们悄悄改掉（这类"看不见的损失"正是本项目反复记录过的风险）。
+
+[*.sh]
+end_of_line = lf
+
+[*.bat]
+end_of_line = crlf

@@ -13,28 +13,20 @@
 9. 删除一张卡片（新功能）
 10. 归档/取消归档笔记（新功能）
 
-运行方式：cd backend && conda activate mineru_env && python tests/test_full_flow.py
+运行方式：cd backend && conda activate mineru_env && python scripts/dev/test_full_flow.py
 """
 
 import time
 import sys
 
-from app.test_support.corpus import real_pdf_path
+from app.test_support.corpus import require_pdf_path
 from pathlib import Path
 
-import pytest
 import httpx
 
 BASE_URL = "http://localhost:8001/api"
-PDF_PATH = real_pdf_path()
-
-
-
-# 真实语料只从 TEST_PDF_PATH 取（仓库里不留个人/客户数据）；未设置则整模块跳过。
-pytestmark = pytest.mark.skipif(
-    PDF_PATH is None,
-    reason="未设置 TEST_PDF_PATH（真实 PDF 语料不在仓库里，请自行指定）",
-)
+# 脚本不是 pytest 用例：缺语料时 require_pdf_path() 直接抛错，而不是 skip 掉自己。
+PDF_PATH = require_pdf_path()
 
 # 测试用户
 TEST_USER = {
@@ -108,7 +100,7 @@ def main():
             token = data["access_token"]
             log_step("用户已存在，已登录", True)
         else:
-            assert False, f"注册失败: {resp.text}"
+            raise AssertionError(f"注册失败: {resp.text}")
     except Exception as e:
         log_step("注册失败", False, str(e))
         sys.exit(1)

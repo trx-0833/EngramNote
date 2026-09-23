@@ -146,6 +146,12 @@ frontend/playwright-report/
 frontend/blob-report/
 frontend/.playwright/
 
+# ---- 视觉重做前的现状基线截图（2026-09-23 审计）----
+# 产物来自 `frontend/e2e/shot-probe.spec.ts`（一次性探针，22 张真实渲染 PNG ≈1.8 MB）。
+# 它不做断言、不属于任何门禁，留着是为了"改外观前后逐页对比"。
+# 截图不入库（可再生成），探针 spec 本身入库 —— 复现方式写在文件头。
+frontend/shots/
+
 # ---- IDE ----
 .vscode/
 .idea/
@@ -193,3 +199,6 @@ docs/*.txt
 # 排查"本机全绿但 CI 失败"时创建（依赖面不同），属于临时产物
 .venv-ci/
 backend/.venv-ci/
+
+# ---- 本地临时目录（本机沙箱内写盘用，不入库） ----
+_agenttmp/
