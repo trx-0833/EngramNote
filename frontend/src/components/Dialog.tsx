@@ -12,6 +12,7 @@
  *
  * ⚠️ **本批次只新建基座，不迁移任何现有对话框** —— 工作区里没有第二个文件
  * import 它。这是刻意的：迁移与新建混在一批里，"行为没变"这件事就无法单独验收。
+ * （批次 D3 起有第一个消费者：`ConfirmDialog.tsx`，它才把这套基座带进产物。）
  *
  * ## 七项能力，逐条对应到下面的哪个 useEffect
  *
@@ -86,6 +87,16 @@ interface DialogProps {
   closeOnEsc?: boolean;
   /** 打开时优先聚焦的元素（例如表单的第一个输入框） */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * 底部的操作区（确认/取消这类按钮）。
+   *
+   * 与 `children` 分开是为了让焦点陷阱的**首元素**是可预期的：只写 children 时，
+   * 谁第一个被渲染谁就吃到初始焦点；调用方要指定初始焦点得自己造 ref。
+   *
+   * ⚠️ 它渲染在 `children` **之后** —— 首元素仍然取决于调用方在 children 里
+   * 先渲染哪个按钮（`ConfirmDialog` 正是靠"取消在前"来满足这条）。
+   */
+  footer?: React.ReactNode;
   /** 面板内容 */
   children?: React.ReactNode;
 }
@@ -111,6 +122,7 @@ export function Dialog({
   closeOnOverlayClick = true,
   closeOnEsc = true,
   initialFocusRef,
+  footer,
   children,
 }: DialogProps) {
   /** 遮罩（fixed 全屏那层）：点空白处关闭、keydown 冒泡到这里 */
@@ -283,6 +295,7 @@ export function Dialog({
           </h2>
         ) : null}
         {children}
+        {footer ? <div className={styles.dialogActions}>{footer}</div> : null}
       </div>
     </div>
   );

@@ -16,6 +16,10 @@ import {
 } from '../api/client';
 import Icon from './Icon';
 import TaskProgress from './TaskProgress';
+// 统一确认框（批次 D3）：本文件有**两处**确认（停止清洗 / 删除重复块），
+// 各自一个 `useState`，但只有一个 `block_index` 需要记住，所以删除那处用
+// `number | null` 承载"打开着呢，等确认的是第几块"（详见 render 段注释）。
+import ConfirmDialog from './ConfirmDialog';
 // 清洗面板样式（overhaul-plan 5.6）：原 src/styles/cleaning.css 整表迁到这里
 import styles from './CleaningPanel.module.css';
 
@@ -55,6 +59,17 @@ export default function CleaningPanel({
   const [error, setError] = useState('');
   /** 当前展开内容对比的重复块索引（null 表示全部收起） */
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  /** 停止清洗的确认框是否打开（批次 D3：原来是同步的 `confirm()`） */
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  /**
+   * 待删除的重复块索引（`null` = 删除确认框关着）。
+   *
+   * 这里**不能**用"是否打开 + 另一个 `blockIndex` state"两个变量：
+   * 两处 state 分别更新会先渲染出"框开着但不知道该删哪块"的一帧。
+   * 也不用 `false` 当"关着"——`block_index` 是数字，用 `-1` 当哨兵值
+   * 会让 `confirmDeleteIndex !== null` 这类判断在别的编号下失效。
+   */
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
 
   /** 触发清洗 */
   async function handleStartCleaning() {
@@ -70,9 +85,11 @@ export default function CleaningPanel({
     }
   }
 
-  /** 停止清洗 */
-  async function handleStopCleaning() {
-    if (!confirm('确定停止清洗？当前进度将丢失。')) return;
+  /**
+   * 真正执行"停止清洗"（批次 D3：原来这段紧跟在同步的 `confirm()` 之后，
+   * 现在由确认框的 `onConfirm` 调用 —— 逐字保留，含 loading 与失败提示）
+   */
+  async function performStopCleaning() {
     setLoading(true);
     setError('');
     try {
@@ -83,6 +100,11 @@ export default function CleaningPanel({
     } finally {
       setLoading(false);
     }
+  }
+
+  /** 停止清洗：先开确认框，不碰数据 */
+  function handleStopCleaning() {
+    setConfirmingStop(true);
   }
 
   /** 恢复重复块 */
@@ -101,9 +123,13 @@ export default function CleaningPanel({
     }
   }
 
-  /** 删除重复块 */
-  async function handleDelete(blockIndex: number) {
-    if (!confirm(`确定删除块 ${blockIndex}？此操作不可恢复。`)) return;
+  /**
+   * 真正执行"删除重复块"（批次 D3：原来这段紧跟在同步的 `confirm()` 之后）
+   *
+   * `blockIndex` 从确认框那处 state 来 —— 不再是入参：原来 `handleDelete(index)`
+   * 是点击时直接调用的，现在中间隔了一次用户点击，索引必须先存起来。
+   */
+  async function performDelete(blockIndex: number) {
     onMutatingChange?.(true);
     setLoading(true);
     setError('');
@@ -116,6 +142,11 @@ export default function CleaningPanel({
       setLoading(false);
       onMutatingChange?.(false);
     }
+  }
+
+  /** 点重复块上的「删除」：先开确认框，不碰数据 */
+  function handleDelete(blockIndex: number) {
+    setConfirmDeleteIndex(blockIndex);
   }
 
   // 从元数据中提取重复块信息
@@ -355,6 +386,42 @@ export default function CleaningPanel({
           )}
         </>
       )}
+
+      {/* ── 两处统一确认框（批次 D3）──
+          文案逐字保留原来的 `confirm()` 参数。两处的 `onConfirm` 都是
+          "先关框、再执行"（见 `ConfirmDialog` 文件头）：原来 `confirm()`
+          是同步的，用户点完弹窗立刻消失、按钮才进入 loading，
+          "先关后执行"才是逐字保留这个观感。取消则什么都不做。 */}
+
+      {/* ① 停止清洗 */}
+      <ConfirmDialog
+        open={confirmingStop}
+        title="确定停止清洗？"
+        message="当前进度将丢失。"
+        confirmText="停止清洗"
+        danger
+        onConfirm={() => {
+          setConfirmingStop(false);
+          void performStopCleaning();
+        }}
+        onCancel={() => setConfirmingStop(false)}
+      />
+
+      {/* ② 删除重复块。`block_index` 进标题（原来就是插值进 `confirm()` 文案的） */}
+      <ConfirmDialog
+        open={confirmDeleteIndex !== null}
+        title={`确定删除块 ${confirmDeleteIndex ?? ''}？`}
+        message="此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={() => {
+          const blockIndex = confirmDeleteIndex;
+          setConfirmDeleteIndex(null);
+          if (blockIndex === null) return;
+          void performDelete(blockIndex);
+        }}
+        onCancel={() => setConfirmDeleteIndex(null)}
+      />
     </div>
   );
 }

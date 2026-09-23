@@ -14,6 +14,7 @@ import ErrorDisplay from '../components/ErrorDisplay';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
 // 页头那一行（标题 + 卡片数 + 图谱按钮）交给组件，窄屏换行随之进模块
 import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import {
   cardTypeLabels,
   cardTypeColors,
@@ -80,6 +81,14 @@ export default function KnowledgeCards() {
   const [filterTab, setFilterTab] = useState<CategoryFilter>('all');
   const [openMenuCardId, setOpenMenuCardId] = useState<string | null>(null);
   const [actionLoadingCardId, setActionLoadingCardId] = useState<string | null>(null);
+  /**
+   * 待出题的拓展卡片 ID（`null` = 出题确认框关着）。
+   *
+   * 这里要记住的是**父卡片 ID**（`result.parent_card_id`）—— 它是
+   * `generateExtension` 的返回值，只在那一刻拿得到；用户点确认时那次调用
+   * 早已结束，所以必须先存起来（与 `CleaningPanel` 的块索引同理）。
+   */
+  const [confirmExtensionQuestions, setConfirmExtensionQuestions] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteId = searchParams.get('note_id') || undefined;
 
@@ -183,20 +192,29 @@ export default function KnowledgeCards() {
     setActionLoadingCardId(card.id);
     try {
       const result = await generateExtension(card.id);
-      const confirmed = window.confirm('拓展知识点已生成！是否立即为拓展知识点出题？');
-      if (confirmed) {
-        try {
-          await generateExtensionQuestions(result.parent_card_id);
-        } catch (err) {
-          // 出题失败不阻断流程，仅提示
-          toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败');
-        }
-      }
+      // 批次 D3：原来是同步的 window.confirm，现在开确认框 ——
+      // `await fetchCards(...)` 仍在同一个 try/finally 里，只是搬到了
+      // "用户在框里做了选择"之后（确认与取消都要刷新，逐字保留原行为）
+      setConfirmExtensionQuestions(result.parent_card_id);
       await fetchCards(searchKeyword || undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '生成拓展知识点失败');
     } finally {
       setActionLoadingCardId(null);
+    }
+  }
+
+  /**
+   * 确认框里点了「立即出题」：逐字搬原来 `if (confirmed)` 那一支。
+   *
+   * 出题失败**不阻断流程**，仅提示 —— 原来的内层 `try/catch` 原样在这里，
+   * 只是从"await 上下文里的内层 try"变成"回调里的 async 函数"。 */
+  async function performGenerateQuestions(parentCardId: string) {
+    try {
+      await generateExtensionQuestions(parentCardId);
+    } catch (err) {
+      // 出题失败不阻断流程，仅提示
+      toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败');
     }
   }
 
@@ -588,6 +606,24 @@ export default function KnowledgeCards() {
           ))}
         </div>
       )}
+
+      {/* 出题确认框（批次 D3）：**只**有标题，文案逐字保留原来
+          `window.confirm` 的那一句 —— 不加 `message`，也不改按钮文案
+          （原来两个按钮是浏览器给的「确定/取消」）。
+          这不是危险操作（出题可重来），所以确认按钮走 `btn-primary`、不加 `danger`。
+          取消 = 原来 `confirmed` 为 false 那一支：不出题，列表已经刷新过了。 */}
+      <ConfirmDialog
+        open={confirmExtensionQuestions !== null}
+        title="拓展知识点已生成！是否立即为拓展知识点出题？"
+        confirmText="确定"
+        onConfirm={() => {
+          const parentCardId = confirmExtensionQuestions;
+          setConfirmExtensionQuestions(null);
+          if (parentCardId === null) return;
+          void performGenerateQuestions(parentCardId);
+        }}
+        onCancel={() => setConfirmExtensionQuestions(null)}
+      />
     </div>
   );
 }

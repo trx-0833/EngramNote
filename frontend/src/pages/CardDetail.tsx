@@ -19,6 +19,7 @@ import Icon from '../components/Icon';
 // （卡片自己的名字），字号本就 1.5rem，用 <PageHeader> 只是让它与全站
 // 页面标题共用同一把量尺 —— 见下方调用点的说明
 import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { cardTypeLabels, difficultyLabels, questionTypeLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -35,6 +36,8 @@ export default function CardDetail() {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
+  /** 删除确认框是否打开（批次 D3：原来是同步的 `confirm()`，改成对话框后由 state 承载） */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const fetchCard = useCallback(async () => {
     setLoading(true);
@@ -70,20 +73,24 @@ export default function CardDetail() {
     }
   }
 
-  async function handleDelete() {
-    if (
-      !card ||
-      !confirm(
-        '确定删除此知识卡片？将同时删除关联的练习题目、复习记录和知识图谱关系。此操作不可恢复。',
-      )
-    )
-      return;
+  /**
+   * 真正执行删除（批次 D3：原来这段紧跟在同步的 `confirm()` 之后，
+   * 现在由确认框的 `onConfirm` 调用 —— 逐字保留，包括失败提示）
+   */
+  async function performDelete() {
+    if (!card) return;
     try {
       await deleteKnowledgeCard(card.id);
       navigate('/cards');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '删除失败');
     }
+  }
+
+  /** 点「删除」：先开确认框，不碰数据 */
+  function handleDelete() {
+    if (!card) return;
+    setConfirmingDelete(true);
   }
 
   function handleCancelEdit() {
@@ -356,6 +363,22 @@ export default function CardDetail() {
           ))}
         </div>
       )}
+
+      {/* 删除确认框（批次 D3）：文案逐字保留原来 `confirm()` 的那一句。
+          `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消则什么都不做。
+          执行期间**故意不加** loading —— 原来 `confirm()` 之后那段也没有。 */}
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="确定删除此知识卡片？"
+        message="将同时删除关联的练习题目、复习记录和知识图谱关系。此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={() => {
+          setConfirmingDelete(false);
+          void performDelete();
+        }}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

@@ -19,9 +19,9 @@
  * `base.css`）会被 CSS Modules 改写成 `animation:_fadeIn_<hash> …`，
  * 而产物里**没有**那个 `@keyframes` ⇒ 动画静默消失，源码与规则清单都看不出来。
  * 所以动画体在下面**逐字复制并改名**（`dialogFadeIn` / `dialogScaleIn`）。
- * 又因为 `Dialog.tsx` 目前还没有被任何页面引入（D1 只建基座），这两个定义
- * 眼下也不在 `dist` 里 —— 等 D2 迁移完第一套 modal 才会进产物，
- * 届时 `scripts/verify-built-css.mjs` 的"死动画"检查会一并覆盖它们。
+ * 批次 D1 时 `Dialog.tsx` 还没有被任何页面引入，这两个定义当时不在 `dist` 里；
+ * 批次 D3 起 `ConfirmDialog` 被 7 处确认弹窗引用，它们才随基座一起进产物
+ * —— `scripts/verify-built-css.mjs` 的"死动画"检查自此覆盖它们。
  */
 
 .dialogOverlay {
@@ -62,6 +62,16 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text);
+}
+
+/* 底部操作区（批次 D3 加入：`ConfirmDialog` 的「取消 / 确认」两枚按钮）。
+   右对齐 + 顶部间距；按钮之间的水平间距由 `.btn` 自己的 `gap` 管不着
+   （那是按钮**内部**图标与文字的间距），所以在这里显式给。 */
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
 }
 
 /* ── 滚动锁：类名由 Dialog 组件挂到 body 上 ──

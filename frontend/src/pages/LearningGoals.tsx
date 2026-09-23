@@ -15,6 +15,7 @@ import Icon from '../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：本页原先内联写 2rem，
 // 统一进组件后是 1.5rem；页头那一行（标题 + 按钮、窄屏换行）也由它承担
 import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 
 /** 目标类型：每日 / 每周 */
@@ -56,6 +57,12 @@ export default function LearningGoals() {
   const [submitting, setSubmitting] = useState(false);
   /** 是否展开已归档区域 */
   const [showArchived, setShowArchived] = useState(false);
+  /**
+   * 待删除的目标 ID（`null` = 删除确认框关着）。
+   *
+   * 批次 D3：原来是同步的 `confirm('确定删除此学习目标？此操作不可恢复。')`。
+   */
+  const [pendingDeleteGoalId, setPendingDeleteGoalId] = useState<string | null>(null);
 
   /** 拉取激活与归档两组目标数据 */
   async function fetchGoals() {
@@ -140,13 +147,21 @@ export default function LearningGoals() {
   }
 
   /**
-   * 删除目标（带二次确认）
-   * @param goalId - 目标 ID
-   * @param e - 鼠标事件，用于阻止冒泡
+   * 删除目标（批次 D3：二次确认由 `ConfirmDialog` 承担）。
+   *
+   * 点「删除」只打开确认框，`e.stopPropagation()` 原样保留 —— 原来那一行
+   * 在 `confirm()` **之前**，现在仍在同一个位置（同一条点击路径）。
    */
-  async function handleDelete(goalId: string, e: React.MouseEvent) {
+  function handleDelete(goalId: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm('确定删除此学习目标？此操作不可恢复。')) return;
+    setPendingDeleteGoalId(goalId);
+  }
+
+  /**
+   * 真正执行删除（原来这段紧跟在同步的 `confirm()` 之后，现在由确认框的
+   * `onConfirm` 调用 —— 逐字保留，含 `fetchGoals()` 刷新与失败提示）
+   */
+  async function performDelete(goalId: string) {
     try {
       await deleteGoal(goalId);
       await fetchGoals();
@@ -434,6 +449,23 @@ export default function LearningGoals() {
           </div>
         </div>
       )}
+
+      {/* 删除目标的确认框（批次 D3）：文案逐字保留原来的 `confirm()` 参数。
+          `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消什么都不做。 */}
+      <ConfirmDialog
+        open={pendingDeleteGoalId !== null}
+        title="确定删除此学习目标？"
+        message="此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={() => {
+          const goalId = pendingDeleteGoalId;
+          setPendingDeleteGoalId(null);
+          if (goalId === null) return;
+          void performDelete(goalId);
+        }}
+        onCancel={() => setPendingDeleteGoalId(null)}
+      />
     </div>
   );
 }

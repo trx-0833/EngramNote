@@ -29,6 +29,7 @@ import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
 // 页头那一行（标题 + 新建文件夹按钮）交给组件，窄屏换行随之进模块
 import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 
 /** 允许上传的文件扩展名列表 */
@@ -144,6 +145,13 @@ export default function DailyMaterials() {
   const [renaming, setRenaming] = useState(false);
   /** 重命名输入框引用 */
   const renameInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * 待删除的文件夹 ID（`null` = 删除确认框关着）。
+   *
+   * 批次 D3：原来是同步的 `confirm('确定删除此文件夹？')`，改成对话框后
+   * "要删哪一个"必须先存起来 —— 用户点确认时那次点击上下文早就不在了。
+   */
+  const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState<string | null>(null);
 
   /**
    * 上传状态轮询的定时器句柄
@@ -249,8 +257,15 @@ export default function DailyMaterials() {
    */
   async function handleDeleteFolder(folderId: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm('确定删除此文件夹？')) return;
+    setPendingDeleteFolderId(folderId);
+  }
 
+  /**
+   * 真正执行"删除空文件夹"（批次 D3：原来这段紧跟在同步的 `confirm()` 之后，
+   * 现在由确认框的 `onConfirm` 调用 —— 逐字保留，含删除后收起详情的联动
+   * 与失败走 `toast.error`）
+   */
+  async function performDeleteFolder(folderId: string) {
     try {
       await deleteFolder(folderId);
       setFolders((prev) => prev.filter((f) => f.id !== folderId));
@@ -806,6 +821,22 @@ export default function DailyMaterials() {
           ))}
         </div>
       )}
+
+      {/* 删除文件夹的确认框（批次 D3）：文案逐字保留原来的 `confirm()` 参数。
+          `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消什么都不做。 */}
+      <ConfirmDialog
+        open={pendingDeleteFolderId !== null}
+        title="确定删除此文件夹？"
+        confirmText="删除"
+        danger
+        onConfirm={() => {
+          const folderId = pendingDeleteFolderId;
+          setPendingDeleteFolderId(null);
+          if (folderId === null) return;
+          void performDeleteFolder(folderId);
+        }}
+        onCancel={() => setPendingDeleteFolderId(null)}
+      />
     </div>
   );
 }
