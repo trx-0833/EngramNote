@@ -18,4 +18,4 @@
 #   app/services/mineru/config_loader.py:14   → yaml
 #   app/services/mineru/converter.py          → requests（懒加载）
 pyyaml~=6.0.0
-requests~=2.32.0
+requests~=2.34.2
