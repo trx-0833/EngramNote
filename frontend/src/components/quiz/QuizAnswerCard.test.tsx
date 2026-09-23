@@ -13,6 +13,9 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SubmitAnswerResponse } from '../../api/client';
 import QuizAnswerCard, { type QuizCardQuestion } from './QuizAnswerCard';
+// 印章是 `aria-hidden` 的装饰，语义查询按定义取不到它 —— 按模块类名查
+// （css-convention §6 允许的少数例外，理由写在用它的那条用例里）
+import styles from './QuizAnswerCard.module.css';
 
 // 卡片内会渲染 SourceContext（它自己按需拉卡片详情）；这里不展开，
 // mock 掉是为了保证"绝不发生真实请求"，而不是为了改行为
@@ -253,5 +256,25 @@ describe('QuizAnswerCard 自评阶段的行为', () => {
     renderCard({ ...pending, selfRated: true, result: makeResult({ self_rating: 4 }) });
     const next = screen.getByRole('button', { name: /下一题|完成复习/ });
     expect(next).not.toBeDisabled();
+  });
+
+  it('★ 自评生效后盖一枚印章，且旁边那句说明同时在场（批次 E6）', () => {
+    renderCard({ ...pending, selfRated: true, result: makeResult({ self_rating: 4 }) });
+
+    // 说明文字走语义查询
+    expect(screen.getByText(/已按自评「想起来了」记录/)).toBeInTheDocument();
+
+    // 印章本身是 `aria-hidden` 的装饰，语义查询看不见它 —— 只能按模块类名取。
+    // 这是 css-convention §6 说的"少数必须按类名查"的地方之一：这里要验的正是
+    // "那枚纯装饰的图形在不在"，而按定义它就没有任何可访问名。
+    const seal = document.querySelector(`.${styles.selfRatingSeal}`);
+    expect(seal).not.toBeNull();
+    // 印章里装的确实是那枚自绘 seal 图标，不是个空 span
+    expect(seal?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('自评还没生效时不盖印章（印章是"完成"的记号，不能提前出现）', () => {
+    renderCard({ ...pending });
+    expect(document.querySelector(`.${styles.selfRatingSeal}`)).toBeNull();
   });
 });

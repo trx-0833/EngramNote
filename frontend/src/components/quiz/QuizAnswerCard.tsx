@@ -14,6 +14,7 @@ import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons';
 // 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
 // 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
 import styles from './QuizAnswerCard.module.css';
+import Icon from '../Icon';
 import {
   questionTypeLabels,
   difficultyLabels,
@@ -418,17 +419,17 @@ export default function QuizAnswerCard({
             />
           )}
 
-          {/* 自评结果确认：让用户看到自己的打分确实生效了 */}
+          {/* 自评结果确认：让用户看到自己的打分确实生效了。
+              批次 E6 加了一枚**印章**（`seal` 图标 + 一次盖章动效）。
+              用墨印而不是绿勾是有意的：绿勾在这个项目里表示"客观判对了"，
+              而自评是主观的、由用户自己盖的章 —— 用金色印章正好落在
+              `visual-design-spec` 的 R2「金色是印章，不是装饰」上。
+              动效尊重 `prefers-reduced-motion`（见模块文件末尾）。 */}
           {selfRated && result?.self_rating != null && (
-            <div
-              style={{
-                fontSize: '0.9rem',
-                padding: 'var(--space-sm)',
-                background: 'var(--color-bg)',
-                borderRadius: 4,
-                marginBottom: 'var(--space-md)',
-              }}
-            >
+            <div className={styles.selfRatingDone}>
+              <span className={styles.selfRatingSeal} aria-hidden="true">
+                <Icon name="seal" size={20} />
+              </span>
               已按自评「{selfRatingLabel(result.self_rating)}」记录，复习进度已更新。
             </div>
           )}

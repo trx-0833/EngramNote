@@ -1,11 +1,10 @@
 /**
- * 四档自评控件的样式（overhaul-plan 5.6：CSS Modules 试点切片）
+ * 四档自评控件的样式（overhaul-plan 5.6 起是模块切片；批次 E6 把内联样式也搬了进来）
  *
  * ## 这个文件为什么同时装桌面值与响应式值
  *
  * `.self-rating-btn` 有一条特殊历史：它**从来只在 responsive.css 里有定义**
- * （基础外观全靠 tsx 的内联样式 —— 见 SelfRatingButtons.tsx），
- * 也就是一个"没有任何样式表拥有它"的类名。
+ * （基础外观全靠 tsx 的内联样式），也就是一个"没有任何样式表拥有它"的类名。
  * 搬进模块时，它的两条窄屏规则也一并搬来，理由是**值的归属权**：
  *
  * - 这个值是"自评按钮的触控目标下限"，自评按钮的拥有者就是这个组件；
@@ -22,7 +21,106 @@
  * tsx 里 `className={`btn ${styles.selfRatingBtn}`}` 已经显式带上了 `.btn`，
  * 依赖在 JSX 上看得见。再 compose 一次等于把 `.btn` 注入两遍
  * （`transition` 会被声明两次），且会造成"依赖到底在哪声明"的两处真相。
+ *
+ * ## 批次 E6 搬进来的内联样式，以及**刻意留在 tsx 里的那两行**
+ *
+ * 四档按钮的 `border` 与 `borderLeft`（4px 的左竖条）**仍然内联**，因为它们
+ * 逐档取 `selfRatingOptions[].color` —— 那个唯一数据源在 `utils/labels.ts`，
+ * 是 tsx 侧的**字面量**（不是 CSS 变量，理由见那个文件的注释）。样式表拿不到它，
+ * 硬搬进来只会变成"四档颜色在样式表里再抄一遍"。
  */
+
+/* ── 外层：把四档"钉"在视口底部（批次 E6）──
+ *
+ * 计划 §6 的 E6 行要求"四档**固定底部横排**"。这里用 `sticky` 而不是 `fixed`：
+ * sticky 仍然占着文档流里的空间（滚到底时它就停在原位，不会盖住最后一段内容），
+ * 而 fixed 要永久悬浮、必须给页面补等高的下内边距才不遮东西 —— 那笔账会散在
+ * 每个调用点的容器上。
+ *
+ * ⚠️ `sticky` 的两个前提在**调用方**：祖先链上不能有 `overflow: hidden/auto`
+ * 或 `transform`（那会让 sticky 静默退化成 static）。复习页的容器满足这两条。
+ *
+ * `background` 必须是不透明的：否则正文会从按钮的缝隙里透出来，
+ * 看起来像渲染坏了。
+ */
+.selfRatingDock {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-dropdown);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) 0;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border-light);
+}
+
+/* ── 提示语 ── */
+
+.selfRatingPrompt {
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+}
+
+/* ── 四档一行等宽（批次 E6）──
+ *
+ * "失败在左、通过靠右"由数据顺序保证（`selfRatingOptions` 是 0/3/4/5 =
+ * 完全忘记 → 勉强想起 → 想起来了 → 轻松想起），这里只负责把它们排成等宽一横排。
+ * `minmax(0, 1fr)` 而不是 `1fr`：网格子项的默认 `min-width: auto` 会被
+ * 最长的那条 hint 顶开，四档就不等宽了。
+ */
+.selfRatingRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.selfRatingBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.selfRatingBtn:disabled {
+  cursor: wait;
+}
+
+.selfRatingLabel {
+  font-weight: 600;
+}
+
+.selfRatingHint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.selfRatingPending {
+  margin-top: var(--space-xs);
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.selfRatingSkip {
+  margin-top: var(--space-xs);
+  text-align: right;
+}
+
+.selfRatingSkipBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+
+/* ── 窄屏（断点沿用全局的 768 / 480，见 css-convention §3 雷区 2）── */
 
 @media (max-width: 768px) {
   .selfRatingBtn {
@@ -32,6 +130,11 @@
        把 56px 提到无媒体查询的基础规则会让 768–∞ 也跟着变成 ≥56px，
        那是行为改动；本轮只搬家，不改行为，所以这层冗余保留。 */
     min-height: 56px;
+  }
+
+  /* 四档在窄屏排两行：320px 屏上四等分每档不到 80px，两行各两档才点得准 */
+  .selfRatingRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

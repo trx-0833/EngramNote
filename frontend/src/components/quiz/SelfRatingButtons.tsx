@@ -28,11 +28,22 @@
  * 2. `prompt` 只有卡片复习会传（"刚才想得起来吗？"）。答题复习的同类
  *    提示是判分横幅里的"请对照答案，给自己的回忆程度打分"，因为它同时
  *    承担"简答题无法自动判分"的解释，与这里的一行提示不是同一件事。
+ *
+ * ## 批次 E6 的改动：四档固定底部横排
+ *
+ * 原先这一块的布局与外观**全在一组内联样式里**（`display: grid` +
+ * `repeat(auto-fit, minmax(140px, 1fr))`），也就是说宽度一变，"几档一行"
+ * 就跟着变 —— 1250px 宽时四档一行，窄一点就掉成三档、两档。
+ * 复习时每张卡都要做一次自评，档位位置**跳动**会直接变成误点。
+ * 现在改成：桌面恒为四档等宽一横排，窄屏才两行（见模块文件末尾的两档），
+ * 整块用 `position: sticky; bottom: 0` 钉在视口底部。
+ *
+ * 只有 `border` / `borderLeft` / 档位文字色**仍然内联**：它们的值逐档取自
+ * `selfRatingOptions[].color`，那是 `utils/labels.ts` 里的字面量（不是 CSS
+ * 变量，理由见那边的注释）。搬进样式表只会变成"同一套色在两个地方各写一遍"。
  */
 import type { ReactNode } from 'react';
 import { selfRatingOptions } from '../../utils/labels';
-// 自评按钮的触控目标（含 768/480 两条窄屏规则）已搬进本模块，
-// 见 SelfRatingButtons.module.css 文件头"为什么同时装桌面值与响应式值"
 import styles from './SelfRatingButtons.module.css';
 
 /**
@@ -64,72 +75,36 @@ export default function SelfRatingButtons({
   onSkip,
 }: SelfRatingButtonsProps) {
   return (
-    <div style={{ marginBottom: 'var(--space-md)' }}>
-      {prompt && <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>{prompt}</p>}
+    <div className={styles.selfRatingDock}>
+      {prompt && <p className={styles.selfRatingPrompt}>{prompt}</p>}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 'var(--space-sm)',
-        }}
-      >
+      <div className={styles.selfRatingRow}>
         {selfRatingOptions.map((opt) => (
           <button
             key={opt.quality}
             className={`btn ${styles.selfRatingBtn}`}
             onClick={() => onRate(opt.quality)}
             disabled={submitting}
+            // 逐档的边框色与左竖条：值来自 utils/labels.ts 的单一数据源，
+            // 刻意留在 tsx（见文件头最后一段）
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              gap: 2,
-              padding: 'var(--space-sm) var(--space-md)',
               border: `1px solid ${opt.color}`,
               borderLeft: `4px solid ${opt.color}`,
-              borderRadius: 6,
-              background: 'transparent',
-              color: 'inherit',
-              cursor: submitting ? 'wait' : 'pointer',
-              textAlign: 'left',
             }}
           >
-            <span style={{ fontWeight: 600, color: opt.color }}>{opt.label}</span>
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              {opt.hint}
+            <span className={styles.selfRatingLabel} style={{ color: opt.color }}>
+              {opt.label}
             </span>
+            <span className={styles.selfRatingHint}>{opt.hint}</span>
           </button>
         ))}
       </div>
 
-      {submitting && (
-        <p
-          style={{
-            marginTop: 'var(--space-xs)',
-            fontSize: '0.85rem',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          正在记录自评...
-        </p>
-      )}
+      {submitting && <p className={styles.selfRatingPending}>正在记录自评...</p>}
 
       {onSkip && !submitting && (
-        <p style={{ marginTop: 'var(--space-xs)', textAlign: 'right' }}>
-          <button
-            className="btn btn-link"
-            onClick={onSkip}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              textDecoration: 'underline',
-            }}
-          >
+        <p className={styles.selfRatingSkip}>
+          <button className={`btn btn-link ${styles.selfRatingSkipBtn}`} onClick={onSkip}>
             跳过自评，先做下一题
           </button>
         </p>

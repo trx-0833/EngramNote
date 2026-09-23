@@ -127,3 +127,55 @@
     transform: translateX(3px);
   }
 }
+
+/* ── 自评生效后的印章（批次 E6）── */
+
+.selfRatingDone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 0.9rem;
+  padding: var(--space-sm);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-md);
+}
+
+/**
+ * 印章本体
+ *
+ * 金色是**刻意的**：`visual-design-spec` 的 R2 把金色定义为"印章"，而这里
+ * 正是一枚印章。它不是"成功"的绿勾 —— 绿勾在这个项目里表示客观判对，
+ * 而自评是主观的。
+ *
+ * 关于对比度：`--color-accent` 压在这块 `--color-bg` 上达不到 3:1（非文本对比度
+ * 的门槛）。这里**不修**，因为印章是**纯装饰**（`aria-hidden`），而它旁边的
+ * 那句话已经把同一件事说全了：`已按自评「X」记录，复习进度已更新。`
+ * —— 信息不依赖这枚图形，所以 WCAG 1.4.11 不适用；反过来，为了凑对比度
+ * 把它压成深棕，R2 那条"金色是印章"的语义就没了。
+ */
+.selfRatingSeal {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-accent);
+  animation: selfRatingStamp var(--duration-base) var(--ease-out-expo);
+}
+
+/* 盖章：从略大、略斜的位置"压"下来 —— 与印章这个隐喻一致 */
+@keyframes selfRatingStamp {
+  from {
+    transform: scale(1.6) rotate(-12deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* ⚠️ 这一档必须留着：盖章动效是"装饰性动态"，开了"减少动态效果"就该停 */
+@media (prefers-reduced-motion: reduce) {
+  .selfRatingSeal {
+    animation: none;
+  }
+}
