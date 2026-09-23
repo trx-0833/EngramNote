@@ -8,15 +8,18 @@
   --color-primary: #0f3460;
   --color-primary-hover: #16213e;
   --color-primary-light: rgba(15, 52, 96, 0.08);
-  --color-primary-rgb: 15, 52, 96;
+  /* `--color-primary-rgb` 与 `--color-accent-rgb` 于 2026-09-23（visual-refactor-plan A2）删除：
+     它们的设计意图是"专供拼 alpha"（拿 rgb 三元组令牌拼出同色系的任意透明度），
+     但全项目 `var()` 零引用 —— 各处一律直接写 rgba 字面量（审计 §2.2 的 272 处硬编码里就有它们该管的那部分）。
+     需要拼 alpha 时再按判据加回来，不留"设计了却没人用"的空令牌。 */
 
   --color-accent: #c9a959;
   --color-accent-light: rgba(201, 169, 89, 0.12);
-  --color-accent-rgb: 201, 169, 89;
 
   --color-bg: #faf9f7;
   --color-surface: #ffffff;
-  --color-surface-elevated: #fefefe;
+  /* `--color-surface-elevated: #fefefe` 于 A2 删除：与 --color-surface 只差 1/255 的灰度，
+     肉眼与机器都分辨不出，且全项目 var() 零引用。区块抬升一律用 --shadow-* 表达。 */
 
   --color-text: #1a1a2e;
   --color-text-secondary: #5a5a7a;
@@ -56,8 +59,10 @@
 
   /* ── 渐变 ── */
   --gradient-primary: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
-  --gradient-accent: linear-gradient(135deg, #c9a959 0%, #e0c97f 100%);
-  --gradient-warm: linear-gradient(135deg, #0f3460 0%, #1a1a5e 50%, #2d1b69 100%);
+  /* `--gradient-accent`（金）与 `--gradient-warm`（紫蓝三色）于 A2 删除：全项目 var() 零引用。
+     ⚠️ 留下的 `--gradient-primary` 有 **17 处使用者**，但它两端色差只有 **1.37:1** ——
+     用作背景时**根本看不出渐变**（"墨韵"的设计意图没兑现）。批次 A3 处理其中最刺眼的两处
+     （透明文字的标题、主按钮），其余 15 处登记在案，随阶段 E 逐页精修时一并收敛。 */
   --gradient-gold: linear-gradient(135deg, #c9a959 0%, #d4b76a 50%, #b8943e 100%);
   --gradient-hero: linear-gradient(160deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a5e 100%);
 
@@ -114,7 +119,9 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
-  --radius-xl: 24px;
+  /* `--radius-xl: 24px` 于 A2 删除：全项目 var() 零引用 —— 圆角实际只用四档（sm/md/lg/full）。
+     下一步（批次 C/D）要把手写的 `9999px`（22 处）收敛回 --radius-full，
+     它现在只被引用过 1 次。 */
   /* 胶囊/正圆：样式表里 `9999px` 手写了 14 处（徽章、筛选标签、进度条轨道、
      评分圆标…）。它们**语义相同**（"能圆就圆"），所以收进一个令牌；
      继续手写的话，想调整"到底多圆"就得改 14 个地方。 */
@@ -133,8 +140,9 @@
 
   /* ── 动画曲线 ── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  /* `--ease-out-quart` 与 `--ease-in-out` 于 A2 删除：全站 48 处缓动里 45 处走 --ease-out-expo，
+     这两条从未被任何声明用过。缓动是本项目**唯一真正做到令牌收口**的维度（94%），
+     别让它重新长出没人用的令牌。 */
 
   /* ── 动效时长（A1 新增）──
    * 现状：38 处 `transition` 用了 7 个时长值、17 处 `animation` 用了 9 个，

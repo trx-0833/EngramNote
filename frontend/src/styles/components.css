@@ -359,19 +359,11 @@ textarea::placeholder {
   background-clip: text;
 }
 
-.gradient-text-gold {
-  background: var(--gradient-gold);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.glass-effect {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-}
+/* `.gradient-text-gold` 与 `.glass-effect` 于 2026-09-23（visual-refactor-plan A2）删除：
+   两者全项目**零使用者** —— grep `gradient-text-gold|glass-effect` 只命中它们自己的定义。
+   `.gradient-text-gold` 是 `.gradient-text` 的金色版（而后者本批下一步就要改掉，见 A3）；
+   `.glass-effect` 是毛玻璃卡片底，从未被任何 tsx 挂上（卡片底一律 --color-surface）。
+   留这段墓碑是为了让下一个读到这里的人知道"它们存在过、为什么没了"。 */
 
 .stagger-1 {
   animation-delay: 0.05s;
