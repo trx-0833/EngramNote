@@ -168,7 +168,10 @@
    > `src/hooks/useAdhdReader.module.css` —— 因为那 4 个类名的**写入点全在一个 hook 里**，
    > 于是它们成了模块自己的本地类（产物里是 `._adhdBlock_hash`），
    > 模块里只把 `.markdown-body` 写成 `:global(.markdown-body)` 去**引用**它
-   > （同 `App.module.css` 的 `.appLayout :global(.container)`）。
+   > （同 `App.module.css` 的 `.appLayout :global(.container)` —— ⚠️ **该写法已于批次 C2 删除**：
+   > 登录后的 `<main>` 不再挂全局 `.container`，改成全模块类 `.main` + 三档宽度类。
+   > 它作为"模块引用一个**本来就该全局**的类名"的例子仍然成立，但**不再是现行代码**，
+   > 别照着它去找一个已经不存在的写法）。
    >
    > ⚠️ 与本节末尾"半搬"的区别只有一句话：`:global(.markdown-body)` 引用的是
    > **本来就该全局**的类名，而 `:global(.adhd-block)` 是把**本模块自己的**类名写成全局
