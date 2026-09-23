@@ -23,8 +23,13 @@ button {
   overflow: hidden;
 }
 
+/* 主按钮底色（批次 A3）：原为 `var(--gradient-primary)`，但那个渐变两端色差只有
+   1.365:1 —— 在按钮这个尺寸上**完全看不出渐变**，白交了"背景是个渐变"这份复杂度，
+   还让"按钮是什么颜色"这个问题只能靠读两处令牌才能回答。
+   改成主色实底：所见即令牌，改 `--color-primary` 它就变。
+   hover / active 的浮起反馈**本批不动** —— 一次只改一件事，截图对比才读得懂。 */
 .btn-primary {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   color: white;
   box-shadow: 0 2px 8px rgba(15, 52, 96, 0.25);
 }
@@ -352,11 +357,25 @@ textarea::placeholder {
   animation: fadeIn 0.4s var(--ease-out-expo);
 }
 
+/**
+ * `.gradient-text` —— 曾用 `--gradient-primary` 做 `background-clip: text` 文字渐变，批次 A3 改掉。
+ *
+ * ## 为什么必须改
+ *
+ * `--gradient-primary` 两端是 `#1a1a2e` → `#0f3460`，**相对亮度比只有 1.365:1** ——
+ * 在 135° 渐变上肉眼根本分辨不出。也就是说"渐变标题"这个设计意图**从未兑现**，
+ * 而代价是实打实的：`-webkit-text-fill-color: transparent` 让这些标题在
+ * **打印**与 **Windows 强制高对比度模式**下存在不可见风险。
+ *
+ * ## 改成什么
+ *
+ * 纯 `--color-text`（焦墨）。标题的层次改由**字号 + 衬线 + 字重**建立 ——
+ * 这正是"墨分五色"的做法：层次靠浓度差，不靠颜色过渡（设计规范 §1 R1）。
+ *
+ * 类名**保留**：18 个页面挂的是它，本批改的是它"怎么画"，不是"叫什么"。
+ */
 .gradient-text {
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-text);
 }
 
 /* `.gradient-text-gold` 与 `.glass-effect` 于 2026-09-23（visual-refactor-plan A2）删除：
@@ -395,7 +414,12 @@ h1,
 h2,
 h3 {
   color: var(--color-text);
-  letter-spacing: -0.01em;
+  /* 字距归零（批次 A3）：`-0.01em` 是给**拉丁字形**调的负字距 ——
+     那是 Radix / Linear 一类英文界面的做法，中文标题被它挤在一起会显得局促。
+     本项目界面以中文为主，负字距在这里是净损失。
+     实测基线：18 个页面的标题字距一律是 -0.2 / -0.24 / -0.28 / -0.32px
+     （正好等于 -0.01em × 各页字号）。 */
+  letter-spacing: 0;
 }
 
 .heading-serif {
