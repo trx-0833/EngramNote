@@ -1,0 +1,374 @@
+/**
+ * 问题集页（`QuestionSets.tsx`）—— visual-refactor-plan 批次 E5
+ *
+ * ## 这一批做了什么
+ *
+ * 借鉴表 §C3「题库 / 问题集」行只抄 Anki 三件，落在本项目就是这个文件的全部内容：
+ *
+ * 1. **可配置列 + 点列头排序**：`.table` / `.th` / `.sortButton` / `.sortIcon*`
+ *    （列头的**可访问名**与 `aria-sort` 由 tsx 提供，这里只管外观）；
+ * 2. **行背景三态高亮**：`.rowEasy` / `.rowMedium` / `.rowHard`（详见下方"三态"）；
+ * 3. **s / d / r 筛选维度**：⚠️ **这一条在数据层没有支撑**，见 `QuestionSets.tsx`
+ *    里 `FILTER_DIMENSIONS` 上方那段逐层核过的证据 —— 筛选 chip 的机制照抄
+ *    （可点击、`aria-pressed`、数据驱动的维度表），但维度只登记数据里真有的那两个。
+ *
+ * ## 为什么整页是一张表（而不是每组一张表）
+ *
+ * 手风琴分组按 `visual-design-spec.md` §6.3 **保留**（"它是合适的"），
+ * 落地方式是**一个 `<table>` + 每组一个 `<tbody>`**：
+ * 列头因此只有一份 ⇒ 键盘用户 Tab 过 5 个排序按钮，而不是 5 × 组数。
+ * 每组一张表会把 Tab 停靠点按组数放大，那是把可访问性换成排版方便。
+ *
+ * ## 三态与"不能只靠颜色"
+ *
+ * Anki 的三态是「旗标色 / 黄=暂缓 / 紫=已标记」，这三样在本项目**都不存在**
+ * （`quiz_items` 没有旗标、暂缓、标记字段，页面上也没有设置它们的入口）。
+ * 于是三态落在数据里**唯一真实的三值维度**上：题目难度（easy / medium / hard）。
+ *
+ * ⚠️ 因此「难度」列在 tsx 里被定为**不可隐藏**：那一格里的中文徽章
+ * （简单 / 中等 / 困难）是行底色的**文字载体**。底色一旦成为唯一线索，
+ * 色觉障碍用户就读不出行状态了 —— 这是本文件与 tsx 之间的一条硬约束。
+ *
+ * ## 令牌
+ *
+ * 全部取自 `base.css` 已有令牌，本文件**没有新增任何硬编码色值**。
+ * 顺带把三处原本内联在 tsx 里的字面量换成了令牌（值逐一相同，零视觉变化）：
+ * `#25714a`「答案」绿 → `--color-success`；`fontSize: '0.875rem'` → `--text-base`；
+ * 两处 `fontSize: '0.75rem'` → `--text-xs`。
+ *
+ * ⚠️ 副作用（交给批次 F2 收口）：`--text-xs` 与 `--text-sm` 此前**零引用**
+ * 且登记在 `design-drift.mjs` 的 `PENDING_WIRING` 里（"规范预留：新写的样式用它"）。
+ * 本批按那条约定接了线，于是这两行登记**变成了过期项** ——
+ * 该脚本的"登记过期自检"会点名要求把它们删掉。`--space-2xs` / `--text-base` /
+ * `--text-2xl` 三条在更早的批次（F1 / C1 / E1）就已经是这个状态。
+ *
+ * ## 顺序即行为（与 `learning.css` 同一类约定）
+ *
+ * `.row > td` 的 `background-color` 必须排在 `.rowEasy/.rowMedium/.rowHard > td`
+ * **之前**（同权重 (0,1,1)，靠源序决胜负）。反过来写，三态底色全部失效。
+ * 这类"同文件、同权重、靠先后"的竞争 `verify-built-css.mjs` 的
+ * `ORDER_PAIRS` 只在**登记过**时才检查，所以这里用注释钉住。
+ */
+
+/* 页头右侧那行计数（原先是内联 `style`，批次 E5 搬进模块 —— 顺带把
+   `fontSize: '0.875rem'` 这个字面量换成 `--text-base`）。 */
+.totalText {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+}
+
+/* ════════════════════════════════════════════════════
+   表格骨架
+   ════════════════════════════════════════════════════ */
+
+.table {
+  width: 100%;
+  /* `separate` + `spacing: 0`（不是 `collapse`）：圆角要靠 `overflow: hidden`
+     把单元格裁出来，而 `border-collapse: collapse` 下 td 的背景会盖住表的圆角。 */
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-surface);
+  font-size: var(--text-base);
+}
+
+/**
+ * 窄屏兜底：表格保持 `table` 布局，最窄处由内容决定，放不下时**横向滚动**。
+ *
+ * 为什么不做 `table { display: block; overflow-x: auto }`：那会让列头与各列的
+ * 宽度塌成"各自的内容宽度"，同一列上下不再对齐 —— 一张对不齐的表就不该叫表。
+ * 也没做"窄屏自动藏列"：列的显隐是**用户的配置**（本批新增的「列」面板），
+ * 让媒体查询再去覆盖它，用户会看到"我打开的列在手机上又不见了"。
+ */
+.tableScroll {
+  overflow-x: auto;
+}
+
+.th {
+  /* 内边距落在里面的 `button` / `span` 上：排序按钮要占满整个表头格，
+     否则"点列头"的可点区域只有文字那几个字宽。 */
+  padding: 0;
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+}
+
+.sortButton:hover {
+  color: var(--color-primary);
+}
+
+/* 不可排序的列头（「答案」是操作列，没有可排的序）用同一套内边距对齐 */
+.thPlain {
+  display: inline-block;
+  padding: var(--space-sm) var(--space-md);
+}
+
+/**
+ * 排序方向指示：**复用 `chevron`**（不新增图标，也没有 Unicode 箭头）。
+ *
+ * 默认朝下、半透明 —— 它同时承担"这一列可以点"的可见线索；
+ * 激活时旋转 ±90° 并变实，含义由 `<th aria-sort>` 负责（图形只是外观）。
+ *
+ * ⚠️ 旋转作用在**包裹 span** 上而不是 `<svg>` 上：`learning.css` 的
+ * `.collapse-arrow-open` 也是这么做的，四处折叠头共用同一条曲线。
+ */
+.sortIcon {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.4;
+  transition: transform var(--duration-fast) var(--ease-out-expo);
+}
+
+.sortIconActive {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+.sortIconActiveAsc {
+  opacity: 1;
+  transform: rotate(-90deg);
+}
+
+/* ════════════════════════════════════════════════════
+   行 —— 三态高亮
+   ════════════════════════════════════════════════════ */
+
+/* ① 基态：白底。**必须**排在三态之前（见文件头"顺序即行为"）。 */
+.row > td {
+  background-color: var(--color-surface);
+  transition: background-color var(--duration-fast) var(--ease-out-expo);
+}
+
+/* ② 三态：难度三档。三个 `*-light` 都是 10% 叠白，观感是"极淡的一层" */
+.rowEasy > td {
+  background-color: var(--color-success-light);
+}
+
+.rowMedium > td {
+  background-color: var(--color-warning-light);
+}
+
+.rowHard > td {
+  background-color: var(--color-error-light);
+}
+
+/**
+ * ③ hover / 键盘焦点落在行内控件上时的浮起。
+ *
+ * 为什么用 `background-image` 叠一层半透明色，而不是改 `background-color`：
+ * 底色已经在表达三态，直接换底色会把状态**盖掉**（鼠标划过就不知道自己看的是哪一档）。
+ * 渐变层画在 `background-color` **之上**、`color` 之下，于是"状态 + 浮起"同时可见。
+ * 两个色标同色 ⇒ 等价于一层纯色覆盖，且不需要任何硬编码 rgba。
+ */
+.row:hover > td,
+.row:focus-within > td {
+  background-image: linear-gradient(var(--color-primary-light), var(--color-primary-light));
+}
+
+.td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: top;
+}
+
+/* 展开的答案区：`colSpan` 铺满整行，底色退到 --color-bg 与内容行区分开 */
+.detailRow > td {
+  padding: 0 var(--space-md) var(--space-md);
+  border-bottom: 1px solid var(--color-border-light);
+  background-color: var(--color-bg);
+}
+
+/* ════════════════════════════════════════════════════
+   单元格内容
+   ════════════════════════════════════════════════════ */
+
+/* 题目：整行摘要，最多 3 行，不把表格撑成一条长条 */
+.questionText {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 题型 / 难度徽章。底色由 tsx 按 `utils/labels.ts` 的颜色表内联给出
+   （那是全站唯一的颜色来源，见该文件的取值口径注释）。 */
+.pill {
+  display: inline-block;
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: white;
+  white-space: nowrap;
+}
+
+.timeText {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  /* 日期用等宽数字：列里逐行上下对齐，扫读时不会跳（借鉴表 §C3 第 4 行
+     "题号用等宽数字（表格右对齐）" 的同一条理由）。 */
+  font-variant-numeric: tabular-nums;
+}
+
+.answerBlock {
+  padding-top: var(--space-sm);
+}
+
+/* 原值 `#25714a` 与 `--color-success` 逐字相同（见 tsx 里的 a11y 说明），
+   这一批换成令牌 —— 硬编码色值因此少一处。 */
+.answerText {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--color-success);
+  line-height: 1.5;
+}
+
+.explanationText {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.optionList {
+  margin: 0 0 var(--space-sm);
+  /* 与改动前的卡片逐项对齐：选项块只缩进 `--space-sm`（不是列表标记那种一级缩进），
+     每一行自己带 2px 纵向内边距 */
+  padding-left: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.optionItem {
+  padding: var(--space-2xs) 0;
+}
+
+/* ════════════════════════════════════════════════════
+   分组（每组一个 `<tbody>`）
+   ════════════════════════════════════════════════════ */
+
+.groupHeaderRow > td {
+  padding: 0;
+  background-color: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* 分组头内容与列头同一套左右内边距，竖向上分组之间才对齐 */
+.groupHeaderInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+}
+
+.groupTitleCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.groupCount {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* ════════════════════════════════════════════════════
+   工具条与「列」面板
+   ════════════════════════════════════════════════════ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-sm);
+}
+
+.toolbarHint {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.columnsPanel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/**
+ * `hidden` 必须显式压掉 `display: flex`：`[hidden]` 的 `display: none` 来自
+ * **UA 样式表**，而下面的 `display: flex` 是作者样式 —— 作者层无论权重多低都赢。
+ * 不加这一条，面板会"永远显示"，`aria-expanded="false"` 就成了一句假话。
+ */
+.columnsPanel[hidden] {
+  display: none;
+}
+
+.columnsPanelTitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.columnOption {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.columnsHint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ════════════════════════════════════════════════════
+   窄屏（断点沿用全局的 768 / 480，不另造）
+   ════════════════════════════════════════════════════ */
+
+/**
+ * 768px：窄屏上题目多给一行，分组头抬高到触控友好的高度。
+ */
+@media (max-width: 768px) {
+  .questionText {
+    -webkit-line-clamp: 4;
+  }
+
+  .groupHeaderInner {
+    flex-wrap: wrap;
+    /* 触控目标抬到 40px（与 `learning.css` 768px 档里 `.filter-pill` 同一条理由） */
+    min-height: 40px;
+  }
+}
