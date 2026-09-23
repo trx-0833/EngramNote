@@ -86,8 +86,10 @@ const PENDING_WIRING = {
   '--z-drawer': '同上，待 D2',
   '--z-toast': '同上，待 D2',
   // ── 规范预留（**不是欠账**，是刻意留给新代码的命名）──
-  '--space-2xs': '规范预留：新写的样式用它；存量 36 处 2px 手写不替换（替换会动外观，留待单独一轮）',
-  '--text-2xs': '规范预留：存量按「保持字号不变」的决策不替换，新写的样式必须用它（见 base.css 字号段的长注释）',
+  '--space-2xs':
+    '规范预留：新写的样式用它；存量 36 处 2px 手写不替换（替换会动外观，留待单独一轮）',
+  '--text-2xs':
+    '规范预留：存量按「保持字号不变」的决策不替换，新写的样式必须用它（见 base.css 字号段的长注释）',
   '--text-xs': '同上',
   '--text-sm': '同上',
   '--text-sm-alt': '同上（且它是「存量专用」，本来就不该有新引用）',
@@ -122,9 +124,7 @@ function collectFiles(dir) {
  * （本仓库的注释里外链很多，arXiv / GitHub 链接满地都是）。
  */
 function stripComments(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
 
 /** 从 `base.css` 的 `:root` 块里取出全部令牌名 */
@@ -248,7 +248,9 @@ function main() {
 
   // 基线未设置：拒绝通过。假基线（0 或 Infinity）都会骗人
   if (BASELINE.hardcodedColors === null || BASELINE.rawFontSizes === null) {
-    console.error('\n✗ 基线未设置 —— 先跑 `node scripts/design-drift.mjs --snapshot` 并把结果填进 BASELINE');
+    console.error(
+      '\n✗ 基线未设置 —— 先跑 `node scripts/design-drift.mjs --snapshot` 并把结果填进 BASELINE',
+    );
     failed = true;
   }
 
