@@ -41,6 +41,18 @@ import { ICONS, type IconName } from './icons';
 
 export type { IconName };
 
+/**
+ * 全部语义名，按注册表里的定义顺序（导航 → 动作 → 状态 → 对象）
+ *
+ * 给**枚举用途**的地方：设计样板间 `/styleguide` 要把 46 个图标排成表，
+ * 新增图标时那张表要自动多一格，而不是靠人手同步两份清单。
+ * 业务代码不需要它 —— 业务代码只写死自己用的那一个名字。
+ *
+ * ⚠️ `Object.keys` 的类型是 `string[]`，这里的断言由 `icons/index.ts` 的
+ * `satisfies` 兜住：注册表的键就是 `IconName`，两者不可能分叉。
+ */
+export const ICON_NAMES = Object.keys(ICONS) as IconName[];
+
 /** 允许的渲染尺寸（px）—— 只此三档，避免再次出现 16/18 混用 */
 export type IconSize = 16 | 20 | 24;
 

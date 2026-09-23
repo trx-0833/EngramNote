@@ -162,20 +162,145 @@
   border-radius: var(--radius-sm);
 }
 
-/* ── 待补清单 ── */
+/* ── `.todoList` 已删除（批次 F1）──
+ *
+ * 它服务的是本页末尾那张"待补清单"，而 F1 把那四条全部补完了
+ * （图标表 / 组件状态矩阵 / 对话框演示 / 页面标题展示），清单随之消失。
+ * 零引用的类不留着：留着的话，下次有人搜 "todo" 会以为这里还有活儿没干。
+ */
 
-.todoList {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  line-height: 1.7;
+/* ── 图标表（批次 F1）──
+ *
+ * 46 个自绘图标按语义分组排成表。排成表的意义是"缺哪个语义一眼可见"：
+ * 这一页不写死"应该有 46 个"，而是把 `ICONS` 注册表的键**原样**列出来 ——
+ * 注册表里少一个，这里就少一格；多一个没归组，下面那段"未归组"会报出来。
+ */
+
+.iconGroup + .iconGroup {
+  margin-top: var(--space-lg);
 }
 
-.todoList strong {
+.iconGroupTitle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.iconGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(118px, 100%), 1fr));
+  gap: var(--space-sm);
+}
+
+.iconCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
   color: var(--color-text);
+}
+
+.iconName {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary);
+  word-break: break-all;
+  text-align: center;
+}
+
+/* ── 组件状态矩阵（批次 F1）──
+ *
+ * 只展示**能用静态 DOM 表达**的状态。hover 没法在静态页里"停住"，
+ * 所以它由真实的 `:hover` 承担（鼠标移上去就看得见），表格里只给说明。
+ */
+
+.stateTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.75rem;
+}
+
+.stateTable th,
+.stateTable td {
+  border: 1px solid var(--color-border-light);
+  padding: var(--space-sm);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.stateTable th {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+}
+
+.stateCell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* ── Dialog / PageHeader 演示 ── */
+
+.demoRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.demoBlock {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── 动效预览 ── */
+
+.motionDemo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.motionBox {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  animation: sgSlide 1.6s var(--ease-out-expo) infinite alternate;
+}
+
+@keyframes sgSlide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(120px);
+  }
+}
+
+/* ⚠️ 这一档是"动效必须尊重 prefers-reduced-motion"的**实物证据**：
+   在系统里打开"减少动态效果"之后再看这一页，上面的方块应当停住。
+   前序批次里只有 Dialog 与 NotesList 两处有这个守卫（实测），这里是第三处。 */
+@media (prefers-reduced-motion: reduce) {
+  .motionBox {
+    animation: none;
+  }
+}
+
+.reducedMotionState {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
 }
 
 /* ── 窄屏（断点沿用全局的 768 / 480，见 css-convention §3 雷区 2）── */
@@ -188,6 +313,25 @@
 
   .swatchChip {
     width: 40px;
+  }
+
+  /* 状态矩阵在窄屏改成一块块堆叠：横向滚动的表格在手机上没人会去滚 */
+  .stateTable,
+  .stateTable thead,
+  .stateTable tbody,
+  .stateTable tr,
+  .stateTable th,
+  .stateTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .stateTable thead {
+    display: none;
+  }
+
+  .stateTable tr + tr {
+    margin-top: var(--space-sm);
   }
 }
 
