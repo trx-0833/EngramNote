@@ -40,6 +40,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .api.router import api_router
+from .version import __version__
 from .config import Settings, get_settings
 from .core import context
 from .core.logging_config import setup_logging
@@ -631,7 +632,7 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(
         title=cfg.app_name,
         description="AI 驱动的学习笔记管理与知识库工具",
-        version="0.1.0",
+        version=__version__,  # 单一来源：app/version.py（见该文件说明）
         debug=cfg.is_dev,
         lifespan=lifespan,
         **_schema_endpoint_kwargs(cfg),
