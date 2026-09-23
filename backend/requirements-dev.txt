@@ -24,7 +24,7 @@
 
 # ---- 测试框架 ----
 pytest~=8.0.0
-pytest-asyncio~=0.23.0
+pytest-asyncio~=1.4.0
 
 # ---- Lint / 格式 ----
 ruff~=0.16.0
