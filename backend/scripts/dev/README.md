@@ -40,22 +40,23 @@
 
 | 文件 | 用途（文件头自述） | 搬迁前的引用方 | git 状态 |
 |---|---|---|---|
-| `test_full_e2e.py` | 全链路 API 级 e2e（登录→上传→转换→清洗→理解→RAG→SM-2→报告→跨用户隔离→负面用例），报告写 `tests/results/` | `backend/tests/测试账号信息.md:3,42`、`backend/tests/test_rate_limit.py:26`（注释）、`docs/open-source-readiness.md:438-443`、`docs/overhaul-plan.md:2938,10711` | 已跟踪 |
-| `test_full_flow.py` | 第 7 周全流程（真实 PDF + 卡片编辑/删除/归档新功能） | `docs/open-source-readiness.md:396`、`docs/archive/开发时间表.md:150`、`backend/tests/test_rate_limit.py:26` | 已跟踪 |
-| `test_week5_6_integration.py` | Week5-6 全流程（上传→转换→清洗→理解→题目→RAG） | `docs/open-source-readiness.md:396`、`backend/tests/test_rate_limit.py:26` | 已跟踪 |
-| `test_week8_e2e.py` | 第 8 周复习调度 e2e；**直连真库插题目**（`:43`、`:139` 的 `sqlite3.connect("data/db/engramnote.db")`） | `docs/open-source-readiness.md:439`、`docs/archive/开发时间表.md:548` | 已跟踪 |
+| `test_full_e2e.py` | 全链路 API 级 e2e（登录→上传→转换→清洗→理解→RAG→SM-2→报告→跨用户隔离→负面用例），报告写 `tests/results/` | `backend/tests/测试账号信息.md:3,42`、`backend/tests/test_rate_limit.py:26`（注释）、`docs/open-source-readiness.md`（§2.20）、`docs/overhaul-plan.md:2938,10711` | 已跟踪 |
+| `test_full_flow.py` | 第 7 周全流程（真实 PDF + 卡片编辑/删除/归档新功能） | `docs/open-source-readiness.md`（§2.17）、`docs/archive/开发时间表.md:150`、`backend/tests/test_rate_limit.py:26` | 已跟踪 |
+| `test_week5_6_integration.py` | Week5-6 全流程（上传→转换→清洗→理解→题目→RAG） | `docs/open-source-readiness.md`（§2.17）、`backend/tests/test_rate_limit.py:26` | 已跟踪 |
+| `test_week8_e2e.py` | 第 8 周复习调度 e2e；**直连真库插题目**（`:43`、`:139` 的 `sqlite3.connect("data/db/engramnote.db")`） | `docs/open-source-readiness.md`（§2.20）、`docs/archive/开发时间表.md:548` | 已跟踪 |
 | `test_week8_review.py` | 第 8 周复习全流程（真实 PDF，SM-2 参数/统计/历史验证） | `docs/archive/开发时间表.md:549` | 已跟踪 |
 | `test_week8_review_existing.py` | 第 8 周复习（复用库里已有用户与题目；`:45` 直连真库） | `docs/overhaul-plan.md:2938` | 已跟踪 |
 | `test_week9_10_e2e.py` | 第 9-10 周全流程（卡片/题目、报告、趋势、薄弱点、异常与认证校验） | `backend/tests/test_no_personal_data.py:14`（"第三种写法"）、`docs/overhaul-plan.md:2938` | 已跟踪 |
-| `test_week11_e2e.py` | 第 11 周全流程 + 前端 `/today` 路由可访问性 | `docs/open-source-readiness.md:396,397`、`docs/archive/开发时间表.md:246` | 已跟踪 |
-| `test_week12_e2e.py` | 第 12 周发布准备（Git/.gitignore/Docker/启动脚本/README）+ API 全流程 | `docs/open-source-readiness.md:396,397`、`docs/archive/开发时间表.md:281` | 已跟踪 |
+| `test_week11_e2e.py` | 第 11 周全流程 + 前端 `/today` 路由可访问性 | `docs/open-source-readiness.md`（§2.17）、`docs/archive/开发时间表.md:246` | 已跟踪 |
+| `test_week12_e2e.py` | 第 12 周发布准备（Git/.gitignore/Docker/启动脚本/README）+ API 全流程 | `docs/open-source-readiness.md`（§2.17）、`docs/archive/开发时间表.md:281` | 已跟踪 |
 
-> 行号实测于 **2026-09-23 23:16**。⚠️ 这几份 doc 正在被**并发编辑** —— 本会话期间
-> `docs/overhaul-plan.md`（`:2925`→`:2938`）、`docs/open-source-readiness.md`（`:395`→`:396`）、
-> `docs/archive/开发时间表.md`（`:148`→`:150` 等）的行号都已经漂移过一次，
-> 所以引用时**以内容为准**，行号只当定位线索。
+> 行号实测于 **2026-09-23 23:16**，**2026-09-24 00:33 重新对过一次**
+> （`docs/open-source-readiness.md` 当天被改写，行号整体下移：§2.17 `:396`→`:423`、
+> §2.20 `:438-443`→`:463-480`）。⚠️ 这两份 doc 都被**并发编辑**过多次 ——
+> `docs/overhaul-plan.md`（`:2925`→`:2938`）、`docs/archive/开发时间表.md`（`:148`→`:150` 等）
+> 的行号也都漂移过，所以引用时**以内容与小节号为准**，行号只当定位线索。
 >
-> "已跟踪"一列的依据：`docs/open-source-readiness.md:396` 把它们列为"**已跟踪**文件"，
+> "已跟踪"一列的依据：`docs/open-source-readiness.md`（§2.17）把它们列为"**已跟踪**"文件，
 > 且 `backend/tests/test_no_personal_data.py` 的 `git grep`（只扫已跟踪文件）历史上命中过它们。
 > ⚠️ **2026-09-23 这次搬迁按指令没有运行任何 git 命令**，因此该列由上面的仓库内证据推出，
 > 不是当场 `git status` 的读数。
@@ -103,7 +104,7 @@
 `os.makedirs(RESULT_DIR)`（建 `backend/tests/results/`）。真正危险的是另外两个 ——
 `test_week8_e2e.py:43,139` 与 `test_week8_review_existing.py:45` 会
 `sqlite3.connect("data/db/engramnote.db")` 写**真实生产库**（写在函数里，所以是
-"被调用时"触发，不是导入时）。这正是 `docs/open-source-readiness.md:438-443` 登记的问题。
+"被调用时"触发，不是导入时）。这正是 `docs/open-source-readiness.md`（§2.20）登记的问题。
 
 **搬迁时同步改了什么（否则会当场坏或行为漂移）**：
 
@@ -142,7 +143,7 @@
    ⚠️ 但要说清楚：`norecursedirs`（现为 `tests/integration data data_backup_e2e __pycache__
    .pytest_cache`）**并不含 `scripts`**，因此"显式点名"的跑法仍会去 `import` 它们 ——
    实测 `python -m pytest --collect-only scripts/dev/test_week8_e2e.py` → 模块被导入、
-   收集到 0 条、退出码 5。`docs/open-source-readiness.md:448-449` 的建议里就有
+   收集到 0 条、退出码 5。`docs/open-source-readiness.md`（§2.20 的"建议"）里就有
    "并在 `pytest.ini` 里显式排除"这一条；本轮**按"读了再决定"的授权选择不改**
    （默认跑法已由 `testpaths` 兜住，且 `norecursedirs` 对"显式指定文件"本来也不生效），
    要不要加 `scripts` 留给下一次决定。
@@ -170,7 +171,7 @@
   4×F841 目标名加 `_` 前缀、3×B007 循环变量 → `_wait`、2×E712 `== True/False` → 真值判断、
   2×B011 `assert False, msg` → `raise AssertionError(msg)`。
 - 旧路径引用核对：`backend/tests/` 下**已无**指向这 9 个文件旧位置的引用（`测试账号信息.md`
-  已同步改成 `backend/scripts/dev/...`）；剩下的引用全在**文档**里（`docs/open-source-readiness.md:396,397`、
+  已同步改成 `backend/scripts/dev/...`）；剩下的引用全在**文档**里（`docs/open-source-readiness.md`（§2.17）、
   `docs/overhaul-plan.md:10711`、`docs/archive/开发时间表.md:150,548,549`）与
   `backend/app/test_support/corpus.py:12` 的一句用法示例，本轮未动（后者在 `app/` 下）。
 
@@ -180,9 +181,12 @@
   `test_rag.py` 甚至在导入期就发真请求），靠 `pytest.ini` 的
   `norecursedirs = tests/integration` 排除，没有搬走。
 - 下列**说明性文字**在本轮之后已与现状不符（且涉及 `app/` 目录，本轮禁改），未动：
-  `docs/open-source-readiness.md:438-443`（"它们仍会被 import"、`:443` 建目录）、
-  `docs/overhaul-plan.md:2938`（"仍未做的一半"）、`backend/tests/test_rate_limit.py:26`
-  （"其他测试模块 … 也会请求 /auth/login"）、`backend/app/test_support/corpus.py:12,23`。
+  ~~`docs/open-source-readiness.md`（"它们仍会被 import"、`:443` 建目录）~~ ——
+  ✅ **2026-09-24 已修**：`docs/open-source-readiness.md` §2.20 的标题与正文已改为
+  "曾有 9 个零用例脚本 / ✅ 已搬出"，并注明仍留在 `tests/` 的是 **0 个**（该文件在本次写权限内）。
+  其余各处**仍未改**：`docs/overhaul-plan.md:2938`（"仍未做的一半"）、
+  `backend/tests/test_rate_limit.py:26`（"其他测试模块 … 也会请求 /auth/login"）、
+  `backend/app/test_support/corpus.py:12,23`。
 
 ## 遗留
 

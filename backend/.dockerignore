@@ -5,10 +5,10 @@
 #
 # `docker-compose.yml` 里三个服务（backend / celery-worker / celery-beat）都用
 # `context: ./backend`，而 **本仓库此前只有 `frontend/.dockerignore`**
-# （`docs/open-source-readiness.md:579-580` 把这条记为待补的缺口）。
+# （`docs/open-source-readiness.md` §3.6 把这条记为待补的缺口）。
 # 没有它，`docker build` 会把整个 `backend/` 目录**先打包发给 Docker daemon**
 # 再开始构建 —— 本机实测这一份是 **4,705.0 MB / 1131 个文件**
-# （`backend/data/`，2026-09-23 实测；`docs/open-source-readiness.md:580` 记的是同一数字）。
+# （`backend/data/`，2026-09-23 实测；`docs/open-source-readiness.md` §3.6 记的是同一数字）。
 #
 # ⚠️ 注意它**不改变镜像内容**：Dockerfile 只 `COPY app/` 等少数路径，
 # 这里排除的是"被送进构建上下文的东西"，收益是构建更快、更不容易把

@@ -9,7 +9,7 @@
 #   - README.md:10                 CI 徽章指向 github.com/trx-0833/EngramNote
 #
 # 说明：单人项目也写这份文件，是为了让"谁负责审阅"有明确答案，
-# 而不是留一个空白的 Reviewers 字段（见 docs/open-source-readiness.md:602）。
+# 而不是留一个空白的 Reviewers 字段（见 docs/open-source-readiness.md §4.1）。
 
 # 默认：全部文件
 *       @trx-0833

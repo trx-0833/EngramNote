@@ -1,6 +1,9 @@
 # 开源化差距报告（Open-Source Readiness）
 
-> **状态：活文档** ｜ 最后核对：2026-09-23 ｜ 权威性：本主题的现状依据（§执行进度 随做随更新）
+> **状态：活文档** ｜ 最后核对：2026-09-24 ｜ 权威性：本主题的现状依据（§执行进度 随做随更新）
+> ⚠️ **§2 / §3 是"核查当日（2026-09-23）"的判断快照，不是现状。**
+> 哪些已完成、证据是什么，**一律以 [§执行进度](#执行进度本文发出后的实际进展) 为准**；
+> 2026-09-24 的复核已就地更正其中若干条已过期的结论（每条都标了"已修"与实测依据）。
 > **性质**：本文件回答一个问题 —— **EngramNote 离"一个别人愿意用、愿意贡献的开源项目"还差什么**。
 > 它不是功能计划，是对着 `origin/main` 的真实快照与本地工作区做的逐条核查。
 >
@@ -24,21 +27,40 @@
 
 > 记账口径：**已完成**必须带可核对的证据（提交号 / 实测命令 / 机器结论）；
 > 未做的写在这里，不写"计划中"。
+>
+> **取数时点：2026-09-24**（本地工作区实测）｜ 远端 `main` HEAD = **`154060c`**
+> （`git rev-parse origin/main`）｜ 下表所列提交**均已推送**。
+> §2 / §3 里写的是**核查当日（2026-09-23）**的判断；哪些已经修完、证据是什么，
+> **以本节为准**（复核时已就地给相关小节加上"已修"标注）。
+>
+> 📌 并行会话提示：前端视觉重构由**另一个会话**在推进，它已在远端留下
+> `fbad410`、`6ab35f5`、`154060c`，本地还有尚未推送的提交（写作期间从 `cbccaf2` 涨到 `e377498`）。
+> 这些**不属于**本次开源化记账，只是会把 HEAD 往前推 —— 引用 HEAD 时请现查。
+>
+> ⚠️ 本文是活文档，仓库里有多处按 `docs/open-source-readiness.md:<行号>` 引用它。
+> 2026-09-24 这次记账让全文从 **789 行涨到 844 行**，那些**行号引用会整体下移**；
+> 本次能改的已改成"小节号 + 行号"，改不到的（不在写权限内）逐条登记在
+> [`docs/journal/README.md`](journal/README.md) 的"行号引用漂移登记"一节。**引用本文请优先写小节号。**
 
-### 已完成并推送（远端 HEAD `fe632f8`，共 8 个提交）
+### 已完成并推送（`a8a10be` → `154060c`，14 个提交）
 
 | 批次 | 内容 | 证据 |
 |---|---|---|
 | — | README 按代码实测重写 + `参赛/` 撤出仓库（本地保留）+ `.gitignore` 防复发 | `a8a10be`；远端 README 与本地逐字节一致；`/contents/参赛` → 404 |
 | 5.1 | **跑测试不再写真实 Vault**：会话级 `VAULT_DIR` 重定向 + 重绑模块级冻结引用 + 守卫测试 | `7af9dfe`；跑前跑后 `data/storage`(98 文件) 与 `db`(6 文件) **逐字节一致** |
 | 0 | **JWT 密钥轮换 + 公开占位值黑名单** + 教程示范值改生成命令 | `07d0e9f`；实测旧占位密钥签发的令牌被 `JWTError` 拒绝；新增 4 条单测 |
-| 1 | **PII 去标识化 30 处 / 18 文件** + 防复发守卫（码点构造禁止串，扫已跟踪文件） | `57e5058`；当前树姓名/个人路径 0 命中；守卫当场抓出我首轮漏掉的客户资料路径 |
+| 1 | **PII 去标识化 30 处 / 18 文件** + 防复发守卫（码点构造禁止串，扫已跟踪文件） | `57e5058`；2026-09-24 复核：**除本文以外**的已跟踪文件里，姓名与"文档类型+姓名"组合均 **0 命中**（守卫 `backend/tests/test_no_personal_data.py:43-45` 的 `ALLOWLIST` **只放行本文**，并且反过来要求本文继续保留该姓名，见改正 3）；客户资料路径由新加的守卫当场发现 |
 | 2 | **依赖分层**（运行/开发/CI/可选四份判据分离）+ 补齐 3 个模块级硬依赖 + 仓库根 `pyproject.toml` | `c14690b`；`pip install -e .` 在干净 venv 实测通过（27 依赖、包可导入） |
-| 2.3 | **`.env.example` 双向守卫**（缺失/未知都报错）+ 补齐 41 个未登记字段（60 → 101） | `c14690b`；CI 新增同名步骤；`--check` 缺失 0 / 未知 0 |
+| 2.3 | **`.env.example` 双向守卫**（缺失/未知都报错）+ 补齐 41 个未登记字段（**60 → 103**） | `c14690b`；CI 新增同名步骤；2026-09-24 复跑 `python scripts/gen_env_example.py --check` → `Settings 字段 103 / 模板已登记 103 / 缺失 0 / 未知 0`，退出码 0 |
 | 3 | **模板抄了就能跑**（`APP_ENV=dev` 生效、`GLM_MODEL` 生效）+ 缺 Key 启动即说明影响范围 | `c14690b`；实测复制模板可加载、密钥落在临时目录、未写真实 `data/` |
-| 5.7 | **`check_env.py`**：删掉已废弃的 chromadb、`shell=True` → `shell=False`、补齐 20 项检测 | `c14690b`；新增守卫锁住三点（其中"不得再用 shell=True"用 AST 判定） |
+| 5.7 | **`check_env.py`**：删掉已废弃的 chromadb、`shell=True` → `shell=False`、补齐 20 项检测 | `c14690b`；新增守卫锁住三点（其中"不得再用 shell=True"用 AST 判定）；2026-09-24 复核：`REQUIRED_PACKAGES` 里已无 `chromadb`（`check_env.py:428` 有说明注释）、全文件 `shell=True` 0 命中 |
 | 4 | **前端**：包元数据补齐、锁文件 371 条回归官方源（integrity 保留）、`VITE_API_BASE_URL` 可配置、lint/format 范围扩到 `e2e/ scripts/` | `3062582`；`VITE_API_BASE_URL` 注入实测命中产物；`vitest` 295 passed、`vite build` 通过 |
-| 4 | **门禁升级**：prettier 与 a11y 从建议性改为**阻断** | `fe632f8`；YAML 解析通过，四个 job 全部步骤枚举确认 |
+| 4 | **门禁升级**：prettier 与 a11y 从建议性改为**阻断** | `fe632f8`；YAML 解析通过，四个 job 全部步骤枚举确认；2026-09-24 复核：`ci.yml` 全文只剩**一处** `continue-on-error: true`（`:147` ruff format），a11y 步骤名已是 `Playwright a11y audit (axe-core, blocking)`（`:311`）、prettier 步骤名已是 `Prettier check (blocking)`（`:237`） |
+| 5 剩余 | **JWT 算法白名单**（`config.py:672` 起 `jwt_algorithm` 的 `field_validator`）、**上传 `temp_id` 归属校验**（`upload.py:98-120` 归属旁载 + `:843-850` 读前校验）、**422 契约结构化**（`main.py:555-586` 返回数组 + `VALIDATION_ERROR`）、**安全响应头**（`middleware/error_handler.py:78-79` `nosniff` / `X-Frame-Options`）、**CORS 凭据可配置且默认关**（`config.py:536` `cors_allow_credentials = False`）、**反代真实 IP**（`config.py:553` `TRUSTED_PROXIES` + `rate_limit.py:115-144` 取 XFF 最右一跳）、**9 个零用例脚本搬出 `tests/`** | `3c631f9`；2026-09-24 实测：9 个脚本在 `backend/tests/` **0 个**、在 `backend/scripts/dev/` **9 个**（逐个 `os.path.exists` 核对） |
+| 6 | **社区文件**：`CONTRIBUTING` / `SECURITY` / `CHANGELOG` / `UPGRADING` / `CODE_OF_CONDUCT` / `CODEOWNERS`（仓库根）/ `.editorconfig` / issue 与 PR 模板 / `dependabot.yml`；**22 份文档状态横幅**；`docs/README.md` 文档地图；`docs/journal/`；容器化补缺（`backend/.dockerignore` 等） | `3c631f9`；2026-09-24 实测：上述文件全部在 `git ls-files` 里、`backend/.dockerignore` 存在；带 `状态：` 横幅的文档 = **22 份**（`docs/` 17 + `frontend/docs/` 5）。⚠️ 例外：`sqlite-single-writer.md` 仍**无**横幅（本轮禁改），`docs/README.md` §4 有登记 |
+| 7.2 | **依赖漂移当次结论入档** | `c741630`；`docs/security-scan.md:573-588`："**39 条声明里只有 2 条与真实环境相符**"（超出声明范围 18 条、传递依赖 49 条） |
+| 7.3 | **版本号单一来源** | `c741630`；`backend/app/version.py:26` `__version__ = "0.1.0"`，`backend/app/main.py:43,635` 从它读取（不再硬编码），另有守卫测试；`frontend/package.json` 同版本 |
+| — | **首个 tag** | `v0.1.0`：annotated（`git cat-file -t v0.1.0` → `tag`），指向 `154060c`，release note 即该 tag 的注解 |
 
 **关键实测结论（与本文原判断不同，已更正）**：
 1. 基线**不是红的**：受限沙箱禁止写 `%TEMP%`，造成 100 error + 2 failed；
@@ -52,14 +74,19 @@
 4. 前端 `format:check` 是建议性的，于是 `src/` 里 162 个文件的风格漂移
    从未被发现；现已成为阻断门禁。
 
-### 尚未做（本轮未完成，按依赖顺序）
+### 尚未做（本轮仍未完成，均带 2026-09-24 实测依据）
 
-| 优先级 | 事项 | 为什么还没做 |
+| 优先级 | 事项 | 为什么还没做 / 实测依据 |
 |---|---|---|
-| 高 | 批次 5 剩余：9 个零用例脚本搬出 `tests/`、JWT 算法白名单、上传 `temp_id` 归属校验、直传补 `check_archive`、422 契约结构化、分页统一、CORS/安全响应头 | 本轮上下文用尽；每项都已定位到 `文件:行号` |
-| 高 | 批次 6：README 收尾（文档清单重排、8 处补充不一致）、文档状态横幅与 `docs/journal/`、`CHANGELOG`/`UPGRADING`/`SECURITY`/`CONTRIBUTING`/`CODE_OF_CONDUCT`、issue/PR 模板、`dependabot.yml`、`.editorconfig`、容器化补缺（`backend/.dockerignore` 等） | 同上 |
-| 中 | 批次 7：漂移检查结论、单一版本源、打 `v0.1.0` tag 与首个 release、GitHub 仓库设置清单（topics/description/Discussions——需你在页面点） | 依赖前三项 |
-| 低 | `ruff format` 全量重排（211/251 文件，需独立纯格式提交）、覆盖率阈值、Windows CI job | 有意推迟，理由写在 `ci.yml` 内 |
+| 高 | **个人数据仍在 git 历史里（未重写）** | `57e5058` 只清了 HEAD 树：`git log -S"劳动合同书" -- backend` 仍命中 **6 个提交**（`b5f7d38` … `57e5058`）。重写历史会改变全部 commit hash 并需要 force push —— **不可逆，须你拍板**（§2.17） |
+| 中 | **覆盖率阈值** | `ci.yml` 里 `coverage` / `--cov` 命中 **0**，`backend/pytest.ini` 与根 `pyproject.toml` 也没有覆盖率配置 —— 门禁只有"过/不过"，没有下限 |
+| 中 | **Windows CI job** | YAML 解析实测：`ci.yml` 的 4 个 job **全部** `runs-on: ubuntu-latest`，全文只有一处 `windows`（一句注释）。而本仓库的主要使用环境恰恰是 Windows |
+| 中 | **容器化仍未真机验证** | README §关于容器化自述"从未构建或运行过"；CI 里那个叫 `Docker build context sanity` 的 job（`ci.yml:482`）只有 **4 条 grep 断言**（nginx `client_max_body_size` / `proxy_buffering off` / `frontend/.dockerignore` / `Dockerfile` 用锁文件），**没有任何 `docker build` 步骤** |
+| 中 | **锁文件（处置依赖漂移）** | 7.2 只把结论入档，**没有改变依赖形态**：后端仍无 lock 文件，`requirements.txt` 仍用 `~=`（`docs/security-scan.md:573-588`） |
+| 中 | **直传补 `check_archive`**（§2.21 B-2） | 2026-09-24 复核：`check_archive` 只在 `/upload/prepare` 路径上（`upload.py:648` 起，调用点 `:729`）；直传 `POST /api/upload`（`:552-644`）做了魔术字节与 `.md` 嗅探，**仍未调用**压缩炸弹检查 |
+| 中 | **分页统一**（§2.21 B-11） | 三套约定仍在：`understanding.py:321/362`（`999 / le=9999`）、`knowledge.py:198`（`20 / le=100`）、`notes/list_detail.py:67`（`20 / le=1000`）、`graph.py:93`（`limit` 无上界校验） |
+| 中 | **GitHub 仓库设置**（topics / description / Discussions / 首个 release 的页面动作） | 只能在网页上点，本地改不了（§4.10） |
+| 低 | **`ruff format` 全量重排**（**211 / 251** 个文件：app 132、tests 79、scripts 40） | **有意推迟**：理由写在 `ci.yml:131-147` —— 纯格式提交要单独开一轮，否则审阅者分不清"真修复"与"排版"；本轮只堵住新增漂移（prettier 侧已升级为阻断） |
 
 > ⚠️ 推送时发现本机两个环境事实（与仓库无关，但会挡住你以后推送）：
 > ① `git` 走 HTTPS 时**无法完成证书校验**（Schannel 无凭据 / OpenSSL 报未知 CA），
@@ -73,7 +100,8 @@
 ## 0. 一句话结论
 
 **代码侧的工程质量远超它的"开源门面"。**
-后端 43,851 行 / 前端 39,236 行 / 测试 28,246 行，CI 有 5 个 job、契约漂移检查、
+后端 43,851 行 / 前端 39,236 行 / 测试 28,246 行，CI 有 4 个 job（backend / frontend /
+security-scan / docker-nginx-config，2026-09-24 用 YAML 解析复核）、契约漂移检查、
 axe 可访问性、依赖扫描 —— 这些是很多千星级项目都没有的。
 但仓库对外的部分基本是**空白**：GitHub 社区健康度 **42%**，
 无 CONTRIBUTING / 模板 / CHANGELOG / release / topics，
@@ -348,7 +376,12 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 `README.md:173` 说"检测 17 个包"，`check_env.py:387` 的 `REQUIRED_PACKAGES` 实际 **16 项**；
 `requirements.txt` 非注释行 **19** 行（含 2 个测试依赖、不含 3 个 PDF 依赖）。
 
-### 2.14 `.env.example` 只登记了 **60 / 102** 个配置项
+### 2.14 `.env.example` 曾只登记不到六成的配置项 ✅ **已修**（见 §执行进度 批次 2.3）
+
+> **2026-09-24 复核**：本条已在本轮修完 —— `.env.example` 与 `Settings` 现已 **103 / 103**
+> 对齐（`python backend/scripts/gen_env_example.py --check` → 缺失 0 / 未知 0，退出码 0），
+> 并有**双向守卫**（缺一个报错、多一个也报错）与 CI 步骤。
+> **下面几行保留为"问题形态"的原始记录**（数字是核查当日的）。
 
 - `Settings` 里共 **102 个字段**，`.env.example` 里出现过的变量名 **60 个**，
   **42 个字段完全没登记** —— 其中包含**会改变产品行为**的那些：
@@ -433,36 +466,50 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 - 结果：新贡献者"复制模板 → 跑 pytest"**必然红**，且报错指向**环境**而不是代码 ——
   这正是本仓库在 CI 上花三轮才分离清楚的那类坑。
 
-### 2.20 `tests/` 里有 9 个"零用例脚本"，仍会被 pytest 导入
+### 2.20 `tests/` 里曾有 9 个"零用例脚本"，会被 pytest 导入 ✅ **已搬出**（见 §执行进度 批次 5）
+
+> **2026-09-24 复核**：这 9 个脚本已全部移入 `backend/scripts/dev/`（`3c631f9`），
+> 现在 `backend/tests/` 下是 **0 个**（逐文件名核对），`backend/scripts/dev/` 下 **9 个**；
+> `pytest.ini` 的 `testpaths = tests` 自然也不再收集它们。
+> **下面几行是核查当日的形态**，保留作为"为什么必须有搬迁 + 守卫"的依据。
 
 - 这 9 个文件 **0 个 `def test_`**，却在模块级创建 `httpx.Client` 指向 `localhost:8001`，
   其中 `test_week8_e2e.py:43/139` 还直接 `sqlite3.connect("data/db/engramnote.db")` 插数据：
   `test_full_e2e` / `test_full_flow` / `test_week5_6_integration` / `test_week8_e2e` /
   `test_week8_review` / `test_week8_review_existing` / `test_week9_10_e2e` /
   `test_week11_e2e` / `test_week12_e2e`。
-- 它们**仍会被 import**：收集期就会建目录（`test_full_e2e.py:44` 建 `backend/tests/results/`）。
-- 另一个隐患：`tests/conftest.py:269` 的 `_LOCAL_HOSTS` 把 `localhost/127.0.0.1` 白名单化，
+- 彼时它们**会被 import**：收集期就会建目录（`test_full_e2e.py:44` 建 `backend/tests/results/`）。
+- 另一个隐患**仍未处理**：`tests/conftest.py:269` 的 `_LOCAL_HOSTS` 把 `localhost/127.0.0.1` 白名单化，
   `:272` 依赖 httpx **私有属性** `_transport`，异常还被 `:298-299` 吞掉 ⇒
   **"离线守卫"可能静默失效**（守卫失效时测试仍显示通过）。
 
-**建议**：这 9 个脚本移入 `backend/scripts/dev/`（那里已有 15 个同类脚本与 README）并在
-`pytest.ini` 里显式排除；守卫改成"装不上就报失败"，而不是吞掉。
+**建议（1/2 已做）**：这 9 个脚本移入 `backend/scripts/dev/`（✅ 已做，该目录现有 24 个同类脚本
+与一份 README，搬迁时改了什么见 `backend/scripts/dev/README.md` 的"第二批"）；
+**守卫改成"装不上就报失败"而不是吞掉 —— 这一半仍未做**。
 
 ### 2.21 其他后端硬伤（逐条带证据，可独立处置）
 
 | # | 问题 | 证据 | 影响 |
 |---|---|---|---|
-| B-1 | **JWT 算法可由环境变量改写**，无白名单 | `config.py:98` → `auth_service.py:163/209/280`、`request_context.py:76` 的 `algorithms=[settings.jwt_algorithm]` | 误配 `none` 即接受**无签名令牌**（`overhaul-plan.md:2359-2361` 自述"待实机验证"）→ 应为常量白名单 |
-| B-2 | **直传绕过压缩炸弹检查** | `POST /api/upload`（`api/upload.py:522-614`）不调用 `check_archive`；只有 `/upload/prepare`（`:695-705`）调用 | `config.py:165-172` 的三条护栏在直传路径上**失效** |
-| B-3 | **上传临时区不校验归属** | `upload.py:806-808` 只验 UUID 正则，不验 temp_id 属于谁 | 越权取用他人暂存文件 |
-| B-4 | **`alembic.ini` 带着弱口令与错的库** | `backend/alembic.ini:6` = `postgresql+asyncpg://engram:engram123@localhost:5432/engramnote` | 公开仓库里的默认口令，且与真实 SQLite 路线不符 |
-| B-5 | **MinIO 默认口令** | `config.py:75-76` `minioadmin/minioadmin`，`.env.example` 照抄 | 自托管用户照抄即弱口令 |
-| B-6 | **`check_env.py` 仍在要求已删除的 chromadb** | `check_env.py:399`（必需清单）、`:428-431`（`--fix` 会装回来）；而 `requirements.txt:23-24`、`config.py:241-250` 都声明 Chroma 已移除 | 首次自检"**假失败 + 假通过**并存"；计数三方不一致（它 16 个 vs README 说 17 vs `requirements.txt` 19 行） |
-| B-7 | **`check_env.py` 的 npm 版本检查在 Linux 上永远"看似通过"** | `check_env.py:369-375` 用 `subprocess.run([...], shell=True)` 且未 `check=True` | POSIX 下 `/bin/sh -c` 把 `args[0]` 当命令串、`--version` 变成 `$0` ⇒ 打印 npm 用法并**记 pass** |
-| B-8 | **422 响应体与 OpenAPI 声明不一致** | `main.py:516-525` 返回 `{"detail": "<str>"}`，而 `openapi.json` 按 FastAPI 规范声明 `detail: List[...]`（`openapi.json:2940`、`:7167`） | 按规范生成的**第三方客户端在参数错误时全部失败**；`detail` 还回显输入 |
-| B-9 | **无安全响应头、无改密/找回入口** | `main.py:638-649` 只挂 CORS + 两个自定义中间件；`api/auth.py` 无改密端点 | 口令泄露后用户**无法自助轮换** |
-| B-10 | `storage_service.py:136 remove_project_dir` 是**无调用方的死代码，内部是 `shutil.rmtree`** | `git grep` 仅命中定义 | 危险能力留着；要么删、要么补用户校验 |
-| B-11 | 分页约定三套并存 | `understanding.py:321/362`（999/9999）、`knowledge.py:198`（20/100）、`notes/list_detail.py:67`（1000）、`graph.py:93`（`limit` 无边界校验） | 贡献者无从判断"该照哪个写" |
+| B-1 | ~~**JWT 算法可由环境变量改写**，无白名单~~ ✅ **已修**（2026-09-24：`config.py:672` 起给 `jwt_algorithm` 加了白名单 `field_validator`） | `config.py:98` → `auth_service.py:163/209/280`、`request_context.py:76` 的 `algorithms=[settings.jwt_algorithm]` | 误配 `none` 即接受**无签名令牌**（`overhaul-plan.md:2359-2361` 自述"待实机验证"）→ 应为常量白名单 |
+| B-2 | **直传绕过压缩炸弹检查** ❌ **仍未做**（2026-09-24 复核） | `POST /api/upload`（`api/upload.py:522-614`）不调用 `check_archive`；只有 `/upload/prepare`（`:695-705`）调用 | `config.py:165-172` 的三条护栏在直传路径上**失效** |
+| B-3 | ~~**上传临时区不校验归属**~~ ✅ **已修**（2026-09-24：`upload.py:98-120` 的 owner 旁载文件 + `:843-850` 在**任何**枚举/读取之前校验归属） | `upload.py:806-808` 只验 UUID 正则，不验 temp_id 属于谁 | 越权取用他人暂存文件 |
+| B-4 | **`alembic.ini` 带着弱口令与错的库** ❌ **仍未做**（2026-09-24 复核） | `backend/alembic.ini:6` = `postgresql+asyncpg://engram:engram123@localhost:5432/engramnote` | 公开仓库里的默认口令，且与真实 SQLite 路线不符 |
+| B-5 | **MinIO 默认口令** ❌ **仍未做**（2026-09-24 复核） | `config.py:75-76` `minioadmin/minioadmin`，`.env.example` 照抄 | 自托管用户照抄即弱口令 |
+| B-6 | ~~**`check_env.py` 仍在要求已删除的 chromadb**~~ ✅ **已修**（2026-09-24：`REQUIRED_PACKAGES` 里已无 `chromadb`，`check_env.py:428` 留有说明注释） | `check_env.py:399`（必需清单）、`:428-431`（`--fix` 会装回来）；而 `requirements.txt:23-24`、`config.py:241-250` 都声明 Chroma 已移除 | 首次自检"**假失败 + 假通过**并存"；计数三方不一致（它 16 个 vs README 说 17 vs `requirements.txt` 19 行） |
+| B-7 | ~~**`check_env.py` 的 npm 版本检查在 Linux 上永远"看似通过"**~~ ✅ **已修**（2026-09-24：改用 `shell=False` 的参数数组，全文件 `shell=True` 0 命中） | `check_env.py:369-375` 用 `subprocess.run([...], shell=True)` 且未 `check=True` | POSIX 下 `/bin/sh -c` 把 `args[0]` 当命令串、`--version` 变成 `$0` ⇒ 打印 npm 用法并**记 pass** |
+| B-8 | ~~**422 响应体与 OpenAPI 声明不一致**~~ ✅ **已修**（2026-09-24：`main.py:555-586` 的 `validation_exception_handler` 返回**数组** + `VALIDATION_ERROR` 错误码） | `main.py:516-525` 返回 `{"detail": "<str>"}`，而 `openapi.json` 按 FastAPI 规范声明 `detail: List[...]`（`openapi.json:2940`、`:7167`） | 按规范生成的**第三方客户端在参数错误时全部失败**；`detail` 还回显输入 |
+| B-9 | **无安全响应头** ✅ **已修**（`middleware/error_handler.py:78-79`：`nosniff` / `X-Frame-Options: DENY`，且错误响应也补头）；**无改密/找回入口** ❌ **仍未做**（`api/auth.py` 只有 register / login / refresh / logout / reminder-settings） | `main.py:638-649` 只挂 CORS + 两个自定义中间件；`api/auth.py` 无改密端点 | 口令泄露后用户**无法自助轮换** |
+| B-10 | `storage_service.py:136 remove_project_dir` 是**无调用方的死代码，内部是 `shutil.rmtree`** ❌ **仍未做**（2026-09-24 复核：`git grep` 仍只命中定义） | `git grep` 仅命中定义 | 危险能力留着；要么删、要么补用户校验 |
+| B-11 | 分页约定三套并存 ❌ **仍未做**（2026-09-24 复核） | `understanding.py:321/362`（999/9999）、`knowledge.py:198`（20/100）、`notes/list_detail.py:67`（1000）、`graph.py:93`（`limit` 无边界校验） | 贡献者无从判断"该照哪个写" |
+
+> **本表逐行复核（2026-09-24，均为代码实测）**：**已修** = B-1 / B-3 / B-6 / B-7 / B-8，
+> 以及 B-9 的"安全响应头"那一半（提交 `3c631f9`，批次 5 剩余）；
+> **仍是缺口** = B-2（直传无压缩炸弹检查）、B-4（`alembic.ini` 弱口令）、B-5（MinIO 默认口令）、
+> B-9 的后一半（无改密/找回入口）、B-10（`remove_project_dir` 死代码）、B-11（分页三套）。
+> 复核命令：`git grep -n check_archive` / `git grep -n remove_project_dir` /
+> `python -c "import re,io;print('shell=True 命中', len(re.findall('shell=True', io.open('check_env.py',encoding='utf-8').read())))"`。
+> 注意：本表的**行号是核查当日的**，`§2` 上游改动会让它们漂移 —— 找的时候按文件名与函数名找。
 
 ### 2.22 README 与代码不一致的**完整清单**（R-1~R-6 之外的补充）
 
@@ -474,9 +521,9 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 | JWT 密钥列在"**可选配置**"（`README.md:214-218`） | `app_env` 默认 `prod`，非 dev 且密钥为空时**启动即 raise** | `config.py:491`、`:564-568` |
 | 全篇 **0 处**提 `APP_ENV` / `LOG_SQL` / `LLM_PROVIDER` | 这三个才是现行开关 | `config.py:482-520` |
 | `docs/architecture.md` 是"随代码更新的首选入口"（`README.md:587`） | 三个文件对"哪份是活文档"互相矛盾 | `README.md:366/587` vs `architecture.md:3-5` vs `overhaul-plan.md:7237-7238` |
-| — | `docs/sqlite-single-writer.md:5` 仍写"D5=保留 Chroma"、`:51` 示例端口 8000（实际 8001） | 该文件自身 |
-| — | `overhaul-plan.md:115` 引 `architecture.md:78`，内容实际在 `:98`（加横幅后全文引用偏移约 +22 行） | 实测 |
-| — | `overhaul-plan.md:11389` 与 `:11406` 是**两个同名 `BO.5.2` 锚点** | 实测 |
+| — | ~~`docs/sqlite-single-writer.md:5` 仍写"D5=保留 Chroma"、`:51` 示例端口 8000（实际 8001）~~ ✅ **已修**：`:5` 那句仍在，但 `:6-8` 已就地标注"**D5 这一半已作废（2026-09-23 核对）**"；示例端口已于 `:57` 改为 **8001**（变更说明在 `:66`） | 2026-09-24 实测：`git grep -n 8000 docs/sqlite-single-writer.md` 只命中 `:66` 的那句说明 |
+| — | `overhaul-plan.md:115` 引 `architecture.md:78`，内容实际在 `:99`（自 `e63793f` 加横幅起偏移 **+21** 行；核查当日为 `:98` / 偏移 +20，其后 `3c631f9` 又插了一行状态横幅） | 实测（`git show e63793f^:docs/architecture.md` 对照当前文件） |
+| — | ~~`overhaul-plan.md:11389` 与 `:11406` 的锚点**重名**（都叫 `BO.5.2`）~~ ✅ **已修**：第二个已改名为 **`BO.5.2b`**（现位置 `:11402` 与 `:11419`），锚点冲突消失 | 实测（`git grep -n "BO.5.2" docs/overhaul-plan.md`） |
 
 **建议**：README 的"质量门禁表"与"开关表"按 `config.py` 重新对一遍，
 并加一条守卫：**README 里出现的配置项名必须在 `config.py` 里存在** ——
@@ -504,7 +551,7 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 | `docs/architecture.md` | 254 行 | 访客 | 自述"重构前快照"，**待阶段 7 重写** |
 | `docs/decisions.md` | 278 行 | 访客 | 自述"**只读历史归档**，可能已与代码不符" |
 | `docs/security-scan.md` | 35 KB | 访客 | 记录的是 **`182ebbd` 时刻**的一次扫描，落后 20+ 个提交 |
-| `docs/archive/` | 6 份 / 约 380 KB | 考古 | 一 份"新手教学"171 KB、"项目架构"52 KB —— **面向访客的旧文档体量比活文档还大** |
+| `docs/archive/` | **7 份 + 索引**（8 个 md）/ 约 380 KB | 考古 | 一 份"新手教学"171 KB、"项目架构"52 KB —— **面向访客的旧文档体量比活文档还大**（2026-09-24 实测：7 份均已在 `docs/archive/README.md` 索引里，且逐份带 `状态：历史快照` 横幅） |
 | `frontend/docs/a11y-audit.md` | 131 KB | 访客 | 同上：过程记录，不是规范 |
 | `frontend/docs/openapi-client.md` | 129 KB | 访客 | 同上 |
 
@@ -576,9 +623,17 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
 - 但仓库里仍有两处会**当场失败**的陷阱：
   1. `docker-compose.yml:15` 把 `./backend/.env` 挂进容器 —— 而 `.env` 被 `.gitignore` 排除，
      **全新克隆的人没有这个文件**，Compose 会直接报错；
-  2. **根目录与 `backend/` 都没有 `.dockerignore`**（只有 `frontend/.dockerignore`），
-     `context: ./backend` 会把 `backend/data/`（本机实测 **4,705 MB**）整个送进构建上下文。
-- `backend/Dockerfile` 里还在 `mkdir /app/data/chroma`（Chroma 已废弃，`requirements.txt:13-14` 自陈移除）。
+  2. ~~**根目录与 `backend/` 都没有 `.dockerignore`**（只有 `frontend/.dockerignore`），
+     `context: ./backend` 会把 `backend/data/`（本机实测 **4,705 MB**）整个送进构建上下文。~~
+     ✅ **已补**（2026-09-24 复核）`backend/.dockerignore` 已入库，逐条排除
+     `data/`（4,705 MB / 1131 文件）、`tests/`（6 MB / 309 文件）、`.env`、`__pycache__`、`.venv/` 等；
+     根目录仍没有 —— 也**不需要**，因为没有任何构建把 `.` 当上下文。
+- ~~`backend/Dockerfile` 里还在 `mkdir /app/data/chroma`（Chroma 已废弃，`requirements.txt:13-14` 自陈移除）。~~
+  ✅ **已删**（2026-09-24 复核）现在的 `mkdir` 只有
+  `/app/data/db /app/data/storage /app/data/celery`。
+
+> 本条**仍未收口的是"真机验证"本身**：README 已如实标注未验证，CI 里也只有配置守卫
+> （见 §执行进度 → 尚未做），所以 §5.1 的处置口径仍然成立 —— **保持诚实标注，不要假装支持**。
 
 **建议改法**：要么按 §3.1 的口径把它标成"实验性、未验证"并补 `.dockerignore`
 与"先 `cp .env.example .env`"的前置说明；要么（更干净）在公开版**移出**容器化文件，

@@ -34,7 +34,7 @@
 # ## 使用前置条件（缺了会直接报错，不是可选项）
 #
 # `backend` 服务把宿主的 `./backend/.env` **只读**挂进容器。全新克隆里**没有**这个文件
-# （`.gitignore:22-27`），Compose 会因此直接报错（`docs/open-source-readiness.md:577`
+# （`.gitignore:22-27`），Compose 会因此直接报错（`docs/open-source-readiness.md` §3.6
 # 把这条记为"会当场失败的陷阱"）。请先：
 #
 #     cp backend/.env.example backend/.env    # 然后填 JWT_SECRET_KEY 等

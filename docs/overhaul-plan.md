@@ -7249,7 +7249,7 @@ messages / 模型 / 参数 —— 于是前一条缓存的响应被后一条命�
 | `README.md` | 保留，重写"功能概览/技术栈/项目结构"三节；删除无法兑现的承诺（项目 Vault 路径、端口不一致等） |
 | `docs/architecture.md` | **阶段 7 从零重写**。当前版本可作为"重构前快照"归档 |
 | `docs/decisions.md` | 转为**只读历史归档**。新架构的决策记入新文件，不带 `F-xx` 编号 |
-| `docs/code-review-report.md`（25KB） | 归档。其结论已被本方案覆盖 |
+| `docs/journal/code-review-report.md`（25KB；2026-09-23 从 `docs/` 顶层移入 `docs/journal/`） | 归档。其结论已被本方案覆盖 |
 | `docs/archive/`（390KB） | 删除或移出仓库 |
 | `docs/eslint-report*.txt` / `ruff-report*.txt`（约 470KB） | 删除（CI 里跑，不需要入库） |
 | `参赛/` | 保留（参赛材料） |
@@ -10710,7 +10710,9 @@ BK.4 与 BK.7 记的正是它们的当时状态。
 **"报告了但没改"的旧引用**（不在本轮可改动的文件范围内，完整清单在 README 的"遗留 3"）：
 `backend/tests/test_full_e2e.py:753,762`、`backend/tests/测试账号信息.md:35,45`、
 `docs/archive/新手教学.md:4175`、`docs/archive/开发时间表.md:77,514`、
-`docs/code-review-report.md:44,150`、`docs/verification-report-20260830.md:24`、`.trae/documents/**`。
+`docs/journal/code-review-report.md:44,150`、`docs/journal/verification-report-20260830.md:24`、`.trae/documents/**`。
+（2026-09-24 更正：上文两处 `docs/code-review-report.md` / `docs/verification-report-20260830.md`
+已随三份报告迁入 `docs/journal/` 改成新路径；其余各处仍未处理。）
 没有一处是可执行的构建 / CI 路径；正确的命令现在写作 `python scripts/dev/<file>.py`
 （**cwd 仍是 `backend/`** —— 部分脚本按 cwd 找 `data/db/engramnote.db`）。
 

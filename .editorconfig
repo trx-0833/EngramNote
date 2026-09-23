@@ -7,7 +7,7 @@
 # 用 GBK 解码的控制台/编辑器里会显示成「鏈湰椤圭洰」这类乱码 ——
 # **文件本身是合法 UTF-8**（用 UTF-8 读取一切正常），乱码来自读的一方按 GBK 解码。
 # 因此在编辑器侧显式声明编码，比让人去猜要省事：
-# 见 docs/open-source-readiness.md:263-266（同一条建议）。
+# 见 docs/open-source-readiness.md §2.8（同一条建议）。
 #
 # ## 换行符：与 .gitattributes 对齐，**不在这里另立一套**
 #

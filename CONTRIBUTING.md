@@ -274,7 +274,7 @@ CI 里这两个变量是显式写死的：`ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"`�
 ## 8. 提交约定
 
 - **提交信息用中文，重点说清"为什么"**，而不是"改了哪些行"。
-  本仓库的历史提交就是这个形态（`docs/open-source-readiness.md:729`：
+  本仓库的历史提交就是这个形态（`docs/open-source-readiness.md` §4.10：
   "150 个提交每条都说清了'为什么'"），**不需要**改写成 Conventional Commits。
 - 一次提交只做一件事：**纯格式重排不要和逻辑修复混在一起**——
   `ruff format --check` 至今是建议性，正是为了让审阅者能分辨

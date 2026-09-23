@@ -251,7 +251,7 @@ CI 定义在 `.github/workflows/ci.yml`，本地跑同样这几条（命令照�
 python -m ruff check app tests scripts     # 阻断
 python scripts/dump_openapi.py --check     # 契约：代码 → openapi.json，阻断
 python -m pytest -q                        # 离线测试，网络被 tests/conftest.py 挡住，阻断
-python -m ruff format --check app tests    # 建议性
+python -m ruff format --check app tests    # 建议性（有意为之，理由见 ci.yml:131-147）
 
 # 前端（在 frontend/ 下）
 npm ci
@@ -260,11 +260,12 @@ npm run gen:api       # openapi.json → src/api/generated/schema.ts（须零 di
 npm test              # vitest 单元/组件，阻断
 npm run build         # tsc + vite build，阻断
 npm run e2e           # Playwright（桩掉 /api），阻断
-npm run a11y          # axe-core 可访问性，建议性
+npm run a11y          # axe-core 可访问性，阻断（2026-09-23 起；此前是建议性）
 ```
 
-另外两项在 CI 里跑、默认不阻断：`security-scan`（`pip-audit` + `npm audit` 归档）
-与 `docker-nginx-config`（部署配置守卫）。逐条理由与当前已知缺口见
+另外两项在 CI 里跑：`security-scan`（`pip-audit` + `npm audit`，**只归档、不阻断**）与
+`docker-nginx-config`（部署配置守卫，**阻断** —— 任一条 grep 断言失败即 job 失败）。
+逐条理由与当前已知缺口见
 [docs/open-source-readiness.md](docs/open-source-readiness.md)。
 
 > **改后端接口后**：必须重跑 `python scripts/dump_openapi.py` 与 `npm run gen:api`，
@@ -302,7 +303,8 @@ EngramNote/
 ├── docs/                       # 架构、决策、整改计划与专题记录
 ├── check_env.py                # 环境检测与初始化
 ├── start.bat / start.sh        # 一键启动（3 进程）
-├── Dockerfile / docker-compose.yml / nginx.conf   # ⚠️ 历史遗留，未验证
+├── docker-compose.yml          # ⚠️ 历史遗留，未验证（配套 backend/Dockerfile、
+│                               #    frontend/Dockerfile、frontend/nginx.conf）
 └── README.md
 ```
 
@@ -312,6 +314,7 @@ EngramNote/
 
 | 文档 | 内容 |
 |---|---|
+| [docs/README.md](docs/README.md) | **文档地图：先看这一份** —— 三种状态（活文档 / 历史快照 / 过程记录）、阅读顺序、`docs/` 全量清单 |
 | [docs/architecture.md](docs/architecture.md) | 系统架构、数据流、状态机、数据库概览（**重构前快照**，标注见文件头） |
 | [docs/overhaul-plan.md](docs/overhaul-plan.md) | 重构全量计划与逐轮执行记录（**最完整的过程台账**） |
 | [docs/decisions.md](docs/decisions.md) | 关键取舍归档（F-xx 编号，代码注释回链到此，**只读**） |
@@ -319,11 +322,13 @@ EngramNote/
 | [docs/security-scan.md](docs/security-scan.md) | 依赖与镜像扫描的当次原始结果与处置口径 |
 | [docs/open-source-readiness.md](docs/open-source-readiness.md) | 开源化差距核查：必须修 / 应当修 / 建议新增（带 `文件:行号` 证据） |
 | [frontend/docs/](frontend/docs/) | 契约生成与漂移检查、CSS 约定与迁移、e2e 说明、可访问性审计 |
+| [docs/journal/](docs/journal/) | 过程记录：代码审查、启动验证、工具链检查的**当次报告**（仅供追溯，不是现状依据） |
 | [docs/archive/](docs/archive/) | 历史设计文档（仅供追溯，**不要以它们为准**） |
 
 ### 关于容器化（请务必读这一段）
 
-仓库里保留了 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但：
+仓库里保留了 `docker-compose.yml` 与 `backend/Dockerfile` / `frontend/Dockerfile` /
+`frontend/nginx.conf`，但：
 
 - 本项目**实际以本地进程方式运行**（后端 8001 / 前端 5173）；
 - 项目曾因磁盘空间与资源约束**明确放弃容器化与 PostgreSQL/Redis**；

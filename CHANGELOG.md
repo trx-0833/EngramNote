@@ -26,7 +26,7 @@
 - `.github/ISSUE_TEMPLATE/`（`bug_report.yml` / `feature_request.yml` / `config.yml`）、
   `.github/PULL_REQUEST_TEMPLATE.md`、`.github/dependabot.yml`。
 - 容器化补缺：`backend/.dockerignore`（此前**只有** `frontend/.dockerignore`，
-  见 `docs/open-source-readiness.md:579-580`）。
+  见 `docs/open-source-readiness.md` §3.6（依赖漂移））。
 
 ### Changed
 
