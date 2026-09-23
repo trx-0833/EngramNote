@@ -61,7 +61,14 @@
   --gradient-gold: linear-gradient(135deg, #c9a959 0%, #d4b76a 50%, #b8943e 100%);
   --gradient-hero: linear-gradient(160deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a5e 100%);
 
-  /* ── 间距 ── */
+  /* ── 间距 ──
+   *
+   * 1-2-3 体系（4/8/16/24/32/48），现状已被 61% 的声明采用，缺口是确定的三档。
+   * `--space-2xs` 是本轮新增的**细微分隔**档：2px 在现状里手写了 36 处
+   * （分隔线偏移、徽章内边距、圆点定位），远超"手写 ≥3 处才进令牌"的判据，
+   * 而它比 --space-xs 还小一档 —— 塞进 4px 会改变观感，不该硬凑。
+   */
+  --space-2xs: 2px;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
@@ -73,6 +80,35 @@
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
   --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* ── 字号（visual-refactor-plan 批次 A1）──
+   *
+   * ## 值逐字等于现状，本轮不改任何一处已有声明
+   *
+   * 现状是 34 个去重值 / 440 处，且**不成模数级数** —— 它是"每次挪 0.05rem"
+   * 的手调档（0.6/0.65/0.7/0.75/0.78/0.8/0.8125/0.85/0.875/0.9/0.95/1.0/1.05/1.1/…）。
+   * 把它们收敛成一套干净 scale 会让 `0.8rem`（104 处）从 12.8px 变成 13px，
+   * 也就是**全站 UI 文字普遍位移 0.2~0.5px** —— 那是一次会动外观的改动。
+   * 用户明确要求"保持字号不变"，因此本轮**只给现状命名**：
+   * 令牌值 = 现状值，存量声明一个字都不动，只有**新写的**样式必须用令牌。
+   *
+   * ## 代价写在这里，免得日后被误解成"没做工作"
+   *
+   * `--text-sm`(12.8) / `--text-sm-alt`(13.6) / `--text-base`(14) / `--text-base-alt`(14.4)
+   * 这四档两两相差 ≤0.8px，**肉眼不可分**。这是"保持现状"的必然结果。
+   * 真正收敛它们需要单开一轮 + 逐处截图对比（那才是会动外观的一轮）。
+   * 带 `-alt` 的两档是**存量专用**：新代码不得使用。
+   */
+  --text-2xs: 0.7rem; /* 11.2px · 现状 23 处 */
+  --text-xs: 0.75rem; /* 12px   · 现状 65 处 */
+  --text-sm: 0.8rem; /* 12.8px · 现状 104 处（UI 主力） */
+  --text-sm-alt: 0.85rem; /* 13.6px · 现状 35 处 · ⚠️ 存量专用，勿新增 */
+  --text-base: 0.875rem; /* 14px   · 现状 60 处 */
+  --text-base-alt: 0.9rem; /* 14.4px · 现状 34 处 · ⚠️ 存量专用，勿新增 */
+  --text-md: 1rem; /* 16px   · 现状 31 处（阅读正文） */
+  --text-lg: 1.1rem; /* 17.6px · 现状 5 处（区块标题） */
+  --text-xl: 1.5rem; /* 24px   · 现状 14 处 · 页面标题统一值 */
+  --text-2xl: 2rem; /* 32px   · 现状 5 处（统计大数字） */
 
   /* ── 圆角 ── */
   --radius-sm: 6px;
@@ -90,15 +126,50 @@
   --shadow-lg: 0 8px 24px rgba(26, 26, 46, 0.08), 0 4px 8px rgba(26, 26, 46, 0.04);
   --shadow-xl: 0 16px 48px rgba(26, 26, 46, 0.1), 0 8px 16px rgba(26, 26, 46, 0.06);
   --shadow-glow: 0 0 20px rgba(201, 169, 89, 0.15);
+  /* 统一的聚焦光环（A1 新增）：现状 `:focus-visible` 样式散落在各模块、没有单一来源。
+     用主色低透明度而不是 `outline` —— 与纸感底更协调，且不改变盒模型。
+     批次 D4 把各处焦点样式收敛到这一个令牌。 */
+  --shadow-focus: 0 0 0 3px rgba(15, 52, 96, 0.16);
 
   /* ── 动画曲线 ── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
+  /* ── 动效时长（A1 新增）──
+   * 现状：38 处 `transition` 用了 7 个时长值、17 处 `animation` 用了 9 个，
+   * 而且**没有任何时长令牌** —— 全是字面量。三档覆盖"即时反馈 / 常规过渡 / 较大的空间变化"。
+   */
+  --duration-fast: 150ms; /* hover、颜色变化 */
+  --duration-base: 250ms; /* 展开、淡入 */
+  --duration-slow: 400ms; /* 页面进入、抽屉 */
+
   /* `--navbar-height`（旧顶部导航栏的高度）已在 5.6 收尾轮随
      `layout.css` 的 `.navbar*` 一起删除：它唯一读者就是 `.navbar { height: … }`。
      证据见 `docs/migration-evidence/5.6-13-dead-css-cleanup.md`。 */
+
+  /* ── 布局宽度（A1 新增）──
+   *
+   * 现状：全局容器的 `max-width: 1200px` 在登录后被显式改成 `none`
+   * （`App.module.css:54-57`），页面宽度于是由各页内联 `maxWidth` 各写各的 ——
+   * 600 / 640 / 700 / 760 / 800 / 960 / 全宽，**六档并存**
+   * （1920 屏上内容区有效宽约 1616px，而答题页正文 700px，同层级差 2.5 倍）。
+   * 批次 C2 收敛成这三档。
+   */
+  --width-reading: 760px; /* 阅读 / 答题 / 表单 / 评估：注意力聚焦 */
+  --width-standard: 1200px; /* 列表 / 卡片 / 管理页：默认 */
+  --width-full: 100%; /* 图谱 / 分屏编辑 */
+
+  /* ── 层级（A1 新增）──
+   *
+   * 现状 z-index 全是手写字面量：`1000` ×6、`100` ×1、`99` ×1，没有令牌；
+   * 六个模态各自拍一个 1000，谁压谁只看运气。批次 D1/D2 收敛到这一组。
+   */
+  --z-base: 1;
+  --z-dropdown: 100;
+  --z-drawer: 200;
+  --z-modal: 1000;
+  --z-toast: 1100;
 
   /* ── 侧边栏 ── */
   --sidebar-width: 240px;
