@@ -1,125 +1,106 @@
 # EngramNote
 
-> AI 驱动的学习笔记管理与知识库工具 —— 从原始资料到长期记忆的完整学习闭环
+> AI 驱动的学习笔记管理与知识库 —— 把「资料 → 清洗 → 理解 → 复习」做成一个闭环
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
-[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22.22.2+-green.svg)](https://nodejs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-blue.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev)
+[![CI](https://github.com/trx-0833/EngramNote/actions/workflows/ci.yml/badge.svg)](https://github.com/trx-0833/EngramNote/actions/workflows/ci.yml)
 
-> **文档校准（2026-09-11，overhaul-plan §2.1 S-4）**：本 README 此前的若干描述与
-> 代码实际不符，已按仓库现状逐条核对修正 —— 包括**后端端口（8001 而非 8000）**、
-> **向量存储（`chunks` 表，不再是 Chroma）**、**混合检索路数（两路，n-gram 通道已删除）**、
+> **文档校准（2026-09-23）**：本次 README 重写**以代码实测为准**，逐条更正了此前的错误陈述 ——
+> 包括**调度算法（实际是 FSRS-5，SM-2 只是可回退路径）**、**检索路数（两路，n-gram 通道已删除）**、
+> **RRF 参数（k=1、BM25 权重 0.65）**、**每日复习上限（10）**、
+> **配置开关（`APP_ENV` / `LOG_SQL` / `LLM_PROVIDER`，`DEBUG` 已降级为遗留等价开关）**、
 > **迁移机制（`init_db()` + `_migrate_sqlite`，不调用 alembic）**、
-> **容器化（历史遗留、未验证）**。
-> 架构层面的完整说明以 `docs/overhaul-plan.md` 为唯一执行依据；
-> `docs/architecture.md` 是重构前快照，`docs/decisions.md` 已转为只读归档。
+> **容器化（历史遗留、未验证）**。修订清单见 [docs/open-source-readiness.md](docs/open-source-readiness.md)。
 
 ---
 
 ## 目录
 
-- [功能概览](#功能概览)
-- [V2.0 新增功能](#v20-新增功能)
+- [它解决什么问题](#它解决什么问题)
+- [功能](#功能)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
-  - [环境要求](#环境要求)
-  - [一键安装与检测](#一键安装与检测)
-  - [配置 API 密钥](#配置-api-密钥)
-  - [启动项目](#启动项目)
-- [Docker 部署](#docker-部署)
+- [配置](#配置)
+- [运行状态与 API](#运行状态与-api)
+- [质量门禁](#质量门禁)
 - [项目结构](#项目结构)
-- [核心流程](#核心流程)
-- [API 密钥获取指南](#api-密钥获取指南)
-- [模型下载说明](#模型下载说明)
-- [常见问题](#常见问题)
 - [文档](#文档)
 - [License](#license)
 
 ---
 
-## 功能概览
+## 它解决什么问题
 
-- **资料摄入**：上传 PDF / 图片 / Office / 音视频 / Markdown，自动转换为 Markdown
-- **AI 清洗**：规则去噪 + BGE-M3 向量相似度去重，生成干净的学习副本（三视图：原始 / 清洗 / 行级 Diff 对比）
-- **AI 理解**：章节摘要、4 类知识卡片提取（概念 / 公式 / 问答 / 定义）、自动出题（选择 / 填空 / 简答）
-- **知识图谱**：嵌入相似度 + LLM 双机制自动推断卡片间关系，力导向图可视化
-- **智能问答**：基于知识库的 RAG 问答，附引用来源；混合检索为**两路**（向量 + BM25，RRF 融合），支持 SSE 流式输出
-- **间隔重复**：SM-2 算法调度复习，薄弱点优先，掌握度双因子公式（60% 正确率 + 40% SM-2）
-- **学习评估**：笔记比对 + 盲点检测 + 改进建议
-- **笔记版本历史**（V2.0）：手动编辑 / 自动清洗 / 系统快照三类版本，支持 diff 对比与一键恢复
-- **学习目标与计划**（V2.0）：daily / weekly 目标管理，自动生成每日推荐任务（薄弱点 > 复习 > 新资料）
-- **复习到期提醒**（V2.0）：浏览器通知 + 邮件提醒 + 免打扰时段，Celery Beat 每日定时刷新与推送
-- **学术优雅界面**：深海军蓝 + 墨金 + 暖米白 + Noto Serif SC 衬线字体 + 微动效
+读一份 PDF、做一遍笔记、过两周忘光 —— 这是大多数人的学习现状，
+原因是**清洗、理解、复习三件事散落在三个工具里**，谁也不管下一步。
+
+EngramNote 把这条链路收进同一个自托管应用：
+
+```
+上传资料 → 转 Markdown → AI 清洗去噪 → 提取知识卡片与题目
+        → 知识图谱 → RAG 问答 → FSRS 间隔重复 → 学习报告
+```
+
+三条设计原则：
+
+1. **原文不可篡改**：AI 只产出**旁挂**的清洗副本与卡片，原始文件与其转换结果永远保留；
+2. **零外部依赖**：SQLite + 文件系统 broker，不装 PostgreSQL / Redis / 向量库；
+3. **大数据模型隔离**：BGE-M3 等嵌入模型只在异步 worker 进程里加载，主进程保持轻量。
 
 ---
 
-## V2.0 新增功能
+## 功能
 
-V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本管理、目标驱动与提醒推送：
+**资料摄入**
+- 支持 PDF / 图片 / Office / 音视频 / Markdown；PDF 走 MinerU（云端 API 或本地模型），音视频走 Qwen3-ASR
+- 「项目 + 状态旁载」存储结构：`{vault}/{user_id}/{project_slug}/source|output|history|cache`
+- 手动放盘：文件直接拷进 `source/` 后点「扫描导入」即可入库
 
-- **RAG 向量检索修复与混合搜索**
-  - 将 BGE-M3 嵌入模型加载隔离到 Celery Worker 进程（`backend/app/tasks/embedding_tasks.py`），彻底解决 FastAPI 主进程段错误
-  - `rag_service.py` 重构为混合检索：向量召回 + 纯 Python BM25（k1=1.5, b=0.75，零新依赖）
-  - ⚠️ 原文写的是"三路（含字符 n-gram）"：**n-gram 通道已在 overhaul-plan 阶段 2.6 删除**。
-    原因是它与 BM25 高度重叠却明显更弱（BM25 有 IDF 加权与长度归一化，
-    n-gram 只是"命中子串就累加长度"），而 RRF 给三路同等投票权 ——
-    它实际在做的是把噪声顶进 top-5。
-- 采用 RRF（Reciprocal Rank Fusion）融合多路结果，公式 `score(d) = Σ 1/(k + rank_i(d))`，k=60
-- 降级策略：向量失败 → 仅 BM25；全部失败 → LLM 自身知识（并明确告知"资料中未找到"）
-- **流式问答输出（SSE）**
-  - `llm_service.py` 新增 `chat_stream()`，基于 httpx `stream=True` 实现 token 级流式推送
-  - 新端点 `POST /api/understanding/ask/stream`，SSE 事件：`token` / `sources` / `done` / `error`
-  - `frontend/src/pages/QA.tsx` 重构为流式渲染，首字到达后实时显示；复用 DeepSeek 缓存（共享 system prompt 前缀）
-- **笔记版本历史**
-  - 新增 `note_versions` 表（NoteVersion 模型），版本来源 `USER_EDIT`（保留 50 个）/ `AUTO_CLEAN`（保留 10 个）/ `SYSTEM`（保留 50 个）
-  - 版本存储路径：`{user_id}/{project_slug}/history/versions/v{N}.md`（Vault 版本区）
-  - `version_service.py` 提供创建 / 列表 / 预览 / diff / 恢复 / 清理全流程
-  - 编辑或清洗覆盖前自动创建版本快照；前端 `VersionHistory.tsx` 模态组件支持 diff 对比与恢复
-- **学习目标与计划管理**
-  - 新增 `learning_goals` 与 `daily_plans` 表；目标类型 daily / weekly，状态 active / completed / expired / archived / deleted
-  - 每用户最多 5 个 active 目标；`goal_service.py` 提供 CRUD + 进度计算 + 每日推荐
-  - 每日推荐三类任务优先级：`weak_points`(3) > `review`(2) > `new_materials`(1)，上限 `DAILY_REVIEW_LIMIT=50`
-  - Celery Beat 每日 00:30 自动刷新目标进度；`LearningGoals.tsx` 页面 + Dashboard 集成目标卡片
-- **复习到期提醒**
-  - `notification_service.py` 提供提醒数据查询与邮件发送；`GET /api/review/reminders` 返回到期数 / 1 小时内到期 / 薄弱点数
-  - 可选 SMTP 邮件提醒（配置开启），Celery Beat 每日 09:00 发送
-  - 前端 `notifications.ts` 浏览器通知工具（权限请求 / 通知发送 / 免打扰 / sessionStorage 去重）
-  - `ReminderBanner.tsx` 提醒横幅；免打扰时段默认 22:00-08:00
-- **数据库迁移**
-  - 运行时迁移由 `database.py` 的 `init_db()` + `_migrate_sqlite()` 负责：
-    `create_all()` 建缺失的表，`_migrate_sqlite()` 用 `ALTER TABLE` 补缺失的列
-    （**只加不减、不删数据**）
-  - `backend/alembic/versions/001–010` 是**历史遗留**的迁移脚本，
-    当前启动路径**不会调用 alembic**；`_migrate_sqlite` 里的注释会标注
-    "对应 Alembic 00X"，仅作为历史对照
-- **项目隔离 + 状态旁载（Vault 目录结构）**
-  - 存储改为「项目 + 状态旁载」结构：新增 `projects` 表（迁移 005），每个笔记归属一个项目目录
-  - 目录树：`{vault}/{user_id}/{project_slug}/source/`（原始文件）、`output/markdown/`（`{base}.md` 原始转换 + `{base}.clean.md` 清洗副本）、`output/meta/`（`{base}.json` 状态旁载镜像）、`history/versions/`（版本归档）、`output/assets/` 与 `cache/`（预留）
-  - 命名关联法则：`source/{base}{ext}` ↔ `output/markdown/{base}.md` 仅扩展名不同；状态只写入 `output/meta/{base}.json`，DB 仍为权威源（写穿镜像）
-  - Vault 根目录可用环境变量 `VAULT_DIR` 覆盖（默认 `backend/data/vault`）；本地与 MinIO 共用同一套 object-name 约定
-  - 项目 slug 创建后不可变（作为 Vault 目录名），重命名只改显示名
-  - 创建项目时**同步预建磁盘目录树**（`source/output/history/cache`），前端 Projects 页展示 Vault 路径
-  - **手动放盘 + 扫描导入**：把文件直接拷贝到项目 `source/` 子目录后，点击「扫描导入」（`POST /projects/{id}/scan`）自动识别为笔记并触发转换，已导入文件自动跳过
+**AI 清洗**
+- 逐行规则去噪（**代码块与数学块内不套规则**）+ BGE-M3 向量相似度去重
+- 三视图：原始 / 清洗副本 / 行级 Diff；覆盖前自动建版本快照，重复块可逐条恢复
+
+**AI 理解**
+- 章节摘要、4 类知识卡片（概念 / 公式 / 问答 / 定义）、自动出题（选择 / 填空 / 简答）
+- Markdown 结构感知分段：按表格 / 代码块 / 列表的**原子块**切分，不从结构中间截断
+
+**检索与问答**
+- 混合检索 **两路**：SQLite FTS5 词法（BM25）+ `chunks` 表向量，RRF 融合（`rag_rrf_k=1`、BM25 权重 `0.65`）
+- 向量与原文**同库同表**（`chunks`），不引入独立向量库
+- SSE 流式问答，附引用来源；检索失败时**显式降级**并告知用户，而不是假装回答
+
+**复习与掌握度**
+- 调度器 **FSRS-5**（`review_scheduler="fsrs"`，可显式回退 SM-2），含 fuzz 与业务日到期时刻
+- 掌握度双因子、薄弱点优先；每日答题上限 `daily_review_limit=10`
+- 学习评估：笔记比对 + 盲点检测 + 改进建议；学习目标（daily / weekly）与每日推荐任务
+- 复习提醒：浏览器通知 + 可选 SMTP 邮件 + 免打扰时段；Celery Beat 定时刷新
+
+**其他**
+- 知识图谱：嵌入相似度 + LLM 双机制推断关系，力导向可视化
+- 笔记版本历史（用户编辑 / 自动清洗 / 系统快照）、回收站、批注与选中文本 AI 提问
+- LLM 调用治理：重试、限流（按用户 / 供应商 / 总闸）、配额、缓存、成本记账
 
 ---
 
 ## 技术栈
 
 | 层次 | 技术 | 说明 |
-|------|------|------|
-| 后端 | FastAPI + SQLAlchemy (async) + SQLite | 零外部数据库依赖 |
-| 异步任务 | Celery + 文件系统 broker + Celery Beat | 无需 Redis；V2.0 引入 Beat 定时任务（每日刷新目标进度 / 发送复习邮件） |
-| 流式输出 | SSE（Server-Sent Events） | V2.0 问答接口 token 级流式推送，复用 DeepSeek 缓存 |
-| AI 理解 | DeepSeek / GLM API | 通过 OpenAI 兼容接口调用；httpx stream=True 实现流式 |
-| 文档解析 | MinerU | PDF → Markdown（保留 LaTeX 公式、表格） |
-| 嵌入模型 | BGE-M3 (BAAI/bge-m3) | 多语言嵌入，ModelScope 优先下载；V2.0 隔离到 Celery Worker 进程 |
-| 向量存储 | **`chunks` 表**（与 BGE-M3 向量同库同表） | 阶段 2.4 起不再使用 Chroma：向量、定位字段（`char_start/char_end/heading_path`）与词法索引同源，一次 SQL 完成向量检索 |
-| 混合检索 | 向量 + BM25（纯 Python）+ RRF 融合 | 两路（n-gram 通道已按阶段 2.6 删除，理由见上）；chunk 级词法检索用 SQLite **FTS5** |
-| 前端 | React 18 + TypeScript + Vite | 学术优雅视觉设计 |
-| 图谱可视化 | react-force-graph-2d | 力导向图，4 种节点形状 |
-| 容器化 | Docker + Docker Compose + Nginx（**历史遗留，未验证**） | 仓库里仍有 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但本项目实际按下文"快速开始"以本地进程方式运行；曾因磁盘空间不足明确放弃容器化与 PG/Redis |
+|---|---|---|
+| 后端 | FastAPI + SQLAlchemy (async) + SQLite | 零外部数据库依赖（`aiosqlite`） |
+| 异步任务 | Celery + 文件系统 broker + Celery Beat | 无需 Redis |
+| 嵌入模型 | BGE-M3（`BAAI/bge-m3`） | **只在 Celery worker 进程加载**，不进主进程 |
+| 向量与词法 | `chunks` 表 + SQLite **FTS5** | 同库同表；无 Chroma、无独立向量库 |
+| 检索融合 | 向量 + BM25 → RRF | 两路（n-gram 通道已删除） |
+| 调度算法 | **FSRS-5** | 可回退 SM-2；参数与事件流落在 `review_states` / `review_logs` |
+| AI 调用 | DeepSeek / GLM（OpenAI 兼容） | 统一网关：重试 / 限流 / 缓存 / 记账 |
+| 文档解析 | MinerU（云端 vlm-http-client 或本地 pipeline） | 保留 LaTeX 公式与表格 |
+| 前端 | React 18 + TypeScript + Vite | 学术优雅视觉；React.lazy 路由分包 |
+| 图谱可视化 | react-force-graph-2d | 力导向图 |
+| 容器化 | Docker / Compose / Nginx | **历史遗留，从未构建验证**，见下文 |
 
 ---
 
@@ -128,188 +109,166 @@ V2.0 在 V1.x 基础上完成 6 项核心增强，覆盖检索、交互、版本
 ### 环境要求
 
 | 软件 | 版本 | 说明 |
-|------|------|------|
-| **Python** | 3.10+ | 推荐 conda 环境 |
-| **Node.js** | 22.22.2+ | 前端构建与测试（见下方说明） |
-| **Git** | 2.0+ | 克隆项目 |
-| **pip** | 23+ | Python 包管理 |
+|---|---|---|
+| **Python** | 3.10+ | 推荐 conda（脚本会提示 `conda create -n mineru_env python=3.10`） |
+| **Node.js** | **22.22.2+** | 版本下界写在 `frontend/.nvmrc` 与 `frontend/package.json` 的 `engines.node`（`check_env.py` 读后者） |
+| **Git** | 2.0+ | |
+| **pip** | 23+ | |
 
-> **无需安装**：PostgreSQL、Redis、MinIO —— 默认使用 SQLite + 文件系统 broker + 本地文件存储，零外部依赖。
+> **无需安装**：PostgreSQL、Redis、MinIO、独立向量库。
 
-> ⚠️ **Node 版本不是"越新越好"，也不是随便写的**：`frontend/package.json` 的
-> `engines.node` 抄的是 `jsdom@30` 自己的声明（`^22.22.2 || ^24.15.0 || >=26.0.0`），
-> 而 `jsdom` 是 `vitest` 跑组件测试的环境。**Node 18/20 上 `npm ci` 只会警告
-> （EBADENGINE）、装得完，但 `npm test` 会报一句与原因无关的 `Test Files  no tests`**
-> —— 这是 2026-09-15 CI 上真实踩到的坑（`docs/overhaul-plan.md` 附录 BO.5）。
-> `check_env.py` 会读上面那个字段来判版本，CI 的前端 job 里另有一道
-> `node -e "require('jsdom')"` 守卫，让这类失败**指名道姓**。
-> 开发机用 `nvm use` 的话，`frontend/.nvmrc` 也钉在同一个下界（`22.22.2`），
-> 而且 **CI 的 `setup-node` 直接读这个文件**（`node-version-file`）——
-> 版本号只有一处，不会出现"CI 与开发机各写一个、然后悄悄漂移"。
+> ⚠️ **Node 版本不是随便写的**：`engines.node` 是 `jsdom@30` 自己的要求
+> （`^22.22.2 || ^24.15.0 || >=26.0.0`），而 `jsdom` 是 `vitest` 跑组件测试的环境。
+> Node 18/20 上 `npm ci` **只会警告**（EBADENGINE）、装得完，但 `npm test` 会报一句
+> 与原因无关的 `Test Files  no tests`。CI 里另有一道 `node -e "require('jsdom')` 守卫
+> 让这类失败**指名道姓**（`.github/workflows/ci.yml`）。
 
 ### 一键安装与检测
 
-本项目提供**自动环境检测脚本**，会自动检测环境、安装依赖、下载模型（通过国内源）：
-
 ```bash
-# 1. 克隆项目
-git clone https://github.com/你的用户名/EngramNote.git
+# 1. 克隆
+git clone https://github.com/trx-0833/EngramNote.git
 cd EngramNote
 
 # 2. （推荐）创建 conda 环境
 conda create -n mineru_env python=3.10
 conda activate mineru_env
 
-# 3. 运行环境检测（自动安装依赖 + 下载模型）
+# 3. 检测并自动修复必需项（依赖 + .env 模板 + BGE-M3 + VAD）
 python check_env.py --fix
 ```
 
-检测脚本会自动完成以下 10 个步骤：
-
-| 步骤 | 检测内容 | 自动修复 |
-|------|----------|----------|
-| 1 | Python 3.10+ 版本 | - |
-| 2 | Node.js（版本要求读 `frontend/package.json` 的 `engines.node`）与 npm | - |
-| 3 | 后端 Python 依赖（17 个包 + qwen_asr 可选） | 清华 PyPI 源自动安装 |
-| 4 | 前端 Node 依赖 | 淘宝 npm 源自动安装 |
-| 5 | .env 配置文件 | 从 .env.example 自动创建 |
-| 6 | BGE-M3 嵌入模型（2.2GB，必需） | ModelScope 国内源自动下载 |
-| 7 | Silero VAD 模型（2MB，ASR 用，可选） | torch.hub / ModelScope 自动下载 |
-| 8 | MinerU 模型（7GB，PDF 本地解析用，可选） | 需 `--all` 参数，或使用云端 API 替代 |
-| 9 | Qwen3-ASR 模型（1.2GB，音视频转写用，可选） | 需 `--all` 参数 |
-| 10 | 运行时数据目录 | 自动创建 |
-
-#### 命令参数说明
+`check_env.py` 共 10 个检测步骤（版本 → 依赖 → `.env` → 模型 → 数据目录），常用参数：
 
 ```bash
-python check_env.py                      # 仅检测不修复
-python check_env.py --fix                # 自动修复必需项（依赖+BGE-M3+VAD）
-python check_env.py --fix --all          # 包含可选大模型（MinerU 7GB + ASR 1.2GB）
-python check_env.py --download-mineru    # 仅下载 MinerU 模型
-python check_env.py --download-asr       # 仅下载 ASR 模型
+python check_env.py                    # 仅检测，不修复
+python check_env.py --fix              # 修复必需项（含 BGE-M3 ≈2.2GB）
+python check_env.py --fix --all        # 追加可选大模型（MinerU ≈7GB + ASR ≈1.2GB）
+python check_env.py --download-mineru  # 仅下载 MinerU（本地 PDF 解析用）
+python check_env.py --download-asr     # 仅下载 ASR（音视频转写用）
 ```
 
-> **推荐做法**：先运行 `python check_env.py --fix`（下载必需项），然后根据需要运行 `--download-mineru` 或 `--download-asr` 下载可选模型。
+> 国内源已内置：pip 用清华源、npm 用淘宝源、模型用 ModelScope。
+> 想省 7GB 磁盘就别用本地 MinerU —— 配 `MINERU_API_TOKEN` 后默认走云端 API。
 
-### 配置 API 密钥
-
-检测脚本会自动从 `.env.example` 创建 `.env` 文件，你需要**手动编辑**填入 API 密钥：
+### 配置密钥
 
 ```bash
-# 编辑配置文件
-# Windows: notepad backend\.env
-# Linux/Mac: nano backend/.env
+# 检测脚本已从模板生成 .env，手动填入密钥
+# Windows: notepad backend\.env      Linux/macOS: nano backend/.env
 ```
 
-**必填项（二选一）**：
+| 变量 | 必需性 | 说明 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | AI 功能二选一 | 生产推荐。[platform.deepseek.com](https://platform.deepseek.com/) |
+| `GLM_API_KEY` | AI 功能二选一 | 有免费额度。[open.bigmodel.cn](https://open.bigmodel.cn/) |
+| `JWT_SECRET_KEY` | **看环境** | `APP_ENV=prod`（默认）下**为空则拒绝启动**；`APP_ENV=dev` 下自动生成并持久化到 `data/.jwt-secret`。生成：`python -c "import secrets; print(secrets.token_hex(32))"` |
+| `MINERU_API_TOKEN` | 可选 | PDF 云端解析。[mineru.net](https://mineru.net/)；不配则只能用 Markdown 等文本格式 |
 
-```env
-# 选项 A：DeepSeek API（生产环境推荐）
-DEEPSEEK_API_KEY=sk-your-deepseek-key-here
+> ⚠️ **默认 `APP_ENV=prod`**：直接 `cp backend/.env.example backend/.env` 后不填 `JWT_SECRET_KEY`
+> 会**启动失败**（这是有意的安全姿态，不是 bug）。本地开发请显式写 `APP_ENV=dev`。
 
-# 选项 B：GLM API（开发调试推荐，有免费额度）
-GLM_API_KEY=your-glm-key-here
-```
-
-**可选配置**：
-
-```env
-# JWT 密钥（生产环境务必更换，生成方法见下方）
-JWT_SECRET_KEY=your-random-secret-key
-
-# 文档解析（不配置则无法解析 PDF）
-MINERU_API_TOKEN=your-mineru-token
-```
-
-> 详细的 API 密钥获取方法见下方 [API 密钥获取指南](#api-密钥获取指南)。
-
-### 启动项目
-
-**方式一：一键启动脚本（推荐）**
+### 启动
 
 ```bash
 # Windows
 start.bat
 
-# Linux/Mac
-chmod +x start.sh
-./start.sh
+# Linux / macOS
+chmod +x start.sh && ./start.sh
 ```
 
-启动脚本会自动运行环境检测，然后启动 3 个服务：
-- Backend API（端口 **8001**，见 `start.bat` 的 `BACKEND_PORT`）
-- Celery Worker（异步任务）
-- Frontend（端口 5173）
+脚本会拉起 3 个进程：后端 API（**8001**）、Celery Worker、前端（**5173**）。
 
-> ⚠️ 后端端口是 **8001 而不是 8000**：`start.bat` 明确设置了 `BACKEND_PORT=8001`。
-> 下面的手动启动命令请与之一致，否则前端代理（`vite.config.ts` 里的 target）
-> 会指向一个没有服务的端口。
-
-**方式二：手动启动（3 个终端）**
+手动启动（3 个终端，命令与脚本一致）：
 
 ```bash
 # 终端 1：后端 API
-cd backend
-python -m uvicorn app.main:app --reload --port 8001 --reload-dir app
+cd backend && python -m uvicorn app.main:app --reload --port 8001 --reload-dir app
 
-# 终端 2：Celery Worker（异步任务）
-cd backend
-python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --pool=solo
+# 终端 2：Celery Worker（Windows 必须加 --pool=solo）
+cd backend && python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --pool=solo
 
 # 终端 3：前端
-cd frontend
-npm run dev
+cd frontend && npm run dev
 ```
 
-**访问地址**：
-
 | 服务 | 地址 |
-|------|------|
+|---|---|
 | 前端 | http://localhost:5173 |
 | 后端 API | http://localhost:8001 |
-| API 文档 | http://localhost:8001/docs |
+| API 文档 | http://localhost:8001/docs（**仅 `APP_ENV=dev` 开放**；prod 下 `/docs`、`/redoc`、`/openapi.json` 全部关闭） |
 
-> **首次上传文件**：第一次上传 PDF 后，系统会加载嵌入模型（约 30 秒），之后会缓存为模块级单例。
+> **首次上传 PDF** 后 worker 会加载嵌入模型（约 30 秒），之后常驻。
 
 ---
 
-## Docker 部署
+## 配置
 
-> ⚠️ **本节未经本项目验证，且当前部署方式不是 Docker。**
->
-> 仓库里保留了 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但：
->
-> - 本项目实际以**本地进程**方式运行（见上面"启动项目"，后端 8001 / 前端 5173）；
-> - 项目曾因**磁盘空间不足**明确放弃容器化与 PostgreSQL/Redis；
-> - ~~已知问题（未修）：`nginx.conf` 的 `/api/` 未设 `client_max_body_size`
->   （大文件上传会 413）、`frontend/.dockerignore` 未排除 `node_modules`。~~
->   **2026-09-14 更正：这两条都已修复** —— `frontend/nginx.conf` 已设
->   `client_max_body_size 500m`（并补齐 `proxy_buffering off` / `gzip_vary on` /
->   静态资源缓存头 / 安全响应头），`frontend/.dockerignore` 已存在且排除
->   `node_modules`；`.github/workflows/ci.yml` 里另有三道回归守卫锁住它们。
->   ⚠️ **但"配置已就绪"不等于"容器部署可用"**：上面的 `Dockerfile` /
->   `docker-compose.yml` 从未在本项目里构建或运行过（本机也没有 Docker），
->   实际路线仍是本地进程 —— 所以**本节开头的结论没有变**。
->
-> 因此下面的命令**不要当作可用的部署路径**；要用请先自行验证 ——
-> 今天的问题已经不是"先修掉上面那两条配置"，而是**这条路从未被走通过**。
+完整字段见 `backend/app/config.py`（`Settings`），模板见 `backend/.env.example`。
+最常用的四个开关：
 
-```bash
-# 构建并启动
-docker compose up -d
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `APP_ENV` | `prod` | `dev`：允许空 JWT 密钥（自动生成）、异常回吐 traceback、开放 `/docs`；`prod`：统一错误信息、关闭文档 |
+| `LOG_SQL` | `false` | 是否把 SQL 打进 `data/logs`。⚠️ 含 bcrypt 哈希与卡片正文，**生产不要开** |
+| `LLM_PROVIDER` | `auto` | `auto` / `deepseek` / `glm`；`auto` = dev 用 GLM、prod 用 DeepSeek |
+| `REVIEW_SCHEDULER` | `fsrs` | `fsrs`（FSRS-5）或 `sm2`（回退） |
 
-# 查看日志
-docker compose logs -f
+其他常改项：`CORS_ORIGINS`（默认本地 5173/3000）、`MAX_UPLOAD_SIZE_MB`（500）、
+`DAILY_REVIEW_LIMIT`（10）、`EMBEDDING_MODEL` / `EMBEDDING_MODEL_FALLBACK`、
+`VAULT_DIR`、SMTP 与提醒相关（`SMTP_*`、`EMAIL_REMINDER_ENABLED`、`REMINDER_QUIET_HOURS_*`）。
 
-# 停止
-docker compose down
+> 环境变量名与默认值以 `config.py` 为准；`.env.example` 只登记了常用的一部分。
+
+---
+
+## 运行状态与 API
+
+| 端点 | 含义 |
+|---|---|
+| `GET /health` | **存活**探针：只返回应用状态，**刻意不检查依赖**（避免依赖抖动被翻译成重启） |
+| `GET /ready` | **就绪**探针：用一次真实业务查询验证「数据库连得上且 schema 就绪」，就绪 200、否则 503；队列深度与索引积压只**报告**、不决定状态码 |
+
+API 统一挂在 `/api` 下，按域分组：`auth` `notes` `upload` `cleaning` `understanding`
+`review`（含快速复习）`report` `graph` `folders` `projects` `assessment` `knowledge`
+`goals` `tasks` `llm`。错误响应是稳定契约：
+
+```json
+{ "detail": "面向用户的中文说明", "error_code": "STABLE_MACHINE_CODE", "request_id": "..." }
 ```
 
-Docker 配置使用国内镜像源加速：
-- **pip**：清华源 `https://pypi.tuna.tsinghua.edu.cn/simple`
-- **npm**：淘宝源 `https://registry.npmmirror.com`
+前端一律按 `error_code` 分流，**不要匹配中文文案**。
 
-> **注意**：Docker 镜像不包含嵌入模型（文件过大，约 2.2GB）。生产环境需挂载本地模型目录或首次启动时自动下载。
+---
+
+## 质量门禁
+
+CI 定义在 `.github/workflows/ci.yml`，本地跑同样这几条（命令照抄 CI，不要凭记忆写）：
+
+```bash
+# 后端（在 backend/ 下）
+python -m ruff check app tests scripts     # 阻断
+python scripts/dump_openapi.py --check     # 契约：代码 → openapi.json，阻断
+python -m pytest -q                        # 离线测试，网络被 tests/conftest.py 挡住，阻断
+python -m ruff format --check app tests    # 建议性
+
+# 前端（在 frontend/ 下）
+npm ci
+npm run lint          # ESLint，阻断
+npm run gen:api       # openapi.json → src/api/generated/schema.ts（须零 diff），阻断
+npm test              # vitest 单元/组件，阻断
+npm run build         # tsc + vite build，阻断
+npm run e2e           # Playwright（桩掉 /api），阻断
+npm run a11y          # axe-core 可访问性，建议性
+```
+
+另外两项在 CI 里跑、默认不阻断：`security-scan`（`pip-audit` + `npm audit` 归档）
+与 `docker-nginx-config`（部署配置守卫）。逐条理由与当前已知缺口见
+[docs/open-source-readiness.md](docs/open-source-readiness.md)。
+
+> **改后端接口后**：必须重跑 `python scripts/dump_openapi.py` 与 `npm run gen:api`，
+> 否则前端会按过期契约编译。
 
 ---
 
@@ -317,315 +276,71 @@ Docker 配置使用国内镜像源加速：
 
 ```
 EngramNote/
-├── backend/                     # 后端 (FastAPI)
+├── backend/
 │   ├── app/
-│   │   ├── api/                 # API 路由（含 V2.0 新增：versions/goals/reminders/ask/stream）
-│   │   ├── models/              # 数据模型（14 个表，V2.0 新增 note_versions/learning_goals/daily_plans）
-│   │   ├── schemas/             # Pydantic Schema
-│   │   ├── services/            # 业务逻辑
-│   │   │   ├── mineru/          # PDF 解析服务
-│   │   │   ├── asr/             # 语音转写服务
-│   │   │   ├── cleaning_service.py    # AI 清洗管道
-│   │   │   ├── embedding_service.py   # BGE-M3 嵌入
-│   │   │   ├── llm_service.py         # DeepSeek/GLM 调用（V2.0 新增 chat_stream）
-│   │   │   ├── rag_service.py         # 智能问答（混合检索：向量 + BM25，RRF 融合，SSE 流式）
-│   │   │   ├── version_service.py     # 笔记版本历史（V2.0 新增）
-│   │   │   ├── goal_service.py        # 学习目标管理（V2.0 新增）
-│   │   │   ├── notification_service.py# 复习提醒 + 邮件（V2.0 新增）
-│   │   │   ├── sm2_service.py         # SM-2 间隔重复算法
-│   │   │   ├── graph_service.py       # 知识图谱双机制推断
-│   │   │   ├── mastery_service.py     # 掌握度双因子计算
-│   │   │   └── ...
-│   │   ├── tasks/               # Celery 异步任务（V2.0 新增 embedding_tasks/reminder_tasks + Beat 定时）
-│   │   ├── middleware/          # 中间件
-│   │   ├── config.py            # 配置管理（pydantic-settings）
-│   │   └── main.py              # 应用入口
-│   ├── alembic/                 # 数据库迁移（V2.0 新增 004_v2_models.py）
-│   ├── tests/                   # 测试
-│   ├── .env.example             # 环境变量模板（提交到 Git）
-│   ├── .env                     # 你的私有配置（不提交，.gitignore 排除）
-│   ├── Dockerfile
+│   │   ├── api/                # 路由（按域拆分；notes/ 与 api 大文件已模块化）
+│   │   ├── models/             # ORM（20 个模型模块 / 21 张表）
+│   │   ├── schemas/            # Pydantic 契约
+│   │   ├── services/           # 业务逻辑：cleaning / embedding / rag / fsrs / scheduler
+│   │   │                       #   mastery / graph / version / goal / notification / mineru / asr
+│   │   │   └── llm/            # LLM 网关：gateway / prompts / scenes / client / 记账
+│   │   ├── tasks/              # Celery 任务（convert / clean / understand / embedding / reminder）
+│   │   ├── core/               # 错误契约、日志、请求上下文
+│   │   ├── middleware/         # 限流、错误处理
+│   │   ├── database.py         # 建表与运行时迁移（init_db + _migrate_sqlite）
+│   │   └── config.py           # 全部配置字段（唯一权威）
+│   ├── alembic/                # ⚠️ 历史遗留：启动路径**不调用**（见 docs 说明）
+│   ├── scripts/                # 运维与开发脚本（备份/恢复/校验/评测/漂移检查）
+│   ├── tests/                  # pytest（默认离线；integration 需显式开启）
 │   └── requirements.txt
-├── frontend/                    # 前端 (React + TypeScript + Vite)
-│   ├── src/
-│   │   ├── api/                 # API 请求封装
-│   │   ├── components/          # 通用组件（V2.0 新增 VersionHistory/ReminderBanner）
-│   │   ├── pages/               # 页面组件（V2.0 新增 LearningGoals；QA 重构为流式）
-│   │   ├── contexts/            # React Context
-│   │   ├── utils/               # 工具函数（V2.0 新增 notifications.ts）
-│   │   └── styles/              # 全局样式
-│   ├── Dockerfile
-│   ├── nginx.conf
+├── frontend/
+│   ├── src/                    # React + TS（api / components / pages / hooks / styles）
+│   ├── e2e/                    # Playwright：功能、a11y、全链路（默认不注册）
+│   ├── scripts/                # CSS 与文档探针
+│   ├── docs/                   # 前端专题文档（见下）
 │   └── package.json
-├── check_env.py                 # 环境自动检测脚本
-├── start.bat                    # Windows 一键启动
-├── start.sh                     # Linux/Mac 一键启动
-├── docker-compose.yml           # Docker Compose 配置
-├── .gitignore                   # Git 忽略规则
-├── .env.example                 # 环境变量模板（根目录引用）
-├── docs/                        # 文档（architecture.md 为活文档，archive/ 为历史归档）
-└── README.md                    # 本文件
+├── docs/                       # 架构、决策、整改计划与专题记录
+├── check_env.py                # 环境检测与初始化
+├── start.bat / start.sh        # 一键启动（3 进程）
+├── Dockerfile / docker-compose.yml / nginx.conf   # ⚠️ 历史遗留，未验证
+└── README.md
 ```
-
----
-
-## 核心流程
-
-```
-上传资料 → MinerU 转 Markdown → AI 清洗（去噪+去重，自动版本快照）→ AI 理解（摘要+知识点+题目）
-                                                              ↓
-                                                        知识图谱构建
-                                                              ↓
-学习评估 ← SM-2 复习 ← RAG 问答（三路混合检索+SSE 流式）← 知识卡片库
-                                                              ↓
-                                                    学习目标管理 + 复习提醒
-```
-
-1. **上传** → PDF/图片/Office/音视频 自动转换为 Markdown
-2. **清洗** → 规则去噪 + BGE-M3 向量去重，生成干净副本（三视图对比）；覆盖前自动创建版本快照
-3. **理解** → AI 提取章节摘要、4 类知识卡片、自动出题
-4. **图谱** → 嵌入相似度 + LLM 双机制自动推断卡片间关系
-5. **复习** → SM-2 间隔重复，薄弱点优先，掌握度双因子计算
-6. **评估** → 笔记比对 + 盲点检测 + 改进建议
-7. **报告** → 每日学习统计与 7 天趋势分析
-8. **目标**（V2.0）→ 设定 daily/weekly 目标，自动生成每日推荐任务（薄弱点 > 复习 > 新资料）
-9. **提醒**（V2.0）→ 浏览器通知 + 邮件提醒 + 免打扰时段，Celery Beat 每日 00:30 刷新目标进度、09:00 发送复习邮件
-
----
-
-## API 密钥获取指南
-
-本项目需要以下 API 密钥，请按需配置：
-
-### 1. DeepSeek API（必填，二选一）
-
-- **用途**：AI 理解管道（摘要、知识点提取、题目生成、RAG 问答）、选中文本 AI 提问
-- **获取地址**：https://platform.deepseek.com/
-- **步骤**：
-  1. 注册 DeepSeek 账号
-  2. 进入 API Keys 页面
-  3. 创建新的 API Key
-  4. 复制到 `.env` 文件：`DEEPSEEK_API_KEY=sk-xxxxxxxx`
-
-### 2. GLM API（必填，二选一，推荐开发调试）
-
-- **用途**：DeepSeek 的备选方案，有免费额度，适合开发调试
-- **获取地址**：https://open.bigmodel.cn/
-- **步骤**：
-  1. 注册智谱 AI 账号
-  2. 进入 API 管理页面
-  3. 创建 API Key
-  4. 复制到 `.env` 文件：`GLM_API_KEY=xxxxxxxx`
-- **切换方式**：`.env` 中设置 `DEBUG=true` 使用 GLM，`DEBUG=false` 使用 DeepSeek
-
-### 3. Mineru API Token（可选，PDF 解析需要）
-
-- **用途**：PDF 文档解析为 Markdown（保留 LaTeX 公式、表格）
-- **获取地址**：https://mineru.net/
-- **步骤**：
-  1. 注册 Mineru 账号
-  2. 进入个人中心获取 API Token
-  3. 复制到 `.env` 文件：`MINERU_API_TOKEN=xxxxxxxx`
-- **不配置的后果**：无法上传 PDF，但 Markdown 文件可直接使用
-
-### 4. JWT 密钥（生产环境必填）
-
-- **用途**：JWT Token 签名，保护 API 安全
-- **生成方法**：
-
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
-
-- **配置**：将生成的字符串填入 `.env`：`JWT_SECRET_KEY=你的随机字符串`
-
----
-
-## 模型下载说明
-
-本项目使用以下 5 个 AI 模型，均通过**国内源（ModelScope）**下载：
-
-### 模型总览
-
-| 模型 | 大小 | 必需性 | 用途 | 下载命令 |
-|------|------|--------|------|----------|
-| **BGE-M3** | 2.2GB | 必需 | 文本向量化（清洗去重、知识图谱） | `--fix` 自动下载 |
-| **Silero VAD** | 2MB | 可选 | 语音活动检测（ASR 切分语音段） | `--fix` 自动下载 |
-| **MinerU Pipeline** | 5GB+ | 可选 | PDF 本地解析（布局/公式/表格识别） | `--download-mineru` 或 `--all` |
-| **MinerU VLM** | 2.5GB | 可选 | PDF 本地解析（视觉语言模型） | `--download-mineru` 或 `--all` |
-| **Qwen3-ASR** | 1.2GB | 可选 | 音视频转写（语音转文字） | `--download-asr` 或 `--all` |
-
-### 1. BGE-M3 嵌入模型（必需，约 2.2GB）
-
-- **用途**：文本向量化，用于清洗去重和知识图谱
-- **下载源**：ModelScope（国内）优先，HuggingFace 镜像备选
-- **自动下载**：运行 `python check_env.py --fix` 自动下载
-- **手动下载**：
-
-```bash
-# 方式 1：ModelScope（推荐，国内速度快）
-pip install modelscope
-python -c "from modelscope import snapshot_download; snapshot_download('Xorbits/bge-m3')"
-
-# 方式 2：HuggingFace 镜像
-set HF_ENDPOINT=https://hf-mirror.com
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
-```
-
-- **缓存位置**：`~/.cache/modelscope/hub/Xorbits/bge-m3/`
-
-### 2. Silero VAD 模型（可选，约 2MB）
-
-- **用途**：语音活动检测，ASR 音视频转写时切分语音段
-- **下载源**：torch.hub（GitHub）/ ModelScope
-- **自动下载**：运行 `python check_env.py --fix` 自动下载
-- **本地路径**：`backend/data/models/silero-vad/silero_vad.jit`
-- **不下载的后果**：ASR 功能会降级为固定时长切分（仍可使用，但效果较差）
-
-### 3. MinerU 模型（可选，PDF 本地解析用，约 7GB）
-
-> **重要**：如果配置了 `MINERU_API_TOKEN` 并设置 `MINERU_BACKEND=vlm-http-client`（云端 API 模式），则**无需下载**本地模型，可节省约 7GB 磁盘空间。推荐使用云端 API。
-
-MinerU 本地 pipeline 模式需要 2 个模型：
-
-#### 3a. Pipeline 模型 (PDF-Extract-Kit-1.0，约 5GB+)
-
-- **用途**：PDF 布局检测、公式识别、表格识别
-- **ModelScope ID**：`OpenDataLab/PDF-Extract-Kit-1.0`
-- **下载命令**：
-
-```bash
-python check_env.py --download-mineru
-# 或手动：
-python -c "from modelscope import snapshot_download; snapshot_download('OpenDataLab/PDF-Extract-Kit-1.0')"
-```
-
-- **缓存位置**：`~/.cache/modelscope/hub/models/OpenDataLab/PDF-Extract-Kit-1___0/`
-
-#### 3b. VLM 模型 (MinerU2.5-Pro-2604-1.2B，约 2.5GB)
-
-- **用途**：PDF 视觉语言模型解析
-- **ModelScope ID**：`OpenDataLab/MinerU2.5-Pro-2604-1.2B`
-- **下载命令**：同上（与 Pipeline 模型一起下载）
-- **缓存位置**：`~/.cache/modelscope/hub/models/OpenDataLab/MinerU2___5-Pro-2604-1___2B/`
-
-#### 选择本地模式 vs 云端 API
-
-| 模式 | 配置 | 优点 | 缺点 |
-|------|------|------|------|
-| **云端 API（推荐）** | `MINERU_API_TOKEN=你的token` + `MINERU_BACKEND=vlm-http-client` | 无需下载 7GB 模型 | 消耗 API 额度 |
-| **本地 Pipeline** | `MINERU_BACKEND=pipeline` + 下载模型 | 离线可用，无 API 费用 | 占用 7GB 磁盘 + 首次下载耗时 |
-
-### 4. Qwen3-ASR 模型（可选，音视频转写用，约 1.2GB）
-
-- **用途**：音视频文件转写为文字
-- **ModelScope ID**：`Qwen/Qwen3-ASR-0.6B`
-- **依赖**：需先安装 `qwen-asr` 包（`pip install qwen-asr`）
-- **下载命令**：
-
-```bash
-python check_env.py --download-asr
-# 或手动：
-pip install qwen-asr
-python -c "from modelscope import snapshot_download; snapshot_download('Qwen/Qwen3-ASR-0.6B')"
-```
-
-- **缓存位置**：`~/.cache/modelscope/hub/models/Qwen/Qwen3-ASR-0___6B/`
-- **不下载的后果**：无法上传音视频文件，PDF/图片/Office/Markdown 功能不受影响
-
-### 国内源配置
-
-本项目默认使用以下国内源加速下载：
-
-| 类型 | 源地址 | 配置位置 |
-|------|--------|----------|
-| PyPI（Python 包） | `https://pypi.tuna.tsinghua.edu.cn/simple` | check_env.py, start.bat/sh |
-| npm（Node 包） | `https://registry.npmmirror.com` | check_env.py, start.bat/sh |
-| ModelScope（模型） | `https://modelscope.cn` | check_env.py |
-| HF 镜像（模型备选） | `https://hf-mirror.com` | 环境变量 HF_ENDPOINT |
-
----
-
-## 常见问题
-
-### Q: 启动后访问前端显示空白？
-
-**A**: 确保前端依赖已安装：`cd frontend && npm install`。运行 `python check_env.py --check` 检测。
-
-### Q: 上传 PDF 后一直处于 "converting" 状态？
-
-**A**: 检查是否配置了 Mineru API Token。查看 Celery Worker 终端的错误日志。运行 `python check_env.py --check` 确认环境。
-
-### Q: 清洗功能报错 "model not found"？
-
-**A**: BGE-M3 模型未下载。运行 `python check_env.py --fix` 自动下载（约 2.2GB，需要较长时间）。
-
-### Q: AI 理解功能报错 "API key not configured"？
-
-**A**: 检查 `backend/.env` 文件是否配置了 `DEEPSEEK_API_KEY` 或 `GLM_API_KEY`。参考 [API 密钥获取指南](#api-密钥获取指南)。
-
-### Q: Celery Worker 启动失败？
-
-**A**: Windows 环境下需要加 `--pool=solo` 参数。启动脚本已自动配置。手动启动时请确保在 `backend/` 目录下运行。
-
-### Q: 如何切换 DeepSeek / GLM？
-
-**A**: 编辑 `backend/.env`：
-- `DEBUG=true` → 使用 GLM（开发调试，有免费额度）
-- `DEBUG=false` → 使用 DeepSeek（生产环境）
-
-### Q: 如何重置数据库？
-
-**A**: 删除 `backend/data/db/engramnote.db` 文件，重启后端会自动重建。
 
 ---
 
 ## 文档
 
-**入口**
+| 文档 | 内容 |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | 系统架构、数据流、状态机、数据库概览（**重构前快照**，标注见文件头） |
+| [docs/overhaul-plan.md](docs/overhaul-plan.md) | 重构全量计划与逐轮执行记录（**最完整的过程台账**） |
+| [docs/decisions.md](docs/decisions.md) | 关键取舍归档（F-xx 编号，代码注释回链到此，**只读**） |
+| [docs/sqlite-single-writer.md](docs/sqlite-single-writer.md) | 为什么 SQLite 路线下只能跑**一个** worker |
+| [docs/security-scan.md](docs/security-scan.md) | 依赖与镜像扫描的当次原始结果与处置口径 |
+| [docs/open-source-readiness.md](docs/open-source-readiness.md) | 开源化差距核查：必须修 / 应当修 / 建议新增（带 `文件:行号` 证据） |
+| [frontend/docs/](frontend/docs/) | 契约生成与漂移检查、CSS 约定与迁移、e2e 说明、可访问性审计 |
+| [docs/archive/](docs/archive/) | 历史设计文档（仅供追溯，**不要以它们为准**） |
 
-- [架构文档](docs/architecture.md) — 系统架构、目录导航、数据流、状态机、数据库概览、技术债索引（**首选入口**，随代码更新）
-- [决策记录](docs/decisions.md) — 关键取舍与历史缺陷编号（F-xx）的归档（**只读**：新决策写进整改计划与代码注释）
-- [单写者约束](docs/sqlite-single-writer.md) — 为什么 SQLite 路线下只能跑一个进程 / 一个 worker（`-c 1`）
+### 关于容器化（请务必读这一段）
 
-**重构与验收记录**
+仓库里保留了 `Dockerfile` / `docker-compose.yml` / `nginx.conf`，但：
 
-- [整改计划 `docs/overhaul-plan.md`](docs/overhaul-plan.md) — 阶段 0–7 的全量计划、逐条状态表与逐轮附录（**本仓库最完整的一份过程记录**，含"哪些不影响使用""还剩什么"两张总表）
-- [契约与前端生成客户端](frontend/docs/openapi-client.md) — 从 OpenAPI 生成类型、漂移检查器、S1–S5 的逐轮记录与守卫设计
-- [CSS 规范](frontend/docs/css-convention.md) / [CSS 迁移计划](frontend/docs/css-migration-plan.md) — CSS Modules 约定、雷区表、14 个样式表的逐批判定与证据
-- [前端取数与状态计划](frontend/docs/query-and-state-plan.md) — 5.2 TanStack Query / 5.3 Zustand 的迁移计划（**待批，未动代码**）
+- 本项目**实际以本地进程方式运行**（后端 8001 / 前端 5173）；
+- 项目曾因磁盘空间与资源约束**明确放弃容器化与 PostgreSQL/Redis**；
+- 这些文件**从未在本项目里构建或运行过**，配置守卫只保证"文件没被改坏"，
+  **不代表这条路走得通**。
 
-**质量门禁（CI = `.github/workflows/ci.yml`）**
-
-| 层 | 内容 | 是否阻断 |
-|---|---|---|
-| 后端 | `ruff check app tests scripts` + `pytest -q`（离线，网络被 `tests/conftest.py` 挡住） | 阻断 |
-| 后端 · 契约 | `python scripts/dump_openapi.py --check`（代码 → `openapi.json`） | 阻断 |
-| 前端 | `eslint` + `vitest` + `tsc && vite build` | 阻断 |
-| 前端 · 契约 | `npm run gen:api` 后 `git diff --exit-code`（`openapi.json` → `schema.ts` 必须幂等） | 阻断 |
-| 前端 · 真浏览器 | `playwright --project=chromium`（e2e，桩掉 `/api`） | 阻断 |
-| 前端 · 可访问性 | `playwright --project=a11y`（axe-core；**REGISTRY 空 = 已清零**） | 建议性 |
-| 依赖安全 | `pip-audit` / `npm audit`（结果归档 + job summary） | 建议性 |
-| 部署配置 | `nginx.conf` 两条（`client_max_body_size` / `proxy_buffering off`）+ `.dockerignore` + `Dockerfile` 用锁文件安装 | 阻断 |
-
-> **前端那几层的运行时前提**：CI 前端 job 的 Node 版本**读 `frontend/.nvmrc`**
-> （`22.22.2` = `engines.node` 的下界，也是 `jsdom@30` 的要求），并在装完依赖后
-> 先跑一道 `node -e "require('jsdom')"` 守卫 —— 否则 Node 版本不对时，
-> vitest 的失败形态是一句与原因无关的 `Test Files  no tests`（2026-09-15 实测，
-> 见 `docs/overhaul-plan.md` 附录 BO.5）。
-
-- [安全扫描记录](docs/security-scan.md) — 当次 `pip-audit` / `npm audit` 的原始结果与"为什么不设阈值"的处置口径
-
-**历史**
-
-- [归档文档](docs/archive/) — 历史设计/教学/开发记录（项目架构、项目图解、新手教学等），仅供追溯，内容可能过时
+```bash
+# ⚠️ 未验证：不要当作可用的部署路径，要用请先自行验证
+docker compose up -d
+```
 
 ---
 
 ## License
 
-MIT License — 详见 [LICENSE](LICENSE) 文件
+MIT License — 详见 [LICENSE](LICENSE)
 
 ---
 
-**EngramNote** — 从"被动阅读"到"主动内化 + 长期记忆"的学习闭环
+**EngramNote** —— 从「被动阅读」到「主动内化 + 长期记忆」
