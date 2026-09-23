@@ -305,12 +305,20 @@
 ```bash
 # 在 frontend/ 下
 npm run lint          # ESLint，阻断
+npm run format:check  # prettier，阻断
 npm test              # vitest，阻断
 npm run build         # tsc + vite build，阻断
 npm run e2e           # Playwright（桩掉 /api），阻断
 npm run a11y          # axe-core 26 场景，阻断
 node scripts/verify-built-css.mjs   # 产物级：悬空动画/级联得主/退休项
+node scripts/design-drift.mjs       # 设计冗余：零引用令牌 / 硬编码色值 / 非令牌字号
 ```
+
+> 最后一条是**批次 F2 启用**的（计划 §7 写的"启用的前提：A–E 全部完成、
+> 存量已收敛到基线"）—— 在那之前跑它必然红一片，基线也失去意义。
+> `BASELINE` 已于 2026-09-23（阶段 E 全部落地后）设为
+> 硬编码色值 228 / 非令牌字号 408。**这两个数是水位线不是目标**：
+> 门禁只拒绝"比它更高"，想压下来是单独一轮的事。
 
 **每批完成即本地提交，不推送。**
 
