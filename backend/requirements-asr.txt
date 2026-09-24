@@ -17,5 +17,5 @@
 #   app/services/asr/asr_engine.py:11   → torch
 #   app/services/asr/asr_engine.py:13   → qwen_asr
 #   app/services/asr/audio_utils.py:11  → soundfile（已在主依赖里）
-torch>=2.0.0
+torch>=2.14.0
 qwen-asr>=0.1.0
