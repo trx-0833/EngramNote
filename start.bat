@@ -111,7 +111,10 @@ echo [OK] Environment check passed
 echo.
 echo [4/7] Checking backend dependencies...
 cd /d "%BACKEND_DIR%"
-python -c "import fastapi" 2>nul
+:: 本步只决定"要不要跑下面的 pip install"，因此只需要知道 fastapi 装没装：
+:: 用 find_spec 定位而不真实导入（实测 0.704s -> 0.111s）。
+:: 第 3 步的 check_env.py 已经真实导入过 fastapi，这里再导一次是重复付费。
+python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('fastapi') else 1)" 2>nul
 if errorlevel 1 (
     echo [INFO] Installing backend dependencies ^(tsinghua mirror^)...
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn

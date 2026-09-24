@@ -71,6 +71,37 @@
   绕法是换 **npm 11** 执行同一条安装命令；`lockfileVersion` 仍是 3，
   CI 用 `npm ci` 只读锁文件、不重新解析，故 runner 上不受影响。
 
+- **`check_env.py` 的依赖检测改为「并行 + 分层」：每个启动周期都跑的第 3 步从 31.98s 降到 1.35s**
+  （2026-09-26；本机 conda `mineru_env` / Python 3.10.21 / Windows，三轮取中位数）。
+  `start.bat:96` 与 `start.sh:84` 每次启动都会跑这一步，而它原来把 22 个模块
+  **串行真实导入**：`sentence_transformers` 20.6s、`qwen_asr` 6.2s、`openai` 2.7s、
+  `torch` 2.8s，其余 18 个合计不到 1.4s。而**后端真实启动**（`import app.main`）只要
+  4.2s，且 `sys.modules` 里没有这四个 —— 那 30s 验的不是「能不能启动」。
+
+  - 省下来的时间**不靠并行**：线程池 8 线程实测只值 **-11%**（`check_env.py:544` 记了原因：
+    GIL 下 import 的耗时大头是模块体字节码，不释放 GIL）。真正的大头是**分层**。
+  - 四个**启动路径不会导入**的重型模块默认只用 `find_spec` 确认「装没装」
+    （22 个模块合计 **0.007s**），真实导入交给新增的 `--deep`
+    （`check_env.py:1147`；`--fix` 自动深度检测）。`--deep` 下全量真实导入为
+    **26.34s**，比原版还快 17.6%（并行那部分仍然有效）。
+  - **严格性没有静默降低**：第 3 步收尾会点名列出「仅确认已安装」的模块与 `--deep`
+    的用法（`check_env.py:597`），不把两种结论印成一样的 ✓。判据写在
+    `check_env.py:490` 的 `HEAVY_MODULES`。
+  - 顺带修掉并行引入的**假失败**：失败项一律**串行复验**后才判负。独立子进程实测
+    「`sqlalchemy` + `alembic` 两线程并发」**8/8** 撞上
+    `partially initialized module ... circular import` —— 直接采信第一次结果就会把
+    已安装的包报成未安装。
+  - 顺带补上两处**隐蔽的重型导入**护栏（否则快路径会被它们偷偷跑掉）：
+    `check_silero_vad` 的 `import torch`（`check_env.py:825`）与
+    `check_qwen_asr` 的 `import qwen_asr`（`check_env.py:1009`）。
+  - `start.bat:117` / `start.sh:102` 用 `find_spec` 取代重复的
+    `python -c "import fastapi"`（实测 **0.704s → 0.111s**）：该步只决定要不要跑
+    `pip install`，而第 3 步已经真实导入过一次。
+  - 分层的前提（「导入昂贵」且「不在 `import app.main` 的闭包内」）由
+    `backend/tests/test_check_env_probe.py` **起子进程实测**守着：哪天有人把
+    `torch` / `openai` 加进启动路径，那条守卫会红，而不是等用户机器上
+    「自检全绿但服务起不来」。
+
 ### Security
 
 - 本节**刻意不宣称"本批次修复了任何安全发现"**（同类声明最容易变成"文档比现实宽松"）。

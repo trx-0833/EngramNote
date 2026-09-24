@@ -142,11 +142,18 @@ python check_env.py --fix
 
 ```bash
 python check_env.py                    # 仅检测，不修复
+python check_env.py --check --deep     # 依赖全部真实导入（最严格，约 26s）
 python check_env.py --fix              # 修复必需项（含 BGE-M3 ≈2.2GB）
 python check_env.py --fix --all        # 追加可选大模型（MinerU ≈7GB + ASR ≈1.2GB）
 python check_env.py --download-mineru  # 仅下载 MinerU（本地 PDF 解析用）
 python check_env.py --download-asr     # 仅下载 ASR（音视频转写用）
 ```
+
+> **依赖检测为什么这么快**：第 3 步默认只用 `find_spec` 确认「装没装」的，是 4 个
+> **启动路径不会导入**的重型模块（`sentence_transformers` / `qwen_asr` / `openai` / `torch`，
+> 合计约 30s）；其余 18 个仍然**真实导入**。要连这 4 个也真导一次就加 `--deep`
+> （`--fix` 自动走深度检测）。判据与理由写在 `check_env.py` 的 `HEAVY_MODULES`，
+> 并由 `backend/tests/test_check_env_probe.py` 守着。
 
 > 国内源已内置：pip 用清华源、npm 用淘宝源、模型用 ModelScope。
 > 想省 7GB 磁盘就别用本地 MinerU —— 配 `MINERU_API_TOKEN` 后默认走云端 API。
