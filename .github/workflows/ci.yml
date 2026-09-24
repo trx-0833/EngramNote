@@ -1,5 +1,21 @@
 name: CI
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 依赖升级说明（2026-09-24）
+#
+# 本文件的 action 版本由 Dependabot 提议、经人工核对后升级：
+#   actions/checkout@v4→v7 · setup-python@v5→v7 · cache@v4→v6 · upload-artifact@v4→v7
+#
+# 核对方式（不只看版本号）：逐个比对 v4/v5 与新版本的 `action.yml`，确认
+# **本项目实际用到的输入**（`python-version` / `cache` / `cache-dependency-path` /
+# `path` / `name` / `if-no-files-found` / `retention-days` / `key`）在新版本里都还在。
+# 结论：都在；`actions/cache` 只弃用了 `save-always`，本项目未使用。
+#
+# ⚠️ `actions/setup-node` **保持 v4**：Dependabot 没有提议它，不擅自升级。
+# ⚠️ 这类升级的最终验证只能由 GitHub runner 完成 —— 本机没有 runner。
+#    若某个 job 因 action 版本失败，先看是"输入/API 变了"还是"runner 环境变了"。
+# ─────────────────────────────────────────────────────────────────────────────
+
 # 本项目此前**没有任何 CI**（无 .github/），后果是：
 # - 测试在收集阶段就发起真实网络请求并消耗 LLM 额度，无人发现
 # - 前端重构后后端测试仍在断言旧文件结构，无人发现
@@ -27,9 +43,9 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -171,7 +187,7 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -275,7 +291,7 @@ jobs:
         #
         # 缓存的是下载后的浏览器目录，**不包含** `playwright install` 的其他副作用，
         # 所以下一节的安装步骤无论缓存命中与否都必须执行（命中时它只是快速校验）。
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -361,9 +377,9 @@ jobs:
     # 门禁的**正确**升级路径是先把上面两类发现处理掉（或在脚本里显式豁免并
     # 写明理由），再把 `--fail-on` 换成具体阈值。在那之前不装作已经守住了。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -468,7 +484,7 @@ jobs:
 
       - name: Upload scan report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-scan-report
           # 两个文件都保留：JSON 供机器读，日志供人读（含"哪个扫描器没跑"的原因）
@@ -482,7 +498,7 @@ jobs:
     name: Docker build context sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: nginx config must set client_max_body_size
         # 回归守卫：nginx 默认 client_max_body_size 只有 1MB，
