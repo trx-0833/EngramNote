@@ -17,5 +17,8 @@
 #   app/services/asr/asr_engine.py:11   → torch
 #   app/services/asr/asr_engine.py:13   → qwen_asr
 #   app/services/asr/audio_utils.py:11  → soundfile（已在主依赖里）
-torch>=2.0.0
+#
+# 2026-09-24：下界由 `>=2.0.0` 对齐到实际在跑的 **2.14.0**（+cpu 轮子）。
+# 原来的 2.0.0 等于形同虚设：它允许装到 2.0.x，而本项目从未在那个版本上跑过。
+torch>=2.14.0
 qwen-asr>=0.1.0

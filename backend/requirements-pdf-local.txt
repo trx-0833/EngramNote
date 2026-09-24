@@ -17,5 +17,7 @@
 # 依赖位置参考：
 #   app/services/mineru/config_loader.py:14   → yaml
 #   app/services/mineru/converter.py          → requests（懒加载）
-pyyaml~=6.0.0
+#
+# 2026-09-24：`pyyaml` 由 `~=6.0.0` 对齐到实际在跑的 **6.0.3**。
+pyyaml~=6.0.3
 requests~=2.34.2
