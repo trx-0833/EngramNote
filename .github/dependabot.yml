@@ -16,6 +16,40 @@
 # 那等于没开（这个仓库对"配置了却从未真正执行"的东西特别警惕，
 # 见 `docs/overhaul-plan.md:3320` 与 `docs/security-scan.md:494-495`）。
 #
+# ## ⚠️ `open-pull-requests-limit` 管的是 **PR 数**，不是**分支数**
+#
+# 这一点在 2026-09-24 的复盘里被实测纠正过一次，写在这里防止再次误判：
+#
+#   * 该选项只限制**同时开着**的 PR 数量。PR 一旦被合并或关闭，名额立刻腾出。
+#   * **而分支不会随 PR 一起消失** —— `dependabot/*` 分支只有被人或脚本
+#     显式删除才会消失。
+#
+# 于是"分支越积越多"的真实成因是"没人删"，不是"限额太高"：
+# 当时仓库里有 **15 个分支**，其中 13 个是**已经关掉、分支还躺着**的。
+# 清理机制见 `.github/workflows/cleanup-dependabot-branches.yml`。
+#
+# 三份 ecosystem 各自计限额，所以 `10` 意味着**理论上限 30 条开放 PR**。
+#
+# ## 大版本：哪些自动开、哪些不自动开
+#
+# **不自动开**（`ignore` 里的四个）—— 它们必须**联动升级**，单独开 PR 只会
+# 得到一个红色 PR 然后等人去关：
+#
+#   * `vite` 与 `@vitejs/plugin-react`：plugin-react 4.x 的 peer 是
+#     `vite: ^4 || ^5 || ^6 || ^7`，**不含 ^8**；只升 vite 会 ERESOLVE。
+#   * `vitest`：2.x 与 vite 8 的配置契约不兼容（3.x 起才跟上）。
+#   * `jsdom`：它的 `engines.node` 就是本仓库 `package.json` 里
+#     `engines.node` 的来源，升级它可能抬高 Node 下界。
+#
+#   这四者的人工升级步骤见 `frontend/.npmrc` 相邻的提交记录与
+#   `docs/open-source-readiness.md` §执行进度（批次 9）。**不是不升**，
+#   是"由人挑一个时间点、四条一起升、跑完整门禁"。
+#
+# **仍然自动开**：其余依赖（如 `react-router-dom`、`marked`）与 `pip` 侧
+# （如 `alembic`）的大版本 —— 它们能独立验证，让人看见比藏起来好。
+# 实测依据：2026-09-24 那一轮里 `marked 14→18`、`react-router-dom 6→7`
+# 都是单个依赖独立升级并各自跑绿门禁的。
+#
 # ## 分组策略（groups）—— 为什么这么分
 #
 # **把 minor / patch 合并成一个 PR，把 major 留成独立 PR。**
@@ -27,6 +61,10 @@
 # 2. **major 不能混进来**：`docs/security-scan.md:403-409` 记着本项目对跨大版本升级的
 #    态度 —— vite 5→8、vitest 2→5、fastapi 升级都会改变应用行为或构建产物，
 #    必须单独验证。混进分组 PR 里，审阅者分不清"哪一处升级导致了失败"。
+#
+# `github-actions` 是**例外**：它的 major 也并进同一个组。理由来自实测 ——
+# 2026-09-24 那轮里 `checkout@v7` / `setup-python@v7` / `cache@v6` /
+# `upload-artifact@v7` 四个 major 是**一轮门禁一次全绿**，逐条开 PR 只是四次重复劳动。
 #
 # 刻意**不**用 `dependency-type` 把 dev/prod 分开成更多组：
 # npm 侧 `npm ci` 装的是同一棵依赖树，CI 的 `npm test` / `npm run build` 会同时验证两者；
@@ -50,7 +88,7 @@ updates:
       day: monday
       time: "09:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - dependencies
       - python
@@ -75,7 +113,7 @@ updates:
       day: monday
       time: "09:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - dependencies
       - javascript
@@ -83,6 +121,20 @@ updates:
       prefix: "chore(deps)"
     assignees:
       - trx-0833
+    # 必须联动升级的四个 → 不自动开 major PR（理由见文件头）
+    ignore:
+      - dependency-name: vite
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@vitejs/plugin-react"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: jsdom
+        update-types:
+          - version-update:semver-major
     groups:
       npm-minor-patch:
         patterns:
@@ -103,7 +155,7 @@ updates:
       day: monday
       time: "09:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - dependencies
       - github-actions
@@ -112,9 +164,11 @@ updates:
     assignees:
       - trx-0833
     groups:
-      actions-minor-patch:
+      # 与 npm/pip 不同：actions 的 **major 也并进同一个组**。
+      # 理由（实测）：2026-09-24 那轮里四个 action 的 major
+      # （checkout@v7 / setup-python@v7 / cache@v6 / upload-artifact@v7）
+      # 是同一轮门禁一次全绿，逐条开 PR 只是四次重复劳动。
+      # 注意 `update-types` 省略 = 不限制更新类型（含 major）。
+      actions-all:
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch

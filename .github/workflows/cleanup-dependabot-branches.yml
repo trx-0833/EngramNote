@@ -1,0 +1,71 @@
+# 清理"已经没有开放 PR 的 Dependabot 分支"
+# ==========================================
+#
+# ## 为什么需要这个 workflow
+#
+# `dependabot.yml` 的 `open-pull-requests-limit` 只限制**同时开着的 PR 数**，
+# **不关分支**：PR 被合并/关闭后名额腾出，分支却留在仓库里。
+# 实测（2026-09-24 复盘）：仓库里有 15 个分支，其中 13 个是"PR 早关了、分支还躺着"的。
+#
+# ⚠️ 仓库设置里的 `delete_branch_on_merge` **对本项目无效** ——
+# 本项目的流程是"本地 merge 再 push"，**从不点 GitHub 的 Merge 按钮**。
+# 所以就靠这个 job 定期扫。
+#
+# ## 安全性
+#
+# * **默认 dry-run**：定时触发只**打印**名单，不删任何东西。
+#   要真删需要在 Actions 页面手动 `Run workflow` 并把 `delete` 填 `true`。
+# * 脚本内部另有两道锁（写死在代码里，不靠人记得）：
+#   只删 `dependabot/` 前缀、只删没有任何开放 PR 的分支。
+#   见 `frontend/scripts/cleanup-dependabot-branches.mjs` 的文件头。
+# * 为什么第一次要 dry-run：先看清名单再授权删除，
+#   免得"清理脚本"变成事故来源（本仓库历史上出现过清理副本却动到真身的事）。
+#
+# ## 为什么是每两周
+#
+# Dependabot 每周一 09:00（Asia/Shanghai）开 PR。每两周跑一次意味着
+# 中间那一周的分支会多留几天 —— 可以接受，且比每天扫更少打扰。
+# 想立刻清就手动触发。
+
+name: Cleanup Dependabot branches
+
+on:
+  schedule:
+    # 每周一 03:00 UTC = 11:00 Asia/Shanghai（比 Dependabot 的 09:00 晚 2 小时，
+    # 确保它当天开的 PR 已经被算作"有开放 PR"从而被保留）
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: "填 true 才真的删除（留空 = 只打印名单）"
+        required: false
+        default: "false"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      # 定时触发时 `inputs.delete` 是空的 → 脚本不加 --delete → dry-run。
+      # 手动触发填 true 才会真删。
+      - name: 清理无开放 PR 的 Dependabot 分支
+        working-directory: frontend
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ inputs.delete }}" = "true" ]; then
+            echo "模式：真删（delete=true）"
+            node scripts/cleanup-dependabot-branches.mjs --delete
+          else
+            echo "模式：dry-run（只打印名单）—— 要真删请在 Actions 页面手动触发并填 delete=true"
+            node scripts/cleanup-dependabot-branches.mjs
+          fi
