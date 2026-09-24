@@ -135,6 +135,7 @@
 | 中 | **分页统一**（§2.21 B-11） | 三套约定仍在：`understanding.py:321/362`（`999 / le=9999`）、`knowledge.py:198`（`20 / le=100`）、`notes/list_detail.py:67`（`20 / le=1000`）、`graph.py:93`（`limit` 无上界校验） |
 | 中 | **GitHub 仓库设置**（topics / description / Discussions / 首个 release 的页面动作） | 只能在网页上点，本地改不了（§4.10）。2026-09-24 第二轮复核：**topics 仍为空**（首页 `topic-tag` 0 命中）；`/releases` 页面实测文案 **"There aren't any releases here"**，而 tag 已存在 ⇒ **tag ≠ release**，页面上的 release 对象确实还没建 |
 | 低 | **剩下 5 个 `dependabot/*` 分支还没删** | 2026-09-24 第二轮实测：分支总数 6（`main` + 5 个 `dependabot/*`）。清理机制已就绪（`302740b` 的 workflow，默认 dry-run），但**首次必须先手工跑一次 dry-run 看名单**再授权删除 |
+| 中 | **Dependabot 的 11 个开放 PR 需要网页上关闭** | 2026-09-24 实测：`git push` **不会**让 Dependabot 关闭它的 PR（目标版本已达成也不会）。其中 **9 个（`#17`–`#25`）已在 `0cabe4c` 里按"声明 = 实装"处理完毕**，只是 PR 还开着；剩余 `#10`（alembic，刻意不动）、`#16`（setup-node 4→7）、`#18`/`#19`/`#21` 的目标版本比实装新（`sqlalchemy 2.0.54` / `pypdfium2 5.13.0` / `openai 3.16.2`）需单独判断。**预期 Dependabot 下一个周一（09:00 Asia/Shanghai）重扫时会自行关闭已满足的那些**；要立刻清掉需要在网页操作或提供带 `repo` 权限的 PAT |
 | 低 | **`ruff format` 全量重排**（**211 / 251** 个文件：app 132、tests 79、scripts 40） | **有意推迟**：理由写在 `ci.yml:131-147` —— 纯格式提交要单独开一轮，否则审阅者分不清"真修复"与"排版"；本轮只堵住新增漂移（prettier 侧已升级为阻断） |
 
 > ⚠️ 推送时发现本机两个环境事实（与仓库无关，但会挡住你以后推送）：
