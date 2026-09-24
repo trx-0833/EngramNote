@@ -65,8 +65,8 @@ dependencies = [
     "uvicorn[standard]~=0.30.0",
     "sqlalchemy[asyncio]~=2.0.0",
     "aiosqlite~=0.20.0",
-    "pydantic~=2.0.0",
-    "pydantic-settings~=2.0.0",
+    "pydantic~=2.13.5",
+    "pydantic-settings~=2.15.0",
     "email-validator~=2.0.0",
     "python-multipart~=0.0.9",
     "python-jose[cryptography]~=3.3.0",
@@ -76,22 +76,22 @@ dependencies = [
     "httpx~=0.27.0",
     "sentence-transformers~=2.2.0",
     "pypdfium2~=4.30.0",
-    "Pillow~=10.0.0",
+    "Pillow~=12.3.0",
     "psutil~=5.9.0",
-    "alembic~=1.13.0",
+    "alembic~=1.19.2",
     "openai~=1.0.0",
     "soundfile~=0.12.0",
 ]
 
 [project.optional-dependencies]
 # MinerU **本地**解析模式（云端 vlm-http-client 模式不需要它）
-pdf-local = ["pyyaml~=6.0.0", "requests~=2.32.0"]
+pdf-local = ["pyyaml~=6.0.0", "requests~=2.34.2"]
 # 音视频转写（GB 级：torch 按平台选轮子）
 asr = ["torch>=2.0.0", "qwen-asr>=0.1.0"]
 # 贡献者：测试 + lint
 dev = [
     "pytest~=8.0.0",
-    "pytest-asyncio~=0.23.0",
+    "pytest-asyncio~=1.4.0",
     "ruff~=0.16.0",
 ]
 

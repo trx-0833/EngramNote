@@ -35,8 +35,8 @@ fastapi~=0.115.0
 uvicorn[standard]~=0.30.0
 sqlalchemy[asyncio]~=2.0.0
 aiosqlite~=0.20.0
-pydantic~=2.0.0
-pydantic-settings~=2.0.0
+pydantic~=2.13.5
+pydantic-settings~=2.15.0
 email-validator~=2.0.0
 python-multipart~=0.0.9
 
@@ -61,7 +61,7 @@ sentence-transformers~=2.2.0
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
 pypdfium2~=4.30.0
-Pillow~=10.0.0
+Pillow~=12.3.0
 
 # ---- 运行期可观测性 ----
 psutil~=5.9.0
@@ -69,7 +69,7 @@ psutil~=5.9.0
 # ---- 数据库迁移 ----
 # ⚠️ 启动路径**不调用** alembic（真实迁移靠 app/database.py 的 init_db +
 #    _migrate_sqlite）。保留它是为了历史对照与将来的重建基线，见 UPGRADING.md。
-alembic~=1.13.0
+alembic~=1.19.2
 
 # ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
 openai~=1.0.0
