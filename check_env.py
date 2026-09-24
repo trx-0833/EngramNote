@@ -21,16 +21,28 @@ EngramNote 环境自动检测与初始化脚本
     python check_env.py --fix --all    # 包含可选大模型（MinerU + ASR）
     python check_env.py --download-mineru   # 仅下载 MinerU 模型
     python check_env.py --download-asr      # 仅下载 ASR 模型
+    python check_env.py --check --deep      # 依赖全部真实导入（最严格，也最慢）
+
+关于依赖检测的速度（2026-09-26 改造）：
+    第 3 步原来把 22 个模块**全部真实导入**，本机实测 29.7s，其中 29.5s 花在
+    三个模块上（sentence_transformers / qwen_asr / openai）—— 而**后端真实启动**
+    （`import app.main`）只要 4.2s，且根本不导入它们。
+    现在改成"并行 + 分层"：便宜的模块仍真实导入（并行跑），
+    昂贵且不在启动闭包内的模块默认只确认"装没装"，真实导入交给 --deep。
+    详见 HEAVY_MODULES 的说明。
 """
 
 import os
 import sys
+import time
 import subprocess
 import importlib
+import importlib.util
 import shutil
 import json
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # ============================================================
@@ -144,6 +156,9 @@ def header(title):
 
 # 检测结果统计
 results = {"pass": 0, "fail": 0, "warn": 0, "fixed": 0}
+
+# 本次检测的起点（`main()` 会重置）—— 用于在总结里如实给出"启动到底等了多久"
+_STARTED_AT = time.perf_counter()
 
 def record_pass():
     results["pass"] += 1
@@ -437,16 +452,192 @@ OPTIONAL_PACKAGES = {
     "torch": ("torch", "PyTorch（嵌入模型和 ASR 依赖，需从 pytorch.org 安装）"),
 }
 
-def check_backend_deps(auto_fix=False):
+# ============================================================
+# 「启动路径不会导入」的重型模块 —— 默认只确认"装没装"
+# ============================================================
+#
+# ## 为什么要有这一层（2026-09-26 实测，Windows / Python 3.14.7）
+#
+# `--check` 每个启动周期都要跑一次（start.bat:96 / start.sh:84），而它原来把
+# 22 个模块**全部真实导入**：实测 29.7s，其中 29.5s 只花在四个模块上 ——
+#     sentence_transformers  20.6s（牵连 torch 2.8s + transformers 9s）
+#     qwen_asr                6.2s（独立冷启 26.6s；与前者共享依赖时降到 6.2s）
+#     openai                  2.7s
+#     torch                   2.8s
+# 其余 18 个模块合计不到 1.4s。
+#
+# 而**后端真实启动**（`import app.main`）只要 4.2s，并且 `sys.modules` 里
+# 没有上面任何一个。也就是说：这 29s 验的不是"项目能不能启动"，
+# 而是"某个可选功能将来能不能用" —— 付在了每次启动上。
+#
+# ## 入层判据（两条都要满足，可复核，不是拍脑袋）
+#
+#   1. **导入昂贵**：该模块真实导入 > 1s；
+#   2. **不在启动闭包内**：`import app.main` 之后它不在 `sys.modules` 里。
+#
+# 判据 2 由 `backend/tests/test_check_env_probe.py` 用**子进程实测**守着 ——
+# 哪天有人把 torch/openai 加进启动路径，那条守卫会红，而不是靠人记得回来改这里。
+#
+# ## 代价（必须说清楚，否则就成了"为了快而放松检查"）
+#
+# 这四个模块"装了但一导入就炸"（Windows 上 torch 缺 DLL 是经典故障）默认
+# **不会**在启动时暴露 —— 只验到"已安装"这一层。要验到真实导入：
+#     python check_env.py --check --deep      # 全量真实导入（约 +26s）
+# `--fix` 一律走深度检测：装完不真导一次，就等于把"假绿"写进修复流程。
+#
+# 输出侧配套：第 3 步结束时会明说"哪些做了真实导入、哪些只确认了安装"，
+# 不把"仅确认已安装"显示成和"真实导入通过"一样的一行 ✓。
+HEAVY_MODULES = {
+    "sentence_transformers": "embedding_service.py:193 —— 函数内惰性导入，API 进程启动不导入",
+    "torch": "asr_engine.py:11 / audio_utils.py:12 —— 仅 ASR 功能路径",
+    "qwen_asr": "asr/__init__.py:50 —— 仅 ASR 功能路径",
+    "openai": "asr_engine.py:12 —— 仅 ASR 功能路径",
+}
+
+#: 只确认"已安装"时给用户看的证据文本（被探测层与测试共同引用，避免两处各写一份）
+DETAIL_INSTALLED_ONLY = "已安装（未做真实导入）"
+#: 真实导入通过时的证据文本
+DETAIL_IMPORTED = "真实导入通过"
+
+
+def _probe_by_import(module):
+    """真实导入一个模块 —— 最严格：能抓出"装了但导入时就炸"（缺 DLL / ABI 不匹配）
+
+    返回 `(是否通过, 证据, 耗时秒)`。
+    """
+    started = time.perf_counter()
+    try:
+        importlib.import_module(module)
+        return True, DETAIL_IMPORTED, time.perf_counter() - started
+    except ImportError as e:
+        return False, f"未安装（{e}）", time.perf_counter() - started
+    except Exception as e:  # noqa: BLE001 - 导入期什么都可能抛（OSError/系统 DLL 缺失等）
+        return False, f"导入失败（{type(e).__name__}: {e}）", time.perf_counter() - started
+
+
+def _probe_by_find_spec(module):
+    """只定位不导入 —— 确认"装没装"，实测 22 个模块合计 0.007s
+
+    返回 `(是否通过, 证据, 耗时秒)`。
+
+    ⚠️ 它**不执行模块体**，因此抓不到"装了但导入就炸"。用它的前提是
+    调用方会把这个事实说出来（见 DETAIL_INSTALLED_ONLY 与第 3 步的收尾说明）。
+    """
+    started = time.perf_counter()
+    try:
+        spec = importlib.util.find_spec(module)
+    except (ImportError, ValueError) as e:
+        return False, f"未安装（{e}）", time.perf_counter() - started
+    cost = time.perf_counter() - started
+    if spec is None:
+        return False, "未安装", cost
+    return True, DETAIL_INSTALLED_ONLY, cost
+
+
+def _pick_probe(module, deep):
+    """选探测方式：只有"昂贵 且 不在启动闭包内"的模块才降级为 find_spec"""
+    if deep or module not in HEAVY_MODULES:
+        return _probe_by_import
+    return _probe_by_find_spec
+
+
+def _probe_modules(modules, deep=False, max_workers=None):
+    """**并行**探测一组模块，返回 `[(模块, 是否通过, 证据, 耗时), ...]`，**保持入参顺序**
+
+    ## 为什么是线程池，而不是进程池
+    线程池实测只能把 28.5s 压到 25.4s（-11%），因为 CPython 的 GIL：
+    import 的耗时大头是模块体的字节码执行（注册表构建、装饰器、类型构造），
+    这部分不释放 GIL，无法并行；只有读文件 / dlopen 能重叠。
+
+    进程池能真并行，但下界是**最慢的那一支**（qwen_asr 独立冷启 26.6s），
+    再加 Windows spawn 开销与每进程一份 torch 内存（数百 MB~GB）—— 收益为负，
+    因此不用。真正的大头靠分层解决（见 HEAVY_MODULES），线程是第二层优化。
+
+    ## 顺序与线程安全
+    `Executor.map` 按入参顺序产出，且结果只在**主线程**打印 ——
+    输出与改造前逐行对应，`ok()/fail()` 的计数也不需要在子线程里加锁。
+
+    ## 失败项必须**串行复验**（不是可选项，是正确性要求）
+    并行导入会撞上"半初始化模块"：`alembic` 在导入 `sqlalchemy` 的子模块时，
+    对方自己的 `import` 可能还没跑完，于是抛
+        cannot import name 'Column' from partially initialized module
+        'sqlalchemy.sql.schema' (most likely due to a circular import)
+    ——**这是并行制造的假失败**。不是理论风险：独立子进程里两线程并发导入
+    `sqlalchemy` + `alembic`，实测 **8/8 全中**（复现方式与断言见
+    `backend/tests/test_check_env_probe.py`）。
+    因此：池子关掉（所有导入落定）之后，**每一个失败项都单独再导一次**；
+    只有"串行也失败"才算真失败。判定标准不能因为跑得快就放松。
+    """
+    modules = list(modules)
+    if not modules:
+        return []
+    if max_workers is None:
+        max_workers = min(8, len(modules), os.cpu_count() or 4)
+
+    def _run(module):
+        passed, detail, cost = _pick_probe(module, deep)(module)
+        return module, passed, detail, cost
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_run, modules))
+
+    # 串行复验失败项（此时池已关闭，所有并发导入都已落定）
+    verified = []
+    for module, passed, detail, cost in results:
+        if not passed:
+            if module not in sys.modules:
+                # 模块体执行失败时，Python 会把**它自己**从 sys.modules 摘掉，
+                # 但**子模块会留下**。不清掉它们，复验就会继承同一片废墟：
+                # 实测（清 vs 不清，独立子进程对照）——
+                #   不清：`import sqlalchemy` 报"成功"，随后
+                #         `from sqlalchemy.orm import ...` 才炸出
+                #         `module 'sqlalchemy.sql' has no attribute 'base'`
+                #         —— 这是**晚到的假绿**，比假失败更坏。
+                #   清掉：复验成功且 `event.listen(engine, "connect")` 正常。
+                for name in [n for n in list(sys.modules) if n.startswith(module + ".")]:
+                    sys.modules.pop(name, None)
+            # 反之：模块**已经**在 sys.modules 里 ⇒ 别的线程已经把它导完了，
+            # 此时绝不能清 —— 清了会让已经持有它的模块类身份分裂
+            # （症状：`No such event 'connect' for target 'Engine(...)'`）。
+            # 直接重新 import 会拿到那份已完成的缓存副本，判定同样可信。
+            passed, detail, retry_cost = _pick_probe(module, deep)(module)
+            cost += retry_cost
+            if not passed:
+                detail = f"{detail}（已串行复验）"
+        verified.append((module, passed, detail, cost))
+    return verified
+
+
+def check_backend_deps(auto_fix=False, deep=False):
     header("步骤 3/10：检测后端 Python 依赖")
+
+    # 必需 + 可选一次探测完（去重且保序：输出仍按"必需在前、可选在后"排列）
+    modules = list(dict.fromkeys([*REQUIRED_PACKAGES, *OPTIONAL_PACKAGES]))
+    started = time.perf_counter()
+    probes = _probe_modules(modules, deep=deep)
+    elapsed = time.perf_counter() - started
+    by_module = {module: (passed, detail) for module, passed, detail, _ in probes}
+
     missing = []
     for module, package in REQUIRED_PACKAGES.items():
-        try:
-            importlib.import_module(module)
-            ok(f"{package}")
-        except ImportError:
-            fail(f"{package} 未安装")
+        passed, detail = by_module[module]
+        if passed:
+            ok(f"{package}（仅确认已安装）" if detail == DETAIL_INSTALLED_ONLY else f"{package}")
+        else:
+            fail(f"{package} {detail}")
             missing.append(package)
+
+    # 说清"这次到底验证了什么" —— 不把"仅确认已安装"和"真实导入通过"混成一样的一行
+    downgraded = [m for m in modules if not deep and m in HEAVY_MODULES]
+    if deep:
+        info(f"验证方式：{len(modules)} 个模块全部真实导入（并行，{elapsed:.1f}s）")
+    elif downgraded:
+        info(
+            f"验证方式：{len(modules)} 个模块确认已安装"
+            f"（其中 {len(modules) - len(downgraded)} 个真实导入完成，并行共 {elapsed:.1f}s）"
+        )
+        info(f"仅确认已安装（未做真实导入）：{'、'.join(downgraded)}")
+        info("这些模块启动路径不会导入；要验证它们能否真正导入：python check_env.py --check --deep")
 
     if missing:
         if auto_fix:
@@ -478,10 +669,10 @@ def check_backend_deps(auto_fix=False):
     print()
     info("可选依赖（音视频转写）：")
     for module, (package, desc) in OPTIONAL_PACKAGES.items():
-        try:
-            importlib.import_module(module)
-            ok(f"{package}（{desc}）")
-        except ImportError:
+        passed, detail = by_module[module]
+        if passed:
+            ok(f"{package}（{desc}）" if detail != DETAIL_INSTALLED_ONLY else f"{package}（{desc}，仅确认已安装）")
+        else:
             if auto_fix:
                 info(f"正在安装可选依赖 {package}（{desc}）...")
                 try:
@@ -645,7 +836,7 @@ def check_bge_m3(auto_fix=False):
 # ============================================================
 # 7. 检测并下载 Silero VAD 模型（可选，ASR 用）
 # ============================================================
-def check_silero_vad(auto_fix=False):
+def check_silero_vad(auto_fix=False, deep=False):
     header("步骤 7/10：检测 Silero VAD 模型（可选，ASR 用）")
     model = MODELS["silero_vad"]
     info(f"用途：{model['purpose']}")
@@ -658,15 +849,22 @@ def check_silero_vad(auto_fix=False):
         return True
 
     # 检查 torch.hub 缓存
-    try:
-        import torch
-        hub_jit = Path(torch.hub.get_dir()) / "snakers4_silero-vad_master" / "src" / "silero_vad" / "data" / "silero_vad.jit"
-        if hub_jit.exists():
-            ok(f"Silero VAD 已在 torch.hub 缓存：{hub_jit}")
-            record_pass()
-            return True
-    except Exception:
-        pass
+    #
+    # ⚠️ 这段要 `import torch`（实测 2.8s），所以快速模式下跳过 —— 但**必须说出来**：
+    # "项目目录里没有这个文件"不等于"模型没下载"，它可能躺在 torch.hub 缓存里。
+    # 把没查过的事说成"未下载"就是**假失败**，和假通过一样不能接受。
+    if deep:
+        try:
+            import torch
+            hub_jit = Path(torch.hub.get_dir()) / "snakers4_silero-vad_master" / "src" / "silero_vad" / "data" / "silero_vad.jit"
+            if hub_jit.exists():
+                ok(f"Silero VAD 已在 torch.hub 缓存：{hub_jit}")
+                record_pass()
+                return True
+        except Exception:
+            pass
+    else:
+        info("torch.hub 缓存本次未检查（需 import torch，约 2.8s）；加 --deep 会检查")
 
     fail("Silero VAD 模型未下载")
 
@@ -822,7 +1020,7 @@ def check_mineru_models(auto_fix=False, force_download=False):
 # ============================================================
 # 9. 检测并下载 Qwen3-ASR 模型（可选，音视频转写用）
 # ============================================================
-def check_qwen_asr(auto_fix=False, force_download=False):
+def check_qwen_asr(auto_fix=False, force_download=False, deep=False):
     header("步骤 9/10：检测 Qwen3-ASR 模型（可选，音视频转写用）")
     model = MODELS["qwen_asr"]
     info(f"用途：{model['purpose']}")
@@ -837,10 +1035,12 @@ def check_qwen_asr(auto_fix=False, force_download=False):
     fail("Qwen3-ASR 模型未下载")
 
     # 检查 qwen_asr 包是否安装
-    try:
-        importlib.import_module("qwen_asr")
-    except ImportError:
-        warn("qwen_asr 包未安装")
+    #
+    # 这里只需要"装没装"（用来决定要不要 pip install），不需要真实导入 ——
+    # 而真实导入实测 6.2s（独立冷启 26.6s），且第 3 步刚刚验过一次。
+    _available, _detail, _cost = _pick_probe("qwen_asr", deep)("qwen_asr")
+    if not _available:
+        warn(f"qwen_asr 包不可用（{_detail}）")
         if auto_fix:
             info("正在安装 qwen_asr（清华源）...")
             try:
@@ -918,6 +1118,7 @@ def print_summary():
     print(f"  {Color.YELLOW}警告：{results['warn']}{Color.END}")
     if results["fixed"] > 0:
         print(f"  {Color.CYAN}已自动修复：{results['fixed']}{Color.END}")
+    print(f"  {Color.CYAN}本次检测耗时：{time.perf_counter() - _STARTED_AT:.1f}s{Color.END}")
     print()
 
     if results["fail"] == 0 and results["warn"] == 0:
@@ -955,6 +1156,11 @@ def main():
     download_mineru = "--download-mineru" in sys.argv
     download_asr = "--download-asr" in sys.argv
     check_only = "--check" in sys.argv
+    # 依赖检测深度：--deep 显式要求全量真实导入；--fix 也一律深度检测 ——
+    # 装完不真导一次，就等于把"假绿"写进修复流程本身（见 HEAVY_MODULES 的说明）。
+    deep = "--deep" in sys.argv or auto_fix
+    global _STARTED_AT
+    _STARTED_AT = time.perf_counter()
 
     # 单独下载模式
     if download_mineru:
@@ -987,6 +1193,8 @@ def main():
             info("如需下载 MinerU 和 ASR 大模型，请加 --all 参数")
     elif check_only:
         info("已启用 --check 模式：仅检测不修复")
+        if deep:
+            info("已启用 --deep 模式：所有依赖真实导入（最严格，也更慢）")
 
     # 简化：只有 --fix 时才修复（默认无参数 = 仅检测）
     fix = auto_fix
@@ -994,13 +1202,13 @@ def main():
     # 执行检测
     check_python()
     check_node()
-    check_backend_deps(fix)
+    check_backend_deps(fix, deep=deep)
     check_frontend_deps(fix)
     check_env_file(fix)
     check_bge_m3(fix)
-    check_silero_vad(fix)
+    check_silero_vad(fix, deep=deep)
     check_mineru_models(fix, force_download=download_all)
-    check_qwen_asr(fix, force_download=download_all)
+    check_qwen_asr(fix, force_download=download_all, deep=deep)
     create_data_dirs()
 
     print_summary()

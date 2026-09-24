@@ -51,6 +51,17 @@ def _extract_required_packages() -> dict[str, str]:
     raise AssertionError("check_env.py 里找不到 REQUIRED_PACKAGES")
 
 
+def _extract_heavy_modules() -> set[str]:
+    """从 check_env.py 里取出 `HEAVY_MODULES = {模块: 理由}`（同样用 AST，不执行文件）"""
+    tree = ast.parse(CHECK_ENV.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "HEAVY_MODULES" in targets:
+                return set(ast.literal_eval(node.value))
+    raise AssertionError("check_env.py 里找不到 HEAVY_MODULES")
+
+
 def _normalise(name: str) -> str:
     return re.split(r"[<>=!~\[]", name.strip())[0].strip().lower().replace("_", "-")
 
@@ -128,6 +139,24 @@ class TestCheckEnvMatchesRequirements:
             _normalise(line) for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
         }, "requirements.txt 里又出现了 chromadb"
+
+    def test_heavy_modules_are_still_declared_dependencies(self):
+        """`HEAVY_MODULES` 只是"验得浅"，**不是"不用装"**
+
+        它改变的是第 3 步的验证深度（`find_spec` 而非真实导入），不改变
+        "这是一个依赖"这个事实。哪天有人把它读成"豁免清单"，顺手从
+        requirements*.txt 里也删掉，就会出现"自检说没问题、装完却没有这个包" ——
+        正是本文件开头记的那类病（清单描述了一个不存在的现实）。
+        """
+        heavy = {NAME_ALIASES.get(_normalise(m), _normalise(m)) for m in _extract_heavy_modules()}
+        declared = _requirements_packages() | _optional_mode_packages()
+        declared = {NAME_ALIASES.get(n, n) for n in declared}
+
+        undeclared = sorted(heavy - declared)
+        assert not undeclared, (
+            f"HEAVY_MODULES 里这些模块没有被任何 requirements 清单声明：{undeclared}\n"
+            "它们只是「不做真实导入」，不是「不用装」。"
+        )
 
     def test_npm_probe_does_not_use_shell_true(self):
         """`shell=True` 在 POSIX 上会让 npm 检查静默假通过（打印用法并记 pass）"""
