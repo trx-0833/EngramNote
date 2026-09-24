@@ -78,5 +78,5 @@ psutil~=5.9.0
 alembic~=1.19.2
 
 # ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
-openai~=2.54.0
+openai~=3.16.2
 soundfile~=0.12.0
