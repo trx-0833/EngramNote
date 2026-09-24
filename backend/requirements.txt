@@ -38,7 +38,7 @@ aiosqlite~=0.20.0
 pydantic~=2.13.5
 pydantic-settings~=2.15.0
 email-validator~=2.0.0
-python-multipart~=0.0.9
+python-multipart~=0.0.32
 
 # ---- 认证 ----
 # ⚠️ python-jose 3.3.x 命中 CVE-2024-33663 / CVE-2024-33664（见 docs/overhaul-plan.md
