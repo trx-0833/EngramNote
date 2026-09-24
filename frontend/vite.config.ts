@@ -83,24 +83,44 @@ export default defineConfig({
     //   - graph    ：react-force-graph-2d + d3 生态（仅知识图谱页需要）
     //   - markdown ：KaTeX + highlight.js（仅含公式/代码的页面需要）
     //   - react    ：react/react-dom/router（长期不变，最易命中缓存）
-    rollupOptions: {
+    //
+    // ## 为什么是 `rolldownOptions.codeSplitting` 而不是 `rollupOptions.manualChunks`
+    //
+    // Vite 8 的打包器已从 Rollup 换成 **Rolldown**。官方迁移指南对旧写法有一句
+    // 精确表述：*"The object form `output.manualChunks` option is not supported
+    // anymore. The function form `output.manualChunks` is deprecated."*
+    // 也就是**函数形式仍能用**（本配置原来用的正是函数形式，升级后实测
+    // 三个分包一个没少），但它已经进了废弃通道。
+    //
+    // 这里按 Rolldown 自己的推荐迁到 `codeSplitting.groups`。两点必须写清楚，
+    // 否则后人会照抄错：
+    //   1. **不能再写成 `rollupOptions`** —— Rolldown 不认这个键，
+    //      写错了它不会报错，而是**静默忽略你的分包**（那才是真事故）。
+    //   2. `test` 只接受**单个** `string | RegExp`（不是数组），所以原来那种
+    //      "三个条件或起来"的判断要写成函数形式；`test` 收到的是模块 id。
+    rolldownOptions: {
       output: {
-        manualChunks(id: string) {
-          if (!id.includes('node_modules')) return undefined
-          if (id.includes('react-force-graph') || id.includes('d3-') || id.includes('three')) {
-            return 'graph'
-          }
-          if (id.includes('katex') || id.includes('highlight.js') || id.includes('marked')) {
-            return 'markdown'
-          }
-          if (
-            id.includes('/react/') ||
-            id.includes('/react-dom/') ||
-            id.includes('react-router')
-          ) {
-            return 'react'
-          }
-          return undefined
+        codeSplitting: {
+          groups: [
+            {
+              name: 'graph',
+              // 三个或条件 → 函数形式（`test` 不接受 RegExp[]）
+              test: (id: string) =>
+                id.includes('react-force-graph') || id.includes('d3-') || id.includes('three'),
+            },
+            {
+              name: 'markdown',
+              test: (id: string) =>
+                id.includes('katex') || id.includes('highlight.js') || id.includes('marked'),
+            },
+            {
+              name: 'react',
+              test: (id: string) =>
+                id.includes('/react/') ||
+                id.includes('/react-dom/') ||
+                id.includes('react-router'),
+            },
+          ],
         },
       },
     },
