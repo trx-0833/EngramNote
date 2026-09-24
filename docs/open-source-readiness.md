@@ -28,21 +28,24 @@
 > 记账口径：**已完成**必须带可核对的证据（提交号 / 实测命令 / 机器结论）；
 > 未做的写在这里，不写"计划中"。
 >
-> **取数时点：2026-09-24**（本地工作区实测）｜ 远端 `main` HEAD = **`154060c`**
-> （`git rev-parse origin/main`）｜ 下表所列提交**均已推送**。
+> **取数时点：2026-09-24（第二轮）**｜ 远端 `main` HEAD = **`0a22405`**
+> （`git rev-parse origin/main`）｜ 第一轮那 14 个提交**均已推送**。
 > §2 / §3 里写的是**核查当日（2026-09-23）**的判断；哪些已经修完、证据是什么，
 > **以本节为准**（复核时已就地给相关小节加上"已修"标注）。
 >
 > 📌 并行会话提示：前端视觉重构由**另一个会话**在推进，它已在远端留下
-> `fbad410`、`6ab35f5`、`154060c`，本地还有尚未推送的提交（写作期间从 `cbccaf2` 涨到 `e377498`）。
-> 这些**不属于**本次开源化记账，只是会把 HEAD 往前推 —— 引用 HEAD 时请现查。
+> `fbad410`、`6ab35f5`、`154060c`，并贡献了 `0a22405` 之前那 44 个提交中的大部分
+> （`0a22405` 本身是本会话的依赖合并）。这些**不属于**本次开源化记账，
+> 只是会把 HEAD 往前推 —— 引用 HEAD 时请现查。
+> 另：该会话仍在改 `frontend/src/**`，工作区里可见它未提交的 `frontend/docs/e2e.md`
+> 与一批 `frontend/_*.mjs` 探针脚本（**不要**把它们卷进本会话的提交）。
 >
 > ⚠️ 本文是活文档，仓库里有多处按 `docs/open-source-readiness.md:<行号>` 引用它。
 > 2026-09-24 这次记账让全文从 **789 行涨到 844 行**，那些**行号引用会整体下移**；
 > 本次能改的已改成"小节号 + 行号"，改不到的（不在写权限内）逐条登记在
 > [`docs/journal/README.md`](journal/README.md) 的"行号引用漂移登记"一节。**引用本文请优先写小节号。**
 
-### 已完成并推送（`a8a10be` → `154060c`，14 个提交）
+### 已完成并推送（`a8a10be` → `0a22405`，第一轮 14 个 + 依赖合并 3 个）
 
 | 批次 | 内容 | 证据 |
 |---|---|---|
@@ -60,7 +63,8 @@
 | 6 | **社区文件**：`CONTRIBUTING` / `SECURITY` / `CHANGELOG` / `UPGRADING` / `CODE_OF_CONDUCT` / `CODEOWNERS`（仓库根）/ `.editorconfig` / issue 与 PR 模板 / `dependabot.yml`；**22 份文档状态横幅**；`docs/README.md` 文档地图；`docs/journal/`；容器化补缺（`backend/.dockerignore` 等） | `3c631f9`；2026-09-24 实测：上述文件全部在 `git ls-files` 里、`backend/.dockerignore` 存在；带 `状态：` 横幅的文档 = **22 份**（`docs/` 17 + `frontend/docs/` 5）。⚠️ 例外：`sqlite-single-writer.md` 仍**无**横幅（本轮禁改），`docs/README.md` §4 有登记 |
 | 7.2 | **依赖漂移当次结论入档** | `c741630`；`docs/security-scan.md:573-588`："**39 条声明里只有 2 条与真实环境相符**"（超出声明范围 18 条、传递依赖 49 条） |
 | 7.3 | **版本号单一来源** | `c741630`；`backend/app/version.py:26` `__version__ = "0.1.0"`，`backend/app/main.py:43,635` 从它读取（不再硬编码），另有守卫测试；`frontend/package.json` 同版本 |
-| — | **首个 tag** | `v0.1.0`：annotated（`git cat-file -t v0.1.0` → `tag`），指向 `154060c`，release note 即该 tag 的注解 |
+| — | **首个 tag** | `v0.1.0`：annotated（`git cat-file -t v0.1.0` → `tag`），指向 `154060c`，release note 即该 tag 的注解。⚠️ **GitHub Releases 页面上的 release 对象尚未创建**（tag ≠ release，见下方"尚未做"）|
+| — | **合并 Dependabot 的 13 个绿 PR**（`git merge` 后本地提交，未走网页 Merge 按钮）| `b1526a6`（pip 声明对齐 6 条）+ `9fa6605`（Actions 版本 4 项）+ `0a22405`（npm 次/补丁 6 项）；证据：`0a22405` 的 **check-runs 20 条全部 `success`、非成功条目 0**（GitHub API 实测），开放 PR 数 **14 → 5** |
 
 **关键实测结论（与本文原判断不同，已更正）**：
 1. 基线**不是红的**：受限沙箱禁止写 `%TEMP%`，造成 100 error + 2 failed；
@@ -74,6 +78,50 @@
 4. 前端 `format:check` 是建议性的，于是 `src/` 里 162 个文件的风格漂移
    从未被发现；现已成为阻断门禁。
 
+### 第二轮（依赖收口 + 防复发）—— 本地 8 个提交，截至本文更新时**尚未推送**
+
+> 触发原因：合并完 13 个绿 PR 之后，仓库里还剩 **5 个开放 PR**（`#10`、`#12`、`#13`、`#14`、`#15`），
+> 其中 `#12`/`#13`/`#14`/`#15` 是 Dependabot "提议已在跑的版本、或跨大版本单独开 PR" 的产物。
+> 这一轮把它们一次收口，并把"会导致复发的机制"钉住。
+
+| 批次 | 内容 | 证据（提交号 + 实跑命令 / 机器结论）|
+|---|---|---|
+| 8.0 | **先建公式渲染护栏**（在升 `marked` 之前）| `a1651f9`；新 `frontend/src/utils/markdown.test.ts` **14 条**。起因：实测 `src/utils/` 下**没有任何用例**碰过 `$$...$$` / `$...$`，而那是 `marked` 大版本最容易**静默**碰坏的地方 |
+| 8.1 | `typescript-eslint` 8.67.0 → **8.70.0**（PR `#15`）| `f60e398`；锁文件里**只有** `@typescript-eslint/*` 一族变化；`lint` / `format:check` / `vitest` **39 文件 438 条** / `build` 全过 |
+| 8.2 | `marked` 14.1.4 → **18.0.13**（PR `#12`，跨 4 个大版本）| `5009c63`；**护栏 14/14 全过**（回退判据未触发）；`e2e` **10 passed**；锁文件只有 `marked` 一行变化 |
+| 8.3 | `react-router-dom` 6.30.4 → **7.18.4**（PR `#13`，唯一进生产包的一个）| `ba9e11b`；先核实 35 处引用全为 v6 风格、`useHistory` / `<Switch` / `<Redirect` **0 命中**；`e2e` **10 passed** |
+| 9 | **`vite` 5.4.21 → 8.3.0 + `@vitejs/plugin-react` → 6.1.1 + `vitest` → 4.1.11**（PR `#14`，三者必须联动）| `e3c68d1`；`esbuild` / `rollup` 已从依赖树消失、`rolldown 1.2.10` 就位；**三个手工分包仍在**（`react` 173.65 / `graph` 193.04 / `markdown` 400.00 kB）；`vitest` **39 文件 438 条**、`e2e` **10 passed**、**`a11y` 26 passed**（上一轮列为"本地未跑"，本轮补上）|
+| 9 | 分包配置迁到 Rolldown 的 `codeSplitting` | 同上提交；`vite.config.ts` 由 `rollupOptions.output.manualChunks`（Rolldown 下**已弃用**）改为 `rolldownOptions.output.codeSplitting.groups`；**迁移等价性证据：产物文件名逐字节相同**（三个分包哈希未变）|
+| 10.1 | **锁文件取源守卫**（防镜像污染复发）| `79c32d8`；`frontend/scripts/check-lockfile-registry.mjs`（实测 **347 条全部 `registry.npmjs.org`**）+ `backend/tests/test_lockfile_registry.py` **6 条**。**新建时先验证它会红**：缺 `frontend/.npmrc` 时为 5 过 1 红 |
+| 10.2 | **项目级 `frontend/.npmrc` 把 registry 钉在官方源** | 同上；起因是本机全局 `.npmrc` 实际指向 `registry.npmmirror.com`，而 npm 缓存索引里镜像 **1014** 条 vs 官方 **77** 条 |
+| 10.3 | **清 Dependabot 分支的 workflow**（默认 dry-run）| `302740b`；`.github/workflows/cleanup-dependabot-branches.yml` + `frontend/scripts/cleanup-dependabot-branches.mjs`（代码内两道锁：只删 `dependabot/` 前缀、只删**无开放 PR** 的）|
+| 10.4 | **`dependabot.yml` 调参 + 纠正一处误判** | 同上；`open-pull-requests-limit` 5 → **10**（三份 ecosystem 各自计），对 `vite` / `@vitejs/plugin-react` / `vitest` / `jsdom` **忽略 major**（这四个必须联动升级）；`github-actions` 组扩到含 major |
+| 11.1 | **修 `CHANGELOG.md` 里两句失实陈述** | `b55112b`；原写"本仓库没有 git tag、没有 release"，而 `v0.1.0` annotated tag 已推到远端 ⇒ 改为"有 tag、Releases 页面尚未创建" |
+
+**第二轮的关键实测结论（含两处对既有判断的更正）**：
+
+1. ⚠️ **更正**：`open-pull-requests-limit` **只管"同时开着的 PR 数"，不关分支**。
+   此前把"15 个分支"归因为"限额太高"是错的 —— 真实机制是"PR 被合并/关闭后名额腾出，
+   **分支却留在仓库里**，只有人或脚本显式删除才会消失"。
+   而仓库设置里的 `delete_branch_on_merge` 对本项目**天然无效**：
+   本项目是本地 merge 再 push，**从不点网页的 Merge 按钮**。
+2. ⚠️ **更正**：`manualChunks` 在 Rolldown 下**不是"已移除"** ——
+   官方迁移指南原文是"对象形式不再支持，**函数形式已弃用**"。
+   实测：升到 vite 8 后**不改配置，三个分包一个没少**（先验证了这条，才决定迁移）。
+3. **npm 自身缺陷**（与仓库无关，但会挡住升级）：npm **10.9.8** 解析 `vitest@4` 的
+   **可选 peer 环**（`vitest` ↔ `@vitest/browser-*`）时崩溃
+   （`Cannot read properties of null (reading 'edgesOut')`，`#loadPeerSet` 无限递归；
+   `--package-lock-only` 同样复现）。绕法：换 **npm 11.20.0** 跑同一条命令。
+   `lockfileVersion` 仍是 3，CI 用 `npm ci` 只读锁文件，故 runner 上不受影响。
+4. **审计告警 11 → 2**（`npm audit --registry=https://registry.npmjs.org`）：
+   消掉 `vite`、`vitest`（**critical**）、`react-router` / `react-router-dom`
+   （open redirect，**唯一进生产包的那条**）、`esbuild`、`postcss`、`nanoid`。
+   这是"版本对齐"的**附带结果**，不是针对性的漏洞修复；依赖扫描**仍然不阻断 CI**。
+5. **浏览器下界**：Vite 8 默认 `build.target = baseline-widely-available`
+   （源码实测展开为 `chrome111 / edge111 / firefox114 / safari16.4 / ios16.4`），
+   而产物语法扫描显示实际只用到 Chrome 85 级别的语法；`tsconfig.target` 与
+   `engines.node` **均未改动**。
+
 ### 尚未做（本轮仍未完成，均带 2026-09-24 实测依据）
 
 | 优先级 | 事项 | 为什么还没做 / 实测依据 |
@@ -85,7 +133,8 @@
 | 中 | **锁文件（处置依赖漂移）** | 7.2 只把结论入档，**没有改变依赖形态**：后端仍无 lock 文件，`requirements.txt` 仍用 `~=`（`docs/security-scan.md:573-588`） |
 | 中 | **直传补 `check_archive`**（§2.21 B-2） | 2026-09-24 复核：`check_archive` 只在 `/upload/prepare` 路径上（`upload.py:648` 起，调用点 `:729`）；直传 `POST /api/upload`（`:552-644`）做了魔术字节与 `.md` 嗅探，**仍未调用**压缩炸弹检查 |
 | 中 | **分页统一**（§2.21 B-11） | 三套约定仍在：`understanding.py:321/362`（`999 / le=9999`）、`knowledge.py:198`（`20 / le=100`）、`notes/list_detail.py:67`（`20 / le=1000`）、`graph.py:93`（`limit` 无上界校验） |
-| 中 | **GitHub 仓库设置**（topics / description / Discussions / 首个 release 的页面动作） | 只能在网页上点，本地改不了（§4.10） |
+| 中 | **GitHub 仓库设置**（topics / description / Discussions / 首个 release 的页面动作） | 只能在网页上点，本地改不了（§4.10）。2026-09-24 第二轮复核：**topics 仍为空**（首页 `topic-tag` 0 命中）；`/releases` 页面实测文案 **"There aren't any releases here"**，而 tag 已存在 ⇒ **tag ≠ release**，页面上的 release 对象确实还没建 |
+| 低 | **剩下 5 个 `dependabot/*` 分支还没删** | 2026-09-24 第二轮实测：分支总数 6（`main` + 5 个 `dependabot/*`）。清理机制已就绪（`302740b` 的 workflow，默认 dry-run），但**首次必须先手工跑一次 dry-run 看名单**再授权删除 |
 | 低 | **`ruff format` 全量重排**（**211 / 251** 个文件：app 132、tests 79、scripts 40） | **有意推迟**：理由写在 `ci.yml:131-147` —— 纯格式提交要单独开一轮，否则审阅者分不清"真修复"与"排版"；本轮只堵住新增漂移（prettier 侧已升级为阻断） |
 
 > ⚠️ 推送时发现本机两个环境事实（与仓库无关，但会挡住你以后推送）：
