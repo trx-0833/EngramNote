@@ -44,7 +44,7 @@ python-multipart~=0.0.9
 # ⚠️ python-jose 3.3.x 命中 CVE-2024-33663 / CVE-2024-33664（见 docs/overhaul-plan.md
 #    的 6.7 记录）。升级到 >=3.4 或迁 PyJWT 是独立批次，需要单独验证。
 python-jose[cryptography]~=3.3.0
-bcrypt~=4.0.0
+bcrypt~=5.0.0
 
 # ---- 异步任务 ----
 celery~=5.4.0
