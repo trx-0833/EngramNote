@@ -4,8 +4,11 @@
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 > **诚实声明（请先读这三行）**
-> 1. 本仓库**没有 git tag、没有 release**，`0.1.0` 是 `pyproject.toml:41` /
->    `frontend/package.json:4` 里声明的版本，**不是**一个已发布的制品。
+> 1. `v0.1.0` 已有 **annotated tag**（`git cat-file -t v0.1.0` → `tag`，指向 `154060c`），
+>    **但 GitHub Releases 页面尚未创建** —— 仓库里的 tag 与页面上的 release 对象是两件事。
+>    版本号 `0.1.0` 写在 `pyproject.toml:41` 与 `frontend/package.json:4` 里，
+>    两者是否一致由守卫测试 `backend/tests/test_version_single_source.py` 守着（这是**机器**保证，
+>    不是靠人记得改）。
 > 2. 下面 `0.1.0` 一节是**首个公开版本的能力清单**，不是"逐次提交的回溯"。
 >    完整过程台账（含每条改动的实测证据与未做事项）在 `docs/overhaul-plan.md`，
 >    未做事项总表在该文件附录 BN（`:11132`）。
@@ -38,6 +41,35 @@
 - `backend/Dockerfile`：删除 `mkdir -p /app/data/chroma`（Chroma 已废弃，
   见 `backend/requirements.txt:60` 与 `backend/app/models/chunk.py:5-26`），
   并修正与实际不符的注释；**未**新增任何"已验证"承诺。
+- **前端依赖树升级（2026-09-24）**：合并 Dependabot 的四个大版本/副版本 PR，
+  让"声明的版本"与"实际在跑的版本"重新对齐（此前 6 条 pip 声明已对齐，这次是前端侧）：
+
+  | 依赖 | 从 | 到 | 说明 |
+  |---|---|---|---|
+  | `vite` | 5.4.21 | **8.3.0** | 打包器由 **Rollup 换成 Rolldown**；`esbuild` / `rollup` 已不在依赖树里 |
+  | `@vitejs/plugin-react` | 4.7.0 | **6.1.1** | 必须与 vite 8 联动（4.7.0 的 peer 不含 `^8`）|
+  | `vitest` | 2.1.9 | **4.1.11** | 同上，2.x 与 vite 8 配置契约不兼容 |
+  | `typescript-eslint` | 8.67.0 | **8.70.0** | 副版本 |
+  | `marked` | 14.1.4 | **18.0.13** | 跨 4 个大版本，**升级前先补了 14 条公式渲染护栏** |
+  | `react-router-dom` | 6.30.4 | **7.18.4** | 唯一进生产包的一个 |
+
+  **分包配置随打包器迁移**：`frontend/vite.config.ts` 从
+  `build.rollupOptions.output.manualChunks`（Rolldown 下**已弃用**，函数形式仍可用）
+  迁到 `build.rolldownOptions.output.codeSplitting.groups`。
+  迁移后三个手工分包（`react` / `graph` / `markdown`）的产物**文件名逐字节相同**，
+  即 chunk 边界未变。
+
+  **浏览器下界变化（如实记录）**：Vite 8 的默认 `build.target` 是
+  `baseline-widely-available`，展开为 `chrome111 / edge111 / firefox114 / safari16.4 / ios16.4`
+  （源码实测）。产物语法扫描显示实际只用到 Chrome 85 级别的语法。
+  `tsconfig.json` 的 `target` 与 `package.json` 的 `engines.node` **均未改动**
+  （vite 8 要 Node `^20.19 || >=22.12`，本项目 `.nvmrc` 是 `22.22.2`，本来就在范围内）。
+
+  **一条 npm 自身缺陷的记录**：本项目环境里的 npm 10.9.8（Node 22.22.3 自带）在解析
+  `vitest@4` 的**可选 peer 环**（`vitest` ↔ `@vitest/browser-*`）时崩溃
+  （`Cannot read properties of null (reading 'edgesOut')`，`#loadPeerSet` 无限递归）。
+  绕法是换 **npm 11** 执行同一条安装命令；`lockfileVersion` 仍是 3，
+  CI 用 `npm ci` 只读锁文件、不重新解析，故 runner 上不受影响。
 
 ### Security
 
@@ -46,6 +78,15 @@
   升级为阻断的前置条件见 `docs/security-scan.md:520-532`；
   已知未处理项（`python-jose` 的 CVE、镜像未加非 root `USER` / `HEALTHCHECK`、
   访问令牌无状态、限流无锁定）逐条列在 `SECURITY.md`。
+- **一条如实记录的副作用**（不是"我们修了漏洞"）：上面前端依赖升级之后，
+  `npm audit --registry=https://registry.npmjs.org` 的告警数从 **11 条降到 2 条**。
+  消掉的是随版本一起更新的 `vite`（optimized deps `.map` 路径穿越）、
+  `vitest`（**critical**：UI server 任意文件读取与执行）、`react-router` /
+  `react-router-dom`（open redirect，**本轮唯一进生产包的那条**），
+  以及 `esbuild` / `postcss` / `nanoid`。
+  这是"版本对齐"的附带结果，**不是**一次针对性的漏洞修复；
+  仍余 2 条工具链传递依赖告警（`browserslist`、`baseline-browser-mapping`）。
+  本节不改口径：扫描仍然不阻断 CI。
 
 ---
 
@@ -167,8 +208,10 @@
 ## 版本政策（当前只有一条）
 
 - 版本号写在 `pyproject.toml:41`（后端包）与 `frontend/package.json:4`（前端包）里，
-  目前两者都是 `0.1.0`；**本仓库没有 git tag / release**，
-  因此本文件与代码版本的一致性靠人工维护——这一条是已知缺口，不是机制。
+  目前两者都是 `0.1.0`；`v0.1.0` **有 annotated tag**（指向 `154060c`），
+  但 **GitHub Releases 页面尚未创建**（tag ≠ release）。
+  两处版本号的一致性由守卫测试保证（`backend/tests/test_version_single_source.py`）；
+  **"页面上的 release 与 tag 同步"仍未机制化** —— 这一条是已知缺口，不是机制。
 - 破坏性变更会写进本文件并在 `UPGRADING.md` 里说明升级路径。
 
 [Unreleased]: https://github.com/trx-0833/EngramNote/commits/main
