@@ -16,6 +16,7 @@ import {
   getLinkWidth,
   hasDirection,
 } from './types';
+import { isNodeInViewport as isNodeInViewportPure } from './viewportCulling';
 
 interface GraphCanvasProps {
   graphRef: MutableRefObject<GraphForceRef | undefined>;
@@ -80,13 +81,44 @@ export default function GraphCanvas({
    * 也就是说：**离屏节点照样每帧走完整绘制**。放大到只剩几十个节点在屏幕上时，
    * 另外一千多个仍在白画。
    *
-   * 判据用的是页面**已经在维护**的 `viewportRef`（minimap 也读它，
-   * 由 `onZoom` 写入）：d3-zoom 的变换是 `screen = world * k + (x, y)`。
+   * ## ⚠️ 第一版写错了，错在哪（用户可见的回归）
+   *
+   * 第一版拿 `viewportRef.current` 当 d3-zoom 的**平移量**，按
+   * `screen = world * k + (x, y)` 算屏幕坐标。但 `viewportRef` 是 `onZoom` 写的，
+   * 而 `onZoom` 收到的是（`force-graph.mjs:1506`）：
+   *
+   *     state.onZoom({ ...zoomTransform(canvas), ...this.centerAt() })
+   *
+   * `centerAt()` 的 `x` / `y` 是**图空间里的视口中心**，展开在后面会把
+   * 变换自己的 `t.x` / `t.y` **覆盖掉**。于是 `x` / `y` 根本不是平移量，
+   * 屏幕坐标算出来是错的 —— 表现为"有链接的节点也被藏起来了"：
+   * 剔除边界错了，屏幕上该看见的节点被判成界外。
+   *
+   * 雪上加霜的是 `onZoom` **只在缩放/平移时**触发，首次进入页面时
+   * `viewportRef` 停在 `{ k: 1, x: 0, y: 0 }` 这个初值上，与实际视口无关。
+   *
+   * ## 现在怎么拿真值
+   *
+   * 不再自己推算变换，改用库自己的换算：`onRenderFramePre` 在**每帧绘制之前**
+   * 触发一次（`force-graph.mjs:1661`），在那儿用 `graph2ScreenCoords(0, 0)`
+   * 读出真实的平移量（`x*0 + t.x` 恒等于 `t.x`），连同该帧的 `globalScale` 一起
+   * 写回 `viewportRef`。
+   *
+   * 这同时修好了 **minimap 的一个既有 bug**：`renderMinimap` 里
+   * `vx = -vp.x / vp.k`、视口框宽 `W / vp.k` —— 那正是"`vp.x` 是平移量"的算法，
+   * 而它一直拿到的是图空间中心，所以缩略图上的视口框位置本来就是错的。
+   *
+   * ## 两道保险
+   *
+   * 1. `transformSyncedRef`：**在拿到真实变换之前一律不剔除**。
+   *    上一版的坑正是"用了一个从未被校正过的初值"。
+   * 2. 尺寸为 0（jsdom / 尚未布局）时一律放行 —— 退化成改动前的行为，而不是崩掉。
    *
    * 尺寸必须**缓存**：`clientWidth` 是强制布局读，每帧每节点读一次就是
    * 1181 次布局查询。所以用 ResizeObserver 维护一份，而不是在判据里现读。
    */
   const viewportSizeRef = useRef({ width: 0, height: 0 });
+  const transformSyncedRef = useRef(false);
   useEffect(() => {
     const element = graphCanvasRef.current;
     if (!element) return;
@@ -108,30 +140,42 @@ export default function GraphCanvas({
   }, [graphCanvasRef]);
 
   /**
+   * 每帧把**真实**的 d3-zoom 变换写进 `viewportRef`（在节点绘制之前）。
+   *
+   * 见上面那段：`onZoom` 给的 `x` / `y` 是图空间中心，不是平移量，不能用来算屏幕坐标。
+   * 这里只用两次库调用/帧（不是每节点），成本可以忽略。
+   */
+  const syncViewportTransform = useCallback(
+    (_ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const forceGraph = graphRef.current;
+      if (!forceGraph) return;
+      // `graph2ScreenCoords(0, 0)` = `{ x: t.x, y: t.y }`，即真实的平移量
+      const origin = forceGraph.graph2ScreenCoords(0, 0);
+      viewportRef.current = { k: globalScale, x: origin.x, y: origin.y };
+      transformSyncedRef.current = true;
+    },
+    [graphRef, viewportRef],
+  );
+
+  /**
    * 节点是否可能出现在屏幕上。
+   *
+   * 判据本体是纯函数 `isNodeInViewportPure`（`./viewportCulling`）—— 抽出去是为了
+   * 能用单测逐点压住坐标换算。这里只负责两道**前置保险**：
+   *
+   * 1. `transformSyncedRef`：**拿到真实变换之前一律不剔除**。
+   *    上一版的坑正是"用了一个从未被校正过的初值"（详见 `viewportCulling.ts` 文件头）。
+   * 2. 尺寸为 0（jsdom / 尚未布局）时一律放行 —— 退化成改动前的行为，而不是崩掉。
    *
    * 只在大图时挂上去（`lowDetail`）：小图本来就全在屏幕内，挂上去只会多一层判据，
    * 而既有的一切小图场景（a11y 桩、全链路用例、视觉基线）需要的是**行为逐字不变**。
-   *
-   * 余量给得宽（节点半径 + 24 + 40 像素，且随缩放放大）：剔除错一个边缘节点的代价
-   * 是"它忽然不见了"，比多画几个节点难看得多。坐标还没算出来的节点一律放行，
-   * 交给绘制侧那条被测试压住的守卫处理。
    */
   const isNodeInViewport = useCallback(
     (node: ForceGraphNode) => {
-      if (node.x == null || node.y == null) return true;
-      const { width, height } = viewportSizeRef.current;
-      if (width === 0 || height === 0) return true;
-      const { k, x, y } = viewportRef.current;
-      const margin = (getNodeSize(node) + 24) * k + 40;
-      const screenX = node.x * k + x;
-      const screenY = node.y * k + y;
-      return (
-        screenX >= -margin &&
-        screenX <= width + margin &&
-        screenY >= -margin &&
-        screenY <= height + margin
-      );
+      if (!transformSyncedRef.current) return true;
+      const size = viewportSizeRef.current;
+      if (size.width === 0 || size.height === 0) return true;
+      return isNodeInViewportPure(node, viewportRef.current, size);
     },
     [viewportRef],
   );
@@ -169,6 +213,9 @@ export default function GraphCanvas({
         ref={graphRef}
         graphData={forceGraphData}
         nodeCanvasObject={nodeCanvasObject}
+        /* 每帧绘制之前同步真实视口变换（见 `syncViewportTransform` 的说明）：
+           视口剔除的判据依赖它，而 `onZoom` 给的值派不上用场 */
+        onRenderFramePre={syncViewportTransform}
         nodePointerAreaPaint={(
           node: ForceGraphNode,
           color: string,
@@ -194,8 +241,19 @@ export default function GraphCanvas({
         onLinkClick={onLinkClick}
         onLinkHover={onLinkHover}
         onBackgroundClick={onBackgroundClick}
-        onZoom={({ k, x, y }: { k: number; x: number; y: number }) => {
-          viewportRef.current = { k, x, y };
+        onZoom={() => {
+          /*
+           * ⚠️ 这里**不再**写 `viewportRef`。
+           *
+           * 这个回调收到的 `x` / `y` 不是 d3-zoom 的平移量，而是**图空间里的视口中心**
+           * （`force-graph.mjs:1506` 用 `{ ...transform, ...centerAt() }` 组装，
+           * `centerAt()` 展开在后面会把 `t.x` / `t.y` 覆盖掉）。第一版拿它当平移量
+           * 去算屏幕坐标做视口剔除，结果把屏幕上的节点判成界外藏了起来。
+           * 真值改由 `onRenderFramePre` 每帧写入（见 `syncViewportTransform`），
+           * 早于本回调、也早于绘制。
+           *
+           * 这里只留 minimap 的节流重绘：缩放期间最多 10 次/秒。
+           */
           if (minimapTimerRef.current == null) {
             minimapTimerRef.current = window.setTimeout(() => {
               drawMinimap();

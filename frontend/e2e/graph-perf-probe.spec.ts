@@ -44,7 +44,7 @@
  * 不进任何阻断门禁（与 `shot-probe` 同一个理由：它永远不会"失败"，
  * 混进 `npm run e2e` 只会让那一层变慢变糊）。
  */
-import { test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { installA11yStubs, loginAs } from './a11y-fixtures';
 import { REAL_SHAPE, buildLargeGraph } from './graph-perf-fixtures';
@@ -263,6 +263,67 @@ function formatStats(stats: FrameStats): string {
   );
 }
 
+/**
+ * 记录**每个被真正画出来的节点**的屏幕坐标。
+ *
+ * 做法：`drawNode.ts` 里"玻璃反射高光点"是每个被绘制的节点**恰好一次**的
+ * `arc` + `fill`，填充色固定为 `rgba(255, 255, 255, 0.85)` —— 用它当指纹。
+ * 屏幕坐标由 `ctx.getTransform()` 现场换算（`force-graph.mjs:1501-1503` 把
+ * `translate(t.x,t.y); scale(t.k,t.k)` 施加在上下文上）。
+ *
+ * 为什么需要它：帧率、覆盖率都是**间接**指标。视口剔除一旦算错变换，
+ * 帧率会**变好**、画布会**变空**，而账面全是绿的 —— 这一条直接问
+ * "画出来的东西到底落在屏幕哪里"，是唯一能证伪它的判据。
+ */
+async function installNodeDotRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const store = window as unknown as { __nodeDots: Array<[number, number]> };
+    store.__nodeDots = [];
+    const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, unknown>;
+    let lastArcScreen: { x: number; y: number } | null = null;
+
+    const originalArc = proto.arc as (...args: unknown[]) => unknown;
+    proto.arc = function patchedArc(
+      this: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      r: number,
+      ...rest: unknown[]
+    ) {
+      const t = this.getTransform();
+      lastArcScreen = { x: t.a * x + t.c * y + t.e, y: t.b * x + t.d * y + t.f };
+      return originalArc.call(this, x, y, r, ...rest);
+    };
+
+    const originalFill = proto.fill as (...args: unknown[]) => unknown;
+    proto.fill = function patchedFill(this: CanvasRenderingContext2D, ...args: unknown[]) {
+      if (this.fillStyle === 'rgba(255, 255, 255, 0.85)' && lastArcScreen) {
+        store.__nodeDots.push([lastArcScreen.x, lastArcScreen.y]);
+      }
+      return originalFill.apply(this, args);
+    };
+  });
+}
+
+/** 强制重绘一次（画布空闲时不会调用任何绘制回调，记录不到东西） */
+async function forceOneRedraw(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaY: 120,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await page.waitForTimeout(400);
+}
+
 test.describe('图谱规模性能探针', () => {
   test('① 空闲窗口：画布还在不在重绘（0 次/秒 = 已空闲）', async ({ page }) => {
     await installCanvasCounters(page);
@@ -330,4 +391,132 @@ test.describe('图谱规模性能探针', () => {
       console.log(`  ${formatStats(stats)}`);
     });
   }
+
+  /**
+   * 默认视角的**视觉快照 + 画布覆盖率**。
+   *
+   * 为什么要有它：帧率与 canvas 调用数都是**间接**指标，它们不能回答
+   * "有没有把该看见的东西藏起来"。视口剔除、按需绘制这类优化一旦算错边界，
+   * 帧率会**变好**而画面**变空** —— 数字全绿、用户一眼就看出来不对。
+   *
+   * 覆盖率（非透明像素占比）是把"藏了多少"变成一个可比的数字，
+   * 截图则是给人眼复核用的。两者一起看。
+   */
+  test('④ 默认视角：画布覆盖率 + 截图（防止"变快是因为画得少了"）', async ({ page }) => {
+    await openLargeGraph(page);
+
+    const coverage = await page.evaluate(() => {
+      const canvases = Array.from(document.querySelectorAll('canvas'));
+      const canvas = canvases.sort(
+        (a, b) => b.width * b.height - a.width * a.height,
+      )[0];
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return null;
+      const { width, height } = canvas;
+      const { data } = ctx.getImageData(0, 0, width, height);
+      let painted = 0;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 0) painted += 1;
+      }
+      return {
+        width,
+        height,
+        painted,
+        ratio: painted / (width * height),
+        canvasCount: canvases.length,
+      };
+    });
+
+    await page.screenshot({ path: 'shots-graph-perf/default-view.png' });
+
+    console.log('\n=== ④ 默认视角 ===');
+    console.log(`  规模        ${REAL_SHAPE.nodes} 节点 / ${REAL_SHAPE.edges} 边`);
+    if (coverage) {
+      console.log(`  画布        ${coverage.width} × ${coverage.height}（页面上共 ${coverage.canvasCount} 个 canvas）`);
+      console.log(
+        `  覆盖率      ${(coverage.ratio * 100).toFixed(2)}%（非透明像素 ${coverage.painted}）`,
+      );
+    } else {
+      console.log('  覆盖率      取不到（没有 canvas 或上下文）');
+    }
+    console.log('  截图        frontend/shots-graph-perf/default-view.png');
+  });
+
+  /**
+   * ★ 视口剔除的端到端判据（给那次真实回归立的守卫）。
+   *
+   * 回归现象：**有链接的节点被藏起来了**。
+   * 成因：剔除用的变换算错了 —— `onZoom` 回调给的 `x` / `y` 是**图空间里的视口中心**
+   * （`force-graph.mjs:1506` 的 `{ ...zoomTransform, ...centerAt() }`，后者覆盖前者），
+   * 而不是 `translate(t.x, t.y)` 里的平移量。真实初值是
+   * `{ k: 1, x: width/2, y: height/2 }`（`force-graph.mjs:999-1002` 的
+   * `translateBy((width-curWidth)/2/k, ...)`），而页面里的 `viewportRef` 停在
+   * `{ k: 1, x: 0, y: 0 }` —— 于是"可见区域"被算成图空间左上角那一块：
+   * **把左半边的节点判成界外藏了起来，同时把右半边的界外节点画了出来**。
+   * 实测（本判据）：越界节点 4397 个、最远 290 px。
+   *
+   * ## 判据的适用范围（别把它当成万能）
+   *
+   * 它断言的是：**大图（开了剔除）时，被绘制的节点应当全部落在画布 + 余量内**。
+   * 变换算错时，判据会"以为"在界内的节点其实在很远处，这条立刻红。
+   *
+   * 反方向（余量太小导致该画的没画）这条**抓不到** —— 那个由
+   * `src/components/graph/viewportCulling.test.ts` 的纯函数单测逐点压住。
+   * 两者是互补的：这里管"喂进去的变换是不是真的"，单测管"给定真变换后判得对不对"。
+   *
+   * 注意这条判据对"**完全没开剔除**"的版本也会红（那时每个节点都画，包括离屏的）。
+   * 那不是误报：它同时也在说"剔除没有生效"。
+   */
+  test('⑤ 被绘制的节点必须落在画布余量内（剔除用的变换算错会立刻红）', async ({ page }) => {
+    await installNodeDotRecorder(page);
+    await openLargeGraph(page);
+    await forceOneRedraw(page);
+
+    const analysis = await page.evaluate(() => {
+      const store = window as unknown as { __nodeDots: Array<[number, number]> };
+      const canvases = Array.from(document.querySelectorAll('canvas'));
+      const canvas = canvases.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      if (store.__nodeDots.length === 0) return { drawn: 0, width, height, worst: 0, outside: 0 };
+
+      // 绘制侧的余量上界：(半径 15 + 24) * k + 40；这里取 k 的宽松上界 4 → 196
+      const margin = 200;
+      let outside = 0;
+      let worst = 0;
+      for (const [x, y] of store.__nodeDots) {
+        const dx = Math.max(0, -x, x - width);
+        const dy = Math.max(0, -y, y - height);
+        const distance = Math.max(dx, dy);
+        if (distance > margin) outside += 1;
+        if (distance > worst) worst = distance;
+      }
+
+      return { drawn: store.__nodeDots.length, width, height, outside, worst, margin };
+    });
+
+    console.log('\n=== ⑤ 视口剔除正确性 ===');
+    expect(analysis, '取不到画布，判据无法成立').not.toBeNull();
+
+    if (analysis!.drawn === 0) {
+      throw new Error('一个节点都没记录到 —— 画布没重绘，判据无法成立（不是"通过"）');
+    }
+
+    console.log(`  画布          ${analysis!.width} × ${analysis!.height}`);
+    console.log(`  绘制记录      ${analysis!.drawn} 次（跨多帧，未去重）`);
+    console.log(
+      `  越界(>${analysis!.margin}px) ${analysis!.outside} 次 ｜ 最远越界 ${Math.round(analysis!.worst)} px`,
+    );
+
+    expect(
+      analysis!.outside,
+      `有 ${analysis!.outside} 次绘制落在画布外 ${Math.round(analysis!.worst)} px 处 —— ` +
+        '说明视口剔除用的变换是错的（它以为这些节点在界内）。' +
+        '变换必须取自 GraphCanvas 的 onRenderFramePre → graph2ScreenCoords(0,0)，' +
+        '不能用 onZoom 回调参数（那是图空间中心，不是平移量）。',
+    ).toBe(0);
+  });
 });

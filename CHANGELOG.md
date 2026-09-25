@@ -113,10 +113,14 @@
 
   | 指标（1181 节点 / 260 边） | 改前 | 改后 |
   |---|---|---|
-  | 每帧强制重绘 | **72.69 ms（13.8 fps）**，p95 122.10 ms | **34.90 ms（28.7 fps）**，p95 61.70 ms |
+  | 每帧强制重绘 | **78.13 ms（12.8 fps）**，p95 117.10 ms | **42.54 ms（23.5 fps）**，p95 81.20 ms |
   | 空闲时重绘（用户没动） | 57 次 / 3 s（≈19 次/秒） | **0** |
-  | 每帧 `createRadialGradient` | 1322 | 30 |
-  | 每帧 `measureText` / `roundRect` | 1097 / 1097 | 29 / 29 |
+  | 每帧 `createRadialGradient` | 1322 | 23 |
+  | 每帧 `measureText` / `roundRect` | 1097 / 1097 | 26 / 26 |
+
+  > 上表是**同一时间窗内的三方对比**（各 3 次取中位数，`f10f6a5` 与它的前一版
+  > 交替跑）。帧率对机器负载极敏感：同一份代码在不同时段量到 34.9 ~ 46.4 ms，
+  > 所以"改前/改后"必须同时段量才算数 —— 跨时段比出来的数字不算证据。
 
   改了什么（全部按**画布实际节点数**分级，阈值 `LARGE_GRAPH_NODES = 300`，
   既有的一切小图场景 —— a11y 桩 4 节点、全链路用例、视觉基线 —— 渲染逐字不变）：
@@ -129,8 +133,7 @@
     `similarity_score` **全部 > 0.6**（每条 2 个粒子 = 520 个持续动画的粒子），
     于是画布**永不空闲**。大图时关掉。
   - **视口剔除**（同上，`nodeVisibility`）：force-graph 默认不剔除，离屏节点
-    照样每帧走完整绘制。用页面已在维护的 `viewportRef` 做判据，尺寸由
-    ResizeObserver 缓存（不在判据里现读 `clientWidth`）。
+    照样每帧走完整绘制。判据抽成纯函数 `components/graph/viewportCulling.ts`。
   - **搜索命中改集合判定**（`knowledgegraph/useCanvasObjects.ts`）：
     原先每帧每节点线性扫搜索结果，是 O(节点数 × 结果数)。
   - **minimap 建 id 索引**（`knowledgegraph/renderMinimap.ts`）：原先每条边两次
@@ -140,7 +143,21 @@
     **零消费者**（`force-graph` / `react-force-graph-2d` / `kapsule` 等的 dist
     里搜不到），是旧版 API 的遗留。
 
-  守卫：新增 `src/pages/knowledgegraph/drawNode.test.ts`（10 条）与
+  > ⚠️ **同批次内修掉一个自己引入的回归：视口剔除算错了变换，把左半边的节点藏了。**
+  > 第一版拿 `onZoom` 回调参数当 d3-zoom 的平移量，而它是**图空间里的视口中心**
+  > （`force-graph.mjs:1506` 的 `{ ...zoomTransform, ...centerAt() }`，后者覆盖前者）；
+  > 加上真实初值是 `{ k: 1, x: width/2, y: height/2 }`（`force-graph.mjs:999-1002`）
+  > 而页面里停在 `{ k: 1, x: 0, y: 0 }` —— 可见区域被算成图空间左上角那一块：
+  > **该看见的藏起来、界外的反倒画出来**（实测越界 4397 次、最远 290 px）。
+  > 修法：真值改由 `onRenderFramePre` + `graph2ScreenCoords(0, 0)` 每帧写入，
+  > 并在拿到真实变换之前**一律不剔除**。顺带修好 **minimap 的视口框** ——
+  > 它按"`vp.x` 是平移量"计算（`vx = -vp.x / vp.k`），而拿到的一直是图空间中心，
+  > 所以框的位置本来就是错的。
+  > 守卫：`components/graph/viewportCulling.test.ts`（8 条，逐点压坐标换算）
+  > + 探针的第 ⑤ 条（端到端，跑在旧版本上会红：4397 次越界）。
+
+  守卫：新增 `src/pages/knowledgegraph/drawNode.test.ts`（10 条）、
+  `src/components/graph/viewportCulling.test.ts`（8 条）与
   `src/components/graph/types.test.ts` 的阈值用例，锁住"降级不能降过头"
   （枢纽/选中/悬停仍走昂贵路径）与"小图行为不变"。
 

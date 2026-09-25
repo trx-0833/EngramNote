@@ -41,7 +41,19 @@ export default function KnowledgeGraph() {
 
   /** Minimap canvas 引用 */
   const minimapRef = useRef<HTMLCanvasElement>(null);
-  /** 当前视口信息 */
+  /**
+   * 当前视口信息。
+   *
+   * ⚠️ 语义是 **d3-zoom 的真实变换** —— `screen = world * k + (x, y)` 里的 `x` / `y`
+   * 是**平移量**，由 `GraphCanvas` 的 `onRenderFramePre` **每帧校正**；
+   * 这里的初值只是"第一帧到达之前"的占位。
+   *
+   * **不要**拿 `ForceGraph2D` 的 `onZoom` 回调参数往这里写：那个回调给的 `x` / `y`
+   * 是**图空间里的视口中心**（`force-graph.mjs:1506` 的
+   * `{ ...zoomTransform(canvas), ...centerAt() }`，后者覆盖了前者），两者不是一回事。
+   * minimap 的视口框（`renderMinimap` 里 `vx = -vp.x / vp.k`）与画布的视口剔除
+   * 都按"平移量"解释这三个数，写错了就会画出/剔除错位置。
+   */
   const viewportRef = useRef({ k: 1, x: 0, y: 0 });
   /** minimap 重绘节流标记 */
   const minimapTimerRef = useRef<number | null>(null);
