@@ -175,6 +175,25 @@ const A11Y_SPEC = '**/a11y.spec.ts'
 const SHOT_PROBE_SPEC = '**/shot-probe.spec.ts'
 
 /**
+ * 图谱规模性能探针的匹配式。
+ *
+ * 它量的是"1181 节点 / 260 边时每帧要花多少"（见 `e2e/graph-perf-fixtures.ts`
+ * 文件头的真实统计），做两件事：采样帧间隔、数 canvas 调用。
+ *
+ * ## 为什么必须从 `chromium` 排除
+ *
+ * 顶层 `FUNCTIONAL_SPEC` 是"除 a11y 之外全部"的**取反匹配**，
+ * 新加的 spec 默认会落进阻断层。而这一层的"通过"没有意义
+ * （探针只打印数字，不判定快慢），却要多跑两次完整页面加载 + 8 秒冷却等待。
+ * 与 `SHOT_PROBE_SPEC` 同一个理由：它有自己的意图，该由 project 表达。
+ *
+ * ⚠️ 注意上面没有把这个匹配式的字面量原样写进注释里 ——
+ * 它的字符序列里含有"星号紧跟斜杠"，而那正是块注释的结束符。
+ * `support.ts` 的文件头与 `FULL_SPEC` 的说明都记着同一个坑。
+ */
+const GRAPH_PERF_SPEC = '**/graph-perf-probe.spec.ts'
+
+/**
  * 全链路层的匹配式（5.13 后半段）。
  *
  * 命名刻意用 `e2e-full.spec.ts` 而不是 `full.spec.ts`：功能层的匹配式
@@ -258,7 +277,12 @@ export default defineConfig({
        */
       name: 'chromium',
       testMatch: FUNCTIONAL_SPEC,
-      testIgnore: ['**/e2e-full.spec.ts', '**/e2e-full-probe.spec.ts', SHOT_PROBE_SPEC],
+      testIgnore: [
+        '**/e2e-full.spec.ts',
+        '**/e2e-full-probe.spec.ts',
+        SHOT_PROBE_SPEC,
+        GRAPH_PERF_SPEC,
+      ],
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -276,6 +300,30 @@ export default defineConfig({
       workers: 4,
       // 独立产物目录：避免与本层其它运行互相清空（同 e2e-full 的 outputDir 说明）
       outputDir: './test-results-shots',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      /**
+       * 图谱规模性能探针（`npm run perf:graph`）：采样帧间隔 + canvas 调用计数。
+       *
+       * ## 为什么 `workers: 1`
+       *
+       * 量的是**帧率**，而帧率取决于这台机器此刻有多忙。两条用例并发跑
+       * 会互相抢 CPU，量出来的数字既不代表"改前"也不代表"改后"。
+       * 与 `a11y` / `shots` 压并发是同一个道理，只是这里的理由更硬：
+       * 那两个是"别把开发服务器敲坏"，这个是"别把被测量本身搞脏"。
+       *
+       * ## 为什么超时给到 120 秒
+       *
+       * 两条用例各自要：登录 → 渲染 1181 个节点 → 等力导向冷却 8 秒 → 采样 3 秒。
+       * 默认 30 秒不够，而超时会以"测试失败"的形态出现 ——
+       * 看起来像探针坏了，其实只是没等完。
+       */
+      name: 'graph-perf',
+      testMatch: GRAPH_PERF_SPEC,
+      workers: 1,
+      timeout: 120_000,
+      outputDir: './test-results-graph-perf',
       use: { ...devices['Desktop Chrome'] },
     },
     {

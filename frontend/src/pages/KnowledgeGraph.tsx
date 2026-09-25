@@ -16,7 +16,7 @@ import Icon from '../components/Icon';
 import GraphCanvas from '../components/graph/GraphCanvas';
 import GraphSidebar from '../components/graph/GraphSidebar';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { type ForceGraphNode, type GraphForceRef } from '../components/graph/types';
+import { type ForceGraphNode, type GraphForceRef, isLargeGraph } from '../components/graph/types';
 import GraphToolbar from './knowledgegraph/GraphToolbar';
 import { buildForceGraphData } from './knowledgegraph/buildForceGraphData';
 import { renderMinimap } from './knowledgegraph/renderMinimap';
@@ -118,6 +118,16 @@ export default function KnowledgeGraph() {
     [graph.graphData, filterCardType],
   );
 
+  /**
+   * 大图降级开关（性能批次 1）。
+   *
+   * 判据是**画布实际渲染的节点数**（`forceGraphData`，已过滤回收站与类型过滤），
+   * 不是接口返回的原始数量 —— 两者在类型过滤下会差很多，而决定绘制成本的是前者。
+   * 阈值、实测依据与"为什么不按缩放级别分级"见 `components/graph/types.ts`
+   * 的 `LARGE_GRAPH_NODES`。
+   */
+  const lowDetail = isLargeGraph(forceGraphData.nodes.length);
+
   const { nodeCanvasObject, linkCanvasObject } = useCanvasObjects({
     selectedNode: interaction.selectedNode,
     hoverNode: interaction.hoverNode,
@@ -128,6 +138,7 @@ export default function KnowledgeGraph() {
     selectedLink: interaction.selectedLink,
     hoverLink: interaction.hoverLink,
     highlightedRelationType: interaction.highlightedRelationType,
+    lowDetail,
   });
 
   /**
@@ -248,6 +259,7 @@ export default function KnowledgeGraph() {
           onLinkHover={interaction.handleLinkHover}
           onBackgroundClick={interaction.handleBackgroundClick}
           onCanvasKeyDown={keyboardNav.handleCanvasKeyDown}
+          lowDetail={lowDetail}
         />
 
         {/* 键盘切换当前节点的**可读反馈**（批次 E4）。

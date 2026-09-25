@@ -142,7 +142,9 @@ export const RELATION_TYPE_OPTIONS = [
 export interface ForceGraphNode extends GraphNode {
   x?: number;
   y?: number;
-  __bckgDimensions?: [number, number];
+  // 曾经还有一个 `__bckgDimensions?: [number, number]`：性能批次 1 删掉了，
+  // 因为它在整个依赖树里**没有任何消费者**（`force-graph` / `react-force-graph-2d`
+  // 的 dist 里搜不到），而绘制侧每帧都要为它新建一个数组。详见 `drawNode.ts` 末尾。
 }
 
 /** 力导向图内部边类型 */
@@ -306,4 +308,38 @@ export function getGraphCanvasTokens(): GraphCanvasTokens {
 /** 清掉令牌缓存（**只给测试用**：用例要分别模拟"读得到"与"读不到"两种浏览器状态） */
 export function resetGraphCanvasTokensCache(): void {
   graphCanvasTokensCache = null;
+}
+
+/*
+ * ── 大图降级阈值（性能批次 1）──
+ *
+ * ## 为什么需要它
+ *
+ * 真实库是 **1181 节点 / 260 边**（`backend/data/db/engramnote.db` 只读统计），
+ * 而 `GET /api/graph` 没有上限。真 Chromium 实测（`npm run perf:graph`，
+ * 见 `e2e/graph-perf-probe.spec.ts`）在这个规模下：
+ *
+ *     每帧强制重绘  改前 72.69 ms（13.8 fps）→ 改后 35.71 ms（28.0 fps）
+ *     空闲重绘      改前 57 次/3s（≈19 次/秒）→ 改后 **0**
+ *
+ * 也就是说"卡"来自两处：**逐节点的高成本装饰**（阴影 / 玻璃渐变）与
+ * **粒子让画布永不空闲** —— 都不是节点数本身。
+ *
+ * ## 为什么按节点数、而不是按缩放级别
+ *
+ * 按 `globalScale` 分级会在缩放时**跳变**（同一个节点一会儿有阴影一会儿没有），
+ * 而按节点数是稳定的：同一张图无论怎么缩放，外观一致。缩放带来的收益由
+ * **视口剔除**（`GraphCanvas.tsx` 的 `nodeVisibility`）负责，那是另一条正交的优化。
+ *
+ * ## 阈值取 300 的依据
+ *
+ * 既有的一切小图场景（a11y 桩 4 节点、全链路用例、视觉基线截图）都远在阈值之下，
+ * 因此它们的渲染**逐字不变** —— 降级路径只对真正的大图生效。
+ * 300 也远低于实测出问题的 1181，留足了余量。
+ */
+export const LARGE_GRAPH_NODES = 300;
+
+/** 画布是否该走"大图降级"绘制路径（阴影 / 玻璃渐变按需） */
+export function isLargeGraph(nodeCount: number): boolean {
+  return nodeCount > LARGE_GRAPH_NODES;
 }

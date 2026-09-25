@@ -102,6 +102,51 @@
     `torch` / `openai` 加进启动路径，那条守卫会红，而不是等用户机器上
     「自检全绿但服务起不来」。
 
+- **知识图谱的大图性能：新增规模探针 + 批次 1 优化**（2026-09-26）。
+  真实库是 **1181 节点 / 260 边**（`backend/data/db/engramnote.db` 只读统计），
+  而 `GET /api/graph`（`backend/app/api/graph.py:57-71`）没有上限，全部下发全部渲染。
+
+  **先立基线**：新增真 Chromium 探针 `frontend/e2e/graph-perf-probe.spec.ts`
+  （`npm run perf:graph`，桩数据见 `e2e/graph-perf-fixtures.ts` —— 复制真实结构、
+  标题用中性占位，真实语料不进仓库）。它量三件事：空闲重绘次数、
+  **每帧强制重绘下的帧间隔**、以及 canvas 调用的逐项归因（含消融实验）。
+
+  | 指标（1181 节点 / 260 边） | 改前 | 改后 |
+  |---|---|---|
+  | 每帧强制重绘 | **72.69 ms（13.8 fps）**，p95 122.10 ms | **34.90 ms（28.7 fps）**，p95 61.70 ms |
+  | 空闲时重绘（用户没动） | 57 次 / 3 s（≈19 次/秒） | **0** |
+  | 每帧 `createRadialGradient` | 1322 | 30 |
+  | 每帧 `measureText` / `roundRect` | 1097 / 1097 | 29 / 29 |
+
+  改了什么（全部按**画布实际节点数**分级，阈值 `LARGE_GRAPH_NODES = 300`，
+  既有的一切小图场景 —— a11y 桩 4 节点、全链路用例、视觉基线 —— 渲染逐字不变）：
+
+  - **节点阴影与玻璃径向渐变按需**（`knowledgegraph/drawNode.ts`）：大图时只给
+    枢纽（度 ≥ 3）与选中/悬停/待创建的节点保留，其余用一次实心填充的廉价光晕代替。
+    消融实测这两项在改前合计约 14.6 ms/帧。
+  - **粒子按需**（`components/graph/GraphCanvas.tsx`）：`force-graph.mjs:1626-1628`
+    的 `doRedraw` 里有一条"任何一条边有粒子就重绘"，而真实数据 260 条边的
+    `similarity_score` **全部 > 0.6**（每条 2 个粒子 = 520 个持续动画的粒子），
+    于是画布**永不空闲**。大图时关掉。
+  - **视口剔除**（同上，`nodeVisibility`）：force-graph 默认不剔除，离屏节点
+    照样每帧走完整绘制。用页面已在维护的 `viewportRef` 做判据，尺寸由
+    ResizeObserver 缓存（不在判据里现读 `clientWidth`）。
+  - **搜索命中改集合判定**（`knowledgegraph/useCanvasObjects.ts`）：
+    原先每帧每节点线性扫搜索结果，是 O(节点数 × 结果数)。
+  - **minimap 建 id 索引**（`knowledgegraph/renderMinimap.ts`）：原先每条边两次
+    `nodes.find`，260 边 × 1181 节点 ≈ 每帧三十万次比较；同时去掉
+    `Math.min(...xs)` 对 1181 个元素的参数展开。
+  - **删掉每帧 1181 次的死分配**：`node.__bckgDimensions` 在整个依赖树里
+    **零消费者**（`force-graph` / `react-force-graph-2d` / `kapsule` 等的 dist
+    里搜不到），是旧版 API 的遗留。
+
+  守卫：新增 `src/pages/knowledgegraph/drawNode.test.ts`（10 条）与
+  `src/components/graph/types.test.ts` 的阈值用例，锁住"降级不能降过头"
+  （枢纽/选中/悬停仍走昂贵路径）与"小图行为不变"。
+
+  > 未做（如实登记）：`GET /api/graph` 仍无上限，节点数与下发量本身没变；
+  > 批次 2（按缩放级别的 LOD）与批次 3（服务端上限 / 默认子图模式）尚未开工。
+
 ### Security
 
 - 本节**刻意不宣称"本批次修复了任何安全发现"**（同类声明最容易变成"文档比现实宽松"）。

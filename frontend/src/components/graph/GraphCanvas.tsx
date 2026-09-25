@@ -1,5 +1,5 @@
 import type { KeyboardEvent, RefObject, MutableRefObject } from 'react';
-import { useId } from 'react';
+import { useCallback, useEffect, useId, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import Icon from '../Icon';
 import Minimap from './Minimap';
@@ -42,6 +42,8 @@ interface GraphCanvasProps {
   onBackgroundClick: () => void;
   /** 画布区域上的键盘操作（批次 E4：上下方向键切换当前节点） */
   onCanvasKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** 大图降级（见 `types.ts` 的 `LARGE_GRAPH_NODES`）：关粒子 + 开视口剔除 */
+  lowDetail: boolean;
 }
 
 /** 图谱画布：力导向图 + 缩略图 + 缩放控件 */
@@ -61,6 +63,7 @@ export default function GraphCanvas({
   onLinkHover,
   onBackgroundClick,
   onCanvasKeyDown,
+  lowDetail,
 }: GraphCanvasProps) {
   /**
    * 画布用法说明的元素 id（`aria-describedby` 用）。
@@ -68,6 +71,70 @@ export default function GraphCanvas({
    * 写死会造成重复 id —— 那是 HTML 合法性错误，也是 axe 会报的一类。
    */
   const hintId = useId();
+
+  /*
+   * ── 性能批次 1：视口剔除 ──
+   *
+   * force-graph 的 `nodeVisibility` 默认恒为 `true`，而它在 `tickFrame` 里是
+   * **唯一的过滤条件**（`force-graph.mjs:557` 的 `filter(getVisibility)`）——
+   * 也就是说：**离屏节点照样每帧走完整绘制**。放大到只剩几十个节点在屏幕上时，
+   * 另外一千多个仍在白画。
+   *
+   * 判据用的是页面**已经在维护**的 `viewportRef`（minimap 也读它，
+   * 由 `onZoom` 写入）：d3-zoom 的变换是 `screen = world * k + (x, y)`。
+   *
+   * 尺寸必须**缓存**：`clientWidth` 是强制布局读，每帧每节点读一次就是
+   * 1181 次布局查询。所以用 ResizeObserver 维护一份，而不是在判据里现读。
+   */
+  const viewportSizeRef = useRef({ width: 0, height: 0 });
+  useEffect(() => {
+    const element = graphCanvasRef.current;
+    if (!element) return;
+    const measure = () => {
+      viewportSizeRef.current = { width: element.clientWidth, height: element.clientHeight };
+    };
+    measure();
+    // ⚠️ jsdom **没有** `ResizeObserver`：不判类型直接用会抛
+    // `ReferenceError: ResizeObserver is not defined`，而它是在 effect 里抛的 ——
+    // 表现为整页渲染被 ErrorBoundary 接住，`KnowledgeGraph.test.tsx` 里
+    // 42 条与本改动毫不相干的用例一起变红（第一次实现时真踩到了）。
+    // 本仓库的既有做法就是"先判类型再用"（见 `pages/StyleGuide.tsx:208-213` 对
+    // `matchMedia` 的处理）。没有观察者时只量一次：判据在尺寸为 0 时一律放行，
+    // 也就是"不剔除" —— 退化成改动前的行为，而不是崩掉。
+    if (typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [graphCanvasRef]);
+
+  /**
+   * 节点是否可能出现在屏幕上。
+   *
+   * 只在大图时挂上去（`lowDetail`）：小图本来就全在屏幕内，挂上去只会多一层判据，
+   * 而既有的一切小图场景（a11y 桩、全链路用例、视觉基线）需要的是**行为逐字不变**。
+   *
+   * 余量给得宽（节点半径 + 24 + 40 像素，且随缩放放大）：剔除错一个边缘节点的代价
+   * 是"它忽然不见了"，比多画几个节点难看得多。坐标还没算出来的节点一律放行，
+   * 交给绘制侧那条被测试压住的守卫处理。
+   */
+  const isNodeInViewport = useCallback(
+    (node: ForceGraphNode) => {
+      if (node.x == null || node.y == null) return true;
+      const { width, height } = viewportSizeRef.current;
+      if (width === 0 || height === 0) return true;
+      const { k, x, y } = viewportRef.current;
+      const margin = (getNodeSize(node) + 24) * k + 40;
+      const screenX = node.x * k + x;
+      const screenY = node.y * k + y;
+      return (
+        screenX >= -margin &&
+        screenX <= width + margin &&
+        screenY >= -margin &&
+        screenY <= height + margin
+      );
+    },
+    [viewportRef],
+  );
 
   /*
    * ── 批次 E4：当前节点的键盘上下切换 ──
@@ -150,9 +217,25 @@ export default function GraphCanvas({
           const color = RELATION_TYPE_COLORS[link.relation_type] || FALLBACK_RELATION_COLOR;
           return link.status === 'suggested' ? `${color}88` : color;
         }}
+        // 视口剔除（见上面的 `isNodeInViewport`）：小图不挂，行为与改动前逐字一致
+        nodeVisibility={lowDetail ? isNodeInViewport : undefined}
         // 连线流光粒子：能量沿墨线缓慢流动（水墨丹青动效）
-        linkDirectionalParticles={(link: ForceGraphLink) =>
-          link.similarity_score != null && link.similarity_score > 0.6 ? 2 : 1
+        //
+        // ⚠️ 性能批次 1：大图时**整段关掉**（返回 0 = 该边没有粒子）。
+        // 理由在 `force-graph.mjs:1626-1628` 的 doRedraw 判定里：
+        //     links.some(d => d.__photons && d.__photons.length)
+        // 只要**任何一条边**还有粒子，画布就每帧清屏 + 全量重绘，**永不空闲**。
+        // 实测（1181 节点 / 260 边，力导向冷却后的静止窗口，用户什么都没做）：
+        //     clearRect 18~20 次/秒
+        // 而真实数据里 260 条边的 similarity_score **全部 > 0.6**，
+        // 于是每条边 2 个粒子 = 520 个持续动画的粒子。
+        // 大图上它们既看不清、又让整机持续满负荷，所以关掉；
+        // 小图（≤ `LARGE_GRAPH_NODES`）保持原样。
+        linkDirectionalParticles={
+          lowDetail
+            ? 0
+            : (link: ForceGraphLink) =>
+                link.similarity_score != null && link.similarity_score > 0.6 ? 2 : 1
         }
         linkDirectionalParticleWidth={2.2}
         linkDirectionalParticleSpeed={0.004}

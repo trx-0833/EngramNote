@@ -42,12 +42,32 @@ export function renderMinimap(
   const H = canvas.height;
 
   const nodes = graphData.nodes as ForceGraphNode[];
-  const xs = nodes.map((n) => n.x || 0);
-  const ys = nodes.map((n) => n.y || 0);
-  let minX = Math.min(...xs),
-    maxX = Math.max(...xs);
-  let minY = Math.min(...ys),
-    maxY = Math.max(...ys);
+
+  // 性能批次 1：原来这里是
+  //     const xs = nodes.map(n => n.x || 0); const ys = ...
+  //     let minX = Math.min(...xs), maxX = Math.max(...xs); ...
+  // 两个问题：① `Math.min(...arr)` 把 1181 个参数摊开压进调用栈（数组一大就危险）；
+  // ② 白建两个等长数组。改成一次循环直接求边界。
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+    minX = 0;
+    maxX = 0;
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    minY = 0;
+    maxY = 0;
+  }
   if (maxX - minX < 1) {
     maxX = minX + 1;
   }
@@ -81,9 +101,14 @@ export function renderMinimap(
 
   ctx.strokeStyle = tokens.inkFaint;
   ctx.lineWidth = 0.5;
+  // 性能批次 1：原先每条边都要 `nodes.find(...)` 两次 —— 260 条边 × 1181 个节点
+  // ≈ 每帧三十万次比较，而 minimap 每次缩放都会重画（100ms 节流只是把频率压下来，
+  // 单次成本没变）。这里先建一次 id → 节点 的索引，整体降到 O(N + E)。
+  const nodeById = new Map<string, ForceGraphNode>();
+  for (const node of nodes) nodeById.set(node.id, node);
   graphData.edges.forEach((e) => {
-    const src = nodes.find((n) => n.id === e.source);
-    const tgt = nodes.find((n) => n.id === e.target);
+    const src = nodeById.get(e.source);
+    const tgt = nodeById.get(e.target);
     if (!src || !tgt) return;
     ctx.beginPath();
     ctx.moveTo(mx(src.x || 0), my(src.y || 0));

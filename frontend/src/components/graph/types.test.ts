@@ -17,12 +17,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FALLBACK_RELATION_LINE_STYLE,
   GRAPH_CANVAS_TOKEN_FALLBACKS,
+  LARGE_GRAPH_NODES,
   RELATION_LINE_DASHES,
   RELATION_TYPE_LINE_STYLES,
   getGraphCanvasTokens,
   getRelationDash,
   getRelationLineStyle,
   hasDirection,
+  isLargeGraph,
   resetGraphCanvasTokensCache,
 } from './types';
 
@@ -100,5 +102,27 @@ describe('canvas 的 --graph-* 令牌读取（批次 E4 接通）', () => {
   it('空串（jsdom / 令牌被删）不会被当成有效值', () => {
     vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '' }));
     expect(getGraphCanvasTokens()).toEqual(GRAPH_CANVAS_TOKEN_FALLBACKS);
+  });
+});
+
+describe('大图降级阈值（性能批次 1）', () => {
+  it('阈值是 300：既有的一切小图场景都在它之下，渲染逐字不变', () => {
+    expect(LARGE_GRAPH_NODES).toBe(300);
+  });
+
+  it('★ 判据是"严格大于"：恰好等于阈值时仍走完整绘制', () => {
+    // 边界写成 `>=` 会让 300 个节点的图悄悄换一套外观 —— 而 300 这个数
+    // 本身没有"到了就必须降级"的含义，它只是个余量充足的起点。
+    expect(isLargeGraph(LARGE_GRAPH_NODES)).toBe(false);
+    expect(isLargeGraph(LARGE_GRAPH_NODES + 1)).toBe(true);
+  });
+
+  it('真实规模（1181 节点）确实落在降级区', () => {
+    expect(isLargeGraph(1181)).toBe(true);
+  });
+
+  it('既有小图场景（a11y 桩 4 节点、全链路用例）不降级', () => {
+    expect(isLargeGraph(0)).toBe(false);
+    expect(isLargeGraph(4)).toBe(false);
   });
 });
