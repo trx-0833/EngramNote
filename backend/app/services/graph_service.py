@@ -12,15 +12,25 @@
 
 设计决策：
 - 自动建议使用卡片「标题 + 截断内容」的嵌入向量计算两两相似度
-- 相似度阈值 0.75，平衡精度和召回率
-- 排除同一笔记内的卡片对，避免章节内高度相似造成噪音建议
+- **选边方式是「每卡 Top-K + 绝对下界」，不是「相似度 ≥ 全局阈值」**（2026-09-26 改）
+- 排除**同一章节**的卡片对（同笔记跨章节保留），避免章节内高度相似造成噪音建议
 - 单次最多处理 200 张卡片，避免计算量过大
 - 手动创建的关系直接为 confirmed 状态
+
+⚠️ 上面这两条（Top-K / 章节粒度）不是拍的，是实测定的。依据与全部数字见
+`docs/journal/relation-quality-2026-09-26.md`，复现脚本
+`backend/scripts/measure_relation_quality.py`（只读）。核心读数：
+
+    现状（跨笔记 + ≥0.75）  4 条新边  覆盖   8/200  精确率 100%
+    改后（章节粒度 + Top-3） 443 条新边 覆盖 197/200  精确率  83%
+
+    单纯把阈值降到 0.55 → 精确率崩到 33%；同样下界 0.55 改成每卡 Top-3 → 回到 83%。
+    也就是说**阈值不是杠杆，"这张卡最像的是谁"才是**。
 """
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sqlalchemy import and_, case, distinct, exists, func, or_, select, update
@@ -33,11 +43,19 @@ from ..schemas.graph import GraphData, GraphNode, GraphEdge, SuggestedRelation
 
 logger = logging.getLogger(__name__)
 
-# 自动建议的相似度阈值
-SIMILARITY_THRESHOLD = 0.75
-# 单次最多处理的卡片数量
+#: 每张卡片最多保留几个「最像的邻居」。
+#:
+#: 为什么不是"相似度 ≥ 某个阈值"：绝对相似度取决于文本长度与语料 —— 本库文本
+#: 中位 54 字，跨笔记对的余弦中位只有 0.443、p99 才 0.656，于是写死 0.75 等于
+#: "几乎不建边"（实测 12,430 对里只活 11 对）。而 K 表达的是"每张卡至少要有
+#: 几个邻居"，与语料无关。实测：同样下界 0.55，`≥阈值` 精确率 33%，
+#: 每卡 Top-3 是 83%，Top-5 又掉到 42%。
+TOP_K_PER_CARD = 3
+#: 绝对下界：只做**兜底**，防止把"谁都不像"的卡片也连上（不再是主判据）。
+MIN_SIMILARITY = 0.55
+#: 单次最多处理的卡片数量
 MAX_CARDS_FOR_SUGGEST = 200
-# 用于嵌入计算的卡片内容最大长度（字符），避免超长文本稀释相似度
+#: 用于嵌入计算的卡片内容最大长度（字符），避免超长文本稀释相似度
 CONTENT_EMBED_LIMIT = 200
 
 
@@ -250,7 +268,8 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     1. 获取用户所有知识卡片（最多 200 张，按更新时间倒序）
     2. 通过 Celery 任务（app.tasks.embedding_tasks.encode_text）编码「标题 + 截断内容」
     3. 计算两两相似度
-    4. 相似度超过阈值（0.75）、不同笔记且不存在已有关系的，创建 suggested 状态的关系
+    4. **每张卡只取最像的 `TOP_K_PER_CARD` 张**（且不低于 `MIN_SIMILARITY`）、
+       **同章节的卡片对跳过**、不存在已有关系的，创建 suggested 状态的关系
 
     Args:
         user_id: 用户 ID
@@ -267,6 +286,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             KnowledgeCard.title,
             KnowledgeCard.content,
             KnowledgeCard.note_id,
+            KnowledgeCard.chapter_title,
         ).where(
             KnowledgeCard.user_id == user_id,
             Note.not_trashed(KnowledgeCard.note_id),
@@ -314,50 +334,80 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         pair_key = tuple(sorted([rel.card_id_1, rel.card_id_2]))
         existing_pairs[pair_key] = rel
 
-    # 卡片所属笔记映射：同一笔记内的卡片高度相似但缺乏跨知识点价值，跳过
-    note_of = {card.id: card.note_id for card in cards}
+    # 卡片所属**章节**映射：(note_id, chapter_title)。
+    #
+    # ## 为什么是"章节"而不是"笔记"（2026-09-26 改）
+    #
+    # 原规则是"同一笔记内的卡片对一律跳过"，注释写的理由是"章节内高度相似造成
+    # 噪音建议"。实测证明**方向对、粒度错**（`docs/journal/relation-quality-2026-09-26.md`）：
+    #
+    #     同笔记·同章节   784 对  余弦中位 0.667  ← 确实是噪音源
+    #     同笔记·跨章节 6,686 对  余弦中位 0.529  ← 比跨笔记的 0.443 还高
+    #
+    # 也就是说被一起丢掉的 7,470 对里有 **89.5% 是"同笔记跨章节"**，而它们恰恰
+    # 相似度更高、更该连。改成只跳过同章节之后，同一阈值下边数 11 → 39。
+    #
+    # 章节为空的两张同笔记卡片算同章节（保守跳过，退化成旧行为，不会更糟）。
+    chapter_of: Dict[str, Tuple[Any, str]] = {
+        card.id: (card.note_id, card.chapter_title or "") for card in cards
+    }
 
     # 使用 numpy 向量化计算相似度矩阵（CPU 密集，放入线程池）
     sim_matrix = await loop.run_in_executor(None, _compute_pairwise_similarity, vectors)
 
-    # 遍历上三角，创建建议
+    # 逐卡取"最像的 TOP_K_PER_CARD 张"，而不是"相似度够不够某个全局阈值"。
+    # 两个理由（都有实测）：
+    #   1. 绝对相似度取决于文本长度与语料，写死的阈值会过期（本库跨笔记 p99 才 0.656，
+    #      而旧阈值是 0.75 —— 等于"几乎不建边"）；
+    #   2. 低阈值 + 全收会把弱相关对放进来（实测精确率 33%），而"每卡取最近邻"
+    #      在**同样的下界**下是 83%：它过滤掉的是"谁都不像"的那些卡。
     new_count = 0
     new_relations = []
 
     for i in range(len(cards)):
-        for j in range(i + 1, len(cards)):
+        chapter_i = chapter_of.get(cards[i].id)
+
+        candidates: List[Tuple[float, int]] = []
+        for j in range(len(cards)):
+            if j == i:
+                continue
             similarity = float(sim_matrix[i][j])
+            if similarity < MIN_SIMILARITY:
+                continue
+            # 同笔记**同章节**才跳过（同笔记跨章节保留，见上面的实测）
+            if chapter_of.get(cards[j].id) == chapter_i:
+                continue
+            candidates.append((similarity, j))
 
-            if similarity >= SIMILARITY_THRESHOLD:
-                card_id_1 = cards[i].id
-                card_id_2 = cards[j].id
+        # `(-相似度, 下标)` 二级排序：并列时按下标定序，保证结果**可复现**
+        candidates.sort(key=lambda item: (-item[0], item[1]))
 
-                # 排除同一笔记内的卡片对，避免章节内高度相似造成噪音建议
-                if note_of.get(card_id_1) == note_of.get(card_id_2):
-                    continue
+        for similarity, j in candidates[:TOP_K_PER_CARD]:
+            card_id_1 = cards[i].id
+            card_id_2 = cards[j].id
+            pair_key = tuple(sorted([card_id_1, card_id_2]))
 
-                pair_key = tuple(sorted([card_id_1, card_id_2]))
+            # 已有关系（含 rejected）跳过；本轮已经建过的也跳过
+            # （i 与 j 可能互相选中对方，那样这一对会出现两次）
+            if pair_key in existing_pairs:
+                continue
 
-                # 如果已有关系，跳过
-                if pair_key in existing_pairs:
-                    continue
+            # 无向关系统一排序存储，确保 card_id_1 <= card_id_2
+            stored_id_1, stored_id_2 = card_id_1, card_id_2
+            if card_id_1 > card_id_2:
+                stored_id_1, stored_id_2 = card_id_2, card_id_1
 
-                # 无向关系统一排序存储，确保 card_id_1 <= card_id_2
-                stored_id_1, stored_id_2 = card_id_1, card_id_2
-                if card_id_1 > card_id_2:
-                    stored_id_1, stored_id_2 = card_id_2, card_id_1
-
-                relation = CardRelation(
-                    user_id=user_id,
-                    card_id_1=stored_id_1,
-                    card_id_2=stored_id_2,
-                    relation_type=RelationType.related,
-                    status=RelationStatus.suggested,
-                    similarity_score=round(similarity, 4),
-                )
-                new_relations.append(relation)
-                existing_pairs[pair_key] = relation  # 防止同一对重复创建
-                new_count += 1
+            relation = CardRelation(
+                user_id=user_id,
+                card_id_1=stored_id_1,
+                card_id_2=stored_id_2,
+                relation_type=RelationType.related,
+                status=RelationStatus.suggested,
+                similarity_score=round(similarity, 4),
+            )
+            new_relations.append(relation)
+            existing_pairs[pair_key] = relation  # 防止同一对重复创建
+            new_count += 1
 
     # 批量添加
     for rel in new_relations:
