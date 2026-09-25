@@ -32,6 +32,7 @@
 | [code-review-report.md](code-review-report.md) | 全项目代码审查报告（静态审查 + 文档三方对照，235 行） | 2026-08-30 | `docs/code-review-report.md` |
 | [verification-report-20260830.md](verification-report-20260830.md) | 启动与功能验证报告（L0 环境自检 → L5 前端冒烟） | 2026-08-30 | `docs/verification-report-20260830.md` |
 | [tooling-report.md](tooling-report.md) | 工具链首轮检查报告（ruff 146 / eslint 81 / prettier 39 = 266 个问题） | 2025-06 | `docs/tooling-report.md` |
+| [relation-quality-2026-09-26.md](relation-quality-2026-09-26.md) | 关系判定质量测量（孤点根因量化：现状 4 条新边 / 覆盖 8-200；提议 443 条 / 197-200，精确率 83%） | 2026-09-26 | 新增 |
 
 三份文件头部都已自带 `状态：过程记录 ｜ 权威性：不是现状依据` 的横幅 ——
 本目录只是把它们从"活文档"堆里分出来，内容一个字都没有改。
