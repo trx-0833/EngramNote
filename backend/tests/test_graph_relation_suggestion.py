@@ -674,6 +674,108 @@ class TestIsolationFirstPool:
         assert await _pairs(test_db) == {("c1", "c2")}
 
 
+class TestSameTitleGate:
+    """**标题相同**的卡片对不建"相关"边（2026-09-26 第 4 步）
+
+    ## 为什么
+
+    同名对要么是同一份内容被抽了两遍（该**合并**），要么是"每篇标准都有的一节"
+    这类模板文本（本来就无关系）。**两种都不是"相关"。**
+
+    实测（`_agenttmp/probe_boilerplate.py`）：全量收敛后有 **49 条边（3.5%）**
+    连接的是同名卡片，相似度**普遍 ~1.000**；其中盲判过的 3 条**全部判为 `dup`**
+    —— 那些不是"错的边"，是**重复的卡片**。把重复当"相关"存下来，等于把
+    "重新理解导致卡片翻倍"这个数据问题藏进图谱里。
+
+    ⚠️ 这只是**不建边**，不是"把重复卡处理掉了" —— 去重/合并是另一件事，本批没做。
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_title_pair_is_not_linked(self, test_db):
+        """★ 同名对不建边，但两张卡**仍能**与别的卡建边（闸门不能把人饿死）"""
+        await _seed(
+            test_db,
+            notes=["n1", "n2", "n3"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),   # 与 c2 同名
+                ("c2", "n2", "第一章", "甲"),   # 与 c1 同名
+                ("c3", "n3", "第一章", "丙"),
+            ],
+            vectors={"甲": _vec(0), "丙": _vec(10)},
+        )
+        # ⚠️ 两张同名卡的向量必须不同，否则 _seed 的 {title: vec} 只能给一个
+        from app.models.chunk import pack_vector
+        from app.models.knowledge_card import KnowledgeCard
+
+        async with test_db() as session:
+            from sqlalchemy import select
+
+            card = (await session.execute(
+                select(KnowledgeCard).where(KnowledgeCard.id == "c2")
+            )).scalar_one()
+            card.embedding = pack_vector(_vec(2))   # 与 c1 几乎一样（cos≈0.999）
+            card.embedding_dim = 2
+            await session.commit()
+
+        await _suggest(test_db)
+        pairs = await _pairs(test_db)
+        assert ("c1", "c2") not in pairs, (
+            "同名卡片对被建了「相关」边 —— 那更可能是重复卡片，该合并而不是连边"
+        )
+        assert ("c1", "c3") in pairs and ("c2", "c3") in pairs, (
+            f"同名闸把整批都挡住了：{pairs} —— 同名卡仍然应该能与别的卡建边"
+        )
+
+    @pytest.mark.asyncio
+    async def test_near_same_title_is_still_linked(self, test_db):
+        """近似但**不同**的标题不受影响（`操作术语` vs `操作术语定义`）
+
+        闸门只做 `strip` 后的**完全相等**判定。更激进的归一（去标点、去后缀）
+        会把"总表"与"定义"这类**内容不同**的卡片误判成重复 —— 宁可漏挡，不可误挡。
+        """
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[
+                ("c1", "n1", "第一章", "操作术语"),
+                ("c2", "n2", "第一章", "操作术语定义"),
+            ],
+            vectors={"操作术语": _vec(0), "操作术语定义": _vec(10)},
+        )
+        await _suggest(test_db)
+        assert ("c1", "c2") in await _pairs(test_db), (
+            "近似标题被误挡了 —— 它们不是重复卡片"
+        )
+
+    @pytest.mark.asyncio
+    async def test_same_title_with_surrounding_spaces_is_still_gated(self, test_db):
+        """标题只差首尾空白也算同名（`strip` 后比较）"""
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", " 甲 "),
+            ],
+            vectors={"甲": _vec(0)},
+        )
+        from app.models.chunk import pack_vector
+        from app.models.knowledge_card import KnowledgeCard
+
+        async with test_db() as session:
+            from sqlalchemy import select
+
+            card = (await session.execute(
+                select(KnowledgeCard).where(KnowledgeCard.id == "c2")
+            )).scalar_one()
+            card.embedding = pack_vector(_vec(2))
+            card.embedding_dim = 2
+            await session.commit()
+
+        await _suggest(test_db)
+        assert ("c1", "c2") not in await _pairs(test_db), "只差空白的同名没被挡住"
+
+
 class TestVectorColumnMigration:
     """**既有库**必须能通过 ALTER 补上那 4 个向量列
 

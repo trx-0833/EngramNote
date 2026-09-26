@@ -365,6 +365,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         select(
             KnowledgeCard.id,
             KnowledgeCard.note_id,
+            KnowledgeCard.title,
             KnowledgeCard.embedding,
             KnowledgeCard.embedding_dim,
             KnowledgeCard.embedding_model,
@@ -455,6 +456,13 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     #    同笔记对全部优于跨笔记对（见两个常量的实测表）。真正的轴是笔记。
     note_of: Dict[str, Any] = {card.id: card.note_id for card in cards}
 
+    #: 归一化标题（只去首尾空白）—— 供「同名闸」用。
+    #:
+    #: 只做 strip，不做更激进的归一（大小写、全半角、去标点）：那样会把
+    #: `操作术语` 与 `操作术语定义` 也算成同名，而它们**不是**重复卡片
+    #: （一个是总表、一个是定义，内容不同）。宁可漏挡，不可误挡。
+    title_of: Dict[str, str] = {card.id: (card.title or "").strip() for card in cards}
+
     # ── 候选：**孤点优先** —— 还没有任何关系的卡片 ──
     #
     # 这是本批的核心改动。以前候选是"最新 200 张"，于是同一批卡片被反复比较，
@@ -493,9 +501,12 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     # 真正的判据是下面那个按「是否同笔记」分档的下界。
     new_count = 0
     new_relations = []
+    # 被「同名闸」挡掉的卡片对（见下面 title_of 的说明）
+    same_title_skipped = 0
 
     for row_i, i in enumerate(cand_pos):
         note_i = note_of.get(cards[i].id)
+        title_i = title_of.get(cards[i].id, "")
 
         candidates: List[Tuple[float, int]] = []
         for j in range(len(cards)):
@@ -506,6 +517,24 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             same_note = note_of.get(cards[j].id) == note_i
             floor = MIN_SIMILARITY if same_note else CROSS_NOTE_MIN_SIMILARITY
             if similarity < floor:
+                continue
+            # ── 同名闸 ──
+            #
+            # 标题相同的两张卡**不该建"相关"边**：它们要么是同一份内容被抽了两遍
+            # （该合并），要么是"每篇标准都有的一节"这类模板文本（本来就无关系）。
+            # 两种都不是"相关"。
+            #
+            # 实测（`_agenttmp/probe_boilerplate.py`）：全量收敛后有 **49 条边
+            # （3.5%）**连接的是同名卡片，而它们的相似度**普遍 ~1.000**；
+            # 其中盲判过的 3 条**全部判为 `dup`（真重复）** —— 也就是说这些不是
+            # "错的边"，是**重复的卡片**。把重复当"相关"存下来，等于把
+            # "重新理解导致卡片翻倍"这个数据问题藏进图谱里。
+            #
+            # ⚠️ 这只是**不建边**，不是"把重复卡处理掉了"：去重/合并是另一件事，
+            # 本批没做（见报告 §14.4）。所以下面会把跳过的对数记进日志，
+            # 免得这个数据问题从此看不见。
+            if title_i and title_i == title_of.get(cards[j].id, ""):
+                same_title_skipped += 1
                 continue
             candidates.append((similarity, j))
 
@@ -546,6 +575,15 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     if new_count > 0:
         await db.commit()
         logger.info(f"自动建议关系: user={user_id[:8]}, 新增 {new_count} 条建议")
+
+    if same_title_skipped:
+        # 这条日志**不能省**：同名闸只是"不建边"，重复卡片本身还在库里。
+        # 没有这条日志，这个数据问题就从"图谱里看得见"变成"完全看不见"了。
+        logger.info(
+            "同名闸: user=%s 跳过了 %d 对同名卡片（它们更可能是重复卡片，"
+            "该合并而不是连边；去重功能尚未实现）",
+            user_id[:8], same_title_skipped,
+        )
 
     return new_count
 

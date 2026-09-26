@@ -66,11 +66,15 @@ import random
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+#: 「可行动」的关系类型 —— 有明确动作可做（合并 / 对比 / 排序）。
+#: 其余（`kin` 同族并列）只算「可导航」。两个目标**分开报**，见 `precision_report`。
+ACTIONABLE_TYPES = {"dup", "opp", "pre"}
 
 DEFAULT_DB = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "data", "db", "engramnote.db"
@@ -355,28 +359,64 @@ def render_sample_markdown(
     return "\n".join(lines)
 
 
-def precision_report(labels: Dict[str, bool], groups: Dict[str, List[Tuple[int, int]]]) -> int:
+def precision_report(labels: Dict[str, Any], groups: Dict[str, List[Tuple[int, int]]]) -> int:
+    """按组报精确率 —— **两个目标分开报**
+
+    ## 为什么必须分两列（`docs/journal/relation-quality-2026-09-26.md` §8.5）
+
+    "有联系"与"值得建边"是两件事：
+
+    - **可导航**：四类关系任意一类（`dup`/`kin`/`opp`/`pre`）——
+      用来在图里点着走，`kin`（同族并列）也算
+    - **可行动**：只有 `dup`（可合并）/ `opp`（可对比）/ `pre`（可排序）——
+      有明确动作可做
+
+    实测两者差得很远（**67% vs 17%**，见 §9.3）。混成一个"精确率"报出来，
+    数字好看但没说清是什么好看 —— 之前就是这么把结论带偏的。
+
+    标签可以是两种格式：
+
+        {"A:0": true, ...}                      ← 旧格式（只有真假）
+        {"A:0": {"label": true, "type": "kin"}} ← 新格式（带类型）
+    """
     print("\n" + "=" * 78)
-    print("抽样精确率（判「确实相关」的比例）")
+    print("抽样精确率（**可导航** = 四类任意；**可行动** = dup/opp/pre）")
     print("=" * 78)
     unfilled = []
+    has_type = False
     for gid, spec_label, _spec, _n in GROUPS:
         pairs = groups.get(gid, [])
         if not pairs:
-            print(f"  {gid}. {spec_label:38s} 无可建边")
+            print(f"  {gid}. {spec_label:36s} 无可建边")
             continue
-        yes = no = 0
+        yes = no = act = 0
         for idx in range(len(pairs)):
             v = labels.get(f"{gid}:{idx}")
             if v is None:
                 unfilled.append(f"{gid}:{idx}")
+                continue
+            if isinstance(v, dict):
+                has_type = True
+                if v.get("label"):
+                    yes += 1
+                    if v.get("type") in ACTIONABLE_TYPES:
+                        act += 1
+                else:
+                    no += 1
             elif v:
                 yes += 1
             else:
                 no += 1
         done = yes + no
         rate = f"{yes / done * 100:.0f}%" if done else "—"
-        print(f"  {gid}. {spec_label:38s} 判准 {done}/{len(pairs)} 对 ｜ 相关 {yes} ｜ 精确率 {rate}")
+        act_s = f"｜ 可行动 {act / done * 100:.0f}%" if (has_type and done) else ""
+        print(f"  {gid}. {spec_label:36s} 判准 {done}/{len(pairs)} ｜ "
+              f"可导航 {yes} = {rate}{act_s}")
+
+    if not has_type:
+        print("\n  [INFO] 标注里没有 `type` 字段 —— 只报了「可导航」。"
+              "要同时报「可行动」，把标签写成 "
+              '{"A:0": {"label": true, "type": "kin"}} 这种形式。')
 
     if unfilled:
         print(f"\n  [WARN] 还有 {len(unfilled)} 对没判：{', '.join(unfilled[:10])}"
