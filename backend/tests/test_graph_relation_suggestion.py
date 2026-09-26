@@ -179,47 +179,54 @@ class TestNoteGranularity:
     async def test_cross_note_pair_needs_the_higher_floor(self, test_db):
         """★ **跨笔记**对落在 `[MIN_SIMILARITY, CROSS_NOTE_MIN_SIMILARITY)` → 跳过
 
-        这是第三次修正的核心。盲判 v2 实测跨笔记 `0.75-0.85` 只有 **50%**
-        （同笔记同段是 83%）—— 跨笔记的余弦更容易被"同领域"骗到。
+        盲判 v3 实测跨笔记 `0.75-0.80` 只有 **58%**（`0.80-0.85` 是 83%）
+        —— 跨笔记的余弦更容易被"同领域"骗到。
         """
         from app.services.graph_service import (
             CROSS_NOTE_MIN_SIMILARITY,
             MIN_SIMILARITY,
         )
 
-        sim = _sim_to(36)  # cos 36° ≈ 0.809
+        sim = _sim_to(39)  # cos 39° ≈ 0.777，落在 [0.75, 0.80)
         assert MIN_SIMILARITY <= sim < CROSS_NOTE_MIN_SIMILARITY, f"前提不成立：{sim}"
 
         await _seed(
             test_db,
             notes=["n1", "n2"],
             cards=[
-                # 跨笔记，相似度 0.809 → 必须跳过
+                # 跨笔记，相似度 0.777 → 必须跳过
                 ("c1", "n1", "第一章", "甲"),
                 ("c2", "n2", "第一章", "乙"),
-                # 同笔记，相似度同为 0.809 → **必须**建边，证明差异来自"是否同笔记"
+                # 同笔记，相似度同为 0.777 → **必须**建边，证明差异来自"是否同笔记"
                 ("c3", "n1", "第二章", "丙"),
             ],
-            vectors={"甲": _vec(0), "乙": _vec(36), "丙": _vec(0)},
+            vectors={"甲": _vec(0), "乙": _vec(39), "丙": _vec(0)},
         )
         await _suggest(test_db)
         pairs = await _pairs(test_db)
         assert ("c1", "c2") not in pairs, (
-            f"跨笔记对（相似度 {sim:.3f}）被建边了 —— 那一段实测只有 50%"
+            f"跨笔记对（相似度 {sim:.3f}）被建边了 —— 那一段实测只有 58%"
         )
         assert ("c1", "c3") in pairs, "同笔记的对照对没建边 —— 上面的断言可能只是'什么都没建'"
 
     @pytest.mark.asyncio
     async def test_cross_note_high_similarity_is_kept(self, test_db):
-        """反证：跨笔记对把相似度提到 ≥0.85 就必须建边"""
+        """反证：跨笔记对把相似度提到 ≥0.80 就必须建边
+
+        这是第四次修正的核心：v2 把下界卡在 0.85，而 v3 拆段重测发现
+        `0.80-0.85` 与 0.85 以上**同档**（都是 83%）。
+        0.809 这一对在 `8a1b50f` 的规则下会被跳过 —— 这条用例在那里会红。
+        """
         await _seed(
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
-            vectors={"甲": _vec(0), "乙": _vec(26)},
+            vectors={"甲": _vec(0), "乙": _vec(36)},  # cos 36° ≈ 0.809
         )
         await _suggest(test_db)
-        assert ("c1", "c2") in await _pairs(test_db)
+        assert ("c1", "c2") in await _pairs(test_db), (
+            "跨笔记 0.809 被跳过了 —— 那一段实测 83%，与 0.85 以上同档"
+        )
 
 
 class TestTopKSelection:
