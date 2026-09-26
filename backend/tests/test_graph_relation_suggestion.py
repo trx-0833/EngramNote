@@ -301,10 +301,23 @@ class TestTopKSelection:
         k1 = len(await _pairs(test_db))
         assert k1 <= 6, f"K=1 时建了 {k1} 条边，超过卡片数"
 
-        # 放宽 K 之后必须还能再建出新边，否则 K 根本没生效
+    @pytest.mark.asyncio
+    async def test_larger_k_creates_more_edges(self, test_db, monkeypatch):
+        """K 更大 → 边更多（对照组，证明上面的上界不是因为"什么都没建"）
+
+        ⚠️ 用**独立的库**跑：候选池现在是"孤点优先"，同一个库里跑完 K=1
+        之后所有卡都有边了，再跑 K=5 会因为"没有孤点"而返回 0 ——
+        那不是 K 没生效，是候选池已经空了（见 `TestIsolationFirstPool`）。
+        """
+        from app.services import graph_service
+
+        cards = [(f"c{i}", f"n{i}", "第一章", f"卡{i}") for i in range(6)]
+        vectors = {f"卡{i}": _vec(i * 4) for i in range(6)}  # 两两都够 0.85
+        await _seed(test_db, notes=[f"n{i}" for i in range(6)], cards=cards, vectors=vectors)
+
         monkeypatch.setattr(graph_service, "TOP_K_PER_CARD", 5)
-        more = await _suggest(test_db)
-        assert more > 0, "放宽 K 之后一条新边都没有 —— K 没有生效"
+        await _suggest(test_db)
+        assert len(await _pairs(test_db)) > 0, "K=5 时一条边都没建"
 
     @pytest.mark.asyncio
     async def test_no_duplicate_pairs_and_storage_is_ordered(self, test_db):
@@ -542,6 +555,116 @@ def test_model_name_falls_back_when_model_not_loaded(monkeypatch):
 
     monkeypatch.setattr(et, "_get_embedding_service", lambda: _FakeService())
     assert et._model_name(), "退回值不能是空 —— 那会让 embedding_model 列变成 NULL"
+
+
+class TestIsolationFirstPool:
+    """候选池 = **还没有任何关系的卡片**（2026-09-26 第 3 步）
+
+    ## 为什么这一组必须存在
+
+    以前候选是"最新 200 张"，于是同一批卡片被**反复比较**，而 904 张孤点
+    （占孤点的 85.2%）**永远轮不到**。现在候选是"一条边都没有的卡"，
+    每处理一批它们就不再是孤点，**下一次点击自然推进到下一批** ——
+    不需要额外的游标，孤点数本身就是进度。
+
+    这一组锁的正是"推进"与"不重复处理"这两件事。
+    """
+
+    @pytest.mark.asyncio
+    async def test_second_run_does_not_reprocess_cards_that_got_edges(
+        self, test_db, monkeypatch
+    ):
+        """★ 已经有边的卡**不再被处理** —— 这是"推进"的另一面
+
+        第一次跑完 c1-c2 就有边了；第二次跑时它们不在候选里，
+        所以不会出现"同一对又被建议一次"。c3 是唯一的孤点，但它够不到下界，
+        因此第二次应当返回 0。
+        """
+        from app.services import graph_service
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2", "n3"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", "乙"),
+                ("c3", "n3", "第一章", "丙"),  # 与甲乙都不像
+            ],
+            vectors={"甲": _vec(0), "乙": _vec(10), "丙": _vec(90)},
+        )
+        first = await _suggest(test_db)
+        assert first == 1, f"第一轮应当建 1 条边，实际 {first}"
+        assert await _pairs(test_db) == {("c1", "c2")}
+
+        # 第二轮：c1/c2 有边了，只剩 c3 一个孤点，而它够不到下界
+        monkeypatch.setattr(graph_service, "MAX_CARDS_FOR_SUGGEST", 10)
+        second = await _suggest(test_db)
+        assert second == 0, f"第二轮又建了 {second} 条 —— 有边的卡被重复处理了"
+        assert await _pairs(test_db) == {("c1", "c2")}, "关系集合被改动了"
+
+    @pytest.mark.asyncio
+    async def test_batch_limit_advances_across_runs(self, test_db, monkeypatch):
+        """★ 候选上限真的分批：每轮只处理 N 张，下一轮自动接上
+
+        两组互不相干的卡片（组内相似、组间不相似），把上限压到 1 ——
+        于是每轮只能救一张，需要三轮才走完。
+        """
+        from app.services import graph_service
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2", "n3", "n4"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", "乙"),
+                ("c3", "n3", "第一章", "丙"),
+                ("c4", "n4", "第一章", "丁"),
+            ],
+            # 甲乙一组（0° vs 10°），丙丁一组（90° vs 100°），组间余弦 0
+            vectors={"甲": _vec(0), "乙": _vec(10), "丙": _vec(90), "丁": _vec(100)},
+        )
+        monkeypatch.setattr(graph_service, "MAX_CARDS_FOR_SUGGEST", 1)
+
+        assert await _suggest(test_db) == 1, "第 1 轮应当只救 1 张"
+        assert len(await _pairs(test_db)) == 1
+        assert await _suggest(test_db) == 1, "第 2 轮没有接上下一批"
+        assert len(await _pairs(test_db)) == 2
+        assert await _suggest(test_db) == 0, "第 3 轮应当没有孤点可救了"
+
+    @pytest.mark.asyncio
+    async def test_no_isolated_cards_returns_zero(self, test_db):
+        """没有任何孤点时直接返回 0（不是报错）"""
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(10)},
+        )
+        assert await _suggest(test_db) == 1
+        assert await _suggest(test_db) == 0, "第二轮应当没有候选"
+
+    @pytest.mark.asyncio
+    async def test_candidate_can_reach_a_neighbor_outside_its_own_batch(
+        self, test_db, monkeypatch
+    ):
+        """★ 非对称比较：孤点的最近邻**可以在这批候选之外**
+
+        这是"候选少、目标全量"的意义所在。这里把上限压到 1，
+        而 c1 的相似对象 c2 不在同一批里 —— 如果比较只在候选批内做，c1 会一无所获。
+        """
+        from app.services import graph_service
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(10)},
+        )
+        monkeypatch.setattr(graph_service, "MAX_CARDS_FOR_SUGGEST", 1)
+        assert await _suggest(test_db) == 1, (
+            "候选批只有 1 张时没能连上批外的卡片 —— 比较被限制在候选批内了"
+        )
+        assert await _pairs(test_db) == {("c1", "c2")}
 
 
 class TestVectorColumnMigration:

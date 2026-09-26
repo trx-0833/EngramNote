@@ -137,12 +137,33 @@ def _compute_pairwise_similarity(vectors: List[List[float]]) -> np.ndarray:
     Returns:
         np.ndarray: n×n 相似度矩阵
     """
-    mat = np.array(vectors, dtype=np.float32)
-    norms = np.linalg.norm(mat, axis=1, keepdims=True)
-    norms = np.where(norms == 0, 1, norms)  # 避免除零
-    normalized = mat / norms
-    sim_matrix = normalized @ normalized.T
-    return sim_matrix
+    return _compute_similarity(vectors, vectors)
+
+
+def _compute_similarity(
+    rows: List[List[float]], cols: List[List[float]]
+) -> np.ndarray:
+    """
+    候选 × 目标 的余弦相似度矩阵（**非对称**：两个集合可以不同大小）
+
+    为什么需要非对称版本：候选是"要救的孤点"（一批 200 张），而目标池是
+    **全部**已嵌入卡片 —— 一张孤点的最近邻完全可能在"这批候选"之外。
+    用方阵版本就必须把两边取成同一个集合，那正是"904 张孤点永远轮不到"的原因。
+
+    Args:
+        rows: 候选向量（结果的行）
+        cols: 目标向量（结果的列）
+
+    Returns:
+        np.ndarray: len(rows) × len(cols) 相似度矩阵
+    """
+    a = np.array(rows, dtype=np.float32)
+    b = np.array(cols, dtype=np.float32)
+    a_norm = np.linalg.norm(a, axis=1, keepdims=True)
+    b_norm = np.linalg.norm(b, axis=1, keepdims=True)
+    a = a / np.where(a_norm == 0, 1, a_norm)  # 避免除零
+    b = b / np.where(b_norm == 0, 1, b_norm)
+    return a @ b.T
 
 
 async def get_graph_data(user_id: str, db: AsyncSession) -> GraphData:
@@ -319,20 +340,16 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     Returns:
         int: 新创建的建议关系数量
     """
-    # 取候选卡片：**只取已经有向量的**（`has_embedding`）。
+    # ── 目标池：**全部**已嵌入的卡片 —— "邻居"从这里找 ──
     #
-    # ## 为什么不再现算向量
+    # 为什么不像以前那样把比较限制在一个 200 张的池子里：孤点 1061 张里
+    # **904 张（85.2%）根本进不了池子**，而一张孤点的最近邻完全可能在池子之外。
+    # 所以现在是**非对称**的：候选（要救的孤点）少，目标（可比对的卡）是全量。
     #
-    # 原来这里每次点击都调 Celery 编码这 200 张：实测 73 秒，而下面的 `task.get`
-    # 超时是 180 秒；全量 1181 张要 **275 秒**，必超时 —— `MAX_CARDS_FOR_SUGGEST`
-    # 就是被它逼出来的，而它正是"904 张卡片进不了候选池"的原因。
-    #
-    # 现在向量存在 `knowledge_cards.embedding`（与 `chunks` 同一套列名与打包方式），
-    # 每次点击只做 numpy：1181² 余弦矩阵实测 10 ms。
-    #
-    # `has_embedding = False` 的卡片**不参与** —— 宁可少建议几条边，也不能把
-    # "缺失"当成"相似度 0"参与排序。补向量见 `scripts/embed_cards.py`。
-    cards_result = await db.execute(
+    # 代价 O(候选 × 全量)：200 × 1181 × 1024 ≈ 2.4 亿次乘加，numpy 实测几十毫秒。
+    # 语料再大一个数量级（万级）时这条会变慢，那时才需要 FTS5 之类的召回 ——
+    # 现在提前上那套复杂度没有依据。
+    targets_result = await db.execute(
         select(
             KnowledgeCard.id,
             KnowledgeCard.note_id,
@@ -343,9 +360,9 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.has_embedding.is_(True),
             Note.not_trashed(KnowledgeCard.note_id),
-        ).order_by(KnowledgeCard.updated_at.desc()).limit(MAX_CARDS_FOR_SUGGEST)
+        ).order_by(KnowledgeCard.updated_at.desc())
     )
-    cards = list(cards_result.all())
+    cards = list(targets_result.all())
 
     if len(cards) < 2:
         # 区分"卡片本来就少"与"卡片有、但都没有向量" —— 后者是部署问题，
@@ -426,22 +443,53 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     #    同笔记对全部优于跨笔记对（见两个常量的实测表）。真正的轴是笔记。
     note_of: Dict[str, Any] = {card.id: card.note_id for card in cards}
 
-    # 使用 numpy 向量化计算相似度矩阵（CPU 密集，放入线程池）
-    sim_matrix = await loop.run_in_executor(None, _compute_pairwise_similarity, vectors)
+    # ── 候选：**孤点优先** —— 还没有任何关系的卡片 ──
+    #
+    # 这是本批的核心改动。以前候选是"最新 200 张"，于是同一批卡片被反复比较，
+    # 而 904 张孤点**永远轮不到**。现在候选是"一条边都没有的卡"，
+    # 每处理一批它们就不再是孤点，**下一次点击自然推进到下一批** ——
+    # 不需要额外的游标，孤点数本身就是进度。
+    #
+    # 判定用「**任何状态**的关系行」（含 rejected）：被拒过的卡片对已经有人看过了，
+    # 再冒出来只是打扰；而且 `existing_pairs` 本来也会跳过那一对。
+    #
+    # ⚠️ 这一筛**在 Python 里做**，不写成 SQL 的 `NOT EXISTS`：关系已经全量加载在
+    # `existing_relations` 里了，再发一条相关子查询实测要 **239 ms**（1312 条关系时），
+    # 而且随关系数增长 —— 那是本函数最慢的一段（见 `_agenttmp/profile_suggest.py`）。
+    # 用同一个集合筛，代价只是几百次哈希查找。
+    # `cards` 已按 `updated_at desc` 排好，切片就是"最新的 N 张孤点"。
+    related_ids: set = set()
+    for rel in existing_relations:
+        related_ids.add(rel.card_id_1)
+        related_ids.add(rel.card_id_2)
+    candidate_ids = [c.id for c in cards if c.id not in related_ids][:MAX_CARDS_FOR_SUGGEST]
+    if not candidate_ids:
+        logger.info("没有孤点卡片了，无需建议: user=%s", user_id)
+        return 0
+
+    pos_of = {card.id: i for i, card in enumerate(cards)}
+    cand_pos = [pos_of[cid] for cid in candidate_ids if cid in pos_of]
+    if not cand_pos:
+        return 0
+
+    # 候选 × 目标 的相似度矩阵（非对称；CPU 密集，放入线程池）
+    sim_matrix = await loop.run_in_executor(
+        None, _compute_similarity, [vectors[p] for p in cand_pos], vectors
+    )
 
     # 逐卡取"最像的 TOP_K_PER_CARD 张"。**K 不是判据**，它只是把候选推到高分段；
     # 真正的判据是下面那个按「是否同笔记」分档的下界。
     new_count = 0
     new_relations = []
 
-    for i in range(len(cards)):
+    for row_i, i in enumerate(cand_pos):
         note_i = note_of.get(cards[i].id)
 
         candidates: List[Tuple[float, int]] = []
         for j in range(len(cards)):
             if j == i:
                 continue
-            similarity = float(sim_matrix[i][j])
+            similarity = float(sim_matrix[row_i][j])
             # 同笔记（含同章节）用 MIN_SIMILARITY；跨笔记要求更高
             same_note = note_of.get(cards[j].id) == note_i
             floor = MIN_SIMILARITY if same_note else CROSS_NOTE_MIN_SIMILARITY
