@@ -847,6 +847,26 @@ logger.info(
 **规模问题**：500 张卡片 → 124,750 个 pair。即使只在候选集上做 LLM 推断，
 成本与延迟都是**不可控的**（且用户点了按钮之后，没有进度反馈，见 D-8）。
 
+> **2026-09-26 部分已解决 —— O(n²) 与"每次现算向量"都处理了，LLM 那一半没动。**
+>
+> - **向量改为持久化**：`knowledge_cards` 加 `embedding_model` / `embedding_dim` /
+>   `embedding`(BLOB) / `has_embedding` 四列（与 `chunks` 同一套列名与打包方式，
+>   `app/models/knowledge_card.py`），迁移在 `app/database.py` 的 `_migrate_sqlite`。
+>   原来每次点击都现算这 200 张：实测 **73 秒**（全量 1181 张 **275 秒**），
+>   而 `task.get` 超时是 180 秒 —— `MAX_CARDS_FOR_SUGGEST = 200` 就是被它逼出来的。
+>   持久化后单次点击 **211 ms**（`docs/journal/relation-quality-2026-09-26.md` §11）。
+> - **比较改成非对称**：新增 `_compute_similarity(rows, cols)`（矩形），
+>   `_compute_pairwise_similarity` 保留为它的方阵特例。候选（要救的孤点，200 张）
+>   × 目标（全量 1181 张）—— 于是候选池能放开，孤点 **1061 → 216**（§12/§13）。
+> - **⚠️ LLM 推断那一半原样未动**：`suggest_semantic_relations()` 没被这条链路调用，
+>   关系类型在真实数据里**依然全是 `related`**（`RelationType` 的
+>   `prerequisite` / `subsequent` / `contrast` **零使用**）。
+>   "500 张卡片 → 124,750 个 pair"这个规模问题**仍然成立**。
+>   盲判显示约 **20%** 的真关系有明确类型（§13.5），所以这一块值得做，
+>   但需要 LLM 参与，是独立一批。
+> - 顺带记一笔：本轮**没有**引入 FTS5 召回 —— 实测 1181 张的余弦矩阵只要 **10 ms**，
+>   提前上那套复杂度没有依据（§12.1）。语料再大一个数量级时才是它上场的时候。
+
 #### 🟡 A-14 RRF 的 `k=60` 是照搬的默认值，没有针对场景调参
 
 `rag_service.py:309` `k: int = 60`，`rag_service.py:497` 传 `k=60`。
