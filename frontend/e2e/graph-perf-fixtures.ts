@@ -3,20 +3,32 @@
  *
  * ## 为什么需要它
  *
- * 真实库（`backend/data/db/engramnote.db`，2026-09-26 只读统计）的实际形状：
+ * 真实库（`backend/data/db/engramnote.db`，2026-09-26 只读统计）的实际形状。
+ *
+ * ⚠️ **2026-09-26 这份数字变过一次，而且变了 5 倍。** 关系判定改完之后
+ * （孤点优先的候选池 + 跨笔记下界 0.80，见
+ * `docs/journal/relation-quality-2026-09-26.md` §12/§13），全量收敛后是：
  *
  *     knowledge_cards  1181   concept 838 / definition 216 / qa 82 / formula 45
- *     card_relations    260   全部 related + confirmed，且 similarity_score **全部 > 0.6**
- *     有边的卡片 120 张，其中 65 张度 >= 3，最大度 23
- *     title 长度 min 2 / median 9 / max 29
+ *     card_relations   1362   （原来是 260）
+ *     有边的卡片        941   （原来是 120）
+ *     度 1 / 度 2 / 度 >= 3   253 / 180 / **508**（原来度 >= 3 只有 65）
+ *     最大度             23
+ *     similarity_score  min 0.750 / 中位 0.814 / max 0.999（**全部 > 0.6**）
+ *     title 长度        min 2 / median 9 / max 29
  *
- * 而 `GET /api/graph`（`backend/app/api/graph.py:57-71`）**没有上限** ——
- * 这 1181 个节点会被全部下发、全部渲染。"节点太多"指的就是这个规模，
- * 所以探针的桩必须**结构一致**，否则量出来的帧率没有意义。
+ * **"度 >= 3 的卡片 65 → 508"这一条最要紧**：`drawNode.ts:56` 的**外发光环**
+ * 只对枢纽节点画，而它是最贵的绘制路径。这条数字涨了 7.8 倍，
+ * 所以探针必须按新数字重测 —— 否则量的是"上一个版本画不画得动"。
  *
- * `similarity_score 全部 > 0.6` 这一条尤其要紧：`GraphCanvas.tsx:154-156` 的
- * `linkDirectionalParticles` 据此给**每条边**返回 2 个粒子（不是 1 个），
- * 于是 260 条边 = 520 个持续动画的粒子。
+ * 而 `GET /api/graph`（`backend/app/api/graph.py:57-71`）**没有上限**，
+ * 且 `graph_service.get_graph_data` 取的是 `confirmed` **与** `suggested` 两种状态
+ * —— 也就是说用户一点「生成建议」，这 1362 条边**立刻**全上屏。
+ *
+ * `similarity_score 全部 > 0.6` 这一条仍然成立：`GraphCanvas.tsx:288` 的
+ * `linkDirectionalParticles` 据此给**每条边**返回 2 个粒子。
+ * 不过 1181 > `LARGE_GRAPH_NODES`，大图路径下粒子已经是 0 ——
+ * 这个数字现在的意义是"**没有**因为粒子而额外变慢"。
  *
  * ## 为什么标题是合成的
  *
@@ -34,7 +46,7 @@
 /** 真实规模。改这里的数就要同时改文件头的说明与断言。 */
 export const REAL_SHAPE = {
   nodes: 1181,
-  edges: 260,
+  edges: 1362,
   /** `card_type` 的真实分布（顺序无关，后面会被确定性洗牌） */
   cardTypes: [
     { type: 'concept', count: 838 },
@@ -42,10 +54,17 @@ export const REAL_SHAPE = {
     { type: 'qa', count: 82 },
     { type: 'formula', count: 45 },
   ],
-  /** 有边的卡片数 */
-  touchedNodes: 120,
-  /** 其中有几张是"枢纽"（度 >= 3，会触发 `drawNode.ts:56` 的外发光环） */
-  hubNodes: 65,
+  /**
+   * 度分布：**度 1 / 度 2 / 度 >= 3** 三段。
+   *
+   * 原来只分"枢纽 + 叶子"两段（非枢纽一律按度 1），而真实数据里有
+   * **180 张度 2** 的卡片 —— 它们的节点半径（`types.ts:237-239` 按
+   * `relation_count` 算）与叶子不同，混成一段会让"节点绘制成本"失真。
+   */
+  degree1Nodes: 253,
+  degree2Nodes: 180,
+  /** 度 >= 3 的"枢纽"（会触发 `drawNode.ts:56` 的外发光环） */
+  hubNodes: 508,
   maxDegree: 23,
   titleMin: 2,
   titleMax: 29,
@@ -137,7 +156,7 @@ export interface LargeGraph {
 }
 
 /**
- * 生成与真实规模一致的图谱桩（1181 节点 / 260 边）。
+ * 生成与真实规模一致的图谱桩（1181 节点 / 1362 边）。
  *
  * `relation_count` **由生成的边反推**（而不是另外编一份）——
  * 真实后端也是这么算的，而它决定节点半径（`types.ts:237-239`）
@@ -145,12 +164,21 @@ export interface LargeGraph {
  */
 export function buildLargeGraph(): LargeGraph {
   const rng = mulberry32(0x5eed);
-  const { nodes: nodeCount, edges: edgeCount, touchedNodes, hubNodes, maxDegree } = REAL_SHAPE;
+  const { nodes: nodeCount, edges: edgeCount, degree1Nodes, degree2Nodes, hubNodes, maxDegree } =
+    REAL_SHAPE;
+  const touchedNodes = degree1Nodes + degree2Nodes + hubNodes;
 
-  // 1) 度序列：65 个枢纽 + 55 个叶子（度 1），合计 2 × 260 = 520
-  const leafCount = touchedNodes - hubNodes;
-  const hubs = hubDegrees(hubNodes, edgeCount * 2 - leafCount, maxDegree);
-  const degrees = [...hubs, ...new Array<number>(leafCount).fill(1)];
+  // 1) 度序列：508 个枢纽 + 180 个度 2 + 253 个度 1，合计 2 × 1362 = 2724
+  //
+  //    枢纽分到的度预算 = 总和 − 度 2 段 − 度 1 段 —— 先把固定段扣掉，
+  //    剩下的才轮到 `hubDegrees` 去分（它要求每个枢纽 >= 3）。
+  const hubBudget = edgeCount * 2 - degree2Nodes * 2 - degree1Nodes;
+  const hubs = hubDegrees(hubNodes, hubBudget, maxDegree);
+  const degrees = [
+    ...hubs,
+    ...new Array<number>(degree2Nodes).fill(2),
+    ...new Array<number>(degree1Nodes).fill(1),
+  ];
 
   // 2) 桩配对成边（确定性洗牌；自环就地与后面一条换掉）
   const stubs: number[] = [];

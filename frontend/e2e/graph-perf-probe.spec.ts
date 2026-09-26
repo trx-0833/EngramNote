@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 图谱规模性能探针（先立基线，再动优化）
  *
  * ## 它回答的问题
@@ -93,7 +93,9 @@ async function openLargeGraph(page: Page): Promise<void> {
       confirmed_edges: graph.edges.length,
       suggested_edges: 0,
       relation_type_distribution: [{ relation_type: 'related', count: graph.edges.length }],
-      isolated_nodes: graph.nodes.length - REAL_SHAPE.touchedNodes,
+      isolated_nodes:
+        graph.nodes.length -
+        (REAL_SHAPE.degree1Nodes + REAL_SHAPE.degree2Nodes + REAL_SHAPE.hubNodes),
     },
   });
   await loginAs(page, '/graph');
@@ -372,6 +374,26 @@ test.describe('图谱规模性能探针', () => {
     console.log(`  measureText ${perFrame('measureText')} 次/帧`);
     console.log(`  roundRect   ${perFrame('roundRect')} 次/帧`);
     console.log(`  fillText    ${perFrame('fillText')} 次/帧`);
+
+    // ── 粗粒度回归闸 ──
+    //
+    // ⚠️ 这条**不是**性能指标，是"灾难探测器"。为什么阈值放这么宽：
+    // 同一个配置连跑两次，② 与 ③对照 分别给出 54.65 ms 与 67.46 ms ——
+    // **噪声约 ±20%**，比大多数真实改动的效应还大。用窄阈值只会得到 flaky 用例。
+    //
+    // 150 ms 是实测值（54~68 ms）的 2~3 倍余量，能抓住的是量级级别的回归 ——
+    // 例如缓存渐变对象却仍调 `addColorStop` 那次（62 ms → **4937 ms**）。
+    // 那种 bug 会让图谱彻底不可用，而"慢了 15%"不会。
+    const FORCED_ZOOM_BUDGET_MS = 150;
+    console.log(
+      `  回归闸      平均帧间隔须 < ${FORCED_ZOOM_BUDGET_MS} ms` +
+        `（实测 ${stats.avgMs.toFixed(2)} ms，噪声 ±20%，余量 2~3 倍）`
+    );
+    expect(
+      stats.avgMs,
+      `持续缩放的平均帧间隔 ${stats.avgMs.toFixed(1)} ms 超过 ${FORCED_ZOOM_BUDGET_MS} ms ` +
+        '—— 量级级别的渲染回归（不是"慢了百分之十几"）'
+    ).toBeLessThan(FORCED_ZOOM_BUDGET_MS);
   });
 
   /**
