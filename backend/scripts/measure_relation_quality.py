@@ -18,6 +18,32 @@
      不说明"建得对不对"；没有第 3 问，调阈值就是拿"边变多了"冒充"变好了"）
 
 ================================================================================
+⚠️ 它与**现在的**线上实现已经不是同口径了（2026-09-26 记）
+================================================================================
+
+本脚本写于关系判定的第一轮改动之前，当时线上是：
+
+    取数    `updated_at desc` 的前 200 张已嵌入卡片
+    比较    **只在候选池内**（方阵）
+    判据    全局相似度阈值
+
+现在（`af39305` → `25695b1` → `4bd842c`）是：
+
+    取数    候选 = **还没有任何关系的卡片**（孤点优先，取最新 200 张）
+    比较    **候选 × 全量**（非对称）—— 一张孤点的最近邻可能在候选批之外
+    判据    **按是否同笔记分档**：同笔记 0.75 / 跨笔记 0.80
+    另加    **同名闸**（标题相同的对不建边）
+
+**所以本脚本的 `GROUPS` 量的是"200 张切片上的历史规则"，不是现在的线上行为。**
+保留它们是为了让第一轮那几张表**可复跑**（报告 §3/§4 就是它们产的），
+以及"同一把尺子量不同规则"的横向比较。
+
+**要看现在的线上行为，用 `--groups current`**（下面新加的那组：
+同笔记 0.75 / 跨笔记 0.80 / 每卡 Top-3 / 同名闸）。它仍然只在 200 张切片上量，
+**不含**"孤点优先的候选池"与"非对称比较"—— 那两件事的复算是
+`_agenttmp/e2e_step3.py`（跑生产函数本身），不在本脚本的范围内。
+
+================================================================================
 它**不**做什么
 ================================================================================
 
@@ -92,28 +118,46 @@ SAMPLE_PER_GROUP = 12
 # 抽样分组：每一组对应一个"如果这样改，会建出什么"的假设
 # ============================================================================
 #
-# `rule` 三种：
-#   current —— 现在的规则：跨笔记 + 阈值
-#   chapter —— 阶段 1 的规则：同笔记**同章节**才跳过 + 阈值
-#   topk    —— 阶段 1 + 阶段 2 的规则：同章节跳过 + 每卡 Top-K + 绝对下界
+# ⚠️ A–F 是**历史分组**（第一轮改动时的假设），保留它们是为了让报告 §3/§4
+# 那几张表可复跑、以及"同一把尺子量不同规则"的横向比较。它们量的是
+# "200 张切片上的历史规则"，**不是现在的线上行为** —— 见文件头的对照表。
+#
+# `rule` 四种：
+#   current —— 最早那版：跨笔记 + 全局阈值
+#   chapter —— 阶段 1：同笔记**同章节**才跳过 + 阈值
+#   topk    —— 阶段 1 + 2：同章节跳过 + 每卡 Top-K + 绝对下界
+#   live    —— **现在的线上规则**：按是否同笔记分档 + 每卡 Top-K + 同名闸
 GROUPS: List[Tuple[str, str, Dict, int]] = [
-    ("A", "现状规则：跨笔记 & ≥0.75", {"rule": "current", "threshold": 0.75}, 0),
-    ("B", "章节粒度 & ≥0.55", {"rule": "chapter", "threshold": 0.55}, SAMPLE_PER_GROUP),
-    ("C", "章节粒度 & ≥0.65", {"rule": "chapter", "threshold": 0.65}, SAMPLE_PER_GROUP),
-    ("D", "章节粒度 & ≥0.75", {"rule": "chapter", "threshold": 0.75}, SAMPLE_PER_GROUP),
+    ("A", "历史：跨笔记 & ≥0.75", {"rule": "current", "threshold": 0.75}, 0),
+    ("B", "历史：章节粒度 & ≥0.55", {"rule": "chapter", "threshold": 0.55}, SAMPLE_PER_GROUP),
+    ("C", "历史：章节粒度 & ≥0.65", {"rule": "chapter", "threshold": 0.65}, SAMPLE_PER_GROUP),
+    ("D", "历史：章节粒度 & ≥0.75", {"rule": "chapter", "threshold": 0.75}, SAMPLE_PER_GROUP),
     (
         "E",
-        "提议方法：章节粒度 + 每卡Top-3 + 下界0.55",
+        "历史：章节粒度 + 每卡Top-3 + 下界0.55",
         {"rule": "topk", "k": 3, "floor": 0.55},
         SAMPLE_PER_GROUP,
     ),
     (
         "F",
-        "对照：章节粒度 + 每卡Top-5 + 下界0.55",
+        "历史：章节粒度 + 每卡Top-5 + 下界0.55",
         {"rule": "topk", "k": 5, "floor": 0.55},
         SAMPLE_PER_GROUP,
     ),
+    (
+        "G",
+        "★ 现在线上：同笔记0.75 / 跨笔记0.80 + 每卡Top-3 + 同名闸",
+        {"rule": "live", "k": 3},
+        SAMPLE_PER_GROUP,
+    ),
 ]
+
+#: 现在线上的两个下界（与 `graph_service` 的常量同值）。
+#: **不 import 那两个常量**：这个脚本要能在"应用层 import 不起来"的环境里跑
+#: （只读测量工具的独立性比"少写两个数"重要），但值必须与代码一致 ——
+#: `test_check_env_consistency.py` 那一类口径的守卫可以盯这一条。
+LIVE_SAME_NOTE_FLOOR = 0.75
+LIVE_CROSS_NOTE_FLOOR = 0.80
 
 
 # ============================================================================
@@ -288,6 +332,34 @@ def eligible_pairs(sim: np.ndarray, cards: Sequence[dict], spec: Dict) -> Set[Tu
                 out.add((min(i, j), max(i, j)))
         return out
 
+    if rule == "live":
+        # **现在的线上规则**（`graph_service.auto_suggest_relations`）：
+        #   1. 下界按**是否同笔记**分档（同笔记 0.75 / 跨笔记 0.80）
+        #   2. 每卡取最像的 Top-K
+        #   3. **同名闸**：标题相同的对不建边
+        #
+        # ⚠️ 这里**没有**建模线上另外两件事 —— "候选 = 孤点优先"与
+        # "候选 × 全量的非对称比较"。它们要跑生产函数本身才量得准，
+        # 见 `_agenttmp/e2e_step3.py`。本组量的是"同一批 200 张、换成新判据"。
+        k = spec["k"]
+        for i in range(n):
+            title_i = (cards[i].get("title") or "").strip()
+            cand = []
+            for j in range(n):
+                if j == i:
+                    continue
+                if title_i and title_i == (cards[j].get("title") or "").strip():
+                    continue                      # 同名闸
+                floor = (LIVE_SAME_NOTE_FLOOR if same_note(i, j)
+                         else LIVE_CROSS_NOTE_FLOOR)
+                if sim[i][j] < floor:
+                    continue
+                cand.append((sim[i][j], j))
+            cand.sort(key=lambda t: (-t[0], t[1]))
+            for _s, j in cand[:k]:
+                out.add((min(i, j), max(i, j)))
+        return out
+
     raise ValueError(f"未知规则：{rule}")
 
 
@@ -438,11 +510,26 @@ def main() -> int:
         os.path.dirname(os.path.abspath(__file__)), "..", "data", "models", "Xorbits", "bge-m3"),
         help="本地嵌入模型目录（**不下载**）")
     ap.add_argument("--vectors", default="", help="复用已算好的向量 .npy")
+    ap.add_argument(
+        "--groups", default="",
+        help="只跑这些组（逗号分隔，如 G 或 A,G）。默认全部；"
+             "A–F 是历史分组，G 是现在的线上规则（见文件头）",
+    )
     ap.add_argument("--save-vectors", default="", help="把向量写到该 .npy")
     ap.add_argument("--out", default="", help="把抽样表写成 markdown")
     ap.add_argument("--emit-labels", default="", help="写出待填的标注模板 JSON")
     ap.add_argument("--labels", default="", help="已填好的标注 JSON，用于算精确率")
     args = ap.parse_args()
+
+    # `--groups` 就地过滤模块级的 GROUPS —— 下游（`eligible_pairs` 的调用方、
+    # `render_sample_markdown`、`precision_report`）都读这个全局，改它一处即可。
+    if args.groups:
+        want = {g.strip().upper() for g in args.groups.split(",") if g.strip()}
+        unknown = want - {g[0] for g in GROUPS}
+        if unknown:
+            print(f"[ERROR] 未知分组：{sorted(unknown)}（可选：{[g[0] for g in GROUPS]}）")
+            return 2
+        GROUPS[:] = [g for g in GROUPS if g[0] in want]
 
     problem = _preflight_db(args.db)
     if problem:
