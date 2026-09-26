@@ -17,7 +17,7 @@
 import enum
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Enum, String, Text, JSON, ForeignKey, Float
+from sqlalchemy import Boolean, Enum, Index, Integer, LargeBinary, String, Text, JSON, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel
@@ -130,3 +130,43 @@ class KnowledgeCard(BaseModel):
     #: 从而污染"第一版的表现"这个统计口径。NULL 的含义是**未知**，
     #: 与 4.2 里 `cost` 为 NULL 而不是 0 是同一条原则。
     prompt_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    #: 卡片嵌入向量（阶段：关系判定提速）
+    #:
+    #: ## 为什么必须持久化
+    #:
+    #: 关系建议原本**每次点击都现算**这 200 张卡的向量：实测编码 200 张要 73 秒，
+    #: 而 `POST /graph/suggest` 里 Celery 的 `task.get` 超时是 **180 秒**
+    #: （`graph_service.auto_suggest_relations`）。全量 1181 张实测要 **275 秒**，
+    #: 必超时 —— 也就是说 `MAX_CARDS_FOR_SUGGEST = 200` 这个上限**是被超时逼出来的**，
+    #: 而它正是"1061 张卡片一个边都没有"的主因（904 张根本进不了候选池）。
+    #:
+    #: 存下来之后：余弦矩阵 1181² 实测 **10 ms**、每行 Top-6 **15 ms** —— 与现算的
+    #: 275 秒差四个数量级，而且再也不撞超时。
+    #:
+    #: ## 为什么与 `chunks` 表用**同一套列名与打包方式**
+    #:
+    #: `app/models/chunk.py:152-157` 已经是这个模式（`embedding_model` /
+    #: `embedding_dim` / `embedding` BLOB / `has_embedding`），且 `pack_vector` /
+    #: `unpack_vector` 就在那里。AGENTS.md §3 的口径是「向量与原文**同库同表**存储，
+    #: 不用独立的向量库」—— 这里照抄，不另立一套。
+    #:
+    #: ## 为什么允许 NULL、且不回填
+    #:
+    #: 本列引入之前入库的卡片没有向量，**且算不出来**（那需要跑一遍嵌入模型）。
+    #: 迁移只加列、不填值；补向量由 worker 任务异步做（一次性，全量约 275 秒）。
+    #: `has_embedding = False` 的行**不参与**关系建议 —— 宁可少建议几条边，
+    #: 也不能拿一个"缺失"当"相似度 0"去参与排序。
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    embedding_dim: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    #: 冗余布尔标记：关系建议要按用户过滤 + 只取已嵌入的行，
+    #: 避免每次都对 BLOB 列做 `IS NOT NULL` 判断（与 `chunks.has_embedding` 同理）
+    has_embedding: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+
+    __table_args__ = (
+        # 关系建议的取数路径：按用户过滤 + 只取已嵌入的行
+        Index("ix_knowledge_cards_user_embed", "user_id", "has_embedding"),
+    )

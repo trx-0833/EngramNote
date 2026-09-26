@@ -17,8 +17,9 @@
   缓存键为 sha256(text)[:16]，减少内存占用并避免重复计算
 - 任务使用 acks_late=True + task_reject_on_worker_lost=True 确保可靠性，
   worker 崩溃时任务会被重新投递
-- Celery 任务为同步函数；本模块**不需要**事件循环（只做模型加载与编码，
-  不碰数据库），因此没有 asyncio 调用
+- Celery 任务为同步函数；`encode_text` **不需要**事件循环（只做模型加载与编码，
+  不碰数据库）。`embed_cards` 例外 —— 它要把向量写回库，因此用
+  `tasks/loop.py` 的 `task_loop` + `run_async`（与 `clean_tasks` 同一套）
 """
 
 from __future__ import annotations
@@ -26,10 +27,11 @@ from __future__ import annotations
 import functools
 import hashlib
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 from .celery_app import celery_app
+from .loop import run_async, task_loop
 from ..config import get_settings
 
 settings = get_settings()
@@ -137,4 +139,140 @@ def encode_text(texts: List[str]) -> List[List[float]]:
                 logger.error(f"直接编码也失败: {fallback_err}")
                 results.append([])
     return results
+
+
+#: `embed_cards` 单批处理多少张卡。
+#:
+#: 为什么是 200 而不是全量：编码本身约 0.37 秒/张（实测 1181 张 275 秒），
+#: 一次 200 张约 75 秒 —— 与 `MAX_CARDS_FOR_SUGGEST` 同量级，任务不会长到
+#: 让 worker 看起来像卡死。调用方循环投递即可推进全量。
+EMBED_CARDS_BATCH = 200
+
+
+@celery_app.task(acks_late=True, task_reject_on_worker_lost=True)
+def embed_cards(user_id: str, limit: int = EMBED_CARDS_BATCH) -> Dict[str, int]:
+    """给**还没有向量**的卡片补向量并写回库（关系判定提速的前提）
+
+    ## 为什么需要这个任务
+
+    关系建议原本每次点击都现算向量：200 张 73 秒、全量 1181 张 275 秒，
+    而 `POST /graph/suggest` 的 Celery `task.get` 超时是 180 秒 ——
+    于是候选池被死死压在 200 张，**904 张卡片根本进不了候选池**
+    （孤点 1061 张里占 85.2%）。
+
+    把向量存进 `knowledge_cards.embedding` 之后，每次点击只做 numpy
+    （1181² 余弦矩阵实测 10 ms），候选池才有可能放开到全量。
+
+    ## 只处理 `has_embedding=False` 的行
+
+    已嵌入的卡片**不重算** —— 嵌入模型换了要重算时，把 `has_embedding`
+    置回 False（或按 `embedding_model` 过滤）另行处理，不在这个任务里做。
+    重算全量是 275 秒，不该混进"补缺失"这条日常路径。
+
+    ## 向量文本口径必须与 `graph_service._build_card_embedding_text` 一致
+
+    否则库里存的向量与"现算"的向量不是同一个东西，相似度就没有可比性。
+    这里**直接 import 那个函数**，不另写一份。
+
+    Args:
+        user_id: 用户 ID
+        limit: 本批最多处理多少张（默认 200）
+
+    Returns:
+        dict: `{"scanned": 扫描到的待嵌入卡片数, "embedded": 实际写入数,
+               "failed": 编码失败数, "remaining": 本批之后还剩多少}
+    """
+    from ..services.graph_service import _build_card_embedding_text
+
+    with task_loop("embed_cards"):
+        return run_async(_embed_cards_async(user_id, limit, _build_card_embedding_text))
+
+
+async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, int]:
+    """`embed_cards` 的异步主体（要读写库，因此必须跑在任务事件循环里）"""
+    from sqlalchemy import func, select, update
+
+    from ..models.chunk import pack_vector
+    from ..models.knowledge_card import KnowledgeCard
+    from ..models.note import Note
+    from .common import get_sync_session
+
+    session_factory = get_sync_session()
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(KnowledgeCard.id, KnowledgeCard.title, KnowledgeCard.content)
+            .where(
+                KnowledgeCard.user_id == user_id,
+                KnowledgeCard.has_embedding.is_(False),
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
+            .order_by(KnowledgeCard.updated_at.desc())
+            .limit(limit)
+        )).all()
+
+        if not rows:
+            return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0}
+
+        texts = [build_text(title, content) for _cid, title, content in rows]
+        vectors = encode_text(texts)
+        model_name = _model_name()
+
+        embedded = failed = 0
+        # strict=True：`encode_text` 保证一条文本一个向量，长度不等说明任务坏了，
+        # 宁可让任务报错，也不能悄悄少写几张卡（那会让它们永远没有向量）
+        for (card_id, _title, _content), vec in zip(rows, vectors, strict=True):
+            if not vec:
+                failed += 1
+                continue
+            await session.execute(
+                update(KnowledgeCard)
+                .where(KnowledgeCard.id == card_id)
+                .values(
+                    embedding=pack_vector(vec),
+                    embedding_dim=len(vec),
+                    embedding_model=model_name,
+                    has_embedding=True,
+                )
+            )
+            embedded += 1
+        await session.commit()
+
+        remaining = (await session.execute(
+            select(func.count()).select_from(KnowledgeCard).where(
+                KnowledgeCard.user_id == user_id,
+                KnowledgeCard.has_embedding.is_(False),
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
+        )).scalar_one()
+
+    logger.info(
+        "embed_cards: user=%s 扫描 %d 张 → 写入 %d、失败 %d，剩余 %d",
+        user_id, len(rows), embedded, failed, remaining,
+    )
+    return {
+        "scanned": len(rows),
+        "embedded": embedded,
+        "failed": failed,
+        "remaining": remaining,
+    }
+
+
+def _model_name() -> Optional[str]:
+    """**实际加载的**嵌入模型名（写进 `embedding_model` 列）
+
+    ⚠️ 必须用 `loaded_model_name` 而不是 `settings.embedding_model` ——
+    `EmbeddingService` 在**可用内存不足时会自动降级**
+    （`embedding_service.py:66` 的 `_pick_embedding_model_name`：主模型
+    `BAAI/bge-m3`（1024 维）→ 降级 `BAAI/bge-small-zh-v1.5`（512 维））。
+    这个降级不是理论情况 —— 本机跑端到端验证时**真的触发了**
+    （"可用内存不足（2.5GB < 4.0GB）"）。
+
+    第一次实现取的是 `getattr(service, "model_name", None) or settings.embedding_model`，
+    而 `EmbeddingService` 根本没有 `model_name` 这个属性（只有 `_model_name` 与
+    属性 `loaded_model_name`），于是**每一行都写成了配置值** —— 库里 512 维的向量
+    被标成 `BAAI/bge-m3`。这一列存在的意义就是"将来按模型重算"，
+    记错等于把它废掉。
+    """
+    service = _get_embedding_service()
+    return getattr(service, "loaded_model_name", None) or settings.embedding_model
 

@@ -910,6 +910,42 @@ async def _migrate_sqlite(conn):
                         "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s", exc,
                     )
 
+        # ---- knowledge_cards 向量列（关系判定提速）----
+        #
+        # 关系建议原本每次点击都现算这 200 张卡的向量：实测编码 200 张 73 秒，
+        # 而 `POST /graph/suggest` 的 Celery `task.get` 超时是 180 秒；全量 1181 张
+        # 实测 275 秒，必超时 —— `MAX_CARDS_FOR_SUGGEST = 200` 就是被它逼出来的，
+        # 而它正是"1061 张卡片没有一条边"的主因（904 张进不了候选池）。
+        #
+        # 这里**只加列、不回填**：历史卡片没有向量，算出来要跑一遍嵌入模型
+        # （全量约 275 秒），不该塞在启动路径里。补向量由 worker 任务异步做
+        # （`app/tasks/embedding_tasks.py`），`has_embedding=False` 的行不参与建议。
+        #
+        # 列名与打包方式与 `chunks` 表一致（`app/models/chunk.py:152-157`），
+        # 不另立一套 —— AGENTS.md §3：向量与原文同库同表存储。
+        if 'knowledge_cards' in table_names:
+            card_cols = {c['name'] for c in inspector.get_columns('knowledge_cards')}
+            for col, ddl in (
+                ('embedding_model',
+                 "ALTER TABLE knowledge_cards ADD COLUMN embedding_model VARCHAR(200)"),
+                ('embedding_dim',
+                 "ALTER TABLE knowledge_cards ADD COLUMN embedding_dim INTEGER"),
+                ('embedding',
+                 "ALTER TABLE knowledge_cards ADD COLUMN embedding BLOB"),
+                ('has_embedding',
+                 "ALTER TABLE knowledge_cards ADD COLUMN has_embedding BOOLEAN DEFAULT 0 NOT NULL"),
+            ):
+                if col not in card_cols:
+                    sync_conn.execute(text(ddl))
+                    logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 %s 列", col)
+            try:
+                sync_conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_user_embed "
+                    "ON knowledge_cards (user_id, has_embedding)"
+                ))
+            except Exception:
+                pass
+
         # ---- 提示词版本列（阶段 4.6：溯源）----
         #
         # 两张表、同一套取值（`prompts.PROMPT_VERSIONS`）。

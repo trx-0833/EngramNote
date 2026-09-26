@@ -54,6 +54,7 @@ from sqlalchemy import and_, case, distinct, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.card_relation import CardRelation, RelationType, RelationStatus
+from ..models.chunk import unpack_vector
 from ..models.knowledge_card import KnowledgeCard
 from ..models.note import Note
 from ..schemas.graph import GraphData, GraphNode, GraphEdge, SuggestedRelation
@@ -318,48 +319,88 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     Returns:
         int: 新创建的建议关系数量
     """
-    # 获取用户所有知识卡片，仅取所需列（含内容用于语义嵌入），限制数量
-    # 回收站中的卡片不参与建议计算
+    # 取候选卡片：**只取已经有向量的**（`has_embedding`）。
+    #
+    # ## 为什么不再现算向量
+    #
+    # 原来这里每次点击都调 Celery 编码这 200 张：实测 73 秒，而下面的 `task.get`
+    # 超时是 180 秒；全量 1181 张要 **275 秒**，必超时 —— `MAX_CARDS_FOR_SUGGEST`
+    # 就是被它逼出来的，而它正是"904 张卡片进不了候选池"的原因。
+    #
+    # 现在向量存在 `knowledge_cards.embedding`（与 `chunks` 同一套列名与打包方式），
+    # 每次点击只做 numpy：1181² 余弦矩阵实测 10 ms。
+    #
+    # `has_embedding = False` 的卡片**不参与** —— 宁可少建议几条边，也不能把
+    # "缺失"当成"相似度 0"参与排序。补向量见 `scripts/embed_cards.py`。
     cards_result = await db.execute(
         select(
             KnowledgeCard.id,
-            KnowledgeCard.title,
-            KnowledgeCard.content,
             KnowledgeCard.note_id,
+            KnowledgeCard.embedding,
+            KnowledgeCard.embedding_dim,
+            KnowledgeCard.embedding_model,
         ).where(
             KnowledgeCard.user_id == user_id,
+            KnowledgeCard.has_embedding.is_(True),
             Note.not_trashed(KnowledgeCard.note_id),
         ).order_by(KnowledgeCard.updated_at.desc()).limit(MAX_CARDS_FOR_SUGGEST)
     )
     cards = list(cards_result.all())
 
     if len(cards) < 2:
+        # 区分"卡片本来就少"与"卡片有、但都没有向量" —— 后者是部署问题，
+        # 静默返回 0 会让用户以为"没有相关卡片"，而实际是没跑补向量
+        total = (await db.execute(
+            select(func.count()).select_from(KnowledgeCard).where(
+                KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
+        )).scalar_one()
+        if total >= 2 and len(cards) == 0:
+            raise GraphSuggestionError(
+                "卡片向量尚未生成，无法自动建议关系。"
+                "请先运行 `python backend/scripts/embed_cards.py` 补向量后重试"
+            )
         return 0
 
-    # 编码「标题 + 截断内容」：嵌入模型在 Celery worker 中执行，
-    # 避免 API 进程加载 BGE-M3 导致内存暴涨；批量编码的阻塞 task.get() 放入线程池
-    texts = [_build_card_embedding_text(card.title, card.content) for card in cards]
-    loop = asyncio.get_event_loop()
-    try:
-        from ..tasks.celery_app import celery_app
-        task = celery_app.send_task(
-            "app.tasks.embedding_tasks.encode_text",
-            args=[texts],
-        )
-        vectors = await asyncio.to_thread(task.get, 180)
-    except Exception as e:
+    # ⚠️ **同一批里只能有一个模型**。
+    #
+    # `EmbeddingService` 会在可用内存不足时自动降级
+    # （`embedding_service.py:66`：bge-m3 1024 维 → bge-small-zh-v1.5 512 维），
+    # 所以同一个库里**可能混着两个模型的向量** —— 端到端验证时真的触发过。
+    # 跨模型算余弦是无意义的数字，而维度不同还会让 `np.array` 直接变成 object 数组。
+    #
+    # 取"条数最多的那一组"，其余**丢弃并告警**：宁可少用几张卡，
+    # 也不能拿两个模型的向量放在一起排序。要彻底消除，重跑
+    # `scripts/embed_cards.py`（把 `has_embedding` 置回 0 即可重算）。
+    groups: Dict[Tuple[Any, Any], List[Any]] = {}
+    for card in cards:
+        groups.setdefault((card.embedding_model, card.embedding_dim), []).append(card)
+    if len(groups) > 1:
+        biggest = max(groups.items(), key=lambda kv: len(kv[1]))
         logger.warning(
-            "卡片嵌入生成失败（Celery worker 不可用或超时）: user=%s, err=%s",
-            user_id, e,
+            "卡片向量混用了多个模型，只用最多的那一组: user=%s 采用 %s(%s) 共 %d 张；"
+            "丢弃 %s —— 跨模型算余弦无意义，请重跑 embed_cards 统一",
+            user_id, biggest[0][0], biggest[0][1], len(biggest[1]),
+            {f"{k[0]}({k[1]})": len(v) for k, v in groups.items() if k != biggest[0]},
         )
-        raise GraphSuggestionError(
-            "嵌入服务不可用或超时，无法自动建议关系，请稍后重试"
-        ) from e
+        cards = biggest[1]
 
-    if not vectors or any(not v for v in vectors):
-        raise GraphSuggestionError(
-            "嵌入服务返回空向量，无法自动建议关系，请稍后重试"
-        )
+    # 解包向量（长度与 `embedding_dim` 不符时 `unpack_vector` 返回 None ——
+    # 那种行按"没有向量"处理，绝不拿长度不对的 BLOB 去算余弦）
+    vectors = []
+    usable = []
+    for card in cards:
+        vec = unpack_vector(card.embedding, card.embedding_dim)
+        if vec:
+            vectors.append(vec)
+            usable.append(card)
+    cards = usable
+
+    if len(cards) < 2:
+        return 0
+
+    loop = asyncio.get_event_loop()
 
     # 查询已有的所有关系（含 rejected），避免重复建议
     existing_result = await db.execute(

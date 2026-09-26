@@ -233,6 +233,70 @@
   > （区间有重叠），方向可信、数值待更大样本。局限逐条登记在报告 §9.6 / §10.4，
   > **不能当定论用**。
 
+- **知识图谱：卡片向量改为持久化存储**（2026-09-26）。孤点 1061 张里
+  **904 张（85.2%）根本进不了候选池**，而候选池被压在 200 张**是被超时逼出来的**：
+
+  | | 实测 |
+  |---|---|
+  | 编码 200 张（bge-m3） | 73 秒 |
+  | 编码 1181 张（bge-m3） | **275 秒** |
+  | `POST /graph/suggest` 里 Celery `task.get` 的超时 | **180 秒** |
+
+  只要向量还得现算，池子就放不开。存进库之后 1181² 余弦矩阵实测 **10 ms**。
+
+  **改动**：
+
+  - `app/models/knowledge_card.py`：加 `embedding_model` / `embedding_dim` /
+    `embedding`(LargeBinary) / `has_embedding` + 索引 `(user_id, has_embedding)`
+    —— 与 `chunk.py:152-157` 同一套列名与打包方式（AGENTS.md §3：向量与原文同库同表）
+  - `app/database.py`：`_migrate_sqlite` 加 `ALTER TABLE ... ADD COLUMN`
+    （**只加列、不回填** —— 回填要跑一遍嵌入模型，不该塞在启动路径里），
+    先例是 `content_hash`（`:872`）
+  - `app/tasks/embedding_tasks.py`：新增 `embed_cards` 任务，只处理
+    `has_embedding=False` 的行，分批复用 `encode_text`
+  - `app/services/graph_service.py`：候选卡**只取有向量的**、向量从库读；
+    "有卡片但一条向量都没有" → **报错并说明怎么补**，而不是静默返回 0
+    （静默返回 0 会让用户以为"没有相关卡片"）
+  - `scripts/embed_cards.py`：补向量入口（在**本进程内**执行任务，不需要 worker 在跑）
+
+  **端到端验证**（真库副本上跑真函数）：
+
+  ```
+  ① 迁移     副本新增 4 列 + 索引 ✓ ｜ 真库未被迁移
+  ② 补向量   1181 张全部写入、0 失败、57 秒
+  ③ 建议     260 → 417 条（新建 157）｜ 单次耗时 211 ms
+  ④ 真库     card_relations 仍是 260，knowledge_cards 仍无向量列
+  ```
+
+  **211 ms 对比改造前的 73 秒** —— 差三个数量级，且不再撞 180 秒超时。
+
+  ⚠️ **端到端跑出来两个真问题，都已修**（这是本批最有价值的部分）：
+
+  1. **`embedding_model` 记的是配置值，不是实际加载的模型。**
+     `EmbeddingService` 在可用内存不足时会**自动降级**
+     （`embedding_service.py:66`：bge-m3 1024 维 → bge-small-zh-v1.5 512 维），
+     而且**本机验证时真的触发了**（"可用内存不足（2.6GB < 4.0GB）"）。
+     第一版实现写的是 `getattr(service, "model_name", None) or settings.embedding_model`，
+     而 `EmbeddingService` **没有 `model_name` 属性**（只有 `loaded_model_name`），
+     于是每行都写成配置值 —— **库里 512 维的向量被标成 `BAAI/bge-m3`**。
+     这一列存在的意义就是"将来按模型重算"，记错等于废掉它。
+  2. **同一个库里可能混着两个模型的向量**（降级按当时的可用内存决定）。
+     跨模型算余弦是无意义的数字，维度不同还会让 `np.array` 变成 object 数组。
+     现在按 `(embedding_model, embedding_dim)` 分组，**只取条数最多的那一组**，
+     其余丢弃并告警。
+
+  守卫：`backend/tests/test_graph_relation_suggestion.py` 12 → **19 条**，
+  新增 `TestVectorSourcing`（缺向量不参与 / 全缺则报错 / BLOB 损坏按缺失处理 /
+  混模型不比较）、两条 `_model_name` 用例、以及 `TestVectorColumnMigration`
+  （**先造一个没有这些列的旧库**再跑真迁移 —— 用全新临时库测不出迁移，
+  因为 `create_all` 会直接带着新列建表）。
+
+  > 未做（如实登记）：**验证时的向量是降级模型的（512 维）**，所以 E2E 得到 157 条边、
+  > 与离线探针预测的 151 不同 —— 向量本身就不同，**机制验证通过、具体条数不可比**。
+  > 本机可用内存 2.6GB < 阈值 4.0GB，说明真实环境可能一直跑在降级模型上，
+  > 这对关系判定的影响**未测**。候选池仍取最新 200 张（向量持久化只是解除了上限的
+  > 理由，池子本身还没改）。也没有"模型变了就重算"的机制，现在只告警 + 丢弃少数派。
+
 ### Security
 
 - 本节**刻意不宣称"本批次修复了任何安全发现"**（同类声明最容易变成"文档比现实宽松"）。

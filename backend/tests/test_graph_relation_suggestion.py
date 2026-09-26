@@ -1,4 +1,4 @@
-"""`auto_suggest_relations` 的选边规则（2026-09-26 改）
+"""`auto_suggest_relations` 的选边规则与向量取数（2026-09-26 改）
 
 ## 这个文件锁的是什么
 
@@ -6,23 +6,22 @@
 `graph_service.py`，测的是 LLM 结构化输出那一块）。于是"边建不出来"这件事
 一直没人发现：真实库 1181 张卡片只有 120 张有边，**1061 张是孤点**。
 
-改动把选边方式从「相似度 ≥ 全局阈值 0.75 + 同笔记一律跳过」换成
-「**每卡 Top-K + 绝对下界 + 只跳过同章节**」。依据与全部实测数字见
-`docs/journal/relation-quality-2026-09-26.md`（现状 4 条新边 / 覆盖 8-200；
-改后 443 条 / 197-200，抽样精确率 83%）。
+依据与全部实测数字见 `docs/journal/relation-quality-2026-09-26.md`。
 
-## 两条最容易回潮、必须各占一条用例
+## 三组最容易回潮、必须各占一条用例
 
-1. **同笔记·跨章节必须被保留**（`:341-353`）。旧规则把它连同同章节噪音一起丢掉，
+1. **同笔记·跨章节必须被保留**。旧规则把它连同同章节噪音一起丢掉，
    而实测它占了被丢弃对的 **89.5%**，且相似度中位 0.529 **比跨笔记的 0.443 还高**。
-   谁哪天把判据改回 `note_id`，这条会红。
-2. **同笔记·同章节必须被跳过**。章节内才是真噪音源（余弦中位 0.667、p95 0.832）。
+2. **跨笔记要用更高的下界**（`CROSS_NOTE_MIN_SIMILARITY`）。盲判 v2 实测
+   跨笔记 `0.75-0.85` 只有 50%，而同笔记同段是 83%。
+3. **没有向量的卡片不参与**，且"有卡片但一条向量都没有"要**报错**而不是静默返回 0
+   —— 后者会让用户以为"没有相关卡片"，而实际是没跑补向量。
 
-## 怎么做到不依赖模型与 Celery
+## 怎么做到不依赖模型
 
-`auto_suggest_relations` 通过 `celery_app.send_task` 拿向量。这里把它替换成
-**按标题查表**的假任务 —— 于是"谁和谁像"由用例自己定，与嵌入模型无关，
-也不需要在测试进程里加载 2.3GB 的 BGE-M3。
+向量不再由 Celery 现算（那正是候选池被压在 200 张的原因），而是**从库里读**。
+所以用例直接把设计好的向量写进 `knowledge_cards.embedding` —— 于是"谁和谁像"
+由用例自己定，与嵌入模型无关，也不需要在测试进程里加载 2.3GB 的 BGE-M3。
 
 向量用二维单位向量：两张卡片的余弦相似度就是两个角度的余弦差，
 所以"让 A 与 B 相似度 0.9"写成 `_vec(0)` 与 `_vec(acos(0.9))` 即可。
@@ -49,15 +48,35 @@ def _sim_to(deg: float) -> float:
     return math.cos(math.radians(deg))
 
 
-async def _seed(test_db, notes, cards):
-    """建用户 + 笔记 + 卡片
+async def _seed(test_db, notes, cards, vectors=None):
+    """建用户 + 笔记 + 卡片，并把向量**写进库**
 
     notes: 笔记 id 列表
     cards: [(id, note_id, chapter_title_or_None, title)]
+    vectors: {title: [float, ...]}；缺的标题按"没有向量"入库（`has_embedding=False`）
     """
+    from app.models.chunk import pack_vector
     from app.models.knowledge_card import CardType, KnowledgeCard
     from app.models.note import Note, NoteStatus, SourceType
     from app.models.user import User
+
+    vectors = vectors or {}
+
+    def _card(cid, nid, chap, title):
+        vec = vectors.get(title)
+        return KnowledgeCard(
+            id=cid,
+            user_id="u1",
+            note_id=nid,
+            card_type=CardType.concept,
+            title=title,
+            content="内容",
+            chapter_title=chap,
+            embedding=pack_vector(vec) if vec else None,
+            embedding_dim=len(vec) if vec else None,
+            embedding_model="test" if vec else None,
+            has_embedding=bool(vec),
+        )
 
     async with test_db() as session:
         session.add(User(id="u1", email="a@x.c", username="a", hashed_password="x"))
@@ -78,47 +97,14 @@ async def _seed(test_db, notes, cards):
             ]
         )
         await session.flush()
-        session.add_all(
-            [
-                KnowledgeCard(
-                    id=cid,
-                    user_id="u1",
-                    note_id=nid,
-                    card_type=CardType.concept,
-                    title=title,
-                    content="内容",
-                    chapter_title=chap,
-                )
-                for cid, nid, chap, title in cards
-            ]
-        )
+        session.add_all([_card(*c) for c in cards])
         await session.commit()
 
 
-def _patch_vectors(monkeypatch, by_title):
-    """把 Celery 编码任务换成"按标题查表"，并记录被请求的文本"""
-    from app.tasks import celery_app as celery_module
-
-    seen = {}
-
-    def _send_task(_name, args=None, **_kwargs):
-        texts = args[0]
-        seen["texts"] = texts
-
-        class _Task:
-            def get(self, timeout=None):  # noqa: ARG002 — 签名要与 Celery 一致
-                return [by_title[text.split("\n")[0]] for text in texts]
-
-        return _Task()
-
-    monkeypatch.setattr(celery_module.celery_app, "send_task", _send_task)
-    return seen
-
-
-async def _suggest(test_db, monkeypatch, by_title, user_id="u1"):
+async def _suggest(test_db, user_id="u1"):
+    """跑一次真实函数（向量从库里读，不需要任何 mock）"""
     from app.services import graph_service
 
-    _patch_vectors(monkeypatch, by_title)
     async with test_db() as session:
         return await graph_service.auto_suggest_relations(user_id=user_id, db=session)
 
@@ -148,7 +134,7 @@ class TestNoteGranularity:
     """
 
     @pytest.mark.asyncio
-    async def test_same_note_cross_chapter_pair_is_kept(self, test_db, monkeypatch):
+    async def test_same_note_cross_chapter_pair_is_kept(self, test_db):
         """★ 同笔记**跨章节**的卡片对必须建边（判据不能只用章节）"""
         await _seed(
             test_db,
@@ -158,19 +144,16 @@ class TestNoteGranularity:
                 ("c2", "n1", "第二章", "乙"),
                 ("c3", "n2", "第一章", "丙"),
             ],
+            vectors={"甲": _vec(0), "乙": _vec(26), "丙": _vec(120)},
         )
-        await _suggest(
-            test_db,
-            monkeypatch,
-            {"甲": _vec(0), "乙": _vec(26), "丙": _vec(120)},
-        )
+        await _suggest(test_db)
         assert ("c1", "c2") in await _pairs(test_db), (
             "同笔记跨章节的卡片对被丢掉了 —— 实测它占被丢弃对的 89.5%，"
             "且相似度中位比跨笔记还高"
         )
 
     @pytest.mark.asyncio
-    async def test_same_chapter_pair_uses_the_normal_floor(self, test_db, monkeypatch):
+    async def test_same_chapter_pair_uses_the_normal_floor(self, test_db):
         """★ 同章节对**不再特殊对待**：与其它同笔记对一样用 `MIN_SIMILARITY`
 
         盲判 v2 实测同章节 `[0.75,0.80)` 是 **92%** —— 前一版要求它 ≥0.80 是多余的。
@@ -184,21 +167,19 @@ class TestNoteGranularity:
         await _seed(
             test_db,
             notes=["n1"],
-            cards=[
-                ("c1", "n1", "第一章", "甲"),
-                ("c2", "n1", "第一章", "乙"),
-            ],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n1", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(39)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(39)})
+        await _suggest(test_db)
         assert ("c1", "c2") in await _pairs(test_db), (
             f"同章节对（相似度 {sim:.3f}）被跳过了 —— 实测这一段 92%，不该特殊对待"
         )
 
     @pytest.mark.asyncio
-    async def test_cross_note_pair_needs_the_higher_floor(self, test_db, monkeypatch):
+    async def test_cross_note_pair_needs_the_higher_floor(self, test_db):
         """★ **跨笔记**对落在 `[MIN_SIMILARITY, CROSS_NOTE_MIN_SIMILARITY)` → 跳过
 
-        这是本次修正的核心。盲判 v2 实测跨笔记 `0.75-0.85` 只有 **50%**
+        这是第三次修正的核心。盲判 v2 实测跨笔记 `0.75-0.85` 只有 **50%**
         （同笔记同段是 83%）—— 跨笔记的余弦更容易被"同领域"骗到。
         """
         from app.services.graph_service import (
@@ -219,12 +200,9 @@ class TestNoteGranularity:
                 # 同笔记，相似度同为 0.809 → **必须**建边，证明差异来自"是否同笔记"
                 ("c3", "n1", "第二章", "丙"),
             ],
+            vectors={"甲": _vec(0), "乙": _vec(36), "丙": _vec(0)},
         )
-        await _suggest(
-            test_db,
-            monkeypatch,
-            {"甲": _vec(0), "乙": _vec(36), "丙": _vec(0)},
-        )
+        await _suggest(test_db)
         pairs = await _pairs(test_db)
         assert ("c1", "c2") not in pairs, (
             f"跨笔记对（相似度 {sim:.3f}）被建边了 —— 那一段实测只有 50%"
@@ -232,22 +210,23 @@ class TestNoteGranularity:
         assert ("c1", "c3") in pairs, "同笔记的对照对没建边 —— 上面的断言可能只是'什么都没建'"
 
     @pytest.mark.asyncio
-    async def test_cross_note_high_similarity_is_kept(self, test_db, monkeypatch):
+    async def test_cross_note_high_similarity_is_kept(self, test_db):
         """反证：跨笔记对把相似度提到 ≥0.85 就必须建边"""
         await _seed(
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        await _suggest(test_db)
         assert ("c1", "c2") in await _pairs(test_db)
 
 
 class TestTopKSelection:
-    """每卡 Top-K + 按是否同章节分档的下界"""
+    """每卡 Top-K + 按是否同笔记分档的下界"""
 
     @pytest.mark.asyncio
-    async def test_below_floor_creates_nothing(self, test_db, monkeypatch):
+    async def test_below_floor_creates_nothing(self, test_db):
         """低于绝对下界的对不建边"""
         from app.services.graph_service import MIN_SIMILARITY
 
@@ -257,17 +236,18 @@ class TestTopKSelection:
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(60)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(60)})
+        await _suggest(test_db)
         assert await _pairs(test_db) == set()
 
     @pytest.mark.asyncio
-    async def test_mid_band_creates_nothing(self, test_db, monkeypatch):
-        """★ 落在 `[0.55, 0.75)` 的跨章节对**不建边** —— 这是本次修正的核心
+    async def test_mid_band_creates_nothing(self, test_db):
+        """★ 落在 `[0.55, 0.75)` 的对**不建边**
 
-        上一批的下界是 0.55，这一对会被建出来。而盲判实测 `0.55-0.65` 那一段
+        `f454a1b` 的下界是 0.55，这一对会被建出来。而盲判实测 `0.55-0.65` 那一段
         精确率只有 **10%**（Wilson 95% `[1.8%, 40.4%]`），与 `0.75-0.85` 的
-        `[49.0%, 94.3%]` **不重叠** —— 也就是说那个下界把一整段噪音放了进来。
+        `[49.0%, 94.3%]` **不重叠** —— 那个下界把一整段噪音放了进来。
 
         夹角 50° → 余弦 0.643，正好落在被否掉的那一段里。
         """
@@ -280,14 +260,15 @@ class TestTopKSelection:
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(50)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(50)})
+        await _suggest(test_db)
         assert await _pairs(test_db) == set(), (
             f"相似度 {sim:.3f} 的卡片对被建边了 —— 那一段盲判精确率只有 10%"
         )
 
     @pytest.mark.asyncio
-    async def test_high_band_creates_edge(self, test_db, monkeypatch):
+    async def test_high_band_creates_edge(self, test_db):
         """反证：同样两张卡，把相似度提到 0.85 以上就必须建边
 
         没有这一条，上面那条"不建边"的断言可能只是"什么都没建"。
@@ -296,8 +277,9 @@ class TestTopKSelection:
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        await _suggest(test_db)
         assert ("c1", "c2") in await _pairs(test_db)
 
     @pytest.mark.asyncio
@@ -311,23 +293,21 @@ class TestTopKSelection:
         from app.services import graph_service
 
         cards = [(f"c{i}", f"n{i}", "第一章", f"卡{i}") for i in range(6)]
-        by_title = {f"卡{i}": _vec(i * 10) for i in range(6)}
-        await _seed(test_db, notes=[f"n{i}" for i in range(6)], cards=cards)
+        vectors = {f"卡{i}": _vec(i * 10) for i in range(6)}
+        await _seed(test_db, notes=[f"n{i}" for i in range(6)], cards=cards, vectors=vectors)
 
         monkeypatch.setattr(graph_service, "TOP_K_PER_CARD", 1)
-        await _suggest(test_db, monkeypatch, by_title)
+        await _suggest(test_db)
         k1 = len(await _pairs(test_db))
         assert k1 <= 6, f"K=1 时建了 {k1} 条边，超过卡片数"
 
-        # 换一张干净的库再跑 K=3：边数必须变多，否则 K 根本没生效
-        # （同一个 test_db 里已有关系会被跳过，所以要新起一个 fixture 调用）
-        # 这里用"K=3 下界=0 且允许更多邻居"来对照：直接比 K=1 与 K=5
+        # 放宽 K 之后必须还能再建出新边，否则 K 根本没生效
         monkeypatch.setattr(graph_service, "TOP_K_PER_CARD", 5)
-        more = await _suggest(test_db, monkeypatch, by_title)
+        more = await _suggest(test_db)
         assert more > 0, "放宽 K 之后一条新边都没有 —— K 没有生效"
 
     @pytest.mark.asyncio
-    async def test_no_duplicate_pairs_and_storage_is_ordered(self, test_db, monkeypatch):
+    async def test_no_duplicate_pairs_and_storage_is_ordered(self, test_db):
         """同一对只出现一次，且按 `card_id_1 <= card_id_2` 定序存储
 
         无向关系若不定序，同一对会以两种形态各存一行（`docs/decisions.md#F-17`
@@ -336,18 +316,16 @@ class TestTopKSelection:
         await _seed(
             test_db,
             notes=["n1", "n2"],
-            cards=[
-                (ID_Z, "n1", "第一章", "甲"),
-                (ID_A, "n2", "第一章", "乙"),
-            ],
+            cards=[(ID_Z, "n1", "第一章", "甲"), (ID_A, "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
         # 互相选中对方：这一对会被 i 与 j 各产生一次
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        await _suggest(test_db)
         pairs = await _pairs(test_db)
         assert pairs == {(ID_A, ID_Z)}, f"期望恰好一条定序后的边，实际 {pairs}"
 
     @pytest.mark.asyncio
-    async def test_existing_relation_is_not_suggested_again(self, test_db, monkeypatch):
+    async def test_existing_relation_is_not_suggested_again(self, test_db):
         """已有关系（含 rejected）不重复建议 —— 被拒过的不该再冒出来
 
         ⚠️ 断言的是「**没有新增 suggested 行**」，不是「这一对不存在」：
@@ -361,6 +339,7 @@ class TestTopKSelection:
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
         async with test_db() as session:
             session.add(
@@ -374,17 +353,18 @@ class TestTopKSelection:
             )
             await session.commit()
 
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        await _suggest(test_db)
 
         async with test_db() as session:
             rows = (await session.execute(select(CardRelation))).scalars().all()
-            assert len(rows) == 1, f"被拒过的卡片对又被建议了一次：{[(r.card_id_1, r.card_id_2, r.status) for r in rows]}"
+            assert len(rows) == 1, (
+                f"被拒过的卡片对又被建议了一次："
+                f"{[(r.card_id_1, r.card_id_2, r.status) for r in rows]}"
+            )
             assert rows[0].status == RelationStatus.rejected, "原来那条 rejected 行被改动了"
 
     @pytest.mark.asyncio
-    async def test_all_created_relations_are_suggested_and_typed_related(
-        self, test_db, monkeypatch
-    ):
+    async def test_all_created_relations_are_suggested_and_typed_related(self, test_db):
         """新建的边一律是 `suggested` + `related`（嵌入路径不判类型，见报告 §6）"""
         from sqlalchemy import select
 
@@ -394,8 +374,9 @@ class TestTopKSelection:
             test_db,
             notes=["n1", "n2"],
             cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        await _suggest(test_db)
         async with test_db() as session:
             rows = (await session.execute(select(CardRelation))).scalars().all()
             assert rows, "一条边都没建，后面两条断言没有意义"
@@ -403,20 +384,278 @@ class TestTopKSelection:
             assert all(r.relation_type == RelationType.related for r in rows)
 
 
-class TestEarlyReturn:
+class TestVectorSourcing:
+    """向量**从库里读**（2026-09-26 新增）—— 这组用例锁的是"缺向量"的行为
+
+    ## 为什么值得单独一组
+
+    换掉"每次现算"之后，多了一条新的失败模式：**卡片有、但向量没生成**。
+    如果这时静默返回 0 条建议，用户看到的是"没有相关卡片"——
+    与"没跑补向量"是完全不同的两件事，却长得一模一样。所以这里要锁住：
+    缺向量 → 那些卡不参与；**一条向量都没有 → 报错并说清怎么补**。
+    """
+
     @pytest.mark.asyncio
-    async def test_single_card_returns_zero_without_calling_embedding(
-        self, test_db, monkeypatch
-    ):
-        """候选不足 2 张时直接返回 0，**不**去调嵌入服务"""
+    async def test_cards_without_embedding_do_not_participate(self, test_db):
+        """没有向量的卡片不参与建议，但**不影响**其它卡片照常建边"""
         await _seed(
             test_db,
-            notes=["n1"],
-            cards=[("c1", "n1", "第一章", "甲")],
+            notes=["n1", "n2"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", "乙"),
+                ("c3", "n1", "第二章", "丙"),  # 故意不给向量
+            ],
+            vectors={"甲": _vec(0), "乙": _vec(26)},
         )
-        seen = _patch_vectors(monkeypatch, {"甲": _vec(0)})
-        from app.services import graph_service
+        await _suggest(test_db)
+        pairs = await _pairs(test_db)
+        assert ("c1", "c2") in pairs, "有向量的两张卡没建边 —— 缺向量的卡把整批带崩了"
+        assert all("c3" not in p for p in pairs), "没有向量的卡片参与了建议"
 
+    @pytest.mark.asyncio
+    async def test_no_embeddings_at_all_raises_actionable_error(self, test_db):
+        """★ 卡片有、但**一条向量都没有** → 报错，而不是静默返回 0
+
+        静默返回 0 会让用户以为"没有相关卡片"。报错信息里必须给出补向量的办法。
+        """
+        from app.services.graph_service import GraphSuggestionError
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+        )
+        with pytest.raises(GraphSuggestionError) as exc:
+            await _suggest(test_db)
+        assert "embed_cards" in str(exc.value), (
+            f"报错信息没告诉用户怎么补向量：{exc.value}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_corrupt_embedding_blob_is_treated_as_missing(self, test_db):
+        """BLOB 长度与 `embedding_dim` 不符 → 按"没有向量"处理，**不**拿去算余弦
+
+        长度不对的向量算出来的余弦是无意义的数字，而它会**静默参与排序** ——
+        比"没有向量"更糟（`models/chunk.py:unpack_vector` 的注释说的就是这条）。
+        """
+        from app.models.chunk import pack_vector
+        from app.models.knowledge_card import KnowledgeCard
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", "乙"),
+                ("c3", "n1", "第二章", "丙"),
+            ],
+            vectors={"甲": _vec(0), "乙": _vec(26), "丙": _vec(26)},
+        )
+        # 把 c3 的 BLOB 截断一半，但 dim 仍写 2 → 长度对不上
         async with test_db() as session:
-            assert await graph_service.auto_suggest_relations(user_id="u1", db=session) == 0
-        assert "texts" not in seen, "候选不足时仍然调用了嵌入服务"
+            from sqlalchemy import select
+
+            card = (await session.execute(
+                select(KnowledgeCard).where(KnowledgeCard.id == "c3")
+            )).scalar_one()
+            card.embedding = pack_vector([1.0, 0.0])[:4]
+            await session.commit()
+
+        await _suggest(test_db)
+        pairs = await _pairs(test_db)
+        assert all("c3" not in p for p in pairs), (
+            "BLOB 长度不对的卡片仍然参与了建议 —— 那种向量算出来的相似度是无意义的"
+        )
+        assert ("c1", "c2") in pairs, "损坏一张卡把整批带崩了"
+
+    @pytest.mark.asyncio
+    async def test_mixed_embedding_models_are_not_compared(self, test_db):
+        """★ 混用**两个模型**的向量不能放在一起算余弦（端到端验证时真的触发过）
+
+        `EmbeddingService` 在可用内存不足时会自动降级
+        （bge-m3 1024 维 → bge-small-zh-v1.5 512 维，见 `embedding_service.py:66`），
+        所以同一个库里可能混着两个模型的向量。跨模型算出来的余弦是无意义的数字。
+
+        这里让"少数派"那张卡的向量与 c1 **完全相同**（余弦 1.0）—— 只要它被算进去，
+        就一定会建边。断言它一条边都没有。
+        """
+        from app.models.chunk import pack_vector
+        from app.models.knowledge_card import KnowledgeCard
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2", "n3", "n4"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n2", "第一章", "乙"),
+                ("c3", "n3", "第一章", "丙"),
+                ("c4", "n4", "第一章", "丁"),
+            ],
+            vectors={"甲": _vec(0), "乙": _vec(26), "丙": _vec(40), "丁": _vec(0)},
+        )
+        # 把 c4 标成另一个模型（向量与 c1 一模一样 → 若参与必然建边）
+        async with test_db() as session:
+            from sqlalchemy import select
+
+            card = (await session.execute(
+                select(KnowledgeCard).where(KnowledgeCard.id == "c4")
+            )).scalar_one()
+            card.embedding_model = "另一个模型"
+            card.embedding = pack_vector(_vec(0))
+            await session.commit()
+
+        await _suggest(test_db)
+        pairs = await _pairs(test_db)
+        assert all("c4" not in p for p in pairs), (
+            f"另一个模型的向量被拿来算余弦了：{pairs} —— 跨模型相似度无意义"
+        )
+        assert ("c1", "c2") in pairs, "多数派那一组没建边 —— 上面的断言可能只是'什么都没建'"
+
+
+def test_model_name_reports_the_actually_loaded_model(monkeypatch):
+    """★ `embedding_model` 列必须记**实际加载的**模型，不是配置值
+
+    第一次实现取的是 `getattr(service, "model_name", None) or settings.embedding_model`，
+    而 `EmbeddingService` 没有 `model_name` 属性（只有属性 `loaded_model_name`），
+    于是每行都写成了配置值 —— 库里 512 维的降级向量被标成 `BAAI/bge-m3`。
+    这一列存在的意义就是"将来按模型重算"，记错等于把它废掉。
+    """
+    from app.tasks import embedding_tasks as et
+
+    class _FakeService:
+        loaded_model_name = "BAAI/bge-small-zh-v1.5"  # 降级模型
+
+    monkeypatch.setattr(et, "_get_embedding_service", lambda: _FakeService())
+    got = et._model_name()
+    assert got == "BAAI/bge-small-zh-v1.5", (
+        f"记成了 {got!r} —— 应该是实际加载的降级模型，不是配置里的主模型"
+    )
+
+
+def test_model_name_falls_back_when_model_not_loaded(monkeypatch):
+    """模型还没加载时（`loaded_model_name` 为 None）退回配置值，而不是写 None"""
+    from app.tasks import embedding_tasks as et
+
+    class _FakeService:
+        loaded_model_name = None
+
+    monkeypatch.setattr(et, "_get_embedding_service", lambda: _FakeService())
+    assert et._model_name(), "退回值不能是空 —— 那会让 embedding_model 列变成 NULL"
+
+
+class TestVectorColumnMigration:
+    """**既有库**必须能通过 ALTER 补上那 4 个向量列
+
+    ⚠️ 用全新临时库测不出迁移：`create_all` 会直接带着新列建表 ——
+    那样测的是"模型定义对不对"，而不是"真库能不能升级"。
+    这里刻意**先造一个没有这些列的旧库**，再跑真实的 `_migrate_sqlite`
+    （与 `test_prompt_version.py:168-239` 同一个套路，那是本项目已有的先例）。
+    """
+
+    async def _old_db(self, tmp_path):
+        """造一个"向量列引入之前"的库：knowledge_cards 没有那 4 列，且有一行
+
+        ⚠️ 为什么要连 `notes` 一起建：`_migrate_sqlite` 里有**防御性建表**
+        （见 `database.py:454` 起），它会在缺表时补出 `projects` / `note_projects`，
+        但**不会**补 `notes`。于是"连跑两次"时第二次的 `table_names` 里有了
+        `note_projects` 却没有 `notes`，那条孤儿清理语句
+        （`DELETE FROM note_projects WHERE note_id NOT IN (SELECT id FROM notes)`）
+        就会 `no such table: notes`。
+
+        这在真实库里不会发生（两张表总是同时存在），是本 fixture 造出来的假象 ——
+        但既然要测"连跑两次"，就得把库造得像真的。
+        """
+        import sqlite3
+
+        path = tmp_path / "old_cards.db"
+        con = sqlite3.connect(path)
+        con.executescript(
+            """
+            CREATE TABLE notes (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                user_id VARCHAR NOT NULL,
+                title VARCHAR(500) NOT NULL
+            );
+            CREATE TABLE knowledge_cards (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                user_id VARCHAR NOT NULL,
+                note_id VARCHAR,
+                card_type VARCHAR NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                content TEXT NOT NULL
+            );
+            INSERT INTO notes (id, user_id, title) VALUES ('n1', 'u1', '历史笔记');
+            INSERT INTO knowledge_cards (id, user_id, note_id, card_type, title, content)
+                VALUES ('c-old', 'u1', 'n1', 'concept', '历史卡片', '向量列引入之前。');
+            """
+        )
+        con.commit()
+        con.close()
+        return path
+
+    @pytest.mark.asyncio
+    async def test_migration_adds_vector_columns_to_existing_db(self, tmp_path):
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.database import _migrate_sqlite
+
+        path = await self._old_db(tmp_path)
+        engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+        try:
+            async with engine.begin() as conn:
+                await _migrate_sqlite(conn)
+            async with engine.connect() as conn:
+                cols = {
+                    row[1] for row in
+                    (await conn.execute(text("PRAGMA table_info(knowledge_cards)"))).all()
+                }
+                missing = {
+                    "embedding_model", "embedding_dim", "embedding", "has_embedding"
+                } - cols
+                assert not missing, (
+                    f"真库会缺这些列：{sorted(missing)} —— 关系建议读不到向量"
+                )
+                # 历史行：**不回填**向量（回填要跑一遍嵌入模型，275 秒，
+                # 不该塞在启动路径里），但 `has_embedding` 必须是 0 而不是 NULL
+                row = (await conn.execute(text(
+                    "SELECT embedding, has_embedding FROM knowledge_cards WHERE id='c-old'"
+                ))).one()
+                assert row[0] is None, "历史行被回填了向量 —— 迁移不该做这件事"
+                assert row[1] == 0, (
+                    f"has_embedding 应为 0（NOT NULL DEFAULT 0），实际 {row[1]!r}"
+                )
+                # 取数路径要走的索引
+                idx = {
+                    r[1] for r in
+                    (await conn.execute(text("PRAGMA index_list(knowledge_cards)"))).all()
+                }
+                assert "ix_knowledge_cards_user_embed" in idx, (
+                    f"缺索引 ix_knowledge_cards_user_embed，实际：{sorted(idx)}"
+                )
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_migration_is_idempotent(self, tmp_path):
+        """连跑两次不能报错（启动路径上每次都会跑一遍）"""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.database import _migrate_sqlite
+
+        path = await self._old_db(tmp_path)
+        engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+        try:
+            for _ in range(2):
+                async with engine.begin() as conn:
+                    await _migrate_sqlite(conn)
+            async with engine.connect() as conn:
+                cols = {
+                    row[1] for row in
+                    (await conn.execute(text("PRAGMA table_info(knowledge_cards)"))).all()
+                }
+                assert "embedding" in cols
+        finally:
+            await engine.dispose()
