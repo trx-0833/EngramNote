@@ -135,14 +135,20 @@ async def _pairs(test_db):
 
 
 class TestChapterGranularity:
-    """阶段 1：只跳过同章节，不再跳过整篇笔记"""
+    """同章节对走**更严的下界**，而不是被整批丢掉
+
+    ## 两次修正的经过（这个类里的用例就是那两次的守卫）
+
+    - 旧规则：`note_id` 相同就跳过 → 误伤 89.5%（被丢弃的 7,470 对里 6,686 对是
+      "同笔记跨章节"，而它们的相似度中位 0.529 **比跨笔记的 0.443 还高**）
+    - 上一批：只跳过同章节 → 仍然错，因为**同章节 ≥0.80 那一层盲判 10/10 全真**
+      （Wilson 95% 下界 72.2%），整批丢是净损失
+    - 现在：同章节要求 `SAME_CHAPTER_MIN_SIMILARITY`（0.80），其余对 0.75
+    """
 
     @pytest.mark.asyncio
     async def test_same_note_cross_chapter_pair_is_kept(self, test_db, monkeypatch):
-        """★ 核心回归：同笔记**跨章节**的卡片对必须建边
-
-        旧规则判 `note_id` 相同就跳过 —— 这条用例在旧规则下必然失败。
-        """
+        """★ 同笔记**跨章节**的卡片对必须建边（判据不能只用 `note_id`）"""
         await _seed(
             test_db,
             notes=["n1", "n2"],
@@ -163,8 +169,14 @@ class TestChapterGranularity:
         )
 
     @pytest.mark.asyncio
-    async def test_same_note_same_chapter_pair_is_skipped(self, test_db, monkeypatch):
-        """同笔记**同章节**必须跳过（章节内才是真噪音源：余弦中位 0.667）"""
+    async def test_same_chapter_high_similarity_is_kept(self, test_db, monkeypatch):
+        """★ 同章节但相似度 ≥0.80 → **必须建边**（这是本次修正的核心）
+
+        上一批的规则在这里会红：它把同章节一律跳过，而盲判实测那一层 10/10 全真。
+        """
+        from app.services.graph_service import SAME_CHAPTER_MIN_SIMILARITY
+
+        assert _sim_to(26) >= SAME_CHAPTER_MIN_SIMILARITY, "前提：这一对的相似度要够高"
         await _seed(
             test_db,
             notes=["n1", "n2"],
@@ -180,15 +192,49 @@ class TestChapterGranularity:
             {"甲": _vec(0), "乙": _vec(26), "丙": _vec(-26)},
         )
         pairs = await _pairs(test_db)
-        assert ("c1", "c2") not in pairs, "同章节的卡片对被建边了 —— 那是噪音"
-        # 反证：同一批里跨笔记的对**必须**建出来，否则上面那条可能只是"什么都没建"
-        assert ("c1", "c3") in pairs
+        assert ("c1", "c2") in pairs, (
+            "同章节的高相似对被丢掉了 —— 盲判实测那一层 10/10 全真，整批丢是净损失"
+        )
 
     @pytest.mark.asyncio
-    async def test_null_chapter_treated_as_same_chapter(self, test_db, monkeypatch):
-        """`chapter_title` 为 NULL 的两张同笔记卡片 → 视为同章节，保守跳过
+    async def test_same_chapter_below_its_floor_is_skipped(self, test_db, monkeypatch):
+        """★ 同章节但落在 `[MIN_SIMILARITY, SAME_CHAPTER_MIN_SIMILARITY)` → 仍跳过
 
-        退化成旧行为（不建边），不会比改动前更糟 —— 这是刻意的兜底。
+        理由不是"同章节是噪音"，而是**这一段没有实测数据**（同章节 [0.75,0.80) 有
+        468 对，盲判只覆盖了 ≥0.80）。不拿没测过的区间下注。
+        """
+        from app.services.graph_service import (
+            MIN_SIMILARITY,
+            SAME_CHAPTER_MIN_SIMILARITY,
+        )
+
+        sim = _sim_to(39)  # cos 39° ≈ 0.777，落在 [0.75, 0.80)
+        assert MIN_SIMILARITY <= sim < SAME_CHAPTER_MIN_SIMILARITY, f"前提不成立：{sim}"
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[
+                ("c1", "n1", "第一章", "甲"),
+                ("c2", "n1", "第一章", "乙"),
+                # 跨笔记的对照对，相似度相同 —— 它**必须**建边，证明差异来自"同章节"
+                ("c3", "n2", "第一章", "丙"),
+            ],
+        )
+        await _suggest(
+            test_db,
+            monkeypatch,
+            {"甲": _vec(0), "乙": _vec(39), "丙": _vec(0)},
+        )
+        pairs = await _pairs(test_db)
+        assert ("c1", "c2") not in pairs, "同章节 [0.75,0.80) 被建边了 —— 这一段没有实测依据"
+        assert ("c1", "c3") in pairs, "对照组没建边 —— 那上面的断言可能只是'什么都没建'"
+
+    @pytest.mark.asyncio
+    async def test_null_chapter_goes_through_the_stricter_floor(self, test_db, monkeypatch):
+        """`chapter_title` 为 NULL 的两张同笔记卡片 → 视为同章节，走更严的下界
+
+        不是"一律不建"，而是"要求更高"。
         """
         await _seed(
             test_db,
@@ -198,19 +244,20 @@ class TestChapterGranularity:
                 ("c2", "n1", None, "乙"),
             ],
         )
-        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        # 0.777 落在 [0.75, 0.80) → 同章节应当跳过
+        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(39)})
         assert ("c1", "c2") not in await _pairs(test_db)
 
 
 class TestTopKSelection:
-    """阶段 2：每卡 Top-K + 绝对下界，取代「相似度 ≥ 全局阈值」"""
+    """每卡 Top-K + 按是否同章节分档的下界"""
 
     @pytest.mark.asyncio
     async def test_below_floor_creates_nothing(self, test_db, monkeypatch):
-        """低于绝对下界的对不建边（下界是兜底，不是主判据）"""
+        """低于绝对下界的对不建边"""
         from app.services.graph_service import MIN_SIMILARITY
 
-        # 夹角 60° → 余弦 0.5，低于下界 0.55
+        # 夹角 60° → 余弦 0.5
         assert _sim_to(60) < MIN_SIMILARITY
         await _seed(
             test_db,
@@ -219,6 +266,45 @@ class TestTopKSelection:
         )
         await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(60)})
         assert await _pairs(test_db) == set()
+
+    @pytest.mark.asyncio
+    async def test_mid_band_creates_nothing(self, test_db, monkeypatch):
+        """★ 落在 `[0.55, 0.75)` 的跨章节对**不建边** —— 这是本次修正的核心
+
+        上一批的下界是 0.55，这一对会被建出来。而盲判实测 `0.55-0.65` 那一段
+        精确率只有 **10%**（Wilson 95% `[1.8%, 40.4%]`），与 `0.75-0.85` 的
+        `[49.0%, 94.3%]` **不重叠** —— 也就是说那个下界把一整段噪音放了进来。
+
+        夹角 50° → 余弦 0.643，正好落在被否掉的那一段里。
+        """
+        from app.services.graph_service import MIN_SIMILARITY
+
+        sim = _sim_to(50)
+        assert 0.55 <= sim < MIN_SIMILARITY, f"前提：要落在 [0.55, 0.75) 内，实际 {sim}"
+
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+        )
+        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(50)})
+        assert await _pairs(test_db) == set(), (
+            f"相似度 {sim:.3f} 的卡片对被建边了 —— 那一段盲判精确率只有 10%"
+        )
+
+    @pytest.mark.asyncio
+    async def test_high_band_creates_edge(self, test_db, monkeypatch):
+        """反证：同样两张卡，把相似度提到 0.85 以上就必须建边
+
+        没有这一条，上面那条"不建边"的断言可能只是"什么都没建"。
+        """
+        await _seed(
+            test_db,
+            notes=["n1", "n2"],
+            cards=[("c1", "n1", "第一章", "甲"), ("c2", "n2", "第一章", "乙")],
+        )
+        await _suggest(test_db, monkeypatch, {"甲": _vec(0), "乙": _vec(26)})
+        assert ("c1", "c2") in await _pairs(test_db)
 
     @pytest.mark.asyncio
     async def test_k_limits_edges_per_card(self, test_db, monkeypatch):
