@@ -53,7 +53,7 @@ python-jose[cryptography]~=3.5.0
 bcrypt~=5.0.0
 
 # ---- 异步任务 ----
-celery~=5.4.0
+celery~=5.6.3
 
 # ---- 数值 / HTTP ----
 # ⚠️ numpy 被 app/services/graph_service.py 与 asr/asr_engine.py 在**模块顶层** import，
