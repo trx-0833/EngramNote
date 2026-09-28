@@ -37,7 +37,7 @@ sqlalchemy[asyncio]~=2.0.52
 aiosqlite~=0.20.0
 pydantic~=2.13.5
 pydantic-settings~=2.15.0
-email-validator~=2.0.0
+email-validator~=2.3.0
 python-multipart~=0.0.32
 
 # ---- 认证 ----
