@@ -189,7 +189,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 版本**读 `frontend/.nvmrc`**（= 开发机 `nvm use` 用的同一个文件），
           # 不在 CI 里另写一个常量 —— 这就是本轮反复出现的那类缺陷：
