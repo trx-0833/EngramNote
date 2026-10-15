@@ -66,7 +66,7 @@ sentence-transformers~=2.2.0
 # chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
-pypdfium2~=5.10.1
+pypdfium2~=5.13.0
 Pillow~=12.3.0
 
 # ---- 运行期可观测性 ----
