@@ -60,7 +60,7 @@ export default function RelatedCardsSection({
                 style={{
                   fontSize: '0.7rem',
                   padding: '1px 6px',
-                  borderRadius: '9999px',
+                  borderRadius: 'var(--radius-full)',
                   // 卡片类型颜色/标签统一从 utils/labels.ts 读取，见 docs/decisions.md#F-28
                   background: cardTypeColors[card.card_type] || FALLBACK_CATEGORY_COLOR,
                   color: 'white',

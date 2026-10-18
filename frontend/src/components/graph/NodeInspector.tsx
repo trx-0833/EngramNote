@@ -44,7 +44,7 @@ export default function NodeInspector({
               style={{
                 fontSize: '0.75rem',
                 padding: '2px 8px',
-                borderRadius: '9999px',
+                borderRadius: 'var(--radius-full)',
                 background: CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR,
                 color: 'white',
                 fontWeight: 500,

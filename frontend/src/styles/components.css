@@ -1,4 +1,18 @@
-/* ── 按钮 ── */
+/* ── 按钮 ──
+ *
+ * ## 过渡属性改成显式清单（本轮，2026-09-26）
+ *
+ * 原来是 `transition: all 0.25s var(--ease-out-expo)`。`all` 会把**每一个**可动画
+ * 属性都挂上过渡 —— 包括 `width` / `padding` / `font-size` 这类触发布局的属性。
+ * 按钮在真实使用中确实会改 `padding`（例如禁用态切换），于是"点一下按钮，
+ * 文字挤了一下"这种抖动就有了来源。
+ *
+ * 改成只列真正会变的四个：底色、边框色、文字色、阴影。这也是"高级感"的
+ * 一部分 —— 过渡只发生在**设计意图之内**的属性上。
+ *
+ * 时长改用 `--duration-fast`(150ms)：交互反馈属于"即时"那一档
+ * （`base.css:169` 的定义就是"hover、颜色变化"）。
+ */
 
 button {
   cursor: pointer;
@@ -17,7 +31,11 @@ button {
   border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 0.875rem;
-  transition: all 0.25s var(--ease-out-expo);
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
   line-height: 1.5;
   position: relative;
   overflow: hidden;
@@ -27,51 +45,51 @@ button {
    1.365:1 —— 在按钮这个尺寸上**完全看不出渐变**，白交了"背景是个渐变"这份复杂度，
    还让"按钮是什么颜色"这个问题只能靠读两处令牌才能回答。
    改成主色实底：所见即令牌，改 `--color-primary` 它就变。
-   hover / active 的浮起反馈**本批不动** —— 一次只改一件事，截图对比才读得懂。 */
+
+   ## 悬浮反馈：去掉"浮起"（本轮，2026-09-26）
+   原来是 `translateY(-1px)` + 阴影从 0.25 加到 0.35 不透明度。
+   **元素位移是最容易暴露"模板感"的一种反馈** —— 它把"可点"这件事
+   演成了"这张纸被抬起来了"。改成只有阴影深一档：反馈还在（可点性有提示），
+   但视线不会被一次 1px 的位移牵走。位移一去掉，`transform` 那一整行
+   连同 `:active` 里的 `translateY(0)` 一起没有存在意义了。 */
 .btn-primary {
   background: var(--color-primary);
   color: white;
-  box-shadow: 0 2px 8px rgba(15, 52, 96, 0.25);
+  box-shadow: 0 1px 3px rgba(15, 52, 96, 0.18);
 }
 
 .btn-primary:hover {
-  box-shadow: 0 4px 16px rgba(15, 52, 96, 0.35);
-  transform: translateY(-1px);
+  /* 底色与 hover 令牌一致：原来这里是"底色不变、只抬阴影"，
+     现在位移没了，用**加深一档**承担主要反馈 */
+  background: var(--color-primary-hover);
+  box-shadow: 0 2px 8px rgba(15, 52, 96, 0.24);
 }
 
 .btn-primary:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(15, 52, 96, 0.2);
+  box-shadow: 0 1px 2px rgba(15, 52, 96, 0.2);
 }
 
 .btn-secondary {
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  transition: all 0.25s var(--ease-out-expo);
 }
 
 .btn-secondary:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
   background: var(--color-primary-light);
-  transform: translateY(-1px);
-}
-
-.btn-secondary:active {
-  transform: translateY(0);
 }
 
 .btn-danger {
   background: var(--color-error);
   color: white;
-  box-shadow: 0 2px 8px rgba(192, 57, 43, 0.2);
+  box-shadow: 0 1px 3px rgba(192, 57, 43, 0.18);
 }
 
 .btn-danger:hover {
   opacity: 0.9;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(192, 57, 43, 0.3);
+  box-shadow: 0 2px 8px rgba(192, 57, 43, 0.24);
 }
 
 /**
@@ -118,11 +136,6 @@ button {
 
 .btn-danger-outline:hover {
   background: var(--color-error-light);
-  transform: translateY(-1px);
-}
-
-.btn-danger-outline:active {
-  transform: translateY(0);
 }
 
 .btn-ghost {
@@ -140,8 +153,14 @@ button {
   left: 50%;
   width: 0;
   height: 2px;
-  background: var(--gradient-primary);
-  transition: all 0.3s var(--ease-out-expo);
+  /* 本轮：`var(--gradient-primary)` → 实色。这条下划线只有 60% 宽、2px 高，
+     那个渐变（两端 1.365:1）在上面**根本看不出来**（A3/E1/E7 已按同一理由
+     收敛过 6 处）。取渐变的起点色 `--color-text`（#1a1a2e）还是终点色
+     `--color-primary`（#0f3460）？取终点色 —— 这条下划线的语义是
+     "当前项"，与 `.btn-ghost.active` 的文字色（`--color-primary`）同源，
+     让"标记"与"文字"是同一个颜色。 */
+  background: var(--color-primary);
+  transition: width var(--duration-base) var(--ease-out-expo);
   transform: translateX(-50%);
   border-radius: 1px;
 }
@@ -237,9 +256,8 @@ textarea::placeholder {
   padding: var(--space-lg);
   box-shadow: var(--shadow-sm);
   transition:
-    transform 0.3s var(--ease-out-expo),
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
+    box-shadow var(--duration-base) var(--ease-out-expo),
+    border-color var(--duration-base) var(--ease-out-expo);
 }
 
 /* ── 卡片悬停（overhaul-plan 5.6 序 12：从 `refinements.css` 收回本文件）──
@@ -258,14 +276,22 @@ textarea::placeholder {
  * `verify-built-css.mjs` 的 `CASCADE_PAIRS` 钉住了这一条。 */
 .card-hover {
   transition:
-    transform 0.3s var(--ease-out-expo),
-    box-shadow 0.3s var(--ease-out-expo),
-    border-color 0.3s var(--ease-out-expo);
+    box-shadow var(--duration-base) var(--ease-out-expo),
+    border-color var(--duration-base) var(--ease-out-expo);
 }
 
+/* 本轮（2026-09-26）：去掉 `translateY(-2px)`，阴影从 `--shadow-lg` 降到 `--shadow-md`。
+ *
+ * 与按钮同一条理由：**元素位移是最容易暴露"模板感"的反馈**。卡片本来就靠
+ * 1px 边框 + 纸白底与页面底色分层，再抬一次反而把层次说乱（"它到底是在纸面上
+ * 还是在纸面上方飘着"）。反馈改由"阴影深一档 + 边框色实一档"承担 ——
+ * 两者都在**同一个平面内**表达"这一块可以点"。
+ *
+ * ⚠️ 这一条与 `.card` 的 `transition` 是**同权重、同文件、靠先后决胜负**的
+ * 一对（原来就登记在 `verify-built-css.mjs` 的 `CASCADE_PAIRS` 里）。
+ * 顺序一字未动：`.card-hover` 仍紧跟在 `.card` 之后。 */
 .card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   border-color: var(--color-border);
 }
 
@@ -299,7 +325,7 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   padding: 2px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.75rem;
   font-weight: 500;
   letter-spacing: 0.02em;

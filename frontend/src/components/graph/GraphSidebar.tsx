@@ -249,7 +249,7 @@ function LinkDetailPanel({
             style={{
               fontSize: '0.75rem',
               padding: '2px 8px',
-              borderRadius: '9999px',
+              borderRadius: 'var(--radius-full)',
               background:
                 selectedLink.status === 'suggested'
                   ? 'var(--color-warning-light)'

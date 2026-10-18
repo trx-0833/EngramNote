@@ -291,7 +291,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                         color: 'white',
                         fontSize: '0.7rem',
                         padding: '2px 8px',
-                        borderRadius: '9999px',
+                        borderRadius: 'var(--radius-full)',
                         whiteSpace: 'nowrap',
                       }}
                     >

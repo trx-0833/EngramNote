@@ -130,7 +130,7 @@
  * 不会变成透明或黑色，也不会报错。
  *
  * `.badge` 基础类给的 `padding: 2px 10px` 必须收回 0（否则色条有 20px 宽），
- * 胶囊圆角（`border-radius: 9999px`）**留着**：3px 宽的竖条两端是圆的，
+ * 胶囊圆角（`border-radius: var(--radius-full)`）**留着**：3px 宽的竖条两端是圆的，
  * 正是 Trilium 那条色条的样子。
  *
  * 色条是纯装饰（tsx 上 `aria-hidden="true"`），不承载任何可访问名。

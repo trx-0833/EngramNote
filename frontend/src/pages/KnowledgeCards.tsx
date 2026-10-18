@@ -425,7 +425,7 @@ export default function KnowledgeCards() {
                             style={{
                               fontSize: '0.7rem',
                               padding: '2px 6px',
-                              borderRadius: '9999px',
+                              borderRadius: 'var(--radius-full)',
                               background:
                                 cardCategoryColors[card.card_category] || FALLBACK_CATEGORY_COLOR,
                               color: 'white',
@@ -438,7 +438,7 @@ export default function KnowledgeCards() {
                             style={{
                               fontSize: '0.7rem',
                               padding: '2px 6px',
-                              borderRadius: '9999px',
+                              borderRadius: 'var(--radius-full)',
                               background: cardTypeColors[card.card_type] || FALLBACK_CATEGORY_COLOR,
                               color: 'white',
                               whiteSpace: 'nowrap',
