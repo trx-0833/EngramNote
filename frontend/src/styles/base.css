@@ -96,9 +96,41 @@
   --space-xl: 32px;
   --space-2xl: 48px;
 
-  /* ── 字体 ── */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
-  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+  /* ── 字体 ──
+   *
+   * ## 为什么中文字族排在系统族**之后**（本轮改正，visual-design-spec §3.1）
+   *
+   * 原写法是 `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif`
+   * —— 中文字族排在最后，于是**永远不生效**：`-apple-system` 在 macOS 上就
+   * 包含了 CJK 字形，Windows 上 `Segoe UI` 之后浏览器会走系统 CJK 回退。
+   * 声明了中文字族却没人用，这是 `visual-design-spec.md:83` 记下的原话
+   * （"声明了中文字族却永远不生效"）。
+   *
+   * 改成按**语言维度**显式指定：拉丁族只留给拉丁字形（它们对拉丁字母的
+   * 字形与字距确实更好），CJK 交给显式声明的中文字族，最后才是通用兜底。
+   * 浏览器逐字符回退，所以这样写不会让英文变难看。
+   *
+   * ## 为什么 `--font-serif` 补了 `'Songti SC'` / `'STSong'`
+   *
+   * 原链是 `'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif`。
+   * 前两个都是**下载来的**（Google Fonts，墙内不可达，见 index.html 的注释与
+   * `docs/open-source-readiness.md:651` 的 FE-4），于是实际落到 `'SimSun'`。
+   * 问题在 macOS 上：`'SimSun'` 通常不存在，链子直接走到通用 `serif` ——
+   * 那在 macOS 上会命中 Times 一类的**拉丁衬线**，中文部分再走系统回退，
+   * 结果是"中文标题用黑体、英文标题用 Times"的混排。
+   * `'Songti SC'`（macOS 自带宋体-简）与 `'STSong'` 是 macOS 上真实存在的
+   * 中文衬线，补进去让这条路在苹果设备上也是**衬线**的。
+   *
+   * ⚠️ **Windows 上的观感一个字没变**（仍然是 `'SimSun'`）——
+   * 这条改动只修"落到通用 serif"那一档，不改变任何平台上的首选字形意图。
+   * 用户 2026-09-26 的决定是"保持现状、只做加载优化"，所以没有自托管字体、
+   * 没有换字族；这里只是让回退链**落到一个中文字体**而不是拉丁衬线。
+   */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-serif:
+    'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
 
   /* ── 字号（visual-refactor-plan 批次 A1）──

@@ -8,7 +8,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" />
+    <!-- ── 字体样式表改成**非阻塞**加载（本轮改动，2026-09-26）──
+         ## 改之前是什么样
+         原来是一条普通的 `<link rel="stylesheet">`，**渲染阻塞**。
+         `display=swap` 早就在 URL 里了（不是本轮加的），但它管不了这一层：
+         `swap` 只决定"字形没到之前用什么画"，而这条跨域样式表在
+         `fonts.googleapis.com` 不可达时（墙内 / 离线 / 企业网，
+         见 `docs/open-source-readiness.md:651` 的 FE-4）
+         会让浏览器**一直等它**，HTML 里的 `<div id="root">` 于是迟迟不上屏。
+         用户看到的不是"宋体渲染的界面"，而是**一段空白**。
+         ## 改之后
+         `media="print"` 让这条样式表**不参与首屏渲染**（打印媒体在当前屏幕
+         不匹配，浏览器仍然会下载它，只是不阻塞绘制）；`onload` 把它换回 `all`，
+         于是字体到位后正常生效。`<noscript>` 那条是给禁用 JS 的访客的兜底 ——
+         没有它，禁用 JS 时字体永远不会被应用（`onload` 不会跑）。
+         ## 代价与边界
+         - 字体到达时会**重绘一次字形**（FOUT）。这是 `swap` 本来就有的行为，
+           改动只是把它从"3 秒空白后重绘"变成"立刻可读、随后重绘"
+         - **不改加载方式本身**：仍然是 Google Fonts 外链，仍然把访客 IP
+           交给第三方 —— FE-4 **不关闭**。用户 2026-09-26 的决定是
+           "保持现状，只做加载优化"，这条改动正落在"加载优化"里
+         - 首屏**仍然有**一次到 `fonts.googleapis.com` 的请求（`preconnect`
+           也保留）；省掉的是"等它"这件事，不是"发它"这件事 -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <title>EngramNote - AI 学习笔记管理</title>
   </head>
   <body>
