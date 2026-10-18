@@ -60,40 +60,78 @@
  * （字号、断词、表格横向滚动、KaTeX 兜底）—— 序 13 已把它们**收回本文件末尾的
  * 媒体块**（`responsive.css` 要清空），这是"按归属回家"而不是迁移：类名本来就
  * 留全局，`markdown.css` 就是拥有 `.markdown-body` 的样式表。
+ *
  * ⚠️ 其中 `.markdown-body .katex { font-size: 1em }` 这一条**从未生效**：
  * 它与 `markdown-extras.css` 顶层那条 `1.1em` 权重相同（都是 (0,2,0)），
- * 而后者在产物里更靠后。收进本文件后它**依然**在后面，胜负关系逐字不变
- * （想让它生效是"改外观"，得单开一轮带截图，见计划 §4.7）。
+ * 而后者在产物里更靠后 —— **收进本文件后它依然在后面，胜负关系逐字不变**。
+ * （想让它生效是"改外观"，得单开一轮带截图，见计划 §4.7。它登记在
+ * `scripts/verify-built-css.mjs` 的 `MEDIA_WAR_RULES` 里。）
+ *
+ * ⚠️ **更正（2026-09-26）**：这里原来接着写的是"位置语义：整个媒体块排在文件末尾
+ * ⇒ 与本文件顶层规则的关系与原来一致（原本 `responsive.css` 也在 `markdown.css`
+ * 之后加载）"。前半句成立，**后半句是错的**：序 13 把这一组从 `responsive.css`
+ * 搬进本文件之后，它们的源序**提前**了 —— 原来在 `markdown-extras.css` 之后，
+ * 现在在它之前。上面那条 KaTeX 规则"依然不生效"是**结果相同、原因不同**：
+ * 原来因为加载顺序输，现在因为**源序**输（同权重、同在 `index.css` 里）。
+ * 这类"结论对、理由错"的注释最危险 —— 下一个人按错误理由去推理会得出错误结论。 */
+
+/* ── Markdown 渲染 ──
+ *
+ * ## 本轮（2026-09-26，前端重设计）改了什么、为什么
+ *
+ * 这一节是**阅读的主场景**（笔记详情 + 编辑分屏预览 + 笔记问答的回答区），
+ * 所以"高级感"在这里的收益最大。改动只落在**行高 / 留白节奏 / 墨阶**三处 ——
+ * **一个字号值都没动**（用户"保持字号不变"的决定仍然成立，且
+ * `design-drift.mjs` 的 `rawFontSizes` 水位线也要求如此）。
+ *
+ * | 项 | 改前 | 改后 | 为什么 |
+ * |---|---|---|---|
+ * | `.markdown-body` 行高 | 1.8 | **1.9** | 中文正文的舒适区间是 1.8–2.0。1.8 在这个项目里是"刚好够"，1.9 让长段落读起来不挤 |
+ * | 段落间距 | `margin-bottom: 1em` | **`0 0 1.15em`** | 首行不再被顶开；段间距略大于行距，"分段"这件事才看得出来 |
+ * | 标题上留白 | 统一 `1.5em` | **h1 2em / h2 1.9em / h3 1.6em** | 大标题需要更多"呼吸"。统一值会让 h1 与上一段粘在一起 |
+ * | h2 下划线 | 无 | **1px `--color-border-light`** | 长文档里 h2 是主要的扫读锚点。这是"结构性标记"，用纸色不用金色（R2：金色是印章，不是装饰） |
+ * | 代码块 | `--shadow-md` + 金色顶边 | **`--shadow-sm`**、顶边改 `--color-border` | 见下 |
+ * | 引用块 | 金色左边框 + 金色淡底 | **墨阶左边框 + `--color-bg` 底** | 见下 |
+ * | 表格 | 每格 1px 实线 | **表头下 1px、行间 1px** | 见下 |
  */
 
-/* ── Markdown 渲染 ── */
-
 .markdown-body {
-  line-height: 1.8;
+  line-height: 1.9;
   font-size: 0.95rem;
 }
 
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3 {
-  margin-top: 1.5em;
   margin-bottom: 0.5em;
   font-weight: 600;
   color: var(--color-text);
 }
 
+/* 标题上留白按层级递增：h1 要能"开一章"，h3 只需要与上一段分开 */
 .markdown-body h1 {
   font-size: 1.5rem;
+  margin-top: 2em;
 }
 .markdown-body h2 {
   font-size: 1.25rem;
+  margin-top: 1.9em;
 }
 .markdown-body h3 {
   font-size: 1.1rem;
+  margin-top: 1.6em;
+}
+
+/* h2 的扫读锚点（本轮新增）。用 `border-bottom` 而不是伪元素：
+   伪元素要写 `position: relative` + 定位，而这里只需要一条线。
+   纸色（`--color-border-light`）而不是金色 —— 见文件头表格。 */
+.markdown-body h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .markdown-body p {
-  margin-bottom: 1em;
+  margin: 0 0 1.15em;
 }
 
 .markdown-body pre {
@@ -102,9 +140,14 @@
   padding: var(--space-md);
   border-radius: var(--radius-md);
   overflow-x: auto;
-  margin-bottom: 1em;
-  border-top: 3px solid var(--color-accent);
-  box-shadow: var(--shadow-md);
+  margin-bottom: 1.15em;
+  /* 本轮：金色顶边 → 纸色。R2 说"金色是印章，不是装饰"，
+     而这里的金色既不是成就也不是 AI 产出，纯粹是"代码块上面那条线"。
+     顶边留着（它是"这是一段代码"的结构标记），改成与纸面同族的颜色。 */
+  border-top: 3px solid var(--color-border);
+  /* 本轮：`--shadow-md` → `--shadow-sm`。代码块是深底，深底本身已经
+     与纸白拉开了最大对比，再压一层 12px 的阴影只是"更重"而不是"更清楚" */
+  box-shadow: var(--shadow-sm);
 }
 
 .markdown-body code {
@@ -119,17 +162,28 @@
   color: var(--color-primary);
 }
 
+/* 表格（本轮）：从"每格都有 1px 实线"改成"表头下一条 + 行间一条"。
+   全网格线（grid table）在中文长文档里会变成一张密集的网，
+   读的时候眼睛一直在线上跑；横线表（horizontal rules）把线减到最少，
+   而列的对齐由 `padding` 与 `text-align` 承担。
+
+   ⚠️ **表头与行用同一条线**（`--color-border-light`），表头靠**底色**区分。
+   曾经想过"表头那条再深一档"，但那样必须在 `.markdown-body th` 里再写一条
+   `border-bottom-color` 去覆盖共享规则里的简写 —— `verify-built-css.mjs` 的
+   "简写 vs 长写"会（正确地）报成一处新的竞争。为了一档深浅多一处级联关系
+   不划算，而且底色已经足够把表头与数据行分开。 */
 .markdown-body table {
   border-collapse: collapse;
   width: 100%;
-  margin-bottom: 1em;
+  margin-bottom: 1.15em;
 }
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--color-border);
   padding: var(--space-sm) var(--space-md);
   text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .markdown-body th {
@@ -143,12 +197,14 @@
   border-radius: var(--radius-sm);
 }
 
+/* 引用块（本轮）：金色左边框 + 金色淡底 → 墨阶左边框 + 纸色底。
+   R2 的理由同上（金色是印章）。墨阶用 `--color-text-tertiary`（淡墨）：
+   它比正文浅、比边框深，正好是"这是引来的话"该有的分量。 */
 .markdown-body blockquote {
-  border-left: 3px solid var(--color-accent);
-  padding-left: var(--space-md);
+  border-left: 3px solid var(--color-text-tertiary);
   color: var(--color-text-secondary);
-  margin-bottom: 1em;
-  background: var(--color-accent-light);
+  margin-bottom: 1.15em;
+  background: var(--color-bg);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding: var(--space-sm) var(--space-md);
 }
@@ -174,11 +230,12 @@
  * 而不是硬塞进某个组件模块。值一个字未改，逐条登记在
  * `scripts/css-migration-diff.mjs` 的 `BATCHES[].relocations`。
  *
- * 位置语义：整个媒体块排在文件末尾 ⇒ 与本文件顶层规则的关系与原来一致
- * （原本 `responsive.css` 也在 `markdown.css` 之后加载）。唯一**看不见**的关系是
- * `.markdown-body .katex { font-size: 1em }` 与 `markdown-extras.css` 的
- * `1.1em` 之争：`main.tsx` 里 markdown.css 仍排在 markdown-extras.css 之前，
- * 所以那条窄屏字号**依然不生效**（迁移前就如此，见文件头）。
+ * 位置语义：整个媒体块排在文件末尾 ⇒ 与本文件**顶层**规则的关系与原来一致。
+ * ⚠️ **更正（2026-09-26）**：这里原来接着写的是"（原本 `responsive.css` 也在
+ * `markdown.css` 之后加载）"，用它解释那条 KaTeX 窄屏字号为什么不生效 ——
+ * **那个理由是错的**。搬进本文件之后，这一组的源序从"`markdown-extras.css` 之后"
+ * 变成了"之前"，所以现在它是**按源序输**，不是按加载顺序输。
+ * 结论（不生效）没变，原因变了 —— 详见文件头同一条更正。
  * ════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {

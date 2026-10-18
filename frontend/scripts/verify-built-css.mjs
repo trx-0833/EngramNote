@@ -529,12 +529,21 @@ for (const pair of CASCADE_PAIRS) {
 //   prop    —— 竞争的属性
 //   winner  —— 必须生效的模块类名（kebab 或 camel 都行，匹配时会剥哈希）
 //   losers  —— 与它同权重、必须排在它**前面**的类名
+//
+// ⚠️ **`context` 必须按产物的形状写，不是源的形状**（2026-09-26 修）。
+// 源文件里是 `@media (max-width: 768px)`，而产物里被 Lightning CSS 压成
+// `@media (width<=768px)`（range 语法）。原来这里写的是源的那一种，
+// 于是这条检查**从启用起就没生效过** —— 它的自检如实报了"产物里找不到
+// sidebarMobileOpen / sidebar / sidebarCollapsed 的 transform 声明 ——
+// 这项检查没起作用"，但那条 ✗ 长期和另外几条混在一起，没人追到根因。
+// 同一类问题在本文件的 `MEDIA_WAR_RULES` 里也有一处（KaTeX 窄屏字号），同轮修掉。
+const MEDIA_768 = ['@media (max-width: 768px)', '@media (width<=768px)'];
 const ORDER_PAIRS = [
   {
     label:
       '移动端抽屉：`.sidebar-mobile-open { transform: translateX(0) }` 必须排在 ' +
       '`.sidebar, .sidebar-collapsed { transform: translateX(-100%) }` 之后',
-    context: '@media (max-width: 768px)',
+    context: MEDIA_768,
     prop: 'transform',
     winner: 'sidebarMobileOpen',
     losers: ['sidebar', 'sidebarCollapsed'],
@@ -547,7 +556,7 @@ const ORDER_PAIRS = [
     label:
       '图谱按钮的 active+hover 态：`.graph-btn-active:hover` 必须排在 `.graph-btn:hover` 之后' +
       '（第七批序 10 搬进 `components/graph/Graph.module.css` 时顺序一字未改）',
-    context: '',
+    context: [''],
     prop: 'color',
     winner: 'graphBtnActive',
     losers: ['graphBtn'],
@@ -563,8 +572,11 @@ for (const pair of ORDER_PAIRS) {
   const decls = [];
   for (const s of sheets) {
     let idx = 0;
+    // `context` 允许是数组：同一个媒体查询在源里与产物里可能是两种写法
+    // （`@media (max-width: 768px)` vs `@media (width<=768px)`），见上方 `MEDIA_768`
+    const contexts = Array.isArray(pair.context) ? pair.context : [pair.context];
     for (const r of parseRules(s.css)) {
-      if (r.context !== pair.context) continue;
+      if (!contexts.includes(r.context)) continue;
       for (const sel of splitSelectors(r.selector)) {
         idx++;
         const bare = stripHash(sel);
@@ -649,7 +661,12 @@ const MEDIA_WAR_RULES = [
     match: (f) =>
       f.sel === '.markdown-body .katex' &&
       f.prop === 'font-size' &&
-      f.media.context === '@media (max-width: 768px)' &&
+      // ⚠️ 两种媒体查询写法都要认（2026-09-26 修）：源文件里写的是
+      // `@media (max-width: 768px)`，而**产物里被压成 `@media (width<=768px)`**
+      // （Lightning CSS 的 range 语法）。原来只认前者，于是这条注册**永远空命中** ——
+      // 而空命中会被本脚本当成"判据写错"报红，与"这条规则真的改了"长得一模一样。
+      // 教训与 `design-drift.mjs` 的"剥注释"同源：**判据要按产物的形状写，不是按源的形状**。
+      /^@media \((?:max-width:\s*768px|width\s*<=\s*768px)\)$/.test(f.media.context) &&
       f.media.val === '1em' &&
       f.top.val === '1.1em',
     why:
@@ -759,14 +776,6 @@ const SHORTHAND_CLASH_RULES = [
     why: '同上那套写法（`-webkit-text-fill-color: transparent` 的兜底），顺序同样不能反。',
   },
   {
-    id: '进度条流光：`background` 简写 + `background-size`',
-    match: (f) =>
-      f.kind === 'same-selector' &&
-      f.short.prop === 'background' &&
-      f.long.prop === 'background-size',
-    why: '`shimmer` 动画靠 `background-size: 200% 100%` 移动渐变；被简写重置就没有流光。',
-  },
-  {
     id: '先给简写、再单独改一边（padding）',
     match: (f) =>
       f.kind === 'same-selector' && f.short.prop === 'padding' && f.winner === 'longhand',
@@ -815,14 +824,53 @@ const SHORTHAND_CLASH_RULES = [
       f.long.prop === 'border-left-color',
     why: '答案卡 hover 只改左边框颜色，长写在简写之后。',
   },
+];
+
+/**
+ * 产物级直查（2026-09-26 新增）：两条**曾经**是"简写 vs 长写"的写法，
+ * 在产物里已经被压成**一条**声明，所以竞争不存在了。
+ *
+ * ## 为什么必须从注册表里搬出来
+ *
+ * 它们原来住在 `SHORTHAND_CLASH_RULES` 里，判据是
+ * `f.long.prop === 'background-size'` / `'line-height'` —— 而这两个属性名
+ * **在产物里根本不存在**：
+ *
+ * | 源 | 产物（Lightning CSS 压过） |
+ * |---|---|
+ * | `background: linear-gradient(…)` + `background-size: 200% 100%` | `background: linear-gradient(…) 0 0/200% 100%` |
+ * | KaTeX 的 `font: 1.21em/1.2 …` + 单独的 `line-height` | `font: 1.21em/1.2 …`（只剩一条） |
+ *
+ * 于是那两条注册**从启用起就是空命中**，而空命中会被 `checkClashRegistry`
+ * 如实报成"判据写错，或那条规则已经改了" —— 它报得对，只是这条 ✗
+ * 长期和别的 ✗ 混在一起，没人追到"是产物把两半合并了"这个根因。
+ *
+ * ## 为什么不是直接删掉
+ *
+ * 这两条各自守着一件**真实的事**：流光要靠 `background-size` 移动才看得见；
+ * KaTeX 的行高是被 `font` 简写带着走的。合并之后这两件事**依然成立**，
+ * 只是证据从"两条声明谁赢"变成"那条合并后的值长什么样"。
+ * 所以改写成直查产物字符串 —— 判据按产物的形状写，这正是本文件反复吃过的教训。
+ */
+const MERGED_SHORTHAND_GUARDS = [
   {
-    id: 'KaTeX 自己的 `font` 简写 + `line-height`',
-    match: (f) =>
-      f.kind === 'same-selector' && f.short.prop === 'font' && f.long.prop === 'line-height',
-    why: '第三方（KaTeX 的 CSS）就是这么写的；它不在我们的改动范围里，登记是为了"已知"。',
+    id: '进度条流光：`background-size` 被压进了 `background` 简写',
+    // 值形如 `linear-gradient(90deg,#0000,#ffffff4d,#0000) 0 0/200% 100%`
+    pattern: /background:[^;}]*\/\s*200%\s+100%/,
+    why:
+      '`shimmer` 动画靠 `background-size: 200% 100%` 移动渐变；' +
+      '尺寸丢了就没有流光（只剩一块静止的白色叠层）。',
+  },
+  {
+    id: 'KaTeX 行高被压进了 `font` 简写（`1.21em/1.2`）',
+    pattern: /font:\s*[\d.]+em\s*\/\s*[\d.]+\s/,
+    why:
+      'KaTeX 自带的 CSS 把行高写在 `font` 简写的 `/` 后面。' +
+      '这条守的是"第三方那份 CSS 还在产物里、没被我们的改动挤掉"。',
   },
 ];
 
+// ── 3d-2. 跨选择器（证据来自 TSX 的 className）──
 const CROSS_CLASS_SHORTHAND_RULES = [
   {
     id: 'card × card-accent-gold（`border` 简写 + `border-left` 长写）',
@@ -1043,6 +1091,21 @@ console.log('\n简写 vs 长写（跨选择器：TSX 证明两个类名并列在
   }
   checkClashRegistry('跨选择器注册表：', deduped, CROSS_CLASS_SHORTHAND_RULES);
 })();
+
+// ── 3d-3. 被压缩器合并掉的简写/长写：改成直查产物 ──
+// （`MERGED_SHORTHAND_GUARDS` 的定义与理由见上文）
+console.log('\n被压缩器合并的简写（源里两半、产物里一条 —— 改判据为直查）：');
+for (const guard of MERGED_SHORTHAND_GUARDS) {
+  if (guard.pattern.test(all)) {
+    console.log(`   ✓ ${guard.id} —— ${guard.why}`);
+  } else {
+    failed = true;
+    console.log(
+      `   ✗ ${guard.id}：产物里找不到匹配 ${guard.pattern} 的声明 —— ${guard.why}` +
+        `\n      （若确认是压缩器换了写法，请按**产物**的新形状改这里的正则，不要放宽成永远匹配）`,
+    );
+  }
+}
 
 // ── 4. 迁移切片是否真的进产物 ──
 // 按批次列：类名（哈希后仍保留原名）与动画名。任何一个 0 次命中都说明
