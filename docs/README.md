@@ -75,6 +75,7 @@
 |---|---|---|---|
 | [README.md](./README.md) | 活文档 | **本文档地图**：三种状态、阅读顺序、全量清单 | ✅ 本目录的阅读顺序与状态判据 |
 | [overhaul-plan.md](./overhaul-plan.md) | 活文档（台账） | 重构全量方案 + J→BO 逐轮执行记录（11,709 行）；自述"重构期间唯一执行依据" | ✅ 是（重构期间的唯一执行依据） |
+| [pipeline-mechanism-plan.md](./pipeline-mechanism-plan.md) | 活文档（**已定案；本轮零代码改动**） | **处理环节机制重设计**：41 条代码级现状证据 + 阶段矩阵（10 段）+ 失败分级 / 幂等断点 / 进度取消 / 成本队列 + S/P 两段路线 + 六项已拍板决策 | ✅ 是（**处理环节 / 任务机制**主题） |
 | [sqlite-single-writer.md](./sqlite-single-writer.md) | 活文档（约束） | SQLite 单写者路线下的硬约束（启动期强制单写者）+ D1~D6 决策落地说明 | ✅ 是（本主题；D5 行已就地标注"Chroma 已移除"） |
 | [open-source-readiness.md](./open-source-readiness.md) | 活文档 | 开源化差距核查（逐条带 `文件:行号`）+ §执行进度 台账 | ✅ 是（开源化主题） |
 | [architecture.md](./architecture.md) | 历史快照（2026-09-11 冻结） | 系统架构、数据流、状态机、数据库概览 —— **重构前**（2025-06） | ❌ 否（现状见 overhaul-plan 与代码） |
