@@ -94,3 +94,22 @@ describe('StyleGuide · 组件状态矩阵', () => {
     expect(screen.getByRole('button', { name: '打开对话框' })).toBeInTheDocument();
   });
 });
+
+describe('StyleGuide · 反馈与层级（2026-09-26 前端重设计第一轮）', () => {
+  it('★ 有一段专门讲"反馈不靠位移"，且两块示例卡片都挂了 card-hover', () => {
+    const { container } = render(<StyleGuide />);
+
+    expect(screen.getByText(/反馈与层级 · 不靠位移/)).toBeInTheDocument();
+
+    // 两块示例卡片必须**真的**挂上 `.card-hover` —— 这一段的全部意义是
+    // "鼠标移上去自己看位置有没有动"，挂不上就变成一段没有例子的说明文字。
+    const hoverCards = container.querySelectorAll('.card.card-hover');
+    expect(hoverCards).toHaveLength(2);
+  });
+
+  it('★ 说明里点明了 transition 已不用 all（这条规矩最容易在新增样式时被忘掉）', () => {
+    render(<StyleGuide />);
+
+    expect(screen.getByText(/过渡属性必须写成显式清单/)).toBeInTheDocument();
+  });
+});
