@@ -69,16 +69,38 @@
      （透明文字的标题、主按钮）；**批次 E1（Dashboard 精修）又收敛 3 处**，
      都改成实色/墨阶：`StatCard.module.css` 的统计卡大数字（原来是 `background-clip: text`
      的渐变文字）、同一文件的蓝变体色条、`Dashboard.module.css` 的趋势柱。
-     **实测（E1 收尾时 `git grep "var(--gradient-primary)"`，注释不计）还剩 9 处**；
-     **批次 E7 收敛掉 `QA.module.css` 那 1 处**（用户提问气泡 → `--color-primary`），
-     所以现在是 **8 处**：
+     **批次 E7 收敛掉 `QA.module.css` 那 1 处**（用户提问气泡 → `--color-primary`）。
+
+     ## 2026-09-26（前端重设计）收口：**8 处 → 2 处**
+
+     那 8 处的清单（E7 之后实测）是：
      `Sidebar.module.css` 1 / `graph/Graph.module.css` 2 / `Auth.module.css` 2 /
      `components.css` 的 `.btn-ghost::after` 1 /
      `dashboard.css` 的 `.progress-bar-fill` 1 / `learning.css` 1。
-     收敛方向不变（随阶段 E 逐页精修一并处理），但**每收敛一处都要同步这个数字**：
-     A2 当时写的"17 处"到 E1 开始时实测只剩 12 处（A3 之后又零星减过几次），
-     一条没人维护的计数比没有计数更容易误导下一个人。 */
-  --gradient-gold: linear-gradient(135deg, #c9a959 0%, #d4b76a 50%, #b8943e 100%);
+
+     本轮收敛掉 **6 处**（全部是"两端 1.365:1、尺寸又小到根本看不出渐变"的位置）：
+     - `components.css` 的 `.btn-ghost::after`（2px 高的下划线）→ `--color-primary`
+     - `dashboard.css` 的 `.progress-bar-fill`（6px 高的进度条）→ `--color-primary`
+     - `learning.css` 的 `.filter-pill-active`（胶囊底）→ `--color-primary`
+     - `graph/Graph.module.css` 的 `.graphBtnActive` 与 `:hover`（按钮底）→ `--color-primary`
+     - `Sidebar.module.css` 的 `.sidebarLogo` → `--color-text`（**这一处是硬伤**：
+       它用 `-webkit-text-fill-color: transparent` 做渐变文字，打印与
+       Windows 强制高对比度下 Logo 会直接消失，见该文件里的长注释）
+
+     **剩下的 2 处都在 `Auth.module.css`，是刻意保留的**：
+     `visual-refactor-plan` §6 的 E8 行明写「登录注册（渐变只留这里）」，
+     `visual-symbol-research.md` §C2 同一条：把 `--gradient-hero`（页面底）与
+     衬线标题集中用在登录页，作为"书卷气"的第一印象，**不要扩散到内页**。
+
+     收敛方向已走完（除刻意保留的 Auth），**所以这个计数从此不必再维护** ——
+     真要再动它，用 `scripts/count-gradient-refs.mjs` 量一次即可，不要凭记忆改数字。
+     （A2 写的"17 处"到 E1 开始时只剩 12 处 —— 一条没人维护的计数比没有计数更容易误导人。） */
+  /* `--gradient-gold` 于 2026-09-26 删除：收敛掉最后两个用户之后**活引用为 0**
+     （`learning.css` 的 `.filter-pill::after` 2px 下划线、`Graph.module.css` 的
+     `.graphSuggestionScoreBarFill` 6px 评分条 —— 都在 2~6px 的高度上放一个
+     三色渐变，看不出渐变，只有复杂度）。两处都改成实色 `--color-accent`。
+     这与 A2 删除 `--gradient-accent` 是同一条判据：**零引用令牌不留**，
+     而 R2「金色是印章，不是装饰」也不希望金色以渐变的形式出现。 */
   --gradient-hero: linear-gradient(160deg, #1a1a2e 0%, #16213e 30%, #0f3460 60%, #1a1a5e 100%);
 
   /* ── 间距 ──
@@ -127,10 +149,9 @@
    * 没有换字族；这里只是让回退链**落到一个中文字体**而不是拉丁衬线。
    */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  --font-serif:
-    'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
 
   /* ── 字号（visual-refactor-plan 批次 A1）──

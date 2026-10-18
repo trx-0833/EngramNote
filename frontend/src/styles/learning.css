@@ -39,7 +39,10 @@
   background: var(--color-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.25s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
 }
 
 .filter-pill:hover {
@@ -48,7 +51,7 @@
 }
 
 .filter-pill-active {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   color: white;
   border-color: transparent;
   box-shadow: 0 2px 8px rgba(15, 52, 96, 0.2);
@@ -71,7 +74,10 @@
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--color-text-secondary);
-  transition: all 0.25s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -111,13 +117,16 @@
   left: 50%;
   width: 0;
   height: 2px;
-  background: var(--gradient-gold);
+  background: var(--color-accent);
   border-radius: 1px;
   transform: translateX(-50%);
   transition: width 0.25s var(--ease-out-expo);
 }
 
-/* 原样式（refinements.css）: .filter-pill-active { background: var(--gradient-primary); … } */
+/* 原样式（refinements.css）: .filter-pill-active { background: var(--gradient-primary); … }
+   ⚠️ 这条注释**保持原样、不要改**：它记录的是 `refinements.css` 里当时的**原文**。
+   2026-09-26 的一次批量替换曾把它一起改掉 —— 那是改坏历史记录，已改回。
+   同类注释在本文件与 `components.css` 里还有几处，都按这条规矩办。 */
 .filter-pill-active::after {
   width: 60%;
 }

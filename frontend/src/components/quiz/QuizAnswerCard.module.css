@@ -57,7 +57,10 @@
   border-radius: var(--radius-sm);
   background: var(--color-surface);
   cursor: pointer;
-  transition: all 0.25s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
   font-size: 0.95rem;
 }
 

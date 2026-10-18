@@ -35,7 +35,9 @@
   padding: var(--space-2xl);
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-base) var(--ease-out-expo),
+    background-color var(--duration-base) var(--ease-out-expo);
   background: var(--color-surface);
   position: relative;
   overflow: hidden;

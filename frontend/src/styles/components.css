@@ -222,7 +222,9 @@ textarea {
   background: var(--color-surface);
   color: var(--color-text);
   width: 100%;
-  transition: all 0.25s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
 }
 
 input:focus,

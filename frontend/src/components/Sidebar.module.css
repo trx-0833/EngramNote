@@ -79,20 +79,49 @@
   flex-shrink: 0;
 }
 
+/* ── 侧边栏 Logo（2026-09-26 本轮改动：去渐变文字）──
+ *
+ * ## 改之前是什么样
+ *
+ *     background: var(--gradient-primary);
+ *     -webkit-background-clip: text;
+ *     -webkit-text-fill-color: transparent;
+ *     background-clip: text;
+ *     background-color: transparent;
+ *
+ * 也就是"用渐变当文字色"那套写法。它与批次 A3 在 `components.css` 的
+ * `.gradient-text` 上、以及批次 C1 在 `.assessment-title` 上处理掉的是**同一件事** ——
+ * 只是这一处当时漏了（A3 只改了全局类，这里在 Sidebar 模块里）。
+ *
+ * ## 为什么必须改（两条理由，第二条是硬伤）
+ *
+ * ① `--gradient-primary` 两端（`#1a1a2e` → `#0f3460`）色差只有 **1.365:1**，
+ *    在 16px 的 Logo 文字上肉眼**分辨不出渐变** —— 设计意图从未兑现；
+ * ② `-webkit-text-fill-color: transparent` 是实打实的代价：**打印**与
+ *    Windows **强制高对比度**模式下，背景被丢掉而文字仍是透明的 ⇒
+ *    Logo 直接消失（`components.css:445-448` 为 `.gradient-text` 记过同一条）。
+ *
+ * ## 改成什么
+ *
+ * 纯 `--color-text`（焦墨，`#1a1a2e`）—— 那正是原渐变的**起点色**，
+ * 所以观感与"渐变看起来的样子"一致，只是不再依赖一个看不出来的渐变。
+ * 层次由衬线字族 + 700 字重 + 字号承担（R3：衬线是标题与数字的特权）。
+ *
+ * ⚠️ `background: none` 是**必须显式写**的：`button` 的 UA 样式与
+ * `components.css` 顶部的 `button { background: none }` 都会给它透明底，
+ * 但这条规则自己原来写着 `background-color: transparent` —— 留着它会让
+ * "这个元素的背景是什么"有两个说法。现在只有一条。 */
 .sidebarLogo {
   font-family: var(--font-serif);
   font-size: 1.15rem;
   font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  background: none;
+  color: var(--color-text);
   cursor: pointer;
   border: none;
-  background-color: transparent;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .sidebarLogo:hover {
@@ -111,7 +140,9 @@
   height: 28px;
   border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
-  transition: all 0.2s ease;
+  transition:
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   flex-shrink: 0;
   border: none;
   background: transparent;
@@ -225,7 +256,9 @@ body.sidebarOpenLock {
   font-size: 0.875rem;
   font-weight: 450;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   white-space: nowrap;
   overflow: hidden;
   border: none;
@@ -294,7 +327,9 @@ body.sidebarOpenLock {
   height: 22px;
   border-radius: 4px;
   color: var(--color-text-tertiary);
-  transition: all 0.15s ease;
+  transition:
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   border: none;
   background: transparent;
   cursor: pointer;

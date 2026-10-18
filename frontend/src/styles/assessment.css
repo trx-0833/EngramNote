@@ -75,7 +75,9 @@
   border: 1px solid var(--color-border-light);
   background: var(--color-surface);
   cursor: pointer;
-  transition: all 0.2s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   margin-bottom: var(--space-xs);
   font-size: 0.875rem;
 }

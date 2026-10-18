@@ -227,7 +227,9 @@
   background: var(--gradient-primary);
   color: white;
   box-shadow: 0 4px 16px rgba(15, 52, 96, 0.3);
-  transition: all 0.3s var(--ease-out-expo);
+  transition:
+    box-shadow var(--duration-base) var(--ease-out-expo),
+    transform var(--duration-base) var(--ease-out-expo);
 }
 
 .authSubmit:hover {

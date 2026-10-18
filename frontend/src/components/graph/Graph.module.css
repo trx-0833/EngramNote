@@ -186,7 +186,10 @@
   gap: 4px;
   padding: 2px 6px;
   border-radius: var(--radius-full);
-  transition: all 0.2s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   user-select: none;
 }
 
@@ -221,7 +224,10 @@
   background: var(--color-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s var(--ease-out-expo);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
   position: relative;
   font-family: inherit;
 }
@@ -233,14 +239,14 @@
 }
 
 .graphBtnActive {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   color: white;
   border-color: transparent;
 }
 
 .graphBtnActive:hover {
   color: white;
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   opacity: 0.9;
 }
 
@@ -394,7 +400,10 @@
   border-radius: var(--radius-sm);
   font-size: 1rem;
   font-weight: 600;
-  transition: all 0.15s var(--ease-out-expo);
+  transition:
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
   font-family: inherit;
   line-height: 1;
 }
@@ -445,7 +454,7 @@
 
 .graphSuggestionScoreBarFill {
   height: 100%;
-  background: var(--gradient-gold);
+  background: var(--color-accent);
   border-radius: var(--radius-full);
   transition: width 0.4s var(--ease-out-expo);
 }

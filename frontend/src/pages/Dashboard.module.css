@@ -121,7 +121,9 @@
   width: 100%;
   max-width: 40px;
   border-radius: 6px 6px 0 0;
-  transition: all 0.3s var(--ease-out-expo);
+  transition:
+    filter var(--duration-base) var(--ease-out-expo),
+    transform var(--duration-base) var(--ease-out-expo);
   position: relative;
   background: var(--color-primary);
 }

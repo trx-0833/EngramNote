@@ -767,14 +767,22 @@ const SHORTHAND_CLASH_RULES = [
       '`background` 在前、`background-clip: text` 在后（本项目 6 处 + KaTeX/评分卡各 1 处）。' +
       '顺序反了渐变就整块铺满元素、文字看不见 —— 而这条顺序在产物里逐字保留，本检查就是在钉它。',
   },
-  {
-    id: '渐变文字配 `background-color: transparent`',
-    match: (f) =>
-      f.kind === 'same-selector' &&
-      f.short.prop === 'background' &&
-      f.long.prop === 'background-color',
-    why: '同上那套写法（`-webkit-text-fill-color: transparent` 的兜底），顺序同样不能反。',
-  },
+  // ── 「渐变文字配 `background-color: transparent`」于 2026-09-26 删除 ──
+  //
+  // 它的判据是 `background` 简写 + `background-color` 长写（同一选择器），
+  // 而那套写法**在项目里已经没有用户了**：
+  //
+  // | 曾经的用户 | 去哪了 |
+  // |---|---|
+  // | `components.css` 的 `.gradient-text` | 批次 A3 改成纯 `--color-text`（不再有 `background`） |
+  // | `Auth.module.css` 的 `.authTitle` | 批次 C1 随 `.assessment-title` 一起换成 `<PageHeader>` |
+  // | `Sidebar.module.css` 的 `.sidebarLogo` | **2026-09-26 本轮**改成纯 `--color-text`（见该文件长注释） |
+  //
+  // 本轮把最后一处（`.sidebarLogo`）改掉之后，这条注册就**空命中**了 ——
+  // 空注册自检如实报了出来，这正是它该做的事。
+  // **删除而不是放宽**：留着一条永远不可能命中的注册，等于把"这套写法已绝迹"
+  // 这个事实伪装成"还在守着它"。真要有新的渐变文字出现，
+  // 上面那条 `background-clip` 的注册会先命中它。
   {
     id: '先给简写、再单独改一边（padding）',
     match: (f) =>
