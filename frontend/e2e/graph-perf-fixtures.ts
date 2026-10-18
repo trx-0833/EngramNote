@@ -164,8 +164,14 @@ export interface LargeGraph {
  */
 export function buildLargeGraph(): LargeGraph {
   const rng = mulberry32(0x5eed);
-  const { nodes: nodeCount, edges: edgeCount, degree1Nodes, degree2Nodes, hubNodes, maxDegree } =
-    REAL_SHAPE;
+  const {
+    nodes: nodeCount,
+    edges: edgeCount,
+    degree1Nodes,
+    degree2Nodes,
+    hubNodes,
+    maxDegree,
+  } = REAL_SHAPE;
   const touchedNodes = degree1Nodes + degree2Nodes + hubNodes;
 
   // 1) 度序列：508 个枢纽 + 180 个度 2 + 253 个度 1，合计 2 × 1362 = 2724

@@ -173,20 +173,23 @@ async function sampleFrames(
 
 /** 装 canvas 调用计数器（必须在导航之前调用） */
 async function installCanvasCounters(page: Page): Promise<void> {
-  await page.addInitScript((names: string[]) => {
-    const store = window as unknown as { __canvasCalls: Record<string, number> };
-    store.__canvasCalls = {};
-    const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, unknown>;
-    for (const name of names) {
-      const original = proto[name];
-      if (typeof original !== 'function') continue;
-      const call = original as (...args: unknown[]) => unknown;
-      proto[name] = function patched(this: unknown, ...args: unknown[]) {
-        store.__canvasCalls[name] = (store.__canvasCalls[name] ?? 0) + 1;
-        return call.apply(this, args);
-      };
-    }
-  }, CANVAS_CALLS as unknown as string[]);
+  await page.addInitScript(
+    (names: string[]) => {
+      const store = window as unknown as { __canvasCalls: Record<string, number> };
+      store.__canvasCalls = {};
+      const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, unknown>;
+      for (const name of names) {
+        const original = proto[name];
+        if (typeof original !== 'function') continue;
+        const call = original as (...args: unknown[]) => unknown;
+        proto[name] = function patched(this: unknown, ...args: unknown[]) {
+          store.__canvasCalls[name] = (store.__canvasCalls[name] ?? 0) + 1;
+          return call.apply(this, args);
+        };
+      }
+    },
+    CANVAS_CALLS as unknown as string[],
+  );
 }
 
 async function readCanvasCounts(page: Page): Promise<Record<string, number>> {
@@ -387,12 +390,12 @@ test.describe('图谱规模性能探针', () => {
     const FORCED_ZOOM_BUDGET_MS = 150;
     console.log(
       `  回归闸      平均帧间隔须 < ${FORCED_ZOOM_BUDGET_MS} ms` +
-        `（实测 ${stats.avgMs.toFixed(2)} ms，噪声 ±20%，余量 2~3 倍）`
+        `（实测 ${stats.avgMs.toFixed(2)} ms，噪声 ±20%，余量 2~3 倍）`,
     );
     expect(
       stats.avgMs,
       `持续缩放的平均帧间隔 ${stats.avgMs.toFixed(1)} ms 超过 ${FORCED_ZOOM_BUDGET_MS} ms ` +
-        '—— 量级级别的渲染回归（不是"慢了百分之十几"）'
+        '—— 量级级别的渲染回归（不是"慢了百分之十几"）',
     ).toBeLessThan(FORCED_ZOOM_BUDGET_MS);
   });
 
@@ -429,9 +432,7 @@ test.describe('图谱规模性能探针', () => {
 
     const coverage = await page.evaluate(() => {
       const canvases = Array.from(document.querySelectorAll('canvas'));
-      const canvas = canvases.sort(
-        (a, b) => b.width * b.height - a.width * a.height,
-      )[0];
+      const canvas = canvases.sort((a, b) => b.width * b.height - a.width * a.height)[0];
       const ctx = canvas?.getContext('2d');
       if (!canvas || !ctx) return null;
       const { width, height } = canvas;
@@ -454,7 +455,9 @@ test.describe('图谱规模性能探针', () => {
     console.log('\n=== ④ 默认视角 ===');
     console.log(`  规模        ${REAL_SHAPE.nodes} 节点 / ${REAL_SHAPE.edges} 边`);
     if (coverage) {
-      console.log(`  画布        ${coverage.width} × ${coverage.height}（页面上共 ${coverage.canvasCount} 个 canvas）`);
+      console.log(
+        `  画布        ${coverage.width} × ${coverage.height}（页面上共 ${coverage.canvasCount} 个 canvas）`,
+      );
       console.log(
         `  覆盖率      ${(coverage.ratio * 100).toFixed(2)}%（非透明像素 ${coverage.painted}）`,
       );

@@ -455,11 +455,10 @@ export default function StyleGuide() {
         <h2 className={styles.sectionTitle}>反馈与层级 · 不靠位移</h2>
         <p className={styles.note}>
           <strong>本轮改动</strong>：按钮与卡片的悬浮反馈<strong>不再抬升元素</strong>
-          （原来 `.btn-*:hover` 是 <code>translateY(-1px)</code>、
-          <code>.card-hover:hover</code> 是 <code>translateY(-2px)</code>）。
-          元素位移是最容易暴露"模板感"的一种反馈 —— 它把"这块可以点"演成了
-          "这张纸被抬起来了"。现在反馈只由<strong>同一平面内</strong>的变化承担：
-          底色加深、边框色实一档、阴影深一档。
+          （原来 `.btn-*:hover` 是 <code>translateY(-1px)</code>、<code>.card-hover:hover</code> 是{' '}
+          <code>translateY(-2px)</code>）。 元素位移是最容易暴露"模板感"的一种反馈 ——
+          它把"这块可以点"演成了 "这张纸被抬起来了"。现在反馈只由<strong>同一平面内</strong>
+          的变化承担： 底色加深、边框色实一档、阴影深一档。
         </p>
         <div className={styles.demoRow}>
           {/* 下面三块都挂 `.card-hover`，鼠标移上去就能看出"不动位置" */}
@@ -477,13 +476,13 @@ export default function StyleGuide() {
           </div>
         </div>
         <p className={styles.note}>
-          另一条本轮定下的规矩：<strong>过渡属性必须写成显式清单</strong>，
-          不再用 <code>transition: all</code> —— <code>all</code> 会把{' '}
-          <code>width</code> / <code>padding</code> / <code>font-size</code>{' '}
-          这类触发布局的属性一起挂上过渡，那是"点一下按钮、文字挤了一下"这类抖动的来源。
-          全站 <code>transition: all</code> 已清零（含本页按钮矩阵）。
-          验证方式：在本页任一按钮上右键 →「检查」，在 Styles 面板里看{' '}
-          <code>transition-property</code> —— 应当是一串具体属性名，不是 <code>all</code>。
+          另一条本轮定下的规矩：<strong>过渡属性必须写成显式清单</strong>， 不再用{' '}
+          <code>transition: all</code> —— <code>all</code> 会把 <code>width</code> /{' '}
+          <code>padding</code> / <code>font-size</code>{' '}
+          这类触发布局的属性一起挂上过渡，那是"点一下按钮、文字挤了一下"这类抖动的来源。 全站{' '}
+          <code>transition: all</code> 已清零（含本页按钮矩阵）。 验证方式：在本页任一按钮上右键
+          →「检查」，在 Styles 面板里看 <code>transition-property</code> ——
+          应当是一串具体属性名，不是 <code>all</code>。
         </p>
       </section>
 

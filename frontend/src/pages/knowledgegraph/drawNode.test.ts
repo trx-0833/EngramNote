@@ -152,12 +152,7 @@ describe('大图降级（lowDetail = true）', () => {
   it('★ 选中的普通节点仍然走昂贵路径 —— 交互反馈不能因为图大就消失', () => {
     const node = makeNode({ relation_count: 0 });
     const ctx = makeCtx();
-    drawGraphNode(
-      node,
-      ctx,
-      1,
-      makeState({ lowDetail: true, selectedNode: node }),
-    );
+    drawGraphNode(node, ctx, 1, makeState({ lowDetail: true, selectedNode: node }));
 
     const used = usedRichDetail(ctx);
     expect(used.gradient).toBe(true);
