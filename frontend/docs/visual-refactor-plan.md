@@ -544,4 +544,9 @@ npx vite preview --outDir <快照目录>
 
 | 欠账 | 状态 |
 |---|---|
-| **`npm run format:check` 在 HEAD 上就是红的**（11 个文件：`GraphCanvas.tsx` / `graph/types.ts` / `KnowledgeGraph.tsx` / `knowledgegraph/*.ts` / `NoteDetail.tsx` / `e2e/graph-perf-*.ts`） | 开工前实测确认过（stash 后重跑，清单一致）。本轮**只格式化了新增/改动的文件**，没有顺手修这 11 个 —— 修它们会让每个提交的 diff 混进无关文件，与本轮"可独立回滚"的要求冲突。**这是 8 条门禁里唯一还红的一条** |
+| **`npm run format:check` 在 HEAD 上就是红的**（11 个文件：`GraphCanvas.tsx` / `graph/types.ts` / `KnowledgeGraph.tsx` / `knowledgegraph/*.ts` / `NoteDetail.tsx` / `e2e/graph-perf-*.ts`） | ✅ **已修**（提交 `be0484d`，标签 `rollback/7-all-green`）。开工前实测确认过它们是**存量债**（stash 后重跑清单一致），来自 `4f32849` 之前几轮 graph 工作。只做格式、`git diff -w` 逐处核对过没有语义改动 |
+| ★ **`npm run a11y` 是抖的**（本会话 6 次运行里 2 次红、4 次 `26 passed`） | ⏸ **未修，独立一轮**。两次失败的形态都指向**测试选择器**而不是产品代码：<br>① `e2e/a11y.spec.ts:1286` 的 `getByRole('heading', { name: '今日学习' })` —— Playwright 的 `name` 选项默认是**子串**匹配，于是它同时命中 `今日学习目标` 与 `今日学习报告 (2026-01-06)`，两者同时可见时抛 strict mode violation。修法是加 `exact: true`（或写成完整标题）<br>② `note-detail` 报 `page-has-heading-one` —— 意味着**那一轮页面根本没渲染出 h1**（数据桩没到位），属等待条件不足<br>⚠️ 两个都不是本轮引入的：本轮只改了 CSS、一个纯新增的 hook、一段样板间内容与若干 markdown，**碰不到 `/today` 与 `/note-detail` 的渲染逻辑**；且同一份代码连跑两次可以一次红一次绿 |
+
+> ⚠️ 这两条（尤其第 2 条）意味着**"8 条门禁全绿"这个结论带一个前提**：
+> `a11y` 那一条需要跑两次取稳定结果，直到上面的选择器缺陷被修掉。
+> 其余 7 条都是确定性的（本会话各自连过多轮，无抖动）。
