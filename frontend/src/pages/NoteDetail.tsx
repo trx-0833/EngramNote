@@ -27,6 +27,8 @@ import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
 import LoadingSpinner from '../components/LoadingSpinner';
 import VersionHistory from '../components/VersionHistory';
 import { useAdhdReader } from '../hooks/useAdhdReader';
+// 阅读位置记忆（「使用时的想法.txt」第 1 条）：刷新后回到上次读到的地方
+import { useScrollMemory } from '../hooks/useScrollMemory';
 import NoteDetailHeader from './notedetail/NoteDetailHeader';
 import NotePropertyRail from './notedetail/NotePropertyRail';
 import RelatedLinksSection, { shouldShowRelatedLinks } from './notedetail/RelatedLinksSection';
@@ -88,6 +90,25 @@ export default function NoteDetail() {
   const [editMode, setEditMode] = useState<EditMode>('view');
   /** 版本历史面板显示状态 */
   const [showVersionHistory, setShowVersionHistory] = useState(false);
+
+  /**
+   * 阅读位置记忆（「使用时的想法.txt」第 1 条）：
+   * 刷新后回到上次读到的地方，而不是回到顶部。
+   *
+   * 三个判据都在这里写死，hook 里不再猜：
+   * - `enabled`：只有"纯阅读"才记。编辑态是分屏、diff 态是另一份 DOM，
+   *   两者的滚动位置对正文没有意义；转换中/上传中根本没有正文。
+   * - `mode`：原始版与清洗版的段落位置不同，恢复时要求模式一致。
+   * - `skipRestore`：引用回跳（`?cs=&ce=`）时把滚动让给 `citationJump`，
+   *   否则两个滚动会打架 —— 用户点的那一下必须赢。
+   */
+  useScrollMemory({
+    noteId,
+    containerRef: markdownRef,
+    enabled: !loading && editMode === 'view' && viewMode !== 'diff',
+    mode: viewMode,
+    skipRestore: jump.hasJump,
+  });
 
   /** ADHD Reader 专注阅读模式（鼠标遮罩/显示文本） */
   const {
