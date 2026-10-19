@@ -72,8 +72,12 @@
   padding: 0;
   font-size: 0.875rem;
   color: var(--color-text-secondary);
-  /* 与下方正文之间一条发丝线：这条是"页头的最后一行"，不是第二个内容块 */
-  padding-bottom: var(--space-md);
+  /* 与下方正文之间一条发丝线：这条是"页头的最后一行"，不是第二个内容块。
+     2026-10-19：`padding-bottom` 去掉（原 `var(--space-md)`）—— 它与下面的
+     `margin` 在加同一件事，两处相加得到 24px，而页头其它三处间隔都是 16px。
+     现在由 `.noteDetailHeader` / `.noteDetailActions` 与页面自己的
+     `margin-bottom` 统一给出 `--space-md`，这一条只负责"画线"。
+     线的位置因此紧贴最后一行文字，不再吊着一段空白。 */
   border-bottom: 1px solid var(--color-border-light);
   /* 长内容（如"创建于 … GMT+8"）在窄屏换行，而不是把这一行撑出横向滚动 */
   overflow-wrap: anywhere;
@@ -92,6 +96,15 @@
   background: var(--note-role-bg);
   color: #fff;
   cursor: pointer;
+  /* ⚠️ 这里**不要**加 `white-space: nowrap`。
+     2026-10-19 试过并撤回：当时看到 768px 下这个控件高 40px（1600/1024 是 23px），
+     猜是文字换行，于是加了 nowrap —— **实测无效**（仍是 40px）。
+     真正的原因是全局规则 `components.css:624-628`：窄屏下
+     `select, input, textarea { min-height: 40px }`，那是项目**刻意**的触控目标
+     决定（同段注释："桌面按钮高约 33px，手指按不准"）。
+     也就是说 40px 不是缺陷，是既有决定；为它写一条 nowrap 会留下
+     "看起来在修什么、其实什么也没修"的规则 —— 本仓库最忌讳的那种。
+     它比同一行的徽章（23px）高，在 ≤768px 是**有意保留**的不一致。 */
 }
 
 /* 焦点可见：键盘用户看得出焦点在这个下拉框上（axe 不检查这一条，

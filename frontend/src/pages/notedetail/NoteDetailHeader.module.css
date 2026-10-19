@@ -98,35 +98,87 @@
 
 /* ════════════════════════════════════════════════════════════════
  * 页头骨架（overhaul-plan 5.6 序 8）
+ *
+ * ## 2026-10-19 第三次改版：标题从"跟按钮抢宽度"改成"独占一行"
+ *
+ * ### 为什么改（真 Chromium 实测，三档视口）
+ *
+ * | 视口 | 标题块 | 按钮组 | 按钮高度 | 标题→元信息 |
+ * |---|---|---|---|---|
+ * | 1600 | 264（1 行） | 679 | 39 | 17 |
+ * | **1024** | **201（挤成 2 行，高 77）** | 519 | **60** | 16 |
+ * | 768 | 264（1 行） | **736（撑满）** | 40 | **64** |
+ *
+ * 根因不是"间距不好看"，是**结构在抢宽度**：
+ * `PageHeader.module.css:80` 给动作区写了 `flex-shrink: 0`（注释原话：
+ * "让按钮永远保持原尺寸，**被压缩的只能是标题**"）—— 在别的页面
+ * （标题短、按钮少）这没问题；这一页标题长、按钮有 8 个（`editMode==='view'`
+ * 时 9 个），于是"标题永远被牺牲"：1024 下只剩 **201px**，折成两行，
+ * 旁边一堵 519px 的按钮墙。而标题是这一页的**主体**。
+ *
+ * 第二个问题是**断点空档**：`.noteDetailActions` 的 `flex-wrap` 原来只写在
+ * ≤768px 档里，而按钮在 ≤768px 又是 `flex: 1 1 auto`。1024 落在两个断点之间
+ * —— 按钮既不能换行、也不能撑满，只能被压成 **49~65px 宽 / 60px 高**。
+ * 现在 `flex-wrap` 提到基础规则，中间宽度能自然换行。
+ *
+ * ### 改成什么：三层，垂直节奏统一为三处 `--space-md`
+ *
+ * ```
+ * tab 条
+ * 标题（独占整行，不再被压缩）
+ * 工具栏（8~9 个按钮，不够就自然换行）
+ * 元信息条（这笔记是什么 —— 现在紧跟在标题之后）
+ * ```
+ *
+ * 语义顺序也顺了：**叫什么 → 是什么 → 能对它做什么**。改之前按钮夹在
+ * 标题与元信息中间，把"这个实体是什么"切成了两半。
+ *
+ * ⚠️ **量尺一个字没动**：标题仍是 `--text-xl`(1.5rem) 衬线 600
+ * （`PageHeader.module.css` 的 `.pageHeaderTitle`），字号与色值全部未改
+ * —— 这是本项目的硬约束（`visual-design-spec.md` §2.1 / §5.1）。
+ * 8 个按钮的文案、顺序、图标、禁用条件也一个都没动。
  * ════════════════════════════════════════════════════════════════ */
 
+/* 标题行。
+ *
+ * ⚠️ 这层包装**留着**，哪怕它现在只有一个孩子（`<PageHeader>`）：
+ * 它是 `verify-built-css.mjs` 切片标记与下面两条窄屏规则的锚点，
+ * 删掉会牵动那套产物级检查。
+ *
+ * `justify-content: space-between` 已去掉：只有一个孩子时它没有任何作用，
+ * 留着会让下一个人以为这里还有第二个东西要推到右边。 */
 .noteDetailHeader {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
   margin-bottom: var(--space-md);
 }
 
+/* 工具栏：8~9 个按钮，一行放不下就换行。
+ *
+ * `flex-wrap` 在**基础规则**里（不再只写在窄屏档）—— 见文件头"断点空档"。
+ * `gap` 与 768px 档原来的值一致（`--space-sm`），所以窄屏观感不变。 */
 .noteDetailActions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-sm);
+  margin-bottom: var(--space-md);
 }
 
+/* ── 窄屏（沿用全局的 768px，不另造断点）── */
+
 @media (max-width: 768px) {
-  /* 原规则（NoteDetailHeader 内联）: display:flex; justify-content:space-between
-     标题与 8 个操作按钮同行，窄屏必然溢出 → 上下排列，按钮组允许换行。 */
+  /* 原来这里要把 `.noteDetailHeader` 改成 `flex-direction: column`
+     （标题与 8 个按钮同行必然溢出）。现在**上下同形**：标题本来就独占一行，
+     所以那条 `flex-direction` 整条删除 —— 断点少一个，"上下同形"不再需要
+     两处维护。
+     `align-items: stretch` 保留给标题块：窄屏下让它占满整行宽度。 */
   .noteDetailHeader {
-    flex-direction: column;
     align-items: stretch;
-    gap: var(--space-sm);
   }
 
-  .noteDetailActions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-  }
-
+  /* 按钮撑满可用宽度（原来是 `flex: 1 1 auto`，值一字未改）。
+     现在工具栏自己会换行，所以这条的效果是"每行的按钮把该行填满"，
+     而不是"把 8 个按钮压在一行里"。 */
   .noteDetailActions :global(.btn) {
     flex: 1 1 auto;
   }

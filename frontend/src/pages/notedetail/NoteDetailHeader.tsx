@@ -147,51 +147,58 @@ export default function NoteDetailHeader({
         />
       </div>
 
-      {/* 标题 + 操作按钮组：窄屏下改为上下排列、按钮换行。
-          这两层骨架（以及窄屏那 3 条）已随组件搬进 NoteDetailHeader.module.css
+      {/* 标题行。2026-10-19：标题**独占一行**，不再与按钮组抢宽度。
+          这两层骨架（以及窄屏那两条）已随组件搬进 NoteDetailHeader.module.css
           —— 类名哈希后写在 responsive.css 里的选择器会永远选不中（5.6 序 8）。 */}
       <div className={styles.noteDetailHeader}>
         {/* ⚠️ 这里**只换量尺、不换骨架**（visual-refactor-plan 批次 C1）：
             这一页的 h1 是**实体标题** —— 显示的是笔记自己的名字，不是页面名；
             而页头骨架（`.noteDetailHeader` / `.noteDetailActions` 以及它们的
-            768px"上下排列 + 按钮换行 + 按钮撑满"与 480px"一行两个"）承载的是
+            768px"按钮撑满"与 480px"一行两个"）承载的是
             **8 个操作按钮的窄屏行为**，是 5.6 序 8 专门搬进模块、并且被
             `verify-built-css.mjs` 的切片标记盯着的既有结论。
             把整行换成 `<PageHeader actions={…}>` 会顺手把那一整套窄屏行为
-            改成 PageHeader 自己的"768px 换行"（按钮不再上下排列、
-            也不再按 50% 撑开）—— 那是 C1 范围之外的版式改动。
+            改成 PageHeader 自己的"768px 换行"（按钮不再按 50% 撑开）——
+            那是 C1 范围之外的版式改动。
             所以：`<PageHeader>` 在这里只负责"1.5rem 衬线 600"这一件事
             （原字号本就 1.5rem，观感不变），`spacing="none"` 把与下方内容的
             间距留给 `.noteDetailHeader` 自己的 `margin-bottom`。
-            批次 E2 也不动它：8 个操作按钮仍在这一层里。 */}
+
+            ⚠️ 2026-10-19 起这一层**不再**用 `space-between` 把按钮推到右边：
+            那正是"标题被压成两行"的成因（见 module.css 文件头的实测表）。
+            现在它只包标题，按钮是它下面的兄弟。 */}
         <PageHeader title={note.title} spacing="none" />
-        <div className={styles.noteDetailActions}>
-          {editMode === 'view' && (
-            <button
-              className="btn btn-secondary"
-              onClick={onEnterEdit}
-              disabled={viewMode === 'original' || isProcessing}
-              title={
-                viewMode === 'original'
-                  ? '原始版不可编辑，请在清洗版中编辑'
-                  : isProcessing
-                    ? '处理中，暂不可编辑'
-                    : '编辑笔记内容'
-              }
-            >
-              <Icon name="edit" size={16} />
-              编辑
-            </button>
-          )}
+      </div>
+
+      {/* 操作工具栏：8~9 个按钮，一行放不下就自然换行。
+          独立成一行之后，标题与按钮不再互相压缩。 */}
+      <div className={styles.noteDetailActions}>
+        {editMode === 'view' && (
           <button
             className="btn btn-secondary"
-            onClick={onOpenVersionHistory}
-            disabled={['uploading', 'converting'].includes(note.status)}
-            title="查看版本历史"
+            onClick={onEnterEdit}
+            disabled={viewMode === 'original' || isProcessing}
+            title={
+              viewMode === 'original'
+                ? '原始版不可编辑，请在清洗版中编辑'
+                : isProcessing
+                  ? '处理中，暂不可编辑'
+                  : '编辑笔记内容'
+            }
           >
-            版本历史
+            <Icon name="edit" size={16} />
+            编辑
           </button>
-          {/* 导出（想法 4「设计导出功能」）—— 页头的第 9 个按钮。
+        )}
+        <button
+          className="btn btn-secondary"
+          onClick={onOpenVersionHistory}
+          disabled={['uploading', 'converting'].includes(note.status)}
+          title="查看版本历史"
+        >
+          版本历史
+        </button>
+        {/* 导出（想法 4「设计导出功能」）—— 页头的第 9 个按钮。
               ⚠️ 复用现成的 `.noteDetailActions` 换行规则，**不改页头 CSS**：
               那 5 条窄屏规则（768px 上下排列 + 按钮撑满、480px 一行两个）
               是 5.6 序 8 专门搬进模块、并被 `verify-built-css.mjs` 的切片标记
@@ -206,76 +213,76 @@ export default function NoteDetailHeader({
                 （`ViewModeTabs` 的 `canShowClean` 已经挡住了切过去），
                 所以用户能导的正是他手上有的那一版。
                 真正没有正文时后端回 `NOTE_EXPORT_EMPTY`，由 toast 透传文案。 */}
+        <button
+          className="btn btn-secondary"
+          onClick={onExport}
+          disabled={isProcessing || viewMode === 'diff' || exporting}
+          title={
+            isProcessing
+              ? '处理中，暂不可导出'
+              : viewMode === 'diff'
+                ? '对比视图无法导出，请先切换到某一版'
+                : viewMode === 'original'
+                  ? '导出原始版 Markdown 文件'
+                  : '导出清洗版 Markdown 文件'
+          }
+        >
+          {exporting ? '导出中…' : '导出'}
+        </button>
+        {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
+          <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>
+            立即复习
+          </button>
+        )}
+        {(note.note_role === 'material' || !note.note_role) && (
           <button
             className="btn btn-secondary"
-            onClick={onExport}
-            disabled={isProcessing || viewMode === 'diff' || exporting}
-            title={
-              isProcessing
-                ? '处理中，暂不可导出'
-                : viewMode === 'diff'
-                  ? '对比视图无法导出，请先切换到某一版'
-                  : viewMode === 'original'
-                    ? '导出原始版 Markdown 文件'
-                    : '导出清洗版 Markdown 文件'
-            }
+            onClick={() => navigate(`/assessment?noteId=${note.id}`)}
           >
-            {exporting ? '导出中…' : '导出'}
+            学习评估
           </button>
-          {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
-            <button
-              className="btn btn-primary"
-              onClick={() => navigate(`/review/quick/${note.id}`)}
-            >
-              立即复习
-            </button>
-          )}
-          {(note.note_role === 'material' || !note.note_role) && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => navigate(`/assessment?noteId=${note.id}`)}
-            >
-              学习评估
-            </button>
-          )}
-          {note.note_role === 'personal_note' && (
-            <button className="btn btn-secondary" onClick={onManageLinks}>
-              管理关联资料
-            </button>
-          )}
-          {(note.status === 'cleaned' ||
-            note.status === 'learning_failed' ||
-            note.status === 'archived') && (
-            <button className="btn btn-primary" onClick={onStartLearning}>
-              AI预处理
-            </button>
-          )}
-          {(note.status === 'cleaned' ||
-            note.status === 'learning_failed' ||
-            note.status === 'converted' ||
-            note.status === 'archived') && (
-            <button className="btn btn-secondary" onClick={onArchive}>
-              {note.status === 'archived' ? '取消审阅' : '审阅'}
-            </button>
-          )}
-          <button className="btn btn-danger" onClick={onDelete}>
-            <Icon name="delete" size={16} />
-            删除
+        )}
+        {note.note_role === 'personal_note' && (
+          <button className="btn btn-secondary" onClick={onManageLinks}>
+            管理关联资料
           </button>
-          <button className="btn btn-secondary" onClick={() => navigate('/notes')}>
-            返回
+        )}
+        {(note.status === 'cleaned' ||
+          note.status === 'learning_failed' ||
+          note.status === 'archived') && (
+          <button className="btn btn-primary" onClick={onStartLearning}>
+            AI预处理
           </button>
-        </div>
+        )}
+        {(note.status === 'cleaned' ||
+          note.status === 'learning_failed' ||
+          note.status === 'converted' ||
+          note.status === 'archived') && (
+          <button className="btn btn-secondary" onClick={onArchive}>
+            {note.status === 'archived' ? '取消审阅' : '审阅'}
+          </button>
+        )}
+        <button className="btn btn-danger" onClick={onDelete}>
+          <Icon name="delete" size={16} />
+          删除
+        </button>
+        <button className="btn btn-secondary" onClick={() => navigate('/notes')}>
+          返回
+        </button>
       </div>
 
       {/* 元信息条（2026-10-18 起从 `children` 进来）。
           批次 E2 曾把这一整块搬去主内容左侧当竖轨（DOM 上从
           `<header>` 的第二个子块变成 `<aside aria-label="笔记元信息">`），
           2026-10-18 用户实测反馈"占地方、滚动不腾位"后搬回页头，
-          但**排版是横排**（不再横占满行、也不再竖占一列）：
-          标题 → 操作按钮 → 元信息，是"这条笔记是什么"的连贯交代。
+          但**排版是横排**（不再横占满行、也不再竖占一列）。
 
-          容器也从 `<aside aria-label>` 改成了 `<ul aria-label>`（见
+          2026-10-19：DOM 顺序从"标题与按钮之间"挪到**工具栏之后**
+          （视觉位置本来就是最后，所以观感不变）。理由是语义顺序 ——
+          人读一页是「叫什么 → 是什么 → 能对它做什么」，改之前按钮夹在
+          标题与元信息中间，把"这个实体是什么"切成了两半。
+
+          容器从 `<aside aria-label>` 改成了 `<ul aria-label>`（见
           `NotePropertyRail.tsx` 的语义对照表）：它不再是"与主内容并列的
           侧轨"，`complementary` 这个地标语义已经名不副实；
           `<ul>` 是原生元素，读屏会直接报"列表，7 项"。 */}
