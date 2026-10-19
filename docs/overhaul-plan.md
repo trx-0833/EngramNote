@@ -2422,6 +2422,21 @@ FastAPI/OpenAPI 规定 422 的 `detail` 是**结构化数组**
 
 #### 🔴 R-1 OpenCode 网关要求 `x-opencode-session` 头，缺失即 400
 
+> **2026-10-19 补记（R-1 相关的一处遗留，已修）**：R-1 本身的修复见本节末尾。
+> 后来发现**同一主题上的第二个坑**：`services/asr/converter._load_llm_config`
+> 的 `except` 分支读 `os.environ.get("DEEPSEEK_API_KEY")` 等三个变量，
+> 而 pydantic-settings 读 `.env` **不导出到进程环境** —— 那段兜底永远拿不到值，
+> 却还在日志里说"回退到环境变量"。危害是"假装能恢复"（key 为 None 时
+> 下游 `and api_key` 守卫会跳过标点恢复与标题生成，所以不会把密钥发到错端点）。
+> 已改成如实返回 `(None, "", "")` + 诚实的日志，见提交
+> `dc59d55`（标签 `rollback/13-asr-env-fix`）与
+> `backend/tests/test_asr_llm_config.py`。
+> ⚠️ **刻意不给"官方 base_url"当兜底** —— 那会在将来补上 key 来源时变成
+> "用 OpenCode 的密钥打官方端点"，正是 `backend/.env` 里两块共用
+> `DEEPSEEK_API_KEY` 变量名最容易踩的坑（认准 `BASE_URL`，不要看变量名）。
+> 同批还把 `backend/.env.example` 补上了 OpenCode 那一段（原模板只有官方
+> DeepSeek 与 GLM 的占位符，是双密钥混用的根源）。
+
 `backend/.env:35` 把 LLM 网关指向了 OpenCode：
 ```env
 DEEPSEEK_BASE_URL=https://opencode.ai/zen/go/v1
