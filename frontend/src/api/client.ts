@@ -311,6 +311,103 @@ export async function authorizedFetch(
 }
 
 /**
+ * 通用文件下载请求（想法 4「设计导出功能」）
+ *
+ * ## 为什么不能直接用 `<a href="/api/notes/x/export">`
+ *
+ * 那个端点**需要认证**（`Authorization: Bearer …`），而浏览器对 `<a href>`
+ * 发起的导航请求**不会带自定义头**。所以必须先用 `fetch` 把字节取回来
+ * （带上令牌），再在内存里造一个 blob URL 交给 `<a download>`。
+ *
+ * 这与视频加载走的是同一条路（`pages/notedetail/useNoteDetailData.ts:237-261`
+ * 手写过一次）—— 本函数把那套逻辑收敛成一处，供导出复用：
+ * **401 刷新一次 + 重放一次**、错误体走统一契约、文件名从头里解析。
+ *
+ * ## 文件名为什么从响应头里读，而不是前端自己拼
+ *
+ * 命名规则（标题安全化 + RFC 5987 编码）只有后端一份实现
+ * （`backend/app/services/note_export.py`）。前端自己再拼一套，就会出现
+ * "下载到的文件"与"后端认为的文件名"两个真相 —— 而它们迟早会不一致
+ * （Windows 非法字符、结尾的点、超长截断，任何一条漏了都不报错）。
+ *
+ * `Content-Disposition` 在 OpenAPI 里表达不出来，所以这个头**不在契约里**，
+ * 只能运行时读（见 `backend/app/schemas/common.py` 的 `MarkdownDownloadResponse`）。
+ *
+ * @param path - 相对 API_BASE 的路径（可含查询串）
+ * @returns `blob` 与解析出的 `filename`（头缺失或无法解析时为 `null`，
+ *   调用方应回退到自己的兜底名）
+ * @throws {ApiError} 响应非 2xx 时抛出，`message` 为后端 detail、`code` 为 error_code
+ */
+export async function downloadRequest(
+  path: string,
+): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await authorizedFetch(path, { method: 'GET' }, REQUEST_TIMEOUT_MS);
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyTokenExpired();
+      throw new ApiError('登录已过期，请重新登录');
+    }
+    const { detail, code } = await readErrorBody(response);
+    throw new ApiError(detail, code);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: parseContentDispositionFilename(response.headers.get('Content-Disposition')),
+  };
+}
+
+/**
+ * 从 `Content-Disposition` 头里取出文件名（RFC 6266 / RFC 5987）
+ *
+ * ## 为什么优先 `filename*` 而不是 `filename`
+ *
+ * 后端**同时**写了两个（见 `build_content_disposition`）：
+ *
+ * - `filename="…"` —— 纯 ASCII 回退，中文被替换成 `_`，**它是乱的名字**；
+ * - `filename*=UTF-8''<percent-encoded>` —— 中文原样还原。
+ *
+ * 所以顺序必须是先 `filename*`：反过来的话，中文标题的笔记会下载成
+ * `____.md`（实测：`"拉哇水电站运行规程学习"` 的 ASCII 回退是 10 个下划线）。
+ *
+ * ## 解析失败返回 `null` 而不是抛错
+ *
+ * 这个头**不在 OpenAPI 契约里**（见 `downloadRequest` 的说明），
+ * 因此它缺失或形态变化时，正确的反应是"让调用方用兜底名把文件存下来"，
+ * 而不是让整个下载失败 —— 用户要的是文件内容，名字是次要的。
+ *
+ * @param header - `Content-Disposition` 头的原始值，缺失时传 `null`
+ * @returns 解析出的文件名，或 `null`
+ */
+export function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+
+  // ① RFC 5987 的 ext-value：`filename*=UTF-8''%E6%8B%89...`
+  //    语言标记（`UTF-8'en'…`）与纯 `UTF-8''…` 都要能匹配，所以中间那段是可选的
+  const ext = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header);
+  if (ext) {
+    try {
+      return decodeURIComponent(ext[2].trim());
+    } catch {
+      // 百分号编码损坏时落到下面的 `filename` 分支，不要整个抛错
+    }
+  }
+
+  // ② 回退到普通 `filename="…"`（去掉两端的引号）
+  const plain = /filename\s*=\s*"([^"]*)"/i.exec(header) ?? /filename\s*=\s*([^;]+)/i.exec(header);
+  if (plain) {
+    const name = plain[1].trim();
+    // 后端在只有非 ASCII 字符时会产出全下划线的回退名（如 `____.md`）。
+    // 那不是"没有名字"，但拿它当文件名对用户毫无意义 ——
+    // 这里**不**做判断（判断规则属于后端），只保证不返回空串。
+    return name || null;
+  }
+
+  return null;
+}
+
+/**
  * 带错误码的 API 错误（阶段 0.11：统一错误契约）
  *
  * 后端错误响应统一为 `{detail, error_code, request_id}`（见后端

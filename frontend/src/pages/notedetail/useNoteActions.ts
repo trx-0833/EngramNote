@@ -10,6 +10,7 @@ import type { NavigateFunction } from 'react-router-dom';
 import {
   archiveNote,
   deleteNote,
+  exportNote,
   startUnderstanding,
   updateNoteContent,
   type NoteContentTarget,
@@ -53,6 +54,14 @@ export function useNoteActions({
   const [saving, setSaving] = useState(false);
   /** 移入回收站确认弹窗显示状态 */
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  /**
+   * 导出进行中（想法 4）
+   *
+   * 存在的理由不是"防重复点击"（导出是只读的，点两次只是存两份文件），
+   * 而是**给用户一个反馈**：导出要先下载整篇正文再落盘，长笔记需要一点时间，
+   * 期间按钮不可点 + 文案变化，用户才知道"点了、正在办"。
+   */
+  const [exporting, setExporting] = useState(false);
 
   /** 触发理解管道（开始学习） */
   async function handleStartLearning() {
@@ -119,6 +128,69 @@ export function useNoteActions({
     }
   }
 
+  /**
+   * 导出笔记正文为 `.md` 文件（想法 4「设计导出功能」）
+   *
+   * ## 导出哪一版 = 用户当前在看哪一版
+   *
+   * 页头已有「原始版 / 清洗版」切换，这里跟着它走 —— 不新增任何选择 UI，
+   * 也不会让用户猜"我导的到底是哪一版"。
+   *
+   * `diff` 视图落到 `clean`：那是"对比"不是一个版本，理论上按钮在 diff 下
+   * 是禁用的（见 `NoteDetailHeader`）。这里的兜底只是为了"万一被调用到"
+   * 时有个确定行为 —— 导清洗版是更合理的那个确定行为，因为清洗版是
+   * 可编辑、质量更高的那一份。
+   *
+   * ## 为什么不能直接把 URL 交给 `<a href>`
+   *
+   * 端点需要 `Authorization` 头，而浏览器对 `<a href>` 的导航请求不带自定义头。
+   * 所以必须先 `fetch` 成 blob（带令牌），再在内存里造一个 blob URL。
+   * 这套"取回 → 造 URL → 点击 → 释放"的写法与视频加载同源
+   * （`useNoteDetailData.ts:237-261`），只是那边是 `<video src>`，
+   * 这里是 `<a download>`。
+   *
+   * ## `revokeObjectURL` 必须在 `finally` 里
+   *
+   * blob URL 会把整个文件内容**钉在内存里**直到被释放。不在 `finally` 释放的话，
+   * 每次导出都漏一份 —— 而这类泄漏在页面上完全看不出来，只有反复导出
+   * 大笔记时才会表现为内存涨。
+   *
+   * ## 文件名
+   *
+   * 优先用后端从 `Content-Disposition` 给出的名字（命名规则只有后端一份实现：
+   * 标题安全化 + RFC 5987 编码）。后端没给或解析不出来时，回退到
+   * `${note.title}.md` —— 那个名字可能含非法字符，但**浏览器的 `download`
+   * 属性会自己做一次安全化**，比我们在这里再实现一遍规则可靠。
+   */
+  async function handleExport() {
+    if (!note) return;
+    // diff 视图下按"导清洗版"处理（按钮在 diff 下禁用，见函数头说明）
+    const variant: 'clean' | 'original' = viewMode === 'original' ? 'original' : 'clean';
+    setExporting(true);
+    try {
+      const { blob, filename } = await exportNote(note.id, variant);
+      const url = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename ?? `${note.title}.md`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        // 点击后立刻移除：`<a>` 只在这次点击里有用，留在 DOM 里没有任何意义
+        document.body.removeChild(anchor);
+      } finally {
+        // 见函数头：不释放会漏一份文件内容在内存里
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      // `NOTE_EXPORT_EMPTY`（该版本没有正文）也会走到这里 ——
+      // 后端的中文 detail 已经说清了原因，直接透传
+      toast.error(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   /** 进入编辑模式：预填充内容（仅允许编辑清洗版，原始版只读） */
   function handleEnterEdit() {
     if (!note) return;
@@ -173,10 +245,12 @@ export function useNoteActions({
     saving,
     showDeleteDialog,
     setShowDeleteDialog,
+    exporting,
     handleStartLearning,
     handleDelete,
     confirmDelete,
     handleArchive,
+    handleExport,
     handleEnterEdit,
     handleSaveContent,
     handleCancelEdit,

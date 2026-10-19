@@ -68,6 +68,15 @@ interface NoteDetailHeaderProps {
   onArchive: () => void;
   /** 打开删除确认弹窗 */
   onDelete: () => void;
+  /**
+   * 导出笔记正文为 `.md`（想法 4「设计导出功能」）
+   *
+   * 导出哪一版由 `viewMode` 决定（原始版 / 清洗版），所以这个回调**不带参数** ——
+   * 判断留在 `useNoteActions` 里，页头只负责"点一下"。
+   */
+  onExport: () => void;
+  /** 导出进行中（按钮禁用 + 文案变化） */
+  exporting: boolean;
   /** 打开版本历史面板 */
   onOpenVersionHistory: () => void;
   /** 打开关联资料管理弹窗 */
@@ -114,6 +123,8 @@ export default function NoteDetailHeader({
   onOpenVersionHistory,
   onManageLinks,
   onRetryConverted,
+  onExport,
+  exporting,
   navigate,
   children,
 }: NoteDetailHeaderProps) {
@@ -179,6 +190,37 @@ export default function NoteDetailHeader({
             title="查看版本历史"
           >
             版本历史
+          </button>
+          {/* 导出（想法 4「设计导出功能」）—— 页头的第 9 个按钮。
+              ⚠️ 复用现成的 `.noteDetailActions` 换行规则，**不改页头 CSS**：
+              那 5 条窄屏规则（768px 上下排列 + 按钮撑满、480px 一行两个）
+              是 5.6 序 8 专门搬进模块、并被 `verify-built-css.mjs` 的切片标记
+              盯着的既有结论。多一个按钮只是多一个被换行的项。
+
+              禁用条件与 `title` 文案：
+              - **处理中**（`isProcessing`）：正文还没生成或正在改写，导出来是半成品；
+              - **对比视图**（`viewMode === 'diff'`）：那是"两版并排看"，
+                不是某一个版本，没有"这一版"可导。要导请先切到具体某一版；
+              - 其余情况都可导 —— 包括**尚未清洗**的笔记（导原始版）。
+                清洗版不可用时**不禁用按钮**：此时 `viewMode` 必然是 `original`
+                （`ViewModeTabs` 的 `canShowClean` 已经挡住了切过去），
+                所以用户能导的正是他手上有的那一版。
+                真正没有正文时后端回 `NOTE_EXPORT_EMPTY`，由 toast 透传文案。 */}
+          <button
+            className="btn btn-secondary"
+            onClick={onExport}
+            disabled={isProcessing || viewMode === 'diff' || exporting}
+            title={
+              isProcessing
+                ? '处理中，暂不可导出'
+                : viewMode === 'diff'
+                  ? '对比视图无法导出，请先切换到某一版'
+                  : viewMode === 'original'
+                    ? '导出原始版 Markdown 文件'
+                    : '导出清洗版 Markdown 文件'
+            }
+          >
+            {exporting ? '导出中…' : '导出'}
           </button>
           {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
             <button

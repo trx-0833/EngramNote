@@ -1609,6 +1609,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/{note_id}/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Note
+     * @description 导出笔记正文为 Markdown 附件（想法 4「设计导出功能」）
+     *
+     *     ## 导出的是"内容"，不是"原文件"
+     *
+     *     这一条与 `/{note_id}/video` 的区别要说清：视频端点返回的是**上传的原始字节**
+     *     （所以它支持 Range、MinIO 模式下直接 307 到预签名 URL）；
+     *     本端点返回的是**加工后的正文文本**（front-matter + Markdown），
+     *     内容很小、一次就能给完，因此**不需要 Range，也不走预签名 URL**。
+     *
+     *     ## 为什么 `variant` 由调用方指定，而不是"永远导清洗版"
+     *
+     *     页面上已有「原始版 / 清洗版」切换。导出跟着**用户当前在看的那一版**走，
+     *     是唯一不需要新增 UI、也不会让用户猜"我导的到底是哪一版"的做法。
+     *     默认 `clean`：清洗版是加工过的、质量更高的那一份，
+     *     也是绝大多数情况下用户想要的。
+     *
+     *     ## 为什么不静默回退到另一版
+     *
+     *     `variant=clean` 而这篇笔记没有清洗版时，**报错而不是偷偷给原始版**：
+     *     给错版本比报错更糟 —— 用户会拿一份"看起来对、实际是未清洗的 OCR 原文"
+     *     去用，而且无从察觉。前端据 `NOTE_EXPORT_EMPTY` 禁用该选项，
+     *     所以正常路径下撞不到这个错误。
+     *
+     *     ## 文件内容
+     *
+     *     front-matter（title / source_type / status / variant / page_count /
+     *     created_at / updated_at / exported_at）+ 空行 + **正文逐字原文**。
+     *     正文一个字都不加工 —— 导出是"把应用里的东西拿出来"，
+     *     任何规范化都会让用户怀疑看到的和导出的不是同一份。
+     *     拼接规则见 `services/note_export.py`。
+     *
+     *     Args:
+     *         note_id: 笔记 ID
+     *         variant: `clean`（默认）或 `original`
+     *         current_user: 当前认证用户
+     *         db: 异步数据库会话
+     *
+     *     Returns:
+     *         StreamingResponse: `text/markdown; charset=utf-8`，
+     *         带 `Content-Disposition: attachment`（文件名由标题安全化而来，
+     *         中文经 RFC 5987 编码，另带 ASCII 回退）
+     *
+     *     Raises:
+     *         AppError: 笔记不存在 / 不属于当前用户 / 在回收站中（NOTE_NOT_FOUND → 404）
+     *         AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）
+     */
+    get: operations['export_note_api_notes__note_id__export_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/{note_id}/links': {
     parameters: {
       query?: never;
@@ -9015,6 +9079,40 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['NoteResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  export_note_api_notes__note_id__export_get: {
+    parameters: {
+      query?: {
+        /** @description 导出哪一版正文：clean（清洗版，默认）或 original（原始版） */
+        variant?: string;
+      };
+      header?: never;
+      path: {
+        note_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'text/markdown; charset=utf-8': string;
         };
       };
       /** @description Validation Error */

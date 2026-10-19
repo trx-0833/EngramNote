@@ -61,6 +61,15 @@ NOTE_ORIGINAL_NOT_EDITABLE = "NOTE_ORIGINAL_NOT_EDITABLE"
 NOTE_CONTENT_TOO_LARGE = "NOTE_CONTENT_TOO_LARGE"
 # 笔记没有可写入的 Markdown 路径（资料尚未转换完成等）
 NOTE_MARKDOWN_PATH_MISSING = "NOTE_MARKDOWN_PATH_MISSING"
+# 要导出的那一版没有正文（未清洗 / 清洗失败 / 内容读不出来）
+#
+# 为什么不复用 CLEANING_NOT_DONE：那个 code 表达的是"清洗这个动作还没做"，
+# 而导出还有第二种成因 —— 清洗记录在、但正文从对象存储里**读不出来**
+# （`get_clean_markdown_content` 在读取失败时返回 None，与"路径为空"同形）。
+# 对调用方来说两者的处置相同（禁用/提示"该版本暂无内容"），
+# 但错误码按"资源 + 条件"取义（本文件的命名约定），
+# 而这里的资源是**导出**、条件是**该版本无内容**。
+NOTE_EXPORT_EMPTY = "NOTE_EXPORT_EMPTY"
 # 笔记不在回收站中，无法恢复
 NOTE_NOT_TRASHED = "NOTE_NOT_TRASHED"
 # 恢复时 inbox 同名冲突且改名序号耗尽

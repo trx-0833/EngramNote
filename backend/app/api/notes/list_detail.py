@@ -7,6 +7,7 @@
 """
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.app_error import (
     NOTE_CONTENT_TOO_LARGE,
+    NOTE_EXPORT_EMPTY,
     NOTE_MARKDOWN_PATH_MISSING,
     NOTE_NOT_FOUND,
     NOTE_NOT_VIDEO,
@@ -29,7 +31,7 @@ from ...core.app_error import (
 from ...database import get_db
 from ...models.note import Note, NoteRole, NoteStatus, SourceType
 from ...models.user import User
-from ...schemas.common import Mp4StreamResponse
+from ...schemas.common import MarkdownDownloadResponse, Mp4StreamResponse
 from ...schemas.note import (
     NoteContentUpdateRequest,
     NoteDetailResponse,
@@ -39,6 +41,12 @@ from ...schemas.note import (
 )
 from ...config import get_settings
 from ...services import note_service
+from ...services.note_export import (
+    build_content_disposition,
+    build_export_text,
+    build_front_matter,
+    sanitize_filename,
+)
 from ...services.note_service import (
     get_clean_markdown_content,
     get_note_detail,
@@ -479,5 +487,113 @@ async def stream_video(
         headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
+        },
+    )
+
+
+@router.get("/{note_id}/export", response_class=MarkdownDownloadResponse)
+async def export_note(
+    note_id: str,
+    variant: str = Query(
+        "clean",
+        pattern="^(clean|original)$",
+        description="导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+    ),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    导出笔记正文为 Markdown 附件（想法 4「设计导出功能」）
+
+    ## 导出的是"内容"，不是"原文件"
+
+    这一条与 `/{note_id}/video` 的区别要说清：视频端点返回的是**上传的原始字节**
+    （所以它支持 Range、MinIO 模式下直接 307 到预签名 URL）；
+    本端点返回的是**加工后的正文文本**（front-matter + Markdown），
+    内容很小、一次就能给完，因此**不需要 Range，也不走预签名 URL**。
+
+    ## 为什么 `variant` 由调用方指定，而不是"永远导清洗版"
+
+    页面上已有「原始版 / 清洗版」切换。导出跟着**用户当前在看的那一版**走，
+    是唯一不需要新增 UI、也不会让用户猜"我导的到底是哪一版"的做法。
+    默认 `clean`：清洗版是加工过的、质量更高的那一份，
+    也是绝大多数情况下用户想要的。
+
+    ## 为什么不静默回退到另一版
+
+    `variant=clean` 而这篇笔记没有清洗版时，**报错而不是偷偷给原始版**：
+    给错版本比报错更糟 —— 用户会拿一份"看起来对、实际是未清洗的 OCR 原文"
+    去用，而且无从察觉。前端据 `NOTE_EXPORT_EMPTY` 禁用该选项，
+    所以正常路径下撞不到这个错误。
+
+    ## 文件内容
+
+    front-matter（title / source_type / status / variant / page_count /
+    created_at / updated_at / exported_at）+ 空行 + **正文逐字原文**。
+    正文一个字都不加工 —— 导出是"把应用里的东西拿出来"，
+    任何规范化都会让用户怀疑看到的和导出的不是同一份。
+    拼接规则见 `services/note_export.py`。
+
+    Args:
+        note_id: 笔记 ID
+        variant: `clean`（默认）或 `original`
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        StreamingResponse: `text/markdown; charset=utf-8`，
+        带 `Content-Disposition: attachment`（文件名由标题安全化而来，
+        中文经 RFC 5987 编码，另带 ASCII 回退）
+
+    Raises:
+        AppError: 笔记不存在 / 不属于当前用户 / 在回收站中（NOTE_NOT_FOUND → 404）
+        AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）
+    """
+    # 归属与回收站过滤都在 get_note_detail 里（它按 user_id 过滤，
+    # 且默认排除 trashed_at 非空的笔记）—— 与同文件其他端点同一口径。
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
+
+    # 两个读取函数在"路径为空"与"读取失败"两种情况下都返回 None，
+    # 因此这里统一按"该版本没有正文"处理（见 NOTE_EXPORT_EMPTY 的定义处）。
+    if variant == "clean":
+        content = await get_clean_markdown_content(note)
+        empty_message = "这篇笔记还没有清洗版，请先清洗或改导原始版"
+    else:
+        content = await get_note_markdown_content(note)
+        empty_message = "这篇笔记的原始版内容读不出来"
+
+    # 空串与 None 同等对待：导出空文件比报错更糟 ——
+    # 用户会以为这篇笔记本来就是空的。
+    if not content:
+        raise AppError(NOTE_EXPORT_EMPTY, empty_message, 400)
+
+    front_matter = build_front_matter(
+        title=note.title,
+        source_type=note.source_type.value,
+        status=note.status.value,
+        variant=variant,
+        page_count=note.page_count,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+        # 去掉微秒：`created_at` / `updated_at` 是秒级的（数据库里的值），
+        # 同一块元信息里两种精度不好看。真浏览器实测发现（`exported_at` 原本是
+        # `2026-10-19T04:34:14.595442+00:00`）—— 秒级对"这份文件什么时候导的"
+        # 完全够用。
+        exported_at=datetime.now(timezone.utc).replace(microsecond=0),
+    )
+    body = build_export_text(front_matter, content)
+    filename_stem = sanitize_filename(note.title, fallback_id=note.id)
+
+    return StreamingResponse(
+        iter([body.encode("utf-8")]),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": build_content_disposition(filename_stem),
+            # 正文是文本且很小，显式给出长度让浏览器能显示下载进度；
+            # 不设 Content-Length 时 Starlette 会走 chunked，行为也对，
+            # 但"已知长度"对小文件更友好。
+            "Content-Length": str(len(body.encode("utf-8"))),
         },
     )

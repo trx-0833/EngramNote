@@ -97,3 +97,26 @@ class Mp4StreamResponse(StreamingResponse):
     """
 
     media_type = "video/mp4"
+
+
+class MarkdownDownloadResponse(StreamingResponse):
+    """Markdown 附件下载响应的 media type 声明载体
+    （`GET /api/notes/{note_id}/export`，想法 4）
+
+    与上面两个同一类问题、同一个处理方式：不声明 `response_class` 时
+    FastAPI 会把 2xx 默认成 `application/json`，于是 OpenAPI 里这个端点长成
+    「200 → 空 JSON schema」—— **不是"缺类型"，而是"类型说错了"**，
+    客户端照它去 `response.json()` 会在真实响应上抛错。
+
+    实际返回的是 **`text/markdown` 的字节流**，并且带一个
+    `Content-Disposition: attachment` 头（文件名由
+    `services/note_export.build_content_disposition` 构造）。
+
+    ⚠️ **`Content-Disposition` 在 OpenAPI 里表达不出来** —— 与上面那个端点的
+    307 重定向同一个性质。因此"文件名长什么样"这件事**不在契约里**，
+    前端的 `downloadRequest` 是从**实际响应头**里解析的
+    （见 `frontend/src/api/client.ts`）。这一条写在这里，是为了让下一个人
+    在 schema 里找不到它时知道该去哪看。
+    """
+
+    media_type = "text/markdown; charset=utf-8"

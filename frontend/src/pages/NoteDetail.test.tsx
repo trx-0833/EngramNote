@@ -24,7 +24,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '../components/ConfirmProvider';
 import NoteDetail from './NoteDetail';
@@ -46,6 +46,7 @@ vi.mock('../api/client', async () => {
     createAnnotation: vi.fn(),
     deleteAnnotation: vi.fn(),
     deleteNote: vi.fn(),
+    exportNote: vi.fn(),
     startUnderstanding: vi.fn(),
     startCleaning: vi.fn(),
     stopCleaning: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('../api/tasks', async () => {
 
 import {
   deleteNote,
+  exportNote,
   getAnnotations,
   getKnowledgeCards,
   getNote,
@@ -88,6 +90,7 @@ const mockedLinks = vi.mocked(getNoteLinks);
 const mockedDelete = vi.mocked(deleteNote);
 const mockedUnderstand = vi.mocked(startUnderstanding);
 const mockedUpdateContent = vi.mocked(updateNoteContent);
+const mockedExport = vi.mocked(exportNote);
 
 function makeNote(over: Partial<NoteDetailType> = {}): NoteDetailType {
   return {
@@ -270,5 +273,134 @@ describe('删除与重新理解', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(mockedUnderstand).toHaveBeenCalledTimes(1);
     expect(mockedUnderstand.mock.calls[0][1]).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 导出（想法 4「设计导出功能」）
+// ---------------------------------------------------------------------------
+
+describe('导出笔记正文', () => {
+  let createdUrls: string[];
+  let revokedUrls: string[];
+  /** 被"点击"过的下载锚点（在真实浏览器里这一步会触发下载） */
+  let clickedAnchors: HTMLAnchorElement[];
+
+  beforeEach(() => {
+    createdUrls = [];
+    revokedUrls = [];
+    clickedAnchors = [];
+
+    // jsdom 不实现 createObjectURL / revokeObjectURL（它们属于 blob URL 存储）
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => {
+        const url = `blob:mock/${createdUrls.length}`;
+        createdUrls.push(url);
+        return url;
+      }),
+      revokeObjectURL: vi.fn((url: string) => {
+        revokedUrls.push(url);
+      }),
+    });
+
+    // jsdom 里 `a.click()` 会尝试导航并打印 "Not implemented: navigation"。
+    // 这里拦住它并记下锚点 —— 我们要断言的正是"锚点被造出来、带上正确的
+    // href 与 download、并被点了一下"，而这三件事都在这一步之前完成。
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clickedAnchors.push(this);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('★ 点「导出」调接口，并用后端给的文件名触发下载', async () => {
+    mockedGetNote.mockResolvedValue(makeNote());
+    mockedExport.mockResolvedValue({ blob: new Blob(['# 正文']), filename: '笔记标题.md' });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(mockedExport).toHaveBeenCalledWith('note-1', 'clean'));
+    // 锚点真的被点了一下，且带上了后端给的文件名与刚造出来的 blob URL
+    expect(clickedAnchors).toHaveLength(1);
+    expect(clickedAnchors[0].download).toBe('笔记标题.md');
+    expect(clickedAnchors[0].href).toBe(createdUrls[0]);
+  });
+
+  it('★ blob URL 被释放（不释放会把整篇正文钉在内存里）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote());
+    mockedExport.mockResolvedValue({ blob: new Blob(['x']), filename: 'a.md' });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(revokedUrls).toEqual(createdUrls));
+  });
+
+  it('★ 导出哪一版跟着当前视图走：切到原始版后导的是 original', async () => {
+    mockedGetNote.mockResolvedValue(makeNote());
+    mockedExport.mockResolvedValue({ blob: new Blob(['x']), filename: 'a.md' });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '原始版' }));
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(mockedExport).toHaveBeenCalledWith('note-1', 'original'));
+  });
+
+  it('★ 后端没给文件名时回退到 `${标题}.md`（下载不该因为头缺失而失败）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote());
+    mockedExport.mockResolvedValue({ blob: new Blob(['x']), filename: null });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(clickedAnchors[0].download).toBe('锂离子电池的浮充与均充.md'));
+  });
+
+  it('★ 对比视图下禁用导出（"对比"不是某一版，没有"这一版"可导）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote());
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '对比视图' }));
+
+    expect(screen.getByRole('button', { name: '导出' })).toBeDisabled();
+    expect(mockedExport).not.toHaveBeenCalled();
+  });
+
+  it('★ 处理中禁用导出（正文还没生成或正在改写，导出来是半成品）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ status: 'cleaning' }));
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    expect(screen.getByRole('button', { name: '导出' })).toBeDisabled();
+  });
+
+  it('导出失败时提示后端文案，且不留下 blob URL（不泄漏）', async () => {
+    // 用 `status: 'converted'` 表达"还没清洗"（`NoteDetail` 类型里**没有**
+    // `clean_md_path` —— 那是后端存储路径，不出现在页面用的详情类型上）。
+    // 失败本身由 mock 抛错驱动，所以这个 override 只是让场景说得通。
+    mockedGetNote.mockResolvedValue(makeNote({ status: 'converted' }));
+    mockedExport.mockRejectedValue(new Error('这篇笔记还没有清洗版，请先清洗或改导原始版'));
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    // 失败路径上不该造出任何 URL（`createObjectURL` 在 `await` 之后才调用）
+    await waitFor(() => expect(mockedExport).toHaveBeenCalled());
+    expect(createdUrls).toHaveLength(0);
+    expect(revokedUrls).toHaveLength(0);
   });
 });

@@ -5,6 +5,7 @@
 import {
   request,
   authorizedFetch,
+  downloadRequest,
   notifyTokenExpired,
   type Note,
   type NoteDetail,
@@ -469,4 +470,31 @@ export async function restoreVersion(noteId: string, versionNumber: number): Pro
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * 导出笔记正文为 Markdown 附件（想法 4「设计导出功能」）
+ *
+ * 返回字节流而不是 JSON，所以走 `downloadRequest`（不能用 `request`：
+ * 那个会 `response.json()`）。文件名由后端经 `Content-Disposition` 给出，
+ * 这里原样带出去 —— 命名规则只有后端一份实现。
+ *
+ * ## 为什么 `variant` 是必填参数而不是可省
+ *
+ * 后端默认 `clean`，但**调用方永远知道自己要哪一版**（页面上有视图切换）。
+ * 让它显式传，可以避免"我以为导的是清洗版、其实走了默认值"这类沉默的错配。
+ *
+ * @param noteId - 笔记 ID
+ * @param variant - `clean`（清洗版）或 `original`（原始版）
+ * @returns blob 与后端给出的文件名（缺失时为 `null`，调用方用兜底名）
+ * @throws {ApiError} 该版本没有正文时 `code` 为 `NOTE_EXPORT_EMPTY`
+ */
+export async function exportNote(
+  noteId: string,
+  variant: 'clean' | 'original',
+): Promise<{ blob: Blob; filename: string | null }> {
+  // 查询参数按契约派生：`GET /api/notes/{note_id}/export`（该端点已进
+  // backend/openapi.json，`variant` 在契约里带 pattern 约束）
+  const query: QueryOf<'/notes/{note_id}/export', 'get'> = { variant };
+  return downloadRequest(`/notes/${noteId}/export${buildQuery(query)}`);
 }

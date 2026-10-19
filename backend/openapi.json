@@ -10226,6 +10226,64 @@
         "summary": "Update Note Content"
       }
     },
+    "/api/notes/{note_id}/export": {
+      "get": {
+        "description": "导出笔记正文为 Markdown 附件（想法 4「设计导出功能」）\n\n## 导出的是\"内容\"，不是\"原文件\"\n\n这一条与 `/{note_id}/video` 的区别要说清：视频端点返回的是**上传的原始字节**\n（所以它支持 Range、MinIO 模式下直接 307 到预签名 URL）；\n本端点返回的是**加工后的正文文本**（front-matter + Markdown），\n内容很小、一次就能给完，因此**不需要 Range，也不走预签名 URL**。\n\n## 为什么 `variant` 由调用方指定，而不是\"永远导清洗版\"\n\n页面上已有「原始版 / 清洗版」切换。导出跟着**用户当前在看的那一版**走，\n是唯一不需要新增 UI、也不会让用户猜\"我导的到底是哪一版\"的做法。\n默认 `clean`：清洗版是加工过的、质量更高的那一份，\n也是绝大多数情况下用户想要的。\n\n## 为什么不静默回退到另一版\n\n`variant=clean` 而这篇笔记没有清洗版时，**报错而不是偷偷给原始版**：\n给错版本比报错更糟 —— 用户会拿一份\"看起来对、实际是未清洗的 OCR 原文\"\n去用，而且无从察觉。前端据 `NOTE_EXPORT_EMPTY` 禁用该选项，\n所以正常路径下撞不到这个错误。\n\n## 文件内容\n\nfront-matter（title / source_type / status / variant / page_count /\ncreated_at / updated_at / exported_at）+ 空行 + **正文逐字原文**。\n正文一个字都不加工 —— 导出是\"把应用里的东西拿出来\"，\n任何规范化都会让用户怀疑看到的和导出的不是同一份。\n拼接规则见 `services/note_export.py`。\n\nArgs:\n    note_id: 笔记 ID\n    variant: `clean`（默认）或 `original`\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    StreamingResponse: `text/markdown; charset=utf-8`，\n    带 `Content-Disposition: attachment`（文件名由标题安全化而来，\n    中文经 RFC 5987 编码，另带 ASCII 回退）\n\nRaises:\n    AppError: 笔记不存在 / 不属于当前用户 / 在回收站中（NOTE_NOT_FOUND → 404）\n    AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）",
+        "operationId": "export_note_api_notes__note_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "clean",
+              "description": "导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+              "pattern": "^(clean|original)$",
+              "title": "Variant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Note"
+      }
+    },
     "/api/notes/{note_id}/links": {
       "get": {
         "description": "获取笔记的链接关系",

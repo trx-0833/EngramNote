@@ -160,6 +160,8 @@ export default function NoteDetail() {
     handleDelete,
     confirmDelete,
     handleArchive,
+    handleExport,
+    exporting,
     handleEnterEdit,
     handleSaveContent,
     handleCancelEdit,
@@ -227,6 +229,8 @@ export default function NoteDetail() {
         onDelete={handleDelete}
         onOpenVersionHistory={() => setShowVersionHistory(true)}
         onManageLinks={handleManageLinks}
+        onExport={handleExport}
+        exporting={exporting}
         onRetryConverted={(result) =>
           setNote((prev) =>
             prev ? { ...prev, status: result.status, error_message: result.error_message } : prev,

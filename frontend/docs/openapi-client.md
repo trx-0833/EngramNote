@@ -3,14 +3,14 @@
 > **状态：过程记录** ｜ 记录时间：2026-09-14（S1→S3b 逐轮追加）｜ 权威性：不是现状依据（契约现状以 `backend/openapi.json` 与 `frontend/src/api/generated/` 为准）
 > **本文件是 5.1 的连续记录，按轮次往下追加，早先的结论不要当成现状读**：
 >
-> | 轮次 | 内容 | 在哪 |
-> |---|---|---|
-> | S1 | 把 schema 落盘（`backend/openapi.json`）+ 漂移检查器 + 分歧报告（基线 19/111 一致） | §0–§10 |
-> | 前置 P1/P2/P3 | 后端补 20 处 `response_model=` 与 5 处内层空壳（`schemaUntyped` 21 → 0） | §11 |
-> | S2 | **只换类型不换请求**：`Schema<'XResponse'>`，`identical` 26 → 104 | §12–§13 |
-> | **S3a** | **按端点索引的请求侧**（`BodyOf`/`QueryOf`/`BodyWithDefaults`）+ `deleteAnnotation` + S4 的 `client.ts` 收敛 | **§14** |
-> | **S3b** | **查询串接入契约**（`buildQuery` + 18 个调用点 + 仪器升级与两次变异验证） | **§15** |
-> | S5 | 5.2 TanStack Query / 5.3 Zustand：**计划已出**，未动代码 | 计划文档 `query-and-state-plan.md` |
+> | 轮次          | 内容                                                                                                         | 在哪                               |
+> | ------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+> | S1            | 把 schema 落盘（`backend/openapi.json`）+ 漂移检查器 + 分歧报告（基线 19/111 一致）                          | §0–§10                             |
+> | 前置 P1/P2/P3 | 后端补 20 处 `response_model=` 与 5 处内层空壳（`schemaUntyped` 21 → 0）                                     | §11                                |
+> | S2            | **只换类型不换请求**：`Schema<'XResponse'>`，`identical` 26 → 104                                            | §12–§13                            |
+> | **S3a**       | **按端点索引的请求侧**（`BodyOf`/`QueryOf`/`BodyWithDefaults`）+ `deleteAnnotation` + S4 的 `client.ts` 收敛 | **§14**                            |
+> | **S3b**       | **查询串接入契约**（`buildQuery` + 18 个调用点 + 仪器升级与两次变异验证）                                    | **§15**                            |
+> | S5            | 5.2 TanStack Query / 5.3 Zustand：**计划已出**，未动代码                                                     | 计划文档 `query-and-state-plan.md` |
 
 > 本轮目标来自 `docs/overhaul-plan.md` §2.8 / 阶段 5.1：
 > "从 OpenAPI 生成类型与客户端，删除手写 `client.ts` 的 90 个函数与重复类型"。
@@ -24,14 +24,14 @@
 
 ## 0. 一句话结论
 
-| 问题 | 答案 |
-|---|---|
-| schema 能完整拿到吗 | 能。`app.openapi()` 给出 **102 条路径 / 118 个操作 / 156 个组件 schema**，且**逐字节可复现** |
-| 生成出来的类型能用吗 | 能。`schema.ts` 261 409 字节 / 10 000 行，`tsc --noEmit`、`vite build` 均通过 |
-| 手写客户端有多少个 API 函数 | **111 个**（110 个不同端点）。计划里写的 "~90 个" **是错的**（§3） |
-| 端点对得上吗 | **111/111 全部命中** schema 的路径 + 方法。0 个缺失 |
-| 类型对得上吗 | 只有 **19/111 完全一致**。28 个前端更窄、4 个前端更宽、**34 个两边都不相容**、22 个 schema 根本没写响应模型、4 个是 204 |
-| 现在能直接切换吗 | **不能。** 22 个端点的 schema 响应是空 schema（`unknown`），切过去等于把类型安全换成 `unknown`。必须先补后端 `response_model=`（§7.1） |
+| 问题                        | 答案                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| schema 能完整拿到吗         | 能。`app.openapi()` 给出 **102 条路径 / 118 个操作 / 156 个组件 schema**，且**逐字节可复现**                                           |
+| 生成出来的类型能用吗        | 能。`schema.ts` 261 409 字节 / 10 000 行，`tsc --noEmit`、`vite build` 均通过                                                          |
+| 手写客户端有多少个 API 函数 | **111 个**（110 个不同端点）。计划里写的 "~90 个" **是错的**（§3）                                                                     |
+| 端点对得上吗                | **111/111 全部命中** schema 的路径 + 方法。0 个缺失                                                                                    |
+| 类型对得上吗                | 只有 **19/111 完全一致**。28 个前端更窄、4 个前端更宽、**34 个两边都不相容**、22 个 schema 根本没写响应模型、4 个是 204                |
+| 现在能直接切换吗            | **不能。** 22 个端点的 schema 响应是空 schema（`unknown`），切过去等于把类型安全换成 `unknown`。必须先补后端 `response_model=`（§7.1） |
 
 ---
 
@@ -102,13 +102,13 @@
 
 （第二条只依赖第一条的产物，可以单独跑。）
 
-| 脚本 | 作用 |
-|---|---|
-| `npm run gen:api` | schema → `src/api/generated/schema.ts`（+ prettier 格式化） |
-| `npm run gen:api:drift` | 打印漂移报告（Markdown） |
-| `npm run gen:api:drift -- --json=out.json` | 机器可读版本 |
-| `node src/api/generated/openapi-drift.mjs --debug --emit-probes=out.ts` | 把喂给编译器的探针文件原样导出（复核判定用） |
-| `python backend/scripts/dump_openapi.py --check` | CI：断言落盘 schema 与代码一致，不一致退出码 1 |
+| 脚本                                                                    | 作用                                                        |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `npm run gen:api`                                                       | schema → `src/api/generated/schema.ts`（+ prettier 格式化） |
+| `npm run gen:api:drift`                                                 | 打印漂移报告（Markdown）                                    |
+| `npm run gen:api:drift -- --json=out.json`                              | 机器可读版本                                                |
+| `node src/api/generated/openapi-drift.mjs --debug --emit-probes=out.ts` | 把喂给编译器的探针文件原样导出（复核判定用）                |
+| `python backend/scripts/dump_openapi.py --check`                        | CI：断言落盘 schema 与代码一致，不一致退出码 1              |
 
 ---
 
@@ -134,12 +134,12 @@
 `docs/overhaul-plan.md:2762`、`:3222`、`:3357`，以及附录 AO（`:7762`）的
 "330 行、90 个函数的 `client.ts`"。**这个数字是错的**，实测：
 
-| 口径 | 数量 | 怎么数的 |
-|---|---|---|
-| 本轮的判定对象：**发起请求的导出函数** | **111** | `openapi-drift.mjs` 用 AST 找出所有 `export function` 且函数体里调了 `request<T>(字面量路径)` / `uploadRequest` / `authorizedFetch` 的函数 |
-| 其中不同的 `方法 + 路径` | 110 | `uploadFile` 与 `uploadFileToFolder` 都打 `POST /api/upload` |
-| `frontend/src/api/*.ts` 里**全部**导出函数 | 121 | 121 − 111 = 10 个被排除：`client.ts` 的 9 个非端点导出（`getToken`/`setTokens`/`clearTokens`/`notifyTokenExpired`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`/`getRefreshToken`）+ `tasks.ts` 的 `isTerminal` |
-| 当前 `client.ts` 自己有几个端点函数 | **1**（`askQuestionStream`） | 其余 110 个早已按域拆走：`client.ts` 末尾是 **11 行 `export *`**（那 11 个模块），另有 `knowledge.ts` / `tasks.ts` 由页面**直接按域引入** —— 所以 **"11" 是转发行的条数**，110 个函数实际落在 **13 个文件**里，别读成"11 个文件装 110 个函数"（**2026-09-14 补注**）；`client.ts` 现在只做 token/401/超时 + `export *` 转发 |
+| 口径                                       | 数量                         | 怎么数的                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本轮的判定对象：**发起请求的导出函数**     | **111**                      | `openapi-drift.mjs` 用 AST 找出所有 `export function` 且函数体里调了 `request<T>(字面量路径)` / `uploadRequest` / `authorizedFetch` 的函数                                                                                                                                                                                  |
+| 其中不同的 `方法 + 路径`                   | 110                          | `uploadFile` 与 `uploadFileToFolder` 都打 `POST /api/upload`                                                                                                                                                                                                                                                                |
+| `frontend/src/api/*.ts` 里**全部**导出函数 | 121                          | 121 − 111 = 10 个被排除：`client.ts` 的 9 个非端点导出（`getToken`/`setTokens`/`clearTokens`/`notifyTokenExpired`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`/`getRefreshToken`）+ `tasks.ts` 的 `isTerminal`                                                                                              |
+| 当前 `client.ts` 自己有几个端点函数        | **1**（`askQuestionStream`） | 其余 110 个早已按域拆走：`client.ts` 末尾是 **11 行 `export *`**（那 11 个模块），另有 `knowledge.ts` / `tasks.ts` 由页面**直接按域引入** —— 所以 **"11" 是转发行的条数**，110 个函数实际落在 **13 个文件**里，别读成"11 个文件装 110 个函数"（**2026-09-14 补注**）；`client.ts` 现在只做 token/401/超时 + `export *` 转发 |
 
 也就是说：**"90 个函数混在 client.ts 里"这个描述在拆分之后就不成立了** ——
 `client.ts` 现在是 490 行的基础设施文件，只剩 1 个端点函数。
@@ -168,21 +168,23 @@
 
    ```ts
    type __HW_0 = Awaited<ReturnType<typeof __mod_0.register>>;
-   type __SC_0 = paths['/api/auth/register']['post']['responses'][201]['content']['application/json'];
-   declare const __hwv_0: __HW_0; declare const __scv_0: __SC_0;
-   const __hwToSc_0: __SC_0 = __hwv_0;   // 手写 ⊆ schema ？
-   const __scToHw_0: __HW_0 = __scv_0;   // schema ⊆ 手写 ？
+   type __SC_0 =
+     paths['/api/auth/register']['post']['responses'][201]['content']['application/json'];
+   declare const __hwv_0: __HW_0;
+   declare const __scv_0: __SC_0;
+   const __hwToSc_0: __SC_0 = __hwv_0; // 手写 ⊆ schema ？
+   const __scToHw_0: __HW_0 = __scv_0; // schema ⊆ 手写 ？
    ```
 
    然后从 `program.getSemanticDiagnostics()` 里按行号取回诊断。
    判定口径：
 
-   | 现象 | 判定 | 含义 |
-   |---|---|---|
-   | 两个方向都可赋值 | `IDENTICAL` | 两边等价 |
-   | 只有 `HW ⊆ Schema` | `HW_NARROWER` | **前端类型更窄**（假设更强：后端可能不给它以为一定有的东西） |
-   | 只有 `Schema ⊆ HW` | `HW_WIDER` | **前端类型更宽**（接受 schema 保证不了的值，典型是枚举被写成 `string`） |
-   | 两个都不行 | `CONFLICT` | 其中必有一方描述错了现实 |
+   | 现象               | 判定          | 含义                                                                    |
+   | ------------------ | ------------- | ----------------------------------------------------------------------- |
+   | 两个方向都可赋值   | `IDENTICAL`   | 两边等价                                                                |
+   | 只有 `HW ⊆ Schema` | `HW_NARROWER` | **前端类型更窄**（假设更强：后端可能不给它以为一定有的东西）            |
+   | 只有 `Schema ⊆ HW` | `HW_WIDER`    | **前端类型更宽**（接受 schema 保证不了的值，典型是枚举被写成 `string`） |
+   | 两个都不行         | `CONFLICT`    | 其中必有一方描述错了现实                                                |
 
 3. **结构化 diff（解释用，不参与判定）**：把 JSON Schema 与 TS 类型各自归一成
    同构的描述子，逐属性递归，产出 `MISSING_FIELD` / `EXTRA_REQUIRED_FIELD` /
@@ -236,14 +238,14 @@ unconsumedOperations     8       schema 里有、前端没有任何调用方的�
 
 诊断原因分类（按函数计，一个函数可命中多类）：
 
-| 原因 | 函数数 | 说明 |
-|---|---|---|
+| 原因                                 | 函数数 | 说明                                        |
+| ------------------------------------ | ------ | ------------------------------------------- |
 | `Type 'undefined' is not assignable` | **53** | 可选性口径不一致（本轮最大的一类，见 §7.3） |
-| `is not assignable to type '"…"'` | 25 | schema 是枚举、前端写 `string`（§7.2） |
-| `Type 'unknown' is not assignable` | 21 | schema 没写响应模型（§7.1） |
-| `is missing in type` | 7 | 前端缺字段 / 后端缺字段 |
-| `Index signature … is missing` | 2 | schema 用了 `additionalProperties`（§7.1） |
-| 其他 | 2 | |
+| `is not assignable to type '"…"'`    | 25     | schema 是枚举、前端写 `string`（§7.2）      |
+| `Type 'unknown' is not assignable`   | 21     | schema 没写响应模型（§7.1）                 |
+| `is missing in type`                 | 7      | 前端缺字段 / 后端缺字段                     |
+| `Index signature … is missing`       | 2      | schema 用了 `additionalProperties`（§7.1）  |
+| 其他                                 | 2      |                                             |
 
 **schema 里无前端调用方的 8 个操作**（切换后仍然没有调用方，但值得知道）：
 
@@ -258,119 +260,119 @@ GET  /health                           POST /api/auth/refresh   ← 由 client.t
 
 ## 6. 逐函数对照表（111 行，可用 `npm run gen:api:drift` 重新生成）
 
-| 模块 | 函数 | 方法 | 路径 | schema 命中 | 返回类型判定 |
-|---|---|---|---|---|---|
-| assessment.ts | `compareAssessment` | POST | `/assessment/compare` | 是 | CONFLICT |
-| assessment.ts | `generateQuiz` | POST | `/assessment/generate-quiz` | 是 | CONFLICT |
-| assessment.ts | `submitQuizAnswers` | POST | `/assessment/submit-answer` | 是 | CONFLICT |
-| assessment.ts | `getAssessmentHistory` | GET | `/assessment/history/{}` | 是 | IDENTICAL |
-| auth.ts | `register` | POST | `/auth/register` | 是 | IDENTICAL |
-| auth.ts | `login` | POST | `/auth/login` | 是 | IDENTICAL |
-| auth.ts | `logout` | POST | `/auth/logout` | 是 | IDENTICAL |
-| auth.ts | `getMe` | GET | `/auth/me` | 是 | IDENTICAL |
-| auth.ts | `getUserReminderSettings` | GET | `/auth/reminder-settings` | 是 | IDENTICAL |
-| auth.ts | `updateUserReminderSettings` | PUT | `/auth/reminder-settings` | 是 | IDENTICAL |
-| cleaning.ts | `startCleaning` | POST | `/cleaning/{}/start` | 是 | **HW_WIDER** |
-| cleaning.ts | `stopCleaning` | POST | `/cleaning/{}/stop` | 是 | **HW_WIDER** |
-| cleaning.ts | `getCleaningStatus` | GET | `/cleaning/{}/status` | 是 | CONFLICT |
-| cleaning.ts | `getCleaningDiff` | GET | `/cleaning/{}/diff` | 是 | HW_NARROWER |
-| cleaning.ts | `restoreBlock` | POST | `/cleaning/{}/restore/{}` | 是 | HW_NARROWER |
-| cleaning.ts | `deleteBlock` | DELETE | `/cleaning/{}/block/{}` | 是 | HW_NARROWER |
-| client.ts | `askQuestionStream` | POST | `/understanding/ask/stream` | 是 | SCHEMA_UNTYPED（SSE） |
-| goals.ts | `createGoal` | POST | `/goals` | 是 | HW_NARROWER |
-| goals.ts | `getGoals` | GET | `/goals` | 是 | HW_NARROWER |
-| goals.ts | `getGoal` | GET | `/goals/{}` | 是 | HW_NARROWER |
-| goals.ts | `updateGoal` | PATCH | `/goals/{}` | 是 | HW_NARROWER |
-| goals.ts | `archiveGoal` | POST | `/goals/{}/archive` | 是 | HW_NARROWER |
-| goals.ts | `deleteGoal` | DELETE | `/goals/{}` | 是 | NO_JSON_RESPONSE（204） |
-| goals.ts | `getDailyPlan` | GET | `/goals/daily-plan` | 是 | IDENTICAL |
-| graph.ts | `getGraphData` | GET | `/graph` | 是 | CONFLICT |
-| graph.ts | `getSuggestions` | GET | `/graph/suggestions` | 是 | HW_NARROWER |
-| graph.ts | `suggestRelations` | POST | `/graph/suggest` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `confirmRelation` | POST | `/graph/confirm` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `rejectRelation` | POST | `/graph/reject` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `createRelation` | POST | `/graph/relation` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `deleteRelation` | DELETE | `/graph/relation/{}` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `getGraphStats` | GET | `/graph/stats` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `searchGraphNodes` | GET | `/graph/search` | 是 | **HW_WIDER** |
-| graph.ts | `getNodeSubgraph` | GET | `/graph/node/{}/subgraph` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `batchConfirmRelations` | POST | `/graph/batch-confirm` | 是 | SCHEMA_UNTYPED |
-| graph.ts | `batchRejectRelations` | POST | `/graph/batch-reject` | 是 | SCHEMA_UNTYPED |
-| knowledge.ts | `extractCombined` | POST | `/knowledge/links/{}/extract-combined` | 是 | IDENTICAL |
-| knowledge.ts | `generateExtension` | POST | `/knowledge/cards/{}/generate-extension` | 是 | CONFLICT |
-| knowledge.ts | `generateExtensionQuestions` | POST | `/knowledge/cards/{}/generate-questions` | 是 | SCHEMA_UNTYPED |
-| knowledge.ts | `markCard` | PATCH | `/knowledge/cards/{}/mark` | 是 | CONFLICT |
-| knowledge.ts | `getBlindSpots` | GET | `/knowledge/blind-spots` | 是 | CONFLICT |
-| knowledge.ts | `getMasteryOverview` | GET | `/knowledge/mastery` | 是 | IDENTICAL |
-| knowledge.ts | `suggestSemanticRelations` | POST | `/graph/suggest-semantic` | 是 | SCHEMA_LOOSE |
-| notes.ts | `getNotes` | GET | `/notes` | 是 | CONFLICT |
-| notes.ts | `getNote` | GET | `/notes/{}` | 是 | CONFLICT |
-| notes.ts | `updateNote` | PUT | `/notes/{}` | 是 | CONFLICT |
-| notes.ts | `updateNoteContent` | PUT | `/notes/{}/content` | 是 | CONFLICT |
-| notes.ts | `archiveNote` | POST | `/notes/{}/archive` | 是 | CONFLICT |
-| notes.ts | `updateNoteRole` | PATCH | `/notes/{}/role` | 是 | CONFLICT |
-| notes.ts | `getArchivedNotes` | GET | `/notes/archive` | 是 | CONFLICT |
-| notes.ts | `deleteNote` | DELETE | `/notes/{}` | 是 | NO_JSON_RESPONSE（204） |
-| notes.ts | `getTrashedNotes` | GET | `/notes/trash` | 是 | CONFLICT |
-| notes.ts | `getNoteTrashInfo` | GET | `/notes/{}/trash-info` | 是 | IDENTICAL |
-| notes.ts | `restoreNote` | POST | `/notes/{}/restore` | 是 | CONFLICT |
-| notes.ts | `purgeNote` | DELETE | `/notes/{}/purge` | 是 | NO_JSON_RESPONSE（204） |
-| notes.ts | `purgeAllTrash` | DELETE | `/notes/trash/purge-all` | 是 | IDENTICAL |
-| notes.ts | `getAnnotations` | GET | `/notes/{}/annotations` | 是 | HW_NARROWER |
-| notes.ts | `createAnnotation` | POST | `/notes/{}/annotations` | 是 | HW_NARROWER |
-| notes.ts | `deleteAnnotation` | DELETE | `/notes/{}/annotations/{}` | 是 | SCHEMA_UNTYPED |
-| notes.ts | `askNoteQuestionStream` | POST | `/notes/{}/ask/stream` | 是 | SCHEMA_UNTYPED（SSE） |
-| notes.ts | `getNoteLinks` | GET | `/notes/{}/links` | 是 | CONFLICT |
-| notes.ts | `updateNoteLinks` | PUT | `/notes/{}/links` | 是 | SCHEMA_UNTYPED |
-| notes.ts | `listVersions` | GET | `/notes/{}/versions` | 是 | HW_NARROWER |
-| notes.ts | `getVersion` | GET | `/notes/{}/versions/{}` | 是 | SCHEMA_UNTYPED |
-| notes.ts | `diffVersions` | GET | `/notes/{}/versions/diff` | 是 | HW_NARROWER |
-| notes.ts | `restoreVersion` | POST | `/notes/{}/versions/{}/restore` | 是 | HW_NARROWER |
-| projects.ts | `createFolder` | POST | `/folders` | 是 | HW_NARROWER |
-| projects.ts | `getFolders` | GET | `/folders` | 是 | HW_NARROWER |
-| projects.ts | `getFolderDetail` | GET | `/folders/{}` | 是 | CONFLICT |
-| projects.ts | `updateFolder` | PATCH | `/folders/{}` | 是 | HW_NARROWER |
-| projects.ts | `deleteFolder` | DELETE | `/folders/{}` | 是 | SCHEMA_UNTYPED |
-| projects.ts | `createProject` | POST | `/projects` | 是 | HW_NARROWER |
-| projects.ts | `getProjects` | GET | `/projects` | 是 | HW_NARROWER |
-| projects.ts | `getProjectDetail` | GET | `/projects/{}` | 是 | HW_NARROWER |
-| projects.ts | `updateProject` | PATCH | `/projects/{}` | 是 | HW_NARROWER |
-| projects.ts | `deleteProject` | DELETE | `/projects/{}` | 是 | SCHEMA_UNTYPED |
-| projects.ts | `scanProject` | POST | `/projects/{}/scan` | 是 | HW_NARROWER |
-| projects.ts | `addNotesToProject` | POST | `/projects/{}/notes` | 是 | SCHEMA_UNTYPED |
-| projects.ts | `removeNoteFromProject` | DELETE | `/projects/{}/notes/{}` | 是 | SCHEMA_UNTYPED |
-| qa.ts | `startUnderstanding` | POST | `/understanding/{}/start` | 是 | **HW_WIDER** |
-| qa.ts | `getUnderstandingStatus` | GET | `/understanding/{}/status` | 是 | CONFLICT |
-| qa.ts | `getChapterSummaries` | GET | `/understanding/{}/chapters` | 是 | IDENTICAL |
-| qa.ts | `getKnowledgeCards` | GET | `/understanding/cards` | 是 | CONFLICT |
-| qa.ts | `getKnowledgeCard` | GET | `/understanding/cards/{}` | 是 | CONFLICT |
-| qa.ts | `askQuestion` | POST | `/understanding/ask` | 是 | CONFLICT |
-| qa.ts | `generateQuestions` | POST | `/understanding/{}/generate-questions` | 是 | IDENTICAL |
-| qa.ts | `getQuestions` | GET | `/understanding/questions` | 是 | CONFLICT |
-| qa.ts | `getCardDuplicates` | GET | `/understanding/{}/duplicates` | 是 | SCHEMA_UNTYPED |
-| qa.ts | `updateKnowledgeCard` | PUT | `/understanding/cards/{}` | 是 | CONFLICT |
-| qa.ts | `deleteKnowledgeCard` | DELETE | `/understanding/cards/{}` | 是 | NO_JSON_RESPONSE（204） |
-| report.ts | `getDailyReport` | GET | `/report/daily` | 是 | IDENTICAL |
-| report.ts | `getWeeklyTrend` | GET | `/report/weekly-trend` | 是 | IDENTICAL |
-| report.ts | `getWeakPoints` | GET | `/report/weak-points` | 是 | IDENTICAL |
-| review.ts | `getDueQuizzes` | GET | `/review/due` | 是 | CONFLICT |
-| review.ts | `submitAnswer` | POST | `/review/submit` | 是 | CONFLICT |
-| review.ts | `getReviewStats` | GET | `/review/stats` | 是 | IDENTICAL |
-| review.ts | `getReviewHistory` | GET | `/review/history` | 是 | HW_NARROWER |
-| review.ts | `getQuickReview` | GET | `/review/quick/{}` | 是 | CONFLICT |
-| review.ts | `submitQuickReviewAnswer` | POST | `/review/quick/{}/submit` | 是 | CONFLICT |
-| review.ts | `getReminders` | GET | `/review/reminders` | 是 | HW_NARROWER |
-| review.ts | `getDueCards` | GET | `/review/cards/due` | 是 | HW_NARROWER |
-| review.ts | `submitCardReview` | POST | `/review/cards/{}/submit` | 是 | HW_NARROWER |
-| tasks.ts | `listNoteTasks` | GET | `/tasks/note/{}` | 是 | HW_NARROWER |
-| tasks.ts | `getTask` | GET | `/tasks/{}` | 是 | HW_NARROWER |
-| tasks.ts | `cancelTask` | POST | `/tasks/{}/cancel` | 是 | IDENTICAL |
-| upload.ts | `uploadFile` | POST | `/upload` | 是 | CONFLICT |
-| upload.ts | `prepareUpload` | POST | `/upload/prepare` | 是 | SCHEMA_UNTYPED |
-| upload.ts | `commitUpload` | POST | `/upload/commit` | 是 | CONFLICT |
-| upload.ts | `getUploadStatus` | GET | `/upload/{}/status` | 是 | CONFLICT |
-| upload.ts | `retryConvert` | POST | `/upload/{}/retry` | 是 | CONFLICT |
-| upload.ts | `uploadFileToFolder` | POST | `/upload` | 是 | CONFLICT |
+| 模块          | 函数                         | 方法   | 路径                                     | schema 命中 | 返回类型判定            |
+| ------------- | ---------------------------- | ------ | ---------------------------------------- | ----------- | ----------------------- |
+| assessment.ts | `compareAssessment`          | POST   | `/assessment/compare`                    | 是          | CONFLICT                |
+| assessment.ts | `generateQuiz`               | POST   | `/assessment/generate-quiz`              | 是          | CONFLICT                |
+| assessment.ts | `submitQuizAnswers`          | POST   | `/assessment/submit-answer`              | 是          | CONFLICT                |
+| assessment.ts | `getAssessmentHistory`       | GET    | `/assessment/history/{}`                 | 是          | IDENTICAL               |
+| auth.ts       | `register`                   | POST   | `/auth/register`                         | 是          | IDENTICAL               |
+| auth.ts       | `login`                      | POST   | `/auth/login`                            | 是          | IDENTICAL               |
+| auth.ts       | `logout`                     | POST   | `/auth/logout`                           | 是          | IDENTICAL               |
+| auth.ts       | `getMe`                      | GET    | `/auth/me`                               | 是          | IDENTICAL               |
+| auth.ts       | `getUserReminderSettings`    | GET    | `/auth/reminder-settings`                | 是          | IDENTICAL               |
+| auth.ts       | `updateUserReminderSettings` | PUT    | `/auth/reminder-settings`                | 是          | IDENTICAL               |
+| cleaning.ts   | `startCleaning`              | POST   | `/cleaning/{}/start`                     | 是          | **HW_WIDER**            |
+| cleaning.ts   | `stopCleaning`               | POST   | `/cleaning/{}/stop`                      | 是          | **HW_WIDER**            |
+| cleaning.ts   | `getCleaningStatus`          | GET    | `/cleaning/{}/status`                    | 是          | CONFLICT                |
+| cleaning.ts   | `getCleaningDiff`            | GET    | `/cleaning/{}/diff`                      | 是          | HW_NARROWER             |
+| cleaning.ts   | `restoreBlock`               | POST   | `/cleaning/{}/restore/{}`                | 是          | HW_NARROWER             |
+| cleaning.ts   | `deleteBlock`                | DELETE | `/cleaning/{}/block/{}`                  | 是          | HW_NARROWER             |
+| client.ts     | `askQuestionStream`          | POST   | `/understanding/ask/stream`              | 是          | SCHEMA_UNTYPED（SSE）   |
+| goals.ts      | `createGoal`                 | POST   | `/goals`                                 | 是          | HW_NARROWER             |
+| goals.ts      | `getGoals`                   | GET    | `/goals`                                 | 是          | HW_NARROWER             |
+| goals.ts      | `getGoal`                    | GET    | `/goals/{}`                              | 是          | HW_NARROWER             |
+| goals.ts      | `updateGoal`                 | PATCH  | `/goals/{}`                              | 是          | HW_NARROWER             |
+| goals.ts      | `archiveGoal`                | POST   | `/goals/{}/archive`                      | 是          | HW_NARROWER             |
+| goals.ts      | `deleteGoal`                 | DELETE | `/goals/{}`                              | 是          | NO_JSON_RESPONSE（204） |
+| goals.ts      | `getDailyPlan`               | GET    | `/goals/daily-plan`                      | 是          | IDENTICAL               |
+| graph.ts      | `getGraphData`               | GET    | `/graph`                                 | 是          | CONFLICT                |
+| graph.ts      | `getSuggestions`             | GET    | `/graph/suggestions`                     | 是          | HW_NARROWER             |
+| graph.ts      | `suggestRelations`           | POST   | `/graph/suggest`                         | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `confirmRelation`            | POST   | `/graph/confirm`                         | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `rejectRelation`             | POST   | `/graph/reject`                          | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `createRelation`             | POST   | `/graph/relation`                        | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `deleteRelation`             | DELETE | `/graph/relation/{}`                     | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `getGraphStats`              | GET    | `/graph/stats`                           | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `searchGraphNodes`           | GET    | `/graph/search`                          | 是          | **HW_WIDER**            |
+| graph.ts      | `getNodeSubgraph`            | GET    | `/graph/node/{}/subgraph`                | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `batchConfirmRelations`      | POST   | `/graph/batch-confirm`                   | 是          | SCHEMA_UNTYPED          |
+| graph.ts      | `batchRejectRelations`       | POST   | `/graph/batch-reject`                    | 是          | SCHEMA_UNTYPED          |
+| knowledge.ts  | `extractCombined`            | POST   | `/knowledge/links/{}/extract-combined`   | 是          | IDENTICAL               |
+| knowledge.ts  | `generateExtension`          | POST   | `/knowledge/cards/{}/generate-extension` | 是          | CONFLICT                |
+| knowledge.ts  | `generateExtensionQuestions` | POST   | `/knowledge/cards/{}/generate-questions` | 是          | SCHEMA_UNTYPED          |
+| knowledge.ts  | `markCard`                   | PATCH  | `/knowledge/cards/{}/mark`               | 是          | CONFLICT                |
+| knowledge.ts  | `getBlindSpots`              | GET    | `/knowledge/blind-spots`                 | 是          | CONFLICT                |
+| knowledge.ts  | `getMasteryOverview`         | GET    | `/knowledge/mastery`                     | 是          | IDENTICAL               |
+| knowledge.ts  | `suggestSemanticRelations`   | POST   | `/graph/suggest-semantic`                | 是          | SCHEMA_LOOSE            |
+| notes.ts      | `getNotes`                   | GET    | `/notes`                                 | 是          | CONFLICT                |
+| notes.ts      | `getNote`                    | GET    | `/notes/{}`                              | 是          | CONFLICT                |
+| notes.ts      | `updateNote`                 | PUT    | `/notes/{}`                              | 是          | CONFLICT                |
+| notes.ts      | `updateNoteContent`          | PUT    | `/notes/{}/content`                      | 是          | CONFLICT                |
+| notes.ts      | `archiveNote`                | POST   | `/notes/{}/archive`                      | 是          | CONFLICT                |
+| notes.ts      | `updateNoteRole`             | PATCH  | `/notes/{}/role`                         | 是          | CONFLICT                |
+| notes.ts      | `getArchivedNotes`           | GET    | `/notes/archive`                         | 是          | CONFLICT                |
+| notes.ts      | `deleteNote`                 | DELETE | `/notes/{}`                              | 是          | NO_JSON_RESPONSE（204） |
+| notes.ts      | `getTrashedNotes`            | GET    | `/notes/trash`                           | 是          | CONFLICT                |
+| notes.ts      | `getNoteTrashInfo`           | GET    | `/notes/{}/trash-info`                   | 是          | IDENTICAL               |
+| notes.ts      | `restoreNote`                | POST   | `/notes/{}/restore`                      | 是          | CONFLICT                |
+| notes.ts      | `purgeNote`                  | DELETE | `/notes/{}/purge`                        | 是          | NO_JSON_RESPONSE（204） |
+| notes.ts      | `purgeAllTrash`              | DELETE | `/notes/trash/purge-all`                 | 是          | IDENTICAL               |
+| notes.ts      | `getAnnotations`             | GET    | `/notes/{}/annotations`                  | 是          | HW_NARROWER             |
+| notes.ts      | `createAnnotation`           | POST   | `/notes/{}/annotations`                  | 是          | HW_NARROWER             |
+| notes.ts      | `deleteAnnotation`           | DELETE | `/notes/{}/annotations/{}`               | 是          | SCHEMA_UNTYPED          |
+| notes.ts      | `askNoteQuestionStream`      | POST   | `/notes/{}/ask/stream`                   | 是          | SCHEMA_UNTYPED（SSE）   |
+| notes.ts      | `getNoteLinks`               | GET    | `/notes/{}/links`                        | 是          | CONFLICT                |
+| notes.ts      | `updateNoteLinks`            | PUT    | `/notes/{}/links`                        | 是          | SCHEMA_UNTYPED          |
+| notes.ts      | `listVersions`               | GET    | `/notes/{}/versions`                     | 是          | HW_NARROWER             |
+| notes.ts      | `getVersion`                 | GET    | `/notes/{}/versions/{}`                  | 是          | SCHEMA_UNTYPED          |
+| notes.ts      | `diffVersions`               | GET    | `/notes/{}/versions/diff`                | 是          | HW_NARROWER             |
+| notes.ts      | `restoreVersion`             | POST   | `/notes/{}/versions/{}/restore`          | 是          | HW_NARROWER             |
+| projects.ts   | `createFolder`               | POST   | `/folders`                               | 是          | HW_NARROWER             |
+| projects.ts   | `getFolders`                 | GET    | `/folders`                               | 是          | HW_NARROWER             |
+| projects.ts   | `getFolderDetail`            | GET    | `/folders/{}`                            | 是          | CONFLICT                |
+| projects.ts   | `updateFolder`               | PATCH  | `/folders/{}`                            | 是          | HW_NARROWER             |
+| projects.ts   | `deleteFolder`               | DELETE | `/folders/{}`                            | 是          | SCHEMA_UNTYPED          |
+| projects.ts   | `createProject`              | POST   | `/projects`                              | 是          | HW_NARROWER             |
+| projects.ts   | `getProjects`                | GET    | `/projects`                              | 是          | HW_NARROWER             |
+| projects.ts   | `getProjectDetail`           | GET    | `/projects/{}`                           | 是          | HW_NARROWER             |
+| projects.ts   | `updateProject`              | PATCH  | `/projects/{}`                           | 是          | HW_NARROWER             |
+| projects.ts   | `deleteProject`              | DELETE | `/projects/{}`                           | 是          | SCHEMA_UNTYPED          |
+| projects.ts   | `scanProject`                | POST   | `/projects/{}/scan`                      | 是          | HW_NARROWER             |
+| projects.ts   | `addNotesToProject`          | POST   | `/projects/{}/notes`                     | 是          | SCHEMA_UNTYPED          |
+| projects.ts   | `removeNoteFromProject`      | DELETE | `/projects/{}/notes/{}`                  | 是          | SCHEMA_UNTYPED          |
+| qa.ts         | `startUnderstanding`         | POST   | `/understanding/{}/start`                | 是          | **HW_WIDER**            |
+| qa.ts         | `getUnderstandingStatus`     | GET    | `/understanding/{}/status`               | 是          | CONFLICT                |
+| qa.ts         | `getChapterSummaries`        | GET    | `/understanding/{}/chapters`             | 是          | IDENTICAL               |
+| qa.ts         | `getKnowledgeCards`          | GET    | `/understanding/cards`                   | 是          | CONFLICT                |
+| qa.ts         | `getKnowledgeCard`           | GET    | `/understanding/cards/{}`                | 是          | CONFLICT                |
+| qa.ts         | `askQuestion`                | POST   | `/understanding/ask`                     | 是          | CONFLICT                |
+| qa.ts         | `generateQuestions`          | POST   | `/understanding/{}/generate-questions`   | 是          | IDENTICAL               |
+| qa.ts         | `getQuestions`               | GET    | `/understanding/questions`               | 是          | CONFLICT                |
+| qa.ts         | `getCardDuplicates`          | GET    | `/understanding/{}/duplicates`           | 是          | SCHEMA_UNTYPED          |
+| qa.ts         | `updateKnowledgeCard`        | PUT    | `/understanding/cards/{}`                | 是          | CONFLICT                |
+| qa.ts         | `deleteKnowledgeCard`        | DELETE | `/understanding/cards/{}`                | 是          | NO_JSON_RESPONSE（204） |
+| report.ts     | `getDailyReport`             | GET    | `/report/daily`                          | 是          | IDENTICAL               |
+| report.ts     | `getWeeklyTrend`             | GET    | `/report/weekly-trend`                   | 是          | IDENTICAL               |
+| report.ts     | `getWeakPoints`              | GET    | `/report/weak-points`                    | 是          | IDENTICAL               |
+| review.ts     | `getDueQuizzes`              | GET    | `/review/due`                            | 是          | CONFLICT                |
+| review.ts     | `submitAnswer`               | POST   | `/review/submit`                         | 是          | CONFLICT                |
+| review.ts     | `getReviewStats`             | GET    | `/review/stats`                          | 是          | IDENTICAL               |
+| review.ts     | `getReviewHistory`           | GET    | `/review/history`                        | 是          | HW_NARROWER             |
+| review.ts     | `getQuickReview`             | GET    | `/review/quick/{}`                       | 是          | CONFLICT                |
+| review.ts     | `submitQuickReviewAnswer`    | POST   | `/review/quick/{}/submit`                | 是          | CONFLICT                |
+| review.ts     | `getReminders`               | GET    | `/review/reminders`                      | 是          | HW_NARROWER             |
+| review.ts     | `getDueCards`                | GET    | `/review/cards/due`                      | 是          | HW_NARROWER             |
+| review.ts     | `submitCardReview`           | POST   | `/review/cards/{}/submit`                | 是          | HW_NARROWER             |
+| tasks.ts      | `listNoteTasks`              | GET    | `/tasks/note/{}`                         | 是          | HW_NARROWER             |
+| tasks.ts      | `getTask`                    | GET    | `/tasks/{}`                              | 是          | HW_NARROWER             |
+| tasks.ts      | `cancelTask`                 | POST   | `/tasks/{}/cancel`                       | 是          | IDENTICAL               |
+| upload.ts     | `uploadFile`                 | POST   | `/upload`                                | 是          | CONFLICT                |
+| upload.ts     | `prepareUpload`              | POST   | `/upload/prepare`                        | 是          | SCHEMA_UNTYPED          |
+| upload.ts     | `commitUpload`               | POST   | `/upload/commit`                         | 是          | CONFLICT                |
+| upload.ts     | `getUploadStatus`            | GET    | `/upload/{}/status`                      | 是          | CONFLICT                |
+| upload.ts     | `retryConvert`               | POST   | `/upload/{}/retry`                       | 是          | CONFLICT                |
+| upload.ts     | `uploadFileToFolder`         | POST   | `/upload`                                | 是          | CONFLICT                |
 
 ---
 
@@ -407,12 +409,12 @@ knowledge.ts suggestSemanticRelations
 `Index signature for type 'string' is missing`（TS 的 interface **不会**自动获得隐式索引签名，
 所以 `AssessmentScores` 赋不给 `{[k:string]: unknown}`）：
 
-| 位置 | schema 写了什么 | 前端按什么解析 |
-|---|---|---|
-| `AssessmentResponse.scores` | `{type: object, additionalProperties: true}` | `{covered_points, uncovered_points, coverage_score, completeness_score, depth_score, clarity_score}` |
-| `AssessmentResponse.quiz_questions[]` | 同上 | `{index, question, key_points}` |
-| `SubmitAnswerResponse.grading_detail` | `{…} \| null` | `{verdict, missing_points, misconceptions, confidence, reason}` |
-| `LinkListResponse.linked_materials[]` / `linked_personal_notes[]` | 同上 | `{id, title, source_type}` / `{id, title}` |
+| 位置                                                              | schema 写了什么                              | 前端按什么解析                                                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `AssessmentResponse.scores`                                       | `{type: object, additionalProperties: true}` | `{covered_points, uncovered_points, coverage_score, completeness_score, depth_score, clarity_score}` |
+| `AssessmentResponse.quiz_questions[]`                             | 同上                                         | `{index, question, key_points}`                                                                      |
+| `SubmitAnswerResponse.grading_detail`                             | `{…} \| null`                                | `{verdict, missing_points, misconceptions, confidence, reason}`                                      |
+| `LinkListResponse.linked_materials[]` / `linked_personal_notes[]` | 同上                                         | `{id, title, source_type}` / `{id, title}`                                                           |
 
 **含义**：这 4 处的"类型"完全靠前端手写维护，**后端改字段前端不会知道** ——
 正是 5.1 想消灭的那类风险，但**生成解决不了它**，只有给后端补 `response_model=` 才能解决。
@@ -423,15 +425,15 @@ knowledge.ts suggestSemanticRelations
 （`CardCategory` / `GoalStatus` / `GoalType`，见 `qa.ts` / `goals.ts` / `knowledge.ts`）。
 没建模的 7 个：
 
-| 后端枚举 | 值 | 前端写成 | 影响的函数 |
-|---|---|---|---|
-| `NoteStatus` | uploading, converting, converted, cleaning, **cleaned**, **cleaning_failed**, learning, **learning_failed**, archived, failed | `string` | 21 处（`Note.status` / `status` 字段遍布 notes/cleaning/qa/upload） |
-| `SourceType` | pdf, image, docx, pptx, xlsx, audio, video, **markdown** | `string` | 8 处 |
-| `CardType` | concept, formula, qa, definition | `string` | 7 处 |
-| `RelationType` | related, prerequisite, subsequent, contrast | `string` | 1 处（`GraphEdge.relation_type`） |
-| `RelationStatus` | suggested, confirmed, **rejected** | `string` | 1 处（`GraphEdge.status`） |
-| `DifficultyLevel` | easy, medium, hard | `string` | 3 处 |
-| `QuestionType` | choice, fill_blank, short_answer | `string` | 3 处 |
+| 后端枚举          | 值                                                                                                                            | 前端写成 | 影响的函数                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------- |
+| `NoteStatus`      | uploading, converting, converted, cleaning, **cleaned**, **cleaning_failed**, learning, **learning_failed**, archived, failed | `string` | 21 处（`Note.status` / `status` 字段遍布 notes/cleaning/qa/upload） |
+| `SourceType`      | pdf, image, docx, pptx, xlsx, audio, video, **markdown**                                                                      | `string` | 8 处                                                                |
+| `CardType`        | concept, formula, qa, definition                                                                                              | `string` | 7 处                                                                |
+| `RelationType`    | related, prerequisite, subsequent, contrast                                                                                   | `string` | 1 处（`GraphEdge.relation_type`）                                   |
+| `RelationStatus`  | suggested, confirmed, **rejected**                                                                                            | `string` | 1 处（`GraphEdge.status`）                                          |
+| `DifficultyLevel` | easy, medium, hard                                                                                                            | `string` | 3 处                                                                |
+| `QuestionType`    | choice, fill_blank, short_answer                                                                                              | `string` | 3 处                                                                |
 
 这 4 个函数因此被判 `HW_WIDER`（唯一一类"前端接受后端保证不了的值"）：
 
@@ -505,12 +507,12 @@ notes.ts   updateNote        （PUT /api/notes/{id} → NoteResponse）
 
 **(c) 前端不接受的 null** —— 9 处 `SCHEMA_NULLABLE_HW_NOT`，逐条列出：
 
-| 位置 | 问题 |
-|---|---|
-| `getSuggestions[].similarity_score` | schema `number \| null`，前端 `number` —— **排序/展示时可能拿到 null** |
+| 位置                                                  | 问题                                                                       |
+| ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| `getSuggestions[].similarity_score`                   | schema `number \| null`，前端 `number` —— **排序/展示时可能拿到 null**     |
 | `compareAssessment/… .quiz_answers` `.quiz_questions` | schema 允许 null，前端 `?:` 只在"没有"时不看，收到 `null` 时 `.map()` 会炸 |
-| `getNote.video_url` | schema `string \| null`，前端 `video_url?: string`（**没带 null**） |
-| `getProjectDetail.notes[].source_type` | schema 可空，前端 `string` —— 笔记卡片徽章会拿到 null |
+| `getNote.video_url`                                   | schema `string \| null`，前端 `video_url?: string`（**没带 null**）        |
+| `getProjectDetail.notes[].source_type`                | schema 可空，前端 `string` —— 笔记卡片徽章会拿到 null                      |
 
 ### 7.4 前端类型里有、后端不给的字段（1 处，**是真错**）
 
@@ -528,22 +530,22 @@ projects.ts getProjectDetail
 后端自己就不一致 —— 这是"同一个前端类型描述两个后端模型"造成的假保证。
 
 **佐证**：`frontend/src/pages/Projects.test.tsx:428`
-已经有一条名为 *"安全：笔记行缺 file_size / source_type / status 时照常渲染"* 的用例，
+已经有一条名为 _"安全：笔记行缺 file_size / source_type / status 时照常渲染"_ 的用例，
 说明**写测试的人早就知道这个类型在撒谎**。目前页面没有真的读 `file_size`
 （只有 `DailyMaterials.tsx:703` 与 `NotesList.tsx:287` 读，用的都是列表端点的 `Note`），
 所以是"潜在错误"而非线上故障 —— 但也正因如此它一直没被发现。
 
 ### 7.5 后端给、前端类型里没有的字段（22 处，切换后会一次性暴露）
 
-| 字段 | 出现在 | 备注 |
-|---|---|---|
-| `video_url` | `NoteResponse` / `NoteDetailResponse` | `Note` 类型完全没有这个字段，`NoteDetail` 才有 |
-| `linked_material_ids` / `linked_personal_note_ids` | 上述两者 | 前端只在 `getNoteLinks` 里单独查 |
-| `original_file_path` / `original_md_path` | `NoteDetailResponse` | 前端完全不知道 |
-| `is_stale` / `link_signature` | `AssessmentResponse` | **必填**，前端类型缺失（`is_stale` 是"评估是否已过期"的标志） |
-| `no_context` | `QuestionAnswerResponse` | 问答"没检索到上下文"的标志，前端目前靠别的方式判断 |
-| `repetition` | `DueQuizResponse` / `CardReviewItem` | 前端 `DueQuiz` 缺 |
-| `email_reminder_enabled` / `last_reminded_at` | `UserResponse` | `register` / `login` / `getMe` 都返回 |
+| 字段                                               | 出现在                                | 备注                                                          |
+| -------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `video_url`                                        | `NoteResponse` / `NoteDetailResponse` | `Note` 类型完全没有这个字段，`NoteDetail` 才有                |
+| `linked_material_ids` / `linked_personal_note_ids` | 上述两者                              | 前端只在 `getNoteLinks` 里单独查                              |
+| `original_file_path` / `original_md_path`          | `NoteDetailResponse`                  | 前端完全不知道                                                |
+| `is_stale` / `link_signature`                      | `AssessmentResponse`                  | **必填**，前端类型缺失（`is_stale` 是"评估是否已过期"的标志） |
+| `no_context`                                       | `QuestionAnswerResponse`              | 问答"没检索到上下文"的标志，前端目前靠别的方式判断            |
+| `repetition`                                       | `DueQuizResponse` / `CardReviewItem`  | 前端 `DueQuiz` 缺                                             |
+| `email_reminder_enabled` / `last_reminded_at`      | `UserResponse`                        | `register` / `login` / `getMe` 都返回                         |
 
 > 这一类**不是错误**，而是"前端少知道一些东西"。切换的价值就在这里：
 > 生成类型会把它们全部变成可选字段，前端可以按需消费。
@@ -606,35 +608,35 @@ generateQuestions schema 有可选参数但前端没传 [target_categories, targ
 
 ### 9.0 前置（必须先做，且**在后端**）
 
-| # | 动作 | 为什么必须先做 |
-|---|---|---|
-| P1 | 给 §7.1 的 **22 个端点**补 `response_model=` | 否则生成类型是 `unknown`，切换 = 用 `unknown` 换掉手写类型，净亏 |
-| P2 | 给 §7.1 的 4 处**内层空壳**补模型（`AssessmentScores` / `quiz_questions[]` / `grading_detail` / `linked_materials[]`） | 同上；这 4 处是前端手写类型最"值钱"的地方 |
-| P3 | 决定 `POST /api/auth/logout` 的 body 是否真的是可选 | `anyOf: [LogoutRequest, null]` 会让生成的客户端把 body 变可选 |
-| P4 | 把 `dump_openapi.py --check` 接进 CI | 没有它，前端会在"后端已改、schema 未更新"的窗口里继续绿 |
+| #   | 动作                                                                                                                   | 为什么必须先做                                                   |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| P1  | 给 §7.1 的 **22 个端点**补 `response_model=`                                                                           | 否则生成类型是 `unknown`，切换 = 用 `unknown` 换掉手写类型，净亏 |
+| P2  | 给 §7.1 的 4 处**内层空壳**补模型（`AssessmentScores` / `quiz_questions[]` / `grading_detail` / `linked_materials[]`） | 同上；这 4 处是前端手写类型最"值钱"的地方                        |
+| P3  | 决定 `POST /api/auth/logout` 的 body 是否真的是可选                                                                    | `anyOf: [LogoutRequest, null]` 会让生成的客户端把 body 变可选    |
+| P4  | 把 `dump_openapi.py --check` 接进 CI                                                                                   | 没有它，前端会在"后端已改、schema 未更新"的窗口里继续绿          |
 
 ### 9.1 切换顺序（每一步都可独立回滚）
 
-| 步骤 | 内容 | 先炸什么 | 怎么验证 |
-|---|---|---|---|
-| **S1** | 冻结基线：把本轮的漂移报告与 `backend/openapi.json` 提交，CI 加 `dump_openapi.py --check` | 无 | `python backend/scripts/dump_openapi.py --check` 退出 0 |
-| **S2** | **只换类型、不换请求**：在 `src/api/generated/` 加 `types.ts`，把 `client.ts` 的 `export interface X` 改成 `export type X = components['schemas']['XResponse']`。调用方零改动（类型名不变） | **测试里的 mock 工厂**：schema 把带默认值的字段标成 required（`note_role`/`project_ids`/`mastery_level`…），`makeNote()` 这类工厂会因缺字段编译失败。**这是好事**，但要有心理与工时准备 | `tsc --noEmit`（看错误数量作为"契约暴露面"的度量）、`npm test` 21/276、`npm run build` |
-| **S3** | 按域替换**请求函数体**，域名顺序按当前判定质量排序：`report.ts`(3 IDENTICAL) → `tasks.ts` → `auth.ts`(6 IDENTICAL) → `knowledge.ts` → `graph.ts`（**必须等 P1**）→ `notes.ts` → `review.ts` → `qa.ts` → `projects.ts` → `upload.ts` | `utils/labels.ts` 的 status→class 映射、`pages/notedetail/viewMode.ts` 等把 status/source_type 当字符串比较的地方，会在枚举收窄后报错 | 每换一个域跑一次 `tsc` + `npm test`；`npm run gen:api:drift` 的判定分布只应单调改善 |
-| **S4** | 收敛 `client.ts`：保留 `getToken`/`setTokens`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`（**这些 schema 生成不出来**），删除重复的类型定义 | 无（类型已由 S2 换成生成版） | `tsc` + `npm test` |
-| **S5** | 才轮到 5.2（TanStack Query）/ 5.3（Zustand） | — | — |
+| 步骤   | 内容                                                                                                                                                                                                                                | 先炸什么                                                                                                                                                                                | 怎么验证                                                                               |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **S1** | 冻结基线：把本轮的漂移报告与 `backend/openapi.json` 提交，CI 加 `dump_openapi.py --check`                                                                                                                                           | 无                                                                                                                                                                                      | `python backend/scripts/dump_openapi.py --check` 退出 0                                |
+| **S2** | **只换类型、不换请求**：在 `src/api/generated/` 加 `types.ts`，把 `client.ts` 的 `export interface X` 改成 `export type X = components['schemas']['XResponse']`。调用方零改动（类型名不变）                                         | **测试里的 mock 工厂**：schema 把带默认值的字段标成 required（`note_role`/`project_ids`/`mastery_level`…），`makeNote()` 这类工厂会因缺字段编译失败。**这是好事**，但要有心理与工时准备 | `tsc --noEmit`（看错误数量作为"契约暴露面"的度量）、`npm test` 21/276、`npm run build` |
+| **S3** | 按域替换**请求函数体**，域名顺序按当前判定质量排序：`report.ts`(3 IDENTICAL) → `tasks.ts` → `auth.ts`(6 IDENTICAL) → `knowledge.ts` → `graph.ts`（**必须等 P1**）→ `notes.ts` → `review.ts` → `qa.ts` → `projects.ts` → `upload.ts` | `utils/labels.ts` 的 status→class 映射、`pages/notedetail/viewMode.ts` 等把 status/source_type 当字符串比较的地方，会在枚举收窄后报错                                                   | 每换一个域跑一次 `tsc` + `npm test`；`npm run gen:api:drift` 的判定分布只应单调改善    |
+| **S4** | 收敛 `client.ts`：保留 `getToken`/`setTokens`/`refreshSession`/`authorizedFetch`/`request`/`uploadRequest`（**这些 schema 生成不出来**），删除重复的类型定义                                                                        | 无（类型已由 S2 换成生成版）                                                                                                                                                            | `tsc` + `npm test`                                                                     |
+| **S5** | 才轮到 5.2（TanStack Query）/ 5.3（Zustand）                                                                                                                                                                                        | —                                                                                                                                                                                       | —                                                                                      |
 
 ### 9.2 风险清单
 
-| 风险 | 具体形态 | 缓解 |
-|---|---|---|
-| **生成客户端替换不了横切逻辑** | 401 刷新 + 单飞（`refreshSession`）、请求超时（30 s / 上传 600 s）、`Content-Type` 合并、204/空响应体处理，全部在 `request()` 里，schema 里没有 | S4 明确保留这一层；**不要**引入 `openapi-fetch` 之类的运行时（本轮已定"不加运行时依赖"） |
-| **multipart 上传无法机械替换** | `uploadFile` / `commitUpload` / `uploadFileToFolder` / `prepareUpload` 把 `project_ids`、`linked_material_ids` 塞成 **JSON 字符串**放进 FormData。OpenAPI 只能表达"这是 string"，表达不了"它是 JSON 编码的数组" | 这 4 个函数**保持手写**，只把返回类型换成生成类型 |
-| **测试 mock 的形状** | **10 个测试文件、13 处 `vi.mock('…/api/…')`**（8 个文件用 `'../api/…'`、2 个用 `'../../api/…'`）—— ⚠️ **2026-09-14 勘误**：原文写"8 个测试文件、13 处"，两个数字取自**不同的口径**（"8"只数了单层 `'../api/…'` 的那一半，"13"是全部 api mock 点）；按 mock 点算应是 **10 个文件 / 13 处**。只要**保留"同名导出函数"这一层**（只换函数体），mock 不用改；一旦改成 `client.GET('/api/notes')` 这种调用形态，13 处全部要重写 | 明确采用"保留同名函数 + 换内部实现"的迁移形态 |
-| **调用方面积** | **74 个源文件、79 处 import** 从 `src/api/*` 拿东西（其中 68 处走 `api/client` 的 `export *` 转发，11 个是测试文件） | S2 的"只换类型名"策略保证这一步零调用方改动；S3 按域替换时逐个域跑测试 |
-| **枚举收窄的连锁反应** | `NoteStatus` 有 10 个值，前端有若干处用字符串比较/拼类名（`utils/labels.ts` 是单一出口，已在 5.9/5.10 收敛过一轮） | 这正是收益：编译器会把所有"拼字符串当状态"的地方一次列出来 |
-| **optional 翻转导致判空逻辑失效** | 带 `default` 的字段在生成类型里变必填（构造侧炸）；不带 default 的可空字段变 `?: T \| null`（读取侧 `x !== null` 放行 `undefined`） | 构造侧：改测试工厂；读取侧：统一改 `x != null`。按域逐个改 |
-| **261 KB 类型文件进 `src/`** | `tsc --noEmit` 与编辑器的负担。当前 `tsc` 仍通过（本轮实测），但 5.2/5.3 之后类型文件还会涨 | 观察 `tsc` 耗时；必要时按 tag 拆成多个生成文件（`openapi-typescript` 不支持按 tag 拆，需要先生成再按 `paths` 过滤，属于额外工具） |
-| **`--check` 未接 CI 就等于没有** | 后端改契约不重新生成时，前端仍绿 | P4 |
+| 风险                              | 具体形态                                                                                                                                                                                                                                                                                                                                                                                                                  | 缓解                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **生成客户端替换不了横切逻辑**    | 401 刷新 + 单飞（`refreshSession`）、请求超时（30 s / 上传 600 s）、`Content-Type` 合并、204/空响应体处理，全部在 `request()` 里，schema 里没有                                                                                                                                                                                                                                                                           | S4 明确保留这一层；**不要**引入 `openapi-fetch` 之类的运行时（本轮已定"不加运行时依赖"）                                          |
+| **multipart 上传无法机械替换**    | `uploadFile` / `commitUpload` / `uploadFileToFolder` / `prepareUpload` 把 `project_ids`、`linked_material_ids` 塞成 **JSON 字符串**放进 FormData。OpenAPI 只能表达"这是 string"，表达不了"它是 JSON 编码的数组"                                                                                                                                                                                                           | 这 4 个函数**保持手写**，只把返回类型换成生成类型                                                                                 |
+| **测试 mock 的形状**              | **10 个测试文件、13 处 `vi.mock('…/api/…')`**（8 个文件用 `'../api/…'`、2 个用 `'../../api/…'`）—— ⚠️ **2026-09-14 勘误**：原文写"8 个测试文件、13 处"，两个数字取自**不同的口径**（"8"只数了单层 `'../api/…'` 的那一半，"13"是全部 api mock 点）；按 mock 点算应是 **10 个文件 / 13 处**。只要**保留"同名导出函数"这一层**（只换函数体），mock 不用改；一旦改成 `client.GET('/api/notes')` 这种调用形态，13 处全部要重写 | 明确采用"保留同名函数 + 换内部实现"的迁移形态                                                                                     |
+| **调用方面积**                    | **74 个源文件、79 处 import** 从 `src/api/*` 拿东西（其中 68 处走 `api/client` 的 `export *` 转发，11 个是测试文件）                                                                                                                                                                                                                                                                                                      | S2 的"只换类型名"策略保证这一步零调用方改动；S3 按域替换时逐个域跑测试                                                            |
+| **枚举收窄的连锁反应**            | `NoteStatus` 有 10 个值，前端有若干处用字符串比较/拼类名（`utils/labels.ts` 是单一出口，已在 5.9/5.10 收敛过一轮）                                                                                                                                                                                                                                                                                                        | 这正是收益：编译器会把所有"拼字符串当状态"的地方一次列出来                                                                        |
+| **optional 翻转导致判空逻辑失效** | 带 `default` 的字段在生成类型里变必填（构造侧炸）；不带 default 的可空字段变 `?: T \| null`（读取侧 `x !== null` 放行 `undefined`）                                                                                                                                                                                                                                                                                       | 构造侧：改测试工厂；读取侧：统一改 `x != null`。按域逐个改                                                                        |
+| **261 KB 类型文件进 `src/`**      | `tsc --noEmit` 与编辑器的负担。当前 `tsc` 仍通过（本轮实测），但 5.2/5.3 之后类型文件还会涨                                                                                                                                                                                                                                                                                                                               | 观察 `tsc` 耗时；必要时按 tag 拆成多个生成文件（`openapi-typescript` 不支持按 tag 拆，需要先生成再按 `paths` 过滤，属于额外工具） |
+| **`--check` 未接 CI 就等于没有**  | 后端改契约不重新生成时，前端仍绿                                                                                                                                                                                                                                                                                                                                                                                          | P4                                                                                                                                |
 
 ### 9.3 每一步的统一验证命令
 
@@ -655,18 +657,18 @@ npm.cmd run gen:api:drift
 
 ## 10. 本轮验证记录（2026-09-14）
 
-| 检查 | 结果 |
-|---|---|
-| `python backend/scripts/dump_openapi.py` | 退出 0，356 080 字节，`paths=102 operations=118 schemas=156 sha256=e21c85952c30` |
-| 生成确定性（连续 3 次） | sha256 完全相同 |
-| `python backend/scripts/dump_openapi.py --check` | 退出 0 |
-| `npm run gen:api`（重复执行） | 退出 0，`schema.ts` hash 不变（两次 `Get-FileHash` 相同） |
-| `npx tsc --noEmit` | **退出 0** |
-| `npm run build` | **退出 0**（✓ built in 4.38s） |
-| `npm test` | **21 files / 276 tests 全通过** |
-| `npm run lint`（`eslint src/`） | 退出 0（生成文件与漂移脚本都干净） |
-| `npx prettier --check src/api/generated/schema.ts` | 通过 |
-| 未改动 | `frontend/src/api/` 下**除新增 `generated/` 外零改动**；未改 pages/components/样式/e2e；未加运行时依赖；未提交 |
+| 检查                                               | 结果                                                                                                           |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `python backend/scripts/dump_openapi.py`           | 退出 0，356 080 字节，`paths=102 operations=118 schemas=156 sha256=e21c85952c30`                               |
+| 生成确定性（连续 3 次）                            | sha256 完全相同                                                                                                |
+| `python backend/scripts/dump_openapi.py --check`   | 退出 0                                                                                                         |
+| `npm run gen:api`（重复执行）                      | 退出 0，`schema.ts` hash 不变（两次 `Get-FileHash` 相同）                                                      |
+| `npx tsc --noEmit`                                 | **退出 0**                                                                                                     |
+| `npm run build`                                    | **退出 0**（✓ built in 4.38s）                                                                                 |
+| `npm test`                                         | **21 files / 276 tests 全通过**                                                                                |
+| `npm run lint`（`eslint src/`）                    | 退出 0（生成文件与漂移脚本都干净）                                                                             |
+| `npx prettier --check src/api/generated/schema.ts` | 通过                                                                                                           |
+| 未改动                                             | `frontend/src/api/` 下**除新增 `generated/` 外零改动**；未改 pages/components/样式/e2e；未加运行时依赖；未提交 |
 
 > 过程中另有一个**与本次改动无关**的瞬时现象：`npx tsc --noEmit` 曾在
 > 16:2x 报 16 条 `Cannot find name 'graphStyles'`（全在 `src/pages/KnowledgeGraph.test.tsx`），
@@ -687,14 +689,14 @@ npm.cmd run gen:api:drift
 
 ### 11.0 一句话结论
 
-| 问题 | 答案 |
-|---|---|
-| §7.1 的 22 个端点解决了吗 | **解决了 20 个**（补了真实 `response_model=`） |
-| 剩下 2 个呢 | **2 个 SSE 端点的 `SCHEMA_UNTYPED` 也归零了**，但不是靠 `response_model=` —— 它们是**流**，`response_model` 是错的工具，改成如实声明 `text/event-stream`（§11.4） |
-| 4 处内层空壳呢 | **5 处全部补齐**（`linked_materials[]` 与 `linked_personal_notes[]` 是两处，§7.1 原文把它们算成一处） |
-| 漂移报告怎么说 | `schemaUntyped` **21 → 0**，`schemaLoose` **1 → 0**，`identical` 19 → 26 |
-| 请求/响应体变了吗 | **没有**。但过程中**改过一个测试**，且发现了 6 处"前端类型与后端现实不符"（§11.7） |
-| 后端测试 | **1051 passed / 3 skipped**（本轮新增 14 条守卫用例） |
+| 问题                      | 答案                                                                                                                                                              |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §7.1 的 22 个端点解决了吗 | **解决了 20 个**（补了真实 `response_model=`）                                                                                                                    |
+| 剩下 2 个呢               | **2 个 SSE 端点的 `SCHEMA_UNTYPED` 也归零了**，但不是靠 `response_model=` —— 它们是**流**，`response_model` 是错的工具，改成如实声明 `text/event-stream`（§11.4） |
+| 4 处内层空壳呢            | **5 处全部补齐**（`linked_materials[]` 与 `linked_personal_notes[]` 是两处，§7.1 原文把它们算成一处）                                                             |
+| 漂移报告怎么说            | `schemaUntyped` **21 → 0**，`schemaLoose` **1 → 0**，`identical` 19 → 26                                                                                          |
+| 请求/响应体变了吗         | **没有**。但过程中**改过一个测试**，且发现了 6 处"前端类型与后端现实不符"（§11.7）                                                                                |
+| 后端测试                  | **1051 passed / 3 skipped**（本轮新增 14 条守卫用例）                                                                                                             |
 
 ### 11.1 重新推导：22 这个数字对，但清单要分两层
 
@@ -728,43 +730,43 @@ UNTYPED / LOOSE 2xx responses: 24
 判定基准是**处理函数真正返回的东西**（handler 的 `return` + 它调用的 service
 的 `return`），**不是**前端类型。前端类型只在最后一步用来对照。
 
-| # | 端点 | 新增/修改的模型 | 形状出处（file:line） |
-|---|---|---|---|
-| 1 | `GET /api/graph/stats` | `GraphStats`（模型本来就有，**只是没挂上**） | `services/graph_service.py:853-860` |
-| 2 | `GET /api/graph/node/{id}/subgraph` | `NodeSubgraph`（同上，模型本就有） | `graph_service.py:1039-1049` |
-| 3 | `POST /api/graph/suggest` | `GraphSuggestResponse`（新） | `api/graph.py:161` + `graph_service.auto_suggest_relations` 返回 `int` |
-| 4 | `POST /api/graph/confirm` | `GraphRelationOperationResponse`（新） | `graph_service.py:409` / `:448` / `:525` / `:545` / `:581` |
-| 5 | `POST /api/graph/reject` | 同上 | 同上 |
-| 6 | `POST /api/graph/relation` | 同上 | `graph_service.py:525` / `:545` |
-| 7 | `DELETE /api/graph/relation/{id}` | 同上 | `graph_service.py:581` |
-| 8 | `POST /api/graph/batch-confirm` | `GraphBatchOperationResponse`（新） | `graph_service.py:1092-1096` |
-| 9 | `POST /api/graph/batch-reject` | 同上 | `graph_service.py:1139-1143` |
-| 10 | `POST /api/graph/suggest-semantic` | `SemanticRelationsResponse`（新，**替掉 `Dict[str, Any]`**） | `graph_service.py:616` 与 `:761-766` |
-| 11 | `DELETE /api/folders/{id}` | `MessageResponse`（新，共用） | `services/folder_service.py:289` |
-| 12 | `DELETE /api/projects/{id}` | `MessageResponse` | `services/project_service.py:245` |
-| 13 | `POST /api/projects/{id}/notes` | `ProjectNotesAddedResponse`（新） | `project_service.py:409-413` |
-| 14 | `DELETE /api/projects/{id}/notes/{nid}` | `ProjectNoteRemovedResponse`（新） | `project_service.py:456` |
-| 15 | `DELETE /api/notes/{id}/annotations/{aid}` | `AnnotationDeleteResponse`（新） | `api/notes/links.py:183` |
-| 16 | `PUT /api/notes/{id}/links` | `LinkUpdateResponse`（新） | `api/notes/links.py:123` |
-| 17 | `GET /api/notes/{id}/versions/{n}` | `NoteVersionContentResponse`（新） | `api/notes/versions.py:147` |
-| 18 | `POST /api/notes/{id}/ask/stream` | **无 JSON 模型**（SSE，见 §11.4） | `api/notes/ask.py:119-123` |
-| 19 | `POST /api/upload/prepare` | `PrepareUploadResponse`（新） | `api/upload.py:682-687` |
-| 20 | `GET /api/understanding/{id}/duplicates` | `CardDuplicateListResponse` + `CardDuplicateItem`（新） | `api/understanding.py:519-525` + `understanding_service.py:600-605` |
-| 21 | `POST /api/knowledge/cards/{id}/generate-questions` | `ExtensionQuestionsTriggeredResponse`（新） | `api/knowledge.py:137-142` |
-| 22 | `POST /api/understanding/ask/stream` | **无 JSON 模型**（SSE，见 §11.4） | `api/understanding.py:670-674` |
-| ＋ | `GET /api/notes/{id}/video` | **无 JSON 模型**（字节流） | `api/notes/list_detail.py:436-461` |
-| ＋ | `GET /health` | `HealthResponse`（新） | `app/main.py:302` |
+| #   | 端点                                                | 新增/修改的模型                                              | 形状出处（file:line）                                                  |
+| --- | --------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| 1   | `GET /api/graph/stats`                              | `GraphStats`（模型本来就有，**只是没挂上**）                 | `services/graph_service.py:853-860`                                    |
+| 2   | `GET /api/graph/node/{id}/subgraph`                 | `NodeSubgraph`（同上，模型本就有）                           | `graph_service.py:1039-1049`                                           |
+| 3   | `POST /api/graph/suggest`                           | `GraphSuggestResponse`（新）                                 | `api/graph.py:161` + `graph_service.auto_suggest_relations` 返回 `int` |
+| 4   | `POST /api/graph/confirm`                           | `GraphRelationOperationResponse`（新）                       | `graph_service.py:409` / `:448` / `:525` / `:545` / `:581`             |
+| 5   | `POST /api/graph/reject`                            | 同上                                                         | 同上                                                                   |
+| 6   | `POST /api/graph/relation`                          | 同上                                                         | `graph_service.py:525` / `:545`                                        |
+| 7   | `DELETE /api/graph/relation/{id}`                   | 同上                                                         | `graph_service.py:581`                                                 |
+| 8   | `POST /api/graph/batch-confirm`                     | `GraphBatchOperationResponse`（新）                          | `graph_service.py:1092-1096`                                           |
+| 9   | `POST /api/graph/batch-reject`                      | 同上                                                         | `graph_service.py:1139-1143`                                           |
+| 10  | `POST /api/graph/suggest-semantic`                  | `SemanticRelationsResponse`（新，**替掉 `Dict[str, Any]`**） | `graph_service.py:616` 与 `:761-766`                                   |
+| 11  | `DELETE /api/folders/{id}`                          | `MessageResponse`（新，共用）                                | `services/folder_service.py:289`                                       |
+| 12  | `DELETE /api/projects/{id}`                         | `MessageResponse`                                            | `services/project_service.py:245`                                      |
+| 13  | `POST /api/projects/{id}/notes`                     | `ProjectNotesAddedResponse`（新）                            | `project_service.py:409-413`                                           |
+| 14  | `DELETE /api/projects/{id}/notes/{nid}`             | `ProjectNoteRemovedResponse`（新）                           | `project_service.py:456`                                               |
+| 15  | `DELETE /api/notes/{id}/annotations/{aid}`          | `AnnotationDeleteResponse`（新）                             | `api/notes/links.py:183`                                               |
+| 16  | `PUT /api/notes/{id}/links`                         | `LinkUpdateResponse`（新）                                   | `api/notes/links.py:123`                                               |
+| 17  | `GET /api/notes/{id}/versions/{n}`                  | `NoteVersionContentResponse`（新）                           | `api/notes/versions.py:147`                                            |
+| 18  | `POST /api/notes/{id}/ask/stream`                   | **无 JSON 模型**（SSE，见 §11.4）                            | `api/notes/ask.py:119-123`                                             |
+| 19  | `POST /api/upload/prepare`                          | `PrepareUploadResponse`（新）                                | `api/upload.py:682-687`                                                |
+| 20  | `GET /api/understanding/{id}/duplicates`            | `CardDuplicateListResponse` + `CardDuplicateItem`（新）      | `api/understanding.py:519-525` + `understanding_service.py:600-605`    |
+| 21  | `POST /api/knowledge/cards/{id}/generate-questions` | `ExtensionQuestionsTriggeredResponse`（新）                  | `api/knowledge.py:137-142`                                             |
+| 22  | `POST /api/understanding/ask/stream`                | **无 JSON 模型**（SSE，见 §11.4）                            | `api/understanding.py:670-674`                                         |
+| ＋  | `GET /api/notes/{id}/video`                         | **无 JSON 模型**（字节流）                                   | `api/notes/list_detail.py:436-461`                                     |
+| ＋  | `GET /health`                                       | `HealthResponse`（新）                                       | `app/main.py:302`                                                      |
 
 内层空壳（P2）：
 
-| 位置 | 修复前 | 修复后 | 形状出处 |
-|---|---|---|---|
-| `AssessmentResponse.scores` | `Dict[str, Any]` | `AssessmentScores` | `assessment_service.py:102-108`（compare 5 键）/ `:349-352`（quiz 2 键）/ `:154,233`（未作答 `{}`） |
-| `AssessmentResponse.quiz_questions[]` | `List[Dict[str, Any]]` | `QuizQuestion` | `assessment_service.py:205-209`，LLM 的 `result_data["questions"]` 原样透传 |
-| `AssessmentResponse.quiz_answers[]` | `List[Dict[str, Any]]` | `QuizAnswer` + `QuizJudgment` | `assessment_service.py:338-342`（元素）、`:316-336`（judgment） |
-| `SubmitAnswerResponse.grading_detail` | `Optional[Dict[str, Any]]` | `Optional[GradingDetail]` | `services/llm/scenes.py:542-548` 的 `GradeResult.model_dump()` |
-| `LinkListResponse.linked_materials[]` | `List[dict]` | `LinkedMaterialItem` | `api/notes/links.py:46-53` |
-| `LinkListResponse.linked_personal_notes[]` | `List[dict]` | `LinkedPersonalNoteItem` | `api/notes/links.py:68` |
+| 位置                                       | 修复前                     | 修复后                        | 形状出处                                                                                            |
+| ------------------------------------------ | -------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `AssessmentResponse.scores`                | `Dict[str, Any]`           | `AssessmentScores`            | `assessment_service.py:102-108`（compare 5 键）/ `:349-352`（quiz 2 键）/ `:154,233`（未作答 `{}`） |
+| `AssessmentResponse.quiz_questions[]`      | `List[Dict[str, Any]]`     | `QuizQuestion`                | `assessment_service.py:205-209`，LLM 的 `result_data["questions"]` 原样透传                         |
+| `AssessmentResponse.quiz_answers[]`        | `List[Dict[str, Any]]`     | `QuizAnswer` + `QuizJudgment` | `assessment_service.py:338-342`（元素）、`:316-336`（judgment）                                     |
+| `SubmitAnswerResponse.grading_detail`      | `Optional[Dict[str, Any]]` | `Optional[GradingDetail]`     | `services/llm/scenes.py:542-548` 的 `GradeResult.model_dump()`                                      |
+| `LinkListResponse.linked_materials[]`      | `List[dict]`               | `LinkedMaterialItem`          | `api/notes/links.py:46-53`                                                                          |
+| `LinkListResponse.linked_personal_notes[]` | `List[dict]`               | `LinkedPersonalNoteItem`      | `api/notes/links.py:68`                                                                             |
 
 **"形状出处"这类注释被写进了代码**（每个新模型的 docstring 里都有 `file:line`
 与那段 return 的字面内容），理由是：`response_model=` 最容易的失效方式就是
@@ -845,17 +847,46 @@ class EventStreamResponse(StreamingResponse):
 **307 那一支 OpenAPI 表达不了**（FastAPI 不会为它自动生成响应条目）。
 这个端点在切换时的正确做法是"保持手写"（它本来就没有前端调用方，见 §5）。
 
+### 11.4.1 第三个 `NO_JSON_RESPONSE`：`GET /api/notes/{note_id}/export`（2026-10-19）
+
+导出功能（`使用时的想法.txt` 第 4 条）新增的端点，与上面两条**同一处理方式**，
+用 `MarkdownDownloadResponse`（`media_type = "text/markdown; charset=utf-8"`）：
+
+| 项               | 值                                                                      |
+| ---------------- | ----------------------------------------------------------------------- |
+| OpenAPI 里的 2xx | `200` → `text/markdown; charset=utf-8`（**无 schema**）                 |
+| 漂移判定         | `NO_JSON_RESPONSE`（不是 `SCHEMA_UNTYPED` —— 它本来就没有 JSON 响应体） |
+| 前端调用方       | `api/notes.ts` 的 `exportNote` → `api/client.ts` 的 `downloadRequest`   |
+
+**与 `video` 端点的两处关键差别**（决定了前端怎么写）：
+
+1. **不支持 `Range`、不走预签名 URL**：它返回的是**加工后的正文文本**
+   （front-matter + Markdown，几 KB），一次给完。`video` 返回的是上传的原始字节，
+   所以那边需要 Range 与 307 重定向。
+2. **文件名在 `Content-Disposition` 里，而 OpenAPI 表达不了这个头**。
+   因此"文件名长什么样"**不在契约里**，前端是**运行时从响应头解析**的
+   （`client.ts` 的 `parseContentDispositionFilename`，优先 `filename*=UTF-8''…`）。
+   这与 307 那一支是同一个性质：契约能表达的部分被如实声明，
+   表达不了的部分在**代码注释里写明去哪看**，而不是留一个"看起来有类型"的空壳。
+
+后端对应的两条约束（`backend/tests/test_note_export.py` 与
+`test_openapi_response_contract.py` 各钉一条）：
+
+- `NON_JSON_2XX` 白名单是**穷举**的，新增端点必须显式加一行并写明理由；
+- 该端点在 schema 里**不能**出现 `application/json`（否则客户端会去
+  `response.json()` 并在真实响应上抛错）。
+
 **事件契约写在哪了**：`app/api/notes/ask.py` 与 `app/api/understanding.py`
 的**模块 docstring** 里各有一张表。两处的差异必须写清楚，
 否则前端会按同一套解析两种流：
 
-| | `POST /api/notes/{id}/ask/stream` | `POST /api/understanding/ask/stream` |
-|---|---|---|
-| `meta` | `{"provider": "..."}` | `{"retrieval_status": "...", "provider": "..."}` |
-| `token` | `{"content": "..."}` | `{"content": "..."}` |
-| `sources` | **没有这个事件** | `{"sources": [<AnswerSource 数组>], "provider": "..."}` |
-| `done` | `{}` | `{}` |
-| `error` | `{"message": ...}`（空问题/空选中文本时另有 `error_code`） | 同左（空问题时 `error_code=EMPTY_QUESTION`） |
+|           | `POST /api/notes/{id}/ask/stream`                          | `POST /api/understanding/ask/stream`                    |
+| --------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| `meta`    | `{"provider": "..."}`                                      | `{"retrieval_status": "...", "provider": "..."}`        |
+| `token`   | `{"content": "..."}`                                       | `{"content": "..."}`                                    |
+| `sources` | **没有这个事件**                                           | `{"sources": [<AnswerSource 数组>], "provider": "..."}` |
+| `done`    | `{}`                                                       | `{}`                                                    |
+| `error`   | `{"message": ...}`（空问题/空选中文本时另有 `error_code`） | 同左（空问题时 `error_code=EMPTY_QUESTION`）            |
 
 > ⚠️ `sources` 事件里的单个 source **就是** `schemas.knowledge.AnswerSource`
 > （`note_id` / `note_title` / `chapter_title` / `relevant_text` +
@@ -895,13 +926,13 @@ FastAPI 于是生成 `anyOf: [LogoutRequest, null]` 且 `required: false`。
 # [ OK ] D:\engramnote\backend\openapi.json 与当前代码一致 | paths=102 operations=118 schemas=181 sha256=c3adfe8be0a8
 ```
 
-| | 修前 | 修后 |
-|---|---|---|
-| 文件字节 | 356 080 | **392 545**（+36 465） |
-| `paths` | 102 | 102（**不变**） |
-| `operations` | 118 | 118（**不变**） |
-| `schemas` | 156 | **181**（+25） |
-| `sha256` 前 12 位 | `e21c85952c30` | `c3adfe8be0a8` |
+|                   | 修前           | 修后                   |
+| ----------------- | -------------- | ---------------------- |
+| 文件字节          | 356 080        | **392 545**（+36 465） |
+| `paths`           | 102            | 102（**不变**）        |
+| `operations`      | 118            | 118（**不变**）        |
+| `schemas`         | 156            | **181**（+25）         |
+| `sha256` 前 12 位 | `e21c85952c30` | `c3adfe8be0a8`         |
 
 > `paths` / `operations` 不变是关键佐证：本轮**没有增删任何路由**，
 > 只补了响应声明。
@@ -913,24 +944,24 @@ FastAPI 于是生成 `anyOf: [LogoutRequest, null]` 且 `required: false`。
 
 漂移报告（`npm run gen:api:drift`，同一份脚本同一份判定口径）：
 
-| 指标 | 修前 | 修后 | 说明 |
-|---|---|---|---|
-| **`schemaUntyped`** | **21** | **0** | ← P1 的主目标 |
-| **`schemaLoose`** | **1** | **0** | ← `suggest-semantic` |
-| `identical` | 19 | **26** | +7 |
-| `hwWider` | 4 | 13 | 前端类型**比后端保证更宽**（见 §11.7） |
-| `conflict` | 34 | 37 | +3：`getNodeSubgraph` / `searchGraphNodes` / `prepareUpload` |
-| `hwNarrower` | 28 | 28 | 不变 |
-| `hwDiscardsBody` | 0 | 1 | `deleteAnnotation`（前端签名是 `Promise<void>`） |
-| `noJsonResponse` | 4 | **6** | +2 = 两个 SSE 端点**分类修正** |
-| `compilerDiagnostics` | 122 | 117 | −5 |
-| `bodyFindings` | 26 | 25 | −1 |
-| `envelopeEndpoints` | 19 | 20 | +1 = `getCardDuplicates` 的 `{duplicates: [...]}` |
-| `envelopeMismatches` | 0 | **0** | 新增的那个也没有被前端当数组解析 |
-| `schemaEnumNotModelled` | 49 | **55** | +6：新声明的枚举（`CardType` / `RelationType` / `RelationStatus` / `SourceType`）暴露出的既有漂移 |
-| `schemaNullableHwNot` | 9 | **34** | +25：同上，新声明的可空字段暴露出的既有漂移 |
-| `unknownQueryParams` / `missingRequiredQuery` | 0 / 0 | 0 / 0 | 不变 |
-| `unconsumedOperations` | 8 | 8 | 不变 |
+| 指标                                          | 修前   | 修后   | 说明                                                                                              |
+| --------------------------------------------- | ------ | ------ | ------------------------------------------------------------------------------------------------- |
+| **`schemaUntyped`**                           | **21** | **0**  | ← P1 的主目标                                                                                     |
+| **`schemaLoose`**                             | **1**  | **0**  | ← `suggest-semantic`                                                                              |
+| `identical`                                   | 19     | **26** | +7                                                                                                |
+| `hwWider`                                     | 4      | 13     | 前端类型**比后端保证更宽**（见 §11.7）                                                            |
+| `conflict`                                    | 34     | 37     | +3：`getNodeSubgraph` / `searchGraphNodes` / `prepareUpload`                                      |
+| `hwNarrower`                                  | 28     | 28     | 不变                                                                                              |
+| `hwDiscardsBody`                              | 0      | 1      | `deleteAnnotation`（前端签名是 `Promise<void>`）                                                  |
+| `noJsonResponse`                              | 4      | **6**  | +2 = 两个 SSE 端点**分类修正**                                                                    |
+| `compilerDiagnostics`                         | 122    | 117    | −5                                                                                                |
+| `bodyFindings`                                | 26     | 25     | −1                                                                                                |
+| `envelopeEndpoints`                           | 19     | 20     | +1 = `getCardDuplicates` 的 `{duplicates: [...]}`                                                 |
+| `envelopeMismatches`                          | 0      | **0**  | 新增的那个也没有被前端当数组解析                                                                  |
+| `schemaEnumNotModelled`                       | 49     | **55** | +6：新声明的枚举（`CardType` / `RelationType` / `RelationStatus` / `SourceType`）暴露出的既有漂移 |
+| `schemaNullableHwNot`                         | 9      | **34** | +25：同上，新声明的可空字段暴露出的既有漂移                                                       |
+| `unknownQueryParams` / `missingRequiredQuery` | 0 / 0  | 0 / 0  | 不变                                                                                              |
+| `unconsumedOperations`                        | 8      | 8      | 不变                                                                                              |
 
 **`schemaUntyped` 与 `schemaLoose` 双归零 = §7.1 描述的阻塞项已经不存在。**
 
@@ -972,14 +1003,14 @@ src/api/graph.ts       searchGraphNodes           HW_WIDER       -> CONFLICT
 这几处都是**补完 schema 之后才被机械暴露出来**的，属于 §7.1 P1/P2 的直接产物。
 按要求**没有改任何响应体**去迁就它们，也没有改前端（那不在本轮文件清单里）。
 
-| # | 端点 | 前端类型 | 后端实际给 | 性质 |
-|---|---|---|---|---|
-| 1 | `graph.ts` 的关系操作（6 个） | `GraphOperationResult`（`success` + 4 个**全可选**） | 每个端点各有一份**固定**形状：`{success, relation_id}` / `{success, new_count}` / `{success, confirmed_count, failed_count}` / `{success, rejected_count, failed_count}` | 前端用一个"万能可选"类型盖住 4 种形状 → 已知字段被写成可选，**未知字段被静默丢掉**（`.relation_id` 现在拿不到类型提示） |
-| 2 | `projects.ts addNotesToProject` | `{added, not_found}` | 还有 `project_id` | 前端少知道一个字段 |
-| 3 | `projects.ts removeNoteFromProject` | `{message}` | 还有 `note_id` | 同上 |
-| 4 | `knowledge.ts generateExtensionQuestions` | `{card_id, note_id, message}` | 还有 `target_categories: ["extension"]` | 同上 |
-| 5 | `qa.ts getCardDuplicates` | 没有 `score` | 每条候选都有 `score`（原始 n-gram 分，**排序键**） | 同上；"为什么这条排第一"目前只有后端知道 |
-| 6 | `notes.ts deleteAnnotation` | `Promise<void>` | `{success: true}` | 前端把返回值整个丢了 |
+| #   | 端点                                      | 前端类型                                             | 后端实际给                                                                                                                                                               | 性质                                                                                                                    |
+| --- | ----------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| 1   | `graph.ts` 的关系操作（6 个）             | `GraphOperationResult`（`success` + 4 个**全可选**） | 每个端点各有一份**固定**形状：`{success, relation_id}` / `{success, new_count}` / `{success, confirmed_count, failed_count}` / `{success, rejected_count, failed_count}` | 前端用一个"万能可选"类型盖住 4 种形状 → 已知字段被写成可选，**未知字段被静默丢掉**（`.relation_id` 现在拿不到类型提示） |
+| 2   | `projects.ts addNotesToProject`           | `{added, not_found}`                                 | 还有 `project_id`                                                                                                                                                        | 前端少知道一个字段                                                                                                      |
+| 3   | `projects.ts removeNoteFromProject`       | `{message}`                                          | 还有 `note_id`                                                                                                                                                           | 同上                                                                                                                    |
+| 4   | `knowledge.ts generateExtensionQuestions` | `{card_id, note_id, message}`                        | 还有 `target_categories: ["extension"]`                                                                                                                                  | 同上                                                                                                                    |
+| 5   | `qa.ts getCardDuplicates`                 | 没有 `score`                                         | 每条候选都有 `score`（原始 n-gram 分，**排序键**）                                                                                                                       | 同上；"为什么这条排第一"目前只有后端知道                                                                                |
+| 6   | `notes.ts deleteAnnotation`               | `Promise<void>`                                      | `{success: true}`                                                                                                                                                        | 前端把返回值整个丢了                                                                                                    |
 
 **另外两处是"前端类型里有、后端不给"**（与 §7.4 的 `file_size` 同类）：
 
@@ -1012,14 +1043,14 @@ src/api/graph.ts       searchGraphNodes           HW_WIDER       -> CONFLICT
 
 ### 11.9 测试与 lint
 
-| 检查 | 结果 |
-|---|---|
-| `python -s -m pytest -q`（修前基线） | **1037 passed / 3 skipped**（190.77s） |
-| `python -s -m pytest -q`（修后） | **1051 passed / 3 skipped** |
-| 修后**失败并已处理**的用例 | **1 个**，见下 |
-| `python -m ruff check app tests scripts` | **All checks passed!** |
-| `dump_openapi.py --check` | 退出 0 |
-| 新增守卫用例 | `tests/test_openapi_response_contract.py`，14 条 |
+| 检查                                     | 结果                                             |
+| ---------------------------------------- | ------------------------------------------------ |
+| `python -s -m pytest -q`（修前基线）     | **1037 passed / 3 skipped**（190.77s）           |
+| `python -s -m pytest -q`（修后）         | **1051 passed / 3 skipped**                      |
+| 修后**失败并已处理**的用例               | **1 个**，见下                                   |
+| `python -m ruff check app tests scripts` | **All checks passed!**                           |
+| `dump_openapi.py --check`                | 退出 0                                           |
+| 新增守卫用例                             | `tests/test_openapi_response_contract.py`，14 条 |
 
 #### 唯一失败的测试：`test_semantic_grading.py::TestGradingDetailReachesTheClient`
 
@@ -1065,15 +1096,15 @@ GET /api/graph/stats 200: 响应 schema 是空壳 ({}) —— 缺 response_model
 
 ### 11.10 明确**没有做**的事
 
-| # | 没做的事 | 为什么 | 需要什么才能做 |
-|---|---|---|---|
-| 1 | 给 SSE 端点造 JSON 响应模型 | `response_model` 会把流包装成一次性 JSON，是行为破坏；OpenAPI 也表达不了事件名→data | 前端**必须**手写这 2 个端点的解析（`client.ts:450` / `notes.ts:297` 已经是手写的），并在生成类型之外单独维护 `sources` 事件的 `AnswerSource` 类型 |
-| 2 | 让 `GraphEdge.type` / `similarity_score` 在两条路径上一致 | 属于"改响应内容"，本轮只做类型 | 产品决策；若要做，应在 `get_graph_data` 里也补上并按需要决定是否总是输出 `null` |
-| 3 | 修 `projects.ts` 把 `NoteSummary` 当成 `NoteInFolder`（§7.4 的 `file_size`） | 属 `frontend/src/**`，本轮禁止改动 | 5.1 正式切换时按域替换类型即可暴露（现在仍被记为 `MISSING_REQUIRED_FIELD`） |
-| 4 | 改 `AssessmentScores.completeness_score` 这类"前端有、后端不给" | 要么改前端类型、要么改后端产出，两者都是产品决策 | 先确认 compare 评估到底要不要"完整性"维度 |
-| 5 | 把 `dump_openapi.py --check` 接进 CI（P4） | 要改 `.github/**`，不在本轮允许改动的文件清单里 | 一条 CI step；命令与退出码语义 §1.4 已经写好 |
-| 6 | 拆分 `ProjectNotesAddedResponse.not_found` 的两个含义 | 改字段语义是产品决策，不是类型修复 | 先决定要不要区分"不存在"与"本来就打了标签" |
-| 7 | 让 `QuizQuestion` 的三个字段可选 | 现在收紧成必填，**理论上** LLM 返回缺字段会让 `generate-quiz` 变成 500（此前会静默把半成品传给前端） | 这是**有意的早失败**，但属于新引入的运行时风险，需要观察；触发时给 `key_points` 加 `default_factory=list` 即可，**不要**退回 `Any` |
+| #   | 没做的事                                                                     | 为什么                                                                                               | 需要什么才能做                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 给 SSE 端点造 JSON 响应模型                                                  | `response_model` 会把流包装成一次性 JSON，是行为破坏；OpenAPI 也表达不了事件名→data                  | 前端**必须**手写这 2 个端点的解析（`client.ts:450` / `notes.ts:297` 已经是手写的），并在生成类型之外单独维护 `sources` 事件的 `AnswerSource` 类型 |
+| 2   | 让 `GraphEdge.type` / `similarity_score` 在两条路径上一致                    | 属于"改响应内容"，本轮只做类型                                                                       | 产品决策；若要做，应在 `get_graph_data` 里也补上并按需要决定是否总是输出 `null`                                                                   |
+| 3   | 修 `projects.ts` 把 `NoteSummary` 当成 `NoteInFolder`（§7.4 的 `file_size`） | 属 `frontend/src/**`，本轮禁止改动                                                                   | 5.1 正式切换时按域替换类型即可暴露（现在仍被记为 `MISSING_REQUIRED_FIELD`）                                                                       |
+| 4   | 改 `AssessmentScores.completeness_score` 这类"前端有、后端不给"              | 要么改前端类型、要么改后端产出，两者都是产品决策                                                     | 先确认 compare 评估到底要不要"完整性"维度                                                                                                         |
+| 5   | 把 `dump_openapi.py --check` 接进 CI（P4）                                   | 要改 `.github/**`，不在本轮允许改动的文件清单里                                                      | 一条 CI step；命令与退出码语义 §1.4 已经写好                                                                                                      |
+| 6   | 拆分 `ProjectNotesAddedResponse.not_found` 的两个含义                        | 改字段语义是产品决策，不是类型修复                                                                   | 先决定要不要区分"不存在"与"本来就打了标签"                                                                                                        |
+| 7   | 让 `QuizQuestion` 的三个字段可选                                             | 现在收紧成必填，**理论上** LLM 返回缺字段会让 `generate-quiz` 变成 500（此前会静默把半成品传给前端） | 这是**有意的早失败**，但属于新引入的运行时风险，需要观察；触发时给 `key_points` 加 `default_factory=list` 即可，**不要**退回 `Any`                |
 
 ### 11.11 本轮改动的文件（后端侧，供 5.1 正式切换时对照）
 
@@ -1142,13 +1173,13 @@ npm.cmd --prefix frontend run gen:api
 # ✨ openapi-typescript 7.13.0 → src/api/generated/schema.ts（+117 行，prettier 已格式化）
 ```
 
-| | §11.6 那轮 | **现在（0.10 之后）** |
-|---|---|---|
-| 文件字节 | 392 545 | **397 598**（+5 053） |
-| `paths` | 102 | **103**（+1） |
-| `operations` | 118 | **119**（+1） |
-| `schemas` | 181 | **184**（+3） |
-| `sha256` 前 12 位 | `c3adfe8be0a8` | **`9a633977af6e`** |
+|                   | §11.6 那轮     | **现在（0.10 之后）** |
+| ----------------- | -------------- | --------------------- |
+| 文件字节          | 392 545        | **397 598**（+5 053） |
+| `paths`           | 102            | **103**（+1）         |
+| `operations`      | 118            | **119**（+1）         |
+| `schemas`         | 181            | **184**（+3）         |
+| `sha256` 前 12 位 | `c3adfe8be0a8` | **`9a633977af6e`**    |
 
 变化**全部**来自阶段 0.10（生产姿态关闭 `/docs`｜`/openapi.json`｜`/redoc`、
 新增 `/ready`）。为了确认"没有夹带别的半成品"，这次把**进程内** schema 与
@@ -1202,11 +1233,11 @@ unconsumedOperations 9（原 8：新增的是 /ready）
 
 **产物指纹**（未改动，这一轮只读）：
 
-| 产物 | 字节 | sha256 |
-|---|---|---|
-| `backend/openapi.json` | 397 598 | `9a633977af6e37dc1e2153747c27d4844a75a2dea267cbee8bb7150e956bb471` |
-| `frontend/src/api/generated/schema.ts` | 291 991 | `56757632b50b60d07bcd583877b697a2b101afd300d261198350453847dd3cbd` |
-| `frontend/src/api/generated/openapi-drift.mjs` | 40 618 | `3f4fe90eecd308afbee356cd741e8e59f7d042b067db4bc13337deea8c527d8` |
+| 产物                                           | 字节    | sha256                                                             |
+| ---------------------------------------------- | ------- | ------------------------------------------------------------------ |
+| `backend/openapi.json`                         | 397 598 | `9a633977af6e37dc1e2153747c27d4844a75a2dea267cbee8bb7150e956bb471` |
+| `frontend/src/api/generated/schema.ts`         | 291 991 | `56757632b50b60d07bcd583877b697a2b101afd300d261198350453847dd3cbd` |
+| `frontend/src/api/generated/openapi-drift.mjs` | 40 618  | `3f4fe90eecd308afbee356cd741e8e59f7d042b067db4bc13337deea8c527d8`  |
 
 `schema.ts` 与 `openapi.json` 的 sha256 在 S2 **前后相同** —— S2 没有重新生成任何产物，
 只改了手写类型（这正是"改的是前端对契约的引用，不是契约本身"的可验证形式）。
@@ -1224,13 +1255,13 @@ unconsumedOperations 9（原 8：新增的是 /ready）
 `Schema<K extends keyof Schemas>`（按组件名取类型）。手写模块里的
 `export interface Note { … }` 因此变成 `export type Note = Schema<'NoteResponse'>`。
 
-| 口径 | 数 | 说明 |
-|---|---|---|
-| 删掉的手写 `export interface` | **93** | 其中 92 个"原地换成别名"，1 个（`GraphOperationResult`）删除，见 §13.4#6 |
-| 现在指向生成类型的别名 | **103** | 92 原地 + **11 个新名字**（见下） |
+| 口径                               | 数            | 说明                                                                                                                 |
+| ---------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 删掉的手写 `export interface`      | **93**        | 其中 92 个"原地换成别名"，1 个（`GraphOperationResult`）删除，见 §13.4#6                                             |
+| 现在指向生成类型的别名             | **103**       | 92 原地 + **11 个新名字**（见下）                                                                                    |
 | 新名字覆盖的"签名里没有名字的形状" | **17 个函数** | 11 个函数的 `Promise<{…}>` 是**内联**的（`git diff` 里逐条可见），另 6 个图谱操作共用一个手写 `GraphOperationResult` |
-| 仍然手写的 `export interface` | 2 | `RecommendedTask`（schema 里没有对应组件）、`CommitUploadOptions`（multipart 参数） |
-| 仍然手写的 `export type` | 3 | `NoteContentTarget`、`GradingMethod`、`QuickQuiz`（= `DueQuiz`） |
+| 仍然手写的 `export interface`      | 2             | `RecommendedTask`（schema 里没有对应组件）、`CommitUploadOptions`（multipart 参数）                                  |
+| 仍然手写的 `export type`           | 3             | `NoteContentTarget`、`GradingMethod`、`QuickQuiz`（= `DueQuiz`）                                                     |
 
 11 个新名字（每个都对应一个原先手抄的响应形状；括号里是它接管的函数数）：
 
@@ -1290,26 +1321,26 @@ CardDuplicateListResponse           ← getCardDuplicates（1）
 "**契约对不对**"的判断，因为这是本轮最有信息量的产出。
 共有 **20 个文件位置**报错（`tsc` 峰值 20 条），下面按根因归并成 12 条。
 
-| # | 位置 | 缺的字段 | 契约依据 | 判断 |
-|---|---|---|---|---|
-| 1 | `pages/Projects.test.tsx::makeNote()` | `note_role`、`project_ids`、`project_names`（**三个**，tsc 只报第一个） | 三者都带 `default`（`"material"` / `[]` / `[]`）→ pydantic **一定会序列化出来** → 生成类型必填 | **测试错、契约对**。这条夹具此前构造的是"后端从不返回的形状"；页面没读这三个字段，所以运行时一直看不出来 |
-| 2 | `pages/projects/helpers.test.ts::makeNote()` | 同上三个 | 同上 | 同上（同一份夹具的复制品） |
-| 3 | `pages/Projects.test.tsx` beforeEach | `addNotesToProject` 少 `project_id`；`removeNoteFromProject` 少 `note_id` | 后端 service 的 `return` 里本来就有（§11.7 #2/#3 已记为"前端少知道一个字段"） | **手写类型错、契约对**。mock 只是继承了手写类型的谎 |
-| 4 | `pages/Review.test.tsx::makeQuiz()` | `repetition` | `DueQuizResponse.repetition` 带默认值 → 必填；而手写 `DueQuiz` **根本没有这个字段** | **手写类型错、契约对**。这是"前端自认为完整、契约里缺一项"的形态 |
-| 5 | `pages/KnowledgeGraph.test.tsx::makeNode()` | `note_trashed` | `default: false` → 必填（它就是"是否过滤回收站节点"的判据） | **测试错、契约对** |
-| 6 | `pages/KnowledgeGraph.test.tsx` beforeEach | 3 处 `mockResolvedValue({ success: true })`：confirm / create 少 `relation_id`，batchConfirm 少 `confirmed_count` / `failed_count` / `rejected_count` | 4 个关系端点各有**固定**形状（§11.7 #1） | **手写类型错、契约对**：`GraphOperationResult`（`success` + 4 个全可选）是用一个类型盖住四种形状，测试于是只给了一个 `success` |
-| 7 | `pages/KnowledgeGraph.test.tsx:943` | —— | —— | **测试意图对，类型不该放宽**：用例专门喂 `card_type: 'unknown-type'`（"后端枚举将来加值、旧前端不能抛错"）。写 `as never` 是**刻意的**，与同一行既有的 `undefined as never` 同风格 |
+| #   | 位置                                         | 缺的字段                                                                                                                                              | 契约依据                                                                                       | 判断                                                                                                                                                                               |
+| --- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `pages/Projects.test.tsx::makeNote()`        | `note_role`、`project_ids`、`project_names`（**三个**，tsc 只报第一个）                                                                               | 三者都带 `default`（`"material"` / `[]` / `[]`）→ pydantic **一定会序列化出来** → 生成类型必填 | **测试错、契约对**。这条夹具此前构造的是"后端从不返回的形状"；页面没读这三个字段，所以运行时一直看不出来                                                                           |
+| 2   | `pages/projects/helpers.test.ts::makeNote()` | 同上三个                                                                                                                                              | 同上                                                                                           | 同上（同一份夹具的复制品）                                                                                                                                                         |
+| 3   | `pages/Projects.test.tsx` beforeEach         | `addNotesToProject` 少 `project_id`；`removeNoteFromProject` 少 `note_id`                                                                             | 后端 service 的 `return` 里本来就有（§11.7 #2/#3 已记为"前端少知道一个字段"）                  | **手写类型错、契约对**。mock 只是继承了手写类型的谎                                                                                                                                |
+| 4   | `pages/Review.test.tsx::makeQuiz()`          | `repetition`                                                                                                                                          | `DueQuizResponse.repetition` 带默认值 → 必填；而手写 `DueQuiz` **根本没有这个字段**            | **手写类型错、契约对**。这是"前端自认为完整、契约里缺一项"的形态                                                                                                                   |
+| 5   | `pages/KnowledgeGraph.test.tsx::makeNode()`  | `note_trashed`                                                                                                                                        | `default: false` → 必填（它就是"是否过滤回收站节点"的判据）                                    | **测试错、契约对**                                                                                                                                                                 |
+| 6   | `pages/KnowledgeGraph.test.tsx` beforeEach   | 3 处 `mockResolvedValue({ success: true })`：confirm / create 少 `relation_id`，batchConfirm 少 `confirmed_count` / `failed_count` / `rejected_count` | 4 个关系端点各有**固定**形状（§11.7 #1）                                                       | **手写类型错、契约对**：`GraphOperationResult`（`success` + 4 个全可选）是用一个类型盖住四种形状，测试于是只给了一个 `success`                                                     |
+| 7   | `pages/KnowledgeGraph.test.tsx:943`          | ——                                                                                                                                                    | ——                                                                                             | **测试意图对，类型不该放宽**：用例专门喂 `card_type: 'unknown-type'`（"后端枚举将来加值、旧前端不能抛错"）。写 `as never` 是**刻意的**，与同一行既有的 `undefined as never` 同风格 |
 
 生产代码里被"类型错误逼出来"的一共 5 处，**其中 4 处被改、1 处被顺带修好**，
 **全部是纯类型修正（零运行时变化）**：
 
-| # | 位置 | 改法 | 为什么不是运行时改动 |
-|---|---|---|---|
-| 8 | `components/graph/types.ts::ForceGraphLink.similarity_score` | `number \| null` → `?: number \| null` | 读取方（`getLinkWidth` / `GraphCanvas:90` / `GraphSidebar:227,407`）用的都是 `== null` / `!= null`，对 `undefined` 与 `null` 完全一致。**没有**改成在边界上 `?? null` —— 那会把 undefined 变成 null，是真的行为变化 |
-| 9 | `pages/QuestionSets.tsx::AnswerSection.explanation` | `string \| null` → `?: string \| null` | 渲染分支是 `{explanation && …}` |
-| 10 | 报错在 `pages/NoteDetail.tsx:187`，**改在** `notedetail/NoteDetailHeader.tsx::onRoleUpdated` | 入参 `string \| undefined` → `string`（`NoteDetail.tsx` **本身一行未改**：参数类型由 props 上下文推断） | `note_role` 有默认值 → 契约保证一定给；页面本来就是"拿到就用" |
-| 11 | 报错在 `pages/NoteDetail.tsx:188` + `notedetail/RetryConvertButton.tsx:30`，**改在**后者的 props 与新增的 `RetryConvertOutcome` | 两处**手抄的同一份形状** `{status: string; error_message: string \| null}` → 共用一个 `RetryConvertOutcome = Pick<NoteStatusResponse, 'status' \| 'error_message'>` | 形状一个字没变，只是从两份抄写收成一份 |
-| 12 | `pages/NotesList.tsx:130` | 无改动 | 它是**被 #11 顺带修好的**：`retryConvert` 的返回类型换成 `NoteStatusResponse` 之后 `result.status` 就是 `NoteStatus` |
+| #   | 位置                                                                                                                            | 改法                                                                                                                                                                | 为什么不是运行时改动                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 8   | `components/graph/types.ts::ForceGraphLink.similarity_score`                                                                    | `number \| null` → `?: number \| null`                                                                                                                              | 读取方（`getLinkWidth` / `GraphCanvas:90` / `GraphSidebar:227,407`）用的都是 `== null` / `!= null`，对 `undefined` 与 `null` 完全一致。**没有**改成在边界上 `?? null` —— 那会把 undefined 变成 null，是真的行为变化 |
+| 9   | `pages/QuestionSets.tsx::AnswerSection.explanation`                                                                             | `string \| null` → `?: string \| null`                                                                                                                              | 渲染分支是 `{explanation && …}`                                                                                                                                                                                     |
+| 10  | 报错在 `pages/NoteDetail.tsx:187`，**改在** `notedetail/NoteDetailHeader.tsx::onRoleUpdated`                                    | 入参 `string \| undefined` → `string`（`NoteDetail.tsx` **本身一行未改**：参数类型由 props 上下文推断）                                                             | `note_role` 有默认值 → 契约保证一定给；页面本来就是"拿到就用"                                                                                                                                                       |
+| 11  | 报错在 `pages/NoteDetail.tsx:188` + `notedetail/RetryConvertButton.tsx:30`，**改在**后者的 props 与新增的 `RetryConvertOutcome` | 两处**手抄的同一份形状** `{status: string; error_message: string \| null}` → 共用一个 `RetryConvertOutcome = Pick<NoteStatusResponse, 'status' \| 'error_message'>` | 形状一个字没变，只是从两份抄写收成一份                                                                                                                                                                              |
+| 12  | `pages/NotesList.tsx:130`                                                                                                       | 无改动                                                                                                                                                              | 它是**被 #11 顺带修好的**：`retryConvert` 的返回类型换成 `NoteStatusResponse` 之后 `result.status` 就是 `NoteStatus`                                                                                                |
 
 **一个反面结论也要写下来**：这 12 条里**没有一条**是"生成类型比现实更严、需要给后端提 issue"。
 缺的字段全部是"后端一定会给"（带默认值）或"后端本来就在给"（service 的 return 里就有）——
@@ -1329,32 +1360,32 @@ node src/api/generated/openapi-drift.mjs --json=before.json   # S1 冻结
 node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
 ```
 
-| 指标 | S1（前） | S2（后） | 说明 |
-|---|---|---|---|
-| **`identical`** | 26 | **104** | +78：**全部 104 个有 JSON 响应的函数都两边等价** |
-| **`conflict`** | 37 | **0** | 归零 |
-| **`hwNarrower`** | 28 | **0** | 归零 |
-| **`hwWider`** | 13 | **0** | 归零 |
-| `hwDiscardsBody` | 1 | 1 | `deleteAnnotation`，**刻意留**（§13.5） |
-| `noJsonResponse` | 6 | 6 | 4 个 204 + 2 个 SSE，本来就没有响应体 |
-| **`compilerDiagnostics`** | 117 | **2** | 剩下的两条就是 `deleteAnnotation` 的 `void` 双向不兼容 |
-| **`schemaEnumNotModelled`** | 55 | **0** | 枚举不再是 `string`（`NoteStatus` / `SourceType` / `CardType` / `RelationType` / `RelationStatus` / `DifficultyLevel` / `QuestionType` 全部从生成类型来） |
-| **`schemaNullableHwNot`** | 34 | **0** | 可空字段不再被前端当"必有且非空" |
-| `bodyFindings` | 25 | 25 | **请求体一处没动**（S2 不碰请求） |
-| `unusedSchemaQuery` / `unknownQueryParams` / `missingRequiredQuery` | 3 / 0 / 0 | 3 / 0 / 0 | 同上 |
-| `arrayVsEnvelope` / `envelopeMismatches` | 0 / 0 | 0 / 0 | 仍是**否定结果**（§7.6 / BH.9） |
-| `unconsumedOperations` | 9 | 9 | 与前端无关 |
-| `handWrittenFunctions` / `pathMatched` / `pathMissing` | 111 / 111 / 0 | 111 / 111 / 0 | **判定对象一个没少**（这是"非空转"的守卫：104+1+6 = 111） |
+| 指标                                                                | S1（前）      | S2（后）      | 说明                                                                                                                                                      |
+| ------------------------------------------------------------------- | ------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`identical`**                                                     | 26            | **104**       | +78：**全部 104 个有 JSON 响应的函数都两边等价**                                                                                                          |
+| **`conflict`**                                                      | 37            | **0**         | 归零                                                                                                                                                      |
+| **`hwNarrower`**                                                    | 28            | **0**         | 归零                                                                                                                                                      |
+| **`hwWider`**                                                       | 13            | **0**         | 归零                                                                                                                                                      |
+| `hwDiscardsBody`                                                    | 1             | 1             | `deleteAnnotation`，**刻意留**（§13.5）                                                                                                                   |
+| `noJsonResponse`                                                    | 6             | 6             | 4 个 204 + 2 个 SSE，本来就没有响应体                                                                                                                     |
+| **`compilerDiagnostics`**                                           | 117           | **2**         | 剩下的两条就是 `deleteAnnotation` 的 `void` 双向不兼容                                                                                                    |
+| **`schemaEnumNotModelled`**                                         | 55            | **0**         | 枚举不再是 `string`（`NoteStatus` / `SourceType` / `CardType` / `RelationType` / `RelationStatus` / `DifficultyLevel` / `QuestionType` 全部从生成类型来） |
+| **`schemaNullableHwNot`**                                           | 34            | **0**         | 可空字段不再被前端当"必有且非空"                                                                                                                          |
+| `bodyFindings`                                                      | 25            | 25            | **请求体一处没动**（S2 不碰请求）                                                                                                                         |
+| `unusedSchemaQuery` / `unknownQueryParams` / `missingRequiredQuery` | 3 / 0 / 0     | 3 / 0 / 0     | 同上                                                                                                                                                      |
+| `arrayVsEnvelope` / `envelopeMismatches`                            | 0 / 0         | 0 / 0         | 仍是**否定结果**（§7.6 / BH.9）                                                                                                                           |
+| `unconsumedOperations`                                              | 9             | 9             | 与前端无关                                                                                                                                                |
+| `handWrittenFunctions` / `pathMatched` / `pathMissing`              | 111 / 111 / 0 | 111 / 111 / 0 | **判定对象一个没少**（这是"非空转"的守卫：104+1+6 = 111）                                                                                                 |
 
 **逐函数判定迁移：78 个函数换了判定，方向全部是"变好"**，没有一个反向，
 而且**每一类的迁移都是一次性搬空的**——基线里非 IDENTICAL 的三类各自归零：
 
-| 迁移 | 个数 | 说明 |
-|---|---|---|
-| `CONFLICT → IDENTICAL` | **37** | = 基线里 `conflict` 的全部 |
-| `HW_NARROWER → IDENTICAL` | **28** | = 基线里 `hwNarrower` 的全部 |
-| `HW_WIDER → IDENTICAL` | **13** | = 基线里 `hwWider` 的全部 |
-| 合计 | **78** | 26（基线 IDENTICAL）+ 78 = **104**；104 + 1（`HW_DISCARDS_BODY`）+ 6（`NO_JSON_RESPONSE`）= **111** |
+| 迁移                      | 个数   | 说明                                                                                                |
+| ------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `CONFLICT → IDENTICAL`    | **37** | = 基线里 `conflict` 的全部                                                                          |
+| `HW_NARROWER → IDENTICAL` | **28** | = 基线里 `hwNarrower` 的全部                                                                        |
+| `HW_WIDER → IDENTICAL`    | **13** | = 基线里 `hwWider` 的全部                                                                           |
+| 合计                      | **78** | 26（基线 IDENTICAL）+ 78 = **104**；104 + 1（`HW_DISCARDS_BODY`）+ 6（`NO_JSON_RESPONSE`）= **111** |
 
 **"104 个 IDENTICAL"的准确含义**：`Awaited<ReturnType<typeof f>>` 与
 `paths[…][method]['responses'][2xx]['content']['application/json']` **双向可赋值** ——
@@ -1364,16 +1395,16 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
 
 ### 13.7 验证（全部真跑过，都在 `frontend/` 下）
 
-| 命令 | 结果 |
-|---|---|
-| `npx.cmd tsc --noEmit` | **退出 0**（切换过程中峰值 **20 条**，全部在 §13.4 的 12 条根因里） |
-| `npm.cmd test` | **21 files / 278 tests 全通过**，退出 0（与基线同数，**没有减少**） |
-| `npm.cmd run lint` | 退出 0（`eslint src/`，新增的 `generated/types.ts` 也干净） |
-| `npm.cmd run build` | 退出 0（`tsc && vite build`，✓ built in 5.32s） |
-| `npm.cmd run e2e` | **10 passed**，退出 0（`--project=chromium`，端口 4319） |
-| `node src/api/generated/openapi-drift.mjs` | 退出 0，数字见 §13.6 |
-| `dump_openapi.py --check` | **未跑**（属后端/CI 的文件清单，且 P4 未做） |
-| 产物指纹 | `schema.ts` / `openapi.json` 的 sha256 与 S1 完全相同 |
+| 命令                                       | 结果                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| `npx.cmd tsc --noEmit`                     | **退出 0**（切换过程中峰值 **20 条**，全部在 §13.4 的 12 条根因里） |
+| `npm.cmd test`                             | **21 files / 278 tests 全通过**，退出 0（与基线同数，**没有减少**） |
+| `npm.cmd run lint`                         | 退出 0（`eslint src/`，新增的 `generated/types.ts` 也干净）         |
+| `npm.cmd run build`                        | 退出 0（`tsc && vite build`，✓ built in 5.32s）                     |
+| `npm.cmd run e2e`                          | **10 passed**，退出 0（`--project=chromium`，端口 4319）            |
+| `node src/api/generated/openapi-drift.mjs` | 退出 0，数字见 §13.6                                                |
+| `dump_openapi.py --check`                  | **未跑**（属后端/CI 的文件清单，且 P4 未做）                        |
+| 产物指纹                                   | `schema.ts` / `openapi.json` 的 sha256 与 S1 完全相同               |
 
 **"没有行为变化"的可核对口径**：`git diff -U0 -- frontend/src/api` 里，
 所有含 `request(` / `uploadRequest(` / `method:` / `body:` / `headers` /
@@ -1383,25 +1414,25 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
 
 ### 13.8 明确**没做**的事
 
-| # | 没做 | 为什么 |
-|---|---|---|
-| 1 | **S3**（按域替换请求函数体） | 本轮范围是 S1+S2；S3 会碰 `utils/labels.ts` 的 status→class 映射等连锁点，必须逐域跑测试 |
-| 2 | **S4**（收敛 `client.ts`、删重复类型） | 同上；`client.ts` 的基础设施层本轮**一行未动** |
-| 3 | **S5**（5.2 TanStack Query / 5.3 Zustand） | 不属于 5.1 |
-| 4 | **P4**（`dump_openapi.py --check` 接 CI） | 要改 `.github/**`（不属本轮文件清单）。**S2 之后这条风险仍然存在** |
-| 5 | `deleteAnnotation` 的返回值 | 要改函数体 = S3（§13.5） |
-| 6 | 两个 SSE 端点的解析 | 它们**本来就是手写**（`client.ts:483` / `notes.ts:297`），且 `AnswerSource` 藏在 SSE 帧里，schema 永远看不到（§11.4） |
-| 7 | `tasks.ts:8` 那句"330 行、90 个函数"的化石注释 | 与类型无关；§3 已经记过，改它属于顺手清理，不在 S1/S2 的验收里 |
-| 8 | 生成类型覆盖不到的任何横切行为 | 401 刷新单飞 / 超时 / 204 / multipart 的 JSON 字符串字段**保持手写** |
+| #   | 没做                                           | 为什么                                                                                                                |
+| --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1   | **S3**（按域替换请求函数体）                   | 本轮范围是 S1+S2；S3 会碰 `utils/labels.ts` 的 status→class 映射等连锁点，必须逐域跑测试                              |
+| 2   | **S4**（收敛 `client.ts`、删重复类型）         | 同上；`client.ts` 的基础设施层本轮**一行未动**                                                                        |
+| 3   | **S5**（5.2 TanStack Query / 5.3 Zustand）     | 不属于 5.1                                                                                                            |
+| 4   | **P4**（`dump_openapi.py --check` 接 CI）      | 要改 `.github/**`（不属本轮文件清单）。**S2 之后这条风险仍然存在**                                                    |
+| 5   | `deleteAnnotation` 的返回值                    | 要改函数体 = S3（§13.5）                                                                                              |
+| 6   | 两个 SSE 端点的解析                            | 它们**本来就是手写**（`client.ts:483` / `notes.ts:297`），且 `AnswerSource` 藏在 SSE 帧里，schema 永远看不到（§11.4） |
+| 7   | `tasks.ts:8` 那句"330 行、90 个函数"的化石注释 | 与类型无关；§3 已经记过，改它属于顺手清理，不在 S1/S2 的验收里                                                        |
+| 8   | 生成类型覆盖不到的任何横切行为                 | 401 刷新单飞 / 超时 / 204 / multipart 的 JSON 字符串字段**保持手写**                                                  |
 
 ### 13.9 比 §9 预想得更难的地方
 
 1. **§9 只预言了"先炸测试里的 mock 工厂"**，实际是 **6 个测试夹具 + 1 处刻意绕过类型
-   + 4 处生产代码**（外加 1 处被顺带修好）。生产代码那 4 处里 2 处是**纯类型放宽**
-   （#8 / #9，读侧）、1 处是**两份手抄形状**（#11）、1 处是"契约保证一定给、
-   前端的 `| undefined` 本来就是多余的"（#10）。§9 的风险表只提了
-   "构造侧炸、读取侧统一改 `!= null`"，没提"同一份响应形状被两个组件各抄一遍"
-   这类**重复定义**也会被一起挤出来。
+   - 4 处生产代码**（外加 1 处被顺带修好）。生产代码那 4 处里 2 处是**纯类型放宽**
+     （#8 / #9，读侧）、1 处是**两份手抄形状**（#11）、1 处是"契约保证一定给、
+     前端的 `| undefined` 本来就是多余的"（#10）。§9 的风险表只提了
+     "构造侧炸、读取侧统一改 `!= null`"，没提"同一份响应形状被两个组件各抄一遍"
+     这类**重复定义**也会被一起挤出来。
 2. **tsc 一次只报一个字段**：#1 的 `makeNote()` 其实缺**三个**必填字段，
    但编译器只报第一个不兼容的属性。**"按报错数量估工作量"会低估**。
 3. **"签名不变"与"类型名不变"必须分开说**：`Note` 这个名字没变，
@@ -1410,8 +1441,8 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
    本轮的实际情况是：**名字 / 参数表 / import 全没动**（13 处 `vi.mock` 的模块工厂一字未改），
    类型层面的改动落在 **15 个 `src/api/**` 文件**（14 改 + 1 新增 `generated/types.ts`）
    与 **8 个 `src/api` 之外的文件**（1 个视图类型 + 1 个页面组件 + 1 个头部组件
-   + 1 个按钮组件 + 4 个测试文件）。**74 个调用方文件里，只有 3 个**（`QuestionSets.tsx`、
-   `NoteDetailHeader.tsx`、`RetryConvertButton.tsx`）真的被类型错误逼着改了。
+   - 1 个按钮组件 + 4 个测试文件）。**74 个调用方文件里，只有 3 个**（`QuestionSets.tsx`、
+     `NoteDetailHeader.tsx`、`RetryConvertButton.tsx`）真的被类型错误逼着改了。
 4. **`GraphOperationResult` 必须删除，否则 6 个函数永远 `HW_WIDER`**：
    §9.1 的 S2 写的是"把 `export interface X` 换成 `export type X = …`"，
    默认每个手写类型都有一个生成类型与之对应 —— 这个前提**对 6 个图谱操作不成立**
@@ -1432,15 +1463,15 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
 
 ### 14.0 一句话结论
 
-| 问题 | 答案 |
-|---|---|
-| S3 做了什么 | 给生成类型加了一层**按端点索引**的入口（`BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`），把 **34 个 JSON 请求体**从"手写形状"换成"契约形状"；`deleteAnnotation` 的返回值改成契约类型 |
-| 为什么按端点索引，而不是按组件名 | 组件名回答不了"这个请求体属于哪个端点的哪个方法"：端点换了模型而这里没换，编译器不会响。按路径 + 方法索引之后，**抄错端点会立刻报错** |
-| 请求体的发现数 | `bodyFindings` **25 → 0**；但见 §14.6 —— **这是结构性的**（类型即契约），所以另加了两条守卫防止"归零是因为没比" |
-| `deleteAnnotation` | `hwDiscardsBody` **1 → 0**，`compilerDiagnostics` **2 → 0**（这是 §13.5 刻意留下的那两条） |
-| S4 做了什么 | 三个请求入口里**逐字重复**的错误响应解析收成一处（`readErrorBody`）；§9.1 说的"删除重复的类型定义"**在 S2 就已经完成**，见 §14.7 的证据 |
-| 调用方改动 | **0**（导出名、参数表、运行时路径与方法一字未改）；只**新增**了 4 个导出类型别名 |
-| 生成器撞出来的两条事实 | ① `requestBody` 可选时生成类型写的是 `… \| undefined`，最自然的条件类型**永远不匹配**（`BodyOf` 会一律退化成 `never`）；② pydantic 带 `default` 的字段被 `openapi-typescript` 标回**必填**，比真实契约更严 —— 两条都见 §14.2 |
+| 问题                             | 答案                                                                                                                                                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S3 做了什么                      | 给生成类型加了一层**按端点索引**的入口（`BodyOf` / `QueryOf` / `ApiMethod` / `BodyWithDefaults`），把 **34 个 JSON 请求体**从"手写形状"换成"契约形状"；`deleteAnnotation` 的返回值改成契约类型                               |
+| 为什么按端点索引，而不是按组件名 | 组件名回答不了"这个请求体属于哪个端点的哪个方法"：端点换了模型而这里没换，编译器不会响。按路径 + 方法索引之后，**抄错端点会立刻报错**                                                                                        |
+| 请求体的发现数                   | `bodyFindings` **25 → 0**；但见 §14.6 —— **这是结构性的**（类型即契约），所以另加了两条守卫防止"归零是因为没比"                                                                                                              |
+| `deleteAnnotation`               | `hwDiscardsBody` **1 → 0**，`compilerDiagnostics` **2 → 0**（这是 §13.5 刻意留下的那两条）                                                                                                                                   |
+| S4 做了什么                      | 三个请求入口里**逐字重复**的错误响应解析收成一处（`readErrorBody`）；§9.1 说的"删除重复的类型定义"**在 S2 就已经完成**，见 §14.7 的证据                                                                                      |
+| 调用方改动                       | **0**（导出名、参数表、运行时路径与方法一字未改）；只**新增**了 4 个导出类型别名                                                                                                                                             |
+| 生成器撞出来的两条事实           | ① `requestBody` 可选时生成类型写的是 `… \| undefined`，最自然的条件类型**永远不匹配**（`BodyOf` 会一律退化成 `never`）；② pydantic 带 `default` 的字段被 `openapi-typescript` 标回**必填**，比真实契约更严 —— 两条都见 §14.2 |
 
 ### 14.1 新的入口：按端点索引
 
@@ -1449,21 +1480,21 @@ node src/api/generated/openapi-drift.mjs --json=after.json    # S2 之后
 
 ```ts
 // 路径键 = schema 路径去掉 /api 前缀 —— 与 request() 收到的那串字面量同形
-export type UpdateNotePayload = BodyOf<'/notes/{note_id}', 'put'>;          // { title?: string | null }
+export type UpdateNotePayload = BodyOf<'/notes/{note_id}', 'put'>; // { title?: string | null }
 export type MarkCardPayload = BodyOf<'/knowledge/cards/{card_id}/mark', 'patch'>;
-export type NotesQuery = QueryOf<'/notes', 'get'>;                          // 含 project_id
+export type NotesQuery = QueryOf<'/notes', 'get'>; // 含 project_id
 // 契约里带 default 的字段：生成类型比真实契约严，按真实契约放宽，K 受 keyof 约束
 export type CreateGoalPayload = BodyWithDefaults<'/goals', 'post', 'type' | 'target_mastery'>;
 ```
 
 四个 helper 的语义边界（每一条都有编译期断言守着）：
 
-| helper | 没有这个东西时 | 守卫 |
-|---|---|---|
-| `ApiPath` | 路径键写错就只能靠人眼 | `Extract<ApiPath, \`/api${string}\`>` 必须是 `never`（带前缀的键不存在） |
-| `ApiMethod<P>` | 给只有 GET 的端点标 `post` 不会报错 | 路径项里 `post?: never` 的方法被滤掉；实测 `ApiMethod<'/notes'>` = `'get'` |
-| `BodyOf<P, M>` | 无请求体的端点会退化成 `unknown`（什么都能传） | 无 body 必须是 `never`；**全 119 个操作扫描一遍，不许有 `unknown`** |
-| `QueryOf<P, M>` | 没有 query 参数时会退化成 `never`（与"写错了"长得一样） | 无 query 参数时是 `Record<string, never>` |
+| helper          | 没有这个东西时                                          | 守卫                                                                       |
+| --------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `ApiPath`       | 路径键写错就只能靠人眼                                  | `Extract<ApiPath, \`/api${string}\`>`必须是`never`（带前缀的键不存在）     |
+| `ApiMethod<P>`  | 给只有 GET 的端点标 `post` 不会报错                     | 路径项里 `post?: never` 的方法被滤掉；实测 `ApiMethod<'/notes'>` = `'get'` |
+| `BodyOf<P, M>`  | 无请求体的端点会退化成 `unknown`（什么都能传）          | 无 body 必须是 `never`；**全 119 个操作扫描一遍，不许有 `unknown`**        |
+| `QueryOf<P, M>` | 没有 query 参数时会退化成 `never`（与"写错了"长得一样） | 无 query 参数时是 `Record<string, never>`                                  |
 
 断言写在 `src/api/generated/types.test.ts` 的 `TypeAssertions` 元组里（**编译期**，
 `tsc` 失败即失败，不需要 `vitest --typecheck`），同一个文件还有两条运行期断言：
@@ -1494,12 +1525,12 @@ type Bad<Op> = Op extends { requestBody: { content: { 'application/json': infer 
 
 pydantic 把带默认值的字段**排除出** `required`：
 
-| 请求模型 | `required`（真实契约） | `default` | 生成类型 |
-|---|---|---|---|
-| `GoalCreateRequest` | `name` | `type="weekly"`、`target_mastery=80` | 四个都必填 |
-| `SubmitAnswerRequest` | `quiz_id`、`user_answer` | `time_spent_ms=0`、`use_semantic_grading=false` | 五个都必填 |
-| `NoteAskRequest` | `question`、`selected_text` | `context_after=""`、`context_before=""`、`view_mode="original"` | 五个都必填 |
-| `UnderstandingStartRequest` | —— | `confirm=false` | 必填 |
+| 请求模型                    | `required`（真实契约）      | `default`                                                       | 生成类型   |
+| --------------------------- | --------------------------- | --------------------------------------------------------------- | ---------- |
+| `GoalCreateRequest`         | `name`                      | `type="weekly"`、`target_mastery=80`                            | 四个都必填 |
+| `SubmitAnswerRequest`       | `quiz_id`、`user_answer`    | `time_spent_ms=0`、`use_semantic_grading=false`                 | 五个都必填 |
+| `NoteAskRequest`            | `question`、`selected_text` | `context_after=""`、`context_before=""`、`view_mode="original"` | 五个都必填 |
+| `UnderstandingStartRequest` | ——                          | `confirm=false`                                                 | 必填       |
 
 对**响应**这是对的（带默认值的字段一定会被序列化出来，S2 就是靠这一点），
 对**请求**则更严：前端"省略字段、让后端用默认值"是合法用法，标注成契约类型就会编译失败。
@@ -1515,18 +1546,18 @@ pydantic 把带默认值的字段**排除出** `required`：
 
 ### 14.3 按域改动清单（34 个 JSON 请求体，无一遗漏）
 
-| 域 | 请求体数 | 处理方式 |
-|---|---:|---|
-| `notes.ts` | 6 | `updateNote` 的**参数类型**换成 `BodyOf<'/notes/{note_id}','put'>`；`NoteContentTarget` 改成 `BodyOf<…>['target']`（导出名保留）；`updateNoteContent` / `updateNoteLinks` / `restoreVersion` 标注**内部** body；`askNoteQuestionStream`（SSE）用 `BodyWithDefaults<…, 'context_before' \| 'context_after' \| 'view_mode'>` |
-| `projects.ts` | 5 | 五处全部标注内部 body（对外签名一字未动） |
-| `goals.ts` | 2 | 新增 `CreateGoalPayload = BodyWithDefaults<'/goals','post','type' \| 'target_mastery'>`、`UpdateGoalPayload = BodyOf<'/goals/{goal_id}','patch'>`，用作 `data` 的参数类型 |
-| `assessment.ts` | 3 | 两处标注内部 body；`generateQuiz` 那行**手写标注**换成 `BodyOf`；`submitQuizAnswers` 见 §14.4 |
-| `review.ts` | 3 | 新增 `SubmitAnswerPayload`（**两个端点共用**，后端是同一个 `SubmitAnswerRequest`）与 `submitCardReview` 的内部标注 |
-| `qa.ts` | 3 | 两处内部标注 + `UpdateKnowledgeCardPayload` 作参数类型 |
-| `knowledge.ts` | 2 | `generateExtension` 内部标注 + `MarkCardPayload` 作参数类型 |
-| `graph.ts` | 5 | 五处内部标注（`createRelation` 的 `relation_type` 保持 `string`，契约也是 `string`，**没有**自作主张收窄） |
-| `auth.ts` | 4 | 四处内部标注（含 `logout` —— 它的 `requestBody` 在 schema 里可选，正是 §14.2 那个坑的样本） |
-| `client.ts` | 1 | `askQuestionStream` 的 body 标注（**响应**侧 SSE 解析刻意保持手写，见 §13.8 第 6 条） |
+| 域              | 请求体数 | 处理方式                                                                                                                                                                                                                                                                                                                   |
+| --------------- | -------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notes.ts`      |        6 | `updateNote` 的**参数类型**换成 `BodyOf<'/notes/{note_id}','put'>`；`NoteContentTarget` 改成 `BodyOf<…>['target']`（导出名保留）；`updateNoteContent` / `updateNoteLinks` / `restoreVersion` 标注**内部** body；`askNoteQuestionStream`（SSE）用 `BodyWithDefaults<…, 'context_before' \| 'context_after' \| 'view_mode'>` |
+| `projects.ts`   |        5 | 五处全部标注内部 body（对外签名一字未动）                                                                                                                                                                                                                                                                                  |
+| `goals.ts`      |        2 | 新增 `CreateGoalPayload = BodyWithDefaults<'/goals','post','type' \| 'target_mastery'>`、`UpdateGoalPayload = BodyOf<'/goals/{goal_id}','patch'>`，用作 `data` 的参数类型                                                                                                                                                  |
+| `assessment.ts` |        3 | 两处标注内部 body；`generateQuiz` 那行**手写标注**换成 `BodyOf`；`submitQuizAnswers` 见 §14.4                                                                                                                                                                                                                              |
+| `review.ts`     |        3 | 新增 `SubmitAnswerPayload`（**两个端点共用**，后端是同一个 `SubmitAnswerRequest`）与 `submitCardReview` 的内部标注                                                                                                                                                                                                         |
+| `qa.ts`         |        3 | 两处内部标注 + `UpdateKnowledgeCardPayload` 作参数类型                                                                                                                                                                                                                                                                     |
+| `knowledge.ts`  |        2 | `generateExtension` 内部标注 + `MarkCardPayload` 作参数类型                                                                                                                                                                                                                                                                |
+| `graph.ts`      |        5 | 五处内部标注（`createRelation` 的 `relation_type` 保持 `string`，契约也是 `string`，**没有**自作主张收窄）                                                                                                                                                                                                                 |
+| `auth.ts`       |        4 | 四处内部标注（含 `logout` —— 它的 `requestBody` 在 schema 里可选，正是 §14.2 那个坑的样本）                                                                                                                                                                                                                                |
+| `client.ts`     |        1 | `askQuestionStream` 的 body 标注（**响应**侧 SSE 解析刻意保持手写，见 §13.8 第 6 条）                                                                                                                                                                                                                                      |
 
 **"对外签名变宽"只发生在两处，都是有意为之**：`updateNote` 的 `title` 与
 `updateKnowledgeCard` 的 `title`/`content` 现在可以传 `null`（契约允许）。
@@ -1534,11 +1565,11 @@ pydantic 把带默认值的字段**排除出** `required`：
 
 **刻意保留的"前端比契约窄"**（这是收益不是缺陷）：
 
-| 位置 | 前端 | 契约 | 为什么保留 |
-|---|---|---|---|
-| `createAnnotation` 的 `type` | `'highlight' \| 'underline'` | `string` | 手写联合能挡住拼错的取值；放宽成 `string` 是**降级** |
-| `createAnnotation` 的 `color` | `string` | `string \| null` | 目前没有"清空颜色"的用法 |
-| `createRelation` 的 `relation_type` | `string` | `string` | 两边一致，无话可说 |
+| 位置                                | 前端                         | 契约             | 为什么保留                                           |
+| ----------------------------------- | ---------------------------- | ---------------- | ---------------------------------------------------- |
+| `createAnnotation` 的 `type`        | `'highlight' \| 'underline'` | `string`         | 手写联合能挡住拼错的取值；放宽成 `string` 是**降级** |
+| `createAnnotation` 的 `color`       | `string`                     | `string \| null` | 目前没有"清空颜色"的用法                             |
+| `createRelation` 的 `relation_type` | `string`                     | `string`         | 两边一致，无话可说                                   |
 
 ### 14.4 只有一处"契约比手写更宽"，用 `satisfies` 而不是标注
 
@@ -1550,7 +1581,10 @@ schema 里内层是 `{ [key: string]: unknown }[]`，而前端手写的是
 
 ```ts
 // satisfies 只做"与契约相容"的检查，不改变 body 的推断类型
-const body = { assessment_id: assessmentId, answers } satisfies BodyOf<'/assessment/submit-answer', 'post'>;
+const body = { assessment_id: assessmentId, answers } satisfies BodyOf<
+  '/assessment/submit-answer',
+  'post'
+>;
 ```
 
 于是"字段名/必填项对得上契约"仍由编译器保证，而内层保留手写窄类型。
@@ -1573,16 +1607,16 @@ const body = { assessment_id: assessmentId, answers } satisfies BodyOf<'/assessm
 新增 `frontend/scripts/drift-delta.mjs`（`npm run gen:api:drift:delta -- before.json after.json`）
 把两份 `--json` 快照逐项对照，方向写在表里，**任何反向都退出码 1**：
 
-| 指标 | 前 | 后 | 方向 |
-|---|---:|---:|---|
-| `hwDiscardsBody` | 1 | **0** | 越小越好 ✅ |
-| `compilerDiagnostics` | 2 | **0** | 越小越好 ✅ |
-| `bodyFindings` | 25 | **0** | 越小越好 ✅ |
-| `identical` | 104 | **105** | 越大越好 ✅ |
-| `handWrittenFunctions` / `pathMatched` | 111 / 111 | 111 / 111 | 必须不变 |
-| **`bodyChecked`（真的被比过请求体的函数数）** | **34** | **34** | 必须不变 |
-| `schemaPaths` / `schemaOperations` | 103 / 119 | 103 / 119 | 必须不变 |
-| `unusedSchemaQuery`（信息） | 3 | 3 | 涨跌都正常 |
+| 指标                                          |        前 |        后 | 方向        |
+| --------------------------------------------- | --------: | --------: | ----------- |
+| `hwDiscardsBody`                              |         1 |     **0** | 越小越好 ✅ |
+| `compilerDiagnostics`                         |         2 |     **0** | 越小越好 ✅ |
+| `bodyFindings`                                |        25 |     **0** | 越小越好 ✅ |
+| `identical`                                   |       104 |   **105** | 越大越好 ✅ |
+| `handWrittenFunctions` / `pathMatched`        | 111 / 111 | 111 / 111 | 必须不变    |
+| **`bodyChecked`（真的被比过请求体的函数数）** |    **34** |    **34** | 必须不变    |
+| `schemaPaths` / `schemaOperations`            | 103 / 119 | 103 / 119 | 必须不变    |
+| `unusedSchemaQuery`（信息）                   |         3 |         3 | 涨跌都正常  |
 
 `identical` 只涨 1：因为 S3 改的是**请求**，而 `identical` 判的是**响应** ——
 唯一变化的就是 `deleteAnnotation`（`HW_DISCARDS_BODY → IDENTICAL`）。
@@ -1611,7 +1645,7 @@ S3 把 `deleteAnnotation` 修好之后，守卫立刻误报：
 选了后者：往探针文件里塞一条**故意写错的金丝雀** ——
 
 ```ts
-declare const __canarySrc: __SC_0;          // 某个端点的 schema 响应类型
+declare const __canarySrc: __SC_0; // 某个端点的 schema 响应类型
 const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 ```
 
@@ -1629,10 +1663,10 @@ const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 
 §9.1 给 S4 写的是两件事，实际情况**一件早已完成、一件才是真的**：
 
-| §9.1 S4 的要求 | 现状 | 证据 |
-|---|---|---|
-| 保留 `getToken` / `setTokens` / `refreshSession` / `authorizedFetch` / `request` / `uploadRequest` | ✅ 全部保留 | 另有 `clearTokens` / `getRefreshToken` / `notifyTokenExpired` / `ApiError` / `askQuestionStream` / `API_BASE` / `TOKEN_EXPIRED_EVENT` 也是横切层，同样保留 |
-| "删除重复的类型定义" | **S2 就已经删干净了** | `src/api` 下 17 个文件的 `export type/interface` 清点：除 4 个**契约里根本没有**的手写类型（`CommitUploadOptions`、`RecommendedTask`、`GradingMethod`，以及本轮改成派生的 `NoteContentTarget`）之外，全部是 `Schema<'X'>` 别名；**没有任何两个文件定义同名类型**（`client.ts` 的 `User`/`TokenResponse`/`Note`/`NoteDetail`/`NoteListResponse` 是唯一一份）。把这些别名搬去各域只会动 68 处 import，收益为零 |
+| §9.1 S4 的要求                                                                                     | 现状                  | 证据                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 保留 `getToken` / `setTokens` / `refreshSession` / `authorizedFetch` / `request` / `uploadRequest` | ✅ 全部保留           | 另有 `clearTokens` / `getRefreshToken` / `notifyTokenExpired` / `ApiError` / `askQuestionStream` / `API_BASE` / `TOKEN_EXPIRED_EVENT` 也是横切层，同样保留                                                                                                                                                                                                                                                   |
+| "删除重复的类型定义"                                                                               | **S2 就已经删干净了** | `src/api` 下 17 个文件的 `export type/interface` 清点：除 4 个**契约里根本没有**的手写类型（`CommitUploadOptions`、`RecommendedTask`、`GradingMethod`，以及本轮改成派生的 `NoteContentTarget`）之外，全部是 `Schema<'X'>` 别名；**没有任何两个文件定义同名类型**（`client.ts` 的 `User`/`TokenResponse`/`Note`/`NoteDetail`/`NoteListResponse` 是唯一一份）。把这些别名搬去各域只会动 68 处 import，收益为零 |
 
 **真正剩下的重复**是三个请求入口里**逐字相同**的错误响应解析
 （`request` / `uploadRequest` / `askQuestionStream` 各抄一份"detail 是数组就 join、
@@ -1651,26 +1685,26 @@ const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 
 ### 14.8 验证（全部真跑过，命令在 `frontend/` 下）
 
-| 命令 | 结果 |
-|---|---|
-| `npx.cmd tsc --noEmit` | **退出 0**（实测耗时 11.5 s） |
-| `npm.cmd test` | **22 files / 280 tests 全通过**，退出 0（基线 21/278，新增的 1 文件 2 用例就是 `types.test.ts`） |
-| `npm.cmd run lint` | 退出 0（`eslint src/`；新文件 `types.test.ts`、改过的 `openapi-drift.mjs` 都干净） |
-| `npx.cmd prettier --check <本轮 12 个改动文件>` | 全部通过 |
-| `npm.cmd run build` | 退出 0（`tsc && vite build`，✓ built in 5.22s） |
-| `npm.cmd run e2e` | **10 passed**（真 Chromium，13.9 s），退出 0 |
-| `npm.cmd run gen:api:drift` | 退出 0，数字见 §14.6 |
-| `node scripts/drift-delta.mjs before after` | 退出 0（没有任何反向指标） |
+| 命令                                            | 结果                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `npx.cmd tsc --noEmit`                          | **退出 0**（实测耗时 11.5 s）                                                                    |
+| `npm.cmd test`                                  | **22 files / 280 tests 全通过**，退出 0（基线 21/278，新增的 1 文件 2 用例就是 `types.test.ts`） |
+| `npm.cmd run lint`                              | 退出 0（`eslint src/`；新文件 `types.test.ts`、改过的 `openapi-drift.mjs` 都干净）               |
+| `npx.cmd prettier --check <本轮 12 个改动文件>` | 全部通过                                                                                         |
+| `npm.cmd run build`                             | 退出 0（`tsc && vite build`，✓ built in 5.22s）                                                  |
+| `npm.cmd run e2e`                               | **10 passed**（真 Chromium，13.9 s），退出 0                                                     |
+| `npm.cmd run gen:api:drift`                     | 退出 0，数字见 §14.6                                                                             |
+| `node scripts/drift-delta.mjs before after`     | 退出 0（没有任何反向指标）                                                                       |
 
 ### 14.9 明确**没做**的事
 
-| # | 没做 | 为什么 / 下一步要什么 |
-|---|---|---|
-| 1 | ~~**S3b：query 参数按契约派生**~~ | **已在 §15 完成**（2026-09-14 同一轮的后半段）：18 个调用点接入契约，仪器同批升级并做了两次变异验证 |
-| 2 | **S5（5.2 TanStack Query / 5.3 Zustand）** | 不属于 S3；两者都会动到 74 个调用方文件的取数方式，属独立大轮次 |
-| 3 | **P4：`dump_openapi.py --check` 接 CI** | 要改 `.github/**`（不属本轮文件清单）。**这条风险仍然存在** |
-| 4 | **P3：`POST /api/auth/logout` 的 body 是否真的可选** | 契约里是 `requestBody?`，前端总是发。本轮只做到"前端与契约一致"，没去动后端声明 |
-| 5 | 把 `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 统一 | 行为变更（提示文案），要单独决策（§14.7） |
+| #   | 没做                                                                | 为什么 / 下一步要什么                                                                               |
+| --- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | ~~**S3b：query 参数按契约派生**~~                                   | **已在 §15 完成**（2026-09-14 同一轮的后半段）：18 个调用点接入契约，仪器同批升级并做了两次变异验证 |
+| 2   | **S5（5.2 TanStack Query / 5.3 Zustand）**                          | 不属于 S3；两者都会动到 74 个调用方文件的取数方式，属独立大轮次                                     |
+| 3   | **P4：`dump_openapi.py --check` 接 CI**                             | 要改 `.github/**`（不属本轮文件清单）。**这条风险仍然存在**                                         |
+| 4   | **P3：`POST /api/auth/logout` 的 body 是否真的可选**                | 契约里是 `requestBody?`，前端总是发。本轮只做到"前端与契约一致"，没去动后端声明                     |
+| 5   | 把 `uploadRequest` / `askQuestionStream` 的 `ApiError.message` 统一 | 行为变更（提示文案），要单独决策（§14.7）                                                           |
 
 ### 14.10 顺带发现（改的是请求侧，照出来的是别的东西）
 
@@ -1714,32 +1748,32 @@ const __canaryMustFail: never = __canarySrc; // 赋给 never，永远不成立
 
 ### 15.0 一句话结论
 
-| 问题 | 答案 |
-|---|---|
-| 改了什么 | 18 个函数的查询串从手拼改成"契约类型标注 + 一个共享序列化器"：`const query: QueryOf<'/notes','get'> = { … }` → `` `/notes${buildQuery(query)}` `` |
-| 参数名现在什么时候被检查 | **编译期**（`QueryOf` 的对象字面量多做/写错一个键就报 TS2561）—— 此前只有漂移脚本**事后**扫字符串 |
-| 运行时行为变了吗 | **没有**：键序逐点保留、空值仍跳过、`promote_key_cards=false` 仍不发、两处 `encodeURIComponent` 的取值域是固定枚举 |
-| 真实链路的证据 | `e2e` 10 passed + `e2e:full` 6 passed（真实后端 + 真实 LLM）——这一轮改的就是**发出去的 URL**，只有这两层能证明它还对 |
-| 仪器怎么保证没坏 | 两个新分母（`queryNameDetections` 54 / `functionsWithQueryNames` 22）进 `MUST_NOT_CHANGE`，外加**两次变异验证**（§15.4） |
+| 问题                     | 答案                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 改了什么                 | 18 个函数的查询串从手拼改成"契约类型标注 + 一个共享序列化器"：`const query: QueryOf<'/notes','get'> = { … }` → `` `/notes${buildQuery(query)}` `` |
+| 参数名现在什么时候被检查 | **编译期**（`QueryOf` 的对象字面量多做/写错一个键就报 TS2561）—— 此前只有漂移脚本**事后**扫字符串                                                 |
+| 运行时行为变了吗         | **没有**：键序逐点保留、空值仍跳过、`promote_key_cards=false` 仍不发、两处 `encodeURIComponent` 的取值域是固定枚举                                |
+| 真实链路的证据           | `e2e` 10 passed + `e2e:full` 6 passed（真实后端 + 真实 LLM）——这一轮改的就是**发出去的 URL**，只有这两层能证明它还对                              |
+| 仪器怎么保证没坏         | 两个新分母（`queryNameDetections` 54 / `functionsWithQueryNames` 22）进 `MUST_NOT_CHANGE`，外加**两次变异验证**（§15.4）                          |
 
 ### 15.1 新的运行时 helper：`src/api/query.ts`
 
 ```ts
-const query: QueryOf<'/notes', 'get'> = { page, page_size: pageSize, keyword, note_role: noteRole }
-return request<NoteListResponse>(`/notes${buildQuery(query)}`)
+const query: QueryOf<'/notes', 'get'> = { page, page_size: pageSize, keyword, note_role: noteRole };
+return request<NoteListResponse>(`/notes${buildQuery(query)}`);
 ```
 
 `buildQuery(params: object): string` 的语义（逐条有单测，共 8 例）：
 
-| # | 语义 | 为什么是这条 |
-|---|---|---|
-| 1 | 键序 = 书写顺序 | 迁移前的输出要逐字一致，顺序是契约的一部分 |
-| 2 | `undefined` / `null` / `''` 跳过 | 迁移前普遍写作 `if (keyword) query.set(…)`，跳过空串就是那个行为 |
-| 3 | `number` / `boolean` → `String(v)`，**`false` 照发** | "false 不发"是调用点该显式表达的事（`promoteKeyCards \|\| undefined`）；在这里跳过 `false` 会变成一条谁也想不起来的隐式规则 |
-| 4 | 数组 → 重复键 | 契约里 `target_categories: string[] \| null` 是数组（今天无调用点用它，类型允许） |
-| 5 | 编码交给 `URLSearchParams` | 空格 → `+`、字面 `+` → `%2B`、中文按 UTF-8；与后端 FastAPI 的 form 解码规则一致 |
-| 6 | 没有参数时返回 `''`（不是 `'?'`） | 于是调用点写成 `` `${path}${buildQuery(q)}` `` 就与迁移前的 `x ? '?a=1' : ''` 形态完全一致 |
-| 7 | 不支持的取值类型**抛 `TypeError`** | 静默 `String(v)` 会发出 `[object Object]`：看起来发了请求，其实发的是垃圾 |
+| #   | 语义                                                 | 为什么是这条                                                                                                                |
+| --- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 键序 = 书写顺序                                      | 迁移前的输出要逐字一致，顺序是契约的一部分                                                                                  |
+| 2   | `undefined` / `null` / `''` 跳过                     | 迁移前普遍写作 `if (keyword) query.set(…)`，跳过空串就是那个行为                                                            |
+| 3   | `number` / `boolean` → `String(v)`，**`false` 照发** | "false 不发"是调用点该显式表达的事（`promoteKeyCards \|\| undefined`）；在这里跳过 `false` 会变成一条谁也想不起来的隐式规则 |
+| 4   | 数组 → 重复键                                        | 契约里 `target_categories: string[] \| null` 是数组（今天无调用点用它，类型允许）                                           |
+| 5   | 编码交给 `URLSearchParams`                           | 空格 → `+`、字面 `+` → `%2B`、中文按 UTF-8；与后端 FastAPI 的 form 解码规则一致                                             |
+| 6   | 没有参数时返回 `''`（不是 `'?'`）                    | 于是调用点写成 `` `${path}${buildQuery(q)}` `` 就与迁移前的 `x ? '?a=1' : ''` 形态完全一致                                  |
+| 7   | 不支持的取值类型**抛 `TypeError`**                   | 静默 `String(v)` 会发出 `[object Object]`：看起来发了请求，其实发的是垃圾                                                   |
 
 **类型检查发生在调用点，不在这里**：`buildQuery` 的参数是宽松的 `object`，
 它只负责序列化；名字与取值域由 `QueryOf<P, M>` 标注保证。文件头明写了这一点，
@@ -1747,17 +1781,17 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 
 ### 15.2 18 个调用点
 
-| 模块 | 函数（原形态 → 现形态） |
-|---|---|
-| `report` | `getWeakPoints`：`URLSearchParams({limit})` → `buildQuery({ limit })` |
-| `tasks` | `listNoteTasks`：`` ?limit=${limit} `` → `buildQuery({ limit })` |
-| `goals` | `getGoals`：`status ? '?status='+encodeURIComponent(status) : ''` → `buildQuery({ status })` |
-| `graph` | `searchGraphNodes`：`URLSearchParams({q, limit})` → `buildQuery({ q: keyword, limit })` |
+| 模块        | 函数（原形态 → 现形态）                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `report`    | `getWeakPoints`：`URLSearchParams({limit})` → `buildQuery({ limit })`                                                             |
+| `tasks`     | `listNoteTasks`：`?limit=${limit}` → `buildQuery({ limit })`                                                                      |
+| `goals`     | `getGoals`：`status ? '?status='+encodeURIComponent(status) : ''` → `buildQuery({ status })`                                      |
+| `graph`     | `searchGraphNodes`：`URLSearchParams({q, limit})` → `buildQuery({ q: keyword, limit })`                                           |
 | `knowledge` | `getBlindSpots` / `getMasteryOverview`：`.set` ×4 / ×3 → `buildQuery` + **参数类型改成 `QueryOf<…>`**（对外是变宽，调用方零改动） |
-| `notes` | `getNotes` / `getArchivedNotes` / `updateNoteRole` / `purgeNote` / `getAnnotations` / `diffVersions` 六处 |
-| `projects` | `getFolders`：`URLSearchParams({days})` → `buildQuery({ days })` |
-| `qa` | `getKnowledgeCards` / `getQuestions` |
-| `review` | `getDueQuizzes` / `getReviewHistory` / `getDueCards` |
+| `notes`     | `getNotes` / `getArchivedNotes` / `updateNoteRole` / `purgeNote` / `getAnnotations` / `diffVersions` 六处                         |
+| `projects`  | `getFolders`：`URLSearchParams({days})` → `buildQuery({ days })`                                                                  |
+| `qa`        | `getKnowledgeCards` / `getQuestions`                                                                                              |
+| `review`    | `getDueQuizzes` / `getReviewHistory` / `getDueCards`                                                                              |
 
 **导出名、函数签名、运行时路径字面量一律未变**；只新增了一个运行时模块
 （`query.ts`）与一个测试文件（`query.test.ts`）。
@@ -1766,11 +1800,11 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 
 查询串换了写法之后，判定"路径对不对"和"参数名对不对"的两条通道**同时失效**：
 
-| # | 位置 | 迁移前的判据 | 为什么失效 | 改法 |
-|---|---|---|---|---|
-| 1 | `renderPath()` | 模板头含 `?`，或插值是**标识符**且初始化以 `?` 开头（`isQuerySuffix`） | `${buildQuery(query)}` 是 **CallExpression** → 判不出来 → 模板被渲染成 `/notes{}` → **111 个 pathMatched 会大面积变成 PATH_MISSING** | 查询 helper 的调用与标识符型后缀同样处理（识别到就 `hadQuery = true` 并 `break`） |
-| 2 | `isQuerySuffix()` | 同上 | 同上（`const query = buildQuery(…)` + `` `${query}` `` 的写法） | 标识符的初始化若来自 helper 调用，也算查询后缀 |
-| 3 | `collectQueryNames()` | `URLSearchParams` 字面量 / `.set`·`.append` / 字符串里的 `?k=` | 参数名搬进了 helper 的**实参**里，而且实参是**标识符**（`buildQuery(query)`），不是对象字面量 | 新增 `objectLiteralKeys(expr, fnBody)`：字面量直接收键，**标识符则回函数体解析它的初始化式**（与 `isQuerySuffix` 同一手法）；三条老通道**全部保留**（`upload.ts` 的 17 个 FormData 字段还靠它） |
+| #   | 位置                  | 迁移前的判据                                                           | 为什么失效                                                                                                                           | 改法                                                                                                                                                                                            |
+| --- | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `renderPath()`        | 模板头含 `?`，或插值是**标识符**且初始化以 `?` 开头（`isQuerySuffix`） | `${buildQuery(query)}` 是 **CallExpression** → 判不出来 → 模板被渲染成 `/notes{}` → **111 个 pathMatched 会大面积变成 PATH_MISSING** | 查询 helper 的调用与标识符型后缀同样处理（识别到就 `hadQuery = true` 并 `break`）                                                                                                               |
+| 2   | `isQuerySuffix()`     | 同上                                                                   | 同上（`const query = buildQuery(…)` + `` `${query}` `` 的写法）                                                                      | 标识符的初始化若来自 helper 调用，也算查询后缀                                                                                                                                                  |
+| 3   | `collectQueryNames()` | `URLSearchParams` 字面量 / `.set`·`.append` / 字符串里的 `?k=`         | 参数名搬进了 helper 的**实参**里，而且实参是**标识符**（`buildQuery(query)`），不是对象字面量                                        | 新增 `objectLiteralKeys(expr, fnBody)`：字面量直接收键，**标识符则回函数体解析它的初始化式**（与 `isQuerySuffix` 同一手法）；三条老通道**全部保留**（`upload.ts` 的 17 个 FormData 字段还靠它） |
 
 三处共用一个 `QUERY_HELPERS = new Set(['buildQuery'])`，将来加第二个 helper 只改一行。
 
@@ -1784,26 +1818,26 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 **M1 是真实踩到的，不是设计的**：仪器第一版只处理"实参就是对象字面量"的形态，
 而迁移后的真实写法是**先存变量再传**。跑漂移立刻触发：
 
-| 指标 | 正常 | M1（扫描器不认标识符实参） |
-|---|---:|---:|
-| `queryNameDetections` | 54 | **17** |
-| `functionsWithQueryNames` | 22 | **4** |
-| `missingRequiredQuery` | 0 | **3** |
-| `unusedSchemaQuery` | 3 | **40** |
-| `drift-delta` 退出码 | 0 | **1** |
+| 指标                      | 正常 | M1（扫描器不认标识符实参） |
+| ------------------------- | ---: | -------------------------: |
+| `queryNameDetections`     |   54 |                     **17** |
+| `functionsWithQueryNames` |   22 |                      **4** |
+| `missingRequiredQuery`    |    0 |                      **3** |
+| `unusedSchemaQuery`       |    3 |                     **40** |
+| `drift-delta` 退出码      |    0 |                      **1** |
 
 注意 `unusedSchemaQuery` 是"信息项"（涨跌都正常）—— 如果没有两个分母，
 这一轮的表现会是"**报错项没变、信息项变多**"，很容易被读成"参数没写错"。
 
 **M2 是人为的对照**：把 `QUERY_HELPERS` 清空（等价于"三处识别全丢"）：
 
-| 指标 | 正常 | M2 |
-|---|---:|---:|
-| `pathMatched` / `pathMissing` | 111 / 0 | **93 / 18** |
-| `identical` | 105 | **88** |
-| `verdictRegressions` | 0 | **18** |
-| `queryNameDetections` / `functionsWithQueryNames` | 54 / 22 | **17 / 4** |
-| `drift-delta` 退出码 | 0 | **1**（6 项被点名） |
+| 指标                                              |    正常 |                  M2 |
+| ------------------------------------------------- | ------: | ------------------: |
+| `pathMatched` / `pathMissing`                     | 111 / 0 |         **93 / 18** |
+| `identical`                                       |     105 |              **88** |
+| `verdictRegressions`                              |       0 |              **18** |
+| `queryNameDetections` / `functionsWithQueryNames` | 54 / 22 |          **17 / 4** |
+| `drift-delta` 退出码                              |       0 | **1**（6 项被点名） |
 
 还原后复跑：`pathMatched 111 / pathMissing 0 / identical 105 / 54 / 22`，退出码 0。
 
@@ -1813,11 +1847,11 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 最自然的写法是 `buildQuery(params)` **透传**。透传会让扫描器**看不到任何键名**
 （它拿不到类型信息，只能看语法）。实测中间态：
 
-| 指标 | 逐个写出（采用的写法） | 透传变量 |
-|---|---:|---:|
-| `queryNameDetections` | 54 | **47** |
-| `functionsWithQueryNames` | 22 | **20** |
-| `unusedSchemaQuery` | 3 | **10** |
+| 指标                      | 逐个写出（采用的写法） | 透传变量 |
+| ------------------------- | ---------------------: | -------: |
+| `queryNameDetections`     |                     54 |   **47** |
+| `functionsWithQueryNames` |                     22 |   **20** |
+| `unusedSchemaQuery`       |                      3 |   **10** |
 
 所以这两个函数（也只有这两个：入参是对象、且要原样转发）在函数体内**把 4 个 / 3 个键
 逐字写出来**，仍然带 `QueryOf<…>` 标注 —— 既保住编译期检查，也让仪器能核对。
@@ -1825,25 +1859,25 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 
 ### 15.6 验证
 
-| 命令 | 结果 |
-|---|---|
-| `npx.cmd tsc --noEmit` | 退出 0 |
-| `npm.cmd test` | **23 files / 288 tests 全通过**（基线 22/280；新增的 8 例就是 `query.test.ts`） |
-| `npm.cmd run lint` | 退出 0（中途被 `no-constant-binary-expression` 拦了一次 —— 测试里用 `true \|\| undefined` 演示写法，已改成经函数参数传入） |
-| `npm.cmd run build` | 退出 0（✓ built in 5.40s） |
-| `npm.cmd run e2e` | **10 passed** |
-| `npm.cmd run e2e:full` | **6 passed**（真实后端 + 真实 LLM；改的是 URL，这一层是唯一真证据） |
+| 命令                                        | 结果                                                                                                                            |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `npx.cmd tsc --noEmit`                      | 退出 0                                                                                                                          |
+| `npm.cmd test`                              | **23 files / 288 tests 全通过**（基线 22/280；新增的 8 例就是 `query.test.ts`）                                                 |
+| `npm.cmd run lint`                          | 退出 0（中途被 `no-constant-binary-expression` 拦了一次 —— 测试里用 `true \|\| undefined` 演示写法，已改成经函数参数传入）      |
+| `npm.cmd run build`                         | 退出 0（✓ built in 5.40s）                                                                                                      |
+| `npm.cmd run e2e`                           | **10 passed**                                                                                                                   |
+| `npm.cmd run e2e:full`                      | **6 passed**（真实后端 + 真实 LLM；改的是 URL，这一层是唯一真证据）                                                             |
 | `npm.cmd run gen:api:drift` + `drift-delta` | 退出 0；`pathMatched 111 / identical 105 / 54 / 22 / unused 3 / unknown 0 / missingReq 0 / bodyChecked 34` **与迁移前逐项相同** |
-| 变异 M1 / M2 | 见 §15.4（跑完即还原，还原后复跑确认回到基线） |
+| 变异 M1 / M2                                | 见 §15.4（跑完即还原，还原后复跑确认回到基线）                                                                                  |
 
 ### 15.7 明确**没做**的事
 
-| # | 没做 | 为什么 |
-|---|---|---|
-| 1 | 接上那 3 条"契约有、UI 从没传"的查询参数（`/notes` 的 `project_id`、`generate-questions` 的 `target_categories` / `target_difficulty`） | 属**产品功能**（要给 UI 加入口），不是 5.1 的契约贴合工作。`unusedSchemaQuery` 仍是 3，作为"未接能力"继续登记 |
-| 2 | `buildQuery` 的运行时校验 | schema 只在类型层；运行期没有可比对的东西 |
-| 3 | `upload.ts` 的 4 个 multipart 字段 | 它们是 FormData 字段、不是 query 参数（脚本按 `helper !== 'uploadRequest'` 已跳过比对），§9.2 早就定了"保持手写" |
-| 4 | 把 `QueryOf` 用到响应侧/路径参数上 | 响应已由 S2 的 `Schema<…>` 覆盖；路径参数在函数签名里是 `string`，接契约不产生新约束 |
+| #   | 没做                                                                                                                                    | 为什么                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1   | 接上那 3 条"契约有、UI 从没传"的查询参数（`/notes` 的 `project_id`、`generate-questions` 的 `target_categories` / `target_difficulty`） | 属**产品功能**（要给 UI 加入口），不是 5.1 的契约贴合工作。`unusedSchemaQuery` 仍是 3，作为"未接能力"继续登记    |
+| 2   | `buildQuery` 的运行时校验                                                                                                               | schema 只在类型层；运行期没有可比对的东西                                                                        |
+| 3   | `upload.ts` 的 4 个 multipart 字段                                                                                                      | 它们是 FormData 字段、不是 query 参数（脚本按 `helper !== 'uploadRequest'` 已跳过比对），§9.2 早就定了"保持手写" |
+| 4   | 把 `QueryOf` 用到响应侧/路径参数上                                                                                                      | 响应已由 S2 的 `Schema<…>` 覆盖；路径参数在函数签名里是 `string`，接契约不产生新约束                             |
 
 ### 15.8 这一轮的方法论（一句话）
 
@@ -1851,4 +1885,3 @@ return request<NoteListResponse>(`/notes${buildQuery(query)}`)
 这一轮真正的风险不是 18 个调用点写错（编译器与 e2e 都会拦），
 而是**扫描器悄悄失明**——它的表现是"报错项一直是 0"。两个分母 + 两次变异验证，
 就是把"没比"从"没问题"里分出来的那一步。
-

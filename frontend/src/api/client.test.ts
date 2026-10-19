@@ -32,9 +32,11 @@ import {
   authorizedFetch,
   askQuestionStream,
   clearTokens,
+  downloadRequest,
   getRefreshToken,
   getToken,
   notifyTokenExpired,
+  parseContentDispositionFilename,
   refreshSession,
   request,
   setTokens,
@@ -296,5 +298,145 @@ describe('API 客户端：401 → 刷新 → 重放', () => {
     await expect(refreshSession()).resolves.toBe(false);
     expect(getToken()).toBe('a-3');
     expect(getRefreshToken()).toBe('r-3');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 文件下载（想法 4「设计导出功能」）
+// ---------------------------------------------------------------------------
+
+/**
+ * 手搓一个带头的文件响应（沿用本文件"不依赖 jsdom 的 Response 构造器"的口径）
+ *
+ * `downloadRequest` 只用到 `ok` / `status` / `blob()` / `headers.get()` 四样，
+ * 所以桩只需要这四样 —— 多写的部分不会被执行，反而会掩盖真实的耦合。
+ */
+function fileResponse(status: number, body = 'x', headers: Record<string, string> = {}): Response {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    blob: async () => new Blob([body]),
+    headers: { get: (name: string) => headers[name] ?? null },
+  } as unknown as Response;
+}
+
+describe('API 客户端：Content-Disposition 文件名解析', () => {
+  /**
+   * ## 这一组为什么值得单独测
+   *
+   * 后端**同时**写 `filename="…"`（ASCII 回退，中文变下划线）与
+   * `filename*=UTF-8''…`（RFC 5987，中文原样）。解析顺序一旦写反，
+   * 中文标题的笔记就会下载成 `__________.md` ——
+   * 而这件事**不会报任何错**，用户只会觉得"文件名怎么坏了"。
+   */
+
+  it('★ 优先 filename*（否则中文会变成一串下划线）', () => {
+    const name = '拉哇水电站运行规程学习.md';
+    const header = `attachment; filename="__________.md"; filename*=UTF-8''${encodeURIComponent(name)}`;
+
+    expect(parseContentDispositionFilename(header)).toBe(name);
+  });
+
+  it('没有 filename* 时回退到 filename', () => {
+    expect(parseContentDispositionFilename('attachment; filename="plain.md"')).toBe('plain.md');
+  });
+
+  it('filename* 带语言标记也能解析（RFC 5987 的完整形态）', () => {
+    const header = `attachment; filename*=UTF-8'en'${encodeURIComponent('标题.md')}`;
+
+    expect(parseContentDispositionFilename(header)).toBe('标题.md');
+  });
+
+  it('filename* 的百分号编码损坏时回退到 filename，而不是抛错', () => {
+    // `%ZZ` 不是合法的百分号编码，decodeURIComponent 会抛 URIError
+    const header = 'attachment; filename="fallback.md"; filename*=UTF-8\'\'%ZZ%ZZ';
+
+    expect(parseContentDispositionFilename(header)).toBe('fallback.md');
+  });
+
+  it('无引号的 filename 也能解析', () => {
+    expect(parseContentDispositionFilename('attachment; filename=bare.md')).toBe('bare.md');
+  });
+
+  it('头缺失或为空时返回 null（调用方用兜底名）', () => {
+    expect(parseContentDispositionFilename(null)).toBeNull();
+    expect(parseContentDispositionFilename('')).toBeNull();
+    expect(parseContentDispositionFilename('attachment')).toBeNull();
+  });
+
+  it('中文经完整往返后逐字不变', () => {
+    const name = '浮充与均充：区别（上）.md';
+    const header = `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
+
+    expect(parseContentDispositionFilename(header)).toBe(name);
+  });
+});
+
+describe('API 客户端：downloadRequest', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    setTokens('a-1', 'r-1');
+    mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('成功时返回 blob 与解析出的文件名，且带上认证头', async () => {
+    mockFetch.mockResolvedValueOnce(
+      fileResponse(200, '# 正文', {
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('笔记.md')}`,
+      }),
+    );
+
+    const { blob, filename } = await downloadRequest('/notes/n1/export?variant=clean');
+
+    expect(filename).toBe('笔记.md');
+    await expect(blob.text()).resolves.toBe('# 正文');
+    expect(authHeaderAt(mockFetch, 0)).toBe('Bearer a-1');
+  });
+
+  it('文件名解析不出来时 filename 为 null（下载不该因此失败）', async () => {
+    mockFetch.mockResolvedValueOnce(fileResponse(200, 'x'));
+
+    const { blob, filename } = await downloadRequest('/notes/n1/export');
+
+    expect(filename).toBeNull();
+    await expect(blob.text()).resolves.toBe('x');
+  });
+
+  it('★ 401 时刷新并重放一次（与 request/uploadRequest 同一口径）', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(401, { detail: '过期' }))
+      .mockResolvedValueOnce(jsonResponse(200, freshPair()))
+      .mockResolvedValueOnce(fileResponse(200, 'x'));
+
+    await downloadRequest('/notes/n1/export');
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(authHeaderAt(mockFetch, 2)).toBe('Bearer new-access');
+  });
+
+  it('★ 后端错误码透传（导出空版本时前端要能按 code 分流）', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(400, { detail: '这篇笔记还没有清洗版', error_code: 'NOTE_EXPORT_EMPTY' }),
+    );
+
+    await expect(downloadRequest('/notes/n1/export')).rejects.toMatchObject({
+      message: '这篇笔记还没有清洗版',
+      code: 'NOTE_EXPORT_EMPTY',
+    });
+  });
+
+  it('非 401 的失败不触发刷新（只发一次请求）', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(404, { detail: '笔记不存在' }));
+
+    await expect(downloadRequest('/notes/n1/export')).rejects.toThrow('笔记不存在');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

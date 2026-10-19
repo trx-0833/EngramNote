@@ -49,6 +49,13 @@ NON_JSON_2XX = {
     ("POST", "/api/understanding/ask/stream"),
     # 视频字节流（本地模式 200/206，MinIO 模式 307 重定向到预签名 URL）
     ("GET", "/api/notes/{note_id}/video"),
+    # Markdown 附件下载（想法 4）：`text/markdown; charset=utf-8` 的字节流，
+    # 带 `Content-Disposition: attachment`。与上面那条同一处理方式 ——
+    # 如实声明 media type，而不是 `application/json` + 空 schema。
+    # ⚠️ 文件名（`Content-Disposition`）在 OpenAPI 里表达不出来，
+    # 前端是从**实际响应头**里解析的，见 app/schemas/common.py 的
+    # `MarkdownDownloadResponse` 与 frontend/src/api/client.ts 的 `downloadRequest`。
+    ("GET", "/api/notes/{note_id}/export"),
 }
 
 #: 本轮补的 4 处"内层空壳"：字段本身必须指向一个 `$ref`，而不是
