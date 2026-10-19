@@ -10,11 +10,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import styles from './Auth.module.css';
 
 export default function Register() {
   const navigate = useNavigate();
   const { register } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -25,8 +27,22 @@ export default function Register() {
     e.preventDefault();
     setError('');
 
+    // ⚠️ 这一道是**防御性**校验 —— 通过正常交互**到不了这里**。
+    //
+    // 同一个 input 上还有 HTML5 的 `pattern="[a-zA-Z0-9]+"`，而两者判据
+    // **完全相同**，所以浏览器会在提交前先拦下（实测真 Chromium：
+    // `validity.patternMismatch=true`、点提交后页面上没有这个 `role="alert"`，
+    // 浏览器弹自己的原生提示）。
+    //
+    // 留着它的理由：① `pattern` 哪天被去掉或改宽，这一道仍然挡得住；
+    // ② 程序化提交（`form.submit()`）绕过原生校验时它是唯一的防线；
+    // ③ 后端的 `pattern` 是最终判据，这里提前给出**本地化**的提示。
+    //
+    // 也正因如此，`auth.usernameInvalid` 那条翻译只在这条路径上出现 ——
+    // `AuthPages.i18n.test.tsx` 里测它时必须**直接派发 submit**
+    // 绕过原生校验（用 `click` 永远测不到）。
     if (!/^[a-zA-Z0-9]+$/.test(username)) {
-      setError('用户名只能包含英文字母和数字');
+      setError(t('auth.usernameInvalid'));
       return;
     }
 
@@ -35,7 +51,7 @@ export default function Register() {
       await register(email, username, password);
       navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败');
+      setError(err instanceof Error ? err.message : t('auth.registerFailed'));
     } finally {
       setLoading(false);
     }
@@ -54,11 +70,11 @@ export default function Register() {
             ⚠️ 这一页是**未认证分支**的第二个入口，只有把它加进扫描场景
             （`register`）才会被发现 —— 上一轮修登录页时它不在任何场景里。 */}
         <main>
-          <h1 className={styles.authTitle}>注册 EngramNote</h1>
+          <h1 className={styles.authTitle}>{t('auth.registerTitle')}</h1>
 
           <form onSubmit={handleSubmit} className={styles.authForm}>
             <div className={styles.authInputGroup}>
-              <label htmlFor="email">邮箱</label>
+              <label htmlFor="email">{t('auth.email')}</label>
               {/* 批次 B3：内联 `<svg>` → `<Icon name="mail" />`（图形逐点未改，
                   线宽由内联的 2 收到全站统一的 1.5，尺寸落回 20 这一档） */}
               <Icon name="mail" size={20} className={styles.authInputIcon} />
@@ -69,12 +85,12 @@ export default function Register() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                placeholder="your@email.com"
+                placeholder={t('auth.emailPlaceholder')}
               />
             </div>
 
             <div className={styles.authInputGroup}>
-              <label htmlFor="username">用户名</label>
+              <label htmlFor="username">{t('auth.username')}</label>
               {/* 批次 B3：内联 `<svg>` → `<Icon name="user" />`（图形未改） */}
               <Icon name="user" size={20} className={styles.authInputIcon} />
               <input
@@ -86,12 +102,12 @@ export default function Register() {
                 minLength={2}
                 maxLength={50}
                 pattern="[a-zA-Z0-9]+"
-                placeholder="仅限英文和数字，2-50个字符"
+                placeholder={t('auth.usernamePlaceholder')}
               />
             </div>
 
             <div className={styles.authInputGroup}>
-              <label htmlFor="password">密码</label>
+              <label htmlFor="password">{t('auth.password')}</label>
               {/* 批次 B3：内联 `<svg>` → `<Icon name="lock" />`（图形未改） */}
               <Icon name="lock" size={20} className={styles.authInputIcon} />
               <input
@@ -102,7 +118,7 @@ export default function Register() {
                 required
                 minLength={6}
                 autoComplete="new-password"
-                placeholder="至少6位"
+                placeholder={t('auth.passwordPlaceholder')}
               />
             </div>
 
@@ -113,12 +129,12 @@ export default function Register() {
             )}
 
             <button type="submit" className={`btn ${styles.authSubmit}`} disabled={loading}>
-              {loading ? '注册中...' : '注册'}
+              {loading ? t('auth.registerSubmitting') : t('auth.registerSubmit')}
             </button>
           </form>
 
           <p className={styles.authFooter}>
-            已有账号？{' '}
+            {t('auth.hasAccount')}{' '}
             <a
               href="/login"
               onClick={(e) => {
@@ -126,7 +142,7 @@ export default function Register() {
                 navigate('/login');
               }}
             >
-              登录
+              {t('auth.goLogin')}
             </a>
           </p>
         </main>

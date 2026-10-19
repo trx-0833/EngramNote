@@ -15,6 +15,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+// 日期**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`
+import { formatDate } from '../utils/datetime';
 // 页面标题（visual-refactor-plan 批次 C1）：1.25rem → 1.5rem
 import PageHeader from '../components/PageHeader';
 import { useToast } from '../components/Toast';
@@ -360,7 +362,7 @@ export default function NotesList() {
                       （这一项本来就没有标签）。字段缺失时回落到创建时间，
                       避免契约漂移时渲染出 "Invalid Date"。 */}
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                    {new Date(note.updated_at || note.created_at).toLocaleDateString('zh-CN')}
+                    {formatDate(note.updated_at || note.created_at)}
                   </span>
                 </div>
                 {/* 错误信息，仅 status 为 failed 时显示 */}

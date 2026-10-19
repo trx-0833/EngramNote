@@ -32,6 +32,9 @@ import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import Icon from '../components/Icon';
 import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+// 日期与时间**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`，
+// 切到英文界面后会显示中文格式的日期 —— 见 `utils/datetime.ts` 文件头
+import { formatMonthDay, formatTime } from '../utils/datetime';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
 // 页头那一行（标题 + 新建文件夹按钮）交给组件，窄屏换行随之进模块
 import PageHeader from '../components/PageHeader';
@@ -86,9 +89,14 @@ function formatDate(dateStr: string): string {
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
+  // ⚠️ 「今天」/「昨天」这两个词是**本页文案**，属于 i18n **阶段 3**
+  // （按页面铺开）的范围，本轮（阶段 0：基础设施 + 认证页）**刻意没动**。
+  // 留这两个字面量在这里是有意的 —— 阶段 3 改这一页时它们会一起走 `t()`。
+  // 下面那行日期**格式**则已收口到 `utils/datetime`（本模块不再是
+  // 全项目唯一一处自定义 `Intl` 选项的地方，见该文件头）。
   if (date.toDateString() === today.toDateString()) return '今天';
   if (date.toDateString() === yesterday.toDateString()) return '昨天';
-  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
+  return formatMonthDay(date);
 }
 
 /**
@@ -887,10 +895,7 @@ export default function DailyMaterials() {
                                     {formatFileSize(note.file_size)}
                                   </span>
                                   <span className={styles.materialsMetaChip}>
-                                    {new Date(note.created_at).toLocaleTimeString('zh-CN', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })}
+                                    {formatTime(note.created_at)}
                                   </span>
                                 </div>
                               </div>

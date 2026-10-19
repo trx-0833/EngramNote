@@ -13,6 +13,8 @@
 import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+// i18n（阶段 0）：`t()` 取文案，`locale` / `setLocale` 驱动语言切换器
+import { useTranslation } from '../i18n';
 // 批次 B2：图标从 Unicode 码点改为 `Icon` 组件（唯一出口，见 visual-design-spec §4.2）
 import Icon, { type IconName } from './Icon';
 // 侧边栏（含移动端抽屉）的类名归模块所有（overhaul-plan 5.6 序 9）：
@@ -88,6 +90,7 @@ export default function Sidebar({
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAuth();
+  const { t, locale, setLocale } = useTranslation();
 
   // 抽屉打开期间锁住 body 滚动（样式见 Sidebar.module.css 的 `body.sidebarOpenLock`）。
   // 放在 effect 里而不是渲染期，是为了让"打开/关闭/卸载"三种路径都必然解绑 ——
@@ -190,8 +193,47 @@ export default function Sidebar({
           ))}
         </div>
 
-        {/* 底部：退出 */}
+        {/* 底部：语言切换 + 退出 */}
         <div className={styles.sidebarFooter}>
+          {/* 语言切换（i18n 阶段 0）。
+              ## 为什么放在这里
+              侧边栏底部是全站唯一"属于当前用户、与页面内容无关"的位置，
+              语言偏好正是这种设置。没有独立的设置页（全仓没有 Setting/Profile 页），
+              为它新开一页不划算。
+              ## 为什么用 `.segment-control` / `.segment-btn`
+              这两个是**既有全局类**（`styles/learning.css:61`），
+              视图切换与学习评估页在用 —— 复用它们等于"语言切换"与
+              "视图切换"是同一类控件（都是二选一/多选一的模式切换），
+              而且**没有新增任何样式**。
+              ## 为什么两个语言名都不翻译
+              见 `messages.zh-CN.ts` 的 `languageZh` / `languageEn` 说明：
+              语言名是**自指**的 —— 一个只懂英文的用户在中文界面里找
+              "English" 时，把它译成"英语"反而更难找。
+              ## 可访问名
+              外层 `role="group"` + `aria-label`（"语言"/"Language"），
+              读屏会读成"语言 分组，中文，按钮，已按下"。
+              两个按钮用 `aria-pressed` 表达选中态，而不是只靠颜色。 */}
+          <div className={styles.sidebarLang} role="group" aria-label={t('common.language')}>
+            <span className="segment-control">
+              <button
+                type="button"
+                className={`segment-btn ${locale === 'zh-CN' ? 'segment-btn-active' : ''}`}
+                onClick={() => setLocale('zh-CN')}
+                aria-pressed={locale === 'zh-CN'}
+              >
+                {t('common.languageZh')}
+              </button>
+              <button
+                type="button"
+                className={`segment-btn ${locale === 'en' ? 'segment-btn-active' : ''}`}
+                onClick={() => setLocale('en')}
+                aria-pressed={locale === 'en'}
+              >
+                {t('common.languageEn')}
+              </button>
+            </span>
+          </div>
+
           <button className={styles.sidebarItem} onClick={logout}>
             <span className={styles.sidebarItemIcon}>
               <Icon name="logout" size={20} />

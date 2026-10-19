@@ -84,6 +84,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/auth/locale': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Locale Setting
+     * @description 获取当前用户的界面语言偏好（i18n 阶段 0）
+     *
+     *     ## 前端的界面语言**不以此为准**
+     *
+     *     界面语言由前端自己决定（`localStorage` → `navigator.language` → 默认），
+     *     这样**未登录的登录页**也能有正确的语言 —— 而登录页调不到这个端点。
+     *     本端点读回来的值用于"同一账号在另一台设备上已经选过语言"时**回填**。
+     *
+     *     Returns:
+     *         LocaleSettingResponse: 当前用户的界面语言
+     */
+    get: operations['get_locale_setting_api_auth_locale_get'];
+    /**
+     * Update Locale Setting
+     * @description 更新当前用户的界面语言偏好（i18n 阶段 0）
+     *
+     *     ## 这个字段的真正用途是给 Celery worker 用
+     *
+     *     LLM 提示词要跟界面语言走，而提示词的调用点在 worker 里 ——
+     *     那里没有请求上下文，读不到 `Accept-Language`。所以 worker 靠
+     *     `note.user_id → users.locale` 反查（见 `models/user.py` 的 `locale` 字段注释）。
+     *
+     *     由认证依赖注入的 `current_user` 仍挂接在会话上，直接改字段并提交即可持久化。
+     *
+     *     Raises:
+     *         ValidationError: `locale` 不是受支持的语言（422，由 `LocaleSettingRequest`
+     *             的 pattern 挡下 —— 合法值清单见 `core/i18n.SUPPORTED_LOCALES`）
+     *
+     *     Returns:
+     *         LocaleSettingResponse: 更新后的界面语言
+     */
+    put: operations['update_locale_setting_api_auth_locale_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/auth/login': {
     parameters: {
       query?: never;
@@ -5016,6 +5064,31 @@ export interface components {
       title: string;
     };
     /**
+     * LocaleSettingRequest
+     * @description 更新语言偏好的请求体
+     *
+     *     `pattern` 而不是 `Literal['zh-CN','en']`：后者的 422 报错里会列出全部合法值，
+     *     但契约（`openapi.json`）里只能表达成一个 enum —— 两种写法都能校验，
+     *     这里选 pattern 是因为它与 `core/i18n.SUPPORTED_LOCALES` 的字符串形态
+     *     直接对应，改语言清单时不必再想"Literal 要不要同步"。
+     *
+     *     ⚠️ 真正的合法值清单在 `core/i18n.SUPPORTED_LOCALES`，本 pattern 是它的
+     *     契约投影。`tests/test_i18n.py` 有一条断言比对两者（避免加了一种语言
+     *     却忘了改这里，表现为"前端能切、保存时报 422"）。
+     */
+    LocaleSettingRequest: {
+      /**
+       * Locale
+       * @description Interface language
+       */
+      locale: string;
+    };
+    /** LocaleSettingResponse */
+    LocaleSettingResponse: {
+      /** Locale */
+      locale: string;
+    };
+    /**
      * LogoutRequest
      * @description 登出请求体（阶段 6.3）
      *
@@ -7047,6 +7120,8 @@ export interface components {
       is_active: boolean;
       /** Last Reminded At */
       last_reminded_at?: string | null;
+      /** Locale */
+      locale?: string | null;
       /** Username */
       username: string;
     };
@@ -7274,6 +7349,59 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['AssessmentResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_locale_setting_api_auth_locale_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LocaleSettingResponse'];
+        };
+      };
+    };
+  };
+  update_locale_setting_api_auth_locale_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LocaleSettingRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LocaleSettingResponse'];
         };
       };
       /** @description Validation Error */

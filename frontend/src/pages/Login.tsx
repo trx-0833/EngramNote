@@ -11,12 +11,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 // 认证页样式（overhaul-plan 5.6）：与 Register 共用一份，见 Auth.module.css 文件头
 import styles from './Auth.module.css';
 
 export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -41,7 +43,7 @@ export default function Login() {
       // 失败仍然留在登录页显示错误（见上面的 catch）。
       navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败');
+      setError(err instanceof Error ? err.message : t('auth.loginFailed'));
     } finally {
       setLoading(false);
     }
@@ -58,11 +60,11 @@ export default function Login() {
             这些值复制一遍（那正是会漂移的写法）；这一层被包住的元素
             正好就是这一页的全部内容，所以地标边界等于页面边界。 */}
         <main>
-          <h1 className={styles.authTitle}>登录 EngramNote</h1>
+          <h1 className={styles.authTitle}>{t('auth.loginTitle')}</h1>
 
           <form onSubmit={handleSubmit} className={styles.authForm}>
             <div className={styles.authInputGroup}>
-              <label htmlFor="email">邮箱</label>
+              <label htmlFor="email">{t('auth.email')}</label>
               {/* 批次 B3：这一处原来是内联 `<svg>`（24 网格、`strokeWidth=2`、
                   渲染尺寸由 `.authInputIcon` 的 18×18 决定）—— 迁进唯一出口后
                   线宽由 1.5 统一，尺寸落回 20 这一档（`.authInputIcon` 同步改成 20×20）。
@@ -75,12 +77,12 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                placeholder="your@email.com"
+                placeholder={t('auth.emailPlaceholder')}
               />
             </div>
 
             <div className={styles.authInputGroup}>
-              <label htmlFor="password">密码</label>
+              <label htmlFor="password">{t('auth.password')}</label>
               {/* 批次 B3：内联 `<svg>` → `<Icon name="lock" />`（同上，图形未改） */}
               <Icon name="lock" size={20} className={styles.authInputIcon} />
               <input
@@ -90,7 +92,7 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                placeholder="至少6位"
+                placeholder={t('auth.passwordPlaceholder')}
               />
             </div>
 
@@ -101,12 +103,12 @@ export default function Login() {
             )}
 
             <button type="submit" className={`btn ${styles.authSubmit}`} disabled={loading}>
-              {loading ? '登录中...' : '登录'}
+              {loading ? t('auth.loginSubmitting') : t('auth.loginSubmit')}
             </button>
           </form>
 
           <p className={styles.authFooter}>
-            没有账号？{' '}
+            {t('auth.noAccount')}{' '}
             <a
               href="/register"
               onClick={(e) => {
@@ -114,7 +116,7 @@ export default function Login() {
                 navigate('/register');
               }}
             >
-              注册
+              {t('auth.goRegister')}
             </a>
           </p>
         </main>

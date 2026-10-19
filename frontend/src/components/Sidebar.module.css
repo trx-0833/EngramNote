@@ -362,6 +362,29 @@ body.sidebarOpenLock {
   flex-shrink: 0;
 }
 
+/* ── 语言切换（i18n 阶段 0）──
+ *
+ * 放在「退出」按钮**上方**：两者都是"属于当前用户、与页面内容无关"的东西，
+ * 而退出是这一栏的最后一个动作，语言是它的设置项。
+ *
+ * ## 为什么只写一条 `margin-bottom`
+ *
+ * 内层用的是**既有全局类** `.segment-control` / `.segment-btn`
+ * （`styles/learning.css:61`，视图切换与学习评估页在用）——
+ * 它的底色是 `--color-bg`、选中项是 `--color-surface` + `--shadow-sm`，
+ * 与侧边栏底正好形成"凹槽 + 凸起"的关系，在这一栏上能看清。
+ * 所以这里**不覆盖它的任何外观**，只负责"放在哪、与下面隔多远"。
+ *
+ * ⚠️ 折叠态（`.sidebarCollapsed`）下侧边栏只有 64px 宽，
+ * 两个语言按钮加起来约 80px 放不下 —— 由折叠栏的 `overflow: hidden`
+ * 裁掉即可（与导航标签同一处理方式），不做专门的折叠态样式：
+ * 折叠态下"换语言"本来就该先展开侧边栏。 */
+.sidebarLang {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-xs);
+}
+
 /* ── 移动端侧边栏遮罩 ── */
 
 .sidebarOverlay {

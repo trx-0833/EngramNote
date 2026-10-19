@@ -40,6 +40,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from ..core import context
+from ..core import i18n
 from ..config import get_settings
 
 logger = logging.getLogger("engramnote.access")
@@ -107,6 +108,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             user_id=user_id,
             method=method,
             path=path,
+            # i18n：从 `Accept-Language` 解析界面语言。**必须在这里设**（而不是
+            # 在 ErrorHandlerMiddleware 里）—— 那个中间件在**内层**，
+            # 而 contextvars 由 `call_next` 向下传播，所以只有设在外层
+            # 才能被路由处理函数与内层中间件看到（与 request_id 同一个道理）。
+            # 解析失败/缺头 → `zh-CN`（默认语言，见 core/i18n.py）
+            locale=i18n.parse_accept_language(request.headers.get("Accept-Language")),
         )
         start = time.monotonic()
 

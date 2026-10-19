@@ -38,6 +38,16 @@ task_id_var: ContextVar[str] = ContextVar("task_id", default="")
 task_name_var: ContextVar[str] = ContextVar("task_name", default="")
 # 业务关联 ID：如 note_id / project_id，由业务代码按需设置
 biz_id_var: ContextVar[str] = ContextVar("biz_id", default="")
+# 本次请求的界面语言（`zh-CN` / `en`，见 core/i18n.py）。
+# 空串表示"没有请求上下文"（Celery 任务里就是这样）——
+# `core/i18n.get_locale()` 会把空串归一成默认语言。
+#
+# ⚠️ 为什么它住在这里而不是 `core/i18n.py` 自己开一个 ContextVar：
+# 本模块的 `reset_context()` 是**显式枚举**变量的（见文件末尾），
+# 变量分散在两处时，将来加新变量极易漏掉某一处，而漏掉的表现是
+# "上下文残留到下一个请求"——那种 bug 只在并发下偶发，极难查。
+# 语言的**解析与查表**仍然归 `core/i18n.py`，这里只放状态。
+locale_var: ContextVar[str] = ContextVar("locale", default="")
 
 
 # ---- 读取辅助函数 ----
@@ -65,6 +75,11 @@ def get_task_name() -> str:
 def get_biz_id() -> str:
     """获取当前业务关联 ID（如 note_id）"""
     return biz_id_var.get()
+
+
+def get_locale() -> str:
+    """获取当前请求的界面语言（无请求上下文时返回空串）"""
+    return locale_var.get()
 
 
 def context_dict() -> Dict[str, str]:
@@ -127,7 +142,13 @@ def context_tag() -> str:
 
 # ---- 写入辅助函数 ----
 
-def set_request_context(request_id: str, user_id: str = "", method: str = "", path: str = "") -> None:
+def set_request_context(
+    request_id: str,
+    user_id: str = "",
+    method: str = "",
+    path: str = "",
+    locale: str = "",
+) -> None:
     """
     设置请求上下文（由 RequestContextMiddleware 在请求入口调用）
 
@@ -136,11 +157,14 @@ def set_request_context(request_id: str, user_id: str = "", method: str = "", pa
         user_id: 用户 ID（未登录为空）
         method: HTTP 方法
         path: 请求路径
+        locale: 本次请求的界面语言（从 `Accept-Language` 解析，见 core/i18n.py）。
+            默认空串 —— 空串表示"没解析到"，`core/i18n.get_locale()` 会归一成默认语言。
     """
     request_id_var.set(request_id)
     user_id_var.set(user_id)
     method_var.set(method)
     path_var.set(path)
+    locale_var.set(locale)
 
 
 def set_task_context(task_id: str, task_name: str = "", biz_id: str = "") -> None:
@@ -173,7 +197,7 @@ def reset_context() -> None:
     """
     for var in (
         request_id_var, user_id_var, method_var, path_var,
-        task_id_var, task_name_var, biz_id_var,
+        task_id_var, task_name_var, biz_id_var, locale_var,
     ):
         try:
             var.set("")

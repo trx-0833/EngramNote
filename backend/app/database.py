@@ -451,6 +451,19 @@ async def _migrate_sqlite(conn):
         inspector = inspect(sync_conn)
         table_names = inspector.get_table_names()
 
+        # 检查 users 表是否缺少列（i18n 阶段 0，对应 Alembic 012）
+        if 'users' in table_names:
+            user_columns = {col['name'] for col in inspector.get_columns('users')}
+            if 'locale' not in user_columns:
+                # `server_default` 必须给：既有行需要一个值，而
+                # `NOT NULL` 加列时不给默认值会被 SQLite 拒绝。
+                # 默认 `zh-CN` = `core/i18n.DEFAULT_LOCALE`，所以既有用户的
+                # 观感一字不变。
+                sync_conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN locale VARCHAR(10) DEFAULT 'zh-CN' NOT NULL"
+                ))
+                logger.info("SQLite 迁移: 已为 users 表添加 locale 列")
+
         # 检查并创建 projects 表（防御性建表，对应 Alembic 005 迁移）
         # 需在 notes.project_id 列添加之前执行，避免 ALTER REFERENCES 找不到目标表
         if 'projects' not in table_names:

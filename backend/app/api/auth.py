@@ -32,6 +32,8 @@ from ..database import get_db
 from ..core.app_error import AUTH_INVALID_CREDENTIALS, AUTH_REGISTRATION_REJECTED, AppError
 from ..models.user import User
 from ..schemas.user import (
+    LocaleSettingRequest,
+    LocaleSettingResponse,
     LogoutRequest,
     LogoutResponse,
     RefreshRequest,
@@ -343,3 +345,51 @@ async def update_reminder_settings(
     current_user.email_reminder_enabled = req.email_reminder_enabled
     await db.commit()
     return UserReminderSettingsResponse.model_validate(current_user)
+
+
+@router.get("/locale", response_model=LocaleSettingResponse)
+async def get_locale_setting(
+    current_user: User = Depends(get_current_user_dependency),
+):
+    """
+    获取当前用户的界面语言偏好（i18n 阶段 0）
+
+    ## 前端的界面语言**不以此为准**
+
+    界面语言由前端自己决定（`localStorage` → `navigator.language` → 默认），
+    这样**未登录的登录页**也能有正确的语言 —— 而登录页调不到这个端点。
+    本端点读回来的值用于"同一账号在另一台设备上已经选过语言"时**回填**。
+
+    Returns:
+        LocaleSettingResponse: 当前用户的界面语言
+    """
+    return LocaleSettingResponse.model_validate(current_user)
+
+
+@router.put("/locale", response_model=LocaleSettingResponse)
+async def update_locale_setting(
+    req: LocaleSettingRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新当前用户的界面语言偏好（i18n 阶段 0）
+
+    ## 这个字段的真正用途是给 Celery worker 用
+
+    LLM 提示词要跟界面语言走，而提示词的调用点在 worker 里 ——
+    那里没有请求上下文，读不到 `Accept-Language`。所以 worker 靠
+    `note.user_id → users.locale` 反查（见 `models/user.py` 的 `locale` 字段注释）。
+
+    由认证依赖注入的 `current_user` 仍挂接在会话上，直接改字段并提交即可持久化。
+
+    Raises:
+        ValidationError: `locale` 不是受支持的语言（422，由 `LocaleSettingRequest`
+            的 pattern 挡下 —— 合法值清单见 `core/i18n.SUPPORTED_LOCALES`）
+
+    Returns:
+        LocaleSettingResponse: 更新后的界面语言
+    """
+    current_user.locale = req.locale
+    await db.commit()
+    return LocaleSettingResponse.model_validate(current_user)

@@ -56,6 +56,33 @@ class UserResponse(BaseModel):
     email_reminder_enabled: Optional[bool] = None
     last_reminded_at: Optional[datetime] = None
     created_at: datetime
+    # 界面语言偏好（i18n 阶段 0）。可选 + 默认 None：老客户端不读它；
+    # ORM 对象上一定有值（模型带 server_default），所以实际不会是 None。
+    locale: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# 界面语言偏好（i18n 阶段 0）——请求与响应用同一个模型，与
+# `UserReminderSettingsResponse` 同款写法（单字段设置对象）
+class LocaleSettingRequest(BaseModel):
+    """更新语言偏好的请求体
+
+    `pattern` 而不是 `Literal['zh-CN','en']`：后者的 422 报错里会列出全部合法值，
+    但契约（`openapi.json`）里只能表达成一个 enum —— 两种写法都能校验，
+    这里选 pattern 是因为它与 `core/i18n.SUPPORTED_LOCALES` 的字符串形态
+    直接对应，改语言清单时不必再想"Literal 要不要同步"。
+
+    ⚠️ 真正的合法值清单在 `core/i18n.SUPPORTED_LOCALES`，本 pattern 是它的
+    契约投影。`tests/test_i18n.py` 有一条断言比对两者（避免加了一种语言
+    却忘了改这里，表现为"前端能切、保存时报 422"）。
+    """
+
+    locale: str = Field(pattern=r"^(zh-CN|en)$", description="Interface language")
+
+
+class LocaleSettingResponse(BaseModel):
+    locale: str
 
     model_config = {"from_attributes": True}
 

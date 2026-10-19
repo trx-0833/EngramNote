@@ -6,6 +6,10 @@
  */
 
 import type { BodyOf, Schema } from './generated/types';
+// ⚠️ 只从 `i18n/locales` 取 —— 那是个**纯数据模块**（无 import），
+// 所以不会与 i18n 的 Provider 形成循环依赖。`getCurrentLocale` 的状态
+// 由 `i18n/index.tsx` 的 `applyLocale()` 写入，两边共用同一个模块级变量。
+import { getCurrentLocale } from '../i18n/locales';
 
 /**
  * API 基础路径，所有请求都会在此路径前缀下发起
@@ -199,6 +203,13 @@ async function doFetch(
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  // 语言偏好：后端按它翻译 `AppError` 的 detail（见 backend/app/core/i18n.py）。
+  //
+  // ⚠️ 放在 `doFetch` 里而不是各个 `request`/`uploadRequest`/`downloadRequest`
+  // 里：这一个是**所有**带认证请求的唯一出口（含 401 后的重放与刷新），
+  // 放这里才不会出现"某个入口忘了带语言"——那会让错误提示语言与界面不一致，
+  // 而那种不一致只在报错时才看得见，很难被发现。
+  headers['Accept-Language'] = getCurrentLocale();
 
   // 调用方自带 signal 时不再叠加超时计时器：请求生命周期由调用方决定
   // （原实现在这种情况下也会建一个 AbortController，但它的 signal 从未被使用，

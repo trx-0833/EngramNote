@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Playwright E2E 配置（overhaul-plan 5.13）
@@ -48,46 +48,46 @@ import { defineConfig, devices } from '@playwright/test'
  * 上一个会话留下的 dev server 可能跑的是改动前的模块图。
  * 这里宁可因为端口被占而明确失败。
  */
-const DEFAULT_E2E_PORT = 4319
+const DEFAULT_E2E_PORT = 4319;
 
 /** 全链路层（`npm run e2e:full`）的三个端口：前端 / 后端 API / 后端监督器控制口 */
-const DEFAULT_E2E_FULL_PORT = 4381
-const DEFAULT_E2E_FULL_API_PORT = 4382
-const DEFAULT_E2E_FULL_CONTROL_PORT = 4383
+const DEFAULT_E2E_FULL_PORT = 4381;
+const DEFAULT_E2E_FULL_API_PORT = 4382;
+const DEFAULT_E2E_FULL_CONTROL_PORT = 4383;
 
 /**
  * 这些端口不属于这一层：**3080 是人类手上的 DSH Web GUI**。
  * 单独列出来而不是"只在注释里说一句"，是因为注释拦不住一个写错的 E2E_PORT，
  * 而占错端口的后果（把正在用的界面顶掉）比这次测试失败严重得多。
  */
-const FORBIDDEN_E2E_PORTS = [3080]
+const FORBIDDEN_E2E_PORTS = [3080];
 
 function resolvePort(envName: string, defaultPort: number): number {
-  const raw = process.env[envName]
-  if (raw === undefined || raw.trim() === '') return defaultPort
-  const value = raw.trim()
+  const raw = process.env[envName];
+  if (raw === undefined || raw.trim() === '') return defaultPort;
+  const value = raw.trim();
   if (!/^\d+$/.test(value)) {
-    throw new Error(`${envName}="${raw}" 不是合法端口：需要 1–65535 的整数。`)
+    throw new Error(`${envName}="${raw}" 不是合法端口：需要 1–65535 的整数。`);
   }
-  const port = Number(value)
+  const port = Number(value);
   if (port < 1 || port > 65535) {
-    throw new Error(`${envName}=${port} 越界：需要 1–65535 的整数。`)
+    throw new Error(`${envName}=${port} 越界：需要 1–65535 的整数。`);
   }
   if (FORBIDDEN_E2E_PORTS.includes(port)) {
     throw new Error(
       `${envName}=${port} 是人类正在使用的 DSH Web GUI 端口，E2E 绝不能占用它。` +
         `换一个高位端口（默认 ${defaultPort}）。`,
-    )
+    );
   }
-  return port
+  return port;
 }
 
 function resolveE2ePort(): number {
-  return resolvePort('E2E_PORT', DEFAULT_E2E_PORT)
+  return resolvePort('E2E_PORT', DEFAULT_E2E_PORT);
 }
 
-const E2E_PORT = resolveE2ePort()
-const E2E_BASE_URL = `http://127.0.0.1:${E2E_PORT}`
+const E2E_PORT = resolveE2ePort();
+const E2E_BASE_URL = `http://127.0.0.1:${E2E_PORT}`;
 
 /**
  * 全链路层的端口。为什么要**三个**：
@@ -101,13 +101,13 @@ const E2E_BASE_URL = `http://127.0.0.1:${E2E_PORT}`
  * 由它在两者都就绪后才返回 200 —— 否则测试会在 worker 还没订阅时开始上传，
  * 表现为"转换超时"，与真实原因（worker 没起来）毫无关系。
  */
-const E2E_FULL_PORT = resolvePort('E2E_FULL_PORT', DEFAULT_E2E_FULL_PORT)
-const E2E_FULL_API_PORT = resolvePort('E2E_FULL_API_PORT', DEFAULT_E2E_FULL_API_PORT)
-const E2E_FULL_CONTROL_PORT = resolvePort('E2E_FULL_CONTROL_PORT', DEFAULT_E2E_FULL_CONTROL_PORT)
-const E2E_FULL_BASE_URL = `http://127.0.0.1:${E2E_FULL_PORT}`
-const E2E_FULL_CONTROL_URL = `http://127.0.0.1:${E2E_FULL_CONTROL_PORT}`
+const E2E_FULL_PORT = resolvePort('E2E_FULL_PORT', DEFAULT_E2E_FULL_PORT);
+const E2E_FULL_API_PORT = resolvePort('E2E_FULL_API_PORT', DEFAULT_E2E_FULL_API_PORT);
+const E2E_FULL_CONTROL_PORT = resolvePort('E2E_FULL_CONTROL_PORT', DEFAULT_E2E_FULL_CONTROL_PORT);
+const E2E_FULL_BASE_URL = `http://127.0.0.1:${E2E_FULL_PORT}`;
+const E2E_FULL_CONTROL_URL = `http://127.0.0.1:${E2E_FULL_CONTROL_PORT}`;
 const E2E_FULL_TMP =
-  process.env.ENGRAMNOTE_E2E_TMP || `${process.env.TEMP ?? ''}\\engramnote-e2e-full`
+  process.env.ENGRAMNOTE_E2E_TMP || `${process.env.TEMP ?? ''}\\engramnote-e2e-full`;
 
 /**
  * 全链路层是否**显式打开**。默认关闭的理由（钱、时间、CI 没密钥）见
@@ -121,7 +121,7 @@ const E2E_FULL_TMP =
  */
 const E2E_FULL_ENABLED = ['1', 'true', 'True', 'yes'].includes(
   (process.env.ENGRAMNOTE_E2E_FULL ?? '').trim(),
-)
+);
 
 /**
  * 只跑探针时（`npm run e2e:full:probe`）**不需要任何服务**：
@@ -131,8 +131,8 @@ const E2E_FULL_ENABLED = ['1', 'true', 'True', 'yes'].includes(
  * 不是按 project，因此"这一轮到底要不要真实后端"只能从命令行意图判断。
  * `--project=e2e-full-probe` 是探针脚本的唯一形态（见 package.json）。
  */
-const PROBE_ONLY_RUN = process.argv.some((arg) => arg.includes('e2e-full-probe'))
-const NEEDS_FULL_STACK = E2E_FULL_ENABLED && !PROBE_ONLY_RUN
+const PROBE_ONLY_RUN = process.argv.some((arg) => arg.includes('e2e-full-probe'));
+const NEEDS_FULL_STACK = E2E_FULL_ENABLED && !PROBE_ONLY_RUN;
 
 /**
  * 可访问性审计的 spec（5.9）——**单独跑**，见文件末尾 `A11Y_SPEC` 的说明。
@@ -142,7 +142,7 @@ const NEEDS_FULL_STACK = E2E_FULL_ENABLED && !PROBE_ONLY_RUN
  * （新加的 spec 若忘了加进来会**不跑**，而"忘加忽略"会让它混进来 —— 前者更吵、
  * 更容易被发现）。
  */
-const FUNCTIONAL_SPEC = '**/!(*a11y).spec.ts'
+const FUNCTIONAL_SPEC = '**/!(*a11y).spec.ts';
 
 /**
  * 可访问性审计自己的匹配式。单一来源：`playwright.config.ts` 里那个 `a11y`
@@ -160,7 +160,7 @@ const FUNCTIONAL_SPEC = '**/!(*a11y).spec.ts'
  *    取交集 → `No tests found`（第一次接线时真踩到了）。用 project 表达
  *    "这一组用例有自己的匹配式与参数"才是配置该说的话。
  */
-const A11Y_SPEC = '**/a11y.spec.ts'
+const A11Y_SPEC = '**/a11y.spec.ts';
 
 /**
  * 现状基线探针的匹配式（visual-refactor-plan 批次 0.1）。
@@ -172,7 +172,7 @@ const A11Y_SPEC = '**/a11y.spec.ts'
  * 10 条用例变成 32 条、多跑约 40 秒，而那一层的"通过"毫无意义
  * （探针没有断言，永远不会红）。
  */
-const SHOT_PROBE_SPEC = '**/shot-probe.spec.ts'
+const SHOT_PROBE_SPEC = '**/shot-probe.spec.ts';
 
 /**
  * 图谱规模性能探针的匹配式。
@@ -191,7 +191,7 @@ const SHOT_PROBE_SPEC = '**/shot-probe.spec.ts'
  * 它的字符序列里含有"星号紧跟斜杠"，而那正是块注释的结束符。
  * `support.ts` 的文件头与 `FULL_SPEC` 的说明都记着同一个坑。
  */
-const GRAPH_PERF_SPEC = '**/graph-perf-probe.spec.ts'
+const GRAPH_PERF_SPEC = '**/graph-perf-probe.spec.ts';
 
 /**
  * 全链路层的匹配式（5.13 后半段）。
@@ -208,7 +208,7 @@ const GRAPH_PERF_SPEC = '**/graph-perf-probe.spec.ts'
  * 这不是巧合而是要求 —— 一条会花钱、要联网、跑几分钟的用例混进阻塞层，
  * 结果一定是那一层被加 `|| true` 或者没人再跑。
  */
-const FULL_SPEC = '**/e2e-full.spec.ts'
+const FULL_SPEC = '**/e2e-full.spec.ts';
 
 /**
  * 全链路层的**探针**（`npm run e2e:full:probe`）。
@@ -221,7 +221,7 @@ const FULL_SPEC = '**/e2e-full.spec.ts'
  * 一次真实后端（uvicorn + Celery）的就绪探针。用一个独立 project 表达
  * "这一组用例不需要后端"才是配置该说的话。
  */
-const FULL_PROBE_SPEC = '**/e2e-full-probe.spec.ts'
+const FULL_PROBE_SPEC = '**/e2e-full-probe.spec.ts';
 
 export default defineConfig({
   testDir: './e2e',
@@ -246,6 +246,29 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // 桌面尺寸：本层不测响应式（那是 5.10 的事），固定尺寸让布局断言可预期
     viewport: { width: 1280, height: 720 },
+    /**
+     * ★ 把浏览器语言钉在 `zh-CN`（i18n 阶段 0）
+     *
+     * ## 不钉会怎样（实测踩过）
+     *
+     * Playwright 默认 `navigator.language = 'en-US'`，而 i18n 的初始语言解析是
+     * "localStorage → `navigator.language` → 默认中文"。于是登录页渲染成
+     * **英文**，而本层与 `a11y` 层的断言在查中文
+     * （`getByRole('heading', { name: '登录 EngramNote' })`）——
+     * 一次跑下来 **e2e 10 条全红、a11y 26 条只过 1 条**。
+     *
+     * ## 为什么这是对的修法，而不是"把断言改成英文"
+     *
+     * 与单元测试同一条口径（见 `src/test/setup.ts`）：**测试环境固定语言**，
+     * 现有断言一条都不用改；英文路径由**显式切语言**的用例覆盖
+     * （`src/pages/AuthPages.i18n.test.tsx`）。把 500+ 条断言改成双语会
+     * 让测试量翻倍，而它们绝大多数与语言无关。
+     *
+     * ⚠️ 这一条**同时**影响 `a11y` / `shots` / `e2e-full` —— 它们都在这个
+     * 顶层 `use` 之下。`e2e-full` 自己那份 `use` 是展开覆盖，所以它需要
+     * 单独写一次（见那里）。
+     */
+    locale: 'zh-CN',
   },
 
   projects: [
@@ -392,6 +415,11 @@ export default defineConfig({
             use: {
               ...devices['Desktop Chrome'],
               baseURL: E2E_FULL_BASE_URL,
+              // ⚠️ 这一份 `use` 是**展开覆盖**（`...devices[...]`），
+              // 不会继承顶层 `use.locale` —— 所以必须单独写。
+              // 全链路用例按 `getByLabel('邮箱')` 之类的中文标签定位，
+              // 不钉语言会让它们全红（与功能层同一个坑）。
+              locale: 'zh-CN',
               trace: 'retain-on-failure' as const,
               screenshot: 'only-on-failure' as const,
             },
@@ -435,64 +463,64 @@ export default defineConfig({
   webServer: PROBE_ONLY_RUN
     ? []
     : NEEDS_FULL_STACK
-    ? [
-        {
-          /**
-           * 全链路层的前端：端口与 `VITE_API_TARGET` 都必须指向这一层的后端，
-           * 否则代理会把请求打到 8001 上那个（人类正在用的）后端 ——
-           * 那正是"测试碰到真实数据"的另一种形态。
-           */
-          command: `npm run dev -- --port ${E2E_FULL_PORT} --strictPort --host 127.0.0.1`,
-          url: E2E_FULL_BASE_URL,
-          reuseExistingServer: false,
-          timeout: 180_000,
-          stdout: 'pipe' as const,
-          stderr: 'pipe' as const,
-          env: {
-            VITE_API_TARGET: `http://127.0.0.1:${E2E_FULL_API_PORT}`,
+      ? [
+          {
+            /**
+             * 全链路层的前端：端口与 `VITE_API_TARGET` 都必须指向这一层的后端，
+             * 否则代理会把请求打到 8001 上那个（人类正在用的）后端 ——
+             * 那正是"测试碰到真实数据"的另一种形态。
+             */
+            command: `npm run dev -- --port ${E2E_FULL_PORT} --strictPort --host 127.0.0.1`,
+            url: E2E_FULL_BASE_URL,
+            reuseExistingServer: false,
+            timeout: 180_000,
+            stdout: 'pipe' as const,
+            stderr: 'pipe' as const,
+            env: {
+              VITE_API_TARGET: `http://127.0.0.1:${E2E_FULL_API_PORT}`,
+            },
           },
-        },
-        {
-          /**
-           * 真实后端（uvicorn + Celery worker 由监督器一起拉起）。
-           *
-           * `url` 指向的是**监督器的控制口**，不是 uvicorn：见
-           * E2E_FULL_CONTROL_PORT 的说明（要等 worker 真的连上 broker）。
-           */
-          command: 'python scripts/_e2e_full_runner.py',
-          cwd: '../backend',
-          url: `${E2E_FULL_CONTROL_URL}/health`,
-          reuseExistingServer: false,
-          // 首次启动要 import 整个应用 + worker 载入 Celery 配置
-          timeout: 300_000,
-          stdout: 'pipe' as const,
-          stderr: 'pipe' as const,
-          env: {
-            ENGRAMNOTE_E2E_API_PORT: String(E2E_FULL_API_PORT),
-            ENGRAMNOTE_E2E_CONTROL_PORT: String(E2E_FULL_CONTROL_PORT),
-            E2E_FULL_PORT: String(E2E_FULL_PORT),
-            ENGRAMNOTE_E2E_TMP: E2E_FULL_TMP,
-            ...(process.env.ENGRAMNOTE_E2E_PYTHON
-              ? { ENGRAMNOTE_E2E_PYTHON: process.env.ENGRAMNOTE_E2E_PYTHON }
-              : {}),
-            ...(process.env.ENGRAMNOTE_E2E_KEEP
-              ? { ENGRAMNOTE_E2E_KEEP: process.env.ENGRAMNOTE_E2E_KEEP }
-              : {}),
+          {
+            /**
+             * 真实后端（uvicorn + Celery worker 由监督器一起拉起）。
+             *
+             * `url` 指向的是**监督器的控制口**，不是 uvicorn：见
+             * E2E_FULL_CONTROL_PORT 的说明（要等 worker 真的连上 broker）。
+             */
+            command: 'python scripts/_e2e_full_runner.py',
+            cwd: '../backend',
+            url: `${E2E_FULL_CONTROL_URL}/health`,
+            reuseExistingServer: false,
+            // 首次启动要 import 整个应用 + worker 载入 Celery 配置
+            timeout: 300_000,
+            stdout: 'pipe' as const,
+            stderr: 'pipe' as const,
+            env: {
+              ENGRAMNOTE_E2E_API_PORT: String(E2E_FULL_API_PORT),
+              ENGRAMNOTE_E2E_CONTROL_PORT: String(E2E_FULL_CONTROL_PORT),
+              E2E_FULL_PORT: String(E2E_FULL_PORT),
+              ENGRAMNOTE_E2E_TMP: E2E_FULL_TMP,
+              ...(process.env.ENGRAMNOTE_E2E_PYTHON
+                ? { ENGRAMNOTE_E2E_PYTHON: process.env.ENGRAMNOTE_E2E_PYTHON }
+                : {}),
+              ...(process.env.ENGRAMNOTE_E2E_KEEP
+                ? { ENGRAMNOTE_E2E_KEEP: process.env.ENGRAMNOTE_E2E_KEEP }
+                : {}),
+            },
           },
+        ]
+      : {
+          // `npm run dev` = `vite`；用 `--` 把端口参数透传给 vite。
+          // Windows 下 Playwright 经 cmd.exe 起进程，`npm` 会解析到 npm.cmd
+          // （不是被策略拦住的 npm.ps1）。
+          command: `npm run dev -- --port ${E2E_PORT} --strictPort --host 127.0.0.1`,
+          url: E2E_BASE_URL,
+          reuseExistingServer: false,
+          timeout: 120_000,
+          stdout: 'pipe',
+          stderr: 'pipe',
         },
-      ]
-    : {
-        // `npm run dev` = `vite`；用 `--` 把端口参数透传给 vite。
-        // Windows 下 Playwright 经 cmd.exe 起进程，`npm` 会解析到 npm.cmd
-        // （不是被策略拦住的 npm.ps1）。
-        command: `npm run dev -- --port ${E2E_PORT} --strictPort --host 127.0.0.1`,
-        url: E2E_BASE_URL,
-        reuseExistingServer: false,
-        timeout: 120_000,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-})
+});
 
 export {
   A11Y_SPEC,
@@ -504,4 +532,4 @@ export {
   E2E_PORT,
   FULL_SPEC,
   FUNCTIONAL_SPEC,
-}
+};

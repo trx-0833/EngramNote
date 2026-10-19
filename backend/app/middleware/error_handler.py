@@ -38,6 +38,12 @@ from starlette.types import ASGIApp
 
 from ..core import context
 from ..core.app_error import AppError
+from ..core import i18n
+from ..core.error_messages import (
+    internal_error_message,
+    resolve_http_status_message,
+    resolve_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +168,13 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "HTTP 错误 | status=%d | detail=%s",
                 exc.status_code, exc.detail,
             )
+            raw_detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             return self._error_response(
                 status_code=exc.status_code,
-                detail=exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+                # i18n：按**中文原文**查表翻译（`HTTPException` 没有业务错误码，
+                # 只有中间件合成的 `HTTP_<status>`，而那个不能用来选文案 ——
+                # 同一个 401 在不同端点可以是不同的意思）。见 core/error_messages.py
+                detail=resolve_http_status_message(raw_detail, i18n.get_locale()),
                 error_code=f"HTTP_{exc.status_code}",
             )
         except ValidationError as exc:
@@ -172,19 +182,25 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "参数校验错误 | detail=%s",
                 str(exc).replace("\n", " ")[:500],
             )
+            # ⚠️ 保持现有行为：Pydantic 的报错本身是**英文**的，原样透传。
+            # 本轮的 i18n 只让"我们写的文案"随语言走，不翻译 Pydantic 的输出
+            # （那需要给每个字段写双语校验消息，是阶段 2 的范围）。
             return self._error_response(
                 status_code=422,
                 detail=str(exc),
                 error_code="VALIDATION_ERROR",
             )
         except AppError as exc:
+            # i18n：表里登记了这个 code 就按当前语言返回，否则用 `raise` 时写的那句
+            # —— 于是 90 处 `AppError` 可以**分批迁移**（见 core/error_messages.py）
+            detail = resolve_message(exc.code, exc.message, i18n.get_locale())
             logger.warning(
                 "业务错误 | code=%s | status=%d | detail=%s",
-                exc.code, exc.http_status, exc.message,
+                exc.code, exc.http_status, detail,
             )
             return self._error_response(
                 status_code=exc.http_status,
-                detail=exc.message,
+                detail=detail,
                 error_code=exc.code,
                 data=exc.data,
             )
@@ -200,6 +216,6 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             )
             return self._error_response(
                 status_code=500,
-                detail="服务器内部错误，请稍后重试",
+                detail=internal_error_message(i18n.get_locale()),
                 error_code="INTERNAL_ERROR",
             )

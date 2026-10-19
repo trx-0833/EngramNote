@@ -13,7 +13,37 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+import { applyLocale } from '../i18n/locales';
+
+/**
+ * ★ 把测试环境的语言**钉死**在 `zh-CN`（i18n 阶段 0）
+ *
+ * ## 为什么这是整轮 i18n 最关键的一行
+ *
+ * 全仓 **502 处测试断言在按中文文案查询**（`KnowledgeGraph.test.tsx` 146 处、
+ * `Projects.test.tsx` 96 处、`QuestionSets.test.tsx` 48 处…）。
+ * 如果不钉住语言，`resolveInitialLocale()` 会去读 `navigator.language` ——
+ * 那在 jsdom 里默认是 `en-US`，于是**所有中文断言一起变红**。
+ *
+ * 钉住之后：那 502 处**一条都不用改**，而英文路径由专门的用例
+ * （显式切到 `en`）覆盖。这条选择写在 i18n 方案的 §3.2 ——
+ * 不钉的话，这轮就会从"做 i18n"变成"重写 502 处断言"，
+ * 而那件事既容易引入假绿，也不是用户要的。
+ *
+ * ## 为什么用 `beforeEach` 而不是只写一次
+ *
+ * 有用例会显式 `setLocale('en')` 或往 localStorage 里写值来测英文路径。
+ * 每个用例前复位，才不会让上一个用例的语言泄漏到下一个 ——
+ * 那种泄漏的表现是"单独跑绿、一起跑红"，极难查。
+ */
+beforeEach(() => {
+  localStorage.setItem('engramnote_locale', 'zh-CN');
+  // 同步模块级变量（`applyLocale` 写的就是它，见 `i18n/locales.ts`）——
+  // 只写 localStorage 不够：`api/client.ts` 读的是那个变量。
+  applyLocale('zh-CN', { persist: false });
+});
 
 /**
  * jsdom 不实现滚动相关的 DOM API

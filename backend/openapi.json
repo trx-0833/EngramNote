@@ -3366,6 +3366,35 @@
         "title": "LinkedPersonalNoteItem",
         "type": "object"
       },
+      "LocaleSettingRequest": {
+        "description": "更新语言偏好的请求体\n\n`pattern` 而不是 `Literal['zh-CN','en']`：后者的 422 报错里会列出全部合法值，\n但契约（`openapi.json`）里只能表达成一个 enum —— 两种写法都能校验，\n这里选 pattern 是因为它与 `core/i18n.SUPPORTED_LOCALES` 的字符串形态\n直接对应，改语言清单时不必再想\"Literal 要不要同步\"。\n\n⚠️ 真正的合法值清单在 `core/i18n.SUPPORTED_LOCALES`，本 pattern 是它的\n契约投影。`tests/test_i18n.py` 有一条断言比对两者（避免加了一种语言\n却忘了改这里，表现为\"前端能切、保存时报 422\"）。",
+        "properties": {
+          "locale": {
+            "description": "Interface language",
+            "pattern": "^(zh-CN|en)$",
+            "title": "Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "title": "LocaleSettingRequest",
+        "type": "object"
+      },
+      "LocaleSettingResponse": {
+        "properties": {
+          "locale": {
+            "title": "Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "title": "LocaleSettingResponse",
+        "type": "object"
+      },
       "LogoutRequest": {
         "description": "登出请求体（阶段 6.3）\n\n两个字段都**可选**：登出必须在\"客户端状态不完整\"时也能调用\n（见 `refresh_token_service.revoke_refresh_token` 的说明）。\n\n- `refresh_token` 为空时服务端没有可撤销的目标，直接返回 `revoked=0`；\n- `all_devices=True` 时撤销该用户全部刷新令牌（各设备都需要重新登录）。",
         "properties": {
@@ -6937,6 +6966,17 @@
             ],
             "title": "Last Reminded At"
           },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
           "username": {
             "title": "Username",
             "type": "string"
@@ -7325,6 +7365,78 @@
         "summary": "Submit Answer",
         "tags": [
           "学习评估"
+        ]
+      }
+    },
+    "/api/auth/locale": {
+      "get": {
+        "description": "获取当前用户的界面语言偏好（i18n 阶段 0）\n\n## 前端的界面语言**不以此为准**\n\n界面语言由前端自己决定（`localStorage` → `navigator.language` → 默认），\n这样**未登录的登录页**也能有正确的语言 —— 而登录页调不到这个端点。\n本端点读回来的值用于\"同一账号在另一台设备上已经选过语言\"时**回填**。\n\nReturns:\n    LocaleSettingResponse: 当前用户的界面语言",
+        "operationId": "get_locale_setting_api_auth_locale_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocaleSettingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Locale Setting",
+        "tags": [
+          "认证"
+        ]
+      },
+      "put": {
+        "description": "更新当前用户的界面语言偏好（i18n 阶段 0）\n\n## 这个字段的真正用途是给 Celery worker 用\n\nLLM 提示词要跟界面语言走，而提示词的调用点在 worker 里 ——\n那里没有请求上下文，读不到 `Accept-Language`。所以 worker 靠\n`note.user_id → users.locale` 反查（见 `models/user.py` 的 `locale` 字段注释）。\n\n由认证依赖注入的 `current_user` 仍挂接在会话上，直接改字段并提交即可持久化。\n\nRaises:\n    ValidationError: `locale` 不是受支持的语言（422，由 `LocaleSettingRequest`\n        的 pattern 挡下 —— 合法值清单见 `core/i18n.SUPPORTED_LOCALES`）\n\nReturns:\n    LocaleSettingResponse: 更新后的界面语言",
+        "operationId": "update_locale_setting_api_auth_locale_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocaleSettingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocaleSettingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Locale Setting",
+        "tags": [
+          "认证"
         ]
       }
     },

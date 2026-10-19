@@ -85,7 +85,29 @@ const SCHEMA_TS = path.join(HERE, 'schema.ts');
 const VIRTUAL_FILE = path.join(HERE, '__openapi_drift__.ts');
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'];
-const REQUEST_HELPERS = new Set(['request', 'uploadRequest', 'authorizedFetch']);
+
+/**
+ * 本脚本认得的"真正发起请求"的 helper（AST 靠它找出端点的调用方）
+ *
+ * ## ⚠️ 新加一个请求 helper 时必须同步这里（2026-10-19 补 `downloadRequest`）
+ *
+ * 漏掉的后果**不是报错，而是静默误报**：`downloadRequest` 是导出功能
+ * （`api/notes.ts` 的 `exportNote`）用的，它不在这个集合里时，AST 认不出
+ * `exportNote` 是"发起请求的导出函数"，于是：
+ *
+ * 1. `GET /api/notes/{note_id}/export` 被列进"schema 中**无前端调用方**的端点"
+ *    —— 而它明明有调用方；
+ * 2. 更糟的是那个端点的**参数与响应**从此不再被漂移检查盯着
+ *    （脚本靠"调用方传了什么"与契约比对）。
+ *
+ * 也就是说：漏一个 helper = 用它写的所有端点**悄悄退出漂移覆盖**。
+ * 加 helper 时顺手跑一次 `npm run gen:api:drift`，确认新端点**没有**
+ * 出现在"无前端调用方"名单里。
+ *
+ * `downloadRequest` 走的是 GET（它的 `init` 固定 `method: 'GET'`，
+ * 见 `api/client.ts`），所以 `readMethod` 的默认值正好适用。
+ */
+const REQUEST_HELPERS = new Set(['request', 'uploadRequest', 'authorizedFetch', 'downloadRequest']);
 
 /**
  * 查询串构造 helper（阶段 5.1 / S3b）

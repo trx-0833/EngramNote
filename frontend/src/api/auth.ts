@@ -8,6 +8,10 @@
  */
 import { request, type User, type TokenResponse } from './client';
 import type { BodyOf, Schema } from './generated/types';
+// `import type` 是必须的：`i18n/locales` 是**运行期**模块（有状态），
+// 这里只借它的 `Locale` 类型 —— 类型导入在编译后完全擦除，
+// 所以不会与 `i18n/index.tsx` 的动态 import 形成任何运行期耦合。
+import type { Locale } from '../i18n/locales';
 
 /**
  * 用户注册
@@ -124,6 +128,48 @@ export async function updateUserReminderSettings(enabled: boolean): Promise<User
   // `UserReminderSettingsResponse`（唯一字段 `email_reminder_enabled: boolean`，必填）
   const body: BodyOf<'/auth/reminder-settings', 'put'> = { email_reminder_enabled: enabled };
   return request<UserReminderSettings>('/auth/reminder-settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+// --- 语言偏好 API（i18n 阶段 0）---
+
+/**
+ * 语言偏好的读写结果
+ *
+ * 形状与 `UserReminderSettingsResponse` 同款（单字段对象），
+ * 这样"设置类端点"在本文件里是一致的写法。
+ */
+export interface LocaleSetting {
+  locale: Locale;
+}
+
+/**
+ * 读取当前用户的语言偏好
+ *
+ * ⚠️ **前端的界面语言不以它为准**：界面语言由 `localStorage` +
+ * `navigator.language` 决定（`i18n/locales.ts` 的 `resolveInitialLocale`），
+ * 这样未登录的登录页也能有正确的语言。本端点读回来的值用于
+ * "同一账号在另一台设备上已经选过语言"时**回填**。
+ */
+export async function getLocale(): Promise<LocaleSetting> {
+  return request<LocaleSetting>('/auth/locale');
+}
+
+/**
+ * 更新当前用户的语言偏好
+ *
+ * 后端把它存进 `users.locale` —— 那个字段的真正用途是**给 Celery worker 用**：
+ * 任务签名只有 `note_id`，worker 里读不到 `Accept-Language`，
+ * 所以"LLM 提示词用哪种语言"必须靠库里这份偏好（见 `backend/app/core/i18n.py`）。
+ *
+ * 调用方（`i18n/index.tsx` 的 `setLocale`）**刻意不 await** 它：
+ * 切换语言是本地动作，网络失败不该让它失败。
+ */
+export async function updateLocale(locale: Locale): Promise<LocaleSetting> {
+  const body: BodyOf<'/auth/locale', 'put'> = { locale };
+  return request<LocaleSetting>('/auth/locale', {
     method: 'PUT',
     body: JSON.stringify(body),
   });

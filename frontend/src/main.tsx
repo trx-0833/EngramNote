@@ -43,20 +43,29 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/ConfirmProvider';
+import { LocaleProvider } from './i18n';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 最外层错误边界：即使路由层或布局层抛错也不会白屏 */}
     <ErrorBoundary>
-      <ToastProvider>
-        {/* 确认框宿主（批次 D3 后半）：给自定义 hook 里的确认提供 useConfirm()。
-            必须在 App 之外 —— 用到它的 hook 分布在多个页面里 */}
-        <ConfirmProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </ConfirmProvider>
-      </ToastProvider>
+      {/* 语言（i18n 阶段 0）：放在**最外层**，理由与 ErrorBoundary 同类 ——
+          它下面的每一层（含 Toast 的文案、ConfirmProvider 的按钮、
+          登录页、侧边栏）都要能取到 `t()`。
+          它的初始化函数会同时写 `<html lang>` 与请求头用的模块级变量
+          （见 `i18n/locales.ts` 的 `applyLocale`），所以必须**先于**任何
+          发请求的组件挂载。 */}
+      <LocaleProvider>
+        <ToastProvider>
+          {/* 确认框宿主（批次 D3 后半）：给自定义 hook 里的确认提供 useConfirm()。
+              必须在 App 之外 —— 用到它的 hook 分布在多个页面里 */}
+          <ConfirmProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ConfirmProvider>
+        </ToastProvider>
+      </LocaleProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

@@ -34,6 +34,8 @@ import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import Icon from '../components/Icon';
 import ReminderBanner from '../components/ReminderBanner';
+// 日期**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`
+import { formatDate } from '../utils/datetime';
 // 页面标题（visual-refactor-plan 批次 C1）：本页原先是内联写的
 // `<h1 style={{ fontSize: '2rem' }}>`，统一进组件后是 1.5rem —— 见 PageHeader.tsx
 import PageHeader from '../components/PageHeader';
@@ -648,7 +650,7 @@ export default function Dashboard() {
                       {statusLabels[note.status] || note.status}
                     </span>
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                      {new Date(note.created_at).toLocaleDateString('zh-CN')}
+                      {formatDate(note.created_at)}
                     </span>
                   </div>
                 </div>

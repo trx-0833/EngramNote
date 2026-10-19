@@ -36,6 +36,9 @@ class User(BaseModel):
         username: 用户名，唯一且建立索引，用于展示
         hashed_password: bcrypt 哈希后的密码，不存储明文
         is_active: 用户是否激活，默认为 True，设为 False 可软禁用用户
+        email_reminder_enabled: 邮件提醒开关，默认开启
+        last_reminded_at: 最近一次提醒发送时间，未发送过为 NULL
+        locale: 界面语言偏好（`zh-CN` / `en`），供 Celery worker 取用（见字段注释）
         created_at: 创建时间（继承自 BaseModel）
         updated_at: 更新时间（继承自 BaseModel）
     """
@@ -53,3 +56,20 @@ class User(BaseModel):
     email_reminder_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # 最近一次提醒发送时间（未发送过为 NULL，用于展示与去重）
     last_reminded_at: Mapped[Optional[datetime]] = mapped_column(TZDateTime(timezone=True), nullable=True)
+    # 界面语言偏好（i18n 阶段 0）。
+    #
+    # ## 为什么这个字段必须存在（而不是只靠 `Accept-Language`）
+    #
+    # LLM 提示词要跟界面语言走（"英文界面下生成的卡片/题目也应是英文"），
+    # 而提示词的调用点在 **Celery worker** 里 —— 那里**没有请求上下文**，
+    # 读不到 `Accept-Language`（任务签名只有 `note_id`，
+    # 见 `tasks/understand_tasks.py` 的 `understand_document_task`）。
+    #
+    # 所以 worker 需要一条"从 note_id 反查用户语言"的路：`note.user_id → users.locale`。
+    # 这是"prompt 跟语言走"这条需求的**前提**，不是可选优化。
+    #
+    # 默认 `zh-CN`：现有用户的观感一字不变，而新注册用户在
+    # `PUT /api/auth/locale` 之前也按中文处理（与 `DEFAULT_LOCALE` 一致）。
+    locale: Mapped[str] = mapped_column(
+        String(10), default="zh-CN", server_default="zh-CN", nullable=False
+    )
