@@ -490,12 +490,22 @@ npx vite preview --outDir <快照目录>
 | 7 | `be0484d` | `rollback/7-all-green` | 修好 `format:check` 的 11 个存量格式债 | 全绿（**8 条门禁首次全绿**） |
 | 8 | `8586d69` / `d8e35f7` | `rollback/8-docs` | 台账补实测基线；登记 `a11y` 门禁的抖动与根因；更正 `docs/README.md` 里过期的行数 | 纯文档 |
 | 9 | `11c14e1` | `rollback/9-layout` | **笔记详情页撤掉常驻竖轨**（用户实测反馈）：元信息 220px sticky 竖轨 → 页头下方一横排（`<aside aria-label>` → `<ul aria-label>`，容器语义随之更正）；正文接上 `--width-reading`(760px) 居中，**编辑态与 diff 态保持全宽** | 全绿；真 Chromium 实测 阅读 **760** / 编辑 **1296** / diff **1296** |
+| 10 | `58796d6` | `rollback/10-collapse` | **重复块列表可折叠**（用户要求）：段级 `<h2>` 里放真 `<button aria-expanded>`（WAI-ARIA 手风琴，与既有四处折叠头逐字同形）+ 补 `CleaningPanel.test.tsx` **12 条**（该组件此前一行测试都没有） | 全绿；测试 494 → **506** |
+| 11 | `ae7ffdf` | `rollback/11-a11y-stable` | **消除 a11y 审计的两处抖动**（修前 11 次运行 4 次红）：两条过宽的选择器补 `exact: true`；审计改在 `prefers-reduced-motion: reduce` 下运行；★ 顺带修掉产品代码里的真缺陷 —— **`.page-enter` 补上 reduced-motion 守卫** | 全绿；**a11y 连跑 4 次全 26 passed** |
 
-> **第 9 条是本轮之后按用户新反馈追加的**（原话：「在左侧位置有点占地方，
-> 上下滑动窗口时，不会腾出它占用的这一列」「让正文在人眼合适的位置」）。
-> 它撤掉了 §6 批次 E2 的"元信息竖轨"决定 —— 那条决定在当时是对的
+> **第 9–11 条是本轮之后按用户新反馈追加的**（第 9 条原话：「在左侧位置有点
+> 占地方，上下滑动窗口时，不会腾出它占用的这一列」「让正文在人眼合适的位置」；
+> 第 10 条：「重复块应该增加一个可以折叠的功能」）。
+>
+> 第 9 条撤掉了 §6 批次 E2 的"元信息竖轨"决定 —— 那条决定在当时是对的
 > （横排会占满整行），但在**长笔记**上被实测推翻：竖轨每一屏都占 220px，
 > 横排只在页头占一行。判据的差别在"代价持续多久"，不在"占多少"。
+>
+> 第 11 条把下面「已知欠账」里那条 a11y 抖动**真正修掉了**，而不是继续登记它 ——
+> 根因是**测量时机**（扫描落在 400ms 整页淡入的中间，axe 量到过渡色，
+> 证据：报出的 `#7f7f97` 在全 `src` grep 为 **0**），
+> 而修法顺带补上了 `.page-enter` 漏掉的 reduced-motion 守卫
+> （`visual-design-spec.md:271` 本来就要求它）。
 
 ### 本轮的量化结果
 
@@ -554,8 +564,7 @@ npx vite preview --outDir <快照目录>
 | 欠账 | 状态 |
 |---|---|
 | **`npm run format:check` 在 HEAD 上就是红的**（11 个文件：`GraphCanvas.tsx` / `graph/types.ts` / `KnowledgeGraph.tsx` / `knowledgegraph/*.ts` / `NoteDetail.tsx` / `e2e/graph-perf-*.ts`） | ✅ **已修**（提交 `be0484d`，标签 `rollback/7-all-green`）。开工前实测确认过它们是**存量债**（stash 后重跑清单一致），来自 `4f32849` 之前几轮 graph 工作。只做格式、`git diff -w` 逐处核对过没有语义改动 |
-| ★ **`npm run a11y` 是抖的**（本会话 6 次运行里 2 次红、4 次 `26 passed`） | ⏸ **未修，独立一轮**。两次失败的形态都指向**测试选择器**而不是产品代码：<br>① `e2e/a11y.spec.ts:1286` 的 `getByRole('heading', { name: '今日学习' })` —— Playwright 的 `name` 选项默认是**子串**匹配，于是它同时命中 `今日学习目标` 与 `今日学习报告 (2026-01-06)`，两者同时可见时抛 strict mode violation。修法是加 `exact: true`（或写成完整标题）<br>② `note-detail` 报 `page-has-heading-one` —— 意味着**那一轮页面根本没渲染出 h1**（数据桩没到位），属等待条件不足<br>⚠️ 两个都不是本轮引入的：本轮只改了 CSS、一个纯新增的 hook、一段样板间内容与若干 markdown，**碰不到 `/today` 与 `/note-detail` 的渲染逻辑**；且同一份代码连跑两次可以一次红一次绿 |
+| ★ **`npm run a11y` 是抖的**（累计 11 次运行里 **4 次红**） | ✅ **已修**（提交 `ae7ffdf`，标签 `rollback/11-a11y-stable`；**修后连跑 4 次全 26 passed**）。根因是**两处测量缺陷**，都不是产品缺陷：<br>① `e2e/a11y.spec.ts` 的 `getByRole('heading', { name: '今日学习' })` —— Playwright 的 `name` 选项默认是**子串**匹配，于是它同时命中页面标题「今日学习」与 `h2`「今日学习报告 (2026-01-06)」⇒ `exact: true`（同一场景的「薄弱点」早就这么写了）<br>② **扫描落在整页淡入的中间**：`.page-enter` 是 400ms 的 `fadeIn`，淡入时所有文字颜色被合成到中间值 ⇒ axe 报出**源码里不存在**的 `color-contrast`（决定性证据：报出的 `#7f7f97` 在全 `src` grep 为 **0**；同一次里 `#c0392b`→`#ce665b` 等**全部**乘了同一系数，说明整页在被淡化）。修法：审计改在 `prefers-reduced-motion: reduce` 下运行 + 等有限动画跑完（有界 3s、过滤 `infinite`）<br>★ **顺带修掉一个产品代码的真缺陷**：`.page-enter` 此前**没有** reduced-motion 守卫 —— 而 `visual-design-spec.md:271` 明写「所有动效必须包 `@media (prefers-reduced-motion: reduce)`」，且它是**每一个页面**都会跑的动画（对动效敏感的用户此前无法关掉它） |
 
-> ⚠️ 这两条（尤其第 2 条）意味着**"8 条门禁全绿"这个结论带一个前提**：
-> `a11y` 那一条需要跑两次取稳定结果，直到上面的选择器缺陷被修掉。
-> 其余 7 条都是确定性的（本会话各自连过多轮，无抖动）。
+> ✅ **"8 条门禁全绿"这条结论现在已经不带前提了**：`a11y` 的抖动根因已修，
+> 修后连跑 4 次全绿。此前那句话（"需要跑两次取稳定结果"）作废。

@@ -25,6 +25,16 @@ mineru_env/
 .env.*.local
 *.env
 !.env.example
+# ⚠️ 备份与临时副本（2026-10-19 补）：`.env` 那条**只匹配这一个文件名**，
+# 而"换密钥前先备份"是本项目的常规动作（`.env.bak-key-rotate-<时间戳>`），
+# 副本里装的是**上一把密钥**。实测过：`git check-ignore backend/.env.bak-…`
+# 当时返回 1（未被忽略），也就是说它会出现在 `git status` 的未跟踪列表里、
+# 一次 `git add -A` 就会被提交上去。下面三条把它堵住。
+# `*.env.bak*` 同时覆盖 `.env.bak` 与 `xxx.env.bak-20261019` 两种写法。
+.env.bak*
+*.env.bak*
+.env.orig
+.env.save
 
 # ---- 运行时数据（用户生成，不提交） ----
 backend/data/db/
