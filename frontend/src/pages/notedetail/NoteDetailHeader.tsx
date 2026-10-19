@@ -132,21 +132,6 @@ export default function NoteDetailHeader({
 
   return (
     <header style={{ marginBottom: 'var(--space-lg)' }}>
-      {/* 顶部视图切换 tab（批次 E2）——位置与外观变了，**行为与文案没变**：
-          仍是 ViewModeTabs 的「原始版 / 清洗版 / 对比视图」三个按钮、
-          同样的禁用条件、同样由 NoteDetail 的 viewMode 驱动。
-          `.viewTabs` 只改这一处的观感（透明底 + 底线 + 金色指示线），
-          `segment-control` / `segment-btn` 两个全局类本身一字未改，
-          学习评估页仍在用它们原来的样子。 */}
-      <div className={styles.viewTabs}>
-        <ViewModeTabs
-          viewMode={viewMode}
-          onViewModeChange={onViewModeChange}
-          canShowClean={canShowClean}
-          canShowDiff={canShowDiff}
-        />
-      </div>
-
       {/* 标题行。2026-10-19：标题**独占一行**，不再与按钮组抢宽度。
           这两层骨架（以及窄屏那两条）已随组件搬进 NoteDetailHeader.module.css
           —— 类名哈希后写在 responsive.css 里的选择器会永远选不中（5.6 序 8）。 */}
@@ -168,6 +153,41 @@ export default function NoteDetailHeader({
             那正是"标题被压成两行"的成因（见 module.css 文件头的实测表）。
             现在它只包标题，按钮是它下面的兄弟。 */}
         <PageHeader title={note.title} spacing="none" />
+      </div>
+
+      {/* 视图切换 tab（批次 E2 建，2026-10-19 **换了位置**）
+          —— 行为与文案一字未变：仍是 `ViewModeTabs` 的
+          「原始版 / 清洗版 / 对比视图」三个按钮、同样的禁用条件、
+          同样由 `NoteDetail` 的 `viewMode` 驱动。
+          `.viewTabs` 只改这一处的观感（透明底 + 底线 + 金色指示线），
+          `segment-control` / `segment-btn` 两个全局类本身一字未改，
+          学习评估页仍在用它们原来的样子。
+
+          ## 为什么从"页头最上面"挪到"标题下面"
+
+          用户实测反馈：**「放在左上角让人搞不懂其具体的功能」**。
+          实测证实了那个观感 —— tab 条**容器占满整行**（1600 下 1296px），
+          而**内容只有 188px 贴在左边缘**，右侧 1108px 全空；
+          三个按钮分别是 42 / 42 / 56px 宽。也就是说它是一条通栏底线下面
+          挂着三个孤立的小按钮，悬在标题、按钮、元信息**之上**，
+          没有任何视觉分组或标签说明它跟下面哪一块有关。
+
+          挪到标题**正下方**之后归属关系直接读得出来：它们控制的是
+          **这一篇笔记**用哪一版显示。页头顺序于是变成
+          「叫什么 → 用哪一版看 → 能对它做什么 → 它是什么」，
+          前两步都是"这个实体"，后两步是"对它做什么/它是什么"。
+
+          ⚠️ 刻意**没有**加「查看：」之类的可见标签：那是改文案
+          （`ViewModeTabs` 的字一个都没动过），而且加标签会让这一行
+          变成"标签 + 控件"的两段式，比现在的"三个 tab 贴着标题"更碎。
+          若挪位之后仍然读不懂，那才轮到考虑加标签。 */}
+      <div className={styles.viewTabs}>
+        <ViewModeTabs
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
+          canShowClean={canShowClean}
+          canShowDiff={canShowDiff}
+        />
       </div>
 
       {/* 操作工具栏：8~9 个按钮，一行放不下就自然换行。
