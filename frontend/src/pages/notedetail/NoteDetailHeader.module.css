@@ -173,15 +173,72 @@
   margin-bottom: var(--space-sm);
 }
 
-/* 工具栏：8~9 个按钮，一行放不下就换行。
+/* ════════════════════════════════════════════════════════════════
+ * 操作工具栏（2026-10-19 第三次改版：按视觉重量分两级）
  *
- * `flex-wrap` 在**基础规则**里（不再只写在窄屏档）—— 见文件头"断点空档"。
- * `gap` 与 768px 档原来的值一致（`--space-sm`），所以窄屏观感不变。 */
+ * ## 结构：一个容器、两组，同一行
+ *
+ * ```
+ * <div .noteDetailToolbar>          ← 容器：display:flex
+ *   <div .noteDetailActions>        ← 辅助组（幽灵按钮，在左）
+ *   <div .noteDetailPrimaryActions> ← 主操作（实心，推到最右）
+ * </div>
+ * ```
+ *
+ * **为什么主操作在 DOM 里排后面、却显示在最右**：用 `margin-left: auto`
+ * 把它推过去，而不是改 DOM 顺序 —— DOM 顺序是**读屏的朗读顺序**，
+ * 而"辅助操作在前、主操作在后"读起来是顺的（先看有什么可做，
+ * 最后落到"去做"）。视觉上它在最右，正好落在阅读的终点。
+ *
+ * ⚠️ **第一版不是这样的**：那时两组各占一行（主操作单独一行靠左），
+ * 人眼核对截图后发现「立即复习」孤零零挂在左边、辅助组在右边，
+ * 中间一大片空 —— 横向断裂比"两组同行"更乱。所以合成一行。
+ *
+ * ## 间距
+ *
+ * 容器与上面 tab 条之间 16（两个区块），与下面元信息条之间 16。
+ * 组之间用 `--space-lg`(24) 而不是 `--space-sm`(8)：那是**分组的边界**，
+ * 要比组内间隔大一档才读得出"这是两组"。
+ * ════════════════════════════════════════════════════════════════ */
+
+.noteDetailToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+/* 辅助操作组：幽灵样式（无边框），退到背景。
+ *
+ * `flex-wrap` 在基础规则里（不再只写在窄屏档）—— 见文件头"断点空档"。 */
 .noteDetailActions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+}
+
+/* 主操作组（只有「立即复习」会落进来）。
+ *
+ * `margin-left: auto` 把它推到容器最右 —— 它是最响的元素，
+ * 落在阅读终点上。
+ *
+ * `:empty` 那条是关键：主操作**经常不存在**（`hasQuizItems` 为假、
+ * 或笔记还没到 archived/learning）。空 div 若仍参与布局，
+ * `justify-content: space-between` 会把它当成第二个 flex 项，
+ * 于是辅助组被推到左边、右边留一片空。 */
+.noteDetailPrimaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+
+.noteDetailPrimaryActions:empty {
+  display: none;
 }
 
 /* ── 窄屏（沿用全局的 768px，不另造断点）── */
@@ -196,17 +253,37 @@
     align-items: stretch;
   }
 
-  /* 按钮撑满可用宽度（原来是 `flex: 1 1 auto`，值一字未改）。
-     现在工具栏自己会换行，所以这条的效果是"每行的按钮把该行填满"，
-     而不是"把 8 个按钮压在一行里"。 */
+  /* 窄屏改成上下两行：辅助组在上（靠左、按内容宽度），主操作在下（靠左）。
+     `flex-direction: column` 而不是让两组各占 `flex-basis: 100%` ——
+     后者在两组都存在时会各占一行，但**顺序仍是 DOM 顺序**
+     （辅助在前、主操作在后），与这里的意图一致，只是写法更绕。 */
+  .noteDetailToolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  /* ⚠️ 辅助组**不再拉伸**，这是本轮修掉的一个缺陷。
+     改之前这里是 `flex: 1 1 auto`，在"一行只剩一个按钮"时会让它
+     **撑满整行**：实测 768px 下「返回」就是一条 1472px 宽的通栏大按钮
+     （截图核对时看到的），看起来像个主操作。
+     `flex-grow: 0` 之后按钮各自保持内容宽度。 */
   .noteDetailActions :global(.btn) {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+  }
+
+  /* 主操作组靠左，`margin-left: auto` 在竖排下没有意义（会把整组推到右边），
+     所以清掉。 */
+  .noteDetailPrimaryActions {
+    margin-left: 0;
   }
 }
 
 @media (max-width: 480px) {
-  /* 笔记详情的操作按钮：一行两个，不再挤成"一个字一行"的竖排 */
+  /* 极窄屏：辅助按钮一行两个，不再挤成"一个字一行"的竖排。
+     用 `flex-basis` 而不是 `flex: 1 1 calc(50% …)` —— 后者在
+     "一行只剩一个按钮"时又会把它拉满整行（正是上面刚修掉的形态）。 */
   .noteDetailActions :global(.btn) {
-    flex: 1 1 calc(50% - var(--space-sm));
+    flex: 0 1 calc(50% - var(--space-sm));
   }
 }

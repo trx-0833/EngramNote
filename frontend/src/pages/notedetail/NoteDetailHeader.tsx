@@ -190,40 +190,82 @@ export default function NoteDetailHeader({
         />
       </div>
 
-      {/* 操作工具栏：8~9 个按钮，一行放不下就自然换行。
-          独立成一行之后，标题与按钮不再互相压缩。 */}
-      <div className={styles.noteDetailActions}>
-        {editMode === 'view' && (
-          <button
-            className="btn btn-secondary"
-            onClick={onEnterEdit}
-            disabled={viewMode === 'original' || isProcessing}
-            title={
-              viewMode === 'original'
-                ? '原始版不可编辑，请在清洗版中编辑'
-                : isProcessing
-                  ? '处理中，暂不可编辑'
-                  : '编辑笔记内容'
-            }
-          >
-            <Icon name="edit" size={16} />
-            编辑
-          </button>
-        )}
-        <button
-          className="btn btn-secondary"
-          onClick={onOpenVersionHistory}
-          disabled={['uploading', 'converting'].includes(note.status)}
-          title="查看版本历史"
-        >
-          版本历史
-        </button>
-        {/* 导出（想法 4「设计导出功能」）—— 页头的第 9 个按钮。
-              ⚠️ 复用现成的 `.noteDetailActions` 换行规则，**不改页头 CSS**：
-              那 5 条窄屏规则（768px 上下排列 + 按钮撑满、480px 一行两个）
-              是 5.6 序 8 专门搬进模块、并被 `verify-built-css.mjs` 的切片标记
-              盯着的既有结论。多一个按钮只是多一个被换行的项。
+      {/* 操作工具栏：**按视觉重量分两级**（2026-10-19 第三次改版）
+          
+          ## 为什么分级（人眼核对真实页面后定的）
+          
+          改之前 9 个按钮是**同一套白底描边、同一字号**，横排一行：
+          编辑 / 版本历史 / 导出 / 立即复习 / 学习评估 / AI预处理 /
+          取消审阅 / 删除 / 返回。于是出现三个问题：
+          
+          1. **没有主次** —— 工具栏是页头里最密的东西，9 个等重方框把标题压住了；
+          2. **两个深蓝按钮并列**（「立即复习」与「AI预处理」）—— 主操作不唯一，
+             眼睛不知道该落哪；
+          3. **「删除」是整页最响的元素** —— 通栏红底白字，比任何操作都显眼。
+             破坏性操作不该是页头的视觉焦点。
+          
+          ## 分级规则
+          
+          | 级 | 成员 | 样式 | 理由 |
+          |---|---|---|---|
+          | **主操作** | 立即复习 | `.btn-primary`（深墨色实心） | 这一页唯一的主动作是"去学习"。它是**唯一**的实心按钮 |
+          | 辅助操作 | 编辑 / 版本历史 / 导出 / 学习评估 / AI预处理 / 取消审阅 / 返回 | `.btn-ghost`（无边框，悬停才浮起） | 偶尔用一次。让工具栏**退到背景**，标题重新成为焦点 |
+          | 破坏性 | 删除 | `.btn-danger-outline`（描边危险色） | 仍清楚可辨（`--color-error` 白底 5.44:1，见 `components.css:128`），但不再是页头最响的东西 |
+          
+          `.btn-ghost` 与 `.btn-danger-outline` 都是**既有的全局类**
+          （`components.css:131` / `:141`），本轮没有新增任何按钮样式。
+          
+          ## 布局：一个容器、两组、同一行
+          
+          ```
+          [编辑 版本历史 导出 学习评估 AI预处理 取消审阅 删除 返回]   [立即复习]
+           ← 辅助组（幽灵，靠左）                                    主操作（实心，最右）→
+          ```
+          
+          ⚠️ **第一版不是这样的**：那时两组各占一行（主操作单独一行靠左），
+          人眼核对截图后发现「立即复习」孤零零挂在左边、辅助组在右边，
+          中间一大片空 —— 横向断裂比"两组同行"更乱。所以合成一行，
+          主操作用 `margin-left: auto` 推到最右。
+          
+          ## 窄屏：上下两行，且不再出现"一个按钮撑满整行"
+          
+          ≤768px 时容器改竖排（辅助组在上、主操作在下）。
+          原来那条 `flex: 1 1 auto` 在"一行只剩一个按钮"时会让它**撑满整行**
+          —— 实测 768px 下「返回」就是一条 1472px 宽的通栏大按钮，
+          看起来像个主操作。现在按钮按内容宽度，不再拉伸。 */}
 
+      <div className={styles.noteDetailToolbar}>
+        {/* ① 辅助操作组：幽灵样式，退到背景。
+            ⚠️ DOM 顺序是**读屏的朗读顺序**：先"有什么可做"，最后才落到
+            "去做"（主操作在下面那个 div 里）。视觉上主操作被推到最右
+            （`margin-left: auto`），正好是阅读的终点。 */}
+        <div className={styles.noteDetailActions}>
+          {editMode === 'view' && (
+            <button
+              className="btn btn-ghost"
+              onClick={onEnterEdit}
+              disabled={viewMode === 'original' || isProcessing}
+              title={
+                viewMode === 'original'
+                  ? '原始版不可编辑，请在清洗版中编辑'
+                  : isProcessing
+                    ? '处理中，暂不可编辑'
+                    : '编辑笔记内容'
+              }
+            >
+              <Icon name="edit" size={16} />
+              编辑
+            </button>
+          )}
+          <button
+            className="btn btn-ghost"
+            onClick={onOpenVersionHistory}
+            disabled={['uploading', 'converting'].includes(note.status)}
+            title="查看版本历史"
+          >
+            版本历史
+          </button>
+          {/* 导出（想法 4「设计导出功能」）。
               禁用条件与 `title` 文案：
               - **处理中**（`isProcessing`）：正文还没生成或正在改写，导出来是半成品；
               - **对比视图**（`viewMode === 'diff'`）：那是"两版并排看"，
@@ -233,62 +275,73 @@ export default function NoteDetailHeader({
                 （`ViewModeTabs` 的 `canShowClean` 已经挡住了切过去），
                 所以用户能导的正是他手上有的那一版。
                 真正没有正文时后端回 `NOTE_EXPORT_EMPTY`，由 toast 透传文案。 */}
-        <button
-          className="btn btn-secondary"
-          onClick={onExport}
-          disabled={isProcessing || viewMode === 'diff' || exporting}
-          title={
-            isProcessing
-              ? '处理中，暂不可导出'
-              : viewMode === 'diff'
-                ? '对比视图无法导出，请先切换到某一版'
-                : viewMode === 'original'
-                  ? '导出原始版 Markdown 文件'
-                  : '导出清洗版 Markdown 文件'
-          }
-        >
-          {exporting ? '导出中…' : '导出'}
-        </button>
-        {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
-          <button className="btn btn-primary" onClick={() => navigate(`/review/quick/${note.id}`)}>
-            立即复习
-          </button>
-        )}
-        {(note.note_role === 'material' || !note.note_role) && (
           <button
-            className="btn btn-secondary"
-            onClick={() => navigate(`/assessment?noteId=${note.id}`)}
+            className="btn btn-ghost"
+            onClick={onExport}
+            disabled={isProcessing || viewMode === 'diff' || exporting}
+            title={
+              isProcessing
+                ? '处理中，暂不可导出'
+                : viewMode === 'diff'
+                  ? '对比视图无法导出，请先切换到某一版'
+                  : viewMode === 'original'
+                    ? '导出原始版 Markdown 文件'
+                    : '导出清洗版 Markdown 文件'
+            }
           >
-            学习评估
+            {exporting ? '导出中…' : '导出'}
           </button>
-        )}
-        {note.note_role === 'personal_note' && (
-          <button className="btn btn-secondary" onClick={onManageLinks}>
-            管理关联资料
+          {(note.note_role === 'material' || !note.note_role) && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => navigate(`/assessment?noteId=${note.id}`)}
+            >
+              学习评估
+            </button>
+          )}
+          {note.note_role === 'personal_note' && (
+            <button className="btn btn-ghost" onClick={onManageLinks}>
+              管理关联资料
+            </button>
+          )}
+          {(note.status === 'cleaned' ||
+            note.status === 'learning_failed' ||
+            note.status === 'archived') && (
+            <button className="btn btn-ghost" onClick={onStartLearning}>
+              AI预处理
+            </button>
+          )}
+          {(note.status === 'cleaned' ||
+            note.status === 'learning_failed' ||
+            note.status === 'converted' ||
+            note.status === 'archived') && (
+            <button className="btn btn-ghost" onClick={onArchive}>
+              {note.status === 'archived' ? '取消审阅' : '审阅'}
+            </button>
+          )}
+          <button className="btn btn-danger-outline" onClick={onDelete}>
+            <Icon name="delete" size={16} />
+            删除
           </button>
-        )}
-        {(note.status === 'cleaned' ||
-          note.status === 'learning_failed' ||
-          note.status === 'archived') && (
-          <button className="btn btn-primary" onClick={onStartLearning}>
-            AI预处理
+          <button className="btn btn-ghost" onClick={() => navigate('/notes')}>
+            返回
           </button>
-        )}
-        {(note.status === 'cleaned' ||
-          note.status === 'learning_failed' ||
-          note.status === 'converted' ||
-          note.status === 'archived') && (
-          <button className="btn btn-secondary" onClick={onArchive}>
-            {note.status === 'archived' ? '取消审阅' : '审阅'}
-          </button>
-        )}
-        <button className="btn btn-danger" onClick={onDelete}>
-          <Icon name="delete" size={16} />
-          删除
-        </button>
-        <button className="btn btn-secondary" onClick={() => navigate('/notes')}>
-          返回
-        </button>
+        </div>
+
+        {/* ② 主操作组：唯一的实心按钮，被推到最右。
+            条件不成立时这个 div 是空的，`.noteDetailPrimaryActions:empty`
+            会把它整个 `display: none`（否则 `justify-content: space-between`
+            会把它当成第二个 flex 项，把辅助组挤到左边、右边留一片空）。 */}
+        <div className={styles.noteDetailPrimaryActions}>
+          {(note.status === 'archived' || note.status === 'learning') && hasQuizItems && (
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/review/quick/${note.id}`)}
+            >
+              立即复习
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 元信息条（2026-10-18 起从 `children` 进来）。

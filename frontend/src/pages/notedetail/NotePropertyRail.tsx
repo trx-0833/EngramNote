@@ -48,7 +48,7 @@
 import type { CSSProperties } from 'react';
 import { updateNoteRole, type NoteDetail } from '../../api/client';
 import { useToast } from '../../components/Toast';
-import { formatDateTime } from '../../utils/datetime';
+import { formatDate } from '../../utils/datetime';
 import { statusClass, statusLabels } from '../../utils/labels';
 import styles from './NotePropertyRail.module.css';
 
@@ -129,9 +129,37 @@ export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRa
           <option value="personal_note">我的笔记</option>
         </select>
       </li>
-      {note.page_count && <li>{note.page_count} 页</li>}
-      <li>{(note.file_size / 1024).toFixed(0)} KB</li>
-      <li>创建于 {formatDateTime(note.created_at)}</li>
+      {/* 规格 + 日期合成**一项**（2026-10-19 第三次改版）。
+          
+          ## 为什么合并
+          
+          人眼核对真实页面（1600 / 1280 / 768 三档截图）后定的：原来
+          「9 页」「3004 KB」「创建于 2026/8/28 GMT+8 19:47:18」是**三个并列项**，
+          与徽章、状态、下拉框同样字号、同样视觉重量，于是这一行读起来
+          是七段等重的碎片；而末尾那段时间戳（`GMT+8 19:47:18`）是整行最长的
+          一段，却几乎没人需要"这篇笔记是几点几分导入的"。
+          
+          合并成一段**三级文字**（`.railMeta`）之后：语义分组清楚了
+          （徽章=身份、状态、控件、规格=次级），这一行也短了一大截。
+          
+          ⚠️ 用 `formatDate`（只到日）而不是 `formatDateTime`：后者会带上
+          `GMT+8 19:47:18`。这个函数是 `utils/datetime.ts` 里**既有**的导出，
+          本轮没有新增任何工具函数。
+          
+          ⚠️ `page_count` 为空（音频、Markdown 笔记）时**整段省略**，
+          不写"0 页" —— 那会把"没有页数这个概念"说成"零页"。
+          与 `page_count` 的真值判断一致（`0` 也不显示，因为 0 页不是有效值）。 */}
+      {(note.page_count || note.file_size) && (
+        <li className={styles.railMeta}>
+          {[
+            note.page_count ? `${note.page_count} 页` : null,
+            note.file_size ? `${(note.file_size / 1024).toFixed(0)} KB` : null,
+            `创建于 ${formatDate(note.created_at)}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </li>
+      )}
     </ul>
   );
 }
