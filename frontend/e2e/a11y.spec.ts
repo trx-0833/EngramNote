@@ -912,9 +912,64 @@ interface SceneOptions {
 async function auditScene(page: Page, log: A11yStubLog, opts: SceneOptions): Promise<AuditResult> {
   await opts.ready();
 
+  /**
+   * 在 `prefers-reduced-motion: reduce` 下审计（2026-10-19 新增）
+   *
+   * ## 为什么：动画中间态会产出**源码里不存在的**违规
+   *
+   * `.page-enter` 是每个页面都会跑的 400ms 整页淡入（`components.css:439`）。
+   * 扫描落在它中间时，**所有**文字颜色都被合成到中间值 —— 实测 note-detail
+   * 一次报 **13 个** `color-contrast` 节点，颜色齐刷刷是 `#7f7f97`
+   * （`--color-text-tertiary` #6f6f8a 与底色按同一系数合成），
+   * 而 `#7f7f97` 在全 `src` grep 为 **0**；同一次失败里还伴随
+   * `page-has-heading-one`，而 axe 自己的 DOM 快照里明明有 h1。
+   *
+   * 也就是说：那不是页面缺陷，是**测量时机**的缺陷。
+   *
+   * ## 为什么这是正当的修法，而不是"把门禁调松"
+   *
+   * `prefers-reduced-motion: reduce` 是**用户真实会用的设置**，而应用现在
+   * 真的尊重它（`.page-enter` 的守卫是同一批补的，见 `components.css`）。
+   * 在这个设置下审计，扫到的是"这类用户实际看到的页面" ——
+   * 静止、颜色是终值。**没有降低任何阈值**：违规仍然一条不放，
+   * 只是不再把过渡态当成稳态。
+   *
+   * ⚠️ 与下面那段"等有限动画跑完"是**两道**，不是重复：
+   * 那一道管的是 `reduce` 下**仍在跑**的动画（例如某个模块漏了守卫），
+   * 这一道管的是"根本不让它跑起来"。两道都不改变任何断言。
+   */
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
   // 数据回来后常还有一次重排（列表、统计、力导向图）。
   // 刻意**不**用 `waitForLoadState('networkidle')`：Vite 的 HMR 常驻连接会让它永不成立。
   await page.waitForTimeout(500);
+
+  // ── 等**有限**动画跑完再扫（2026-10-19 新增）──
+  //
+  // ## 为什么必须过滤掉 `infinite`
+  //
+  // 全站有 7 处无限动画（`graphSpin` / `shimmer` / `uploadGlowPulse` / `spin` /
+  // `sgSlide` …，见 `animation: … infinite`）。不过滤的话 `getAnimations()` 永远非空，
+  // 26 个场景每个都要等满超时 —— 那是拿 3 秒 × 26 的代价换一个假象。
+  // 用 `playState !== 'finished'` 判断：无限动画永远停在 `running`，
+  // 而有限动画跑完后是 `finished`。
+  //
+  // 超时是**有界**的（3s）且失败**不抛错**：这是个"尽量"的改进，
+  // 不该因为某个页面动画卡住就把整个审计判红。真正的门禁是下面那些断言。
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .getAnimations()
+          .every(
+            (a) => a.effect?.getTiming().iterations === Infinity || a.playState === 'finished',
+          ),
+      null,
+      { timeout: 3000 },
+    )
+    .catch(() => {
+      // 有无限动画（或动画没在 3 秒内结束）—— 继续扫，不把审计判红
+    });
 
   const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
   const nodeCount = await page.evaluate(() => document.querySelectorAll('*').length);
@@ -1283,8 +1338,18 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       scene: 'today-learn',
       ready: async () => {
         await loginAs(page, '/today');
-        await expect(page.getByRole('heading', { name: '今日学习' })).toBeVisible();
-        await expect(page.getByRole('heading', { name: '每日推荐任务' })).toBeVisible();
+        // ⚠️ 前两条的 `exact: true` 是 2026-10-19 补的，不是可有可无的修辞：
+        // Playwright 的 `name` 选项**默认是子串匹配**，于是
+        //   - `'今日学习'` 同时命中页面标题「今日学习」**与** `h2`「今日学习报告 (2026-01-06)」
+        //   - `'每日推荐任务'` 同理
+        // 两者同时可见时抛 strict mode violation —— 实测在 6 次 a11y 运行里
+        // 复现 3 次（且与任何代码改动无关，是**数据可见时机**的抖动）。
+        // 下面 `:1294` 的「薄弱点」早就这么写了（那条注释解释了同一个坑），
+        // 这两条是当时漏掉的。
+        await expect(page.getByRole('heading', { name: '今日学习', exact: true })).toBeVisible();
+        await expect(
+          page.getByRole('heading', { name: '每日推荐任务', exact: true }),
+        ).toBeVisible();
         await expect(page.getByText('复习「均充的适用场景」')).toBeVisible();
         await expect(page.getByRole('heading', { name: '今日报告 (2026-01-06)' })).toBeVisible();
         // 待复习卡片的计数来自 /api/review/stats（12）：0 的话整块换成空状态

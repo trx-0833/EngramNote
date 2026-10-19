@@ -440,6 +440,36 @@ textarea::placeholder {
 }
 
 /**
+ * 页面进入动效的 `prefers-reduced-motion` 守卫（2026-10-19 补）
+ *
+ * ## 为什么补它：它既违反了本项目的规矩，又制造了一个假缺陷
+ *
+ * `visual-design-spec.md:271` 写着 **「所有动效必须包
+ * `@media (prefers-reduced-motion: reduce)`」**，而 `.page-enter` 是
+ * **每一个页面**都会跑的那个动画（400ms 整页淡入），此前是全站唯一
+ * 漏掉守卫的常驻动效（实测：全 `src` 只有 5 个模块有守卫，见
+ * `a11y-audit.md` 的登记）。
+ *
+ * 更实际的后果：它让**可访问性审计扫到过渡态**。整页淡入时所有文字颜色
+ * 都被合成到中间值，axe 于是报出**源码里根本不存在的**违规 ——
+ * 实测（2026-10-19）note-detail 场景一次报 13 个节点，颜色齐刷刷是
+ * `#7f7f97`（= `--color-text-tertiary` #6f6f8a 与底色按同一系数合成的结果），
+ * 而 `#7f7f97` 在全 `src` grep 为 **0**。
+ *
+ * 补上守卫后，审计可以在 `prefers-reduced-motion: reduce` 下运行，
+ * 动画不参与合成 ⇒ 扫到的是**静止后的真实颜色**，抖动消失。
+ *
+ * ⚠️ `animation: none` 而不是缩短时长：`prefers-reduced-motion: reduce`
+ * 的语义是"不要动"，不是"动得快一点"。缩短时长反而会让颜色**更快**落到
+ * 中间值上，把审计的窗口挪来挪去。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}
+
+/**
  * `.gradient-text` —— 曾用 `--gradient-primary` 做 `background-clip: text` 文字渐变，批次 A3 改掉。
  *
  * ## 为什么必须改
