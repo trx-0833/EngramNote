@@ -6,7 +6,7 @@
  * 3. 重复块列表与操作（恢复/删除）
  * 4. 清洗统计摘要
  */
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   startCleaning,
   stopCleaning,
@@ -59,6 +59,32 @@ export default function CleaningPanel({
   const [error, setError] = useState('');
   /** 当前展开内容对比的重复块索引（null 表示全部收起） */
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  /**
+   * 「重复块」整段列表是否展开（2026-10-19 新增）
+   *
+   * 与上面那个 `expandedIndex` 是**两层不同的折叠**，不要混：
+   * - 这一层折的是**整段列表**（10 个重复块时，面板会先占掉半屏）；
+   * - `expandedIndex` 折的是**单个块的内容对比**（「查看内容 / 收起内容」）。
+   *
+   * 默认**展开**（`true`）：清洗完最该看到的就是"有几处重复"，
+   * 一进来就是收起态等于把结果藏起来。折叠是用户主动的动作，不是默认姿态。
+   *
+   * ⚠️ 刻意**不做持久化**（不写 localStorage）：这是"我现在想把它挪开"的
+   * 临时动作，与阅读位置记忆（`hooks/useScrollMemory.ts`）不是一类东西 ——
+   * 那个记的是"我读到哪了"，这个记的是"我此刻想不想看"。下次打开笔记时
+   * 默认展开才是对的。
+   */
+  const [duplicatesOpen, setDuplicatesOpen] = useState(true);
+
+  /**
+   * 折叠按钮 `aria-controls` 指向的列表 id。
+   *
+   * 用 `useId()` 而不是写死一个字符串：本组件在页面上只渲染一次，写死也能跑，
+   * 但那样一来"这个 id 全页唯一"就只是个巧合 —— 将来若在别处复用这个面板
+   * （例如"清洗对比"页），两个 id 会撞上，而 `aria-controls` 指向错元素
+   * **不会有任何报错**。`useId` 由 React 保证唯一（与 `Dialog.tsx` 同款）。
+   */
+  const duplicatesListId = useId();
   /** 停止清洗的确认框是否打开（批次 D3：原来是同步的 `confirm()`） */
   const [confirmingStop, setConfirmingStop] = useState(false);
   /**
@@ -286,90 +312,131 @@ export default function CleaningPanel({
           {duplicatesDetail.length > 0 && (
             <div className={styles.duplicateBlocks}>
               {/* 与「清洗统计」同级的第二个区块 → 同为 `h2`（同一个 F-08 修复的
-                  第二条渲染路径；它们只在重复块非空时渲染）。字数/字重不变。 */}
-              <h2
-                style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}
-              >
-                重复块（{duplicatesDetail.length} 个）
-              </h2>
-              {duplicatesDetail.map((dup) => {
-                const expanded = expandedIndex === dup.block_index;
-                const hasContent = !!dup.content || !!dup.original_content;
-                return (
-                  <div key={dup.block_index} className={styles.duplicateBlock}>
-                    <div className={styles.duplicateBlockHeader}>
-                      <div className={styles.duplicateBlockInfo}>
-                        <span className={styles.duplicateBlockIndex}>块 {dup.block_index}</span>
-                        <span className={styles.duplicateBlockSimilarity}>
-                          与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className={styles.duplicateBlockActions}>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                          onClick={() => setExpandedIndex(expanded ? null : dup.block_index)}
-                          disabled={loading}
-                        >
-                          {expanded ? '收起内容' : '查看内容'}
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                          onClick={() => handleRestore(dup.block_index)}
-                          disabled={loading}
-                        >
-                          恢复
-                        </button>
-                        <button
-                          className="btn btn-danger"
-                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                          onClick={() => handleDelete(dup.block_index)}
-                          disabled={loading}
-                        >
-                          {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
-                          <Icon name="delete" size={16} />
-                          删除
-                        </button>
-                      </div>
-                    </div>
+                  第二条渲染路径；它们只在重复块非空时渲染）。字数/字重不变。
 
-                    {/* 块内容对比（供人工核对重复判断是否准确） */}
-                    {expanded && (
-                      <div className={styles.duplicateBlockCompare}>
-                        {hasContent ? (
-                          <>
-                            {/* 这一层 div 原本挂着 `duplicate-block-text`，但**全项目
+                  2026-10-19：整段列表可折叠。折叠是**一个真控件** ——
+                  WAI-ARIA 手风琴的标准写法（标题里放按钮），与本仓库
+                  `KnowledgeCards` / `QuestionSets` / `DailyMaterials` /
+                  `ProjectCard` 四处折叠头**逐字同形**（`KnowledgeCards.tsx:339-354`
+                  是最近的一份先例）：
+                  - `<h2>` 保留在**外壳**上（它是区块级标题，`heading-order` 靠它）；
+                  - 折叠行为落进 `<h2>` 里一个真 `<button aria-expanded>`；
+                  - 箭头 `aria-hidden`（"开还是关"由 `aria-expanded` 表达，
+                    留着只会让可访问名里多一个"▶"），旋转交给四个折叠头
+                    共用的全局类 `.collapse-arrow` / `.collapse-arrow-open`。
+
+                  ⚠️ 不用 `<details>/<summary>`：那会换掉现成的 `h2` 语义，
+                  而 F-08 那条 `heading-order` 修复正是钉在"这里是 h2"上
+                  （见上面 `清洗统计` 那段注释）。
+
+                  计数留在按钮**里面**：折叠后标题仍然告诉你有几处重复 ——
+                  否则收起之后这一行就只剩「重复块」三个字，
+                  用户得再展开一次才知道里面有多少。 */}
+              <h2
+                className={duplicatesOpen ? styles.duplicatesHeadingOpen : styles.duplicatesHeading}
+                style={{ fontSize: '0.875rem', fontWeight: 600 }}
+              >
+                <button
+                  type="button"
+                  className={styles.duplicatesToggle}
+                  onClick={() => setDuplicatesOpen((open) => !open)}
+                  aria-expanded={duplicatesOpen}
+                  aria-controls={duplicatesListId}
+                >
+                  <span
+                    className={`collapse-arrow ${duplicatesOpen ? 'collapse-arrow-open' : ''}`}
+                    aria-hidden="true"
+                  >
+                    <Icon name="chevron" size={16} />
+                  </span>
+                  <span>重复块（{duplicatesDetail.length} 个）</span>
+                </button>
+              </h2>
+
+              {/* 折叠的是**列表本身**，不是把标题一起藏掉 —— 藏掉标题的话
+                  用户就没有任何入口能把它再打开了。 */}
+              {duplicatesOpen && (
+                <div id={duplicatesListId}>
+                  {duplicatesDetail.map((dup) => {
+                    const expanded = expandedIndex === dup.block_index;
+                    const hasContent = !!dup.content || !!dup.original_content;
+                    return (
+                      <div key={dup.block_index} className={styles.duplicateBlock}>
+                        <div className={styles.duplicateBlockHeader}>
+                          <div className={styles.duplicateBlockInfo}>
+                            <span className={styles.duplicateBlockIndex}>块 {dup.block_index}</span>
+                            <span className={styles.duplicateBlockSimilarity}>
+                              与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className={styles.duplicateBlockActions}>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                              onClick={() => setExpandedIndex(expanded ? null : dup.block_index)}
+                              disabled={loading}
+                            >
+                              {expanded ? '收起内容' : '查看内容'}
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                              onClick={() => handleRestore(dup.block_index)}
+                              disabled={loading}
+                            >
+                              恢复
+                            </button>
+                            <button
+                              className="btn btn-danger"
+                              style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                              onClick={() => handleDelete(dup.block_index)}
+                              disabled={loading}
+                            >
+                              {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
+                              <Icon name="delete" size={16} />
+                              删除
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 块内容对比（供人工核对重复判断是否准确） */}
+                        {expanded && (
+                          <div className={styles.duplicateBlockCompare}>
+                            {hasContent ? (
+                              <>
+                                {/* 这一层 div 原本挂着 `duplicate-block-text`，但**全项目
                                 14 个样式表都没有定义它** —— 死类名，本轮随迁移删除
                                 （与试点轮删 `.feedback-pending` 同一处理）。
                                 嵌套保留：删掉它会改变 DOM 层级，那超出"纯搬家"。 */}
-                            <div>
-                              <div className={styles.duplicateBlockTextLabel}>
-                                保留的块 {dup.duplicate_of}（首次出现）
-                              </div>
-                              <pre className={styles.duplicateBlockTextContent}>
-                                {dup.original_content || '（内容缺失）'}
-                              </pre>
-                            </div>
-                            <div>
-                              <div className={styles.duplicateBlockTextLabel}>
-                                重复的块 {dup.block_index}
-                              </div>
-                              <pre className={styles.duplicateBlockTextContent}>
-                                {dup.content || '（内容缺失）'}
-                              </pre>
-                            </div>
-                          </>
-                        ) : (
-                          <p className={styles.duplicateBlockTextEmpty}>
-                            该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看
-                          </p>
+                                <div>
+                                  <div className={styles.duplicateBlockTextLabel}>
+                                    保留的块 {dup.duplicate_of}（首次出现）
+                                  </div>
+                                  <pre className={styles.duplicateBlockTextContent}>
+                                    {dup.original_content || '（内容缺失）'}
+                                  </pre>
+                                </div>
+                                <div>
+                                  <div className={styles.duplicateBlockTextLabel}>
+                                    重复的块 {dup.block_index}
+                                  </div>
+                                  <pre className={styles.duplicateBlockTextContent}>
+                                    {dup.content || '（内容缺失）'}
+                                  </pre>
+                                </div>
+                              </>
+                            ) : (
+                              <p className={styles.duplicateBlockTextEmpty}>
+                                该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

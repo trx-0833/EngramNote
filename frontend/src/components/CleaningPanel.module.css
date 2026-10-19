@@ -57,6 +57,55 @@
   margin-top: var(--space-sm);
 }
 
+/**
+ * 「重复块」区块标题里的折叠按钮（2026-10-19 新增）
+ *
+ * ## 为什么要把 `font` / `color` / `background` / `border` / `padding` / `margin`
+ * ## 全部显式复位
+ *
+ * `<button>` 有自己的 UA 样式（系统字体、灰底、2px 边框、居中文字、内边距）。
+ * 不复位的话，"把原来那行纯文字标题换成真按钮"就变成了一次改版 ——
+ * 而本轮的目标只是"能折叠"，外观应当**逐像素不变**。
+ * 取值逐项对应改动前那一行 `<h2>` 的实际外观：字号/字重/颜色**继承外层 `h2`**，
+ * 背景与边框本来就没有。与 `KnowledgeCards.tsx:638-650` 的 `groupToggleStyle`
+ * 逐项同形（那边是同一个问题的另一份解法）。
+ *
+ * ## 为什么写进样式表而不是像 KnowledgeCards 那样用内联常量
+ *
+ * 本组件的其余样式**已经全部在这个模块里**（5.6 第一批整表搬进来的），
+ * 再插一份内联常量会让"这个组件的样式在哪"有两个答案。
+ * 内联那一条先例的前提是那个页面本来就有内联样式的传统。
+ */
+.duplicatesToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/**
+ * 标题的两档下边距 —— 展开时留出与列表的间隔，收起时不留。
+ *
+ * ⚠️ 这两条**必须**成对存在，而且都要写：原来那个 `marginBottom` 写在
+ * `<h2>` 的**内联** `style` 里，内联权重高于任何选择器 —— 只要它还留在 tsx 里，
+ * 这里写什么都没用（"规则还在、永不生效"，本仓库 `css-convention.md` §3
+ * 记过多次的事故类型）。所以 tsx 那边已经把它删掉，改由这两个类承担。
+ */
+.duplicatesHeading {
+  margin-bottom: 0;
+}
+
+.duplicatesHeadingOpen {
+  margin-bottom: var(--space-sm);
+}
+
 .duplicateBlock {
   display: flex;
   flex-direction: column;
