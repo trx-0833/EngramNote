@@ -1,18 +1,20 @@
 /**
- * 笔记详情页「元信息竖轨」的私有样式（批次 E2）
+ * 笔记详情页「元信息条」的私有样式
  *
- * 借鉴表 `docs/visual-symbol-research.md` §C3「笔记详情」行的
- * **Memos property rail**：元信息收进一条窄竖轨，主内容区保持纯净。
+ * ## 版式变迁（两轮，都记在这里）
  *
- * ## 它为什么是"窄"的、为什么是竖的
+ * | 轮次 | 形态 | 动机 |
+ * |---|---|---|
+ * | 批次 E2（2026-09-23） | 主内容**左侧**一条 220px 常驻竖轨（Memos property rail，`position: sticky`） | 让主内容区保持纯净；7 项元信息横排会占满整行、把正文往下推 |
+ * | **2026-10-18（本轮）** | **标题下方一横排**（`flex-wrap`），不再有那一列 | 用户实测反馈：**「上下滑动窗口时，不会腾出它占用的这一列」** —— sticky 那一列整篇笔记都在占着 220px，正文被永久挤到右边 |
  *
- * 这一块原本横在页头与正文之间（一行 flex、`gap: --space-md`），
- * 单条笔记要交代 7 项信息，横排就得占满整行、把正文往下推；
- * 竖排之后它只占 220px 宽，与正文**并列**——正文的起始位置不再随
- * "这条笔记有几个项目标签"左右晃动（这正是 Memos/Linear 那条 rail 的动机）。
+ * ⚠️ 上一轮的理由（"横排会占满整行、把正文往下推"）在**长笔记**上被实测推翻了：
+ * 横排只在页头多占一行（滚过就没了），竖轨却是**每一屏**都占着 220px。
+ * 两者的代价不在一个量级上，所以这一轮换回来。
  *
- * 页宽在这一页是**全宽档**（`App.tsx` 的 `PAGE_WIDTH_ROUTES`：
- * `/notes/:noteId` → `full`，编辑态要分屏），所以让出 220px 不会挤压正文。
+ * 而且窄屏档（≤768px）**本来就是横排**（上一轮自己写的规则）—— 现在等于
+ * 把那套排版推广到所有宽度，**断点反而少了一个**：原来 768px 档要专门把
+ * `flex-direction` 从 column 改成 row，现在上下同形，那条媒体查询整条删除。
  *
  * ## `.roleSelect`（从 `NoteDetailHeader.module.css` 整体搬来，值一字未改）
  *
@@ -40,10 +42,10 @@
  *     白内圈在页面白底上对比度只有 1.0:1，单靠它控件"边界"仍然看不清；
  *     外圈负责把控件从背景里划出来（WCAG 2.4.11 要求焦点指示 ≥ 3:1）。
  *
- * 用 `box-shadow` 而不是 `outline` + `outline-offset`：
- * 这一列是 `display:flex; flex-direction:column`，`outline-offset` 画到
- * 控件外面的那两圈会被相邻兄弟元素压住，看起来像被裁掉一角；
- * `box-shadow` 不参与布局、也完全不改变控件几何（不会让这一列发生位移）。
+ * 用 `box-shadow` 而不是 `outline` + `outline-offset`：横排里相邻项挨得近，
+ * `outline-offset` 画到控件外面的那两圈会被相邻兄弟元素压住，看起来像被
+ * 裁掉一角；`box-shadow` 不参与布局、也完全不改变控件几何（不会让这一行
+ * 发生位移）。
  *
  * ### 兼容保留：`.roleSelect` 的基础值
  *
@@ -54,24 +56,27 @@
  */
 
 .rail {
+  /* 一横排、允许换行 —— 7 项在窄屏上自动折成两行，不需要媒体查询 */
   display: flex;
-  flex-direction: column;
-  /* ⚠️ 必须是 flex-start：列方向的默认 `stretch` 会把每一枚徽章拉成
-      整轨宽（胶囊变成横条），而它们应该各自只有文字的宽度。 */
-  align-items: flex-start;
-  gap: var(--space-sm);
+  flex-wrap: wrap;
+  /* 横排里的对齐语义是 `center`（原来是列方向的 `flex-start`）：
+     徽章、文字、下拉框的行高各不相同，不居中的话它们会各自贴着自己的
+     上边缘，看起来像没对齐 */
+  align-items: center;
+  /* 行内间距比竖排大（横排相邻项之间要有可辨的间隔），行间用小间距 */
+  gap: var(--space-sm) var(--space-md);
+  /* `ul` 的默认圆点与缩进必须清掉：这是"一条元信息"，不是"一列条目"。
+     `aria-label` 仍然保留 —— 读屏照样把它读成一个（有名字的）列表 */
+  list-style: none;
+  margin: 0;
+  padding: 0;
   font-size: 0.875rem;
   color: var(--color-text-secondary);
-  /* 与正文之间只留一条发丝线：这条轨是"页边的注"，不是第二个内容块 */
-  padding-right: var(--space-lg);
-  border-right: 1px solid var(--color-border-light);
-  /* 长内容（如"创建于 … GMT+8"）在窄轨里换行，而不是把轨道撑宽 */
+  /* 与下方正文之间一条发丝线：这条是"页头的最后一行"，不是第二个内容块 */
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border-light);
+  /* 长内容（如"创建于 … GMT+8"）在窄屏换行，而不是把这一行撑出横向滚动 */
   overflow-wrap: anywhere;
-  /* 轨道跟着滚动（正文很长时元信息仍可读）；`align-self` 让它在网格
-     单元格里不被拉伸，`sticky` 才有可移动的余量。 */
-  align-self: start;
-  position: sticky;
-  top: var(--space-md);
 }
 
 .roleSelect {
@@ -99,20 +104,12 @@
 
 /* ── 窄屏（沿用全局的 768px，不另造断点）──
  *
- * 两栏骨架在 ≤768px 收成单栏（见 `NoteDetail.module.css`），
- * 于是这条轨从"左侧竖轨"变成"正文上方的一横排"：
- * 竖排 → 横排换行，发丝线从右边挪到下边，sticky 取消（横条吸顶会挡住正文）。
- */
-@media (max-width: 768px) {
-  .rail {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-sm) var(--space-md);
-    padding-right: 0;
-    padding-bottom: var(--space-md);
-    border-right: none;
-    border-bottom: 1px solid var(--color-border-light);
-    position: static;
-  }
-}
+ * ⚠️ 这里**原来是一整条 `@media (max-width: 768px)` 块、5 条规则**
+ * （把竖轨改成横排：`flex-direction: row` / `flex-wrap: wrap` /
+ * `align-items: center` / 去掉 `border-right` / 加 `border-bottom` /
+ * `position: static`）。本轮把横排推广到所有宽度之后，那 5 条**全部成为
+ * 基础规则的一部分**，媒体查询整条删除 —— 断点少一个，"上下同形"
+ * 不再需要两处维护。
+ *
+ * 留着一条空的 `@media` 会让下一个人以为这里还有窄屏特例要照顾，
+ * 所以连块一起删，只留这段墓碑。 */

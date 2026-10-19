@@ -21,6 +21,7 @@
  *    角色下拉的样式（含那一圈两层焦点环）随之搬到
  *    `NotePropertyRail.module.css`，原处留了墓碑注释。
  */
+import type { ReactNode } from 'react';
 import type { NoteDetail, RetryConvertOutcome } from '../../api/client';
 import Icon from '../../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：本页的 h1 是**实体标题**
@@ -80,6 +81,20 @@ interface NoteDetailHeaderProps {
   onRetryConverted: (next: RetryConvertOutcome) => void;
   /** 跳转路由 */
   navigate: (path: string) => void;
+  /**
+   * 页头最下方的内容（2026-10-18 新增）
+   *
+   * 目前唯一的调用方是 `NoteDetail.tsx` 传进来的**元信息条**
+   * （`NotePropertyRail`）。它原本是主内容左侧那条常驻竖轨，用户实测反馈
+   * "占地方、滚动不腾位"，于是回到页头。
+   *
+   * 为什么用 `children` 而不是让页头直接 import 那个组件：
+   * 元信息条要用到 `note` 与 `onRoleUpdated`，而 `onRoleUpdated` 的落点是
+   * **页面**的 `setNote`（局部合并）—— 页头自己接这个回调会把它变成
+   * "页头管数据"，与它现在"只收 props、只渲染"的角色不符。
+   * 用 `children` 让页面继续持有那条数据流，页头只管**放在哪**。
+   */
+  children?: ReactNode;
 }
 
 /** 笔记详情页头部区域 */
@@ -100,6 +115,7 @@ export default function NoteDetailHeader({
   onManageLinks,
   onRetryConverted,
   navigate,
+  children,
 }: NoteDetailHeaderProps) {
   const isProcessing = PROCESSING_STATUSES.includes(note.status);
 
@@ -210,15 +226,21 @@ export default function NoteDetailHeader({
         </div>
       </div>
 
-      {/* 元信息标签行**整块搬到 `NotePropertyRail.tsx`**（批次 E2）：
-          它原本横在标题与正文之间，现在收进主内容左侧那条窄竖轨。
-          DOM 上它从 `<header>` 的第二个子块变成了 `<aside aria-label="笔记元信息">`
-          的内容 —— 里面每一项的类名、文案、顺序、可访问名逐字未变
-          （唯一的原生控件「笔记角色」下拉仍是 `aria-label="笔记角色"`，
-          仍是 `combobox`）。 */}
+      {/* 元信息条（2026-10-18 起从 `children` 进来）。
+          批次 E2 曾把这一整块搬去主内容左侧当竖轨（DOM 上从
+          `<header>` 的第二个子块变成 `<aside aria-label="笔记元信息">`），
+          2026-10-18 用户实测反馈"占地方、滚动不腾位"后搬回页头，
+          但**排版是横排**（不再横占满行、也不再竖占一列）：
+          标题 → 操作按钮 → 元信息，是"这条笔记是什么"的连贯交代。
 
-      {/* 错误信息提示 + 重试按钮。⚠️ 留在页头：它是"这一页现在出问题了"，
-          与"这条笔记是什么"（竖轨里的元信息）不是一类信息。 */}
+          容器也从 `<aside aria-label>` 改成了 `<ul aria-label>`（见
+          `NotePropertyRail.tsx` 的语义对照表）：它不再是"与主内容并列的
+          侧轨"，`complementary` 这个地标语义已经名不副实；
+          `<ul>` 是原生元素，读屏会直接报"列表，7 项"。 */}
+      {children}
+
+      {/* 错误信息提示 + 重试按钮。⚠️ 留在页头最下方：它是"这一页现在出问题了"，
+          与"这条笔记是什么"（上面的元信息条）不是一类信息。 */}
       {note.error_message && (
         <div
           style={{

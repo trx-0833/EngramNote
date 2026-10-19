@@ -1,48 +1,81 @@
 /**
- * 笔记详情页的私有样式（批次 E2 新增）
+ * 笔记详情页的私有样式
  *
- * 借鉴表 `docs/visual-symbol-research.md` §C3「笔记详情」行的
- * **Memos property rail**：元信息收进一条窄竖轨（组件在
- * `pages/notedetail/NotePropertyRail.tsx`），**主内容区保持纯净**。
+ * ## 版式变迁
  *
- * ## 为什么骨架放在页面这一层，而不是塞进页头组件
+ * | 轮次 | 骨架 |
+ * |---|---|
+ * | 批次 E2（2026-09-23） | **两栏网格**：左侧 220px「元信息竖轨」（`position: sticky`）+ 右侧主内容。借鉴 `docs/visual-symbol-research.md` §C3「笔记详情」行的 Memos property rail |
+ * | **2026-10-18（本轮）** | **一栏**：元信息条搬进页头（横排，见 `NotePropertyRail.module.css`），正文得到一个**可读行宽** |
  *
- * 这条轨要与**正文并列**（正文从它右边开始），而页头（标题 + 8 个操作按钮
- * + 顶部 tab 条）是横跨整页的。页头组件管不到正文里的东西，所以两栏骨架
- * 只能由同时渲染"页头"和"正文"的 `NoteDetail.tsx` 来搭。
- * 页头自己的骨架（`.noteDetailHeader` / `.noteDetailActions` 与那 5 条窄屏规则）
- * 仍在 `noteDetail/NoteDetailHeader.module.css` 里，本批**一个字没动**。
+ * ### 为什么撤掉两栏（用户实测反馈）
  *
- * ## 220px 这个宽度
+ * > 笔记内容页的这些信息，在左侧位置有点占地方，上下滑动窗口时，
+ * > 不会腾出它占用的这一列，因此重新排列这段信息。
+ * > 并且让正文在人眼合适的位置。
  *
- * 轨里最长的一项是 `创建于 2026/1/5 08:00:00 GMT+8`（`formatDateTime`），
- * 12.8px 字号下约 190px；220px 给它留了余量又不会把正文挤窄。
- * 页宽在这一页是全宽档（`App.tsx`：`/notes/:noteId` → `full`），
- * 所以这两栏是在 100% 宽里分的，不涉及任何最大宽度上限。
+ * 那条轨是 `position: sticky` 的，所以它**整篇笔记都在占着 220px** ——
+ * 正文被永久挤到右边。而页宽在这一页是全宽档（`App.tsx` 的
+ * `PAGE_WIDTH_ROUTES`：`/notes/:noteId` → `full`），1920 屏上正文那一列
+ * 因此有 1600px 以上宽。**中文长文一行 60~80 字，眼睛回行会丢行** ——
+ * 这正是用户说的"人眼合适的位置"。
+ *
+ * ### `--width-reading`（760px）在这里才真正被用上
+ *
+ * 它由批次 A1 定义、C2 接线，`base.css` 对它的注释写着
+ * **"阅读 / 答题 / 表单 / 评估：注意力聚焦"** —— 但此前只用在
+ * `/review` `/upload` `/assessment` `/qa` 那几条路由上，
+ * **笔记正文这一页（最典型的阅读场景）反而没接**，因为 C2 把
+ * `/notes/:noteId` 整条归进了"全宽档"（理由是编辑态要分屏）。
+ *
+ * 本轮把两件事分开：
+ * - **阅读态**（`editMode === 'view'`）→ `.detailReading`：正文按可读行宽居中；
+ * - **编辑态**（`editMode === 'edit'`）→ 全宽：分屏预览要真实可用宽度。
+ *
+ * 判据由 `NoteDetail.tsx` 给（它同时知道 `editMode` 与 `viewMode`），
+ * 这里只负责版式 —— 组件不猜。
  */
 
+/**
+ * 主内容列：**单栏**。
+ *
+ * `min-width: 0` 仍然必须显式写：它是"这一列可以被压窄"的约定，
+ * 正文里的长代码块 / 长 URL 顶开整页横向滚动就是靠它挡住的
+ * （批次 E2 的结论，与栏数无关）。
+ */
 .detailBody {
-  display: grid;
-  /* `minmax(0, 1fr)` 而不是 `1fr`：网格子项的默认 `min-width: auto` 会被
-     正文里的长代码块 / 长 URL 顶开，整页跟着横向滚动。 */
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: var(--space-lg);
-  align-items: start;
-}
-
-.detailMain {
-  /* 同上：显式写出来，让"这一列可以被压窄"是代码里的约定而不是巧合 */
+  display: block;
   min-width: 0;
 }
 
-/* ── 窄屏（沿用全局的 768px，不另造断点）──
+/**
+ * 阅读态的正文列：按 `--width-reading` 限宽并居中。
  *
- * 两栏收成一栏：竖轨变成正文上方的一横排（方向与分隔线的调整在
- * `NotePropertyRail.module.css` 的同名档里），正文恢复整幅宽度。
+ * ⚠️ **限的是整列，不只是 `<article>`**。理由：`MarkdownReader` 渲染的是
+ * 一个**片段**（工具条 + 正文卡片，`notedetail/MarkdownReader.tsx:36-119`），
+ * 没有可挂类名的单一根元素 —— 给 `<article>` 单独限宽会让工具条与正文
+ * 左边缘对不齐。限整列则工具条、正文卡片、清洗面板、关联区**一起**
+ * 落在同一条中线里，这是"文档"该有的样子。
+ *
+ * ⚠️ **不作用于 diff 视图与编辑态**：
+ * - diff 是左右分栏（`DiffView` 的「原始版 | 清洗版」），760px 会把两栏
+ *   压到各 380px，行号 + 内容挤成一团；它是**对照工具**不是阅读正文；
+ * - 编辑态是分屏（原文 | 编辑），同样要真实可用宽度。
+ *
+ * 这两种情况由 `NoteDetail.tsx` 决定**不挂这个类** —— 版式判断留在页面层，
+ * 因为只有它同时知道 `editMode` 与 `viewMode`。
  */
-@media (max-width: 768px) {
-  .detailBody {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-md);
-  }
+.detailReading {
+  max-width: var(--width-reading);
+  /* 居中：宽屏上左右留白；窄屏上 `max-width` 不起作用（自然满宽） */
+  margin-inline: auto;
+}
+
+/**
+ * `detailMain` 现在只是 `detailBody` 里的一个普通容器 —— 两栏拆掉后
+ * 它不再承担"右列"的角色。保留类名是为了不让 `NoteDetail.tsx` 的 DOM
+ * 结构多一次无意义的改动（少一层包装不会带来任何可测量的收益）。
+ */
+.detailMain {
+  min-width: 0;
 }

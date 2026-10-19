@@ -205,9 +205,13 @@ export default function NoteDetail() {
   return (
     <div className="page-enter">
       {/* 头部信息区域。
-          批次 E2：`onRoleUpdated` 不再传给它 —— 「笔记角色」下拉随元信息
-          整块搬进了下面那条竖轨，回调改由 `NotePropertyRail` 接
-          （数据流方向与合并逻辑一字未改）。 */}
+          批次 E2：`onRoleUpdated` 不再传给页头 —— 「笔记角色」下拉随元信息
+          整块搬进了 `NotePropertyRail`，回调改由它接
+          （数据流方向与合并逻辑一字未改）。
+          2026-10-18：元信息条改从 `children` 传进来，渲染在**页头最下方** ——
+          它原来是主内容左侧那条常驻竖轨，用户实测反馈"占地方、滚动不腾位"。
+          放这里而不是放进 `detailBody`，是因为它属于**页头**：
+          标题 → 操作按钮 → 这条元信息，是一个连贯的"这条笔记是什么"。 */}
       <NoteDetailHeader
         note={note}
         noteId={noteId}
@@ -229,19 +233,32 @@ export default function NoteDetail() {
           )
         }
         navigate={navigate}
-      />
-
-      {/* 批次 E2：两条栏 —— 左侧「元信息竖轨」，右侧是纯净的主内容区。
-          ⚠️ 这一层只加包装：里面每一个子块（清洗面板 / 关联资料 / 被引用 /
-          视频 / 正文）连同它们的 props、显示条件、顺序都留在原位。 */}
-      <div className={styles.detailBody}>
+      >
         <NotePropertyRail
           note={note}
           onRoleUpdated={(noteRole) =>
             setNote((prev) => (prev ? { ...prev, note_role: noteRole } : prev))
           }
         />
+      </NoteDetailHeader>
 
+      {/* 主内容区。
+          ⚠️ 2026-10-18：这一层**不再是两栏网格** —— 让出 220px 的那条轨
+          已经搬进页头，所以这里只剩一列。
+          里面每一个子块（清洗面板 / 关联资料 / 被引用 / 视频 / 正文）
+          连同它们的 props、显示条件、顺序都留在原位。
+
+          `.detailReading` 只加在**纯阅读态**：
+          - `editMode === 'view'` 排除编辑分屏（原文 | 编辑要真实可用宽度）；
+          - `viewMode !== 'diff'` 排除对比视图（左右分栏，760px 会把两栏
+            压到各 380px、行号与内容挤成一团）。
+          其余情况保持全宽 —— 版式判断留在这里，因为只有页面同时知道
+          `editMode` 与 `viewMode`（见 `NoteDetail.module.css` 的长注释）。 */}
+      <div
+        className={`${styles.detailBody}${
+          editMode === 'view' && viewMode !== 'diff' ? ` ${styles.detailReading}` : ''
+        }`}
+      >
         <div className={styles.detailMain}>
           {/* 清洗操作面板（converted/cleaning/cleaning_failed/cleaned 状态时显示） */}
           {(note.status === 'converted' ||
