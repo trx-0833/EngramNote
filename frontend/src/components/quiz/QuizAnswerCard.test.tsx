@@ -63,18 +63,20 @@ function renderCard(props: Partial<Parameters<typeof QuizAnswerCard>[0]> = {}) {
     onSubmit: vi.fn(),
     onNext: vi.fn(),
   };
-  render(
-    <QuizAnswerCard
-      quiz={BASE_QUIZ}
-      userAnswer="浮充是一种运行方式"
-      submitted={false}
-      result={null}
-      isLast={false}
-      {...handlers}
-      {...props}
-    />,
-  );
-  return handlers;
+  return {
+    ...render(
+      <QuizAnswerCard
+        quiz={BASE_QUIZ}
+        userAnswer="浮充是一种运行方式"
+        submitted={false}
+        result={null}
+        isLast={false}
+        {...handlers}
+        {...props}
+      />,
+    ),
+    ...handlers,
+  };
 }
 
 describe('QuizAnswerCard 的作答区', () => {
@@ -114,6 +116,95 @@ describe('QuizAnswerCard 的作答区', () => {
   it('★ 额度用尽时「上一题」仍然可用（能回看已答的题）', () => {
     renderCard({ quotaExhausted: true, onPrev: vi.fn(), hasPrev: true });
     expect(screen.getByRole('button', { name: '上一题' })).toBeEnabled();
+  });
+
+  /**
+   * ★ 已提交的选择题**必须仍然显示选项**
+   *
+   * 用户实测报的缺陷：答完一道选择题（或刷新后回看）选项就消失了，
+   * 只剩一句"回答错误 + 正确答案: A. …"。而选择题复习的内容恰恰是
+   * "我当时选的哪个、正确的哪个、其余选项是什么"。
+   *
+   * 根因：选项此前**只在未提交分支渲染**。
+   */
+  describe('已提交后的选项回看（用户实测报的缺陷）', () => {
+    const CHOICE = {
+      question_type: 'choice' as const,
+      question: '电力工业的发展主要包括什么？',
+      card_id: 'c1',
+      note_id: 'n1',
+      options: JSON.stringify([
+        'A. 发电厂和变电站的建设',
+        'B. 仅发电厂的建设',
+        'C. 仅变电站的建设',
+      ]),
+    };
+
+    it('★ 选项全部可见（不是只剩"正确答案"一行）', () => {
+      const { container } = renderCard({
+        quiz: CHOICE,
+        submitted: true,
+        userAnswer: 'B. 仅发电厂的建设',
+        result: makeResult({
+          question_type: 'choice',
+          is_correct: false,
+          correct_answer: 'A. 发电厂和变电站的建设',
+        }),
+      });
+      // ⚠️ 用 container 查而不是 getByText：判分反馈里也会打印
+      // `正确答案: A. 发电厂和变电站的建设`，直接按文本查会命中两个元素
+      const items = container.querySelectorAll('li');
+      expect(items).toHaveLength(3);
+      expect(items[0].textContent).toContain('A. 发电厂和变电站的建设');
+      expect(items[1].textContent).toContain('B. 仅发电厂的建设');
+      expect(items[2].textContent).toContain('C. 仅变电站的建设');
+      // 标出哪个是对的、哪个是用户选的（错的）
+      expect(items[0].textContent).toContain('正确答案');
+      expect(items[1].textContent).toContain('你的选择（错）');
+      // 未选的错误项不加任何标记（只给原样文本）
+      expect(items[2].textContent).toBe('C. 仅变电站的建设');
+    });
+
+    it('★ `correct_answer` 是**单个字母**时也能标对（真库里 2212/3358 是这种）', () => {
+      const { container } = renderCard({
+        quiz: CHOICE,
+        submitted: true,
+        userAnswer: 'C. 仅变电站的建设',
+        result: makeResult({
+          question_type: 'choice',
+          is_correct: false,
+          correct_answer: 'A',
+        }),
+      });
+      const items = container.querySelectorAll('li');
+      expect(items[0].textContent).toContain('正确答案');
+      expect(items[2].textContent).toContain('你的选择（错）');
+      // B 项既不是正确答案也不是用户所选
+      expect(items[1].textContent).toBe('B. 仅发电厂的建设');
+    });
+
+    it('答对时不出现"你的选择（错）"标记', () => {
+      const { container } = renderCard({
+        quiz: CHOICE,
+        submitted: true,
+        userAnswer: 'A. 发电厂和变电站的建设',
+        result: makeResult({
+          question_type: 'choice',
+          is_correct: true,
+          correct_answer: 'A. 发电厂和变电站的建设',
+        }),
+      });
+      const items = container.querySelectorAll('li');
+      expect(items[0].textContent).toContain('正确答案');
+      expect(container.textContent).not.toContain('你的选择（错）');
+    });
+
+    it('未提交时**不**渲染只读列表（那一支有自己的可点选项）', () => {
+      const { container } = renderCard({ quiz: CHOICE, submitted: false, userAnswer: '' });
+      // 未提交分支渲染的是 button（可点）；只读列表是 ul/li
+      expect(container.querySelectorAll('li')).toHaveLength(0);
+      expect(screen.getByRole('button', { name: 'A. 发电厂和变电站的建设' })).toBeInTheDocument();
+    });
   });
 
   it('提交中禁用按钮（防连点重复提交）', () => {

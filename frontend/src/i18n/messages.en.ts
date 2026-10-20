@@ -1271,6 +1271,8 @@ const en = {
     quotaExhaustedHint: 'Daily quota used up — come back tomorrow',
     quotaExhaustedBanner:
       'Daily quota used up ({done} / {limit}) — you can still review answered questions',
+    optionCorrect: 'Correct answer',
+    optionYourWrong: 'Your choice (wrong)',
   },
 } satisfies typeof zhCN;
 

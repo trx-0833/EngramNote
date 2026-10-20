@@ -144,6 +144,39 @@ export default function QuizAnswerCard({
     }
   }
 
+  /**
+   * 判断某个选项是不是正确答案
+   *
+   * ## 为什么不能只做一次字符串相等
+   *
+   * 真库里的 `answer` **有两种形态**（实测 3358 道选择题：**2212 条是单个字母**
+   * `"A"`、**1142 条是选项原文** `"A. 发电厂和变电站的建设…"`、4 条其它），
+   * 而选项文本一律是 `"A. 发电厂和变电站的建设…"` 这种"字母 + 点 + 内容"。
+   *
+   * 所以只比全文会漏掉那 2212 条（`"A" !== "A. …"`），
+   * 只比首字母又会在选项不以字母开头时误判。三条判据按可靠性从高到低：
+   *
+   * 1. 全文相等 —— 最可靠；
+   * 2. 选项以"答案 + 分隔符"开头（`A` → `A. …` / `A、…` / `A …`）；
+   * 3. 答案以"选项首字母 + 分隔符"开头（反向，兜住格式略有出入的情况）。
+   *
+   * 拿不准时返回 false（**不标**），而不是猜 —— 标错"正确答案"比不标更糟。
+   */
+  function isCorrectOption(opt: string, correct: string | undefined | null): boolean {
+    const a = (correct ?? '').trim();
+    if (!a) return false;
+    if (opt.trim() === a) return true;
+    // `A` → `A. …`：要求后面紧跟分隔符，避免 `A` 命中 `AB. …`
+    const head = new RegExp(`^${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.、．,，:：)）\\s]`);
+    if (head.test(opt.trim())) return true;
+    const first = opt.trim().charAt(0);
+    if (/[A-Za-z]/.test(first)) {
+      const back = new RegExp(`^${first}[.、．,，:：)）\\s]`);
+      if (back.test(a)) return true;
+    }
+    return false;
+  }
+
   const typeLabel = questionTypeLabels[quiz.question_type] || quiz.question_type;
   const diffLabel = difficultyLabels[quiz.difficulty || ''] || quiz.difficulty || '';
 
@@ -353,6 +386,46 @@ export default function QuizAnswerCard({
         </>
       ) : (
         <>
+          {/* 选择题的选项（**已提交后也要显示**）
+              ⚠️ 这一段曾经不存在 —— 选项只在未提交分支渲染，所以**答完一道
+              选择题，选项就消失了**（刷新后回看同样没有）。而"我当时选的哪个、
+              正确的哪个"恰恰是选择题复习的全部内容：只给一个
+              "回答错误 + 正确答案: A. …" 的结论，用户没法对照其余选项。
+
+              三条信息都要给：**正确项**、**用户错选项**、以及其余项的原样文本。
+              标记用"符号 + 文字 + 颜色"三通道，不只靠颜色（WCAG 1.4.1）。
+
+              刻意**不做成禁用按钮**：禁用元素对读屏不友好（不进 Tab 序列、
+              状态难播报），而且这里本来就没有"可点"的语义 —— 用纯文本 + 标记。 */}
+          {quiz.question_type === 'choice' && options.length > 0 && (
+            <ul className={styles.optionReview}>
+              {options.map((opt, i) => {
+                const isCorrect = isCorrectOption(opt, result?.correct_answer);
+                const isPicked = userAnswer === opt;
+                const cls = isCorrect
+                  ? styles.optionReviewCorrect
+                  : isPicked
+                    ? styles.optionReviewWrong
+                    : '';
+                const mark = isCorrect
+                  ? t('quizNav.optionCorrect')
+                  : isPicked
+                    ? t('quizNav.optionYourWrong')
+                    : '';
+                return (
+                  <li key={i} className={`${styles.optionReviewItem} ${cls}`.trim()}>
+                    <span className={styles.optionReviewText}>{opt}</span>
+                    {mark && (
+                      <span className={styles.optionReviewMark}>
+                        <span aria-hidden="true">{isCorrect ? '✓' : '✗'}</span> {mark}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
           {/* 判分结果
               等待自评时（needs_self_assessment）**不显示对错**：此时后端给的
               quality 只是占位值（简答题固定 1 = "错误"），照常渲染会把每个

@@ -88,6 +88,63 @@
   animation: feedbackScaleIn 0.3s var(--ease-out-expo);
 }
 
+/* ── 已提交后的选择题选项（回看用）──
+ *
+ * 为什么是"只读列表"而不是禁用按钮：这里没有可点的语义，禁用元素对读屏
+ * 也不友好（不进 Tab 序列、状态难播报）。标记走"符号 + 文字 + 颜色"三通道。
+ *
+ * 字号/颜色一律走令牌 —— `design-drift.mjs` 会拦硬编码（本轮被拦下过两次）。 */
+.optionReview {
+  list-style: none;
+  margin: 0 0 var(--space-md);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.optionReviewItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-base);
+}
+
+.optionReviewText {
+  flex: 1;
+}
+
+.optionReviewMark {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.optionReviewCorrect {
+  border-color: var(--color-success);
+  background: var(--color-success-light);
+}
+
+.optionReviewCorrect .optionReviewMark {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.optionReviewWrong {
+  border-color: var(--color-error);
+  background: var(--color-error-light);
+}
+
+.optionReviewWrong .optionReviewMark {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
 .feedbackIncorrect {
   padding: var(--space-md);
   border-radius: var(--radius-sm);
