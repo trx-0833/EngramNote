@@ -1,3 +1,4 @@
+import { translate } from '../i18n/translate';
 /**
  * @file 检索降级提示（把 SSE `meta` 里的 `retrieval_status` 翻成一句人话）
  *
@@ -31,8 +32,8 @@
 /** 后端 `retrieval_status` 的取值（未知值一律不提示） */
 const NOTICES: Record<string, string> = {
   // 与改造前的文案**逐字一致**：这条不是本轮新增的，只是搬进了这里
-  bm25_only: '已降级为关键词检索（向量服务不可用）',
-  hybrid: '本次只用关键词检索（向量检索没有命中，刚导入的资料可能还没建索引）',
+  bm25_only: translate('retrievalNotice.bm25Only'),
+  hybrid: translate('retrievalNotice.hybrid'),
 };
 
 /**

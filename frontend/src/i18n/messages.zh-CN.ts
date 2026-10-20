@@ -1452,6 +1452,20 @@ const zhCN = {
     deleteRelationConfirm: '确定要删除此关系吗？',
     delete: '删除',
   },
+  /** 检索降级提示（`utils/retrievalNotice.ts`，i18n 阶段 3） */
+  retrievalNotice: {
+    bm25Only: '已降级为关键词检索（向量服务不可用）',
+    hybrid: '本次只用关键词检索（向量检索没有命中，刚导入的资料可能还没建索引）',
+  },
+
+  /** 最后的零散文案（i18n 阶段 3 收尾） */
+  misc: {
+    requestFailed: '请求失败: {status}',
+    taskAttempt: '第 {attempt}/{max} 次尝试',
+    taskCancelFailedWithReason: '取消失败：{reason}',
+    selfRatingSubmitFailed: '自评提交失败',
+    mastery: '掌握度 {percent}%',
+  },
 };
 
 export default zhCN;

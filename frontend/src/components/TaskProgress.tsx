@@ -111,7 +111,9 @@ export default function TaskProgress({
       onCancelled?.();
     } catch (err) {
       setCancelNotice(
-        err instanceof Error ? `取消失败：${err.message}` : t('shared.taskCancelFailed'),
+        err instanceof Error
+          ? t('misc.taskCancelFailedWithReason', { reason: err.message })
+          : t('shared.taskCancelFailed'),
       );
     } finally {
       setCancelling(false);
@@ -161,7 +163,7 @@ export default function TaskProgress({
         )}
         {run.attempt > 1 && (
           <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
-            第 {run.attempt}/{run.max_attempts} 次尝试
+            {t('misc.taskAttempt', { attempt: run.attempt, max: run.max_attempts })}
           </span>
         )}
         {terminal && run.status === 'failed' && run.error && (

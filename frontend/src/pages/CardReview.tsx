@@ -155,8 +155,8 @@ export default function CardReview() {
                 {/* 批次 B3：复习到期补 `due` 图标（沙漏）—— "到期共 N 张"是
                     全站唯一把这个数字说成"到期"的地方，正是这个语义的落点。
                     `verticalAlign: middle`：这一行是内联计数，图标按行内元素排。 */}
-                <Icon name="due" size={16} style={{ verticalAlign: 'middle' }} /> 到期共 {totalDue}{' '}
-                张
+                <Icon name="due" size={16} style={{ verticalAlign: 'middle' }} />{' '}
+                {t('cardReview.dueTotal', { count: totalDue })}
               </>
             )}
           </>

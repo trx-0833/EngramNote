@@ -839,7 +839,9 @@ export default function DailyMaterials() {
                           >
                             {/* 批次 B3：上传按钮补 `upload` 图标（托盘 + 向上箭头） */}
                             <Icon name="upload" size={16} />
-                            {uploading ? t('dailyMaterials.uploading') : '上传文件'}
+                            {uploading
+                              ? t('dailyMaterials.uploading')
+                              : t('dailyMaterials.uploadFile')}
                           </button>
                           <input
                             ref={fileInputRef}

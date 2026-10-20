@@ -32,6 +32,7 @@
  */
 import { getMasteryColor } from '../utils/labels';
 import styles from './MasteryRing.module.css';
+import { useTranslation } from '../i18n';
 
 /** 环的半径（viewBox 单位） */
 const RING_RADIUS = 15.5;
@@ -47,6 +48,7 @@ interface MasteryRingProps {
 }
 
 export default function MasteryRing({ level }: MasteryRingProps) {
+  const { t } = useTranslation();
   // 夹取放在**上色之前**：色阶与弧长必须看到同一个数，
   // 否则 level = -3 时会出现"红色 + 空环"这种自相矛盾的绘制。
   const clamped = Math.min(100, Math.max(0, level));
@@ -76,7 +78,9 @@ export default function MasteryRing({ level }: MasteryRingProps) {
           strokeDashoffset={RING_LENGTH * (1 - clamped / 100)}
         />
       </svg>
-      <span className={styles.masteryRingText}>掌握度 {Math.round(clamped)}%</span>
+      <span className={styles.masteryRingText}>
+        {t('misc.mastery', { percent: Math.round(clamped) })}
+      </span>
     </span>
   );
 }

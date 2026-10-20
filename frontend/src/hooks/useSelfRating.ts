@@ -14,6 +14,7 @@
  */
 import { useCallback, useRef, useState } from 'react';
 import type { SubmitAnswerResponse } from '../api/client';
+import { translate } from '../i18n/translate';
 
 interface UseSelfRatingOptions {
   /**
@@ -56,7 +57,7 @@ export function useSelfRating({ submit, onRated, onError }: UseSelfRatingOptions
         onRated(result, quality);
         return result;
       } catch (e: unknown) {
-        onError(e instanceof Error ? e.message : '自评提交失败');
+        onError(e instanceof Error ? e.message : translate('misc.selfRatingSubmitFailed'));
         return null;
       } finally {
         inFlightRef.current = false;

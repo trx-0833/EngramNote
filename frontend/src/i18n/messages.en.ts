@@ -1242,6 +1242,20 @@ const en = {
     deleteRelationConfirm: 'Delete this relation?',
     delete: 'Delete',
   },
+
+  retrievalNotice: {
+    bm25Only: 'Fell back to keyword search (the vector service is unavailable)',
+    hybrid:
+      'Only keyword search was used this time (vector search found nothing — recently imported material may not be indexed yet)',
+  },
+
+  misc: {
+    requestFailed: 'Request failed: {status}',
+    taskAttempt: 'Attempt {attempt}/{max}',
+    taskCancelFailedWithReason: 'Could not cancel: {reason}',
+    selfRatingSubmitFailed: 'Could not submit your self-rating',
+    mastery: 'Mastery {percent}%',
+  },
 } satisfies typeof zhCN;
 
 export default en;

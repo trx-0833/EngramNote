@@ -221,7 +221,7 @@ export default function LearningGoals() {
               description={t('goals.emptyHint')}
               action={
                 <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
-                  新建目标
+                  {t('goals.newGoal')}
                 </button>
               }
             />
@@ -592,7 +592,7 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
         >
           {/* 批次 B3：同上一处（已归档目标的删除按钮） */}
           <Icon name="delete" size={16} />
-          删除
+          {t('goals.delete')}
         </button>
       </div>
     </article>

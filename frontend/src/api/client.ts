@@ -471,7 +471,7 @@ async function readErrorBody(response: Response): Promise<{ detail: string; code
     ? error.detail
         .map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e))
         .join('; ')
-    : error.detail || `请求失败: ${response.status}`;
+    : error.detail || translate('misc.requestFailed', { status: response.status });
   // 错误响应统一为 {detail, error_code, request_id}：优先识别稳定的 error_code
   // （存在时前置，供上层按错误码分流/定位），缺失时回退中文 detail 文案兜底。
   const code = typeof error.error_code === 'string' && error.error_code ? error.error_code : null;

@@ -13,6 +13,7 @@ import {
 } from './client';
 import type { BodyOf, BodyWithDefaults, QueryOf, Schema } from './generated/types';
 import { buildQuery } from './query';
+import { translate } from '../i18n/translate';
 
 /**
  * 获取笔记列表（分页）
@@ -351,7 +352,7 @@ export async function askNoteQuestionStream(
       ? error.detail
           .map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e))
           .join('; ')
-      : error.detail || `请求失败: ${response.status}`;
+      : error.detail || translate('misc.requestFailed', { status: response.status });
     throw new Error(detail);
   }
   if (!response.body) {
