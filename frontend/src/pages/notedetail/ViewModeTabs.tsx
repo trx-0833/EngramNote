@@ -5,6 +5,7 @@
  * 按钮顺序、类名拼接、禁用条件均与拆分前一致。
  */
 import type { ViewMode } from './types';
+import { useTranslation } from '../../i18n';
 
 interface ViewModeTabsProps {
   /** 当前视图模式 */
@@ -24,27 +25,28 @@ export default function ViewModeTabs({
   canShowClean,
   canShowDiff,
 }: ViewModeTabsProps) {
+  const { t } = useTranslation();
   return (
     <div className="segment-control" style={{ marginTop: 'var(--space-sm)' }}>
       <button
         className={`segment-btn ${viewMode === 'original' ? 'segment-btn-active' : ''}`}
         onClick={() => onViewModeChange('original')}
       >
-        原始版
+        {t('noteDetail.viewOriginal')}
       </button>
       <button
         className={`segment-btn ${viewMode === 'clean' ? 'segment-btn-active' : ''}`}
         onClick={() => onViewModeChange('clean')}
         disabled={!canShowClean}
       >
-        清洗版
+        {t('noteDetail.viewClean')}
       </button>
       <button
         className={`segment-btn ${viewMode === 'diff' ? 'segment-btn-active' : ''}`}
         onClick={() => onViewModeChange('diff')}
         disabled={!canShowDiff}
       >
-        对比视图
+        {t('noteDetail.viewDiff')}
       </button>
     </div>
   );

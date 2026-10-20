@@ -7,6 +7,7 @@
  */
 // 分屏栅格的类名归模块所有（overhaul-plan 5.6 序 8）；见 EditSplitView.module.css
 import styles from './EditSplitView.module.css';
+import { useTranslation } from '../../i18n';
 
 interface EditSplitViewProps {
   /** 编辑中的 Markdown 原文 */
@@ -32,14 +33,15 @@ export default function EditSplitView({
   onCancel,
   previewHtml,
 }: EditSplitViewProps) {
+  const { t } = useTranslation();
   return (
     <div>
       <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
         <button className="btn btn-primary" onClick={onSave} disabled={saving}>
-          {saving ? '保存中...' : '保存'}
+          {saving ? t('noteDetail.saving') : t('noteDetail.save')}
         </button>
         <button className="btn btn-secondary" onClick={onCancel} disabled={saving}>
-          取消
+          {t('noteDetail.cancel')}
         </button>
       </div>
       {/* 分屏栅格用 min(320px, 100%) 做内在尺寸：窄屏自动变单栏，不需要额外断点。

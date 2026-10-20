@@ -1,5 +1,5 @@
 /**
- * @file 关联的学习资料列表（含悬挂链接占位与清理）
+ * @file {t('noteDetail.relatedMaterials')}列表（含悬挂链接占位与清理）
  * @description
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运。
  *
@@ -11,6 +11,7 @@
  * 拆分后**必须**保留这些兜底，`NoteDetail.test.tsx` 里有一条断言盯着它。
  */
 import type { NoteLinksResponse } from '../../api/client';
+import { useTranslation } from '../../i18n';
 
 interface RelatedLinksSectionProps {
   /** 当前笔记的链接关系（为 null 时本组件不渲染任何内容） */
@@ -19,16 +20,19 @@ interface RelatedLinksSectionProps {
   onCleanDanglingLinks: () => void;
 }
 
-/** 关联的学习资料 / 悬挂链接清理 */
+/** {t('noteDetail.relatedMaterials')} / 悬挂链接清理 */
 export default function RelatedLinksSection({
   noteLinks,
   onCleanDanglingLinks,
 }: RelatedLinksSectionProps) {
+  const { t } = useTranslation();
   if (!noteLinks) return null;
 
   return (
     <div className="card" style={{ marginBottom: '1rem' }}>
-      <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>关联的学习资料</h3>
+      <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
+        {t('noteDetail.relatedMaterials')}
+      </h3>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(noteLinks.linked_materials ?? []).map((m) => (
           <li key={m.id} style={{ padding: '0.25rem 0' }}>
@@ -57,7 +61,7 @@ export default function RelatedLinksSection({
               style={{ fontSize: '0.75rem', padding: '2px 8px' }}
               onClick={onCleanDanglingLinks}
             >
-              清理此链接
+              {t('noteDetail.removeLink')}
             </button>
           </li>
         )}
@@ -66,7 +70,7 @@ export default function RelatedLinksSection({
   );
 }
 
-/** 是否应该显示「关联的学习资料」区块（含悬挂链接占位；同样做字段缺失兜底） */
+/** 是否应该显示「{t('noteDetail.relatedMaterials')}」区块（含悬挂链接占位；同样做字段缺失兜底） */
 export function shouldShowRelatedLinks(noteLinks: NoteLinksResponse | null): boolean {
   if (!noteLinks) return false;
   return (

@@ -6,6 +6,7 @@
  */
 import DiffView from '../../components/DiffView';
 import type { CleaningDiffResponse } from '../../api/client';
+import { useTranslation } from '../../i18n';
 
 interface DiffPanelProps {
   /** diff 数据（null 表示未加载成功） */
@@ -16,10 +17,11 @@ interface DiffPanelProps {
 
 /** diff 对比视图 */
 export default function DiffPanel({ diffData, diffLoading }: DiffPanelProps) {
+  const { t } = useTranslation();
   if (diffLoading) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-        <p style={{ color: 'var(--color-text-secondary)' }}>加载对比数据...</p>
+        <p style={{ color: 'var(--color-text-secondary)' }}>{t('noteDetail.loadingDiff')}</p>
       </div>
     );
   }
@@ -36,7 +38,7 @@ export default function DiffPanel({ diffData, diffLoading }: DiffPanelProps) {
 
   return (
     <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-      <p style={{ color: 'var(--color-text-secondary)' }}>无法加载对比数据</p>
+      <p style={{ color: 'var(--color-text-secondary)' }}>{t('noteDetail.loadDiffFailed')}</p>
     </div>
   );
 }

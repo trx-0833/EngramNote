@@ -5,19 +5,21 @@
  * `linked_personal_notes` 缺失时按空数组处理（契约漂移兜底，与拆分前一致）。
  */
 import type { NoteLinksResponse } from '../../api/client';
+import { useTranslation } from '../../i18n';
 
 interface CitingNotesSectionProps {
   /** 当前笔记的链接关系（为 null 时本组件不渲染任何内容） */
   noteLinks: NoteLinksResponse | null;
 }
 
-/** 被以下笔记引用 */
+/** {t('noteDetail.citedBy')} */
 export default function CitingNotesSection({ noteLinks }: CitingNotesSectionProps) {
+  const { t } = useTranslation();
   if (!noteLinks) return null;
 
   return (
     <div className="card" style={{ marginBottom: '1rem' }}>
-      <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>被以下笔记引用</h3>
+      <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>{t('noteDetail.citedBy')}</h3>
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(noteLinks.linked_personal_notes ?? []).map((n) => (
           <li key={n.id} style={{ padding: '0.25rem 0' }}>
@@ -31,7 +33,7 @@ export default function CitingNotesSection({ noteLinks }: CitingNotesSectionProp
   );
 }
 
-/** 是否应该显示「被以下笔记引用」区块 */
+/** 是否应该显示「{t('noteDetail.citedBy')}」区块 */
 export function shouldShowCitingNotes(noteLinks: NoteLinksResponse | null): boolean {
   if (!noteLinks) return false;
   return (noteLinks.linked_personal_notes?.length ?? 0) > 0;

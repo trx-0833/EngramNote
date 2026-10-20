@@ -1,10 +1,10 @@
 /**
  * @file Diff 对比视图组件
- * @description 展示原始版与清洗版 Markdown 的行级差异对比。
+ * @description 展示{t('shared.diffOriginal')}与{t('shared.diffClean')} Markdown 的行级差异对比。
  * 自实现简单 LCS diff 算法，不引入第三方 diff 库。
  *
  * 功能：
- * 1. 左右分栏布局（原始版 | 清洗版）
+ * 1. 左右分栏布局（{t('shared.diffOriginal')} | {t('shared.diffClean')}）
  * 2. 行级 diff 高亮：删除行红色、新增行绿色、未变行白色
  * 3. 行号对齐
  * 4. 响应式设计
@@ -12,13 +12,14 @@
 import { type DiffBlock, type DiffLine } from '../api/client';
 // diff 视图样式（overhaul-plan 5.6）：原 src/styles/diff.css 整表迁到这里
 import styles from './DiffView.module.css';
+import { useTranslation } from '../i18n';
 
 interface DiffViewProps {
   /** diff 块数据 */
   blocks: DiffBlock[];
-  /** 原始版总行数 */
+  /** {t('shared.diffOriginal')}总行数 */
   originalLines: number;
-  /** 清洗版总行数 */
+  /** {t('shared.diffClean')}总行数 */
   cleanLines: number;
 }
 
@@ -66,6 +67,7 @@ function DiffLineRow({ line }: { line: DiffLine }) {
  * 每个块包含连续的变更行，块之间用分隔线区分。
  */
 export default function DiffView({ blocks, originalLines, cleanLines }: DiffViewProps) {
+  const { t } = useTranslation();
   if (!blocks || blocks.length === 0) {
     return (
       <div className={styles.diffContainer}>
@@ -76,7 +78,7 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
             padding: 'var(--space-md)',
           }}
         >
-          两个版本完全相同，没有差异。
+          {t('shared.diffIdentical')}
         </p>
       </div>
     );
@@ -86,16 +88,20 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
     <div className={styles.diffContainer}>
       {/* 统计信息 */}
       <div className={styles.diffSummary}>
-        <span>原始版 {originalLines} 行</span>
-        <span>清洗版 {cleanLines} 行</span>
+        <span>
+          {t('shared.diffOriginal')} {originalLines} 行
+        </span>
+        <span>
+          {t('shared.diffClean')} {cleanLines} 行
+        </span>
         <span>{blocks.length} 处差异</span>
       </div>
 
       {/* 表头 */}
       <div className={styles.diffHeader}>
-        <span className={styles.diffColLabel}>原始版</span>
-        <span className={styles.diffColLabel}>清洗版</span>
-        <span className={styles.diffColLabel}>内容</span>
+        <span className={styles.diffColLabel}>{t('shared.diffOriginal')}</span>
+        <span className={styles.diffColLabel}>{t('shared.diffClean')}</span>
+        <span className={styles.diffColLabel}>{t('shared.diffContent')}</span>
       </div>
 
       {/* diff 内容 */}

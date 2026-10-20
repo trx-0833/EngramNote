@@ -143,6 +143,55 @@ describe('★ 英文（阶段 3 验收）', () => {
   });
 });
 
+describe('★ 每个标签都真的被翻译了（不是回退成键名）', () => {
+  /**
+   * ## 这条守的是什么（第一版守卫是空转的，这是重写的）
+   *
+   * `useLabelTable` 里有一句 `t(\`${namespace}.${key}\` as MessageKey)` ——
+   * 那个 `as MessageKey` **断言绕过了 `tsc` 的键检查**（必须存在，
+   * 因为键是拼出来的）。代价是 namespace 或取值拼错时**不会报错**：
+   * `t()` 走"两者都缺 → 返回键名本身"那条回退，界面上出现
+   * `labels.statuss.converted` 这种字符串。
+   *
+   * ⚠️ 第一版把守卫写在 `i18n.test.tsx` 里、只比对**消息表**里的键 ——
+   * 那测不出 `labels.ts` 里写的 namespace 是什么。实测把 `labels.status`
+   * 改成 `labels.statuss` 后它**照样全绿**（空转）。
+   *
+   * 这一版直接断言 `readLabels()` 的**返回值**：真实译文里不可能带
+   * `labels.` 前缀，也不可能含有 `.`（键名的形态）。
+   */
+  const looksLikeKey = (value: string) => value.startsWith('labels.') || value.includes('.');
+
+  /** 把标签集合里所有字符串值摊平出来 */
+  function allStrings(labels: ReturnType<typeof readLabels>): string[] {
+    const out: string[] = [];
+    for (const table of Object.values(labels)) {
+      if (Array.isArray(table)) {
+        for (const opt of table) out.push(opt.label, opt.hint);
+        continue;
+      }
+      for (const value of Object.values(table as Record<string, unknown>)) {
+        if (typeof value === 'string') out.push(value);
+        else if (value && typeof value === 'object' && 'label' in value) {
+          out.push((value as { label: string }).label);
+        }
+      }
+    }
+    return out;
+  }
+
+  it('中文下没有一个是键名', () => {
+    const offenders = allStrings(readLabels()).filter(looksLikeKey);
+    expect(offenders, `这些标签回退成了键名（namespace 或取值拼错了）：${offenders}`).toEqual([]);
+  });
+
+  it('★ 英文下也没有（两种语言都要查，漏一种就是只有一种界面坏）', () => {
+    useEnglish();
+    const offenders = allStrings(readLabels()).filter(looksLikeKey);
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('颜色表与语言无关（a11y 口径，逐值未改）', () => {
   it('切换语言不改变任何颜色', () => {
     const before = {

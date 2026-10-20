@@ -3,10 +3,11 @@
  * @description
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 展示**真实**进度与阶段名，并可取消任务（阶段 5.11）。
- * 改造前这里只有一句"正在转换中，请稍候..."，而任务侧其实一直在
+ * 改造前这里只有一句「正在转换中，请稍候...」（走 `t('noteDetail.converting')`），而任务侧其实一直在
  * 上报 progress/stage（后端从阶段 1′ 起就有这个契约），拆分不得回退。
  */
 import TaskProgress from '../../components/TaskProgress';
+import { useTranslation } from '../../i18n';
 
 interface ProcessingPanelProps {
   /** 笔记 ID（任务进度按笔记维度查询） */
@@ -19,11 +20,14 @@ interface ProcessingPanelProps {
 
 /** 转换中 / 上传中的进度面板 */
 export default function ProcessingPanel({ noteId, status, onCancelled }: ProcessingPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="card" style={{ padding: 'var(--space-xl)' }}>
       <TaskProgress
         noteId={noteId}
-        fallbackText={status === 'uploading' ? '正在上传...' : '正在转换中，请稍候...'}
+        fallbackText={
+          status === 'uploading' ? t('noteDetail.uploading') : t('noteDetail.converting')
+        }
         onCancelled={onCancelled}
       />
     </div>

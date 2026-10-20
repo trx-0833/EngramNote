@@ -8,10 +8,11 @@
  * 2. `editMode === 'edit'` → 编辑分屏
  * 3. `viewMode === 'diff'` → diff 视图
  * 4. 有正文 → Markdown 渲染
- * 5. 其余 → "暂无内容"
+ * 5. 其余 → 空态「暂无内容」（文案走 `t('noteDetail.noContent')`）
  */
 import type { RefObject } from 'react';
 import type { CleaningDiffResponse } from '../../api/client';
+import { useTranslation } from '../../i18n';
 import DiffPanel from './DiffPanel';
 import EditSplitView from './EditSplitView';
 import MarkdownReader from './MarkdownReader';
@@ -78,6 +79,7 @@ export default function ContentArea({
   onSave,
   onCancelEdit,
 }: ContentAreaProps) {
+  const { t } = useTranslation();
   if ((status === 'converting' || status === 'uploading') && noteId) {
     return <ProcessingPanel noteId={noteId} status={status} onCancelled={onRefresh} />;
   }
@@ -114,7 +116,7 @@ export default function ContentArea({
 
   return (
     <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-      <p style={{ color: 'var(--color-text-secondary)' }}>暂无内容</p>
+      <p style={{ color: 'var(--color-text-secondary)' }}>{t('noteDetail.noContent')}</p>
     </div>
   );
 }

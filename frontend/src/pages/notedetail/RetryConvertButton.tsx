@@ -1,5 +1,5 @@
 /**
- * @file 「重试转换」按钮
+ * @file 「{t('noteDetail.retryConvert')}」按钮
  * @description
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
  * 成功时只更新 status/error_message（不整页刷新）、失败走 toast.error，
@@ -7,6 +7,7 @@
  */
 import { retryConvert, type RetryConvertOutcome } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import { useTranslation } from '../../i18n';
 
 interface RetryConvertButtonProps {
   /** 当前笔记 ID（缺失时不发起请求） */
@@ -22,6 +23,7 @@ interface RetryConvertButtonProps {
 
 /** 转换失败提示旁的重试按钮 */
 export default function RetryConvertButton({ noteId, onRetried }: RetryConvertButtonProps) {
+  const { t } = useTranslation();
   const toast = useToast();
 
   return (
@@ -34,11 +36,11 @@ export default function RetryConvertButton({ noteId, onRetried }: RetryConvertBu
           const result = await retryConvert(noteId);
           onRetried({ status: result.status, error_message: result.error_message });
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : '重试失败');
+          toast.error(err instanceof Error ? err.message : t('noteDetail.retryFailed'));
         }
       }}
     >
-      重试转换
+      {t('noteDetail.retryConvert')}
     </button>
   );
 }

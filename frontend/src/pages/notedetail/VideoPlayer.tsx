@@ -1,3 +1,4 @@
+import { useTranslation } from '../../i18n';
 /**
  * @file 视频笔记播放器
  * @description
@@ -12,10 +13,11 @@ interface VideoPlayerProps {
 
 /** 视频播放器（仅视频类型笔记显示） */
 export default function VideoPlayer({ videoUrl }: VideoPlayerProps) {
+  const { t } = useTranslation();
   return (
     <div style={{ marginBottom: '1.5rem' }}>
       <video controls style={{ width: '100%', borderRadius: '0.5rem' }} src={videoUrl}>
-        您的浏览器不支持视频播放
+        {t('noteDetail.videoUnsupported')}
       </video>
     </div>
   );

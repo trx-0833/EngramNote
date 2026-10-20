@@ -298,6 +298,117 @@ const zhCN = {
       easy: { label: '轻松想起', hint: '脱口而出，毫不费力' },
     },
   },
+  /**
+   * 笔记详情页及其子组件（i18n 阶段 3）
+   *
+   * 这一页是全站最复杂的一页（分屏编辑、版本、批注、ADHD 阅读、关联资料…），
+   * 所以它单独一个命名空间，而不是把几十条塞进 `common`。
+   */
+  noteDetail: {
+    // ---- 视图切换 ----
+    viewOriginal: '原始版',
+    viewClean: '清洗版',
+    viewDiff: '对比视图',
+    // ---- 加载与错误 ----
+    notFound: '笔记不存在',
+    backToList: '返回列表',
+    noContent: '暂无内容',
+    loadDiffFailed: '无法加载对比数据',
+    loadingDiff: '加载对比数据...',
+    // ---- 处理中 ----
+    uploading: '正在上传...',
+    converting: '正在转换中，请稍候...',
+    retryConvert: '重试转换',
+    retryFailed: '重试失败',
+    // ---- 编辑 ----
+    saving: '保存中...',
+    save: '保存',
+    cancel: '取消',
+    // ---- 版本历史 ----
+    versionHistory: '版本历史',
+    versionListFailed: '加载版本列表失败',
+    versionContentFailed: '加载版本内容失败',
+    diffFailed: '加载对比失败',
+    restoreVersionFailed: '恢复版本失败',
+    restoreVersionConfirm: '确定恢复到此版本吗？',
+    restoreVersionImpact: '当前内容将被保存为新版本。',
+    restore: '恢复',
+    close: '关闭',
+    closePreview: '关闭预览',
+    loading: '加载中...',
+    noVersions: '暂无版本历史',
+    preview: '预览',
+    restoreThisVersion: '恢复此版本',
+    versionsIdentical: '两个版本完全相同，没有差异。',
+    // ---- 内容区与关联 ----
+    citedBy: '被以下笔记引用',
+    relatedMaterials: '关联的学习资料',
+    removeLink: '清理此链接',
+    videoUnsupported: '您的浏览器不支持视频播放',
+  },
+
+  /**
+   * 共享组件的通用文案（i18n 阶段 3）
+   *
+   * 这些词在**多个页面**上重复出现（"加载失败"在 20+ 处），
+   * 所以放在一处 —— 各页面自己写一份的话，同一句话会有多种译法。
+   */
+  shared: {
+    loadFailed: '加载失败',
+    saveFailed: '保存失败',
+    deleteFailed: '删除失败',
+    restoreFailed: '恢复失败',
+    retryFailed: '重试失败',
+    submitFailed: '提交失败',
+    operationFailed: '操作失败',
+    loading: '加载中...',
+    loadingDots: '加载中…',
+    cancel: '取消',
+    confirm: '确认',
+    close: '关闭',
+    retry: '重试',
+    delete: '删除',
+    // ---- 任务进度 ----
+    taskProcessing: '处理中，请稍候...',
+    taskCancelled: '已取消。',
+    taskCancelRequested:
+      '已请求取消：任务会在下一个阶段边界退出（正在进行的这一步不会中断）。',
+    taskCancelFailed: '取消失败，请重试。',
+    taskFinished: '已结束',
+    taskProcessingShort: '处理中',
+    taskCancelling: '正在取消...',
+    taskCancel: '取消任务',
+    // ---- 差异视图 ----
+    diffIdentical: '两个版本完全相同，没有差异。',
+    diffOriginal: '原始版',
+    diffClean: '清洗版',
+    diffContent: '内容',
+    // ---- 删除笔记对话框 ----
+    moveToTrash: '移入回收站',
+    purgeForever: '彻底删除',
+    confirmMoveToTrash: '确认移入',
+    countingRelated: '正在统计关联内容…',
+    knowledgeCards: '知识卡片',
+    coreCards: '核心卡片',
+    bidirectionalLinks: '双向链接',
+    moveToTrashImpact: '笔记及其全部内容（卡片、题目、复习记录）将作为整体移入回收站，可随时恢复。',
+    irreversible: '不可恢复',
+    promoteCoreCards: '高级选项：将本笔记中的核心卡片自动提升为独立节点',
+    // ---- 复习提醒 ----
+    reviewReminder: '复习提醒',
+    dueForReview: '你有 {count} 个题目待复习',
+    reminderEnabled: '复习提醒已开启',
+    reminderHint: '将在有待复习题目时提醒你',
+    notificationDenied: '通知权限已被拒绝，请在浏览器设置中开启',
+    dismissReminder: '关闭提醒',
+    dueWithinOneHour: '其中 {count} 个将在 1 小时内到期',
+    weakPointsCount: '薄弱知识点：{count} 个',
+    enableNotifications: '开启桌面通知，及时获取复习提醒',
+    reminderAlgorithmHint: '基于 FSRS 算法的间隔重复，不错过任何最佳复习时机',
+    enable: '开启',
+    later: '稍后',
+    goReview: '去复习',
+  },
 };
 
 export default zhCN;
