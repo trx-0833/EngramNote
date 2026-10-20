@@ -30,8 +30,7 @@ import ReviewProgress from '../components/quiz/ReviewProgress';
 // 题号导航条（想法 8）：可前后翻、可点题号跳转
 import QuizNavigator, { type QuizNavItem } from '../components/quiz/QuizNavigator';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
-import { useSelfRating } from '../hooks/useSelfRating';
-import { useToast } from '../components/Toast';
+import { useQuizSession } from '../hooks/useQuizSession';
 // 统计卡片（overhaul-plan 5.6 第三批）：与 Dashboard 共用的 `.stat-card*` 已抽成
 // 组件、样式进模块 —— 本页不再需要 `dashboard.css` 里的全局类名
 import StatCard from '../components/StatCard';
@@ -39,15 +38,6 @@ import StatCard from '../components/StatCard';
 import PageHeader from '../components/PageHeader';
 import { useLabels, weakPointBadge } from '../utils/labels';
 import { useTranslation, type MessageKey } from '../i18n';
-
-/** 单题答题状态 */
-interface QuizState {
-  quiz: DueQuiz;
-  userAnswer: string;
-  submitted: boolean;
-  result: SubmitAnswerResponse | null;
-  startTime: number;
-}
 
 /**
  * 读取异常对象上的后端 error_code（阶段 0.11）
@@ -66,7 +56,6 @@ export default function TodayLearn() {
   const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   const navigate = useNavigate();
-  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState<ReviewStats | null>(null);
@@ -75,52 +64,97 @@ export default function TodayLearn() {
   /** 今日每日推荐任务 */
   const [dailyPlan, setDailyPlan] = useState<DailyPlanResponse | null>(null);
 
-  // 答题状态
-  const [quizzes, setQuizzes] = useState<QuizState[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [completed, setCompleted] = useState(false);
-  // 语义判分开关（阶段 3.5）：状态由页面持有，回车提交才能用上它
-  const [semanticGrading, setSemanticGrading] = useState(false);
-  /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
-  const submittingRef = useRef(false);
+  /**
+   * 提交作答：本页用普通复习入口
+   *
+   * 只做转发；错误分流交给下面的 `onSubmitError`（理由见 `Review.tsx` 同名处）。
+   */
+  const submit = useCallback(
+    (
+      quiz: DueQuiz,
+      userAnswer: string,
+      timeSpentMs: number,
+      selfRating: number | undefined,
+      semanticGrading?: boolean,
+    ): Promise<SubmitAnswerResponse> =>
+      submitAnswer(quiz.id, userAnswer, timeSpentMs, selfRating, semanticGrading),
+    [],
+  );
 
-  // 四档自评：补完简答题的占位记录并推进 SM-2 调度
-  const onRated = useCallback(
-    (result: SubmitAnswerResponse) => {
-      setQuizzes((prev) => prev.map((q) => (q.quiz.id === result.quiz_id ? { ...q, result } : q)));
-      if (result.is_correct) setSessionCorrect((prev) => prev + 1);
-      setSessionTotal((prev) => prev + 1);
-      getReviewStats()
-        .then(setStats)
-        .catch(() => {
-          /* 统计刷新失败不影响答题 */
-        });
-      toast.success(t('review.selfRatingRecorded'));
+  /** 刷新复习统计（今日已完成数变了） */
+  const refreshStats = useCallback(() => {
+    void getReviewStats()
+      .then(setStats)
+      .catch(() => {
+        /* 统计刷新失败不影响答题 */
+      });
+  }, []);
+
+  /**
+   * 提交失败：按后端**错误码**分流，不匹配中文文案（阶段 0.11 / F-19）
+   *
+   * ⚠️ 刻意**不** import `client.ts` 的 `ApiError` 做 instanceof：本模块的
+   * API 客户端在测试里被整体 mock（`vi.mock('../api/client')`），
+   * instanceof 拿到的是 undefined，会直接抛 TypeError。结构化读字段
+   * 对这种替换是免疫的。
+   *
+   * 用 ref 拿 `setCompleted` 是为了避免与 `session` 形成循环引用 —— 见
+   * `Review.tsx` 同名处的详细说明。
+   */
+  const setCompletedRef = useRef<((v: boolean) => void) | null>(null);
+  const onSubmitError = useCallback(
+    (e: unknown) => {
+      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
+        refreshStats();
+        setCompletedRef.current?.(true);
+      } else {
+        setError(e instanceof Error ? e.message : t('todayLearn.submitFailed'));
+      }
     },
-    [toast, t],
+    [refreshStats, t],
   );
-  const onRateError = useCallback(
-    (message: string) => {
-      setError(message);
-      toast.error(message);
-    },
-    [toast],
-  );
-  const {
-    submitRating,
-    submitting: ratingSubmitting,
-    isRated,
-    skipRating,
-  } = useSelfRating({
-    submit: submitAnswer,
-    onRated,
-    onError: onRateError,
+
+  const session = useQuizSession<DueQuiz>({
+    submit,
+    onSubmitted: refreshStats,
+    onRated: refreshStats,
+    // 本页把自评失败也写进页面级错误（`Review` 只弹 toast）
+    onRateError: (message) => setError(message),
+    onSubmitError,
   });
+  const {
+    quizzes,
+    currentIndex,
+    current,
+    sessionCorrect,
+    sessionTotal,
+    completed,
+    semanticGrading,
+    submitting,
+    isRated,
+    ratingSubmitting,
+    skipRating,
+    replaceAll,
+    goTo,
+    handlePrev,
+    handleNext,
+    handleSubmit,
+    handleSelfRate,
+    handleEnter,
+    setAnswer,
+    setSemanticGrading,
+    setCompleted,
+  } = session;
+  // 供 onSubmitError 使用，见那里的说明。
+  // ⚠️ 在 effect 里赋值而不是渲染期直接写：渲染期写 ref 被
+  // react-hooks/refs 规则判为 error。回调只在用户交互时跑，那时早已填好。
+  useEffect(() => {
+    setCompletedRef.current = setCompleted;
+  }, [setCompleted]);
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadData() {
@@ -148,118 +182,10 @@ export default function TodayLearn() {
     try {
       const dueData = await getDueQuizzes(50);
       if (dueData.items.length === 0) return;
-      setQuizzes(
-        dueData.items.map((q, i) => ({
-          quiz: q,
-          userAnswer: '',
-          submitted: false,
-          result: null,
-          // 只有第 1 题在装载时开始计时；其余 0 = "从未到过"（见 goTo 的说明）
-          startTime: i === 0 ? Date.now() : 0,
-        })),
-      );
-      setCurrentIndex(0);
-      setSessionCorrect(0);
-      setSessionTotal(0);
-      setCompleted(false);
+      replaceAll(dueData.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('todayLearn.loadQuestionsFailed'));
     }
-  }
-
-  async function handleSubmit() {
-    // in-flight 锁，防止双击/连按回车重复提交，见 docs/decisions.md#F-23
-    if (submittingRef.current) return;
-    const current = quizzes[currentIndex];
-    if (!current || current.submitted || !current.userAnswer.trim()) return;
-
-    submittingRef.current = true;
-    const timeSpent = Date.now() - current.startTime;
-    try {
-      // 语义判分只在首次提交时按用户的勾选请求（带自评的那次后端会直接跳过 LLM）
-      const result = await submitAnswer(
-        current.quiz.id,
-        current.userAnswer,
-        timeSpent,
-        undefined,
-        semanticGrading,
-      );
-      const newQuizzes = [...quizzes];
-      newQuizzes[currentIndex] = { ...current, submitted: true, result };
-      setQuizzes(newQuizzes);
-      // 只有真正推进了调度的提交才计入本次统计；简答题的占位提交
-      // （grading_method='ungraded'，尚未自评）不算一次"已答"。
-      if (result.grading_method !== 'ungraded') {
-        if (result.is_correct) setSessionCorrect((prev) => prev + 1);
-        setSessionTotal((prev) => prev + 1);
-      }
-      const newStats = await getReviewStats();
-      setStats(newStats);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '';
-      // 每日上限：按后端**错误码**分流，不再匹配中文文案（阶段 0.11 / F-19）。
-      //
-      // 后端 `POST /api/review/submit` 在额度用尽时返回
-      // `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案里的数字会变，码不会）。
-      // 这里刻意**不** import client.ts 的 ApiError 做 instanceof：本模块的
-      // API 客户端在测试里被整体 mock（`vi.mock('../api/client')`），
-      // instanceof 拿到的是 undefined，会直接抛 TypeError。结构化读字段
-      // 对这种替换是免疫的。
-      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
-        setCompleted(true);
-        const newStats = await getReviewStats();
-        setStats(newStats);
-      } else {
-        setError(message || t('todayLearn.submitFailed'));
-      }
-    } finally {
-      submittingRef.current = false;
-    }
-  }
-
-  /** 四档自评：补完占位记录并推进 SM-2 调度 */
-  const handleSelfRate = useCallback(
-    async (quality: number) => {
-      const current = quizzes[currentIndex];
-      if (!current || isRated(current.quiz.id)) return;
-      const timeSpent = Date.now() - current.startTime;
-      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality);
-    },
-    [quizzes, currentIndex, isRated, submitRating],
-  );
-
-  function handleNext() {
-    const current = quizzes[currentIndex];
-    // 等待自评时不允许跳到下一题：此刻调度尚未推进，
-    // 放行会让这道题永远停在"答了但结不了账"的状态。
-    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
-    if (currentIndex < quizzes.length - 1) {
-      goTo(currentIndex + 1);
-    } else {
-      setCompleted(true);
-    }
-  }
-
-  /**
-   * 跳到某一题（上一题 / 题号条共用）
-   *
-   * 与 `QuickReview.goTo` 同一套规则（三页是同一份交互，注释不重复写）：
-   * 往前翻不受"等待自评"约束（自评是结账，回看是别处，两者无关），
-   * 往后跳受约束（不能借题号条绕过「下一题」的等待条件）；
-   * 计时只在**第一次**到达时起算，否则回看时间会被算进作答耗时。
-   */
-  function goTo(target: number) {
-    if (target === currentIndex) return;
-    if (target > currentIndex) {
-      const current = quizzes[currentIndex];
-      if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
-    }
-    setCurrentIndex(target);
-    const newQuizzes = [...quizzes];
-    if (newQuizzes[target].startTime === 0) {
-      newQuizzes[target] = { ...newQuizzes[target], startTime: Date.now() };
-    }
-    setQuizzes(newQuizzes);
   }
 
   /** 题号条的数据：序号 + 是否已答 + 是否答对 */
@@ -268,13 +194,6 @@ export default function TodayLearn() {
     submitted: q.submitted,
     isCorrect: q.result?.is_correct,
   }));
-
-  /** 回车 = 推进当前这一步：已提交则下一题，否则提交答案（与卡片复习页同一约定） */
-  function handleEnter() {
-    const current = quizzes[currentIndex];
-    if (current?.submitted) handleNext();
-    else void handleSubmit();
-  }
 
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
@@ -334,8 +253,7 @@ export default function TodayLearn() {
   }
 
   // --- 答题中 ---
-  if (quizzes.length > 0) {
-    const current = quizzes[currentIndex];
+  if (quizzes.length > 0 && current) {
     const quiz = current.quiz;
 
     return (
@@ -369,7 +287,7 @@ export default function TodayLearn() {
           userAnswer={current.userAnswer}
           submitted={current.submitted}
           result={current.result}
-          submitting={submittingRef.current}
+          submitting={submitting}
           showSm2Info={false}
           semanticGrading={semanticGrading}
           onToggleSemanticGrading={setSemanticGrading}
@@ -377,16 +295,12 @@ export default function TodayLearn() {
           isLast={currentIndex >= quizzes.length - 1}
           selfRated={isRated(quiz.id)}
           selfRatingSubmitting={ratingSubmitting}
-          onSelectAnswer={(answer) => {
-            const newQuizzes = [...quizzes];
-            newQuizzes[currentIndex] = { ...current, userAnswer: answer };
-            setQuizzes(newQuizzes);
-          }}
+          onSelectAnswer={setAnswer}
           onSubmit={handleSubmit}
           onSelfRate={handleSelfRate}
           onSkipSelfRate={() => skipRating(quiz.id)}
           onNext={handleNext}
-          onPrev={() => goTo(currentIndex - 1)}
+          onPrev={handlePrev}
           hasPrev={currentIndex > 0}
         />
       </div>

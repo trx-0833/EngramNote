@@ -2,8 +2,14 @@
  * @file 复习答题页面
  * @description 基于间隔重复算法的复习答题界面，支持选择题、填空题和简答题。
  * 用户逐题作答，提交后即时显示正误判断和解析，SM-2 算法自动更新复习间隔。
+ *
+ * ## 会话逻辑住在 `hooks/useQuizSession`
+ *
+ * 本页只保留**这一页独有**的东西：取数（到期题目 + 统计）、每日额度用尽时的
+ * 分流、以及完成页/错误页的排版。答题会话的状态机（当前题、前后翻、题号条、
+ * 提交锁、自评接线、计时）三页共用一份实现 —— 理由见那个 hook 的文件头。
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getDueQuizzes,
   submitAnswer,
@@ -21,18 +27,8 @@ import QuizNavigator, { type QuizNavItem } from '../components/quiz/QuizNavigato
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
-import { useSelfRating } from '../hooks/useSelfRating';
-import { useToast } from '../components/Toast';
+import { useQuizSession } from '../hooks/useQuizSession';
 import { useTranslation } from '../i18n';
-
-/** 单题答题状态 */
-interface QuizState {
-  quiz: DueQuiz;
-  userAnswer: string;
-  submitted: boolean;
-  result: SubmitAnswerResponse | null;
-  startTime: number;
-}
 
 /**
  * 读取异常对象上的后端 error_code（阶段 0.11）
@@ -50,184 +46,125 @@ function errorCodeOf(e: unknown): string | null {
 
 export default function Review() {
   const { t } = useTranslation();
-  const toast = useToast();
-  const [quizzes, setQuizzes] = useState<QuizState[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [completed, setCompleted] = useState(false);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  /** 提交 in-flight 锁（防双击重复提交），见 docs/decisions.md#F-23 */
-  const submittingRef = useRef(false);
 
-  // 四档自评：补完简答题的占位记录并推进 SM-2 调度
-  const onRated = useCallback(
-    (result: SubmitAnswerResponse) => {
-      setQuizzes((prev) => prev.map((q) => (q.quiz.id === result.quiz_id ? { ...q, result } : q)));
-      if (result.is_correct) setSessionCorrect((prev) => prev + 1);
-      setSessionTotal((prev) => prev + 1);
-      // 自评会推进调度并写入今日完成数，刷新统计
-      getReviewStats()
-        .then(setStats)
-        .catch(() => {
-          /* 统计刷新失败不影响答题 */
-        });
-      toast.success(t('review.selfRatingRecorded'));
-    },
-    [toast, t],
+  /**
+   * 提交作答
+   *
+   * 这里**只做转发**：错误分流交给下面的 `onSubmitError`。
+   * 为什么不在这一层 `catch`：hook 需要看到异常才能弹 toast，
+   * 而页面需要看到 `error_code` 才能判断"是限额还是真错误" ——
+   * 两边都要看，所以用回调而不是在这里把异常吃掉。
+   */
+  const submit = useCallback(
+    (
+      quiz: DueQuiz,
+      userAnswer: string,
+      timeSpentMs: number,
+      selfRating: number | undefined,
+      semanticGrading?: boolean,
+    ): Promise<SubmitAnswerResponse> =>
+      submitAnswer(quiz.id, userAnswer, timeSpentMs, selfRating, semanticGrading),
+    [],
   );
 
-  const onRateError = useCallback(
-    (message: string) => {
-      toast.error(message);
+  /** 每次提交后刷新统计（今日已完成数变了） */
+  const refreshStats = useCallback(() => {
+    void getReviewStats()
+      .then(setStats)
+      .catch(() => {
+        /* 统计刷新失败不影响答题 */
+      });
+  }, []);
+
+  /**
+   * 提交失败：按后端**错误码**分流，不匹配中文文案（阶段 0.11 / F-19）
+   *
+   * 后端 `POST /api/review/submit` 在额度用尽时返回
+   * `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案中的数字会变，码不会）。
+   * 额度用尽**不是错误**，是"今天做完了"—— 切到完成页，并刷新统计，
+   * 否则完成页上的"今日已完成"显示的是旧值。
+   *
+   * ⚠️ 用 ref 拿 `setCompleted` 而不是直接从 `session` 解构：那会形成
+   * **循环引用**（`onSubmitError` → `session` → `onSubmitError`），
+   * `tsc` 会报 TS7022/TS2448。ref 在首次渲染后就填好，而回调只在
+   * 用户交互时才跑，所以不存在"还没填上"的窗口。
+   */
+  const setCompletedRef = useRef<((v: boolean) => void) | null>(null);
+  const onSubmitError = useCallback(
+    (e: unknown) => {
+      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
+        refreshStats();
+        setCompletedRef.current?.(true);
+      }
     },
-    [toast],
+    [refreshStats],
   );
 
-  const {
-    submitRating,
-    submitting: ratingSubmitting,
-    isRated,
-    skipRating,
-  } = useSelfRating({
-    submit: submitAnswer,
-    onRated,
-    onError: onRateError,
+  const session = useQuizSession<DueQuiz>({
+    submit,
+    // 每次提交成功都刷新统计：今日已完成数变了
+    onSubmitted: refreshStats,
+    // 自评也会推进调度并写入今日完成数
+    onRated: refreshStats,
+    onSubmitError,
   });
-
-  // 语义判分开关（阶段 3.5）：见 handleSubmit 里"为什么放在页面而不是卡片"的说明
-  const [semanticGrading, setSemanticGrading] = useState(false);
-
+  const {
+    quizzes,
+    currentIndex,
+    current,
+    sessionCorrect,
+    sessionTotal,
+    completed,
+    semanticGrading,
+    submitting,
+    isRated,
+    ratingSubmitting,
+    skipRating,
+    replaceAll,
+    clear,
+    goTo,
+    handlePrev,
+    handleNext,
+    handleSubmit,
+    handleSelfRate,
+    handleEnter,
+    setAnswer,
+    setSemanticGrading,
+    setCompleted,
+  } = session;
+  // 供 onSubmitError 使用，见那里的说明。
+  // ⚠️ 在 effect 里赋值而不是渲染期直接写：渲染期写 ref 被
+  // react-hooks/refs 规则判为 error。回调只在用户交互时跑，那时早已填好。
   useEffect(() => {
-    loadData();
-    // `t` 进依赖：语言切换后重新加载时，错误文案要是新语言的
-  }, [t]);
+    setCompletedRef.current = setCompleted;
+  }, [setCompleted]);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [dueData, statsData] = await Promise.all([getDueQuizzes(50), getReviewStats()]);
-      setQuizzes(
-        dueData.items.map((q, i) => ({
-          quiz: q,
-          userAnswer: '',
-          submitted: false,
-          result: null,
-          // 只有第 1 题在装载时开始计时；其余 0 = "从未到过"（见 goTo 的说明）
-          startTime: i === 0 ? Date.now() : 0,
-        })),
-      );
       setStats(statsData);
       if (dueData.items.length === 0) {
+        clear();
         setCompleted(true);
+      } else {
+        replaceAll(dueData.items);
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : t('review.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }
+  }, [t, clear, replaceAll, setCompleted]);
 
-  async function handleSubmit() {
-    // in-flight 锁，防止双击/连按回车重复提交（重复 ReviewLog + SM-2 叠加），见 docs/decisions.md#F-23
-    if (submittingRef.current) return;
-    const current = quizzes[currentIndex];
-    if (!current || current.submitted) return;
-    if (!current.userAnswer.trim()) return;
-
-    submittingRef.current = true;
-    const timeSpent = Date.now() - current.startTime;
-
-    try {
-      // 语义判分只在首次提交时按用户的勾选请求（带自评的那次后端会直接跳过 LLM）。
-      // 开关状态放在页面上而不是卡片里：回车提交也走这个函数，藏在卡片里
-      // 会让"勾了框再按回车"静默按不判分提交。
-      const result = await submitAnswer(
-        current.quiz.id,
-        current.userAnswer,
-        timeSpent,
-        undefined,
-        semanticGrading,
-      );
-      const newQuizzes = [...quizzes];
-      newQuizzes[currentIndex] = { ...current, submitted: true, result };
-      setQuizzes(newQuizzes);
-
-      // 只有真正推进了调度的提交才计入本次会话统计。
-      // grading_method='ungraded' 是简答题的占位提交（尚未自评、未推进 SM-2），
-      // 把它算作一次"已答"会让会话正确率虚高（占位判分恒为错误，反而虚低）。
-      if (result.grading_method !== 'ungraded') {
-        if (result.is_correct) setSessionCorrect((prev) => prev + 1);
-        setSessionTotal((prev) => prev + 1);
-      }
-
-      // 刷新统计（更新今日已完成数）
-      const newStats = await getReviewStats();
-      setStats(newStats);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : t('review.submitFailed');
-      // 达到每日限额：按后端**错误码**分流，不再匹配中文文案（阶段 0.11 / F-19）。
-      // 后端 `POST /api/review/submit` 在额度用尽时返回
-      // `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案中的数字会变，码不会）。
-      if (errorCodeOf(e) === 'DAILY_REVIEW_LIMIT_REACHED') {
-        // 达到每日限额，跳到完成页面
-        setCompleted(true);
-        const newStats = await getReviewStats();
-        setStats(newStats);
-      } else {
-        setError(msg);
-      }
-    } finally {
-      submittingRef.current = false;
-    }
-  }
-
-  /** 四档自评：把质量分回传后端，补完占位记录并推进 SM-2 调度 */
-  const handleSelfRate = useCallback(
-    async (quality: number) => {
-      const current = quizzes[currentIndex];
-      if (!current || isRated(current.quiz.id)) return;
-      const timeSpent = Date.now() - current.startTime;
-      await submitRating(current.quiz.id, current.userAnswer, timeSpent, quality);
-    },
-    [quizzes, currentIndex, isRated, submitRating],
-  );
-
-  function handleNext() {
-    const current = quizzes[currentIndex];
-    // 等待自评时不允许跳到下一题：此刻 SM-2 调度尚未推进，
-    // 放行会让这道题永远停在"答了但结不了账"的状态。
-    if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
-    if (currentIndex < quizzes.length - 1) {
-      goTo(currentIndex + 1);
-    } else {
-      setCompleted(true);
-    }
-  }
-
-  /**
-   * 跳到某一题（上一题 / 题号条共用）
-   *
-   * 与 `QuickReview.goTo` 同一套规则（两页是同一份交互，注释不重复写）：
-   * 往前翻不受"等待自评"约束（自评是结账，回看是别处，两者无关），
-   * 往后跳受约束（不能借题号条绕过「下一题」的等待条件）；
-   * 计时只在**第一次**到达时起算，否则回看时间会被算进作答耗时。
-   */
-  function goTo(target: number) {
-    if (target === currentIndex) return;
-    if (target > currentIndex) {
-      const current = quizzes[currentIndex];
-      if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
-    }
-    setCurrentIndex(target);
-    const newQuizzes = [...quizzes];
-    if (newQuizzes[target].startTime === 0) {
-      newQuizzes[target] = { ...newQuizzes[target], startTime: Date.now() };
-    }
-    setQuizzes(newQuizzes);
-  }
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+    // `t` 进依赖：语言切换后重新加载时，错误文案要是新语言的
+  }, [t, loadData]);
 
   /** 题号条的数据：序号 + 是否已答 + 是否答对 */
   const navItems: QuizNavItem[] = quizzes.map((q, i) => ({
@@ -235,23 +172,6 @@ export default function Review() {
     submitted: q.submitted,
     isCorrect: q.result?.is_correct,
   }));
-
-  /**
-   * 回车 = 推进当前这一步：已提交则下一题，否则提交答案
-   *
-   * ⚠️ 这里曾经有一段"聚焦下一题的输入框"的 setTimeout，但 `inputRef` /
-   * `textareaRef` 从未接到 `QuizAnswerCard` 上（组件不接受 ref），
-   * 所以它一直在对 null 调 focus —— 看着像功能，实际是死代码，本轮删除。
-   * 真正的聚焦由卡片的 `fillAutoFocus` 承担。
-   */
-  function handleEnter() {
-    const cur = quizzes[currentIndex];
-    if (cur?.submitted) {
-      handleNext();
-    } else {
-      void handleSubmit();
-    }
-  }
 
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
@@ -329,7 +249,6 @@ export default function Review() {
     );
   }
 
-  const current = quizzes[currentIndex];
   if (!current) return null;
 
   const quiz = current.quiz;
@@ -381,13 +300,13 @@ export default function Review() {
 
       {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
       <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
-      {/* 题目卡片（共享 QuizAnswerCard；提交竞态锁由 handleSubmit 的 submittingRef 承担，见 docs/decisions.md#F-23） */}
+      {/* 题目卡片（共享 QuizAnswerCard；提交竞态锁由 useQuizSession 的 submittingRef 承担，见 docs/decisions.md#F-23） */}
       <QuizAnswerCard
         quiz={quiz}
         userAnswer={current.userAnswer}
         submitted={current.submitted}
         result={current.result}
-        submitting={submittingRef.current}
+        submitting={submitting}
         showSm2Info
         showReviewMeta
         isLast={currentIndex >= quizzes.length - 1}
@@ -395,16 +314,12 @@ export default function Review() {
         selfRatingSubmitting={ratingSubmitting}
         semanticGrading={semanticGrading}
         onToggleSemanticGrading={setSemanticGrading}
-        onSelectAnswer={(answer) => {
-          const newQuizzes = [...quizzes];
-          newQuizzes[currentIndex] = { ...current, userAnswer: answer };
-          setQuizzes(newQuizzes);
-        }}
+        onSelectAnswer={setAnswer}
         onSubmit={handleSubmit}
         onSelfRate={handleSelfRate}
         onSkipSelfRate={() => skipRating(quiz.id)}
         onNext={handleNext}
-        onPrev={() => goTo(currentIndex - 1)}
+        onPrev={handlePrev}
         hasPrev={currentIndex > 0}
       />
     </div>

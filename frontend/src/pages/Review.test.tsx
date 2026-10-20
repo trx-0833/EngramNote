@@ -270,7 +270,17 @@ describe('答题复习的回车约定（与卡片复习页一致）', () => {
 
     // 第二次提交必须带上自评分 —— 也就是"回车真的激活了那个按钮"
     expect(mockedSubmit).toHaveBeenCalledTimes(2);
-    expect(mockedSubmit).toHaveBeenLastCalledWith('q1', '恒压运行', expect.any(Number), 4);
+    // 第 5 个参数是语义判分开关。自评那一路（`useSelfRating` → hook 的 submit）
+    // 不传它，所以是 `undefined` —— 后端在带自评时会直接跳过 LLM，传什么值都无所谓。
+    // 这里刻意断言 `undefined` 而不是"有传"：它固定的是"自评路径不碰语义判分"，
+    // 哪天有人在自评路径上也把开关传下去，这条会红。
+    expect(mockedSubmit).toHaveBeenLastCalledWith(
+      'q1',
+      '恒压运行',
+      expect.any(Number),
+      4,
+      undefined,
+    );
   });
 
   it('★ 焦点在"查看原文语境"上时，回车展开原文而不是被带去下一题', async () => {
