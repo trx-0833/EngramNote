@@ -1242,21 +1242,52 @@ async def _rebuild_dangling_tables() -> None:
         if netloc:
             db_file = netloc + urlparse(db_url.replace("+aiosqlite", "")).path
 
-    # (表名, 探测列)：探测列 notnull=1 视为旧 schema 需重建
+    # (表名, 探测列, 探测种类)
+    #
+    # 探测种类：
+    # - `"notnull"`：探测列 `notnull=1` 视为旧 schema 需重建。
+    # - `"not_pk"`：探测列**不是主键**视为旧 schema 需重建（i18n 阶段 5 补）。
     #
     # `review_logs.quiz_id` 是阶段 3.12（卡片可直接复习）引入的变更：
     # 卡片级复习没有题目，因此该列必须可空。
     # SQLite 不能直接 `ALTER COLUMN ... DROP NOT NULL`，只能重建表 ——
     # 正好复用本函数已有的"按 metadata 生成 DDL → 拷数据 → 换名"机制，
     # 它天然会让重建后的表带上新的 nullable 约束。
+    #
+    # `chunks.chunk_rowid`（2026-10-20 补）—— 见下面 `chunks` 那一项的注释。
     targets = (
-        ("card_relations", "card_id_1"),
-        ("note_material_links", "personal_note_id"),
-        ("knowledge_cards", "note_id"),
-        ("quiz_items", "note_id"),
-        ("review_logs", "note_id"),
-        ("review_logs", "quiz_id"),
+        ("card_relations", "card_id_1", "notnull"),
+        ("note_material_links", "personal_note_id", "notnull"),
+        ("knowledge_cards", "note_id", "notnull"),
+        ("quiz_items", "note_id", "notnull"),
+        ("review_logs", "note_id", "notnull"),
+        ("review_logs", "quiz_id", "notnull"),
+        ("chunks", "chunk_rowid", "not_pk"),
     )
+
+    # 重建时**不参与拷贝**的列：交给 SQLite 重新生成。
+    #
+    # `chunks.chunk_rowid` 必须是自增主键 —— 若把旧值一起拷过去，
+    # 它就不再是"由 SQLite 分配的 rowid"，重建的意义（让该列成为
+    # rowid 别名）会落空。
+    REGENERATED_COLUMNS = {"chunks": ("chunk_rowid",)}
+
+    def _column_probe(conn, table: str, probe_col: str, kind: str) -> bool:
+        """探测该表是否为旧 schema（True = 需要重建）"""
+        rows = list(conn.execute(f"PRAGMA table_info({table})"))
+        if not rows:
+            return False
+        if kind == "notnull":
+            for row in rows:
+                if row[1] == probe_col:
+                    return bool(row[3])
+            return False
+        # "not_pk"：PRAGMA table_info 的第 6 列（索引 5）是主键序号，
+        # 0 = 不是主键，>0 = 是主键（复合主键时是它的位置）
+        for row in rows:
+            if row[1] == probe_col:
+                return not row[5]
+        return False
 
     # 未放行时：只探测旧 schema 并告警，绝不修改任何数据
     if not allowed:
@@ -1264,11 +1295,9 @@ async def _rebuild_dangling_tables() -> None:
             probe = sqlite3.connect(db_file)
             try:
                 stale = []
-                for table, probe_col in targets:
-                    for row in probe.execute(f"PRAGMA table_info({table})"):
-                        if row[1] == probe_col and bool(row[3]):
-                            stale.append(table)
-                            break
+                for table, probe_col, kind in targets:
+                    if _column_probe(probe, table, probe_col, kind):
+                        stale.append(f"{table}.{probe_col}")
             finally:
                 probe.close()
             if stale:
@@ -1299,12 +1328,6 @@ async def _rebuild_dangling_tables() -> None:
             try:
                 raw.execute("PRAGMA foreign_keys=OFF")
 
-                def _needs_rebuild(table: str, probe_col: str) -> bool:
-                    for row in raw.execute(f"PRAGMA table_info({table})"):
-                        if row[1] == probe_col:
-                            return bool(row[3])  # notnull 标志
-                    return False
-
                 # 双检：锁内重放探测，避免等待锁期间已被其他实例重建而重复执行
                 #
                 # 必须**去重**：同一张表可能因为多个探测列未达标而出现多次
@@ -1312,7 +1335,7 @@ async def _rebuild_dangling_tables() -> None:
                 # 不去重会对同一张表连续重建两次，第二次必然在
                 # `CREATE TABLE ...temp` 或 `DROP TABLE` 处报错。
                 todo = list(dict.fromkeys(
-                    t for t, probe in targets if _needs_rebuild(t, probe)
+                    t for t, probe, kind in targets if _column_probe(raw, t, probe, kind)
                 ))
                 if not todo:
                     return
@@ -1340,10 +1363,20 @@ async def _rebuild_dangling_tables() -> None:
                         col_list = ", ".join(f'"{c.name}"' for c in table.columns)
                         raw.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
                         raw.execute(create_ddl)
-                        raw.execute(
-                            f'INSERT INTO "{temp_name}" ({col_list}) '
-                            f'SELECT {col_list} FROM "{table_name}"'
-                        )
+                        # 自增列**不拷贝**：交给 SQLite 重新分配（见 REGENERATED_COLUMNS）
+                        skip = set(REGENERATED_COLUMNS.get(table_name, ()))
+                        copy_cols = [c.name for c in table.columns if c.name not in skip]
+                        if skip:
+                            copy_list = ", ".join(f'"{n}"' for n in copy_cols)
+                            raw.execute(
+                                f'INSERT INTO "{temp_name}" ({copy_list}) '
+                                f'SELECT {copy_list} FROM "{table_name}"'
+                            )
+                        else:
+                            raw.execute(
+                                f'INSERT INTO "{temp_name}" ({col_list}) '
+                                f'SELECT {col_list} FROM "{table_name}"'
+                            )
                         raw.execute(f'DROP TABLE "{table_name}"')
                         raw.execute(f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"')
                         # 旧索引随 DROP TABLE 消失，按 metadata 重建
@@ -1358,6 +1391,44 @@ async def _rebuild_dangling_tables() -> None:
                 violations = raw.execute("PRAGMA foreign_key_check").fetchall()
                 if violations:
                     logger.warning("悬挂引用表重建后 FK 校验异常（保留数据，仅告警）: %s", violations[:5])
+
+                # ⚠️ `chunks` 重建后**必须**重建 FTS 索引
+                #
+                # `chunks_fts` 是 FTS5 **外部内容表**（`content='chunks'`，
+                # `content_rowid='chunk_rowid'`），它的倒排索引里存的是
+                # `chunk_rowid` 的值。而重建把这一列交给了 SQLite 重新分配
+                # （见 `REGENERATED_COLUMNS`），旧值全部作废 ——
+                # 不重建就会得到"索引里有一批 rowid，内容表里没有对应行"，
+                # 表现为检索**静默返回 0 条**（`models/chunk.py:111-118` 记的
+                # 就是这一类最难排查的缺陷）。
+                #
+                # 官方 `'rebuild'` 是外部内容表唯一可靠的同步方式
+                # （逐条同步的几种写法都实测失败，见 `fts_search_service.reindex_note`）。
+                # 放在事务**提交之后**：`rebuild` 会整表重读 `chunks`，
+                # 必须在数据已经落定的状态下做。
+                if "chunks" in todo:
+                    try:
+                        raw.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+                        n_fts = raw.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0]
+                        n_chunks = raw.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+                        if n_fts != n_chunks:
+                            logger.error(
+                                "chunks 重建后 FTS 行数不一致: chunks_fts=%s chunks=%s "
+                                "—— 词法检索可能不完整，请运行 scripts/ 下的重建脚本",
+                                n_fts, n_chunks,
+                            )
+                        else:
+                            logger.info(
+                                "SQLite 迁移: chunks 重建后已重建 FTS 索引（%d 行）", n_fts
+                            )
+                    except Exception as exc:
+                        logger.error(
+                            "chunks 重建后 FTS 索引重建失败: %s —— "
+                            "词法检索会退化，请手工执行 "
+                            "`INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')`",
+                            exc,
+                        )
+
                 logger.info("SQLite 迁移: 悬挂引用表重建完成")
             finally:
                 try:

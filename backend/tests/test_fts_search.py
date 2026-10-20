@@ -168,6 +168,56 @@ class TestFtsSearch:
         for rid, cnt in rowids:
             assert cnt == 1, f"chunk_rowid={rid} 出现 {cnt} 次"
 
+    async def test_chunk_rowid_is_autoincrement_pk(self, test_db):
+        """**schema 不变量**：`chunk_rowid` 必须是自增主键，且是真正的 rowid 别名
+
+        ## 为什么单独钉这一条（2026-10-20 补）
+
+        真库（从旧版本升级上来的）里 `chunk_rowid` 曾经是**普通可空列** ——
+        因为 `create_all()` 不 ALTER 已有表，而 `_migrate_sqlite` 当时只用
+        `ALTER TABLE ... ADD COLUMN` 加列，**SQLite 无法把已有列改成主键**。
+
+        症状：`chunk_service.index_note_from_storage` 走
+        `delete(Chunk)` + `add_all([Chunk(...)])` + `flush()`，而 `Chunk(...)`
+        **不传 `chunk_rowid`**（模型说它是自增主键，SQLAlchemy 认为库会给值）
+        —— 旧 schema 下库不给值，flush 抛
+        `Instance <Chunk> has a NULL identity key`，被 `clean_tasks` 的
+        `except` 吞掉，只留一条 warning，**那篇笔记的 chunk 一条都写不进去**。
+
+        ## 为什么原有的测试全绿也发现不了
+
+        测试用的是**新建**的库，`create_all()` 会按当前模型建出正确 schema。
+        这个差异**只在从旧版本升级上来的真库上出现**。
+        所以这里断言的是"库里的实际 schema"，而不是"功能能用"。
+        """
+        async with test_db() as db:
+            cols = (await db.execute(text("PRAGMA table_info(chunks)"))).all()
+            by_name = {c[1]: c for c in cols}
+            assert "chunk_rowid" in by_name, "chunks 表缺少 chunk_rowid 列"
+            cr = by_name["chunk_rowid"]
+            # PRAGMA table_info 的第 6 列（索引 5）是主键序号：0 = 不是主键
+            assert cr[5] > 0, (
+                "chunk_rowid 不是主键 —— 旧 schema。SQLAlchemy 会认为库负责生成"
+                "该值而 INSERT 里不带它，flush 将抛 NULL identity key。"
+                "需重建 chunks 表（见 database._rebuild_dangling_tables 的 targets）"
+            )
+            assert cr[3] == 1, "chunk_rowid 必须 NOT NULL"
+
+            # 它还得是**真正的 rowid 别名**：FTS5 外部内容表的 content_rowid
+            # 指向它，只有两者相等时索引与正文才稳定对应
+            uid, _ = await _make_note_with_chunks(test_db, ["甲乙丙丁戊己庚辛"])
+            mismatch = (await db.execute(text(
+                "SELECT COUNT(*) FROM chunks WHERE chunk_rowid IS NOT rowid"
+            ))).scalar()
+            assert mismatch == 0, (
+                f"{mismatch} 行的 chunk_rowid 与 rowid 不相等 —— "
+                f"它不是 rowid 别名，删除后 rowid 复用会让 FTS 指向错误的行"
+            )
+            nulls = (await db.execute(text(
+                "SELECT COUNT(*) FROM chunks WHERE chunk_rowid IS NULL"
+            ))).scalar()
+            assert nulls == 0, f"{nulls} 行的 chunk_rowid 为 NULL"
+
     async def test_isolated_per_user(self, test_db):
         """跨用户必须隔离"""
         uid_a, _ = await _make_note_with_chunks(test_db, ["甲用户的资料内容"])
