@@ -1,3 +1,4 @@
+import { useTranslation } from '../../i18n';
 /**
  * @file 项目卡片里的行内重命名编辑区
  * @description 自 `pages/Projects.tsx` 的 `renderCard` 拆分（overhaul-plan 5.5），
@@ -21,13 +22,18 @@ export default function ProjectRenameForm({
   onSave,
   onCancel,
 }: ProjectRenameFormProps) {
+  const { t } = useTranslation();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <input value={name} onChange={(e) => onChangeName(e.target.value)} placeholder="项目名称" />
+      <input
+        value={name}
+        onChange={(e) => onChangeName(e.target.value)}
+        placeholder={t('projectPage.namePlaceholderShort')}
+      />
       <textarea
         value={description}
         onChange={(e) => onChangeDescription(e.target.value)}
-        placeholder="项目描述（可选）"
+        placeholder={t('projectPage.descriptionLabel')}
         rows={2}
         style={{ resize: 'vertical' }}
       />
@@ -37,14 +43,14 @@ export default function ProjectRenameForm({
           style={{ fontSize: '0.8rem', padding: '6px 14px' }}
           onClick={onSave}
         >
-          保存
+          {t('projectPage.save')}
         </button>
         <button
           className="btn btn-secondary"
           style={{ fontSize: '0.8rem', padding: '6px 14px' }}
           onClick={onCancel}
         >
-          取消
+          {t('projectPage.cancel')}
         </button>
       </div>
     </div>

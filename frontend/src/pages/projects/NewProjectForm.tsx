@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { createProject } from '../../api/client';
 import Icon from '../../components/Icon';
+import { useTranslation } from '../../i18n';
 
 interface NewProjectFormProps {
   /** 创建成功后刷新项目列表（`loadProjects`） */
@@ -18,6 +19,7 @@ interface NewProjectFormProps {
 }
 
 export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
+  const { t } = useTranslation();
   // 新建项目表单
   const [showForm, setShowForm] = useState(false);
   const [newName, setNewName] = useState('');
@@ -29,7 +31,7 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
   async function handleCreate() {
     const name = newName.trim();
     if (!name) {
-      setFormError('请输入项目名称');
+      setFormError(t('projectPage.nameRequiredCreate'));
       return;
     }
     setCreating(true);
@@ -42,7 +44,7 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
       await onCreated();
     } catch (err) {
       console.error('创建项目失败:', err);
-      setFormError('创建项目失败，请稍后重试');
+      setFormError(t('projectPage.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -63,7 +65,9 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
             {/* `h2` 而不是 `h3`（a11y-audit **F-20**）：与 `ProjectCard` 同一次修复 ——
                 这一页的 h1 是「项目」，这些卡片标题就是它的直接下级区块。
                 字号 1rem / 字重 600 本来就显式钉着，**像素不变**。 */}
-            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>创建新项目</h2>
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+              {t('projectPage.createTitle')}
+            </h2>
             <p
               style={{
                 margin: '4px 0 0',
@@ -71,38 +75,40 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
                 color: 'var(--color-text-secondary)',
               }}
             >
-              项目为纯标签，创建后不生成物理目录；用标签给笔记打归属
+              {t('projectPage.createHint')}
             </p>
           </div>
           <button className="btn btn-primary" onClick={() => setShowForm(true)}>
             {/* 批次 B3：全角 `\uFF0B` ＋ 换 `<Icon name="add" />` ——
                 此前全站"+ / ＋"两种写法并存，且都跟正文用同一套字体度量 */}
             <Icon name="add" size={16} />
-            新建项目
+            {t('projectPage.newProject')}
           </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>新建项目</h2>
+          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+            {t('projectPage.newProjectTitle')}
+          </h2>
           <div>
             <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              项目名称
+              {t('projectPage.nameLabel')}
             </label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="如：Transformer 论文精读"
+              placeholder={t('projectPage.namePlaceholder')}
               autoFocus
             />
           </div>
           <div>
             <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              项目描述（可选）
+              {t('projectPage.descriptionLabel')}
             </label>
             <textarea
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="这个项目是做什么的？"
+              placeholder={t('projectPage.descriptionPlaceholder')}
               rows={2}
               style={{ resize: 'vertical' }}
             />
@@ -112,7 +118,7 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
           )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>
-              {creating ? '创建中…' : '创建项目'}
+              {creating ? t('projectPage.creating') : t('projectPage.create')}
             </button>
             <button
               className="btn btn-secondary"
@@ -121,7 +127,7 @@ export default function NewProjectForm({ onCreated }: NewProjectFormProps) {
                 setFormError('');
               }}
             >
-              取消
+              {t('projectPage.cancel')}
             </button>
           </div>
         </div>

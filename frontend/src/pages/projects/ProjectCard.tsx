@@ -27,6 +27,7 @@ import ScanResultPanel from './ScanResultPanel';
 import { unwrapProjectNotes } from './helpers';
 // 本卡片私有样式（visual-refactor-plan 批次 E8）：计数 chip 的两个颜色
 import styles from './ProjectCard.module.css';
+import { useTranslation } from '../../i18n';
 
 interface ProjectCardProps {
   project: Project;
@@ -89,6 +90,7 @@ export default function ProjectCard({
   onCloseAddPanel,
   onRemoveNote,
 }: ProjectCardProps) {
+  const { t } = useTranslation();
   const isRenaming = !!rename;
   const isExpanded = !!detail;
   // 详情里的 notes 与 `/projects` 走同一道拆包判据：缺字段/包装对象都不该让 `notes.map` 白屏。
@@ -130,7 +132,7 @@ export default function ProjectCard({
             <input
               value={rename.name}
               onChange={(e) => onChangeRenameName(e.target.value)}
-              placeholder="项目名称"
+              placeholder={t('projectPage.namePlaceholderShort')}
               style={{ width: '100%', fontWeight: 600 }}
               autoFocus
             />
@@ -167,7 +169,7 @@ export default function ProjectCard({
             {/* 计数 chip（批次 E8）：`.badge` 提供胶囊基线，本模块只补"浅墨底 + 墨蓝字"
                 两个颜色 —— 这两个属性 `.badge` 一个都没声明，所以没有同权重竞争。 */}
             <span className={`badge ${styles.projectNoteCountChip}`}>
-              {p.note_count ?? 0} 篇笔记
+              {t('projectPage.noteCount', { count: p.note_count ?? 0 })}
             </span>
           </div>
         </div>
@@ -175,22 +177,22 @@ export default function ProjectCard({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
           <button
             className="btn btn-ghost"
-            title="从已有笔记中选择并添加到本项目"
+            title={t('projectPage.addNotesHint')}
             onClick={onOpenAddPanel}
             style={{ fontSize: '0.8rem', padding: '4px 10px' }}
           >
             {/* 批次 B3：「添加」此前是全站纯文字按钮 —— 补一枚加号图标 */}
             <Icon name="add" size={16} />
-            添加笔记
+            {t('projectPage.addNotes')}
           </button>
           <button
             className="btn btn-ghost"
-            title="扫描导入 source/ 目录中的新文件"
+            title={t('projectPage.scanHint')}
             onClick={onScan}
             disabled={isScanning}
             style={{ fontSize: '0.8rem', padding: '4px 10px' }}
           >
-            {isScanning ? '扫描中…' : '扫描导入'}
+            {isScanning ? t('projectPage.scanning') : t('projectPage.scan')}
           </button>
         </div>
       </div>
@@ -262,7 +264,9 @@ export default function ProjectCard({
           <span className={`collapse-arrow ${isExpanded ? 'collapse-arrow-open' : ''}`}>
             <Icon name="chevron" size={16} />
           </span>
-          {isExpanded ? '收起笔记' : `查看笔记（${p.note_count ?? 0}）`}
+          {isExpanded
+            ? t('projectPage.collapseNotes')
+            : t('projectPage.expandNotes', { count: p.note_count ?? 0 })}
         </button>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           <button
@@ -270,7 +274,7 @@ export default function ProjectCard({
             style={{ fontSize: '0.8rem', padding: '4px 8px' }}
             onClick={onStartRename}
           >
-            重命名
+            {t('projectPage.rename')}
           </button>
           <button
             className="btn btn-ghost"
@@ -280,7 +284,7 @@ export default function ProjectCard({
             {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete`（带叉的浅桶，动作）
                 而不是 `trash`（回收站，位置）。两者怎么区分见 icons/delete.tsx 文件头。 */}
             <Icon name="delete" size={16} />
-            删除
+            {t('projectPage.delete')}
           </button>
         </div>
       </div>

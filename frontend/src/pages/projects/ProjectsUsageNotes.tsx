@@ -4,8 +4,10 @@
  * （批次 B3：`\u{1F4D6}` 📖 换成 `<Icon name="book" />`，正文逐字未动。）
  */
 import Icon from '../../components/Icon';
+import { useTranslation } from '../../i18n';
 
 export default function ProjectsUsageNotes() {
+  const { t } = useTranslation();
   return (
     <div
       className="card"
@@ -27,19 +29,20 @@ export default function ProjectsUsageNotes() {
         }}
       >
         <Icon name="book" size={16} />
-        使用说明
+        {t('projectPage.usageTitle')}
       </strong>
       <ol style={{ margin: '8px 0 0 20px', padding: 0 }}>
-        <li>项目是纯标签：一篇笔记可打上多个项目标签，创建项目不会生成物理文件夹。</li>
+        <li>{t('projectPage.usageTagOnly')}</li>
         <li>
-          所有文件统一存放在收件箱（inbox）的{' '}
-          <code style={{ color: 'var(--color-primary)' }}>source/</code> 目录。
+          {t('projectPage.usageAllFiles')}{' '}
+          <code style={{ color: 'var(--color-primary)' }}>source/</code>.
         </li>
         <li>
-          把文件直接拷贝到收件箱 <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
-          后，点击「扫描导入」即可识别为笔记并打上当前项目标签。
+          {t('projectPage.usageCopyHint')}{' '}
+          <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
+          {t('projectPage.usageScanHint')}
         </li>
-        <li>也可以在上传页选择多个项目标签，通过网页直接上传文件。</li>
+        <li>{t('projectPage.usageUploadHint')}</li>
       </ol>
     </div>
   );

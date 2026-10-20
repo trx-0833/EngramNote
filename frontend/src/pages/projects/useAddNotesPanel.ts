@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { addNotesToProject, getNotes, type Note, type Project } from '../../api/client';
 import { unwrapCandidateNotes } from './helpers';
+import { translate } from '../../i18n/translate';
 
 interface UseAddNotesPanelOptions {
   /** 刷新项目列表（笔记归属变化会影响 note_count） */
@@ -42,7 +43,7 @@ export function useAddNotesPanel({ loadProjects, refreshExpandedDetail }: UseAdd
       setCandidateNotes(unwrapCandidateNotes(data).filter((n) => !n.project_ids?.includes(p.id)));
     } catch (err) {
       console.error('加载候选笔记失败:', err);
-      setAddError('加载候选笔记失败，请稍后重试');
+      setAddError(translate('projectPage.loadCandidatesFailed'));
       setCandidateNotes([]);
     }
   }
@@ -66,7 +67,7 @@ export function useAddNotesPanel({ loadProjects, refreshExpandedDetail }: UseAdd
   /** 确认添加选中笔记到项目 */
   async function confirmAdd(p: Project) {
     if (selectedNoteIds.length === 0) {
-      setAddError('请先勾选要添加的笔记');
+      setAddError(translate('projectPage.selectNotesFirst'));
       return;
     }
     setAdding(true);
@@ -78,7 +79,7 @@ export function useAddNotesPanel({ loadProjects, refreshExpandedDetail }: UseAdd
       await refreshExpandedDetail(p);
     } catch (err) {
       console.error('添加笔记失败:', err);
-      setAddError('添加笔记失败，请稍后重试');
+      setAddError(translate('projectPage.addNotesFailed'));
     } finally {
       setAdding(false);
     }

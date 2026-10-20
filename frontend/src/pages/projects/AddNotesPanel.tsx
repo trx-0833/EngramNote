@@ -15,6 +15,7 @@
 import type { Note } from '../../api/client';
 import Icon from '../../components/Icon';
 import { statusClass } from '../../utils/labels';
+import { useTranslation } from '../../i18n';
 
 interface AddNotesPanelProps {
   /** 未过滤的候选笔记（打开面板时已剔除已归属本项目的） */
@@ -41,6 +42,7 @@ export default function AddNotesPanel({
   onConfirm,
   onClose,
 }: AddNotesPanelProps) {
+  const { t } = useTranslation();
   const addKeyword = search.trim().toLowerCase();
   const filteredCandidates = candidates.filter(
     // title 可能为 null（后端/历史数据）：原来直接 `null.toLowerCase()` 一输入搜索词就崩，
@@ -67,7 +69,9 @@ export default function AddNotesPanel({
           marginBottom: 8,
         }}
       >
-        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>添加笔记</span>
+        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+          {t('projectPage.addPanelTitle')}
+        </span>
         <button
           style={{
             display: 'flex',
@@ -76,7 +80,7 @@ export default function AddNotesPanel({
             color: 'var(--color-text-tertiary)',
           }}
           onClick={onClose}
-          aria-label="关闭添加笔记面板"
+          aria-label={t('projectPage.addPanelClose')}
         >
           {/* 批次 B3：`\u2715` ✕ 换 `<Icon name="close" />`。原来按钮的可见文字就是
               无障碍名（"✕"），读屏念的是一个符号名 —— 现在给它一个真名字。 */}
@@ -86,7 +90,7 @@ export default function AddNotesPanel({
       <input
         value={search}
         onChange={(e) => onChangeSearch(e.target.value)}
-        placeholder="按标题搜索候选笔记…"
+        placeholder={t('projectPage.searchPlaceholder')}
         // 故意不设内联 font-size：全局 `input, textarea { font-size: 1rem }`（components.css）
         // 正好是 16px。原来的 0.8rem（12.8px）会让 iOS Safari 在聚焦时把**整页**放大，
         // 用户得手动缩小才能继续操作（面板其余文字仍按 0.8rem，不受影响）。
@@ -111,7 +115,7 @@ export default function AddNotesPanel({
           <div
             style={{ color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '12px 0' }}
           >
-            暂无可添加的笔记
+            {t('projectPage.noCandidates')}
           </div>
         ) : (
           filteredCandidates.map((n) => (
@@ -155,14 +159,16 @@ export default function AddNotesPanel({
           {/* 批次 B3：「添加」此前是全站纯文字按钮 —— 补一枚加号图标。
               `.btn` 本来就是 `inline-flex` + `gap`，图标与文字无需额外对齐样式。 */}
           <Icon name="add" size={16} />
-          {adding ? '添加中…' : `添加（${selectedNoteIds.length}）`}
+          {adding
+            ? t('projectPage.adding')
+            : t('projectPage.addWithCount', { count: selectedNoteIds.length })}
         </button>
         <button
           className="btn btn-secondary"
           style={{ fontSize: '0.8rem', padding: '4px 12px' }}
           onClick={onClose}
         >
-          取消
+          {t('projectPage.cancel')}
         </button>
       </div>
     </div>

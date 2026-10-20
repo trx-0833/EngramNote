@@ -20,13 +20,11 @@
  *   - 文案、DOM 语义（一级标题 + 一行副标题）、`Projects.tsx` 的调用点：**逐字未变**。
  */
 import PageHeader from '../../components/PageHeader';
+import { useTranslation } from '../../i18n';
 
 export default function ProjectsHeader() {
+  const { t } = useTranslation();
   return (
-    <PageHeader
-      title="项目"
-      subtitle="项目作为标签归属笔记，一篇笔记可属于多个项目；所有文件统一存放在收件箱（inbox）。"
-      spacing="xl"
-    />
+    <PageHeader title={t('projectPage.title')} subtitle={t('projectPage.subtitle')} spacing="xl" />
   );
 }

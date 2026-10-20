@@ -13,6 +13,7 @@ import { Link } from 'react-router-dom';
 import type { NoteInFolder } from '../../api/client';
 import { statusClass } from '../../utils/labels';
 import { TYPE_BADGE, formatSize } from './helpers';
+import { useTranslation } from '../../i18n';
 
 interface ProjectNotesListProps {
   notes: NoteInFolder[];
@@ -21,6 +22,7 @@ interface ProjectNotesListProps {
 }
 
 export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesListProps) {
+  const { t } = useTranslation();
   return (
     <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 10 }}>
       {notes.length === 0 ? (
@@ -32,8 +34,8 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
             padding: '16px 0',
           }}
         >
-          项目暂无笔记。可把文件放入收件箱{' '}
-          <code style={{ color: 'var(--color-primary)' }}>source/</code> 后点击「扫描导入」。
+          {t('projectPage.noNotes')} <code style={{ color: 'var(--color-primary)' }}>source/</code>{' '}
+          {t('projectPage.noNotesTail')}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -81,14 +83,14 @@ export default function ProjectNotesList({ notes, onRemoveNote }: ProjectNotesLi
               </span>
               <button
                 className="btn btn-ghost"
-                title="将笔记移出该项目"
+                title={t('projectPage.removeNoteHint')}
                 style={{ fontSize: '0.7rem', padding: '2px 8px', flexShrink: 0 }}
                 onClick={(e) => {
                   e.stopPropagation(); // 避免触发整行跳转到笔记详情
                   onRemoveNote(n);
                 }}
               >
-                移出
+                {t('projectPage.remove')}
               </button>
             </div>
           ))}

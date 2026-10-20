@@ -32,6 +32,7 @@ import {
 import { useConfirm } from '../../components/ConfirmProvider';
 import { useContractDriftNotice } from '../contractDrift';
 import { unwrapProjects } from './helpers';
+import { translate } from '../../i18n/translate';
 
 export function useProjects() {
   const confirm = useConfirm();
@@ -68,7 +69,7 @@ export function useProjects() {
       setProjects(unwrapProjects(data));
     } catch (err) {
       console.error('加载项目列表失败:', err);
-      setError('加载项目列表失败，请稍后重试');
+      setError(translate('projectPage.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -101,7 +102,7 @@ export function useProjects() {
     if (!edit) return;
     const name = edit.name.trim();
     if (!name) {
-      setRenameError('项目名称不能为空');
+      setRenameError(translate('projectPage.nameRequired'));
       return;
     }
     setRenameError('');
@@ -115,7 +116,7 @@ export function useProjects() {
       await loadProjects();
     } catch (err) {
       console.error('重命名项目失败:', err);
-      setError('重命名项目失败，请稍后重试');
+      setError(translate('projectPage.renameFailed'));
     }
   }
 
@@ -133,9 +134,9 @@ export function useProjects() {
   async function handleDelete(p: Project) {
     const ok = await confirm({
       // 原文案一字未删，只是按 ConfirmDialog 的两段拆开
-      title: `确定删除项目「${p.name}」？`,
-      message: '删除仅移除该项目标签，关联笔记与文件都会保留。',
-      confirmText: '删除',
+      title: translate('projectPage.deleteConfirm', { name: p.name }),
+      message: translate('projectPage.deleteImpact'),
+      confirmText: translate('common.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -144,7 +145,7 @@ export function useProjects() {
       await loadProjects();
     } catch (err) {
       console.error('删除项目失败:', err);
-      setError('删除项目失败，请稍后重试');
+      setError(translate('projectPage.deleteFailed'));
     }
   }
 
@@ -163,7 +164,7 @@ export function useProjects() {
       setExpanded((prev) => ({ ...prev, [p.id]: detail }));
     } catch (err) {
       console.error('加载项目详情失败:', err);
-      setError('加载项目笔记失败，请稍后重试');
+      setError(translate('projectPage.loadNotesFailed'));
     }
   }
 
@@ -180,7 +181,7 @@ export function useProjects() {
       }
     } catch (err) {
       console.error('扫描导入失败:', err);
-      setError('扫描导入失败，请确认后端服务可用后重试');
+      setError(translate('projectPage.scanFailed'));
     } finally {
       setScanning((prev) => {
         const next = { ...prev };
@@ -206,8 +207,8 @@ export function useProjects() {
     // 「移出项目」刻意**不加** danger：笔记还能再加回来，红色留给不可恢复的操作
     // （批次 D2 收尾定的规矩 —— 红色一旦到处都是就不再承载语义）
     const ok = await confirm({
-      title: `确定将笔记「${n.title}」移出项目「${p.name}」？`,
-      confirmText: '移出',
+      title: translate('projectPage.removeConfirm', { note: n.title, project: p.name }),
+      confirmText: translate('projectPage.remove'),
     });
     if (!ok) return;
     try {
@@ -216,7 +217,7 @@ export function useProjects() {
       await refreshExpandedDetail(p);
     } catch (err) {
       console.error('移出笔记失败:', err);
-      setError('移出笔记失败，请稍后重试');
+      setError(translate('projectPage.removeNoteFailed'));
     }
   }
 

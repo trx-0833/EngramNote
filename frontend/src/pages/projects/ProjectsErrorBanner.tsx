@@ -11,6 +11,7 @@
  *    此前无名时的名字来自那个 ✕ 字符本身，读屏念的是一个符号名。
  */
 import Icon from '../../components/Icon';
+import { useTranslation } from '../../i18n';
 
 interface ProjectsErrorBannerProps {
   error: string;
@@ -28,6 +29,7 @@ export default function ProjectsErrorBanner({
   onDismiss,
   dismissLabel,
 }: ProjectsErrorBannerProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="card"
@@ -42,7 +44,7 @@ export default function ProjectsErrorBanner({
     >
       {error}
       <button
-        aria-label={dismissLabel ?? '关闭'}
+        aria-label={dismissLabel ?? t('projectPage.dismissBanner')}
         style={{
           float: 'right',
           display: 'flex',

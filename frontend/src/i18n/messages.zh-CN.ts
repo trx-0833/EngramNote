@@ -1324,6 +1324,83 @@ const zhCN = {
     followHint: '鼠标跟随 · 移动鼠标高亮所在行',
     reading: '正在阅读',
   },
+
+  /** 项目页（`pages/projects/*`，i18n 阶段 3） */
+  projectPage: {
+    title: '项目',
+    subtitle: '项目作为标签归属笔记，一篇笔记可属于多个项目；所有文件统一存放在收件箱（inbox）。',
+    // ---- 错误 ----
+    loadFailed: '加载项目列表失败，请稍后重试',
+    /** 重命名表单：名称清空时的校验 */
+    nameRequired: '项目名称不能为空',
+    /** 新建表单：名称清空时的校验（与重命名表单**文案不同**，不要合并） */
+    nameRequiredCreate: '请输入项目名称',
+    renameFailed: '重命名项目失败，请稍后重试',
+    deleteFailed: '删除项目失败，请稍后重试',
+    loadNotesFailed: '加载项目笔记失败，请稍后重试',
+    scanFailed: '扫描导入失败，请确认后端服务可用后重试',
+    removeNoteFailed: '移出笔记失败，请稍后重试',
+    createFailed: '创建项目失败，请稍后重试',
+    loadCandidatesFailed: '加载候选笔记失败，请稍后重试',
+    selectNotesFirst: '请先勾选要添加的笔记',
+    addNotesFailed: '添加笔记失败，请稍后重试',
+    // ---- 新建项目 ----
+    createTitle: '创建新项目',
+    createHint: '项目为纯标签，创建后不生成物理目录；用标签给笔记打归属',
+    newProject: '新建项目',
+    newProjectTitle: '新建项目',
+    nameLabel: '项目名称',
+    namePlaceholder: '如：Transformer 论文精读',
+    descriptionLabel: '项目描述（可选）',
+    descriptionPlaceholder: '这个项目是做什么的？',
+    create: '创建项目',
+    creating: '创建中…',
+    cancel: '取消',
+    save: '保存',
+    // ---- 项目卡片 ----
+    namePlaceholderShort: '项目名称',
+    noteCount: '{count} 篇笔记',
+    addNotesHint: '从已有笔记中选择并添加到本项目',
+    addNotes: '添加笔记',
+    scanHint: '扫描导入 source/ 目录中的新文件',
+    scan: '扫描导入',
+    scanning: '扫描中…',
+    collapseNotes: '收起笔记',
+    expandNotes: '查看笔记（{count}）',
+    rename: '重命名',
+    delete: '删除',
+    removeNoteHint: '将笔记移出该项目',
+    remove: '移出',
+    noNotes: '项目暂无笔记。可把文件放入收件箱',
+    noNotesTail: '后点击「扫描导入」。',
+    // ---- 删除 / 移出确认 ----
+    deleteConfirm: '确定删除项目「{name}」？',
+    deleteImpact: '删除仅移除该项目标签，关联笔记与文件都会保留。',
+    removeConfirm: '确定将笔记「{note}」移出项目「{project}」？',
+    // ---- 扫描结果 ----
+    scanResult: '扫描结果',
+    scanImported: '新增 {count}',
+    scanSkipped: '跳过 {count}',
+    scanUnsupported: '不支持 {count}',
+    scanEmptyPrefix: '未在收件箱',
+    scanEmptyMiddle: '目录发现新文件。可把文件拷贝到',
+    scanEmptySuffix: '后再扫描。',
+    // ---- 使用说明 ----
+    usageTitle: '使用说明',
+    usageTagOnly: '项目是纯标签：一篇笔记可打上多个项目标签，创建项目不会生成物理文件夹。',
+    usageAllFiles: '所有文件统一存放在收件箱（inbox）的',
+    usageCopyHint: '把文件直接拷贝到收件箱',
+    usageScanHint: '后，点击「扫描导入」即可识别为笔记并打上当前项目标签。',
+    usageUploadHint: '也可以在上传页选择多个项目标签，通过网页直接上传文件。', // ---- 添加笔记面板 ----
+    addPanelTitle: '添加笔记',
+    addPanelClose: '关闭添加笔记面板',
+    searchPlaceholder: '按标题搜索候选笔记…',
+    noCandidates: '暂无可添加的笔记',
+    adding: '添加中…',
+    addWithCount: '添加（{count}）',
+    // ---- 错误横幅 ----
+    dismissBanner: '关闭',
+  },
 };
 
 export default zhCN;
