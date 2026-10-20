@@ -32,6 +32,7 @@ import RetryConvertButton from './RetryConvertButton';
 import ViewModeTabs from './ViewModeTabs';
 import styles from './NoteDetailHeader.module.css';
 import type { EditMode, ViewMode } from './types';
+import { useTranslation } from '../../i18n';
 
 /** 处理中（不可编辑）的笔记状态 */
 const PROCESSING_STATUSES = ['uploading', 'converting', 'cleaning', 'learning'];
@@ -128,6 +129,7 @@ export default function NoteDetailHeader({
   navigate,
   children,
 }: NoteDetailHeaderProps) {
+  const { t } = useTranslation();
   const isProcessing = PROCESSING_STATUSES.includes(note.status);
 
   return (
@@ -247,23 +249,23 @@ export default function NoteDetailHeader({
               disabled={viewMode === 'original' || isProcessing}
               title={
                 viewMode === 'original'
-                  ? '原始版不可编辑，请在清洗版中编辑'
+                  ? t('noteDetail.editBlockedOriginal')
                   : isProcessing
-                    ? '处理中，暂不可编辑'
-                    : '编辑笔记内容'
+                    ? t('noteDetail.editBlockedProcessing')
+                    : t('noteDetail.editHint')
               }
             >
               <Icon name="edit" size={16} />
-              编辑
+              {t('noteDetail.edit')}
             </button>
           )}
           <button
             className="btn btn-ghost"
             onClick={onOpenVersionHistory}
             disabled={['uploading', 'converting'].includes(note.status)}
-            title="查看版本历史"
+            title={t('noteDetail.viewVersionHistory')}
           >
-            版本历史
+            {t('noteDetail.versionHistory')}
           </button>
           {/* 导出（想法 4「设计导出功能」）。
               禁用条件与 `title` 文案：
@@ -281,34 +283,34 @@ export default function NoteDetailHeader({
             disabled={isProcessing || viewMode === 'diff' || exporting}
             title={
               isProcessing
-                ? '处理中，暂不可导出'
+                ? t('noteDetail.exportBlockedProcessing')
                 : viewMode === 'diff'
-                  ? '对比视图无法导出，请先切换到某一版'
+                  ? t('noteDetail.exportBlockedDiff')
                   : viewMode === 'original'
-                    ? '导出原始版 Markdown 文件'
-                    : '导出清洗版 Markdown 文件'
+                    ? t('noteDetail.exportOriginalHint')
+                    : t('noteDetail.exportCleanHint')
             }
           >
-            {exporting ? '导出中…' : '导出'}
+            {exporting ? t('noteDetail.exporting') : t('noteDetail.export')}
           </button>
           {(note.note_role === 'material' || !note.note_role) && (
             <button
               className="btn btn-ghost"
               onClick={() => navigate(`/assessment?noteId=${note.id}`)}
             >
-              学习评估
+              {t('noteDetail.assessment')}
             </button>
           )}
           {note.note_role === 'personal_note' && (
             <button className="btn btn-ghost" onClick={onManageLinks}>
-              管理关联资料
+              {t('noteDetail.manageLinks')}
             </button>
           )}
           {(note.status === 'cleaned' ||
             note.status === 'learning_failed' ||
             note.status === 'archived') && (
             <button className="btn btn-ghost" onClick={onStartLearning}>
-              AI预处理
+              {t('noteDetail.aiPreprocess')}
             </button>
           )}
           {(note.status === 'cleaned' ||
@@ -316,15 +318,15 @@ export default function NoteDetailHeader({
             note.status === 'converted' ||
             note.status === 'archived') && (
             <button className="btn btn-ghost" onClick={onArchive}>
-              {note.status === 'archived' ? '取消审阅' : '审阅'}
+              {note.status === 'archived' ? t('noteDetail.unarchive') : t('noteDetail.archive')}
             </button>
           )}
           <button className="btn btn-danger-outline" onClick={onDelete}>
             <Icon name="delete" size={16} />
-            删除
+            {t('noteDetail.delete')}
           </button>
           <button className="btn btn-ghost" onClick={() => navigate('/notes')}>
-            返回
+            {t('noteDetail.back')}
           </button>
         </div>
 
@@ -338,7 +340,7 @@ export default function NoteDetailHeader({
               className="btn btn-primary"
               onClick={() => navigate(`/review/quick/${note.id}`)}
             >
-              立即复习
+              {t('noteDetail.reviewNow')}
             </button>
           )}
         </div>
@@ -373,7 +375,7 @@ export default function NoteDetailHeader({
           }}
         >
           <p role="alert" style={{ color: 'var(--color-error)', fontSize: '0.875rem', margin: 0 }}>
-            错误: {note.error_message}
+            {t('noteDetail.errorPrefix')}: {note.error_message}
           </p>
           {note.status === 'failed' && (
             <RetryConvertButton noteId={noteId} onRetried={onRetryConverted} />
