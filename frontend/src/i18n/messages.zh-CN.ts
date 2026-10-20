@@ -155,6 +155,33 @@ const zhCN = {
     retry: '重试',
     reload: '刷新页面',
   },
+
+  /**
+   * **前端本地生成**的 API 错误文案（i18n 阶段 2）
+   *
+   * ## 为什么只有这几条，而不是把后端 55 个错误码也抄一份
+   *
+   * 后端的 `AppError` 文案**已经**按 `Accept-Language` 翻译了
+   * （见 `backend/app/core/error_messages.py`）。前端再维护一份码→英文的表，
+   * 就是**同一个事实的两份副本** —— 后端改一句措辞，前端那份不会跟着变，
+   * 而症状是"英文界面下偶尔冒出一句旧文案"，极难发现。
+   *
+   * 所以前端只翻译**到不了后端**的那些：网络层失败、超时、令牌失效、
+   * 浏览器能力不足。这些文案是前端自己造的，请求根本没发出去或没拿到响应，
+   * 后端无从翻译。
+   */
+  apiErrors: {
+    /** `request()` 的默认超时文案（`client.ts` 的 `doFetch` 参数默认值） */
+    timeout: '请求超时，请检查网络后重试',
+    /** 上传专用超时（`UPLOAD_TIMEOUT_MS`，10 分钟） */
+    uploadTimeout: '上传超时，请检查网络后重试',
+    /** 401 且是登录/注册接口 —— 就是密码错，不是令牌过期 */
+    invalidCredentials: '邮箱或密码错误',
+    /** 401 且是普通接口 —— 令牌失效，`notifyTokenExpired()` 已触发跳登录页 */
+    sessionExpired: '登录已过期，请重新登录',
+    /** 流式响应不可用（`ReadableStream` 缺失，老浏览器） */
+    streamUnsupported: '浏览器不支持流式响应',
+  },
 };
 
 export default zhCN;

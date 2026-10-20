@@ -75,11 +75,27 @@ class TestRemindersSwallowingGuard:
     def test_app_error_passes_through_with_its_own_status_and_code(
         self, test_db, monkeypatch
     ):
-        """**核心**：注入的 AppError 必须原样透传（而不是变成 500）"""
-        from app.core.app_error import CARD_REVIEW_STATE_UNAVAILABLE, AppError
+        """**核心**：注入的 AppError 必须原样透传（而不是变成 500）
+
+        ## ⚠️ 为什么用一个**没进 i18n 文案表**的错误码（i18n 阶段 2）
+
+        本用例测的是"状态码与错误码不被兜底改写"，`detail` 那句只是附带。
+        但 `CARD_REVIEW_STATE_UNAVAILABLE` **已经进了**
+        `core/error_messages.py`，而查表是**优先于** `raise` 时那句 message 的
+        （那是 i18n 的设计：登记了就该按语言返回）—— 于是注入的合成文案
+        `"注入的业务错误"` 会被替换成表里的文案，这条断言就不再是
+        "透传"的意思了。
+
+        换成一个刻意**未登记**的码，语义才准确：
+        表里没有 → 原样用 `raise` 时那句 → 这才是"透传"。
+        """
+        from app.core.app_error import AppError
+
+        # 刻意选一个不在 ERROR_MESSAGES 里的码（见 error_messages.py）
+        passthrough_code = "TEST_ONLY_PASSTHROUGH_CODE"
 
         _inject(monkeypatch, AppError(
-            CARD_REVIEW_STATE_UNAVAILABLE, "注入的业务错误", _INJECTED_STATUS,
+            passthrough_code, "注入的业务错误", _INJECTED_STATUS,
         ))
         client = _client()
 
@@ -90,11 +106,49 @@ class TestRemindersSwallowingGuard:
             f"响应: {resp.status_code} {resp.text}"
         )
         body = resp.json()
-        assert body["error_code"] == CARD_REVIEW_STATE_UNAVAILABLE, (
+        assert body["error_code"] == passthrough_code, (
             "服务层抛出的 AppError 被兜底改写成了别的错误码（很可能是 "
             f"REVIEW_REMINDERS_FAILED）: {body}"
         )
         assert body["detail"] == "注入的业务错误"
+
+    def test_registered_code_gets_the_translated_detail(self, test_db, monkeypatch):
+        """★ 反向断言：**已登记**的码，detail 按语言取表里的文案（i18n 阶段 2）
+
+        与上一条互为对照：上一条证明"未登记的码原样透传"，
+        这一条证明"已登记的码会被表覆盖" —— 两者合起来才是查表的完整语义。
+        少了这一条，把查表整个删掉也不会有测试红。
+        """
+        from app.core.app_error import CARD_REVIEW_STATE_UNAVAILABLE, AppError
+
+        _inject(monkeypatch, AppError(
+            CARD_REVIEW_STATE_UNAVAILABLE, "这句会被表里的文案取代", _INJECTED_STATUS,
+        ))
+        client = _client()
+
+        resp = client.get("/api/review/reminders", headers=_auth(client))
+
+        assert resp.status_code == _INJECTED_STATUS
+        body = resp.json()
+        assert body["error_code"] == CARD_REVIEW_STATE_UNAVAILABLE
+        # 默认语言是 zh-CN，所以取到表里的中文；关键是**不是**注入的那句
+        assert body["detail"] == "卡片复习状态不可用", body
+
+    def test_accept_language_switches_the_detail(self, test_db, monkeypatch):
+        """★ `Accept-Language: en` 时同一个码返回英文（端到端串起中间件与表）"""
+        from app.core.app_error import CARD_REVIEW_STATE_UNAVAILABLE, AppError
+
+        _inject(monkeypatch, AppError(
+            CARD_REVIEW_STATE_UNAVAILABLE, "这句会被表里的文案取代", _INJECTED_STATUS,
+        ))
+        client = _client()
+
+        headers = _auth(client)
+        headers["Accept-Language"] = "en"
+        resp = client.get("/api/review/reminders", headers=headers)
+
+        assert resp.status_code == _INJECTED_STATUS
+        assert resp.json()["detail"] == "Card review state is unavailable"
 
     def test_http_exception_also_passes_through(self, test_db, monkeypatch):
         """原本就想表达的那条（HTTPException）没被改坏"""

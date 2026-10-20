@@ -10,6 +10,9 @@ import type { BodyOf, Schema } from './generated/types';
 // 所以不会与 i18n 的 Provider 形成循环依赖。`getCurrentLocale` 的状态
 // 由 `i18n/index.tsx` 的 `applyLocale()` 写入，两边共用同一个模块级变量。
 import { getCurrentLocale } from '../i18n/locales';
+// `translate` 是**非组件**版本的 `t()`（本文件是普通模块，没有 hook 上下文）。
+// 它读的也是 `i18n/locales` 里那个模块级语言变量，所以两者始终一致。
+import { translate } from '../i18n/translate';
 
 /**
  * API 基础路径，所有请求都会在此路径前缀下发起
@@ -194,7 +197,7 @@ async function doFetch(
   path: string,
   init: RequestInit,
   timeoutMs?: number,
-  timeoutMessage = '请求超时，请检查网络后重试',
+  timeoutMessage = translate('apiErrors.timeout'),
 ): Promise<Response> {
   const headers: Record<string, string> = {
     ...((init.headers as Record<string, string> | undefined) ?? {}),
@@ -357,7 +360,7 @@ export async function downloadRequest(
   if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
-      throw new ApiError('登录已过期，请重新登录');
+      throw new ApiError(translate('apiErrors.sessionExpired'));
     }
     const { detail, code } = await readErrorBody(response);
     throw new ApiError(detail, code);
@@ -507,8 +510,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       }
       throw new Error(
         response.status === 401 && isAuthCredentialPath(path)
-          ? '邮箱或密码错误'
-          : '登录已过期，请重新登录',
+          ? translate('apiErrors.invalidCredentials')
+          : translate('apiErrors.sessionExpired'),
       );
     }
     const { detail, code } = await readErrorBody(response);
@@ -541,13 +544,13 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
     path,
     { method: 'POST', body: formData },
     UPLOAD_TIMEOUT_MS,
-    '上传超时，请检查网络后重试',
+    translate('apiErrors.uploadTimeout'),
   );
 
   if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
-      throw new ApiError('登录已过期，请重新登录');
+      throw new ApiError(translate('apiErrors.sessionExpired'));
     }
     // message 仍是 detail（与改造前逐字一致），只是额外带上结构化的 code
     const { detail, code } = await readErrorBody(response);
@@ -596,13 +599,13 @@ export async function askQuestionStream(
   if (!response.ok) {
     if (response.status === 401) {
       notifyTokenExpired();
-      throw new ApiError('登录已过期，请重新登录');
+      throw new ApiError(translate('apiErrors.sessionExpired'));
     }
     const { detail, code } = await readErrorBody(response);
     throw new ApiError(detail, code);
   }
   if (!response.body) {
-    throw new Error('浏览器不支持流式响应');
+    throw new Error(translate('apiErrors.streamUnsupported'));
   }
   return response.body;
 }

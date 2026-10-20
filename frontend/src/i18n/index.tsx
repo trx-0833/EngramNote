@@ -40,7 +40,6 @@ import {
 } from 'react';
 
 import {
-  DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
   applyLocale,
   getCurrentLocale,
@@ -48,14 +47,11 @@ import {
   resolveInitialLocale,
   type Locale,
 } from './locales';
-import en from './messages.en';
-import zhCN from './messages.zh-CN';
+// 查表 + 插值 + 键类型都住在 `translate.ts`（零 import 的纯逻辑），
+// 这样 `api/client.ts` 能用同一份实现而不形成循环依赖。见那个文件头。
+import { lookupMessage, type MessageKey, type TranslateParams } from './translate';
 
-/** 消息表集合。键是 `Locale`，所以新增语言时 `tsc` 会要求这里也加 */
-const MESSAGES: Record<Locale, typeof zhCN> = {
-  'zh-CN': zhCN,
-  en,
-};
+export type { MessageKey, TranslateParams } from './translate';
 
 /** 语言上下文的值 */
 interface LocaleContextValue {
@@ -162,52 +158,14 @@ export function useLocale(): LocaleContextValue {
   };
 }
 
-/** 点号路径的键类型（从消息表递归推导） */
-type DotPaths<T, Prefix extends string = ''> = {
-  [K in keyof T & string]: T[K] extends string ? `${Prefix}${K}` : DotPaths<T[K], `${Prefix}${K}.`>;
-}[keyof T & string];
-
-/** 所有合法的翻译键。`t('auth.logIn')` 这种拼错会被 `tsc` 挡下 */
-export type MessageKey = DotPaths<typeof zhCN>;
-
-/** `t()` 的插值参数。值允许 number —— `{count}` 这类最常见 */
-export type TranslateParams = Record<string, string | number>;
-
-/** 按点号路径取值；路径不存在返回 `undefined`（不抛错） */
-function lookup(messages: unknown, key: string): string | undefined {
-  let node: unknown = messages;
-  for (const part of key.split('.')) {
-    if (typeof node !== 'object' || node === null) return undefined;
-    node = (node as Record<string, unknown>)[part];
-  }
-  return typeof node === 'string' ? node : undefined;
-}
-
-/** 把 `{name}` 换成实参；未提供的占位符**原样保留**（便于一眼看出漏传了什么） */
-function interpolate(template: string, params?: TranslateParams): string {
-  if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
-    name in params ? String(params[name]) : whole,
-  );
-}
+/** 点号路径的键类型、`MessageKey`、插值参数都住在 `translate.ts`（见那里的说明） */
 
 /**
- * 翻译。
+ * 翻译（组件版）。
  *
- * ## 缺键时的三级回退（刻意的，不是偷懒）
- *
- * 1. 当前语言有 → 用它；
- * 2. 当前语言没有、中文有 → 用中文（英文用户看到一句中文，
- *    好过看到一片空白或一个键名）；
- * 3. 两者都没有 → **返回键名本身**。
- *
- * 第 3 条为什么不返回空串：空串在界面上是"这里什么都没有"，
- * 而键名（`auth.loginTitle`）会立刻暴露"这里漏了一条翻译"。
- * 两者都难看，但后者能被发现，前者只能靠猜。
- *
- * ⚠️ 有了 `satisfies typeof zhCN`，第 2、3 条在**编译期**几乎不可能发生
- * （漏键直接编译失败）。留着它们是为了挡住运行期才出现的路径
- * （例如将来有人用动态字符串调 `t()`）。
+ * 缺键时的三级回退与插值规则都在 `translate.ts` 的 `lookupMessage` 里 ——
+ * 这里只负责"取当前语言"并订阅它的变化。把规则写在两处必然漂移，
+ * 所以组件版与非组件版（`translate()`）共用同一份实现。
  */
 export function useTranslation(): {
   t: (key: MessageKey, params?: TranslateParams) => string;
@@ -220,10 +178,7 @@ export function useTranslation(): {
   const { locale, setLocale } = useLocale();
 
   const t = useCallback(
-    (key: MessageKey, params?: TranslateParams): string => {
-      const template = lookup(MESSAGES[locale], key) ?? lookup(MESSAGES[DEFAULT_LOCALE], key);
-      return interpolate(template ?? key, params);
-    },
+    (key: MessageKey, params?: TranslateParams): string => lookupMessage(key, locale, params),
     [locale],
   );
 
@@ -231,3 +186,4 @@ export function useTranslation(): {
 }
 
 export { getCurrentLocale, DEFAULT_LOCALE, type Locale } from './locales';
+export { translate } from './translate';

@@ -631,7 +631,33 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
     # 生产姿态下三条路由都不注册 —— 理由见 `_schema_endpoint_kwargs`
     app = FastAPI(
         title=cfg.app_name,
-        description="AI 驱动的学习笔记管理与知识库工具",
+        # `description` 里加了「语言协商」一节（i18n 阶段 2）。
+        #
+        # ## 为什么不把本文件与 schema 里的中文 docstring 翻成英文
+        #
+        # 实测 `openapi.json` 里含中文的 `description`/`title`/`summary` 有
+        # **458 条**（`components` 286 + `paths` 171 + `info` 1）。只翻
+        # Pydantic 的 `Field(description=...)` 那 123 条会让文档变成**半中半英**
+        # —— 比全中文更难读。
+        #
+        # 而 OpenAPI 文档的受众是**开发者**（集成方），不是终端用户：
+        # 终端用户看到的是界面与 `detail` 文案，后者**已经**按
+        # `Accept-Language` 翻译了。所以这里做的是"让文档**描述** i18n 能力"，
+        # 而不是"把 458 条文档翻成英文"——后者是文档工程，不是 i18n 基础设施。
+        description=(
+            "AI 驱动的学习笔记管理与知识库工具\n\n"
+            "## 语言协商（Accept-Language）\n\n"
+            "本服务的**错误文案**支持中文与英文两种语言，由请求头 "
+            "`Accept-Language` 决定：\n\n"
+            "- `zh-CN`、`zh`、`zh-Hans`、`zh-Hant`、`zh-TW` → 简体中文（**默认**）\n"
+            "- `en`、`en-US`、`en-GB` → 英文\n"
+            "- 缺失、不受支持、或格式错误 → 简体中文\n\n"
+            "响应体形如 `{detail, error_code, request_id}`：`detail` 是**已按上述规则"
+            "翻译**的人读文案，`error_code` 是**语言无关**的稳定标识 —— "
+            "程序化分流请用 `error_code`，不要匹配 `detail` 的文字。\n\n"
+            "**本页其余说明文字（各端点与字段的描述）只有中文** —— "
+            "它们面向集成开发者，不属于终端用户可见内容。\n"
+        ),
         version=__version__,  # 单一来源：app/version.py（见该文件说明）
         debug=cfg.is_dev,
         lifespan=lifespan,

@@ -29,6 +29,7 @@ from app.core import context, i18n
 from app.core.error_messages import (
     ERROR_MESSAGES,
     HTTP_STATUS_MESSAGES,
+    UNTRANSLATED_CODES,
     internal_error_message,
     registered_codes,
     resolve_http_status_message,
@@ -253,11 +254,11 @@ class TestHardcodedMessages:
 
 
 def _collect_app_error_messages() -> dict[str, set[str]]:
-    """扫全 `app/`，收集 `{error_code: {出现过的 message}}`
+    """扫全 `app/`，收集 `{error_code: {出现过的**中文字面量** message}}`
 
     只看**字面量**形式的 `AppError(CODE, "中文")` —— 变量、f-string、
-    `str(e)` 这类跳过（它们本来就不能进表，见 `error_messages.py` 里
-    `AUTH_REGISTRATION_REJECTED` 的说明）。
+    `str(e)` 这类跳过（它们本来就不能逐字进表，见 `error_messages.py` 里
+    `UNTRANSLATED_CODES` 的说明）。
     """
     found: dict[str, set[str]] = {}
     for path in APP_DIR.rglob("*.py"):
@@ -281,6 +282,35 @@ def _collect_app_error_messages() -> dict[str, set[str]]:
     return found
 
 
+def _collect_app_error_codes() -> set[str]:
+    """扫全 `app/`，收集**所有** `AppError(...)` 用到的 code（不论 message 形态）
+
+    与 `_collect_app_error_messages` 的区别：这个连"message 是变量"的调用点
+    也算 —— 判断"表里这个码还有没有人用"必须用这一份，否则
+    `AppError(NOTE_EXPORT_EMPTY, empty_message, 400)` 这种会被误判成
+    "表里登记了但代码里没人用"。
+    """
+    found: set[str] = set()
+    for path in APP_DIR.rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name != "AppError" or not node.args:
+                continue
+            # 也接受 `AppError(code=...)` 关键字形态
+            for candidate in [node.args[0], *(kw.value for kw in node.keywords if kw.arg == "code")]:
+                if isinstance(candidate, ast.Name):
+                    found.add(candidate.id)
+                    break
+    return found
+
+
 class TestTableMatchesRaiseSites:
     """★ 本文件最重要的一组断言
 
@@ -290,13 +320,50 @@ class TestTableMatchesRaiseSites:
     """
 
     def test_every_registered_code_exists_in_code(self):
-        """表里的 code 必须在 `app/` 里真的被用到（防手滑写错常量名）"""
-        used = set(_collect_app_error_messages())
+        """表里的 code 必须在 `app/` 里真的被用到（防手滑写错常量名）
+
+        ⚠️ 用 `_collect_app_error_codes`（**所有**调用点）而不是
+        `_collect_app_error_messages`（只收字面量）：`NOTE_EXPORT_EMPTY`
+        这类码的 message 是变量，只收字面量会把它们误判成"没人用"。
+        """
+        used = _collect_app_error_codes()
         unknown = [code for code in registered_codes() if code not in used]
         assert not unknown, (
             f"这些 code 在 error_messages.py 里登记了，但 app/ 里没有任何 "
             f"AppError(...) 调用点使用它们：{unknown}\n"
             "（可能是常量名抄错，或那个调用点已被删掉而表没跟着清）"
+        )
+
+    def test_untranslated_codes_really_are_absent_from_the_table(self):
+        """★ `UNTRANSLATED_CODES` 里的码**确实**不在表里
+
+        这份名单的价值在于让"漏了"与"刻意没做"能被区分开。若某个码
+        既在名单里、又进了表，那名单就在说谎 —— 后人照着它做决策会出错。
+        """
+        overlap = sorted(set(registered_codes()) & UNTRANSLATED_CODES)
+        assert not overlap, (
+            f"这些 code 既在 UNTRANSLATED_CODES 里、又进了 ERROR_MESSAGES：{overlap}\n"
+            "（要么从名单里删掉它，要么把表项删掉 —— 两者只能有一个）"
+        )
+
+    def test_untranslated_codes_are_real_codes(self):
+        """名单里的码必须是 `app/` 里真实存在的 code（防名单腐化成垃圾）"""
+        used = _collect_app_error_codes()
+        unknown = sorted(UNTRANSLATED_CODES - used)
+        assert not unknown, f"UNTRANSLATED_CODES 里有 app/ 中不存在的 code：{unknown}"
+
+    def test_every_code_is_either_translated_or_known_untranslated(self):
+        """★ 每个用到的 code 要么进了表、要么在"刻意未翻译"名单里
+
+        这条是本阶段真正的**覆盖率断言**：新增一个 `AppError` 而两者都没登记时，
+        它会红。没有它的话，"漏了一个码"只能靠人去比对两份清单。
+        """
+        used = _collect_app_error_codes()
+        covered = set(registered_codes()) | UNTRANSLATED_CODES
+        missing = sorted(used - covered)
+        assert not missing, (
+            f"这些 code 既没进 ERROR_MESSAGES、也不在 UNTRANSLATED_CODES 里：{missing}\n"
+            "请二选一：翻译它（加表项），或明确登记为刻意未翻译（加名单 + 写理由）"
         )
 
     def test_chinese_value_matches_the_raise_site_verbatim(self):

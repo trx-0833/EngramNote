@@ -113,6 +113,14 @@ const en = {
     retry: 'Retry',
     reload: 'Reload page',
   },
+
+  apiErrors: {
+    timeout: 'The request timed out. Check your connection and try again.',
+    uploadTimeout: 'The upload timed out. Check your connection and try again.',
+    invalidCredentials: 'Incorrect email or password',
+    sessionExpired: 'Your session has expired. Please sign in again.',
+    streamUnsupported: 'Your browser does not support streaming responses',
+  },
 } satisfies typeof zhCN;
 
 export default en;
