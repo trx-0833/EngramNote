@@ -35,10 +35,331 @@
 
 from typing import Any, Dict, List, Optional
 
+from ...core.i18n import DEFAULT_LOCALE, normalize_locale
 
 
-def summarize_chapter_messages(chapter_title: str, chapter_content: str) -> List[Dict[str, str]]:
+def _resolve_locale(locale: Optional[str] = None) -> str:
+    """决定这次提示词用哪种语言
+
+    ## 三级回落（与前端 `t()` 的三级回落同构）
+
+    1. 显式传入的 `locale`（调用方明确指定）；
+    2. `llm_context` 里声明的 `locale`（worker 从 `users.locale` 读出来后声明）；
+    3. `core.i18n.DEFAULT_LOCALE`（中文）。
+
+    ## 为什么默认是"读上下文"而不是"默认中文"
+
+    因为**绝大多数调用点不该关心语言**：语言是"谁在用"的属性，
+    不是"这一步在做什么"的属性。默认读上下文意味着
+    `summarize_chapter(...)` 这类调用一个字都不用改，而 worker 只在
+    最外层声明一次 `llm_context(locale=...)` 即可（与 `user_id` 同一模式）。
+
+    ## 非法值怎么办
+
+    交给 `normalize_locale()`：它把 `en-US` / `EN` 这类规范成 `en`，
+    无法识别时回落 `DEFAULT_LOCALE`。**不抛错** —— 提示词语言不值得
+    让一次理解任务失败。
+    """
+    if locale is None:
+        # 延迟导入：`llm_accounting_service` 会 import 本模块之外的很多东西，
+        # 顶层 import 会形成环（本模块被 llm 包内多处引用）。
+        from ..llm_accounting_service import current_context
+
+        locale = current_context().locale
+    if locale is None:
+        return DEFAULT_LOCALE
+    return normalize_locale(locale)
+
+
+# ---------------------------------------------------------------------------
+# 英文提示词（i18n 阶段 4）
+# ---------------------------------------------------------------------------
+#
+# ## ⚠️ 中文提示词一个字都没有动
+#
+# `tests/test_prompt_golden.py` 固化了每个场景送给模型的输入的 sha256，
+# 用来证明"搬移提示词时没改一个字符"。这次加英文**没有**动中文的任何一个
+# 字符，所以那 11 个摘要**保持不变** —— 这不是巧合，是刻意：
+#
+# - 中文用户的响应缓存不会失效（缓存键是完整输入的 sha256）；
+# - golden 测试仍然证明"中文提示词自搬移以来逐字节未变"。
+#
+# 若哪天**有意**改中文提示词，才需要同时更新 GOLDEN 与 `PROMPT_VERSIONS`。
+#
+# ## 英文不是"逐字直译"
+#
+# 几处刻意不同：
+#
+# - **JSON 里的示例值仍用中文**（如 `"章节标题"` → `"chapter title"` 改成英文，
+#   但 `card_type` 的**枚举值** `concept/formula/qa/definition` 一律不译 ——
+#   它们是代码里的标识符，译了会让 `validate_items` 解析失败）；
+# - `rag_answer` 的「资料中没有找到相关信息」译成英文时**必须与前端
+#   `qa` 场景的展示逻辑对齐**：那句是给用户看的固定话术，不是随便一句话。
+_EN_PROMPTS: Dict[str, str] = {
+    # ---- 章节摘要 ----
+    "summarize_chapter": (
+        "You are a professional academic assistant. Produce a concise and accurate "
+        "summary of the given chapter. The summary should cover: 1) the chapter's core "
+        "topic, 2) the key arguments or findings, 3) the important conclusions. "
+        "Keep the summary under 200 words."
+    ),
+    # ---- 单章节知识点提取 ----
+    "extract_knowledge_points": (
+        "You are a professional knowledge-extraction assistant. Extract the key "
+        "knowledge points from the given chapter.\n\n"
+        "Knowledge point types:\n"
+        "- concept: conceptual knowledge that must be understood and remembered\n"
+        "- formula: formulas, chemical equations, and the like\n"
+        "- qa: question-and-answer pairs\n"
+        "- definition: definitions that must be remembered precisely\n\n"
+        "Return a JSON array where each element contains:\n"
+        "- card_type: one of concept/formula/qa/definition\n"
+        "- title: a concise title for the knowledge point\n"
+        "- content: a detailed description of the knowledge point\n"
+        "- source_text: the passage in the original text it comes from\n\n"
+        "Requirements:\n"
+        "1. Each knowledge point must be self-contained and understandable on its own\n"
+        "2. source_text should quote the original text as closely as possible\n"
+        "3. Extract 5-15 knowledge points\n"
+        "4. Return only the JSON array, with no other text"
+    ),
+    # ---- 多轮知识提取会话 ----
+    "understanding_session": (
+        "You are a professional knowledge-extraction assistant. I will give you the "
+        "content of one or more chapters at a time; for each chapter, produce a summary "
+        "and extract the key knowledge points.\n\n"
+        "Knowledge point types:\n"
+        "- concept: conceptual knowledge that must be understood and remembered\n"
+        "- formula: formulas, chemical equations, and the like\n"
+        "- qa: question-and-answer pairs\n"
+        "- definition: definitions that must be remembered precisely\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        '{"chapters": [\n'
+        '  {\n'
+        '    "chapter_title": "chapter title",\n'
+        '    "summary": "chapter summary (under 200 words)",\n'
+        '    "points": [\n'
+        '      {"card_type": "concept", "title": "knowledge point title", '
+        '"content": "knowledge point content", "source_text": "quoted source text"},\n'
+        '      ...\n'
+        '    ]\n'
+        '  },\n'
+        '  ...\n'
+        "]}\n\n"
+        "Requirements:\n"
+        "1. Each knowledge point must be self-contained and understandable on its own\n"
+        "2. source_text should quote the original text as closely as possible\n"
+        "3. Extract 5-15 knowledge points per chapter\n"
+        "4. Do not repeat knowledge points extracted earlier\n"
+        "5. Return only the JSON object, with no other text"
+    ),
+    # ---- 单卡片出题 ----
+    "generate_questions": (
+        "You are a professional question-writing assistant. Generate $types_str "
+        "based on the given knowledge point.\n\n"
+        "Return a JSON array where each element contains:\n"
+        "- question_type: one of choice/fill_blank/short_answer\n"
+        "- difficulty: one of easy/medium/hard\n"
+        "- question: the question text\n"
+        "- answer: the correct answer\n"
+        "- options: the choices (only for multiple-choice; a JSON array such as "
+        '["A. option 1", "B. option 2", "C. option 3", "D. option 4"]; null otherwise)\n'
+        "- explanation: why this answer is correct\n\n"
+        "Requirements:\n"
+        "1. Questions must test the knowledge point accurately and stay within the given content\n"
+        "2. Distractors in multiple-choice questions must be plausible, not obviously wrong\n"
+        "3. Generate 1-2 questions of each type\n"
+        "4. Return only the JSON array, with no other text"
+    ),
+    # ---- 批量出题 ----
+    "generate_questions_batch": (
+        "You are a professional question-writing assistant. Based on the "
+        "$card_count knowledge points given, generate 1 $types_str for each "
+        "knowledge point.\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        '{"questions": [\n'
+        '  {"card_index": 1, "question_type": "choice", "difficulty": "easy", '
+        '"question": "question text", "answer": "correct answer", '
+        '"options": ["A.option 1", "B.option 2", "C.option 3", "D.option 4"], '
+        '"explanation": "explanation"},\n'
+        '  {"card_index": 2, ...}\n'
+        ']}\n\n'
+        "Requirements:\n"
+        "1. Generate 1 question per knowledge point, $card_count questions in total\n"
+        "2. Questions must test the knowledge point accurately and stay within the given content\n"
+        "3. Distractors in multiple-choice questions must be plausible\n"
+        "4. card_index starts at 1 and corresponds to the knowledge point number\n"
+        "5. options must be an array of strings, each formatted as 'letter.content'\n"
+        "6. Return only the JSON object, with no other text"
+    ),
+    # ---- 多轮出题会话 ----
+    "question_session": (
+        "You are a professional question-writing assistant. I will give you several "
+        "groups of knowledge points in turn; generate multiple-choice questions for "
+        "each group.\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        '{"questions": [\n'
+        '  {"card_index": 1, "question_type": "choice", "difficulty": "easy", '
+        '"question": "question text", "answer": "correct answer", '
+        '"options": ["A.option 1", "B.option 2", "C.option 3", "D.option 4"], '
+        '"explanation": "explanation"},\n'
+        '  {"card_index": 2, ...}\n'
+        "]}\n\n"
+        "Requirements:\n"
+        "1. Generate 1 multiple-choice question per knowledge point\n"
+        "2. Questions must test the knowledge point accurately and stay within the given content\n"
+        "3. Distractors in multiple-choice questions must be plausible\n"
+        "4. card_index starts at 1 and corresponds to the number within this group\n"
+        "5. options must be an array of strings, each formatted as 'letter.content'\n"
+        "6. Do not repeat or closely resemble questions generated earlier\n"
+        "7. Return only the JSON object, with no other text"
+    ),
+    # ---- RAG 问答 ----
+    "rag_answer": (
+        "You are a rigorous study assistant. Your answer may draw **only** on the "
+        "reference material provided below.\n\n"
+        "Hard rules (you must follow these):\n"
+        "1. **Reference material only**: do not use any knowledge beyond the reference "
+        "material, even if you are confident it is correct.\n"
+        "2. **Say so when there is no basis**: if the reference material does not contain "
+        "enough information to answer, reply directly with "
+        '"No relevant information was found in the material." and explain what the '
+        "material does cover. **Do not guess, do not fill in, do not generalize.**\n"
+        "3. **Cite every claim**: after each conclusion, mark which passage it comes from "
+        "with [n], where n is the passage number in the reference material.\n"
+        "4. **Report faithfully**: do not change the meaning, and do not omit conditions, "
+        "scopes or premises. If the material contradicts itself, point out the "
+        "contradiction instead of deciding for the user.\n"
+        "5. **Separate fact from inference**: if a sentence is your inference rather than "
+        'the material\'s own words, mark it explicitly with "(inferred)".\n\n'
+        "Answer format: answer the question directly first, then list the passage numbers "
+        "you relied on."
+    ),
+    # ---- 联合分析会话 ----
+    "combined_analysis_session": (
+        "You are a professional study-analysis assistant. I will give you each chapter "
+        "of the study material together with the user's complete notes; perform a "
+        "combined analysis for each chapter.\n\n"
+        "Knowledge point types:\n"
+        "- concept: conceptual knowledge that must be understood and remembered\n"
+        "- formula: formulas, chemical equations, and the like\n"
+        "- qa: question-and-answer pairs\n"
+        "- definition: definitions that must be remembered precisely\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        "{\n"
+        '  "chapter_title": "chapter title",\n'
+        '  "regular_points": [\n'
+        '    {"card_type": "concept", "title": "knowledge point title", '
+        '"content": "knowledge point content", '
+        '"source_text": "quoted source text", "is_key_point": false, "is_difficulty": false}\n'
+        "  ],\n"
+        '  "blind_spots": [\n'
+        '    {"card_type": "concept", "title": "blind spot title", '
+        '"content": "blind spot content", '
+        '"source_text": "quoted source text", "is_key_point": false, "is_difficulty": false}\n'
+        "  ]\n"
+        "}\n\n"
+        "Requirements:\n"
+        "1. regular_points: knowledge points covered by both the material and the user's notes\n"
+        "2. blind_spots: knowledge points present in the material but missing from the user's notes\n"
+        "3. is_key_point/is_difficulty: suggest true/false based on importance and difficulty\n"
+        "4. Each knowledge point must be self-contained and understandable on its own\n"
+        "5. source_text should quote the material as closely as possible\n"
+        "6. Do not repeat knowledge points extracted earlier\n"
+        "7. Return only the JSON object, with no other text"
+    ),
+    # ---- 拓展知识点 ----
+    "generate_extension_knowledge": (
+        "You are a professional knowledge-expansion assistant. I will give you a "
+        "knowledge point the user has already mastered together with related material; "
+        "generate 1-3 advanced extension knowledge points.\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        "{\n"
+        '  "extensions": [\n'
+        '    {"card_type": "concept", "title": "extension title", '
+        '"content": "extension content", "source_text": "quoted source text or empty"}\n'
+        "  ]\n"
+        "}\n\n"
+        "Requirements:\n"
+        "1. Extensions must go further than, relate to, or deepen the original knowledge point\n"
+        "2. Each knowledge point must be self-contained\n"
+        "3. Return only the JSON object, with no other text"
+    ),
+    # ---- 卡片关系推断 ----
+    "infer_card_relations": (
+        "You are a professional knowledge-graph assistant. I will give you summaries "
+        "of several knowledge cards; infer the semantic relations between them.\n\n"
+        "Relation types:\n"
+        "- prerequisite: card_a is a prerequisite for card_b (you must learn a to understand b)\n"
+        "- subsequent: card_a is a follow-up to card_b (a extends b)\n"
+        "- contrast: the two cards contrast with each other\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        "{\n"
+        '  "relations": [\n'
+        '    {"card_id_a": "card id 1", "card_id_b": "card id 2", '
+        '"relation_type": "prerequisite", "reason": "why you inferred this"}\n'
+        "  ]\n"
+        "}\n\n"
+        "Requirements:\n"
+        "1. Only infer relations that genuinely exist; do not force connections\n"
+        "2. relation_type must be one of prerequisite/subsequent/contrast\n"
+        "3. card_id_a and card_id_b must be ids from the given card list\n"
+        "4. At most one relation per pair of cards\n"
+        "5. Return only the JSON object, with no other text"
+    ),
+    # ---- 简答判分 ----
+    "grade_short_answer": (
+        "You are a strict examiner judging whether a student's **short answer** is "
+        "semantically equivalent to the reference answer.\n\n"
+        "Judge **semantic equivalence only**: do not bring in knowledge beyond the "
+        "reference answer, and do not mark an answer wrong just because the wording differs.\n\n"
+        "Return strictly in the following JSON format (add no other text):\n"
+        '{"verdict": "correct|partial|incorrect",\n'
+        ' "missing_points": ["key points the student missed"],\n'
+        ' "misconceptions": ["statements that contradict the reference answer"],\n'
+        ' "confidence": 0.0,\n'
+        ' "reason": "one sentence explaining the verdict"}\n\n'
+        "Criteria:\n"
+        "1. correct: the core meaning matches the reference answer. Different wording, "
+        "different order, more brevity or more detail are all **allowed**\n"
+        "2. partial: partly right, but with clear omissions or imprecision\n"
+        "3. incorrect: contradicts the reference answer, or answers something else\n\n"
+        "confidence must honestly reflect how sure you are:\n"
+        "- Give a high score (>=0.8) when the meanings are clearly the same or clearly different\n"
+        "- Give a low score when the student's answer is outside the reference answer but "
+        "may be equally correct, or when the wording is too vague to judge\n"
+        "- **Do not** inflate confidence just to sound certain"
+    ),
+}
+
+
+def system_prompt_for(name: str, locale: Optional[str] = None) -> str:
+    """按语言取**会话类**的系统提示词
+
+    `name` 取 `summarize_chapter` 之外的那几个会话名（`understanding_session`
+    / `question_session` / `combined_analysis_session`）。
+
+    ⚠️ 中文分支返回的是**模块级常量本身**（不是重新拼一遍字符串）——
+    这样 `UNDERSTANDING_SYSTEM_PROMPT` 这类公开名字仍然是权威定义，
+    golden 测试固化的也是同一个对象的内容。
+    """
+    resolved = _resolve_locale(locale)
+    if resolved == "en":
+        return _EN_PROMPTS[name]
+    return _ZH_SYSTEM_PROMPTS[name]
+
+
+
+def summarize_chapter_messages(chapter_title: str, chapter_content: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """章节摘要"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {"role": "system", "content": _EN_PROMPTS["summarize_chapter"]},
+            {
+                "role": "user",
+                "content": f"Chapter title: {chapter_title}\n\nChapter content:\n{chapter_content}",
+            },
+        ]
     return [
         {
             "role": "system",
@@ -55,8 +376,16 @@ def summarize_chapter_messages(chapter_title: str, chapter_content: str) -> List
     ]
 
 
-def extract_knowledge_points_messages(chapter_title: str, chapter_content: str) -> List[Dict[str, str]]:
+def extract_knowledge_points_messages(chapter_title: str, chapter_content: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """单章节知识点提取（非会话路径）"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {"role": "system", "content": _EN_PROMPTS["extract_knowledge_points"]},
+            {
+                "role": "user",
+                "content": f"Chapter title: {chapter_title}\n\nChapter content:\n{chapter_content}",
+            },
+        ]
     return [
         {
             "role": "system",
@@ -117,8 +446,26 @@ UNDERSTANDING_SYSTEM_PROMPT = (
 )
 
 
-def generate_questions_messages(card_title: str, card_content: str, card_type: str, types_str: str) -> List[Dict[str, str]]:
+def generate_questions_messages(card_title: str, card_content: str, card_type: str, types_str: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """单卡片出题"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {
+                "role": "system",
+                # ⚠️ 不能用 `str.format()`：英文提示词里有 JSON 字面量
+                # （`{"questions": [...]}`），`{` 会被当成占位符并抛
+                # `KeyError: '"questions"'`。用显式 replace 最直白。
+                "content": _EN_PROMPTS["generate_questions"].replace("$types_str", types_str),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Knowledge point title: {card_title}\n"
+                    f"Knowledge point type: {card_type}\n"
+                    f"Knowledge point content: {card_content}"
+                ),
+            },
+        ]
     return [
         {
             "role": "system",
@@ -150,8 +497,22 @@ def generate_questions_messages(card_title: str, card_content: str, card_type: s
     ]
 
 
-def generate_questions_batch_messages(cards_text: str, types_str: str, card_count: int) -> List[Dict[str, str]]:
+def generate_questions_batch_messages(cards_text: str, types_str: str, card_count: int, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """批量出题：一次请求里为多个知识点各出一道题"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {
+                "role": "system",
+                # 同上：不能 `str.format()`（JSON 字面量里的 `{` 会炸）
+                "content": _EN_PROMPTS["generate_questions_batch"]
+                .replace("$types_str", types_str)
+                .replace("$card_count", str(card_count)),
+            },
+            {
+                "role": "user",
+                "content": cards_text,
+            },
+        ]
     return [
         {
             "role": "system",
@@ -205,8 +566,16 @@ QUESTION_SYSTEM_PROMPT = (
 )
 
 
-def rag_answer_messages(question: str, context: str) -> List[Dict[str, str]]:
+def rag_answer_messages(question: str, context: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """RAG 问答：**只依据给定资料**回答（阶段 2.8 重写，见函数内说明）"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {"role": "system", "content": _EN_PROMPTS["rag_answer"]},
+            {
+                "role": "user",
+                "content": f"Reference material:\n{context}\n\nQuestion: {question}",
+            },
+        ]
     return [
         {
             "role": "system",
@@ -265,8 +634,33 @@ COMBINED_ANALYSIS_SYSTEM_PROMPT = (
 )
 
 
-def generate_extension_knowledge_messages(card_title: str, card_content: str, material_context: str) -> List[Dict[str, str]]:
+#: 会话类系统提示词的**中文**权威表（i18n 阶段 4）
+#:
+#: 值是上面那几个模块级常量**本身**，不是重新拼的副本 ——
+#: 这样"中文提示词只有一处定义"这条性质不被 i18n 破坏。
+#: `system_prompt_for()` 按语言在这张表与 `_EN_PROMPTS` 之间选。
+_ZH_SYSTEM_PROMPTS: Dict[str, str] = {
+    "understanding_session": UNDERSTANDING_SYSTEM_PROMPT,
+    "question_session": QUESTION_SYSTEM_PROMPT,
+    "combined_analysis_session": COMBINED_ANALYSIS_SYSTEM_PROMPT,
+}
+
+
+def generate_extension_knowledge_messages(card_title: str, card_content: str, material_context: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """进阶拓展知识点：系统提示词 + 用户消息"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {"role": "system", "content": _EN_PROMPTS["generate_extension_knowledge"]},
+            {
+                "role": "user",
+                "content": (
+                    f"## Mastered knowledge point:\nTitle: {card_title}\n"
+                    f"Content: {card_content}\n\n"
+                    f"## Related material:\n{material_context}\n\n"
+                    f"Generate 1-3 advanced extension knowledge points."
+                ),
+            },
+        ]
     system_prompt = (
         "你是一个专业的知识拓展助手。我将给你一个已掌握的知识点及其关联资料，请生成1-3个进阶拓展知识点。\n\n"
         "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
@@ -293,8 +687,17 @@ def generate_extension_knowledge_messages(card_title: str, card_content: str, ma
     return messages
 
 
-def infer_card_relations_messages(cards_summary: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def infer_card_relations_messages(cards_summary: List[Dict[str, Any]], locale: Optional[str] = None) -> List[Dict[str, str]]:
     """卡片关系推断：系统提示词 + 卡片摘要文本 + 用户消息"""
+    if _resolve_locale(locale) == "en":
+        en_lines = [
+            f"- [id={c['id']}] {c['title']} ({c['card_type']}): {c['content'][:300]}"
+            for c in cards_summary
+        ]
+        return [
+            {"role": "system", "content": _EN_PROMPTS["infer_card_relations"]},
+            {"role": "user", "content": "\n".join(en_lines)},
+        ]
     system_prompt = (
         "你是一个专业的知识图谱构建助手。我将给你若干知识卡片的摘要，请推断它们之间的语义关系。\n\n"
         "关系类型说明：\n"
@@ -329,8 +732,20 @@ def infer_card_relations_messages(cards_summary: List[Dict[str, Any]]) -> List[D
     return messages
 
 
-def grade_short_answer_messages(question: str, expected_answer: str, user_answer: str) -> List[Dict[str, str]]:
+def grade_short_answer_messages(question: str, expected_answer: str, user_answer: str, locale: Optional[str] = None) -> List[Dict[str, str]]:
     """简答判分：系统提示词 + 用户消息"""
+    if _resolve_locale(locale) == "en":
+        return [
+            {"role": "system", "content": _EN_PROMPTS["grade_short_answer"]},
+            {
+                "role": "user",
+                "content": (
+                    f"Question: {question}\n\n"
+                    f"Reference answer: {expected_answer}\n\n"
+                    f"Student answer: {user_answer}"
+                ),
+            },
+        ]
     system_prompt = (
         "你是一个严格的阅卷老师，负责判断学生的**简答题**作答在语义上"
         "是否与标准答案一致。\n\n"

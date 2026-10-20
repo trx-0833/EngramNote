@@ -69,10 +69,26 @@ ERROR_MAX_LEN = 500
 
 @dataclass(frozen=True)
 class LLMContext:
-    """一次 LLM 调用的来源上下文（谁、为了哪篇笔记、由什么触发）"""
+    """一次 LLM 调用的来源上下文（谁、为了哪篇笔记、由什么触发、说什么语言）
+
+    ## `locale` 为什么在这里，而不是当成 `chat()` 的参数
+
+    i18n 阶段 4 要解决的问题是「提示词跟界面语言走」。把它放进**上下文**
+    而不是加到 `chat(messages, ..., locale=...)` 上，理由是三者性质相同：
+    `user_id` / `note_id` / `locale` 都是**每次调用都相同**的来源信息，
+    而 `messages` 是**每次调用都不同**的载荷。
+
+    放进上下文还带来一个实际好处：**调用点不必改签名**。`chat()` 有
+    七八个参数，再加一个会让每个场景方法都得透传；而上下文是
+    「声明一次、整段作用域生效」（见 `llm_context` 的嵌套说明）。
+    """
     user_id: Optional[str] = None
     note_id: Optional[str] = None
     task: Optional[str] = None
+    #: 提示词语言（`zh-CN` / `en`）。None 表示"没人声明过"，
+    #: 此时提示词层会回落到 `core.i18n.DEFAULT_LOCALE`（中文）——
+    #: 这与 `user_id` 为 None 时"照记一笔、只是少了维度"是同一条原则。
+    locale: Optional[str] = None
 
 
 #: 当前上下文。默认 None（表示"没人声明过"），而不是空对象 ——
@@ -86,6 +102,7 @@ def llm_context(
     user_id: Optional[str] = None,
     note_id: Optional[str] = None,
     task: Optional[str] = None,
+    locale: Optional[str] = None,
 ) -> Iterator[None]:
     """在这段作用域内声明的 LLM 调用上下文
 
@@ -104,6 +121,7 @@ def llm_context(
         user_id=user_id if user_id is not None else (outer.user_id if outer else None),
         note_id=note_id if note_id is not None else (outer.note_id if outer else None),
         task=task if task is not None else (outer.task if outer else None),
+        locale=locale if locale is not None else (outer.locale if outer else None),
     )
     token = _current.set(merged)
     try:

@@ -41,6 +41,7 @@ from .common import (
 from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
+from ..models.user import User
 from ..services.llm.prompts import prompt_version
 from ..services.llm.structured import QuizQuestion, validate_items
 
@@ -90,6 +91,16 @@ async def _understand_document(note_id: str):
         clean_md_path = note.clean_md_path
         original_md_path = note.original_md_path
 
+        # 提示词语言（i18n 阶段 4）：worker 里**没有**请求上下文，
+        # 所以只能查库读用户偏好。查不到时留 None，
+        # 提示词层会回落到默认语言（中文）。
+        locale: Optional[str] = None
+        if user_id:
+            user_row = (
+                await session.execute(select(User.locale).where(User.id == user_id))
+            ).scalars().first()
+            locale = user_row or None
+
     # 2. 读取 Markdown 内容（优先清洗版）
     md_path = clean_md_path or original_md_path
     if not md_path:
@@ -123,7 +134,9 @@ async def _understand_document(note_id: str):
     # 没有这层声明的调用照样会被记账，只是 user_id/note_id 为 NULL。
     from ..services.llm_accounting_service import llm_context
 
-    with llm_context(user_id=user_id, note_id=note_id, task="understand_note"):
+    with llm_context(
+        user_id=user_id, note_id=note_id, task="understand_note", locale=locale
+    ):
         async with session_factory() as session:
             result = await process_note_understanding(
                 db=session,

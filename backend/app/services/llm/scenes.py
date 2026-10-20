@@ -31,9 +31,6 @@ from typing import Any, Dict, List, Optional
 
 from ...config import get_settings
 from .prompts import (
-    COMBINED_ANALYSIS_SYSTEM_PROMPT,
-    QUESTION_SYSTEM_PROMPT,
-    UNDERSTANDING_SYSTEM_PROMPT,
     extract_knowledge_points_messages,
     generate_extension_knowledge_messages,
     generate_questions_batch_messages,
@@ -42,6 +39,7 @@ from .prompts import (
     infer_card_relations_messages,
     rag_answer_messages,
     summarize_chapter_messages,
+    system_prompt_for,
 )
 from .sessions import CombinedAnalysisSession, ConversationSession, UnderstandingSession
 from .structured import GradeResult, validate_items
@@ -327,7 +325,9 @@ class SceneMethods:
         Returns:
             ConversationSession: 知识提取对话会话
         """
-        system_prompt = UNDERSTANDING_SYSTEM_PROMPT
+        # 语言由 `llm_context` 决定（worker 从 `users.locale` 声明），
+        # 不传 locale 时 `system_prompt_for` 自己读上下文
+        system_prompt = system_prompt_for("understanding_session")
         return UnderstandingSession(
             self,
             system_prompt,
@@ -348,7 +348,7 @@ class SceneMethods:
         Returns:
             ConversationSession: 题目生成对话会话
         """
-        system_prompt = QUESTION_SYSTEM_PROMPT
+        system_prompt = system_prompt_for("question_session")
         return ConversationSession(
             self,
             system_prompt,
@@ -369,7 +369,7 @@ class SceneMethods:
         Returns:
             CombinedAnalysisSession: 联合分析对话会话
         """
-        system_prompt = COMBINED_ANALYSIS_SYSTEM_PROMPT
+        system_prompt = system_prompt_for("combined_analysis_session")
         return CombinedAnalysisSession(
             self,
             system_prompt,

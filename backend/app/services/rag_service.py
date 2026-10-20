@@ -832,8 +832,11 @@ class RAGService:
         # 因此这里必须带上上下文 —— 否则"这个月的钱花在哪"会得出
         # "问答不花钱"这种与事实相反的结论。
         from .llm_accounting_service import llm_context
+        from ..core.context import get_locale as _request_locale
 
-        with llm_context(user_id=user_id, task="qa_answer"):
+        # 语言取**本次请求**的语言（中间件从 Accept-Language 解析），
+        # 而不是查库读用户偏好 —— 用户可能临时切了界面语言而偏好还没保存。
+        with llm_context(user_id=user_id, task="qa_answer", locale=_request_locale()):
             answer = await llm_service.rag_answer(question, context)
 
         return {

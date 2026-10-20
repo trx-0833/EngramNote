@@ -401,13 +401,19 @@ async def grade_short_answer_semantically(
 
     from .llm_service import LLMService
     from .llm_accounting_service import llm_context
+    from ..core.context import get_locale as _request_locale
 
     try:
         # 超时上限**远小于**全局 llm_timeout_seconds：判分在复习提交的同步
         # 路径上，用户就等在原地（见 SEMANTIC_GRADE_TIMEOUT_SECONDS 的说明）。
         #
         # 阶段 4.2：带上上下文，让这次判分的花费能归到具体用户/笔记。
-        with llm_context(user_id=user_id, note_id=note_id, task="grade_short_answer"):
+        with llm_context(
+            user_id=user_id,
+            note_id=note_id,
+            task="grade_short_answer",
+            locale=_request_locale(),
+        ):
             detail = await asyncio.wait_for(
                 LLMService().grade_short_answer(
                     question=question,
