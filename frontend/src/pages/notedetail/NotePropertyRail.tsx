@@ -49,7 +49,7 @@ import type { CSSProperties } from 'react';
 import { updateNoteRole, type NoteDetail } from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { formatDate } from '../../utils/datetime';
-import { statusClass, statusLabels } from '../../utils/labels';
+import { statusClass, useLabels } from '../../utils/labels';
 import styles from './NotePropertyRail.module.css';
 
 interface NotePropertyRailProps {
@@ -73,6 +73,7 @@ interface NotePropertyRailProps {
  * 名字与现状的偏差已在此处写明，不留给下一个人去猜。
  */
 export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRailProps) {
+  const { statusLabels } = useLabels();
   const toast = useToast();
 
   return (

@@ -21,10 +21,11 @@ import Icon from '../components/Icon';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MasteryRing from '../components/MasteryRing';
-import { cardTypeLabels, difficultyLabels, questionTypeLabels } from '../utils/labels';
+import { useLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
 export default function CardDetail() {
+  const { cardTypeLabels, difficultyLabels, questionTypeLabels } = useLabels();
   const toast = useToast();
   const { cardId } = useParams<{ cardId: string }>();
   const navigate = useNavigate();

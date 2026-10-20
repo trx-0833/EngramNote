@@ -9,7 +9,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { selfRatingOptions } from '../../utils/labels';
+import { readLabels } from '../../utils/labels.testkit';
 import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons';
 
 /** 只声明本文件用到的那几个 API（本项目没有 @types/node） */
@@ -51,6 +51,7 @@ describe('SelfRatingButtons 的四档', () => {
   it('四档的标签与说明全部来自 utils/labels（单一数据源，不另写字面量）', () => {
     render(<SelfRatingButtons onRate={vi.fn()} />);
 
+    const { selfRatingOptions } = readLabels();
     for (const opt of selfRatingOptions) {
       expect(screen.getByText(opt.label)).toBeInTheDocument();
       expect(screen.getByText(opt.hint)).toBeInTheDocument();
@@ -63,6 +64,7 @@ describe('SelfRatingButtons 的四档', () => {
     async (quality) => {
       const onRate = vi.fn();
       render(<SelfRatingButtons onRate={onRate} />);
+      const { selfRatingOptions } = readLabels();
       const opt = selfRatingOptions.find((o) => o.quality === quality);
       if (!opt) throw new Error(`selfRatingOptions 缺少 quality=${quality}`);
 
@@ -87,6 +89,7 @@ describe('SelfRatingButtons 的提交中状态', () => {
   it('★ 提交中禁用全部按钮，并给出"正在记录自评"的反馈', () => {
     render(<SelfRatingButtons onRate={vi.fn()} submitting />);
 
+    const { selfRatingOptions } = readLabels();
     for (const opt of selfRatingOptions) {
       expect(screen.getByText(opt.label).closest('button')).toBeDisabled();
     }
@@ -126,8 +129,8 @@ describe('SelfRatingButtons 的跳过逃生口', () => {
 
 describe('selfRatingLabel', () => {
   it('把 quality 翻译成用户看到的档位名', () => {
-    expect(selfRatingLabel(4)).toBe('想起来了');
-    expect(selfRatingLabel(0)).toBe('完全忘记');
+    expect(selfRatingLabel(4, readLabels().selfRatingOptions)).toBe('想起来了');
+    expect(selfRatingLabel(0, readLabels().selfRatingOptions)).toBe('完全忘记');
   });
 
   it('未知档位回退成 quality=N，而不是 undefined', () => {

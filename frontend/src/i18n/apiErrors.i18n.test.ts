@@ -48,7 +48,7 @@ describe('translate()：非组件版的 t()', () => {
     expect(translate('apiErrors.uploadTimeout')).toBe(
       'The upload timed out. Check your connection and try again.',
     );
-    expect(translate('apiErrors.streamUnsupported')).toBe(
+    expect(translate('apiErrors.unsupportedStream')).toBe(
       'Your browser does not support streaming responses',
     );
   });

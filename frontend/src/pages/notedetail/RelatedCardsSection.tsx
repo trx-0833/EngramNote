@@ -7,7 +7,7 @@
  * 显示条件（`relatedCards.length > 0`）由页面侧判断。
  */
 import type { KnowledgeCard } from '../../api/client';
-import { cardTypeColors, cardTypeLabels, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
+import { cardTypeColors, FALLBACK_CATEGORY_COLOR, useLabels } from '../../utils/labels';
 
 /** 首页最多展示的卡片数，超出时提供"查看全部"入口 */
 const MAX_VISIBLE_CARDS = 6;
@@ -27,6 +27,7 @@ export default function RelatedCardsSection({
   noteId,
   navigate,
 }: RelatedCardsSectionProps) {
+  const { cardTypeLabels } = useLabels();
   return (
     <div style={{ marginTop: 'var(--space-lg)' }}>
       <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>

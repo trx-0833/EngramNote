@@ -35,7 +35,7 @@ import { useToast } from '../components/Toast';
 import StatCard from '../components/StatCard';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
-import { cardTypeLabels, weakPointBadge } from '../utils/labels';
+import { useLabels, weakPointBadge } from '../utils/labels';
 
 /** 单题答题状态 */
 interface QuizState {
@@ -60,6 +60,7 @@ function errorCodeOf(e: unknown): string | null {
 }
 
 export default function TodayLearn() {
+  const { cardTypeLabels } = useLabels();
   const navigate = useNavigate();
   const toast = useToast();
   const [loading, setLoading] = useState(true);

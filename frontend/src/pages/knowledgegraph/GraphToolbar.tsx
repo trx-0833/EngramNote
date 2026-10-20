@@ -15,8 +15,8 @@ import styles from '../../components/graph/Graph.module.css';
 import PageHeader from '../../components/PageHeader';
 import {
   cardTypeColors as CARD_TYPE_COLORS,
-  cardTypeLabels as CARD_TYPE_LABELS,
   FALLBACK_CATEGORY_COLOR,
+  useLabels,
 } from '../../utils/labels';
 
 interface GraphToolbarProps {
@@ -59,6 +59,7 @@ export default function GraphToolbar({
   sidebarOpen,
   onToggleSidebar,
 }: GraphToolbarProps) {
+  const { cardTypeLabels } = useLabels();
   return (
     <div className={styles.graphToolbar} style={{ marginBottom: 'var(--space-md)' }}>
       <div className={styles.graphToolbarLeft}>
@@ -95,7 +96,7 @@ export default function GraphToolbar({
                   />
                   <span className={styles.graphSearchResultTitle}>{r.title}</span>
                   <span className={styles.graphSearchResultType}>
-                    {CARD_TYPE_LABELS[r.card_type] || r.card_type}
+                    {cardTypeLabels[r.card_type] || r.card_type}
                   </span>
                 </div>
               ))}
@@ -117,7 +118,7 @@ export default function GraphToolbar({
           onChange={(e) => onFilterCardTypeChange(e.target.value || null)}
         >
           <option value="">全部类型</option>
-          {Object.entries(CARD_TYPE_LABELS).map(([type, label]) => (
+          {Object.entries(cardTypeLabels).map(([type, label]) => (
             <option key={type} value={type}>
               {label}
             </option>
@@ -126,7 +127,7 @@ export default function GraphToolbar({
 
         {/* 图例 */}
         <div className={styles.graphLegend}>
-          {Object.entries(CARD_TYPE_LABELS).map(([type, label]) => (
+          {Object.entries(cardTypeLabels).map(([type, label]) => (
             <span key={type} className={styles.graphLegendItem}>
               <span
                 className={styles.graphLegendDot}

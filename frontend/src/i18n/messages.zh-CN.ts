@@ -180,7 +180,123 @@ const zhCN = {
     /** 401 且是普通接口 —— 令牌失效，`notifyTokenExpired()` 已触发跳登录页 */
     sessionExpired: '登录已过期，请重新登录',
     /** 流式响应不可用（`ReadableStream` 缺失，老浏览器） */
-    streamUnsupported: '浏览器不支持流式响应',
+    unsupportedStream: '浏览器不支持流式响应',
+  },
+
+  /**
+   * 枚举值 → 标签（i18n 阶段 3）
+   *
+   * ## 为什么这些必须进消息表（而不是留在 `utils/labels.ts`）
+   *
+   * 它们是**后端枚举值**到人读标签的映射，出现在几乎每一页的徽章与筛选器上
+   * （58 个消费点）。留在 `labels.ts` 里当字符串字面量，就等于 46 条文案
+   * 永远只有中文 —— 而它们恰恰是最显眼的那批（状态徽章、题型、难度）。
+   *
+   * ## 值必须与后端枚举**逐一对应**
+   *
+   * 清单来自后端 `app/models/**` 的 Enum 类（实测导出）：
+   * `NoteStatus` 10 个、`CardType` 4 个、`QuestionType` 3 个、`DifficultyLevel` 3 个、
+   * `CardCategory` 3 个、`SourceType` 5 个 + 前端的 `audio`/`video`/`markdown`、
+   * `NoteRole` 2 个、`VersionSource` 3 个、`RelationStatus` 3 个。
+   *
+   * ⚠️ 后端新增一个枚举值时，这里要跟着加 —— 否则界面上会**直接显示原始值**
+   * （`labels.ts` 的 `useLabels()` 在键缺失时回退到值本身，那是刻意的：
+   * 显示 `blind_spot` 好过显示空白）。
+   */
+  labels: {
+    /** 来源类型。`PDF` / `Word` / `PPT` / `Excel` / `Markdown` 是**专有名词**，两种语言同形 */
+    source: {
+      pdf: 'PDF',
+      image: '图片',
+      docx: 'Word',
+      pptx: 'PPT',
+      xlsx: 'Excel',
+      audio: '音频',
+      video: '视频',
+      markdown: 'Markdown',
+    },
+    /** 笔记处理状态（`NoteStatus`，10 个） */
+    status: {
+      uploading: '上传中',
+      converting: '转换中',
+      converted: '已完成',
+      cleaning: '清洗中',
+      cleaned: '已清洗',
+      cleaning_failed: '清洗失败',
+      learning: '学习中',
+      learning_failed: '学习失败',
+      archived: '已审阅',
+      failed: '失败',
+    },
+    /** 知识卡片类型（`CardType`，4 个） */
+    cardType: {
+      concept: '概念',
+      formula: '公式',
+      qa: '问答',
+      definition: '定义',
+    },
+    /** 题目类型（`QuestionType`，3 个） */
+    questionType: {
+      choice: '选择题',
+      fill_blank: '填空题',
+      short_answer: '简答题',
+    },
+    /** 难度（`DifficultyLevel`，3 个） */
+    difficulty: {
+      easy: '简单',
+      medium: '中等',
+      hard: '困难',
+    },
+    /** 卡片分类（`CardCategory`，3 个） */
+    cardCategory: {
+      regular: '常规',
+      blind_spot: '盲点',
+      extension: '拓展',
+    },
+    /** 笔记角色（`NoteRole`，2 个） */
+    noteRole: {
+      material: '学习资料',
+      personal_note: '个人笔记',
+    },
+    /** 版本来源（`VersionSource`，3 个） */
+    versionSource: {
+      user_edit: '手动编辑',
+      auto_clean: '自动清洗',
+      system: '系统',
+    },
+    /** 关系状态（`RelationStatus`，3 个） */
+    relationStatus: {
+      suggested: '建议',
+      confirmed: '已确认',
+      rejected: '已拒绝',
+    },
+    /** 判分方式（用于向用户解释这一次的分数是怎么来的） */
+    gradingMethod: {
+      choice: '选择题自动判分',
+      fill_blank: '填空题自动判分',
+      self_rating: '你的自评',
+      ungraded: '待你自评（尚未计入复习进度）',
+      legacy: '历史记录',
+    },
+    /** 语义判分的三档结论 */
+    verdict: {
+      correct: '回答正确',
+      partial: '答对了部分',
+      incorrect: '回答错误',
+    },
+    /**
+     * SM-2 / FSRS 四档自评
+     *
+     * `label` 是按钮主文案，`hint` 是帮助用户区分档位的补充说明。
+     * 四档**同时**用于自评按钮（`quality` 0/3/4/5）与历史记录的档位标签
+     * （`rating` 1/2/3/4）—— 两处文案刻意相同，用户看到的是同一套说法。
+     */
+    selfRating: {
+      again: { label: '完全忘记', hint: '想不起来，需要重新学' },
+      hard: { label: '勉强想起', hint: '很吃力，答得不完整' },
+      good: { label: '想起来了', hint: '稍作回忆就答对了' },
+      easy: { label: '轻松想起', hint: '脱口而出，毫不费力' },
+    },
   },
 };
 

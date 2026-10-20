@@ -43,18 +43,38 @@
  * 变量，理由见那边的注释）。搬进样式表只会变成"同一套色在两个地方各写一遍"。
  */
 import type { ReactNode } from 'react';
-import { selfRatingOptions } from '../../utils/labels';
+import { useLabels, type SelfRatingOption } from '../../utils/labels';
 import styles from './SelfRatingButtons.module.css';
 
 /**
  * 把 SM-2 quality 分翻译成用户看到的档位名
  *
  * 两条流程都要在"自评生效"的反馈里回显档位名。各写一遍
- * `selfRatingOptions.find(...) ?? `quality=${q}`` 的话，回退文案
- * 迟早会有一页忘记写。
+ * `options.find(...) ?? `quality=${q}`` 的话，回退文案迟早会有一页忘记写。
+ *
+ * ## ⚠️ i18n 阶段 3：多了一个 `options` 参数
+ *
+ * 档位文案现在来自消息表（`labels.selfRating.*`），所以**必须由调用方传进来**
+ * —— 本函数是普通函数，调不了 hook（`useLabels()` 只能在组件里调）。
+ *
+ * 组件里请用下面的 `useSelfRatingLabel()`（它把 hook 与这个函数接起来），
+ * 只有测试或非组件代码才需要直接调本函数。
+ *
+ * @param quality SM-2 分值（0/3/4/5）
+ * @param options `useLabels().selfRatingOptions`；为空时回退成 `quality=N`
  */
-export function selfRatingLabel(quality: number): string {
-  return selfRatingOptions.find((o) => o.quality === quality)?.label ?? `quality=${quality}`;
+export function selfRatingLabel(quality: number, options: SelfRatingOption[] = []): string {
+  return options.find((o) => o.quality === quality)?.label ?? `quality=${quality}`;
+}
+
+/**
+ * 组件里取档位名的 hook（把 `useLabels()` 与 `selfRatingLabel` 接起来）
+ *
+ * 用法：`const labelOf = useSelfRatingLabel(); ... labelOf(result.self_rating)`
+ */
+export function useSelfRatingLabel(): (quality: number) => string {
+  const { selfRatingOptions } = useLabels();
+  return (quality: number) => selfRatingLabel(quality, selfRatingOptions);
 }
 
 interface SelfRatingButtonsProps {
@@ -74,6 +94,7 @@ export default function SelfRatingButtons({
   prompt,
   onSkip,
 }: SelfRatingButtonsProps) {
+  const { selfRatingOptions } = useLabels();
   return (
     <div className={styles.selfRatingDock}>
       {prompt && <p className={styles.selfRatingPrompt}>{prompt}</p>}

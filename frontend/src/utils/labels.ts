@@ -1,41 +1,232 @@
 /**
  * @file 统一标签映射
  * @description 集中管理各页面共用的标签映射，颜色更和谐
+ *
+ * ## i18n（阶段 3）：标签文案搬进了消息表，本文件只留**结构**与**颜色**
+ *
+ * 改之前，这个文件里有 46 条中文字面量（状态、题型、难度、分类…），
+ * 出现在 58 个消费点上。它们搬进了 `i18n/messages.*.ts` 的 `labels` 命名空间。
+ *
+ * ### 消费点怎么改（只有一种改法）
+ *
+ * ```diff
+ * - import { statusLabels } from '../utils/labels';
+ * + import { useLabels } from '../utils/labels';
+ *
+ *   function NoteRow({ note }) {
+ * +   const { statusLabels } = useLabels();
+ *     return <span>{statusLabels[note.status] || note.status}</span>;
+ *   }
+ * ```
+ *
+ * 即：**数据源从模块级常量换成 hook 的返回值**，取值表达式一个字不变。
+ *
+ * ### 为什么用 hook 返回整表，而不是给每个属性套 `t()`
+ *
+ * 这些标签几乎都是**动态取值**（`statusLabels[note.status]`、
+ * `cardTypeLabels[card.type] || card.type`）。给每处套 `t()` 要先把
+ * "值 → 键"的映射写在组件里 —— 那正是本文件要收敛掉的东西
+ * （`statusClass` 的注释记着同一类教训：两套并行机制必然漂移）。
+ * 让 hook 返回已翻译的整表，动态取值就能原样保留。
+ *
+ * ### 颜色表**没有**动
+ *
+ * `cardTypeColors` / `difficultyColors` / `verdictLabels[].color` 等是
+ * **a11y 对比度**算出来的值（口径见下方长注释），与语言无关，逐字未改。
  */
 
-/** 来源类型到中文标签的映射 */
-export const sourceTypeLabels: Record<string, string> = {
-  pdf: 'PDF',
-  image: '图片',
-  docx: 'Word',
-  pptx: 'PPT',
-  xlsx: 'Excel',
-  audio: '音频',
-  video: '视频',
-  markdown: 'Markdown',
-};
+import { useMemo } from 'react';
 
-/** 笔记状态到中文标签的映射 */
-export const statusLabels: Record<string, string> = {
-  uploading: '上传中',
-  converting: '转换中',
-  converted: '已完成',
-  cleaning: '清洗中',
-  cleaned: '已清洗',
-  cleaning_failed: '清洗失败',
-  learning: '学习中',
-  learning_failed: '学习失败',
-  archived: '已审阅',
-  failed: '失败',
-};
+import { useTranslation, type MessageKey } from '../i18n';
 
-/** 知识卡片类型到中文标签的映射 */
-export const cardTypeLabels: Record<string, string> = {
-  concept: '概念',
-  formula: '公式',
-  qa: '问答',
-  definition: '定义',
-};
+/**
+ * 把消息表里的一层子树取成 `Record<值, 已翻译标签>`
+ *
+ * ## 为什么返回类型是 `Record<string, string>` 而不是 `Record<K, string>`
+ *
+ * 第一版写成 `Record<K, string>`（K 是取值联合），`tsc` 立刻在消费点报错：
+ * `statusLabels[note.status]` 里 `note.status` 的类型是 `string`
+ * （契约里就是 `string`，不是联合），索引进联合键会报 TS7053。
+ *
+ * 收紧成联合需要**先**给契约加上枚举联合 —— 那是契约改动，不是本轮的事。
+ * 所以这里放宽成 `Record<string, string>`，与改之前的模块级常量**类型完全一致**
+ * （那本来就是 `Record<string, string>`）。
+ *
+ * 代价是"取值拼错"不会在编译期被发现；运行时靠消费点的
+ * `表[值] || 值` 回退兜住（显示 `blind_spot` 好过显示空白）。
+ * 键本身的拼写仍由 `t()` 的 `MessageKey` 联合守着 —— 那才是最容易错的地方。
+ */
+function useLabelTable<K extends string>(
+  namespace: string,
+  keys: readonly K[],
+): Record<string, string> {
+  const { t } = useTranslation();
+  return useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const key of keys) {
+      out[key] = t(`${namespace}.${key}` as MessageKey);
+    }
+    return out;
+    // `t` 会随语言变化（`useTranslation` 内部 useCallback 依赖 locale），
+    // 所以语言一切换这里就重算 —— 这正是要的行为。
+  }, [t, namespace, keys]);
+}
+
+/** 各枚举的取值清单（与后端 Enum 逐一对应，见 `messages.zh-CN.ts` 的 `labels` 注释） */
+const SOURCE_TYPES = [
+  'pdf',
+  'image',
+  'docx',
+  'pptx',
+  'xlsx',
+  'audio',
+  'video',
+  'markdown',
+] as const;
+const NOTE_STATUSES = [
+  'uploading',
+  'converting',
+  'converted',
+  'cleaning',
+  'cleaned',
+  'cleaning_failed',
+  'learning',
+  'learning_failed',
+  'archived',
+  'failed',
+] as const;
+const CARD_TYPES = ['concept', 'formula', 'qa', 'definition'] as const;
+const QUESTION_TYPES = ['choice', 'fill_blank', 'short_answer'] as const;
+const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
+const CARD_CATEGORIES = ['regular', 'blind_spot', 'extension'] as const;
+const NOTE_ROLES = ['material', 'personal_note'] as const;
+const VERSION_SOURCES = ['user_edit', 'auto_clean', 'system'] as const;
+const RELATION_STATUSES = ['suggested', 'confirmed', 'rejected'] as const;
+const GRADING_METHODS = ['choice', 'fill_blank', 'self_rating', 'ungraded', 'legacy'] as const;
+/**
+ * 四档自评的**语义名**（SM-2 的 Again/Hard/Good/Easy），不是 quality 数字
+ *
+ * ⚠️ 它是**类型来源**，不是运行期清单 —— 四档的实际取值写死在
+ * `useLabels()` 的 `selfRatingOptions` 里（因为每档还要带 `quality` 与 `color`，
+ * 光有语义名拼不出那一档）。所以这里没有对应的 `*_TIERS` 运行期数组：
+ * 加一个 `as const` 数组只为了取类型，会被 eslint 判成"只用作类型"而未使用。
+ */
+export type SelfRatingTier = 'again' | 'hard' | 'good' | 'easy';
+
+/**
+ * 已按当前语言翻译好的标签表集合
+ *
+ * 用法：`const { statusLabels, cardTypeLabels } = useLabels();`
+ * 只取用到的那几张 —— hook 内部按表缓存，多取几张没有额外代价，
+ * 但**写清楚用了什么**对读代码的人有用。
+ */
+export function useLabels() {
+  const { t } = useTranslation();
+  const sourceTypeLabels = useLabelTable('labels.source', SOURCE_TYPES);
+  const statusLabels = useLabelTable('labels.status', NOTE_STATUSES);
+  const cardTypeLabels = useLabelTable('labels.cardType', CARD_TYPES);
+  const questionTypeLabels = useLabelTable('labels.questionType', QUESTION_TYPES);
+  const difficultyLabels = useLabelTable('labels.difficulty', DIFFICULTIES);
+  const cardCategoryLabels = useLabelTable('labels.cardCategory', CARD_CATEGORIES);
+  const noteRoleLabels = useLabelTable('labels.noteRole', NOTE_ROLES);
+  const versionSourceLabels = useLabelTable('labels.versionSource', VERSION_SOURCES);
+  const relationStatusLabels = useLabelTable('labels.relationStatus', RELATION_STATUSES);
+  const gradingMethodLabels = useLabelTable('labels.gradingMethod', GRADING_METHODS);
+
+  /**
+   * 语义判分三档 —— 保留原来的 `{label, color}` 形状
+   *
+   * `color` 来自 a11y 口径（色字压浅底 ≥4.5:1，见下方长注释），
+   * 所以这里只把 `label` 换成译文、颜色逐字保留。
+   *
+   * ⚠️ 返回类型带 `Record<string, …>` 索引签名：消费点是
+   * `verdictLabels[detail.verdict]`，而 `verdict` 在契约里是 `string`。
+   * 不加索引签名会报 TS7053（与 `useLabelTable` 同一个理由，见那里的说明）。
+   */
+  const verdictLabels = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      correct: { label: t('labels.verdict.correct'), color: '#25714a' },
+      partial: { label: t('labels.verdict.partial'), color: '#7d6417' },
+      incorrect: { label: t('labels.verdict.incorrect'), color: '#c0392b' },
+    }),
+    [t],
+  );
+
+  /**
+   * SM-2 四档自评量表（单一数据源）
+   *
+   * `quality` 与 `color` 都与语言无关，只有 `label` / `hint` 走 `t()`。
+   * `quality` 必须与后端 `sm2_service` 的语义一致：0=失败、3=勉强通过、
+   * 4=通过、5=轻松，后端据此计算 EF 与下次间隔。
+   */
+  const selfRatingOptions = useMemo<SelfRatingOption[]>(
+    () => [
+      {
+        quality: 0,
+        tier: 'again',
+        label: t('labels.selfRating.again.label'),
+        hint: t('labels.selfRating.again.hint'),
+        color: '#c0392b',
+      },
+      {
+        quality: 3,
+        tier: 'hard',
+        label: t('labels.selfRating.hard.label'),
+        hint: t('labels.selfRating.hard.hint'),
+        color: '#8f7020',
+      },
+      {
+        quality: 4,
+        tier: 'good',
+        label: t('labels.selfRating.good.label'),
+        hint: t('labels.selfRating.good.hint'),
+        color: '#25714a',
+      },
+      {
+        quality: 5,
+        tier: 'easy',
+        label: t('labels.selfRating.easy.label'),
+        hint: t('labels.selfRating.easy.hint'),
+        color: '#0f3460',
+      },
+    ],
+    [t],
+  );
+
+  /**
+   * FSRS 评分档位（1-4）→ 标签
+   *
+   * 这四档**恰好**是自评四档按钮的取值（0/3/4/5 → Again/Hard/Good/Easy），
+   * 所以文案与 `selfRatingOptions` 指向**同一批消息键** —— 用户看到的是
+   * 同一套说法。机器判分不会有 Easy（"选对了"里没有"毫不费力"这层信息，
+   * 见后端 `scheduler_service.rating_from_quality`）。
+   */
+  const ratingLabels = useMemo<Record<number, string>>(
+    () => ({
+      1: t('labels.selfRating.again.label'),
+      2: t('labels.selfRating.hard.label'),
+      3: t('labels.selfRating.good.label'),
+      4: t('labels.selfRating.easy.label'),
+    }),
+    [t],
+  );
+
+  return {
+    sourceTypeLabels,
+    statusLabels,
+    cardTypeLabels,
+    questionTypeLabels,
+    difficultyLabels,
+    cardCategoryLabels,
+    noteRoleLabels,
+    versionSourceLabels,
+    relationStatusLabels,
+    gradingMethodLabels,
+    verdictLabels,
+    selfRatingOptions,
+    ratingLabels,
+  };
+}
 
 /**
  * ── 颜色表的取值口径（a11y 修复轮：见 docs/a11y-audit.md 的 F-33）──
@@ -76,25 +267,11 @@ export const cardTypeColors: Record<string, string> = {
   definition: '#8f7020',
 };
 
-/** 题目类型到中文标签的映射 */
-export const questionTypeLabels: Record<string, string> = {
-  choice: '选择题',
-  fill_blank: '填空题',
-  short_answer: '简答题',
-};
-
 /** 题目类型到颜色的映射（白字压色块，见上面的取值口径） */
 export const questionTypeColors: Record<string, string> = {
   choice: '#0f3460',
   fill_blank: '#6d28d9',
   short_answer: '#25714a',
-};
-
-/** 难度到中文标签的映射 */
-export const difficultyLabels: Record<string, string> = {
-  easy: '简单',
-  medium: '中等',
-  hard: '困难',
 };
 
 /**
@@ -107,13 +284,6 @@ export const difficultyColors: Record<string, string> = {
   easy: '#25714a',
   medium: '#8f7020',
   hard: '#c0392b',
-};
-
-/** 知识卡片分类到中文标签的映射 */
-export const cardCategoryLabels: Record<string, string> = {
-  regular: '常规',
-  blind_spot: '盲点',
-  extension: '拓展',
 };
 
 /**
@@ -162,6 +332,8 @@ export function getMasteryColor(level: number): string {
  *
  * 这里收敛为唯一出口：所有页面调用本函数，未知状态显式落到 `status-unknown`
  * （有兜底样式），而不是拼出一个不存在的类名静默失效。
+ *
+ * ⚠️ 类名与语言无关，所以它**不是** hook —— 保持普通函数。
  */
 const STATUS_CLASS_MAP: Record<string, string> = {
   uploading: 'status-uploading',
@@ -182,106 +354,24 @@ export function statusClass(status: string | null | undefined): string {
 }
 
 /**
- * SM-2 四档自评分量表（单一数据源）
+ * 一档自评的全部外观参数
  *
- * 为什么是四档而不是 0-5 六档：用户实际能可靠区分的是「完全没想起来 /
- * 勉强想起来 / 想起来 / 轻松想起来」四种主观体验，六档会让相邻档位
- * 无法区分、自评失去信息量。四档映射到 SM-2 的 quality 0/3/4/5
- * （整数分，SM-2 只用它做 >=3 的成功判定与 EF 增量）。
- *
- * `quality` 必须与后端 sm2_service 的语义一致：0=失败、3=勉强通过、
- * 4=通过、5=轻松，后端据此计算 EF 与下次间隔。
- *
- * ── 关于 `color`（本轮 a11y 修复，见 docs/a11y-audit.md 的 F-19）──
- *
- * 这四个色**本身就是区分手段**（按钮的文字与左侧 4px 竖条都用它），
- * 所以它们必须对低视力与色觉障碍用户也成立 —— 也就是小字要 ≥ 4.5:1。
- * 审计实测：金 #c9a959 白底只有 2.26:1、绿 #2d8a56 是 4.30:1，
- * 于是「勉强想起」与「想起来了」两档几乎看不出区别（红 #c0392b 5.44:1、
- * 墨 #0f3460 12.50:1 本来就够，未改）。修法是**只压深这两档**，
- * 色相与四档之间的相对关系（红→金→绿→墨）都不变：
- *
- * | 档位 | 原值 | 白底 | 新值 | 白底 |
- * |---|---|---|---|---|
- * | 完全忘记 | `#c0392b` | 5.44:1 | 未改 | — |
- * | 勉强想起 | `#c9a959` | 2.26:1 | `#8f7020` | 4.66:1 |
- * | 想起来了 | `#2d8a56` | 4.30:1 | `#25714a` | 5.93:1 |
- * | 轻松想起 | `#0f3460` | 12.50:1 | 未改 | — |
- *
- * ⚠️ 本文件里的颜色是**字面量**，不读 CSS 变量（`--color-success` 等）——
- * 这些值要作为内联样式与 canvas 参数使用，拿不到 `var()` 的解析结果。
- * 后果是"同一语义两处取值"：本文件是**唯一数据源**，
- * `base.css` 的 `--color-success` 必须**手工**与这里的绿保持一致。
- * 这次修复就是这么做的（两处都改成了 `#25714a`），但它没有门禁守着。
+ * `quality` 与 `color` 与语言无关；`label` / `hint` 已翻译。
+ * `tier` 是**语义名**（`again`/`hard`/`good`/`easy`），供需要按档位分支的
+ * 调用方使用 —— 用语义名而不是 `quality` 数字，因为数字是 SM-2 的实现细节。
  */
 export interface SelfRatingOption {
   /** SM-2 quality 分值（0-5） */
   quality: number;
-  /** 按钮主文案 */
+  /** 语义档位名（与 FSRS rating 1-4 一一对应） */
+  tier: SelfRatingTier;
+  /** 按钮主文案（已翻译） */
   label: string;
-  /** 补充说明，帮助用户区分档位 */
+  /** 补充说明，帮助用户区分档位（已翻译） */
   hint: string;
-  /** 按钮强调色 */
+  /** 按钮强调色（a11y 口径算出来的，与语言无关） */
   color: string;
 }
-
-export const selfRatingOptions: SelfRatingOption[] = [
-  { quality: 0, label: '完全忘记', hint: '想不起来，需要重新学', color: '#c0392b' },
-  { quality: 3, label: '勉强想起', hint: '很吃力，答得不完整', color: '#8f7020' },
-  { quality: 4, label: '想起来了', hint: '稍作回忆就答对了', color: '#25714a' },
-  { quality: 5, label: '轻松想起', hint: '脱口而出，毫不费力', color: '#0f3460' },
-];
-
-/** 判分方式到中文标签的映射（用于向用户解释这一次的分数是怎么来的） */
-export const gradingMethodLabels: Record<string, string> = {
-  choice: '选择题自动判分',
-  fill_blank: '填空题自动判分',
-  self_rating: '你的自评',
-  ungraded: '待你自评（尚未计入复习进度）',
-  legacy: '历史记录',
-};
-
-/**
- * FSRS 评分档位（1-4）到中文标签的映射
- *
- * 这四档**恰好**是自评四档按钮的取值（0/3/4/5 → Again/Hard/Good/Easy），
- * 所以文案与 `selfRatingOptions` 保持一致 —— 用户看到的是同一套说法。
- * 机器判分不会有 Easy（"选对了"里没有"毫不费力"这层信息，见后端
- * `scheduler_service.rating_from_quality`）。
- */
-export const ratingLabels: Record<number, string> = {
-  1: '完全忘记',
-  2: '勉强想起',
-  3: '想起来了',
-  4: '轻松想起',
-};
-
-/**
- * 语义判分的三档结论（用于缺失点/误解点区块的标题与配色）
- *
- * ⚠️ **这一张表与上面四张方向相反**：它是**色字压浅底**
- * （`QuizAnswerCard` 的语义判分块，容器 `background: var(--color-bg)` = #faf9f7），
- * 所以判据是"该色对 #faf9f7 ≥ 4.5:1"，不是"对白色"。
- * 三档原值（`#4caf50` 2.64:1 / `#c9a959` 2.15:1 / `#f44336` 3.50:1，
- * 均对 #faf9f7）**三档全部不达标**，本轮一起压深：
- *
- * | 档位 | 原值 | 对 #faf9f7 | 新值 | 对 #faf9f7 |
- * |---|---|---|---|---|
- * | 回答正确 | `#4caf50` | 2.64:1 | `#25714a` | 5.64:1 |
- * | 答对了部分 | `#c9a959` | 2.15:1 | `#7d6417` | 5.38:1 |
- * | 回答错误 | `#f44336` | 3.50:1 | `#c0392b` | 5.17:1 |
- *
- * （`partial` 用 `#7d6417` 而不是色块底那支 `#8f7020`：后者对 #faf9f7 只有
- * 4.43:1，压在浅底上不够 —— 同一个语义在两种背景下各有一个值，见上面的口径表。
- * 同一个"压在浅底上的金"也用在 `CardDetail` 的「独立卡片」徽章上，
- * 那里底色是 `--color-accent-light`（rgba(201,169,89,.12) 叠白 = #f9f5eb），
- * `#c9a959` 只有 2.07:1，`#7d6417` 是 5.19:1。）
- */
-export const verdictLabels: Record<string, { label: string; color: string }> = {
-  correct: { label: '回答正确', color: '#25714a' },
-  partial: { label: '答对了部分', color: '#7d6417' },
-  incorrect: { label: '回答错误', color: '#c0392b' },
-};
 
 /**
  * 「薄弱点」列表里那块**卡片类型徽章**的配色（今日学习页与仪表盘共用一份）

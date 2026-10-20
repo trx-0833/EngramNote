@@ -10,19 +10,12 @@ import { type ReactNode } from 'react';
 import type { SubmitAnswerResponse } from '../../api/client';
 import SourceContext from './SourceContext';
 // 四档自评控件与卡片复习页共用（5.12：两条复习流程的统一件）
-import SelfRatingButtons, { selfRatingLabel } from './SelfRatingButtons';
+import SelfRatingButtons, { useSelfRatingLabel } from './SelfRatingButtons';
 // 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
 // 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
 import styles from './QuizAnswerCard.module.css';
 import Icon from '../Icon';
-import {
-  questionTypeLabels,
-  difficultyLabels,
-  difficultyColors,
-  gradingMethodLabels,
-  ratingLabels,
-  verdictLabels,
-} from '../../utils/labels';
+import { difficultyColors, useLabels } from '../../utils/labels';
 
 /** 答题卡片所需的最小题目结构 */
 export interface QuizCardQuestion {
@@ -101,6 +94,10 @@ export default function QuizAnswerCard({
   onSkipSelfRate,
   onNext,
 }: QuizAnswerCardProps) {
+  const { questionTypeLabels, difficultyLabels, gradingMethodLabels, ratingLabels, verdictLabels } =
+    useLabels();
+  const labelOfSelfRating = useSelfRatingLabel();
+
   // 解析选择题选项
   let options: string[] = [];
   if (Array.isArray(quiz.options)) {
@@ -438,7 +435,7 @@ export default function QuizAnswerCard({
               <span className={styles.selfRatingSeal} aria-hidden="true">
                 <Icon name="seal" size={20} />
               </span>
-              已按自评「{selfRatingLabel(result.self_rating)}」记录，复习进度已更新。
+              已按自评「{labelOfSelfRating(result.self_rating)}」记录，复习进度已更新。
             </div>
           )}
 

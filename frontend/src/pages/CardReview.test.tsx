@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDueCards, submitCardReview, type DueCard } from '../api/review';
-import { selfRatingOptions } from '../utils/labels';
+import { readLabels } from '../utils/labels.testkit';
 import CardReview from './CardReview';
 // 卡面的类名从模块导出取（css-convention §6：类名是哈希的，测试按类名查时
 // 只能走 `styles` 导出，别写字面量）
@@ -264,6 +264,7 @@ describe('CardReview 与答题复习共用的交互件（5.12）', () => {
     await screen.findByText('浮充的定义');
     await userEvent.click(screen.getByRole('button', { name: '显示答案' }));
 
+    const { selfRatingOptions } = readLabels();
     for (const opt of selfRatingOptions) {
       expect(screen.getByText(opt.label)).toBeInTheDocument();
       expect(screen.getByText(opt.hint)).toBeInTheDocument();

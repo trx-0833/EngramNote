@@ -44,14 +44,7 @@ import PageHeader from '../components/PageHeader';
 // 抽成组件后样式随组件进模块 —— 见 StatCard.module.css 文件头
 import StatCard from '../components/StatCard';
 import { useToast } from '../components/Toast';
-import {
-  sourceTypeLabels,
-  statusLabels,
-  statusClass,
-  cardTypeLabels,
-  questionTypeLabels,
-  weakPointBadge,
-} from '../utils/labels';
+import { statusClass, weakPointBadge, useLabels } from '../utils/labels';
 // 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
 // 连带 768px 的两条响应式规则（见 Dashboard.module.css 文件头）
 import styles from './Dashboard.module.css';
@@ -60,6 +53,7 @@ import styles from './Dashboard.module.css';
  * 仪表盘页面组件
  */
 export default function Dashboard() {
+  const { sourceTypeLabels, statusLabels, cardTypeLabels, questionTypeLabels } = useLabels();
   const navigate = useNavigate();
   const [recentNotes, setRecentNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);

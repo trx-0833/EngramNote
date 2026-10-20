@@ -47,11 +47,10 @@ import ErrorDisplay from '../components/ErrorDisplay';
 // 页头那一行（标题 + 题量计数）交给组件，窄屏换行随之进模块
 import PageHeader from '../components/PageHeader';
 import {
-  questionTypeLabels,
   questionTypeColors,
-  difficultyLabels,
   difficultyColors,
   FALLBACK_CATEGORY_COLOR,
+  useLabels,
 } from '../utils/labels';
 // 本页自己的外观（批次 E5）：表格 / 行三态 / 列头排序 / 「列」面板。
 // 从模块取类名是因为它们只被这一个文件写出来（`css-convention.md` §4 判据 2）。
@@ -413,6 +412,7 @@ function formatTime(value: string): string {
 }
 
 export default function QuestionSets() {
+  const { questionTypeLabels, difficultyLabels } = useLabels();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [groups, setGroups] = useState<NoteGroup[]>([]);

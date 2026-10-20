@@ -17,7 +17,7 @@
  * 已经收在 `components/quiz/SelfRatingButtons.tsx`。
  */
 import type { CardReviewSubmitResponse } from '../../api/review';
-import { selfRatingLabel } from '../../components/quiz/SelfRatingButtons';
+import { useSelfRatingLabel } from '../../components/quiz/SelfRatingButtons';
 
 interface ScheduleFeedbackProps {
   result: CardReviewSubmitResponse;
@@ -34,6 +34,7 @@ function formatDue(value: string | null | undefined): string {
 }
 
 export default function ScheduleFeedback({ result, previousMastery }: ScheduleFeedbackProps) {
+  const labelOfSelfRating = useSelfRatingLabel();
   return (
     <div
       style={{
@@ -51,7 +52,7 @@ export default function ScheduleFeedback({ result, previousMastery }: ScheduleFe
       {/* 措辞与答题复习侧的"已按自评「…」记录"统一：同一个事件，
           用户在两条路径上不该读到两句不同的话。 */}
       <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-        已按自评「{selfRatingLabel(result.quality)}」记录
+        已按自评「{labelOfSelfRating(result.quality)}」记录
       </p>
       <p>
         下次复习: <strong>{result.interval_days} 天后</strong>

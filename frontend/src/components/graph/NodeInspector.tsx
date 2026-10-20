@@ -1,7 +1,7 @@
 import {
   cardTypeColors as CARD_TYPE_COLORS,
-  cardTypeLabels as CARD_TYPE_LABELS,
   FALLBACK_CATEGORY_COLOR,
+  useLabels,
 } from '../../utils/labels';
 import type { ForceGraphNode } from './types';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
@@ -21,6 +21,7 @@ export default function NodeInspector({
   onViewSubgraph,
   loadingSubgraph,
 }: NodeInspectorProps) {
+  const { cardTypeLabels } = useLabels();
   // 契约漂移：`note_id` 缺失时原来直接 `undefined.slice(0, 8)`，点击节点即整页崩。
   // 缺失时给出可读占位并去掉跳转（没有目标可去），其余详情照常显示。
   const noteId = node.note_id;
@@ -50,7 +51,7 @@ export default function NodeInspector({
                 fontWeight: 500,
               }}
             >
-              {CARD_TYPE_LABELS[node.card_type] || node.card_type}
+              {cardTypeLabels[node.card_type] || node.card_type}
             </span>
           </div>
         </div>

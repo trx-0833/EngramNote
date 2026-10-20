@@ -605,7 +605,7 @@ export async function askQuestionStream(
     throw new ApiError(detail, code);
   }
   if (!response.body) {
-    throw new Error(translate('apiErrors.streamUnsupported'));
+    throw new Error(translate('apiErrors.unsupportedStream'));
   }
   return response.body;
 }

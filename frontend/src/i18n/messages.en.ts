@@ -119,7 +119,86 @@ const en = {
     uploadTimeout: 'The upload timed out. Check your connection and try again.',
     invalidCredentials: 'Incorrect email or password',
     sessionExpired: 'Your session has expired. Please sign in again.',
-    streamUnsupported: 'Your browser does not support streaming responses',
+    unsupportedStream: 'Your browser does not support streaming responses',
+  },
+
+  labels: {
+    // 专有名词与缩写两种语言同形 —— 刻意不译
+    source: {
+      pdf: 'PDF',
+      image: 'Image',
+      docx: 'Word',
+      pptx: 'PPT',
+      xlsx: 'Excel',
+      audio: 'Audio',
+      video: 'Video',
+      markdown: 'Markdown',
+    },
+    status: {
+      uploading: 'Uploading',
+      converting: 'Converting',
+      converted: 'Converted',
+      cleaning: 'Cleaning',
+      cleaned: 'Cleaned',
+      cleaning_failed: 'Cleaning failed',
+      learning: 'Learning',
+      learning_failed: 'Learning failed',
+      archived: 'Reviewed',
+      failed: 'Failed',
+    },
+    cardType: {
+      concept: 'Concept',
+      formula: 'Formula',
+      qa: 'Q&A',
+      definition: 'Definition',
+    },
+    questionType: {
+      choice: 'Multiple choice',
+      fill_blank: 'Fill in the blank',
+      short_answer: 'Short answer',
+    },
+    difficulty: {
+      easy: 'Easy',
+      medium: 'Medium',
+      hard: 'Hard',
+    },
+    cardCategory: {
+      regular: 'Regular',
+      blind_spot: 'Blind spot',
+      extension: 'Extension',
+    },
+    noteRole: {
+      material: 'Material',
+      personal_note: 'Personal note',
+    },
+    versionSource: {
+      user_edit: 'Manual edit',
+      auto_clean: 'Auto clean',
+      system: 'System',
+    },
+    relationStatus: {
+      suggested: 'Suggested',
+      confirmed: 'Confirmed',
+      rejected: 'Rejected',
+    },
+    gradingMethod: {
+      choice: 'Graded automatically (multiple choice)',
+      fill_blank: 'Graded automatically (fill in the blank)',
+      self_rating: 'Your self-rating',
+      ungraded: 'Awaiting your self-rating (not counted toward progress yet)',
+      legacy: 'Historical record',
+    },
+    verdict: {
+      correct: 'Correct',
+      partial: 'Partially correct',
+      incorrect: 'Incorrect',
+    },
+    selfRating: {
+      again: { label: 'Forgot', hint: 'Could not recall it — needs relearning' },
+      hard: { label: 'Hard', hint: 'Struggled; the answer was incomplete' },
+      good: { label: 'Good', hint: 'Recalled it with a little effort' },
+      easy: { label: 'Easy', hint: 'Instant recall, no effort' },
+    },
   },
 } satisfies typeof zhCN;
 

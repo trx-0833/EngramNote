@@ -31,7 +31,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
 import Icon from '../components/Icon';
-import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+import { statusClass, useLabels } from '../utils/labels';
 // 日期与时间**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`，
 // 切到英文界面后会显示中文格式的日期 —— 见 `utils/datetime.ts` 文件头
 import { formatMonthDay, formatTime } from '../utils/datetime';
@@ -146,6 +146,7 @@ let pageMemory: { folderId: string | null; scrollY: number } | null = null;
  * - uploading: 是否正在上传
  */
 export default function DailyMaterials() {
+  const { sourceTypeLabels, statusLabels } = useLabels();
   const toast = useToast();
   /**
    * 这次渲染是"怎么来的"。

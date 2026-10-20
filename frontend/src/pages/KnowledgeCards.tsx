@@ -17,11 +17,10 @@ import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import MasteryRing from '../components/MasteryRing';
 import {
-  cardTypeLabels,
   cardTypeColors,
-  cardCategoryLabels,
   cardCategoryColors,
   FALLBACK_CATEGORY_COLOR,
+  useLabels,
 } from '../utils/labels';
 import { useToast } from '../components/Toast';
 
@@ -74,6 +73,7 @@ function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
 }
 
 export default function KnowledgeCards() {
+  const { cardTypeLabels, cardCategoryLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

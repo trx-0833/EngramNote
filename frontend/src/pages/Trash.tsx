@@ -28,7 +28,7 @@ import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
-import { sourceTypeLabels } from '../utils/labels';
+import { useLabels } from '../utils/labels';
 import { formatDateTime } from '../utils/datetime';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变；
 // 页头那一行（标题 + 副标题 + 清空按钮）整块交给组件 —— 副标题也一并进去，
@@ -40,6 +40,7 @@ import { useToast } from '../components/Toast';
 import styles from './Trash.module.css';
 
 export default function Trash() {
+  const { sourceTypeLabels } = useLabels();
   const toast = useToast();
   /** 回收站列表 */
   const [items, setItems] = useState<TrashNoteItem[]>([]);

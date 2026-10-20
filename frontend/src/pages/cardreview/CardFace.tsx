@@ -23,7 +23,7 @@
  * `CardFace.module.css` 的文件头，样式值不在 tsx 里重复一遍。
  */
 import type { DueCard } from '../../api/review';
-import { cardTypeLabels } from '../../utils/labels';
+import { useLabels } from '../../utils/labels';
 // 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
 // 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
 import styles from './CardFace.module.css';
@@ -36,6 +36,7 @@ interface CardFaceProps {
 }
 
 export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
+  const { cardTypeLabels } = useLabels();
   const typeLabel = cardTypeLabels[card.card_type] || card.card_type;
 
   return (

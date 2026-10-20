@@ -14,7 +14,7 @@ import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
-import { sourceTypeLabels, statusLabels, statusClass } from '../utils/labels';
+import { statusClass, useLabels } from '../utils/labels';
 // 日期**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`
 import { formatDate } from '../utils/datetime';
 // 页面标题（visual-refactor-plan 批次 C1）：1.25rem → 1.5rem
@@ -43,6 +43,7 @@ import styles from './NotesList.module.css';
  * - loading: 数据加载状态
  */
 export default function NotesList() {
+  const { sourceTypeLabels, statusLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
   /** 当前页的笔记列表 */
