@@ -404,10 +404,17 @@ docker compose up -d
 - and the **code comments**, which are unusually detailed and often record *why*
   a design was chosen and which alternatives were rejected.
 
-If you need an English entry point for a specific topic, the code itself is the
-most reliable source: every non-obvious decision is commented at the point where
-it matters. For anything beyond this file, a translation tool is the practical
-route.
+Two English entry points exist:
+
+| Entry point | Covers |
+|---|---|
+| **this file** | install, run, configuration, tech stack, i18n architecture, quality gates |
+| [`docs/README.en.md`](docs/README.en.md) | the documentation map: the three-state banner convention, what each document contains, and which one to trust |
+
+If you need the actual content of a specific Chinese document, translation is
+currently the practical route. The code itself is the most reliable source for
+anything beyond these two files: every non-obvious decision is commented at the
+point where it matters.
 
 ---
 

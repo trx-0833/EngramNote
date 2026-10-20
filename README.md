@@ -325,6 +325,7 @@ EngramNote/
 | 文档 | 内容 |
 |---|---|
 | [docs/README.md](docs/README.md) | **文档地图：先看这一份** —— 三种状态（活文档 / 历史快照 / 过程记录）、阅读顺序、`docs/` 全量清单 |
+| [docs/README.en.md](docs/README.en.md) | 上面那份地图的**英文入口**（三种状态约定 + 每份文档讲什么 + 为什么正文仍是中文） |
 | [docs/architecture.md](docs/architecture.md) | 系统架构、数据流、状态机、数据库概览（**重构前快照**，标注见文件头） |
 | [docs/overhaul-plan.md](docs/overhaul-plan.md) | 重构全量计划与逐轮执行记录（**最完整的过程台账**） |
 | [docs/decisions.md](docs/decisions.md) | 关键取舍归档（F-xx 编号，代码注释回链到此，**只读**） |
