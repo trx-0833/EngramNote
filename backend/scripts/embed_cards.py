@@ -59,15 +59,33 @@ def _fail_vacuous(problem: str) -> int:
     return 2
 
 
+def _db_path() -> str:
+    """库文件路径
+
+    ## ⚠️ 必须用 `get_database_url()`，不能读 `settings.database_url`
+
+    `Settings.database_url` 是个**默认空串的字段**（`app/config.py:104`），
+    只在用户显式配置了连接串时才有值；实际的库路径由
+    `Settings.get_database_url()`（`app/config.py:725`）按 `DB_DIR` 算出来。
+
+    本脚本原先三处都写成 `get_settings().database_url` —— 于是 url 是空串、
+    `path` 也是空串，`os.path.exists("")` 为假，脚本直接以
+    「库不存在：」退出码 2 结束。**功能完全不可用**，而报错信息里
+    库名是空的、看不出原因（2026-10-20 实测踩到）。
+
+    其他脚本的写法是对的，见 `scripts/migrate_project_tags.py:101`。
+    """
+    from app.config import get_settings
+
+    url = get_settings().get_database_url()
+    return url.split("///")[-1] if "///" in url else url
+
+
 def _pending(user_id: str) -> int:
     """还差多少张（同步 sqlite 只读，避免为了一个计数拉起整个 ORM 栈）"""
     import sqlite3
 
-    from app.config import get_settings
-
-    url = get_settings().database_url
-    path = url.split("///")[-1] if "///" in url else url
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{_db_path()}?mode=ro", uri=True)
     try:
         return con.execute(
             "SELECT count(*) FROM knowledge_cards c LEFT JOIN notes n ON n.id = c.note_id "
@@ -81,11 +99,7 @@ def _pending(user_id: str) -> int:
 def _resolve_user(user_id: str) -> str:
     import sqlite3
 
-    from app.config import get_settings
-
-    url = get_settings().database_url
-    path = url.split("///")[-1] if "///" in url else url
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{_db_path()}?mode=ro", uri=True)
     try:
         if user_id:
             row = con.execute(
@@ -109,10 +123,7 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="只检查，不做改动")
     args = ap.parse_args()
 
-    from app.config import get_settings
-
-    url = get_settings().database_url
-    path = url.split("///")[-1] if "///" in url else url
+    path = _db_path()
     if not os.path.exists(path):
         return _fail_vacuous(f"库不存在：{path}")
 
