@@ -21,8 +21,10 @@ import ProjectsHeader from './projects/ProjectsHeader';
 import ProjectsUsageNotes from './projects/ProjectsUsageNotes';
 import { useAddNotesPanel } from './projects/useAddNotesPanel';
 import { useProjects } from './projects/useProjects';
+import { useTranslation } from '../i18n';
 
 export default function Projects() {
+  const { t } = useTranslation();
   const {
     projects,
     loading,
@@ -65,7 +67,7 @@ export default function Projects() {
         <ProjectsErrorBanner
           error={renameError}
           onDismiss={clearRenameError}
-          dismissLabel="关闭重命名提示"
+          dismissLabel={t('projects.dismissRenameHint')}
         />
       )}
 
@@ -76,7 +78,7 @@ export default function Projects() {
       {loading ? (
         <div className="state-container">
           <div className="spinner" />
-          <p className="state-message">正在加载项目…</p>
+          <p className="state-message">{t('projects.loading')}</p>
         </div>
       ) : projects.length === 0 ? (
         <div className="state-container">
@@ -87,10 +89,8 @@ export default function Projects() {
           <div className="state-icon">
             <Icon name="folder" size={24} />
           </div>
-          <p className="state-message">还没有项目</p>
-          <p className="state-description">
-            点击上方「新建项目」创建第一个项目（纯标签，不生成文件夹）。
-          </p>
+          <p className="state-message">{t('projects.empty')}</p>
+          <p className="state-description">{t('projects.emptyHint')}</p>
         </div>
       ) : (
         <div

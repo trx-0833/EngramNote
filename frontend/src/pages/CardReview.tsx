@@ -53,8 +53,10 @@ import ScheduleFeedback from './cardreview/ScheduleFeedback';
 import CardReviewSummary from './cardreview/CardReviewSummary';
 import CardFace from './cardreview/CardFace';
 import { useCardReviewSession } from './cardreview/useCardReviewSession';
+import { useTranslation } from '../i18n';
 
 export default function CardReview() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const {
     loading,
@@ -90,7 +92,7 @@ export default function CardReview() {
   });
 
   // --- 加载中 ---
-  if (loading) return <LoadingSpinner text="加载到期卡片..." />;
+  if (loading) return <LoadingSpinner text={t('cardReview.loading')} />;
 
   // --- 错误 ---
   if (error && cards.length === 0) return <ErrorDisplay message={error} onRetry={reload} />;
@@ -100,15 +102,11 @@ export default function CardReview() {
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
         <EmptyState
-          message="没有到期的卡片"
-          description={
-            '卡片复习只包含「已进入复习计划」的卡片。' +
-            '刚导入的卡片会在你第一次复习它们时加入计划；' +
-            '若刚重建过数据，可能需要先运行一次复习状态迁移。'
-          }
+          message={t('cardReview.empty')}
+          description={t('cardReview.emptyHint')}
           action={
             <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
-              去看知识卡片
+              {t('cardReview.goToCards')}
             </button>
           }
         />
@@ -147,10 +145,10 @@ export default function CardReview() {
         index={currentIndex}
         total={cards.length}
         done={!!result}
-        title="卡片复习"
+        title={t('cardReview.title')}
         label={
           <>
-            第 {currentIndex + 1} / {cards.length} 张
+            {t('cardReview.progress', { current: currentIndex + 1, total: cards.length })}
             {totalDue > cards.length && (
               <>
                 {' · '}
@@ -176,7 +174,7 @@ export default function CardReview() {
                 自评就是提交本身，"跳过"等于什么都没提交（见组件文件头）。 */}
             {!result && (
               <SelfRatingButtons
-                prompt="刚才想得起来吗？"
+                prompt={t('cardReview.selfRatingPrompt')}
                 submitting={submitting}
                 onRate={(quality) => void handleRate(quality)}
               />
@@ -193,9 +191,11 @@ export default function CardReview() {
                 className="btn btn-primary"
                 onClick={handleNext}
                 disabled={!result}
-                title={!result ? '请先完成自评' : undefined}
+                title={!result ? t('cardReview.needSelfRating') : undefined}
               >
-                {currentIndex >= cards.length - 1 ? '完成本轮' : '下一张'}
+                {currentIndex >= cards.length - 1
+                  ? t('cardReview.finishRound')
+                  : t('cardReview.nextCard')}
               </button>
             </div>
           </>
@@ -203,8 +203,8 @@ export default function CardReview() {
       </div>
 
       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', textAlign: 'center' }}>
-        卡片复习是轻量回顾，不占用每日答题限额。 想复习带题目的内容请到{' '}
-        <Link to="/review">答题复习</Link>。
+        {t('cardReview.lightweightNote')} <Link to="/review">{t('cardReview.quizReviewLink')}</Link>
+        。
       </p>
     </div>
   );

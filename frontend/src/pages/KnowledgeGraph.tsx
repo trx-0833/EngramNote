@@ -30,8 +30,10 @@ import { useSubgraph } from './knowledgegraph/useSubgraph';
 import { useSuggestionSelection } from './knowledgegraph/useSuggestionSelection';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from '../components/graph/Graph.module.css';
+import { useTranslation } from '../i18n';
 
 export default function KnowledgeGraph() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const graphRef = useRef<GraphForceRef | undefined>(undefined);
   const graphCanvasRef = useRef<HTMLDivElement>(null);
@@ -181,7 +183,7 @@ export default function KnowledgeGraph() {
   });
 
   if (graph.loading) {
-    return <LoadingSpinner text="加载知识图谱..." />;
+    return <LoadingSpinner text={t('graph.loading')} />;
   }
 
   if (graph.error) {
@@ -191,10 +193,7 @@ export default function KnowledgeGraph() {
   if (!graph.graphData || (graph.graphData.nodes ?? []).length === 0) {
     return (
       <div className="page-enter">
-        <EmptyState
-          message="暂无图谱数据"
-          description="请先上传笔记并触发理解管道，生成知识卡片后即可查看图谱"
-        />
+        <EmptyState message={t('graph.empty')} description={t('graph.emptyHint')} />
       </div>
     );
   }
@@ -214,7 +213,11 @@ export default function KnowledgeGraph() {
     : 0;
   const canvasStatusText =
     selectedNode && currentOrdinal > 0
-      ? `当前节点：${selectedNode.title}（第 ${currentOrdinal} / ${forceGraphData.nodes.length} 个）`
+      ? t('graph.currentOrdinal', {
+          title: selectedNode.title,
+          current: currentOrdinal,
+          total: forceGraphData.nodes.length,
+        })
       : '';
 
   return (
@@ -247,8 +250,8 @@ export default function KnowledgeGraph() {
               图标与文字的对齐由它的 `align-items: center` 承担 */}
           <Icon name="dot" size={16} style={{ color: 'var(--color-accent)' }} />
           {interaction.createFirstNode
-            ? `已选择: ${interaction.createFirstNode.title}，请点击第二个节点`
-            : '请点击第一个节点'}
+            ? t('graph.createSecondNode', { title: interaction.createFirstNode.title })
+            : t('graph.createFirstNode')}
         </div>
       )}
 

@@ -15,11 +15,13 @@ import {
   showNotification,
   isInQuietHours,
 } from '../utils/notifications';
+import { useTranslation } from '../i18n';
 
 /** 轮询间隔：10 分钟 */
 const POLL_INTERVAL_MS = 600000;
 
 export default function ReminderBanner() {
+  const { t } = useTranslation();
   const toast = useToast();
   const navigate = useNavigate();
   /** 当前通知权限状态 */
@@ -49,7 +51,7 @@ export default function ReminderBanner() {
       if (res.due_count > 0 && res.due_count !== lastNotifiedDueRef.current) {
         // 静默时段不弹通知
         if (!isInQuietHours()) {
-          showNotification('复习提醒', `你有 ${res.due_count} 个题目待复习`);
+          showNotification(t('reminder.title'), t('reminder.dueCount', { count: res.due_count }));
           // 记录本次已通知的 due_count，值变化才再次通知
           lastNotifiedDueRef.current = res.due_count;
         }
@@ -90,7 +92,7 @@ export default function ReminderBanner() {
   }, [permission]);
 
   /**
-   * 处理"开启"按钮点击
+   * 处理t('reminder.enable')按钮点击
    * 请求权限，成功则启动轮询并发送成功通知
    */
   async function handleEnable() {
@@ -98,10 +100,10 @@ export default function ReminderBanner() {
     if (granted) {
       setPermission('granted');
       // 立即弹出成功通知
-      showNotification('复习提醒已开启', '将在有待复习题目时提醒你');
+      showNotification(t('reminder.enabledTitle'), t('reminder.enabledBody'));
     } else {
       setPermission('denied');
-      toast.error('通知权限已被拒绝，请在浏览器设置中开启');
+      toast.error(t('reminder.permissionDenied'));
     }
   }
 
@@ -129,22 +131,22 @@ export default function ReminderBanner() {
       >
         <div style={{ flex: 1 }}>
           <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-            开启桌面通知，及时获取复习提醒
+            {t('reminder.desktopHint')}
           </p>
           <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-            基于 FSRS 算法的间隔重复，不错过任何最佳复习时机
+            {t('reminder.algorithmHint')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           <button className="btn btn-primary" onClick={handleEnable}>
-            开启
+            {t('reminder.enable')}
           </button>
           <button
             className="btn btn-secondary"
             onClick={() => setDismissed(true)}
-            aria-label="关闭提醒"
+            aria-label={t('reminder.dismissLabel')}
           >
-            稍后
+            {t('reminder.later')}
           </button>
         </div>
       </div>
@@ -166,13 +168,13 @@ export default function ReminderBanner() {
   // 构造文案
   const messages: string[] = [];
   if (reminders.due_count > 0) {
-    messages.push(`你有 ${reminders.due_count} 个题目待复习`);
+    messages.push(t('reminder.dueCount', { count: reminders.due_count }));
   }
   if (reminders.due_in_1h_count > 0) {
-    messages.push(`其中 ${reminders.due_in_1h_count} 个将在 1 小时内到期`);
+    messages.push(t('reminder.dueInOneHour', { count: reminders.due_in_1h_count }));
   }
   if (reminders.weak_point_count > 0) {
-    messages.push(`薄弱知识点: ${reminders.weak_point_count} 个`);
+    messages.push(t('reminder.weakPoints', { count: reminders.weak_point_count }));
   }
 
   return (
@@ -204,7 +206,7 @@ export default function ReminderBanner() {
       </div>
       {reminders.due_count > 0 && (
         <button className="btn btn-primary" onClick={goToReview}>
-          去复习
+          {t('reminder.goReview')}
         </button>
       )}
     </div>

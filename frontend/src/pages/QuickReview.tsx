@@ -24,6 +24,7 @@ import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import { useSelfRating } from '../hooks/useSelfRating';
 import { useToast } from '../components/Toast';
+import { useTranslation } from '../i18n';
 
 /** 单题答题状态 */
 interface QuizState {
@@ -35,6 +36,7 @@ interface QuizState {
 }
 
 export default function QuickReview() {
+  const { t } = useTranslation();
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
   const toast = useToast();
@@ -58,9 +60,9 @@ export default function QuickReview() {
       setQuizzes((prev) => prev.map((q) => (q.quiz.id === result.quiz_id ? { ...q, result } : q)));
       if (result.is_correct) setSessionCorrect((prev) => prev + 1);
       setSessionTotal((prev) => prev + 1);
-      toast.success('自评已记录，复习进度已更新');
+      toast.success(t('quickReview.selfRatingRecorded'));
     },
-    [toast],
+    [toast, t],
   );
   const onRateError = useCallback(
     (message: string) => {
@@ -102,11 +104,11 @@ export default function QuickReview() {
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载题目失败');
+      setError(err instanceof Error ? err.message : t('quickReview.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [noteId]);
+  }, [noteId, t]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -142,7 +144,7 @@ export default function QuickReview() {
         setSessionTotal((prev) => prev + 1);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '提交失败');
+      setError(e instanceof Error ? e.message : t('quickReview.submitFailed'));
     } finally {
       submittingRef.current = false;
     }
@@ -186,7 +188,7 @@ export default function QuickReview() {
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
   // --- 加载中 ---
-  if (loading) return <LoadingSpinner text="加载复习题目..." />;
+  if (loading) return <LoadingSpinner text={t('quickReview.loading')} />;
 
   // --- 错误 ---
   if (error && quizzes.length === 0) return <ErrorDisplay message={error} onRetry={loadQuizzes} />;
@@ -196,11 +198,11 @@ export default function QuickReview() {
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
         <EmptyState
-          message="暂无复习题目"
-          description="该笔记还没有生成题目，请先完成理解流程"
+          message={t('quickReview.empty')}
+          description={t('quickReview.emptyHint')}
           action={
             <button className="btn btn-secondary" onClick={() => navigate(`/notes/${noteId}`)}>
-              返回笔记
+              {t('quickReview.backToNote')}
             </button>
           }
         />
@@ -213,16 +215,16 @@ export default function QuickReview() {
     const accuracy = sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0;
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
-        <h2 style={{ marginBottom: 'var(--space-lg)' }}>复习完成</h2>
+        <h2 style={{ marginBottom: 'var(--space-lg)' }}>{t('quickReview.done')}</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3>本次统计</h3>
-          <p>答题数: {sessionTotal}</p>
-          <p>正确数: {sessionCorrect}</p>
-          <p>正确率: {accuracy}%</p>
+          <h3>{t('quickReview.sessionStats')}</h3>
+          <p>{t('quickReview.answerCount', { count: sessionTotal })}</p>
+          <p>{t('quickReview.correctCount', { count: sessionCorrect })}</p>
+          <p>{t('quickReview.accuracy', { percent: accuracy })}</p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           <button className="btn btn-primary" onClick={() => navigate(`/notes/${noteId}`)}>
-            返回笔记
+            {t('quickReview.backToNote')}
           </button>
           <button
             className="btn btn-secondary"
@@ -250,13 +252,13 @@ export default function QuickReview() {
                   setCompleted(false);
                 }
               } catch (err) {
-                setError(err instanceof Error ? err.message : '加载题目失败');
+                setError(err instanceof Error ? err.message : t('quickReview.loadFailed'));
               } finally {
                 setLoading(false);
               }
             }}
           >
-            再来一次
+            {t('quickReview.again')}
           </button>
         </div>
       </div>
@@ -281,7 +283,7 @@ export default function QuickReview() {
           同样刻意**不用** `ReviewProgress` 的 `title`：那会把进度条挤到第二行，
           而答题侧的排版本来就是"标题在别处 + 一行式进度条"（见该组件文件头）。
           批次 C1：量尺交给 `<PageHeader>`（字号本就 1.5rem，观感不变）。 */}
-      <PageHeader title="快速复习" />
+      <PageHeader title={t('quickReview.title')} />
 
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress
@@ -294,9 +296,7 @@ export default function QuickReview() {
           </>
         }
         trailing={
-          <>
-            {sessionCorrect}/{sessionTotal} 正确
-          </>
+          <>{t('quickReview.headerProgress', { correct: sessionCorrect, total: sessionTotal })}</>
         }
       />
       {/* 题目卡片（共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
@@ -327,7 +327,7 @@ export default function QuickReview() {
       />
       <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
         <button className="btn btn-secondary" onClick={() => navigate(`/notes/${noteId}`)}>
-          返回笔记
+          {t('quickReview.backToNote')}
         </button>
       </div>
     </div>

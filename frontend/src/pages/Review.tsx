@@ -21,6 +21,7 @@ import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import { useSelfRating } from '../hooks/useSelfRating';
 import { useToast } from '../components/Toast';
+import { useTranslation } from '../i18n';
 
 /** 单题答题状态 */
 interface QuizState {
@@ -46,6 +47,7 @@ function errorCodeOf(e: unknown): string | null {
 }
 
 export default function Review() {
+  const { t } = useTranslation();
   const toast = useToast();
   const [quizzes, setQuizzes] = useState<QuizState[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -70,9 +72,9 @@ export default function Review() {
         .catch(() => {
           /* 统计刷新失败不影响答题 */
         });
-      toast.success('自评已记录，复习进度已更新');
+      toast.success(t('review.selfRatingRecorded'));
     },
-    [toast],
+    [toast, t],
   );
 
   const onRateError = useCallback(
@@ -98,7 +100,8 @@ export default function Review() {
 
   useEffect(() => {
     loadData();
-  }, []);
+    // `t` 进依赖：语言切换后重新加载时，错误文案要是新语言的
+  }, [t]);
 
   async function loadData() {
     try {
@@ -118,7 +121,7 @@ export default function Review() {
         setCompleted(true);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '加载失败');
+      setError(e instanceof Error ? e.message : t('review.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -161,7 +164,7 @@ export default function Review() {
       const newStats = await getReviewStats();
       setStats(newStats);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : '提交失败';
+      const msg = e instanceof Error ? e.message : t('review.submitFailed');
       // 达到每日限额：按后端**错误码**分流，不再匹配中文文案（阶段 0.11 / F-19）。
       // 后端 `POST /api/review/submit` 在额度用尽时返回
       // `error_code="DAILY_REVIEW_LIMIT_REACHED"`（文案中的数字会变，码不会）。
@@ -227,7 +230,9 @@ export default function Review() {
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>加载复习题目中...</div>;
+    return (
+      <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>{t('review.loading')}</div>
+    );
   }
 
   // 完成页面
@@ -239,25 +244,27 @@ export default function Review() {
 
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
-        <h2>复习完成</h2>
+        <h2>{t('review.done')}</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3>本次复习统计</h3>
-          <p>答题数: {sessionTotal}</p>
-          <p>正确数: {sessionCorrect}</p>
-          <p>正确率: {sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%</p>
+          <h3>{t('review.sessionStats')}</h3>
+          <p>{t('review.answerCount', { count: sessionTotal })}</p>
+          <p>{t('review.correctCount', { count: sessionCorrect })}</p>
+          <p>
+            {t('review.accuracy', {
+              percent: sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0,
+            })}
+          </p>
         </div>
 
         {stats && (
           <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-            <h3>总体统计</h3>
-            <p>
-              今日已完成: {todayDone} / {dailyLimit}
-            </p>
-            <p>今日正确率: {stats.today_accuracy}%</p>
-            <p>待复习题目: {stats.due_count}</p>
-            <p>累计复习次数: {stats.total_reviews}</p>
-            <p>累计正确率: {stats.total_accuracy}%</p>
-            <p>总题目数: {stats.total_quizzes}</p>
+            <h3>{t('review.overallStats')}</h3>
+            <p>{t('review.todayProgress', { done: todayDone, limit: dailyLimit })}</p>
+            <p>{t('review.todayAccuracy', { percent: stats.today_accuracy })}</p>
+            <p>{t('review.dueCount', { count: stats.due_count })}</p>
+            <p>{t('review.totalReviews', { count: stats.total_reviews })}</p>
+            <p>{t('review.totalAccuracy', { percent: stats.total_accuracy })}</p>
+            <p>{t('review.totalQuizzes', { count: stats.total_quizzes })}</p>
           </div>
         )}
 
@@ -269,15 +276,15 @@ export default function Review() {
             {/* 原值 `#ff9800`（白底 2.16:1）与 F-36 的「中」徽章同色值，
                 换成 `--color-warning` 的取值（#936408，白底 5.16:1）。 */}
             <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>
-              今日已完成 {dailyLimit} 道题，休息一下吧！
+              {t('review.dailyLimitReached', { limit: dailyLimit })}
             </p>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-              明天再来继续复习
+              {t('review.comeBackTomorrow')}
             </p>
           </div>
         ) : (
           <button className="btn btn-primary" onClick={loadData}>
-            继续复习
+            {t('review.continueReview')}
           </button>
         )}
       </div>
@@ -289,7 +296,7 @@ export default function Review() {
       <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
         <p style={{ color: 'var(--color-error)' }}>{error}</p>
         <button className="btn btn-primary" onClick={loadData}>
-          重试
+          {t('review.retry')}
         </button>
       </div>
     );
@@ -321,7 +328,7 @@ export default function Review() {
           文案就是「答题复习」（`ReviewProgress` 的文件头也这么称呼它）。
           批次 C1：量尺交给 `<PageHeader>`（字号本就 1.5rem，观感不变），
           上面那条"标题长在页面上、不借 `ReviewProgress` 的 `title`"的结论不变。 */}
-      <PageHeader title="答题复习" />
+      <PageHeader title={t('review.title')} />
 
       {/* 进度条（与卡片复习页共用） */}
       <ReviewProgress
@@ -335,7 +342,11 @@ export default function Review() {
         }
         trailing={
           <>
-            {sessionCorrect}/{sessionTotal} 正确 | 今日 {stats?.today_done ?? 0}/
+            {t('review.headerProgress', {
+              correct: sessionCorrect,
+              total: sessionTotal,
+              done: stats?.today_done ?? 0,
+            })}
             {stats?.daily_limit ?? 10}
           </>
         }

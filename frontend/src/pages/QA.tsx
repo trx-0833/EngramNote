@@ -41,6 +41,7 @@ import PageHeader from '../components/PageHeader';
 // 本页私有样式（overhaul-plan 5.6 第三批）：`.qa-*` 从 `src/styles/learning.css` 拆出，
 // 连同被哈希的 `@keyframes slideUp`（改名 `qaSlideUp`）—— 见 QA.module.css 文件头
 import styles from './QA.module.css';
+import { useTranslation } from '../i18n';
 
 interface QARecord {
   question: string;
@@ -58,6 +59,7 @@ interface QARecord {
  * 而忘记的后果是"跳到笔记开头"—— 用户会以为引用就是开头那段，比不给跳转更容易误导。
  */
 function SourceLinks({ sources }: { sources: AnswerSource[] }) {
+  const { t } = useTranslation();
   return (
     <>
       {sources.map((source, sIdx) => {
@@ -93,7 +95,7 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
           <Link
             key={source.chunk_id || sIdx}
             to={href}
-            title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息，只能打开笔记'}
+            title={canJump ? t('qa.jumpToSource') : t('qa.noLocation')}
             style={{
               display: 'block',
               fontSize: '0.8rem',
@@ -105,7 +107,7 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
                 emoji 是彩色的，夹在 `[1] 笔记标题` 这样一行 0.8rem 的
                 引用里比标题还抢眼。
                 `verticalAlign: middle`：图标**内联**在原来那个 emoji 的位置，
-                整行的 `display: block` 与后续 `heading_path` / 「（无定位）」
+                整行的 `display: block` 与后续 `heading_path` / 「{t('qa.noLocationShort')}」
                 的拼接方式一字未改（改成 flex 会把这些文本节点拆成多个 flex 项，
                 中间凭空多出 gap）。 */}
             [{sIdx + 1}] <Icon name="file" size={16} style={{ verticalAlign: 'middle' }} />{' '}
@@ -115,7 +117,7 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
               : source.chapter_title
                 ? ` > ${source.chapter_title}`
                 : ''}
-            {!canJump && <span style={{ fontSize: '0.7rem' }}>（无定位）</span>}
+            {!canJump && <span style={{ fontSize: '0.7rem' }}>{t('qa.noLocationShort')}</span>}
           </Link>
         );
       })}
@@ -124,6 +126,7 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
 }
 
 export default function QA() {
+  const { t } = useTranslation();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -308,7 +311,7 @@ export default function QA() {
           setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
         }
       } else {
-        setError(err instanceof Error ? err.message : '问答失败');
+        setError(err instanceof Error ? err.message : t('qa.failed'));
         // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
         if (!firstTokenReceived) {
           setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
@@ -339,7 +342,7 @@ export default function QA() {
   return (
     <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
-      <PageHeader title="智能问答" />
+      <PageHeader title={t('qa.title')} />
 
       {/* 两栏骨架（批次 E7）：左对话流 / 右常驻引用栏。窄屏收成一栏，见模块 CSS */}
       <div className={styles.qaLayout}>
@@ -350,7 +353,7 @@ export default function QA() {
               <input
                 type="text"
                 className="input"
-                placeholder="输入你的问题，AI 将基于你的笔记内容回答..."
+                placeholder={t('qa.inputPlaceholder')}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -359,11 +362,11 @@ export default function QA() {
               />
               {streaming ? (
                 <button className="btn btn-danger" onClick={handleStop}>
-                  停止生成
+                  {t('qa.stop')}
                 </button>
               ) : (
                 <button className="btn btn-primary" onClick={handleAsk} disabled={!question.trim()}>
-                  提问
+                  {t('qa.ask')}
                 </button>
               )}
             </div>
@@ -382,10 +385,7 @@ export default function QA() {
 
           {/* 问答历史 */}
           {history.length === 0 ? (
-            <EmptyState
-              message="输入问题开始问答"
-              description="AI 将基于你所有笔记的内容进行回答"
-            />
+            <EmptyState message={t('qa.empty')} description={t('qa.emptyHint')} />
           ) : (
             history.map((record, idx) => {
               // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
@@ -418,7 +418,7 @@ export default function QA() {
                           lineHeight: 1.8,
                         }}
                       >
-                        AI 正在思考...
+                        {t('qa.thinking')}
                       </div>
                     ) : record.answer ? (
                       // 流式渲染：答案实时增长
@@ -431,7 +431,7 @@ export default function QA() {
                           lineHeight: 1.8,
                         }}
                       >
-                        AI 正在思考...
+                        {t('qa.thinking')}
                       </div>
                     )}
                     {/* 检索降级提示：向量检索没命中（`hybrid`）或向量服务不可用（`bm25_only`）
@@ -469,7 +469,7 @@ export default function QA() {
                         >
                           {/* 批次 B3：引用来源补 `quote` 图标（一对上引号） */}
                           <Icon name="quote" size={16} />
-                          引用来源:
+                          {t('qa.sources')}:
                         </p>
                         <SourceLinks sources={record.sources} />
                       </div>
@@ -483,7 +483,9 @@ export default function QA() {
                           textAlign: 'right',
                         }}
                       >
-                        由 {record.provider === 'glm' ? 'GLM' : 'DeepSeek'} 提供支持
+                        {t('qa.poweredBy', {
+                          provider: record.provider === 'glm' ? 'GLM' : 'DeepSeek',
+                        })}
                       </p>
                     )}
                   </div>
@@ -494,19 +496,19 @@ export default function QA() {
         </div>
 
         {/* ── 常驻引用栏（批次 E7，Khoj 的 Reference Panel 做法）── */}
-        <aside className={styles.qaRail} aria-label="引用来源">
+        <aside className={styles.qaRail} aria-label={t('qa.sources')}>
           <p className={styles.qaRailTitle}>
             <Icon name="quote" size={16} />
-            引用来源{latestSources.length > 0 ? `（${latestSources.length}）` : ''}
+            {latestSources.length > 0
+              ? t('qa.sourcesCount', { count: latestSources.length })
+              : t('qa.sources')}
           </p>
           {latestSources.length > 0 ? (
             <div className={styles.qaRailList}>
               <SourceLinks sources={latestSources} />
             </div>
           ) : (
-            <p className={styles.qaRailEmpty}>
-              提问之后，这一轮回答引用到的笔记会列在这里 —— 不用滚动就能点进原文。
-            </p>
+            <p className={styles.qaRailEmpty}>{t('qa.sourcesRailHint')}</p>
           )}
         </aside>
       </div>

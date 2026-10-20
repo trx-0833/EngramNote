@@ -34,6 +34,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useToast } from '../components/Toast';
+import { translate } from '../i18n/translate';
 
 /** 形状漂移的两种形态：本该是数组却收到包装对象 / 收到的根本不是数组 */
 export type ContractDriftKind = 'wrapper' | 'non-array';
@@ -135,16 +136,18 @@ export function resetContractDriftNotices(): void {
 
 /** 提示文案：说清"哪个接口、哪里不对、系统怎么处理了"，用户和后端都能据此行动 */
 function noticeText(event: ContractDriftEvent): { message: string; detail: string } {
-  const where = event.field ? `${event.field} 字段` : '响应体';
+  const where = event.field
+    ? translate('contractDrift.fieldSuffix', { field: event.field })
+    : translate('contractDrift.responseBody');
   if (event.kind === 'wrapper') {
     return {
-      message: `${event.source} 的响应结构与约定不符`,
-      detail: '期望纯数组，实际是 items 包装；已拆包正常渲染，后端应改为直接返回数组',
+      message: translate('contractDrift.shapeMismatch', { source: event.source }),
+      detail: translate('contractDrift.itemsWrapped'),
     };
   }
   return {
-    message: `${event.source} 的响应结构与约定不符`,
-    detail: `${where}不是数组，已按空列表处理（页面不崩，但数据可能不完整）`,
+    message: translate('contractDrift.shapeMismatch', { source: event.source }),
+    detail: translate('contractDrift.notArray', { where }),
   };
 }
 

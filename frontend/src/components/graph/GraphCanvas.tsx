@@ -17,6 +17,7 @@ import {
   hasDirection,
 } from './types';
 import { isNodeInViewport as isNodeInViewportPure } from './viewportCulling';
+import { useTranslation } from '../../i18n';
 
 interface GraphCanvasProps {
   graphRef: MutableRefObject<GraphForceRef | undefined>;
@@ -66,6 +67,7 @@ export default function GraphCanvas({
   onCanvasKeyDown,
   lowDetail,
 }: GraphCanvasProps) {
+  const { t } = useTranslation();
   /**
    * 画布用法说明的元素 id（`aria-describedby` 用）。
    * `useId` 而不是写死字符串：一个页面上可能有多个画布实例（局部图谱面板正在长），
@@ -205,7 +207,7 @@ export default function GraphCanvas({
       style={{ flex: 1 }}
       tabIndex={0}
       role="application"
-      aria-label="知识图谱画布"
+      aria-label={t('graph.canvasLabel')}
       aria-describedby={hintId}
       onKeyDown={onCanvasKeyDown}
     >
@@ -326,8 +328,8 @@ export default function GraphCanvas({
             const fg = graphRef.current;
             if (fg) fg.zoom(viewportRef.current.k * 1.4, 400);
           }}
-          aria-label="放大"
-          title="放大"
+          aria-label={t('graph.zoomIn')}
+          title={t('graph.zoomIn')}
         >
           <Icon name="zoom-in" size={16} />
         </button>
@@ -337,8 +339,8 @@ export default function GraphCanvas({
             const fg = graphRef.current;
             if (fg) fg.zoom(viewportRef.current.k / 1.4, 400);
           }}
-          aria-label="缩小"
-          title="缩小"
+          aria-label={t('graph.zoomOut')}
+          title={t('graph.zoomOut')}
         >
           <Icon name="zoom-out" size={16} />
         </button>
@@ -348,8 +350,8 @@ export default function GraphCanvas({
             const fg = graphRef.current;
             if (fg) fg.zoomToFit(400, 60);
           }}
-          aria-label="适应屏幕"
-          title="适应屏幕"
+          aria-label={t('graph.fitScreen')}
+          title={t('graph.fitScreen')}
         >
           <Icon name="fit-screen" size={16} />
         </button>
@@ -359,7 +361,7 @@ export default function GraphCanvas({
           但留在无障碍树里，由上面区域的 `aria-describedby` 引用 ——
           键盘用户聚焦到画布时会听到"按上下方向键切换当前节点" */}
       <div id={hintId} className={styles.graphA11yStatus}>
-        按上下方向键切换当前节点，当前节点的详情会显示在侧边栏面板中。
+        {t('graph.keyboardHint')}
       </div>
     </div>
   );

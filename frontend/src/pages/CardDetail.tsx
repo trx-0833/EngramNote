@@ -23,8 +23,10 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import MasteryRing from '../components/MasteryRing';
 import { useLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
+import { useTranslation } from '../i18n';
 
 export default function CardDetail() {
+  const { t } = useTranslation();
   const { cardTypeLabels, difficultyLabels, questionTypeLabels } = useLabels();
   const toast = useToast();
   const { cardId } = useParams<{ cardId: string }>();
@@ -52,11 +54,11 @@ export default function CardDetail() {
       const related = qData.items.filter((q) => q.card_id === cardId);
       setQuestions(related);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('cardDetail.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [cardId]);
+  }, [cardId, t]);
 
   useEffect(() => {
     if (!cardId) return;
@@ -71,7 +73,7 @@ export default function CardDetail() {
       await fetchCard(); // 重新获取完整数据，避免 note_title 丢失
       setEditing(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '保存失败');
+      toast.error(err instanceof Error ? err.message : t('cardDetail.saveFailed'));
     }
   }
 
@@ -85,7 +87,7 @@ export default function CardDetail() {
       await deleteKnowledgeCard(card.id);
       navigate('/cards');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '删除失败');
+      toast.error(err instanceof Error ? err.message : t('cardDetail.deleteFailed'));
     }
   }
 
@@ -117,9 +119,9 @@ export default function CardDetail() {
   if (error || !card) {
     return (
       <div style={{ padding: 'var(--space-lg)' }}>
-        <ErrorDisplay message={error || '卡片不存在'} />
+        <ErrorDisplay message={error || t('cardDetail.notFound')} />
         <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
-          返回列表
+          {t('cardDetail.backToList')}
         </button>
       </div>
     );
@@ -140,10 +142,10 @@ export default function CardDetail() {
             {editing ? (
               <>
                 <button className="btn btn-primary" onClick={handleSave}>
-                  保存
+                  {t('cardDetail.save')}
                 </button>
                 <button className="btn btn-secondary" onClick={handleCancelEdit}>
-                  取消
+                  {t('cardDetail.cancel')}
                 </button>
               </>
             ) : (
@@ -151,16 +153,16 @@ export default function CardDetail() {
                 {/* 批次 B3：「编辑 / 删除」此前是全站纯文字按钮 —— 各补一枚图标 */}
                 <button className="btn btn-secondary" onClick={() => setEditing(true)}>
                   <Icon name="edit" size={16} />
-                  编辑
+                  {t('cardDetail.edit')}
                 </button>
                 <button className="btn btn-danger" onClick={handleDelete}>
                   <Icon name="delete" size={16} />
-                  删除
+                  {t('cardDetail.delete')}
                 </button>
               </>
             )}
             <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
-              返回
+              {t('cardDetail.back')}
             </button>
           </>
         }
@@ -169,9 +171,11 @@ export default function CardDetail() {
       {/* 来源笔记链接：独立卡片（提升后的核心卡片）显示徽章，悬挂引用显示灰色占位 */}
       {card.note_id ? (
         <p style={{ marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
-          来源笔记：
-          {card.note_title === '已删除的笔记' ? (
-            <span style={{ color: 'var(--color-text-secondary)' }}>[已删除的笔记]</span>
+          {t('cardDetail.sourceNote')}
+          {card.note_title === t('cardDetail.deletedNote') ? (
+            <span style={{ color: 'var(--color-text-secondary)' }}>
+              [{t('cardDetail.deletedNote')}]
+            </span>
           ) : (
             /* ⚠️ 这里原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**。
                现在它是真 `<Link>`（Tab 一次即达、可右键、可新标签页）。
@@ -179,13 +183,13 @@ export default function CardDetail() {
                （「来源笔记：<标题>」），属于 F-13 那一类 —— 链接必须不只靠颜色
                与周围文字区分，`link-in-text-block` 会判它（card-detail 场景有门禁）。 */
             <Link to={`/notes/${card.note_id}`} style={{ color: 'var(--color-primary)' }}>
-              {card.note_title || '查看笔记'}
+              {card.note_title || t('cardDetail.viewNote')}
             </Link>
           )}
         </p>
       ) : (
         <p style={{ marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
-          来源：
+          {t('cardDetail.source')}
           <span
             style={{
               padding: '2px 8px',
@@ -200,7 +204,7 @@ export default function CardDetail() {
               fontSize: '0.75rem',
             }}
           >
-            独立卡片
+            {t('cardDetail.standaloneCard')}
           </span>
         </p>
       )}
@@ -222,7 +226,9 @@ export default function CardDetail() {
           }}
         >
           <span className="badge">{cardTypeLabels[card.card_type] || card.card_type}</span>
-          {card.chapter_title && <span>章节: {card.chapter_title}</span>}
+          {card.chapter_title && (
+            <span>{t('cardDetail.chapter', { title: card.chapter_title })}</span>
+          )}
           {/* 掌握度：与知识卡片列表**同一枚环**（批次 E3）。
               详情页此前完全看不到掌握度 —— 而它正是"这张卡值不值得再花时间"的依据，
               列表里那一枚点进来看不见是没有道理的。
@@ -239,7 +245,7 @@ export default function CardDetail() {
                 marginBottom: 'var(--space-xs)',
               }}
             >
-              标题
+              {t('cardDetail.labelTitle')}
             </label>
             <input
               className="input"
@@ -255,7 +261,7 @@ export default function CardDetail() {
                 marginBottom: 'var(--space-xs)',
               }}
             >
-              内容
+              {t('cardDetail.labelContent')}
             </label>
             <textarea
               className="input"
@@ -279,7 +285,7 @@ export default function CardDetail() {
       {card.summary && !editing && (
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-            章节摘要
+            {t('cardDetail.chapterSummary')}
           </h2>
           <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>{card.summary}</p>
         </div>
@@ -289,7 +295,7 @@ export default function CardDetail() {
       {card.source_text && !editing && (
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
           <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-            原始出处
+            {t('cardDetail.originalSource')}
           </h2>
           <blockquote
             style={{
@@ -309,7 +315,7 @@ export default function CardDetail() {
       {questions.length > 0 && !editing && (
         <div className="card">
           <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
-            关联题目 ({questions.length})
+            {t('cardDetail.relatedQuestions', { count: questions.length })}
           </h2>
           {questions.map((q, idx) => (
             <div
@@ -346,7 +352,7 @@ export default function CardDetail() {
                 style={{ fontSize: '0.8rem' }}
                 onClick={() => setShowAnswer((prev) => ({ ...prev, [q.id]: !prev[q.id] }))}
               >
-                {showAnswer[q.id] ? '隐藏答案' : '显示答案'}
+                {showAnswer[q.id] ? t('cardDetail.hideAnswer') : t('cardDetail.showAnswer')}
               </button>
               {showAnswer[q.id] && (
                 <div
@@ -357,7 +363,9 @@ export default function CardDetail() {
                     borderRadius: '4px',
                   }}
                 >
-                  <p style={{ color: 'var(--color-success)', fontWeight: 500 }}>答案: {q.answer}</p>
+                  <p style={{ color: 'var(--color-success)', fontWeight: 500 }}>
+                    {t('cardDetail.answer', { text: q.answer })}
+                  </p>
                   {q.explanation && (
                     <p
                       style={{
@@ -366,7 +374,7 @@ export default function CardDetail() {
                         marginTop: 'var(--space-xs)',
                       }}
                     >
-                      解析: {q.explanation}
+                      {t('cardDetail.explanation', { text: q.explanation })}
                     </p>
                   )}
                 </div>
@@ -381,9 +389,9 @@ export default function CardDetail() {
           执行期间**故意不加** loading —— 原来 `confirm()` 之后那段也没有。 */}
       <ConfirmDialog
         open={confirmingDelete}
-        title="确定删除此知识卡片？"
-        message="将同时删除关联的练习题目、复习记录和知识图谱关系。此操作不可恢复。"
-        confirmText="删除"
+        title={t('cardDetail.deleteConfirm')}
+        message={t('cardDetail.deleteImpact')}
+        confirmText={t('cardDetail.delete')}
         danger
         onConfirm={() => {
           setConfirmingDelete(false);
