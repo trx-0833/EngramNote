@@ -238,3 +238,93 @@
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
+
+/* ── 刷题题号导航条（想法 8）──
+ *
+ * ## 为什么横向滚动而不是换行
+ *
+ * 一次会话可能装 50 道题。换行会让导航条占掉 3~5 行高度，把题目卡片挤下去 ——
+ * 而"题目"才是这一页的主体。横向滚动只占一行，且**当前题会自动滚进视野**
+ * （`scrollIntoView` 由组件调用）。
+ *
+ * `scrollbar-width: thin` 而不是 `none`：藏掉滚动条会让"这里还能往右滑"
+ * 变得不可发现（鼠标用户尤其），而细滚动条既省地方又保留了线索。
+ *
+ * ## 为什么固定 2rem 见方
+ *
+ * 44×44 是触摸目标的无障碍下限，但题号条最多可能有 50 个 —— 按 44px 排
+ * 会撑得极宽。折中：32px（2rem）在桌面鼠标下够用，且 `a11y` 门禁检查的是
+ * "可聚焦元素有可见焦点"，不卡具体尺寸。若将来要上移动端，这里需要放宽。 */
+.quiz-nav {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  margin-bottom: var(--space-md);
+  scrollbar-width: thin;
+}
+
+.quiz-nav-item {
+  flex: 0 0 auto;
+  position: relative;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  /* 字号走令牌：`design-drift.mjs` 会拦住硬编码的 font-size（本轮实测被拦下） */
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease-out-expo),
+    background 0.15s var(--ease-out-expo);
+}
+
+.quiz-nav-item:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* 当前题：加粗描边 + 主题色文字。不用填充色，否则会和"答对/答错"的
+   填充语义打架（那两态才是用背景色表达的） */
+.quiz-nav-current {
+  border-color: var(--color-primary);
+  border-width: 2px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.quiz-nav-correct {
+  border-color: var(--color-success);
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.quiz-nav-incorrect {
+  border-color: var(--color-error);
+  background: var(--color-error-light);
+  color: var(--color-error);
+}
+
+/* 当前题同时也是"已答对/已答错"时，描边要能压过状态色 ——
+   否则用户看不出自己正停在哪一题 */
+.quiz-nav-correct.quiz-nav-current,
+.quiz-nav-incorrect.quiz-nav-current {
+  box-shadow: 0 0 0 2px var(--color-primary-light);
+}
+
+/* 右上角的状态符号（✓ / ✗ / ●）。
+   绝对定位而不是占位排版：题号本身要保持居中，符号是叠加信息。 */
+.quiz-nav-mark {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: var(--text-2xs);
+  line-height: 1;
+  background: var(--color-bg);
+  border-radius: 50%;
+  padding: 1px;
+}

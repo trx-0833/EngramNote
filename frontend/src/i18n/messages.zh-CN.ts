@@ -1466,6 +1466,28 @@ const zhCN = {
     selfRatingSubmitFailed: '自评提交失败',
     mastery: '掌握度 {percent}%',
   },
+
+  /**
+   * 刷题导航（想法 8：刷题页要能前后翻、能跳题）
+   *
+   * 与 `quizCard` 分开的理由：那些是"题目卡片内部"的文案，
+   * 这些是"在题目之间移动"的文案，消费方也不同（卡片 vs 导航条）。
+   */
+  quizNav: {
+    /** 导航条的无障碍名（`role="group"` 的 aria-label） */
+    navigatorLabel: '题目导航',
+    /** 第 N 题的按钮可访问名模板 */
+    jumpTo: '跳到第 {number} 题',
+    /** 单题状态的按钮可访问名后缀（与 jumpTo 拼起来读屏才完整） */
+    stateUnanswered: '未作答',
+    stateCorrect: '已答对',
+    stateIncorrect: '已答错',
+    stateCurrent: '当前题',
+    prevQuestion: '上一题',
+    firstQuestion: '已经是第一题',
+    /** 本次会话进度：已答 N 题 / 对 M 题 */
+    sessionProgress: '本次已答 {answered} 题 · 正确 {correct}',
+  },
 };
 
 export default zhCN;

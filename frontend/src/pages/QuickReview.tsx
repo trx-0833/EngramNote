@@ -19,6 +19,8 @@ import ErrorDisplay from '../components/ErrorDisplay';
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard';
 // 与卡片复习页共用的进度条与回车键约定（5.12）
 import ReviewProgress from '../components/quiz/ReviewProgress';
+// 题号导航条（想法 8）：可前后翻、可点题号跳转
+import QuizNavigator, { type QuizNavItem } from '../components/quiz/QuizNavigator';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
@@ -94,12 +96,16 @@ export default function QuickReview() {
         setQuizzes([]);
       } else {
         setQuizzes(
-          data.items.map((q) => ({
+          data.items.map((q, i) => ({
             quiz: q,
             userAnswer: '',
             submitted: false,
             result: null,
-            startTime: Date.now(),
+            // 只有**第 1 题**在装载时就开始计时（用户此刻正看着它）；
+            // 其余为 0 = "从未到过"，等 `goTo` 第一次到达时才起算。
+            // 若这里全填 `Date.now()`，那么在第 1 题停留 5 分钟后翻到第 2 题，
+            // 第 2 题的"作答耗时"会包含那 5 分钟。
+            startTime: i === 0 ? Date.now() : 0,
           })),
         );
       }
@@ -167,15 +173,50 @@ export default function QuickReview() {
     // 放行会让这道题永远停在"答了但结不了账"的状态。
     if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
     if (currentIndex < quizzes.length - 1) {
-      const nextIndex = currentIndex + 1;
-      setCurrentIndex(nextIndex);
-      const newQuizzes = [...quizzes];
-      newQuizzes[nextIndex] = { ...newQuizzes[nextIndex], startTime: Date.now() };
-      setQuizzes(newQuizzes);
+      goTo(currentIndex + 1);
     } else {
       setCompleted(true);
     }
   }
+
+  /**
+   * 跳到某一题（上一题 / 题号条共用）
+   *
+   * ## 两条规则，都是刻意的
+   *
+   * 1. **往前翻不受"等待自评"约束。** 自评是"给这道题结账"，往回翻是
+   *    "去看别处"，两者无关。把上一题也锁住会让用户卡在一道不想现在评的题上。
+   *    这与 `QuizAnswerCard` 里"上一题不禁用"是同一个决定。
+   * 2. **往后跳仍受约束。** 与「下一题」按钮一致 —— 不能借题号条绕过它，
+   *    否则那道题会永远停在未结算状态（`overhaul-plan.md` 阶段 1.4）。
+   *
+   * ## 计时只在**第一次**到达时起算
+   *
+   * 原实现在每次 `handleNext` 里都写 `startTime: Date.now()`。加回退之后
+   * 那样写就有问题了：往前翻再往后翻会**重置计时**，把回看的时间也算进
+   * 这道题的作答耗时（`time_spent_ms` 会被 `report_service` 汇总成学习时长）。
+   * 所以只在 `startTime === 0`（从未到过）时才置。
+   */
+  function goTo(target: number) {
+    if (target === currentIndex) return;
+    if (target > currentIndex) {
+      const current = quizzes[currentIndex];
+      if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
+    }
+    setCurrentIndex(target);
+    const newQuizzes = [...quizzes];
+    if (newQuizzes[target].startTime === 0) {
+      newQuizzes[target] = { ...newQuizzes[target], startTime: Date.now() };
+    }
+    setQuizzes(newQuizzes);
+  }
+
+  /** 题号条的数据：序号 + 是否已答 + 是否答对 */
+  const navItems: QuizNavItem[] = quizzes.map((q, i) => ({
+    index: i,
+    submitted: q.submitted,
+    isCorrect: q.result?.is_correct,
+  }));
 
   /** 回车 = 推进当前这一步：已提交则下一题，否则提交答案（与卡片复习页同一约定） */
   function handleEnter() {
@@ -238,12 +279,12 @@ export default function QuickReview() {
                   setQuizzes([]);
                 } else {
                   setQuizzes(
-                    data.items.map((q) => ({
+                    data.items.map((q, i) => ({
                       quiz: q,
                       userAnswer: '',
                       submitted: false,
                       result: null,
-                      startTime: Date.now(),
+                      startTime: i === 0 ? Date.now() : 0,
                     })),
                   );
                   setCurrentIndex(0);
@@ -299,6 +340,8 @@ export default function QuickReview() {
           <>{t('quickReview.headerProgress', { correct: sessionCorrect, total: sessionTotal })}</>
         }
       />
+      {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
+      <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
       {/* 题目卡片（共享 QuizAnswerCard；快速复习不展示 SM-2 信息） */}
       <QuizAnswerCard
         quiz={quiz}
@@ -306,7 +349,6 @@ export default function QuickReview() {
         submitted={current.submitted}
         result={current.result}
         // 渲染期读取 ref 作为按钮禁用锁(提交中标记不触发重渲染,由 submit 的 setState 兜底)
-        // eslint-disable-next-line react-hooks/refs
         submitting={submittingRef.current}
         showSm2Info={false}
         semanticGrading={semanticGrading}
@@ -324,6 +366,8 @@ export default function QuickReview() {
         onSelfRate={handleSelfRate}
         onSkipSelfRate={() => skipRating(quiz.id)}
         onNext={handleNext}
+        onPrev={() => goTo(currentIndex - 1)}
+        hasPrev={currentIndex > 0}
       />
       <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
         <button className="btn btn-secondary" onClick={() => navigate(`/notes/${noteId}`)}>

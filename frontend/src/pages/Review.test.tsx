@@ -293,3 +293,65 @@ describe('答题复习的回车约定（与卡片复习页一致）', () => {
     expect(screen.queryByText('2 / 2')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * 想法 8：刷题页要能前后翻、能跳题
+ *
+ * ## 为什么组件测试之外还要页面级测试
+ *
+ * `QuizNavigator.test.tsx` 已经证明了"给什么状态就渲染什么"。但它证明不了
+ * **页面把状态喂对了**：`navItems` 是页面从 `quizzes` 映射出来的，
+ * 映射写错（比如把 `result` 漏掉、或用了错的字段）组件那边照样全绿。
+ * 这类"接线错"只有渲染真页面才看得见。
+ */
+describe('刷题导航（想法 8）', () => {
+  it('★ 题号条按题数渲染，且第一题时「上一题」是禁用的', async () => {
+    renderPage();
+    await loaded();
+
+    const nav = screen.getByRole('group', { name: '题目导航' });
+    expect(nav).toBeInTheDocument();
+    // 夹具是 2 道题
+    expect(screen.getByRole('button', { name: '跳到第 1 题，未作答' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '跳到第 2 题，未作答' })).toBeInTheDocument();
+
+    // 停在第 1 题：上一题不可点（而不是不渲染 —— 渲染了才知道边界在哪）
+    expect(screen.getByRole('button', { name: '上一题' })).toBeDisabled();
+  });
+
+  it('★ 点题号能跳到那一题，且「上一题」随之可用', async () => {
+    renderPage();
+    await loaded();
+
+    await userEvent.click(screen.getByRole('button', { name: '跳到第 2 题，未作答' }));
+
+    // 真的换题了：进度文案与题目都变了
+    expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一题' })).toBeEnabled();
+  });
+
+  it('★ 「上一题」能翻回已做过的题，并保留当时的作答与判分结果', async () => {
+    mockedSubmit.mockResolvedValue(makeResult());
+    renderPage();
+    await loaded();
+
+    // 第 1 题作答并提交
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行');
+    await userEvent.click(screen.getByRole('button', { name: '提交答案' }));
+    await screen.findByText('回答正确!');
+
+    // 走到第 2 题
+    await userEvent.click(screen.getByRole('button', { name: '下一题' }));
+    expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
+
+    // 翻回第 1 题 —— 这正是想法 8 的核心诉求："查看刚刚做过的题"
+    await userEvent.click(screen.getByRole('button', { name: '上一题' }));
+
+    expect(await screen.findByText('浮充是什么？')).toBeInTheDocument();
+    // 作答内容与判分结果都还在（不是重置成空白）
+    expect(screen.getByText('回答正确!')).toBeInTheDocument();
+    // 题号条把它标成"已答对"，而不是"未作答"
+    expect(screen.getByRole('button', { name: '跳到第 1 题，已答对' })).toBeInTheDocument();
+  });
+});

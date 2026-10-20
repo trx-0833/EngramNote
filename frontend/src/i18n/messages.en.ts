@@ -1256,6 +1256,19 @@ const en = {
     selfRatingSubmitFailed: 'Could not submit your self-rating',
     mastery: 'Mastery {percent}%',
   },
+
+  /** Quiz navigation (idea 8: move back and forth, jump to any question) */
+  quizNav: {
+    navigatorLabel: 'Question navigation',
+    jumpTo: 'Go to question {number}',
+    stateUnanswered: 'not answered',
+    stateCorrect: 'answered correctly',
+    stateIncorrect: 'answered incorrectly',
+    stateCurrent: 'current question',
+    prevQuestion: 'Previous',
+    firstQuestion: 'Already the first question',
+    sessionProgress: 'Answered {answered} this session · {correct} correct',
+  },
 } satisfies typeof zhCN;
 
 export default en;

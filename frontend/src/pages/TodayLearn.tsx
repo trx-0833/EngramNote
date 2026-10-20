@@ -27,6 +27,8 @@ import ErrorDisplay from '../components/ErrorDisplay';
 import QuizAnswerCard from '../components/quiz/QuizAnswerCard';
 // 与卡片复习页共用的进度条与回车键约定（5.12）
 import ReviewProgress from '../components/quiz/ReviewProgress';
+// 题号导航条（想法 8）：可前后翻、可点题号跳转
+import QuizNavigator, { type QuizNavItem } from '../components/quiz/QuizNavigator';
 import { useReviewKeyboard } from '../components/quiz/useReviewKeyboard';
 import { useSelfRating } from '../hooks/useSelfRating';
 import { useToast } from '../components/Toast';
@@ -147,12 +149,13 @@ export default function TodayLearn() {
       const dueData = await getDueQuizzes(50);
       if (dueData.items.length === 0) return;
       setQuizzes(
-        dueData.items.map((q) => ({
+        dueData.items.map((q, i) => ({
           quiz: q,
           userAnswer: '',
           submitted: false,
           result: null,
-          startTime: Date.now(),
+          // 只有第 1 题在装载时开始计时；其余 0 = "从未到过"（见 goTo 的说明）
+          startTime: i === 0 ? Date.now() : 0,
         })),
       );
       setCurrentIndex(0);
@@ -231,15 +234,40 @@ export default function TodayLearn() {
     // 放行会让这道题永远停在"答了但结不了账"的状态。
     if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
     if (currentIndex < quizzes.length - 1) {
-      const nextIndex = currentIndex + 1;
-      setCurrentIndex(nextIndex);
-      const newQuizzes = [...quizzes];
-      newQuizzes[nextIndex] = { ...newQuizzes[nextIndex], startTime: Date.now() };
-      setQuizzes(newQuizzes);
+      goTo(currentIndex + 1);
     } else {
       setCompleted(true);
     }
   }
+
+  /**
+   * 跳到某一题（上一题 / 题号条共用）
+   *
+   * 与 `QuickReview.goTo` 同一套规则（三页是同一份交互，注释不重复写）：
+   * 往前翻不受"等待自评"约束（自评是结账，回看是别处，两者无关），
+   * 往后跳受约束（不能借题号条绕过「下一题」的等待条件）；
+   * 计时只在**第一次**到达时起算，否则回看时间会被算进作答耗时。
+   */
+  function goTo(target: number) {
+    if (target === currentIndex) return;
+    if (target > currentIndex) {
+      const current = quizzes[currentIndex];
+      if (current?.result?.needs_self_assessment && !isRated(current.quiz.id)) return;
+    }
+    setCurrentIndex(target);
+    const newQuizzes = [...quizzes];
+    if (newQuizzes[target].startTime === 0) {
+      newQuizzes[target] = { ...newQuizzes[target], startTime: Date.now() };
+    }
+    setQuizzes(newQuizzes);
+  }
+
+  /** 题号条的数据：序号 + 是否已答 + 是否答对 */
+  const navItems: QuizNavItem[] = quizzes.map((q, i) => ({
+    index: i,
+    submitted: q.submitted,
+    isCorrect: q.result?.is_correct,
+  }));
 
   /** 回车 = 推进当前这一步：已提交则下一题，否则提交答案（与卡片复习页同一约定） */
   function handleEnter() {
@@ -332,6 +360,9 @@ export default function TodayLearn() {
           }
         />
 
+        {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
+        <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
+
         {/* 题目卡片（共享 QuizAnswerCard） */}
         <QuizAnswerCard
           quiz={quiz}
@@ -355,6 +386,8 @@ export default function TodayLearn() {
           onSelfRate={handleSelfRate}
           onSkipSelfRate={() => skipRating(quiz.id)}
           onNext={handleNext}
+          onPrev={() => goTo(currentIndex - 1)}
+          hasPrev={currentIndex > 0}
         />
       </div>
     );

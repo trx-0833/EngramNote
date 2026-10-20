@@ -71,6 +71,20 @@ interface QuizAnswerCardProps {
   /** 跳过自评（逃生口，见 hooks/useSelfRating.ts 的 skipRating 说明） */
   onSkipSelfRate?: () => void;
   onNext: () => void;
+  /**
+   * 上一题（可选）
+   *
+   * ## 为什么是可选而不是必填
+   *
+   * 卡片复习页（`CardReview`）是"翻卡片"的心智模型，没有"第几题"的概念，
+   * 传了反而奇怪。三个刷题页（答题复习 / 快速复习 / 今日学习）传它。
+   *
+   * ⚠️ 不传 `onPrev` 时**不渲染**按钮，而不是渲染一个禁用按钮 ——
+   * 后者会让卡片复习页平白多出一个永远点不动的控件。
+   */
+  onPrev?: () => void;
+  /** 是否存在上一题（第一题时为 false，按钮禁用） */
+  hasPrev?: boolean;
 }
 
 export default function QuizAnswerCard({
@@ -94,6 +108,8 @@ export default function QuizAnswerCard({
   onSelfRate,
   onSkipSelfRate,
   onNext,
+  onPrev,
+  hasPrev = false,
 }: QuizAnswerCardProps) {
   const { t } = useTranslation();
   const { questionTypeLabels, difficultyLabels, gradingMethodLabels, ratingLabels, verdictLabels } =
@@ -285,6 +301,27 @@ export default function QuizAnswerCard({
               {t('quizCard.submit')}
             </button>
           </div>
+
+          {/* 上一题（未提交时也要有）
+              ⚠️ 这里曾经没有 —— 整行导航都写在 `submitted` 分支里，于是
+              **答题前根本翻不动页**：想跳过一道不会做的题、或回头看看
+              上一题，都必须先提交。而"这道题我不会、先看别的"是刷题里
+              最常见的动作之一，强制提交等于逼用户乱填一个答案。
+
+              只给「上一题」不给「下一题」：往后走由"提交答案"承担，
+              留着它才能维持"答完才推进"的主线；往回走不该有任何门槛。 */}
+          {onPrev && (
+            <div style={{ marginTop: 'var(--space-sm)' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={onPrev}
+                disabled={!hasPrev}
+                title={hasPrev ? undefined : t('quizNav.firstQuestion')}
+              >
+                {t('quizNav.prevQuestion')}
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -481,10 +518,35 @@ export default function QuizAnswerCard({
             </div>
           )}
 
-          {/* 下一题按钮
-              等待自评时禁用：此刻调度尚未推进，直接进入下一题会让这道题
-              永远停在未完成状态（见 docs/overhaul-plan.md 阶段 1.4）。 */}
-          <div style={{ textAlign: 'right' }}>
+          {/* 上一题 / 下一题
+              下一题在等待自评时禁用：此刻调度尚未推进，直接进入下一题会让这道题
+              永远停在未完成状态（见 docs/overhaul-plan.md 阶段 1.4）。
+
+              ⚠️ 上一题**不**受 `needsSelfAssessment` 约束，这是刻意的：
+              自评是"给这道题结账"，而往回翻是"去看别处"，两者无关。
+              把上一题也锁住会让用户卡在一道不想现在评的题上 ——
+              而"往后翻不受限、往前翻也不该受限"才是对称的。
+
+              按钮行从 `textAlign: right` 改成 `space-between`：只有两个按钮
+              都渲染时才有布局意义；只渲染下一题时右对齐的观感与原来一致。 */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: onPrev ? 'space-between' : 'flex-end',
+              alignItems: 'center',
+              gap: 'var(--space-sm)',
+            }}
+          >
+            {onPrev && (
+              <button
+                className="btn btn-secondary"
+                onClick={onPrev}
+                disabled={!hasPrev}
+                title={hasPrev ? undefined : t('quizNav.firstQuestion')}
+              >
+                {t('quizNav.prevQuestion')}
+              </button>
+            )}
             <button
               className="btn btn-primary"
               onClick={onNext}
