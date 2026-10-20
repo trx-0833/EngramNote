@@ -21,6 +21,7 @@ import Dialog from '../components/Dialog';
 import { useToast } from '../components/Toast';
 // 本页私有样式（visual-refactor-plan 批次 E8）：进度条右侧的百分比 + 达成态金框
 import styles from './LearningGoals.module.css';
+import { useTranslation } from '../i18n';
 
 /** 目标类型：每日 / 每周 */
 type GoalType = 'daily' | 'weekly';
@@ -42,6 +43,7 @@ const INITIAL_FORM: CreateFormState = {
 };
 
 export default function LearningGoals() {
+  const { t } = useTranslation();
   const toast = useToast();
   /** 激活中的学习目标列表 */
   const [goals, setGoals] = useState<LearningGoal[]>([]);
@@ -80,7 +82,7 @@ export default function LearningGoals() {
       if (activeRes) setGoals(activeRes.goals);
       if (archivedRes) setArchivedGoals(archivedRes.goals);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -101,16 +103,16 @@ export default function LearningGoals() {
     // 名称校验：1-200 字符
     const name = createForm.name.trim();
     if (!name) {
-      setFormError('请输入目标名称');
+      setFormError(t('goals.nameRequired'));
       return;
     }
     if (name.length > 200) {
-      setFormError('目标名称不能超过 200 个字符');
+      setFormError(t('goals.nameTooLong'));
       return;
     }
     // 掌握度校验：0-100
     if (createForm.target_mastery < 0 || createForm.target_mastery > 100) {
-      setFormError('目标掌握度需在 0-100 之间');
+      setFormError(t('goals.masteryRange'));
       return;
     }
 
@@ -129,7 +131,7 @@ export default function LearningGoals() {
       // 刷新两组列表
       await fetchGoals();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : '创建失败');
+      setFormError(err instanceof Error ? err.message : t('goals.createFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +148,7 @@ export default function LearningGoals() {
       await archiveGoal(goalId);
       await fetchGoals();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '归档失败');
+      toast.error(err instanceof Error ? err.message : t('goals.archiveFailed'));
     }
   }
 
@@ -170,7 +172,7 @@ export default function LearningGoals() {
       await deleteGoal(goalId);
       await fetchGoals();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '删除失败');
+      toast.error(err instanceof Error ? err.message : t('shared.deleteFailed'));
     }
   }
 
@@ -198,10 +200,10 @@ export default function LearningGoals() {
       {/* 页头：标题 + 新建按钮（批次 C1：2rem → 1.5rem；
           窄屏换行原由全局 `.page-header-row` 负责，现随组件进模块） */}
       <PageHeader
-        title="学习目标"
+        title={t('goals.title')}
         actions={
           <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
-            新建目标
+            {t('goals.newGoal')}
           </button>
         }
       />
@@ -215,8 +217,8 @@ export default function LearningGoals() {
         <>
           {goals.length === 0 && !error ? (
             <EmptyState
-              message="还没有学习目标"
-              description="创建你的第一个学习目标，开始追踪学习进度"
+              message={t('goals.empty')}
+              description={t('goals.emptyHint')}
               action={
                 <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
                   新建目标
@@ -229,7 +231,7 @@ export default function LearningGoals() {
                 className="heading-serif"
                 style={{ fontSize: '1.25rem', marginBottom: 'var(--space-md)' }}
               >
-                进行中的目标
+                {t('goals.activeSection')}
               </h2>
               <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
                 {goals.map((goal) => (
@@ -253,7 +255,10 @@ export default function LearningGoals() {
                 onClick={() => setShowArchived((s) => !s)}
                 aria-expanded={showArchived}
               >
-                {showArchived ? '收起' : '展开'}已归档目标 ({archivedGoals.length})
+                {t('goals.archivedToggle', {
+                  action: showArchived ? t('goals.collapse') : t('goals.expand'),
+                  count: archivedGoals.length,
+                })}
               </button>
               {showArchived && (
                 <div className="card" style={{ padding: 'var(--space-md)' }}>
@@ -277,19 +282,23 @@ export default function LearningGoals() {
                             color: 'var(--color-text-secondary)',
                           }}
                         >
-                          {goal.type === 'daily' ? '每日' : '每周'} · 目标 {goal.target_mastery}%
+                          {t('goals.goalSummary', {
+                            type:
+                              goal.type === 'daily' ? t('goals.typeDaily') : t('goals.typeWeekly'),
+                            mastery: goal.target_mastery,
+                          })}
                         </span>
                       </div>
                       <button
                         className="btn btn-danger-outline"
                         style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                         onClick={(e) => handleDelete(goal.id, e)}
-                        aria-label={`删除 ${goal.name}`}
+                        aria-label={t('goals.deleteNamed', { name: goal.name })}
                       >
                         {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标
                             （`aria-label` 保留，图标本身是装饰性的 aria-hidden） */}
                         <Icon name="delete" size={16} />
-                        删除
+                        {t('goals.delete')}
                       </button>
                     </div>
                   ))}
@@ -307,7 +316,7 @@ export default function LearningGoals() {
           那时补的四件事现在的归属：
             1. `role="dialog"` —— 基座给；
             2. `aria-modal="true"` —— 基座给；
-            3. 对话框的可访问名 —— 基座给：`title="新建学习目标"` 渲染成面板顶部的
+            3. 对话框的可访问名 —— 基座给：`title={t('goals.createTitle')}` 渲染成面板顶部的
                `h2`，并用 `useId()` 生成 `id` 接到 `aria-labelledby` 上，
                所以原来写死的 `id="learning-goal-create-title"` 连同那枚 `<h3>`
                一起删掉了（信息一个字没少，`<h2>` 与 `<h3>` 都不跳级）；
@@ -318,7 +327,7 @@ export default function LearningGoals() {
       <Dialog
         open={showCreateForm}
         onClose={handleCancelCreate}
-        title="新建学习目标"
+        title={t('goals.createTitle')}
         footer={
           <>
             <button
@@ -326,10 +335,10 @@ export default function LearningGoals() {
               onClick={handleCancelCreate}
               disabled={submitting}
             >
-              取消
+              {t('goals.cancel')}
             </button>
             <button className="btn btn-primary" onClick={handleCreate} disabled={submitting}>
-              {submitting ? '创建中...' : '创建'}
+              {submitting ? t('goals.creating') : t('goals.create')}
             </button>
           </>
         }
@@ -340,13 +349,13 @@ export default function LearningGoals() {
             htmlFor="learning-goal-create-name"
             style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
           >
-            目标名称
+            {t('goals.nameLabel')}
           </label>
           <input
             id="learning-goal-create-name"
             type="text"
             className="input"
-            placeholder="例如：掌握第一章核心概念"
+            placeholder={t('goals.namePlaceholder')}
             value={createForm.name}
             onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
             maxLength={200}
@@ -360,7 +369,7 @@ export default function LearningGoals() {
             htmlFor="learning-goal-create-type"
             style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
           >
-            目标类型
+            {t('goals.typeLabel')}
           </label>
           <select
             id="learning-goal-create-type"
@@ -370,8 +379,8 @@ export default function LearningGoals() {
               setCreateForm((prev) => ({ ...prev, type: e.target.value as GoalType }))
             }
           >
-            <option value="daily">每日目标</option>
-            <option value="weekly">每周目标</option>
+            <option value="daily">{t('goals.typeDailyOption')}</option>
+            <option value="weekly">{t('goals.typeWeeklyOption')}</option>
           </select>
         </div>
 
@@ -381,7 +390,7 @@ export default function LearningGoals() {
             htmlFor="learning-goal-create-mastery"
             style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
           >
-            目标掌握度 (%)
+            {t('goals.masteryLabel')}
           </label>
           <input
             id="learning-goal-create-mastery"
@@ -402,7 +411,7 @@ export default function LearningGoals() {
             htmlFor="learning-goal-create-deadline"
             style={{ display: 'block', marginBottom: 'var(--space-xs)', fontSize: '0.9rem' }}
           >
-            截止日期（可选）
+            {t('goals.dueDateLabel')}
           </label>
           <input
             id="learning-goal-create-deadline"
@@ -431,9 +440,9 @@ export default function LearningGoals() {
           `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消什么都不做。 */}
       <ConfirmDialog
         open={pendingDeleteGoalId !== null}
-        title="确定删除此学习目标？"
-        message="此操作不可恢复。"
-        confirmText="删除"
+        title={t('goals.deleteConfirm')}
+        message={t('goals.deleteImpact')}
+        confirmText={t('goals.delete')}
         danger
         onConfirm={() => {
           const goalId = pendingDeleteGoalId;
@@ -458,6 +467,7 @@ interface GoalCardProps {
 }
 
 function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
+  const { t } = useTranslation();
   // 进度百分比，后端可能不返回，默认为 0
   const progress = goal.progress_percentage ?? 0;
   // 进度条的宽度是"钳过的"百分比：后端理论上会给 0-100，但脏数据不该把条顶出卡片
@@ -514,15 +524,15 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
                 background: goal.type === 'daily' ? 'var(--color-primary)' : '#6d28d9',
               }}
             >
-              {goal.type === 'daily' ? '每日' : '每周'}
+              {goal.type === 'daily' ? t('goals.typeDaily') : t('goals.typeWeekly')}
             </span>
             {/* 目标掌握度 */}
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              目标 {goal.target_mastery}%
+              {t('goals.masteryOnly', { mastery: goal.target_mastery })}
             </span>
             {/* 关联笔记数 */}
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              关联笔记 {noteCount} 篇
+              {t('goals.linkedNotes', { count: noteCount })}
             </span>
             {/* 截止日期 / 剩余天数 */}
             {daysRemaining !== null && (
@@ -533,10 +543,10 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
                 }}
               >
                 {daysRemaining < 0
-                  ? '已过期'
+                  ? t('goals.expired')
                   : daysRemaining === 0
-                    ? '今日截止'
-                    : `剩余 ${daysRemaining} 天`}
+                    ? t('goals.dueToday')
+                    : t('goals.daysRemaining', { count: daysRemaining })}
               </span>
             )}
           </div>
@@ -554,7 +564,7 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
         <div
           className={`progress-bar ${styles.goalProgressBarTrack}`}
           role="progressbar"
-          aria-label="学习进度"
+          aria-label={t('goals.progressLabel')}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={clampedProgress}
@@ -570,15 +580,15 @@ function GoalCard({ goal, onArchive, onDelete }: GoalCardProps) {
           className="btn btn-secondary"
           style={{ fontSize: '0.75rem', padding: '4px 8px' }}
           onClick={onArchive}
-          aria-label={`归档 ${goal.name}`}
+          aria-label={t('goals.archiveNamed', { name: goal.name })}
         >
-          归档
+          {t('goals.archive')}
         </button>
         <button
           className="btn btn-danger-outline"
           style={{ fontSize: '0.75rem', padding: '4px 8px' }}
           onClick={onDelete}
-          aria-label={`删除 ${goal.name}`}
+          aria-label={t('goals.deleteNamed', { name: goal.name })}
         >
           {/* 批次 B3：同上一处（已归档目标的删除按钮） */}
           <Icon name="delete" size={16} />

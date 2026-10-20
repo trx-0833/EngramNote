@@ -666,6 +666,54 @@ const zhCN = {
     taskNewMaterial: '新资料',
     itemCount: '{count} 个',
   },
+
+  /** 学习目标页（`LearningGoals`，i18n 阶段 3） */
+  goals: {
+    title: '学习目标',
+    newGoal: '新建目标',
+    empty: '还没有学习目标',
+    emptyHint: '创建你的第一个学习目标，开始追踪学习进度',
+    activeSection: '进行中的目标',
+    archivedToggle: '{action}已归档目标 ({count})',
+    collapse: '收起',
+    expand: '展开',
+    // ---- 目标卡片 ----
+    typeDaily: '每日',
+    typeWeekly: '每周',
+    /** `{type}` 传的是「每日」/「每周」的**已翻译**文案 */
+    goalSummary: '{type} · 目标 {mastery}%',
+    typeOnly: '{type}',
+    masteryOnly: '目标 {mastery}%',
+    linkedNotes: '关联笔记 {count} 篇',
+    expired: '已过期',
+    dueToday: '今日截止',
+    daysRemaining: '剩余 {count} 天',
+    progressLabel: '学习进度',
+    archiveNamed: '归档 {name}',
+    deleteNamed: '删除 {name}',
+    archive: '归档',
+    delete: '删除',
+    // ---- 新建表单 ----
+    createTitle: '新建学习目标',
+    nameLabel: '目标名称',
+    namePlaceholder: '例如：掌握第一章核心概念',
+    nameRequired: '请输入目标名称',
+    nameTooLong: '目标名称不能超过 200 个字符',
+    masteryRange: '目标掌握度需在 0-100 之间',
+    typeLabel: '目标类型',
+    typeDailyOption: '每日目标',
+    typeWeeklyOption: '每周目标',
+    masteryLabel: '目标掌握度 (%)',
+    dueDateLabel: '截止日期（可选）',
+    cancel: '取消',
+    create: '创建',
+    creating: '创建中...',
+    createFailed: '创建失败',
+    archiveFailed: '归档失败',
+    // ---- 确认框 ----
+    deleteConfirm: '确定删除此学习目标？',
+    deleteImpact: '此操作不可恢复。',
+  },
 };
 
 export default zhCN;
