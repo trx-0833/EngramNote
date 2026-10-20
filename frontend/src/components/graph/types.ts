@@ -4,13 +4,14 @@
  */
 import type { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
 import type { GraphNode } from '../../api/client';
+import type { MessageKey } from '../../i18n/translate';
 
 /** 关系类型 → 中文标签 */
-export const RELATION_TYPE_LABELS: Record<string, string> = {
-  related: '相关',
-  prerequisite: '前置',
-  subsequent: '后续',
-  contrast: '对比',
+export const RELATION_TYPE_LABELS: Record<string, MessageKey> = {
+  related: 'graphTypes.relationRelated',
+  prerequisite: 'graphTypes.relationPrerequisite',
+  subsequent: 'graphTypes.relationSubsequent',
+  contrast: 'graphTypes.relationContrast',
 };
 
 /**
@@ -123,19 +124,19 @@ export const CARD_TYPE_SHAPES: Record<string, NodeShape> = {
 };
 
 /** 卡片类型 → 节点内显示的首字 */
-export const CARD_TYPE_INITIALS: Record<string, string> = {
-  concept: '概',
-  formula: '式',
-  qa: '问',
-  definition: '定',
+export const CARD_TYPE_INITIALS: Record<string, MessageKey> = {
+  concept: 'graphTypes.nodeConcept',
+  formula: 'graphTypes.nodeFormula',
+  qa: 'graphTypes.nodeQa',
+  definition: 'graphTypes.nodeDefinition',
 };
 
 /** 关系类型选项，用于创建关系表单 */
-export const RELATION_TYPE_OPTIONS = [
-  { value: 'related', label: '相关' },
-  { value: 'prerequisite', label: '前置' },
-  { value: 'subsequent', label: '后续' },
-  { value: 'contrast', label: '对比' },
+export const RELATION_TYPE_OPTIONS: { value: string; labelKey: MessageKey }[] = [
+  { value: 'related', labelKey: 'graphTypes.relationRelated' },
+  { value: 'prerequisite', labelKey: 'graphTypes.relationPrerequisite' },
+  { value: 'subsequent', labelKey: 'graphTypes.relationSubsequent' },
+  { value: 'contrast', labelKey: 'graphTypes.relationContrast' },
 ];
 
 /** 力导向图内部节点类型 */

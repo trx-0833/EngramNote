@@ -111,7 +111,9 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
           {distribution.map((d) => (
             <div key={d.relation_type} className={styles.graphStatsBarRow}>
               <span className={styles.graphStatsBarLabel}>
-                {RELATION_TYPE_LABELS[d.relation_type] || d.relation_type}
+                {RELATION_TYPE_LABELS[d.relation_type]
+                  ? t(RELATION_TYPE_LABELS[d.relation_type])
+                  : d.relation_type}
               </span>
               <div className={styles.graphStatsBarTrack}>
                 <div
@@ -206,7 +208,9 @@ function SubgraphPanel({
                 <div className={styles.graphNeighborTitle}>{n.title}</div>
                 {edge && (
                   <div className={styles.graphNeighborRel}>
-                    {RELATION_TYPE_LABELS[edge.relation_type] || edge.relation_type}
+                    {RELATION_TYPE_LABELS[edge.relation_type]
+                      ? t(RELATION_TYPE_LABELS[edge.relation_type])
+                      : edge.relation_type}
                   </div>
                 )}
               </div>
@@ -247,7 +251,9 @@ function LinkDetailPanel({
           <span style={{ color: 'var(--color-text-secondary)' }}>
             {t('graphSidebar.labelType')}
           </span>
-          {RELATION_TYPE_LABELS[selectedLink.relation_type] || selectedLink.relation_type}
+          {RELATION_TYPE_LABELS[selectedLink.relation_type]
+            ? t(RELATION_TYPE_LABELS[selectedLink.relation_type])
+            : selectedLink.relation_type}
         </div>
         <div>
           <span style={{ color: 'var(--color-text-secondary)' }}>
@@ -598,7 +604,7 @@ function CreateRelationPanel({
           >
             {RELATION_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {t(opt.labelKey)}
               </option>
             ))}
           </select>
@@ -647,7 +653,7 @@ function RelationLegend({
             ⚠️ 批次 E4：线段从"纯色实线"改成"该类型在画布上的**线型**"——
             这一块是"线型 → 类型"的说明，颜色只是辅助（可访问名仍是关系类型名，
             `e2e/a11y.spec.ts` 用 `getByRole('button', { name: '相关' })` 找它）。 */}
-        {Object.entries(RELATION_TYPE_LABELS).map(([type, label]) => (
+        {Object.entries(RELATION_TYPE_LABELS).map(([type, labelKey]) => (
           <button
             key={type}
             type="button"
@@ -669,7 +675,7 @@ function RelationLegend({
               style={{ color: RELATION_TYPE_COLORS[type] }}
               aria-hidden="true"
             />
-            {label}
+            {t(labelKey)}
           </button>
         ))}
         {/* 待审建议：线型已经让给关系类型，状态改用"淡色 + 无箭头"两条通道 ——

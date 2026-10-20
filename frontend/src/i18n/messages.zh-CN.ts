@@ -1401,6 +1401,57 @@ const zhCN = {
     // ---- 错误横幅 ----
     dismissBanner: '关闭',
   },
+
+  /** 知识图谱的节点/关系类型（`components/graph/types.ts`，i18n 阶段 3） */
+  graphTypes: {
+    // ---- 关系类型 ----
+    relationRelated: '相关',
+    relationPrerequisite: '前置',
+    relationSubsequent: '后续',
+    relationContrast: '对比',
+    // ---- 节点类型（图例里的单字缩写） ----
+    nodeConcept: '概',
+    nodeFormula: '式',
+    nodeQa: '问',
+    nodeDefinition: '定',
+  },
+
+  /** 知识图谱页的操作（`knowledgegraph/*`，i18n 阶段 3） */
+  graphPage: {
+    title: '知识图谱',
+    /** 节点/边计数，如「12 节点 · 8 边 · 3 待审」 */
+    stats: '{nodes} 节点 · {edges} 边',
+    statsSuggested: ' · {count} 待审',
+    searchPlaceholder: '搜索卡片...',
+    filterByType: '按卡片类型筛选',
+    allTypes: '全部类型',
+    cancel: '取消',
+    createRelation: '创建关系',
+    suggestions: '建议',
+    collapse: '收起',
+    expand: '展开',
+    // ---- 节点详情 ----
+    nodeDetail: '节点详情',
+    labelTitle: '标题',
+    labelType: '类型',
+    labelRelationCount: '关联数',
+    labelSourceNote: '来源笔记',
+    unknownSource: '未知来源',
+    viewPointDetail: '查看知识点详情',
+    loading: '加载中...',
+    viewRelatedNodes: '查看关联节点',
+    // ---- 错误与确认 ----
+    operationFailed: '操作失败',
+    batchFailed: '批量操作失败',
+    suggestFailed: '生成建议失败',
+    deleteFailed: '删除失败',
+    createFailed: '创建失败',
+    loadFailed: '加载图谱失败',
+    rejectBatchConfirm: '确定要拒绝 {count} 条建议关系吗？',
+    reject: '拒绝',
+    deleteRelationConfirm: '确定要删除此关系吗？',
+    delete: '删除',
+  },
 };
 
 export default zhCN;

@@ -18,6 +18,7 @@ import {
   FALLBACK_CATEGORY_COLOR,
   useLabels,
 } from '../../utils/labels';
+import { useTranslation } from '../../i18n';
 
 interface GraphToolbarProps {
   /** 画布实际渲染的节点/边数（已过滤回收站与类型过滤） */
@@ -59,6 +60,7 @@ export default function GraphToolbar({
   sidebarOpen,
   onToggleSidebar,
 }: GraphToolbarProps) {
+  const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   return (
     <div className={styles.graphToolbar} style={{ marginBottom: 'var(--space-md)' }}>
@@ -66,9 +68,10 @@ export default function GraphToolbar({
         {/* 页面标题（批次 C1）。计数是**并列的兄弟节点**而不是 `actions`：
             这一行后面还跟着搜索框，计数夹在标题与搜索框之间，
             原本就是三个 flex 项用 `.graphToolbarLeft` 的 gap 分开的。 */}
-        <PageHeader title="知识图谱" spacing="none" />
+        <PageHeader title={t('graphPage.title')} spacing="none" />
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-          {nodeCount} 节点 · {edgeCount} 边{suggestedCount > 0 && ` · ${suggestedCount} 待审`}
+          {t('graphPage.stats', { nodes: nodeCount, edges: edgeCount })}
+          {suggestedCount > 0 && t('graphPage.statsSuggested', { count: suggestedCount })}
         </span>
 
         {/* 搜索框 —— 批次 B3：补放大镜（此前只有 NotesList 那一处有图形） */}
@@ -77,7 +80,7 @@ export default function GraphToolbar({
           <input
             type="text"
             className={styles.graphSearchInput}
-            placeholder="搜索卡片..."
+            placeholder={t('graphPage.searchPlaceholder')}
             value={searchKeyword}
             onChange={(e) => onSearchKeywordChange(e.target.value)}
           />
@@ -113,11 +116,11 @@ export default function GraphToolbar({
             接受 aria-label；名字是否"念出来清楚"属于人工复核（a11y-audit §4.2）。 */}
         <select
           className={styles.graphFilterSelect}
-          aria-label="按卡片类型筛选"
+          aria-label={t('graphPage.filterByType')}
           value={filterCardType || ''}
           onChange={(e) => onFilterCardTypeChange(e.target.value || null)}
         >
-          <option value="">全部类型</option>
+          <option value="">{t('graphPage.allTypes')}</option>
           {Object.entries(cardTypeLabels).map(([type, label]) => (
             <option key={type} value={type}>
               {label}
@@ -143,18 +146,18 @@ export default function GraphToolbar({
           className={`${styles.graphBtn}${createMode ? ` ${styles.graphBtnActive}` : ''}`}
           onClick={onToggleCreateMode}
         >
-          {createMode ? '取消' : '创建关系'}
+          {createMode ? t('graphPage.cancel') : t('graphPage.createRelation')}
         </button>
 
         {/* 建议按钮 */}
         <button className={styles.graphBtn} onClick={onToggleSuggestions}>
-          建议
+          {t('graphPage.suggestions')}
           {suggestionsCount > 0 && <span className={styles.graphBadge}>{suggestionsCount}</span>}
         </button>
 
         {/* 侧边栏切换 */}
         <button className={styles.graphBtn} onClick={onToggleSidebar}>
-          {sidebarOpen ? '收起' : '展开'}
+          {sidebarOpen ? t('graphPage.collapse') : t('graphPage.expand')}
         </button>
       </div>
     </div>

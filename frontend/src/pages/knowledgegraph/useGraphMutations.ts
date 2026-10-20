@@ -40,6 +40,7 @@ import type { ForceGraphNode } from '../../components/graph/types';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { useToast } from '../../components/Toast';
 import { normalizeStats, normalizeSuggestions } from './normalize';
+import { translate } from '../../i18n/translate';
 
 interface UseGraphMutationsOptions {
   setGraphData: Dispatch<SetStateAction<GraphData | null>>;
@@ -118,7 +119,7 @@ export function useGraphMutations({
       clearSelectedLink(); // 清除选中的待审边，避免详情面板残留旧状态
       await refetchGraphAndStats('sequential');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.operationFailed'));
     } finally {
       setActionLoading(null);
     }
@@ -133,7 +134,7 @@ export function useGraphMutations({
       clearSelectedLink(); // 清除选中的待审边，避免详情面板残留旧状态
       await refetchGraphAndStats('sequential');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.operationFailed'));
     } finally {
       setActionLoading(null);
     }
@@ -149,7 +150,7 @@ export function useGraphMutations({
       clearSelectedSuggestions();
       await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '批量操作失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.batchFailed'));
     } finally {
       setBatchLoading(false);
     }
@@ -160,8 +161,8 @@ export function useGraphMutations({
     if (selectedSuggestions.size === 0) return;
     // 「拒绝建议」不加 danger：拒绝的是尚未采纳的建议，不是已存在的数据
     const ok = await confirm({
-      title: `确定要拒绝 ${selectedSuggestions.size} 条建议关系吗？`,
-      confirmText: '拒绝',
+      title: translate('graphPage.rejectBatchConfirm', { count: selectedSuggestions.size }),
+      confirmText: translate('graphPage.reject'),
     });
     if (!ok) return;
     setBatchLoading(true);
@@ -171,7 +172,7 @@ export function useGraphMutations({
       clearSelectedSuggestions();
       await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '批量操作失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.batchFailed'));
     } finally {
       setBatchLoading(false);
     }
@@ -191,7 +192,7 @@ export function useGraphMutations({
         await refetchGraphAndStats('parallel');
       }
     } catch (err) {
-      setSuggestError(err instanceof Error ? err.message : '生成建议失败');
+      setSuggestError(err instanceof Error ? err.message : translate('graphPage.suggestFailed'));
     } finally {
       setSuggesting(false);
     }
@@ -200,8 +201,8 @@ export function useGraphMutations({
   /** 删除已确认的关系 */
   async function handleDeleteRelation(relationId: string) {
     const ok = await confirm({
-      title: '确定要删除此关系吗？',
-      confirmText: '删除',
+      title: translate('graphPage.deleteRelationConfirm'),
+      confirmText: translate('graphPage.delete'),
       danger: true,
     });
     if (!ok) return;
@@ -211,7 +212,7 @@ export function useGraphMutations({
       clearSelectedLink();
       await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '删除失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.deleteFailed'));
     } finally {
       setActionLoading(null);
     }
@@ -226,7 +227,7 @@ export function useGraphMutations({
       exitCreateMode();
       await refetchGraphAndStats('parallel');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '创建失败');
+      toast.error(err instanceof Error ? err.message : translate('graphPage.createFailed'));
     } finally {
       setCreating(false);
     }

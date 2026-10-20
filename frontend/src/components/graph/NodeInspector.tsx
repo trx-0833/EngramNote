@@ -6,6 +6,7 @@ import {
 import type { ForceGraphNode } from './types';
 // 图谱功能的类名归模块所有（overhaul-plan 5.6 序 10）：见 Graph.module.css 文件头
 import styles from './Graph.module.css';
+import { useTranslation } from '../../i18n';
 
 interface NodeInspectorProps {
   node: ForceGraphNode;
@@ -21,6 +22,7 @@ export default function NodeInspector({
   onViewSubgraph,
   loadingSubgraph,
 }: NodeInspectorProps) {
+  const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   // 契约漂移：`note_id` 缺失时原来直接 `undefined.slice(0, 8)`，点击节点即整页崩。
   // 缺失时给出可读占位并去掉跳转（没有目标可去），其余详情照常显示。
@@ -32,14 +34,14 @@ export default function NodeInspector({
         borderTop: `4px solid ${CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR}`,
       }}
     >
-      <div className={styles.graphPanelTitle}>节点详情</div>
+      <div className={styles.graphPanelTitle}>{t('graphPage.nodeDetail')}</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>标题</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('graphPage.labelTitle')}</span>
           <div style={{ fontWeight: 500, marginTop: 2 }}>{node.title}</div>
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>类型</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('graphPage.labelType')}</span>
           <div style={{ marginTop: 4 }}>
             <span
               style={{
@@ -56,13 +58,17 @@ export default function NodeInspector({
           </div>
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>关联数</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {t('graphPage.labelRelationCount')}
+          </span>
           <span style={{ marginLeft: 'var(--space-sm)', fontWeight: 600 }}>
             {node.relation_count}
           </span>
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>来源笔记</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {t('graphPage.labelSourceNote')}
+          </span>
           {noteId ? (
             <span
               style={{
@@ -83,7 +89,7 @@ export default function NodeInspector({
                 fontSize: '0.8rem',
               }}
             >
-              未知来源
+              {t('graphPage.unknownSource')}
             </span>
           )}
         </div>
@@ -94,7 +100,7 @@ export default function NodeInspector({
           style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.8rem' }}
           onClick={() => navigate(`/cards/${node.id}`)}
         >
-          查看知识点详情
+          {t('graphPage.viewPointDetail')}
         </button>
 
         {/* 查看子图按钮 */}
@@ -104,7 +110,7 @@ export default function NodeInspector({
           onClick={() => onViewSubgraph(node.id)}
           disabled={loadingSubgraph}
         >
-          {loadingSubgraph ? '加载中...' : '查看关联节点'}
+          {loadingSubgraph ? t('graphPage.loading') : t('graphPage.viewRelatedNodes')}
         </button>
       </div>
     </div>

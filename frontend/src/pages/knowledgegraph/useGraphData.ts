@@ -17,6 +17,7 @@ import {
 } from '../../api/client';
 import { normalizeGraphData, normalizeStats, normalizeSuggestions } from './normalize';
 import { useContractDriftNotice } from '../contractDrift';
+import { translate } from '../../i18n/translate';
 
 /** 图谱页数据层：图谱本体、建议列表、统计数据与加载/失败状态 */
 export function useGraphData() {
@@ -50,7 +51,7 @@ export function useGraphData() {
       setSuggestions(normalizeSuggestions(sugData));
       setStats(normalizeStats(statsData));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载图谱失败');
+      setError(err instanceof Error ? err.message : translate('graphPage.loadFailed'));
     } finally {
       setLoading(false);
     }
