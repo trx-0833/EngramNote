@@ -104,6 +104,8 @@ export default function Review() {
   );
 
   const session = useQuizSession<DueQuiz>({
+    // 进度持久化：刷新后回到离开时的那一题（想法 8 阶段 3）
+    scope: 'review',
     submit,
     // 每次提交成功都刷新统计：今日已完成数变了
     onSubmitted: refreshStats,

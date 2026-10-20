@@ -365,3 +365,63 @@ describe('刷题导航（想法 8）', () => {
     expect(screen.getByRole('button', { name: '跳到第 1 题，已答对' })).toBeInTheDocument();
   });
 });
+
+/**
+ * 想法 8 阶段 3：进度持久化
+ *
+ * ## 为什么在这里断言 localStorage 而不是"真的刷新一次"
+ *
+ * jsdom 里没有"刷新"这个动作。持久化的**契约**就是"离开时把状态写进了
+ * 那个键"，而"刷新后能读回来"由 `utils/quizSessionMemory.test.ts` 覆盖
+ * （包括指纹不匹配、TTL 过期、坏数据那些分支）。两边合起来才是完整链路，
+ * 各自断言自己那一半。
+ */
+describe('刷题进度持久化（想法 8 阶段 3）', () => {
+  function stored(): Record<string, unknown> | null {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('engramnote:quiz:v1:review:'));
+    if (!key) return null;
+    try {
+      return JSON.parse(localStorage.getItem(key) ?? 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  beforeEach(() => {
+    // 清掉别的用例可能留下的记录，避免互相影响
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('engramnote:quiz:v1:'))
+      .forEach((k) => localStorage.removeItem(k));
+  });
+
+  it('★ 提交后进度被写进 localStorage（刷新能接着做）', async () => {
+    mockedSubmit.mockResolvedValue(makeResult());
+    renderPage();
+    await loaded();
+
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行');
+    await userEvent.click(screen.getByRole('button', { name: '提交答案' }));
+    await screen.findByText('回答正确!');
+
+    const rec = stored();
+    expect(rec, '提交后应当留下进度记录').not.toBeNull();
+    const items = (rec as { items: Array<{ id: string; submitted: boolean; userAnswer: string }> })
+      .items;
+    expect(items).toHaveLength(2);
+    expect(items[0].id).toBe('q1');
+    expect(items[0].submitted).toBe(true);
+    expect(items[0].userAnswer).toBe('恒压运行');
+    // 本次统计也要带上，否则恢复后汇总页的数字接不上
+    expect((rec as { sessionTotal: number }).sessionTotal).toBe(1);
+  });
+
+  it('★ 翻到第 2 题后，记录里的 currentIndex 跟着变', async () => {
+    renderPage();
+    await loaded();
+
+    await userEvent.click(screen.getByRole('button', { name: '跳到第 2 题，未作答' }));
+    expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
+
+    expect((stored() as { currentIndex: number } | null)?.currentIndex).toBe(1);
+  });
+});

@@ -43,6 +43,25 @@ beforeEach(() => {
   // 同步模块级变量（`applyLocale` 写的就是它，见 `i18n/locales.ts`）——
   // 只写 localStorage 不够：`api/client.ts` 读的是那个变量。
   applyLocale('zh-CN', { persist: false });
+
+  /**
+   * 清掉刷题进度记忆（想法 8 阶段 3）
+   *
+   * 与上面钉语言是同一类问题，但**后果更隐蔽**：`useQuizSession` 在装载题目时
+   * 会尝试恢复上次进度（含 `currentIndex` 与已答状态）。若上一个用例留下了
+   * 记录，下一个用例的页面会**直接停在第 N 题**，于是 `findByText('第一题')`
+   * 超时 —— 报错指向"第一题没渲染出来"，而真实原因是"它停在第 3 题"。
+   *
+   * 实测踩到：加了持久化用例之后，同一个文件里**前面 8 条全红**，
+   * 而每条单独跑都绿。
+   *
+   * 键前缀与 `utils/quizSessionMemory.ts` 的 `KEY_PREFIX` 一致；这里写死
+   * 字面量而不是 import 那个常量 —— setup 文件被所有用例加载，
+   * 为一个字符串把它拖进依赖图不划算（那个常量有测试盯着，改了两边一起红）。
+   */
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('engramnote:quiz:v1:')) localStorage.removeItem(key);
+  }
 });
 
 /**

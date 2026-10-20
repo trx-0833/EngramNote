@@ -35,6 +35,7 @@ import type { SubmitAnswerResponse } from '../api/client';
 import { useToast } from '../components/Toast';
 import { useTranslation } from '../i18n';
 import { useSelfRating } from './useSelfRating';
+import { clearQuizSession, loadQuizSession, saveQuizSession } from '../utils/quizSessionMemory';
 
 /** 单题在会话里的状态 */
 export interface QuizSessionItem<TQuiz> {
@@ -56,6 +57,15 @@ interface HasId {
 }
 
 interface UseQuizSessionOptions<TQuiz extends HasId> {
+  /**
+   * 会话标识，用于进度持久化（`utils/quizSessionMemory.ts`）
+   *
+   * 形如 `review` / `quick:<noteId>` / `today`。同一页的不同笔记必须是
+   * 不同的 scope，否则会互相覆盖。
+   *
+   * 不传则**不持久化** —— 刷新后从头开始。
+   */
+  scope?: string;
   /**
    * 提交一次作答。三页各自注入自己的端点。
    *
@@ -103,6 +113,7 @@ interface UseQuizSessionOptions<TQuiz extends HasId> {
 }
 
 export function useQuizSession<TQuiz extends HasId>({
+  scope,
   submit,
   onRated,
   onRateError,
@@ -177,6 +188,18 @@ export function useQuizSession<TQuiz extends HasId>({
     quizByIdRef.current = new Map(quizzes.map((q) => [q.quiz.id, q.quiz]));
   }, [quizzes]);
 
+  /**
+   * 当前题目 id 列表的镜像
+   *
+   * 只给 `clear()` 用：它要按**同一个题目集合**算出同一个键才能删掉记录，
+   * 而 `clear()` 希望保持稳定身份（页面把它放进依赖里）。
+   * 用 effect 维护而不是渲染期写 ref（同上）。
+   */
+  const idsRef = useRef<string[]>([]);
+  useEffect(() => {
+    idsRef.current = quizzes.map((q) => q.quiz.id);
+  }, [quizzes]);
+
   /** 把 API 返回的一批题目变成会话初始状态 */
   const makeItems = useCallback(
     (items: TQuiz[]): QuizSessionItem<TQuiz>[] =>
@@ -191,26 +214,96 @@ export function useQuizSession<TQuiz extends HasId>({
     [],
   );
 
-  /** 灌入/替换整批题目（页面取数成功后调用） */
+  /**
+   * 灌入/替换整批题目（页面取数成功后调用）
+   *
+   * 若传了 `scope`，会尝试恢复上次的进度（见 `utils/quizSessionMemory.ts`）。
+   * 恢复**只在题目集合完全一致时**生效 —— 那个模块用题目 id 的指纹做键，
+   * 集合变了就取不到记录。否则"昨天的第 7 题"会套到"今天的第 7 题"上，
+   * 用户会看到自己的答案出现在一道没做过的题上。
+   */
   const replaceAll = useCallback(
     (items: TQuiz[]) => {
-      setQuizzes(makeItems(items));
+      const fresh = makeItems(items);
+      if (scope && items.length > 0) {
+        const saved = loadQuizSession(
+          scope,
+          items.map((q) => q.id),
+        );
+        if (saved && saved.items.length === fresh.length) {
+          // 逐题按 id 对齐后再采纳：指纹只保证"集合相同"，
+          // 不保证顺序相同（后端排序理论上稳定，但不该依赖它）
+          const byId = new Map(saved.items.map((it) => [it.id, it]));
+          const restored = fresh.map((f) => {
+            const rec = byId.get(f.quiz.id);
+            if (!rec) return f;
+            return {
+              ...f,
+              userAnswer: rec.userAnswer,
+              submitted: rec.submitted,
+              result: rec.result,
+              // 恢复时按"已到过"处理：计时从此刻起算，
+              // 不把刷新前那段空白时间算进去
+              startTime: Date.now(),
+            };
+          });
+          setQuizzes(restored);
+          setCurrentIndex(Math.min(saved.currentIndex, restored.length - 1));
+          setSessionCorrect(saved.sessionCorrect);
+          setSessionTotal(saved.sessionTotal);
+          setCompleted(false);
+          return;
+        }
+      }
+      setQuizzes(fresh);
       setCurrentIndex(0);
       setSessionCorrect(0);
       setSessionTotal(0);
       setCompleted(false);
     },
-    [makeItems],
+    [makeItems, scope],
   );
 
   /** 清空会话（"再复习一轮"取到 0 题时用） */
   const clear = useCallback(() => {
+    if (scope) {
+      clearQuizSession(scope, idsRef.current);
+    }
     setQuizzes([]);
     setCurrentIndex(0);
     setSessionCorrect(0);
     setSessionTotal(0);
     setCompleted(false);
-  }, []);
+  }, [scope]);
+
+  /**
+   * 进度落盘
+   *
+   * 依赖里带上 `currentIndex` / 统计：它们都是"进度"的一部分，
+   * 少了任何一个，刷新后回到的就不是离开时的样子。
+   *
+   * ⚠️ 用 effect 而不是在各处 setState 旁边顺手写一次：那样有 6 个写入点
+   * （提交、自评、翻页、跳题、选答案、清空），漏一个就出现"大部分时候能恢复、
+   * 偶尔不能"这种最难查的形态。
+   */
+  useEffect(() => {
+    if (!scope || quizzes.length === 0) return;
+    saveQuizSession(
+      scope,
+      quizzes.map((q) => q.quiz.id),
+      {
+        currentIndex,
+        sessionTotal,
+        sessionCorrect,
+        items: quizzes.map((q) => ({
+          id: q.quiz.id,
+          userAnswer: q.userAnswer,
+          submitted: q.submitted,
+          result: q.result,
+        })),
+      },
+    );
+  }, [scope, quizzes, currentIndex, sessionTotal, sessionCorrect]);
 
   /**
    * 自评成功：回填结果 + 累加统计 + 交给页面做额外动作

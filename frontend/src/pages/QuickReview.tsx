@@ -47,7 +47,12 @@ export default function QuickReview() {
     [noteId],
   );
 
-  const session = useQuizSession<QuickQuiz>({ submit });
+  const session = useQuizSession<QuickQuiz>({
+    // 进度持久化：**必须带 noteId** —— 不同笔记是不同会话，
+    // 共用一个 scope 会让它们互相覆盖
+    scope: `quick:${noteId ?? ''}`,
+    submit,
+  });
   const {
     quizzes,
     currentIndex,

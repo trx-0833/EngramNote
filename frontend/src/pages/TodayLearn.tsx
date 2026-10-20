@@ -115,6 +115,8 @@ export default function TodayLearn() {
   );
 
   const session = useQuizSession<DueQuiz>({
+    // 进度持久化：刷新后回到离开时的那一题（想法 8 阶段 3）
+    scope: 'today',
     submit,
     onSubmitted: refreshStats,
     onRated: refreshStats,
