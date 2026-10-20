@@ -423,6 +423,51 @@ const zhCN = {
     later: '稍后',
     goReview: '去复习',
   },
+
+  /**
+   * 清洗面板（`CleaningPanel`，i18n 阶段 3）
+   *
+   * ⚠️ `cleaning.*` 与后端错误码 `CLEANING_*` **不是一回事**：
+   * 前者是面板自己的界面文案，后者是 API 返回的错误码文案
+   * （在 `backend/app/core/error_messages.py` 里，按 `Accept-Language` 翻译）。
+   * 两者都叫"清洗"，但住在不同的层，改一处不会带动另一处。
+   */
+  cleaning: {
+    triggerFailed: '触发清洗失败',
+    stopFailed: '停止清洗失败',
+    restoreFailed: '恢复失败',
+    deleteFailed: '删除失败',
+    readyHint: '笔记已转换完成，可以开始 AI 清洗',
+    triggering: '正在触发...',
+    start: '开始清洗',
+    inProgress: '正在进行 AI 清洗，请稍候...',
+    stopping: '正在停止...',
+    stop: '停止清洗',
+    failed: '清洗失败',
+    reclean: '重新清洗',
+    stats: '清洗统计',
+    totalChunks: '总分块',
+    duplicateBlocks: '重复块',
+    emptyLinesRemoved: '去空行',
+    headersFootersRemoved: '去页眉页脚',
+    watermarksRemoved: '去水印',
+    duplicateBlocksCount: '重复块（{count} 个）',
+    blockIndex: '块 {index}',
+    similarToBlock: '与块 {index} 相似度 {percent}%',
+    collapseContent: '收起内容',
+    viewContent: '查看内容',
+    restore: '恢复',
+    delete: '删除',
+    originalBlock: '保留的块 {index}（首次出现）',
+    duplicateBlock: '重复的块 {index}',
+    contentMissing: '（内容缺失）',
+    legacyNoBlockContent: '该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看',
+    noDuplicates: '未检测到重复内容',
+    stopConfirm: '确定停止清洗？',
+    stopImpact: '当前进度将丢失。',
+    deleteBlockConfirm: '确定删除块 {index}？',
+    deleteBlockImpact: '此操作不可恢复。',
+  },
 };
 
 export default zhCN;

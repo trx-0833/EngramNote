@@ -22,6 +22,7 @@ import TaskProgress from './TaskProgress';
 import ConfirmDialog from './ConfirmDialog';
 // 清洗面板样式（overhaul-plan 5.6）：原 src/styles/cleaning.css 整表迁到这里
 import styles from './CleaningPanel.module.css';
+import { useTranslation } from '../i18n';
 
 interface DuplicateBlock {
   block_index: number;
@@ -55,6 +56,7 @@ export default function CleaningPanel({
   onStatusChange,
   onMutatingChange,
 }: CleaningPanelProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   /** 当前展开内容对比的重复块索引（null 表示全部收起） */
@@ -105,7 +107,7 @@ export default function CleaningPanel({
       await startCleaning(note.id);
       onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '触发清洗失败');
+      setError(err instanceof Error ? err.message : t('cleaning.triggerFailed'));
     } finally {
       setLoading(false);
     }
@@ -122,7 +124,7 @@ export default function CleaningPanel({
       await stopCleaning(note.id);
       onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '停止清洗失败');
+      setError(err instanceof Error ? err.message : t('cleaning.stopFailed'));
     } finally {
       setLoading(false);
     }
@@ -142,7 +144,7 @@ export default function CleaningPanel({
       await restoreBlock(note.id, blockIndex);
       onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复失败');
+      setError(err instanceof Error ? err.message : t('cleaning.restoreFailed'));
     } finally {
       setLoading(false);
       onMutatingChange?.(false);
@@ -163,7 +165,7 @@ export default function CleaningPanel({
       await deleteBlock(note.id, blockIndex);
       onStatusChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      setError(err instanceof Error ? err.message : t('cleaning.deleteFailed'));
     } finally {
       setLoading(false);
       onMutatingChange?.(false);
@@ -208,10 +210,10 @@ export default function CleaningPanel({
               fontSize: '0.875rem',
             }}
           >
-            笔记已转换完成，可以开始 AI 清洗
+            {t('cleaning.readyHint')}
           </p>
           <button className="btn btn-primary" onClick={handleStartCleaning} disabled={loading}>
-            {loading ? '正在触发...' : '开始清洗'}
+            {loading ? t('cleaning.triggering') : t('cleaning.start')}
           </button>
         </div>
       )}
@@ -225,7 +227,7 @@ export default function CleaningPanel({
         <div style={{ padding: 'var(--space-md)' }}>
           <TaskProgress
             noteId={note.id}
-            fallbackText="正在进行 AI 清洗，请稍候..."
+            fallbackText={t('cleaning.inProgress')}
             allowCancel={false}
             onCancelled={onStatusChange}
           />
@@ -236,7 +238,7 @@ export default function CleaningPanel({
               onClick={handleStopCleaning}
               disabled={loading}
             >
-              {loading ? '正在停止...' : '停止清洗'}
+              {loading ? t('cleaning.stopping') : t('cleaning.stop')}
             </button>
           </div>
         </div>
@@ -252,10 +254,11 @@ export default function CleaningPanel({
               fontSize: '0.875rem',
             }}
           >
-            清洗失败{note.error_message ? `：${note.error_message}` : ''}
+            {t('cleaning.failed')}
+            {note.error_message ? `：${note.error_message}` : ''}
           </p>
           <button className="btn btn-primary" onClick={handleStartCleaning} disabled={loading}>
-            {loading ? '正在触发...' : '重新清洗'}
+            {loading ? t('cleaning.triggering') : t('cleaning.reclean')}
           </button>
         </div>
       )}
@@ -274,7 +277,7 @@ export default function CleaningPanel({
                 字号 0.875rem / 字重 600 本来就显式钉着，所以**一个像素都没动**
                 （与 F-18 / F-14/F-15 / trash / card-detail 的做法逐字相同）。 */}
             <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-              清洗统计
+              {t('cleaning.stats')}
             </h2>
             <div
               style={{
@@ -284,13 +287,23 @@ export default function CleaningPanel({
                 color: 'var(--color-text-secondary)',
               }}
             >
-              <span>总分块: {totalChunks}</span>
-              <span>重复块: {duplicateBlocks}</span>
+              <span>
+                {t('cleaning.totalChunks')}: {totalChunks}
+              </span>
+              <span>
+                {t('cleaning.duplicateBlocks')}: {duplicateBlocks}
+              </span>
               {cleanStats && (
                 <>
-                  <span>去空行: {cleanStats.empty_lines_removed || 0}</span>
-                  <span>去页眉页脚: {cleanStats.headers_footers_removed || 0}</span>
-                  <span>去水印: {cleanStats.watermarks_removed || 0}</span>
+                  <span>
+                    {t('cleaning.emptyLinesRemoved')}: {cleanStats.empty_lines_removed || 0}
+                  </span>
+                  <span>
+                    {t('cleaning.headersFootersRemoved')}: {cleanStats.headers_footers_removed || 0}
+                  </span>
+                  <span>
+                    {t('cleaning.watermarksRemoved')}: {cleanStats.watermarks_removed || 0}
+                  </span>
                 </>
               )}
             </div>
@@ -304,7 +317,7 @@ export default function CleaningPanel({
               onClick={handleStartCleaning}
               disabled={loading}
             >
-              {loading ? '正在触发...' : '重新清洗'}
+              {loading ? t('cleaning.triggering') : t('cleaning.reclean')}
             </button>
           </div>
 
@@ -349,7 +362,9 @@ export default function CleaningPanel({
                   >
                     <Icon name="chevron" size={16} />
                   </span>
-                  <span>重复块（{duplicatesDetail.length} 个）</span>
+                  <span>
+                    {t('cleaning.duplicateBlocksCount', { count: duplicatesDetail.length })}
+                  </span>
                 </button>
               </h2>
 
@@ -364,9 +379,14 @@ export default function CleaningPanel({
                       <div key={dup.block_index} className={styles.duplicateBlock}>
                         <div className={styles.duplicateBlockHeader}>
                           <div className={styles.duplicateBlockInfo}>
-                            <span className={styles.duplicateBlockIndex}>块 {dup.block_index}</span>
+                            <span className={styles.duplicateBlockIndex}>
+                              {t('cleaning.blockIndex', { index: dup.block_index })}
+                            </span>
                             <span className={styles.duplicateBlockSimilarity}>
-                              与块 {dup.duplicate_of} 相似度 {(dup.similarity * 100).toFixed(1)}%
+                              {t('cleaning.similarToBlock', {
+                                index: dup.duplicate_of,
+                                percent: (dup.similarity * 100).toFixed(1),
+                              })}
                             </span>
                           </div>
                           <div className={styles.duplicateBlockActions}>
@@ -376,7 +396,7 @@ export default function CleaningPanel({
                               onClick={() => setExpandedIndex(expanded ? null : dup.block_index)}
                               disabled={loading}
                             >
-                              {expanded ? '收起内容' : '查看内容'}
+                              {expanded ? t('cleaning.collapseContent') : t('cleaning.viewContent')}
                             </button>
                             <button
                               className="btn btn-secondary"
@@ -384,7 +404,7 @@ export default function CleaningPanel({
                               onClick={() => handleRestore(dup.block_index)}
                               disabled={loading}
                             >
-                              恢复
+                              {t('cleaning.restore')}
                             </button>
                             <button
                               className="btn btn-danger"
@@ -394,7 +414,7 @@ export default function CleaningPanel({
                             >
                               {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
                               <Icon name="delete" size={16} />
-                              删除
+                              {t('cleaning.delete')}
                             </button>
                           </div>
                         </div>
@@ -410,24 +430,24 @@ export default function CleaningPanel({
                                 嵌套保留：删掉它会改变 DOM 层级，那超出"纯搬家"。 */}
                                 <div>
                                   <div className={styles.duplicateBlockTextLabel}>
-                                    保留的块 {dup.duplicate_of}（首次出现）
+                                    {t('cleaning.originalBlock', { index: dup.duplicate_of })}
                                   </div>
                                   <pre className={styles.duplicateBlockTextContent}>
-                                    {dup.original_content || '（内容缺失）'}
+                                    {dup.original_content || t('cleaning.contentMissing')}
                                   </pre>
                                 </div>
                                 <div>
                                   <div className={styles.duplicateBlockTextLabel}>
-                                    重复的块 {dup.block_index}
+                                    {t('cleaning.duplicateBlock', { index: dup.block_index })}
                                   </div>
                                   <pre className={styles.duplicateBlockTextContent}>
-                                    {dup.content || '（内容缺失）'}
+                                    {dup.content || t('cleaning.contentMissing')}
                                   </pre>
                                 </div>
                               </>
                             ) : (
                               <p className={styles.duplicateBlockTextEmpty}>
-                                该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看
+                                {t('cleaning.legacyNoBlockContent')}
                               </p>
                             )}
                           </div>
@@ -448,7 +468,7 @@ export default function CleaningPanel({
                 textAlign: 'center',
               }}
             >
-              未检测到重复内容
+              {t('cleaning.noDuplicates')}
             </p>
           )}
         </>
@@ -463,9 +483,9 @@ export default function CleaningPanel({
       {/* ① 停止清洗 */}
       <ConfirmDialog
         open={confirmingStop}
-        title="确定停止清洗？"
-        message="当前进度将丢失。"
-        confirmText="停止清洗"
+        title={t('cleaning.stopConfirm')}
+        message={t('cleaning.stopImpact')}
+        confirmText={t('cleaning.stop')}
         danger
         onConfirm={() => {
           setConfirmingStop(false);
@@ -477,9 +497,9 @@ export default function CleaningPanel({
       {/* ② 删除重复块。`block_index` 进标题（原来就是插值进 `confirm()` 文案的） */}
       <ConfirmDialog
         open={confirmDeleteIndex !== null}
-        title={`确定删除块 ${confirmDeleteIndex ?? ''}？`}
-        message="此操作不可恢复。"
-        confirmText="删除"
+        title={t('cleaning.deleteBlockConfirm', { index: confirmDeleteIndex ?? '' })}
+        message={t('cleaning.deleteBlockImpact')}
+        confirmText={t('cleaning.delete')}
         danger
         onConfirm={() => {
           const blockIndex = confirmDeleteIndex;
