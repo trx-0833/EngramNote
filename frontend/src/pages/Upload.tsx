@@ -22,6 +22,7 @@ import styles from './Upload.module.css';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
 import Icon from '../components/Icon';
+import { useTranslation } from '../i18n';
 
 /** 允许上传的文件扩展名列表，与后端支持的格式保持一致 */
 const ALLOWED_EXTENSIONS = [
@@ -41,15 +42,15 @@ const ALLOWED_EXTENSIONS = [
 
 /** 解析后端选项 */
 const BACKEND_OPTIONS = [
-  { value: '', label: '自动', description: '使用后端默认配置' },
-  { value: 'pipeline', label: '本地解析', description: '使用本地模型解析（需要本地环境支持）' },
-  { value: 'vlm-http-client', label: '云端解析', description: '使用云端API解析（需要API Token）' },
+  { value: '', labelKey: 'upload.parseAuto', descKey: 'upload.parseAutoHint' },
+  { value: 'pipeline', labelKey: 'upload.parseLocal', descKey: 'upload.parseLocalHint' },
+  { value: 'vlm-http-client', labelKey: 'upload.parseCloud', descKey: 'upload.parseCloudHint' },
 ] as const;
 
 /** 笔记角色选项 */
 const NOTE_ROLE_OPTIONS = [
-  { value: 'material', label: '学习资料' },
-  { value: 'personal_note', label: '我的笔记' },
+  { value: 'material', labelKey: 'labels.noteRole.material' },
+  { value: 'personal_note', labelKey: 'labels.noteRole.personal_note' },
 ] as const;
 
 /**
@@ -69,6 +70,7 @@ const NOTE_ROLE_OPTIONS = [
  * - status: 当前处理状态文本，用于界面展示
  */
 export default function Upload() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   /** 隐藏的文件输入框引用，用于点击上传区域时触发文件选择 */
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,7 +161,7 @@ export default function Upload() {
     // 提取文件扩展名并校验格式
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setError(`不支持的文件格式: ${ext}`);
+      setError(t('upload.unsupportedFormat', { ext }));
       return;
     }
 
@@ -170,7 +172,7 @@ export default function Upload() {
     setCropPageRange('');
     setPrepared(null);
     setUploading(true);
-    setStatus('上传中...');
+    setStatus(t('upload.uploading'));
 
     try {
       // 阶段 1：暂存文件，获取页数等信息
@@ -181,7 +183,7 @@ export default function Upload() {
       setUploading(false);
       setStatus(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败');
+      setError(err instanceof Error ? err.message : t('upload.uploadFailed'));
       setUploading(false);
     }
   }
@@ -195,22 +197,22 @@ export default function Upload() {
    */
   function validatePageSpec(spec: string, pageCount: number): string {
     const trimmed = spec.trim();
-    if (!trimmed) return '页码范围不能为空';
+    if (!trimmed) return t('upload.cropRangeEmpty');
     const items = trimmed.split(',');
     const pageRangeRe = /^(\d+)(?:-(\d+))?$/;
     const pages: number[] = [];
     for (const item of items) {
       const match = pageRangeRe.exec(item.trim());
-      if (!match) return `无效的页码范围: ${item.trim()}`;
+      if (!match) return t('upload.cropRangeInvalid', { item: item.trim() });
       const start = parseInt(match[1], 10);
       const end = match[2] !== undefined ? parseInt(match[2], 10) : start;
-      if (start < 1 || end < 1) return `页码必须从 1 开始: ${item.trim()}`;
+      if (start < 1 || end < 1) return t('upload.cropRangeStartFromOne', { item: item.trim() });
       if (start > pageCount || end > pageCount)
-        return `页码超出范围（文档共 ${pageCount} 页）: ${item.trim()}`;
-      if (start > end) return `区间起始页不能大于结束页: ${item.trim()}`;
+        return t('upload.cropRangeOutOfBounds', { count: pageCount, item: item.trim() });
+      if (start > end) return t('upload.cropRangeOrder', { item: item.trim() });
       for (let p = start; p <= end; p++) pages.push(p);
     }
-    if (pages.length === 0) return '页码范围不能为空';
+    if (pages.length === 0) return t('upload.cropRangeEmpty');
     return '';
   }
 
@@ -225,9 +227,9 @@ export default function Upload() {
    */
   function validateRename(name: string, originalFilename: string): { name: string; error: string } {
     const trimmed = name.trim();
-    if (!trimmed) return { name: '', error: '文件名不能为空' };
+    if (!trimmed) return { name: '', error: t('upload.fileNameRequired') };
     if (trimmed.includes('/') || trimmed.includes('\\')) {
-      return { name: '', error: '文件名不能包含路径分隔符' };
+      return { name: '', error: t('upload.fileNameNoSeparator') };
     }
     const dotIndex = originalFilename.lastIndexOf('.');
     const ext = dotIndex >= 0 ? originalFilename.slice(dotIndex) : '';
@@ -271,7 +273,7 @@ export default function Upload() {
   async function commitPrepared(tempId: string, cropRange: string | undefined, finalName: string) {
     setError('');
     setUploading(true);
-    setStatus('上传中...');
+    setStatus(t('upload.uploading'));
 
     try {
       const note = await commitUpload(tempId, {
@@ -284,12 +286,12 @@ export default function Upload() {
       });
       setNoteId(note.id);
       setPrepared(null);
-      setStatus('文件已上传，正在转换...');
+      setStatus(t('upload.uploadedConverting'));
 
       // 开始轮询转换状态
       pollStatus(note.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败');
+      setError(err instanceof Error ? err.message : t('upload.uploadFailed'));
       setUploading(false);
     }
   }
@@ -316,13 +318,13 @@ export default function Upload() {
       let isTerminal = false;
       try {
         const res = await getUploadStatus(id);
-        setStatus(`状态: ${res.status}`);
+        setStatus(t('upload.convertingStatus', { status: res.status }));
 
         // 成功终态
         if (res.status === 'converted' || res.status === 'cleaned' || res.status === 'archived') {
           isTerminal = true;
           setUploading(false);
-          setStatus('转换完成！');
+          setStatus(t('upload.convertDone'));
           // 延迟 1 秒后自动跳转到笔记详情页
           setTimeout(() => navigate(`/notes/${id}`), 1000);
         } else if (
@@ -333,7 +335,7 @@ export default function Upload() {
           // 补全失败终态（旧实现漏掉 cleaning_failed/learning_failed，会空转到超时），见 docs/decisions.md#F-15
           isTerminal = true;
           setUploading(false);
-          setError(res.error_message || `处理失败（${res.status}）`);
+          setError(res.error_message || t('upload.processFailed', { status: res.status }));
         }
       } catch {
         // 轮询过程中的网络错误，继续尝试
@@ -345,7 +347,7 @@ export default function Upload() {
       if (attempts >= maxAttempts) {
         // 超时处理
         setUploading(false);
-        setError('处理超时，请稍后在笔记列表中查看');
+        setError(t('upload.processTimeout'));
         return;
       }
       // 递归调度下一次（等本次完成后再计时，避免重叠）
@@ -402,7 +404,7 @@ export default function Upload() {
        居中由 `App.module.css` 的 `.main` 负责，这一条是 C2 之前自己居中的遗留。 */
     <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
-      <PageHeader title="上传学习资料" />
+      <PageHeader title={t('upload.title')} />
 
       {/* 拖拽上传区：支持点击和拖拽两种方式。
           ⚠️ 原来这里整个容器是 `div[role="button"][tabIndex=0]` + 一个只认 `Enter`
@@ -421,7 +423,7 @@ export default function Upload() {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
-        aria-label="点击或拖拽文件上传"
+        aria-label={t('upload.dropZoneLabel')}
         style={{
           display: 'block',
           width: '100%',
@@ -451,12 +453,12 @@ export default function Upload() {
             marginBottom: 'var(--space-sm)',
           }}
         >
-          {uploading ? '处理中...' : '点击或拖拽文件到此处'}
+          {uploading ? t('upload.dropZoneBusy') : t('upload.dropZoneIdle')}
         </span>
         <span
           style={{ display: 'block', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}
         >
-          支持 PDF、图片、Office 文档、音视频、Markdown 文件
+          {t('upload.supportedFormats')}
         </span>
         {/* 显示所有支持的文件扩展名 */}
         <span
@@ -486,7 +488,9 @@ export default function Upload() {
       {prepared && (
         <div className={`card ${styles.uploadPanel}`}>
           <p className={styles.uploadPanelTitle}>
-            上传设置{prepared.source_type === 'pdf' && `（共 ${prepared.page_count ?? '?'} 页）`}
+            {prepared.source_type === 'pdf'
+              ? t('upload.settingsPdf', { count: prepared.page_count ?? '?' })
+              : t('upload.settings')}
           </p>
 
           {/* 文件名（可修改） */}
@@ -497,7 +501,7 @@ export default function Upload() {
               marginBottom: 'var(--space-xs)',
             }}
           >
-            文件名
+            {t('upload.fileName')}
           </p>
           <input
             type="text"
@@ -514,7 +518,7 @@ export default function Upload() {
               border: `1px solid ${renameError ? 'var(--color-error)' : 'var(--color-border)'}`,
               marginBottom: 'var(--space-xs)',
             }}
-            aria-label="文件名"
+            aria-label={t('upload.fileName')}
           />
           {renameError && (
             <p
@@ -540,7 +544,7 @@ export default function Upload() {
                   marginTop: 'var(--space-sm)',
                 }}
               >
-                按页裁剪（可选）：只保留需要的页码范围，其余页面在上传处理前剔除。
+                {t('upload.cropHint')}
               </p>
               <input
                 type="text"
@@ -549,7 +553,7 @@ export default function Upload() {
                   setCropPageRange(e.target.value);
                   setCropError('');
                 }}
-                placeholder="如 1-20,25,30-32"
+                placeholder={t('upload.cropPlaceholder')}
                 disabled={uploading}
                 style={{
                   width: '100%',
@@ -557,7 +561,7 @@ export default function Upload() {
                   borderRadius: 'var(--radius-sm)',
                   border: `1px solid ${cropError ? 'var(--color-error)' : 'var(--color-border)'}`,
                 }}
-                aria-label="页码范围"
+                aria-label={t('upload.cropRangeLabel')}
               />
               {cropError && (
                 <p
@@ -589,14 +593,14 @@ export default function Upload() {
                   disabled={uploading}
                   onClick={() => confirmUpload(undefined)}
                 >
-                  不裁剪，直接上传
+                  {t('upload.cropSkip')}
                 </button>
                 <button
                   className="btn btn-primary"
                   disabled={uploading}
                   onClick={() => confirmUpload(cropPageRange)}
                 >
-                  裁剪后上传
+                  {t('upload.cropApply')}
                 </button>
               </>
             ) : (
@@ -605,7 +609,7 @@ export default function Upload() {
                 disabled={uploading}
                 onClick={() => confirmUpload(undefined)}
               >
-                确认上传
+                {t('upload.confirmUpload')}
               </button>
             )}
           </div>
@@ -614,7 +618,7 @@ export default function Upload() {
 
       {/* 解析方式选择 */}
       <div className={`card ${styles.uploadPanel}`}>
-        <p className={styles.uploadPanelTitle}>解析方式</p>
+        <p className={styles.uploadPanelTitle}>{t('upload.parseMode')}</p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           {BACKEND_OPTIONS.map((option) => (
             <button
@@ -622,9 +626,9 @@ export default function Upload() {
               className={`filter-pill${parseBackend === option.value ? ' filter-pill-active' : ''}`}
               onClick={() => setParseBackend(option.value)}
               disabled={uploading}
-              title={option.description}
+              title={t(option.descKey)}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>
@@ -635,13 +639,16 @@ export default function Upload() {
             marginTop: 'var(--space-xs)',
           }}
         >
-          {BACKEND_OPTIONS.find((o) => o.value === parseBackend)?.description}
+          {(() => {
+            const opt = BACKEND_OPTIONS.find((o) => o.value === parseBackend);
+            return opt ? t(opt.descKey) : null;
+          })()}
         </p>
       </div>
 
       {/* 项目标签选择（支持多选） */}
       <div className={`card ${styles.uploadPanel}`}>
-        <p className={styles.uploadPanelTitle}>所属项目（标签，可多选）</p>
+        <p className={styles.uploadPanelTitle}>{t('upload.projects')}</p>
         {projects.length > 0 ? (
           <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
             {projects.map((project) => {
@@ -665,7 +672,7 @@ export default function Upload() {
           </div>
         ) : (
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-            暂无项目，可先不选择或稍后创建。
+            {t('upload.noProjects')}
           </p>
         )}
         <p
@@ -675,13 +682,13 @@ export default function Upload() {
             marginTop: 'var(--space-xs)',
           }}
         >
-          一篇笔记可归属多个项目（标签）；不选择则稍后可在「项目」页面添加。
+          {t('upload.projectsHint')}
         </p>
       </div>
 
       {/* 笔记角色选择 */}
       <div className={`card ${styles.uploadPanel}`}>
-        <p className={styles.uploadPanelTitle}>笔记类型</p>
+        <p className={styles.uploadPanelTitle}>{t('upload.noteType')}</p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           {NOTE_ROLE_OPTIONS.map((option) => (
             <button
@@ -690,7 +697,7 @@ export default function Upload() {
               onClick={() => setNoteRole(option.value)}
               disabled={uploading}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>
@@ -699,7 +706,7 @@ export default function Upload() {
       {/* 关联学习资料（仅 personal_note 时显示） */}
       {noteRole === 'personal_note' && availableMaterials.length > 0 && (
         <div className={`card ${styles.uploadPanel}`}>
-          <p className={styles.uploadPanelTitle}>关联学习资料（可选）</p>
+          <p className={styles.uploadPanelTitle}>{t('upload.relatedMaterials')}</p>
           <div
             style={{
               display: 'flex',
@@ -758,7 +765,7 @@ export default function Upload() {
       {noteId && !uploading && !error && (
         <div style={{ marginTop: 'var(--space-md)', textAlign: 'center' }}>
           <button className="btn btn-primary" onClick={() => navigate(`/notes/${noteId}`)}>
-            查看笔记
+            {t('upload.viewNote')}
           </button>
         </div>
       )}

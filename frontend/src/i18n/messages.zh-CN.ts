@@ -549,6 +549,60 @@ const zhCN = {
     cancel: '取消',
     emptyAction: '清空',
   },
+
+  /** 上传页（`Upload`，i18n 阶段 3） */
+  upload: {
+    title: '上传学习资料',
+    dropZoneLabel: '点击或拖拽文件上传',
+    dropZoneIdle: '点击或拖拽文件到此处',
+    dropZoneBusy: '处理中...',
+    supportedFormats: '支持 PDF、图片、Office 文档、音视频、Markdown 文件',
+    // ---- 上传设置 ----
+    settings: '上传设置',
+    settingsPdf: '上传设置（共 {count} 页）',
+    fileName: '文件名',
+    fileNameRequired: '文件名不能为空',
+    fileNameNoSeparator: '文件名不能包含路径分隔符',
+    // ---- PDF 裁剪 ----
+    cropHint: '按页裁剪（可选）：只保留需要的页码范围，其余页面在上传处理前剔除。',
+    cropPlaceholder: '如 1-20,25,30-32',
+    cropRangeLabel: '页码范围',
+    cropSkip: '不裁剪，直接上传',
+    cropApply: '裁剪后上传',
+    cropRangeEmpty: '页码范围不能为空',
+    cropRangeInvalid: '无效的页码范围: {item}',
+    cropRangeStartFromOne: '页码必须从 1 开始: {item}',
+    cropRangeOutOfBounds: '页码超出范围（文档共 {count} 页）: {item}',
+    cropRangeOrder: '区间起始页不能大于结束页: {item}',
+    confirmUpload: '确认上传',
+    // ---- 解析方式 ----
+    parseMode: '解析方式',
+    parseAuto: '自动',
+    parseAutoHint: '使用后端默认配置',
+    parseLocal: '本地解析',
+    parseLocalHint: '使用本地模型解析（需要本地环境支持）',
+    parseCloud: '云端解析',
+    parseCloudHint: '使用云端API解析（需要API Token）',
+    // ---- 所属项目 ----
+    projects: '所属项目（标签，可多选）',
+    noProjects: '暂无项目，可先不选择或稍后创建。',
+    projectsHint: '一篇笔记可归属多个项目（标签）；不选择则稍后可在「项目」页面添加。',
+    // ---- 笔记类型与关联 ----
+    noteType: '笔记类型',
+    noteTypeMaterial: '学习资料',
+    noteTypePersonal: '我的笔记',
+    relatedMaterials: '关联学习资料（可选）',
+    // ---- 状态与错误 ----
+    uploading: '上传中...',
+    uploadFailed: '上传失败',
+    uploadedConverting: '文件已上传，正在转换...',
+    convertingStatus: '状态: {status}',
+    convertDone: '转换完成！',
+    processFailed: '处理失败（{status}）',
+    processTimeout: '处理超时，请稍后在笔记列表中查看',
+    unsupportedFormat: '不支持的文件格式: {ext}',
+    viewNote: '查看笔记',
+  },
 };
 
 export default zhCN;
