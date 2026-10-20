@@ -9,6 +9,9 @@
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://react.dev)
 [![CI](https://github.com/trx-0833/EngramNote/actions/workflows/ci.yml/badge.svg)](https://github.com/trx-0833/EngramNote/actions/workflows/ci.yml)
 
+> **🌐 English: [README.en.md](README.en.md)** —— 英文入口（覆盖安装、运行、
+> 技术栈与 i18n 架构；**仓库内的 `docs/` 与代码注释仍为中文**，见那里的说明）。
+
 > **文档校准（2026-09-23）**：本次 README 重写**以代码实测为准**，逐条更正了此前的错误陈述 ——
 > 包括**调度算法（实际是 FSRS-5，SM-2 只是可回退路径）**、**检索路数（两路，n-gram 通道已删除）**、
 > **RRF 参数（k=1、BM25 权重 0.65）**、**每日复习上限（10）**、
