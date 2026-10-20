@@ -22,6 +22,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelTask, isTerminal, listNoteTasks, type TaskRun } from '../api/tasks';
+import { useTranslation } from '../i18n';
 
 /** 轮询间隔：进度条不需要更实时，2 秒足够让用户看到"在动" */
 const POLL_INTERVAL_MS = 2000;
@@ -44,10 +45,16 @@ interface Props {
 
 export default function TaskProgress({
   noteId,
-  fallbackText = '处理中，请稍候...',
+  fallbackText,
   onCancelled,
   allowCancel = true,
 }: Props) {
+  const { t } = useTranslation();
+  // ⚠️ `fallbackText` 的默认值**不能**写在参数解构里
+  // （原来写的是 `fallbackText = '处理中，请稍候...'`，改文案时自然想写成
+  // `= t('shared.taskProcessing')`）—— 解构默认值在**组件体外**求值，
+  // 取不到 hook，语言切换时它也不会变。改成体内 `??` 才是对的。
+  const fallback = fallbackText ?? t('shared.taskProcessing');
   const [run, setRun] = useState<TaskRun | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
@@ -99,13 +106,13 @@ export default function TaskProgress({
     try {
       const result = await cancelTask(run.task_id);
       setCancelNotice(
-        result.terminated
-          ? '已取消。'
-          : '已请求取消：任务会在下一个阶段边界退出（正在进行的这一步不会中断）。',
+        result.terminated ? t('shared.taskCancelled') : t('shared.taskCancelRequested'),
       );
       onCancelled?.();
     } catch (err) {
-      setCancelNotice(err instanceof Error ? `取消失败：${err.message}` : '取消失败，请重试。');
+      setCancelNotice(
+        err instanceof Error ? `取消失败：${err.message}` : t('shared.taskCancelFailed'),
+      );
     } finally {
       setCancelling(false);
     }
@@ -115,14 +122,15 @@ export default function TaskProgress({
   if (unavailable || !run) {
     return (
       <p style={{ color: 'var(--color-warning)', margin: 0 }} data-testid="task-progress-fallback">
-        {fallbackText}
+        {fallback}
       </p>
     );
   }
 
   const percent = Math.round(Math.max(0, Math.min(1, run.progress)) * 100);
   const terminal = isTerminal(run.status);
-  const stageText = run.stage || (terminal ? '已结束' : '处理中');
+  const stageText =
+    run.stage || (terminal ? t('shared.taskFinished') : t('shared.taskProcessingShort'));
 
   return (
     <div data-testid="task-progress" style={{ textAlign: 'left' }}>
@@ -148,7 +156,7 @@ export default function TaskProgress({
       <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center', marginTop: 10 }}>
         {!terminal && allowCancel && (
           <button className="btn btn-secondary" onClick={handleCancel} disabled={cancelling}>
-            {cancelling ? '正在取消...' : '取消任务'}
+            {cancelling ? t('shared.taskCancelling') : t('shared.taskCancel')}
           </button>
         )}
         {run.attempt > 1 && (

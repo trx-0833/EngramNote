@@ -340,6 +340,10 @@ const zhCN = {
     preview: '预览',
     restoreThisVersion: '恢复此版本',
     versionsIdentical: '两个版本完全相同，没有差异。',
+    /** 版本历史里的"选择两个版本进行对比"提示 */
+    selectTwoToCompare: '选择两个版本进行对比（已选 {count}/2）',
+    versionCompare: '版本对比: v{v1} → v{v2}',
+    versionPreview: '版本内容预览 (v{version})',
     // ---- 内容区与关联 ----
     citedBy: '被以下笔记引用',
     relatedMaterials: '关联的学习资料',
@@ -371,8 +375,7 @@ const zhCN = {
     // ---- 任务进度 ----
     taskProcessing: '处理中，请稍候...',
     taskCancelled: '已取消。',
-    taskCancelRequested:
-      '已请求取消：任务会在下一个阶段边界退出（正在进行的这一步不会中断）。',
+    taskCancelRequested: '已请求取消：任务会在下一个阶段边界退出（正在进行的这一步不会中断）。',
     taskCancelFailed: '取消失败，请重试。',
     taskFinished: '已结束',
     taskProcessingShort: '处理中',
@@ -383,6 +386,9 @@ const zhCN = {
     diffOriginal: '原始版',
     diffClean: '清洗版',
     diffContent: '内容',
+    /** `{label}` 传的是「原始版」或「清洗版」的**已翻译**文案 */
+    diffLineCount: '{label} {count} 行',
+    diffBlockCount: '{count} 处差异',
     // ---- 删除笔记对话框 ----
     moveToTrash: '移入回收站',
     purgeForever: '彻底删除',
@@ -391,9 +397,17 @@ const zhCN = {
     knowledgeCards: '知识卡片',
     coreCards: '核心卡片',
     bidirectionalLinks: '双向链接',
+    moveToTrashConfirm: '确定将「{title}」移入回收站吗？',
+    moveToTrashLinked:
+      '该笔记与 {cards} 张知识卡片、{links} 个原始资料存在双向链接。移入回收站后，这些关联将暂不可见，但不影响其他笔记的引用。笔记及其全部内容（卡片、题目、复习记录）将作为整体保存，可随时在回收站中恢复。',
     moveToTrashImpact: '笔记及其全部内容（卡片、题目、复习记录）将作为整体移入回收站，可随时恢复。',
+    purgeConfirm: '确定彻底删除「{title}」吗？此操作',
     irreversible: '不可恢复',
+    purgeImpact:
+      '笔记及其卡片、题目、复习记录将被永久删除。其他笔记对该笔记的引用将以「[已删除的笔记]」占位符保留，不会破坏其他笔记的内容结构。',
     promoteCoreCards: '高级选项：将本笔记中的核心卡片自动提升为独立节点',
+    promoteCoreCardsHint:
+      '勾选后，标记为核心（is_key_point）的卡片在知识图谱中依然存活，不会因父级笔记删除而变成信息孤岛。',
     // ---- 复习提醒 ----
     reviewReminder: '复习提醒',
     dueForReview: '你有 {count} 个题目待复习',

@@ -22,6 +22,7 @@ import {
 import ConfirmDialog from './ConfirmDialog';
 // 对话框基座（批次 D2）：版本历史面板的遮罩 / 面板 / Esc / 焦点陷阱由它渲染
 import Dialog from './Dialog';
+import { useTranslation, type MessageKey } from '../i18n';
 
 interface VersionHistoryProps {
   /** 笔记 ID */
@@ -32,18 +33,31 @@ interface VersionHistoryProps {
   onRestored: () => void;
 }
 
-/** 来源徽章配置：标签 + 背景色 */
-function getSourceBadge(source: string): { label: string; bg: string } {
+/**
+ * 来源徽章配置：标签 + 背景色
+ *
+ * ## ⚠️ i18n 阶段 3：多了一个 `t` 参数
+ *
+ * 标签文案现在来自消息表（`labels.versionSource.*`），而本函数是**模块级函数**
+ * —— 调不了 hook（`useTranslation()` 只能在组件里调）。所以由调用方把 `t` 传进来。
+ *
+ * 这与 `SelfRatingButtons.selfRatingLabel` 是同一类改法（那里传的是
+ * `options`），理由也一样：文案搬进消息表后，纯函数拿不到它。
+ */
+function getSourceBadge(
+  source: string,
+  t: (key: MessageKey) => string,
+): { label: string; bg: string } {
   switch (source) {
     case 'user_edit':
       // 手动编辑：主色（蓝色）
-      return { label: '手动编辑', bg: 'var(--color-primary)' };
+      return { label: t('labels.versionSource.user_edit'), bg: 'var(--color-primary)' };
     case 'auto_clean':
       // 自动清洗：次要文字色（灰色）
-      return { label: '自动清洗', bg: 'var(--color-text-secondary)' };
+      return { label: t('labels.versionSource.auto_clean'), bg: 'var(--color-text-secondary)' };
     case 'system':
       // 系统：成功色（绿色）
-      return { label: '系统', bg: 'var(--color-success)' };
+      return { label: t('labels.versionSource.system'), bg: 'var(--color-success)' };
     default:
       return { label: source, bg: 'var(--color-text-secondary)' };
   }
@@ -62,6 +76,7 @@ function formatSize(size: number): string {
 }
 
 export default function VersionHistory({ noteId, onClose, onRestored }: VersionHistoryProps) {
+  const { t } = useTranslation();
   const [versions, setVersions] = useState<NoteVersion[]>([]);
   /** 选中的两个版本号（用于 diff），null 表示未选 */
   const [selectedVersions, setSelectedVersions] = useState<[number | null, number | null]>([
@@ -95,11 +110,12 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
       const sorted = [...(data.versions || [])].sort((a, b) => b.version_number - a.version_number);
       setVersions(sorted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载版本列表失败');
+      setError(err instanceof Error ? err.message : t('noteDetail.versionListFailed'));
     } finally {
       setLoading(false);
     }
-  }, [noteId]);
+    // 	 进依赖：语言切换后重新加载时，错误文案要是新语言的
+  }, [noteId, t]);
 
   // 组件挂载时加载版本列表（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
@@ -141,13 +157,13 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : '加载对比失败');
+          setError(err instanceof Error ? err.message : t('noteDetail.diffFailed'));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedVersions, noteId]);
+  }, [selectedVersions, noteId, t]);
 
   /** 预览指定版本的原始内容 */
   async function handlePreview(versionNumber: number) {
@@ -156,7 +172,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
       const data = await getVersion(noteId, versionNumber);
       setPreviewContent({ version_number: data.version_number, content: data.content });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载版本内容失败');
+      setError(err instanceof Error ? err.message : t('noteDetail.versionContentFailed'));
     }
   }
 
@@ -174,7 +190,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
       onRestored();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复版本失败');
+      setError(err instanceof Error ? err.message : t('noteDetail.restoreVersionFailed'));
     } finally {
       setRestoring(false);
     }
@@ -202,10 +218,10 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
       <Dialog
         open
         onClose={onClose}
-        title="版本历史"
+        title={t('noteDetail.versionHistory')}
         footer={
           <button className="btn btn-secondary" onClick={onClose} disabled={restoring}>
-            关闭
+            {t('noteDetail.close')}
           </button>
         }
       >
@@ -229,7 +245,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
               padding: 'var(--space-lg)',
             }}
           >
-            加载中...
+            {t('noteDetail.loading')}
           </p>
         ) : versions.length === 0 ? (
           <p
@@ -239,7 +255,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
               padding: 'var(--space-lg)',
             }}
           >
-            暂无版本历史
+            {t('noteDetail.noVersions')}
           </p>
         ) : (
           <>
@@ -252,10 +268,10 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                   marginBottom: 'var(--space-xs)',
                 }}
               >
-                选择两个版本进行对比（已选 {selectedCount}/2）
+                {t('noteDetail.selectTwoToCompare', { count: selectedCount })}
               </p>
               {versions.map((v) => {
-                const badge = getSourceBadge(v.source);
+                const badge = getSourceBadge(v.source, t);
                 const isSelected =
                   selectedVersions[0] === v.version_number ||
                   selectedVersions[1] === v.version_number;
@@ -326,7 +342,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                         onClick={() => handlePreview(v.version_number)}
                         disabled={restoring}
                       >
-                        预览
+                        {t('noteDetail.preview')}
                       </button>
                       <button
                         className="btn btn-primary"
@@ -334,7 +350,7 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                         onClick={() => handleRestore(v.version_number)}
                         disabled={restoring}
                       >
-                        恢复此版本
+                        {t('noteDetail.restoreThisVersion')}
                       </button>
                     </div>
                   </div>
@@ -346,11 +362,14 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
             {diffResult && (
               <div className="card" style={{ padding: '1rem', marginBottom: 'var(--space-md)' }}>
                 <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>
-                  版本对比: v{diffResult.v1_number} → v{diffResult.v2_number}
+                  {t('noteDetail.versionCompare', {
+                    v1: diffResult.v1_number,
+                    v2: diffResult.v2_number,
+                  })}
                 </h3>
                 {diffResult.diff_lines.length === 0 ? (
                   <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-                    两个版本完全相同，没有差异。
+                    {t('noteDetail.versionsIdentical')}
                   </p>
                 ) : (
                   <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: 1.6 }}>
@@ -407,14 +426,14 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
                   }}
                 >
                   <h3 style={{ fontSize: '1rem', margin: 0 }}>
-                    版本内容预览 (v{previewContent.version_number})
+                    {t('noteDetail.versionPreview', { version: previewContent.version_number })}
                   </h3>
                   <button
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '4px 10px' }}
                     onClick={() => setPreviewContent(null)}
                   >
-                    关闭预览
+                    {t('noteDetail.closePreview')}
                   </button>
                 </div>
                 <pre
@@ -442,9 +461,9 @@ export default function VersionHistory({ noteId, onClose, onRestored }: VersionH
           `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头）；取消什么都不做。 */}
       <ConfirmDialog
         open={confirmRestoreVersion !== null}
-        title="确定恢复到此版本吗？"
-        message="当前内容将被保存为新版本。"
-        confirmText="恢复"
+        title={t('noteDetail.restoreVersionConfirm')}
+        message={t('noteDetail.restoreVersionImpact')}
+        confirmText={t('noteDetail.restore')}
         onConfirm={() => {
           const versionNumber = confirmRestoreVersion;
           setConfirmRestoreVersion(null);

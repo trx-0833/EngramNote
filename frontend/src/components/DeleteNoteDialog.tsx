@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { getNoteTrashInfo, type Note, type TrashInfoResponse } from '../api/client';
 import Dialog from './Dialog';
 import Icon from './Icon';
+import { useTranslation } from '../i18n';
 
 /**
  * 批次 D2：这里原来有一对 `overlayStyle` / `cardStyle` 内联常量 ——
@@ -52,6 +53,7 @@ interface DeleteNoteDialogProps {
  * - "关联暂不可见，但可在回收站中整体恢复"的说明
  */
 export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogProps) {
+  const { t } = useTranslation();
   const [info, setInfo] = useState<TrashInfoResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -77,13 +79,13 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
     <Dialog
       open
       onClose={onClose}
-      title="移入回收站"
+      title={t('shared.moveToTrash')}
       // 操作区走基座的 `footer`（右对齐 + 上边距由 `.dialogActions` 统一给）；
       // 两枚按钮本身、文案、onClick 逐字保留。
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>
-            取消
+            {t('shared.cancel')}
           </button>
           <button className="btn btn-primary" onClick={onConfirm}>
             {/* 批次 B3：两枚确认按钮各补图标，正好演示 `trash` 与 `delete` 的分工 ——
@@ -91,14 +93,18 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
                 "彻底删除"是**动作**（`delete`，见 icons/delete.tsx 文件头）。
                 两个图标都是装饰性的（aria-hidden），按钮的可访问名仍是可见文字。 */}
             <Icon name="trash" size={16} />
-            确认移入
+            {t('shared.confirmMoveToTrash')}
           </button>
         </>
       }
     >
-      <p style={{ marginBottom: 'var(--space-md)' }}>确定将「{note.title}」移入回收站吗？</p>
+      <p style={{ marginBottom: 'var(--space-md)' }}>
+        {t('shared.moveToTrashConfirm', { title: note.title })}
+      </p>
 
-      {loading && <p style={{ color: 'var(--color-text-secondary)' }}>正在统计关联内容…</p>}
+      {loading && (
+        <p style={{ color: 'var(--color-text-secondary)' }}>{t('shared.countingRelated')}</p>
+      )}
 
       {!loading && info && (
         <>
@@ -106,19 +112,19 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
             <div style={statItemStyle}>
               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.card_count}</div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                知识卡片
+                {t('shared.knowledgeCards')}
               </div>
             </div>
             <div style={statItemStyle}>
               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.key_card_count}</div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                核心卡片
+                {t('shared.coreCards')}
               </div>
             </div>
             <div style={statItemStyle}>
               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{info.link_count}</div>
               <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                双向链接
+                {t('shared.bidirectionalLinks')}
               </div>
             </div>
           </div>
@@ -131,16 +137,17 @@ export function DeleteNoteDialog({ note, onClose, onConfirm }: DeleteNoteDialogP
               borderRadius: 'var(--radius-md)',
             }}
           >
-            该笔记与 {info.card_count} 张知识卡片、{info.link_count} 个原始资料存在双向链接。
-            移入回收站后，这些关联将暂不可见，但不影响其他笔记的引用。
-            笔记及其全部内容（卡片、题目、复习记录）将作为整体保存，可随时在回收站中恢复。
+            {t('shared.moveToTrashLinked', {
+              cards: info.card_count,
+              links: info.link_count,
+            })}
           </p>
         </>
       )}
 
       {!loading && !info && (
         <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-          笔记及其全部内容（卡片、题目、复习记录）将作为整体移入回收站，可随时恢复。
+          {t('shared.moveToTrashImpact')}
         </p>
       )}
     </Dialog>
@@ -167,13 +174,14 @@ interface PurgeNoteDialogProps {
  * 笔记删除后，勾选的核心卡片在知识图谱中依然存活，不会成为信息孤岛。
  */
 export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogProps) {
+  const { t } = useTranslation();
   const [promote, setPromote] = useState(false);
 
   return (
     <Dialog
       open
       onClose={onClose}
-      title="彻底删除"
+      title={t('shared.purgeForever')}
       // ⚠️ 原来这一处标题是 `<h3 style={{ color: 'var(--color-error)' }}>` 的红字。
       // 批次 D2 迁到基座时被 `.dialogTitle` 的统一标题色抹掉了，本批由
       // `titleTone="danger"` 补回（基座侧见 `Dialog.module.css` 的 `.dialogTitleDanger`）。
@@ -183,7 +191,7 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>
-            取消
+            {t('shared.cancel')}
           </button>
           <button
             className="btn"
@@ -191,13 +199,14 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
             onClick={() => onConfirm(promote)}
           >
             <Icon name="delete" size={16} />
-            彻底删除
+            {t('shared.purgeForever')}
           </button>
         </>
       }
     >
       <p style={{ marginBottom: 'var(--space-md)' }}>
-        确定彻底删除「{note.title}」吗？此操作<strong>不可恢复</strong>。
+        {t('shared.purgeConfirm', { title: note.title })}
+        <strong>{t('shared.irreversible')}</strong>。
       </p>
       <p
         style={{
@@ -209,8 +218,7 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
           marginBottom: 'var(--space-md)',
         }}
       >
-        笔记及其卡片、题目、复习记录将被永久删除。其他笔记对该笔记的引用将以
-        「[已删除的笔记]」占位符保留，不会破坏其他笔记的内容结构。
+        {t('shared.purgeImpact')}
       </p>
 
       <label
@@ -232,11 +240,10 @@ export function PurgeNoteDialog({ note, onClose, onConfirm }: PurgeNoteDialogPro
           style={{ marginTop: 2 }}
         />
         <span>
-          <strong>高级选项：将本笔记中的核心卡片自动提升为独立节点</strong>
+          <strong>{t('shared.promoteCoreCards')}</strong>
           <br />
           <span style={{ color: 'var(--color-text-secondary)' }}>
-            勾选后，标记为核心（is_key_point）的卡片在知识图谱中依然存活，
-            不会因父级笔记删除而变成信息孤岛。
+            {t('shared.promoteCoreCardsHint')}
           </span>
         </span>
       </label>

@@ -89,12 +89,12 @@ export default function DiffView({ blocks, originalLines, cleanLines }: DiffView
       {/* 统计信息 */}
       <div className={styles.diffSummary}>
         <span>
-          {t('shared.diffOriginal')} {originalLines} 行
+          {t('shared.diffLineCount', { label: t('shared.diffOriginal'), count: originalLines })}
         </span>
         <span>
-          {t('shared.diffClean')} {cleanLines} 行
+          {t('shared.diffLineCount', { label: t('shared.diffClean'), count: cleanLines })}
         </span>
-        <span>{blocks.length} 处差异</span>
+        <span>{t('shared.diffBlockCount', { count: blocks.length })}</span>
       </div>
 
       {/* 表头 */}
