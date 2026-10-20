@@ -820,6 +820,56 @@ const zhCN = {
     generateQuestionsFailed: '生成问题失败',
     submitAnswerFailed: '提交答案失败',
   },
+
+  /** 问题集页（`QuestionSets`，i18n 阶段 3） */
+  questionSets: {
+    title: '问题集',
+    untitledNote: '未命名笔记',
+    totalCount: '共 {count} 道题',
+    totalFiltered: '，筛选后 {count} 道',
+    searchPlaceholder: '搜索题目内容...',
+    filterBy: '按{label}筛选',
+    filterAll: '全部',
+    // ---- 可配置列 ----
+    colQuestion: '题目',
+    colQuestionType: '题型',
+    colDifficulty: '难度',
+    colCreatedAt: '创建时间',
+    colUpdatedAt: '更新时间',
+    colAnswer: '答案',
+    columnsCount: '列（{shown}/{total}）',
+    columnsHint: '点列头可按该列排序',
+    columnsPanel: '显示列',
+    columnsFixedNote:
+      '「题目」「难度」固定显示：难度那一格里的中文是行底色的文字说明，隐藏它，色觉障碍用户就读不出行状态了。',
+    tableLabel: '题目列表（按所属笔记分组）',
+    groupCount: '({count} 道题)',
+    viewNote: '查看笔记',
+    // ---- 排序可访问名 ----
+    sortIdle: '{label}，点击按此列排序',
+    sortAsc: '{label}，当前升序，点击改为降序',
+    sortDesc: '{label}，当前降序，点击改为升序',
+    // ---- 筛选维度 ----
+    dimensionType: '题型',
+    dimensionDifficulty: '难度',
+    /** 题型筛选项的短名（与表格里的 `labels.questionType` 全称不同） */
+    typeChoice: '选择',
+    typeFillBlank: '填空',
+    typeShortAnswer: '简答',
+    difficultyEasy: '简单',
+    difficultyMedium: '中等',
+    difficultyHard: '困难',
+    // ---- 答案 ----
+    showAnswer: '显示答案',
+    hideAnswer: '隐藏答案',
+    answer: '答案：',
+    explanation: '解析：',
+    // ---- 空态与错误 ----
+    empty: '暂无题目',
+    emptyHint: '请先上传笔记并触发理解管道生成题目',
+    noMatch: '没有符合筛选条件的题目',
+    noMatchHint: '试试放宽题型或难度筛选',
+  },
 };
 
 export default zhCN;

@@ -55,6 +55,7 @@ import {
 // 本页自己的外观（批次 E5）：表格 / 行三态 / 列头排序 / 「列」面板。
 // 从模块取类名是因为它们只被这一个文件写出来（`css-convention.md` §4 判据 2）。
 import styles from './QuestionSets.module.css';
+import { useTranslation, type MessageKey } from '../i18n';
 
 /**
  * 解析选择题的选项（`options` 在契约里是 `string | null` 且**可缺省**，
@@ -77,7 +78,10 @@ interface NoteGroup {
 }
 
 /** 将题目按所属笔记分组（纯函数，模块级便于复用与测试） */
-function groupByNote(questions: QuizItem[]): NoteGroup[] {
+function groupByNote(
+  questions: QuizItem[],
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): NoteGroup[] {
   const map = new Map<string, QuizItem[]>();
   for (const q of questions) {
     const list = map.get(q.note_id) || [];
@@ -87,7 +91,7 @@ function groupByNote(questions: QuizItem[]): NoteGroup[] {
   return Array.from(map.entries())
     .map(([noteId, questions]) => ({
       note_id: noteId,
-      note_title: questions[0].note_title || '未命名笔记',
+      note_title: questions[0].note_title || t('questionSets.untitledNote'),
       questions,
     }))
     .sort((a, b) => {
@@ -130,17 +134,66 @@ type ColumnId = SortKey | 'detail';
  * - 默认显示 5 列，落在计划要求的"默认 4–6 列"区间里。
  */
 type ColumnDef =
-  | { id: SortKey; label: string; sortable: true; hideable: boolean; defaultVisible: boolean }
-  | { id: 'detail'; label: string; sortable: false; hideable: boolean; defaultVisible: boolean };
+  | {
+      id: SortKey;
+      /** 文案**键名**（不是文案本身）—— 模块级常量拿不到 hook，见 `utils/labels.ts` 的说明 */
+      labelKey: MessageKey;
+      sortable: true;
+      hideable: boolean;
+      defaultVisible: boolean;
+    }
+  | {
+      id: 'detail';
+      labelKey: MessageKey;
+      sortable: false;
+      hideable: boolean;
+      defaultVisible: boolean;
+    };
 
 const COLUMNS: ColumnDef[] = [
-  { id: 'question', label: '题目', sortable: true, hideable: false, defaultVisible: true },
-  { id: 'question_type', label: '题型', sortable: true, hideable: true, defaultVisible: true },
-  { id: 'difficulty', label: '难度', sortable: true, hideable: false, defaultVisible: true },
-  { id: 'created_at', label: '创建时间', sortable: true, hideable: true, defaultVisible: true },
+  {
+    id: 'question',
+    labelKey: 'questionSets.colQuestion',
+    sortable: true,
+    hideable: false,
+    defaultVisible: true,
+  },
+  {
+    id: 'question_type',
+    labelKey: 'questionSets.colQuestionType',
+    sortable: true,
+    hideable: true,
+    defaultVisible: true,
+  },
+  {
+    id: 'difficulty',
+    labelKey: 'questionSets.colDifficulty',
+    sortable: true,
+    hideable: false,
+    defaultVisible: true,
+  },
+  {
+    id: 'created_at',
+    labelKey: 'questionSets.colCreatedAt',
+    sortable: true,
+    hideable: true,
+    defaultVisible: true,
+  },
   // 默认关着：它是"列真的可配置"的证据，也避免默认视图塞进 6 列
-  { id: 'updated_at', label: '更新时间', sortable: true, hideable: true, defaultVisible: false },
-  { id: 'detail', label: '答案', sortable: false, hideable: true, defaultVisible: true },
+  {
+    id: 'updated_at',
+    labelKey: 'questionSets.colUpdatedAt',
+    sortable: true,
+    hideable: true,
+    defaultVisible: false,
+  },
+  {
+    id: 'detail',
+    labelKey: 'questionSets.colAnswer',
+    sortable: false,
+    hideable: true,
+    defaultVisible: true,
+  },
 ];
 
 type SortDirection = 'asc' | 'desc';
@@ -304,11 +357,16 @@ function ariaSortOf(
  * ⚠️ 名字必须**以可见文字开头**（WCAG 2.5.3 Label in Name：语音输入的
  * 用户念的是屏幕上那几个字）。所以是 `${label}，当前升序…` 而不是反过来。
  */
-function sortButtonLabel(key: SortKey, label: string, sort: SortState): string {
-  if (sort === null || sort.key !== key) return `${label}，点击按此列排序`;
+function sortButtonLabel(
+  key: SortKey,
+  label: string,
+  sort: SortState,
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): string {
+  if (sort === null || sort.key !== key) return t('questionSets.sortIdle', { label });
   return sort.direction === 'asc'
-    ? `${label}，当前升序，点击改为降序`
-    : `${label}，当前降序，点击改为升序`;
+    ? t('questionSets.sortAsc', { label })
+    : t('questionSets.sortDesc', { label });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -339,13 +397,16 @@ const DEFAULT_FILTERS: FilterState = { question_type: 'all', difficulty: 'all' }
 
 interface FilterDimension {
   id: FilterId;
-  label: string;
-  options: { value: string; label: string }[];
+  labelKey: MessageKey;
+  options: { value: string; labelKey: MessageKey }[];
   /** 取这一维度在题目上的值（`'all'` 由 `filters[id] === 'all'` 单独判定） */
   valueOf: (item: QuizItem) => string;
 }
 
-const ALL_OPTION = { value: 'all', label: '全部' };
+const ALL_OPTION: { value: string; labelKey: MessageKey } = {
+  value: 'all',
+  labelKey: 'questionSets.filterAll',
+};
 
 /**
  * 筛选维度表 —— **渲染层是数据驱动的**：一个 `options` 列表 + 一个 `valueOf`，
@@ -377,23 +438,23 @@ const ALL_OPTION = { value: 'all', label: '全部' };
 const FILTER_DIMENSIONS: FilterDimension[] = [
   {
     id: 'question_type',
-    label: '题型',
+    labelKey: 'questionSets.dimensionType',
     options: [
       ALL_OPTION,
-      { value: 'choice', label: '选择' },
-      { value: 'fill_blank', label: '填空' },
-      { value: 'short_answer', label: '简答' },
+      { value: 'choice', labelKey: 'questionSets.typeChoice' },
+      { value: 'fill_blank', labelKey: 'questionSets.typeFillBlank' },
+      { value: 'short_answer', labelKey: 'questionSets.typeShortAnswer' },
     ],
     valueOf: (q) => q.question_type,
   },
   {
     id: 'difficulty',
-    label: '难度',
+    labelKey: 'questionSets.dimensionDifficulty',
     options: [
       ALL_OPTION,
-      { value: 'easy', label: '简单' },
-      { value: 'medium', label: '中等' },
-      { value: 'hard', label: '困难' },
+      { value: 'easy', labelKey: 'questionSets.difficultyEasy' },
+      { value: 'medium', labelKey: 'questionSets.difficultyMedium' },
+      { value: 'hard', labelKey: 'questionSets.difficultyHard' },
     ],
     valueOf: (q) => q.difficulty,
   },
@@ -412,6 +473,7 @@ function formatTime(value: string): string {
 }
 
 export default function QuestionSets() {
+  const { t } = useTranslation();
   const { questionTypeLabels, difficultyLabels } = useLabels();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -473,17 +535,18 @@ export default function QuestionSets() {
           );
         }
 
-        const grouped = groupByNote(allItems);
+        const grouped = groupByNote(allItems, t);
         setGroups(grouped);
         setTotal(truncated ? allItems.length : totalCount);
         setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
       } catch (err) {
-        setError(err instanceof Error ? err.message : '加载失败');
+        setError(err instanceof Error ? err.message : t('shared.loadFailed'));
       } finally {
         setLoading(false);
       }
+      // 	 进依赖：语言切换后重新加载时，错误文案要是新语言的
     },
-    [noteId],
+    [noteId, t],
   );
 
   // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
@@ -558,12 +621,12 @@ export default function QuestionSets() {
   return (
     <div className="page-enter">
       <PageHeader
-        title="问题集"
+        title={t('questionSets.title')}
         spacing="md"
         actions={
           <span className={styles.totalText}>
-            共 {total} 道题
-            {filterActive ? `，筛选后 ${totalFiltered} 道` : ''}
+            {t('questionSets.totalCount', { count: total })}
+            {filterActive ? t('questionSets.totalFiltered', { count: totalFiltered }) : ''}
           </span>
         }
       />
@@ -586,7 +649,7 @@ export default function QuestionSets() {
         />
         <input
           type="text"
-          placeholder="搜索题目内容..."
+          placeholder={t('questionSets.searchPlaceholder')}
           onChange={(e) => handleSearchChange(e.target.value)}
           style={{
             width: '100%',
@@ -625,11 +688,11 @@ export default function QuestionSets() {
           <div
             key={dimension.id}
             role="group"
-            aria-label={`按${dimension.label}筛选`}
+            aria-label={t('questionSets.filterBy', { label: t(dimension.labelKey) })}
             style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
           >
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-              {dimension.label}：
+              {t(dimension.labelKey)}：
             </span>
             {dimension.options.map((opt) => {
               const pressed = filters[dimension.id] === opt.value;
@@ -641,7 +704,7 @@ export default function QuestionSets() {
                   aria-pressed={pressed}
                   onClick={() => setFilter(dimension.id, opt.value)}
                 >
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </button>
               );
             })}
@@ -654,11 +717,14 @@ export default function QuestionSets() {
       ) : error ? (
         <ErrorDisplay message={error} onRetry={fetchQuestions} />
       ) : groups.length === 0 ? (
-        <EmptyState message="暂无题目" description="请先上传笔记并触发理解管道生成题目" />
+        <EmptyState message={t('questionSets.empty')} description={t('questionSets.emptyHint')} />
       ) : totalFiltered === 0 ? (
         // 此前这一支渲染的是"一个只剩筛选栏的空页面"（分组全被过滤掉、逐个 return null）。
         // 表格化之后那个空壳更刺眼：列头还在、下面一行都没有。
-        <EmptyState message="没有符合筛选条件的题目" description="试试放宽题型或难度筛选" />
+        <EmptyState
+          message={t('questionSets.noMatch')}
+          description={t('questionSets.noMatchHint')}
+        />
       ) : (
         <>
           {/* 工具条：「列」面板的开关 + 排序可发现性提示。
@@ -671,9 +737,9 @@ export default function QuestionSets() {
               aria-controls={COLUMN_PANEL_ID}
               onClick={() => setColumnsOpen((open) => !open)}
             >
-              列（{columnCount}/{COLUMNS.length}）
+              {t('questionSets.columnsCount', { shown: columnCount, total: COLUMNS.length })}
             </button>
-            <span className={styles.toolbarHint}>点列头可按该列排序</span>
+            <span className={styles.toolbarHint}>{t('questionSets.columnsHint')}</span>
           </div>
 
           {/* 「列」面板：**常驻 DOM、用 `hidden` 属性开合**。
@@ -681,7 +747,7 @@ export default function QuestionSets() {
               axe 的 `aria-valid-attr-value` 会报"IDREF 指向的节点不在文档里"。
               `hidden` 在 CSS 里要显式压掉 `display: flex`（见模块里 `.columnsPanel[hidden]`）。 */}
           <div id={COLUMN_PANEL_ID} className={styles.columnsPanel} hidden={!columnsOpen}>
-            <span className={styles.columnsPanelTitle}>显示列</span>
+            <span className={styles.columnsPanelTitle}>{t('questionSets.columnsPanel')}</span>
             {COLUMNS.filter((col) => col.hideable).map((col) => (
               <label key={col.id} className={styles.columnOption}>
                 <input
@@ -689,16 +755,14 @@ export default function QuestionSets() {
                   checked={visibleColumns.has(col.id)}
                   onChange={() => toggleColumn(col.id)}
                 />
-                {col.label}
+                {t(col.labelKey)}
               </label>
             ))}
-            <p className={styles.columnsHint}>
-              「题目」「难度」固定显示：难度那一格里的中文是行底色的文字说明，隐藏它，色觉障碍用户就读不出行状态了。
-            </p>
+            <p className={styles.columnsHint}>{t('questionSets.columnsFixedNote')}</p>
           </div>
 
           <div className={styles.tableScroll}>
-            <table className={styles.table} aria-label="题目列表（按所属笔记分组）">
+            <table className={styles.table} aria-label={t('questionSets.tableLabel')}>
               <thead>
                 <tr>
                   {visibleColumnList.map((col) => {
@@ -716,16 +780,16 @@ export default function QuestionSets() {
                             type="button"
                             className={styles.sortButton}
                             onClick={() => toggleSort(sortKey)}
-                            aria-label={sortButtonLabel(sortKey, col.label, sort)}
+                            aria-label={sortButtonLabel(sortKey, t(col.labelKey), sort, t)}
                           >
-                            {col.label}
+                            {t(col.labelKey)}
                             {/* 箭头是外观（`Icon` 默认 aria-hidden），含义在 `aria-sort` 里 */}
                             <span className={SORT_ICON_CLASS[sortIconState(sortKey, sort)]}>
                               <Icon name="chevron" size={16} />
                             </span>
                           </button>
                         ) : (
-                          <span className={styles.thPlain}>{col.label}</span>
+                          <span className={styles.thPlain}>{t(col.labelKey)}</span>
                         )}
                       </th>
                     );
@@ -770,7 +834,9 @@ export default function QuestionSets() {
                               </span>
                               <strong>{group.note_title}</strong>
                             </button>
-                            <span className={styles.groupCount}>({filtered.length} 道题)</span>
+                            <span className={styles.groupCount}>
+                              {t('questionSets.groupCount', { count: filtered.length })}
+                            </span>
                           </div>
                           <button
                             className="btn btn-secondary"
@@ -780,7 +846,7 @@ export default function QuestionSets() {
                               navigate(`/notes/${group.note_id}`);
                             }}
                           >
-                            查看笔记
+                            {t('questionSets.viewNote')}
                           </button>
                         </div>
                       </td>
@@ -848,7 +914,9 @@ export default function QuestionSets() {
                                       aria-expanded={answerOpen}
                                       onClick={() => toggleAnswer(q.id)}
                                     >
-                                      {answerOpen ? '隐藏答案' : '显示答案'}
+                                      {answerOpen
+                                        ? t('questionSets.hideAnswer')
+                                        : t('questionSets.showAnswer')}
                                     </button>
                                   )}
                                 </td>
@@ -880,12 +948,12 @@ export default function QuestionSets() {
                                         这行答案此前从未被任何一层判过（要点击「显示答案」才渲染），
                                         本轮的 `question-sets` 场景会点开它，所以它现在有门禁。 */}
                                     <p className={styles.answerText}>
-                                      <strong>答案：</strong>
+                                      <strong>{t('questionSets.answer')}</strong>
                                       {q.answer}
                                     </p>
                                     {q.explanation && (
                                       <p className={styles.explanationText}>
-                                        <strong>解析：</strong>
+                                        <strong>{t('questionSets.explanation')}</strong>
                                         {q.explanation}
                                       </p>
                                     )}
