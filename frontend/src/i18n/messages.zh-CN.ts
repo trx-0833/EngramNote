@@ -762,6 +762,64 @@ const zhCN = {
     unsupportedFormat: '不支持的文件格式: {ext}',
     uploadedConverting: '文件已上传，正在转换...',
   },
+
+  /** 学习评估页（`LearningAssessment`，i18n 阶段 3） */
+  assessment: {
+    title: '学习评估',
+    subtitle: '通过笔记比对或开放性问题，评估你对学习资料的掌握程度',
+    // ---- 两种模式 ----
+    modeCompare: '笔记比对',
+    modeQuiz: '开放性问题',
+    // ---- 笔记选择 ----
+    selectNote: '选择笔记',
+    linkedCompare: '已链接对比',
+    manualSelect: '手动选择',
+    loadingLinkedNotes: '加载已链接笔记...',
+    noLinkedNotes: '暂无已链接的笔记',
+    noLinkedNotesHint: '请先在笔记详情页关联资料后再使用此功能',
+    goToNotes: '前往笔记列表',
+    linkedMaterialsCount: '关联资料: {count} 篇',
+    willCompareWith: '将比对以下资料与该笔记：',
+    willGenerateFrom: '将基于以下资料生成开放性问题：',
+    useLinkedNotes: '使用已链接的笔记',
+    noSelectableNotes: '暂无可选笔记',
+    // ---- 资料选择 ----
+    materials: '学习资料',
+    noMaterials: '暂无学习资料',
+    myNotes: '我的笔记',
+    noPersonalNotes: '暂无个人笔记（请先上传并标记为"我的笔记"）',
+    // ---- 操作 ----
+    startAssessment: '开始评估',
+    assessing: '评估中...',
+    generateQuestions: '生成问题',
+    generating: '生成中...',
+    submitAnswer: '提交答案',
+    judging: '评判中...',
+    answerPlaceholder: '请输入你的答案...',
+    retry: '重试',
+    // ---- 结果 ----
+    result: '评估结果',
+    scoreCoverage: '内容覆盖度',
+    scoreDepth: '思考深度',
+    scoreClarity: '结构清晰度',
+    scoreOverall: '综合评分',
+    coveredPoints: '已覆盖知识点',
+    missedPoints: '未覆盖知识点',
+    suggestions: '改进建议：',
+    yourAnswer: '你的回答：',
+    judgment: '评判结果',
+    scoreAccuracy: '准确性',
+    scoreCompleteness: '完整性',
+    // ---- 错误与提示 ----
+    loadNotesFailed: '加载笔记失败',
+    selectNoteFirst: '请选择一个笔记',
+    selectMaterialAndNote: '请选择学习资料和笔记',
+    selectMaterial: '请选择学习资料',
+    answerAllQuestions: '请回答所有问题',
+    assessFailed: '评估失败',
+    generateQuestionsFailed: '生成问题失败',
+    submitAnswerFailed: '提交答案失败',
+  },
 };
 
 export default zhCN;

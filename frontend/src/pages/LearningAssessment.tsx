@@ -30,6 +30,7 @@ import { useToast } from '../components/Toast';
 // 与 `refinements.css` 打架的那 14 条按实测胜者并入，480px 的
 // `.knowledge-points-grid` 从 `responsive.css` 一起搬进来 —— 见 LearningAssessment.module.css 文件头
 import styles from './LearningAssessment.module.css';
+import { useTranslation } from '../i18n';
 
 /**
  * 评分条填充色的类名查表。
@@ -66,6 +67,7 @@ const noteSelectButtonStyle: React.CSSProperties = {
 };
 
 export default function LearningAssessment() {
+  const { t } = useTranslation();
   const toast = useToast();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -113,13 +115,14 @@ export default function LearningAssessment() {
       setNotes(data.items.filter((n) => assessableStatuses.includes(n.status)));
       setNotesError('');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载笔记失败';
+      const msg = e instanceof Error ? e.message : t('assessment.loadNotesFailed');
       console.error('加载笔记失败:', e);
       setNotesError(msg);
     } finally {
       setNotesLoading(false);
     }
-  }, []);
+    // 	 进依赖：语言切换后重新加载时，错误文案要是新语言的
+  }, [t]);
 
   // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
@@ -189,13 +192,13 @@ export default function LearningAssessment() {
     let personalIds = selectedPersonalNotes;
     if (compareMode === 'linked') {
       if (!selectedPersonalNoteId) {
-        toast.warning('请选择一个笔记');
+        toast.warning(t('assessment.selectNoteFirst'));
         return;
       }
       personalIds = [selectedPersonalNoteId];
     }
     if (materialIds.length === 0 || personalIds.length === 0) {
-      toast.warning('请选择学习资料和笔记');
+      toast.warning(t('assessment.selectMaterialAndNote'));
       return;
     }
     setLoading(true);
@@ -203,7 +206,7 @@ export default function LearningAssessment() {
       const res = await compareAssessment(materialIds, personalIds);
       setResult(res);
     } catch (e) {
-      toast.error('评估失败: ' + (e instanceof Error ? e.message : String(e)));
+      toast.error(`${t('assessment.assessFailed')}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -222,7 +225,7 @@ export default function LearningAssessment() {
   // Quiz mode handlers
   const handleGenerateQuiz = async () => {
     if (selectedMaterials.length === 0) {
-      toast.warning('请选择学习资料');
+      toast.warning(t('assessment.selectMaterial'));
       return;
     }
     setLoading(true);
@@ -240,7 +243,9 @@ export default function LearningAssessment() {
       });
       setAnswers(initialAnswers);
     } catch (e) {
-      toast.error('生成问题失败: ' + (e instanceof Error ? e.message : String(e)));
+      toast.error(
+        `${t('assessment.generateQuestionsFailed')}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setLoading(false);
     }
@@ -280,7 +285,7 @@ export default function LearningAssessment() {
     // Check all answers are filled
     const unanswered = Object.values(answers).some((a) => !a.trim());
     if (unanswered) {
-      toast.error('请回答所有问题');
+      toast.error(t('assessment.answerAllQuestions'));
       return;
     }
     submittingRef.current = true;
@@ -293,7 +298,9 @@ export default function LearningAssessment() {
       const res = await submitQuizAnswers(quizAssessment.id, answerList);
       setQuizResult(res);
     } catch (e) {
-      toast.error('提交答案失败: ' + (e instanceof Error ? e.message : String(e)));
+      toast.error(
+        `${t('assessment.submitAnswerFailed')}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setLoading(false);
       submittingRef.current = false;
@@ -359,11 +366,7 @@ export default function LearningAssessment() {
           影响面：1.75rem → 1.5rem（变小，有意为之）；
           副标题 0.9rem → 0.875rem（`--text-base`，差 0.4px，肉眼不可分）；
           `spacing="xl"` 保持原来 `.assessment-header` 的 `margin-bottom: --space-xl`。 */}
-      <PageHeader
-        title="学习评估"
-        subtitle="通过笔记比对或开放性问题，评估你对学习资料的掌握程度"
-        spacing="xl"
-      />
+      <PageHeader title={t('assessment.title')} subtitle={t('assessment.subtitle')} spacing="xl" />
 
       {/* Mode selection */}
       <div className="segment-control" style={{ marginBottom: 'var(--space-lg)' }}>
@@ -374,7 +377,7 @@ export default function LearningAssessment() {
             setResult(null);
           }}
         >
-          笔记比对
+          {t('assessment.modeCompare')}
         </button>
         <button
           className={`segment-btn ${mode === 'quiz' ? 'segment-btn-active' : ''}`}
@@ -384,7 +387,7 @@ export default function LearningAssessment() {
             setQuizResult(null);
           }}
         >
-          开放性问题
+          {t('assessment.modeQuiz')}
         </button>
       </div>
 
@@ -392,13 +395,15 @@ export default function LearningAssessment() {
         <LoadingSpinner />
       ) : notesError ? (
         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-          <p style={{ color: 'var(--color-error)' }}>加载笔记失败: {notesError}</p>
+          <p style={{ color: 'var(--color-error)' }}>
+            {t('assessment.loadNotesFailed')}: {notesError}
+          </p>
           <button
             className="btn btn-secondary"
             style={{ marginTop: 'var(--space-sm)' }}
             onClick={loadNotes}
           >
-            重试
+            {t('assessment.retry')}
           </button>
         </div>
       ) : mode === 'compare' ? (
@@ -409,13 +414,13 @@ export default function LearningAssessment() {
               className={`segment-btn ${compareMode === 'linked' ? 'segment-btn-active' : ''}`}
               onClick={() => handleCompareModeChange('linked')}
             >
-              已链接对比
+              {t('assessment.linkedCompare')}
             </button>
             <button
               className={`segment-btn ${compareMode === 'manual' ? 'segment-btn-active' : ''}`}
               onClick={() => handleCompareModeChange('manual')}
             >
-              手动选择
+              {t('assessment.manualSelect')}
             </button>
           </div>
 
@@ -423,16 +428,18 @@ export default function LearningAssessment() {
             /* 已链接对比模式：列出有 material 链接的 personal_note */
             compareLinksLoading ? (
               <div className="card" style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-                <p style={{ color: 'var(--color-text-secondary)' }}>加载已链接笔记...</p>
+                <p style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('assessment.loadingLinkedNotes')}
+                </p>
               </div>
             ) : compareLinkedPersonalNotes.length === 0 ? (
               /* 空状态：无任何有链接关系的 personal_note */
               <EmptyState
-                message="暂无已链接的笔记"
-                description="请先在笔记详情页关联资料后再使用此功能"
+                message={t('assessment.noLinkedNotes')}
+                description={t('assessment.noLinkedNotesHint')}
                 action={
                   <button className="btn btn-primary" onClick={() => navigate('/notes')}>
-                    前往笔记列表
+                    {t('assessment.goToNotes')}
                   </button>
                 }
               />
@@ -446,7 +453,7 @@ export default function LearningAssessment() {
                     h3→h2）、F-14/F-15（CardFace h3→h2）逐字相同。 */}
                 {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
                     现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
-                <h2 className={styles.assessmentSectionLabel}>选择笔记</h2>
+                <h2 className={styles.assessmentSectionLabel}>{t('assessment.selectNote')}</h2>
                 <div
                   style={{
                     display: 'grid',
@@ -477,8 +484,9 @@ export default function LearningAssessment() {
                         </button>
                       </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                        关联资料: {selectedPersonalNoteId === n.id ? linkedMaterials.length : '—'}{' '}
-                        篇
+                        {t('assessment.linkedMaterialsCount', {
+                          count: selectedPersonalNoteId === n.id ? linkedMaterials.length : '—',
+                        })}
                       </p>
                     </div>
                   ))}
@@ -486,7 +494,7 @@ export default function LearningAssessment() {
                 {selectedPersonalNoteId && linkedMaterials.length > 0 && (
                   <div style={{ marginTop: 'var(--space-md)' }}>
                     <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
-                      将比对以下资料与该笔记：
+                      {t('assessment.willCompareWith')}
                     </p>
                     {linkedMaterials.map((m) => (
                       <div key={m.id} style={{ padding: '0.25rem 0' }}>
@@ -511,10 +519,10 @@ export default function LearningAssessment() {
               <div className="card">
                 {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
                     现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
-                <h2 className={styles.assessmentSectionLabel}>学习资料</h2>
+                <h2 className={styles.assessmentSectionLabel}>{t('assessment.materials')}</h2>
                 {materialNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
-                    暂无学习资料
+                    {t('assessment.noMaterials')}
                   </p>
                 ) : (
                   materialNotes.map((note) =>
@@ -530,10 +538,10 @@ export default function LearningAssessment() {
               <div className="card">
                 {/* 区块小标签（批次 E8）：这一段原先在 tsx 里逐字重复了 5 遍，
                     现在只有 `LearningAssessment.module.css` 的 `.assessmentSectionLabel` 一处定义 */}
-                <h2 className={styles.assessmentSectionLabel}>我的笔记</h2>
+                <h2 className={styles.assessmentSectionLabel}>{t('assessment.myNotes')}</h2>
                 {personalNotes.length === 0 ? (
                   <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
-                    暂无个人笔记（请先上传并标记为"我的笔记"）
+                    {t('assessment.noPersonalNotes')}
                   </p>
                 ) : (
                   personalNotes.map((note) =>
@@ -557,7 +565,7 @@ export default function LearningAssessment() {
               disabled={loading}
               style={{ marginBottom: 'var(--space-lg)' }}
             >
-              {loading ? '评估中...' : '开始评估'}
+              {loading ? t('assessment.assessing') : t('assessment.startAssessment')}
             </button>
           )}
 
@@ -568,12 +576,12 @@ export default function LearningAssessment() {
                 className="heading-serif"
                 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}
               >
-                评估结果
+                {t('assessment.result')}
               </h2>
-              {renderScoreBar('内容覆盖度', result.scores?.coverage_score || 0)}
-              {renderScoreBar('思考深度', result.scores?.depth_score || 0)}
-              {renderScoreBar('结构清晰度', result.scores?.clarity_score || 0)}
-              {renderScoreBar('综合评分', result.overall_score)}
+              {renderScoreBar(t('assessment.scoreCoverage'), result.scores?.coverage_score || 0)}
+              {renderScoreBar(t('assessment.scoreDepth'), result.scores?.depth_score || 0)}
+              {renderScoreBar(t('assessment.scoreClarity'), result.scores?.clarity_score || 0)}
+              {renderScoreBar(t('assessment.scoreOverall'), result.overall_score)}
 
               {((result.scores?.covered_points?.length ?? 0) > 0 ||
                 (result.scores?.uncovered_points?.length ?? 0) > 0) && (
@@ -594,7 +602,7 @@ export default function LearningAssessment() {
                         }}
                       >
                         <Icon name="success" size={16} />
-                        已覆盖知识点
+                        {t('assessment.coveredPoints')}
                       </h3>
                       <ul>
                         {result.scores?.covered_points?.map((p: string, i: number) => (
@@ -619,7 +627,7 @@ export default function LearningAssessment() {
                         }}
                       >
                         <Icon name="error" size={16} />
-                        未覆盖知识点
+                        {t('assessment.missedPoints')}
                       </h3>
                       <ul>
                         {result.scores?.uncovered_points?.map((p: string, i: number) => (
@@ -643,7 +651,7 @@ export default function LearningAssessment() {
                     borderLeft: '3px solid var(--color-primary)',
                   }}
                 >
-                  <strong>改进建议：</strong>
+                  <strong>{t('assessment.suggestions')}</strong>
                   <div dangerouslySetInnerHTML={{ __html: renderMarkdown(result.suggestions) }} />
                 </div>
               )}
@@ -667,7 +675,7 @@ export default function LearningAssessment() {
                   setSelectedMaterials([]);
                 }}
               />
-              <span>使用已链接的笔记</span>
+              <span>{t('assessment.useLinkedNotes')}</span>
             </label>
           </div>
 
@@ -675,10 +683,10 @@ export default function LearningAssessment() {
           {mode === 'quiz' && useLinkedMode ? (
             <div style={{ marginBottom: 'var(--space-lg)' }}>
               {/* 区块小标签（批次 E8）：与 compare 模式那一处同源，见 `.assessmentSectionLabel` */}
-              <h2 className={styles.assessmentSectionLabel}>选择笔记</h2>
+              <h2 className={styles.assessmentSectionLabel}>{t('assessment.selectNote')}</h2>
               {linkablePersonalNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
-                  暂无可选笔记
+                  {t('assessment.noSelectableNotes')}
                 </p>
               ) : (
                 <div
@@ -705,7 +713,7 @@ export default function LearningAssessment() {
                         </button>
                       </h3>
                       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                        关联资料: {linkedMaterials.length} 篇
+                        {t('assessment.linkedMaterialsCount', { count: linkedMaterials.length })}
                       </p>
                     </div>
                   ))}
@@ -714,7 +722,7 @@ export default function LearningAssessment() {
               {selectedPersonalNoteId && linkedMaterials.length > 0 && (
                 <div style={{ marginTop: 'var(--space-md)' }}>
                   <p style={{ fontWeight: 500, marginBottom: 'var(--space-sm)' }}>
-                    将基于以下资料生成开放性问题：
+                    {t('assessment.willGenerateFrom')}
                   </p>
                   {linkedMaterials.map((m) => (
                     <div key={m.id} style={{ padding: '0.25rem 0' }}>
@@ -728,10 +736,10 @@ export default function LearningAssessment() {
             /* Quiz mode - 手动选择资料 */
             <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
               {/* 区块小标签（批次 E8）：同上 */}
-              <h2 className={styles.assessmentSectionLabel}>学习资料</h2>
+              <h2 className={styles.assessmentSectionLabel}>{t('assessment.materials')}</h2>
               {materialNotes.length === 0 ? (
                 <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
-                  暂无学习资料
+                  {t('assessment.noMaterials')}
                 </p>
               ) : (
                 materialNotes.map((note) =>
@@ -747,7 +755,7 @@ export default function LearningAssessment() {
 
           {!quizAssessment ? (
             <button className="btn btn-primary" onClick={handleGenerateQuiz} disabled={loading}>
-              {loading ? '生成中...' : '生成问题'}
+              {loading ? t('assessment.generating') : t('assessment.generateQuestions')}
             </button>
           ) : (
             <>
@@ -764,7 +772,7 @@ export default function LearningAssessment() {
                   <textarea
                     value={answers[idx] || ''}
                     onChange={(e) => setAnswers((prev) => ({ ...prev, [idx]: e.target.value }))}
-                    placeholder="请输入你的答案..."
+                    placeholder={t('assessment.answerPlaceholder')}
                     style={{ width: '100%', minHeight: '100px' }}
                   />
                 </div>
@@ -776,7 +784,7 @@ export default function LearningAssessment() {
                   onClick={handleSubmitAnswers}
                   disabled={loading}
                 >
-                  {loading ? '评判中...' : '提交答案'}
+                  {loading ? t('assessment.judging') : t('assessment.submitAnswer')}
                 </button>
               ) : (
                 <>
@@ -806,7 +814,9 @@ export default function LearningAssessment() {
                             color: 'var(--color-text-secondary)',
                           }}
                         >
-                          <strong style={{ color: 'var(--color-text-primary)' }}>你的回答：</strong>
+                          <strong style={{ color: 'var(--color-text-primary)' }}>
+                            {t('assessment.yourAnswer')}
+                          </strong>
                           <div dangerouslySetInnerHTML={{ __html: renderMarkdown(qa.answer) }} />
                         </div>
                       )}
@@ -819,11 +829,17 @@ export default function LearningAssessment() {
                           color: 'var(--color-text-secondary)',
                         }}
                       >
-                        评判结果
+                        {t('assessment.judgment')}
                       </div>
-                      {renderScoreBar('准确性', qa.judgment?.accuracy_score || 0)}
-                      {renderScoreBar('完整性', qa.judgment?.completeness_score || 0)}
-                      {renderScoreBar('深度', qa.judgment?.depth_score || 0)}
+                      {renderScoreBar(
+                        t('assessment.scoreAccuracy'),
+                        qa.judgment?.accuracy_score || 0,
+                      )}
+                      {renderScoreBar(
+                        t('assessment.scoreCompleteness'),
+                        qa.judgment?.completeness_score || 0,
+                      )}
+                      {renderScoreBar(t('assessment.scoreDepth'), qa.judgment?.depth_score || 0)}
                       {qa.judgment?.feedback && (
                         <div
                           style={{
@@ -842,7 +858,7 @@ export default function LearningAssessment() {
                   ))}
                   <div className={styles.scoreSummaryCard}>
                     <div className={styles.scoreSummaryNumber}>{quizResult.overall_score}</div>
-                    <div className={styles.scoreSummaryLabel}>综合评分</div>
+                    <div className={styles.scoreSummaryLabel}>{t('assessment.scoreOverall')}</div>
                     {quizResult.suggestions && (
                       <div
                         style={{
