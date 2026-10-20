@@ -82,15 +82,30 @@ async def get_due_quizzes(
 
     返回 next_review_at <= 当前时间的题目（含新题目），
     按到期时间升序排列，最过期的优先。
+
+    ## ⚠️ 列表**不按每日配额截断**（B 方案，2026-10-20 改）
+
+    配额只影响**能不能提交**（由 `remaining_quota` 表达，前端据此置灰未答题的
+    提交按钮），不影响**能不能看**。
+
+    改之前是"配额用尽就返回空列表"，于是前端直接跳复习完成页 ——
+    用户看不到今天还剩多少、也看不到已答过的题（而回看正是想法 8 的诉求），
+    且"提前置灰"那套 UI 永远不显示（截图实测确认）。
+
+    `remaining_quota` 与列表在**同一次查询里**算出，口径必然一致；
+    前端若自己拿 `/review/stats` 的 `today_done` 去减，两次请求之间
+    用户可能刚提交过一道，会算错。
     """
-    quizzes = await review_service.get_due_quizzes(
+    items, remaining = await review_service.get_due_quizzes(
         user_id=current_user.id,
         db=db,
         limit=limit,
     )
     return DueQuizListResponse(
-        items=[DueQuizResponse.model_validate(q) for q in quizzes],
-        total=len(quizzes),
+        items=[DueQuizResponse.model_validate(q) for q in items],
+        total=len(items),
+        remaining_quota=remaining,
+        daily_limit=review_service.DAILY_REVIEW_LIMIT,
     )
 
 

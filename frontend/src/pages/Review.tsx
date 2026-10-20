@@ -49,6 +49,15 @@ export default function Review() {
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /**
+   * 今日剩余可结算数 / 每日上限
+   *
+   * ⚠️ 来源是 `/review/due` 返回的 `remaining_quota`，**不是**从
+   * `stats.today_done` 自己减 —— 两次请求之间用户可能刚提交过一道。
+   * 见后端 `DueQuizListResponse` 的说明。
+   */
+  const [remainingQuota, setRemainingQuota] = useState(0);
+  const [dailyLimit, setDailyLimit] = useState(10);
 
   /**
    * 提交作答
@@ -149,6 +158,21 @@ export default function Review() {
       setLoading(true);
       const [dueData, statsData] = await Promise.all([getDueQuizzes(50), getReviewStats()]);
       setStats(statsData);
+      /**
+       * 剩余配额来自**列表这次请求**（`/review/due` 的 `remaining_quota`），
+       * 而不是从 `/review/stats` 的 `today_done` 自己减 —— 两次请求之间
+       * 用户可能刚提交过一道，自己减会算错。见 `DueQuizListResponse` 的说明。
+       */
+      setRemainingQuota(dueData.remaining_quota);
+      setDailyLimit(dueData.daily_limit || statsData.daily_limit);
+      /**
+       * ⚠️ 只有"**没有到期题目**"才直接进完成页。
+       *
+       * 原先的判据是"配额用尽 → 后端返回空列表 → 完成页"，于是用户
+       * 看不到今天还剩多少、也看不到已答过的题。B 方案之后列表不再按配额
+       * 截断，所以这里必须改成只看题目数 —— 配额用尽时**照样把题目显示出来**，
+       * 只是未答题的提交按钮置灰（配额只影响"能不能提交"，不影响"能不能看"）。
+       */
       if (dueData.items.length === 0) {
         clear();
         setCompleted(true);
@@ -176,19 +200,19 @@ export default function Review() {
   }));
 
   /**
-   * 今日额度是否已用尽（想法 8 阶段 4）
+   * 今日额度是否已用尽（想法 8 阶段 4 / B 方案）
    *
-   * 判据与后端**同一口径**：额度按"已结算"的题数算（`review_service.py`
-   * 的 `_count_settled_today` 排除了 `grading_method='ungraded'` 的占位记录），
-   * 而 `stats.today_done` 就是这个数（`/review/stats` 直接给的），
-   * 所以这里不必自己重算。
+   * 判据用**后端在同一次列表请求里给的** `remainingQuota`，而不是
+   * 前端拿 `stats.today_done` 与 `dailyLimit` 自己比 —— 两个数字来自
+   * 两次独立请求，中间用户可能刚提交过一道，自己比会算错。
    *
    * 为什么要有它：`/review/due` 一次装载 50 道，而每日只能结算 10 道。
    * 没有它的话，用户做到第 11 道点提交才拿到 429，
    * 而页面上还剩 40 道**看起来完全能点**的题 —— 一道道撞墙。
+   *
+   * ⚠️ 它只影响**未答题能不能提交**，不影响看与翻（见 `quotaExhausted` 的用法）。
    */
-  const dailyLimit = stats?.daily_limit ?? 10;
-  const quotaExhausted = (stats?.today_done ?? 0) >= dailyLimit;
+  const quotaExhausted = remainingQuota <= 0;
 
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
@@ -316,21 +340,31 @@ export default function Review() {
       {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
       <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
 
-      {/* 额度用尽：明确告知，而不是让用户一道道去撞 429。
-          已提交的题不受影响 —— 回看它们正是本功能的另一半诉求。 */}
-      {quotaExhausted && !current.submitted && (
-        <div
-          className="card card-accent-warning"
-          style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+      {/* 今日额度：**始终显示还剩几道**（B 方案）
+          原先只在"已用尽"时提示一句，于是用户看不到今天还有多少可做 ——
+          做完第 10 道就只看到"休息一下吧"，不知道是全做完了还是被限额挡了。
+
+          两种措辞：还有剩 → 中性提示；已用尽 → 警告色 + 说明仍可回看。 */}
+      <div
+        className={`card ${quotaExhausted ? 'card-accent-warning' : ''}`}
+        style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+      >
+        <p
+          style={{
+            fontWeight: 600,
+            color: quotaExhausted ? 'var(--color-warning)' : 'var(--color-text-secondary)',
+          }}
         >
-          <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>
-            {t('quizNav.quotaExhaustedBanner', {
-              done: stats?.today_done ?? 0,
-              limit: dailyLimit,
-            })}
-          </p>
-        </div>
-      )}
+          {quotaExhausted
+            ? t('quizNav.quotaExhaustedBanner', {
+                // 用"上限 - 剩余"反推今日已结算数，而不是读 `stats.today_done` ——
+                // 那个数来自另一次请求，可能落后于本次列表
+                done: dailyLimit - remainingQuota,
+                limit: dailyLimit,
+              })
+            : t('quizNav.quotaRemaining', { remaining: remainingQuota, limit: dailyLimit })}
+        </p>
+      </div>
       {/* 题目卡片（共享 QuizAnswerCard；提交竞态锁由 useQuizSession 的 submittingRef 承担，见 docs/decisions.md#F-23） */}
       <QuizAnswerCard
         quiz={quiz}

@@ -139,15 +139,33 @@ function fillWidth(container: HTMLElement): string {
   return fill.style.width;
 }
 
+/**
+ * 造一个 `/review/due` 的响应
+ *
+ * ⚠️ B 方案之后响应体多了 `remaining_quota` / `daily_limit`（配额只影响
+ * **能不能提交**，不影响能不能看）。默认给"配额充足"，需要测额度用尽的
+ * 用例显式传 `remainingQuota: 0`。
+ */
+function makeDueResponse(
+  items: DueQuiz[],
+  over: { remainingQuota?: number; dailyLimit?: number } = {},
+) {
+  return {
+    items,
+    total: items.length,
+    remaining_quota: over.remainingQuota ?? 10,
+    daily_limit: over.dailyLimit ?? 10,
+  };
+}
+
 beforeEach(() => {
   mockedDue.mockReset();
   mockedSubmit.mockReset();
   mockedStats.mockReset();
   mockedCard.mockReset();
-  mockedDue.mockResolvedValue({
-    items: [makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })],
-    total: 2,
-  });
+  mockedDue.mockResolvedValue(
+    makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })]),
+  );
   mockedStats.mockResolvedValue(makeStats());
 });
 
@@ -212,7 +230,12 @@ describe('每日限额的分流依据是 error_code，不是中文文案（阶�
   });
 
   it('★ 额度已满时**不发请求**（阶段 4：提前置灰取代了"撞 429"）', async () => {
-    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+    // 配额来自 `/review/due` 的 `remaining_quota`（B 方案）
+    mockedDue.mockResolvedValue(
+      makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })], {
+        remainingQuota: 0,
+      }),
+    );
     renderPage();
     await loaded();
 
@@ -271,10 +294,7 @@ describe('答题复习的回车约定（与卡片复习页一致）', () => {
   });
 
   it('★ 焦点在四档自评上时，回车要真的提交自评（旧实现把它 preventDefault 掉了）', async () => {
-    mockedDue.mockResolvedValue({
-      items: [makeQuiz({ question_type: 'short_answer' })],
-      total: 1,
-    });
+    mockedDue.mockResolvedValue(makeDueResponse([makeQuiz({ question_type: 'short_answer' })]));
     mockedSubmit.mockResolvedValueOnce(makePending()).mockResolvedValueOnce(
       makeResult({
         question_type: 'short_answer',
@@ -456,10 +476,15 @@ describe('刷题进度持久化（想法 8 阶段 3）', () => {
  * 本页的加载量（`/review/due` 50 道）与每日可结算量（10 道）差 5 倍，
  * 所以"做到第 11 道才撞 429、页面上还剩 40 道能点的题"是必然发生的。
  */
-describe('每日额度用尽时的表现（想法 8 阶段 4）', () => {
-  it('★ 额度已满：提交按钮置灰 + 顶部说明，而不是等提交报 429', async () => {
-    // today_done 已达 daily_limit
-    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+describe('每日额度（想法 8 阶段 4 + B 方案）', () => {
+  it('★ 额度已满：提交按钮置灰 + 顶部警告，而不是等提交报 429', async () => {
+    // B 方案之后配额来自 `/review/due` 的 `remaining_quota`，不再由前端算
+    mockedDue.mockResolvedValue(
+      makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })], {
+        remainingQuota: 0,
+        dailyLimit: 10,
+      }),
+    );
     renderPage();
     await loaded();
 
@@ -467,20 +492,29 @@ describe('每日额度用尽时的表现（想法 8 阶段 4）', () => {
     expect(screen.getByText('今日额度已用完（10 / 10）—— 仍可回看已答过的题')).toBeInTheDocument();
   });
 
-  it('额度未满时不禁用、也不显示那句说明', async () => {
-    mockedStats.mockResolvedValue(makeStats({ today_done: 3, daily_limit: 10 }));
+  it('★ 额度还有剩时**显示还剩几道**（B 方案：不再只在用尽时才提示）', async () => {
+    mockedDue.mockResolvedValue(
+      makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })], {
+        remainingQuota: 4,
+        dailyLimit: 10,
+      }),
+    );
     renderPage();
     await loaded();
 
     await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行');
     expect(screen.getByRole('button', { name: '提交答案' })).toBeEnabled();
-    expect(
-      screen.queryByText('今日额度已用完（3 / 10）—— 仍可回看已答过的题'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('今日还可结算 4 道（上限 10）')).toBeInTheDocument();
+    // 用尽时的那句不该出现
+    expect(screen.queryByText(/今日额度已用完/)).not.toBeInTheDocument();
   });
 
-  it('★ 额度已满时仍能前后翻（回看不受额度约束）', async () => {
-    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+  it('★ 额度已满时仍能前后翻（配额只挡提交，不挡看与翻）', async () => {
+    mockedDue.mockResolvedValue(
+      makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })], {
+        remainingQuota: 0,
+      }),
+    );
     renderPage();
     await loaded();
 
@@ -489,5 +523,28 @@ describe('每日额度用尽时的表现（想法 8 阶段 4）', () => {
     expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
     // 再翻回来：也允许
     expect(screen.getByRole('button', { name: '上一题' })).toBeEnabled();
+  });
+
+  it('★ 额度已满但**有到期题目**时不再直接跳完成页（B 方案的核心）', async () => {
+    /**
+     * 改之前：后端配额用尽返回空列表 → 前端 `items.length === 0` →
+     * 直接 `setCompleted(true)` → 用户只看到"休息一下吧"，
+     * 看不到今天还剩多少、也看不到已答过的题。
+     *
+     * 现在列表不再按配额截断，所以有题就该显示题目（只是不能提交）。
+     */
+    mockedDue.mockResolvedValue(
+      makeDueResponse([makeQuiz(), makeQuiz({ id: 'q2', question: '均充是什么？' })], {
+        remainingQuota: 0,
+      }),
+    );
+    renderPage();
+    await loaded();
+
+    // 关键：**没有**跳到完成页，题目照常显示
+    expect(screen.queryByText('复习完成')).not.toBeInTheDocument();
+    expect(screen.getByText('浮充是什么？')).toBeInTheDocument();
+    // 题号条也在（能回看）
+    expect(screen.getByRole('group', { name: '题目导航' })).toBeInTheDocument();
   });
 });

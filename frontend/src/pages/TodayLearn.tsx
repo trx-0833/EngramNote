@@ -63,6 +63,14 @@ export default function TodayLearn() {
   const [weakPoints, setWeakPoints] = useState<WeakPoint[]>([]);
   /** 今日每日推荐任务 */
   const [dailyPlan, setDailyPlan] = useState<DailyPlanResponse | null>(null);
+  /**
+   * 今日剩余可结算数 / 每日上限
+   *
+   * ⚠️ 来源是 `startReview()` 拿到的 `/review/due` 的 `remaining_quota`，
+   * **不是**从 `stats.today_done` 自己减 —— 两次请求之间用户可能刚提交过一道。
+   */
+  const [remainingQuota, setRemainingQuota] = useState(0);
+  const [dailyLimit, setDailyLimit] = useState(10);
 
   /**
    * 提交作答：本页用普通复习入口
@@ -183,6 +191,13 @@ export default function TodayLearn() {
   async function startReview() {
     try {
       const dueData = await getDueQuizzes(50);
+      /**
+       * 剩余配额来自**列表这次请求**（`/review/due` 的 `remaining_quota`），
+       * 而不是从 `stats.today_done` 自己减 —— 两次请求之间用户可能刚提交过一道。
+       * 见后端 `DueQuizListResponse` 的说明。
+       */
+      setRemainingQuota(dueData.remaining_quota);
+      if (dueData.daily_limit) setDailyLimit(dueData.daily_limit);
       if (dueData.items.length === 0) return;
       replaceAll(dueData.items);
     } catch (err) {
@@ -198,13 +213,15 @@ export default function TodayLearn() {
   }));
 
   /**
-   * 今日额度是否已用尽（想法 8 阶段 4）
+   * 今日额度是否已用尽（想法 8 阶段 4 / B 方案）
    *
-   * 与 `Review` 同一判据（`stats.today_done` 是后端按"已结算"口径给的数），
-   * 也同一理由：本页同样一次装载 50 道而每日只能结算 10 道。
+   * 判据用**后端在同一次列表请求里给的** `remainingQuota`（来自
+   * `startReview()` 拿到的 `/review/due`），而不是前端拿 `stats.today_done`
+   * 与 `dailyLimit` 自己比 —— 两个数字来自两次独立请求，中间用户可能刚提交过一道。
+   *
+   * ⚠️ 它只影响**未答题能不能提交**，不影响看与翻。
    */
-  const dailyLimit = stats?.daily_limit ?? 10;
-  const quotaExhausted = (stats?.today_done ?? 0) >= dailyLimit;
+  const quotaExhausted = remainingQuota <= 0;
 
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
@@ -292,20 +309,25 @@ export default function TodayLearn() {
         {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
         <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
 
-        {/* 额度用尽：明确告知，而不是让用户一道道去撞 429 */}
-        {quotaExhausted && !current.submitted && (
-          <div
-            className="card card-accent-warning"
-            style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+        {/* 今日额度：**始终显示还剩几道**（B 方案，与 Review 同一处理） */}
+        <div
+          className={`card ${quotaExhausted ? 'card-accent-warning' : ''}`}
+          style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+        >
+          <p
+            style={{
+              fontWeight: 600,
+              color: quotaExhausted ? 'var(--color-warning)' : 'var(--color-text-secondary)',
+            }}
           >
-            <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>
-              {t('quizNav.quotaExhaustedBanner', {
-                done: stats?.today_done ?? 0,
-                limit: dailyLimit,
-              })}
-            </p>
-          </div>
-        )}
+            {quotaExhausted
+              ? t('quizNav.quotaExhaustedBanner', {
+                  done: dailyLimit - remainingQuota,
+                  limit: dailyLimit,
+                })
+              : t('quizNav.quotaRemaining', { remaining: remainingQuota, limit: dailyLimit })}
+          </p>
+        </div>
 
         {/* 题目卡片（共享 QuizAnswerCard） */}
         <QuizAnswerCard

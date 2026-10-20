@@ -19,7 +19,7 @@ SM-2 参数更新和复习统计等功能。
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,44 +70,63 @@ async def get_due_quizzes(
     db: AsyncSession,
     limit: int = 50,
     daily_max: int = DAILY_REVIEW_LIMIT,
-) -> List[QuizItem]:
-    """
-    获取用户今日到期的复习题目
+) -> Tuple[List[QuizItem], int]:
+    """获取用户今日到期的复习题目 + 今日剩余配额
 
-    查询条件：
-    - next_review_at <= 当前时间（已到期）
-    - next_review_at 为 None（新题目，尚未设置复习时间）
-    - 每日最多返回 daily_max 道题（按今日已答题数扣减）
+    ## 查询条件
 
-    排序策略：
-    1. 最过期的优先（next_review_at 升序，nullsfirst）
+    - `next_review_at <= 当前时间`（已到期）
+    - `next_review_at is None`（新题目，尚未设置复习时间）
+
+    ## 排序策略
+
+    1. 最过期的优先（`next_review_at` 升序，nullsfirst）
     2. 薄弱点优先：关联卡片的错误次数越多，排序越靠前
+
+    ## ⚠️ 列表**不按每日配额截断**（B 方案，2026-10-20 改）
+
+    配额只影响**能不能提交**（由返回的 `remaining_quota` 表达，前端据此
+    置灰未答题的提交按钮），不影响**能不能看**。
+
+    改之前是"配额用尽就返回空列表"，于是前端直接跳复习完成页 ——
+    用户看不到今天还剩多少、也看不到已答过的题（而回看正是想法 8 的诉求），
+    且为"配额中途用尽"写的置灰与横幅**永远不显示**（截图实测确认）。
+
+    ⚠️ 提交侧的配额校验**不变**（`submit_answer` 仍按 `_count_settled_today`
+    拒绝超限提交）。本函数只放宽"看"，不放宽"结算"。
 
     Args:
         user_id: 用户 ID
         db: 数据库会话
-        limit: 最大返回数量
+        limit: 最多返回多少道
         daily_max: 每日最大答题数
 
     Returns:
-        List[QuizItem]: 到期题目列表
+        `(到期题目列表, 今日剩余可结算数)`；剩余数下限为 0。
     """
     now = datetime.now(timezone.utc)
     # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
-    today_start = today_start_utc(now)
 
+    today_start = today_start_utc(now)
     # 计算今日已结算题数（口径见 _count_settled_today）
     today_done = await _count_settled_today(db, user_id, today_start)
+    remaining = max(0, daily_max - today_done)
+    items = await _query_due_quizzes(db, user_id, now, limit)
+    return items, remaining
 
-    # 今日已达到上限，返回空列表
-    remaining = daily_max - today_done
-    if remaining <= 0:
-        return []
 
-    # 实际返回数量 = min(剩余配额, limit)
-    actual_limit = min(remaining, limit)
+async def _query_due_quizzes(
+    db: AsyncSession,
+    user_id: str,
+    now: datetime,
+    actual_limit: int,
+) -> List[QuizItem]:
+    """到期题目的实际查询（上面两个入口共用）
 
+    抽出来是为了让"配额怎么影响返回条数"只写一处：两个入口的差别**只在**
+    `actual_limit` 怎么算，查询本身逐字相同。
+    """
     # 子查询：统计每张卡片的错误次数，用于薄弱点优先排序
     # （与主查询一致地排除回收站笔记的题目，保证排序口径一致）
     error_subq = (

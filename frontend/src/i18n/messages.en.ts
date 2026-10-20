@@ -1273,6 +1273,7 @@ const en = {
       'Daily quota used up ({done} / {limit}) — you can still review answered questions',
     optionCorrect: 'Correct answer',
     optionYourWrong: 'Your choice (wrong)',
+    quotaRemaining: '{remaining} of {limit} left to answer today',
   },
 } satisfies typeof zhCN;
 
