@@ -16,6 +16,7 @@ import SelfRatingButtons, { useSelfRatingLabel } from './SelfRatingButtons';
 import styles from './QuizAnswerCard.module.css';
 import Icon from '../Icon';
 import { difficultyColors, useLabels } from '../../utils/labels';
+import { useTranslation } from '../../i18n';
 
 /** 答题卡片所需的最小题目结构 */
 export interface QuizCardQuestion {
@@ -94,6 +95,7 @@ export default function QuizAnswerCard({
   onSkipSelfRate,
   onNext,
 }: QuizAnswerCardProps) {
+  const { t } = useTranslation();
   const { questionTypeLabels, difficultyLabels, gradingMethodLabels, ratingLabels, verdictLabels } =
     useLabels();
   const labelOfSelfRating = useSelfRatingLabel();
@@ -123,7 +125,7 @@ export default function QuizAnswerCard({
   const missingPoints = detail?.missing_points ?? [];
   const misconceptions = detail?.misconceptions ?? [];
   const verdictMeta = detail ? verdictLabels[detail.verdict] : undefined;
-  const verdictLabel = verdictMeta?.label ?? '已判分';
+  const verdictLabel = verdictMeta?.label ?? t('quizCard.graded');
   const verdictColor = verdictMeta?.color ?? 'var(--color-primary)';
 
   const ratingLabel = result?.sm2?.rating ? ratingLabels[result.sm2.rating] : '';
@@ -172,7 +174,10 @@ export default function QuizAnswerCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           {showReviewMeta && quiz.review_count != null && quiz.review_count > 0 && (
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              已复习 {quiz.review_count} 次 | 间隔 {quiz.interval ?? 0} 天
+              {t('quizCard.reviewStats', {
+                count: quiz.review_count,
+                interval: quiz.interval ?? 0,
+              })}
             </span>
           )}
           {headerExtra}
@@ -208,7 +213,7 @@ export default function QuizAnswerCard({
               type="text"
               value={userAnswer}
               onChange={(e) => onSelectAnswer(e.target.value)}
-              placeholder="请输入答案..."
+              placeholder={t('quizCard.answerPlaceholder')}
               autoFocus={fillAutoFocus}
               style={{
                 width: '100%',
@@ -225,7 +230,7 @@ export default function QuizAnswerCard({
             <textarea
               value={userAnswer}
               onChange={(e) => onSelectAnswer(e.target.value)}
-              placeholder="请输入你的回答..."
+              placeholder={t('quizCard.shortAnswerPlaceholder')}
               rows={4}
               style={{
                 width: '100%',
@@ -263,11 +268,9 @@ export default function QuizAnswerCard({
                 style={{ marginTop: 3 }}
               />
               <span>
-                让 AI 先判一次，指出遗漏与误解
+                {t('quizCard.aiGradeLabel')}
                 <br />
-                <span style={{ fontSize: '0.8rem' }}>
-                  需要联网调用模型，提交会慢几秒；不勾选则直接由你自评。
-                </span>
+                <span style={{ fontSize: '0.8rem' }}>{t('quizCard.aiGradeHint')}</span>
               </span>
             </label>
           )}
@@ -279,7 +282,7 @@ export default function QuizAnswerCard({
               onClick={onSubmit}
               disabled={!userAnswer.trim() || submitting}
             >
-              提交答案
+              {t('quizCard.submit')}
             </button>
           </div>
         </>
@@ -305,7 +308,7 @@ export default function QuizAnswerCard({
                 borderRadius: 4,
               }}
             >
-              <p style={{ fontWeight: 600 }}>请对照答案，给自己的回忆程度打分</p>
+              <p style={{ fontWeight: 600 }}>{t('quizCard.selfRatingPrompt')}</p>
               <p
                 style={{
                   marginTop: 'var(--space-xs)',
@@ -313,7 +316,7 @@ export default function QuizAnswerCard({
                   color: 'var(--color-text-secondary)',
                 }}
               >
-                简答题无法自动判分，需要你自评后才会计入复习进度。
+                {t('quizCard.shortAnswerNote')}
               </p>
             </div>
           ) : (
@@ -327,11 +330,11 @@ export default function QuizAnswerCard({
                   color: result?.is_correct ? 'var(--color-success)' : 'var(--color-error)',
                 }}
               >
-                {result?.is_correct ? '回答正确!' : '回答错误'}
+                {result?.is_correct ? t('quizCard.correct') : t('quizCard.incorrect')}
               </p>
               {!result?.is_correct && (
                 <p style={{ marginTop: 'var(--space-xs)' }}>
-                  <strong>正确答案:</strong> {result?.correct_answer}
+                  <strong>{t('quizCard.correctAnswer')}</strong> {result?.correct_answer}
                 </p>
               )}
             </div>
@@ -341,11 +344,11 @@ export default function QuizAnswerCard({
           {needsSelfAssessment && (
             <div style={{ marginBottom: 'var(--space-md)' }}>
               <p>
-                <strong>参考答案:</strong> {result?.correct_answer}
+                <strong>{t('quizCard.referenceAnswer')}</strong> {result?.correct_answer}
               </p>
               {result?.explanation && (
                 <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}>
-                  <strong>解析:</strong> {result.explanation}
+                  <strong>{t('quizCard.explanation')}</strong> {result.explanation}
                 </p>
               )}
             </div>
@@ -367,7 +370,9 @@ export default function QuizAnswerCard({
                 fontSize: '0.9rem',
               }}
             >
-              <p style={{ fontWeight: 600, color: verdictColor }}>AI 判分：{verdictLabel}</p>
+              <p style={{ fontWeight: 600, color: verdictColor }}>
+                {t('quizCard.aiVerdict', { verdict: verdictLabel })}
+              </p>
               {detail.reason && <p style={{ marginTop: 'var(--space-xs)' }}>{detail.reason}</p>}
               {missingPoints.length > 0 && (
                 // `<ul>` **不能是 `<p>` 的后代**：HTML 规范里 `<p>` 只收短语内容。
@@ -378,7 +383,7 @@ export default function QuizAnswerCard({
                 // 显式补回 `<p>` 原本的 1em 下外边距 —— 全局样式表没有重置
                 // `p` 的 margin，不补就会少 14.4px（此处 font-size 是 0.9rem）。
                 <div style={{ marginTop: 'var(--space-xs)', marginBottom: '1em' }}>
-                  <strong>遗漏：</strong>
+                  <strong>{t('quizCard.omissions')}</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
                     {missingPoints.map((point, i) => (
                       <li key={i}>{point}</li>
@@ -389,7 +394,7 @@ export default function QuizAnswerCard({
               {misconceptions.length > 0 && (
                 // 同上：`<ul>` 不能住进 `<p>` 里
                 <div style={{ marginTop: 'var(--space-xs)', marginBottom: '1em' }}>
-                  <strong>误解：</strong>
+                  <strong>{t('quizCard.misunderstandings')}</strong>
                   <ul style={{ margin: '4px 0 0 1.2em', padding: 0 }}>
                     {misconceptions.map((point, i) => (
                       <li key={i}>{point}</li>
@@ -399,7 +404,7 @@ export default function QuizAnswerCard({
               )}
               {missingPoints.length === 0 && misconceptions.length === 0 && (
                 <p style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-secondary)' }}>
-                  没有发现遗漏或误解。
+                  {t('quizCard.noIssues')}
                 </p>
               )}
             </div>
@@ -435,7 +440,7 @@ export default function QuizAnswerCard({
               <span className={styles.selfRatingSeal} aria-hidden="true">
                 <Icon name="seal" size={20} />
               </span>
-              已按自评「{labelOfSelfRating(result.self_rating)}」记录，复习进度已更新。
+              {t('quizCard.selfRatingRecorded', { rating: labelOfSelfRating(result.self_rating) })}
             </div>
           )}
 
@@ -455,18 +460,22 @@ export default function QuizAnswerCard({
                 marginBottom: 'var(--space-md)',
               }}
             >
-              下次复习: {result.sm2.interval} 天后 | 评分: {result.quality}
-              {ratingLabel && <> | 档位: {ratingLabel}</>}
+              {t('quizCard.nextReview', { interval: result.sm2.interval, quality: result.quality })}
+              {ratingLabel && <>{t('quizCard.ratingTier', { label: ratingLabel })}</>}
               {showRetention && (
                 <>
                   {' | '}
-                  复习前预测还能想起: {Math.round((result.sm2.predicted_retention ?? 0) * 100)}%
+                  {t('quizCard.predictedRetention', {
+                    percent: Math.round((result.sm2.predicted_retention ?? 0) * 100),
+                  })}
                 </>
               )}
               {result.grading_method && (
                 <>
                   {' '}
-                  | 判分方式: {gradingMethodLabels[result.grading_method] ?? result.grading_method}
+                  {t('quizCard.gradingMethod', {
+                    method: gradingMethodLabels[result.grading_method] ?? result.grading_method,
+                  })}
                 </>
               )}
             </div>
@@ -480,9 +489,9 @@ export default function QuizAnswerCard({
               className="btn btn-primary"
               onClick={onNext}
               disabled={needsSelfAssessment}
-              title={needsSelfAssessment ? '请先完成自评' : undefined}
+              title={needsSelfAssessment ? t('quizCard.needSelfRating') : undefined}
             >
-              {nextButtonText ?? (isLast ? '完成复习' : '下一题')}
+              {nextButtonText ?? (isLast ? t('quizCard.finishReview') : t('quizCard.nextQuestion'))}
             </button>
           </div>
         </>

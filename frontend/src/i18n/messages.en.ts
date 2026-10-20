@@ -761,6 +761,7 @@ const en = {
   cardReview: {
     title: 'Card review',
     loading: 'Loading due cards…',
+    loadFailed: 'Could not load due cards',
     empty: 'No cards are due',
     emptyHint:
       'Card review only includes cards that have entered the review schedule. Newly imported cards join the schedule the first time you review them; if you just rebuilt the data, you may need to run the review-state migration once.',
@@ -973,6 +974,97 @@ const en = {
     cancel: 'Cancel',
     relationTypesLegend: 'Relation types (click to highlight)',
     pendingSuggestionLegend: 'Pending suggestions (pale · no arrow)',
+  },
+
+  quizCard: {
+    graded: 'Graded',
+    reviewStats: 'Reviewed {count} times | interval {interval} days',
+    answerPlaceholder: 'Type your answer…',
+    shortAnswerPlaceholder: 'Type your response…',
+    aiGradeLabel: 'Have AI grade it first and point out omissions and misunderstandings',
+    aiGradeHint:
+      'This calls the model online, so submitting takes a few extra seconds. Leave it unchecked to rate yourself.',
+    submit: 'Submit answer',
+    selfRatingPrompt: 'Compare with the answer and rate how well you recalled it',
+    shortAnswerNote:
+      'Short answers cannot be graded automatically — rate yourself for it to count toward review progress.',
+    correct: 'Correct!',
+    incorrect: 'Incorrect',
+    correctAnswer: 'Correct answer:',
+    referenceAnswer: 'Reference answer:',
+    explanation: 'Explanation:',
+    aiVerdict: 'AI verdict: {verdict}',
+    omissions: 'Omissions:',
+    misunderstandings: 'Misunderstandings:',
+    noIssues: 'No omissions or misunderstandings found.',
+    selfRatingRecorded: 'Recorded as “{rating}”; review progress updated.',
+    nextReview: 'Next review: in {interval} days | rating: {quality}',
+    ratingTier: ' | tier: {label}',
+    predictedRetention: 'Predicted recall before review: {percent}%',
+    gradingMethod: ' | graded by: {method}',
+    needSelfRating: 'Rate yourself first',
+    finishReview: 'Finish review',
+    nextQuestion: 'Next question',
+  },
+
+  sourceContext: {
+    loadFailed: 'Could not load the original text',
+    expand: 'View source context',
+    collapse: 'Hide source context',
+    loading: 'Loading the original text…',
+    retry: 'Retry',
+    noSource: 'No source passage was recorded when this card was generated.',
+    viewFullText: 'View the full text in the note →',
+  },
+
+  selfRating: {
+    pending: 'Saving self-rating…',
+    skip: 'Skip self-rating and go to the next question',
+  },
+
+  cardReviewSummary: {
+    done: 'This round of card review is complete',
+    stats: 'This session',
+    reviewed: 'Cards reviewed: {count}',
+    recalled: 'Recalled: {count}',
+    loadedAllDue: 'Loaded {loaded} cards out of {due} due in total — you can go another round.',
+    queueCleared: 'The due queue is empty.',
+    again: 'Review another round',
+    backToToday: 'Back to study today',
+  },
+
+  scheduleFeedback: {
+    monthDay: '{month}/{day}',
+    recorded: 'Recorded as “{rating}”',
+    nextReview: 'Next review: ',
+    daysLater: 'in {count} days',
+    predictedRetention: 'The model expected you to recall: ',
+    retentionNote: '— the closer to forgetting, the larger the interval grows on a correct answer',
+    stability: 'Stability {value} days',
+    difficulty: 'Difficulty {value}',
+    mastery: 'Mastery {from} → {to}',
+    empty: '—',
+  },
+
+  noteAsk: {
+    title: 'Ask AI',
+    dragHint: 'Drag to move this window',
+    placeholder: 'Type your question…',
+    selectionPrefix: 'Based on the text selected in this note: “{text}”',
+    ask: 'Ask',
+    askAgain: 'Ask again',
+    jumpFailed:
+      'Could not locate the cited passage (the text may not be loaded yet, or the layout differs)',
+  },
+
+  cardFace: {
+    reviewCount: 'Reviewed {count} times',
+    intervalDays: ' · interval {count} days',
+    lapses: ' · {count} lapses',
+    selfTestHint:
+      'Recite this card to yourself before revealing the answer — flipping straight over is the same as reading the answer, and your self-rating would be meaningless.',
+    showAnswer: 'Show answer',
+    summary: 'Summary:',
   },
 } satisfies typeof zhCN;
 

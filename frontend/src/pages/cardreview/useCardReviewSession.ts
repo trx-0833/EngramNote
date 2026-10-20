@@ -32,6 +32,7 @@ import {
   type DueCard,
 } from '../../api/review';
 import { useToast } from '../../components/Toast';
+import { translate } from '../../i18n/translate';
 
 /** 一张卡片的会话状态 */
 export interface CardState {
@@ -89,7 +90,7 @@ export function useCardReviewSession(pageSize: number = PAGE_SIZE) {
     () =>
       getDueCards(pageSize)
         .then(applyLoaded)
-        .catch(() => setError('加载到期卡片失败')),
+        .catch(() => setError(translate('cardReview.loadFailed'))),
     [pageSize, applyLoaded],
   );
 
@@ -146,7 +147,7 @@ export function useCardReviewSession(pageSize: number = PAGE_SIZE) {
         setSessionCount((prev) => prev + 1);
         if (result.is_correct) setSessionPassed((prev) => prev + 1);
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : '提交失败');
+        toast.error(e instanceof Error ? e.message : translate('shared.submitFailed'));
       } finally {
         submittingRef.current = false;
         setSubmitting(false);

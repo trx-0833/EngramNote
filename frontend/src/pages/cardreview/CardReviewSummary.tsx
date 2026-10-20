@@ -1,3 +1,4 @@
+import { useTranslation } from '../../i18n';
 /**
  * @file 卡片复习的本轮汇总
  *
@@ -33,13 +34,14 @@ export default function CardReviewSummary({
   onRestart,
   onBack,
 }: CardReviewSummaryProps) {
+  const { t } = useTranslation();
   return (
     <div className="page-enter" style={{ margin: '0 auto' }}>
-      <h2 style={{ marginBottom: 'var(--space-lg)' }}>本轮卡片复习完成</h2>
+      <h2 style={{ marginBottom: 'var(--space-lg)' }}>{t('cardReviewSummary.done')}</h2>
       <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-        <h3 style={{ marginBottom: 'var(--space-sm)' }}>本次统计</h3>
-        <p>复习卡片: {sessionCount} 张</p>
-        <p>想起来了: {sessionPassed} 张</p>
+        <h3 style={{ marginBottom: 'var(--space-sm)' }}>{t('cardReviewSummary.stats')}</h3>
+        <p>{t('cardReviewSummary.reviewed', { count: sessionCount })}</p>
+        <p>{t('cardReviewSummary.recalled', { count: sessionPassed })}</p>
         <p
           style={{
             color: 'var(--color-text-secondary)',
@@ -48,16 +50,16 @@ export default function CardReviewSummary({
           }}
         >
           {totalDue > loadedCount
-            ? `本次加载了 ${loadedCount} 张，全部到期共 ${totalDue} 张 —— 可以再来一轮。`
-            : '到期队列已经清空。'}
+            ? t('cardReviewSummary.loadedAllDue', { loaded: loadedCount, due: totalDue })
+            : t('cardReviewSummary.queueCleared')}
         </p>
       </div>
       <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
         <button className="btn btn-primary" onClick={onRestart}>
-          再复习一轮
+          {t('cardReviewSummary.again')}
         </button>
         <button className="btn btn-secondary" onClick={onBack}>
-          回到今日学习
+          {t('cardReviewSummary.backToToday')}
         </button>
       </div>
     </div>

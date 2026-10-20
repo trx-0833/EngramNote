@@ -24,6 +24,7 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getKnowledgeCard } from '../../api/qa';
+import { useTranslation } from '../../i18n';
 
 interface SourceContextProps {
   /** 卡片 ID（`source_text` 存在卡片上） */
@@ -33,6 +34,7 @@ interface SourceContextProps {
 }
 
 export default function SourceContext({ cardId, noteId }: SourceContextProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [sourceText, setSourceText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,11 +48,11 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
       const card = await getKnowledgeCard(cardId);
       setSourceText((card.source_text || '').trim());
     } catch (e) {
-      setError(e instanceof Error ? e.message : '原文加载失败');
+      setError(e instanceof Error ? e.message : t('sourceContext.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [cardId]);
+  }, [cardId, t]);
 
   // 加载由**点击**触发，而不是放在 effect 里同步 setState ——
   // 后者会引发级联渲染（eslint 的 react-hooks/set-state-in-effect 正是查这个），
@@ -81,7 +83,7 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
           textDecoration: 'underline',
         }}
       >
-        {expanded ? '收起原文语境' : '查看原文语境'}
+        {expanded ? t('sourceContext.collapse') : t('sourceContext.expand')}
       </button>
 
       {expanded && (
@@ -96,7 +98,11 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
             lineHeight: 1.7,
           }}
         >
-          {loading && <span style={{ color: 'var(--color-text-secondary)' }}>正在读取原文...</span>}
+          {loading && (
+            <span style={{ color: 'var(--color-text-secondary)' }}>
+              {t('sourceContext.loading')}
+            </span>
+          )}
           {!loading && error && (
             <div>
               {/* `var(--color-error)` 而不是字面量 `#f44336`：后者白底 3.68:1，
@@ -104,13 +110,13 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
                   （要求 4.5:1）。同一语义在 base.css 里有取值，不再各写一份。 */}
               <p style={{ color: 'var(--color-error)' }}>{error}</p>
               <button className="btn btn-link" onClick={() => void load()}>
-                重试
+                {t('sourceContext.retry')}
               </button>
             </div>
           )}
           {!loading && !error && sourceText === '' && (
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              这张卡片的生成过程没有记下原文段落。
+              {t('sourceContext.noSource')}
             </span>
           )}
           {!loading && !error && sourceText && (
@@ -118,7 +124,7 @@ export default function SourceContext({ cardId, noteId }: SourceContextProps) {
           )}
           {noteId && (
             <p style={{ marginTop: 'var(--space-sm)', marginBottom: 0 }}>
-              <Link to={`/notes/${noteId}?view=clean`}>在笔记中查看完整原文 →</Link>
+              <Link to={`/notes/${noteId}?view=clean`}>{t('sourceContext.viewFullText')}</Link>
             </p>
           )}
         </div>

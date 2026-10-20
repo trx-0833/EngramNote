@@ -45,6 +45,7 @@
 import type { ReactNode } from 'react';
 import { useLabels, type SelfRatingOption } from '../../utils/labels';
 import styles from './SelfRatingButtons.module.css';
+import { useTranslation } from '../../i18n';
 
 /**
  * 把 SM-2 quality 分翻译成用户看到的档位名
@@ -94,6 +95,7 @@ export default function SelfRatingButtons({
   prompt,
   onSkip,
 }: SelfRatingButtonsProps) {
+  const { t } = useTranslation();
   const { selfRatingOptions } = useLabels();
   return (
     <div className={styles.selfRatingDock}>
@@ -121,12 +123,12 @@ export default function SelfRatingButtons({
         ))}
       </div>
 
-      {submitting && <p className={styles.selfRatingPending}>正在记录自评...</p>}
+      {submitting && <p className={styles.selfRatingPending}>{t('selfRating.pending')}</p>}
 
       {onSkip && !submitting && (
         <p className={styles.selfRatingSkip}>
           <button className={`btn btn-link ${styles.selfRatingSkipBtn}`} onClick={onSkip}>
-            跳过自评，先做下一题
+            {t('selfRating.skip')}
           </button>
         </p>
       )}

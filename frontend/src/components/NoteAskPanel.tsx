@@ -27,6 +27,7 @@ import { useThrottledStream } from '../hooks/useStreamAnswer';
 // AI 提问浮层样式（overhaul-plan 5.6）：原 src/styles/markdown-extras.css 的
 // `.ask-ai-*` 17 条搬到这里；同表的 KaTeX / 批注规则留在全局（见模块文件头）
 import styles from './NoteAskPanel.module.css';
+import { useTranslation } from '../i18n';
 
 interface NoteAskPanelProps {
   noteId: string;
@@ -59,6 +60,7 @@ export default function NoteAskPanel({
   pos,
   onClose,
 }: NoteAskPanelProps) {
+  const { t } = useTranslation();
   const [question, setQuestion] = useState(initialText);
   const [submittedQuestion, setSubmittedQuestion] = useState('');
   const [answer, setAnswer] = useState('');
@@ -221,7 +223,7 @@ export default function NoteAskPanel({
       if (controller.signal.aborted) {
         // 用户主动停止：保留已生成文本
       } else {
-        setError(err instanceof Error ? err.message : '问答失败');
+        setError(err instanceof Error ? err.message : t('qa.failed'));
         // 如果首字未到，清空答案，避免展示空白回答
         if (!firstTokenReceived) {
           setAnswer('');
@@ -309,9 +311,13 @@ export default function NoteAskPanel({
 
   return (
     <div className={styles.askAiPanel} style={panelStyle}>
-      <div className={styles.askAiHeader} onMouseDown={handleDragStart} title="按住拖动窗口">
-        <span className={styles.askAiTitle}>AI 提问</span>
-        <button className={styles.askAiClose} onClick={handleClose} title="关闭">
+      <div
+        className={styles.askAiHeader}
+        onMouseDown={handleDragStart}
+        title={t('noteAsk.dragHint')}
+      >
+        <span className={styles.askAiTitle}>{t('noteAsk.title')}</span>
+        <button className={styles.askAiClose} onClick={handleClose} title={t('common.close')}>
           {/* 批次 B3：`\u2715` ✕ 换 `<Icon name="close" />`。
               按钮的 `title="关闭"` 仍是它的可访问名（title 在无内容文本时生效）。 */}
           <Icon name="close" size={16} />
@@ -325,25 +331,25 @@ export default function NoteAskPanel({
               className={styles.askAiInput}
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="输入你的问题..."
+              placeholder={t('noteAsk.placeholder')}
               rows={3}
             />
             <p className={styles.askAiSelectedHint}>
-              基于当前笔记选中文本：「{selectedTextPreview}」
+              {t('noteAsk.selectionPrefix', { text: selectedTextPreview })}
             </p>
             <div className={styles.askAiActions}>
               <button className="btn btn-secondary" onClick={handleClose}>
-                取消
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={handleAsk} disabled={!question.trim()}>
-                提问
+                {t('noteAsk.ask')}
               </button>
             </div>
           </>
         ) : (
           <>
             <div className={styles.askAiQuestion}>{submittedQuestion}</div>
-            {loading && <div className={styles.askAiThinking}>AI 正在思考...</div>}
+            {loading && <div className={styles.askAiThinking}>{t('qa.thinking')}</div>}
             {answer && (
               <div
                 className={`${styles.askAiAnswer} markdown-body`}
@@ -368,7 +374,7 @@ export default function NoteAskPanel({
                     <span
                       key={s.chunk_id || `${s.note_id}-${i}`}
                       style={{ cursor: canJump ? 'pointer' : 'default' }}
-                      title={canJump ? '点击跳到原文该段落' : '该引用缺少定位信息'}
+                      title={canJump ? t('qa.jumpToSource') : t('qa.noLocation')}
                       onClick={() => {
                         if (!canJump) return;
                         // 面板浮在正文上，跳到别的笔记没有意义 → 只处理当前笔记
@@ -380,7 +386,7 @@ export default function NoteAskPanel({
                           s.char_end,
                         );
                         if (!result.highlighted) {
-                          setError('未能定位到引用段落（正文可能尚未加载或排版有差异）');
+                          setError(t('noteAsk.jumpFailed'));
                         }
                       }}
                     >
@@ -404,22 +410,22 @@ export default function NoteAskPanel({
             <div className={styles.askAiActions}>
               {streaming ? (
                 <button className="btn btn-danger" onClick={stopActiveStream}>
-                  停止生成
+                  {t('qa.stop')}
                 </button>
               ) : (
                 <>
                   <button className="btn btn-secondary" onClick={handleReask}>
-                    重新提问
+                    {t('noteAsk.askAgain')}
                   </button>
                   <button className="btn btn-primary" onClick={handleClose}>
-                    关闭
+                    {t('common.close')}
                   </button>
                 </>
               )}
             </div>
             {provider && (
               <p className={styles.askAiProvider}>
-                由 {provider === 'glm' ? 'GLM' : 'DeepSeek'} 提供支持
+                {t('qa.poweredBy', { provider: provider === 'glm' ? 'GLM' : 'DeepSeek' })}
               </p>
             )}
             {retrievalNotice(retrievalStatus) && (

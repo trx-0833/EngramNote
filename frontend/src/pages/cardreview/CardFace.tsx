@@ -27,6 +27,7 @@ import { useLabels } from '../../utils/labels';
 // 类名由 CSS Modules 哈希化后从 styles 取（overhaul-plan 5.6 的约定）：
 // 不再写全局类名字面量，否则搬迁到模块的规则会因为选择器对不上而静默失效
 import styles from './CardFace.module.css';
+import { useTranslation } from '../../i18n';
 
 interface CardFaceProps {
   card: DueCard;
@@ -36,6 +37,7 @@ interface CardFaceProps {
 }
 
 export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
+  const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   const typeLabel = cardTypeLabels[card.card_type] || card.card_type;
 
@@ -71,9 +73,11 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
           )}
         </div>
         <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-          已复习 {card.review_count} 次
-          {card.review_count > 0 && <> · 间隔 {card.interval_days} 天</>}
-          {card.lapses > 0 && <> · 遗忘 {card.lapses} 次</>}
+          {t('cardFace.reviewCount', { count: card.review_count })}
+          {card.review_count > 0 && (
+            <> {t('cardFace.intervalDays', { count: card.interval_days })}</>
+          )}
+          {card.lapses > 0 && <> {t('cardFace.lapses', { count: card.lapses })}</>}
         </span>
       </div>
 
@@ -109,11 +113,11 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
                 marginBottom: 'var(--space-md)',
               }}
             >
-              先在心里把这张卡的内容讲一遍，再看答案 —— 直接翻面等于看答案， 这次自评就不准了。
+              {t('cardFace.selfTestHint')}
             </p>
             <div style={{ textAlign: 'right' }}>
               <button className="btn btn-primary" onClick={onReveal}>
-                显示答案
+                {t('cardFace.showAnswer')}
               </button>
             </div>
           </>
@@ -136,7 +140,7 @@ export default function CardFace({ card, revealed, onReveal }: CardFaceProps) {
                   marginTop: 'var(--space-md)',
                 }}
               >
-                <strong>摘要:</strong> {card.summary}
+                <strong>{t('cardFace.summary')}</strong> {card.summary}
               </p>
             )}
           </>

@@ -938,6 +938,7 @@ const zhCN = {
   cardReview: {
     title: '卡片复习',
     loading: '加载到期卡片...',
+    loadFailed: '加载到期卡片失败',
     empty: '没有到期的卡片',
     emptyHint:
       '卡片复习只包含「已进入复习计划」的卡片。刚导入的卡片会在你第一次复习它们时加入计划；若刚重建过数据，可能需要先运行一次复习状态迁移。',
@@ -1163,6 +1164,103 @@ const zhCN = {
     // ---- 图例 ----
     relationTypesLegend: '关系类型（点击高亮）',
     pendingSuggestionLegend: '待审建议（淡色 · 无箭头）',
+  },
+
+  /** 答题卡组件（`quiz/QuizAnswerCard`，i18n 阶段 3） */
+  quizCard: {
+    /** 判分结果未知时的兜底标签 */
+    graded: '已判分',
+    reviewStats: '已复习 {count} 次 | 间隔 {interval} 天',
+    answerPlaceholder: '请输入答案...',
+    shortAnswerPlaceholder: '请输入你的回答...',
+    aiGradeLabel: '让 AI 先判一次，指出遗漏与误解',
+    aiGradeHint: '需要联网调用模型，提交会慢几秒；不勾选则直接由你自评。',
+    submit: '提交答案',
+    selfRatingPrompt: '请对照答案，给自己的回忆程度打分',
+    shortAnswerNote: '简答题无法自动判分，需要你自评后才会计入复习进度。',
+    correct: '回答正确!',
+    incorrect: '回答错误',
+    correctAnswer: '正确答案:',
+    referenceAnswer: '参考答案:',
+    explanation: '解析:',
+    aiVerdict: 'AI 判分：{verdict}',
+    omissions: '遗漏：',
+    misunderstandings: '误解：',
+    noIssues: '没有发现遗漏或误解。',
+    selfRatingRecorded: '已按自评「{rating}」记录，复习进度已更新。',
+    nextReview: '下次复习: {interval} 天后 | 评分: {quality}',
+    ratingTier: ' | 档位: {label}',
+    predictedRetention: '复习前预测还能想起: {percent}%',
+    gradingMethod: ' | 判分方式: {method}',
+    needSelfRating: '请先完成自评',
+    finishReview: '完成复习',
+    nextQuestion: '下一题',
+  },
+
+  /** 原文语境面板（`quiz/SourceContext`，i18n 阶段 3） */
+  sourceContext: {
+    loadFailed: '原文加载失败',
+    expand: '查看原文语境',
+    collapse: '收起原文语境',
+    loading: '正在读取原文...',
+    retry: '重试',
+    noSource: '这张卡片的生成过程没有记下原文段落。',
+    viewFullText: '在笔记中查看完整原文 →',
+  },
+
+  /** 自评按钮组（`quiz/SelfRatingButtons`，i18n 阶段 3） */
+  selfRating: {
+    pending: '正在记录自评...',
+    skip: '跳过自评，先做下一题',
+  },
+
+  /** 卡片复习完成汇总（`cardreview/CardReviewSummary`，i18n 阶段 3） */
+  cardReviewSummary: {
+    done: '本轮卡片复习完成',
+    stats: '本次统计',
+    reviewed: '复习卡片: {count} 张',
+    recalled: '想起来了: {count} 张',
+    loadedAllDue: '本次加载了 {loaded} 张，全部到期共 {due} 张 —— 可以再来一轮。',
+    queueCleared: '到期队列已经清空。',
+    again: '再复习一轮',
+    backToToday: '回到今日学习',
+  },
+
+  /** 卡片复习排程反馈（`cardreview/ScheduleFeedback`，i18n 阶段 3） */
+  scheduleFeedback: {
+    /** 短日期，如「1月15日」 */
+    monthDay: '{month}月{day}日',
+    recorded: '已按自评「{rating}」记录',
+    nextReview: '下次复习: ',
+    daysLater: '{count} 天后',
+    predictedRetention: '复习前模型认为你还能想起: ',
+    retentionNote: '—— 越接近遗忘，这次答对后间隔涨得越大',
+    stability: '记忆强度 {value} 天',
+    difficulty: '难度 {value}',
+    mastery: '掌握度 {from} → {to}',
+    empty: '—',
+  },
+
+  /** 笔记内 AI 提问浮窗（`NoteAskPanel`，i18n 阶段 3） */
+  noteAsk: {
+    title: 'AI 提问',
+    dragHint: '按住拖动窗口',
+    placeholder: '输入你的问题...',
+    selectionPrefix: '基于当前笔记选中文本：「{text}」',
+    ask: '提问',
+    askAgain: '重新提问',
+    jumpFailed: '未能定位到引用段落（正文可能尚未加载或排版有差异）',
+  },
+
+  /** 卡片正面（`cardreview/CardFace`，i18n 阶段 3） */
+  cardFace: {
+    reviewCount: '已复习 {count} 次',
+    intervalDays: ' · 间隔 {count} 天',
+    lapses: ' · 遗忘 {count} 次',
+    selfTestHint:
+      '先在心里把这张卡的内容讲一遍，再看答案 —— 直接翻面等于看答案， 这次自评就不准了。',
+    showAnswer: '显示答案',
+    summary: '摘要:',
   },
 };
 

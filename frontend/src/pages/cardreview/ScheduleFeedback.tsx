@@ -18,6 +18,7 @@
  */
 import type { CardReviewSubmitResponse } from '../../api/review';
 import { useSelfRatingLabel } from '../../components/quiz/SelfRatingButtons';
+import { useTranslation, type MessageKey } from '../../i18n';
 
 interface ScheduleFeedbackProps {
   result: CardReviewSubmitResponse;
@@ -25,15 +26,23 @@ interface ScheduleFeedbackProps {
   previousMastery: number;
 }
 
-/** 格式化到"月日"（本地时区）；空值与非法值都给占位，不显示 NaN */
-function formatDue(value: string | null | undefined): string {
-  if (!value) return '—';
+/**
+ * 格式化到"月日"（本地时区）；空值与非法值都给占位，不显示 NaN
+ *
+ * ⚠️ 模块级函数调不了 hook，所以 `t` 由调用方传进来（i18n 阶段 3）。
+ */
+function formatDue(
+  value: string | null | undefined,
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): string {
+  if (!value) return t('scheduleFeedback.empty');
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (Number.isNaN(d.getTime())) return t('scheduleFeedback.empty');
+  return t('scheduleFeedback.monthDay', { month: d.getMonth() + 1, day: d.getDate() });
 }
 
 export default function ScheduleFeedback({ result, previousMastery }: ScheduleFeedbackProps) {
+  const { t } = useTranslation();
   const labelOfSelfRating = useSelfRatingLabel();
   return (
     <div
@@ -52,25 +61,38 @@ export default function ScheduleFeedback({ result, previousMastery }: ScheduleFe
       {/* 措辞与答题复习侧的"已按自评「…」记录"统一：同一个事件，
           用户在两条路径上不该读到两句不同的话。 */}
       <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-        已按自评「{labelOfSelfRating(result.quality)}」记录
+        {t('scheduleFeedback.recorded', { rating: labelOfSelfRating(result.quality) })}
       </p>
       <p>
-        下次复习: <strong>{result.interval_days} 天后</strong>
-        {result.next_review_at && <> （{formatDue(result.next_review_at)}）</>}
+        {t('scheduleFeedback.nextReview')}
+        <strong>{t('scheduleFeedback.daysLater', { count: result.interval_days })}</strong>
+        {result.next_review_at && <> （{formatDue(result.next_review_at, t)}）</>}
       </p>
       {typeof result.predicted_retention === 'number' && result.predicted_retention < 0.999 && (
         <p>
-          复习前模型认为你还能想起: <strong>{Math.round(result.predicted_retention * 100)}%</strong>{' '}
-          —— 越接近遗忘，这次答对后间隔涨得越多
+          {t('scheduleFeedback.predictedRetention')}
+          <strong>{Math.round(result.predicted_retention * 100)}%</strong>{' '}
+          {t('scheduleFeedback.retentionNote')}
         </p>
       )}
       {(result.stability != null || result.difficulty != null) && (
         <p style={{ color: 'var(--color-text-secondary)' }}>
-          记忆强度 {result.stability != null ? `${result.stability.toFixed(1)} 天` : '—'}
+          {t('scheduleFeedback.stability', {
+            value:
+              result.stability != null ? result.stability.toFixed(1) : t('scheduleFeedback.empty'),
+          })}
           {' · '}
-          难度 {result.difficulty != null ? result.difficulty.toFixed(1) : '—'}
+          {t('scheduleFeedback.difficulty', {
+            value:
+              result.difficulty != null
+                ? result.difficulty.toFixed(1)
+                : t('scheduleFeedback.empty'),
+          })}
           {' · '}
-          掌握度 {previousMastery.toFixed(0)} → {result.mastery_level.toFixed(0)}
+          {t('scheduleFeedback.mastery', {
+            from: previousMastery.toFixed(0),
+            to: result.mastery_level.toFixed(0),
+          })}
         </p>
       )}
     </div>
