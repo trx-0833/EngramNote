@@ -1262,6 +1262,68 @@ const zhCN = {
     showAnswer: '显示答案',
     summary: '摘要:',
   },
+
+  /** 笔记详情页的批注 / 关联 / 属性栏（i18n 阶段 3） */
+  noteAnnotations: {
+    railLabel: '笔记元信息',
+    roleLabel: '笔记角色',
+    roleUpdateFailed: '更新角色失败',
+    pageCount: '{count} 页',
+    createdAt: '创建于 {date}',
+    highlight: '高亮',
+    underline: '下划线',
+    askAiTitle: '选中文本调用 AI 提问',
+    deleteConfirm: '确定删除此批注？',
+    deleteFailed: '删除批注失败',
+    selectionInvalid: '选中文本过长或为空',
+    saveFailed: '保存批注失败',
+  },
+
+  /** 关联资料（i18n 阶段 3） */
+  noteLinks: {
+    loadFailed: '加载资料列表失败',
+    updated: '关联资料已更新',
+    unchanged: '关联资料未变化',
+    saveFailed: '保存关联失败',
+    cleanupFailed: '清理链接失败',
+    manageTitle: '管理关联资料',
+    empty: '暂无可关联的资料',
+    relatedCards: '关联知识卡片 ({count})',
+    viewAllCards: '查看全部 {count} 张卡片',
+  },
+
+  /** 笔记详情页的操作（i18n 阶段 3） */
+  noteActions: {
+    impactCards: '{count} 张知识卡片',
+    impactQuizzes: '{count} 道题目',
+    impactReviewLogs: '{count} 条复习记录',
+    impactRelations: '{count} 条图谱关系',
+    /** 影响清单的连接符（中文用顿号） */
+    impactSeparator: '、',
+    relearnConfirm: '此笔记已归档，重新学习将清空其现有学习成果。此操作不可恢复，确定继续？',
+    relearnImpact: '将删除：{items}',
+    continueAction: '继续',
+    startLearningFailed: '启动学习失败',
+    moveToTrashFailed: '移入回收站失败',
+    operationFailed: '操作失败',
+    exportFailed: '导出失败',
+    originalNotEditable: '原始版不可编辑，请切换到清洗版后编辑',
+    saveFailed: '保存失败',
+    discardConfirm: '放弃当前编辑的修改？',
+    discard: '放弃',
+    loadFailed: '加载失败',
+    citationJumpFailed: '已打开笔记，但未能定位到引用段落（可能因排版差异）',
+  },
+
+  /** ADHD 专注阅读模式（`MarkdownReader`，i18n 阶段 3） */
+  adhdReader: {
+    disableHint: '关闭 ADHD 专注阅读模式',
+    enableHint: '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）',
+    disable: '关闭 ADHD Reader',
+    enable: '开启 ADHD Reader',
+    followHint: '鼠标跟随 · 移动鼠标高亮所在行',
+    reading: '正在阅读',
+  },
 };
 
 export default zhCN;

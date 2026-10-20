@@ -13,6 +13,7 @@ import {
   type NoteLinksResponse,
 } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import { translate } from '../../i18n/translate';
 
 interface UseNoteLinksOptions {
   /** 当前笔记 ID（未加载完成时为 undefined） */
@@ -66,7 +67,7 @@ export function useNoteLinks({ noteId, noteRole }: UseNoteLinksOptions) {
       setAvailableMaterials(data.items || []);
       setShowLinkManager(true);
     } catch {
-      toast.error('加载资料列表失败');
+      toast.error(translate('noteLinks.loadFailed'));
     }
   }
 
@@ -79,13 +80,13 @@ export function useNoteLinks({ noteId, noteRole }: UseNoteLinksOptions) {
         // 重新加载链接
         const links = await getNoteLinks(noteId);
         setNoteLinks(links);
-        toast.success('关联资料已更新');
+        toast.success(translate('noteLinks.updated'));
       } else {
-        toast.error('关联资料未变化');
+        toast.error(translate('noteLinks.unchanged'));
       }
       setShowLinkManager(false);
     } catch {
-      toast.error('保存关联失败');
+      toast.error(translate('noteLinks.saveFailed'));
     }
   }
 
@@ -100,7 +101,7 @@ export function useNoteLinks({ noteId, noteRole }: UseNoteLinksOptions) {
       const links = await getNoteLinks(noteId);
       setNoteLinks(links);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '清理链接失败');
+      toast.error(err instanceof Error ? err.message : translate('noteLinks.cleanupFailed'));
     }
   }
 

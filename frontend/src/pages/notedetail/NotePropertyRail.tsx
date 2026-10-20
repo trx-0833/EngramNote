@@ -51,6 +51,7 @@ import { useToast } from '../../components/Toast';
 import { formatDate } from '../../utils/datetime';
 import { statusClass, useLabels } from '../../utils/labels';
 import styles from './NotePropertyRail.module.css';
+import { useTranslation } from '../../i18n';
 
 interface NotePropertyRailProps {
   /** 笔记详情（与页面同一个对象，未做拷贝） */
@@ -73,11 +74,12 @@ interface NotePropertyRailProps {
  * 名字与现状的偏差已在此处写明，不留给下一个人去猜。
  */
 export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRailProps) {
+  const { t } = useTranslation();
   const { statusLabels } = useLabels();
   const toast = useToast();
 
   return (
-    <ul className={styles.rail} aria-label="笔记元信息">
+    <ul className={styles.rail} aria-label={t('noteAnnotations.railLabel')}>
       <li>
         <span className={`badge badge-${note.source_type}`}>{note.source_type.toUpperCase()}</span>
       </li>
@@ -109,14 +111,16 @@ export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRa
       <li>
         <select
           className={styles.roleSelect}
-          aria-label="笔记角色"
+          aria-label={t('noteAnnotations.roleLabel')}
           value={note.note_role || 'material'}
           onChange={async (e) => {
             try {
               const updated = await updateNoteRole(note.id, e.target.value);
               onRoleUpdated(updated.note_role);
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : '更新角色失败');
+              toast.error(
+                err instanceof Error ? err.message : t('noteAnnotations.roleUpdateFailed'),
+              );
             }
           }}
           style={
@@ -126,8 +130,8 @@ export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRa
             } as CSSProperties
           }
         >
-          <option value="material">学习资料</option>
-          <option value="personal_note">我的笔记</option>
+          <option value="material">{t('labels.noteRole.material')}</option>
+          <option value="personal_note">{t('labels.noteRole.personal_note')}</option>
         </select>
       </li>
       {/* 规格 + 日期合成**一项**（2026-10-19 第三次改版）。
@@ -153,9 +157,9 @@ export default function NotePropertyRail({ note, onRoleUpdated }: NotePropertyRa
       {(note.page_count || note.file_size) && (
         <li className={styles.railMeta}>
           {[
-            note.page_count ? `${note.page_count} 页` : null,
+            note.page_count ? t('noteAnnotations.pageCount', { count: note.page_count }) : null,
             note.file_size ? `${(note.file_size / 1024).toFixed(0)} KB` : null,
-            `创建于 ${formatDate(note.created_at)}`,
+            t('noteAnnotations.createdAt', { date: formatDate(note.created_at) }),
           ]
             .filter(Boolean)
             .join(' · ')}

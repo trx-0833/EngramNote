@@ -8,6 +8,7 @@
 import type { RefObject } from 'react';
 
 import Icon from '../../components/Icon';
+import { useTranslation } from '../../i18n';
 
 interface MarkdownReaderProps {
   /** 渲染好的正文 HTML */
@@ -33,6 +34,7 @@ export default function MarkdownReader({
   adhdCurrentLineText,
   onToggleAdhdReader,
 }: MarkdownReaderProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div
@@ -47,13 +49,9 @@ export default function MarkdownReader({
         <button
           className={`btn ${adhdReaderEnabled ? 'btn-primary' : 'btn-secondary'}`}
           onClick={onToggleAdhdReader}
-          title={
-            adhdReaderEnabled
-              ? '关闭 ADHD 专注阅读模式'
-              : '开启 ADHD 专注阅读模式（鼠标跟随：高亮所在行、模糊其他内容）'
-          }
+          title={adhdReaderEnabled ? t('adhdReader.disableHint') : t('adhdReader.enableHint')}
         >
-          {adhdReaderEnabled ? '关闭 ADHD Reader' : '开启 ADHD Reader'}
+          {adhdReaderEnabled ? t('adhdReader.disable') : t('adhdReader.enable')}
         </button>
         {adhdReaderEnabled && (
           <span
@@ -68,7 +66,7 @@ export default function MarkdownReader({
             {/* 批次 B3：`\u{1F5B1}` 🖱 换 `<Icon name="mouse" />` —— emoji 自带颜色，
                 在这一行灰字提示里是唯一的彩色字形 */}
             <Icon name="mouse" size={16} />
-            鼠标跟随 · 移动鼠标高亮所在行
+            {t('adhdReader.followHint')}
           </span>
         )}
       </div>
@@ -96,7 +94,7 @@ export default function MarkdownReader({
             }}
           >
             <Icon name="book" size={16} />
-            正在阅读
+            {t('adhdReader.reading')}
           </span>
           <span
             style={{

@@ -8,6 +8,7 @@
 // 浮层样式（overhaul-plan 5.6）：原 src/styles/markdown-extras.css 的
 // `.selection-menu` 3 条搬到这里
 import styles from './SelectionMenu.module.css';
+import { useTranslation } from '../../i18n';
 
 interface SelectionMenuProps {
   /** 浮层锚点（选区中心的视口坐标） */
@@ -20,6 +21,7 @@ interface SelectionMenuProps {
 
 /** 选中文本后显示的批注操作浮层 */
 export default function SelectionMenu({ pos, onApplyAnnotation, onOpenAskAI }: SelectionMenuProps) {
+  const { t } = useTranslation();
   return (
     <div
       className={styles.selectionMenu}
@@ -31,14 +33,14 @@ export default function SelectionMenu({ pos, onApplyAnnotation, onOpenAskAI }: S
         zIndex: 1000,
       }}
     >
-      <button onClick={() => onApplyAnnotation('highlight')} title="高亮">
-        高亮
+      <button onClick={() => onApplyAnnotation('highlight')} title={t('noteAnnotations.highlight')}>
+        {t('noteAnnotations.highlight')}
       </button>
-      <button onClick={() => onApplyAnnotation('underline')} title="下划线">
-        下划线
+      <button onClick={() => onApplyAnnotation('underline')} title={t('noteAnnotations.underline')}>
+        {t('noteAnnotations.underline')}
       </button>
-      <button onClick={onOpenAskAI} title="选中文本调用 AI 提问">
-        AI 提问
+      <button onClick={onOpenAskAI} title={t('noteAnnotations.askAiTitle')}>
+        {t('noteAsk.title')}
       </button>
     </div>
   );

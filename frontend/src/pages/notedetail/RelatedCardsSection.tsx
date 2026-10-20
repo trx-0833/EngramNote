@@ -8,6 +8,7 @@
  */
 import type { KnowledgeCard } from '../../api/client';
 import { cardTypeColors, FALLBACK_CATEGORY_COLOR, useLabels } from '../../utils/labels';
+import { useTranslation } from '../../i18n';
 
 /** 首页最多展示的卡片数，超出时提供"查看全部"入口 */
 const MAX_VISIBLE_CARDS = 6;
@@ -27,11 +28,12 @@ export default function RelatedCardsSection({
   noteId,
   navigate,
 }: RelatedCardsSectionProps) {
+  const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   return (
     <div style={{ marginTop: 'var(--space-lg)' }}>
       <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-        关联知识卡片 ({relatedCards.length})
+        {t('noteLinks.relatedCards', { count: relatedCards.length })}
       </h2>
       {/* min(280px, 100%)：320px 窄屏（可用宽度约 256px）下不再横向溢出 */}
       <div
@@ -92,7 +94,7 @@ export default function RelatedCardsSection({
           style={{ marginTop: 'var(--space-sm)', fontSize: '0.85rem' }}
           onClick={() => navigate(`/cards?note_id=${noteId}`)}
         >
-          查看全部 {relatedCards.length} 张卡片
+          {t('noteLinks.viewAllCards', { count: relatedCards.length })}
         </button>
       )}
     </div>

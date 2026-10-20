@@ -1066,6 +1066,66 @@ const en = {
     showAnswer: 'Show answer',
     summary: 'Summary:',
   },
+
+  noteAnnotations: {
+    railLabel: 'Note metadata',
+    roleLabel: 'Note role',
+    roleUpdateFailed: 'Could not update the role',
+    pageCount: '{count} pages',
+    createdAt: 'Created {date}',
+    highlight: 'Highlight',
+    underline: 'Underline',
+    askAiTitle: 'Ask AI about the selected text',
+    deleteConfirm: 'Delete this annotation?',
+    deleteFailed: 'Could not delete the annotation',
+    selectionInvalid: 'The selection is too long or empty',
+    saveFailed: 'Could not save the annotation',
+  },
+
+  noteLinks: {
+    loadFailed: 'Could not load the material list',
+    updated: 'Linked materials updated',
+    unchanged: 'Linked materials unchanged',
+    saveFailed: 'Could not save the links',
+    cleanupFailed: 'Could not clean up the links',
+    manageTitle: 'Manage linked materials',
+    empty: 'No materials available to link',
+    relatedCards: 'Related knowledge cards ({count})',
+    viewAllCards: 'View all {count} cards',
+  },
+
+  noteActions: {
+    impactCards: '{count} knowledge cards',
+    impactQuizzes: '{count} questions',
+    impactReviewLogs: '{count} review records',
+    impactRelations: '{count} graph relations',
+    impactSeparator: ', ',
+    relearnConfirm:
+      'This note is archived. Relearning will clear its existing learning results. This cannot be undone — continue?',
+    relearnImpact: 'Will be deleted: {items}',
+    continueAction: 'Continue',
+    startLearningFailed: 'Could not start learning',
+    moveToTrashFailed: 'Could not move to trash',
+    operationFailed: 'Action failed',
+    exportFailed: 'Export failed',
+    originalNotEditable: 'The original version cannot be edited, switch to the cleaned version',
+    saveFailed: 'Could not save',
+    discardConfirm: 'Discard your edits?',
+    discard: 'Discard',
+    loadFailed: 'Failed to load',
+    citationJumpFailed:
+      'The note opened, but the cited passage could not be located (the layout may differ)',
+  },
+
+  adhdReader: {
+    disableHint: 'Turn off ADHD focus reading mode',
+    enableHint:
+      'Turn on ADHD focus reading mode (mouse tracking: highlight the current line, blur the rest)',
+    disable: 'Turn off ADHD Reader',
+    enable: 'Turn on ADHD Reader',
+    followHint: 'Mouse tracking · move the mouse to highlight the current line',
+    reading: 'Reading',
+  },
 } satisfies typeof zhCN;
 
 export default en;

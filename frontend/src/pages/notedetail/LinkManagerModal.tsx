@@ -40,6 +40,7 @@
  */
 import type { Note } from '../../api/client';
 import Dialog from '../../components/Dialog';
+import { useTranslation } from '../../i18n';
 
 interface LinkManagerModalProps {
   /** 可关联的学习资料列表 */
@@ -62,24 +63,25 @@ export default function LinkManagerModal({
   onClose,
   onSave,
 }: LinkManagerModalProps) {
+  const { t } = useTranslation();
   return (
     <Dialog
       open
       onClose={onClose}
-      title="管理关联资料"
+      title={t('noteLinks.manageTitle')}
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </button>
           <button className="btn btn-primary" onClick={onSave}>
-            保存
+            {t('common.save')}
           </button>
         </>
       }
     >
       {availableMaterials.length === 0 ? (
-        <p style={{ color: 'var(--color-text-secondary)' }}>暂无可关联的资料</p>
+        <p style={{ color: 'var(--color-text-secondary)' }}>{t('noteLinks.empty')}</p>
       ) : (
         <div
           style={{

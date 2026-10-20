@@ -24,6 +24,7 @@ import {
 } from './annotations';
 import { getAnnotationViewMode } from './viewMode';
 import type { AskAIState, EditMode, SelectionContext, ViewMode } from './types';
+import { translate } from '../../i18n/translate';
 
 /** 选中文本的最大可批注长度（超过则提示并放弃） */
 const MAX_ANNOTATION_TEXT_LENGTH = 5000;
@@ -87,8 +88,8 @@ export function useNoteAnnotations({
     async (annotationId: string) => {
       if (!note) return;
       const ok = await confirm({
-        title: '确定删除此批注？',
-        confirmText: '删除',
+        title: translate('noteAnnotations.deleteConfirm'),
+        confirmText: translate('common.delete'),
         danger: true,
       });
       if (!ok) return;
@@ -100,7 +101,7 @@ export function useNoteAnnotations({
         // 从 DOM 移除样式
         unwrapAnnotationFromDom(markdownRef.current, annotationId);
       } catch {
-        toast.error('删除批注失败');
+        toast.error(translate('noteAnnotations.deleteFailed'));
       }
     },
     // toast 有意不入依赖：与拆分前一致，删除失败提示用当时闭包里的 toast 即可
@@ -182,7 +183,7 @@ export function useNoteAnnotations({
 
     const text = selection.toString().trim();
     if (!text || text.length > MAX_ANNOTATION_TEXT_LENGTH) {
-      toast.warning('选中文本过长或为空');
+      toast.warning(translate('noteAnnotations.selectionInvalid'));
       return;
     }
 
@@ -212,7 +213,7 @@ export function useNoteAnnotations({
         console.warn('应用批注失败:', err);
       }
     } catch {
-      toast.error('保存批注失败');
+      toast.error(translate('noteAnnotations.saveFailed'));
     }
 
     setShowAnnotationMenu(false);

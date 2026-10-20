@@ -20,6 +20,7 @@ import {
 import { useToast } from '../../components/Toast';
 import { highlightCitation } from '../../utils/citationJump';
 import type { ViewMode } from './types';
+import { translate } from '../../i18n/translate';
 
 interface UseNoteDetailDataOptions {
   /** 路由参数里的笔记 ID */
@@ -112,7 +113,7 @@ export function useNoteDetailData({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : translate('noteActions.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -176,7 +177,7 @@ export function useNoteDetailData({
       );
       if (!result.highlighted) {
         // 明说失败，而不是让用户以为"引用就在开头"
-        toast.warning('已打开笔记，但未能定位到引用段落（可能因排版差异）');
+        toast.warning(translate('noteActions.citationJumpFailed'));
       }
       // 清掉跳转参数，避免后续视图切换被反复拉回
       const next = new URLSearchParams(searchParams);

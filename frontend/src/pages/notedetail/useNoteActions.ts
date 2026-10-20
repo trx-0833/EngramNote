@@ -19,6 +19,7 @@ import {
 import { useConfirm } from '../../components/ConfirmProvider';
 import { useToast } from '../../components/Toast';
 import type { EditMode, ViewMode } from './types';
+import { translate } from '../../i18n/translate';
 
 interface UseNoteActionsOptions {
   /** 当前笔记（未加载完成时为 null） */
@@ -73,18 +74,27 @@ export function useNoteActions({
         const impact = res.impact;
         const parts: string[] = [];
         if (impact) {
-          if (impact.cards > 0) parts.push(`${impact.cards} 张知识卡片`);
-          if (impact.quizzes > 0) parts.push(`${impact.quizzes} 道题目`);
-          if (impact.review_logs > 0) parts.push(`${impact.review_logs} 条复习记录`);
-          if (impact.relations > 0) parts.push(`${impact.relations} 条图谱关系`);
+          if (impact.cards > 0)
+            parts.push(translate('noteActions.impactCards', { count: impact.cards }));
+          if (impact.quizzes > 0)
+            parts.push(translate('noteActions.impactQuizzes', { count: impact.quizzes }));
+          if (impact.review_logs > 0)
+            parts.push(translate('noteActions.impactReviewLogs', { count: impact.review_logs }));
+          if (impact.relations > 0)
+            parts.push(translate('noteActions.impactRelations', { count: impact.relations }));
         }
         // 批次 D3 后半：原文案的文字一个字符都没增删，只是按 ConfirmDialog 的
         // 两段重新分了一次段 —— "不可恢复、确定继续"那句原来跟在影响清单后面，
         // 现在与第一句合成 title，清单整体挪进 message。
         const ok = await confirm({
-          title: '此笔记已归档，重新学习将清空其现有学习成果。此操作不可恢复，确定继续？',
-          message: parts.length > 0 ? `将删除：${parts.join('、')}` : undefined,
-          confirmText: '继续',
+          title: translate('noteActions.relearnConfirm'),
+          message:
+            parts.length > 0
+              ? translate('noteActions.relearnImpact', {
+                  items: parts.join(translate('noteActions.impactSeparator')),
+                })
+              : undefined,
+          confirmText: translate('noteActions.continueAction'),
           danger: true,
         });
         if (!ok) return;
@@ -95,7 +105,9 @@ export function useNoteActions({
       onStatusChange();
     } catch (err) {
       // 409（进行中）等状态透传提示
-      toast.error(err instanceof Error ? err.message : '启动学习失败');
+      toast.error(
+        err instanceof Error ? err.message : translate('noteActions.startLearningFailed'),
+      );
     }
   }
 
@@ -112,7 +124,7 @@ export function useNoteActions({
       await deleteNote(note.id);
       navigate('/notes');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '移入回收站失败');
+      toast.error(err instanceof Error ? err.message : translate('noteActions.moveToTrashFailed'));
       setShowDeleteDialog(false);
     }
   }
@@ -124,7 +136,7 @@ export function useNoteActions({
       await archiveNote(note.id);
       await fetchNote(); // 重新获取完整数据，避免部分数据覆盖
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败');
+      toast.error(err instanceof Error ? err.message : translate('noteActions.operationFailed'));
     }
   }
 
@@ -185,7 +197,7 @@ export function useNoteActions({
     } catch (err) {
       // `NOTE_EXPORT_EMPTY`（该版本没有正文）也会走到这里 ——
       // 后端的中文 detail 已经说清了原因，直接透传
-      toast.error(err instanceof Error ? err.message : '导出失败');
+      toast.error(err instanceof Error ? err.message : translate('noteActions.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -195,7 +207,7 @@ export function useNoteActions({
   function handleEnterEdit() {
     if (!note) return;
     if (viewMode === 'original') {
-      toast.warning('原始版不可编辑，请切换到清洗版后编辑');
+      toast.warning(translate('noteActions.originalNotEditable'));
       return;
     }
     setEditContent(note.clean_md_content || '');
@@ -214,7 +226,7 @@ export function useNoteActions({
       setEditMode('view');
       setEditContent('');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '保存失败');
+      toast.error(err instanceof Error ? err.message : translate('noteActions.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -232,7 +244,10 @@ export function useNoteActions({
     const original = note?.clean_md_content || '';
     if (editContent !== original) {
       // 放弃编辑可以重来（内容还在后端），所以不给 danger
-      const ok = await confirm({ title: '放弃当前编辑的修改？', confirmText: '放弃' });
+      const ok = await confirm({
+        title: translate('noteActions.discardConfirm'),
+        confirmText: translate('noteActions.discard'),
+      });
       if (!ok) return;
     }
     setEditContent('');
