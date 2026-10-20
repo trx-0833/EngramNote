@@ -48,11 +48,13 @@ import { statusClass, weakPointBadge, useLabels } from '../utils/labels';
 // 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
 // 连带 768px 的两条响应式规则（见 Dashboard.module.css 文件头）
 import styles from './Dashboard.module.css';
+import { useTranslation, type MessageKey } from '../i18n';
 
 /**
  * 仪表盘页面组件
  */
 export default function Dashboard() {
+  const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels, cardTypeLabels, questionTypeLabels } = useLabels();
   const navigate = useNavigate();
   const [recentNotes, setRecentNotes] = useState<Note[]>([]);
@@ -117,10 +119,10 @@ export default function Dashboard() {
       if (planRes) setDailyPlan(planRes);
       // 非关键失败：显示提示条而不是假装"暂无数据"
       if (failedCount > 0) {
-        setError(`部分数据加载失败（${failedCount} 项），其余内容正常显示，可刷新重试`);
+        setError(t('dashboard.partialLoadFailed', { count: failedCount }));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败，请重试');
+      setError(e instanceof Error ? e.message : t('dashboard.loadFailedRetry'));
     } finally {
       setLoading(false);
     }
@@ -134,9 +136,9 @@ export default function Dashboard() {
 
   /** 格式化复习时长 */
   function formatTime(ms: number): string {
-    if (ms < 60000) return `${Math.round(ms / 1000)}秒`;
-    if (ms < 3600000) return `${Math.round(ms / 60000)}分钟`;
-    return `${(ms / 3600000).toFixed(1)}小时`;
+    if (ms < 60000) return t('dashboard.durationSeconds', { count: Math.round(ms / 1000) });
+    if (ms < 3600000) return t('dashboard.durationMinutes', { count: Math.round(ms / 60000) });
+    return t('dashboard.durationHours', { count: (ms / 3600000).toFixed(1) });
   }
 
   // 趋势图最大值（用于计算柱高百分比）
@@ -155,21 +157,21 @@ export default function Dashboard() {
         {/* 页面标题（批次 C1）：2rem → 1.5rem。
             导航名是「仪表盘」、页内标题是「欢迎使用 EngramNote」——
             这一处不一致属于产品语义，本批**只登记不改**（见计划 C1 的"顺带修"第 ② 条）。 */}
-        <PageHeader title="欢迎使用 EngramNote" spacing="sm" />
+        <PageHeader title={t('dashboard.welcome')} spacing="sm" />
         <p
           className="fade-in"
           style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}
         >
-          AI 驱动的学习笔记管理与知识库工具
+          {t('dashboard.tagline')}
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={() => navigate('/upload')}>
             {/* 批次 B3：上传按钮补 `upload` 图标（托盘 + 向上箭头） */}
             <Icon name="upload" size={16} />
-            上传新资料
+            {t('dashboard.uploadNew')}
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/today')}>
-            今日学习
+            {t('dashboard.todayLearn')}
           </button>
         </div>
         {/* 新用户引导 */}
@@ -178,7 +180,9 @@ export default function Dashboard() {
             className="card card-accent-gold"
             style={{ marginTop: 'var(--space-md)', background: 'var(--color-primary-light)' }}
           >
-            <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>快速开始</p>
+            <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
+              {t('dashboard.quickStart')}
+            </p>
             <ol
               style={{
                 paddingLeft: 'var(--space-lg)',
@@ -187,10 +191,10 @@ export default function Dashboard() {
                 lineHeight: 1.8,
               }}
             >
-              <li>点击「上传新资料」上传 PDF、Word 或图片文件</li>
-              <li>系统自动转换并清洗内容，生成知识卡片</li>
-              <li>AI 自动生成复习题目，点击「今日学习」开始答题</li>
-              <li>间隔重复算法帮你高效记忆，薄弱点一目了然</li>
+              <li>{t('dashboard.quickStartUpload')}</li>
+              <li>{t('dashboard.quickStartClean')}</li>
+              <li>{t('dashboard.quickStartQuiz')}</li>
+              <li>{t('dashboard.quickStartReview')}</li>
             </ol>
           </div>
         )}
@@ -219,12 +223,12 @@ export default function Dashboard() {
             {/* 下划线显式关掉：这是"整块可点的卡片标题"，不是正文里的行内链接
                 （正文链接必须带下划线，见 base.css 与 F-13） */}
             <Link to="/goals" style={{ color: 'inherit', textDecoration: 'none' }}>
-              今日学习目标
+              {t('dashboard.goals')}
             </Link>
           </h2>
           {goals.length === 0 ? (
             <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-              还没有学习目标，点击创建
+              {t('dashboard.noGoals')}
             </p>
           ) : (
             <>
@@ -235,7 +239,7 @@ export default function Dashboard() {
                   marginBottom: 'var(--space-sm)',
                 }}
               >
-                进行中目标 {goals.length} 个
+                {t('dashboard.activeGoals', { count: goals.length })}
               </p>
               {/* 整体平均进度 */}
               <div style={{ marginBottom: 'var(--space-xs)' }}>
@@ -248,7 +252,7 @@ export default function Dashboard() {
                     marginBottom: 4,
                   }}
                 >
-                  <span>平均进度</span>
+                  <span>{t('dashboard.averageProgress')}</span>
                   <span>
                     {Math.round(
                       goals.reduce((sum, g) => sum + (g.progress_percentage ?? 0), 0) /
@@ -298,11 +302,11 @@ export default function Dashboard() {
         {/* 每日推荐任务卡片 */}
         <div className="card card-accent-gold">
           <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-            每日推荐任务
+            {t('dashboard.dailyPlan')}
           </h2>
           {!dailyPlan || dailyPlan.total_count === 0 ? (
             <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-              今日暂无推荐任务
+              {t('dashboard.noDailyPlan')}
             </p>
           ) : (
             <>
@@ -314,7 +318,11 @@ export default function Dashboard() {
                   marginBottom: 'var(--space-sm)',
                 }}
               >
-                {dailyPlan.plan_date} · 已完成 {dailyPlan.completed_count} / {dailyPlan.total_count}
+                {t('dashboard.dailyPlanProgress', {
+                  date: dailyPlan.plan_date,
+                  done: dailyPlan.completed_count,
+                  total: dailyPlan.total_count,
+                })}
               </p>
               {/* 按类别统计任务数 */}
               <DailyTaskBreakdown plan={dailyPlan} navigate={navigate} />
@@ -330,7 +338,7 @@ export default function Dashboard() {
             className="heading-serif"
             style={{ fontSize: '1.25rem', marginBottom: 'var(--space-md)' }}
           >
-            今日学习报告 ({dailyReport.date})
+            {t('dashboard.dailyReport', { date: dailyReport.date })}
           </h2>
           {/* 统计卡**一横排**（批次 E1，依据借鉴表 §C3 的 Dashboard 行：
               "把…做成一横排卡片，每卡只讲一个数"）。
@@ -340,13 +348,25 @@ export default function Dashboard() {
               这 4 张卡各只有**一个**数（`<StatCard>` 的 value + label），
               本批**没有需要拆开的卡**；`value` 里的 '%' / '分钟' 是同一个数的单位。 */}
           <div className={styles.statRow}>
-            <StatCard variant="blue" value={dailyReport.new_mastered} label="新掌握" />
-            <StatCard variant="green" value={dailyReport.total_reviews} label="复习次数" />
-            <StatCard variant="gold" value={`${dailyReport.today_accuracy}%`} label="正确率" />
+            <StatCard
+              variant="blue"
+              value={dailyReport.new_mastered}
+              label={t('dashboard.statNewMastered')}
+            />
+            <StatCard
+              variant="green"
+              value={dailyReport.total_reviews}
+              label={t('dashboard.statTotalReviews')}
+            />
+            <StatCard
+              variant="gold"
+              value={`${dailyReport.today_accuracy}%`}
+              label={t('dashboard.statAccuracy')}
+            />
             <StatCard
               variant="purple"
               value={formatTime(dailyReport.total_review_time_ms)}
-              label="复习时长"
+              label={t('dashboard.statReviewTime')}
             />
           </div>
 
@@ -395,14 +415,17 @@ export default function Dashboard() {
           <div className={`card card-accent-left ${styles.dashboardReviewCard}`}>
             <div>
               <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-                今日待复习: {reviewStats.due_count} 题
+                {t('dashboard.dueToday', { count: reviewStats.due_count })}
               </h2>
               <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-                今日已完成 {reviewStats.today_done} 题 | 正确率 {reviewStats.today_accuracy}%
+                {t('dashboard.todayDone', {
+                  count: reviewStats.today_done,
+                  accuracy: reviewStats.today_accuracy,
+                })}
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => navigate('/review')}>
-              开始复习
+              {t('dashboard.startReview')}
             </button>
           </div>
         )}
@@ -411,7 +434,7 @@ export default function Dashboard() {
         {weakPoints.length > 0 && (
           <div className="card card-accent-error">
             <h2 style={{ fontSize: '1.17em', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-              薄弱点
+              {t('dashboard.weakPoints')}
             </h2>
             {/* 每一行是**真链接**：原来外层是 `div[onClick]`（没有 role/tabIndex），
                 键盘到不了 —— 而"跳到那张卡片"是这一行唯一的行为。
@@ -453,7 +476,7 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                  错{wp.error_count}次 | {wp.accuracy}%
+                  {t('dashboard.errorCount', { count: wp.error_count, accuracy: wp.accuracy })}
                 </span>
               </Link>
             ))}
@@ -468,7 +491,7 @@ export default function Dashboard() {
             className="heading-serif"
             style={{ fontSize: '1.25rem', marginBottom: 'var(--space-md)' }}
           >
-            本周复习趋势
+            {t('dashboard.weeklyTrend')}
           </h2>
           <div className="card" style={{ padding: 'var(--space-lg)' }}>
             <div
@@ -547,7 +570,7 @@ export default function Dashboard() {
                     marginRight: 4,
                   }}
                 />
-                正确率 ≥ 60%
+                {t('dashboard.accuracyAbove')}
               </span>
               <span>
                 <span
@@ -566,7 +589,7 @@ export default function Dashboard() {
                     marginRight: 4,
                   }}
                 />
-                正确率 &lt; 60%
+                {t('dashboard.accuracyBelow')}
               </span>
             </div>
           </div>
@@ -584,10 +607,10 @@ export default function Dashboard() {
           }}
         >
           <h2 className="heading-serif" style={{ fontSize: '1.25rem' }}>
-            最近笔记
+            {t('dashboard.recentNotes')}
           </h2>
           <button className="btn btn-secondary" onClick={() => navigate('/notes')}>
-            查看全部
+            {t('dashboard.viewAll')}
           </button>
         </div>
 
@@ -597,13 +620,13 @@ export default function Dashboard() {
           <ErrorDisplay message={error} onRetry={fetchRecent} />
         ) : recentNotes.length === 0 ? (
           <EmptyState
-            message="还没有笔记"
-            description="上传你的第一份学习资料"
+            message={t('dashboard.noNotes')}
+            description={t('dashboard.noNotesHint')}
             action={
               <button className="btn btn-primary" onClick={() => navigate('/upload')}>
                 {/* 批次 B3：空状态里的上传入口同样补 `upload` 图标 */}
                 <Icon name="upload" size={16} />
-                上传资料
+                {t('dashboard.upload')}
               </button>
             }
           />
@@ -666,6 +689,7 @@ export default function Dashboard() {
  * 初始加载与更新均容错（失败静默，保持原值，不打断页面）。
  */
 function EmailReminderToggle() {
+  const { t } = useTranslation();
   const toast = useToast();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -695,7 +719,9 @@ function EmailReminderToggle() {
       // 没有任何提示，用户以为开关坏了而反复点击，且无从判断原因。
       // 开关类控件必须给出明确反馈，否则"没生效"与"没点中"无法区分。
       toast.error(
-        checked ? '开启邮件提醒失败' : '关闭邮件提醒失败',
+        checked
+          ? t('dashboard.emailReminderEnableFailed')
+          : t('dashboard.emailReminderDisableFailed'),
         err instanceof Error ? err.message : undefined,
       );
     } finally {
@@ -716,9 +742,11 @@ function EmailReminderToggle() {
       }}
     >
       <div style={{ flex: 1 }}>
-        <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>邮件复习提醒</p>
+        <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
+          {t('dashboard.emailReminder')}
+        </p>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          每日通过邮件发送到期复习提醒
+          {t('dashboard.emailReminderHint')}
         </p>
       </div>
       <label
@@ -737,7 +765,11 @@ function EmailReminderToggle() {
           style={{ accentColor: 'var(--color-primary)' }}
         />
         <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          {enabled === null ? '加载中…' : enabled ? '已开启' : '已关闭'}
+          {enabled === null
+            ? t('shared.loadingDots')
+            : enabled
+              ? t('dashboard.enabled')
+              : t('dashboard.disabled')}
         </span>
       </label>
     </div>
@@ -767,13 +799,20 @@ interface DailyTaskBreakdownProps {
  * 顺带把这两个键改对 —— 与 F-35 那次的"桩的字段名写错、页面照常渲染"同一类：
  * **没被渲染过的分支里，任何错误都不会报出来。**
  */
-const taskTypeLabels: Record<string, string> = {
-  weak_point: '薄弱点',
-  review: '复习',
-  new_material: '新资料',
+/**
+ * 每日任务类型 → 文案**键名**（不是文案本身）
+ *
+ * ⚠️ 与 `Sidebar.tsx` 的 `NAV_SECTIONS` 同一个道理：模块级常量在加载时就固化了，
+ * 存译文的话切语言不会变。存键名、渲染时 `t()` 才对。
+ */
+const taskTypeLabelKeys: Record<string, MessageKey> = {
+  weak_point: 'dashboard.taskWeakPoint',
+  review: 'dashboard.taskReview',
+  new_material: 'dashboard.taskNewMaterial',
 };
 
 function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
+  const { t } = useTranslation();
   // 将 recommended_tasks 统一规整为 RecommendedTask[] 数组
   // 兼容两种后端结构：数组形式 或 按类别分组的对象形式
   const tasks: RecommendedTask[] = (() => {
@@ -819,7 +858,7 @@ function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
               }}
             >
               <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                {taskTypeLabels[cat] || cat}
+                {t(taskTypeLabelKeys[cat] ?? 'dashboard.taskReview') || cat}
               </span>
               <span
                 style={{
@@ -830,7 +869,7 @@ function DailyTaskBreakdown({ plan, navigate }: DailyTaskBreakdownProps) {
                   color: 'var(--color-primary)',
                 }}
               >
-                {arr.length} 个
+                {t('dashboard.itemCount', { count: arr.length })}
               </span>
             </div>
             {/* 展示前 2 条任务标题作为示例 */}

@@ -603,6 +603,69 @@ const zhCN = {
     unsupportedFormat: '不支持的文件格式: {ext}',
     viewNote: '查看笔记',
   },
+
+  /** 仪表盘 / 首页（`Dashboard`，i18n 阶段 3） */
+  dashboard: {
+    welcome: '欢迎使用 EngramNote',
+    tagline: 'AI 驱动的学习笔记管理与知识库工具',
+    uploadNew: '上传新资料',
+    todayLearn: '今日学习',
+    // ---- 空态引导 ----
+    quickStart: '快速开始',
+    quickStartUpload: '点击「上传新资料」上传 PDF、Word 或图片文件',
+    quickStartClean: '系统自动转换并清洗内容，生成知识卡片',
+    quickStartQuiz: 'AI 自动生成复习题目，点击「今日学习」开始答题',
+    quickStartReview: '间隔重复算法帮你高效记忆，薄弱点一目了然',
+    // ---- 目标 ----
+    goals: '今日学习目标',
+    noGoals: '还没有学习目标，点击创建',
+    activeGoals: '进行中目标 {count} 个',
+    averageProgress: '平均进度',
+    // ---- 每日计划 ----
+    dailyPlan: '每日推荐任务',
+    noDailyPlan: '今日暂无推荐任务',
+    dailyPlanProgress: '{date} · 已完成 {done} / {total}',
+    // ---- 日报 ----
+    dailyReport: '今日学习报告 ({date})',
+    statNewMastered: '新掌握',
+    statTotalReviews: '复习次数',
+    statAccuracy: '正确率',
+    statReviewTime: '复习时长',
+    // ---- 复习 ----
+    dueToday: '今日待复习: {count} 题',
+    todayDone: '今日已完成 {count} 题 | 正确率 {accuracy}%',
+    startReview: '开始复习',
+    weakPoints: '薄弱点',
+    errorCount: '错{count}次 | {accuracy}%',
+    weeklyTrend: '本周复习趋势',
+    accuracyAbove: '正确率 ≥ 60%',
+    accuracyBelow: '正确率 &lt; 60%',
+    // ---- 最近笔记 ----
+    recentNotes: '最近笔记',
+    viewAll: '查看全部',
+    noNotes: '还没有笔记',
+    noNotesHint: '上传你的第一份学习资料',
+    upload: '上传资料',
+    // ---- 邮件提醒 ----
+    emailReminder: '邮件复习提醒',
+    emailReminderHint: '每日通过邮件发送到期复习提醒',
+    emailReminderEnableFailed: '开启邮件提醒失败',
+    emailReminderDisableFailed: '关闭邮件提醒失败',
+    enabled: '已开启',
+    disabled: '已关闭',
+    // ---- 时长格式 ----
+    durationSeconds: '{count}秒',
+    durationMinutes: '{count}分钟',
+    durationHours: '{count}小时',
+    // ---- 错误 ----
+    partialLoadFailed: '部分数据加载失败（{count} 项），其余内容正常显示，可刷新重试',
+    loadFailedRetry: '加载失败，请重试',
+    // ---- 每日任务分类 ----
+    taskWeakPoint: '薄弱点',
+    taskReview: '复习',
+    taskNewMaterial: '新资料',
+    itemCount: '{count} 个',
+  },
 };
 
 export default zhCN;
