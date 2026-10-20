@@ -38,8 +38,10 @@ import { useToast } from '../components/Toast';
 // 回收站私有样式（visual-refactor-plan 批次 E8）：表格化的承载结构
 // —— 类名进模块后会被哈希，留在全局样式表里的选择器再也选不中它（css-convention.md §3 雷区 2）
 import styles from './Trash.module.css';
+import { useTranslation } from '../i18n';
 
 export default function Trash() {
+  const { t } = useTranslation();
   const { sourceTypeLabels } = useLabels();
   const toast = useToast();
   /** 回收站列表 */
@@ -63,7 +65,7 @@ export default function Trash() {
       const res = await getTrashedNotes();
       setItems(res.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -85,11 +87,11 @@ export default function Trash() {
     try {
       const res = await restoreNote(item.note.id);
       if (res.renamed_to) {
-        toast.info(`原位置已存在同名文件，恢复后已自动重命名为「${res.renamed_to}」`);
+        toast.info(t('trash.restoredRenamed', { name: res.renamed_to }));
       }
       setItems((prev) => prev.filter((it) => it.note.id !== item.note.id));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '恢复失败');
+      toast.error(err instanceof Error ? err.message : t('trash.restoreFailed'));
     } finally {
       setOperatingId(null);
     }
@@ -104,7 +106,7 @@ export default function Trash() {
       setItems((prev) => prev.filter((it) => it.note.id !== noteToPurge.note.id));
       setNoteToPurge(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '彻底删除失败');
+      toast.error(err instanceof Error ? err.message : t('trash.purgeFailed'));
     } finally {
       setOperatingId(null);
     }
@@ -117,10 +119,10 @@ export default function Trash() {
       setShowPurgeAll(false);
       setItems([]);
       if (res.failed > 0) {
-        toast.success(`已彻底删除 ${res.purged} 条，${res.failed} 条删除失败，请重试`);
+        toast.success(t('trash.purgeResult', { purged: res.purged, failed: res.failed }));
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '清空回收站失败');
+      toast.error(err instanceof Error ? err.message : t('trash.emptyAllFailed'));
     }
   }
 
@@ -129,8 +131,8 @@ export default function Trash() {
       {/* 头部：标题 + 副标题 + 清空按钮（批次 C1：统一进 <PageHeader>；
           窄屏换行原由全局 `.page-header-row` 负责，现随组件进模块） */}
       <PageHeader
-        title="回收站"
-        subtitle="笔记及其全部内容（卡片、题目、复习记录、关系）作为整体保存，可随时整体恢复"
+        title={t('trash.title')}
+        subtitle={t('trash.subtitle')}
         actions={
           // `? :` 而不是 `&&`：回收站为空时动作区**必须真的不存在**。
           // 传 `false` 会渲染出一个 0 宽的空容器，那在窄屏换行后会白占一行
@@ -143,7 +145,7 @@ export default function Trash() {
             <button className="btn btn-danger-outline" onClick={() => setShowPurgeAll(true)}>
               {/* 批次 B3：「删除」类按钮此前全是纯文字 —— 补 `delete` 图标 */}
               <Icon name="delete" size={16} />
-              清空回收站
+              {t('trash.emptyAll')}
             </button>
           ) : undefined
         }
@@ -154,7 +156,7 @@ export default function Trash() {
       {loading ? (
         <LoadingSpinner />
       ) : items.length === 0 ? (
-        <EmptyState message="回收站是空的" description="被删除的笔记会在这里保留，随时可以恢复" />
+        <EmptyState message={t('trash.empty')} description={t('trash.emptyHint')} />
       ) : (
         /* 表格化（批次 E8）：一条已删除的笔记 = 一行。
            ⚠️ 真 `<table>`：`<th scope="col">` 是读屏用户唯一能拿到的列语义，
@@ -165,10 +167,10 @@ export default function Trash() {
           <table className={styles.trashTable}>
             <thead>
               <tr>
-                <th scope="col">笔记</th>
-                <th scope="col">来源与删除时间</th>
-                <th scope="col">包含内容</th>
-                <th scope="col">操作</th>
+                <th scope="col">{t('trash.colNote')}</th>
+                <th scope="col">{t('trash.colSourceAndDeletedAt')}</th>
+                <th scope="col">{t('trash.colContains')}</th>
+                <th scope="col">{t('trash.colActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -185,17 +187,19 @@ export default function Trash() {
                   <td className={styles.trashMeta}>
                     {sourceTypeLabels[item.note.source_type] || item.note.source_type}
                     {' · '}
-                    删除于 {item.note.trashed_at ? formatDateTime(item.note.trashed_at) : '—'}
+                    {t('trash.deletedAt', {
+                      time: item.note.trashed_at ? formatDateTime(item.note.trashed_at) : '—',
+                    })}
                   </td>
                   {/* 附属统计：恢复时可还原的内容 */}
                   <td>
                     <div className={styles.trashChips}>
                       {[
-                        `${item.card_count} 张卡片`,
-                        `${item.quiz_count} 道题目`,
-                        `${item.annotation_count} 条批注`,
-                        `${item.version_count} 个版本`,
-                        `${item.link_count} 个双向链接`,
+                        t('trash.countCards', { count: item.card_count }),
+                        t('trash.countQuizzes', { count: item.quiz_count }),
+                        t('trash.countAnnotations', { count: item.annotation_count }),
+                        t('trash.countVersions', { count: item.version_count }),
+                        t('trash.countLinks', { count: item.link_count }),
                       ].map((text) => (
                         <span key={text} className={styles.trashChip}>
                           {text}
@@ -210,7 +214,7 @@ export default function Trash() {
                         disabled={operatingId === item.note.id}
                         onClick={() => handleRestore(item)}
                       >
-                        恢复
+                        {t('trash.restore')}
                       </button>
                       {/* 描边危险（批次 E8）：它打开的是确认框，不是最终删除 */}
                       <button
@@ -219,7 +223,7 @@ export default function Trash() {
                         onClick={() => setNoteToPurge(item)}
                       >
                         <Icon name="delete" size={16} />
-                        彻底删除
+                        {t('trash.purge')}
                       </button>
                     </div>
                   </td>
@@ -247,28 +251,29 @@ export default function Trash() {
       <Dialog
         open={showPurgeAll}
         onClose={() => setShowPurgeAll(false)}
-        title="清空回收站"
+        title={t('trash.emptyAll')}
         titleTone="danger"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setShowPurgeAll(false)}>
-              取消
+              {t('trash.cancel')}
             </button>
             {/* 最终确认（批次 E8）：这里是**真的**不可恢复那一下，
                 所以用实底 `.btn-danger` —— 描边只留给"打开确认框"的入口，
                 内联的 `background: var(--color-error); color: '#fff'` 随之去掉
                 （既与 `.btn-danger` 逐字同值，又少两个硬编码色值）。 */}
             <button className="btn btn-danger" onClick={confirmPurgeAll}>
-              清空
+              {t('trash.emptyAction')}
             </button>
           </>
         }
       >
         <p style={{ marginBottom: 'var(--space-md)' }}>
-          确定彻底删除回收站中的全部 {items.length} 条笔记吗？此操作<strong>不可恢复</strong>。
+          {t('trash.emptyAllConfirm', { count: items.length })}
+          <strong>{t('shared.irreversible')}</strong>。
         </p>
         <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-          其他笔记对这些笔记的引用将以「[已删除的笔记]」占位符保留，不会影响其他笔记的内容。
+          {t('trash.emptyAllImpact')}
         </p>
       </Dialog>
     </div>

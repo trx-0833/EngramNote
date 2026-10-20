@@ -26,6 +26,7 @@ import { useToast } from '../components/Toast';
 // `.note-list-item` / `.note-list-actions`（含 768px 档 3 条）从
 // `components.css` + `responsive.css` 搬进来 —— 见 NotesList.module.css 文件头
 import styles from './NotesList.module.css';
+import { useTranslation } from '../i18n';
 
 /**
  * 笔记列表页面组件
@@ -43,6 +44,7 @@ import styles from './NotesList.module.css';
  * - loading: 数据加载状态
  */
 export default function NotesList() {
+  const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
@@ -83,11 +85,12 @@ export default function NotesList() {
       setNotes(res.items);
       setTotal(res.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [page, keyword, noteRole, showArchived]);
+    // `t` 进依赖：语言切换后重新加载时，错误文案要是新语言的
+  }, [page, keyword, noteRole, showArchived, t]);
 
   // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
@@ -118,7 +121,7 @@ export default function NotesList() {
       setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id));
       setTotal((prev) => prev - 1);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '移入回收站失败');
+      toast.error(err instanceof Error ? err.message : t('notesList.moveToTrashFailed'));
     } finally {
       setNoteToDelete(null);
     }
@@ -141,7 +144,7 @@ export default function NotesList() {
         ),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '重试失败');
+      toast.error(err instanceof Error ? err.message : t('shared.retryFailed'));
     }
   }
 
@@ -159,7 +162,7 @@ export default function NotesList() {
           批次 C1：1.25rem → 1.5rem（**变大**，有意为之），量尺交给
           `<PageHeader>`；`spacing="sm"` 保持与下方工具条原有的 8px。
           导航名「笔记列表」与这里「笔记」的不一致属于产品语义，本批只登记不改。 */}
-      <PageHeader title="笔记" spacing="sm" />
+      <PageHeader title={t('notesList.title')} spacing="sm" />
 
       {/* 搜索栏：输入关键词即时搜索，同时重置到第 1 页 */}
       <div
@@ -178,17 +181,17 @@ export default function NotesList() {
           <Icon name="search" size={16} className={styles.searchInputIcon} />
           <input
             type="search"
-            placeholder="搜索笔记标题..."
+            placeholder={t('notesList.searchPlaceholder')}
             value={keyword}
             onChange={(e) => {
               setKeyword(e.target.value);
               setPage(1);
             }}
-            aria-label="搜索笔记"
+            aria-label={t('notesList.searchLabel')}
           />
         </div>
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-          共 {total} 条
+          {t('notesList.totalCount', { count: total })}
         </span>
       </div>
 
@@ -208,7 +211,7 @@ export default function NotesList() {
             setPage(1);
           }}
         >
-          学习资料
+          {t('notesList.filterMaterial')}
         </button>
         <button
           className={`filter-pill ${noteRole === 'personal_note' ? 'filter-pill-active' : ''}`}
@@ -217,7 +220,7 @@ export default function NotesList() {
             setPage(1);
           }}
         >
-          我的笔记
+          {t('notesList.filterPersonal')}
         </button>
       </div>
 
@@ -230,7 +233,7 @@ export default function NotesList() {
             setPage(1);
           }}
         >
-          全部
+          {t('notesList.filterAll')}
         </button>
         <button
           className={`filter-pill ${archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
@@ -239,7 +242,7 @@ export default function NotesList() {
             setPage(1);
           }}
         >
-          已审阅
+          {t('notesList.filterArchived')}
         </button>
       </div>
 
@@ -251,14 +254,14 @@ export default function NotesList() {
       ) : notes.length === 0 ? (
         /* 空状态：根据是否有搜索关键词显示不同提示 */
         <EmptyState
-          message={keyword ? '没有找到匹配的笔记' : '还没有笔记'}
-          description={keyword ? undefined : '上传你的第一份学习资料'}
+          message={keyword ? t('notesList.noMatch') : t('notesList.empty')}
+          description={keyword ? undefined : t('notesList.emptyHint')}
           action={
             !keyword ? (
               <button className="btn btn-primary" onClick={() => navigate('/upload')}>
                 {/* 批次 B3：空状态里的上传入口补 `upload` 图标 */}
                 <Icon name="upload" size={16} />
-                上传资料
+                {t('notesList.upload')}
               </button>
             ) : undefined
           }
@@ -350,7 +353,7 @@ export default function NotesList() {
                   {/* 页数信息，仅 PDF/Office 文档有值 */}
                   {note.page_count && (
                     <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                      {note.page_count} 页
+                      {t('notesList.pageCount', { count: note.page_count })}
                     </span>
                   )}
                   {/* 文件大小，从字节转换为 KB 显示 */}
@@ -387,9 +390,9 @@ export default function NotesList() {
                     className="btn btn-primary"
                     style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                     onClick={() => handleRetry(note.id)}
-                    aria-label={`重试 ${note.title}`}
+                    aria-label={t('notesList.retryNamed', { title: note.title })}
                   >
-                    重试
+                    {t('notesList.retry')}
                   </button>
                 )}
                 {/* 删除按钮（移入回收站），需要阻止事件冒泡 */}
@@ -397,11 +400,11 @@ export default function NotesList() {
                   className="btn btn-danger"
                   style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                   onClick={() => handleDelete(note)}
-                  aria-label={`删除 ${note.title}`}
+                  aria-label={t('notesList.deleteNamed', { title: note.title })}
                 >
                   {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
                   <Icon name="delete" size={16} />
-                  删除
+                  {t('notesList.delete')}
                 </button>
                 <span
                   style={{ color: 'var(--color-text-secondary)', alignSelf: 'center' }}
@@ -424,14 +427,14 @@ export default function NotesList() {
             gap: 'var(--space-sm)',
             marginTop: 'var(--space-lg)',
           }}
-          aria-label="分页"
+          aria-label={t('notesList.pagination')}
         >
           <button
             className="btn btn-secondary"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            上一页
+            {t('notesList.prevPage')}
           </button>
           <span
             style={{
@@ -447,7 +450,7 @@ export default function NotesList() {
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            下一页
+            {t('notesList.nextPage')}
           </button>
         </nav>
       )}

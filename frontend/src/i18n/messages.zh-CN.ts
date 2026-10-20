@@ -489,6 +489,66 @@ const zhCN = {
     deleteBlockConfirm: '确定删除块 {index}？',
     deleteBlockImpact: '此操作不可恢复。',
   },
+
+  /** 笔记列表页（`NotesList`，i18n 阶段 3） */
+  notesList: {
+    title: '笔记',
+    searchPlaceholder: '搜索笔记标题...',
+    searchLabel: '搜索笔记',
+    totalCount: '共 {count} 条',
+    /** 角色筛选 */
+    filterMaterial: '学习资料',
+    filterPersonal: '我的笔记',
+    /** 状态筛选 */
+    filterAll: '全部',
+    filterArchived: '已审阅',
+    noMatch: '没有找到匹配的笔记',
+    empty: '还没有笔记',
+    emptyHint: '上传你的第一份学习资料',
+    upload: '上传资料',
+    pageCount: '{count} 页',
+    retryNamed: '重试 {title}',
+    deleteNamed: '删除 {title}',
+    retry: '重试',
+    delete: '删除',
+    pagination: '分页',
+    prevPage: '上一页',
+    nextPage: '下一页',
+    moveToTrashFailed: '移入回收站失败',
+  },
+
+  /** 回收站页（`Trash`，i18n 阶段 3） */
+  trash: {
+    title: '回收站',
+    subtitle: '笔记及其全部内容（卡片、题目、复习记录、关系）作为整体保存，可随时整体恢复',
+    emptyAll: '清空回收站',
+    empty: '回收站是空的',
+    emptyHint: '被删除的笔记会在这里保留，随时可以恢复',
+    // ---- 表格列头 ----
+    colNote: '笔记',
+    colSourceAndDeletedAt: '来源与删除时间',
+    colContains: '包含内容',
+    colActions: '操作',
+    deletedAt: '删除于 {time}',
+    countCards: '{count} 张卡片',
+    countQuizzes: '{count} 道题目',
+    countAnnotations: '{count} 条批注',
+    countVersions: '{count} 个版本',
+    countLinks: '{count} 个双向链接',
+    restore: '恢复',
+    purge: '彻底删除',
+    restoredRenamed: '原位置已存在同名文件，恢复后已自动重命名为「{name}」',
+    restoreFailed: '恢复失败',
+    purgeFailed: '彻底删除失败',
+    purgeResult: '已彻底删除 {purged} 条，{failed} 条删除失败，请重试',
+    emptyAllFailed: '清空回收站失败',
+    // ---- 清空确认框 ----
+    emptyAllConfirm: '确定彻底删除回收站中的全部 {count} 条笔记吗？此操作',
+    emptyAllImpact:
+      '其他笔记对这些笔记的引用将以「[已删除的笔记]」占位符保留，不会影响其他笔记的内容。',
+    cancel: '取消',
+    emptyAction: '清空',
+  },
 };
 
 export default zhCN;
