@@ -714,6 +714,54 @@ const zhCN = {
     deleteConfirm: '确定删除此学习目标？',
     deleteImpact: '此操作不可恢复。',
   },
+
+  /** 今日资料页（`DailyMaterials`，i18n 阶段 3） */
+  dailyMaterials: {
+    title: '今日资料',
+    newFolder: '新建文件夹',
+    creating: '创建中...',
+    // ---- 状态筛选 ----
+    filterAll: '全部',
+    filterProcessing: '处理中',
+    filterCompleted: '已完成',
+    filterFailed: '失败',
+    // ---- 相对日期 ----
+    today: '今天',
+    yesterday: '昨天',
+    // ---- 文件夹 ----
+    emptyFolders: '还没有文件夹',
+    emptyFoldersHint: '创建一个文件夹来组织今天的学习资料',
+    /** 新建文件夹时的默认名，如「2024-01-15 学习资料」 */
+    defaultFolderName: '{date} 学习资料',
+    folderNameLabel: '文件夹名称',
+    folderNameEmpty: '文件夹名称不能为空',
+    saveNameLabel: '保存名称',
+    cancelRenameLabel: '取消重命名',
+    renameFolderLabel: '重命名文件夹',
+    deleteFolderLabel: '删除文件夹',
+    fileCount: '{count} 个文件',
+    saving: '保存中...',
+    save: '保存',
+    cancel: '取消',
+    rename: '重命名',
+    delete: '删除',
+    deleteFolderConfirm: '确定删除此文件夹？',
+    // ---- 文件 ----
+    loading: '加载中...',
+    uploadFile: '上传文件',
+    uploading: '上传中...',
+    noMatchingFiles: '没有符合筛选条件的文件',
+    emptyFolder: '文件夹为空',
+    emptyFolderHint: '点击上方按钮上传学习资料',
+    // ---- 错误 ----
+    loadFailed: '加载失败',
+    loadDetailFailed: '加载详情失败',
+    createFailed: '创建失败',
+    renameFailed: '重命名失败',
+    uploadFailed: '上传失败',
+    unsupportedFormat: '不支持的文件格式: {ext}',
+    uploadedConverting: '文件已上传，正在转换...',
+  },
 };
 
 export default zhCN;

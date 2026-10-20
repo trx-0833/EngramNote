@@ -42,6 +42,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 // 本页私有样式（visual-refactor-plan 批次 E8）：时间线与元数据 chip
 import styles from './DailyMaterials.module.css';
+import { useTranslation, type MessageKey } from '../i18n';
 
 /** 允许上传的文件扩展名列表 */
 const ALLOWED_EXTENSIONS = [
@@ -61,10 +62,10 @@ const ALLOWED_EXTENSIONS = [
 
 /** 状态筛选选项 */
 const STATUS_FILTERS = [
-  { key: 'all', label: '全部' },
-  { key: 'processing', label: '处理中' },
-  { key: 'completed', label: '已完成' },
-  { key: 'failed', label: '失败' },
+  { key: 'all', labelKey: 'dailyMaterials.filterAll' },
+  { key: 'processing', labelKey: 'dailyMaterials.filterProcessing' },
+  { key: 'completed', labelKey: 'dailyMaterials.filterCompleted' },
+  { key: 'failed', labelKey: 'dailyMaterials.filterFailed' },
 ] as const;
 
 /**
@@ -79,11 +80,16 @@ function formatFileSize(bytes: number): string {
 }
 
 /**
- * 格式化日期为中文格式
+ * 格式化日期为「今天 / 昨天 / 月日」
+ *
+ * ⚠️ i18n 阶段 3：多了一个 	 参数 —— 它是**模块级函数**，调不了 hook。
  * @param dateStr - ISO 日期字符串
- * @returns 格式化后的日期字符串
+ * @param t - 翻译函数（由调用方从 useTranslation() 取）
  */
-function formatDate(dateStr: string): string {
+function formatDate(
+  dateStr: string,
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): string {
   const date = new Date(dateStr);
   const today = new Date();
   const yesterday = new Date(today);
@@ -94,8 +100,8 @@ function formatDate(dateStr: string): string {
   // 留这两个字面量在这里是有意的 —— 阶段 3 改这一页时它们会一起走 `t()`。
   // 下面那行日期**格式**则已收口到 `utils/datetime`（本模块不再是
   // 全项目唯一一处自定义 `Intl` 选项的地方，见该文件头）。
-  if (date.toDateString() === today.toDateString()) return '今天';
-  if (date.toDateString() === yesterday.toDateString()) return '昨天';
+  if (date.toDateString() === today.toDateString()) return t('dailyMaterials.today');
+  if (date.toDateString() === yesterday.toDateString()) return t('dailyMaterials.yesterday');
   return formatMonthDay(date);
 }
 
@@ -146,6 +152,7 @@ let pageMemory: { folderId: string | null; scrollY: number } | null = null;
  * - uploading: 是否正在上传
  */
 export default function DailyMaterials() {
+  const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels } = useLabels();
   const toast = useToast();
   /**
@@ -270,7 +277,7 @@ export default function DailyMaterials() {
       const data = await getFolders(7);
       setFolders(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('dailyMaterials.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -280,6 +287,14 @@ export default function DailyMaterials() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchFolders();
+    // ⚠️ 这里**不能**把 `fetchFolders` 写进依赖数组：它是组件内的普通函数
+    // （不是 `useCallback`），每次渲染都是新引用 —— 加进去会**无限循环**。
+    // 试过包 `useCallback`，但它闭包了多个 state，react-hooks 的编译器规则
+    // 直接报 `Existing memoization could not be preserved`，即**它不适合**。
+    // 与 `Trash.tsx` / `Dashboard.tsx` / `LearningGoals.tsx` 是同一形态、同一处理。
+    // ⚠️ 本轮的 i18n 改动**没有**改变这条依赖数组的取值，只是把 `t` 加进另一处
+    // 之后，规则开始检查这里 —— 所以这两条豁免是**本轮引入的**，不是本来就有的。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**
@@ -289,7 +304,7 @@ export default function DailyMaterials() {
    * `restoredRef` 保证只做一次（这两个依赖会变好几次）。
    *
    * 只恢复"还在最近 7 天列表里的那个文件夹"：不在列表里（隔天/被删）就只滚位置，
-   * 免得对一个已经不存在的 id 发请求、再把"加载详情失败"糊到用户脸上。
+   * 免得对一个已经不存在的 id 发请求、再把t('dailyMaterials.loadDetailFailed')糊到用户脸上。
    */
   useEffect(() => {
     if (loading || restoredRef.current) return;
@@ -306,6 +321,14 @@ export default function DailyMaterials() {
     } else {
       window.scrollTo({ top: memory.scrollY });
     }
+    // ⚠️ 这里**不能**把 `loadFolderDetail` 写进依赖数组：它是组件内的普通函数
+    // （不是 `useCallback`），每次渲染都是新引用 —— 加进去会**无限循环**。
+    // 试过包 `useCallback`，但它闭包了多个 state，react-hooks 的编译器规则
+    // 直接报 `Existing memoization could not be preserved`，即**它不适合**。
+    // 与 `Trash.tsx` / `Dashboard.tsx` / `LearningGoals.tsx` 是同一形态、同一处理。
+    // ⚠️ 本轮 i18n 改动**没有**改变这条依赖数组的取值（仍是 `loading, folders`），
+    // 只是把 `t` 加进另一处之后规则开始检查这里 —— 所以这条豁免是**本轮引入的**。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, folders]);
 
   /**
@@ -341,7 +364,7 @@ export default function DailyMaterials() {
       setFolderDetail(detail);
       if (restoreScrollY !== undefined) pendingScrollRef.current = restoreScrollY;
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : '加载详情失败');
+      setDetailError(err instanceof Error ? err.message : t('dailyMaterials.loadDetailFailed'));
     } finally {
       setDetailLoading(false);
     }
@@ -371,10 +394,10 @@ export default function DailyMaterials() {
     setCreating(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const folder = await createFolder(`${today} 学习资料`);
+      const folder = await createFolder(t('dailyMaterials.defaultFolderName', { date: today }));
       setFolders((prev) => [folder, ...prev]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '创建失败');
+      toast.error(err instanceof Error ? err.message : t('dailyMaterials.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -404,7 +427,7 @@ export default function DailyMaterials() {
         setFolderDetail(null);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '删除失败');
+      toast.error(err instanceof Error ? err.message : t('shared.deleteFailed'));
     }
   }
 
@@ -447,7 +470,7 @@ export default function DailyMaterials() {
     e?.stopPropagation();
     const trimmed = editingName.trim();
     if (!trimmed) {
-      toast.warning('文件夹名称不能为空');
+      toast.warning(t('dailyMaterials.folderNameEmpty'));
       return;
     }
 
@@ -462,7 +485,7 @@ export default function DailyMaterials() {
       setEditingFolderId(null);
       setEditingName('');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '重命名失败');
+      toast.error(err instanceof Error ? err.message : t('dailyMaterials.renameFailed'));
     } finally {
       setRenaming(false);
     }
@@ -493,21 +516,21 @@ export default function DailyMaterials() {
 
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      toast.error(`不支持的文件格式: ${ext}`);
+      toast.error(t('dailyMaterials.unsupportedFormat', { ext }));
       return;
     }
 
     setUploading(true);
-    setUploadStatus('上传中...');
+    setUploadStatus(t('dailyMaterials.uploading'));
 
     try {
       const note = await uploadFileToFolder(file, expandedFolderId);
-      setUploadStatus('文件已上传，正在转换...');
+      setUploadStatus(t('dailyMaterials.uploadedConverting'));
 
       // 轮询转换状态
       pollUploadStatus(note.id);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '上传失败');
+      toast.error(err instanceof Error ? err.message : t('dailyMaterials.uploadFailed'));
       setUploading(false);
       setUploadStatus(null);
     }
@@ -543,7 +566,9 @@ export default function DailyMaterials() {
       try {
         const res = await getUploadStatus(noteId);
         if (unmountedRef.current) return;
-        setUploadStatus(`状态: ${statusLabels[res.status] || res.status}`);
+        setUploadStatus(
+          t('upload.convertingStatus', { status: statusLabels[res.status] || res.status }),
+        );
 
         if (successStatuses.includes(res.status) || failedStatuses.includes(res.status)) {
           setUploading(false);
@@ -592,10 +617,10 @@ export default function DailyMaterials() {
     <div className="page-enter">
       {/* 页面标题和操作按钮（批次 C1：统一进 <PageHeader>） */}
       <PageHeader
-        title="今日资料"
+        title={t('dailyMaterials.title')}
         actions={
           <button className="btn btn-primary" onClick={handleCreateFolder} disabled={creating}>
-            {creating ? '创建中...' : '新建文件夹'}
+            {creating ? t('dailyMaterials.creating') : t('dailyMaterials.newFolder')}
           </button>
         }
       />
@@ -607,11 +632,11 @@ export default function DailyMaterials() {
         <ErrorDisplay message={error} onRetry={fetchFolders} />
       ) : folders.length === 0 ? (
         <EmptyState
-          message="还没有文件夹"
-          description="创建一个文件夹来组织今天的学习资料"
+          message={t('dailyMaterials.emptyFolders')}
+          description={t('dailyMaterials.emptyFoldersHint')}
           action={
             <button className="btn btn-primary" onClick={handleCreateFolder}>
-              新建文件夹
+              {t('dailyMaterials.newFolder')}
             </button>
           }
         />
@@ -665,7 +690,7 @@ export default function DailyMaterials() {
                           borderRadius: '4px',
                         }}
                         disabled={renaming}
-                        aria-label="文件夹名称"
+                        aria-label={t('dailyMaterials.folderNameLabel')}
                       />
                     ) : (
                       <h2
@@ -718,10 +743,10 @@ export default function DailyMaterials() {
                     )}
                     <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
                       <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {formatDate(folder.folder_date)}
+                        {formatDate(folder.folder_date, t)}
                       </span>
                       <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {folder.note_count} 个文件
+                        {t('dailyMaterials.fileCount', { count: folder.note_count })}
                       </span>
                     </div>
                   </div>
@@ -739,18 +764,18 @@ export default function DailyMaterials() {
                         style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                         onClick={(e) => saveRenameFolder(folder.id, e)}
                         disabled={renaming}
-                        aria-label="保存名称"
+                        aria-label={t('dailyMaterials.saveNameLabel')}
                       >
-                        {renaming ? '保存中...' : '保存'}
+                        {renaming ? t('dailyMaterials.saving') : t('dailyMaterials.save')}
                       </button>
                       <button
                         className="btn btn-secondary"
                         style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                         onClick={(e) => cancelRenameFolder(e)}
                         disabled={renaming}
-                        aria-label="取消重命名"
+                        aria-label={t('dailyMaterials.cancelRenameLabel')}
                       >
-                        取消
+                        {t('dailyMaterials.cancel')}
                       </button>
                     </>
                   ) : (
@@ -759,9 +784,9 @@ export default function DailyMaterials() {
                         className="btn btn-secondary"
                         style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                         onClick={(e) => startRenameFolder(folder, e)}
-                        aria-label="重命名文件夹"
+                        aria-label={t('dailyMaterials.renameFolderLabel')}
                       >
-                        重命名
+                        {t('dailyMaterials.rename')}
                       </button>
                       {/* 仅空文件夹可删除 */}
                       {folder.note_count === 0 && (
@@ -769,11 +794,11 @@ export default function DailyMaterials() {
                           className="btn btn-danger"
                           style={{ fontSize: '0.75rem', padding: '4px 8px' }}
                           onClick={(e) => handleDeleteFolder(folder.id, e)}
-                          aria-label="删除文件夹"
+                          aria-label={t('dailyMaterials.deleteFolderLabel')}
                         >
                           {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
                           <Icon name="delete" size={16} />
-                          删除
+                          {t('dailyMaterials.delete')}
                         </button>
                       )}
                     </>
@@ -787,7 +812,7 @@ export default function DailyMaterials() {
                   style={{ borderTop: '1px solid var(--color-border)', padding: 'var(--space-md)' }}
                 >
                   {detailLoading ? (
-                    <LoadingSpinner text="加载中..." />
+                    <LoadingSpinner text={t('dailyMaterials.loading')} />
                   ) : detailError ? (
                     <ErrorDisplay message={detailError} onRetry={() => toggleFolder(folder.id)} />
                   ) : (
@@ -814,7 +839,7 @@ export default function DailyMaterials() {
                           >
                             {/* 批次 B3：上传按钮补 `upload` 图标（托盘 + 向上箭头） */}
                             <Icon name="upload" size={16} />
-                            {uploading ? '上传中...' : '上传文件'}
+                            {uploading ? t('dailyMaterials.uploading') : '上传文件'}
                           </button>
                           <input
                             ref={fileInputRef}
@@ -838,7 +863,7 @@ export default function DailyMaterials() {
                               className={`filter-pill${statusFilter === filter.key ? ' filter-pill-active' : ''}`}
                               onClick={() => setStatusFilter(filter.key)}
                             >
-                              {filter.label}
+                              {t(filter.labelKey)}
                             </button>
                           ))}
                         </div>
@@ -851,9 +876,13 @@ export default function DailyMaterials() {
                           结构与几何见 `DailyMaterials.module.css`。 */}
                       {filteredNotes.length === 0 ? (
                         <EmptyState
-                          message={statusFilter !== 'all' ? '没有符合筛选条件的文件' : '文件夹为空'}
+                          message={
+                            statusFilter !== 'all'
+                              ? t('dailyMaterials.noMatchingFiles')
+                              : t('dailyMaterials.emptyFolder')
+                          }
                           description={
-                            statusFilter !== 'all' ? undefined : '点击上方按钮上传学习资料'
+                            statusFilter !== 'all' ? undefined : t('dailyMaterials.emptyFolderHint')
                           }
                         />
                       ) : (
@@ -923,8 +952,8 @@ export default function DailyMaterials() {
           `onConfirm` 先关框再执行（见 `ConfirmDialog` 文件头），取消什么都不做。 */}
       <ConfirmDialog
         open={pendingDeleteFolderId !== null}
-        title="确定删除此文件夹？"
-        confirmText="删除"
+        title={t('dailyMaterials.deleteFolderConfirm')}
+        confirmText={t('dailyMaterials.delete')}
         danger
         onConfirm={() => {
           const folderId = pendingDeleteFolderId;
