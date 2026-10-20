@@ -1268,6 +1268,9 @@ const en = {
     prevQuestion: 'Previous',
     firstQuestion: 'Already the first question',
     sessionProgress: 'Answered {answered} this session · {correct} correct',
+    quotaExhaustedHint: 'Daily quota used up — come back tomorrow',
+    quotaExhaustedBanner:
+      'Daily quota used up ({done} / {limit}) — you can still review answered questions',
   },
 } satisfies typeof zhCN;
 

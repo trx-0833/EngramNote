@@ -175,6 +175,21 @@ export default function Review() {
     isCorrect: q.result?.is_correct,
   }));
 
+  /**
+   * 今日额度是否已用尽（想法 8 阶段 4）
+   *
+   * 判据与后端**同一口径**：额度按"已结算"的题数算（`review_service.py`
+   * 的 `_count_settled_today` 排除了 `grading_method='ungraded'` 的占位记录），
+   * 而 `stats.today_done` 就是这个数（`/review/stats` 直接给的），
+   * 所以这里不必自己重算。
+   *
+   * 为什么要有它：`/review/due` 一次装载 50 道，而每日只能结算 10 道。
+   * 没有它的话，用户做到第 11 道点提交才拿到 429，
+   * 而页面上还剩 40 道**看起来完全能点**的题 —— 一道道撞墙。
+   */
+  const dailyLimit = stats?.daily_limit ?? 10;
+  const quotaExhausted = (stats?.today_done ?? 0) >= dailyLimit;
+
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
@@ -186,11 +201,9 @@ export default function Review() {
 
   // 完成页面
   if (completed) {
-    // 每日限额从后端 /review/stats 读取（单一来源），见 docs/decisions.md#F-12
-    const dailyLimit = stats?.daily_limit ?? 10;
+    // 每日限额从后端 /review/stats 读取（单一来源），见 docs/decisions.md#F-12。
+    // `dailyLimit` 已在组件级算过，这里只需要今日已完成数。
     const todayDone = stats?.today_done ?? 0;
-    const reachedDailyLimit = todayDone >= dailyLimit;
-
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
         <h2>{t('review.done')}</h2>
@@ -217,7 +230,7 @@ export default function Review() {
           </div>
         )}
 
-        {reachedDailyLimit ? (
+        {quotaExhausted ? (
           <div
             className="card card-accent-warning"
             style={{ textAlign: 'center', marginBottom: 'var(--space-md)' }}
@@ -302,6 +315,22 @@ export default function Review() {
 
       {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
       <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
+
+      {/* 额度用尽：明确告知，而不是让用户一道道去撞 429。
+          已提交的题不受影响 —— 回看它们正是本功能的另一半诉求。 */}
+      {quotaExhausted && !current.submitted && (
+        <div
+          className="card card-accent-warning"
+          style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+        >
+          <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>
+            {t('quizNav.quotaExhaustedBanner', {
+              done: stats?.today_done ?? 0,
+              limit: dailyLimit,
+            })}
+          </p>
+        </div>
+      )}
       {/* 题目卡片（共享 QuizAnswerCard；提交竞态锁由 useQuizSession 的 submittingRef 承担，见 docs/decisions.md#F-23） */}
       <QuizAnswerCard
         quiz={quiz}
@@ -323,6 +352,7 @@ export default function Review() {
         onNext={handleNext}
         onPrev={handlePrev}
         hasPrev={currentIndex > 0}
+        quotaExhausted={quotaExhausted}
       />
     </div>
   );

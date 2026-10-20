@@ -83,6 +83,39 @@ describe('QuizAnswerCard 的作答区', () => {
     expect(screen.getByRole('button', { name: '提交答案' })).toBeDisabled();
   });
 
+  /**
+   * 想法 8 阶段 4：额度用尽时**提前**置灰
+   *
+   * 没有这条时：`/review/due` 一次装载 50 道、每日只能结算 10 道，
+   * 用户做到第 11 道点提交才拿到 429，而页面上还剩 40 道看起来能点的题。
+   */
+  it('★ 额度用尽时提交按钮禁用，并说明原因（不是静默变灰）', () => {
+    renderCard({ quotaExhausted: true });
+    const submit = screen.getByRole('button', { name: '提交答案' });
+    expect(submit).toBeDisabled();
+    // 说明必须**看得见**，不能只藏在 title 里（触屏与键盘用户看不到 title）
+    expect(screen.getByText('今日额度已用完，明天再来')).toBeInTheDocument();
+  });
+
+  it('额度未用尽时不禁用，也不显示那句说明', () => {
+    renderCard({ quotaExhausted: false });
+    expect(screen.getByRole('button', { name: '提交答案' })).toBeEnabled();
+    expect(screen.queryByText('今日额度已用完，明天再来')).not.toBeInTheDocument();
+  });
+
+  it('★ 额度用尽**不影响已提交的题**（回看不受额度约束）', () => {
+    // 已提交的题渲染的是判分结果区，本来就没有提交按钮
+    renderCard({ submitted: true, result: makeResult(), quotaExhausted: true });
+    expect(screen.queryByRole('button', { name: '提交答案' })).not.toBeInTheDocument();
+    // 那句额度说明也不该出现 —— 它只针对"还能不能提交"
+    expect(screen.queryByText('今日额度已用完，明天再来')).not.toBeInTheDocument();
+  });
+
+  it('★ 额度用尽时「上一题」仍然可用（能回看已答的题）', () => {
+    renderCard({ quotaExhausted: true, onPrev: vi.fn(), hasPrev: true });
+    expect(screen.getByRole('button', { name: '上一题' })).toBeEnabled();
+  });
+
   it('提交中禁用按钮（防连点重复提交）', () => {
     renderCard({ submitting: true });
     expect(screen.getByRole('button', { name: '提交答案' })).toBeDisabled();

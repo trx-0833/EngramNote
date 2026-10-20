@@ -187,7 +187,18 @@ describe('每日限额的分流依据是 error_code，不是中文文案（阶�
     // 文案里**故意不带**"每日上限"四个字：只要分支还在匹配中文，这条就会红
     // （这正是 F-19 要消灭的形态 —— 后端改文案不该影响前端分支）。
     mockedSubmit.mockRejectedValue(apiError('DAILY_REVIEW_LIMIT_REACHED', '今日额度已用完'));
-    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+    /**
+     * ⚠️ `today_done` 必须是 **9**（未满）而不是 10。
+     *
+     * 阶段 4 之后，`today_done >= daily_limit` 会让提交按钮**提前置灰**，
+     * 于是 `click` 根本不会触发请求，这条用例就永远走不到 429 那条分支
+     * （实测踩到：改成 10 之后这条立刻红）。
+     *
+     * 9 是真实场景：页面加载时额度还剩 1，用户做这一道的同时
+     * 额度被用尽（比如另一个标签页也在做题），后端于是返回 429 ——
+     * 这正是"提前置灰"覆盖不到的竞态，也是这条用例该守的东西。
+     */
+    mockedStats.mockResolvedValue(makeStats({ today_done: 9, daily_limit: 10 }));
 
     renderPage();
     await loaded();
@@ -198,6 +209,19 @@ describe('每日限额的分流依据是 error_code，不是中文文案（阶�
     expect(await screen.findByText('复习完成')).toBeInTheDocument();
     // 进入完成页前必须重新拉一次统计（否则"今日已完成"显示的是旧值）
     expect(mockedStats).toHaveBeenCalledTimes(2);
+  });
+
+  it('★ 额度已满时**不发请求**（阶段 4：提前置灰取代了"撞 429"）', async () => {
+    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+    renderPage();
+    await loaded();
+
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行');
+    const submit = screen.getByRole('button', { name: '提交答案' });
+    expect(submit).toBeDisabled();
+    // 按钮禁用，所以即使点也发不出去 —— 这才是"不撞墙"的实证
+    await userEvent.click(submit);
+    expect(mockedSubmit).not.toHaveBeenCalled();
   });
 
   it('其它错误码仍然报错，不会被误判成"今日完成"', async () => {
@@ -423,5 +447,47 @@ describe('刷题进度持久化（想法 8 阶段 3）', () => {
     expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
 
     expect((stored() as { currentIndex: number } | null)?.currentIndex).toBe(1);
+  });
+});
+
+/**
+ * 想法 8 阶段 4：额度用尽时**提前**置灰
+ *
+ * 本页的加载量（`/review/due` 50 道）与每日可结算量（10 道）差 5 倍，
+ * 所以"做到第 11 道才撞 429、页面上还剩 40 道能点的题"是必然发生的。
+ */
+describe('每日额度用尽时的表现（想法 8 阶段 4）', () => {
+  it('★ 额度已满：提交按钮置灰 + 顶部说明，而不是等提交报 429', async () => {
+    // today_done 已达 daily_limit
+    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+    renderPage();
+    await loaded();
+
+    expect(screen.getByRole('button', { name: '提交答案' })).toBeDisabled();
+    expect(screen.getByText('今日额度已用完（10 / 10）—— 仍可回看已答过的题')).toBeInTheDocument();
+  });
+
+  it('额度未满时不禁用、也不显示那句说明', async () => {
+    mockedStats.mockResolvedValue(makeStats({ today_done: 3, daily_limit: 10 }));
+    renderPage();
+    await loaded();
+
+    await userEvent.type(screen.getByPlaceholderText('请输入答案...'), '恒压运行');
+    expect(screen.getByRole('button', { name: '提交答案' })).toBeEnabled();
+    expect(
+      screen.queryByText('今日额度已用完（3 / 10）—— 仍可回看已答过的题'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('★ 额度已满时仍能前后翻（回看不受额度约束）', async () => {
+    mockedStats.mockResolvedValue(makeStats({ today_done: 10, daily_limit: 10 }));
+    renderPage();
+    await loaded();
+
+    // 跳到第 2 题：允许
+    await userEvent.click(screen.getByRole('button', { name: '跳到第 2 题，未作答' }));
+    expect(await screen.findByText('均充是什么？')).toBeInTheDocument();
+    // 再翻回来：也允许
+    expect(screen.getByRole('button', { name: '上一题' })).toBeEnabled();
   });
 });

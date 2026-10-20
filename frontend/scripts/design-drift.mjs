@@ -186,7 +186,19 @@ function countRawFontSizes(files) {
     for (const re of [css, tsx]) {
       for (const m of text.matchAll(re)) {
         const value = m[1].trim();
-        if (value.startsWith('var(--')) continue; // 走令牌的不算
+        /**
+         * ⚠️ 先剥掉包裹的引号再判断"走没走令牌"。
+         *
+         * 内联样式里写的是 `fontSize: 'var(--text-sm)'` —— 捕获组拿到的是
+         * **带引号**的 `'var(--text-sm)'`，而 `startsWith('var(--')` 对它为假，
+         * 于是**走了令牌的字号被算成非令牌**。
+         *
+         * 实测踩到（想法 8 阶段 4）：题号条的额度提示用 `var(--text-sm)`，
+         * 门禁却报"比基线多了 1 处"，而那一处明明就是令牌。
+         * 这条误报的代价是**逼人把令牌改回字面量**才能过门禁 —— 正好反了。
+         */
+        const bare = value.replace(/^['"]|['"]$/g, '');
+        if (bare.startsWith('var(--')) continue; // 走令牌的不算
         hits.push(`${rel}: ${value}`);
       }
     }

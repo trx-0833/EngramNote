@@ -197,6 +197,15 @@ export default function TodayLearn() {
     isCorrect: q.result?.is_correct,
   }));
 
+  /**
+   * 今日额度是否已用尽（想法 8 阶段 4）
+   *
+   * 与 `Review` 同一判据（`stats.today_done` 是后端按"已结算"口径给的数），
+   * 也同一理由：本页同样一次装载 50 道而每日只能结算 10 道。
+   */
+  const dailyLimit = stats?.daily_limit ?? 10;
+  const quotaExhausted = (stats?.today_done ?? 0) >= dailyLimit;
+
   // 焦点刻意不收回容器：这一页的焦点应当留在填空/简答输入框里（见 hook 的说明）
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
@@ -283,6 +292,21 @@ export default function TodayLearn() {
         {/* 题号导航条（想法 8）：可点题号跳转，四态可视 */}
         <QuizNavigator items={navItems} currentIndex={currentIndex} onJump={goTo} />
 
+        {/* 额度用尽：明确告知，而不是让用户一道道去撞 429 */}
+        {quotaExhausted && !current.submitted && (
+          <div
+            className="card card-accent-warning"
+            style={{ marginBottom: 'var(--space-md)', textAlign: 'center' }}
+          >
+            <p style={{ fontWeight: 600, color: 'var(--color-warning)' }}>
+              {t('quizNav.quotaExhaustedBanner', {
+                done: stats?.today_done ?? 0,
+                limit: dailyLimit,
+              })}
+            </p>
+          </div>
+        )}
+
         {/* 题目卡片（共享 QuizAnswerCard） */}
         <QuizAnswerCard
           quiz={quiz}
@@ -304,6 +328,7 @@ export default function TodayLearn() {
           onNext={handleNext}
           onPrev={handlePrev}
           hasPrev={currentIndex > 0}
+          quotaExhausted={quotaExhausted}
         />
       </div>
     );

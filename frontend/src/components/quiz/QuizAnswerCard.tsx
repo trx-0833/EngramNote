@@ -85,6 +85,20 @@ interface QuizAnswerCardProps {
   onPrev?: () => void;
   /** 是否存在上一题（第一题时为 false，按钮禁用） */
   hasPrev?: boolean;
+  /**
+   * 今日额度是否已用尽（想法 8 阶段 4）
+   *
+   * 为真时禁用「提交答案」并给出明确提示。**为什么要有它**：
+   * `/review/due` 一次装载 50 道，而每日只能结算 10 道 —— 没有这个 prop 时，
+   * 用户做到第 11 道点提交才拿到 429「今日已完成 10 道题」，
+   * 而页面上还剩 40 道**看起来完全能点**的题，一道道撞墙。
+   *
+   * ⚠️ 只影响**未提交**的题：已提交的题本来就没有提交按钮，
+   * 回看它们不受额度约束（那是本功能的另一半诉求）。
+   *
+   * 快速复习**不传**它（那条入口 `skip_daily_limit=True`，不受额度约束）。
+   */
+  quotaExhausted?: boolean;
 }
 
 export default function QuizAnswerCard({
@@ -110,6 +124,7 @@ export default function QuizAnswerCard({
   onNext,
   onPrev,
   hasPrev = false,
+  quotaExhausted = false,
 }: QuizAnswerCardProps) {
   const { t } = useTranslation();
   const { questionTypeLabels, difficultyLabels, gradingMethodLabels, ratingLabels, verdictLabels } =
@@ -291,15 +306,28 @@ export default function QuizAnswerCard({
             </label>
           )}
 
-          {/* 提交按钮（submitting 时禁用，防连点重复提交，见 docs/decisions.md#F-23） */}
+          {/* 提交按钮（submitting 时禁用，防连点重复提交，见 docs/decisions.md#F-23；
+              额度用尽时也禁用并说明原因，见 `quotaExhausted` 的说明） */}
           <div style={{ marginTop: 'var(--space-md)', textAlign: 'right' }}>
             <button
               className="btn btn-primary"
               onClick={onSubmit}
-              disabled={!userAnswer.trim() || submitting}
+              disabled={!userAnswer.trim() || submitting || quotaExhausted}
+              title={quotaExhausted ? t('quizNav.quotaExhaustedHint') : undefined}
             >
               {t('quizCard.submit')}
             </button>
+            {quotaExhausted && (
+              <p
+                style={{
+                  marginTop: 'var(--space-xs)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-warning)',
+                }}
+              >
+                {t('quizNav.quotaExhaustedHint')}
+              </p>
+            )}
           </div>
 
           {/* 上一题（未提交时也要有）
