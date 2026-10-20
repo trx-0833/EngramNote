@@ -10,6 +10,8 @@ import {
 } from 'react';
 
 import Icon, { type IconName } from './Icon';
+// i18n（阶段 1）：关闭按钮的可访问名
+import { useTranslation } from '../i18n';
 
 /**
  * 全局提示层（toast）
@@ -94,6 +96,11 @@ let nextId = 1;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // i18n 阶段 1：`Provider` 本身是函数组件，所以关闭按钮的 aria-label 直接在这里取。
+  // ⚠️ 不用 `useTranslation()` 的 `t` 去**翻译调用方传来的 message** ——
+  // 那是调用方给的成品文案（通常是后端 detail 或页面自己的句子），
+  // 本组件只负责渲染它。
+  const { t } = useTranslation();
 
   const dismiss = useCallback((id: number) => {
     const timer = timersRef.current.get(id);
@@ -201,7 +208,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => dismiss(item.id)}
-                aria-label="关闭提示"
+                aria-label={t('common.dismiss')}
                 style={{
                   flexShrink: 0,
                   display: 'flex',

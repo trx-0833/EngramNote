@@ -310,22 +310,37 @@ function domClassName(t: Target): string {
 }
 
 describe('iOS 聚焦缩放：输入框的计算字号不得低于 16px', () => {
-  it('★ 按 main.tsx 的真实导入顺序级联后，两个输入框都 ≥16px（jsdom 引擎判读）', () => {
-    // 顺序前提：responsive.css 在前、markdown-extras.css 在后。
-    // 这条断言同时守住"全局层的先后 = main.tsx 的导入顺序"这个前提本身 ——
-    // 它是本文件其余判断的基础（见文件头与 main.tsx 里的顺序说明）。
-    const files = stylesheetImportOrder();
-    expect(files.indexOf('markdown-extras.css')).toBeGreaterThan(files.indexOf('responsive.css'));
+  /**
+   * ⚠️ 这一条显式给 20s 超时（默认 5s 在满载时会红）
+   *
+   * 它是本文件最重的一条：把 `src/styles/*.css` 与 `src/**\/*.module.css`
+   * **全部**拼成一份样式表注入 jsdom，再对两个元素读
+   * `getComputedStyle` —— jsdom 的级联是真实计算，样式表越大越慢。
+   *
+   * 实测：空载 ~1s，全量套件负载下 **7.8s**（那次就是 `Test timed out
+   * in 5000ms` 红的）。这是**测试的等待预算**，不是产品行为：
+   * 真实缺陷（字号算错）在任何超时下都会红。
+   */
+  it(
+    '★ 按 main.tsx 的真实导入顺序级联后，两个输入框都 ≥16px（jsdom 引擎判读）',
+    { timeout: 20_000 },
+    () => {
+      // 顺序前提：responsive.css 在前、markdown-extras.css 在后。
+      // 这条断言同时守住"全局层的先后 = main.tsx 的导入顺序"这个前提本身 ——
+      // 它是本文件其余判断的基础（见文件头与 main.tsx 里的顺序说明）。
+      const files = stylesheetImportOrder();
+      expect(files.indexOf('markdown-extras.css')).toBeGreaterThan(files.indexOf('responsive.css'));
 
-    for (const t of TARGETS) {
-      const px = computedFontSizePx(t.tag, domClassName(t));
-      expect(
-        px,
-        `${t.className}（${t.where}）的计算字号是 ${px}px < ${IOS_MIN_FONT_PX}px：` +
-          `iOS Safari 聚焦它会放大整页。请在 ${t.owner} 里把值抬到 1rem。`,
-      ).toBeGreaterThanOrEqual(IOS_MIN_FONT_PX);
-    }
-  });
+      for (const t of TARGETS) {
+        const px = computedFontSizePx(t.tag, domClassName(t));
+        expect(
+          px,
+          `${t.className}（${t.where}）的计算字号是 ${px}px < ${IOS_MIN_FONT_PX}px：` +
+            `iOS Safari 聚焦它会放大整页。请在 ${t.owner} 里把值抬到 1rem。`,
+        ).toBeGreaterThanOrEqual(IOS_MIN_FONT_PX);
+      }
+    },
+  );
 
   it('★ 模块层必须排在全局层之后：main.tsx 里组件 import 在样式表 import 之后', () => {
     // 这条守住 overhaul-plan 5.6 第二批新发现的级联反转：

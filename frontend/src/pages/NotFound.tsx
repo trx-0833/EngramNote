@@ -24,20 +24,24 @@
  * 2. `padding: 64px 16px` 改用 `var(--space-2xl) var(--space-md)`（上下 64 → 48px，
  *    一屏居中的空页上肉眼几乎不可分，换来的是"不留裸数字"）。
  */
+import { useTranslation } from '../i18n';
 import styles from './NotFound.module.css';
 
 export default function NotFound() {
+  const { t } = useTranslation();
   return (
     <div className={`page-enter ${styles.notFoundPage}`}>
-      <h1 className={styles.notFoundTitle}>404</h1>
-      <p className={styles.notFoundMessage}>页面不存在，可能是链接已失效。</p>
+      {/* `404` 两种语言相同，但仍走 `t()` —— 这一页的文案在
+          `messages.*.ts` 的 `notFound` 命名空间里能一次看全 */}
+      <h1 className={styles.notFoundTitle}>{t('notFound.title')}</h1>
+      <p className={styles.notFoundMessage}>{t('notFound.message')}</p>
       {/* 按钮造型的链接：`base.css` 给所有 <a> 加了默认下划线
           （正文链接必须能与正文区分，见 a11y-audit F-13/F-26），
           这里显式关掉 —— 它长得是按钮，不是正文里的链接。
           ⚠️ 不要把它换成 `<button onClick={navigate}>`：读屏与
           `getByRole('link', { name: '返回首页' })` 都按链接认它。 */}
       <a className={`btn btn-primary ${styles.notFoundHomeLink}`} href="/">
-        返回首页
+        {t('notFound.backHome')}
       </a>
     </div>
   );

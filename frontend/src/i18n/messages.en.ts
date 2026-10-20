@@ -43,6 +43,9 @@ const en = {
     // 语言名自指，两种语言表里**值相同** —— 这是刻意的，见中文表的说明
     languageZh: '中文',
     languageEn: 'English',
+    dismiss: 'Dismiss notification',
+    confirmAction: 'Confirm',
+    cancelAction: 'Cancel',
   },
 
   auth: {
@@ -67,6 +70,48 @@ const en = {
     username: 'Username',
     usernamePlaceholder: 'Letters and digits only, 2–50 characters',
     usernameInvalid: 'Username may contain letters and digits only',
+  },
+
+  nav: {
+    dashboard: 'Dashboard',
+    sectionLearning: 'Learning',
+    today: 'Today',
+    reviewCards: 'Card review',
+    daily: 'Today’s materials',
+    projects: 'Projects',
+    assessment: 'Assessment',
+    goals: 'Goals',
+    sectionNotes: 'Notes',
+    notes: 'All notes',
+    trash: 'Trash',
+    sectionKnowledge: 'Knowledge',
+    cards: 'Cards',
+    graph: 'Graph',
+    qa: 'Q&A',
+    questions: 'Question sets',
+    upload: 'Upload',
+    logout: 'Sign out',
+    mainNav: 'Main navigation',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
+    closeMenu: 'Close menu',
+    openMenu: 'Open menu',
+    uploadAction: 'Upload material',
+  },
+
+  notFound: {
+    title: '404',
+    message: 'This page does not exist. The link may have expired.',
+    backHome: 'Back to home',
+  },
+
+  errorBoundary: {
+    title: 'Something went wrong on this page',
+    description:
+      'A rendering error was caught by the error boundary. The rest of the app still works.',
+    hint: 'This is usually caused by malformed Markdown or formula syntax in a note.',
+    retry: 'Retry',
+    reload: 'Reload page',
   },
 } satisfies typeof zhCN;
 

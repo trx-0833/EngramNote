@@ -1,13 +1,22 @@
 /**
  * @file 统一错误展示组件
  * @description SVG 图标 + 抖动动画 + 渐变重试按钮
+ *
+ * i18n 阶段 1：重试按钮的文案走 `t('common.retry')`。
+ * ⚠️ `message` 是**调用方传进来的**（通常来自后端 `detail` 或
+ * `Error.message`），本组件不翻译它 —— 后端的错误文案按
+ * `Accept-Language` 翻译（见 `backend/app/core/i18n.py`），
+ * 前端只在有 `error_code` 时才用本地表覆盖（阶段 2）。
  */
+import { useTranslation } from '../i18n';
+
 interface ErrorDisplayProps {
   message: string;
   onRetry?: () => void;
 }
 
 export default function ErrorDisplay({ message, onRetry }: ErrorDisplayProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="card state-container"
@@ -41,7 +50,7 @@ export default function ErrorDisplay({ message, onRetry }: ErrorDisplayProps) {
       </p>
       {onRetry && (
         <button className="btn btn-primary" onClick={onRetry}>
-          重试
+          {t('common.retry')}
         </button>
       )}
     </div>

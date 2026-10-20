@@ -24,6 +24,8 @@ import LoadingSpinner from './components/LoadingSpinner';
 // 应用骨架的类名归模块所有（overhaul-plan 5.6 序 9）：`layout.css` 的
 // `.app-layout*` / `.sidebar-mobile-toggle` + `responsive.css` 里同一批窄屏规则
 import styles from './App.module.css';
+// i18n（阶段 1）：汉堡菜单的可访问名
+import { useTranslation } from './i18n';
 
 // ── 登录前页面（首屏必需，保持静态导入以最快呈现登录框） ──
 import Login from './pages/Login';
@@ -174,6 +176,8 @@ function AppRoutes() {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // i18n 阶段 1：汉堡菜单的可访问名
+  const { t } = useTranslation();
 
   if (!isAuthenticated) {
     return (
@@ -198,7 +202,7 @@ function AppRoutes() {
       <button
         className={styles.sidebarMobileToggle}
         onClick={() => setMobileOpen(true)}
-        aria-label="打开菜单"
+        aria-label={t('nav.openMenu')}
         aria-expanded={mobileOpen}
       >
         <Icon name="menu" size={24} />

@@ -109,10 +109,25 @@ function renderApp(initialEntries: string[]) {
   );
 }
 
-/** 展开文件夹（列表到位后第一个可点的文件夹头） */
+/**
+ * 展开文件夹（列表到位后第一个可点的文件夹头）
+ *
+ * ## 为什么显式给 `findBy` 超时（而不是用默认的 1000ms）
+ *
+ * 这两处 `findBy` 等的是**两次异步请求之后**才出现的节点
+ * （`getFolders` → 渲染列表 → 点击 → `getFolderDetail` → 渲染详情）。
+ * 默认 1000ms 在空载下够用，但全量套件（47 个文件、576 个用例、
+ * 十几个 jsdom 环境并行）里 CPU 是被抢的 —— 实测在负载下这一条会以
+ * `Unable to find role="button"` 的形式偶发失败，而**代码没问题**。
+ *
+ * 超时是"测试的等待预算"，不是产品行为；把它调到 5000ms 不会掩盖任何
+ * 真实缺陷（真实缺陷是"永远不出现"，那在 5000ms 下同样会红）。
+ */
 async function expandFolder(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: /2026-01-05 学习资料/ }));
-  await screen.findByText('浮充与均充的讲义.pdf');
+  await user.click(
+    await screen.findByRole('button', { name: /2026-01-05 学习资料/ }, { timeout: 5000 }),
+  );
+  await screen.findByText('浮充与均充的讲义.pdf', undefined, { timeout: 5000 });
 }
 
 /**

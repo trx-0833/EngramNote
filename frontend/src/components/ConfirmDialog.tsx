@@ -69,6 +69,8 @@
  */
 import { useCallback, useRef } from 'react';
 import Dialog from './Dialog';
+// i18n（阶段 1）：两个按钮的默认文案
+import { useTranslation } from '../i18n';
 
 interface ConfirmDialogProps {
   /** 是否打开。`false` 时 `Dialog` **完全不渲染**（连遮罩都不留） */
@@ -135,14 +137,21 @@ export function ConfirmDialog({
   title,
   message,
   impactList,
-  confirmText = '确认',
-  cancelText = '取消',
+  confirmText,
+  cancelText,
   danger = false,
   onConfirmClose,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  // i18n 阶段 1：两个按钮的**默认**文案走 `t()`。
+  //
+  // ⚠️ 默认值不能写在参数解构里（原来写的是 `confirmText = '确认'`）——
+  // 那里在组件体外求值，取不到 hook，也就拿不到当前语言。
+  // 改成 `confirmText ?? t(...)`：调用方显式传了就用它（那些是**业务文案**，
+  // 如"移入回收站"，由调用方自己 `t()`），没传才用通用默认值。
+  const { t } = useTranslation();
 
   /**
    * 点"确认"：**先关对话框，再执行**。
@@ -172,14 +181,14 @@ export function ConfirmDialog({
         <>
           {/* ⚠️ 顺序是行为：这个按钮必须排在确认按钮**之前**（见文件头"初始焦点"） */}
           <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={onCancel}>
-            {cancelText}
+            {cancelText ?? t('common.cancelAction')}
           </button>
           <button
             type="button"
             className={danger ? 'btn btn-danger' : 'btn btn-primary'}
             onClick={handleConfirm}
           >
-            {confirmText}
+            {confirmText ?? t('common.confirmAction')}
           </button>
         </>
       }

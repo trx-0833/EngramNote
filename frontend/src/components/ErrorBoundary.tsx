@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
+import { useTranslation } from '../i18n';
+
 /**
  * 全局错误边界
  *
@@ -27,6 +29,106 @@ interface Props {
 interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
+}
+
+/**
+ * 默认兜底界面 —— **单独抽成函数组件**，而不是写在 `ErrorBoundary.render` 里
+ *
+ * ## 为什么必须抽出来（i18n 阶段 1）
+ *
+ * `ErrorBoundary` 是**类组件**（React 只支持类组件做错误边界），而
+ * `useTranslation()` 是 hook —— 类组件的 `render` 里调不了。
+ *
+ * 抽出来之后有两件事同时成立：
+ * 1. 它是函数组件，能用 hook 取 `t()`；
+ * 2. 语言切换会**重渲染它**（它订阅了 context），于是"出错时切语言"
+ *    文案也跟着变 —— 若在类组件里直接读 `getCurrentLocale()`，
+ *    拿到的是一个不会触发重渲染的静态值。
+ *
+ * 样式**逐字未改**（全是内联 style，带 var() 兜底值），只换了文案来源。
+ */
+function ErrorFallback({
+  error,
+  errorInfo,
+  onReset,
+}: {
+  error: Error;
+  errorInfo: ErrorInfo | null;
+  onReset: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      role="alert"
+      style={{
+        maxWidth: 720,
+        margin: '48px auto',
+        padding: '24px 28px',
+        border: '1px solid var(--color-border, #e5e5e5)',
+        borderRadius: 12,
+        background: 'var(--color-surface, #fff)',
+        color: 'var(--color-text, #1a1a1a)',
+        lineHeight: 1.7,
+      }}
+    >
+      <h2 style={{ margin: '0 0 8px', fontSize: '1.25rem' }}>{t('errorBoundary.title')}</h2>
+      <p style={{ margin: '0 0 16px', color: 'var(--color-text-secondary, #666)' }}>
+        {t('errorBoundary.description')} {t('errorBoundary.hint')}
+      </p>
+
+      {/* 技术细节**不翻译**：它是异常消息与组件栈，翻译它只会让排查更难。
+          这正是"用户可见内容"与"诊断信息"的边界。 */}
+      <pre
+        style={{
+          margin: '0 0 16px',
+          padding: '12px 14px',
+          background: 'var(--color-bg-subtle, #f7f7f8)',
+          borderRadius: 8,
+          fontSize: '0.8rem',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          maxHeight: 220,
+          overflow: 'auto',
+        }}
+      >
+        {error.message || String(error)}
+        {errorInfo?.componentStack ? `\n${errorInfo.componentStack.trim()}` : ''}
+      </pre>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={onReset}
+          style={{
+            padding: '8px 18px',
+            borderRadius: 8,
+            border: '1px solid var(--color-border, #ddd)',
+            background: 'var(--color-surface, #fff)',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+          }}
+        >
+          {t('errorBoundary.retry')}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            padding: '8px 18px',
+            borderRadius: 8,
+            border: 'none',
+            background: 'var(--color-primary, #0f3460)',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+          }}
+        >
+          {t('errorBoundary.reload')}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -59,76 +161,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     if (this.props.fallback) return this.props.fallback(error, this.reset);
 
-    return (
-      <div
-        role="alert"
-        style={{
-          maxWidth: 720,
-          margin: '48px auto',
-          padding: '24px 28px',
-          border: '1px solid var(--color-border, #e5e5e5)',
-          borderRadius: 12,
-          background: 'var(--color-surface, #fff)',
-          color: 'var(--color-text, #1a1a1a)',
-          lineHeight: 1.7,
-        }}
-      >
-        <h2 style={{ margin: '0 0 8px', fontSize: '1.25rem' }}>这个页面出错了</h2>
-        <p style={{ margin: '0 0 16px', color: 'var(--color-text-secondary, #666)' }}>
-          页面渲染时发生异常，已被错误边界拦截（应用其余部分仍可正常使用）。 常见原因是笔记内容里的
-          Markdown/公式语法异常。
-        </p>
-
-        <pre
-          style={{
-            margin: '0 0 16px',
-            padding: '12px 14px',
-            background: 'var(--color-bg-subtle, #f7f7f8)',
-            borderRadius: 8,
-            fontSize: '0.8rem',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            maxHeight: 220,
-            overflow: 'auto',
-          }}
-        >
-          {error.message || String(error)}
-          {errorInfo?.componentStack ? `\n${errorInfo.componentStack.trim()}` : ''}
-        </pre>
-
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={this.reset}
-            style={{
-              padding: '8px 18px',
-              borderRadius: 8,
-              border: '1px solid var(--color-border, #ddd)',
-              background: 'var(--color-surface, #fff)',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-            }}
-          >
-            重试
-          </button>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            style={{
-              padding: '8px 18px',
-              borderRadius: 8,
-              border: 'none',
-              background: 'var(--color-primary, #0f3460)',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-            }}
-          >
-            刷新页面
-          </button>
-        </div>
-      </div>
-    );
+    return <ErrorFallback error={error} errorInfo={errorInfo} onReset={this.reset} />;
   }
 }
 

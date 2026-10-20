@@ -13,8 +13,9 @@
 import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-// i18n（阶段 0）：`t()` 取文案，`locale` / `setLocale` 驱动语言切换器
-import { useTranslation } from '../i18n';
+// i18n（阶段 0 起）：`t()` 取文案，`locale` / `setLocale` 驱动语言切换器。
+// `MessageKey` 用于 `NavItem.labelKey` —— 导航文案存**键名**不存文案
+import { useTranslation, type MessageKey } from '../i18n';
 // 批次 B2：图标从 Unicode 码点改为 `Icon` 组件（唯一出口，见 visual-design-spec §4.2）
 import Icon, { type IconName } from './Icon';
 // 侧边栏（含移动端抽屉）的类名归模块所有（overhaul-plan 5.6 序 9）：
@@ -25,7 +26,14 @@ import styles from './Sidebar.module.css';
 /** 一个导航项。`icon` 是**语义名**（`IconName` 联合类型 —— 拼错在编译期就报错） */
 interface NavItem {
   path: string;
-  label: string;
+  /**
+   * 文案**键名**，不是文案本身（i18n 阶段 1）
+   *
+   * ⚠️ 这里刻意**不存字符串文案**：存了的话，切语言时这份模块级常量
+   * 不会跟着变（它在模块加载时就固化了），于是导航永远是加载时的语言。
+   * 存键名、渲染时 `t(labelKey)` 才对。
+   */
+  labelKey: MessageKey;
   icon: IconName;
 }
 
@@ -39,37 +47,41 @@ interface NavItem {
  * `▷ ▣ ◉ ◈ ◎` 五个几何图形在 16px 下彼此几乎分不清，语义完全靠旁边的文字兜；
  * `\u2618` ☘ 是三叶草，与"今日学习"毫无关系。
  * 现在换成自绘图标（24 网格 / 线宽 1.5 / currentColor），尺寸与基线由 `Icon` 统一保证。
+ *
+ * **i18n 阶段 1**：`title` / `label` 从**文案**改成**键名**（`MessageKey`）——
+ * 渲染时才 `t()`。理由见 `NavItem.labelKey` 的注释。
  */
-const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
+const NAV_SECTIONS: { titleKey: MessageKey | null; items: NavItem[] }[] = [
   {
-    title: '',
-    items: [{ path: '/', label: '仪表盘', icon: 'dashboard' }],
+    // 第一组没有分组标题（仪表盘独立成组）
+    titleKey: null,
+    items: [{ path: '/', labelKey: 'nav.dashboard', icon: 'dashboard' }],
   },
   {
-    title: '学习',
+    titleKey: 'nav.sectionLearning',
     items: [
-      { path: '/today', label: '今日学习', icon: 'today' },
-      { path: '/review/cards', label: '卡片复习', icon: 'review-cards' },
-      { path: '/daily', label: '今日资料', icon: 'daily' },
-      { path: '/projects', label: '项目', icon: 'projects' },
-      { path: '/assessment', label: '学习评估', icon: 'assessment' },
-      { path: '/goals', label: '学习目标', icon: 'goals' },
+      { path: '/today', labelKey: 'nav.today', icon: 'today' },
+      { path: '/review/cards', labelKey: 'nav.reviewCards', icon: 'review-cards' },
+      { path: '/daily', labelKey: 'nav.daily', icon: 'daily' },
+      { path: '/projects', labelKey: 'nav.projects', icon: 'projects' },
+      { path: '/assessment', labelKey: 'nav.assessment', icon: 'assessment' },
+      { path: '/goals', labelKey: 'nav.goals', icon: 'goals' },
     ],
   },
   {
-    title: '笔记',
+    titleKey: 'nav.sectionNotes',
     items: [
-      { path: '/notes', label: '笔记列表', icon: 'notes' },
-      { path: '/trash', label: '回收站', icon: 'trash' },
+      { path: '/notes', labelKey: 'nav.notes', icon: 'notes' },
+      { path: '/trash', labelKey: 'nav.trash', icon: 'trash' },
     ],
   },
   {
-    title: '知识',
+    titleKey: 'nav.sectionKnowledge',
     items: [
-      { path: '/cards', label: '知识卡片', icon: 'cards' },
-      { path: '/graph', label: '知识图谱', icon: 'graph' },
-      { path: '/qa', label: '问答', icon: 'qa' },
-      { path: '/questions', label: '问题集', icon: 'questions' },
+      { path: '/cards', labelKey: 'nav.cards', icon: 'cards' },
+      { path: '/graph', labelKey: 'nav.graph', icon: 'graph' },
+      { path: '/qa', labelKey: 'nav.qa', icon: 'qa' },
+      { path: '/questions', labelKey: 'nav.questions', icon: 'questions' },
     ],
   },
 ];
@@ -123,7 +135,7 @@ export default function Sidebar({
       {/* 移动端遮罩 */}
       {mobileOpen && <div className={styles.sidebarOverlay} onClick={onMobileClose} />}
 
-      <nav className={sidebarClass} role="navigation" aria-label="主导航">
+      <nav className={sidebarClass} role="navigation" aria-label={t('nav.mainNav')}>
         {/* 头部：Logo + 折叠按钮（桌面）/ 关闭按钮（移动抽屉） */}
         <div className={styles.sidebarHeader}>
           <button className={styles.sidebarLogo} onClick={() => handleNav('/')}>
@@ -132,7 +144,7 @@ export default function Sidebar({
           <button
             className={styles.sidebarCollapseBtn}
             onClick={onToggleCollapse}
-            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            aria-label={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
           >
             {collapsed ? '\u00BB' : '\u00AB'}
           </button>
@@ -142,7 +154,7 @@ export default function Sidebar({
             <button
               className={styles.sidebarMobileClose}
               onClick={onMobileClose}
-              aria-label="关闭菜单"
+              aria-label={t('nav.closeMenu')}
             >
               {'\u2715'}
             </button>
@@ -152,8 +164,12 @@ export default function Sidebar({
         {/* 导航分组 */}
         <div className={styles.sidebarBody}>
           {NAV_SECTIONS.map((section) => (
-            <div key={section.title || 'home'} className={styles.sidebarSection}>
-              {section.title && <div className={styles.sidebarSectionTitle}>{section.title}</div>}
+            /* ⚠️ `key` 用 `titleKey` 而不是 `t(titleKey)`：键名在两种语言下都稳定，
+               而译文可能重复（那时 React 会因 key 冲突丢掉一组）。 */
+            <div key={section.titleKey ?? 'home'} className={styles.sidebarSection}>
+              {section.titleKey && (
+                <div className={styles.sidebarSectionTitle}>{t(section.titleKey)}</div>
+              )}
               {section.items.map((item) => (
                 /* 每行包一层 div：行内快捷操作（笔记分组的「上传资料」）
                    必须是导航按钮的**兄弟**节点 —— 把一个 <button> 嵌进
@@ -171,14 +187,14 @@ export default function Sidebar({
                     <span className={styles.sidebarItemIcon}>
                       <Icon name={item.icon} size={20} />
                     </span>
-                    <span className={styles.sidebarItemLabel}>{item.label}</span>
+                    <span className={styles.sidebarItemLabel}>{t(item.labelKey)}</span>
                   </button>
                   {/* 上传快捷入口在笔记分组 */}
                   {item.path === '/notes' && !collapsed && (
                     <button
                       className={styles.sidebarItemAction}
                       onClick={() => handleNav('/upload')}
-                      aria-label="上传资料"
+                      aria-label={t('nav.uploadAction')}
                     >
                       {/* 批次 B3：ASCII `+` 换 `<Icon name="upload" />` ——
                           这个按钮的动作是「上传资料」（它就是 aria-label），
@@ -238,7 +254,7 @@ export default function Sidebar({
             <span className={styles.sidebarItemIcon}>
               <Icon name="logout" size={20} />
             </span>
-            <span className={styles.sidebarItemLabel}>退出</span>
+            <span className={styles.sidebarItemLabel}>{t('nav.logout')}</span>
           </button>
         </div>
       </nav>
