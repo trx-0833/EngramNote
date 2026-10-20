@@ -36,6 +36,7 @@ import StatCard from '../components/StatCard';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变
 import PageHeader from '../components/PageHeader';
 import { useLabels, weakPointBadge } from '../utils/labels';
+import { useTranslation, type MessageKey } from '../i18n';
 
 /** 单题答题状态 */
 interface QuizState {
@@ -60,6 +61,7 @@ function errorCodeOf(e: unknown): string | null {
 }
 
 export default function TodayLearn() {
+  const { t } = useTranslation();
   const { cardTypeLabels } = useLabels();
   const navigate = useNavigate();
   const toast = useToast();
@@ -93,9 +95,9 @@ export default function TodayLearn() {
         .catch(() => {
           /* 统计刷新失败不影响答题 */
         });
-      toast.success('自评已记录，复习进度已更新');
+      toast.success(t('review.selfRatingRecorded'));
     },
-    [toast],
+    [toast, t],
   );
   const onRateError = useCallback(
     (message: string) => {
@@ -134,7 +136,7 @@ export default function TodayLearn() {
       if (weakRes) setWeakPoints(weakRes.items);
       if (planRes) setDailyPlan(planRes);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : t('todayLearn.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -158,7 +160,7 @@ export default function TodayLearn() {
       setSessionTotal(0);
       setCompleted(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载题目失败');
+      setError(err instanceof Error ? err.message : t('todayLearn.loadQuestionsFailed'));
     }
   }
 
@@ -205,7 +207,7 @@ export default function TodayLearn() {
         const newStats = await getReviewStats();
         setStats(newStats);
       } else {
-        setError(message || '提交失败');
+        setError(message || t('todayLearn.submitFailed'));
       }
     } finally {
       submittingRef.current = false;
@@ -250,13 +252,13 @@ export default function TodayLearn() {
   const { containerRef, handleKeyDown } = useReviewKeyboard({ onEnter: handleEnter });
 
   function formatTime(ms: number): string {
-    if (ms < 60000) return `${Math.round(ms / 1000)}秒`;
-    if (ms < 3600000) return `${Math.round(ms / 60000)}分钟`;
-    return `${(ms / 3600000).toFixed(1)}小时`;
+    if (ms < 60000) return t('dashboard.durationSeconds', { count: Math.round(ms / 1000) });
+    if (ms < 3600000) return t('dashboard.durationMinutes', { count: Math.round(ms / 60000) });
+    return t('dashboard.durationHours', { count: (ms / 3600000).toFixed(1) });
   }
 
   // --- 加载中 ---
-  if (loading) return <LoadingSpinner text="加载今日学习数据..." />;
+  if (loading) return <LoadingSpinner text={t('todayLearn.loading')} />;
 
   // --- 错误 ---
   if (error && !stats) return <ErrorDisplay message={error} onRetry={loadData} />;
@@ -268,33 +270,35 @@ export default function TodayLearn() {
     const todayDone = stats?.today_done ?? 0;
     return (
       <div className="page-enter" style={{ margin: '0 auto' }}>
-        <h2 style={{ marginBottom: 'var(--space-lg)' }}>今日复习完成</h2>
+        <h2 style={{ marginBottom: 'var(--space-lg)' }}>{t('todayLearn.done')}</h2>
         <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-          <h3>本次统计</h3>
-          <p>答题数: {sessionTotal}</p>
-          <p>正确数: {sessionCorrect}</p>
-          <p>正确率: {sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%</p>
+          <h3>{t('todayLearn.sessionStats')}</h3>
+          <p>{t('todayLearn.answerCount', { count: sessionTotal })}</p>
+          <p>{t('todayLearn.correctCount', { count: sessionCorrect })}</p>
+          <p>
+            {t('todayLearn.accuracy', {
+              percent: sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0,
+            })}
+          </p>
         </div>
         {stats && (
           <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-            <h3>今日总体</h3>
-            <p>
-              已完成: {todayDone} / {dailyLimit}
-            </p>
-            <p>正确率: {stats.today_accuracy}%</p>
-            <p>待复习: {stats.due_count}</p>
+            <h3>{t('todayLearn.todayOverall')}</h3>
+            <p>{t('todayLearn.todayProgress', { done: todayDone, limit: dailyLimit })}</p>
+            <p>{t('todayLearn.todayAccuracy', { percent: stats.today_accuracy })}</p>
+            <p>{t('todayLearn.dueCount', { count: stats.due_count })}</p>
           </div>
         )}
         {todayDone < dailyLimit ? (
           <button className="btn btn-primary" onClick={startReview}>
-            继续复习
+            {t('todayLearn.continueReview')}
           </button>
         ) : (
           // 原值 `#ff9800` 白底只有 2.16:1（0.9rem 文字要求 4.5:1），
           // 与 F-36 的「中」优先级徽章是同一个色值 —— 换成 `--color-warning`
           // 的取值（#936408，白底 5.16:1），不再各处写一份橙。
           <p style={{ color: 'var(--color-warning)', fontWeight: 600 }}>
-            今日已完成 {dailyLimit} 道题，休息一下吧！
+            {t('todayLearn.dailyLimitReached', { limit: dailyLimit })}
           </p>
         )}
       </div>
@@ -324,9 +328,7 @@ export default function TodayLearn() {
             </>
           }
           trailing={
-            <>
-              {sessionCorrect}/{sessionTotal} 正确
-            </>
+            <>{t('todayLearn.headerProgress', { correct: sessionCorrect, total: sessionTotal })}</>
           }
         />
 
@@ -365,7 +367,7 @@ export default function TodayLearn() {
   return (
     <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
-      <PageHeader title="今日学习" />
+      <PageHeader title={t('todayLearn.title')} />
 
       {error && <ErrorDisplay message={error} onRetry={loadData} />}
 
@@ -373,7 +375,7 @@ export default function TodayLearn() {
       {dailyPlan && dailyPlan.total_count > 0 && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-            每日推荐任务
+            {t('todayLearn.dailyPlan')}
           </h2>
           <p
             style={{
@@ -382,7 +384,11 @@ export default function TodayLearn() {
               marginBottom: 'var(--space-md)',
             }}
           >
-            {dailyPlan.plan_date} · 已完成 {dailyPlan.completed_count} / {dailyPlan.total_count}
+            {t('todayLearn.dailyPlanProgress', {
+              date: dailyPlan.plan_date,
+              done: dailyPlan.completed_count,
+              total: dailyPlan.total_count,
+            })}
           </p>
           <DailyPlanSection plan={dailyPlan} navigate={navigate} />
         </section>
@@ -392,7 +398,7 @@ export default function TodayLearn() {
       {dailyReport && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
-            今日报告 ({dailyReport.date})
+            {t('todayLearn.todayReport', { date: dailyReport.date })}
           </h2>
           <div
             style={{
@@ -401,13 +407,25 @@ export default function TodayLearn() {
               gap: 'var(--space-md)',
             }}
           >
-            <StatCard variant="blue" value={dailyReport.new_mastered} label="新掌握" />
-            <StatCard variant="green" value={dailyReport.total_reviews} label="复习次数" />
-            <StatCard variant="gold" value={`${dailyReport.today_accuracy}%`} label="正确率" />
+            <StatCard
+              variant="blue"
+              value={dailyReport.new_mastered}
+              label={t('todayLearn.statNewMastered')}
+            />
+            <StatCard
+              variant="green"
+              value={dailyReport.total_reviews}
+              label={t('todayLearn.statTotalReviews')}
+            />
+            <StatCard
+              variant="gold"
+              value={`${dailyReport.today_accuracy}%`}
+              label={t('todayLearn.statAccuracy')}
+            />
             <StatCard
               variant="purple"
               value={formatTime(dailyReport.total_review_time_ms)}
-              label="复习时长"
+              label={t('todayLearn.statReviewTime')}
             />
           </div>
         </section>
@@ -422,7 +440,7 @@ export default function TodayLearn() {
           键盘结果更好：Tab 只停一次，且按钮原生支持 Space。 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
-          待复习任务
+          {t('todayLearn.dueTasks')}
         </h2>
         {dueCount > 0 ? (
           <div className="card card-accent-left">
@@ -433,14 +451,17 @@ export default function TodayLearn() {
             >
               <div>
                 <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-                  今日待复习: {dueCount} 题
+                  {t('todayLearn.dueToday', { count: dueCount })}
                 </h3>
                 <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-                  今日已完成 {todayDone} 题 | 正确率 {stats?.today_accuracy ?? 0}%
+                  {t('todayLearn.todayDone', {
+                    count: todayDone,
+                    accuracy: stats?.today_accuracy ?? 0,
+                  })}
                 </p>
               </div>
               <button className="btn btn-primary" onClick={startReview}>
-                开始复习
+                {t('todayLearn.startReview')}
               </button>
             </div>
             {/* 进度条 */}
@@ -459,11 +480,14 @@ export default function TodayLearn() {
                 marginTop: 'var(--space-xs)',
               }}
             >
-              每日目标 {stats?.daily_limit ?? 10} 题，已完成 {todayDone} 题
+              {t('todayLearn.dailyGoal', {
+                limit: stats?.daily_limit ?? 10,
+                done: todayDone,
+              })}
             </p>
           </div>
         ) : (
-          <EmptyState message="今日没有待复习的题目" description="所有题目都已复习完毕，明天再来" />
+          <EmptyState message={t('todayLearn.noDue')} description={t('todayLearn.noDueHint')} />
         )}
       </section>
 
@@ -471,7 +495,7 @@ export default function TodayLearn() {
       {weakPoints.length > 0 && (
         <section style={{ marginBottom: 'var(--space-xl)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
-            薄弱点
+            {t('todayLearn.weakPoints')}
           </h2>
           <div className="card card-accent-error">
             {/* 每一行是**真链接**：原来外层是 `div[onClick]`（没有 role/tabIndex），
@@ -510,7 +534,7 @@ export default function TodayLearn() {
                   </span>
                 </div>
                 <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                  错{wp.error_count}次 | {wp.accuracy}%
+                  {t('todayLearn.errorCount', { count: wp.error_count, accuracy: wp.accuracy })}
                 </span>
               </Link>
             ))}
@@ -531,11 +555,17 @@ interface DailyPlanSectionProps {
   navigate: (path: string) => void;
 }
 
-/** 任务类型到中文标签的映射 */
-const dailyTaskTypeLabels: Record<string, string> = {
-  weak_point: '薄弱点',
-  review: '复习',
-  new_material: '新资料',
+/**
+ * 任务类型 → 文案**键名**（不是文案本身）
+ *
+ * ⚠️ 模块级常量在加载时就固化了，存译文则切语言不变 —— 这是本项目
+ * 反复踩到的坑（`Sidebar.NAV_SECTIONS` / `Upload.BACKEND_OPTIONS` /
+ * `Dashboard.taskTypeLabelKeys` / `DailyMaterials.STATUS_FILTERS`）。
+ */
+const dailyTaskTypeLabelKeys: Record<string, MessageKey> = {
+  weak_point: 'todayLearn.weakPoints',
+  review: 'todayLearn.taskReview',
+  new_material: 'todayLearn.taskNewMaterial',
 };
 
 /**
@@ -567,13 +597,14 @@ const dailyTaskTypeLabels: Record<string, string> = {
  * （"需要注意但不是错误"），共用色值才不会又出现"改了令牌漏了字面量"。
  * 与该令牌一样，这是 `#ff9800` 加深后的琥珀色，色相没换。
  */
-const priorityMeta: Record<number, { color: string; label: string }> = {
-  1: { color: '#c0392b', label: '高' },
-  2: { color: '#936408', label: '中' },
-  3: { color: '#25714a', label: '低' },
+const priorityMeta: Record<number, { color: string; labelKey: MessageKey }> = {
+  1: { color: '#c0392b', labelKey: 'todayLearn.difficultyHigh' },
+  2: { color: '#936408', labelKey: 'todayLearn.difficultyMedium' },
+  3: { color: '#25714a', labelKey: 'todayLearn.difficultyLow' },
 };
 
 function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
+  const { t } = useTranslation();
   // 兼容 recommended_tasks 的两种结构：数组形式 / 对象分组形式
   const tasks: RecommendedTask[] = (() => {
     const raw = plan.recommended_tasks as unknown;
@@ -618,7 +649,7 @@ function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
         return (
           <div key={cat} className="card" style={{ padding: 'var(--space-md)' }}>
             <h3 style={{ fontWeight: 600, marginBottom: 'var(--space-sm)', fontSize: '1rem' }}>
-              {dailyTaskTypeLabels[cat] || cat}
+              {t(dailyTaskTypeLabelKeys[cat]) || cat}
               <span
                 style={{
                   marginLeft: 'var(--space-sm)',
@@ -627,7 +658,7 @@ function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
                   fontWeight: 400,
                 }}
               >
-                共 {arr.length} 项
+                {t('todayLearn.itemCount', { count: arr.length })}
               </span>
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
@@ -667,7 +698,7 @@ function DailyPlanSection({ plan, navigate }: DailyPlanSectionProps) {
                         marginLeft: 'var(--space-sm)',
                       }}
                     >
-                      {prio.label}
+                      {t(prio.labelKey)}
                     </span>
                   </>
                 );

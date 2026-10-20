@@ -16,6 +16,7 @@ import {
   RELATION_TYPE_OPTIONS,
   getRelationLineStyle,
 } from './types';
+import { useTranslation } from '../../i18n';
 
 /**
  * 线型 → 图例线段的类名（批次 E4）
@@ -74,6 +75,7 @@ interface GraphSidebarProps {
 
 /** 图谱统计面板 */
 function StatsPanel({ stats }: { stats: GraphStats }) {
+  const { t } = useTranslation();
   // `relation_type_distribution` 是接口的可选尾巴：缺失时只少一段条形图。
   // 这里原来直接读 `.length`，字段一缺就抛在渲染中 → 整个图谱页被错误边界接走。
   const distribution = stats.relation_type_distribution ?? [];
@@ -81,27 +83,27 @@ function StatsPanel({ stats }: { stats: GraphStats }) {
 
   return (
     <div className={styles.graphPanel}>
-      <div className={styles.graphPanelTitle}>图谱统计</div>
+      <div className={styles.graphPanelTitle}>{t('graphSidebar.stats')}</div>
       <div className={styles.graphStatsGrid}>
         <div className={styles.graphStatItem}>
           <span className={styles.graphStatValue}>{stats.total_nodes}</span>
-          <span className={styles.graphStatLabel}>节点</span>
+          <span className={styles.graphStatLabel}>{t('graphSidebar.statNodes')}</span>
         </div>
         <div className={styles.graphStatItem}>
           <span className={styles.graphStatValue}>{stats.confirmed_edges}</span>
-          <span className={styles.graphStatLabel}>边</span>
+          <span className={styles.graphStatLabel}>{t('graphSidebar.statEdges')}</span>
         </div>
         <div className={styles.graphStatItem}>
           <span className={styles.graphStatValue} style={{ color: 'var(--color-warning)' }}>
             {stats.suggested_edges}
           </span>
-          <span className={styles.graphStatLabel}>待确认</span>
+          <span className={styles.graphStatLabel}>{t('graphSidebar.statPending')}</span>
         </div>
         <div className={styles.graphStatItem}>
           <span className={styles.graphStatValue} style={{ color: 'var(--color-text-tertiary)' }}>
             {stats.isolated_nodes}
           </span>
-          <span className={styles.graphStatLabel}>孤立节点</span>
+          <span className={styles.graphStatLabel}>{t('graphSidebar.statIsolated')}</span>
         </div>
       </div>
       {distribution.length > 0 && (
@@ -144,6 +146,7 @@ function SubgraphPanel({
   setActivePanel: Dispatch<SetStateAction<SidebarPanel>>;
   setSubgraphData: Dispatch<SetStateAction<NodeSubgraph | null>>;
 }) {
+  const { t } = useTranslation();
   const neighbors = subgraphData.neighbor_nodes ?? [];
   const subgraphEdges = subgraphData.edges ?? [];
 
@@ -155,7 +158,7 @@ function SubgraphPanel({
       }}
     >
       <div className={styles.graphPanelTitle}>
-        关联节点
+        {t('graphSidebar.relatedNodes')}
         <button
           style={{
             marginLeft: 'auto',
@@ -170,13 +173,13 @@ function SubgraphPanel({
             setSubgraphData(null);
           }}
         >
-          关闭
+          {t('graphSidebar.close')}
         </button>
       </div>
       <div style={{ fontSize: '0.8rem', marginBottom: 'var(--space-sm)' }}>
         <strong>{subgraphData.center_node.title}</strong>
         <span style={{ color: 'var(--color-text-secondary)', marginLeft: 'var(--space-xs)' }}>
-          → {neighbors.length} 个关联节点
+          {t('graphSidebar.relatedCount', { count: neighbors.length })}
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -213,7 +216,7 @@ function SubgraphPanel({
         })}
         {neighbors.length === 0 && (
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-            该节点暂无关联节点
+            {t('graphSidebar.noRelated')}
           </p>
         )}
       </div>
@@ -235,16 +238,21 @@ function LinkDetailPanel({
   onReject: (relationId: string) => void;
   onDelete: (relationId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.graphPanel}>
-      <div className={styles.graphPanelTitle}>关系详情</div>
+      <div className={styles.graphPanelTitle}>{t('graphSidebar.relationDetail')}</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div>
-          <span style={{ color: 'var(--color-text-secondary)' }}>类型：</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {t('graphSidebar.labelType')}
+          </span>
           {RELATION_TYPE_LABELS[selectedLink.relation_type] || selectedLink.relation_type}
         </div>
         <div>
-          <span style={{ color: 'var(--color-text-secondary)' }}>状态：</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {t('graphSidebar.labelStatus')}
+          </span>
           <span
             style={{
               fontSize: '0.75rem',
@@ -260,12 +268,16 @@ function LinkDetailPanel({
                   : 'var(--color-success)',
             }}
           >
-            {selectedLink.status === 'suggested' ? '建议' : '已确认'}
+            {selectedLink.status === 'suggested'
+              ? t('graphSidebar.statusSuggested')
+              : t('graphSidebar.statusConfirmed')}
           </span>
         </div>
         {selectedLink.similarity_score != null && (
           <div>
-            <span style={{ color: 'var(--color-text-secondary)' }}>相似度：</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>
+              {t('graphSidebar.labelSimilarity')}
+            </span>
             <span style={{ fontWeight: 600 }}>{selectedLink.similarity_score.toFixed(2)}</span>
           </div>
         )}
@@ -278,7 +290,7 @@ function LinkDetailPanel({
             onClick={() => onConfirm(selectedLink.id)}
             disabled={actionLoading === selectedLink.id}
           >
-            确认
+            {t('graphSidebar.confirm')}
           </button>
           <button
             className="btn"
@@ -292,7 +304,7 @@ function LinkDetailPanel({
             onClick={() => onReject(selectedLink.id)}
             disabled={actionLoading === selectedLink.id}
           >
-            拒绝
+            {t('graphSidebar.reject')}
           </button>
         </div>
       )}
@@ -308,7 +320,7 @@ function LinkDetailPanel({
           onClick={() => onDelete(selectedLink.id)}
           disabled={actionLoading === selectedLink.id}
         >
-          删除关系
+          {t('graphSidebar.deleteRelation')}
         </button>
       )}
     </div>
@@ -349,10 +361,11 @@ function SuggestionsPanel({
   onConfirm: (relationId: string) => void;
   onReject: (relationId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.graphPanel}>
       <div className={styles.graphPanelTitle}>
-        建议关系 ({suggestions.length})
+        {t('graphSidebar.suggestions', { count: suggestions.length })}
         {suggestions.length > 1 && (
           <label
             style={{
@@ -372,7 +385,7 @@ function SuggestionsPanel({
               onChange={toggleSelectAll}
               style={{ cursor: 'pointer' }}
             />
-            全选
+            {t('graphSidebar.selectAll')}
           </label>
         )}
       </div>
@@ -385,7 +398,7 @@ function SuggestionsPanel({
             onClick={onBatchConfirm}
             disabled={selectedSuggestions.size === 0 || batchLoading}
           >
-            批量确认 ({selectedSuggestions.size})
+            {t('graphSidebar.confirmSelected', { count: selectedSuggestions.size })}
           </button>
           <button
             className="btn"
@@ -399,7 +412,7 @@ function SuggestionsPanel({
             onClick={onBatchReject}
             disabled={selectedSuggestions.size === 0 || batchLoading}
           >
-            批量拒绝 ({selectedSuggestions.size})
+            {t('graphSidebar.rejectSelected', { count: selectedSuggestions.size })}
           </button>
         </div>
       )}
@@ -413,7 +426,7 @@ function SuggestionsPanel({
               marginBottom: 'var(--space-sm)',
             }}
           >
-            暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联
+            {t('graphSidebar.noSuggestions')}
           </p>
           <button
             className="btn btn-primary"
@@ -421,7 +434,7 @@ function SuggestionsPanel({
             onClick={onGenerate}
             disabled={suggesting}
           >
-            {suggesting ? '生成中，卡片较多时可能需要数十秒...' : '生成相关建议'}
+            {suggesting ? t('graphSidebar.generating') : t('graphSidebar.generateSuggestions')}
           </button>
           {suggestError && (
             <p
@@ -475,7 +488,9 @@ function SuggestionsPanel({
                       fontSize: '0.75rem',
                     }}
                   >
-                    相似度: {s.similarity_score != null ? s.similarity_score.toFixed(2) : '—'}
+                    {t('graphSidebar.similarity', {
+                      score: s.similarity_score != null ? s.similarity_score.toFixed(2) : '—',
+                    })}
                     {s.similarity_score != null && (
                       <div className={styles.graphSuggestionScoreBar}>
                         <div
@@ -495,7 +510,7 @@ function SuggestionsPanel({
                       }}
                       disabled={actionLoading === s.id}
                     >
-                      确认
+                      {t('graphSidebar.confirm')}
                     </button>
                     <button
                       className="btn"
@@ -512,7 +527,7 @@ function SuggestionsPanel({
                       }}
                       disabled={actionLoading === s.id}
                     >
-                      拒绝
+                      {t('graphSidebar.reject')}
                     </button>
                   </div>
                 </div>
@@ -543,17 +558,18 @@ function CreateRelationPanel({
   creating: boolean;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.graphPanel}>
-      <div className={styles.graphPanelTitle}>创建关系</div>
+      <div className={styles.graphPanelTitle}>{t('graphSidebar.createRelation')}</div>
       <div style={{ fontSize: '0.875rem', lineHeight: 1.8 }}>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>节点 1：</span>
-          {createFirstNode?.title || '请在图谱中点击选择'}
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('graphSidebar.node1')}</span>
+          {createFirstNode?.title || t('graphSidebar.clickToSelect')}
         </div>
         <div style={{ marginBottom: 'var(--space-xs)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>节点 2：</span>
-          {createSecondNode?.title || '请在图谱中点击选择'}
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('graphSidebar.node2')}</span>
+          {createSecondNode?.title || t('graphSidebar.clickToSelect')}
         </div>
         <div style={{ marginTop: 'var(--space-sm)' }}>
           <label
@@ -566,7 +582,7 @@ function CreateRelationPanel({
               letterSpacing: '0.05em',
             }}
           >
-            关系类型
+            {t('graphSidebar.relationType')}
           </label>
           <select
             value={createRelationType}
@@ -594,7 +610,7 @@ function CreateRelationPanel({
             onClick={onSubmit}
             disabled={creating}
           >
-            {creating ? '创建中...' : '确认创建'}
+            {creating ? t('graphSidebar.creating') : t('graphSidebar.confirmCreate')}
           </button>
         )}
         <button
@@ -602,7 +618,7 @@ function CreateRelationPanel({
           style={{ width: '100%', marginTop: 'var(--space-xs)', fontSize: '0.875rem' }}
           onClick={onCancel}
         >
-          取消
+          {t('graphSidebar.cancel')}
         </button>
       </div>
     </div>
@@ -617,9 +633,10 @@ function RelationLegend({
   highlightedRelationType: string | null;
   setHighlightedRelationType: Dispatch<SetStateAction<string | null>>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.graphPanel}>
-      <div className={styles.graphPanelTitle}>关系类型（点击高亮）</div>
+      <div className={styles.graphPanelTitle}>{t('graphSidebar.relationTypesLegend')}</div>
       <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {/* ⚠️ 这里原来是 `span[onClick]`（没有 role/tabIndex）—— **键盘到不了**，
             而"点一下高亮这类关系"是这一块唯一的操作。axe 报不出来这一类
@@ -663,7 +680,7 @@ function RelationLegend({
             className={`${styles.graphRelationLine} ${styles.graphRelationLinePending}`}
             aria-hidden="true"
           />
-          待审建议（淡色 · 无箭头）
+          {t('graphSidebar.pendingSuggestionLegend')}
         </span>
       </div>
     </div>

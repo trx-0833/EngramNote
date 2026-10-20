@@ -23,6 +23,7 @@ import {
   useLabels,
 } from '../utils/labels';
 import { useToast } from '../components/Toast';
+import { useTranslation, type MessageKey } from '../i18n';
 
 interface NoteGroup {
   note_id: string;
@@ -34,11 +35,11 @@ interface NoteGroup {
 type CategoryFilter = 'all' | 'regular' | 'blind_spot' | 'extension';
 
 /** 筛选选项配置 */
-const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'regular', label: '常规' },
-  { value: 'blind_spot', label: '盲点' },
-  { value: 'extension', label: '拓展' },
+const FILTER_TABS: { value: CategoryFilter; labelKey: MessageKey }[] = [
+  { value: 'all', labelKey: 'knowledgeCards.filterAll' },
+  { value: 'regular', labelKey: 'knowledgeCards.filterRegular' },
+  { value: 'blind_spot', labelKey: 'knowledgeCards.filterBlindSpot' },
+  { value: 'extension', labelKey: 'knowledgeCards.filterExtension' },
 ];
 
 /* `getMasteryColor` 已于 A4 移入 `utils/labels.ts`：它原来用的是 a11y 压深**之前**
@@ -52,7 +53,10 @@ const FILTER_TABS: { value: CategoryFilter; label: string }[] = [
    共用同一枚环。 */
 
 /** 将卡片按所属笔记分组（纯函数，模块级便于复用与测试） */
-function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
+function groupByNote(
+  cards: KnowledgeCard[],
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+): NoteGroup[] {
   const map = new Map<string, KnowledgeCard[]>();
   for (const card of cards) {
     const list = map.get(card.note_id) || [];
@@ -62,7 +66,7 @@ function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
   return Array.from(map.entries())
     .map(([noteId, cards]) => ({
       note_id: noteId,
-      note_title: cards[0].note_title || '未命名笔记',
+      note_title: cards[0].note_title || t('knowledgeCards.untitledNote'),
       cards,
     }))
     .sort((a, b) => {
@@ -73,6 +77,7 @@ function groupByNote(cards: KnowledgeCard[]): NoteGroup[] {
 }
 
 export default function KnowledgeCards() {
+  const { t } = useTranslation();
   const { cardTypeLabels, cardCategoryLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
@@ -102,17 +107,18 @@ export default function KnowledgeCards() {
       setLoading(true);
       try {
         const data = await getKnowledgeCards(1, 999, noteId, keyword);
-        const grouped = groupByNote(data.items);
+        const grouped = groupByNote(data.items, t);
         setGroups(grouped);
         setTotal(data.total);
         setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
       } catch (err) {
-        setError(err instanceof Error ? err.message : '加载失败');
+        setError(err instanceof Error ? err.message : t('knowledgeCards.loadFailed'));
       } finally {
         setLoading(false);
       }
+      // \	\ 进依赖：语言切换后重新加载时，错误文案要是新语言的
     },
-    [noteId],
+    [noteId, t],
   );
 
   // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
@@ -183,7 +189,7 @@ export default function KnowledgeCards() {
         })),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '操作失败');
+      toast.error(err instanceof Error ? err.message : t('knowledgeCards.actionFailed'));
     } finally {
       setActionLoadingCardId(null);
     }
@@ -203,7 +209,7 @@ export default function KnowledgeCards() {
       setConfirmExtensionQuestions(result.parent_card_id);
       await fetchCards(searchKeyword || undefined);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '生成拓展知识点失败');
+      toast.error(err instanceof Error ? err.message : t('knowledgeCards.generateExtensionFailed'));
     } finally {
       setActionLoadingCardId(null);
     }
@@ -219,7 +225,11 @@ export default function KnowledgeCards() {
       await generateExtensionQuestions(parentCardId);
     } catch (err) {
       // 出题失败不阻断流程，仅提示
-      toast.error(err instanceof Error ? `出题失败：${err.message}` : '出题失败');
+      toast.error(
+        err instanceof Error
+          ? t('knowledgeCards.quizFailedWithReason', { reason: err.message })
+          : t('knowledgeCards.quizFailed'),
+      );
     }
   }
 
@@ -228,18 +238,18 @@ export default function KnowledgeCards() {
   return (
     <div className="page-enter">
       <PageHeader
-        title="知识卡片"
+        title={t('knowledgeCards.title')}
         actions={
           <>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-              共 {total} 张卡片
+              {t('knowledgeCards.totalCount', { count: total })}
             </span>
             <button
               className="btn"
               style={{ fontSize: '0.8rem', padding: '4px 12px' }}
               onClick={() => navigate('/graph')}
             >
-              图谱视图
+              {t('knowledgeCards.graphView')}
             </button>
           </>
         }
@@ -258,7 +268,7 @@ export default function KnowledgeCards() {
             onClick={() => setFilterTab(tab.value)}
             className={`filter-pill${filterTab === tab.value ? ' filter-pill-active' : ''}`}
           >
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>
@@ -281,7 +291,7 @@ export default function KnowledgeCards() {
         />
         <input
           type="text"
-          placeholder="搜索卡片标题或内容..."
+          placeholder={t('knowledgeCards.searchPlaceholder')}
           onChange={(e) => handleSearchChange(e.target.value)}
           style={{
             width: '100%',
@@ -302,7 +312,10 @@ export default function KnowledgeCards() {
       ) : error ? (
         <ErrorDisplay message={error} onRetry={() => fetchCards()} />
       ) : filteredGroups.length === 0 ? (
-        <EmptyState message="暂无知识卡片" description="请先上传笔记并触发理解管道" />
+        <EmptyState
+          message={t('knowledgeCards.empty')}
+          description={t('knowledgeCards.emptyHint')}
+        />
       ) : (
         <div>
           {filteredGroups.map((group) => (
@@ -353,7 +366,7 @@ export default function KnowledgeCards() {
                     </button>
                   </h2>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                    ({group.cards.length} 张卡片)
+                    {t('knowledgeCards.groupCount', { count: group.cards.length })}
                   </span>
                 </div>
               </div>
@@ -411,13 +424,18 @@ export default function KnowledgeCards() {
                           }}
                         >
                           {card.is_key_point && (
-                            <Icon name="star" size={16} title="重点" style={{ color: '#c9a959' }} />
+                            <Icon
+                              name="star"
+                              size={16}
+                              title={t('knowledgeCards.keyPointTitle')}
+                              style={{ color: '#c9a959' }}
+                            />
                           )}
                           {card.is_difficulty && (
                             <Icon
                               name="warning"
                               size={16}
-                              title="难点"
+                              title={t('knowledgeCards.difficultyTitle')}
                               style={{ color: '#c0392b' }}
                             />
                           )}
@@ -473,7 +491,7 @@ export default function KnowledgeCards() {
                             marginTop: 'var(--space-sm)',
                           }}
                         >
-                          章节: {card.chapter_title}
+                          {t('knowledgeCards.chapter', { title: card.chapter_title })}
                         </p>
                       )}
 
@@ -503,7 +521,7 @@ export default function KnowledgeCards() {
                               {/* 批次 B3：`✨` 换 `<Icon name="ai" />` —— emoji 自带颜色，
                                   不受 `currentColor` 控制，在 0.7rem 的提示文字里比文字还重 */}
                               <Icon name="ai" size={16} />
-                              建议生成拓展知识点
+                              {t('knowledgeCards.suggestExtension')}
                             </button>
                           )}
                         </div>
@@ -530,7 +548,7 @@ export default function KnowledgeCards() {
                             fontSize: '0.8rem',
                             opacity: actionLoadingCardId === card.id ? 0.6 : 1,
                           }}
-                          title="更多操作"
+                          title={t('knowledgeCards.moreActions')}
                         >
                           {actionLoadingCardId === card.id ? '...' : <Icon name="more" size={16} />}
                         </button>
@@ -555,18 +573,24 @@ export default function KnowledgeCards() {
                               onClick={(e) => handleMark(e, card, 'is_key_point')}
                               style={menuItemStyle}
                             >
-                              {card.is_key_point ? '取消重点' : '标记重点'}
+                              {card.is_key_point
+                                ? t('knowledgeCards.unmarkKeyPoint')
+                                : t('knowledgeCards.markKeyPoint')}
                             </button>
                             <button
                               onClick={(e) => handleMark(e, card, 'is_difficulty')}
                               style={menuItemStyle}
                             >
-                              {card.is_difficulty ? '取消难点' : '标记难点'}
+                              {card.is_difficulty
+                                ? t('knowledgeCards.unmarkDifficulty')
+                                : t('knowledgeCards.markDifficulty')}
                             </button>
                             <button
                               onClick={(e) => handleGenerateExtension(e, card)}
                               disabled={card.mastery_level < 80}
-                              title={card.mastery_level < 80 ? '掌握度需达到 80' : ''}
+                              title={
+                                card.mastery_level < 80 ? t('knowledgeCards.masteryTooLow') : ''
+                              }
                               style={{
                                 ...menuItemStyle,
                                 color:
@@ -577,7 +601,7 @@ export default function KnowledgeCards() {
                                 opacity: card.mastery_level < 80 ? 0.5 : 1,
                               }}
                             >
-                              生成拓展知识点
+                              {t('knowledgeCards.generateExtension')}
                             </button>
                           </div>
                         )}
@@ -598,8 +622,8 @@ export default function KnowledgeCards() {
           取消 = 原来 `confirmed` 为 false 那一支：不出题，列表已经刷新过了。 */}
       <ConfirmDialog
         open={confirmExtensionQuestions !== null}
-        title="拓展知识点已生成！是否立即为拓展知识点出题？"
-        confirmText="确定"
+        title={t('knowledgeCards.extensionConfirm')}
+        confirmText={t('knowledgeCards.confirm')}
         onConfirm={() => {
           const parentCardId = confirmExtensionQuestions;
           setConfirmExtensionQuestions(null);

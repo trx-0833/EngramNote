@@ -636,6 +636,9 @@ const zhCN = {
     todayDone: '今日已完成 {count} 题 | 正确率 {accuracy}%',
     startReview: '开始复习',
     weakPoints: '薄弱点',
+    /** 每日任务类型（与 dashboard.taskReview 同一批说法） */
+    taskReview: '复习',
+    taskNewMaterial: '新资料',
     errorCount: '错{count}次 | {accuracy}%',
     weeklyTrend: '本周复习趋势',
     accuracyAbove: '正确率 ≥ 60%',
@@ -662,8 +665,6 @@ const zhCN = {
     loadFailedRetry: '加载失败，请重试',
     // ---- 每日任务分类 ----
     taskWeakPoint: '薄弱点',
-    taskReview: '复习',
-    taskNewMaterial: '新资料',
     itemCount: '{count} 个',
   },
 
@@ -1031,6 +1032,137 @@ const zhCN = {
     shapeMismatch: '{source} 的响应结构与约定不符',
     itemsWrapped: '期望纯数组，实际是 items 包装；已拆包正常渲染，后端应改为直接返回数组',
     notArray: '{where}不是数组，已按空列表处理（页面不崩，但数据可能不完整）',
+  },
+
+  /** 今日学习页（`TodayLearn`，i18n 阶段 3） */
+  todayLearn: {
+    title: '今日学习',
+    loading: '加载今日学习数据...',
+    // ---- 完成态 ----
+    done: '今日复习完成',
+    sessionStats: '本次统计',
+    answerCount: '答题数: {count}',
+    correctCount: '正确数: {count}',
+    accuracy: '正确率: {percent}%',
+    todayOverall: '今日总体',
+    todayProgress: '已完成: {done} / {limit}',
+    todayAccuracy: '正确率: {percent}%',
+    dueCount: '待复习: {count}',
+    continueReview: '继续复习',
+    dailyLimitReached: '今日已完成 {limit} 道题，休息一下吧！',
+    headerProgress: '{correct}/{total} 正确',
+    // ---- 计划与报告 ----
+    dailyPlan: '每日推荐任务',
+    dailyPlanProgress: '{date} · 已完成 {done} / {total}',
+    todayReport: '今日报告 ({date})',
+    statNewMastered: '新掌握',
+    statTotalReviews: '复习次数',
+    statAccuracy: '正确率',
+    statReviewTime: '复习时长',
+    // ---- 待复习 ----
+    dueTasks: '待复习任务',
+    dueToday: '今日待复习: {count} 题',
+    todayDone: '今日已完成 {count} 题 | 正确率 {accuracy}%',
+    startReview: '开始复习',
+    dailyGoal: '每日目标 {limit} 题，已完成 {done} 题',
+    noDue: '今日没有待复习的题目',
+    noDueHint: '所有题目都已复习完毕，明天再来',
+    weakPoints: '薄弱点',
+    /** 每日任务类型（与 dashboard.taskReview 同一批说法） */
+    taskReview: '复习',
+    taskNewMaterial: '新资料',
+    errorCount: '错{count}次 | {accuracy}%',
+    itemCount: '共 {count} 项',
+    // ---- 难度档位 ----
+    difficultyHigh: '高',
+    difficultyMedium: '中',
+    difficultyLow: '低',
+    // ---- 错误 ----
+    loadFailed: '加载失败',
+    loadQuestionsFailed: '加载题目失败',
+    submitFailed: '提交失败',
+  },
+
+  /** 知识卡片页（`KnowledgeCards`，i18n 阶段 3） */
+  knowledgeCards: {
+    title: '知识卡片',
+    untitledNote: '未命名笔记',
+    totalCount: '共 {count} 张卡片',
+    graphView: '图谱视图',
+    searchPlaceholder: '搜索卡片标题或内容...',
+    empty: '暂无知识卡片',
+    emptyHint: '请先上传笔记并触发理解管道',
+    groupCount: '({count} 张卡片)',
+    // ---- 筛选 ----
+    filterAll: '全部',
+    filterRegular: '常规',
+    filterBlindSpot: '盲点',
+    filterExtension: '拓展',
+    // ---- 卡片操作 ----
+    keyPointTitle: '重点',
+    difficultyTitle: '难点',
+    chapter: '章节: {title}',
+    suggestExtension: '建议生成拓展知识点',
+    moreActions: '更多操作',
+    markKeyPoint: '标记重点',
+    unmarkKeyPoint: '取消重点',
+    markDifficulty: '标记难点',
+    unmarkDifficulty: '取消难点',
+    masteryTooLow: '掌握度需达到 80',
+    generateExtension: '生成拓展知识点',
+    extensionConfirm: '拓展知识点已生成！是否立即为拓展知识点出题？',
+    confirm: '确定',
+    // ---- 错误 ----
+    loadFailed: '加载失败',
+    actionFailed: '操作失败',
+    generateExtensionFailed: '生成拓展知识点失败',
+    quizFailed: '出题失败',
+    quizFailedWithReason: '出题失败：{reason}',
+  },
+
+  /** 图谱侧边栏（`GraphSidebar`，i18n 阶段 3） */
+  graphSidebar: {
+    stats: '图谱统计',
+    statNodes: '节点',
+    statEdges: '边',
+    statPending: '待确认',
+    statIsolated: '孤立节点',
+    // ---- 关联节点 ----
+    relatedNodes: '关联节点',
+    close: '关闭',
+    relatedCount: '→ {count} 个关联节点',
+    noRelated: '该节点暂无关联节点',
+    // ---- 关系详情 ----
+    relationDetail: '关系详情',
+    labelType: '类型：',
+    labelStatus: '状态：',
+    statusSuggested: '建议',
+    statusConfirmed: '已确认',
+    labelSimilarity: '相似度：',
+    confirm: '确认',
+    reject: '拒绝',
+    deleteRelation: '删除关系',
+    // ---- 建议关系 ----
+    suggestions: '建议关系 ({count})',
+    selectAll: '全选',
+    confirmSelected: '批量确认 ({count})',
+    rejectSelected: '批量拒绝 ({count})',
+    noSuggestions: '暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联',
+    generating: '生成中，卡片较多时可能需要数十秒...',
+    generateSuggestions: '生成相关建议',
+    similarity: '相似度: {score}',
+    // ---- 创建关系 ----
+    createRelation: '创建关系',
+    node1: '节点 1：',
+    node2: '节点 2：',
+    clickToSelect: '请在图谱中点击选择',
+    relationType: '关系类型',
+    creating: '创建中...',
+    confirmCreate: '确认创建',
+    cancel: '取消',
+    // ---- 图例 ----
+    relationTypesLegend: '关系类型（点击高亮）',
+    pendingSuggestionLegend: '待审建议（淡色 · 无箭头）',
   },
 };
 
