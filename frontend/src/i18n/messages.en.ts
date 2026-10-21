@@ -854,9 +854,9 @@ const en = {
   contractDrift: {
     responseBody: 'the response body',
     fieldSuffix: 'the {field} field',
-    shapeMismatch: 'The response shape from {source} does not match the contract',
+    shapeMismatch: 'Some data came back in an unexpected format; it was handled automatically (a few items may not display)',
     itemsWrapped:
-      'A plain array was expected but an items wrapper was returned; it was unwrapped and rendered normally, and the backend should return an array directly',
+      'The returned data was wrapped in an extra layer; it was unwrapped automatically, so nothing is lost',
     notArray:
       '{where} is not an array, so an empty list was used (the page will not crash, but data may be incomplete)',
   },
@@ -965,7 +965,7 @@ const en = {
     confirmSelected: 'Confirm selected ({count})',
     rejectSelected: 'Reject selected ({count})',
     noSuggestions:
-      'No suggested relations yet — use the button below to mine potential links from the embedding vectors',
+      'No suggested relations yet — use the button below to look for potential links between cards',
     generating: 'Generating… with many cards this can take tens of seconds',
     generateSuggestions: 'Generate suggestions',
     similarity: 'Similarity: {score}',
@@ -1142,7 +1142,7 @@ const en = {
     renameFailed: 'Could not rename the project. Please try again later.',
     deleteFailed: 'Could not delete the project. Please try again later.',
     loadNotesFailed: 'Could not load the project’s notes. Please try again later.',
-    scanFailed: 'Scan import failed. Check that the backend is running and try again.',
+    scanFailed: 'Scan import failed. Please try again later.',
     removeNoteFailed: 'Could not remove the note. Please try again later.',
     createFailed: 'Could not create the project. Please try again later.',
     loadCandidatesFailed: 'Could not load candidate notes. Please try again later.',
@@ -1249,7 +1249,7 @@ const en = {
   },
 
   retrievalNotice: {
-    bm25Only: 'Fell back to keyword search (the vector service is unavailable)',
+    bm25Only: 'Keyword search was used this time (semantic search is unavailable, so results may be less precise)',
     hybrid:
       'Only keyword search was used this time (vector search found nothing — recently imported material may not be indexed yet)',
   },

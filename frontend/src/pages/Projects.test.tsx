@@ -206,12 +206,25 @@ async function expandProject(name = 'Transformer 论文精读') {
   await userEvent.click(screen.getAllByRole('button', { name: /查看笔记/ })[0]);
 }
 
+/**
+ * `console.warn` 的替身（契约漂移的**开发者出口**）
+ *
+ * 2026-10-21 起漂移提示分两路：用户看到一句人话（不含接口路径），
+ * 开发者在 `console.warn` 里拿到 `source`（如 `GET /projects`）。
+ * 漂移用例要同时钉住这两路。
+ */
+let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   // 失败路径上页面会 console.error 记录原因；静音以免淹没测试输出（断言照做）
   vi.spyOn(console, 'error').mockImplementation(() => {});
   // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
   // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
   resetContractDriftNotices();
+  // 契约漂移的**开发者出口**（2026-10-21）：接口路径不再进用户提示文案，
+  // 改由 console.warn 带出来。漂移用例要同时断言"用户侧不含路径"与
+  // "开发者侧拿得到路径"，所以这里盯住 console.warn。
+  consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
   mockedProjects.mockResolvedValue([makeProject()]);
   mockedCreate.mockResolvedValue(makeProject({ id: 'p-9' }));
@@ -608,7 +621,7 @@ describe('扫描导入', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '扫描导入' }));
 
-    expect(await screen.findByText('扫描导入失败，请确认后端服务可用后重试')).toBeInTheDocument();
+    expect(await screen.findByText('扫描导入失败，请稍后重试')).toBeInTheDocument();
     expect(screen.queryByText('扫描结果')).not.toBeInTheDocument();
   });
 });
@@ -694,17 +707,23 @@ describe('契约漂移时的健壮性（缺字段一律降级，不再崩到错�
  * —— 一个总在响的提示比没有提示更糟，用户会学会无视它。
  */
 describe('契约漂移的可见性（既容忍又报出来）', () => {
-  it('★ 包装载荷：既照常渲染项目，又浮出一条说明是哪个接口的提示', async () => {
+  it('★ 包装载荷：既照常渲染项目，又浮出一条人话提示（不含接口路径）', async () => {
     mockedProjects.mockResolvedValue({ items: [makeProject()] } as never);
     renderPage();
 
     // 容忍照旧：项目还在（不能说成"一个都没有"）
     expect(await screen.findByText('Transformer 论文精读')).toBeInTheDocument();
 
-    // 提示浮出来，且能看出是哪个接口、什么形状
+    // 提示浮出来 —— ⚠️ 2026-10-21 改：**接口路径不再进提示文案**。
+    // 改造前这里断言 `toHaveTextContent('GET /projects 的响应结构与约定不符')`，
+    // 而走查报告 §2.2 实测到用户界面上出现 `GET /graph/suggestions 的响应结构与
+    // 约定不符` —— 接口路径是给开发者排查用的，不是给用户看的。
+    // 现在分两路：用户看到一句人话，开发者看 console.warn（带 source）。
     const notice = await screen.findByRole('status');
-    expect(notice).toHaveTextContent('GET /projects 的响应结构与约定不符');
-    expect(notice).toHaveTextContent('items 包装');
+    expect(notice).toHaveTextContent('部分数据格式异常，已自动兼容');
+    expect(notice).not.toHaveTextContent('GET /projects');
+    expect(notice).not.toHaveTextContent('items 包装');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('GET /projects'));
 
     // 非阻塞、不替换内容：页面骨架与卡片都还在，也没有弹窗
     expect(screen.getByRole('heading', { name: '项目' })).toBeInTheDocument();
@@ -718,8 +737,10 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     expect(await screen.findByText('还没有项目')).toBeInTheDocument();
 
     const notice = await screen.findByRole('status');
-    expect(notice).toHaveTextContent('GET /projects 的响应结构与约定不符');
+    expect(notice).toHaveTextContent('部分数据格式异常，已自动兼容');
     expect(notice).toHaveTextContent('不是数组');
+    expect(notice).not.toHaveTextContent('GET /projects');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('GET /projects'));
   });
 
   it('★ 正常响应一条提示都不报（最重要的反向断言）', async () => {
@@ -745,8 +766,10 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     expect(screen.queryByText('加载候选笔记失败，请稍后重试')).not.toBeInTheDocument();
 
     const notice = await screen.findByRole('status');
-    expect(notice).toHaveTextContent('GET /notes 的响应结构与约定不符');
-    expect(notice).toHaveTextContent('items');
+    // 同上：用户侧是人话、不含接口路径；开发者侧 console.warn 里带 source
+    expect(notice).toHaveTextContent('部分数据格式异常，已自动兼容');
+    expect(notice).not.toHaveTextContent('GET /notes');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('GET /notes'));
     expect(screen.queryByText('这个页面出错了')).not.toBeInTheDocument();
   });
 });

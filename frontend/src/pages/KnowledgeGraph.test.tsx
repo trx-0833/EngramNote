@@ -195,6 +195,16 @@ interface FakeCtx {
 let lastCanvasCtx: FakeCtx | null = null;
 
 /**
+ * `console.warn` 的替身（契约漂移的**开发者出口**）
+ *
+ * 2026-10-21 起，漂移提示分两路：用户看到的是一句人话（不含接口路径），
+ * 开发者看到的 `console.warn` 里带 `source`（如 `/graph/suggestions`）。
+ * 漂移用例要同时钉住这两路，所以这里必须能读到 warn 的实参 ——
+ * 不 mock 的话测试输出会被这些警告刷屏。
+ */
+let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+/**
  * 真实 canvas 对**非有限数值**并不宽容（`createRadialGradient` 等直接抛 TypeError），
  * 而 force 布局刚起步时节点坐标就是 undefined/NaN。替身在这里同样抛错，
  * 好让页面里"跳过无效坐标"的守卫真的被测试压住 —— 否则一个照单全收的假上下文
@@ -408,6 +418,10 @@ beforeEach(() => {
   // 漂移提示的去重键是模块级状态、跨用例存活：不清的话，前面喂过漂移数据的用例
   // 会把后面用例的提示去重掉，测出来是"提示没出现"的假红
   resetContractDriftNotices();
+  // 契约漂移的**开发者出口**（2026-10-21）：接口路径不再进用户提示文案，
+  // 改由 `console.warn` 带出来。漂移用例要同时断言"用户侧不含路径"与
+  // "开发者侧拿得到路径"，所以这里盯住 console.warn。
+  consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   mockedGraphData.mockResolvedValue(makeGraph());
   mockedStats.mockResolvedValue(makeStats());
   mockedSuggestions.mockResolvedValue([]);
@@ -860,10 +874,20 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     // 容忍照旧：建议照常渲染（数据其实在）
     expect(screen.getByText(/建议关系 \(1\)/)).toBeInTheDocument();
 
-    // 提示浮出来，且能看出是哪个接口、什么形状
+    // 提示浮出来 —— ⚠️ 2026-10-21 改：**接口路径不再进提示文案**。
+    // 改造前这里断言 `toContain('/graph/suggestions')`，而走查报告 §2.2 实测到
+    // 用户界面上出现 `GET /graph/suggestions 的响应结构与约定不符` —— 接口路径是
+    // 给开发者排查用的。现在分两路：用户看到一句人话，开发者看 console.warn。
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
-    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/suggestions');
-    expect(String(toast.warning.mock.calls[0][1])).toContain('items');
+    const noticeMessage = String(toast.warning.mock.calls[0][0]);
+    const noticeDetail = String(toast.warning.mock.calls[0][1]);
+    // 用户侧：说了"格式异常 + 已自动兼容"，且**不含**接口路径
+    expect(noticeMessage).toContain('数据格式异常');
+    expect(noticeMessage).not.toContain('/graph/suggestions');
+    expect(noticeMessage).not.toContain('GET ');
+    // 开发者侧：路径与形状仍拿得到（console.warn），排查不缺信息
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('/graph/suggestions'));
+    expect(noticeDetail).toContain('多包了一层');
   });
 
   it('★ 非数组载荷（stats 的分布字段是对象）：面板降级的同时报出来', async () => {
@@ -878,8 +902,11 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     expect(screen.getByText('待确认')).toBeInTheDocument();
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
-    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/stats');
-    expect(String(toast.warning.mock.calls[0][1])).toContain('relation_type_distribution');
+    const noticeMessage = String(toast.warning.mock.calls[0][0]);
+    const noticeDetail = String(toast.warning.mock.calls[0][1]);
+    expect(noticeMessage).not.toContain('/graph/stats');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('/graph/stats'));
+    expect(noticeDetail).toContain('relation_type_distribution');
   });
 
   it('★ 正常响应一条提示都不报（最重要的反向断言）', async () => {
@@ -909,7 +936,9 @@ describe('契约漂移的可见性（既容忍又报出来）', () => {
     await waitFor(() => expect(mockedSearch).toHaveBeenCalled(), { timeout: 2000 });
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
-    expect(String(toast.warning.mock.calls[0][0])).toContain('/graph/search');
+    // 与上面两条同一口径：用户侧不含接口路径，开发者侧（console.warn）拿得到
+    expect(String(toast.warning.mock.calls[0][0])).not.toContain('/graph/search');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('/graph/search'));
     expect(String(toast.warning.mock.calls[0][1])).toContain('items');
 
     // 退化行为不变：不崩，也不残留旧结果（GraphToolbar 的 length 检查照旧兜底）

@@ -1030,8 +1030,8 @@ const zhCN = {
   contractDrift: {
     responseBody: '响应体',
     fieldSuffix: '{field} 字段',
-    shapeMismatch: '{source} 的响应结构与约定不符',
-    itemsWrapped: '期望纯数组，实际是 items 包装；已拆包正常渲染，后端应改为直接返回数组',
+    shapeMismatch: '部分数据格式异常，已自动兼容（个别内容可能显示不全）',
+    itemsWrapped: '返回的数据被多包了一层，已自动兼容显示（数据不会丢）',
     notArray: '{where}不是数组，已按空列表处理（页面不崩，但数据可能不完整）',
   },
 
@@ -1154,7 +1154,7 @@ const zhCN = {
     selectAll: '全选',
     confirmSelected: '批量确认 ({count})',
     rejectSelected: '批量拒绝 ({count})',
-    noSuggestions: '暂无建议关系，可点击下方按钮基于嵌入向量挖掘新的潜在关联',
+    noSuggestions: '暂无建议关系，可点击下方按钮自动挖掘卡片之间的潜在关联',
     generating: '生成中，卡片较多时可能需要数十秒...',
     generateSuggestions: '生成相关建议',
     similarity: '相似度: {score}',
@@ -1344,7 +1344,7 @@ const zhCN = {
     renameFailed: '重命名项目失败，请稍后重试',
     deleteFailed: '删除项目失败，请稍后重试',
     loadNotesFailed: '加载项目笔记失败，请稍后重试',
-    scanFailed: '扫描导入失败，请确认后端服务可用后重试',
+    scanFailed: '扫描导入失败，请稍后重试',
     removeNoteFailed: '移出笔记失败，请稍后重试',
     createFailed: '创建项目失败，请稍后重试',
     loadCandidatesFailed: '加载候选笔记失败，请稍后重试',
@@ -1460,7 +1460,7 @@ const zhCN = {
   },
   /** 检索降级提示（`utils/retrievalNotice.ts`，i18n 阶段 3） */
   retrievalNotice: {
-    bm25Only: '已降级为关键词检索（向量服务不可用）',
+    bm25Only: '本次为关键词检索（语义检索暂不可用，结果可能不够准）',
     hybrid: '本次只用关键词检索（向量检索没有命中，刚导入的资料可能还没建索引）',
   },
 

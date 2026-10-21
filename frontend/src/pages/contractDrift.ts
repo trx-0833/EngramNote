@@ -134,21 +134,36 @@ export function resetContractDriftNotices(): void {
   pending.length = 0;
 }
 
-/** 提示文案：说清"哪个接口、哪里不对、系统怎么处理了"，用户和后端都能据此行动 */
+/**
+ * 提示文案：说清"哪里不对、系统怎么处理了"
+ *
+ * ## ⚠️ 接口路径不再进提示文案（2026-10-21 改）
+ *
+ * 改造前 `message` 是 `shapeMismatch: 'The response shape from {source} does not
+ * match the contract'`，而 `source` 是 `'GET /graph/suggestions'` 这样的**接口路径**
+ * —— 走查报告 §2.2 实测到用户界面上出现 `GET /graph/suggestions 的响应结构与约定不符`。
+ * 接口路径是给开发者排查用的，不是给用户看的。
+ *
+ * 现在分两路：
+ * - **用户看到的**：一句人话（数据格式不对、已自动兼容、可能有内容显示不全）；
+ * - **开发者看到的**：`console.warn` 里带 `source` 与 `kind`，排查时一样拿得到。
+ *
+ * 这样"用户不被技术细节打扰"与"排查不缺信息"两件事同时成立。
+ */
 function noticeText(event: ContractDriftEvent): { message: string; detail: string } {
   const where = event.field
     ? translate('contractDrift.fieldSuffix', { field: event.field })
     : translate('contractDrift.responseBody');
+  const message = translate('contractDrift.shapeMismatch');
+  // 开发者出口：接口路径与漂移种类只出现在这里
+  console.warn(
+    `[contractDrift] ${event.kind} | source=${event.source}` +
+      (event.field ? ` | field=${event.field}` : ''),
+  );
   if (event.kind === 'wrapper') {
-    return {
-      message: translate('contractDrift.shapeMismatch', { source: event.source }),
-      detail: translate('contractDrift.itemsWrapped'),
-    };
+    return { message, detail: translate('contractDrift.itemsWrapped') };
   }
-  return {
-    message: translate('contractDrift.shapeMismatch', { source: event.source }),
-    detail: translate('contractDrift.notArray', { where }),
-  };
+  return { message, detail: translate('contractDrift.notArray', { where }) };
 }
 
 /**
