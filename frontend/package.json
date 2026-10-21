@@ -37,7 +37,8 @@
     "gen:api": "openapi-typescript ../backend/openapi.json -o src/api/generated/schema.ts && prettier --write src/api/generated/schema.ts",
     "gen:api:drift": "node src/api/generated/openapi-drift.mjs",
     "gen:api:drift:delta": "node scripts/drift-delta.mjs",
-    "docs:tables": "node scripts/doc-table-scan.mjs"
+    "docs:tables": "node scripts/doc-table-scan.mjs",
+    "docs:links": "node scripts/doc-link-check.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.15",

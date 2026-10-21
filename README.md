@@ -271,6 +271,7 @@ npm test              # vitest 单元/组件，阻断
 npm run build         # tsc + vite build，阻断
 npm run e2e           # Playwright（桩掉 /api），阻断
 npm run a11y          # axe-core 可访问性，阻断（2026-09-23 起；此前是建议性）
+npm run docs:links    # 文档相对链接 + 锚点完整性，阻断（2026-10-21 起）
 ```
 
 另外两项在 CI 里跑：`security-scan`（`pip-audit` + `npm audit`，**只归档、不阻断**）与

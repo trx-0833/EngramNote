@@ -535,17 +535,21 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
    */
   const RENDER_HEAVY_TIMEOUT = 20_000;
 
-  it('多页时**并发**请求，而不是逐页串行', async () => {
-    // 2500 条 = 3 页（1000 / 1000 / 500）
-    const state = trackingMock(2500);
-    const { container } = renderPage();
+  it(
+    '多页时**并发**请求，而不是逐页串行',
+    async () => {
+      // 2500 条 = 3 页（1000 / 1000 / 500）
+      const state = trackingMock(2500);
+      const { container } = renderPage();
 
-    await waitFor(() => expect(dataRows(container)).toHaveLength(2500));
+      await waitFor(() => expect(dataRows(container)).toHaveLength(2500));
 
-    // 串行实现下这个值恒为 1 —— 它才是"并发"这件事的直接证据
-    expect(state.maxInFlight).toBeGreaterThan(1);
-    expect([...state.calls].sort((a, b) => a - b)).toEqual([1, 2, 3]);
-  }, RENDER_HEAVY_TIMEOUT);
+      // 串行实现下这个值恒为 1 —— 它才是"并发"这件事的直接证据
+      expect(state.maxInFlight).toBeGreaterThan(1);
+      expect([...state.calls].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    },
+    RENDER_HEAVY_TIMEOUT,
+  );
 
   it('页大小按 1000 请求（34 次往返 → 4 次的关键）', async () => {
     const state = trackingMock(2500);
@@ -555,37 +559,54 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
     expect(firstCall[1]).toBe(1000);
   });
 
-  it('页边界重叠时按 id 去重，行数不虚高', async () => {
-    const state = trackingMock(2500, { overlap: true });
-    const { container } = renderPage();
+  it(
+    '页边界重叠时按 id 去重，行数不虚高',
+    async () => {
+      const state = trackingMock(2500, { overlap: true });
+      const { container } = renderPage();
 
-    // 并发取页 + 中途写入 ⇒ 第 2 页可能重复返回第 1 页尾部的条目
-    await waitFor(() => expect(state.calls.length).toBeGreaterThan(1));
-    await waitFor(() => {
-      const ids = dataRows(container).map((r) => r.textContent);
-      expect(new Set(ids).size).toBe(ids.length);
-    });
-  }, RENDER_HEAVY_TIMEOUT);
+      // 并发取页 + 中途写入 ⇒ 第 2 页可能重复返回第 1 页尾部的条目
+      await waitFor(() => expect(state.calls.length).toBeGreaterThan(1));
+      await waitFor(() => {
+        const ids = dataRows(container).map((r) => r.textContent);
+        expect(new Set(ids).size).toBe(ids.length);
+      });
+    },
+    RENDER_HEAVY_TIMEOUT,
+  );
 
-  it('单页就能装下时只请求一次（不额外打空页）', async () => {
-    const state = trackingMock(300);
-    const { container } = renderPage();
+  it(
+    '单页就能装下时只请求一次（不额外打空页）',
+    async () => {
+      const state = trackingMock(300);
+      const { container } = renderPage();
 
-    await waitFor(() => expect(dataRows(container)).toHaveLength(300));
-    expect(state.calls).toEqual([1]);
-  }, RENDER_HEAVY_TIMEOUT);
+      await waitFor(() => expect(dataRows(container)).toHaveLength(300));
+      expect(state.calls).toEqual([1]);
+    },
+    RENDER_HEAVY_TIMEOUT,
+  );
 
-  it('total 撒谎（远大于实际可返回条数）时靠"空页即停"收工', async () => {
-    // 声称 10000 条，实际只有 1000 条 → 第 2 页就是空页
-    mockedQuestions.mockImplementation(async (page = 1, pageSize = PAGE_SIZE) => {
-      const all = makeItems(1000);
-      const start = (page - 1) * pageSize;
-      return { items: all.slice(start, start + pageSize), page, page_size: pageSize, total: 10000 };
-    });
-    const { container } = renderPage();
+  it(
+    'total 撒谎（远大于实际可返回条数）时靠"空页即停"收工',
+    async () => {
+      // 声称 10000 条，实际只有 1000 条 → 第 2 页就是空页
+      mockedQuestions.mockImplementation(async (page = 1, pageSize = PAGE_SIZE) => {
+        const all = makeItems(1000);
+        const start = (page - 1) * pageSize;
+        return {
+          items: all.slice(start, start + pageSize),
+          page,
+          page_size: pageSize,
+          total: 10000,
+        };
+      });
+      const { container } = renderPage();
 
-    await waitFor(() => expect(dataRows(container)).toHaveLength(1000));
-    // 第 1 页满 1000 条 ⇒ 会去取第 2 页；第 2 页为空 ⇒ 立即停，不会打到 100 页上限
-    await waitFor(() => expect(mockedQuestions.mock.calls.length).toBeLessThan(10));
-  }, RENDER_HEAVY_TIMEOUT);
+      await waitFor(() => expect(dataRows(container)).toHaveLength(1000));
+      // 第 1 页满 1000 条 ⇒ 会去取第 2 页；第 2 页为空 ⇒ 立即停，不会打到 100 页上限
+      await waitFor(() => expect(mockedQuestions.mock.calls.length).toBeLessThan(10));
+    },
+    RENDER_HEAVY_TIMEOUT,
+  );
 });

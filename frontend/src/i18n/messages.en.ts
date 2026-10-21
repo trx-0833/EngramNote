@@ -854,7 +854,8 @@ const en = {
   contractDrift: {
     responseBody: 'the response body',
     fieldSuffix: 'the {field} field',
-    shapeMismatch: 'Some data came back in an unexpected format; it was handled automatically (a few items may not display)',
+    shapeMismatch:
+      'Some data came back in an unexpected format; it was handled automatically (a few items may not display)',
     itemsWrapped:
       'The returned data was wrapped in an extra layer; it was unwrapped automatically, so nothing is lost',
     notArray:
@@ -1249,7 +1250,8 @@ const en = {
   },
 
   retrievalNotice: {
-    bm25Only: 'Keyword search was used this time (semantic search is unavailable, so results may be less precise)',
+    bm25Only:
+      'Keyword search was used this time (semantic search is unavailable, so results may be less precise)',
     hybrid:
       'Only keyword search was used this time (vector search found nothing — recently imported material may not be indexed yet)',
   },

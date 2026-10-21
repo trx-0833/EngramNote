@@ -156,9 +156,7 @@ describe('知识卡片列表：服务端分页', () => {
     // ⚠️ 这里刻意**不**造满 100 张卡：本用例要验的是分页控件与请求页码，
     // 与"这一页有几张卡"无关；造满 100 张会让本用例在整仓测试并发跑时
     // 超 5s 默认超时（实测：单独跑 2.0s、整仓跑 >5s）。
-    const page1 = Array.from({ length: 5 }, (_, i) =>
-      makeCard({ id: `c${i}`, title: `卡片${i}` }),
-    );
+    const page1 = Array.from({ length: 5 }, (_, i) => makeCard({ id: `c${i}`, title: `卡片${i}` }));
     mockedCards.mockResolvedValueOnce({ items: page1, page: 1, page_size: 100, total: 3469 });
     mockedCards.mockResolvedValueOnce({
       items: [makeCard({ id: 'p2', title: '第二页的卡片' })],
