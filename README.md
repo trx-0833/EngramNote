@@ -332,6 +332,7 @@ EngramNote/
 | [docs/sqlite-single-writer.md](docs/sqlite-single-writer.md) | 为什么 SQLite 路线下只能跑**一个** worker |
 | [docs/security-scan.md](docs/security-scan.md) | 依赖与镜像扫描的当次原始结果与处置口径 |
 | [docs/open-source-readiness.md](docs/open-source-readiness.md) | 开源化差距核查：必须修 / 应当修 / 建议新增（带 `文件:行号` 证据） |
+| [docs/agent-workstream-plan.md](docs/agent-workstream-plan.md) | **长跑型改进方案集**（计划，未落地）：12 条工作流 + 事实底账 + 6 个待拍板项 |
 | [frontend/docs/](frontend/docs/) | 契约生成与漂移检查、CSS 约定与迁移、e2e 说明、可访问性审计 |
 | [docs/journal/](docs/journal/) | 过程记录：代码审查、启动验证、工具链检查的**当次报告**（仅供追溯，不是现状依据） |
 | [docs/archive/](docs/archive/) | 历史设计文档（仅供追溯，**不要以它们为准**） |
