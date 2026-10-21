@@ -356,6 +356,8 @@ const en = {
     legacyNoBlockContent:
       'Block content was not saved when this note was cleaned (an older version of cleaning). Click “Clean again” to view it.',
     noDuplicates: 'No duplicate content detected',
+    noDuplicatesGranular:
+      'No duplicates found at either granularity (per paragraph, and per 500-character chunk)',
     stopConfirm: 'Stop cleaning?',
     stopImpact: 'Current progress will be lost.',
     deleteBlockConfirm: 'Delete block {index}?',

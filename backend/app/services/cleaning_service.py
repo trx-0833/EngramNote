@@ -522,11 +522,89 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
     return result, stats
 
 
+def apply_line_range_marks(
+    text: str,
+    duplicates: List[Dict],
+) -> Tuple[str, int]:
+    """按**行范围**给重复段落加注释标记（与块索引那条路径并存）
+
+    ## 为什么需要"按行范围"这条路
+
+    `generate_clean_copy` 标记重复靠的是 `block_index` → 重新分块查行范围。
+    而段落级去重（`find_duplicate_paragraphs`）与块级去重**不是同一个坐标系**
+    （段落 vs 500 字检索块），所以它的结果不能混进同一次调用；
+    而"跑两次 `generate_clean_copy`"也不行 —— 第二次会重新输出整篇，
+    把第一次的标记覆盖掉。
+
+    段落级的结果**自带** `start_line` / `end_line`（它就是这么产出的），
+    所以这条路直接用行范围，不需要任何坐标翻译。
+
+    ## 不重复标记
+
+    已经在 `<!-- duplicate: … -->` 块里的行**不再包一层**（否则嵌套注释会让
+    Markdown 渲染出乱码）。判据是"这一行是否落在某个已标记区间内"。
+
+    Args:
+        text: 已有块级标记的清洗副本
+        duplicates: 段落级重复列表，每项含 `start_line` / `end_line` /
+            `block_index` / `similarity`
+
+    Returns:
+        (新文本, 实际标记的条数)
+    """
+    if not duplicates:
+        return text, 0
+
+    lines = text.split("\n")
+
+    # 先算出"已经被块级标记覆盖"的行区间，避免嵌套
+    already: List[Tuple[int, int]] = []
+    open_at: Optional[int] = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("<!-- duplicate:") and open_at is None:
+            open_at = i
+        elif stripped.startswith("<!-- /duplicate -->") and open_at is not None:
+            already.append((open_at, i))
+            open_at = None
+
+    def _covered(start: int, end: int) -> bool:
+        return any(start <= b and a <= end for a, b in already)
+
+    # 收集要标记的区间（按起始行降序插入，这样前面的插入不影响后面的行号）
+    targets: List[Tuple[int, int, Dict]] = []
+    for d in duplicates:
+        start = int(d.get("start_line") or 0)
+        end = int(d.get("end_line") or start)
+        if end < start:
+            start, end = end, start
+        if start < 0 or end >= len(lines):
+            continue
+        if _covered(start, end):
+            continue
+        targets.append((start, end, d))
+
+    targets.sort(key=lambda t: t[0], reverse=True)
+
+    marked = 0
+    for start, end, d in targets:
+        lines.insert(end + 1, "<!-- /duplicate -->")
+        lines.insert(
+            start,
+            f"<!-- duplicate: block_{d.get('block_index')} "
+            f"similarity={float(d.get('similarity') or 0):.2f} -->",
+        )
+        marked += 1
+
+    return "\n".join(lines), marked
+
+
 def generate_clean_copy(
     original_text: str,
     cleaned_text: str,
     duplicate_blocks: List[Dict],
     total_blocks: Optional[int] = None,
+    granularity: str = "chunk",
 ) -> Tuple[str, Dict[str, int]]:
     """
     根据去重结果生成清洗副本
@@ -548,7 +626,10 @@ def generate_clean_copy(
         total_blocks: 分块总数。**调用方已经算过就务必传进来** ——
             它与 `metadata.total_chunks` 同源，两个字段因此不可能打架；
             不传则本函数在有重复块时自行重新分块得出（见下方 2026-10-21 的说明）。
-
+        granularity: `"chunk"`（默认）或 `"paragraph"` —— **必须与检测那一侧的
+            粒度一致**。`duplicate_blocks` 里的 `block_index` 是检测时的块索引，
+            而"检索块"与"段落"不是同一个坐标系；传错会让标记打在错误的行上
+            （且不会报错，只是标错）。
     Returns:
         Tuple[str, Dict[str, int]]: (清洗副本文本, 清洗统计信息)
     """
@@ -557,6 +638,13 @@ def generate_clean_copy(
     stats = {
         "duplicate_blocks_marked": 0,
         "total_blocks": 0,
+        #: 去重用的粒度（`chunk` = 检索块 / `paragraph` = 空行分界的段落）
+        #:
+        #: 它存在的唯一理由是**让界面能如实描述**：改造前界面上那句
+        #: 「本次未检测到重复块」在按 500 字块去重时是**静默说谎** ——
+        #: 段落级的重复根本不在它的判据里。有了这个字段，文案可以写成
+        #: "按段落/按 500 字块"。
+        "granularity": "chunk",
     }
 
     if not cleaned_text:
@@ -574,6 +662,12 @@ def generate_clean_copy(
         stats["total_blocks"] = int(total_blocks)
 
     # 如果没有重复块，直接返回清洗后的文本
+    #
+    # ⚠️ `granularity` 必须**在早退之前**就按调用方给的粒度写进 stats：
+    # 界面那句"未检测到重复"要说清是**按什么粒度**找的。第一版把它放在
+    # 早退之后，于是"没有重复"时永远报 `chunk` —— 而"没有重复"恰恰是
+    # 那句文案出现的**唯一**场景，等于这个字段在最需要它的时候失效。
+    stats["granularity"] = "paragraph" if granularity == "paragraph" else "chunk"
     if not duplicate_blocks:
         return cleaned_text, stats
 
@@ -593,9 +687,23 @@ def generate_clean_copy(
     # 否则 block_index 对不上，标记的重复块就不是检测到的那一块。
     # 曾经的 `split_into_chunks` 与 markdown_segmenter 是两套独立实现，
     # 同一文档会产生不同的块边界 —— 这正是 S-3 那类缺陷的温床。
-    chunks = to_retrieval_chunks(
-        segment_with_offsets(cleaned_text, settings.chunk_size)
-    )
+    #
+    # ⚠️ 2026-10-22（B1 第 ④ 项）：分块粒度必须与**检测时的粒度一致**。
+    #
+    # `duplicate_blocks` 里的 `block_index` 是"检测那一侧"的块索引：
+    #   - `granularity="chunk"`（默认）：按检索块（`settings.chunk_size`）检出来的；
+    #   - `granularity="paragraph"`：按**段落**（空行分界）检出来的
+    #     （`find_duplicate_paragraphs`）。
+    #
+    # 两套索引**不是同一个坐标系**。所以这里必须按同一个粒度重新分块，
+    # 否则 `block_index` 会指到错误的块上 —— 症状是"标记出来的重复块
+    # 不是检测到的那一块"，而且**不会报错**（只是标错行）。
+    if granularity == "paragraph":
+        chunks = segment_paragraphs(cleaned_text)
+    else:
+        chunks = to_retrieval_chunks(
+            segment_with_offsets(cleaned_text, settings.chunk_size)
+        )
     # 调用方传了就用它的（与 metadata.total_chunks 同源，保证两字段一致）；
     # 没传才用本地重新分块的结果。
     if total_blocks is None:
@@ -738,6 +846,207 @@ def _text_similarity(a: str, b: str, threshold: float) -> float:
     if matcher.quick_ratio() < threshold:
         return 0.0
     return matcher.ratio()
+
+
+#: 段落级去重里"一个段落块"的长度上限
+#:
+#: ⚠️ **不能靠 `segment_with_offsets(text, 1)` 拿段落** —— 实测那样会得到
+#: **65 个"段落"**（5 行文本），因为 `limit` 小于块长度时，分块器会把**每个块
+#: 按字符拆开**（`markdown_segmenter.py:662-669` 的"超限块必须拆开"）。
+#: 于是 `#`、`。` 这种单字符块互相相似度 1.0，去重结果里塞满垃圾。
+#:
+#: 所以段落级自己走**块级**切分：`_split_blocks_with_offsets` 拿块与偏移，
+#: 每个块自成一个段落，再翻译成行范围。超长块（> 此上限）仍然按安全边界拆，
+#: 避免一个 5000 字的块把两处重复藏在一起。
+PARAGRAPH_MAX_CHARS = 800
+
+
+def segment_paragraphs(text: str) -> List[Dict]:
+    """把文本切成**段落级**块（以**空行**为界，超长段再按安全边界拆）
+
+    返回的字典与 `to_retrieval_chunks(...)` 同形（含 `index` / `content` /
+    `start_line` / `end_line` / `char_start` / `char_end`），所以下游的
+    `find_duplicates_lightweight` 与 `generate_clean_copy` 都能直接吃。
+
+    ## 为什么不用 `segment_with_offsets(text, 1)`（第一版就是这么写的）
+
+    实测那样会得到 **65 个"段落"**（对 5 行文本），因为 `limit` 一旦小于块长度，
+    分块器会把**每个块按字符拆开**（`markdown_segmenter.py:662-669`
+    "超限块必须拆开"）。于是 `#`、`。` 这种单字符块互相相似度 1.0，
+    去重结果里塞满垃圾（实测 34 条"重复"，全是标点）。
+
+    ## 判据：空行分界
+
+    "段落"在 Markdown 里就是**空行分隔的文本块** —— 这也是用户口语里的段落。
+    所以先按空行切成段；段内若还超过 `PARAGRAPH_MAX_CHARS`，再按安全边界
+    （换行/句末标点）拆，避免一个 5000 字的段把两处重复藏在一起。
+
+    ## 不变量
+
+    `text[char_start:char_end] == content` —— 与检索分块同一条不变量
+    （它在开发中被违反过两次，各 1318 个分段，见 `docs/overhaul-plan.md` 附录 L.2）。
+    按行边界构造区间，这条不变量由构造保证。
+    """
+    if not text or not text.strip():
+        return []
+
+    lines = text.split("\n")
+    # 每行首字符在原文中的下标（与 `_split_blocks_with_offsets` 同一手法）
+    line_starts: List[int] = []
+    _off = 0
+    for line in lines:
+        line_starts.append(_off)
+        _off += len(line) + 1  # +1 为 "\n"
+
+    def _line_of(char_idx: int) -> int:
+        lo, hi = 0, len(line_starts) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if line_starts[mid] <= char_idx:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    # 按空行切段：连续非空行算一段
+    spans: List[Tuple[int, int]] = []
+    cur_start_line: Optional[int] = None
+    for i, line in enumerate(lines):
+        if line.strip():
+            if cur_start_line is None:
+                cur_start_line = i
+        elif cur_start_line is not None:
+            spans.append((cur_start_line, i - 1))
+            cur_start_line = None
+    if cur_start_line is not None:
+        spans.append((cur_start_line, len(lines) - 1))
+
+    # 超长段再拆（按字符找安全边界，仍落在行内）
+    final_spans: List[Tuple[int, int]] = []
+    for start_line, end_line in spans:
+        seg = "\n".join(lines[start_line : end_line + 1])
+        if len(seg) <= PARAGRAPH_MAX_CHARS:
+            final_spans.append((start_line, end_line))
+            continue
+        # 逐行累积，超过上限就封口（行是天然的安全边界）
+        chunk_start = start_line
+        acc = 0
+        for ln in range(start_line, end_line + 1):
+            add = len(lines[ln]) + (1 if ln > chunk_start else 0)
+            if acc and acc + add > PARAGRAPH_MAX_CHARS:
+                final_spans.append((chunk_start, ln - 1))
+                chunk_start = ln
+                acc = len(lines[ln])
+            else:
+                acc += add
+        final_spans.append((chunk_start, end_line))
+
+    out: List[Dict] = []
+    for start_line, end_line in final_spans:
+        char_start = line_starts[start_line]
+        char_end = line_starts[end_line] + len(lines[end_line])
+        content = text[char_start:char_end]
+        if not content.strip():
+            continue
+        out.append({
+            "index": len(out),
+            "content": content,
+            "char_start": char_start,
+            "char_end": char_end,
+            "start_line": start_line,
+            "end_line": end_line,
+            "char_count": len(content),
+        })
+
+    # 自证不变量（与 `index_note_chunks` 同一条判据）：切片必须逐字等于 content。
+    # 违反时**返回空列表**而不是返回错位的块 —— 错位的块会让下游把
+    # 重复标记打在错误的行上，而那种错误是静默的。
+    for p in out:
+        if text[p["char_start"] : p["char_end"]] != p["content"]:
+            logger.error(
+                "段落切分不变量被破坏（返回空列表，不做段落级去重）: "
+                "index=%s chars=%s-%s",
+                p["index"], p["char_start"], p["char_end"],
+            )
+            return []
+
+    return out
+
+
+def find_duplicate_paragraphs(
+    cleaned_text: str,
+    chunk_duplicates: List[Dict],
+    threshold: float = 0.0,
+) -> List[Dict]:
+    """**段落级**去重（B1 第 ④ 项）：找出"整段重复"的那些块
+
+    ## 它补的是什么缺口
+
+    检索分块是 `chunk_size=500`（`config.py`），于是一段 100 字的重复文字
+    会和它前后文**落在同一个 500 字块里** —— 块与块的相似度因此远低于阈值，
+    检测不到。走查报告 §5 实测：样本原文里刻意重复的段落**仍出现 2 次**，
+    而界面上却显示「本次未检测到重复块」。
+
+    **这是"静默说谎"**：用户看到的是"没有重复"，事实是"我们按 500 字找的、
+    找不到段落级的重复"。两个修法各做一半 —— 检测放到段落级（本函数），
+    文案如实描述粒度（前端）。
+
+    ## 为什么用**文本**相似度而不是嵌入
+
+    段落级重复绝大多数是**逐字重复**（页眉残留、复制粘贴、MinerU 把同一段
+    切到相邻页）。嵌入模型在 500 字块上算的向量对 100 字段落本来就不敏感，
+    而且这一步要能在**没有模型**的降级路径（`dedup_mode=lightweight`）里也工作。
+    所以走 `find_duplicates_lightweight` 那条纯文本路径。
+
+    ## 与块级结果的关系：**并列，不覆盖**
+
+    块级去重能发现"大段改写式重复"（语义相同、用词不同），段落级能发现
+    "短段逐字重复"。两者找到的是不同的东西，所以结果是**并集**：
+    以段落块的 `start_line` 为键去重（同一段落块只报一次）。
+
+    Args:
+        cleaned_text: 规则清洗后的 Markdown（与块级去重同一份输入）
+        chunk_duplicates: 块级去重的结果（只用来判断"这个行范围已经报过了"）
+        threshold: 相似度阈值，0 表示用配置默认值
+
+    Returns:
+        List[Dict]: 与块级同形的重复列表（`block_index` / `duplicate_of` /
+        `similarity`），**外加** `start_line` / `end_line` ——
+        因为段落块的索引与检索块的索引不是同一套坐标，下游必须按行范围定位。
+    """
+    paragraphs = segment_paragraphs(cleaned_text)
+    if len(paragraphs) < 2:
+        return []
+
+    dupes = find_duplicates_lightweight(paragraphs, threshold=threshold)
+    if not dupes:
+        return []
+
+    # 已经由块级去重覆盖过的行范围：不重复报（否则界面上同一条重复会出现两次，
+    # 一次按 500 字块、一次按段落 —— 用户看到的是"重复数虚高"）
+    covered: List[Tuple[int, int]] = []
+    for d in chunk_duplicates:
+        rng = d.get("line_range")
+        if rng:
+            covered.append((int(rng[0]), int(rng[1])))
+
+    by_index = {p["index"]: p for p in paragraphs}
+    out: List[Dict] = []
+    for d in dupes:
+        para = by_index.get(d["block_index"])
+        if para is None:
+            continue
+        start = int(para.get("start_line") or 0)
+        end = int(para.get("end_line") or 0)
+        if any(start <= c_end and c_start <= end for c_start, c_end in covered):
+            continue
+        out.append({
+            **d,
+            "start_line": start,
+            "end_line": end,
+            "granularity": "paragraph",
+        })
+    return out
 
 
 def find_duplicates_by_embedding(

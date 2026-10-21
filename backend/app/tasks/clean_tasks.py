@@ -314,14 +314,71 @@ async def _clean_document(note_id: str):
             )
             return
 
+    # 7c. **段落级**去重（B1 第 ④ 项，2026-10-22）
+    #
+    # ## 为什么块级去重不够
+    #
+    # 检索分块是 `chunk_size=500`（`config.py`），于是一段 100 字的重复文字
+    # 会和它前后文**落在同一个 500 字块里** —— 块与块的相似度因此远低于阈值，
+    # 检测不到。走查报告 §5 实测：样本里刻意重复的段落**仍出现 2 次**，
+    # 而界面上显示「本次未检测到重复块」。
+    #
+    # **那是"静默说谎"**：用户看到的是"没有重复"，事实是"我们按 500 字找的"。
+    # 两个修法各做一半 —— 检测补到段落级（这里），文案如实描述粒度（前端）。
+    #
+    # ## ⚠️ 两套 `block_index` **不是同一个坐标系**（第一版在这里搞错了）
+    #
+    # 块级的 `block_index` 按**检索块**（500 字）编号，段落级按**段落**（空行分界）
+    # 编号。所以它们**不能混进同一次 `generate_clean_copy` 调用** ——
+    # 那个函数的 `block_index` 是拿来查行范围的，坐标错了就会把标记打在
+    # **错误的行**上，而且不会报错（只是标错）。
+    #
+    # 第一版想"跑两次、把结果拼起来"，那也不行：第二次调用会从 `cleaned_text`
+    # 重新分块并重新输出，把第一次的标记**整片覆盖掉**。
+    #
+    # 正解是**按行范围标记**，而不是按块索引：段落级的结果自带
+    # `start_line` / `end_line`，用 `apply_line_range_marks()` 在块级标记之后
+    # **追加**注释 —— 两套坐标因此不需要互相翻译。
+    paragraph_duplicates: list = []
+    try:
+        from ..services.cleaning_service import (
+            apply_line_range_marks,
+            find_duplicate_paragraphs,
+        )
+
+        paragraph_duplicates = find_duplicate_paragraphs(cleaned_text, duplicates)
+    except Exception as e:  # noqa: BLE001 - 段落级去重失败不该让清洗挂掉
+        logger.warning("段落级去重失败（块级结果照常使用）: note_id=%s, err=%s", note_id, e)
+
+    if paragraph_duplicates:
+        logger.info(
+            "段落级去重补充: note_id=%s, 新增 %d 条（块级 %d 条）",
+            note_id, len(paragraph_duplicates), len(duplicates),
+        )
+
     # 8. 生成清洗副本
+    #
     # `total_blocks` 显式传入：`chunks` 就是下面 metadata 里 `total_chunks` 的来源，
     # 同一个数字传给两边，`copy_stats.total_blocks` 与 `total_chunks` 就不可能打架
     # （2026-10-21 修：此前不传，且函数内部只在"有重复块"时才计算，
     #   导致无重复块的文档 total_blocks 恒为 0）
+    #
+    # ⚠️ 粒度：这一趟的 `duplicates` 是**块级**检出来的，所以默认
+    # `granularity="chunk"`（`block_index` 按检索块坐标）。段落级那批
+    # **不能混进同一次调用** —— 两套索引不是同一个坐标系，混着传会让标记
+    # 打在错误的行上。所以段落级的标记单独走一次（下面 8b）。
     clean_copy, copy_stats = generate_clean_copy(
         original_text, cleaned_text, duplicates, total_blocks=len(chunks)
     )
+
+    # 8b. 段落级的重复标记：按**行范围**追加（与块级标记并存，互不覆盖）
+    para_marked = 0
+    if paragraph_duplicates:
+        clean_copy, para_marked = apply_line_range_marks(clean_copy, paragraph_duplicates)
+        copy_stats["duplicate_blocks_marked"] += para_marked
+        # 粒度如实记为"两种都跑了"：界面据此说清"按段落 + 按 500 字块都找过"
+        copy_stats["granularity"] = "chunk+paragraph"
+    copy_stats["paragraph_duplicates_marked"] = para_marked
 
     # 检查用户是否已停止清洗（上传清洗副本前）
     if await _is_cleaning_stopped(note_id):

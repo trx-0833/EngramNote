@@ -484,6 +484,14 @@ const zhCN = {
     contentMissing: '（内容缺失）',
     legacyNoBlockContent: '该笔记清洗时未保存块内容（旧版本清洗），点击"重新清洗"后即可查看',
     noDuplicates: '未检测到重复内容',
+    /**
+     * 「未检测到重复」的**如实版本**（B1 第 ④ 项，2026-10-22）
+     *
+     * 与 `noDuplicates` 的差别只有一件事：**说清按什么粒度找的**。
+     * 旧文案在按 500 字检索块去重时是静默说谎 —— 段落级的重复不在判据里，
+     * 用户却读到"没有重复"。
+     */
+    noDuplicatesGranular: '按段落与 500 字分块两种粒度都未检测到重复内容',
     stopConfirm: '确定停止清洗？',
     stopImpact: '当前进度将丢失。',
     deleteBlockConfirm: '确定删除块 {index}？',

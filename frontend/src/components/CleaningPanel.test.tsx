@@ -177,7 +177,12 @@ describe('段级折叠（2026-10-19 新增）', () => {
     );
 
     expect(screen.queryByRole('button', { name: /重复块/ })).not.toBeInTheDocument();
-    expect(screen.getByText('未检测到重复内容')).toBeInTheDocument();
+    // ⚠️ 2026-10-22（B1 第 ④ 项）：文案从「未检测到重复内容」改成**如实版** ——
+    // 旧文案在"按 500 字检索块去重"时是静默说谎（段落级重复不在判据里），
+    // 而用户读到的是"没有重复"。新文案说清按哪两种粒度找过。
+    expect(screen.getByText(/按段落与 500 字分块两种粒度都未检测到重复内容/)).toBeInTheDocument();
+    // 旧文案不该再出现（防止两处并存）
+    expect(screen.queryByText('未检测到重复内容')).not.toBeInTheDocument();
   });
 });
 
