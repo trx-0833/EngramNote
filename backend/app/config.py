@@ -260,6 +260,31 @@ class Settings(BaseSettings):
     #
     # 注：另一路 n-gram 检索通道已删除（阶段 2.6）。
     vector_similarity_floor: float = 0.35
+    # ---- 清洗改写规则（B1，2026-10-21）----
+    #
+    # ⚠️ 这两条**打破**了清洗长期以来的"仅做减法、不改变原意"承诺
+    # （见本文件上方与 `services/cleaning_service.py` 的模块说明）。
+    # 它们由用户在 `使用时的想法.txt` 第 5 条明确要求，且已单独拍板。
+    #
+    # 为什么是配置项而不是写死：
+    #   - `clean_simplify_formula` **默认关** —— 它把 `$6.34m \times 61.95m$`
+    #     改写成 `6.34m*61.95m`，而清洗副本同时是"用户要编辑的 Markdown"
+    #     与"公式可回退的 LaTeX 来源"。默认关 = 现有用户的产物逐字节不变。
+    #   - `clean_normalize_spacing` **默认开** —— 它只压缩数字/字母前后的多余
+    #     空格（`10  台` → `10 台`），不增删字符，风险最低。
+    #
+    # 两条都**只作用于普通文本行**：代码块、数学块（`$$`）、行内代码与行内公式
+    # （`$…$`）内部一律不碰 —— 那条边界是既有清洗规则就守着的（见
+    # `clean_rules` 的逐行状态机），新规则必须沿用同一套状态。
+    clean_simplify_formula: bool = False
+    clean_normalize_spacing: bool = True
+    # 标题层级按编号重排（`## 1.2 小节` → `### 1.2 小节`）
+    #
+    # **默认开**：它只改 `#` 的数量、不动标题文字与行序，且判据是标题里
+    # **客观存在**的编号（推不出层级的标题一律不动，见
+    # `cleaning_service.infer_heading_level`）。用户点名的三件事里，
+    # 这条是"输出结构"而不是"内容"。
+    clean_normalize_heading_levels: bool = True
     # 文本分块大小（字符数）
     chunk_size: int = 500
     # 分块重叠大小（字符数）。

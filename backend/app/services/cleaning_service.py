@@ -46,6 +46,284 @@ _HEADER_FOOTER_PATTERNS = [
 # ]
 _WATERMARK_KEYWORDS = ["仅供内部使用", "内部资料", "CONFIDENTIAL", ]
 
+
+# ============================================================
+# 改写类规则（B1，2026-10-21）—— ⚠️ 与"仅做减法"的旧承诺不同
+# ============================================================
+#
+# ## 为什么会有改写
+#
+# 用户在 `使用时的想法.txt` 第 5 条点名了三件事：
+#   ① `$6.34m \times 61.95m$` 换成 `6.34m*61.95m`（方便编辑）
+#   ② 标题层级要严谨（不能大标题小标题都是 `##`）
+#   ③ 数字、字母前后各空一格的，取消那个空格
+#
+# 走查报告 §5 实测：**一条都没做**，且对 Markdown 输入逐字节空转（711 → 711）。
+#
+# ## 边界（三条，都必须守住）
+#
+# 1. **只作用于普通文本行** —— 代码块（```）、数学块（`$$`）、行内代码
+#    （`` `…` ``）、行内公式（`$…$`）内部一律不碰；
+# 2. **公式简化只认"简单公式"** —— 命令走**白名单**，遇到任何不认识的
+#    结构（`\frac` / `\int` / 希腊字母 / 上下标 / 矩阵…）**整条公式原样保留**。
+#    宁可漏改，不可改错：改错一个公式比不改严重得多；
+# 3. **不做减法以外的语义改动** —— 不改措辞、不加内容、不重排段落。
+
+#: 行内公式 `$…$` 的匹配（不跨行；`$$` 块由调用方的状态机先排除）
+_INLINE_MATH_RE = re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)")
+
+#: 行内代码 `` `…` ``（公式/空格规则都要跳过它内部）
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+#: 简单公式允许出现的 LaTeX 命令 → 纯文本写法
+#:
+#: 这是**白名单**：公式里出现任何**不在此表**的反斜杠命令，整条公式不改。
+_SIMPLE_LATEX_COMMANDS = {
+    r"\times": "*",
+    r"\cdot": "*",
+    r"\div": "/",
+    r"\pm": "±",
+    r"\leq": "<=",
+    r"\geq": ">=",
+    r"\neq": "!=",
+    r"\approx": "≈",
+    r"\left": "",
+    r"\right": "",
+}
+
+#: 简单公式里**不允许**出现的字符（出现即放弃简化）
+#:
+#: 覆盖：上下标（`^` / `_`）、花括号分组（`{` / `}`）、以及已经写成 unicode 的
+#: 数学符号（求和/连乘/积分/根号/无穷/±≤≥≠≈）—— 那些不是"数字字母的四则运算"。
+#:
+#: ⚠️ **反斜杠不在这里**。第一版把它写进了这个字符类，结果**一条公式都简化不了**：
+#: LaTeX 命令本身就是用反斜杠写的，而白名单里的 `\times` 正是要替换掉的东西。
+#: 正确的顺序是"**先做白名单替换，再看还剩不剩反斜杠**"（见 `simplify_inline_math`）。
+_LATEX_NOT_SIMPLE_RE = re.compile(r"[\^_{}]|[∑∏∫√∞±≤≥≠≈]")
+
+#: 允许出现在简单公式里的字符（其余一律放弃简化）
+_SIMPLE_MATH_CHARS_RE = re.compile(r"^[0-9A-Za-z\s.,+\-*/=()<>%:;'\"°]+$")
+
+
+def simplify_inline_math(line: str) -> Tuple[str, int]:
+    """把**简单**行内公式改写成纯文本写法，返回 (新行, 改写条数)
+
+    ## 判据（全部满足才改）
+
+    1. 是行内公式 `$…$`（不是 `$$` 块）；
+    2. 里面**没有** `\\` / `^` / `_` / `{` / `}`（即没有命令、上下标、分组）；
+    3. 去掉白名单命令替换后，剩下的字符**只有** `0-9A-Za-z`、空格、
+       以及 `.,+-*/=()<>%:;'"°` —— 也就是说它是"数字/字母的四则运算"，
+       不是需要 KaTeX 才能读的数学表达。
+
+    改写只做两件事：白名单命令 → 纯文本符号；去掉 `$` 与命令两侧多余空格。
+
+    ## 为什么这么保守
+
+    公式是**用户要照着算/照着抄**的东西。把它改错（例如把 `\\frac{a}{b}`
+    拍平成 `a/b` 丢了分组，或把 `x^2` 变成 `x2`）比不改严重得多 ——
+    而清洗副本同时是"可编辑的 Markdown"与"公式的来源"。所以命令走白名单、
+    结构字符一出现就整条放弃。
+    """
+    changed = 0
+
+    def _replace(match: re.Match) -> str:
+        nonlocal changed
+        body = match.group(1)
+
+        # 判据 2：上下标 / 花括号分组 / unicode 数学符号 → 放弃
+        if _LATEX_NOT_SIMPLE_RE.search(body):
+            return match.group(0)
+
+        # 判据 3：**先**做白名单命令替换，**再**看还剩不剩反斜杠。
+        # 顺序反了会把白名单命令本身也当成"不认识的命令"（见
+        # `_LATEX_NOT_SIMPLE_RE` 的说明）。
+        simplified = body
+        for cmd, plain in _SIMPLE_LATEX_COMMANDS.items():
+            # 命令后面可能跟空格（`\times 61`），替换时一并吃掉一个空格
+            simplified = re.sub(re.escape(cmd) + r"\s*", plain, simplified)
+
+        # 替换后若还残留反斜杠（不认识的命令）→ 放弃
+        if "\\" in simplified:
+            return match.group(0)
+
+        simplified = simplified.strip()
+        if not simplified or not _SIMPLE_MATH_CHARS_RE.match(simplified):
+            return match.group(0)
+
+        # 收掉运算符两侧的空格：用户点名的目标形态是 `6.34m*61.95m`
+        # （`$6.34m \times 61.95m$` 换掉之后会剩下 `6.34m *61.95m`，
+        #   那个空格正是 LaTeX 为了排版加的，对"照着抄/照着算"没有意义）。
+        # 只收 `* / + - = < >` 这几个**明确是运算符**的字符两侧；
+        # `,` 后面的空格保留（`a, b` 是正常排版）。
+        simplified = re.sub(r"\s*([*/+=<>])\s*", r"\1", simplified)
+        # `-` 单独处理：只在**两侧都有内容且不是数字正负号**时收空格。
+        # `a - b` → `a-b`；但 `5 -3` 这种（负号）不动，避免把减法读成负数。
+        simplified = re.sub(r"(?<=[\w)])\s+-\s+(?=[\w(])", "-", simplified)
+        # 括号内侧的空格（`( a + b )` → `(a+b)`）
+        simplified = re.sub(r"\(\s+", "(", simplified)
+        simplified = re.sub(r"\s+\)", ")", simplified)
+        simplified = re.sub(r"\s{2,}", " ", simplified).strip()
+
+        # 与原文等价就不算改写（避免把 stats 记成"改过"）
+        if f"${simplified}$" == match.group(0):
+            return match.group(0)
+
+        changed += 1
+        return simplified
+
+    return _INLINE_MATH_RE.sub(_replace, line), changed
+
+
+#: 数字/字母与中文之间的**多余**空格（≥2 个才动，见下）
+#:
+#: 为什么是 `{2,}` 而不是 `+`：用户的原话是"数字、字母，**前后各空一格**的
+#: 识别内容，可以取消其空格"。而"各空一格"在产物里表现为**两个**空格
+#: （`10  台`：MinerU 给的空格 + 原文的空格）。压到一个空格是**去掉多余的那一个**，
+#: 不是"删掉所有空格"—— 后者会把 `220 kV` 变成 `220kV`，那是另一种改写。
+_MULTI_SPACE_RE = re.compile(r" {2,}")
+
+#: 中文字符（用于判断空格是不是"中英之间"的那个）
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
+
+
+def normalize_spacing(line: str) -> Tuple[str, int]:
+    """压缩**普通文本行**里多余的空格，返回 (新行, 改写处数)
+
+    ## 做什么 / 不做什么
+
+    - **做**：把连续 ≥2 个半角空格压成 1 个（`10  台` → `10 台`）。
+      这是用户点名的"前后各空一格"的实际形态。
+    - **不做**：删掉单个空格。`220 kV` 里的那一个是**正确**的排版，
+      删掉会变成 `220kV`（那是"改写"而不是"去掉多余的"）。
+    - **不做**：动行首缩进（Markdown 的缩进有语义：列表、代码块）。
+      所以只处理 `line.lstrip()` 之后的部分，缩进原样保留。
+
+    ## 边界
+
+    行内代码与行内公式内部不碰 —— 那里的空格可能是内容的一部分
+    （`` `print("a  b")` ``、`$a  b$`）。
+
+    ⚠️ 判据里**没有**"必须挨着中文"这一条。第一版想加上"只在数字/字母与中文
+    之间压空格"，但那样会漏掉 `价格  10 元` 这类**纯多余空格**，而用户的原话是
+    "数字、字母，前后各空一格的识别内容，可以取消其空格" ——
+    他要的就是把**多余的那一个**去掉，与前后是不是中文无关。
+    真正需要保护的是行内代码与行内公式（上面那条），不是"中文邻接"。
+    """
+    indent_len = len(line) - len(line.lstrip(" "))
+    indent = line[:indent_len]
+    body = line[indent_len:]
+    if not body:
+        return line, 0
+
+    # 把行内代码/公式挖出来占位，处理完再放回去（避免动它们内部的空格）
+    placeholders: List[str] = []
+
+    def _stash(match: re.Match) -> str:
+        placeholders.append(match.group(0))
+        # 用不可能出现在正文里的哨兵（含 \x00）
+        return f"\x00{len(placeholders) - 1}\x00"
+
+    stashed = _INLINE_CODE_RE.sub(_stash, body)
+    stashed = _INLINE_MATH_RE.sub(_stash, stashed)
+
+    fixed, count = _MULTI_SPACE_RE.subn(" ", stashed)
+
+    # 放回占位
+    def _restore(match: re.Match) -> str:
+        return placeholders[int(match.group(1))]
+
+    fixed = re.sub(r"\x00(\d+)\x00", _restore, fixed)
+    if count == 0:
+        return line, 0
+    return indent + fixed, count
+
+
+#: Markdown ATX 标题：`## 标题`（`#` 数量 = 层级；`###` 起是 3 个以上）
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})(\s+)(.*)$")
+
+#: 标题里开头的编号：`1.2`、`1.2.3`、`一、`、`（1）`、`第 1 章`…
+_HEADING_NUMBER_RE = re.compile(
+    r"^\s*(?:"
+    r"(?P<dotted>\d+(?:\.\d+)*)[.、)）]?\s*"     # 1.2 / 1.2.3 / 1)
+    r"|第\s*(?P<cn_num>[0-9一二三四五六七八九十百]+)\s*[章节篇部分]\s*"
+    r"|(?P<paren>[（(]\s*\d+\s*[)）])\s*"
+    r")"
+)
+
+
+def infer_heading_level(title: str) -> Optional[int]:
+    """从标题文本的编号推断**建议的**层级（推不出来时返回 None）
+
+    ## 判据
+
+    编号的**点数**决定层级：`1` → 2 级、`1.2` → 3 级、`1.2.3` → 4 级
+    （1 级留给文档标题）。中文编号（`第一章`）→ 2 级，`（1）` → 3 级。
+
+    ## 为什么返回 None 而不是猜一个
+
+    "标题层级严谨化"这条规则**没有唯一正确答案**：`## 概述` 该是 2 级还是 3 级，
+    取决于它在文档里的位置，而单看一行标题推不出来。
+    所以这个函数只对**带编号**的标题下结论 —— 那些是有客观依据的；
+    没有编号的一律 `None`（调用方保持原样）。
+
+    这与本模块其它规则的取舍一致：**宁可漏改，不可改错**。
+    """
+    match = _HEADING_NUMBER_RE.match(title)
+    if not match:
+        return None
+    if match.group("dotted"):
+        depth = len(match.group("dotted").split("."))
+        # `1` → 2 级；`1.2` → 3 级；`1.2.3` → 4 级；再深也不超过 6
+        return min(1 + depth, 6)
+    if match.group("cn_num"):
+        return 2
+    if match.group("paren"):
+        return 3
+    return None
+
+
+def normalize_heading_levels(text: str) -> Tuple[str, int]:
+    """按标题里的编号重排 ATX 层级，返回 (新文本, 改写行数)
+
+    ## 只改**层级**，不改标题文字、不改行序
+
+    用户的原话是"不能大标题是 `##` 内容、小标题也是 `##` 内容，
+    这样标题层级就没法区分了"。所以本函数只把 `#` 的**数量**按编号对齐，
+    标题文字与顺序一个字符都不动。
+
+    ## 为什么不动代码块里的 `#`
+
+    `# 注释` 在 shell/Python 片段里是注释，不是标题。逐行状态机跟踪
+    ``` 围栏 —— 与 `clean_rules` 同一套判据。
+    """
+    lines = text.split("\n")
+    in_fence = False
+    changed = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+
+        match = _ATX_HEADING_RE.match(line)
+        if not match:
+            continue
+        hashes, gap, title = match.groups()
+        # 只处理"像标题"的行：标题文字不能为空、不能是纯符号
+        if not title.strip():
+            continue
+        target = infer_heading_level(title)
+        if target is None or target == len(hashes):
+            continue
+        lines[i] = "#" * target + gap + title
+        changed += 1
+
+    return "\n".join(lines), changed
+
 # 全角标点 → 半角标点映射（暂不启用：可能破坏 Markdown 中的数学公式）
 # 保留定义以便后续需要时启用
 # _FULLWIDTH_TO_HALFWIDTH = {
@@ -179,6 +457,57 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
 
     # 6. 去除文件末尾多余空行
     result = result.rstrip("\n") + "\n"
+
+    # ---- 7. 改写类规则（B1，2026-10-21）----
+    #
+    # ⚠️ 位置刻意放在**减法规则之后**：先去掉页眉页脚/水印/多余空行，
+    # 再改写剩下的正文 —— 顺序反了会把即将被删掉的行也改一遍（stats 会虚高）。
+    #
+    # ⚠️ 这三条与上面的规则不同：它们**改变字符**，而清洗长期承诺
+    # "仅做减法、不改变原意"。所以两条开关都在 `config.py` 里显式声明，
+    # 且公式简化**默认关**。逐行状态机（代码块 / 数学块）在这里**重新走一遍** ——
+    # 上面那个循环的 `in_code_block` / `in_math_block` 已经结束，
+    # 而这三条规则各自需要知道"这一行在不在块里"。
+    #
+    # 统计键与上面那批并列，前端「清洗统计」面板不需要改形状即可展示
+    # （新增的键是纯增量）。
+    stats.setdefault("formula_simplified", 0)
+    stats.setdefault("spacing_normalized", 0)
+    stats.setdefault("heading_levels_fixed", 0)
+
+    # 7a. 标题层级（整篇一起看：需要跟踪围栏状态）
+    if settings.clean_normalize_heading_levels:
+        result, n_heading = normalize_heading_levels(result)
+        stats["heading_levels_fixed"] = n_heading
+
+    # 7b/7c. 逐行：公式简化 + 空格压缩（都要跳过代码块/数学块）
+    out_lines = []
+    in_code = False
+    in_math = False
+    for line in result.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_code = not in_code
+            out_lines.append(line)
+            continue
+        if stripped.startswith("$$"):
+            if not (stripped.endswith("$$") and len(stripped) > 2):
+                in_math = not in_math
+            out_lines.append(line)
+            continue
+        if in_code or in_math:
+            out_lines.append(line)
+            continue
+
+        new_line = line
+        if settings.clean_simplify_formula:
+            new_line, n_formula = simplify_inline_math(new_line)
+            stats["formula_simplified"] += n_formula
+        if settings.clean_normalize_spacing:
+            new_line, n_space = normalize_spacing(new_line)
+            stats["spacing_normalized"] += n_space
+        out_lines.append(new_line)
+    result = "\n".join(out_lines)
 
     return result, stats
 
