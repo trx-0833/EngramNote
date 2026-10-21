@@ -645,6 +645,50 @@ i18n 守卫红了 → 补中英双语表；② 我最初在 raise 处写了带�
 
 ---
 
+## D1 `backend/data/` 盘点与删除决策报告（`238a570`）—— ✅ 完成
+
+**只读**盘点（`os.walk` + `stat`，**没删、没移、没改任何一个字节**），
+产出 [`docs/data-inventory-2026-10-22.md`](data-inventory-2026-10-22.md)。
+按 plan §5 第 6 条：**D1 只产出清单，任何删除另开一轮单独批 + 单独备份**。
+
+**实测总览 6.8 GB**：`models/` 4.4 GB 🟢 在用 ｜ `mineru/` 2.0 GB 🟠 当前不用 ｜
+`_uxwalk/` 155 MB 🔴 副本但 A2/A3′ 还没跑 ｜ `storage/` 117 MB 🔴 用户文件 ｜
+`chroma/` 54 MB 🟠 历史数据 ｜ `db/` 45 MB 🔴 主库。
+
+三档清单：🟢 现在就能删 **约 35 MB** ｜ 🟠 要先确认 **约 4.2 GB** ｜
+🔴 不确定 → 不动 **约 305 MB**。
+
+**三条实测发现**：
+① 计划 `:396` 的「约 4.6 GB MinerU」**已过时**，实测 2.0 GB
+（`mineru-backend-decision.md:17` 记着已回收 6.66 GB）—— 以实测为准；
+② `bge-m3` 的 `pytorch_model.bin` 与 `model.safetensors` **各 2.1 GB 同权重双格式**，
+但**不主张删**（归"要先确认"）；
+③ `chroma/` 判据最确凿：`grep "import chromadb"` 无结果 +
+`hasattr(settings,'chroma_dir')` 为 `False`。
+
+**附带撞到一个坏脚本**（只记不修）：`scripts/cleanup_test_data.py` import 就崩
+（`chroma_dir` 已移除），它带 `--apply`、能删数据，且被 `.gitignore:136` 忽略。
+让删数据脚本重新能跑不属于"只读盘点"，要单独批。
+
+**顺手修一处文档错误**：`测试账号信息.md` 的清理命令少了 `scripts/dev/` 前缀。
+
+**★ 给报告加了 13 条结构守卫**（`tests/test_data_inventory_report.py`）——
+最要紧的一条：**`storage/` 与真库 `data/db/engramnote.db` 绝不能出现在
+🟢「现在就能删」档**。这类错误是静默的（报告读起来通顺、免责声明齐全）。
+
+守卫里留了一个**自己踩过的坑当实例**：`data/` 根目录有一个 **0 字节的
+`engramnote.db`** 与真库**同名** —— 按 basename 判分不开两者，必须按**路径**判。
+
+**反空转做了两次，第一次是假通过**：用 PowerShell here-string 拼注入文本时
+反引号被吃掉 ⇒ `str.replace` 静默没匹配上、**什么都没注入**，测试全绿。
+看起来像"守卫没抓到"。改成独立脚本并**先自检注入成功**再跑 ⇒ 3 条红；
+恢复后 13 条全绿。**"验证通过"与"验证真的跑了"是两件事。**
+
+**验证**：整仓 **1670 passed**（+13）；ruff 全过；`docs:links` 0 死链。
+⚠️ 无代码/契约改动 ⇒ 本次未跑漂移检查（只加了一个测试文件与两份文档）。
+
+---
+
 ## 本轮之后的仓库状态
 
 ```
