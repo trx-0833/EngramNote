@@ -33,9 +33,12 @@
 **拼出来的文本完全相同** —— 由 test_prompt_golden 的摘要证明。
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from ...core.i18n import DEFAULT_LOCALE, normalize_locale
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_locale(locale: Optional[str] = None) -> str:
@@ -564,6 +567,338 @@ QUESTION_SYSTEM_PROMPT = (
     "6. 不要与之前已生成的题目重复或雷同\n"
     "7. 只返回 JSON 对象，不要其他文字"
 )
+
+
+# ===========================================================================
+# A2/A3′：题型 + 难度可配的出题提示词（**版本 2**，2026-10-22）
+# ===========================================================================
+#
+# ## 改的是什么、为什么必须改
+#
+# 改造前 `question_session`（版本 1）把两件事**写死在提示词里**：
+#   ① 任务描述："请为每组知识点生成**选择题**" ⇒ 只能出 choice；
+#   ② JSON 样例：`"question_type": "choice"` 与 `"difficulty": "easy"`
+#      —— 样例是最强的指令，模型会照着填。
+# 于是实测真库 **3358 道题全是 `choice`**、难度 easy 2567 / medium 773 /
+# hard 仅 18。`understand_tasks.py` 也不传题型与难度，
+# 所以**不改提示词就重跑一万遍也还是"简单四选一"**。
+#
+# ## 为什么不用"把 `target_categories` 拼进卡片文本"那条现成路径
+#
+# `understand_tasks.py:313-321` 确实会在卡片文本里追加
+# `[本知识点需生成 N 道题，难度倾向：…]`，但**任务描述与 JSON 样例在系统
+# 提示词里仍然写着"选择题 / easy"** —— 局部提示压不过全局指令，
+# 模型照样只出选择。所以修必须修在系统提示词这一层。
+#
+# ## 三版的分工（A3′ 要跑的三版）
+#
+# | 版本 | 改了什么 | 为什么这样切 |
+# |---|---|---|
+# | **v1**（原有，现保留为默认） | 只有选择题、只有 easy | 对照组：重跑后的"旧版"基线 |
+# | **v2** | 题型与难度**可配**，并给出配比与各题型的写法要求 | 单独隔离"题型/难度"这一个变量 |
+# | **v3** | 在 v2 之上加**出题质量规则**（干扰项必须同范畴、填空必须唯一答案、简答必须可自评） | 单独隔离"质量约束"这一个变量 |
+#
+# 三版**同时存在**（不是替换）：默认仍是 v1，只有显式传 `question_plan`
+# 才用 v2/v3 —— 这样"老产物的可复现性"与"新版本可对比"两件事不冲突，
+# 也才可能在没有第二次重跑的情况下对比两版（`PROMPT_VERSIONS` 会记版本号，
+# 分组报表能按它切）。
+
+#: v2 各题型的**写法要求**（题型 → 要求文本）
+_QUESTION_TYPE_RULES_ZH: Dict[str, str] = {
+    "choice": "4 个选项、只有 1 个正确答案，干扰项必须合理（不是明显错的那种）",
+    "fill_blank": "题干中用 ____ 留一个空，answer 填**唯一**的答案（不要填一串同义词）",
+    "short_answer": "answer 给出**要点清单**（分条），便于用户自评对了几点",
+}
+
+_QUESTION_TYPE_RULES_EN: Dict[str, str] = {
+    "choice": "4 options with exactly 1 correct answer; distractors must be plausible",
+    "fill_blank": "leave one blank as ____ in the question; answer must be the single unique answer",
+    "short_answer": "answer must be a list of key points so the learner can self-rate coverage",
+}
+
+#: 题型的 JSON 样例片段（样例是最强指令，必须跟着题型变）
+_QUESTION_SAMPLE_ZH: Dict[str, str] = {
+    "choice": (
+        '{"card_index": 1, "question_type": "choice", "difficulty": "medium", '
+        '"question": "题目内容", "answer": "正确答案", '
+        '"options": ["A.选项1", "B.选项2", "C.选项3", "D.选项4"], '
+        '"explanation": "解析"}'
+    ),
+    "fill_blank": (
+        '{"card_index": 1, "question_type": "fill_blank", "difficulty": "medium", '
+        '"question": "题干，关键处留 ____", "answer": "唯一答案", '
+        '"options": [], "explanation": "解析"}'
+    ),
+    "short_answer": (
+        '{"card_index": 1, "question_type": "short_answer", "difficulty": "hard", '
+        '"question": "题干（要求简明回答）", "answer": "要点1；要点2；要点3", '
+        '"options": [], "explanation": "解析"}'
+    ),
+}
+
+_QUESTION_SAMPLE_EN: Dict[str, str] = {
+    "choice": (
+        '{"card_index": 1, "question_type": "choice", "difficulty": "medium", '
+        '"question": "question text", "answer": "correct answer", '
+        '"options": ["A.option 1", "B.option 2", "C.option 3", "D.option 4"], '
+        '"explanation": "explanation"}'
+    ),
+    "fill_blank": (
+        '{"card_index": 1, "question_type": "fill_blank", "difficulty": "medium", '
+        '"question": "sentence with a ____ blank", "answer": "the unique answer", '
+        '"options": [], "explanation": "explanation"}'
+    ),
+    "short_answer": (
+        '{"card_index": 1, "question_type": "short_answer", "difficulty": "hard", '
+        '"question": "question requiring a concise answer", '
+        '"answer": "point 1; point 2; point 3", "options": [], '
+        '"explanation": "explanation"}'
+    ),
+}
+
+
+def _question_plan_block(plan: Dict[str, int], locale: str) -> str:
+    """把 `{题型: 道数}` 渲染成提示词里的"题型配比"段
+
+    空 plan（或全 0）返回空串 —— 调用方据此退化成 v1 的"只出选择题"。
+    """
+    items = [(k, v) for k, v in plan.items() if v and v > 0]
+    if not items:
+        return ""
+    total = sum(v for _, v in items)
+    rules = _QUESTION_TYPE_RULES_EN if locale == "en" else _QUESTION_TYPE_RULES_ZH
+    if locale == "en":
+        lines = [f"Generate {total} question(s) in total, with this type mix:"]
+        for qtype, count in items:
+            lines.append(f"  - {qtype} × {count}: {rules.get(qtype, '')}")
+    else:
+        lines = [f"本组共生成 {total} 道题，题型配比："]
+        for qtype, count in items:
+            lines.append(f"  - {qtype} × {count}：{rules.get(qtype, '')}")
+    return "\n".join(lines)
+
+
+def _difficulty_block(plan: Dict[str, int], locale: str) -> str:
+    """把 `{难度: 道数}` 渲染成提示词里的"难度配比"段"""
+    items = [(k, v) for k, v in plan.items() if v and v > 0]
+    if not items:
+        return ""
+    rules = {
+        "easy": ("基础概念回忆，答案在原文中能直接找到", "recall of basic concepts, directly stated"),
+        "medium": ("需要理解与简单应用，要跨一两句话才能拼出答案", "understanding and simple application"),
+        "hard": ("需要综合、比较或推理，答案不在原文里现成", "synthesis, comparison or inference"),
+    }
+    if locale == "en":
+        lines = ["Difficulty mix:"]
+        for level, count in items:
+            lines.append(f"  - {level} × {count}: {rules.get(level, ('', ''))[1]}")
+    else:
+        lines = ["难度配比："]
+        for level, count in items:
+            lines.append(f"  - {level} × {count}：{rules.get(level, ('', ''))[0]}")
+    return "\n".join(lines)
+
+
+def question_session_prompt_v2(
+    *,
+    question_types: Optional[Dict[str, int]] = None,
+    difficulty_mix: Optional[Dict[str, int]] = None,
+    locale: Optional[str] = None,
+) -> str:
+    """出题会话的系统提示词 **v2**：题型与难度可配
+
+    ## 与 v1 的逐项差别（写下来，因为"改了哪一处"要靠它回答）
+
+    | 位置 | v1 | v2 |
+    |---|---|---|
+    | 任务描述 | "生成**选择题**" | 按 `question_types` 给配比，逐个题型附**写法要求** |
+    | JSON 样例 | 写死 `"choice"` / `"easy"` | 按**实际题型**选样例，`difficulty` 用 `medium`（与配比段一致） |
+    | 难度 | 无 | `difficulty_mix` 段，逐档给**判据**（不是只报名字） |
+    | 要求条数 | 7 条（含"每个知识点1道选择题"） | 题型/道数那条改成引用配比段，其余保留 |
+
+    ## 为什么"逐档给判据"是必须的
+
+    只写"medium × 2 / hard × 1"时，模型对"hard"的理解是**它自己的**
+    （通常等于"题干写长一点"）。实测真库 hard 只有 18/3358 —— 而提示词里
+    根本没出现过 hard 这个词，所以那 18 道是模型自己在样例之外发挥的。
+    给出判据（"答案不在原文里现成"）才有可依据的刻度。
+
+    Args:
+        question_types: `{题型: 道数}`；空 ⇒ 退化成"只出选择题"（= v1 行为）
+        difficulty_mix: `{难度: 道数}`；空 ⇒ 不写难度段（由模型自定）
+        locale: `zh-CN` / `en`
+    """
+    resolved = _resolve_locale(locale)
+    types = question_types or {}
+    diffs = difficulty_mix or {}
+
+    block_types = _question_plan_block(types, resolved)
+    block_diff = _difficulty_block(diffs, resolved)
+
+    if resolved == "en":
+        # 样例取**配比里第一个**题型（典型的"1~2 种题型"用法）；没有配比就退回 choice
+        first_type = next((k for k, v in types.items() if v and v > 0), "choice")
+        sample = _QUESTION_SAMPLE_EN.get(first_type, _QUESTION_SAMPLE_EN["choice"])
+        parts = [
+            "You are a professional question-writing assistant. I will give you "
+            "several groups of knowledge points in turn.\n",
+            "Return strictly in the following JSON format (add no other text):\n"
+            '{"questions": [\n  ' + sample + ",\n"
+            '  {"card_index": 2, ...}\n'
+            "]}\n",
+        ]
+        if block_types:
+            parts.append(block_types + "\n")
+        if block_diff:
+            parts.append(block_diff + "\n")
+        parts.append(
+            "Requirements:\n"
+            "1. Generate exactly the number of questions specified above\n"
+            "2. Questions must test the knowledge point accurately and stay within the given content\n"
+            "3. card_index starts at 1 and corresponds to the number within this group\n"
+            "4. options is an array of strings; for choice questions each is 'letter.content'; "
+            "for fill_blank / short_answer pass an empty array\n"
+            "5. Do not repeat or closely resemble questions generated earlier\n"
+            "6. question_type must be one of: choice, fill_blank, short_answer\n"
+            "7. Return only the JSON object, with no other text"
+        )
+        return "\n".join(parts)
+
+    first_type = next((k for k, v in types.items() if v and v > 0), "choice")
+    sample = _QUESTION_SAMPLE_ZH.get(first_type, _QUESTION_SAMPLE_ZH["choice"])
+    parts = [
+        "你是一个专业的出题助手。我将依次给你多组知识点，请为每组知识点出题。\n",
+        "请严格按以下 JSON 格式返回（不要添加任何其他文字）：\n"
+        '{"questions": [\n  ' + sample + ",\n"
+        '  {"card_index": 2, ...}\n'
+        "]}\n",
+    ]
+    if block_types:
+        parts.append(block_types + "\n")
+    if block_diff:
+        parts.append(block_diff + "\n")
+    parts.append(
+        "要求：\n"
+        "1. 严格按上面的配比生成题目（题型与道数都要对上）\n"
+        "2. 题目应准确考察知识点，不超出给定内容范围\n"
+        "3. card_index 从1开始，对应本组知识点编号\n"
+        "4. options 是字符串数组：选择题每个元素格式为 '字母.内容'；"
+        "填空题与简答题传空数组 []\n"
+        "5. 不要与之前已生成的题目重复或雷同\n"
+        "6. question_type 只能是 choice / fill_blank / short_answer 三者之一\n"
+        "7. 只返回 JSON 对象，不要其他文字"
+    )
+    return "\n".join(parts)
+
+
+#: v3 在 v2 之上追加的**质量规则**（单独一段，便于对照实验时逐条关掉）
+QUESTION_QUALITY_RULES_ZH = (
+    "\n质量规则（这几条决定题目能不能用）：\n"
+    "A. **干扰项必须同范畴**：与正确答案属于同一类（同是设备名 / 同是数值量级 / "
+    "同是步骤），不能靠「看起来不像」来排除；\n"
+    "B. **填空题的答案必须唯一**：如果原文里有多个等价说法，改成简答题；\n"
+    "C. **简答题必须可自评**：answer 分条列要点，用户在界面上逐条对；\n"
+    "D. **不得引入原文没有的信息**：需要背景知识才能答的题不出；\n"
+    "E. **同一知识点的多道题不得考同一个点**：换角度（定义→适用条件→反例）。"
+)
+
+QUESTION_QUALITY_RULES_EN = (
+    "\nQuality rules (these decide whether a question is usable):\n"
+    "A. **Distractors must be same-category**: same kind of device / same order of "
+    "magnitude / same kind of step — never rely on 'looks unlikely';\n"
+    "B. **Fill-in-the-blank answers must be unique**: if the source allows several "
+    "equivalent phrasings, use short_answer instead;\n"
+    "C. **Short answers must be self-ratable**: list key points so the learner can "
+    "check them off;\n"
+    "D. **Never introduce information absent from the source**: skip questions that "
+    "need outside background;\n"
+    "E. **Multiple questions on one knowledge point must not test the same thing**: "
+    "change the angle (definition → applicability → counter-example)."
+)
+
+
+def question_session_prompt_v3(
+    *,
+    question_types: Optional[Dict[str, int]] = None,
+    difficulty_mix: Optional[Dict[str, int]] = None,
+    locale: Optional[str] = None,
+) -> str:
+    """出题会话的系统提示词 **v3**：v2 + 出题质量规则
+
+    ## 为什么把质量规则**单独成一段**而不是揉进 v2
+
+    A3′ 要对比的是"v2 与 v3 哪个更好"。揉进 v2 之后，"v3 更好"就无法归因到
+    具体规则上，而**逐条规则的价值**才是下一轮该调的东西。
+    单独一段也便于将来按 `A`–`E` 逐条开关做消融实验。
+    """
+    resolved = _resolve_locale(locale)
+    base = question_session_prompt_v2(
+        question_types=question_types, difficulty_mix=difficulty_mix, locale=locale
+    )
+    rules = QUESTION_QUALITY_RULES_EN if resolved == "en" else QUESTION_QUALITY_RULES_ZH
+    return base + "\n" + rules
+
+
+#: 出题提示词的版本选择器：`"1"` / `"2"` / `"3"` → 生成函数
+#:
+#: ⚠️ 版本号必须与 `PROMPT_VERSIONS["question_session"]` 对得上。
+#: 改成 `"2"` 会让全部缓存失效（那是**有意的** —— 提示词变了缓存就该失效），
+#: 与 `test_prompt_golden.py` 的说明同一条口径。
+QUESTION_PROMPT_BUILDERS = {
+    "1": lambda *, question_types=None, difficulty_mix=None, locale=None: (
+        _EN_PROMPTS["question_session"] if _resolve_locale(locale) == "en"
+        else QUESTION_SYSTEM_PROMPT
+    ),
+    "2": question_session_prompt_v2,
+    "3": question_session_prompt_v3,
+}
+
+
+#: 出题提示词**默认**用哪一版
+#:
+#: ## 为什么默认仍是 "1"（而 A3′ 要跑 v2/v3）
+#
+# 三个理由，任何一个单独都够：
+#
+# 1. **默认改了 = 上游全部改口径**：`understanding.py` 的重跑会把某些笔记的
+#    卡片/题目**删掉重建**（`159-184`），默认一变，下次谁点"重新理解"就不再是
+#    对照组了 —— 而 A3′ 的对比恰恰需要一个**没变的旧版**当基线。
+# 2. **缓存键包含提示词文本**：默认改了 ⇒ 全库提示词缓存当场失效。
+#    那是**该付的代价**，但要付在"决定切版"那一刻，不是"顺手改了一行"。
+# 3. 切版是**产品决策**（用户要的是"题目别全是简单四选一"），
+#    而 `DEFAULT_QUESTION_PROMPT_VERSION` 就是那个开关 ——
+#    它应该被显式引用、被文档记录，而不是藏在一个 `or` 的默认值里。
+#    切版时改这一个常量，比在七处调用点各改一次可靠。
+DEFAULT_QUESTION_PROMPT_VERSION = "1"
+
+
+def question_session_prompt(
+    *,
+    question_types: Optional[Dict[str, int]] = None,
+    difficulty_mix: Optional[Dict[str, int]] = None,
+    locale: Optional[str] = None,
+    version: Optional[str] = None,
+) -> str:
+    """按版本取"出题会话"的系统提示词
+
+    版本解析顺序：`version` 参数 → `DEFAULT_QUESTION_PROMPT_VERSION`。
+
+    ⚠️ 没有配比且版本 > 1 时，v2/v3 的文本仍会与 v1 **不同**（任务描述与
+    样例的措辞变了）。这是刻意的：A3′ 的对比要的是"三个完整版本"，
+    不是"同一版加不加参数"。`version="1"` 永远是那个对照组。
+    """
+    resolved_version = version or DEFAULT_QUESTION_PROMPT_VERSION
+    builder = QUESTION_PROMPT_BUILDERS.get(resolved_version)
+    if builder is None:
+        # 未登记的版本号：退回默认版而不是抛异常 ——
+        # 出题是长任务，为"版本号写错"整篇失败代价太大。
+        logger.warning(
+            "未登记的出题提示词版本 %r，退回 %s", resolved_version, DEFAULT_QUESTION_PROMPT_VERSION
+        )
+        builder = QUESTION_PROMPT_BUILDERS[DEFAULT_QUESTION_PROMPT_VERSION]
+    return builder(
+        question_types=question_types, difficulty_mix=difficulty_mix, locale=locale
+    )
 
 
 def rag_answer_messages(question: str, context: str, locale: Optional[str] = None) -> List[Dict[str, str]]:

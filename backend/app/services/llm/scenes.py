@@ -37,6 +37,7 @@ from .prompts import (
     generate_questions_messages,
     grade_short_answer_messages,
     infer_card_relations_messages,
+    question_session_prompt,
     rag_answer_messages,
     summarize_chapter_messages,
     system_prompt_for,
@@ -338,17 +339,37 @@ class SceneMethods:
             scene="extract_knowledge",
         )
 
-    def create_question_session(self) -> ConversationSession:
+    def create_question_session(
+        self,
+        *,
+        question_types: Optional[Dict[str, int]] = None,
+        difficulty_mix: Optional[Dict[str, int]] = None,
+        prompt_version: Optional[str] = None,
+    ) -> ConversationSession:
         """
         创建题目生成的多轮对话会话
 
         所有批次在同一对话窗口内依次送入，LLM 可以参考之前已生成的题目，
         避免不同批次的题目重复或雷同。
 
-        Returns:
-            ConversationSession: 题目生成对话会话
+        Args:
+            question_types: `{题型: 道数}`。空 ⇒ 用 `PROMPT_VERSIONS` 里登记的
+                版本（当前是 v2）按**默认配比**出题
+            difficulty_mix: `{难度: 道数}`；空 ⇒ 不写难度段（由模型自定）
+            prompt_version: 显式指定 `"1"` / `"2"` / `"3"`。**A3′ 的对比实验靠它** ——
+                它让"三版同时存在"成为可能，而不是改一次文本就再也拿不到旧版。
+                `None` ⇒ 用 `PROMPT_VERSIONS` 登记的那一版。
+
+        ⚠️ 题型/难度是**会话级**的（写在 system prompt 里），不是逐批的：
+        `ConversationSession` 只在创建时设一次 system prompt，之后每批只是追问。
+        所以"本批要出几道什么题"必须由调用方在**建会话时**决定。
         """
-        system_prompt = system_prompt_for("question_session")
+        system_prompt = question_session_prompt(
+            question_types=question_types,
+            difficulty_mix=difficulty_mix,
+            locale=getattr(self, "_locale", None),
+            version=prompt_version,
+        )
         return ConversationSession(
             self,
             system_prompt,

@@ -728,8 +728,27 @@ async def generate_questions(
     db: AsyncSession = Depends(get_db),
     target_categories: Optional[List[str]] = Query(None, description="目标卡片类别，如 blind_spot/extension"),
     target_difficulty: Optional[str] = Query(None, description="目标难度倾向"),
+    prompt_version: Optional[str] = Query(
+        None,
+        description="出题提示词版本（1/2/3）。留空用服务端默认版；A3′ 的三版对比靠它",
+    ),
 ):
-    """触发题目生成"""
+    """触发题目生成
+
+    ## `prompt_version`（A3′，2026-10-22）
+
+    出题提示词有**三个并存版本**（`services/llm/prompts.py`）：
+    v1 = 只有选择题/只有 easy（改造前的行为，仍是服务端默认）、
+    v2 = 题型与难度可配、v3 = v2 + 出题质量规则。
+
+    它们同时存在而不是"改一次文本"的原因有两个：① 改了默认版就再也拿不到
+    旧版的产物，**对比实验做不了**；② `prompt_version` 会按版本分组
+    （`PROMPT_VERSIONS`），分组报表才可能回答"新版是不是更好"。
+
+    ⚠️ 版本号写错时**不报错**、退回服务端默认版（见
+    `prompts.question_session_prompt` 的说明）—— 出题是长任务，
+    为参数写错整篇失败代价太大。所以这里也不做枚举校验。
+    """
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
@@ -746,8 +765,10 @@ async def generate_questions(
     if card_count == 0:
         raise AppError(UNDERSTANDING_NO_CARDS, "该笔记暂无知识卡片，请先触发理解管道", 400)
 
-    # 触发 Celery 题目生成任务（透传定向出题参数）
-    generate_questions_task.delay(note_id, target_categories, target_difficulty)
+    # 触发 Celery 题目生成任务（透传定向出题参数 + 提示词版本）
+    generate_questions_task.delay(
+        note_id, target_categories, target_difficulty, prompt_version
+    )
 
     return GenerateQuestionsResponse(
         note_id=note_id,

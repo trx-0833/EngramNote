@@ -21,7 +21,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional
 
 from celery.exceptions import Retry
 from sqlalchemy import select, delete
@@ -42,7 +42,7 @@ from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..models.user import User
-from ..services.llm.prompts import prompt_version
+from ..services.llm.prompts import DEFAULT_QUESTION_PROMPT_VERSION
 from ..services.llm.structured import QuizQuestion, validate_items
 
 settings = get_settings()
@@ -213,7 +213,69 @@ def _questions_for_card(card: dict, target_categories: Optional[list], target_di
     return [{"count": 1, "difficulty": None}]
 
 
-async def _generate_questions(note_id: str, target_categories: Optional[list] = None, target_difficulty: Optional[str] = None):
+#: 定向出题时的**默认题型配比**（A3′，2026-10-22）
+#:
+#: ## 为什么是这个比例
+#:
+#: 实测真库 3358 道题**全是 `choice`**、难度 easy 2567 / medium 773 / hard 仅 18。
+#: 用户能忍受的单调上限早就过了 —— 但"全改成简答题"也不对：
+#: `choice` 是唯一能**自动判分**的题型（`review_log.grading_method='choice'`），
+#: 其余两种要走自评或编辑距离容错（见 `models/review_log.py:103`）。
+#: 所以保留一半选择题，把另外一半换成需要主动回忆的题型。
+#:
+#: 2 : 1 : 1 是**起点，不是结论** —— A3′ 的重跑就是为了拿数据决定它。
+DEFAULT_QUESTION_TYPE_MIX: Dict[str, int] = {
+    "choice": 2,
+    "fill_blank": 1,
+    "short_answer": 1,
+}
+
+#: 定向出题时的**默认难度配比**
+#:
+#: 同样按"真库现状"倒过来配：hard 只有 18/3358（0.5%）。
+#: 但也不能全给 hard —— 难度配比是**学习曲线**，不是"越难越好"。
+DEFAULT_DIFFICULTY_MIX: Dict[str, int] = {
+    "easy": 1,
+    "medium": 2,
+    "hard": 1,
+}
+
+
+def _question_plan_for(
+    target_categories: Optional[list],
+    target_difficulty: Optional[str],
+) -> tuple:
+    """把"定向出题"的两个入参翻译成**会话级**的题型/难度配比（A3′）
+
+    ## 判据
+
+    - **没有 `target_categories`** ⇒ `(None, None)`：会话退回默认提示词版本，
+      **行为逐字节不变**（这是"改造不动存量"的保证，也保住了对照组）。
+    - 有目标类别 ⇒ 用 `DEFAULT_QUESTION_TYPE_MIX` / `DEFAULT_DIFFICULTY_MIX`；
+      若 `target_difficulty` 是合法难度名，则把难度配比**压成该档**
+      （用户显式指定时以他为准，而不是被默认配比盖掉）。
+
+    ⚠️ `target_difficulty` 此前是"**暂不强制使用，仅作为提示**"
+    （`_questions_for_card` 的 docstring 原话），也就是说它进了卡片文本却
+    没人保证生效。现在它至少能决定**会话级的难度配比** —— 那比"一句提示"硬。
+    """
+    if not target_categories:
+        return None, None
+
+    difficulty_mix: Optional[Dict[str, int]] = dict(DEFAULT_DIFFICULTY_MIX)
+    if target_difficulty in {"easy", "medium", "hard"}:
+        # 显式指定难度：全部压到该档（而不是"倾向"）
+        difficulty_mix = {target_difficulty: sum(DEFAULT_DIFFICULTY_MIX.values())}
+
+    return dict(DEFAULT_QUESTION_TYPE_MIX), difficulty_mix
+
+
+async def _generate_questions(
+    note_id: str,
+    target_categories: Optional[list] = None,
+    target_difficulty: Optional[str] = None,
+    question_prompt_version: Optional[str] = None,
+):
     """
     执行题目生成的核心逻辑（多轮对话模式）
 
@@ -295,7 +357,35 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
             )
 
     # 3. 创建多轮对话会话（所有批次共用同一窗口）
-    question_session = llm_service.create_question_session()
+    #
+    # ⚠️ A3′（2026-10-22）：会话的**系统提示词**里写着题型与难度配比，
+    # 而它是**会话级**的（`ConversationSession` 只在创建时设一次）。
+    # 所以配比必须在这里决定，而不是逐批拼进卡片文本 ——
+    # 改造前正是后者：`target_categories` 只往卡片文本里追加
+    # `[本知识点需生成 N 道题，难度倾向：…]`，而系统提示词仍写着
+    # "生成选择题" + 样例写死 `easy`，局部提示压不过全局指令，
+    # 于是实测 3358 道题**全是 choice**。
+    #
+    # 没传 `target_categories` 时 `question_types` / `difficulty_mix` 都是 None，
+    # 会话退回默认版本（`DEFAULT_QUESTION_PROMPT_VERSION = "1"`）⇒ **行为逐字节不变**。
+    question_types, difficulty_mix = _question_plan_for(target_categories, target_difficulty)
+    #: **实际用**的那一版（写进 `QuizItem.prompt_version` 的也是它）。
+    #: 写成 `question_prompt_version or DEFAULT` 而不是再来一次
+    #: `prompt_version("question_session")`：后者的语义是"当前默认版"，
+    #: 不是"这一次用的版" —— A3′ 的对比实验就差这一个字。
+    effective_question_prompt_version = (
+        question_prompt_version or DEFAULT_QUESTION_PROMPT_VERSION
+    )
+    question_session = llm_service.create_question_session(
+        question_types=question_types,
+        difficulty_mix=difficulty_mix,
+        prompt_version=effective_question_prompt_version,
+    )
+    logger.info(
+        "出题会话: note=%s prompt_version=%s 题型=%s 难度=%s",
+        note_id, effective_question_prompt_version, question_types or "继承默认",
+        difficulty_mix or "继承默认",
+    )
 
     # 4. 分批生成题目（在同一对话窗口中依次追问）
     total_questions = 0
@@ -376,7 +466,13 @@ async def _generate_questions(note_id: str, target_categories: Optional[list] = 
                         options=json.dumps(q.get("options"), ensure_ascii=False) if q.get("options") else None,
                         explanation=q.get("explanation"),
                         # 阶段 4.6：这道题是哪一版提示词产出的（溯源）
-                        prompt_version=prompt_version("question_session"),
+                        #
+                        # ⚠️ A3′（2026-10-22）：这里**必须记"实际用的那一版"**，
+                        # 不能记 `prompt_version("question_session")`（那个常量恒为
+                        # 默认版）。否则 A3′ 跑完 v2/v3 之后，库里每一行都写着
+                        # "1" —— `prompt_version_report_service` 的分组报表会把
+                        # 三版混成一组，**对比实验的结论直接作废**，而界面看不出异常。
+                        prompt_version=effective_question_prompt_version,
                     )
                     session.add(quiz_item)
                     total_questions += 1
@@ -496,7 +592,13 @@ def understand_document_task(self, note_id: str):
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
-def generate_questions_task(self, note_id: str, target_categories: Optional[list] = None, target_difficulty: Optional[str] = None):
+def generate_questions_task(
+    self,
+    note_id: str,
+    target_categories: Optional[list] = None,
+    target_difficulty: Optional[str] = None,
+    question_prompt_version: Optional[str] = None,
+):
     """
     Celery 任务：题目生成
 
@@ -506,11 +608,17 @@ def generate_questions_task(self, note_id: str, target_categories: Optional[list
         self: Celery 任务实例
         note_id: 笔记 ID
         target_categories: 目标卡片类别列表，如 ["blind_spot"]、["extension"]；默认 None（兼容原行为）
-        target_difficulty: 目标难度倾向（暂不强制使用，仅作为提示）；默认 None
+        target_difficulty: 目标难度倾向；默认 None。**A3′ 起它能真正决定会话级
+            难度配比**（此前只写进卡片文本、没人保证生效）
+        question_prompt_version: 出题提示词版本 `"1"` / `"2"` / `"3"`；
+            `None` = 用 `prompts.DEFAULT_QUESTION_PROMPT_VERSION`。
+            **A3′ 的三版对比靠它**，也让"改了默认版之后仍能跑旧版"成为可能。
     """
     try:
         with _task_loop("generate_questions"):
-            _run_async(_generate_questions(note_id, target_categories, target_difficulty))
+            _run_async(_generate_questions(
+                note_id, target_categories, target_difficulty, question_prompt_version
+            ))
     except Exception as exc:
         logger.error(f"题目生成任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:
