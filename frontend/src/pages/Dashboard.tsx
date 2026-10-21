@@ -51,6 +51,20 @@ import styles from './Dashboard.module.css';
 import { useTranslation, type MessageKey } from '../i18n';
 
 /**
+ * 读取异常对象上的后端 error_code（阶段 0.11）
+ *
+ * 与 `Review.tsx:41-45` / `TodayLearn.tsx` 的同名助手**逐字同形**，
+ * 理由也一样：用**结构化读字段**而不是 `instanceof ApiError` —— 本页依赖的
+ * `../api/client` 在测试里被整体 mock，从被 mock 的模块 import 进来的类会是
+ * undefined，那时 `e instanceof undefined` 直接抛 TypeError。
+ */
+function errorCodeOf(e: unknown): string | null {
+  if (typeof e !== 'object' || e === null) return null;
+  const code = (e as { code?: unknown }).code;
+  return typeof code === 'string' && code ? code : null;
+}
+
+/**
  * 仪表盘页面组件
  */
 export default function Dashboard() {
@@ -74,8 +88,9 @@ export default function Dashboard() {
     setError('');
     // 统计类接口失败不再静默吞掉——记录失败集合，非关键失败轻提示，
     // 关键失败（notes）仍走整页错误，见 docs/decisions.md#F-24。
-    // getDailyPlan 在"无活跃目标"时返回 400（正常业务状态，不是加载失败），
-    // 不计数到 failedCount，避免新用户每次打开都误报"部分数据加载失败"
+    // getDailyPlan 在"无活跃目标"时返回 400 `GOAL_NONE_ACTIVE`（正常业务状态，
+    // 不是加载失败），按 error_code 分流、不计数到 failedCount，
+    // 避免新用户每次打开都误报"部分数据加载失败"
     let failedCount = 0;
     try {
       const [notesRes, statsRes, reportRes, trendRes, weakRes, goalsRes, planRes] =
@@ -102,9 +117,15 @@ export default function Dashboard() {
             return null;
           }),
           getDailyPlan().catch((e: unknown) => {
-            // 无活跃目标 → 400 "No active goals..."：正常状态，不算失败
-            const msg = e instanceof Error ? e.message : '';
-            if (!msg.includes('active goals')) {
+            // 无活跃目标 → 400 `GOAL_NONE_ACTIVE`：正常状态，不算失败。
+            //
+            // ⚠️ 2026-10-21 改：这里原来是 `msg.includes('active goals')` ——
+            // 对**英文文案**做子串匹配。后端把文案改一个字（或走 i18n 表把
+            // 中文界面的文案换成中文）这个分支就静默失效，而失效的样子是
+            // 「控制台红字回来了」而不是报错 —— 正是 overhaul-plan 的 F-19
+            // 记的那个形态。现在按**结构化的 `error_code`** 分流（阶段 0.11
+            // 给 `ApiError` 加 `code` 字段就是为了这件事，见 `client.ts:431-437`）。
+            if (errorCodeOf(e) !== 'GOAL_NONE_ACTIVE') {
               failedCount++;
             }
             return null;
