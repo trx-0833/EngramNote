@@ -369,6 +369,10 @@ const en = {
 
   notesList: {
     title: 'Notes',
+    exportAll: 'Export all (ZIP)',
+    exportingAll: 'Packing…',
+    exportAllDone: 'Download started',
+    exportAllFailed: 'Export failed',
     searchPlaceholder: 'Search note titles…',
     searchLabel: 'Search notes',
     totalCount: '{count} total',

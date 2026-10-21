@@ -26,8 +26,8 @@ pipeline（`requirements-pdf-local.txt`），而 `app/services/mineru/config_loa
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # 文件名安全化
@@ -255,3 +255,78 @@ def build_export_text(front_matter: str, content: str) -> str:
       而且它是显式声明的元信息块，不是对正文的改写。
     """
     return f"{front_matter}\n{content}"
+
+
+# ===========================================================================
+# 批量导出（B4）：ZIP 的目录页与文件名
+# ===========================================================================
+
+def build_zip_index(entries: List[Dict[str, str]], *, variant: str) -> str:
+    """生成批量导出的 `index.md`（目录页）
+
+    ## 为什么要有它
+
+    一个 ZIP 里摊着几十个 `.md` 时，用户解压后**不知道从哪看起**，
+    也不知道每篇是什么来源、哪一版。目录页把这几件事一次说清：
+    文件名 ←→ 标题、来源类型、笔记状态。
+
+    ## 链接必须相对、且要 URL 编码
+
+    目录页是给 Obsidian / Typora 这类 Markdown 阅读器点的，
+    所以链接用 `./文件名.md`。文件名里可能有中文、空格、括号 ——
+    这些字符在 Markdown 链接里必须**百分号编码**，否则链接会断在第一个空格处。
+    用 `urllib.parse.quote` 而不是"自己替换几个字符"：
+    前者是唯一能覆盖全部保留字符的做法。
+
+    ## 为什么不写"导出时间"以外的统计
+
+    统计数字（多少篇、多少字）要看就会过期，而这份目录是**静态文件**。
+    只写导出时间与总数 —— 它们描述"这一份快照"，不会随时间变得不准。
+    """
+    from urllib.parse import quote
+
+    lines = [
+        "# 导出目录",
+        "",
+        f"- 导出时间：{datetime.now(timezone.utc).replace(microsecond=0).isoformat()}",
+        f"- 正文版本：{'清洗版（clean）' if variant == 'clean' else '原始版（original）'}",
+        f"- 笔记数量：{len(entries)}",
+        "",
+        "| 标题 | 文件名 | 来源 | 状态 |",
+        "|---|---|---|---|",
+    ]
+    for entry in entries:
+        filename = entry["filename"]
+        # 表格里的 `|` 会破坏列结构 —— 标题里出现竖线时必须转义
+        title = entry["title"].replace("|", "\\|")
+        lines.append(
+            f"| [{title}](./{quote(filename)}) | `{filename}` "
+            f"| {entry.get('source_type', '')} | {entry.get('status', '')} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def unique_zip_filename(title: str, used: set, fallback_id: str = "") -> str:
+    """给 ZIP 内的文件取一个**不重名**的名字（不含目录，`.md` 结尾）
+
+    ## 为什么必须去重
+
+    同一个库里有 72 种标题重复（实测），其中 `标准适用范围` 出现了 9 次。
+    直接用标题当文件名的话，`zipfile` **不报错**、后写的静默覆盖先写的 ——
+    用户导出一个 ZIP，解压后发现少了 8 篇，而**全程没有任何提示**。
+
+    做法：撞名时追加 ` (2)`、` (3)`…。与操作系统"复制副本"的命名习惯一致，
+    所以用户不用学新规则。
+    """
+    stem = sanitize_filename(title, fallback_id=fallback_id)
+    candidate = f"{stem}.md"
+    if candidate not in used:
+        used.add(candidate)
+        return candidate
+    n = 2
+    while f"{stem} ({n}).md" in used:
+        n += 1
+    candidate = f"{stem} ({n}).md"
+    used.add(candidate)
+    return candidate

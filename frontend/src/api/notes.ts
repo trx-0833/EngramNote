@@ -499,3 +499,39 @@ export async function exportNote(
   const query: QueryOf<'/notes/{note_id}/export', 'get'> = { variant };
   return downloadRequest(`/notes/${noteId}/export${buildQuery(query)}`);
 }
+
+/**
+ * 批量导出为 ZIP（B4，2026-10-22）
+ *
+ * ## 为什么这条才是"防锁定"的真正价值
+ *
+ * `docs/open-source-readiness.md` 写着：单篇导出已落地，但**批量导出（整库搬走）
+ * 与导入都还没有**，而「整库可搬走」才是这条真正的价值。
+ * 导出的 ZIP 解压后可直接放进 Obsidian vault（`index.md` 目录 + 每篇一个 `.md`）。
+ *
+ * ## `ids` 省略 = 导出全部
+ *
+ * 不传就是"当前用户的全部未删除笔记"。**这不是默认值的偷懒**：
+ * 界面上"导出全部"是最常用的那个动作，而"导出选中的 N 篇"要先有批量选择 UI
+ * （计划里明确把批量选择列为配套、不在本轮）。
+ *
+ * ## 跳过数是可见的
+ *
+ * 该版本没有正文的笔记会被**跳过**（而不是让整包失败）—— 批量导出 200 篇时
+ * 因为 3 篇没清洗就全盘失败，用户只能一个个试错。跳过数在后端响应头
+ * `X-Export-Skipped` 与 ZIP 内的 `index.md` 里都有。
+ *
+ * @param variant - `clean`（清洗版，默认）或 `original`（原始版）
+ * @param ids - 只导这几篇；省略 = 全部
+ * @returns blob 与文件名
+ * @throws {ApiError} 一篇都没有该版本正文时 `code` 为 `NOTE_EXPORT_ZIP_EMPTY`
+ */
+export async function exportNotesZip(
+  variant: 'clean' | 'original' = 'clean',
+  ids?: string[],
+): Promise<{ blob: Blob; filename: string | null }> {
+  // 查询参数按契约派生。`ids` 是数组，`buildQuery` 会展开成重复键
+  // （`ids=a&ids=b`）—— 后端用 `List[str]` 接，两者必须同一约定。
+  const query: QueryOf<'/notes/export', 'get'> = { variant, ids };
+  return downloadRequest(`/notes/export${buildQuery(query)}`);
+}

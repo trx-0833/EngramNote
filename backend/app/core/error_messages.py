@@ -134,6 +134,16 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "这篇笔记的原始版内容读不出来",
         "en": "The original version of this note could not be read",
     },
+    # B4 批量导出（独立 code：语义是"这一批全都没有该版本的正文"，
+    # 与单篇的 `NOTE_EXPORT_EMPTY` 不是一回事）
+    "NOTE_EXPORT_ZIP_EMPTY": {
+        "zh-CN": "没有可导出的正文 —— 这些笔记都没有该版本的正文，请换一个版本或先清洗",
+        "en": "Nothing to export — these notes have no content in the requested version.",
+    },
+    "NOTE_EXPORT_TOO_MANY": {
+        "zh-CN": "一次最多导出 200 篇笔记，请分批导出",
+        "en": "At most 200 notes can be exported at once — please export in batches.",
+    },
     "NOTE_NOT_TRASHED": {"zh-CN": "该笔记不在回收站中", "en": "This note is not in the trash"},
     "NOTE_RESTORE_CONFLICT": {
         "zh-CN": "恢复失败：目标位置存在同名笔记，且自动改名已用尽",

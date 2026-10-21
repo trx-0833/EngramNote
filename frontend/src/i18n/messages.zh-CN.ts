@@ -510,6 +510,11 @@ const zhCN = {
   /** 笔记列表页（`NotesList`，i18n 阶段 3） */
   notesList: {
     title: '笔记',
+    /** 批量导出为 ZIP（B4）：解压后可直接放进 Obsidian vault */
+    exportAll: '导出全部（ZIP）',
+    exportingAll: '正在打包…',
+    exportAllDone: '已开始下载',
+    exportAllFailed: '导出失败',
     searchPlaceholder: '搜索笔记标题...',
     searchLabel: '搜索笔记',
     totalCount: '共 {count} 条',

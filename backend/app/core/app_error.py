@@ -70,6 +70,17 @@ NOTE_MARKDOWN_PATH_MISSING = "NOTE_MARKDOWN_PATH_MISSING"
 # 但错误码按"资源 + 条件"取义（本文件的命名约定），
 # 而这里的资源是**导出**、条件是**该版本无内容**。
 NOTE_EXPORT_EMPTY = "NOTE_EXPORT_EMPTY"
+# 批量导出时一篇都没有该版本的正文（B4）
+#
+# ⚠️ 为什么**另起一个码**而不是复用 `NOTE_EXPORT_EMPTY`：
+# 后者的文案来自两个**变量**（单篇导出的 `empty_message`），
+# 而 `tests/test_i18n.py` 的逐字守卫只看**字面量**调用点 ——
+# 复用它会让那个码的表值变成"没有任何字面量调用点能匹配上"，
+# 守卫当场红。而且语义本来就不同：一个是"这一篇没有清洗版"，
+# 一个是"这一批全都没有该版本的正文"。
+NOTE_EXPORT_ZIP_EMPTY = "NOTE_EXPORT_ZIP_EMPTY"
+# 批量导出请求的篇数超过上限（B4：ZIP 在临时文件里生成，防止大库撑爆进程）
+NOTE_EXPORT_TOO_MANY = "NOTE_EXPORT_TOO_MANY"
 # 笔记不在回收站中，无法恢复
 NOTE_NOT_TRASHED = "NOTE_NOT_TRASHED"
 # 恢复时 inbox 同名冲突且改名序号耗尽

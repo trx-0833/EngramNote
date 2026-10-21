@@ -7,10 +7,13 @@
 """
 
 import logging
+import os
 import re
+import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -18,6 +21,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.app_error import (
+    NOTE_EXPORT_TOO_MANY,
+    NOTE_EXPORT_ZIP_EMPTY,
     NOTE_CONTENT_TOO_LARGE,
     NOTE_EXPORT_EMPTY,
     NOTE_MARKDOWN_PATH_MISSING,
@@ -46,7 +51,9 @@ from ...services.note_export import (
     build_content_disposition,
     build_export_text,
     build_front_matter,
+    build_zip_index,
     sanitize_filename,
+    unique_zip_filename,
 )
 from ...services.note_service import (
     get_clean_markdown_content,
@@ -159,6 +166,194 @@ async def list_archived_notes(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+#: 批量导出一次最多打包多少篇笔记
+#:
+#: 为什么要有上限：ZIP 在**内存/临时文件**里生成，而每篇笔记要先从对象存储
+#: 读出来。一个几万篇的库会直接把进程内存打满（计划里 B4 的风险栏点了这条）。
+#: 200 是"绝对够用、又不会失控"的数量级 —— 真库目前 28 篇。
+#: ⚠️ 超限时**报错**而不是静默截断：悄悄少导几篇比报错糟得多，
+#: 用户会以为"我的库就这么多"。
+EXPORT_ZIP_MAX_NOTES = 200
+
+
+@router.get("/export", response_class=StreamingResponse)
+async def export_notes_batch(
+    variant: str = Query(
+        "clean",
+        pattern="^(clean|original)$",
+        description="导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+    ),
+    ids: Optional[List[str]] = Query(
+        None,
+        description="要导出的笔记 ID（可重复传）；不传 = 导出当前用户的全部未删除笔记",
+    ),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导出为 ZIP（B4，2026-10-22）
+
+    ## 为什么这条才是"防锁定"的真正价值
+
+    `docs/open-source-readiness.md` 写着：单篇导出已落地，但**批量导出（整库搬走）
+    与导入都还没有**，而「整库可搬走」才是这条真正的价值。本篇实现前者。
+
+    ## ⚠️ 这条路由必须注册在 `/{note_id}` **之前**
+
+    FastAPI / Starlette 按**注册顺序**匹配。`GET /api/notes/{note_id}`（详情）
+    在本文件更早的位置注册，所以如果这条放在它后面，
+    `/api/notes/export` 会被当成 `note_id="export"` 的详情请求 ⇒ 404「笔记不存在」。
+    放在前面才抢得到这个路径。（本函数写在 `/{note_id}` 上方，位置即契约。）
+
+    ## ZIP 里有什么
+
+    - `index.md` —— 目录页（标题 ←→ 文件名、来源、状态、导出时间、版本）
+    - 每篇一个 `<标题>.md` —— 与**单篇导出逐字节同一格式**
+      （同一对 `build_front_matter` + `build_export_text`）。
+      这样"单篇导出的文件"和"批量导出里的那一个"不会长得不一样。
+
+    ## 生成方式是"临时文件 + 分块流出"，不是"内存里拼一个大 bytes"
+
+    `SpooledTemporaryFile` 先写内存（默认 1 MB），超了自动落到磁盘临时文件。
+    于是：小库不碰磁盘，大库不占内存。最后按 256 KB 分块流出去 ——
+    与计划的 B4 风险栏「防大库内存占用」对应。
+
+    ## 跳过而不是失败的两种笔记
+
+    - 该版本**没有正文**（例如还没清洗）的笔记；
+    - 回收站里的笔记（`get_note_detail` 已过滤）。
+
+    「静默跳过」在这里是**对的**：批量导出 200 篇时，因为其中 3 篇没清洗
+    就整包失败，用户只能一个个试错。跳过的数量会出现在 `index.md` 里
+    与响应头 `X-Export-Skipped` 里 —— 用户能看见，不是黑箱。
+
+    Raises:
+        AppError: 一篇都没有可导出的（NOTE_EXPORT_EMPTY → 400）
+        AppError: 请求的篇数超过上限（NOTE_EXPORT_TOO_MANY → 400）
+    """
+    if ids:
+        # 显式点名的 id：逐个查（仍走 `get_note_detail` 做归属 + 回收站校验）。
+        # 不存在的 id **不报错**而跳过 —— 与"笔记被别人删了"这种情况和解，
+        # 且跳过数会体现在 index.md 与响应头里。
+        notes = []
+        for note_id in ids:
+            note = await get_note_detail(db, note_id, current_user.id)
+            if note:
+                notes.append(note)
+    else:
+        notes, _total = await get_notes_list(
+            db, current_user.id, page=1, page_size=EXPORT_ZIP_MAX_NOTES + 1
+        )
+
+    if len(notes) > EXPORT_ZIP_MAX_NOTES:
+        # ⚠️ 文案**不用 f-string**：`tests/test_i18n.py` 会拿 raise 处的字面量
+        # 与 `error_messages.py` 的译文逐字比对，而 f-string 拼出来的值在 AST 里
+        # 不是常量 —— 那条守卫只能把这种情况列进"未翻译"白名单，
+        # 等于让这个错误码在英文界面下退回中文。上限数字因此写进文案字面量。
+        raise AppError(
+            NOTE_EXPORT_TOO_MANY,
+            "一次最多导出 200 篇笔记，请分批导出",
+            400,
+        )
+
+    entries: List[dict] = []
+    skipped = 0
+    used_names: set = set()
+
+    # `SpooledTemporaryFile`：内存写满 1MB 才落盘 —— 小库完全不碰磁盘。
+    # 用 `mode="w+b"` 是 ZipFile 的要求（它要能 seek）。
+    spool = tempfile.SpooledTemporaryFile(max_size=1 << 20, mode="w+b")
+    with zipfile.ZipFile(spool, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for note in notes:
+            if variant == "clean":
+                content = await get_clean_markdown_content(note)
+            else:
+                content = await get_note_markdown_content(note)
+            if not content:
+                # 该版本没有正文 ⇒ 跳过（不建一个空文件：空文件看起来像
+                # "这篇笔记本来就是空的"）
+                skipped += 1
+                continue
+
+            front_matter = build_front_matter(
+                title=note.title,
+                source_type=note.source_type.value,
+                status=note.status.value,
+                variant=variant,
+                page_count=note.page_count,
+                created_at=note.created_at,
+                updated_at=note.updated_at,
+                exported_at=datetime.now(timezone.utc).replace(microsecond=0),
+            )
+            body = build_export_text(front_matter, content)
+            filename = unique_zip_filename(note.title, used_names, fallback_id=note.id)
+            zf.writestr(filename, body.encode("utf-8"))
+            entries.append({
+                "filename": filename,
+                "title": note.title,
+                "source_type": note.source_type.value,
+                "status": note.status.value,
+            })
+
+        # 目录页最后写：它要列出**实际写进去的**那些文件（含去重后的文件名），
+        # 先写就只能列计划写的，两者在撞名时不一致。
+        #
+        # ⚠️ 一篇都没有时的分支**不能**写在 `with` 里面并 close spool ——
+        # `ZipFile.__exit__` 还要写中央目录，对着已关闭的文件会抛
+        # `ValueError: I/O operation on closed file`，被全局处理器翻成 **500**
+        # （实测踩过：本来是 400 的语义，用户看到的是"服务器内部错误"）。
+        if entries:
+            index = build_zip_index(entries, variant=variant)
+            if skipped:
+                index = index.replace(
+                    f"- 笔记数量：{len(entries)}",
+                    f"- 笔记数量：{len(entries)}（另有 {skipped} 篇没有该版本的正文，已跳过）",
+                )
+            zf.writestr("index.md", index.encode("utf-8"))
+
+    # 空包的分支放在 `with` **之外**：先让 ZipFile 正常收尾（写中央目录），
+    # 再关 spool、再抛 400。
+    if not entries:
+        spool.close()
+        raise AppError(
+            NOTE_EXPORT_ZIP_EMPTY,
+            "没有可导出的正文 —— 这些笔记都没有该版本的正文，请换一个版本或先清洗",
+            400,
+        )
+
+    spool.seek(0)
+    size = spool.seek(0, os.SEEK_END)
+    spool.seek(0)
+
+    def _chunks():
+        """按 256KB 分块流出（不把整个 ZIP 读成一个大 bytes）"""
+        try:
+            while True:
+                chunk = spool.read(256 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            # 流结束时关掉临时文件。放在 finally 里：客户端中断（浏览器取消下载）
+            # 时生成器会被 close()，这里必须仍然执行 —— 否则临时文件会漏到
+            # 进程退出才被清理（Windows 上尤其明显：删不掉）。
+            spool.close()
+
+    return StreamingResponse(
+        _chunks(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": build_content_disposition("engramnote-export"),
+            "Content-Length": str(size),
+            # 跳过数放进响应头：用户从浏览器下载时看不到 index.md 里的那句话，
+            # 但开发者工具/脚本能读到它。不加这个头，"有 3 篇被跳过"就只能
+            # 解压后翻目录页才知道。
+            "X-Export-Skipped": str(skipped),
+            # 让前端能读到上面那个自定义头（跨源时需要显式暴露）
+            "Access-Control-Expose-Headers": "X-Export-Skipped",
+        },
     )
 
 

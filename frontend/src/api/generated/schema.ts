@@ -1432,6 +1432,64 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Notes Batch
+     * @description 批量导出为 ZIP（B4，2026-10-22）
+     *
+     *     ## 为什么这条才是"防锁定"的真正价值
+     *
+     *     `docs/open-source-readiness.md` 写着：单篇导出已落地，但**批量导出（整库搬走）
+     *     与导入都还没有**，而「整库可搬走」才是这条真正的价值。本篇实现前者。
+     *
+     *     ## ⚠️ 这条路由必须注册在 `/{note_id}` **之前**
+     *
+     *     FastAPI / Starlette 按**注册顺序**匹配。`GET /api/notes/{note_id}`（详情）
+     *     在本文件更早的位置注册，所以如果这条放在它后面，
+     *     `/api/notes/export` 会被当成 `note_id="export"` 的详情请求 ⇒ 404「笔记不存在」。
+     *     放在前面才抢得到这个路径。（本函数写在 `/{note_id}` 上方，位置即契约。）
+     *
+     *     ## ZIP 里有什么
+     *
+     *     - `index.md` —— 目录页（标题 ←→ 文件名、来源、状态、导出时间、版本）
+     *     - 每篇一个 `<标题>.md` —— 与**单篇导出逐字节同一格式**
+     *       （同一对 `build_front_matter` + `build_export_text`）。
+     *       这样"单篇导出的文件"和"批量导出里的那一个"不会长得不一样。
+     *
+     *     ## 生成方式是"临时文件 + 分块流出"，不是"内存里拼一个大 bytes"
+     *
+     *     `SpooledTemporaryFile` 先写内存（默认 1 MB），超了自动落到磁盘临时文件。
+     *     于是：小库不碰磁盘，大库不占内存。最后按 256 KB 分块流出去 ——
+     *     与计划的 B4 风险栏「防大库内存占用」对应。
+     *
+     *     ## 跳过而不是失败的两种笔记
+     *
+     *     - 该版本**没有正文**（例如还没清洗）的笔记；
+     *     - 回收站里的笔记（`get_note_detail` 已过滤）。
+     *
+     *     「静默跳过」在这里是**对的**：批量导出 200 篇时，因为其中 3 篇没清洗
+     *     就整包失败，用户只能一个个试错。跳过的数量会出现在 `index.md` 里
+     *     与响应头 `X-Export-Skipped` 里 —— 用户能看见，不是黑箱。
+     *
+     *     Raises:
+     *         AppError: 一篇都没有可导出的（NOTE_EXPORT_EMPTY → 400）
+     *         AppError: 请求的篇数超过上限（NOTE_EXPORT_TOO_MANY → 400）
+     */
+    get: operations['export_notes_batch_api_notes_export_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/trash': {
     parameters: {
       query?: never;
@@ -9162,6 +9220,38 @@ export interface operations {
         content: {
           'application/json': components['schemas']['NoteListResponse'];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  export_notes_batch_api_notes_export_get: {
+    parameters: {
+      query?: {
+        /** @description 导出哪一版正文：clean（清洗版，默认）或 original（原始版） */
+        variant?: string;
+        /** @description 要导出的笔记 ID（可重复传）；不传 = 导出当前用户的全部未删除笔记 */
+        ids?: string[] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

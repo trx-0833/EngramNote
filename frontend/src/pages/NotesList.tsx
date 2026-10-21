@@ -8,7 +8,14 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getNotes, getArchivedNotes, deleteNote, retryConvert, type Note } from '../api/client';
+import {
+  getNotes,
+  getArchivedNotes,
+  deleteNote,
+  retryConvert,
+  exportNotesZip,
+  type Note,
+} from '../api/client';
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
 import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -56,6 +63,8 @@ export default function NotesList() {
   const [page, setPage] = useState(1);
   /** 搜索关键词 */
   const [keyword, setKeyword] = useState('');
+  /** 「导出全部」进行中（B4）—— 期间禁用按钮，防止连点生成多份 ZIP */
+  const [exportingAll, setExportingAll] = useState(false);
   /** 当前笔记角色筛选：material=学习资料，personal_note=我的笔记 */
   const [noteRole, setNoteRole] = useState<'material' | 'personal_note'>('material');
   /** 各角色下是否只显示已审阅笔记，保持两个 Tab 下已审阅筛选独立 */
@@ -145,6 +154,53 @@ export default function NotesList() {
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('shared.retryFailed'));
+    }
+  }
+
+  /**
+   * 「导出全部为 ZIP」（B4，2026-10-22）
+   *
+   * ## 为什么这条才是"防锁定"的真正价值
+   *
+   * `docs/open-source-readiness.md` 写着：单篇导出已落地，但**批量导出
+   * （整库搬走）与导入都还没有**，而「整库可搬走」才是这条真正的价值。
+   * 导出的 ZIP 解压后可直接放进 Obsidian vault。
+   *
+   * ## 与单篇导出同一套下载写法
+   *
+   * `downloadRequest` 已经处理了"后端把错误写在 body 里但状态码不是 2xx"
+   * 那种情况（详见 `api/client.ts` 的 `downloadRequest` 注释）。这里唯一
+   * 不同的是文件名兜底：后端给的是 `engramnote-export.zip`，但它也可能缺失，
+   * 所以保留一个兜底名。
+   *
+   * ## 失败时**透传后端文案**
+   *
+   * `NOTE_EXPORT_ZIP_EMPTY`（一篇都没有该版本正文）这种情况下，后端那句
+   * "没有可导出的正文 —— 这些笔记都没有该版本的正文"比前端任何自造文案都准确
+   * —— 它说清了**为什么**（版本不对）与**怎么办**（换版本或先清洗）。
+   */
+  async function handleExportAll() {
+    setExportingAll(true);
+    try {
+      const { blob, filename } = await exportNotesZip('clean');
+      const url = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename ?? 'engramnote-export.zip';
+        document.body.appendChild(anchor);
+        anchor.click();
+        // 点击后立刻移除：`<a>` 只在这次点击里有用
+        document.body.removeChild(anchor);
+      } finally {
+        // 不释放会漏一份文件内容在内存里（与单篇导出的处理一致）
+        URL.revokeObjectURL(url);
+      }
+      toast.success(t('notesList.exportAllDone'));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('notesList.exportAllFailed'));
+    } finally {
+      setExportingAll(false);
     }
   }
 
@@ -245,6 +301,28 @@ export default function NotesList() {
           {t('notesList.filterArchived')}
         </button>
       </div>
+
+      {/* ── 导出全部（B4，2026-10-22）──
+          放在列表之上、筛选之下的位置：它是"对整个库"的动作，
+          与上面那排"筛选"不是一类，与下面的"每行操作"也不是一类。
+
+          只在**没有搜索关键词**时显示：搜索状态下"全部"到底指什么会变得
+          歧义（全部库？还是搜索结果？），而这次导出的是**整个库**。
+          用户搜索时看到这个按钮，会以为导的是筛出来的那些。
+
+          ⚠️ 计划里明确把"批量选择 UI（勾选框）"列为配套、不在本轮，
+          所以这里只有"导出全部"一个动作，没有"导出选中的 N 篇"。 */}
+      {!keyword && (
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <button className="btn btn-secondary" onClick={handleExportAll} disabled={exportingAll}>
+            {/* 图标集里**没有**下载图标（`components/icons/` 只有 upload 等 40 个）。
+                这里不新造一个：按钮文案「导出全部（ZIP）」已经把动作说清了，
+                为一次导出加一个图标文件不值当 —— 而"新造图标"会让图标集
+                多一个来源不明的资产。 */}
+            {exportingAll ? t('notesList.exportingAll') : t('notesList.exportAll')}
+          </button>
+        </div>
+      )}
 
       {/* 笔记列表 */}
       {loading ? (
