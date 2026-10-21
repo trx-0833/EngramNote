@@ -18,7 +18,7 @@ code -> error_code、message -> detail、http_status -> HTTP 状态码，
 - 新增错误码常量时在下方常量区追加，保持 code 全大写、语义化命名。
 """
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 # ---- 常用错误码常量 ----
@@ -230,6 +230,29 @@ class AppError(Exception):
         message: 面向用户的可读错误详情（对应响应体 detail）
         http_status: 对应的 HTTP 状态码
         data: 可选附带数据，透传到响应体 data 字段（默认 None）
+        params: 可选**模板参数**，用于翻译时填充占位符（默认空）
+
+    ## `params` 是干什么的（为什么需要它）
+
+    有些文案带运行期值：
+
+        f"无效的卡片类别: {card_category}，合法值为 regular/blind_spot/extension"
+
+    而 `resolve_message()` 的判据是 `(code, fallback)` **精确匹配** ——
+    文案里嵌了运行期值就永远匹配不上，只能回退成中文。于是这类码此前
+    被整体排除在翻译表之外（见 `error_messages.UNTRANSLATED_CODES`），
+    **英文界面下用户直接看到中文**。
+
+    加了 `params` 之后：表里存模板（`"无效的卡片类别: {value}，…"`），
+    运行时用这里的值填充。
+
+    ## ⚠️ `message` 仍然要写完整的那句（带值）
+
+    这是刻意的，不是冗余：
+
+    - 它是**兜底**。表里没登记、或 `params` 没传全时，行为与加 `params`
+      之前**逐字一致**，不会出现空文案或半截文案；
+    - 它也是 `str(exc)` 的内容，日志里要能直接看懂，不该是 `{value}`。
     """
 
     def __init__(
@@ -238,11 +261,13 @@ class AppError(Exception):
         message: str,
         http_status: int = 500,
         data: Optional[Any] = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.code = code
         self.message = message
         self.http_status = http_status
         self.data = data
+        self.params: Dict[str, Any] = dict(params) if params else {}
         super().__init__(message)
 
     def __str__(self) -> str:

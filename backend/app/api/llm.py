@@ -155,6 +155,7 @@ async def get_llm_usage(
             LLM_USAGE_GROUP_BY_INVALID,
             f"group_by 只能是 {'/'.join(GROUP_BY_CHOICES)} 之一",
             400,
+            params={"choices": "/".join(GROUP_BY_CHOICES)},
         )
 
     until = datetime.now(timezone.utc)
@@ -166,7 +167,12 @@ async def get_llm_usage(
         )
     except ValueError as exc:
         # 服务层的防御性重复校验（同一个维度白名单），语义与上面一致
-        raise AppError(LLM_USAGE_GROUP_BY_INVALID, str(exc), 400) from exc
+        raise AppError(
+            LLM_USAGE_GROUP_BY_INVALID,
+            str(exc),
+            400,
+            params={"choices": "/".join(GROUP_BY_CHOICES)},
+        ) from exc
 
     from ..config import get_settings
 
@@ -454,6 +460,9 @@ async def get_prompt_version_report(
                 f"（如 1 / 2），收到 {version!r}"
             ),
             400,
+            # 表里用 `{version}`（不带 `!r`）—— `!r` 是**调用点**的格式选择，
+            # 不属于文案本身。表里那个占位符由 `fill_params` 直接 `str()` 填充。
+            params={"version": version},
         )
 
     until = datetime.now(timezone.utc)

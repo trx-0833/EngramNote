@@ -136,6 +136,10 @@ async def start_cleaning(
             NOTE_STATUS_INVALID,
             f"笔记当前状态为 {note.status.value}，只有 converted、cleaned 或 cleaning_failed 状态可以触发清洗",
             400,
+            # `params` 的键与表里的占位符一致（表里是 `{status}`）。
+            # 调用点传的是 `note.status.value` —— 两边**不必同名**，
+            # 文案不该去耦合对象的属性路径（见 error_messages 文件头第 1 条）。
+            params={"status": note.status.value},
         )
 
     # 先将数据库状态更新为 cleaning，避免前端刷新时仍显示旧状态
@@ -191,6 +195,7 @@ async def stop_cleaning(
             NOTE_STATUS_INVALID,
             f"笔记当前状态为 {note.status.value}，只有 cleaning 状态可以停止清洗",
             400,
+            params={"status": note.status.value},
         )
 
     # 更新笔记状态为清洗失败
@@ -380,6 +385,7 @@ async def restore_duplicate_block(
             CLEANING_MARKER_NOT_FOUND,
             f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
             400,
+            params={"block_index": block_index},
         )
 
     # 上传更新后的清洗副本
@@ -456,6 +462,7 @@ async def delete_duplicate_block(
             CLEANING_MARKER_NOT_FOUND,
             f"未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
             400,
+            params={"block_index": block_index},
         )
 
     # 上传更新后的清洗副本

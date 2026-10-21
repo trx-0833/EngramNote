@@ -246,6 +246,7 @@ async def _stream_upload(
                         UPLOAD_FILE_TOO_LARGE,
                         f"文件大小超过限制 ({max_size // (1024 * 1024)}MB)",
                         400,
+                        params={"max_mb": max_size // (1024 * 1024)},
                     )
                 if len(head) < _MD_SNIFF_HEAD_SIZE:
                     head += chunk[:_MD_SNIFF_HEAD_SIZE - len(head)]
@@ -376,6 +377,10 @@ async def _do_upload(
                 UPLOAD_STORAGE_QUOTA_EXCEEDED,
                 f"存储空间不足：已使用 {used // (1024 * 1024)}MB，配额 {settings.max_storage_per_user_mb}MB",
                 400,
+                params={
+                    "used_mb": used // (1024 * 1024),
+                    "quota_mb": settings.max_storage_per_user_mb,
+                },
             )
 
     # 1b. 单用户笔记数上限（阶段 6.4）：容量配额挡不住"传一万个小文件"，
@@ -443,7 +448,14 @@ async def _do_upload(
     try:
         note_role_enum = NoteRole(note_role)
     except ValueError as e:
-        raise AppError(NOTE_ROLE_INVALID, f"无效的 note_role 值: {note_role}", 400) from e
+        # 走 `NOTE_ROLE_INVALID_ALT`（不带"有效值为"清单的那一条）——
+        # 上传接口不提供清单，与列表接口的句式不同
+        raise AppError(
+            NOTE_ROLE_INVALID,
+            f"无效的 note_role 值: {note_role}",
+            400,
+            params={"role": note_role},
+        ) from e
 
     note = Note(
         id=note_id,
@@ -603,6 +615,7 @@ async def upload_document(
             UPLOAD_FORMAT_UNSUPPORTED,
             f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
             400,
+            params={"ext": ext, "allowed": ", ".join(sorted(ALLOWED_EXTS))},
         )
 
     # 根据扩展名确定文件来源类型
@@ -621,6 +634,7 @@ async def upload_document(
                 UPLOAD_CONTENT_MISMATCH,
                 f"文件内容与格式不匹配，不是有效的 {ext} 文件",
                 400,
+                params={"ext": ext},
             )
 
         # 2.6 .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
@@ -630,6 +644,7 @@ async def upload_document(
                 UPLOAD_SCRIPT_CONTENT_REJECTED,
                 f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
                 400,
+                params={"violation": violation},
             )
 
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
@@ -688,6 +703,7 @@ async def prepare_upload(
             UPLOAD_FORMAT_UNSUPPORTED,
             f"不支持的文件格式: {ext}，支持: {', '.join(sorted(ALLOWED_EXTS))}",
             400,
+            params={"ext": ext, "allowed": ", ".join(sorted(ALLOWED_EXTS))},
         )
 
     # 根据扩展名确定文件来源类型
@@ -708,6 +724,7 @@ async def prepare_upload(
                 UPLOAD_CONTENT_MISMATCH,
                 f"文件内容与格式不匹配，不是有效的 {ext} 文件",
                 400,
+                params={"ext": ext},
             )
         # .md 内容轻量嗅探（拦截 <script>/<iframe>/事件属性，防 XSS）
         violation = _sniff_md_content(ext, head)
@@ -716,6 +733,7 @@ async def prepare_upload(
                 UPLOAD_SCRIPT_CONTENT_REJECTED,
                 f"检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
                 400,
+                params={"violation": violation},
             )
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -874,6 +892,7 @@ async def commit_upload(
                 UPLOAD_EXTENSION_MISMATCH,
                 f"文件名扩展名必须为 {ext}，请保留文件类型后缀",
                 400,
+                params={"ext": ext},
             )
         display_name = new_name
 
@@ -888,6 +907,7 @@ async def commit_upload(
                     UPLOAD_CROP_UNSUPPORTED_TYPE,
                     f"仅支持 PDF 裁剪，当前文件类型为 {source_type.value}",
                     400,
+                    params={"source_type": source_type.value},
                 )
             try:
                 page_count = pdf_crop.get_pdf_page_count(str(src_path))
@@ -1008,6 +1028,7 @@ async def retry_convert(
             NOTE_STATUS_INVALID,
             f"当前状态为 {note.status.value}，仅失败状态可重试",
             400,
+            params={"status": note.status.value},
         )
 
     # 清除错误信息，重置状态

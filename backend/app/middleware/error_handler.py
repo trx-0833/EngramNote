@@ -193,7 +193,10 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         except AppError as exc:
             # i18n：表里登记了这个 code 就按当前语言返回，否则用 `raise` 时写的那句
             # —— 于是 90 处 `AppError` 可以**分批迁移**（见 core/error_messages.py）
-            detail = resolve_message(exc.code, exc.message, i18n.get_locale())
+            #
+            # `exc.params` 用来填充带运行期值的文案模板（见 `AppError.params`）：
+            # 没有它，`无效的卡片类别: {value}` 这类文案永远匹配不上表，只能回退中文。
+            detail = resolve_message(exc.code, exc.message, i18n.get_locale(), exc.params)
             logger.warning(
                 "业务错误 | code=%s | status=%d | detail=%s",
                 exc.code, exc.http_status, detail,

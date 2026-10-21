@@ -143,6 +143,7 @@ async def start_understanding(
             NOTE_STATUS_INVALID,
             f"笔记当前状态为 {note.status.value}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
             400,
+            params={"status": note.status.value},
         )
 
     # archived 笔记未确认时，只返回影响数量，不执行任何删除（见 docs/decisions.md#F-02）

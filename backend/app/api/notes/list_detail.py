@@ -69,6 +69,23 @@ settings = get_settings()
 router = APIRouter()
 
 
+def _reject_invalid_note_role(note_role: str, valid_roles: list) -> None:
+    """`note_role` 不在白名单里就抛 `NOTE_ROLE_INVALID`
+
+    抽成函数是因为**三个列表端点用的是逐字相同的文案**（列表 / 已归档 / 改角色）。
+    写三遍的代价不只是重复：加 `params` 时漏改一处，那一处就会静默回退成中文 ——
+    而且只有走那个端点的用户才撞得到。
+
+    `params` 的键与表里的占位符一致（表里是 `{role}` / `{valid}`）。
+    """
+    raise AppError(
+        NOTE_ROLE_INVALID,
+        f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
+        400,
+        params={"role": note_role, "valid": ", ".join(valid_roles)},
+    )
+
+
 @router.get("", response_model=NoteListResponse)
 async def list_notes(
     page: int = Query(1, ge=1),
@@ -100,11 +117,7 @@ async def list_notes(
     if note_role is not None:
         valid_roles = [e.value for e in NoteRole]
         if note_role not in valid_roles:
-            raise AppError(
-                NOTE_ROLE_INVALID,
-                f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
-                400,
-            )
+            _reject_invalid_note_role(note_role, valid_roles)
     notes, total = await get_notes_list(
         db, current_user.id, page, page_size, keyword, note_role=note_role, project_id=project_id
     )
@@ -133,11 +146,7 @@ async def list_archived_notes(
     if note_role is not None:
         valid_roles = [e.value for e in NoteRole]
         if note_role not in valid_roles:
-            raise AppError(
-                NOTE_ROLE_INVALID,
-                f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
-                400,
-            )
+            _reject_invalid_note_role(note_role, valid_roles)
     notes, total = await get_notes_list(
         db, current_user.id, page, page_size, note_status=NoteStatus.archived, note_role=note_role
     )
@@ -251,6 +260,7 @@ async def update_note_content(
             NOTE_STATUS_INVALID,
             f"笔记正在处理中（{note.status.value}），暂不可编辑",
             400,
+            params={"status": note.status.value},
         )
 
     # 2.1 原始版内容不可编辑（只读），仅允许编辑清洗版
@@ -317,6 +327,7 @@ async def archive_note_api(
             NOTE_STATUS_INVALID,
             f"当前状态 {note.status.value} 不允许归档/取消归档操作",
             400,
+            params={"status": note.status.value},
         )
 
     if note.status == NoteStatus.archived:
@@ -367,11 +378,7 @@ async def update_note_role(
     # 验证 note_role 值是否合法
     valid_roles = [e.value for e in NoteRole]
     if note_role not in valid_roles:
-        raise AppError(
-            NOTE_ROLE_INVALID,
-            f"无效的 note_role 值: {note_role}，有效值为: {', '.join(valid_roles)}",
-            400,
-        )
+        _reject_invalid_note_role(note_role, valid_roles)
 
     note = await get_note_detail(db, note_id, current_user.id)
     if not note:

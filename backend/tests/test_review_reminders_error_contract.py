@@ -150,6 +150,41 @@ class TestRemindersSwallowingGuard:
         assert resp.status_code == _INJECTED_STATUS
         assert resp.json()["detail"] == "Card review state is unavailable"
 
+    def test_accept_language_also_fills_params(self, test_db, monkeypatch):
+        """★ 端到端：`params` 真的从 `AppError` 传到了响应里
+
+        ## 为什么必须有这一条
+
+        上面那条证明"表里的文案会覆盖 `raise` 时那句"，但它用的码**不带占位符**。
+        而 `params` 是**另一条链路**：`AppError.params` → 中间件
+        `resolve_message(..., exc.params)` → `fill_params`。任何一环漏了，
+        结果都是**模板原样返回**（用户看到 `资料 {material_id} 不存在`），
+        而"表里有没有这个码"的测试**全都还是绿的**。
+
+        实测：给 `AppError` 加 `params` 时，中间件那一行如果没改，
+        单测（只测 `resolve_message`）全过，只有真实请求会暴露。
+        """
+        from app.core.app_error import AppError
+
+        _inject(monkeypatch, AppError(
+            "MATERIAL_NOT_FOUND",
+            "资料 7f3a 不存在",  # fallback：带值的那句
+            _INJECTED_STATUS,
+            params={"material_id": "7f3a"},
+        ))
+        client = _client()
+
+        headers = _auth(client)
+        headers["Accept-Language"] = "en"
+        resp = client.get("/api/review/reminders", headers=headers)
+
+        assert resp.status_code == _INJECTED_STATUS
+        detail = resp.json()["detail"]
+        # 英文模板 + 参数已填
+        assert detail == "Material 7f3a does not exist", detail
+        # 关键：不能残留模板占位符
+        assert "{" not in detail and "}" not in detail, detail
+
     def test_http_exception_also_passes_through(self, test_db, monkeypatch):
         """原本就想表达的那条（HTTPException）没被改坏"""
         from fastapi import HTTPException

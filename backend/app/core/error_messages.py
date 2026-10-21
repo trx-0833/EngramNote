@@ -60,6 +60,34 @@ detail = resolve_message(exc.code, fallback=exc.message, locale=...)
 2. **上游异常透传**（约 9 处），如 `str(e)`（LLM 失败、PDF 解析失败）。
    文案来自第三方库，翻译它等于给别人的报错编中文。
 
+## 带运行期值的文案（`params` + `{占位符}`）
+
+`AppError` 有一个可选的 `params`（`core/app_error.py`），用来填充文案里的
+`{name}` 占位符。**表里存模板，运行时填值**：
+
+```python
+# 表里
+"MATERIAL_NOT_FOUND": {
+    "zh-CN": "资料 {material_id} 不存在",
+    "en": "Material {material_id} does not exist",
+},
+# 调用点
+raise AppError(MATERIAL_NOT_FOUND, f"资料 {material_id} 不存在", 404,
+               params={"material_id": material_id})
+```
+
+三条约定：
+
+1. **占位符名由表定义，不由调用点的表达式定义**。调用点写的是
+   `f"... {note.status.value} ..."`，而表里用 `{status}` —— 因为
+   `{note.status.value}` 既不是合法的 `format` 字段名，也不该让文案去耦合
+   对象的属性路径。**两边不必同名**，只有 `params` 的键要与表里的占位符一致。
+2. **`message` 仍然写完整的那句**（带值）。它是兜底，也是 `str(exc)` 的内容 ——
+   表里没登记或 `params` 缺键时，行为与加 `params` 之前逐字一致。
+3. **表里的 `zh-CN` 与调用点的 f-string 逐字对应**（把 `{表达式}` 换成
+   `{占位符名}`）。`tests/test_i18n.py` 有一条守卫扫 f-string 调用点做比对，
+   防止"表里写的是 A、代码里改成了 B"这种静默漂移。
+
 ## 新增语言时
 
 `SUPPORTED_LOCALES`（`core/i18n.py`）加一种，本表每种 code 加一个键。
@@ -69,7 +97,8 @@ detail = resolve_message(exc.code, fallback=exc.message, locale=...)
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+import re
+from typing import Any, Dict, Optional
 
 from .i18n import DEFAULT_LOCALE
 
@@ -122,6 +151,55 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "笔记-资料关联不存在或无权访问",
         "en": "The note–material link does not exist or you have no access to it",
     },
+    # ── 笔记：带运行期值的校验（`params`）──
+    # `NOTE_ROLE_INVALID` 有两种句式：列表接口给"有效值清单"，上传接口不给。
+    # 主项是前者（更常见，3 处 vs 1 处），后者登记成 `_ALT`。
+    # ⚠️ 占位符名与调用点表达式不同名是刻意的，见文件头第 1 条约定。
+    "NOTE_ROLE_INVALID": {
+        "zh-CN": "无效的 note_role 值: {role}，有效值为: {valid}",
+        "en": "Invalid note_role: {role}. Valid values are: {valid}",
+    },
+    "NOTE_ROLE_INVALID_ALT": {
+        "zh-CN": "无效的 note_role 值: {role}",
+        "en": "Invalid note_role: {role}",
+    },
+    # `NOTE_STATUS_INVALID` 有 6 种句式（触发条件各不相同），全部登记。
+    # 主项选"触发清洗"那条（它是最早写入的、也是最典型的）。
+    "NOTE_STATUS_INVALID": {
+        "zh-CN": "笔记当前状态为 {status}，只有 converted、cleaned 或 cleaning_failed 状态可以触发清洗",
+        "en": "This note is in status {status}; only converted, cleaned or cleaning_failed "
+        "notes can start cleaning",
+    },
+    "NOTE_STATUS_INVALID_ALT": {
+        "zh-CN": "笔记当前状态为 {status}，只有 cleaning 状态可以停止清洗",
+        "en": "This note is in status {status}; only cleaning notes can stop cleaning",
+    },
+    "NOTE_STATUS_INVALID_ALT2": {
+        "zh-CN": "笔记正在处理中（{status}），暂不可编辑",
+        "en": "This note is being processed ({status}) and cannot be edited yet",
+    },
+    "NOTE_STATUS_INVALID_ALT3": {
+        "zh-CN": "当前状态 {status} 不允许归档/取消归档操作",
+        "en": "Archiving or unarchiving is not allowed while the note is in status {status}",
+    },
+    "NOTE_STATUS_INVALID_ALT4": {
+        "zh-CN": "笔记当前状态为 {status}，只有 cleaned、learning_failed 或 archived 状态可以触发理解",
+        "en": "This note is in status {status}; only cleaned, learning_failed or archived "
+        "notes can start understanding",
+    },
+    "NOTE_STATUS_INVALID_ALT5": {
+        "zh-CN": "当前状态为 {status}，仅失败状态可重试",
+        "en": "The note is in status {status}; only failed notes can be retried",
+    },
+    # `MATERIAL_*`：`material_id` 在调用点就是纯标量，两边同名
+    "MATERIAL_NOT_FOUND": {
+        "zh-CN": "资料 {material_id} 不存在",
+        "en": "Material {material_id} does not exist",
+    },
+    "MATERIAL_ROLE_INVALID": {
+        "zh-CN": "笔记 {material_id} 不是学习资料",
+        "en": "Note {material_id} is not a study material",
+    },
 
     # ── 批注 ──
     "ANNOTATION_NOT_FOUND": {"zh-CN": "批注不存在", "en": "Annotation not found"},
@@ -168,6 +246,14 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "卡片复习状态不可用",
         "en": "Card review state is unavailable",
     },
+    # 合法值清单**写死在文案里**（不放进占位符）：调用点的清单也是硬编码的
+    # `regular/blind_spot/extension`，把清单塞进 `params` 只会让两边有第二个
+    # 漂移点 —— 改枚举值时要改两处，而文案里那一处不会被编译器发现。
+    "CARD_CATEGORY_INVALID": {
+        "zh-CN": "无效的卡片类别: {category}，合法值为 regular/blind_spot/extension",
+        "en": "Invalid card category: {category}. Valid values are "
+        "regular/blind_spot/extension",
+    },
 
     # ── 清洗 ──
     "CLEANING_IN_PROGRESS": {
@@ -185,6 +271,12 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     "CLEANING_CONTENT_UNREADABLE_ALT": {
         "zh-CN": "无法读取 Markdown 内容",
         "en": "Could not read the Markdown content",
+    },
+    # 占位符 `{block_index}` 对应调用点的 `{block_index}`（两边同名，因为那是纯标量）
+    "CLEANING_MARKER_NOT_FOUND": {
+        "zh-CN": "未在清洗副本中找到块 {block_index} 的重复标记（可能已被处理）",
+        "en": "No duplicate marker for block {block_index} was found in the cleaned copy "
+        "(it may have been handled already)",
     },
 
     # ── 理解 / 出题 / 问答 ──
@@ -219,6 +311,46 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     "UPLOAD_FORMAT_UNSUPPORTED_ALT": {
         "zh-CN": "不支持的文件格式",
         "en": "Unsupported file format",
+    },
+    # 第三、四种文案：带"收到的扩展名 + 支持清单"（实测 `upload.py:616/703`）。
+    # ⚠️ 支持清单**写死在文案里**还是放进占位符，两种做法都有代价：
+    # 写死 → 改 `ALLOWED_EXTS` 时文案不会跟着变（但至少编译器不报错）；
+    # 放进占位符 → 文案随配置变，但"哪些是支持的"就不再可翻译。
+    # 这里选**放进占位符**：清单本身是机器可读的取值，翻译它没有意义，
+    # 而写死会让文案与实际支持的类型**静默不一致**（用户看到"支持 pdf"却传不进 pdf）。
+    "UPLOAD_FORMAT_UNSUPPORTED_ALT2": {
+        "zh-CN": "不支持的文件格式: {ext}，支持: {allowed}",
+        "en": "Unsupported file format: {ext}. Supported: {allowed}",
+    },
+    # ── 上传：带运行期值的校验（`params`）──
+    # 占位符名与调用点表达式不同名是**刻意**的：调用点写的是
+    # `{max_size // (1024 * 1024)}`（一个算式），表里用 `{max_mb}`。
+    # 文案不该耦合调用点的算式（见文件头"带运行期值的文案"第 1 条）。
+    "UPLOAD_FILE_TOO_LARGE": {
+        "zh-CN": "文件大小超过限制 ({max_mb}MB)",
+        "en": "The file exceeds the size limit ({max_mb} MB)",
+    },
+    "UPLOAD_STORAGE_QUOTA_EXCEEDED": {
+        "zh-CN": "存储空间不足：已使用 {used_mb}MB，配额 {quota_mb}MB",
+        "en": "Not enough storage: {used_mb} MB used of a {quota_mb} MB quota",
+    },
+    "UPLOAD_CONTENT_MISMATCH": {
+        "zh-CN": "文件内容与格式不匹配，不是有效的 {ext} 文件",
+        "en": "The file content does not match its format; it is not a valid {ext} file",
+    },
+    "UPLOAD_EXTENSION_MISMATCH": {
+        "zh-CN": "文件名扩展名必须为 {ext}，请保留文件类型后缀",
+        "en": "The file name must keep the {ext} extension; do not drop the file type suffix",
+    },
+    "UPLOAD_CROP_UNSUPPORTED_TYPE": {
+        "zh-CN": "仅支持 PDF 裁剪，当前文件类型为 {source_type}",
+        "en": "Only PDF cropping is supported; the current file type is {source_type}",
+    },
+    "UPLOAD_SCRIPT_CONTENT_REJECTED": {
+        "zh-CN": "检测到疑似脚本注入内容（{violation}），已拒绝上传；"
+        "请移除相关 HTML 标签或事件属性后重试",
+        "en": "Possible script injection detected ({violation}); the upload was rejected. "
+        "Remove the HTML tags or event attributes and try again.",
     },
     "UPLOAD_PDF_PARSE_FAILED": {
         "zh-CN": "PDF 解析失败：文件可能已损坏或加密，请确认后重试",
@@ -309,6 +441,32 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ── 任务 ──
     "TASK_NOT_FOUND": {"zh-CN": "任务不存在", "en": "Task not found"},
 
+    # ── LLM 用量 / 提示词版本 ──
+    # 占位符 `{choices}` / `{version}` 与调用点表达式不同名（那边是
+    # `'/'.join(GROUP_BY_CHOICES)` 与 `{version!r}`），见文件头第 1 条约定。
+    "LLM_USAGE_GROUP_BY_INVALID": {
+        "zh-CN": "group_by 只能是 {choices} 之一",
+        "en": "group_by must be one of: {choices}",
+    },
+    # ⚠️ 中文文案里的 `unknown` 与 `1 / 2` **刻意保留原样**：它们是**字面量取值**，
+    # 不是可翻译的词（调用点写的也是反引号包起来的代码字面量）。
+    "PROMPT_VERSION_INVALID": {
+        "zh-CN": "version 只能是 `unknown`（版本未知那一桶）或纯数字版本号"
+        "（如 1 / 2），收到 {version}",
+        "en": "version must be either `unknown` (the bucket for unknown versions) or a "
+        "numeric version (e.g. 1 / 2); got {version}",
+    },
+
+    # ── 学习目标：带运行期值的校验 ──
+    # ⚠️ 调用点给的**原文案是英文**（`goal_service.py:150`
+    # 的 `f"Maximum {MAX_ACTIVE_GOALS} active goals"`）—— 实测确认，不是笔误。
+    # 所以本条的 `en` 与调用点逐字相同，`zh-CN` 是**新写的**。
+    # 这是本轮唯一一条"中文是新增的"条目；其余条目的中文都来自调用点。
+    "GOAL_ACTIVE_LIMIT_REACHED": {
+        "zh-CN": "活跃目标数已达上限（最多 {max_goals} 个）",
+        "en": "Maximum {max_goals} active goals",
+    },
+
     # ── 认证 ──
     "AUTH_INVALID_CREDENTIALS": {
         "zh-CN": "邮箱或密码错误",
@@ -355,46 +513,63 @@ VALIDATION_ERROR_MESSAGES: Dict[str, str] = {
     "en": "Request validation failed",
 }
 
-#: 刻意**没有**进表的错误码 —— 受众是开发者/调用方的入参校验，或上游异常透传
+#: 刻意**没有**进表的错误码
 #:
 #: 这份名单的作用是让"漏了"与"刻意没做"能被区分开：
 #: `tests/test_i18n.py` 断言这些码确实不在 `ERROR_MESSAGES` 里。
-#: 哪天给 `AppError` 加了 `params` 并把某一条迁进表，就从这里删掉它。
+#: 哪天把某一条迁进表，就从这里删掉它。
+#:
+#: ## 2026-10-21 的修订：从 32 个减到 17 个
+#:
+#: 原先这 32 个被统一描述成"受众是开发者/调用方的入参校验"。**那句话不准确** ——
+#: 逐个核实调用点后发现，其中 15 个的文案是**用户可见的**，它们没进表只是因为
+#: `AppError` 当时没有 `params`，带运行期值的文案无法进模板表。
+#: 加了 `params` 之后那 15 个已迁走（见 `ERROR_MESSAGES` 里带 `{占位符}` 的条目）。
+#:
+#: 剩下这 17 个按**真正的原因**分三类：
+#:
+#: 1. **上游透传**（10 个）：`str(e)` 或 `result["error"]`，文案由服务层/第三方
+#:    库生成。要翻译得改服务层的返回契约，属另一件事。
+#:    - `ASSESSMENT_*`（4 个）：⚠️ 这条出口把**内部异常文本**回给客户端
+#:      （`assessment.py:47-49` 的注释、计划里的 H5 项）。翻译它没有意义 ——
+#:      文本是任意的。**该修的是那个泄漏本身，不是它的翻译。**
+#:    - `COMBINED_EXTRACT_FAILED` / `EXTENSION_GENERATE_FAILED`：文案来自
+#:      `knowledge_link_service` 的 `{"error": ...}`（十余条不同句子）。
+#:    - `FOLDER_NOT_EMPTY` / `PROJECT_NOTE_LINK_NOT_FOUND` /
+#:      `GRAPH_SUGGESTION_FAILED` / `VERSION_CONTENT_UNAVAILABLE` /
+#:      `AUTH_REGISTRATION_REJECTED`：服务层 `ValueError` / 异常文本。
+#: 2. **刻意不翻**（1 个）：`NOTE_VERSION_RESTORE_REJECTED` 的 message 是
+#:    `str(e)`（`versions.py:215`），内容是 `笔记不存在: note_id=...` 这类
+#:    带标识符的诊断串，受众是排查问题的人。
+#: 3. **仍待处理**（6 个）：`DAILY_REVIEW_LIMIT_REACHED`、
+#:    `GRAPH_RELATION_OPERATION_FAILED`、`UPLOAD_NOTE_COUNT_LIMIT_REACHED`、
+#:    `UPLOAD_ARCHIVE_REJECTED`、`UPLOAD_PDF_TOO_MANY_PAGES`、
+#:    `AUTH_REGISTRATION_REJECTED` —— 同样是上游给的 `reason` 串，
+#:    但文案是**固定句式**（不含运行期值），理论上可以直接进表；
+#:    没有本轮做是因为要先把服务层的 `reason` 改成**错误码**而不是句子，
+#:    否则表里存中文、服务层给中文，两边靠字符串相等维系，一改就断。
 UNTRANSLATED_CODES: frozenset = frozenset(
     {
-        # 含运行期值的入参校验（要进表得先给 AppError 加 params）
-        "NOTE_ROLE_INVALID",
-        "NOTE_STATUS_INVALID",
-        "CARD_CATEGORY_INVALID",
-        "LLM_USAGE_GROUP_BY_INVALID",
-        "PROMPT_VERSION_INVALID",
-        "UPLOAD_FILE_TOO_LARGE",
-        "UPLOAD_STORAGE_QUOTA_EXCEEDED",
-        "UPLOAD_NOTE_COUNT_LIMIT_REACHED",
-        "UPLOAD_CONTENT_MISMATCH",
-        "UPLOAD_SCRIPT_CONTENT_REJECTED",
-        "UPLOAD_ARCHIVE_REJECTED",
-        "UPLOAD_PDF_TOO_MANY_PAGES",
-        "UPLOAD_EXTENSION_MISMATCH",
-        "UPLOAD_CROP_UNSUPPORTED_TYPE",
-        "CLEANING_MARKER_NOT_FOUND",
-        "GOAL_ACTIVE_LIMIT_REACHED",
-        "MATERIAL_NOT_FOUND",
-        "MATERIAL_ROLE_INVALID",
-        "FOLDER_NOT_EMPTY",
-        "PROJECT_NOTE_LINK_NOT_FOUND",
-        "DAILY_REVIEW_LIMIT_REACHED",
-        "GRAPH_RELATION_OPERATION_FAILED",
-        "GRAPH_SUGGESTION_FAILED",
-        "COMBINED_EXTRACT_FAILED",
-        "EXTENSION_GENERATE_FAILED",
+        # ── 上游透传 ──
         "ASSESSMENT_COMPARE_FAILED",
         "ASSESSMENT_QUIZ_GENERATE_FAILED",
         "ASSESSMENT_ANSWER_REJECTED",
         "ASSESSMENT_ANSWER_FAILED",
-        "AUTH_REGISTRATION_REJECTED",
-        "NOTE_VERSION_RESTORE_REJECTED",
+        "COMBINED_EXTRACT_FAILED",
+        "EXTENSION_GENERATE_FAILED",
+        "FOLDER_NOT_EMPTY",
+        "PROJECT_NOTE_LINK_NOT_FOUND",
+        "GRAPH_SUGGESTION_FAILED",
         "VERSION_CONTENT_UNAVAILABLE",
+        # ── 刻意不翻（诊断串）──
+        "NOTE_VERSION_RESTORE_REJECTED",
+        # ── 仍待处理（服务层给句子而非错误码）──
+        "DAILY_REVIEW_LIMIT_REACHED",
+        "GRAPH_RELATION_OPERATION_FAILED",
+        "UPLOAD_NOTE_COUNT_LIMIT_REACHED",
+        "UPLOAD_ARCHIVE_REJECTED",
+        "UPLOAD_PDF_TOO_MANY_PAGES",
+        "AUTH_REGISTRATION_REJECTED",
     }
 )
 
@@ -403,11 +578,19 @@ _ALT_INDEX: Dict[tuple, str] = {}
 
 
 def _base_code(key: str) -> str:
-    """`CARD_NOT_FOUND_ALT2` → `CARD_NOT_FOUND`"""
-    for suffix in ("_ALT2", "_ALT"):
-        if key.endswith(suffix):
-            return key[: -len(suffix)]
-    return key
+    """`CARD_NOT_FOUND_ALT2` / `NOTE_STATUS_INVALID_ALT5` → 去掉 `_ALT[n]` 后缀
+
+    ⚠️ 用正则匹配**任意**编号，不要写死 `("_ALT2", "_ALT")` 那样的元组 ——
+    原先就是写死的，于是 `_ALT3` 及以上不被认作变体，
+    `registered_codes()` 会把它们当成"表里登记了但代码里没人用"的独立码，
+    测试直接报"这些 code 没有任何 AppError 使用"（实测踩到：
+    加 `NOTE_STATUS_INVALID_ALT3/4/5` 后 `test_every_registered_code_exists_in_code` 红）。
+
+    `_ALT` 后面**必须**跟数字或结束，否则 `CARD_NOT_FOUND_ALTITUDE` 这类
+    会被误剥 —— 虽然现在没有这种码，但判据应当写对。
+    """
+    m = re.match(r"^(.*?)_ALT(\d*)$", key)
+    return m.group(1) if m else key
 
 
 def _build_alt_index() -> None:
@@ -429,7 +612,46 @@ def _build_alt_index() -> None:
 _build_alt_index()
 
 
-def resolve_message(code: str, fallback: str, locale: str = DEFAULT_LOCALE) -> str:
+class _SafeParams(dict):
+    """`str.format_map` 用的参数字典：**缺键时原样保留占位符**，不抛异常
+
+    ## 为什么要这个而不是直接 `template.format(**params)`
+
+    `format` 在缺键时抛 `KeyError`。而这里是**错误处理路径** ——
+    为了给用户报错反而自己炸掉、最后变成一个 500，是最糟的形态。
+
+    保留 `{value}` 原样虽然难看，但：它是**局部**问题（只有一个占位符没填上），
+    而不是整个请求失败；日志里也能一眼看出是哪个参数没传。
+
+    `format_map` 只走 `__missing__`，所以继承 `dict` 就够了。
+    """
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def fill_params(template: str, params: Optional[Dict[str, Any]]) -> str:
+    """把 `{name}` 占位符换成 `params[name]`
+
+    - `params` 为空 → 原样返回（不解析，避免把文案里本就存在的花括号当占位符）；
+    - 缺某个键 → 保留该占位符（见 `_SafeParams`）；
+    - 模板本身花括号不配对 → 原样返回（同上，不让错误路径抛异常）。
+    """
+    if not params:
+        return template
+    try:
+        return template.format_map(_SafeParams(params))
+    except (ValueError, IndexError):
+        # 花括号不配对之类 —— 宁可给未填充的模板，也不要 500
+        return template
+
+
+def resolve_message(
+    code: str,
+    fallback: str,
+    locale: str = DEFAULT_LOCALE,
+    params: Optional[Dict[str, Any]] = None,
+) -> str:
     """
     按错误码 + 语言取文案；表里没有就用 `fallback`
 
@@ -442,6 +664,8 @@ def resolve_message(code: str, fallback: str, locale: str = DEFAULT_LOCALE) -> s
         code: 业务错误码（`AppError.code`）
         fallback: `raise` 时写的那句 `message`（= 现有行为）
         locale: 目标语言
+        params: 模板参数，用于填充文案里的 `{name}` 占位符
+            （见 `AppError.params`；带运行期值的文案靠它才能进表）
 
     Returns:
         该语言的文案；该 code 未登记、或登记了但没有这个语言的翻译时，
@@ -451,7 +675,8 @@ def resolve_message(code: str, fallback: str, locale: str = DEFAULT_LOCALE) -> s
     entry = ERROR_MESSAGES.get(key)
     if not entry:
         return fallback
-    return entry.get(locale) or entry.get(DEFAULT_LOCALE) or fallback
+    template = entry.get(locale) or entry.get(DEFAULT_LOCALE) or fallback
+    return fill_params(template, params)
 
 
 def resolve_http_status_message(detail: str, locale: str = DEFAULT_LOCALE) -> str:

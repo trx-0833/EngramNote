@@ -108,10 +108,18 @@ async def update_note_links(
         for material_id in request.material_note_ids:
             material = await note_service.get_note_detail(db, material_id, current_user.id)
             if not material:
-                raise AppError(MATERIAL_NOT_FOUND, f"资料 {material_id} 不存在", 404)
+                raise AppError(
+                    MATERIAL_NOT_FOUND,
+                    f"资料 {material_id} 不存在",
+                    404,
+                    params={"material_id": material_id},
+                )
             if material.note_role != NoteRole.material:
                 raise AppError(
-                    MATERIAL_ROLE_INVALID, f"笔记 {material_id} 不是学习资料", 400
+                    MATERIAL_ROLE_INVALID,
+                    f"笔记 {material_id} 不是学习资料",
+                    400,
+                    params={"material_id": material_id},
                 )
 
     # 更新链接

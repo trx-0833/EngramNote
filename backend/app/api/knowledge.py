@@ -285,6 +285,7 @@ async def mastery_overview(
                 CARD_CATEGORY_INVALID,
                 f"无效的卡片类别: {card_category}，合法值为 regular/blind_spot/extension",
                 400,
+                params={"category": card_category},
             ) from e
         conditions.append(KnowledgeCard.card_category == cat)
 

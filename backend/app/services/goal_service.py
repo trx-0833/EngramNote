@@ -145,10 +145,14 @@ class GoalService:
         )
         active_count = count_result.scalar() or 0
         if active_count >= MAX_ACTIVE_GOALS:
+            # ⚠️ 调用点这句**本来就是英文**（实测确认，不是笔误）。
+            # 表里 `en` 与它逐字相同、`zh-CN` 是本轮新写的 —— 见
+            # `error_messages.GOAL_ACTIVE_LIMIT_REACHED` 的注释。
             raise AppError(
                 GOAL_ACTIVE_LIMIT_REACHED,
                 f"Maximum {MAX_ACTIVE_GOALS} active goals",
                 400,
+                params={"max_goals": MAX_ACTIVE_GOALS},
             )
 
         # 兼容 pydantic 模型与普通对象

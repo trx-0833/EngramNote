@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -37,6 +38,18 @@ from app.core.error_messages import (
 )
 
 APP_DIR = pathlib.Path(__file__).resolve().parent.parent / "app"
+
+#: 表里的中文**是新写的**、调用点原本是英文的错误码
+#:
+#: `test_fstring_templates_match_the_raise_site` 的判据是"表里的中文骨架
+#: 与调用点逐字相同"。这个前提对下面这些码**不成立** —— 它们的调用点给的
+#: 就是英文，所以不可能相同。放进名单是**显式豁免**，而不是把守卫关掉：
+#: 以后新增的码仍然会被检查。
+#:
+#: - `GOAL_ACTIVE_LIMIT_REACHED`：`goal_service.py:150` 是
+#:   `f"Maximum {MAX_ACTIVE_GOALS} active goals"`（实测确认，不是笔误）。
+#:   本轮给它补了中文；表里的 `en` 与调用点逐字相同。
+CHINESE_WRITTEN_FROM_SCRATCH: frozenset = frozenset({"GOAL_ACTIVE_LIMIT_REACHED"})
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +229,84 @@ class TestResolveMessage:
                 assert resolve_message(code, "fallback", locale) != ""
 
 
+class TestParamsFilling:
+    """带运行期值的文案：`params` 填充（`AppError.params` → `resolve_message`）"""
+
+    def test_params_are_filled_in_both_locales(self):
+        """★ 两种语言都要填对 —— 只填一种等于另一种仍是模板"""
+        assert (
+            resolve_message(
+                "MATERIAL_NOT_FOUND", "x", "zh-CN", {"material_id": "abc123"}
+            )
+            == "资料 abc123 不存在"
+        )
+        assert (
+            resolve_message("MATERIAL_NOT_FOUND", "x", "en", {"material_id": "abc123"})
+            == "Material abc123 does not exist"
+        )
+
+    def test_placeholder_names_differ_from_call_site_expressions(self):
+        """★ 表里的占位符名与调用点表达式不同名也能填
+
+        调用点写的是 `{note.status.value}`（不是合法的 format 字段名），
+        表里用 `{status}` —— 两者**不必同名**，只有 `params` 的键要对上。
+        """
+        got = resolve_message(
+            "NOTE_STATUS_INVALID", "x", "en", {"status": "cleaning"}
+        )
+        assert "cleaning" in got
+        assert "{status}" not in got
+
+    def test_missing_param_keeps_the_placeholder(self):
+        """★ 缺参数时保留占位符，**不抛异常**
+
+        这是错误处理路径 —— 为了报错反而自己炸掉、最后变成 500，是最糟的形态。
+        保留 `{value}` 虽难看，但只是局部问题，日志里也能看出哪个参数没传。
+        """
+        got = resolve_message("MATERIAL_NOT_FOUND", "x", "en", {"wrong_key": "v"})
+        assert got == "Material {material_id} does not exist"
+
+    def test_no_params_returns_template_verbatim(self):
+        """不传 params 时**不解析**模板（避免把文案里本就有的花括号当占位符）"""
+        got = resolve_message("MATERIAL_NOT_FOUND", "x", "en")
+        assert got == "Material {material_id} does not exist"
+
+    def test_unregistered_code_with_params_returns_fallback(self):
+        """未登记的码即使给了 params 也回退 `fallback`（不试图填充它）"""
+        got = resolve_message("NOPE", "原中文 {v}", "en", {"v": "x"})
+        assert got == "原中文 {v}"
+
+    def test_malformed_template_does_not_raise(self):
+        """花括号不配对时原样返回，不抛 —— 同上，错误路径不该二次失败"""
+        from app.core.error_messages import fill_params
+
+        assert fill_params("值 {v 无效", {"v": "x"}) == "值 {v 无效"
+        assert fill_params("值 } 无效", {"v": "x"}) == "值 } 无效"
+
+    def test_every_placeholdered_entry_fills_without_leftover_braces(self):
+        """★ 表里**每一条**带占位符的文案，用其占位符名填充后都不该残留 `{`
+
+        这条是"漏配占位符"的守卫：某条文案里写了 `{foo}` 而没人会传 `foo`
+        的话，用户就会看到字面量 `{foo}`。
+        """
+        import string
+
+        leftovers: list[str] = []
+        for code, entry in ERROR_MESSAGES.items():
+            for locale, text in entry.items():
+                fields = {
+                    name
+                    for _, name, _, _ in string.Formatter().parse(text)
+                    if name
+                }
+                if not fields:
+                    continue
+                filled = resolve_message(code, "x", locale, {f: "V" for f in fields})
+                if "{" in filled or "}" in filled:
+                    leftovers.append(f"{code}/{locale}: {filled!r}")
+        assert not leftovers, "这些文案填充后仍残留花括号：\n  " + "\n  ".join(leftovers)
+
+
 class TestHttpStatusMessages:
     """`HTTPException` 的翻译按**中文原文**查，不按状态码"""
 
@@ -279,6 +370,56 @@ def _collect_app_error_messages() -> dict[str, set[str]]:
             if not isinstance(msg_node.value, str):
                 continue
             found.setdefault(code_node.id, set()).add(msg_node.value)
+    return found
+
+
+def _placeholder_skeleton(text: str) -> str:
+    """把 `{任意内容}` 替换成 `{}`，得到"字面骨架"
+
+    用于比对"表里的模板"与"调用点的 f-string" —— 两者占位符名可以不同，
+    但**除了占位符以外的字**必须逐字相同。
+
+    ⚠️ 用**非贪婪**匹配 `\\{[^{}]*\\}`：`{a} 与 {b}` 要变成两个 `{}`，
+    贪婪匹配会把它整段吞成一个。
+    """
+    return re.sub(r"\{[^{}]*\}", "{}", text)
+
+
+def _collect_app_error_fstring_templates() -> dict[str, set[str]]:
+    """扫全 `app/`，收集 `{error_code: {f-string 的"骨架"}}`
+
+    与 `_collect_app_error_messages` 互补：那个只看字面量，这个只看 f-string
+    （`AppError(CODE, f"...{expr}...")`）。
+
+    f-string 的还原方式：把 `FormattedValue` 的部分换成 `{}`，
+    把 `Constant` 的文本原样拼接 —— 于是
+    `f"文件大小超过限制 ({max_size // (1024*1024)}MB)"` 得到
+    `"文件大小超过限制 ({}MB)"`，正好能与表里
+    `"文件大小超过限制 ({max_mb}MB)"` 的骨架比对。
+    """
+    found: dict[str, set[str]] = {}
+    for path in APP_DIR.rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name != "AppError" or len(node.args) < 2:
+                continue
+            code_node, msg_node = node.args[0], node.args[1]
+            if not isinstance(code_node, ast.Name) or not isinstance(msg_node, ast.JoinedStr):
+                continue
+            parts: list[str] = []
+            for piece in msg_node.values:
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    parts.append(piece.value)
+                else:
+                    parts.append("{}")  # FormattedValue
+            found.setdefault(code_node.id, set()).add("".join(parts))
     return found
 
 
@@ -385,6 +526,52 @@ class TestTableMatchesRaiseSites:
                 )
         assert not mismatches, (
             "error_messages.py 的中文值与调用点不一致：\n  " + "\n  ".join(mismatches)
+        )
+
+    def test_fstring_templates_match_the_raise_site(self):
+        """★ f-string 调用点的**骨架**必须与表里的模板一致（占位符名除外）
+
+        ## 为什么需要这一条
+
+        `test_chinese_value_matches_the_raise_site_verbatim` 只看**字面量**
+        （`_collect_app_error_messages` 跳过 f-string）。而带 `params` 的文案
+        在调用点**就是 f-string** —— 于是那 15 个码没有任何守卫：
+        表里写"文件大小超过限制 ({max_mb}MB)"、代码里改成"文件过大（{max_mb}MB）"，
+        两边都合法、测试全绿，而**表里的中文永远匹配不上**，
+        英文界面下静默回退成中文。
+
+        ## 判据
+
+        把 f-string 的 `{表达式}` 全部替换成 `{}` 占位，表里的 `{名字}` 也
+        替换成 `{}`，然后比对**字面骨架**。占位符名故意不比对 ——
+        表里用 `{status}`、调用点写 `{note.status.value}` 是**允许**的
+        （见 `error_messages.py` 文件头第 1 条约定）。
+        """
+        sites = _collect_app_error_fstring_templates()
+        mismatches: list[str] = []
+        for code, templates in sites.items():
+            if code in CHINESE_WRITTEN_FROM_SCRATCH:
+                # 调用点原本就是英文（见名单的说明）—— 表里的中文是新写的，
+                # 不可能与调用点逐字相同，所以这条守卫对它不适用
+                continue
+            # ⚠️ 要查**该码的全部条目**（主项 + 所有 `_ALT`），不能只看主项：
+            # 同码多文案是常态（`UPLOAD_FORMAT_UNSUPPORTED` 有 4 种），
+            # f-string 那个变体登记在 `_ALT2` 里，只看主项会误报。
+            skeletons = {
+                _placeholder_skeleton(entry.get("zh-CN") or "")
+                for key, entry in ERROR_MESSAGES.items()
+                if key == code or key.startswith(f"{code}_ALT")
+            }
+            if not skeletons or skeletons == {""}:
+                continue  # 未进表的码由另一条守卫负责
+            if not any(_placeholder_skeleton(t) in skeletons for t in templates):
+                mismatches.append(
+                    f"{code}:\n    表里骨架 {sorted(skeletons)!r}\n"
+                    f"    代码里骨架 {sorted(templates)!r}"
+                )
+        assert not mismatches, (
+            "表里的模板骨架与 f-string 调用点不一致（占位符名可以不同，其余必须逐字相同）：\n  "
+            + "\n  ".join(mismatches)
         )
 
     def test_every_entry_has_all_supported_locales(self):
