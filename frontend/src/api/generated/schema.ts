@@ -4889,16 +4889,41 @@ export interface components {
      *
      *     `pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：
      *     这些内容**只被 BM25 检索到**，向量通道里还看不见它们
-     *     （清洗路径刻意不写向量，补嵌入是人工脚本，见本模块 `/ready` 上方说明）。
+     *     （清洗路径刻意不写向量，补嵌入此前只有人工脚本 —— 2026-10-21 起
+     *     由 Beat 的 `backfill_embeddings` 周期补齐，见 B2）。
      *
      *     `None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`
      *     同一条原则：0 会让"没测"与"真的没有积压"在监控面板上长得一模一样。
+     *
+     *     ## 向量模型快照（D2-①，2026-10-21 加）
+     *
+     *     `vector_models` / `vector_dims` / `degraded` 三件回答的是同一个问题：
+     *     **库里现在的向量到底是谁算的。** 为什么必须有它：`EmbeddingService` 在
+     *     可用内存不足时会**静默降级**（`embedding_service.py:66-83`：
+     *     主模型 `BAAI/bge-m3`(1024 维) → 降级 `BAAI/bge-small-zh-v1.5`(512 维)），
+     *     而那次降级**只在日志里留一行 WARNING** —— 界面上完全无感，用户与运维
+     *     都无从得知（走查报告附录 C.1 实测触发过一次，结论是
+     *     "降级本身是确凿的，而且用户无从得知"）。
+     *
+     *     判据是**从库里读**的（`embedding_model` / `embedding_dim` 两列），
+     *     不是读配置、也不是读进程内存 —— 因为算向量的进程是 worker，
+     *     而 `/ready` 跑在 API 进程里，两者不是同一份内存状态。
      */
     IndexBacklog: {
+      /** Degraded */
+      degraded?: boolean | null;
       /** Pending Embeddings */
       pending_embeddings?: number | null;
       /** Source */
       source: string;
+      /** Vector Dims */
+      vector_dims?: {
+        [key: string]: number;
+      } | null;
+      /** Vector Models */
+      vector_models?: {
+        [key: string]: number;
+      } | null;
     };
     /**
      * KnowledgeCardListResponse

@@ -71,12 +71,25 @@ async def _seed_task_runs(session_factory, statuses) -> None:
         await session.commit()
 
 
-async def _seed_chunks(session_factory, *, embedded: int, pending: int) -> None:
+async def _seed_chunks(
+    session_factory,
+    *,
+    embedded: int,
+    pending: int,
+    model: str | None = None,
+    dim: int | None = None,
+    note_id: str | None = None,
+    start_index: int = 0,
+) -> None:
     """往 `chunks` 里写 `embedded` 条已嵌入 + `pending` 条未嵌入的行
 
     需要先有 user + note（按依赖顺序显式插入，理由同 `test_chunks.py` 的同一手法）。
     这个分母是这条测试的**核心**：只有"已嵌入的不算进积压"才能证明
     `pending_embeddings` 数的是待补向量，而不是 chunk 总数。
+
+    `model` / `dim` / `note_id` / `start_index` 是 2026-10-21（D2-①）加的，
+    默认值与旧行为一致：调用两次时给不同的 `note_id` + `start_index`，
+    就能造出"库里混着两种模型"的状态（`/ready` 的 `degraded` 判据就是它）。
     """
     import uuid as _uuid
 
@@ -87,7 +100,7 @@ async def _seed_chunks(session_factory, *, embedded: int, pending: int) -> None:
     from app.models.user import User
 
     uid = str(_uuid.uuid4())
-    nid = str(_uuid.uuid4())
+    nid = note_id or str(_uuid.uuid4())
     async with session_factory() as db:
         await db.execute(insert(User).values(
             id=uid, email=f"{uid[:8]}@example.com", username=f"u{uid[:8]}",
@@ -98,10 +111,14 @@ async def _seed_chunks(session_factory, *, embedded: int, pending: int) -> None:
             source_type=SourceType.pdf.value, status=NoteStatus.cleaned.value,
         ))
         for i in range(embedded + pending):
+            has = i < embedded
             db.add(Chunk(
-                user_id=uid, note_id=nid, index=i, content=f"chunk {i}",
+                user_id=uid, note_id=nid, index=start_index + i, content=f"chunk {i}",
                 char_start=i, char_end=i + 1, line_start=i, line_end=i,
-                char_count=1, has_embedding=i < embedded,
+                char_count=1, has_embedding=has,
+                # 已嵌入的行带上模型与维度（`/ready` 的向量快照读的就是这两列）
+                embedding_model=model if has else None,
+                embedding_dim=dim if has else None,
             ))
         await db.commit()
 
@@ -189,14 +206,79 @@ class TestReadinessWithHealthyDatabase:
         assert body["queue"]["pending"] == 0
 
     async def test_index_backlog_shape_is_stable(self, test_db):
-        """索引积压必须**存在且形状固定**（看板靠字段名取值）"""
+        """索引积压必须**存在且形状固定**（看板靠字段名取值）
+
+        ⚠️ 2026-10-21（D2-①）新增三个字段：`vector_models` / `vector_dims` /
+        `degraded` —— 它们回答"库里现在的向量到底是谁算的"。
+        这条断言因此从两字段扩到五字段（形状固定这条约定没变，
+        变的是"固定成什么形状"）。
+        """
         async with _client() as client:
             body = (await client.get("/ready")).json()
 
         index = body["index"]
-        assert set(index) == {"pending_embeddings", "source"}, index
+        assert set(index) == {
+            "pending_embeddings",
+            "source",
+            "vector_models",
+            "vector_dims",
+            "degraded",
+        }, index
         assert isinstance(index["pending_embeddings"], int), "库已答话时必须是数字（空表即 0）"
         assert isinstance(index["source"], str) and index["source"]
+        # 空表：模型/维度分布是空字典（"一条向量都没有"是**已知**，不是"测不到"）
+        assert index["vector_models"] == {}, index["vector_models"]
+        assert index["vector_dims"] == {}, index["vector_dims"]
+        assert index["degraded"] is False, "空库不是降级（还没有向量 ≠ 混了模型）"
+
+    async def test_vector_model_snapshot_reports_what_is_actually_in_the_db(self, test_db):
+        """★ 向量模型快照读的是**库里的既成事实**（D2-①）
+
+        为什么必须有它：`EmbeddingService` 在可用内存不足时会**静默降级**
+        （bge-m3 1024 维 → bge-small-zh 512 维），而那次降级**只在日志里留一行
+        WARNING** —— 界面上完全无感（走查报告附录 C.1 实测触发过一次）。
+
+        这条用例造出"库里混着两种模型"的状态，断言 `/ready` 能报出来。
+        判据是**从 `embedding_model` / `embedding_dim` 两列读**，不是读配置 ——
+        算向量的进程是 worker，`/ready` 跑在 API 进程，配置值在这里答不了。
+        """
+        await _seed_chunks(test_db, embedded=2, pending=0, model="BAAI/bge-m3", dim=1024)
+        await _seed_chunks(
+            test_db,
+            embedded=1,
+            pending=0,
+            model="BAAI/bge-small-zh-v1.5",
+            dim=512,
+            note_id="n2",
+            start_index=100,
+        )
+
+        async with _client() as client:
+            body = (await client.get("/ready")).json()
+
+        index = body["index"]
+        assert index["vector_models"] == {"BAAI/bge-m3": 2, "BAAI/bge-small-zh-v1.5": 1}, index
+        assert index["vector_dims"] == {"1024": 2, "512": 1}, index
+        assert index["degraded"] is True, (
+            "库里混着两种模型/维度却没报 degraded —— 跨模型余弦相似度没有意义，"
+            "这正是要暴露的状态"
+        )
+
+    async def test_single_model_is_not_reported_as_degraded(self, test_db):
+        """反向断言：只有一种模型一种维度时 `degraded` 必须是 False
+
+        没有这条，把 `degraded` 写成恒 `True` 也能让上面那条绿 ——
+        而那会让这个指标失去意义（永远报警的指标等于没有指标）。
+        """
+        await _seed_chunks(test_db, embedded=3, pending=0, model="BAAI/bge-m3", dim=1024)
+
+        async with _client() as client:
+            body = (await client.get("/ready")).json()
+
+        index = body["index"]
+        assert index["vector_models"] == {"BAAI/bge-m3": 3}
+        assert index["vector_dims"] == {"1024": 3}
+        assert index["degraded"] is False, index
 
     async def test_index_backlog_counts_only_unembedded_chunks(self, test_db):
         """★ 积压数的是**待补向量**的行，不是 chunk 总数

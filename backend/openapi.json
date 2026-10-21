@@ -2980,8 +2980,19 @@
         "type": "object"
       },
       "IndexBacklog": {
-        "description": "`/ready` 的索引积压快照（阶段 5.1 的取证发现的缺口）\n\n`pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：\n这些内容**只被 BM25 检索到**，向量通道里还看不见它们\n（清洗路径刻意不写向量，补嵌入是人工脚本，见本模块 `/ready` 上方说明）。\n\n`None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`\n同一条原则：0 会让\"没测\"与\"真的没有积压\"在监控面板上长得一模一样。",
+        "description": "`/ready` 的索引积压快照（阶段 5.1 的取证发现的缺口）\n\n`pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：\n这些内容**只被 BM25 检索到**，向量通道里还看不见它们\n（清洗路径刻意不写向量，补嵌入此前只有人工脚本 —— 2026-10-21 起\n由 Beat 的 `backfill_embeddings` 周期补齐，见 B2）。\n\n`None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`\n同一条原则：0 会让\"没测\"与\"真的没有积压\"在监控面板上长得一模一样。\n\n## 向量模型快照（D2-①，2026-10-21 加）\n\n`vector_models` / `vector_dims` / `degraded` 三件回答的是同一个问题：\n**库里现在的向量到底是谁算的。** 为什么必须有它：`EmbeddingService` 在\n可用内存不足时会**静默降级**（`embedding_service.py:66-83`：\n主模型 `BAAI/bge-m3`(1024 维) → 降级 `BAAI/bge-small-zh-v1.5`(512 维)），\n而那次降级**只在日志里留一行 WARNING** —— 界面上完全无感，用户与运维\n都无从得知（走查报告附录 C.1 实测触发过一次，结论是\n\"降级本身是确凿的，而且用户无从得知\"）。\n\n判据是**从库里读**的（`embedding_model` / `embedding_dim` 两列），\n不是读配置、也不是读进程内存 —— 因为算向量的进程是 worker，\n而 `/ready` 跑在 API 进程里，两者不是同一份内存状态。",
         "properties": {
+          "degraded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded"
+          },
           "pending_embeddings": {
             "anyOf": [
               {
@@ -2996,6 +3007,34 @@
           "source": {
             "title": "Source",
             "type": "string"
+          },
+          "vector_dims": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Dims"
+          },
+          "vector_models": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Models"
           }
         },
         "required": [

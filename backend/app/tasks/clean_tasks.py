@@ -393,26 +393,126 @@ async def _clean_document(note_id: str):
     #
     # 失败**不抛异常**：清洗的主产物是 clean.md 与状态；索引缺失时
     # 检索退化为只用 BM25 通道，属于可用状态，不该让整个清洗任务失败。
-    try:
-        from ..services.chunk_service import index_note_from_storage
-
-        session_factory = _get_clean_session()
-        async with session_factory() as chunk_db:
-            n_chunks = await index_note_from_storage(
-                chunk_db,
-                note_id=note_id,
-                user_id=user_id,
-                clean_md_path=clean_md_path,
-                original_md_path=original_md_path,
-                chunk_size=settings.chunk_size,
-            )
-            await chunk_db.commit()
-        logger.info("chunk 索引已重建: note_id=%s, chunks=%d", note_id, n_chunks)
-    except Exception as exc:
-        logger.warning("chunk 索引重建失败（不影响清洗结果）: note_id=%s, %s", note_id, exc)
+    #
+    # ── 2026-10-21 改（D2-③）──
+    #
+    # 原文案是 `logger.warning("chunk 索引重建失败（不影响清洗结果）: …")`。
+    # **"不影响清洗结果"这半句把后果说小了**：索引重建失败意味着该笔记在
+    # **FTS 与向量两条通道里都没有语料** —— 它不只是"少一层优化"，
+    # 而是这篇笔记**问答/原文回跳都查不到**（走查报告 §5 第 7 条登记了这条，
+    # 并指出"后果被低估"）。实测触发过一次：`Instance <Chunk …> has a NULL
+    # identity key`（chunk_rowid 主键问题，已在 `f9f50ca` 修掉根因）。
+    #
+    # 现在两处一起改：
+    #   ① **有界重试**（3 次，间隔 0.5/1/2 秒）—— 那次失败是事务/主键类的
+    #      瞬时问题，重试一次就过去了；不重试等于让用户白等一次重新清洗；
+    #   ② 仍然失败时**写进 `note.error_message`** —— 那个字段在界面上是可见的
+    #      （`NoteDetailHeader.tsx:368`、`NotesList.tsx:373`、`CleaningPanel.tsx:258`），
+    #      而日志只有运维看得到。走查报告要的"用户能知道"就是这一步。
+    #
+    # ⚠️ 重试**不**改变"失败不抛异常"这条：三次都失败也只是记一条可见的说明，
+    # 清洗状态仍是 cleaned（主产物已经落盘）。
+    _index_ok, _index_err = await _rebuild_chunk_index_with_retry(
+        note_id=note_id,
+        user_id=user_id,
+        clean_md_path=clean_md_path,
+        original_md_path=original_md_path,
+    )
+    if not _index_ok:
+        await _mark_index_failure(note_id, _index_err)
 
     elapsed = time.monotonic() - start_time
     logger.info("文档清洗完成: note_id=%s, elapsed=%.1fs", note_id, elapsed)
+
+
+#: chunk 索引重建的重试次数与退避（秒）
+#:
+#: 为什么是 3 次 / 0.5-1-2 秒：实测触发的那次失败（NULL identity key）是
+#: 事务/主键类的**瞬时**问题，重试一次就过去了；再多的重试只会让清洗任务
+#: 变长，而"笔记没有索引"这件事已经有可见出口（`error_message`）兜底。
+_INDEX_RETRY_DELAYS = (0.5, 1.0, 2.0)
+
+
+async def _rebuild_chunk_index_with_retry(
+    *,
+    note_id: str,
+    user_id: str,
+    clean_md_path: str,
+    original_md_path: str,
+) -> tuple[bool, str]:
+    """重建 chunk 索引，失败时有界重试
+
+    Returns:
+        (是否成功, 失败原因)。成功时原因是空串。
+    """
+    import asyncio
+
+    from ..services.chunk_service import index_note_from_storage
+
+    last_err = ""
+    for attempt, delay in enumerate((*_INDEX_RETRY_DELAYS, None), start=1):
+        try:
+            session_factory = _get_clean_session()
+            async with session_factory() as chunk_db:
+                n_chunks = await index_note_from_storage(
+                    chunk_db,
+                    note_id=note_id,
+                    user_id=user_id,
+                    clean_md_path=clean_md_path,
+                    original_md_path=original_md_path,
+                    chunk_size=settings.chunk_size,
+                )
+                await chunk_db.commit()
+            logger.info("chunk 索引已重建: note_id=%s, chunks=%d（第 %d 次尝试）",
+                        note_id, n_chunks, attempt)
+            return True, ""
+        except Exception as exc:  # noqa: BLE001 - 失败要记下来，不能让清洗任务挂
+            last_err = f"{type(exc).__name__}: {exc}"
+            if delay is None:
+                break
+            logger.warning(
+                "chunk 索引重建失败（第 %d 次），%.1fs 后重试: note_id=%s, %s",
+                attempt, delay, note_id, last_err,
+            )
+            await asyncio.sleep(delay)
+
+    # ⚠️ 措辞刻意说清后果，不再写"不影响清洗结果"
+    logger.error(
+        "chunk 索引重建最终失败 —— 该笔记在检索通道里没有语料"
+        "（问答与原文回跳都查不到它，不是'少一层优化'）: note_id=%s, %s",
+        note_id, last_err,
+    )
+    return False, last_err
+
+
+async def _mark_index_failure(note_id: str, reason: str) -> None:
+    """把索引失败写进 `note.error_message`（界面上可见的那个字段）
+
+    ⚠️ **不动 status**：清洗的主产物（clean.md）已经落盘，状态就该是 cleaned。
+    这里只是补一条用户能看到的说明 —— 用 `update()` 而不是 `_update_note_status`
+    正是为了避免连状态一起改。
+
+    写入是**尽力而为**的：写不进去只记日志，不能让清洗任务失败
+    （这条路径本来就是"出错了才走到"）。
+    """
+    from sqlalchemy import update
+
+    from ..models.note import Note
+
+    message = (
+        f"检索索引未建好（{reason}）。这篇笔记的问答与原文定位暂时不可用，"
+        f"重新清洗一次可重试。"
+    )
+    try:
+        session_factory = _get_clean_session()
+        async with session_factory() as db:
+            await db.execute(
+                update(Note).where(Note.id == note_id).values(error_message=message)
+            )
+            await db.commit()
+        logger.info("已把索引失败写进 note.error_message: note_id=%s", note_id)
+    except Exception as exc:  # noqa: BLE001 - 尽力而为
+        logger.warning("写 note.error_message 失败（索引失败本身已记 error）: %s", exc)
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=60)

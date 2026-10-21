@@ -31,7 +31,7 @@ Celery 启动说明（独立进程，不嵌入 FastAPI）：
 from contextlib import asynccontextmanager
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -353,15 +353,35 @@ class IndexBacklog(BaseModel):
 
     `pending_embeddings` = `chunks` 表里 `has_embedding = false` 的行数：
     这些内容**只被 BM25 检索到**，向量通道里还看不见它们
-    （清洗路径刻意不写向量，补嵌入是人工脚本，见本模块 `/ready` 上方说明）。
+    （清洗路径刻意不写向量，补嵌入此前只有人工脚本 —— 2026-10-21 起
+    由 Beat 的 `backfill_embeddings` 周期补齐，见 B2）。
 
     `None` 表示**当前测不到**（库不可用），而不是 0 —— 与 `QueueDepth.depth`
     同一条原则：0 会让"没测"与"真的没有积压"在监控面板上长得一模一样。
-    """
 
+    ## 向量模型快照（D2-①，2026-10-21 加）
+
+    `vector_models` / `vector_dims` / `degraded` 三件回答的是同一个问题：
+    **库里现在的向量到底是谁算的。** 为什么必须有它：`EmbeddingService` 在
+    可用内存不足时会**静默降级**（`embedding_service.py:66-83`：
+    主模型 `BAAI/bge-m3`(1024 维) → 降级 `BAAI/bge-small-zh-v1.5`(512 维)），
+    而那次降级**只在日志里留一行 WARNING** —— 界面上完全无感，用户与运维
+    都无从得知（走查报告附录 C.1 实测触发过一次，结论是
+    "降级本身是确凿的，而且用户无从得知"）。
+
+    判据是**从库里读**的（`embedding_model` / `embedding_dim` 两列），
+    不是读配置、也不是读进程内存 —— 因为算向量的进程是 worker，
+    而 `/ready` 跑在 API 进程里，两者不是同一份内存状态。
+    """
     pending_embeddings: Optional[int] = None
     #: 来源；测不到时是原因码（如 `chunks_unavailable`）
     source: str
+    #: 已嵌入 chunk 用到的模型 → 条数；测不到时是 `None`
+    vector_models: Optional[Dict[str, int]] = None
+    #: 已嵌入 chunk 的维度 → 条数；测不到时是 `None`
+    vector_dims: Optional[Dict[str, int]] = None
+    #: `True` = 库里存在**多种**模型或维度（跨模型相似度无意义，检索结果不可比）
+    degraded: Optional[bool] = None
 
 
 class ReadinessResponse(BaseModel):
@@ -455,6 +475,62 @@ async def _pending_embedding_count() -> tuple[Optional[int], str]:
         logger.warning("就绪检查：chunk 待嵌入数查询失败 | %s: %s", type(exc).__name__, exc)
         return None, "chunks_unavailable"
     return int(total), "chunks_table"
+
+
+async def _vector_model_snapshot() -> tuple[Optional[Dict[str, int]], Optional[Dict[str, int]]]:
+    """库里已嵌入 chunk 用到的模型与维度分布（D2-①）
+
+    ## 为什么读库而不是读配置
+
+    `settings.embedding_model` 是**打算用的**模型；实际算向量的进程是
+    **Celery worker**，而 `/ready` 跑在 **API 进程**里 —— 两者不是同一份内存
+    状态，配置值在这里答不了"库里现在是什么"。`embedding_model` /
+    `embedding_dim` 两列才是既成事实。
+
+    ## 为什么这两个数就能暴露"静默降级"
+
+    降级（bge-m3 1024 维 → bge-small-zh 512 维）会**如实写进那两列**
+    （`_model_name()` 取的是 `loaded_model_name`，不是配置值 —— 这一条
+    有专门的用例守着）。所以：
+
+    - 只有一种模型一种维度 ⇒ 一致；
+    - **多种**模型或维度 ⇒ 库里混着不同来源的向量，而**跨模型余弦相似度
+      没有意义**（这正是 `scripts/embed_chunks.py` 模块说明里要消除的状态）。
+
+    取不到时返回 `(None, None)`（与 `pending_embeddings` 同一条原则：
+    "没测到"不能长得像"没有问题"）。
+    """
+    from sqlalchemy import func, select
+
+    from .models.chunk import Chunk
+
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            model_rows = (
+                await session.execute(
+                    select(Chunk.embedding_model, func.count())
+                    .where(Chunk.has_embedding.is_(True))
+                    .group_by(Chunk.embedding_model)
+                )
+            ).all()
+            dim_rows = (
+                await session.execute(
+                    select(Chunk.embedding_dim, func.count())
+                    .where(Chunk.has_embedding.is_(True))
+                    .group_by(Chunk.embedding_dim)
+                )
+            ).all()
+    except Exception as exc:
+        logger.warning("就绪检查：向量模型快照查询失败 | %s: %s", type(exc).__name__, exc)
+        return None, None
+
+    # 键转字符串：`embedding_model` 可能是 NULL（早期行没写），`embedding_dim` 是整数。
+    # JSON 对象的键必须是字符串，而 pydantic 会把 int 键**静默转成字符串** ——
+    # 显式转一次，免得"读的时候才发现在比较 1024 与 '1024'"。
+    models = {str(m or "unknown"): int(c) for m, c in model_rows}
+    dims = {str(d if d is not None else "unknown"): int(c) for d, c in dim_rows}
+    return models, dims
 
 
 def _broker_queue_depth(cfg: Settings) -> tuple[Optional[int], str]:
@@ -800,6 +876,16 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         pending_embeddings, index_source = (
             await _pending_embedding_count() if db_ok else (None, "database_unavailable")
         )
+        vector_models, vector_dims = (
+            await _vector_model_snapshot() if db_ok else (None, None)
+        )
+        # 降级判据：多种模型或多种维度 ⇒ 库里混着不同来源的向量。
+        # 只有一种（含"一种都没有"）时是 False —— "还没有向量"不是降级。
+        degraded = (
+            None
+            if vector_models is None or vector_dims is None
+            else len(vector_models) > 1 or len(vector_dims) > 1
+        )
 
         payload = ReadinessResponse(
             status="ready" if db_ok else "not_ready",
@@ -820,6 +906,9 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
             index=IndexBacklog(
                 pending_embeddings=pending_embeddings,
                 source=index_source,
+                vector_models=vector_models,
+                vector_dims=vector_dims,
+                degraded=degraded,
             ),
         )
         return JSONResponse(
