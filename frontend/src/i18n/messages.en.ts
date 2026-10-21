@@ -263,6 +263,7 @@ const en = {
   },
 
   shared: {
+    saving: 'Saving…',
     loadFailed: 'Failed to load',
     saveFailed: 'Failed to save',
     deleteFailed: 'Failed to delete',
@@ -660,6 +661,24 @@ const en = {
     submitAnswerFailed: 'Could not submit the answer',
   },
 
+  questionEditor: {
+    edit: 'Edit',
+    questionLabel: 'Question',
+    optionsLabel: 'Options',
+    optionsHint: 'One option per line, e.g. A.First',
+    answerLabel: 'Answer',
+    explanationLabel: 'Explanation (leave empty to clear)',
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Delete this question',
+    saved: 'Saved',
+    deleted: 'Deleted',
+    required: 'Question and answer cannot be empty',
+    optionsRequired: 'A multiple-choice question needs at least 2 options',
+    deleteConfirm: 'Delete this question?',
+    deleteConfirmDetail:
+      'This cannot be undone — the review history and review progress for this question will be removed as well.',
+  },
   questionSets: {
     title: 'Question sets',
     untitledNote: 'Untitled note',

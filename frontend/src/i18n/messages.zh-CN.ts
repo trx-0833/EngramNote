@@ -387,6 +387,7 @@ const zhCN = {
    * 所以放在一处 —— 各页面自己写一份的话，同一句话会有多种译法。
    */
   shared: {
+    saving: '保存中…',
     loadFailed: '加载失败',
     saveFailed: '保存失败',
     deleteFailed: '删除失败',
@@ -839,6 +840,26 @@ const zhCN = {
   },
 
   /** 问题集页（`QuestionSets`，i18n 阶段 3） */
+  questionEditor: {
+    /** 题目行内编辑（B5，2026-10-22） */
+    edit: '编辑',
+    questionLabel: '题干',
+    optionsLabel: '选项',
+    optionsHint: '一行一个选项，例如 A.甲',
+    answerLabel: '答案',
+    /** "留空即清空"必须写出来：PUT 语义下清空是**明确动作**，不是"没填" */
+    explanationLabel: '解析（留空即清空）',
+    save: '保存',
+    cancel: '取消',
+    delete: '删除这道题',
+    saved: '已保存',
+    deleted: '已删除',
+    required: '题干与答案都不能为空',
+    optionsRequired: '选择题至少需要 2 个选项',
+    deleteConfirm: '删除这道题？',
+    /** 删除是**不可撤销**且会连复习进度一起清 —— 这句话不能省 */
+    deleteConfirmDetail: '删除后不可恢复，这道题的复习记录与复习进度也会一并清除。',
+  },
   questionSets: {
     title: '问题集',
     untitledNote: '未命名笔记',

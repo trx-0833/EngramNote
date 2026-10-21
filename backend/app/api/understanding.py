@@ -69,6 +69,8 @@ from ..core.app_error import (
     EMPTY_QUESTION,
     NOTE_NOT_FOUND,
     NOTE_STATUS_INVALID,
+    QUIZ_OPTIONS_REQUIRED,
+    REVIEW_QUIZ_NOT_FOUND,
     UNDERSTANDING_IN_PROGRESS,
     UNDERSTANDING_NO_CARDS,
     AppError,
@@ -77,8 +79,10 @@ from ..database import get_db
 from ..models.note import Note, NoteStatus
 from ..models.user import User
 from ..models.knowledge_card import KnowledgeCard
-from ..models.quiz_item import QuizItem
+from ..models.quiz_item import QuizItem, QuestionType
 from ..models.review_log import ReviewLog
+# B5：删除题目要级联清 review_states（它没有外键，数据库不会替你做）
+from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
 from ..schemas.common import EventStreamResponse
@@ -95,6 +99,7 @@ from ..schemas.knowledge import (
     CardDuplicateListResponse,
     QuizItemResponse,
     QuizItemListResponse,
+    QuizItemUpdateRequest,
     QuestionRequest,
     QuestionAnswerResponse,
     AnswerSource,
@@ -888,3 +893,143 @@ async def get_all_questions(
         page=page,
         page_size=page_size,
     )
+
+
+async def _load_quiz_for_user(db: AsyncSession, quiz_id: str, user_id: str) -> QuizItem:
+    """按 id + 归属人取一道题；不存在/不属于当前用户都报同一个 404
+
+    ## 为什么"不属于你"也报 404 而不是 403
+
+    403 会泄露"这个 id 确实存在"这一位信息。与 `cards/{card_id}` 同一口径 ——
+    把"存在性"与"归属"合成一个回答没有任何代价，分成两种状态反而要多一组
+    用例去守它。
+    """
+    result = await db.execute(
+        select(QuizItem).where(
+            QuizItem.id == quiz_id,
+            QuizItem.user_id == user_id,
+        )
+    )
+    quiz = result.scalars().first()
+    if not quiz:
+        raise AppError(REVIEW_QUIZ_NOT_FOUND, "题目不存在", 404)
+    return quiz
+
+
+def _normalized_options(quiz_type: QuestionType, options: Optional[List[str]]) -> Optional[str]:
+    """把选项列表序列化成库里存的 JSON 字符串（**非选择题一律存 None**）
+
+    为什么非选择题要丢掉选项：答题与判分路径按 `question_type` 分流
+    （`sm2_service` 的 `_grade_choice` / `_grade_fill_blank` / 自评），
+    非选择题上的选项**不会被任何代码读到**。留着它只会在导出、展示、
+    以及将来的数据清理里冒出噪音 —— 而"存了但永远不读"的字段正是
+    这个仓库反复清理的那类东西。
+    """
+    if quiz_type != QuestionType.choice:
+        return None
+    if not options:
+        return None
+    return json.dumps(options, ensure_ascii=False)
+
+
+@router.put("/questions/{quiz_id}", response_model=QuizItemResponse)
+async def update_question(
+    quiz_id: str,
+    req: QuizItemUpdateRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """编辑一道题（题干 / 选项 / 答案 / 解析）
+
+    ## 为什么需要这个端点（B5，2026-10-22）
+
+    改造前**题目只有 GET，没有 PUT/DELETE** —— 卡片有（`/cards/{id}` 的
+    PUT 与 DELETE），题目没有。后果是模型出一道坏题时，用户**没有任何入口**
+    修它，只能整篇"重新理解"（那会删掉该笔记的全部卡片/题目/复习记录）。
+
+    而 A2/A3′ 的三版提示词重跑之后**题库会整批换掉** ——
+    没有审核入口，用户无从对比新旧、也无从留下好的那几道。
+
+    ## 语义：PUT 全量替换（不是 PATCH）
+
+    见 `QuizItemUpdateRequest` 的说明：题目编辑天然是"改完整体提交"，
+    用 PUT 就没有"没传 vs 显式清空"的二义性。`explanation=null` 明确表示清空。
+
+    ## 编辑**不**重置复习进度
+
+    这里只改内容，不动 `review_states` 与调度字段 ——
+    用户改的可能是解析里的错字，那不该让复习进度归零
+    （`models/review_state.py` 开头记的正是这条原则：
+    内容可替换、学习历史不该被替换）。
+    """
+    quiz = await _load_quiz_for_user(db, quiz_id, current_user.id)
+
+    if quiz.question_type == QuestionType.choice and len(req.options or []) < 2:
+        # ⚠️ 文案与 `error_messages.py` 的 `QUIZ_OPTIONS_REQUIRED` **逐字一致**
+        # （`tests/test_i18n.py::TestTableMatchesRaiseSites` 会比对）。
+        # 理由：这个 code 既可能被前端按码翻译、也可能被直接展示 ——
+        # 两处文案不同会让用户看到两句不一样的话（而且没人会想到去对）。
+        # "少于 2 个无法区分对错"这层解释留在常量注释里，不进用户文案。
+        raise AppError(
+            QUIZ_OPTIONS_REQUIRED,
+            "选择题至少需要 2 个选项",
+            400,
+        )
+
+    quiz.question = req.question
+    quiz.answer = req.answer
+    quiz.options = _normalized_options(quiz.question_type, req.options)
+    quiz.explanation = req.explanation
+    await db.commit()
+    await db.refresh(quiz)
+
+    item = QuizItemResponse.model_validate(quiz)
+    # 与列表端点同一口径填 note_title（编辑后前端直接用它替换列表里那一行，
+    # 不该为了一个标题再拉一次列表）
+    if quiz.note_id:
+        note_title = (
+            await db.execute(select(Note.title).where(Note.id == quiz.note_id))
+        ).scalar_one_or_none()
+        item.note_title = note_title or "已删除的笔记"
+    else:
+        item.note_title = "独立卡片"
+    return item
+
+
+@router.delete("/questions/{quiz_id}", status_code=204)
+async def delete_question(
+    quiz_id: str,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除一道题，并**级联清掉它的复习记录与复习状态**
+
+    ## 级联清单（少清一样就会留下孤儿行）
+
+    | 表 | 判据 | 不清会怎样 |
+    |---|---|---|
+    | `review_logs` | `quiz_id` | 复习历史指向不存在的题；掌握度统计会把它们算进去 |
+    | `review_states` | `item_type='quiz'` **且** `item_id` | **最隐蔽的一条**：那张表用 `(user_id, item_type, item_id)` 定位，`item_id` 是普通字符串（**没有外键**），数据库不会替你级联 —— 孤儿行会一直留在"到期队列"里，用户看到一个点不开的复习项 |
+    | `quiz_items` | 自身 | —— |
+
+    ⚠️ `review_states` 里 `item_type='card'` 的行**不能碰**：
+    删除题目不该影响那张卡片本身的复习进度（卡片还能整体回忆）。
+
+    ## 为什么不用 `db.delete(quiz)` 让 ORM 自己排顺序
+
+    与 `delete_card` 同一个理由（那段注释记了）：Core 的批量 DELETE
+    **立即执行**，而 ORM 的 flush 排序不确定 —— 依赖"先删子行再删父行"
+    的隐式顺序在 SQLite 上不保证。显式按子的顺序删，行为才可预期。
+    """
+    quiz = await _load_quiz_for_user(db, quiz_id, current_user.id)
+
+    await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id == quiz_id))
+    await db.execute(
+        sql_delete(ReviewState).where(
+            ReviewState.user_id == current_user.id,
+            ReviewState.item_type == ITEM_TYPE_QUIZ,
+            ReviewState.item_id == quiz_id,
+        )
+    )
+    await db.delete(quiz)
+    await db.commit()

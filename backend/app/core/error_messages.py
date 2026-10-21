@@ -433,6 +433,11 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "题目不存在或不属于该笔记",
         "en": "The question does not exist or does not belong to this note",
     },
+    # B5：编辑选择题时选项少于 2 个（少于 2 个无法区分对错）
+    "QUIZ_OPTIONS_REQUIRED": {
+        "zh-CN": "选择题至少需要 2 个选项",
+        "en": "A multiple-choice question needs at least 2 options",
+    },
     "REVIEW_REMINDERS_FAILED": {
         "zh-CN": "获取复习提醒数据失败",
         "en": "Failed to load review reminders",

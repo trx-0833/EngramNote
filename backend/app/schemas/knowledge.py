@@ -85,6 +85,43 @@ class QuizItemListResponse(BaseModel):
     page_size: int
 
 
+class QuizItemUpdateRequest(BaseModel):
+    """题目编辑请求（B5，2026-10-22）
+
+    ## 为什么是 **PUT 全量替换**而不是 PATCH 部分更新
+
+    改造前项目里刚踩过一个坑（B3）：`Optional[str] = None` **无法区分**
+    "没传这个字段"与"显式清空"，于是用户的清空被静默丢掉。
+    PATCH 语义要正确处理就必须再引入一套 `model_fields_set` 判据。
+
+    而题目编辑**天然**是"用户把这一道题改完、整体提交" ——
+    表单里四个字段全在，没有"只改一个字段"的用法。所以这里用 PUT：
+    **每个字段都必须给**，`None` 就明确表示"清空"。
+    不需要第二套判据，也就不会再有第二种"值无法表达两种意思"的坑。
+
+    ## 校验只做"不给用户挖坑"的那几条
+
+    - `question` / `answer` 非空（空的题干/答案是死题）；
+    - `choice` 题 `options` 至少 2 个（少于 2 个就无法区分对错）；
+    - 非选择题忽略传入的 `options`（存成空）—— 因为答题与判分路径
+      按 `question_type` 分流，留着无意义的选项只会在导出/展示时冒出噪音。
+
+    **不校验** "answer 必须是 options 里的某一项"：判分器
+    （`sm2_service._grade_choice`）明确接受"字母 / 字母+文本 / 完整选项文本"
+    三种写法，还有模糊容错。强行要求 `answer ∈ options` 会把模型产出的
+    合法数据挡在门外（实测存在 answer 是选项文本而 options 带 `A.` 前缀的行）。
+    """
+
+    question: str = Field(..., min_length=1, max_length=2000, description="题干")
+    answer: str = Field(..., min_length=1, max_length=2000, description="正确答案")
+    #: 选项列表（仅选择题有意义）。传 `[]` 或 `null` 都表示"没有选项"。
+    options: Optional[List[str]] = Field(
+        None, description="选项列表；非选择题忽略此项"
+    )
+    #: 解析。`null` = 清空解析（PUT 语义下这是明确意思，不是"没传"）
+    explanation: Optional[str] = Field(None, max_length=4000, description="解析")
+
+
 # --- 理解管道响应模型 ---
 
 class UnderstandingStartRequest(BaseModel):

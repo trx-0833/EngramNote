@@ -5251,6 +5251,59 @@
         "title": "QuizItemResponse",
         "type": "object"
       },
+      "QuizItemUpdateRequest": {
+        "description": "题目编辑请求（B5，2026-10-22）\n\n## 为什么是 **PUT 全量替换**而不是 PATCH 部分更新\n\n改造前项目里刚踩过一个坑（B3）：`Optional[str] = None` **无法区分**\n\"没传这个字段\"与\"显式清空\"，于是用户的清空被静默丢掉。\nPATCH 语义要正确处理就必须再引入一套 `model_fields_set` 判据。\n\n而题目编辑**天然**是\"用户把这一道题改完、整体提交\" ——\n表单里四个字段全在，没有\"只改一个字段\"的用法。所以这里用 PUT：\n**每个字段都必须给**，`None` 就明确表示\"清空\"。\n不需要第二套判据，也就不会再有第二种\"值无法表达两种意思\"的坑。\n\n## 校验只做\"不给用户挖坑\"的那几条\n\n- `question` / `answer` 非空（空的题干/答案是死题）；\n- `choice` 题 `options` 至少 2 个（少于 2 个就无法区分对错）；\n- 非选择题忽略传入的 `options`（存成空）—— 因为答题与判分路径\n  按 `question_type` 分流，留着无意义的选项只会在导出/展示时冒出噪音。\n\n**不校验** \"answer 必须是 options 里的某一项\"：判分器\n（`sm2_service._grade_choice`）明确接受\"字母 / 字母+文本 / 完整选项文本\"\n三种写法，还有模糊容错。强行要求 `answer ∈ options` 会把模型产出的\n合法数据挡在门外（实测存在 answer 是选项文本而 options 带 `A.` 前缀的行）。",
+        "properties": {
+          "answer": {
+            "description": "正确答案",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "解析",
+            "title": "Explanation"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "选项列表；非选择题忽略此项",
+            "title": "Options"
+          },
+          "question": {
+            "description": "题干",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "QuizItemUpdateRequest",
+        "type": "object"
+      },
       "QuizJudgment": {
         "description": "单题评判明细（`quiz_answers[].judgment`）\n\n出处：`services/assessment_service.py` 第 316-336 行 —— 同样是\n**LLM 返回的 JSON 原样透传**（`judgment = json.loads(response)`），\n解析失败时用一份全 0 的兜底字典（第 328-336 行），\n键为 `accuracy_score` / `completeness_score` / `depth_score` /\n`question_score` / `feedback` / `covered_key_points` / `missed_key_points`。\n\n提示词（第 294-303 行）只要求前 5 个键 + 两个列表；\n`question_score` 被 `submit_answers` 用来算总分（第 343 行\n`judgment.get(\"question_score\", 0)`）。\n\n⚠️ 与 `QuizQuestion` 不同，这里**全部字段可选**：兜底字典与提示词\n并不完全一致，而且 `covered_key_points` / `missed_key_points`\n在提示词里是\"要求\"而非\"保证\"。判分缺失是**可恢复**状态\n（总分按 0 计），不该让整个响应 500。\n\n⚠️ 同样需要 `_omit_unset_none`：LLM 没返回某个键时，\n响应里不该多出一个 `null`（那会改变响应体形状）。",
         "properties": {
@@ -12674,6 +12727,103 @@
           }
         ],
         "summary": "Get All Questions",
+        "tags": [
+          "理解"
+        ]
+      }
+    },
+    "/api/understanding/questions/{quiz_id}": {
+      "delete": {
+        "description": "删除一道题，并**级联清掉它的复习记录与复习状态**\n\n## 级联清单（少清一样就会留下孤儿行）\n\n| 表 | 判据 | 不清会怎样 |\n|---|---|---|\n| `review_logs` | `quiz_id` | 复习历史指向不存在的题；掌握度统计会把它们算进去 |\n| `review_states` | `item_type='quiz'` **且** `item_id` | **最隐蔽的一条**：那张表用 `(user_id, item_type, item_id)` 定位，`item_id` 是普通字符串（**没有外键**），数据库不会替你级联 —— 孤儿行会一直留在\"到期队列\"里，用户看到一个点不开的复习项 |\n| `quiz_items` | 自身 | —— |\n\n⚠️ `review_states` 里 `item_type='card'` 的行**不能碰**：\n删除题目不该影响那张卡片本身的复习进度（卡片还能整体回忆）。\n\n## 为什么不用 `db.delete(quiz)` 让 ORM 自己排顺序\n\n与 `delete_card` 同一个理由（那段注释记了）：Core 的批量 DELETE\n**立即执行**，而 ORM 的 flush 排序不确定 —— 依赖\"先删子行再删父行\"\n的隐式顺序在 SQLite 上不保证。显式按子的顺序删，行为才可预期。",
+        "operationId": "delete_question_api_understanding_questions__quiz_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quiz_id",
+            "required": true,
+            "schema": {
+              "title": "Quiz Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Question",
+        "tags": [
+          "理解"
+        ]
+      },
+      "put": {
+        "description": "编辑一道题（题干 / 选项 / 答案 / 解析）\n\n## 为什么需要这个端点（B5，2026-10-22）\n\n改造前**题目只有 GET，没有 PUT/DELETE** —— 卡片有（`/cards/{id}` 的\nPUT 与 DELETE），题目没有。后果是模型出一道坏题时，用户**没有任何入口**\n修它，只能整篇\"重新理解\"（那会删掉该笔记的全部卡片/题目/复习记录）。\n\n而 A2/A3′ 的三版提示词重跑之后**题库会整批换掉** ——\n没有审核入口，用户无从对比新旧、也无从留下好的那几道。\n\n## 语义：PUT 全量替换（不是 PATCH）\n\n见 `QuizItemUpdateRequest` 的说明：题目编辑天然是\"改完整体提交\"，\n用 PUT 就没有\"没传 vs 显式清空\"的二义性。`explanation=null` 明确表示清空。\n\n## 编辑**不**重置复习进度\n\n这里只改内容，不动 `review_states` 与调度字段 ——\n用户改的可能是解析里的错字，那不该让复习进度归零\n（`models/review_state.py` 开头记的正是这条原则：\n内容可替换、学习历史不该被替换）。",
+        "operationId": "update_question_api_understanding_questions__quiz_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quiz_id",
+            "required": true,
+            "schema": {
+              "title": "Quiz Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuizItemUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuizItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Question",
         "tags": [
           "理解"
         ]

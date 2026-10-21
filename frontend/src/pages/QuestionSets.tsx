@@ -39,6 +39,7 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getQuestions, type QuizItem } from '../api/client';
+import { QuestionEditor } from './questionsets/QuestionEditor';
 import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -483,6 +484,13 @@ export default function QuestionSets() {
   const [error, setError] = useState('');
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [searchKeyword, setSearchKeyword] = useState('');
+  /**
+   * 正在行内编辑的题目 id（`null` = 没有在编辑）。
+   *
+   * 用**单个 id** 而不是每行一个布尔：同时编辑两道题既没有意义，
+   * 又会让"保存后该刷新什么"变复杂。展开题目会自动退出编辑态（见下）。
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
   // ── 批次 E5 新增的四个状态 ──
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<SortState>(INITIAL_SORT);
@@ -584,6 +592,30 @@ export default function QuestionSets() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchQuestions(searchKeyword || undefined);
   }, [noteId, fetchQuestions, searchKeyword]);
+
+  /**
+   * 把编辑后的题目替换进本地状态（B5）
+   *
+   * ## 为什么"替换一行"而不是重拉整页
+   *
+   * 这个页面为了"按笔记分组"必须把题目**全部取回**（真库 3367 道题、
+   * 4 次请求 —— 见 `get_all_questions` 的说明）。改一道题就重拉全部，
+   * 代价与收益完全不成比例。
+   *
+   * ## 为什么删除走重拉、编辑不走
+   *
+   * 编辑不改变"有哪些题"，所以替换行就够了；删除会让**总数**变化
+   * （`total`、分组头计数、分组是否为空），逐处手改这些计数只会多几个
+   * 能出错的点。删除是低频动作，重拉一次最稳妥。
+   */
+  function replaceQuestion(updated: QuizItem) {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        questions: g.questions.map((q) => (q.id === updated.id ? updated : q)),
+      })),
+    );
+  }
 
   function handleSearchChange(value: string) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -986,6 +1018,45 @@ export default function QuestionSets() {
                                         <strong>{t('questionSets.explanation')}</strong>
                                         {q.explanation}
                                       </p>
+                                    )}
+
+                                    {/* ── 题目编辑 / 删除（B5，2026-10-22）──
+                                        改造前题目**只有 GET**（卡片有 PUT/DELETE，题目没有），
+                                        所以模型出一道坏题时用户没有任何入口修它 ——
+                                        只能整篇"重新理解"（那会删掉该笔记的全部卡片/题目/复习记录）。
+
+                                        放在**展开的答案区**里：用户判断"要不要改"要先看答案，
+                                        而他展开答案区时就已经在读这里了。每题都在表格行里挂按钮
+                                        会让 5 列密集表的行宽翻倍，收益不值。
+                                        编辑成功后直接用返回的行替换本地状态（不重拉整页），
+                                        删除后重拉（总数变了，得重新分组）。 */}
+                                    {editingId === q.id ? (
+                                      <QuestionEditor
+                                        question={q}
+                                        onCancel={() => setEditingId(null)}
+                                        onSaved={(updated) => {
+                                          setEditingId(null);
+                                          if (updated) {
+                                            replaceQuestion(updated);
+                                          } else {
+                                            void fetchQuestions(searchKeyword || undefined);
+                                          }
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className={styles.answerActions}>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary"
+                                          style={{
+                                            fontSize: 'var(--text-xs)',
+                                            padding: '2px 10px',
+                                          }}
+                                          onClick={() => setEditingId(q.id)}
+                                        >
+                                          {t('questionEditor.edit')}
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 </td>

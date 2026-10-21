@@ -2848,6 +2848,68 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/understanding/questions/{quiz_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Question
+     * @description 编辑一道题（题干 / 选项 / 答案 / 解析）
+     *
+     *     ## 为什么需要这个端点（B5，2026-10-22）
+     *
+     *     改造前**题目只有 GET，没有 PUT/DELETE** —— 卡片有（`/cards/{id}` 的
+     *     PUT 与 DELETE），题目没有。后果是模型出一道坏题时，用户**没有任何入口**
+     *     修它，只能整篇"重新理解"（那会删掉该笔记的全部卡片/题目/复习记录）。
+     *
+     *     而 A2/A3′ 的三版提示词重跑之后**题库会整批换掉** ——
+     *     没有审核入口，用户无从对比新旧、也无从留下好的那几道。
+     *
+     *     ## 语义：PUT 全量替换（不是 PATCH）
+     *
+     *     见 `QuizItemUpdateRequest` 的说明：题目编辑天然是"改完整体提交"，
+     *     用 PUT 就没有"没传 vs 显式清空"的二义性。`explanation=null` 明确表示清空。
+     *
+     *     ## 编辑**不**重置复习进度
+     *
+     *     这里只改内容，不动 `review_states` 与调度字段 ——
+     *     用户改的可能是解析里的错字，那不该让复习进度归零
+     *     （`models/review_state.py` 开头记的正是这条原则：
+     *     内容可替换、学习历史不该被替换）。
+     */
+    put: operations['update_question_api_understanding_questions__quiz_id__put'];
+    post?: never;
+    /**
+     * Delete Question
+     * @description 删除一道题，并**级联清掉它的复习记录与复习状态**
+     *
+     *     ## 级联清单（少清一样就会留下孤儿行）
+     *
+     *     | 表 | 判据 | 不清会怎样 |
+     *     |---|---|---|
+     *     | `review_logs` | `quiz_id` | 复习历史指向不存在的题；掌握度统计会把它们算进去 |
+     *     | `review_states` | `item_type='quiz'` **且** `item_id` | **最隐蔽的一条**：那张表用 `(user_id, item_type, item_id)` 定位，`item_id` 是普通字符串（**没有外键**），数据库不会替你级联 —— 孤儿行会一直留在"到期队列"里，用户看到一个点不开的复习项 |
+     *     | `quiz_items` | 自身 | —— |
+     *
+     *     ⚠️ `review_states` 里 `item_type='card'` 的行**不能碰**：
+     *     删除题目不该影响那张卡片本身的复习进度（卡片还能整体回忆）。
+     *
+     *     ## 为什么不用 `db.delete(quiz)` 让 ORM 自己排顺序
+     *
+     *     与 `delete_card` 同一个理由（那段注释记了）：Core 的批量 DELETE
+     *     **立即执行**，而 ORM 的 flush 排序不确定 —— 依赖"先删子行再删父行"
+     *     的隐式顺序在 SQLite 上不保证。显式按子的顺序删，行为才可预期。
+     */
+    delete: operations['delete_question_api_understanding_questions__quiz_id__delete'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/understanding/{note_id}/cards': {
     parameters: {
       query?: never;
@@ -6169,6 +6231,55 @@ export interface components {
       updated_at: string;
       /** User Id */
       user_id: string;
+    };
+    /**
+     * QuizItemUpdateRequest
+     * @description 题目编辑请求（B5，2026-10-22）
+     *
+     *     ## 为什么是 **PUT 全量替换**而不是 PATCH 部分更新
+     *
+     *     改造前项目里刚踩过一个坑（B3）：`Optional[str] = None` **无法区分**
+     *     "没传这个字段"与"显式清空"，于是用户的清空被静默丢掉。
+     *     PATCH 语义要正确处理就必须再引入一套 `model_fields_set` 判据。
+     *
+     *     而题目编辑**天然**是"用户把这一道题改完、整体提交" ——
+     *     表单里四个字段全在，没有"只改一个字段"的用法。所以这里用 PUT：
+     *     **每个字段都必须给**，`None` 就明确表示"清空"。
+     *     不需要第二套判据，也就不会再有第二种"值无法表达两种意思"的坑。
+     *
+     *     ## 校验只做"不给用户挖坑"的那几条
+     *
+     *     - `question` / `answer` 非空（空的题干/答案是死题）；
+     *     - `choice` 题 `options` 至少 2 个（少于 2 个就无法区分对错）；
+     *     - 非选择题忽略传入的 `options`（存成空）—— 因为答题与判分路径
+     *       按 `question_type` 分流，留着无意义的选项只会在导出/展示时冒出噪音。
+     *
+     *     **不校验** "answer 必须是 options 里的某一项"：判分器
+     *     （`sm2_service._grade_choice`）明确接受"字母 / 字母+文本 / 完整选项文本"
+     *     三种写法，还有模糊容错。强行要求 `answer ∈ options` 会把模型产出的
+     *     合法数据挡在门外（实测存在 answer 是选项文本而 options 带 `A.` 前缀的行）。
+     */
+    QuizItemUpdateRequest: {
+      /**
+       * Answer
+       * @description 正确答案
+       */
+      answer: string;
+      /**
+       * Explanation
+       * @description 解析
+       */
+      explanation?: string | null;
+      /**
+       * Options
+       * @description 选项列表；非选择题忽略此项
+       */
+      options?: string[] | null;
+      /**
+       * Question
+       * @description 题干
+       */
+      question: string;
     };
     /**
      * QuizJudgment
@@ -10715,6 +10826,70 @@ export interface operations {
         content: {
           'application/json': components['schemas']['QuizItemListResponse'];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  update_question_api_understanding_questions__quiz_id__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        quiz_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QuizItemUpdateRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuizItemResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_question_api_understanding_questions__quiz_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        quiz_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

@@ -30,6 +30,9 @@ export type QuizItem = Schema<'QuizItemResponse'>;
 /** 题目列表响应（生成自 `QuizItemListResponse`） */
 export type QuizItemListResponse = Schema<'QuizItemListResponse'>;
 
+/** 单道题（生成自 `QuizItemResponse`） */
+export type QuizItemResponse = Schema<'QuizItemResponse'>;
+
 /** 理解管道影响面（生成自 `UnderstandingImpact`） */
 export type UnderstandingImpact = Schema<'UnderstandingImpact'>;
 
@@ -191,6 +194,46 @@ export async function getQuestions(
     keyword,
   };
   return request<QuizItemListResponse>(`/understanding/questions${buildQuery(query)}`);
+}
+
+/**
+ * 编辑一道题（B5，2026-10-22）
+ *
+ * ## 为什么需要它
+ *
+ * 改造前题目**只有 GET** —— 卡片能改能删，题目不能。模型出一道坏题时
+ * 用户**没有任何入口**修它，只能整篇"重新理解"（那会删掉该笔记的
+ * 全部卡片/题目/复习记录）。而 A2/A3′ 重跑之后题库会整批换掉 ——
+ * 没有审核入口就无从对比新旧。
+ *
+ * ## 语义是 **PUT 全量替换**（不是 PATCH 部分更新）
+ *
+ * 题目编辑天然是"改完整体提交"，所以四个字段都得给。
+ * `explanation: null` **明确表示清空**，没有"没传 vs 显式清空"的二义性
+ * （B3 那个坑的反面 —— 那里用 PATCH 才需要 `model_fields_set` 补信息）。
+ *
+ * 编辑**不会**重置复习进度：改的可能是解析里的错字，
+ * 那不该让用户复习了一个月的进度归零。
+ */
+export async function updateQuestion(
+  quizId: string,
+  body: BodyOf<'/understanding/questions/{quiz_id}', 'put'>,
+): Promise<QuizItemResponse> {
+  return request<QuizItemResponse>(`/understanding/questions/${quizId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * 删除一道题（B5，2026-10-22）
+ *
+ * 后端会级联清掉它的 `review_logs` 与 `review_states`
+ * （后者没有外键，所以必须由后端显式删 —— 否则「到期队列」里会留下
+ * 一个点不开的复习项，而且不会有任何报错）。
+ */
+export async function deleteQuestion(quizId: string): Promise<void> {
+  return request<void>(`/understanding/questions/${quizId}`, { method: 'DELETE' });
 }
 
 /**

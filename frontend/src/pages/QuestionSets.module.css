@@ -234,6 +234,17 @@
   padding-top: var(--space-sm);
 }
 
+/* 题目编辑/删除的入口按钮行（B5，2026-10-22）
+ *
+ * 放在答案区**下方**、与答案文字同一块：用户的动作顺序是
+ * "读答案 → 觉得不对 → 改它"，按钮跟在这段内容后面符合那个顺序。
+ * 上边距把它与答案文字分开，但不加分隔线 —— 它们是同一件事的两半。 */
+.answerActions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
 /* 原值 `#25714a` 与 `--color-success` 逐字相同（见 tsx 里的 a11y 说明），
    这一批换成令牌 —— 硬编码色值因此少一处。 */
 .answerText {
