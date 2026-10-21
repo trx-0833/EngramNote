@@ -473,7 +473,7 @@ def _process_with_mineru(
     ## 为什么用 `--format zip`
 
     项目下游需要 **Markdown + 页码**两样东西：`page_count` 取自
-    `middle_json.json` 的 `pdf_info`（与 3.x 从 `layout.json` 取的口径一致），
+    `middle_json.json` 的页列表（3.x 叫 `pdf_info`，4.x 叫 `pages`），
     `layout.json` 也由它复制而来。`--format markdown` 只给一个 .md，
     拿不到页数。实测 zip 内含：
         markdown.md / middle_json.json / model_output.json / structured_content.json
@@ -608,7 +608,10 @@ def _process_with_mineru(
         json_path = json_candidates[0]
         try:
             layout_json_data = json.loads(json_path.read_text(encoding="utf-8"))
-            pdf_info = layout_json_data.get("pdf_info", [])
+            # 4.x 的 middle_json schema 变了：3.x 是顶层 `pdf_info`，
+            # 4.x 是顶层 `pages`（schema=docvortex.middle, version=2.0）。
+            # 两个都认 —— 否则本地路径的 page_count 会静默变成 0（实测踩到过）。
+            pdf_info = layout_json_data.get("pdf_info") or layout_json_data.get("pages") or []
             page_count = len(pdf_info)
         except Exception as e:
             logger.warning(f"读取 layout.json 失败: {json_path} - {e}")
