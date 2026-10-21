@@ -77,11 +77,11 @@ def _log(msg: str) -> None:
 
 
 async def run(args) -> int:
-    from sqlalchemy import func, select, update
+    from sqlalchemy import func, select
 
     from app import database as db_mod
     from app.config import get_settings
-    from app.models.chunk import Chunk, pack_vector
+    from app.models.chunk import Chunk
 
     settings = get_settings()
     await db_mod.init_db()
@@ -132,6 +132,24 @@ async def run(args) -> int:
         return 2
 
     # ---- 3. 分批编码并落库 ----
+    #
+    # ⚠️ 2026-10-21（B2）：编码与写回这一段**改为复用 Celery 任务**
+    # `app.tasks.embedding_tasks.embed_chunks` —— 它与 Beat 的
+    # `backfill_embeddings` 走同一份实现。此前这里是**第二份**实现
+    # （脚本一份、任务一份），两份都要维护"只补缺的、四列齐全、
+    # 模型名记实际加载的那个"这些不变量，迟早漂移。
+    #
+    # 直接调用任务函数：Celery 任务的 `__call__` 会在**本进程内**执行，
+    # 不需要 worker 在跑 —— 脚本本来就是为了"没有 worker 时也能补"
+    # （与 `embed_cards.py:152-154` 同一条做法）。
+    #
+    # 脚本自己保留的两件事（不搬进任务）：
+    #   ① `--check` 只看不做；
+    #   ② 开始前/过程中的**内存安全线** —— 脚本是"人在旁边看着跑"的入口，
+    #      主动停比等 OOM 好；任务侧的内存约束由 `EmbeddingService`
+    #      自己的降级逻辑承担（降级时会记进 `embedding_model` 列）。
+    from app.tasks.embedding_tasks import embed_chunks as embed_chunks_task
+
     batch_size = max(1, args.batch_size)
     limit = args.limit or 10 ** 9
     written = 0
@@ -139,43 +157,20 @@ async def run(args) -> int:
 
     while written < limit:
         take = min(batch_size, limit - written)
+        result = embed_chunks_task(take)
 
-        # 只取未嵌入的行；每批重新查询，天然支持续跑
-        async with session_factory() as db:
-            rows = list((await db.execute(
-                select(Chunk.id, Chunk.content)
-                .where(Chunk.has_embedding.is_(False))
-                .order_by(Chunk.note_id, Chunk.index)
-                .limit(take)
-            )).all())
-
-        if not rows:
+        if result["scanned"] == 0:
             break
 
-        ids = [r.id for r in rows]
-        texts = [r.content or "" for r in rows]
-        vectors = service.encode(texts)
-
-        async with session_factory() as db:
-            for cid, vec in zip(ids, vectors, strict=True):
-                if vec is None:
-                    continue
-                await db.execute(
-                    update(Chunk).where(Chunk.id == cid).values(
-                        embedding=pack_vector(vec),
-                        embedding_model=model_name,
-                        embedding_dim=len(vec),
-                        has_embedding=True,
-                    )
-                )
-            # 每批单独提交：中断只影响当前批次
-            await db.commit()
-
-        written += len(ids)
+        written += result["embedded"]
         batches += 1
-        if batches % 5 == 0 or written >= pending:
+        if batches % 5 == 0 or result["remaining"] == 0:
             _log(f"  已写入 {written}/{min(pending, limit)}   "
                  f"可用内存 {_free_gb():.2f} GB")
+
+        if result["embedded"] == 0 and result["failed"] > 0:
+            _log(f"本批 {result['failed']} 条编码失败、0 条成功，主动停止以免空转。")
+            return 3
 
         if _free_gb() < MIN_FREE_GB_DURING:
             _log(f"可用内存降至 {_free_gb():.2f} GB（安全线 {MIN_FREE_GB_DURING} GB），"

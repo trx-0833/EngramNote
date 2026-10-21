@@ -257,6 +257,235 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
     }
 
 
+#: `embed_chunks` 单批处理多少条 chunk。
+#:
+#: 与 `EMBED_CARDS_BATCH` 取同一个量级的理由相同：编码约 0.37 秒/张（实测），
+#: 一批 200 条约 75 秒 —— 任务不会长到让 worker 看起来像卡死。
+#: 注意 chunk 的文本比卡片长（500 字上限 vs 卡片正文），所以实际会更慢一些。
+EMBED_CHUNKS_BATCH = 200
+
+
+@celery_app.task(acks_late=True, task_reject_on_worker_lost=True)
+def embed_chunks(limit: int = EMBED_CHUNKS_BATCH) -> Dict[str, int]:
+    """给**还没有向量**的 chunk 补向量并写回库（B2：自动补嵌入闭环）
+
+    ## 为什么需要这个任务（而不是继续用脚本）
+
+    这是 `docs/overhaul-plan.md` 附录 BN.3 里**仅有的两条「确实影响使用」**
+    之一（丙-2）：清洗路径**刻意不写向量**（要加载 4.3GB 模型，不能放在
+    高并发的用户路径里，见 `services/chunk_service.py:20-28`），
+    而补嵌入此前**只有人工脚本** `scripts/embed_chunks.py`，
+    且 `tasks/celery_app.py` 的 `beat_schedule` 里**没有**这个任务。
+
+    后果是**用户侧看不见的降级**：新导入的笔记在有人手工跑脚本之前，
+    问答**只能用 BM25**（换个说法/同义的问题答不出或答歪），
+    而界面上只有 SSE 的 `meta.retrieval_status` 写着 `hybrid` ——
+    `/ready` 的 `pending_embeddings` 是给运维看的探针，用户不会去读。
+    实测真库 **210/818 chunk 无向量**。
+
+    ## 与脚本的关系
+
+    脚本 `scripts/embed_chunks.py` 仍是"没有 worker 时也能补"的入口，
+    它的编码循环现在**复用这个任务**（同一份实现，不再是两份）。
+    脚本的 `--check` / 内存安全线语义由它自己保留。
+
+    ## 只处理 `has_embedding=False` 的行
+
+    已嵌入的**不重算** —— 换模型要重算时把 `has_embedding` 置回 False
+    另行处理（与 `embed_cards` 同一条口径）。
+
+    Args:
+        limit: 本批最多处理多少条（默认 200）
+
+    Returns:
+        dict: `{"scanned": 扫描到的待嵌入数, "embedded": 实际写入数,
+               "failed": 编码失败数, "remaining": 本批之后还剩多少,
+               "model": 实际使用的模型名}`
+    """
+    with task_loop("embed_chunks"):
+        return run_async(_embed_chunks_async(limit))
+
+
+async def _embed_chunks_async(limit: int) -> Dict[str, int]:
+    """`embed_chunks` 的异步主体（要读写库，因此必须跑在任务事件循环里）"""
+    from sqlalchemy import func, select, update
+
+    from ..models.chunk import Chunk, pack_vector
+    from .common import get_sync_session
+
+    session_factory = get_sync_session()
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(Chunk.id, Chunk.content)
+            .where(Chunk.has_embedding.is_(False))
+            .order_by(Chunk.note_id, Chunk.index)
+            .limit(limit)
+        )).all()
+
+        if not rows:
+            return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0, "model": ""}
+
+        texts = [content or "" for _cid, content in rows]
+        vectors = encode_text(texts)
+        model_name = _model_name()
+
+        embedded = failed = 0
+        # strict=True：`encode_text` 保证一条文本一个向量，长度不等说明任务坏了，
+        # 宁可让任务报错，也不能悄悄少写几条（那会让它们永远没有向量）
+        for (chunk_id, _content), vec in zip(rows, vectors, strict=True):
+            if not vec:
+                failed += 1
+                continue
+            await session.execute(
+                update(Chunk)
+                .where(Chunk.id == chunk_id)
+                .values(
+                    embedding=pack_vector(vec),
+                    embedding_model=model_name,
+                    embedding_dim=len(vec),
+                    has_embedding=True,
+                )
+            )
+            embedded += 1
+        await session.commit()
+
+        remaining = (await session.execute(
+            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
+        )).scalar_one()
+
+    logger.info(
+        "embed_chunks: 扫描 %d 条 → 写入 %d、失败 %d，剩余 %d（模型 %s）",
+        len(rows), embedded, failed, remaining, model_name,
+    )
+    return {
+        "scanned": len(rows),
+        "embedded": embedded,
+        "failed": failed,
+        "remaining": remaining,
+        "model": model_name,
+    }
+
+
+#: `backfill_embeddings` 单轮最多处理多少条/张。
+#:
+#: 比单任务的批次小：这一轮是**周期任务**，只要每轮能清掉一批、
+#: 且不会长时间占住 worker 就够了。剩下的下一轮继续。
+BACKFILL_ROUND_LIMIT = 100
+
+
+@celery_app.task(acks_late=True, task_reject_on_worker_lost=True)
+def backfill_embeddings(limit: int = BACKFILL_ROUND_LIMIT) -> Dict[str, object]:
+    """周期性地把"缺向量"的 chunk 与卡片补齐（B2）
+
+    ## 为什么是一个编排任务，而不是两条 Beat 项
+
+    两条 Beat 项会在**两个 worker 进程**里各加载一次 4.3GB 的嵌入模型
+    （`_embedding_service` 是**进程内**单例）。一条编排任务串行调用两者，
+    模型只加载一次 —— 这是本项目"资源约束"下唯一合理的选择
+    （见 `AGENTS.md` §3：嵌入模型必须隔离在异步 worker 进程）。
+
+    ## 为什么先 chunk 后卡片
+
+    chunk 是**检索通道**（问答/原文回跳），卡片是**关系判定通道**。
+    前者影响用户每一次提问，后者只影响图谱建议的候选池。
+    一轮做不完时，先把影响面大的那条做完。
+
+    ## 空转保护
+
+    两条都没有待办时**一次数据库查询都不发**（先各查一次计数），
+    且不加载模型 —— 周期任务最常见的情况就是"没有活干"，
+    那种情况下不该让 worker 去读 4.3GB 权重。
+
+    Args:
+        limit: 每一类本轮最多处理多少（默认 100）
+
+    Returns:
+        dict: `{"chunks": {...}, "cards": {...}}`，各自是子任务的结果字典；
+              没有活干时是 `{"chunks": {"skipped": true}, "cards": {"skipped": true}}`
+    """
+    with task_loop("backfill_embeddings"):
+        return run_async(_backfill_embeddings_async(limit))
+
+
+async def _pending_counts() -> Dict[str, int]:
+    """两类待补数量（chunk 全库、卡片按用户）"""
+    from sqlalchemy import func, select
+
+    from ..models.chunk import Chunk
+    from ..models.knowledge_card import KnowledgeCard
+    from ..models.note import Note
+    from .common import get_sync_session
+
+    session_factory = get_sync_session()
+    async with session_factory() as session:
+        chunks = (await session.execute(
+            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
+        )).scalar_one()
+        cards = (await session.execute(
+            select(func.count()).select_from(KnowledgeCard).where(
+                KnowledgeCard.has_embedding.is_(False),
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
+        )).scalar_one()
+    return {"chunks": int(chunks), "cards": int(cards)}
+
+
+async def _card_user_ids() -> List[str]:
+    """有"待补向量的卡片"的用户 ID 列表（`embed_cards` 是 per-user 的）"""
+    from sqlalchemy import distinct, select
+
+    from ..models.knowledge_card import KnowledgeCard
+    from ..models.note import Note
+    from .common import get_sync_session
+
+    session_factory = get_sync_session()
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(distinct(KnowledgeCard.user_id)).where(
+                KnowledgeCard.has_embedding.is_(False),
+                Note.not_trashed(KnowledgeCard.note_id),
+            )
+        )).scalars().all()
+    return [uid for uid in rows if uid]
+
+
+async def _backfill_embeddings_async(limit: int) -> Dict[str, object]:
+    result: Dict[str, object] = {}
+
+    pending = await _pending_counts()
+
+    # 空转保护：两条都没有待办 ⇒ 不加载模型、不再查库
+    if pending["chunks"] == 0 and pending["cards"] == 0:
+        logger.debug("backfill_embeddings: 无待补内容，跳过")
+        return {"chunks": {"skipped": True}, "cards": {"skipped": True}}
+
+    # 先 chunk（影响面大），再卡片
+    if pending["chunks"] > 0:
+        result["chunks"] = await _embed_chunks_async(limit)
+    else:
+        result["chunks"] = {"skipped": True}
+
+    if pending["cards"] > 0:
+        from ..services.graph_service import _build_card_embedding_text
+
+        per_user: List[Dict[str, int]] = []
+        for uid in await _card_user_ids():
+            per_user.append(await _embed_cards_async(uid, limit, _build_card_embedding_text))
+            # 一轮里每个用户最多处理 limit 张，避免用户多时单轮过长
+        result["cards"] = {
+            "users": len(per_user),
+            "embedded": sum(u["embedded"] for u in per_user),
+            "failed": sum(u["failed"] for u in per_user),
+            "remaining": sum(u["remaining"] for u in per_user),
+        }
+    else:
+        result["cards"] = {"skipped": True}
+
+    logger.info("backfill_embeddings: 待补 chunk=%d 卡片=%d → %s",
+                pending["chunks"], pending["cards"], result)
+    return result
+
+
 def _model_name() -> Optional[str]:
     """**实际加载的**嵌入模型名（写进 `embedding_model` 列）
 
