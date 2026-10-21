@@ -65,8 +65,8 @@ function renderPage() {
 }
 
 /** 接口一次性返回整页（`page` / `page_size` 是响应契约的一部分，不能省） */
-function mockCards(items: KnowledgeCard[]) {
-  mockedCards.mockResolvedValue({ items, page: 1, page_size: 999, total: items.length });
+function mockCards(items: KnowledgeCard[], total = items.length) {
+  mockedCards.mockResolvedValue({ items, page: 1, page_size: 100, total });
 }
 
 /** 同一个色值在 jsdom 里的规范写法（`#8f7020` 会被读成 `rgb(143, 112, 32)`） */
@@ -124,5 +124,75 @@ describe('知识卡片列表：掌握度改成环形（批次 E3）', () => {
 
     expect(container.querySelectorAll(`.${masteryStyles.masteryRing}`)).toHaveLength(0);
     expect(screen.queryByText(/掌握度/)).toBeNull();
+  });
+});
+
+/**
+ * 服务端分页（走查报告 §4 的 🟠「声称 3469 张，只渲染 999 张，无分页无提示」）
+ *
+ * 改造前是 `getKnowledgeCards(1, 999, …)` —— 一页 999 张、没有分页控件、
+ * 页尾也不说"还有多少没显示"，所以真库里 3469 张卡片有 2470 张**静默不可见**。
+ *
+ * 这一组用例把新的三件事钉住：
+ * 1. 请求带的是 `PAGE_SIZE`（100）与当前页码，不是写死的 999；
+ * 2. 超过一页时出现分页控件，且能翻页（翻页后请求页码跟着变）；
+ * 3. 页尾如实说明"本页显示第几到第几张、共多少张"。
+ */
+describe('知识卡片列表：服务端分页', () => {
+  beforeEach(() => {
+    mockedCards.mockReset();
+  });
+
+  it('★ 请求用的是 PAGE_SIZE=100 与当前页码，不再写死 999', async () => {
+    mockCards([makeCard()]);
+    renderPage();
+    await screen.findByText('浮充的定义');
+
+    expect(mockedCards).toHaveBeenCalledWith(1, 100, undefined, undefined);
+  });
+
+  it('★ 超过一页时出现分页控件，翻页后请求第 2 页', async () => {
+    // 第 1 页返回 5 张、总数 3469 → 35 页。
+    // ⚠️ 这里刻意**不**造满 100 张卡：本用例要验的是分页控件与请求页码，
+    // 与"这一页有几张卡"无关；造满 100 张会让本用例在整仓测试并发跑时
+    // 超 5s 默认超时（实测：单独跑 2.0s、整仓跑 >5s）。
+    const page1 = Array.from({ length: 5 }, (_, i) =>
+      makeCard({ id: `c${i}`, title: `卡片${i}` }),
+    );
+    mockedCards.mockResolvedValueOnce({ items: page1, page: 1, page_size: 100, total: 3469 });
+    mockedCards.mockResolvedValueOnce({
+      items: [makeCard({ id: 'p2', title: '第二页的卡片' })],
+      page: 2,
+      page_size: 100,
+      total: 3469,
+    });
+
+    renderPage();
+    await screen.findByText('卡片0');
+
+    // 控件出现，且页尾如实说明范围
+    expect(screen.getByRole('navigation', { name: '知识卡片分页' })).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 35 页')).toBeInTheDocument();
+    expect(screen.getByText('本页显示第 1–5 张，共 3469 张')).toBeInTheDocument();
+
+    // 上一页在第 1 页时不可点
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+
+    // 翻到第 2 页：请求页码跟着变，页尾数字也跟着变
+    screen.getByRole('button', { name: '下一页' }).click();
+    await screen.findByText('第二页的卡片');
+
+    expect(mockedCards).toHaveBeenLastCalledWith(2, 100, undefined, undefined);
+    expect(screen.getByText('第 2 / 35 页')).toBeInTheDocument();
+    expect(screen.getByText('本页显示第 101–101 张，共 3469 张')).toBeInTheDocument();
+  });
+
+  it('只有一页时不显示分页控件 —— 那排按钮没有任何可做的事', async () => {
+    mockCards([makeCard()], 1);
+    renderPage();
+    await screen.findByText('浮充的定义');
+
+    expect(screen.queryByRole('navigation', { name: '知识卡片分页' })).toBeNull();
+    expect(screen.queryByText(/本页显示第/)).toBeNull();
   });
 });

@@ -34,6 +34,27 @@ interface NoteGroup {
 /** 卡片分类筛选 tab 类型 */
 type CategoryFilter = 'all' | 'regular' | 'blind_spot' | 'extension';
 
+/**
+ * 每页卡片数（走查报告 §4 的「声称 3469 张，只渲染 999 张」）
+ *
+ * ## 为什么是服务端分页，而不是"一次拉全量"
+ *
+ * 后端 `/understanding/cards` 的 `page_size` 上限是 9999（`api/understanding.py:363`），
+ * 所以把 999 改成 9999 确实能"一次拿全"。**但那样 DOM 会同时挂上 3469 张卡片** ——
+ * 走查实测这一页当时就有 3441 个按钮 / 161,766 字（`walk1.json` B09），
+ * 而那次也只渲染了 999 张。拉全量会把已知的性能问题放大 3.5 倍。
+ *
+ * 服务端分页同时解决两件事：① 数据不再被静默截断；② 每页只挂 100 张卡片。
+ *
+ * ## 已知取舍（如实写出来，不假装没有）
+ *
+ * 分页在**卡片**粒度，而页面按**笔记**分组 —— 所以同一篇笔记的卡片可能跨页，
+ * 分组头会在相邻两页各出现一次（每页的组只显示该页内的卡片）。
+ * 这是刻意的：若改成"按笔记分页"，单篇笔记卡片数超过一页时仍然会切，
+ * 反而更难解释。页尾的 `showingRange` 会把"这一页是什么"说清楚。
+ */
+const PAGE_SIZE = 100;
+
 /** 筛选选项配置 */
 const FILTER_TABS: { value: CategoryFilter; labelKey: MessageKey }[] = [
   { value: 'all', labelKey: 'knowledgeCards.filterAll' },
@@ -89,6 +110,20 @@ export default function KnowledgeCards() {
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [searchKeyword, setSearchKeyword] = useState('');
   const [filterTab, setFilterTab] = useState<CategoryFilter>('all');
+  /**
+   * 当前页码（服务端分页，见 `PAGE_SIZE` 的说明）。
+   *
+   * 搜索词、`note_id` 变化时必须回到第 1 页 —— 否则会停在一个
+   * 对新结果集而言越界的页码上，页面显示空白而 `total` 不为 0。
+   */
+  const [page, setPage] = useState(1);
+  /**
+   * `total` 的镜像（只在 `fetchCards` 里读，见那里的越界守卫说明）。
+   *
+   * 用 ref 而不是直接读 state 的原因写在 `fetchCards` 的依赖说明里：
+   * state 进依赖会让"每取一次数就多一次请求"。
+   */
+  const totalRef = useRef(0);
   const [openMenuCardId, setOpenMenuCardId] = useState<string | null>(null);
   const [actionLoadingCardId, setActionLoadingCardId] = useState<string | null>(null);
   /**
@@ -103,14 +138,30 @@ export default function KnowledgeCards() {
   const noteId = searchParams.get('note_id') || undefined;
 
   const fetchCards = useCallback(
-    async (keyword?: string) => {
+    async (keyword?: string, targetPage = 1) => {
+      // 页码越界守卫：`total` 会因为删除卡片/笔记而变小，而 `page` 还停在旧值上，
+      // 于是请求会返回空页 —— 页面显示"暂无知识卡片"（假的），而 `total` 不为 0。
+      // 这里直接不发那个请求，改发最后一页。在**取数之前**判断，所以不会出现
+      // "先渲染一帧空列表"的闪烁。
+      //
+      // ⚠️ 读的是 `totalRef` 而不是 `total` state：`total` 若进依赖数组，
+      // `setTotal` 会让 `fetchCards` 换新引用 → 取数 effect 重跑 → 再取一次，
+      // 变成"每取一次数就多一次请求"。ref 不参与依赖，没有这个问题。
+      const lastPage = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE));
+      const wantedPage = Math.min(targetPage, lastPage);
+
       setLoading(true);
       try {
-        const data = await getKnowledgeCards(1, 999, noteId, keyword);
+        // 服务端分页（走查报告 §4）：此前硬编码 page_size=999，
+        // 3469 张卡片只渲染 999 张，界面上没有任何提示 —— 静默丢数据。
+        const data = await getKnowledgeCards(wantedPage, PAGE_SIZE, noteId, keyword);
         const grouped = groupByNote(data.items, t);
         setGroups(grouped);
         setTotal(data.total);
+        totalRef.current = data.total;
         setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
+        // 页码被夹到最后一页时把 state 同步回来，否则控件上显示的还是旧页码
+        if (wantedPage !== targetPage) setPage(wantedPage);
       } catch (err) {
         setError(err instanceof Error ? err.message : t('knowledgeCards.loadFailed'));
       } finally {
@@ -121,11 +172,11 @@ export default function KnowledgeCards() {
     [noteId, t],
   );
 
-  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
+  // 挂载 / 页码变化 / 搜索词变化时加载数据（数据获取型 effect，同步 setState 豁免）
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchCards(searchKeyword || undefined);
-  }, [noteId, fetchCards, searchKeyword]);
+    fetchCards(searchKeyword || undefined, page);
+  }, [noteId, fetchCards, searchKeyword, page]);
 
   // 点击页面任意位置时关闭操作菜单
   useEffect(() => {
@@ -140,6 +191,16 @@ export default function KnowledgeCards() {
   function handleSearchChange(value: string) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
+      // 搜索词变了就回第 1 页 —— 与 `setSearchKeyword` **放在同一个批**里，
+      // 所以取数 effect 只会跑一次（带上 page=1）。
+      //
+      // ⚠️ 为什么不写成 `useEffect(() => setPage(1), [searchKeyword])`：
+      // 那个 effect 与取数 effect 在同一次 commit 里跑，顺序是"先取数、后重置"，
+      // 于是搜索会先按旧页码打一次请求、再按第 1 页打一次（两次请求），
+      // 中间那一帧渲染的还是"新搜索结果 + 旧页码"。
+      // 也试过"渲染期比较 ref"的写法，被 `react-hooks/refs` 挡下
+      // （本仓库不允许在渲染期读写 ref）—— 放在事件处理里是唯一干净的位置。
+      if (page !== 1) setPage(1);
       setSearchKeyword(value);
     }, 300);
   }
@@ -207,7 +268,7 @@ export default function KnowledgeCards() {
       // `await fetchCards(...)` 仍在同一个 try/finally 里，只是搬到了
       // "用户在框里做了选择"之后（确认与取消都要刷新，逐字保留原行为）
       setConfirmExtensionQuestions(result.parent_card_id);
-      await fetchCards(searchKeyword || undefined);
+      await fetchCards(searchKeyword || undefined, page);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('knowledgeCards.generateExtensionFailed'));
     } finally {
@@ -234,6 +295,15 @@ export default function KnowledgeCards() {
   }
 
   const filteredGroups = getFilteredGroups();
+
+  // 分页派生值（见 `PAGE_SIZE` 的说明）。
+  // `total` 是**服务端**给的全量计数，不受前端分类筛选影响 —— 所以页尾那句
+  // 「共 N 张」说的是"这个搜索结果下总共有多少张"，与筛选后的可见数可能不同。
+  // 这一点保持与改造前一致：筛选一直是纯前端行为，`totalCount` 也一直是服务端的数。
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const shownCount = filteredGroups.reduce((n, g) => n + g.cards.length, 0);
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = (page - 1) * PAGE_SIZE + shownCount;
 
   return (
     <div className="page-enter">
@@ -613,6 +683,66 @@ export default function KnowledgeCards() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* 分页控件（走查报告 §4「声称 3469 张，只渲染 999 张，无分页无提示」）
+          —— 与 `NotesList.tsx:422-456` 的形态逐字同形（`nav` + `btn btn-secondary`
+          + 「上一页 / x / y / 下一页」），这样两页的分页手感一致。
+          `totalPages > 1` 才显示：只有一页时这排按钮没有任何可做的事。
+          ⚠️ 空态与加载态下不显示（`total` 此时可能还是 0 或上一轮的旧值）。 */}
+      {!loading && !error && filteredGroups.length > 0 && totalPages > 1 && (
+        <>
+          <nav
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 'var(--space-sm)',
+              marginTop: 'var(--space-lg)',
+            }}
+            aria-label={t('knowledgeCards.pagination')}
+          >
+            <button
+              className="btn btn-secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              {t('knowledgeCards.prevPage')}
+            </button>
+            <span
+              style={{
+                alignSelf: 'center',
+                fontSize: '0.875rem',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              {t('knowledgeCards.pageIndicator', { page, totalPages })}
+            </span>
+            <button
+              className="btn btn-secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              {t('knowledgeCards.nextPage')}
+            </button>
+          </nav>
+          {/* 页尾把"这一页是什么"说清楚 —— 静默丢数据的另一半是"没有提示"。
+              `from`/`to` 按**本页实际卡片数**算，不按 `PAGE_SIZE` 推算：
+              最后一页不满时推算值会大于总数（说"显示第 3401–3500 张，共 3469 张"）。
+              `shownCount === 0` 时不渲染：分类筛选是纯前端过滤，某一页可能
+              整页都不属于当前分类，此时 `to` 会小于 `from`（"第 101–100 张"）。 */}
+          {shownCount > 0 && (
+            <p
+              style={{
+                textAlign: 'center',
+                marginTop: 'var(--space-sm)',
+                fontSize: '0.8rem',
+                color: 'var(--color-text-tertiary)',
+              }}
+            >
+              {t('knowledgeCards.showingRange', { from, to, total })}
+            </p>
+          )}
+        </>
       )}
 
       {/* 出题确认框（批次 D3）：**只**有标题，文案逐字保留原来

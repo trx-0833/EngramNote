@@ -1094,6 +1094,12 @@ const zhCN = {
     empty: '暂无知识卡片',
     emptyHint: '请先上传笔记并触发理解管道',
     groupCount: '({count} 张卡片)',
+    // ---- 分页（走查报告 §4：此前硬编码 page_size=999，3469 张只渲染 999 张且无提示）----
+    pagination: '知识卡片分页',
+    prevPage: '上一页',
+    nextPage: '下一页',
+    pageIndicator: '第 {page} / {totalPages} 页',
+    showingRange: '本页显示第 {from}–{to} 张，共 {total} 张',
     // ---- 筛选 ----
     filterAll: '全部',
     filterRegular: '常规',
