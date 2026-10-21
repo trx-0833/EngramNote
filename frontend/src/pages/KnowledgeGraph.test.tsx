@@ -604,6 +604,46 @@ describe('筛选与画布数据装配', () => {
     expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2,c-3,c-4');
   });
 
+  /**
+   * 孤立点折叠开关（C3-③，走查报告 §3.10）
+   *
+   * 真库实测 **3469 节点 / 604 边 / 3028 孤立（87.3%）**，力导向把画布铺成
+   * 实心圆盘、文字重叠成灰色噪点。这个开关让用户能一键摘掉噪音。
+   *
+   * 默认关（= 行为与改造前一致）：87.3% 是孤立点，默认打开会让一进页面就少画
+   * 八成节点，用户会以为数据丢了。关着的时候工具栏把"有 N 张未关联"说出来 ——
+   * 让问题**可见**，而不是替用户决定。
+   */
+  it('★ 孤立点开关：默认关（画布不变）+ 工具栏报出未关联数 + 打开后只摘掉孤立点', async () => {
+    renderPage();
+    await screen.findByText('知识图谱');
+
+    // 默认关：四个节点都在（c-4 是 makeGraph 里唯一没有边的那个）
+    const toggle = screen.getByRole('button', { name: /隐藏未关联/ });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2,c-3,c-4');
+    // 关着的时候把噪音数量说出来
+    expect(screen.getByText(/其中 1 张卡片还没有任何关联/)).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+
+    // 打开后：c-4 被摘掉，边一条不少
+    expect(screen.getByRole('button', { name: /隐藏未关联/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2,c-3');
+    expect(screen.getByTestId('fg-node-ids')).not.toHaveTextContent('c-4');
+    expect(screen.getByTestId('fg-link-ids')).toHaveTextContent('e-1,e-2');
+    // 打开后**不再**说"其中 N 张未关联" —— 画布上已经没有它们了，
+    // 再说一遍会与眼前的画面矛盾
+    expect(screen.queryByText(/其中 1 张卡片还没有任何关联/)).toBeNull();
+
+    // 再点一次恢复（开关是可逆的，不是单向操作）
+    await userEvent.click(screen.getByRole('button', { name: /隐藏未关联/ }));
+    expect(screen.getByTestId('fg-node-ids')).toHaveTextContent('c-1,c-2,c-3,c-4');
+  });
+
   it('★ minimap 在节点还没有坐标时照常重绘（force 布局过程中坐标可能是 undefined）', async () => {
     // makeGraph 的节点都没有 x/y —— 正是布局开始前的真实状态
     renderPage();

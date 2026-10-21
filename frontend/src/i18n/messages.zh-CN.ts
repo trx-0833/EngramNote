@@ -1434,6 +1434,11 @@ const zhCN = {
     cancel: '取消',
     createRelation: '创建关系',
     suggestions: '建议',
+    // ---- 孤立点折叠（C3-③，走查报告 §3.10）----
+    /** 开关的可见文案；开/关状态由 `aria-pressed` 承担，所以文案不随状态变 */
+    hideIsolated: '隐藏未关联',
+    /** 关着时的说明：把"画布上有多少噪音"说出来，而不是替用户决定 */
+    isolatedHint: '其中 {count} 张卡片还没有任何关联',
     collapse: '收起',
     expand: '展开',
     // ---- 节点详情 ----

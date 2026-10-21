@@ -38,6 +38,16 @@ interface GraphToolbarProps {
   /** 待审建议数（按钮徽标） */
   suggestionsCount: number;
   onToggleSuggestions: () => void;
+  /**
+   * 当前筛选结果里"一条边都没有"的节点数（C3-③）
+   *
+   * ⚠️ 口径是"相对当前筛选结果"，不是接口原始数据的孤立点 —— 与画布一致，
+   * 见 `buildForceGraphData` 的 `isolatedCount` 注释。
+   */
+  isolatedCount: number;
+  /** 是否已折叠孤立点 */
+  hideIsolated: boolean;
+  onToggleHideIsolated: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
 }
@@ -57,6 +67,9 @@ export default function GraphToolbar({
   onToggleCreateMode,
   suggestionsCount,
   onToggleSuggestions,
+  isolatedCount,
+  hideIsolated,
+  onToggleHideIsolated,
   sidebarOpen,
   onToggleSidebar,
 }: GraphToolbarProps) {
@@ -72,6 +85,17 @@ export default function GraphToolbar({
         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
           {t('graphPage.stats', { nodes: nodeCount, edges: edgeCount })}
           {suggestedCount > 0 && t('graphPage.statsSuggested', { count: suggestedCount })}
+          {/* 孤立点计数（C3-③）：关着的时候把"画布上有多少噪音"说出来。
+              不放在 `hideIsolated` 打开时显示 —— 那时画布上已经没有它们了，
+              再说一遍"其中 N 张未关联"会与眼前的画面矛盾。 */}
+          {!hideIsolated && isolatedCount > 0 && (
+            <>
+              {' · '}
+              <span style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('graphPage.isolatedHint', { count: isolatedCount })}
+              </span>
+            </>
+          )}
         </span>
 
         {/* 搜索框 —— 批次 B3：补放大镜（此前只有 NotesList 那一处有图形） */}
@@ -153,6 +177,21 @@ export default function GraphToolbar({
         <button className={styles.graphBtn} onClick={onToggleSuggestions}>
           {t('graphPage.suggestions')}
           {suggestionsCount > 0 && <span className={styles.graphBadge}>{suggestionsCount}</span>}
+        </button>
+
+        {/* 孤立点折叠开关（C3-③，走查报告 §3.10）
+            —— 真库 3469 节点里 3028 个（87.3%）一条边都没有，力导向把画布
+            铺成实心圆盘、文字重叠成噪点。这个按钮让用户能一键把噪音摘掉。
+            `aria-pressed` 而不是两个不同文案的按钮：它是一个**开关**（同一件事的
+            开/关），读屏用户需要知道"现在是开还是关"，而不是听到两个不同的动作名。
+            计数用 `isolatedCount` 徽标 —— 与「建议」按钮的徽标同一形态。 */}
+        <button
+          className={`${styles.graphBtn}${hideIsolated ? ` ${styles.graphBtnActive}` : ''}`}
+          onClick={onToggleHideIsolated}
+          aria-pressed={hideIsolated}
+        >
+          {t('graphPage.hideIsolated')}
+          {isolatedCount > 0 && <span className={styles.graphBadge}>{isolatedCount}</span>}
         </button>
 
         {/* 侧边栏切换 */}

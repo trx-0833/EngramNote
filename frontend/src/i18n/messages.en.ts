@@ -1226,6 +1226,8 @@ const en = {
     cancel: 'Cancel',
     createRelation: 'Create relation',
     suggestions: 'Suggestions',
+    hideIsolated: 'Hide unlinked',
+    isolatedHint: '{count} cards have no relations yet',
     collapse: 'Hide',
     expand: 'Show',
     nodeDetail: 'Node details',

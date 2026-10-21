@@ -62,6 +62,14 @@ export default function KnowledgeGraph() {
 
   /** 类型过滤器 */
   const [filterCardType, setFilterCardType] = useState<string | null>(null);
+  /**
+   * 是否折叠孤立点（C3-③，走查报告 §3.10）
+   *
+   * **默认关** —— 真库 87.3% 是孤立点，默认打开会让一进页面就少画八成节点。
+   * 关着的时候工具栏会把"有 N 个未关联卡片"说出来，让问题可见；
+   * 要不要改成默认开是产品决策，见 `buildForceGraphData` 的说明。
+   */
+  const [hideIsolated, setHideIsolated] = useState(false);
 
   /** 绘制 minimap 缩略图（每次渲染重建，闭包读的是当次渲染的 graphData） */
   function drawMinimap() {
@@ -126,10 +134,10 @@ export default function KnowledgeGraph() {
     }
   }
 
-  /** 将 GraphData 转为 ForceGraph2D 所需格式（回收站过滤 + 类型过滤） */
-  const forceGraphData = useMemo(
-    () => buildForceGraphData(graph.graphData, filterCardType),
-    [graph.graphData, filterCardType],
+  /** 将 GraphData 转为 ForceGraph2D 所需格式（回收站过滤 + 类型过滤 + 孤立点折叠） */
+  const { data: forceGraphData, isolatedCount } = useMemo(
+    () => buildForceGraphData(graph.graphData, filterCardType, hideIsolated),
+    [graph.graphData, filterCardType, hideIsolated],
   );
 
   /**
@@ -238,6 +246,9 @@ export default function KnowledgeGraph() {
         onToggleCreateMode={interaction.toggleCreateMode}
         suggestionsCount={graph.suggestions.length}
         onToggleSuggestions={interaction.toggleSuggestionsPanel}
+        isolatedCount={isolatedCount}
+        hideIsolated={hideIsolated}
+        onToggleHideIsolated={() => setHideIsolated((v) => !v)}
         sidebarOpen={interaction.sidebarOpen}
         onToggleSidebar={interaction.toggleSidebar}
       />
