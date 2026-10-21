@@ -808,11 +808,25 @@ async def get_all_questions(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     note_id: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None, description="搜索关键词，匹配题目内容"),
 ):
-    """获取当前用户所有题目（分页），支持关键词搜索"""
+    """获取当前用户所有题目（分页），支持关键词搜索
+
+    ## `page_size` 上限 2026-10-21 由 100 放宽到 1000
+
+    起因：真实用户走查发现 `/questions` 要 4.8 秒才出内容。
+    实测该用户 **3367 道题**，而前端为了"按笔记分组"必须把题目**全部取回**，
+    于是按 100/页 要打 **34 次**请求。
+
+    单次请求实测 76~126 ms，且后端是**单进程 uvicorn + SQLite**——
+    并发只是把网络往返重叠掉，服务端仍近乎串行，所以**唯一有效的杠杆是
+    减少往返次数**：34 次 → 4 次。
+
+    放宽而不是新开"取全部"接口的理由：这是**纯粹的边界放宽**，
+    对既有调用方（`page_size<=100`）行为逐字节不变，也不需要新的响应契约。
+    """
     conditions = [QuizItem.user_id == current_user.id]
     # 回收站笔记的题目暂不可见（note_id 为 NULL 的悬挂/提升题目保留）
     conditions.append(Note.not_trashed(QuizItem.note_id))

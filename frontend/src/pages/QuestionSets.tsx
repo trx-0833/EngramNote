@@ -500,44 +500,74 @@ export default function QuestionSets() {
     async (keyword?: string) => {
       setLoading(true);
       try {
-        // 后端 page_size 上限为 100，需分页加载全部题目。
+        // 后端 page_size 上限 2026-10-21 由 100 放宽到 1000（见
+        // backend/app/api/understanding.py 的同名说明）。
         //
-        // 终止条件必须有多重兜底（见 docs/overhaul-plan.md §2.8 F-3）：
+        // ## 2026-10-21：由「逐页串行」改为「少页 + 有界并发」
+        //
+        // 实测该用户 **3367 道题**。原实现 page_size=100 且逐页 `await`：
+        // **34 次往返全串行**，页面停在「加载中…」约 4.8 秒。
+        //
+        // 关键观察：
+        //   ① 瓶颈是**往返次数**，不是数据量（单页约 78 KB，全量约 2.6 MB）；
+        //   ② 后端是**单进程 uvicorn + SQLite**，并发只重叠网络往返，
+        //      服务端仍近乎串行 —— 所以只并发不改页大小，收益有限。
+        // 因此两件事一起做：页大小 100 → 1000（34 次 → 4 次），再并发取。
+        //
+        // 终止条件仍保留多重兜底（见 docs/overhaul-plan.md §2.8 F-3）：
         // 原实现只写 `while (allItems.length < totalCount)`，一旦后端返回的
         // total 与可返回条数不一致（分页越界、软删过滤口径不同、并发写入等），
         // 这个循环**永远不会结束**，会持续向后端发请求并把页面卡在 loading。
-        // 现在加上"最大页数"与"空页即停"两道硬兜底。
+        // 现在有"最大页数""空页即停""按 total 推算页数"三道。
         const MAX_PAGES = 100;
-        const allItems: QuizItem[] = [];
-        let page = 1;
-        const pageSize = 100;
-        let totalCount = 0;
+        const PAGE_SIZE = 1000;
+        const CONCURRENCY = 4;
+
+        // 第 1 页：既取数据，也取 total（它决定还要取几页）
+        const first = await getQuestions(1, PAGE_SIZE, noteId, keyword);
+        const firstItems = first.items || [];
+        const totalCount = first.total ?? firstItems.length;
+
+        const allItems: QuizItem[] = [...firstItems];
         let truncated = false;
 
-        while (page <= MAX_PAGES) {
-          const data = await getQuestions(page, pageSize, noteId, keyword);
-          const items = data.items || [];
-          allItems.push(...items);
-          totalCount = data.total ?? allItems.length;
+        // 空页说明已经取完（后端 total 可能不准），不再继续
+        if (firstItems.length > 0 && firstItems.length < totalCount) {
+          const neededPages = Math.ceil(totalCount / PAGE_SIZE);
+          const lastPage = Math.min(neededPages, MAX_PAGES);
+          truncated = neededPages > MAX_PAGES;
 
-          // 空页说明已经取完（后端 total 可能不准），立即停止
-          if (items.length === 0) break;
-          // 已取够 total 声明的数量
-          if (allItems.length >= totalCount) break;
+          const remaining: number[] = [];
+          for (let p = 2; p <= lastPage; p++) remaining.push(p);
 
-          page++;
+          for (let i = 0; i < remaining.length; i += CONCURRENCY) {
+            const batch = remaining.slice(i, i + CONCURRENCY);
+            const results = await Promise.all(
+              batch.map((p) => getQuestions(p, PAGE_SIZE, noteId, keyword)),
+            );
+            for (const r of results) allItems.push(...(r.items || []));
+            // 这一批里有空页 → 后面也不会有数据了，提前收工
+            if (results.some((r) => (r.items || []).length === 0)) break;
+          }
         }
 
-        if (page > MAX_PAGES && allItems.length < totalCount) {
-          truncated = true;
+        if (truncated) {
           console.warn(
             `[QuestionSets] 分页达到上限 ${MAX_PAGES} 页，已加载 ${allItems.length}/${totalCount} 条`,
           );
         }
 
-        const grouped = groupByNote(allItems, t);
+        // 并发取页时若中途有写入，页边界可能重叠 —— 按 id 去重兜底
+        const seen = new Set<string>();
+        const deduped = allItems.filter((item) => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+
+        const grouped = groupByNote(deduped, t);
         setGroups(grouped);
-        setTotal(truncated ? allItems.length : totalCount);
+        setTotal(truncated ? deduped.length : totalCount);
         setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
       } catch (err) {
         setError(err instanceof Error ? err.message : t('shared.loadFailed'));

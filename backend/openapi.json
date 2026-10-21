@@ -12413,7 +12413,7 @@
     },
     "/api/understanding/questions": {
       "get": {
-        "description": "获取当前用户所有题目（分页），支持关键词搜索",
+        "description": "获取当前用户所有题目（分页），支持关键词搜索\n\n## `page_size` 上限 2026-10-21 由 100 放宽到 1000\n\n起因：真实用户走查发现 `/questions` 要 4.8 秒才出内容。\n实测该用户 **3367 道题**，而前端为了\"按笔记分组\"必须把题目**全部取回**，\n于是按 100/页 要打 **34 次**请求。\n\n单次请求实测 76~126 ms，且后端是**单进程 uvicorn + SQLite**——\n并发只是把网络往返重叠掉，服务端仍近乎串行，所以**唯一有效的杠杆是\n减少往返次数**：34 次 → 4 次。\n\n放宽而不是新开\"取全部\"接口的理由：这是**纯粹的边界放宽**，\n对既有调用方（`page_size<=100`）行为逐字节不变，也不需要新的响应契约。",
         "operationId": "get_all_questions_api_understanding_questions_get",
         "parameters": [
           {
@@ -12433,7 +12433,7 @@
             "required": false,
             "schema": {
               "default": 20,
-              "maximum": 100,
+              "maximum": 1000,
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"

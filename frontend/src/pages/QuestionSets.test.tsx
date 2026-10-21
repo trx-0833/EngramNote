@@ -14,7 +14,7 @@
  * 是一个 Proxy（`styles.row` → `_row_xxxxxx`），用来 `querySelector` 没问题，
  * 但**不能枚举**它。`KnowledgeCards.test.tsx` 已有同样的先例。
  */
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -469,5 +469,108 @@ describe('问题集：答案仍然默认折叠（分组与遮挡语义不变）'
 
     expect(groupToggle).toHaveAttribute('aria-expanded', 'false');
     expect(dataRows(container)).toHaveLength(0);
+  });
+});
+
+/**
+ * 2026-10-21：分页取数由「逐页串行」改为「少页 + 有界并发」
+ *
+ * 起因是真实用户走查：`/questions` 长时间停在「加载中…」，实测约 4.8 秒。
+ * 该用户 **3367 道题**，原实现 page_size=100 且逐页 await → **34 次往返全串行**。
+ * 后端是单进程 uvicorn + SQLite，并发只重叠网络往返、服务端仍近乎串行，
+ * 所以同时做了两件事：页大小上限 100 → 1000（34 次 → 4 次），再并发取。
+ */
+describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
+  /** 与 `QuestionSets.tsx` 的 PAGE_SIZE 对齐 —— 改了那边就要改这里 */
+  const PAGE_SIZE = 1000;
+
+  beforeEach(() => {
+    mockedQuestions.mockReset();
+  });
+
+  /** 造 n 条 id 唯一的题目（id 是去重键，必须唯一） */
+  function makeItems(n: number): QuizItem[] {
+    return Array.from({ length: n }, (_, i) => ({
+      ...QUIZ_ITEMS[0],
+      id: `q-${i}`,
+      question: `题目 ${i}`,
+    }));
+  }
+
+  /** 一个"记录同时在飞几个请求"的分页 mock */
+  function trackingMock(total: number, opts: { overlap?: boolean } = {}) {
+    const all = makeItems(total);
+    const state = { inFlight: 0, maxInFlight: 0, calls: [] as number[] };
+    mockedQuestions.mockImplementation(async (page = 1, pageSize = PAGE_SIZE) => {
+      state.inFlight += 1;
+      state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
+      state.calls.push(page);
+      await new Promise((r) => setTimeout(r, 20));
+      state.inFlight -= 1;
+      const start = (page - 1) * pageSize;
+      // overlap 模式：故意让第 2 页与第 1 页重叠，模拟并发写入导致的页边界漂移
+      const shifted = opts.overlap && page > 1 ? start - 200 : start;
+      return {
+        items: all.slice(Math.max(0, shifted), Math.max(0, shifted) + pageSize),
+        page,
+        page_size: pageSize,
+        total,
+      };
+    });
+    return state;
+  }
+
+  it('多页时**并发**请求，而不是逐页串行', async () => {
+    // 2500 条 = 3 页（1000 / 1000 / 500）
+    const state = trackingMock(2500);
+    const { container } = renderPage();
+
+    await waitFor(() => expect(dataRows(container)).toHaveLength(2500));
+
+    // 串行实现下这个值恒为 1 —— 它才是"并发"这件事的直接证据
+    expect(state.maxInFlight).toBeGreaterThan(1);
+    expect([...state.calls].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  });
+
+  it('页大小按 1000 请求（34 次往返 → 4 次的关键）', async () => {
+    const state = trackingMock(2500);
+    renderPage();
+    await waitFor(() => expect(state.calls.length).toBeGreaterThan(0));
+    const firstCall = mockedQuestions.mock.calls[0];
+    expect(firstCall[1]).toBe(1000);
+  });
+
+  it('页边界重叠时按 id 去重，行数不虚高', async () => {
+    const state = trackingMock(2500, { overlap: true });
+    const { container } = renderPage();
+
+    // 并发取页 + 中途写入 ⇒ 第 2 页可能重复返回第 1 页尾部的条目
+    await waitFor(() => expect(state.calls.length).toBeGreaterThan(1));
+    await waitFor(() => {
+      const ids = dataRows(container).map((r) => r.textContent);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+  });
+
+  it('单页就能装下时只请求一次（不额外打空页）', async () => {
+    const state = trackingMock(300);
+    const { container } = renderPage();
+
+    await waitFor(() => expect(dataRows(container)).toHaveLength(300));
+    expect(state.calls).toEqual([1]);
+  });
+
+  it('total 撒谎（远大于实际可返回条数）时靠"空页即停"收工', async () => {
+    // 声称 10000 条，实际只有 1000 条 → 第 2 页就是空页
+    mockedQuestions.mockImplementation(async (page = 1, pageSize = PAGE_SIZE) => {
+      const all = makeItems(1000);
+      const start = (page - 1) * pageSize;
+      return { items: all.slice(start, start + pageSize), page, page_size: pageSize, total: 10000 };
+    });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(dataRows(container)).toHaveLength(1000));
+    // 第 1 页满 1000 条 ⇒ 会去取第 2 页；第 2 页为空 ⇒ 立即停，不会打到 100 页上限
+    await waitFor(() => expect(mockedQuestions.mock.calls.length).toBeLessThan(10));
   });
 });
