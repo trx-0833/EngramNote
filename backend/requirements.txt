@@ -28,6 +28,9 @@
 #   - pytest / ruff 等 → requirements-dev.txt（用户不需要它们才能跑服务）
 #   - torch / qwen-asr   → 重量级可选，见 requirements-asr.txt
 #   - pyyaml             → 仅 MinerU 本地 pipeline 模式需要，见 requirements-pdf-local.txt
+#                           （同文件里还有 torchvision/ftfy/shapely/pyclipper —— 2026-10-21 补上，
+#                            此前漏登记，照那份装完 pipeline 会在 torchvision 处 ModuleNotFoundError。
+#                            本项目已改用云端 vlm-http-client，见 docs/mineru-backend-decision.md）
 #   - asyncpg / minio / redis → 项目明确不引入的中间件（见 AGENTS.md 的已否决方向）
 
 # ---- Web / ORM / 配置 ----

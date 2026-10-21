@@ -1,23 +1,51 @@
 # ============================================================
-# MinerU 本地解析模式（可选，约 7GB 模型之外的 pip 侧依赖）
+# MinerU 本地解析模式（可选）
 # ============================================================
+#
+# ⚠️ 2026-10-21：**本项目已不采用这条路径**，默认走云端 VLM
+#    （`MINERU_BACKEND=vlm-http-client`）。取舍依据、实测证据与版本策略见
+#    `docs/mineru-backend-decision.md`。这份文件保留，是为了让「仍然想用本地
+#    pipeline」的人有一条**真的能走通**的路 —— 它此前是走不通的（见下）。
 #
 # 什么时候需要：把 `MINERU_BACKEND` 设为 `pipeline`，用**本地模型**解析 PDF。
 # 不需要它的场合：`MINERU_BACKEND=vlm-http-client`（默认）走 MinerU 云端 API，
-# 只需 `MINERU_API_TOKEN`，**不用装这份** —— 这也是省下 7GB 磁盘的推荐路径。
+# 只需 `MINERU_API_TOKEN`，**不用装这份**。
 #
 # 用法：
 #     pip install -r requirements.txt -r requirements-pdf-local.txt
-#     python ../check_env.py --download-mineru     # 再下模型
+#     python ../check_env.py --download-mineru     # 再下模型（约 7GB）
 #
-# 为什么单独一份：这些依赖只在本地解析模式下被 import，
-# 而它们（连同模型）对大多数用户是纯负担。此前 `pyyaml` 只登记在测试依赖里，
-# 于是"本地 PDF 解析"在用户环境中直接 ModuleNotFoundError。
+# ## 为什么单独一份
+#
+# 这些依赖只在本地解析模式下被 import，而它们（连同模型）对大多数用户是纯负担。
+# 此前 `pyyaml` 只登记在测试依赖里，于是"本地 PDF 解析"在用户环境中直接
+# ModuleNotFoundError。
+#
+# ## 2026-10-21：补上真正缺的那 4 个依赖
+#
+# 上一轮只修了 `pyyaml`，但 `mineru[pipeline]` 一共声明 9 个依赖，本机实测缺 4 个。
+# 照原来的文件装完，`do_parse(backend='pipeline')` 会在
+# `mineru/model/layout/pp_doclayoutv2.py:15` 处以
+#     ModuleNotFoundError: No module named 'torchvision'
+# 炸掉 —— 也就是说这份文件此前**描述的安装路径装不出能用的后端**。
+#
+# 依赖清单来源：`importlib.metadata` 读 mineru 3.4.5 的 `[pipeline]` extra。
+# 未列出的（`torch` / `transformers` / `safetensors` / `onnxruntime` / `PyYAML`）
+# 已由 `requirements.txt` 或运行环境提供，此处不重复钉版本。
 #
 # 依赖位置参考：
 #   app/services/mineru/config_loader.py:14   → yaml
 #   app/services/mineru/converter.py          → requests（懒加载）
+#   app/services/mineru/model_loader.py       → ModelScope 本地模型路径
 #
 # 2026-09-24：`pyyaml` 由 `~=6.0.0` 对齐到实际在跑的 **6.0.3**。
 pyyaml~=6.0.3
 requests~=2.34.2
+
+# ---- mineru[pipeline] 真正需要、此前漏掉的 4 个 ----
+# torchvision 无版本上界：它必须与已装的 torch 2.14.0 匹配，
+# 硬钉版本反而会在换 torch 轮子（cpu/cuXXX）时把环境搞坏。
+torchvision
+ftfy>=6.3.1,<7
+shapely>=2.0.7,<3
+pyclipper>=1.3.0,<2

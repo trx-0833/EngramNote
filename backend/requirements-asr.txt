@@ -21,4 +21,10 @@
 # 2026-09-24：下界由 `>=2.0.0` 对齐到实际在跑的 **2.14.0**（+cpu 轮子）。
 # 原来的 2.0.0 等于形同虚设：它允许装到 2.0.x，而本项目从未在那个版本上跑过。
 torch>=2.14.0
-qwen-asr>=0.1.0
+# 2026-10-21：**修掉一个装不上的 pin** —— 原写 `qwen-asr>=0.1.0`，
+# 而 PyPI 上只有 0.0.1~0.0.6（`pip index versions qwen-asr` 报 LATEST: 0.0.6），
+# 于是 `pip install -r requirements-asr.txt` 直接以
+#   ERROR: No matching distribution found for qwen-asr>=0.1.0
+# 失败 —— 即「文档里写的 ASR 安装路径根本走不通」。
+# 对齐到实际在跑的版本，与上面 torch 的处理口径一致。
+qwen-asr>=0.0.6

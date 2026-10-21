@@ -26,7 +26,7 @@ from .intake import (
     intake_pptx,
     intake_xlsx,
 )
-from .model_loader import configure_modelscope_models
+from .model_loader import configure_modelscope_models, pipeline_runtime_available
 from .models import (
     DOCX_EXTS,
     IMAGE_EXTS,
@@ -102,7 +102,32 @@ def convert(
     file_path = Path(file_path)
 
     if backend == "pipeline":
-        configure_modelscope_models(config)
+        # 预检：模型与运行期依赖都就位才继续。
+        #
+        # 为什么要在这里拦：不拦的话 `do_parse` 会在 mineru 内部的
+        # `mineru/model/layout/pp_doclayoutv2.py:15` 抛
+        # `ModuleNotFoundError: No module named 'torchvision'` ——
+        # 报错点在一个第三方包的深层模块里，用户看不出"我该装什么"。
+        # 实测本机就缺 torchvision/ftfy/shapely/pyclipper 四个包
+        # （见 docs/mineru-backend-decision.md §3）。
+        if not configure_modelscope_models(config, backend=backend):
+            runtime_ok, runtime_reason = pipeline_runtime_available()
+            why = (
+                f"本地 MinerU pipeline 后端不可用：{runtime_reason}"
+                if not runtime_ok
+                else "本地 MinerU pipeline 后端不可用：本地模型未就位"
+            )
+            return ConversionResult(
+                title="",
+                source_path=str(file_path),
+                error=(
+                    f"{why}。"
+                    "补齐本地路径：pip install -r requirements-pdf-local.txt，"
+                    "再运行 python ../check_env.py --download-mineru；"
+                    "或改用云端：把 MINERU_BACKEND 设为 vlm-http-client（推荐，需 MINERU_API_TOKEN）"
+                ),
+                success=False,
+            )
 
     if timeout is None:
         timeout = config.get("timeout", 300)
