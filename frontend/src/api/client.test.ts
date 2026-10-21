@@ -242,6 +242,25 @@ describe('API 客户端：401 → 刷新 → 重放', () => {
     expect(getToken()).toBe('old-access');
   });
 
+  it('★ error_code 不前置进用户可见文案，但仍能从 code 字段读到（走查报告 §2.1）', async () => {
+    // 改造前 message 是 `${code}: ${detail}`，用户看到的是
+    // `NOTE_EXPORT_EMPTY: 笔记没有可导出的正文` —— 机器码不该出现在界面上。
+    // 这条同时钉住**两半**：文案干净、且 code 照旧可分流（少了任何一半都是回归）。
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(400, { detail: '笔记没有可导出的正文', error_code: 'NOTE_EXPORT_EMPTY' }),
+    );
+
+    const err = await request('/notes/n1/export').then(
+      () => null,
+      (e: unknown) => e as { message: string; code: string | null },
+    );
+
+    expect(err).not.toBeNull();
+    expect(err!.message).toBe('笔记没有可导出的正文');
+    expect(err!.message).not.toContain('NOTE_EXPORT_EMPTY');
+    expect(err!.code).toBe('NOTE_EXPORT_EMPTY');
+  });
+
   it('上传请求同样会刷新并重放（FormData 原样再发一次）', async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse(401, { detail: '过期' }))

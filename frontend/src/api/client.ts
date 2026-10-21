@@ -436,10 +436,17 @@ export function parseContentDispositionFilename(header: string | null): string |
  * 失效，而失效的样子是"页面不跳转"而不是报错（overhaul-plan 的 F-19 记的
  * 正是这个形态）。`code` 字段让分流依据与文案解耦。
  *
- * ## 为什么 message 的构造一个字都没改
+ * ## 为什么 message 里**不再**带 error_code 前缀（2026-10-21 改）
  *
- * `message` 仍是 `${error_code}: ${detail}`（没有 error_code 时就是 detail）：
- * 展示层看到的内容不变，本次改造**只新增**结构化的 `code`。
+ * 阶段 0.11 建这个类时，`message` 是 `${error_code}: ${detail}`，理由是
+ * "展示层看到的内容不变，本次改造只新增结构化的 code"。那个理由在当时成立，
+ * 但它把**机器码留在了用户看得见的地方** —— 走查报告 §2.1 实测到的原话是
+ * `NOTE_EXPORT_EMPTY: 笔记没有可导出的正文`。
+ *
+ * `error_code` 的用途是分流与日志，不是给人看的。所以本轮把前缀去掉，
+ * `code` 字段原样保留：**按 code 分流的地方一行都不用改**。
+ * 至此三处 `ApiError.message` 的拼法统一（`downloadRequest` /
+ * `askQuestionStream` 本来就是只给 `detail`）。
  */
 export class ApiError extends Error {
   /** 后端 error_code；响应里没有该字段时为 null（如客户端本地生成的 401 文案） */
@@ -459,10 +466,10 @@ export class ApiError extends Error {
  * 一份**逐字相同**的解析逻辑（FastAPI 422 的 `detail` 是数组、`error_code` 可能缺失），
  * 阶段 5.1 / S4 收敛成这一处 —— 少一份抄写，就少一处"改了一个忘了另一个"。
  *
- * ⚠️ 三处 `ApiError.message` 的拼法**仍然不同**（`request()` 会把 error_code 前置成
- * `"CODE: detail"`，另两处只给 detail）—— 那是阶段 0.11 刻意保留的兼容口径
- * （上传/流式问答的提示文案已固化），本次收敛**没有**动它：统一文案是行为变更，
- * 要单独决策，不属于 S4。
+ * ⚠️ 三处 `ApiError.message` 的拼法**曾经不同**（`request()` 会把 error_code
+ * 前置成 `"CODE: detail"`，另两处只给 detail）。**2026-10-21 起统一为只给
+ * `detail`**（理由见 `ApiError` 的注释）—— 上传/流式问答的文案一个字没变，
+ * 变的是 `request()` 那一侧：用户不再看到机器码前缀。
  */
 async function readErrorBody(response: Response): Promise<{ detail: string; code: string | null }> {
   const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -515,7 +522,18 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       );
     }
     const { detail, code } = await readErrorBody(response);
-    throw new ApiError(code ? `${code}: ${detail}` : detail, code);
+    // ⚠️ 2026-10-21 改：`message` 此前是 `${code}: ${detail}`，于是 toast 与
+    // 页内错误块会原样显示机器码（用户看到的是
+    // `NOTE_EXPORT_EMPTY: 笔记没有可导出的正文`）。
+    //
+    // `error_code` 的用途是**分流与日志**，不是给人看的 —— 这一点本文件
+    // `ApiError` 的注释（:428-437）自己就写着「按 error_code 分流，不要匹配文案」。
+    // 走查报告 §2.1 把这条列为全站级问题，改造时**只**去掉前缀：
+    // `code` 字段照旧带上，所以所有按 code 分流的地方一行都不用改。
+    //
+    // 三处 `ApiError.message` 的拼法至此统一（`downloadRequest` 与
+    // `askQuestionStream` 本来就是只给 detail）—— 见 `readErrorBody` 的说明。
+    throw new ApiError(detail, code);
   }
 
   // 204 No Content 无响应体，返回 undefined
