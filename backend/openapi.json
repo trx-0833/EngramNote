@@ -2908,6 +2908,31 @@
             "title": "Suggested Edges",
             "type": "integer"
           },
+          "suspected_duplicate_pairs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suspected Duplicate Pairs"
+          },
+          "suspected_duplicates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SuspectedDuplicatePair"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suspected Duplicates"
+          },
           "total_edges": {
             "title": "Total Edges",
             "type": "integer"
@@ -6371,6 +6396,57 @@
         "title": "SuggestedRelation",
         "type": "object"
       },
+      "SuspectedDuplicatePair": {
+        "description": "一对**疑似重复**的卡片（A1 P0-3：只报不处理）\n\n由来：`auto_suggest_relations` 里有一道「同名闸」—— 标题相同的两张卡\n**不建边**，因为实测同名对的相似度**普遍 ~1.000**、盲判过的 3 条\n**全部是真重复**。它们不是\"错的边\"，是**重复的卡片**\n（同一个知识点被反复理解成了多张卡）。\n\n但闸门只做了\"不建边\"，于是这个数据问题从\"图谱里看得见\"变成了\n\"只有日志里看得见\"。这个模型就是把它**变成用户能看见的**。\n\n⚠️ **合并/删除要另开一轮单独批**（`agent-workstream-plan.md` §5 第 6 条）：\n它会动 `review_states`（复习历史变孤儿行），属产品语义变更。",
+        "properties": {
+          "card_id_1": {
+            "title": "Card Id 1",
+            "type": "string"
+          },
+          "card_id_2": {
+            "title": "Card Id 2",
+            "type": "string"
+          },
+          "note_id_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id 1"
+          },
+          "note_id_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id 2"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card_id_1",
+          "card_id_2",
+          "title",
+          "similarity"
+        ],
+        "title": "SuspectedDuplicatePair",
+        "type": "object"
+      },
       "TaskRunListResponse": {
         "description": "任务列表响应",
         "properties": {
@@ -9089,8 +9165,22 @@
     },
     "/api/graph/stats": {
       "get": {
-        "description": "获取知识图谱统计数据\n\n返回节点数、边数、关系类型分布、孤立节点数等统计信息。",
+        "description": "获取知识图谱统计数据\n\n返回节点数、边数、关系类型分布、孤立节点数等统计信息。\n\n## `include_duplicates` 为什么默认关\n\n「疑似重复卡片」这条要**读向量并两两算余弦**（只算有同名同伴的那些卡，\n真库是 72 种标题 / 187 张，很便宜 —— 但它是\"读向量\"，\n而这份统计的其余部分都是**计数**）。默认关 = 常规轮询的代价不变；\n界面在用户**打开重复卡面板**时才带上这个参数。\n\n⚠️ 统计失败时两个字段留 `None`（\"没测到\"），**不是空列表/0** ——\n\"没测到\"与\"真的没有重复卡\"必须能分开（与 `/ready` 的\n`pending_embeddings` 同一条原则）。所以这里包了 try：\n附加读数不该让整份统计失败。",
         "operationId": "get_graph_stats_api_graph_stats_get",
+        "parameters": [
+          {
+            "description": "是否附带疑似重复卡片清单（A1 P0-3）。要读向量，默认关",
+            "in": "query",
+            "name": "include_duplicates",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "是否附带疑似重复卡片清单（A1 P0-3）。要读向量，默认关",
+              "title": "Include Duplicates",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9101,6 +9191,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

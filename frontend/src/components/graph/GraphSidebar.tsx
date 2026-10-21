@@ -34,6 +34,14 @@ const RELATION_LINE_CLASSES: Record<RelationLineStyle, string> = {
 
 interface GraphSidebarProps {
   stats: GraphStats | null;
+  /**
+   * 「疑似重复卡」面板本体（A1 P0-3），由页面决定何时渲染
+   *
+   * 为什么用 slot 而不是在这里 import 那个组件：那个面板**自己拉数据**
+   * （要读向量），而侧边栏是纯展示层。用 slot 让"什么时候拉"归页面管，
+   * 侧边栏不需要知道它的加载状态。
+   */
+  duplicatePanelSlot?: React.ReactNode;
   activePanel: SidebarPanel;
   selectedNode: ForceGraphNode | null;
   selectedLink: ForceGraphLink | null;
@@ -697,6 +705,7 @@ function RelationLegend({
 export default function GraphSidebar(props: GraphSidebarProps) {
   const {
     stats,
+    duplicatePanelSlot,
     activePanel,
     selectedNode,
     selectedLink,
@@ -774,6 +783,9 @@ export default function GraphSidebar(props: GraphSidebarProps) {
       )}
 
       {/* 建议关系面板（含批量操作） */}
+      {/* 疑似重复卡面板（A1 P0-3）：页面传进来的 slot */}
+      {activePanel === 'duplicates' && duplicatePanelSlot}
+
       {activePanel === 'suggestions' && (
         <SuggestionsPanel
           suggestions={suggestions}

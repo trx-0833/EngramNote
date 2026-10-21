@@ -1457,6 +1457,23 @@ const zhCN = {
     isolatedHint: '其中 {count} 张卡片还没有任何关联',
     collapse: '收起',
     expand: '展开',
+    // ---- 疑似重复卡片（A1 P0-3）----
+    /** 工具栏/按钮文案 */
+    duplicates: '疑似重复',
+    duplicatesTitle: '疑似重复的卡片',
+    /**
+     * 说明：把"为什么会有这个清单"讲清楚，并**立刻**说明合并不在这里做 ——
+     * 否则用户第一反应是"那帮我合并吧"，而那个动作的代价（复习历史变孤儿行）
+     * 根本不在这个面板里。
+     */
+    duplicatesHint:
+      '这些卡片标题相同、内容也几乎一致，很可能是同一个知识点被重复理解成了多张卡（它们不会被连成关系，因为那不是"相关"而是"重复"）。',
+    duplicatesCount: '共 {count} 对',
+    duplicatesSimilarity: '内容相似度 {value}%',
+    duplicatesNone: '没有发现疑似重复的卡片',
+    /** `null` = 后端没统计到。**不能**说成"没有重复"（那是假的好消息） */
+    duplicatesUnavailable: '暂时无法统计（稍后重试）',
+    duplicatesNextStep: '合并卡片会改动复习历史，属于单独的一步改动，当前只做提示、不自动处理。',
     // ---- 节点详情 ----
     nodeDetail: '节点详情',
     labelTitle: '标题',

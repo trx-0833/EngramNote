@@ -115,6 +115,31 @@ class RelationTypeCount(BaseModel):
     count: int
 
 
+class SuspectedDuplicatePair(BaseModel):
+    """一对**疑似重复**的卡片（A1 P0-3：只报不处理）
+
+    由来：`auto_suggest_relations` 里有一道「同名闸」—— 标题相同的两张卡
+    **不建边**，因为实测同名对的相似度**普遍 ~1.000**、盲判过的 3 条
+    **全部是真重复**。它们不是"错的边"，是**重复的卡片**
+    （同一个知识点被反复理解成了多张卡）。
+
+    但闸门只做了"不建边"，于是这个数据问题从"图谱里看得见"变成了
+    "只有日志里看得见"。这个模型就是把它**变成用户能看见的**。
+
+    ⚠️ **合并/删除要另开一轮单独批**（`agent-workstream-plan.md` §5 第 6 条）：
+    它会动 `review_states`（复习历史变孤儿行），属产品语义变更。
+    """
+
+    card_id_1: str
+    card_id_2: str
+    #: 两张卡完全相同的标题（`strip()` 后）
+    title: str
+    #: 余弦相似度。**≥ `SUSPECTED_DUPLICATE_SIMILARITY`（0.98）**才会出现在这里
+    similarity: float
+    note_id_1: Optional[str] = None
+    note_id_2: Optional[str] = None
+
+
 class GraphStats(BaseModel):
     """知识图谱统计数据"""
     total_nodes: int
@@ -123,6 +148,16 @@ class GraphStats(BaseModel):
     suggested_edges: int
     relation_type_distribution: List[RelationTypeCount]
     isolated_nodes: int  # 孤立节点（无任何关系）
+    #: 疑似重复的卡片对（A1 P0-3）。`None` = 没统计（**不是 0**）——
+    #: 与 `/ready` 的 `pending_embeddings` 同一条原则：0 会让"没测到"
+    #: 与"真的没有重复卡"长得一模一样，而后者才是"可以收工了"。
+    #:
+    #: 默认 `None`：这份统计只在**用户打开图谱页**时算，而它要读向量；
+    #: 不想让每次 `GET /graph/stats` 都付这个代价（见 API 的 `include_duplicates`）。
+    suspected_duplicates: Optional[List[SuspectedDuplicatePair]] = None
+    #: 疑似重复对的**总数**（`suspected_duplicates` 是截断后的清单，
+    #: 而这个数是完整的）—— 两个数不一致时界面才能说"显示前 N 对，共 M 对"
+    suspected_duplicate_pairs: Optional[int] = None
 
 
 # --- 节点子图 ---

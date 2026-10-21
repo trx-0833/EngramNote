@@ -1065,6 +1065,18 @@ export interface paths {
      * @description 获取知识图谱统计数据
      *
      *     返回节点数、边数、关系类型分布、孤立节点数等统计信息。
+     *
+     *     ## `include_duplicates` 为什么默认关
+     *
+     *     「疑似重复卡片」这条要**读向量并两两算余弦**（只算有同名同伴的那些卡，
+     *     真库是 72 种标题 / 187 张，很便宜 —— 但它是"读向量"，
+     *     而这份统计的其余部分都是**计数**）。默认关 = 常规轮询的代价不变；
+     *     界面在用户**打开重复卡面板**时才带上这个参数。
+     *
+     *     ⚠️ 统计失败时两个字段留 `None`（"没测到"），**不是空列表/0** ——
+     *     "没测到"与"真的没有重复卡"必须能分开（与 `/ready` 的
+     *     `pending_embeddings` 同一条原则）。所以这里包了 try：
+     *     附加读数不该让整份统计失败。
      */
     get: operations['get_graph_stats_api_graph_stats_get'];
     put?: never;
@@ -4864,6 +4876,10 @@ export interface components {
       relation_type_distribution: components['schemas']['RelationTypeCount'][];
       /** Suggested Edges */
       suggested_edges: number;
+      /** Suspected Duplicate Pairs */
+      suspected_duplicate_pairs?: number | null;
+      /** Suspected Duplicates */
+      suspected_duplicates?: components['schemas']['SuspectedDuplicatePair'][] | null;
       /** Total Edges */
       total_edges: number;
       /** Total Nodes */
@@ -6826,6 +6842,35 @@ export interface components {
       similarity_score?: number | null;
     };
     /**
+     * SuspectedDuplicatePair
+     * @description 一对**疑似重复**的卡片（A1 P0-3：只报不处理）
+     *
+     *     由来：`auto_suggest_relations` 里有一道「同名闸」—— 标题相同的两张卡
+     *     **不建边**，因为实测同名对的相似度**普遍 ~1.000**、盲判过的 3 条
+     *     **全部是真重复**。它们不是"错的边"，是**重复的卡片**
+     *     （同一个知识点被反复理解成了多张卡）。
+     *
+     *     但闸门只做了"不建边"，于是这个数据问题从"图谱里看得见"变成了
+     *     "只有日志里看得见"。这个模型就是把它**变成用户能看见的**。
+     *
+     *     ⚠️ **合并/删除要另开一轮单独批**（`agent-workstream-plan.md` §5 第 6 条）：
+     *     它会动 `review_states`（复习历史变孤儿行），属产品语义变更。
+     */
+    SuspectedDuplicatePair: {
+      /** Card Id 1 */
+      card_id_1: string;
+      /** Card Id 2 */
+      card_id_2: string;
+      /** Note Id 1 */
+      note_id_1?: string | null;
+      /** Note Id 2 */
+      note_id_2?: string | null;
+      /** Similarity */
+      similarity: number;
+      /** Title */
+      title: string;
+    };
+    /**
      * TaskRunListResponse
      * @description 任务列表响应
      */
@@ -8567,7 +8612,10 @@ export interface operations {
   };
   get_graph_stats_api_graph_stats_get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description 是否附带疑似重复卡片清单（A1 P0-3）。要读向量，默认关 */
+        include_duplicates?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -8581,6 +8629,15 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['GraphStats'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
         };
       };
     };

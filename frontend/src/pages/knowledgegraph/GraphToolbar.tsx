@@ -48,6 +48,14 @@ interface GraphToolbarProps {
   /** 是否已折叠孤立点 */
   hideIsolated: boolean;
   onToggleHideIsolated: () => void;
+
+  /**
+   * 打开/关闭「疑似重复卡」面板（A1 P0-3）
+   *
+   * 面板自己按需拉数据（它要读向量，不该挂在常规轮询上），
+   * 所以这里只传一个开关动作，不传清单本身。
+   */
+  onToggleDuplicates: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
 }
@@ -70,6 +78,7 @@ export default function GraphToolbar({
   isolatedCount,
   hideIsolated,
   onToggleHideIsolated,
+  onToggleDuplicates,
   sidebarOpen,
   onToggleSidebar,
 }: GraphToolbarProps) {
@@ -192,6 +201,15 @@ export default function GraphToolbar({
         >
           {t('graphPage.hideIsolated')}
           {isolatedCount > 0 && <span className={styles.graphBadge}>{isolatedCount}</span>}
+        </button>
+
+        {/* 疑似重复按钮（A1 P0-3）
+            —— 「同名闸」规定标题相同的两张卡不建边（因为它们是**重复卡片**
+            而不是相关卡片），但闸门只做了"不建边"，于是这个数据问题从
+            图谱里看不见了。这个按钮把清单打开给用户看。
+            ⚠️ 面板里**没有**操作按钮：合并会动复习历史，属单独的一批改动。 */}
+        <button className={styles.graphBtn} onClick={onToggleDuplicates}>
+          {t('graphPage.duplicates')}
         </button>
 
         {/* 侧边栏切换 */}

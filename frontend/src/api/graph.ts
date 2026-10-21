@@ -175,11 +175,24 @@ export async function deleteRelation(relationId: string): Promise<GraphRelationO
 /** 图谱统计数据（生成自 `GraphStats`） */
 export type GraphStats = Schema<'GraphStats'>;
 
+/** 一对疑似重复的卡片（生成自 `SuspectedDuplicatePair`） */
+export type SuspectedDuplicatePair = Schema<'SuspectedDuplicatePair'>;
+
 /**
  * 获取知识图谱统计数据
+ *
+ * @param options.includeDuplicates 是否附带疑似重复卡清单（A1 P0-3）
+ *
+ * ## 为什么默认**不**带
+ *
+ * 这条要**读向量并两两算余弦**（只算有同名同伴的卡），而统计的其余部分都是计数。
+ * 默认关 ⇒ 常规轮询的代价不变；只有用户**打开重复卡面板**时才带上它。
  */
-export async function getGraphStats(): Promise<GraphStats> {
-  return request<GraphStats>('/graph/stats');
+export async function getGraphStats(options?: {
+  includeDuplicates?: boolean;
+}): Promise<GraphStats> {
+  const query = options?.includeDuplicates ? '?include_duplicates=true' : '';
+  return request<GraphStats>(`/graph/stats${query}`);
 }
 
 /**

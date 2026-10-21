@@ -169,7 +169,14 @@ export interface ForceGraphLink {
 }
 
 /** 侧边栏面板类型 */
-export type SidebarPanel = 'suggestions' | 'nodeDetail' | 'createRelation' | 'viewSubgraph' | null;
+export type SidebarPanel =
+  | 'suggestions'
+  | 'nodeDetail'
+  | 'createRelation'
+  | 'viewSubgraph'
+  /** A1 P0-3：疑似重复卡片清单（**只报不处理**，见 `SuspectedDuplicatesPanel`） */
+  | 'duplicates'
+  | null;
 
 /** 力导向图 ref 类型 */
 export type GraphForceRef = ForceGraphMethods<

@@ -15,6 +15,7 @@ import ErrorDisplay from '../components/ErrorDisplay';
 import Icon from '../components/Icon';
 import GraphCanvas from '../components/graph/GraphCanvas';
 import GraphSidebar from '../components/graph/GraphSidebar';
+import { SuspectedDuplicatesPanel } from '../components/graph/SuspectedDuplicatesPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { type ForceGraphNode, type GraphForceRef, isLargeGraph } from '../components/graph/types';
 import GraphToolbar from './knowledgegraph/GraphToolbar';
@@ -249,6 +250,7 @@ export default function KnowledgeGraph() {
         isolatedCount={isolatedCount}
         hideIsolated={hideIsolated}
         onToggleHideIsolated={() => setHideIsolated((v) => !v)}
+        onToggleDuplicates={interaction.toggleDuplicatesPanel}
         sidebarOpen={interaction.sidebarOpen}
         onToggleSidebar={interaction.toggleSidebar}
       />
@@ -302,6 +304,15 @@ export default function KnowledgeGraph() {
         {interaction.sidebarOpen && (
           <GraphSidebar
             stats={graph.stats}
+            duplicatePanelSlot={
+              // 疑似重复面板（A1 P0-3）作为一个**独立面板**挂进侧边栏。
+              //
+              // 为什么不塞进 `SuggestionsPanel`：两者说的不是一类事 ——
+              // 建议是"这两张卡可能相关"，疑似重复是"这两张卡可能是同一张卡"。
+              // 混在一起会让用户把"重复"当"相关"来确认，而那是把数据问题
+              // 变成图谱里的错误边。
+              interaction.activePanel === 'duplicates' ? <SuspectedDuplicatesPanel open /> : null
+            }
             activePanel={interaction.activePanel}
             selectedNode={interaction.selectedNode}
             selectedLink={interaction.selectedLink}

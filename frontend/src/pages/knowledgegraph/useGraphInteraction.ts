@@ -138,6 +138,17 @@ export function useGraphInteraction() {
     setSidebarOpen(true);
   }
 
+  /**
+   * 工具栏「疑似重复」按钮：开合该面板（总是展开侧边栏）
+   *
+   * 与「建议」按钮同一形态：再点一次关掉。面板自己按需拉数据，
+   * 所以这里只切面板状态，不发请求。
+   */
+  function toggleDuplicatesPanel() {
+    setActivePanel(activePanel === 'duplicates' ? null : 'duplicates');
+    setSidebarOpen(true);
+  }
+
   /** 工具栏「收起 / 展开」按钮 */
   function toggleSidebar() {
     setSidebarOpen(!sidebarOpen);
@@ -169,6 +180,7 @@ export function useGraphInteraction() {
     cancelCreateMode,
     toggleCreateMode,
     toggleSuggestionsPanel,
+    toggleDuplicatesPanel,
     toggleSidebar,
   };
 }

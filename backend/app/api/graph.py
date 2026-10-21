@@ -79,16 +79,49 @@ async def get_graph(
 async def get_graph_stats(
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
+    include_duplicates: bool = Query(
+        False,
+        description="是否附带疑似重复卡片清单（A1 P0-3）。要读向量，默认关",
+    ),
 ):
     """
     获取知识图谱统计数据
 
     返回节点数、边数、关系类型分布、孤立节点数等统计信息。
+
+    ## `include_duplicates` 为什么默认关
+
+    「疑似重复卡片」这条要**读向量并两两算余弦**（只算有同名同伴的那些卡，
+    真库是 72 种标题 / 187 张，很便宜 —— 但它是"读向量"，
+    而这份统计的其余部分都是**计数**）。默认关 = 常规轮询的代价不变；
+    界面在用户**打开重复卡面板**时才带上这个参数。
+
+    ⚠️ 统计失败时两个字段留 `None`（"没测到"），**不是空列表/0** ——
+    "没测到"与"真的没有重复卡"必须能分开（与 `/ready` 的
+    `pending_embeddings` 同一条原则）。所以这里包了 try：
+    附加读数不该让整份统计失败。
     """
-    return await graph_service.get_graph_stats(
+    stats = await graph_service.get_graph_stats(
         user_id=current_user.id,
         db=db,
     )
+
+    if include_duplicates:
+        try:
+            pairs = await graph_service.find_suspected_duplicate_cards(
+                current_user.id, db
+            )
+            stats["suspected_duplicate_pairs"] = len(pairs)
+            stats["suspected_duplicates"] = pairs
+        except Exception as exc:  # noqa: BLE001 - 附加读数不该让统计失败
+            logger.warning(
+                "图谱统计：疑似重复卡查询失败（该字段留空）| %s: %s",
+                type(exc).__name__, exc,
+            )
+            stats["suspected_duplicate_pairs"] = None
+            stats["suspected_duplicates"] = None
+
+    return stats
 
 
 @router.get("/search", response_model=GraphSearchResponse)

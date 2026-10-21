@@ -998,6 +998,142 @@ async def count_isolated_cards(user_id: str, db: AsyncSession) -> int:
     return int(total)
 
 
+async def find_suspected_duplicate_cards(
+    user_id: str,
+    db: AsyncSession,
+    *,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """找出**疑似重复**的卡片对（A1 P0-3：可见化，**不处理**）
+
+    ## 它暴露的是什么问题
+
+    `auto_suggest_relations` 里有一道「同名闸」：两张卡标题（`strip()` 后）
+    完全相同时**不建边**。原因是实测的：同名对的相似度**普遍 ~1.000**，
+    盲判过的 3 条**全部是真重复** —— 也就是说它们不是"错的边"，
+    是**重复的卡片**（同一个知识点被反复理解成了多张卡）。
+
+    但闸门只做了一件事：**不建边**。于是这个数据问题从"图谱里看得见"
+    变成了"只有日志里看得见"（`docs/relation-method-research-20261021.md` §14.4
+    把去重列为未做的事）。本函数把它**变成用户能看见的**。
+
+    ## ⚠️ 只报不处理（已拍板）
+
+    `docs/agent-workstream-plan.md` §5 第 6 条：**合并/删除要另开一轮单独批**，
+    因为它会动 `review_states`（复习历史会变孤儿行），属产品语义变更。
+    所以本函数**只读**：不建边、不改卡、不落任何标记。
+
+    ## 判据：标题完全相同 **且** 相似度 ≥ `SUSPECTED_DUPLICATE_SIMILARITY`
+
+    为什么要**两个**条件而不是只看标题：同名不同内容的卡在真库里确实存在
+    （`操作术语` 与 `操作术语定义` 就不是重复，一个是总表一个是定义 ——
+    同名闸的注释专门写了这个反例）。加上相似度这一条，
+    才能把"同名但确实是两件事"的排除掉。
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+        limit: 最多返回多少对（默认 50 —— 这是给人看的清单，不是全量导出）
+
+    Returns:
+        `[{card_id_1, card_id_2, title, similarity, note_id_1, note_id_2}, ...]`
+        按相似度降序、再按 `(card_id_1, card_id_2)` 定序（**可复现**）。
+        只含**已嵌入**的卡：没有向量的卡算不出相似度，而按标题就下"疑似重复"
+        的结论依据不足（见上）。
+    """
+    rows = list((await db.execute(
+        select(
+            KnowledgeCard.id,
+            KnowledgeCard.title,
+            KnowledgeCard.note_id,
+            KnowledgeCard.embedding,
+            KnowledgeCard.embedding_dim,
+            KnowledgeCard.embedding_model,
+        ).where(
+            KnowledgeCard.user_id == user_id,
+            KnowledgeCard.has_embedding.is_(True),
+            Note.not_trashed(KnowledgeCard.note_id),
+        ).order_by(KnowledgeCard.id)
+    )).all())
+
+    # 按归一化标题分组（只 strip —— 与同名闸同一判据，不能更激进：
+    # 见 `title_of` 那段说明，`操作术语` 与 `操作术语定义` 不是重复卡）
+    by_title: Dict[str, List[Any]] = {}
+    for row in rows:
+        key = (row.title or "").strip()
+        if not key:
+            continue
+        by_title.setdefault(key, []).append(row)
+
+    groups = {t: g for t, g in by_title.items() if len(g) >= 2}
+    if not groups:
+        return []
+
+    # 只对有同名同伴的卡算向量（真库里 72 种标题 / 187 张，很便宜）
+    wanted = [row for group in groups.values() for row in group]
+    vectors = [_unpack_vector(row.embedding, row.embedding_dim) for row in wanted]
+    vec_of = {row.id: v for row, v in zip(wanted, vectors, strict=True) if v is not None}
+    #: 卡 id → 它的向量是哪个模型算的。**跨模型余弦没有意义**，
+    #: 所以下面两两比较时会先比这一列（与 `auto_suggest_relations`
+    #: 里那条 `test_mixed_embedding_models_are_not_compared` 同一判据）。
+    model_of = {row.id: (row.embedding_model or "") for row in wanted}
+
+    pairs: List[Dict[str, Any]] = []
+    for title, group in groups.items():
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                a, b = group[i], group[j]
+                va, vb = vec_of.get(a.id), vec_of.get(b.id)
+                if va is None or vb is None:
+                    continue
+                if model_of.get(a.id) != model_of.get(b.id):
+                    continue
+                sim = float(np.dot(va, vb))
+                if sim < SUSPECTED_DUPLICATE_SIMILARITY:
+                    continue
+                id1, id2 = sorted([a.id, b.id])
+                pairs.append({
+                    "card_id_1": id1,
+                    "card_id_2": id2,
+                    "title": title,
+                    "similarity": round(sim, 4),
+                    "note_id_1": a.note_id,
+                    "note_id_2": b.note_id,
+                })
+
+    pairs.sort(key=lambda p: (-p["similarity"], p["card_id_1"], p["card_id_2"]))
+    if len(pairs) > limit:
+        logger.info(
+            "疑似重复卡片: user=%s 共 %d 对，按相似度只返回前 %d 对",
+            user_id[:8], len(pairs), limit,
+        )
+    return pairs[:limit]
+
+
+def _unpack_vector(blob: Any, dim: Optional[int]) -> Optional[np.ndarray]:
+    """把库里存的向量还原成**单位化**的 `np.ndarray`；不可用时返回 `None`
+
+    单位化是必须的：`auto_suggest_relations` 里比较的是余弦，
+    而它依赖 `pack_vector` 写入时已经单位化。这里对读出来的向量**再除一次模长**
+    更稳（早期行按别的口径写过也不影响结果），模长为 0 时返回 `None`
+    而不是让 `np.dot` 悄悄给出 0 —— 0 会被读成"完全不相似"，
+    与"这条向量坏了"是两件事。
+    """
+    if blob is None:
+        return None
+    try:
+        vec = unpack_vector(blob, dim)
+    except Exception:  # noqa: BLE001 - 坏行跳过，不让整批失败
+        return None
+    if vec is None:
+        return None
+    arr = np.asarray(vec, dtype=np.float32)
+    norm = float(np.linalg.norm(arr))
+    if norm <= 0:
+        return None
+    return arr / norm
+
+
 async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str, Any]:
     """
     基于 LLM 批量推断知识卡片间的语义关系（prerequisite/subsequent/contrast）

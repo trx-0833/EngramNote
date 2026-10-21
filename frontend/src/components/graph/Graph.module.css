@@ -292,6 +292,26 @@
   box-shadow: var(--shadow-sm);
 }
 
+/**
+ * 面板内的说明文字（A1 P0-3 的疑似重复面板用）
+ *
+ * 与 `graphCreateHint` 的区别：那个是**进入创建模式**的醒目提示，
+ * 这个只是面板里的常规说明 —— 用背景色会把"说明"画成"警告"。
+ */
+.graphHint {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 0 0 var(--space-sm) 0;
+}
+
+/** 面板内的错误提示（与全局 `.graphError` 分开：那个是画布级覆盖层） */
+.graphError {
+  color: var(--color-error);
+  font-size: 0.8rem;
+  margin: 0 0 var(--space-sm) 0;
+}
+
 .graphPanelTitle {
   font-size: 0.7rem;
   font-weight: 600;

@@ -164,11 +164,35 @@ class Note(BaseModel):
 
         Returns:
             SQLAlchemy 布尔表达式，可直接放入 where 条件
+
+        ## ⚠️ 2026-10-22 修：`.correlate(None)` 让这个条件**几乎恒真**
+
+        改造前是 `.exists().correlate(None)`，生成的 SQL 是：
+
+        ```sql
+        WHERE t.note_id IS NULL OR (EXISTS (
+            SELECT notes.id FROM notes, t          -- ← t 被**当成了子查询自己的表**
+            WHERE notes.id = t.note_id AND notes.trashed_at IS NULL))
+        ```
+
+        `correlate(None)` 关掉了**全部**关联，于是 SQLAlchemy 把外层的 `t`
+        也加进子查询的 FROM。那条 `notes.id = t.note_id` 于是变成
+        "notes 与子查询自己那份 t 的任意一行相等" —— **与外层的这一行无关**。
+        后果：只要库里存在**任何一篇**未回收的笔记，EXISTS 就对每一行都为真，
+        回收站过滤**完全失效**（实测：把 n2 移进回收站后，n2 的卡片照旧被查出来）。
+
+        正解是**只把 `notes` 排除在"不许关联"之外**：`.correlate_except(cls)`。
+        它的语义是"这个子查询可以关联除了 notes 之外的一切" ——
+        于是外层 `t` 的列被正确关联（不再被加进子查询的 FROM），
+        而 `notes` 仍然按子查询自己的表来处理。
+
+        （不能写 `.correlate(note_id_col)`：`correlate()` 只接受
+        FROM 对象/实体，传一个列会抛 `ArgumentError` —— 实测踩过。）
         """
         from sqlalchemy import or_, select
         return or_(
             note_id_col.is_(None),
             select(cls.id).where(
                 cls.id == note_id_col, cls.trashed_at.is_(None)
-            ).exists().correlate(None),
+            ).exists().correlate_except(cls),
         )

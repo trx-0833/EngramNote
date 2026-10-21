@@ -1232,6 +1232,16 @@ const en = {
     suggestions: 'Suggestions',
     hideIsolated: 'Hide unlinked',
     isolatedHint: '{count} cards have no relations yet',
+    duplicates: 'Suspected duplicates',
+    duplicatesTitle: 'Suspected duplicate cards',
+    duplicatesHint:
+      'These cards share the same title and nearly identical content — likely the same knowledge point captured as several cards (they are not linked, because that is duplication rather than a relation).',
+    duplicatesCount: '{count} pair(s)',
+    duplicatesSimilarity: 'Content similarity {value}%',
+    duplicatesNone: 'No suspected duplicate cards found',
+    duplicatesUnavailable: 'Statistics unavailable right now (try again later)',
+    duplicatesNextStep:
+      'Merging cards would rewrite review history, so it is a separate change — this panel only reports, it does not merge.',
     collapse: 'Hide',
     expand: 'Show',
     nodeDetail: 'Node details',
