@@ -174,6 +174,62 @@ describe('加载与状态展示', () => {
   });
 });
 
+/**
+ * 「还没建索引」提示（B2 的"可见"那半，2026-10-22）
+ *
+ * ## 为什么这一组必须存在
+ *
+ * 清洗路径刻意不写向量，补嵌入由 Beat 的 `backfill_embeddings` 周期补齐。
+ * 在那之前这篇笔记**只被 BM25 检索到** —— 而用户此前**不提问就看不到**这件事
+ * （只有问答时的 SSE `meta.retrieval_status` 会提示）。
+ *
+ * ## 三条判据各一条用例
+ *
+ * 关键是第三条：**`0` 与 `null` 都不能显示**。
+ * `0` 是常态（索引都建好了），常驻一条"0 个待建"只会变成噪音；
+ * `null` 是"还没统计"（笔记还没清洗完）—— "没测到"不能长得像"有问题"。
+ * 没有这条反向断言，把判据写成 `!= null` 也能让正向那条绿。
+ */
+describe('索引未建好的提示', () => {
+  const PENDING_TEXT = /还有 5 段内容在建立索引/;
+
+  it('★ 有未建索引的段落时显示提示，并说清"会自愈"', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ pending_embedding_chunks: 5 }));
+    renderPage();
+
+    const hint = await screen.findByText(PENDING_TEXT);
+    expect(hint).toBeInTheDocument();
+    // 用户需要知道"要不要我做什么" —— 答案是不用，那就直说
+    expect(hint).toHaveTextContent(/每半小时自动补齐/);
+  });
+
+  it('★ 全部已建索引（0）时**不显示** —— 0 是常态，不是问题', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ pending_embedding_chunks: 0 }));
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    expect(screen.queryByText(PENDING_TEXT)).not.toBeInTheDocument();
+  });
+
+  it('★ 还没统计（null）时也不显示 —— "没测到"不能长得像"有问题"', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ pending_embedding_chunks: null }));
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    expect(screen.queryByText(PENDING_TEXT)).not.toBeInTheDocument();
+  });
+
+  it('老接口没这个字段（undefined）时同样不显示（向后兼容）', async () => {
+    const note = makeNote();
+    delete (note as Record<string, unknown>).pending_embedding_chunks;
+    mockedGetNote.mockResolvedValue(note);
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    expect(screen.queryByText(PENDING_TEXT)).not.toBeInTheDocument();
+  });
+});
+
 describe('编辑与保存', () => {
   it('★ 进入编辑、修改、保存走的是 updateNoteContent', async () => {
     mockedGetNote.mockResolvedValue(makeNote());

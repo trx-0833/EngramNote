@@ -359,6 +359,15 @@ describe('阶段 0 的验收：认证页文案齐全', () => {
       'auth.username',
       'auth.usernamePlaceholder',
       'auth.usernameInvalid',
+      // B2 的"可见"那半（2026-10-22）：笔记详情页的"还没建索引"提示。
+      // ⚠️ 它是**带占位符**的文案（`{count}`），而占位符一致性那条用例
+      // **抓不到**"两处都写成 `{{count}}`"这种错误 —— 两边一致，所以它绿。
+      // 实测就是这样：中文与英文都写成 i18next 风格的 `{{count}}`，
+      // 而本项目的 `t()` 认的是**单花括号**，于是界面上显示成
+      // 「这篇笔记还有 {5} 段内容…」。抓到它的是**渲染断言**
+      // （`NoteDetail.test.tsx` 的 `findByText(/还有 5 段内容/)`）。
+      // 教训：占位符一致性 ≠ 占位符**语法**正确，后者只有渲染能验。
+      'noteDetail.indexPending',
       'common.language',
       'common.languageZh',
       'common.languageEn',

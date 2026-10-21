@@ -363,6 +363,45 @@ export default function NoteDetailHeader({
           `<ul>` 是原生元素，读屏会直接报"列表，7 项"。 */}
       {children}
 
+      {/* 索引未建好的提示（B2 的"可见"那半，2026-10-22）
+
+          ## 它说的是什么
+
+          清洗路径**刻意不写向量**（要加载 4.3GB 模型，不能放在高并发的用户路径
+          里），补嵌入由 Beat 的 `backfill_embeddings` 周期补齐。在那之前这篇
+          笔记**只被 BM25 检索到** —— 换个说法/同义的提问会答不出或答歪。
+
+          ## 为什么必须在这里出现
+
+          此前只有两处能看到这件事：就绪探针里的一个计数（**运维视角**，
+          用户不会去读；那条端点的名字刻意不写在这里 —— 有守卫禁止前端源码
+          出现它，见 `backend/tests/test_ready_endpoint.py` 的
+          `test_no_frontend_source_references_ready`），以及问答时的 SSE
+          `meta.retrieval_status`（**要先提一个问题**才会出现）。
+          也就是说"不提问就不知道" —— 而用户不知道就会以为
+          "这篇资料问不出来"是系统坏了。
+
+          ## 判据与措辞
+
+          - `undefined` / `null`：还没统计（笔记还没清洗完）⇒ **不显示**。
+            "没测到"不能长得像"有问题"（与后端那个 `Optional[int]` 同一条原则）。
+          - `0`：全部已建索引 ⇒ **正常，不显示**。这是绝大多数情况，
+            常驻一条"0 个待建"只会变成噪音。
+          - `> 0`：显示，并说明**会自愈**（周期任务会补）而不是"出错了"。
+            用户需要的不是焦虑，是"要不要做什么" —— 答案通常是"不用，
+            等一会儿"，那就直说。 */}
+      {typeof note.pending_embedding_chunks === 'number' && note.pending_embedding_chunks > 0 && (
+        <p
+          style={{
+            color: 'var(--color-text-secondary)',
+            fontSize: '0.8125rem',
+            margin: 'var(--space-sm) 0 0',
+          }}
+        >
+          {t('noteDetail.indexPending', { count: note.pending_embedding_chunks })}
+        </p>
+      )}
+
       {/* 错误信息提示 + 重试按钮。⚠️ 留在页头最下方：它是"这一页现在出问题了"，
           与"这条笔记是什么"（上面的元信息条）不是一类信息。 */}
       {note.error_message && (

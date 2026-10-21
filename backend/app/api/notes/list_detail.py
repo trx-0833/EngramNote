@@ -6,6 +6,7 @@
 笔记是系统的核心资源，用户只能访问自己创建的笔记。
 """
 
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,11 +61,13 @@ from ...api.auth import get_current_user_dependency
 from ._common import (
     _build_note_response,
     _build_note_responses,
+    _count_pending_embedding_chunks,
     _fill_project_names,
     _load_project_tags,
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -193,6 +196,31 @@ async def get_note(
     resp = NoteDetailResponse.model_validate(note)
     resp.original_md_content = original_md
     resp.clean_md_content = clean_md
+    # 还没补向量的 chunk 数（B2 的"可见"那半）
+    #
+    # 为什么在这个端点上算：用户打开笔记详情时**不问问题也能看到**
+    # "这篇还没建好索引" —— 而此前只有问答时的 SSE meta 会提示，
+    # 也就是说"不提问就不知道"（`docs/overhaul-plan.md` 附录 BN.3 把它列为
+    # 「确实影响使用」时缺的正是这一环）。
+    #
+    # 只对**已经清洗过**的笔记算：还没清洗的笔记根本没有 chunk，
+    # 报 0 会让人以为"索引没问题"（而它其实是"还没有内容可索引"）。
+    #
+    # ⚠️ 这里**还要再包一层 try**：`_count_pending_embedding_chunks` 内部已经
+    # 把查询异常转成 `None`，但"转成 None"要靠它自己被成功调用 ——
+    # 而它可能在 import、会话获取等更早的环节就抛出来。实测用例
+    # `test_query_failure_degrades_to_none_and_does_not_break_the_page`
+    # 正是这样把端点打成了 500：**把兜底放在助手函数里，防不住助手函数自己出错**。
+    # 这个字段是详情页的附加提示，为了它让整页 500 是本末倒置。
+    if note.status in (NoteStatus.cleaned, NoteStatus.archived):
+        try:
+            resp.pending_embedding_chunks = await _count_pending_embedding_chunks(db, note.id)
+        except Exception as exc:  # noqa: BLE001 - 附加提示不该让详情页失败
+            logger.warning(
+                "笔记详情：待嵌入 chunk 统计失败（该字段留空）| note_id=%s | %s: %s",
+                note.id, type(exc).__name__, exc,
+            )
+            resp.pending_embedding_chunks = None
     tags = await _load_project_tags(db, [note])
     _fill_project_names(resp, note, tags)
     if note.source_type == SourceType.video:

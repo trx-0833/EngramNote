@@ -3779,6 +3779,17 @@
             ],
             "title": "Page Count"
           },
+          "pending_embedding_chunks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Embedding Chunks"
+          },
           "project_ids": {
             "default": [],
             "items": {

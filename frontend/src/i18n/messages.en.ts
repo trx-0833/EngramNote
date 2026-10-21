@@ -258,6 +258,8 @@ const en = {
     back: 'Back',
     reviewNow: 'Review now',
     errorPrefix: 'Error',
+    indexPending:
+      '{count} section(s) of this note are still being indexed — only keyword search is available for now (backfilled automatically every 30 minutes)',
   },
 
   shared: {

@@ -5313,6 +5313,8 @@ export interface components {
       original_md_path?: string | null;
       /** Page Count */
       page_count?: number | null;
+      /** Pending Embedding Chunks */
+      pending_embedding_chunks?: number | null;
       /**
        * Project Ids
        * @default []
