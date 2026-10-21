@@ -315,7 +315,13 @@ async def _clean_document(note_id: str):
             return
 
     # 8. 生成清洗副本
-    clean_copy, copy_stats = generate_clean_copy(original_text, cleaned_text, duplicates)
+    # `total_blocks` 显式传入：`chunks` 就是下面 metadata 里 `total_chunks` 的来源，
+    # 同一个数字传给两边，`copy_stats.total_blocks` 与 `total_chunks` 就不可能打架
+    # （2026-10-21 修：此前不传，且函数内部只在"有重复块"时才计算，
+    #   导致无重复块的文档 total_blocks 恒为 0）
+    clean_copy, copy_stats = generate_clean_copy(
+        original_text, cleaned_text, duplicates, total_blocks=len(chunks)
+    )
 
     # 检查用户是否已停止清洗（上传清洗副本前）
     if await _is_cleaning_stopped(note_id):

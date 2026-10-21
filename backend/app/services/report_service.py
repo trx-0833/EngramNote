@@ -16,7 +16,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from sqlalchemy import select, func, case, distinct
@@ -52,9 +52,16 @@ async def get_daily_report(
     """
     now = datetime.now(timezone.utc)
     # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
-    from ..utils.timeutil import today_start_utc
+    #
+    # ⚠️ 2026-10-21 修：这里原先是
+    #       today_str = today_start_utc(now).strftime("%Y-%m-%d")
+    #   `today_start_utc()` 返回的是 **UTC 时刻**（北京 10-21 00:00 = UTC 10-20 16:00），
+    #   直接 strftime 得到 "2026-10-20" —— 于是「今日报告」永远标着昨天。
+    #   真实用户走查在 /today 页面上看到的就是「今日报告 (2026-10-20)」而当天是 10-21。
+    #   日期串必须**转回业务时区再取**，用 business_date_str。
+    from ..utils.timeutil import business_date_str, today_start_utc
     today_start = today_start_utc(now)
-    today_str = today_start.strftime("%Y-%m-%d")
+    today_str = business_date_str(now)
 
     # 合并查询：今日复习总数、正确数、总时长
     today_stats = await db.execute(
@@ -144,15 +151,19 @@ async def get_weekly_trend(
     """
     now = datetime.now(timezone.utc)
     # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
-    from ..utils.timeutil import local_day_start_utc
+    #
+    # ⚠️ 2026-10-21 修：原实现有两处口径打架，导致**每根柱子都是 0**：
+    #   ① 建键：`day_start = local_day_start_utc(day)`（UTC 时刻）再 strftime
+    #      → 得到"业务日起点所在的 UTC 日"，比业务日**早一天**；
+    #   ② 查找：`(now - timedelta(days=i)).strftime(...)` → UTC 日。
+    #   两套口径永不相等，`daily_map.get()` 恒 miss。
+    #   现在日期串与区间都出自 `recent_business_day_ranges` 的同一个 `day_local`，
+    #   结构上不可能对不上（该函数在业务时区里逐日回退，跨午夜也不重复/跳过）。
+    from ..utils.timeutil import recent_business_day_ranges
 
     # 按业务日界做范围查询聚合，避免 func.date() 在不同数据库方言下的兼容性问题
     daily_map = {}
-    for i in range(6, -1, -1):
-        day = now - timedelta(days=i)
-        day_start = local_day_start_utc(day)
-        day_end = day_start + timedelta(days=1)
-        day_str = day_start.strftime("%Y-%m-%d")
+    for day_str, day_start, day_end in recent_business_day_ranges(7, now):
 
         day_stats = await db.execute(
             select(
@@ -170,9 +181,8 @@ async def get_weekly_trend(
     items = []
     total_reviews = 0
     total_correct = 0
-    for i in range(6, -1, -1):
-        day = now - timedelta(days=i)
-        day_str = day.strftime("%Y-%m-%d")
+    # 查找必须用**与建键同一套**业务日期串（见上面的说明）
+    for day_str, _start, _end in recent_business_day_ranges(7, now):
         day_data = daily_map.get(day_str, {"total": 0, "correct": 0})
         day_total = day_data["total"]
         day_correct = day_data["correct"]

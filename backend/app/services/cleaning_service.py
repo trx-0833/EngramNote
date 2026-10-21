@@ -19,7 +19,7 @@
 import difflib
 import logging
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..config import get_settings
 
@@ -187,6 +187,7 @@ def generate_clean_copy(
     original_text: str,
     cleaned_text: str,
     duplicate_blocks: List[Dict],
+    total_blocks: Optional[int] = None,
 ) -> Tuple[str, Dict[str, int]]:
     """
     根据去重结果生成清洗副本
@@ -205,6 +206,9 @@ def generate_clean_copy(
             - block_index: 块序号
             - duplicate_of: 首次出现的块序号
             - similarity: 相似度分数
+        total_blocks: 分块总数。**调用方已经算过就务必传进来** ——
+            它与 `metadata.total_chunks` 同源，两个字段因此不可能打架；
+            不传则本函数在有重复块时自行重新分块得出（见下方 2026-10-21 的说明）。
 
     Returns:
         Tuple[str, Dict[str, int]]: (清洗副本文本, 清洗统计信息)
@@ -218,6 +222,17 @@ def generate_clean_copy(
 
     if not cleaned_text:
         return cleaned_text, stats
+
+    # ⚠️ 2026-10-21 修（真实用户走查发现）：
+    #    `total_blocks` 原先**只在"有重复块"的分支里**被赋值（原来那行
+    #    `stats["total_blocks"] = len(chunks)` 在下面的分块之后）。于是
+    #    **没有重复块的文档 —— 也就是绝大多数文档 —— 返回的 copy_stats 里
+    #    `total_blocks` 恒为 0**，与同一份 metadata 里的 `total_chunks` 自相矛盾。
+    #    实测：一篇 6 块的笔记 `total_chunks: 6` / `copy_stats.total_blocks: 0`，
+    #    而界面「总分块: 6」用的是前者，所以用户看不出、接口却在说谎。
+    #    现在先把值落下来，再走后续分支。
+    if total_blocks is not None:
+        stats["total_blocks"] = int(total_blocks)
 
     # 如果没有重复块，直接返回清洗后的文本
     if not duplicate_blocks:
@@ -242,7 +257,10 @@ def generate_clean_copy(
     chunks = to_retrieval_chunks(
         segment_with_offsets(cleaned_text, settings.chunk_size)
     )
-    stats["total_blocks"] = len(chunks)
+    # 调用方传了就用它的（与 metadata.total_chunks 同源，保证两字段一致）；
+    # 没传才用本地重新分块的结果。
+    if total_blocks is None:
+        stats["total_blocks"] = len(chunks)
 
     if not chunks:
         return cleaned_text, stats

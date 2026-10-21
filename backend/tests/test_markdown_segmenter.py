@@ -511,3 +511,82 @@ class TestCompatibilityWithExistingApi:
         assert isinstance(seg, Segment)
         with pytest.raises(dataclasses.FrozenInstanceError):
             seg.char_start = 999  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# `copy_stats.total_blocks` 必须与 `metadata.total_chunks` 一致
+# ---------------------------------------------------------------------------
+
+class TestCopyStatsTotalBlocks:
+    """2026-10-21 修：真实用户走查发现一篇 6 块的笔记里
+
+        metadata.total_chunks           = 6
+        metadata.copy_stats.total_blocks = 0
+
+    两者自相矛盾。根因：`generate_clean_copy` 里
+    `stats["total_blocks"] = len(chunks)` 写在**"有重复块"分支之后**，
+    而没有重复块的文档（绝大多数）在 `if not duplicate_blocks: return` 就返回了，
+    于是 `total_blocks` 永远是初始值 0。
+
+    界面「总分块: 6」读的是 `total_chunks`，所以用户看不出 —— 接口在说谎。
+    """
+
+    DOC = "\n\n".join(
+        f"## 章节 {i}\n\n这是第 {i} 段正文，用来产生多个分块。" * 3 for i in range(1, 7)
+    )
+
+    def test_no_duplicates_still_reports_total_blocks(self):
+        """核心回归：**没有重复块**时也必须报出真实块数"""
+        from app.services.cleaning_service import generate_clean_copy
+
+        _, stats = generate_clean_copy(self.DOC, self.DOC, [], total_blocks=6)
+        assert stats["total_blocks"] == 6, (
+            f"无重复块时 total_blocks 又变成 {stats['total_blocks']} 了 —— "
+            "这正是本次修的 bug"
+        )
+        assert stats["duplicate_blocks_marked"] == 0
+
+    def test_passed_total_blocks_wins_over_internal_resegmentation(self):
+        """显式传入的值优先 —— 它与 metadata.total_chunks 同源"""
+        from app.services.cleaning_service import generate_clean_copy
+
+        _, stats = generate_clean_copy(
+            self.DOC, self.DOC, [{"block_index": 1, "duplicate_of": 0, "similarity": 0.9}],
+            total_blocks=42,
+        )
+        assert stats["total_blocks"] == 42, "内部重新分块不该覆盖调用方给的权威值"
+
+    def test_without_argument_it_falls_back_to_internal_segmentation(self):
+        """不传时保持旧行为（自行分块）—— 兼容其他调用方"""
+        from app.config import get_settings
+        from app.services.cleaning_service import generate_clean_copy
+
+        _, stats = generate_clean_copy(
+            self.DOC, self.DOC, [{"block_index": 1, "duplicate_of": 0, "similarity": 0.9}]
+        )
+        expected = len(to_retrieval_chunks(segment_with_offsets(self.DOC, get_settings().chunk_size)))
+        assert stats["total_blocks"] == expected
+
+    def test_empty_text_keeps_zero(self):
+        """空文本提前返回，0 是合理的"""
+        from app.services.cleaning_service import generate_clean_copy
+
+        _, stats = generate_clean_copy(self.DOC, "", [], total_blocks=6)
+        assert stats["total_blocks"] == 0
+
+    def test_production_call_site_passes_total_blocks(self):
+        """接线守卫：`clean_tasks` 必须把 `len(chunks)` 传进去
+
+        否则上面几条断言全绿、线上依旧报 0 —— 这类"函数修好了但没人用新参数"
+        的缺口只能靠源码断言拦住。
+        """
+        import re as _re
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1] / "app" / "tasks" / "clean_tasks.py"
+        ).read_text(encoding="utf-8")
+        assert _re.search(r"generate_clean_copy\([^)]*total_blocks\s*=", src, _re.S), (
+            "clean_tasks.py 调用 generate_clean_copy 时没有传 total_blocks —— "
+            "copy_stats.total_blocks 会重新退化成 0"
+        )

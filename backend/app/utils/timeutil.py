@@ -62,6 +62,65 @@ def _as_utc(dt: datetime) -> datetime:
     return dt
 
 
+def business_date_str(dt: datetime) -> str:
+    """
+    时刻所属**业务日**的日期串（`YYYY-MM-DD`）
+
+    ## 为什么必须有这个函数（2026-10-21）
+
+    在它出现之前，代码里到处是这种写法：
+
+        today_start = today_start_utc(now)          # 返回的是 **UTC 时刻**
+        today_str = today_start.strftime("%Y-%m-%d")   # ← 格式化的却是 UTC
+
+    北京 2026-10-21 00:00 对应的 UTC 是 **2026-10-20 16:00**，于是
+    `today_str` 得到 `"2026-10-20"` —— **"今日报告"永远标着昨天**。
+    这个坑在东八区是必然触发的，不是偶发。
+
+    正确做法是把时刻**先转回业务时区再取日期**，本函数就是那一句。
+    """
+    return _as_utc(dt).astimezone(BUSINESS_TZ).strftime("%Y-%m-%d")
+
+
+def recent_business_day_ranges(
+    days: int, now: datetime | None = None
+) -> list[tuple[str, datetime, datetime]]:
+    """
+    最近 `days` 个业务日的 `[(日期串, 起始UTC, 结束UTC)]`，**从早到晚**
+
+    ## 为什么不能 `now - timedelta(days=i)` 之后再取日界
+
+    那样做会同时踩两个坑（`report_service.get_weekly_trend` 原先就是）：
+
+    1. **日期串错位**：`local_day_start_utc()` 返回 UTC 时刻，
+       直接 `strftime` 得到的是"业务日起点所在的 UTC 日"，比业务日早一天；
+    2. **键与查找对不上**：查询按上面的口径生成键，查找却用
+       `(now - timedelta(days=i)).strftime(...)`（UTC 日）——
+       两套口径永不相等，于是**每根柱子都是 0**。
+
+    本函数在**业务时区里**逐日回退，日期串与区间出自同一个 `day_local`，
+    结构上就不可能对不上。回退发生在本地时间，跨午夜也不会重复或跳过某天。
+
+    Args:
+        days: 要几个业务日（含今天）
+        now: 当前时刻（UTC，缺省取现在）
+
+    Returns:
+        [( "2026-10-15", 起始UTC, 结束UTC ), ...]，长度 = days
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today_local = _as_utc(now).astimezone(BUSINESS_TZ).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    out: list[tuple[str, datetime, datetime]] = []
+    for i in range(max(0, int(days)) - 1, -1, -1):
+        day_local = today_local - timedelta(days=i)
+        start = day_local.astimezone(timezone.utc)
+        out.append((day_local.strftime("%Y-%m-%d"), start, start + timedelta(days=1)))
+    return out
+
+
 def business_day_index(dt: datetime) -> int:
     """时刻落在**业务日**的第几天（自公元 1 年 1 月 1 日起算）
 
