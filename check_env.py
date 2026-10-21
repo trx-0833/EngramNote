@@ -57,6 +57,27 @@ MODELS_DIR = DATA_DIR / "models"
 # ModelScope 缓存目录
 MODELSCOPE_CACHE = Path.home() / ".cache" / "modelscope" / "hub"
 
+# MinerU 4.x 的配置与模型根（2026-10-21 迁移）
+# 4.x 把模型统一放在 `$MINERU_HOME/models`，**不再是 ModelScope 缓存目录**。
+# 项目把 MINERU_HOME 指向 D 盘（见 backend/.env），故这里也读环境变量 / .env。
+def _resolve_mineru_home() -> Path:
+    """MINERU_HOME：系统环境变量 > backend/.env > 4.x 默认值 ~/.mineru"""
+    env_home = (os.environ.get("MINERU_HOME") or "").strip()
+    if env_home:
+        return Path(env_home)
+    env_file = BACKEND_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("MINERU_HOME="):
+                value = line.split("=", 1)[1].strip()
+                if value:
+                    return Path(value)
+    return Path.home() / ".mineru"
+
+
+MINERU_HOME = _resolve_mineru_home()
+
 # 模型清单
 MODELS = {
     "bge_m3": {
@@ -80,35 +101,26 @@ MODELS = {
         "size": "约 2MB",
         "purpose": "语音活动检测，ASR 音视频转写时切分语音段（可选）",
     },
-    "mineru_pipeline": {
-        "name": "MinerU Pipeline 模型 (PDF-Extract-Kit-1.0)",
-        "modelscope_id": "OpenDataLab/PDF-Extract-Kit-1.0",
+    "mineru_onnx": {
+        "name": "MinerU 4.x 小模型 (MinerU-4_models_onnx)",
+        "modelscope_id": "OpenDataLab/MinerU-4_models_onnx",
         "cache_paths": [
-            # D 盘项目目录（优先检查）
-            MODELS_DIR / "OpenDataLab" / "PDF-Extract-Kit-1.0",
-            MODELS_DIR / "OpenDataLab" / "PDF-Extract-Kit-1___0",
-            # C 盘 ModelScope 默认缓存
-            MODELSCOPE_CACHE / "models" / "OpenDataLab" / "PDF-Extract-Kit-1___0",
-            MODELSCOPE_CACHE / "models" / "OpenDataLab" / "PDF-Extract-Kit-1.0",
+            # 4.x 统一放 $MINERU_HOME/models（不再是 ModelScope 缓存目录）
+            MINERU_HOME / "models" / "MinerU-4_models_onnx",
         ],
         "required": False,
-        "size": "约 5GB+",
-        "purpose": "PDF 本地解析（布局检测、公式识别、表格识别）。使用云端 API 时不需要",
+        "size": "约 0.9GB",
+        "purpose": "PDF 本地解析（布局/OCR/公式，ONNX CPU）。basic 档位只需它",
     },
-    "mineru_vlm": {
-        "name": "MinerU VLM 模型 (MinerU2.5-Pro-2604-1.2B)",
-        "modelscope_id": "OpenDataLab/MinerU2.5-Pro-2604-1.2B",
+    "mineru_vlm_gguf": {
+        "name": "MinerU 4.x VLM 模型 (MinerU2.5-Pro-2605-1.2B-GGUF)",
+        "modelscope_id": "OpenDataLab/MinerU2.5-Pro-2605-1.2B-GGUF",
         "cache_paths": [
-            # D 盘项目目录（优先检查）
-            MODELS_DIR / "OpenDataLab" / "MinerU2.5-Pro-2604-1.2B",
-            MODELS_DIR / "OpenDataLab" / "MinerU2___5-Pro-2604-1___2B",
-            # C 盘 ModelScope 默认缓存
-            MODELSCOPE_CACHE / "models" / "OpenDataLab" / "MinerU2___5-Pro-2604-1___2B",
-            MODELSCOPE_CACHE / "models" / "OpenDataLab" / "MinerU2.5-Pro-2604-1.2B",
+            MINERU_HOME / "models" / "MinerU2.5-Pro-2605-1.2B-GGUF",
         ],
         "required": False,
-        "size": "约 2.5GB",
-        "purpose": "PDF 本地解析（视觉语言模型）。使用云端 API 时不需要",
+        "size": "约 0.5GB",
+        "purpose": "PDF 本地解析（VLM，standard 档位叠在小模型之上）。云端 API 不需要",
     },
     "qwen_asr": {
         "name": "Qwen3-ASR-0.6B 语音识别模型",
@@ -921,101 +933,146 @@ def check_silero_vad(auto_fix=False, deep=False):
 # ============================================================
 # 8. 检测并下载 MinerU 模型（可选，PDF 本地解析用）
 # ============================================================
+def _read_env_key(key, default=""):
+    """从 backend/.env 读一个键（找不到返回 default）"""
+    env_file = BACKEND_DIR / ".env"
+    if not env_file.exists():
+        return default
+    for line in env_file.read_text(encoding="utf-8").split("\n"):
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip()
+    return default
+
+
+def _find_mineru_kit():
+    """
+    定位 `mineru-kit`（MinerU 4.x 的命令行入口）；找不到返回 None。
+
+    与 `backend/app/services/mineru/model_loader.py:find_mineru_cli` 同口径
+    （check_env.py 是独立脚本，不 import app，所以这里保留一份等价实现）。
+    优先找**当前解释器同级的 Scripts** —— pip 装完常打警告说该目录不在 PATH 上。
+    """
+    explicit = (os.environ.get("MINERU_CLI") or _read_env_key("MINERU_CLI")).strip()
+    if explicit and Path(explicit).exists():
+        return explicit
+    exe_dir = Path(sys.executable).resolve().parent
+    for candidate in (
+        exe_dir / "Scripts" / "mineru-kit.exe",
+        exe_dir / "mineru-kit",
+        exe_dir.parent / "bin" / "mineru-kit",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    for name in ("mineru-kit", "mineru-kit.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _mineru_tier():
+    """档位：环境变量 > .env > 默认 standard"""
+    return (os.environ.get("MINERU_TIER") or _read_env_key("MINERU_TIER") or "standard").strip()
+
+
+def _run_mineru_kit(args, timeout=1800):
+    """跑一条 mineru-kit 命令，返回 (returncode, stdout+stderr)"""
+    cli = _find_mineru_kit()
+    if not cli:
+        return None, "找不到 mineru-kit"
+    env = os.environ.copy()
+    home = (os.environ.get("MINERU_HOME") or _read_env_key("MINERU_HOME")).strip()
+    if home:
+        env["MINERU_HOME"] = home
+    try:
+        proc = subprocess.run(
+            [cli, *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout, env=env,
+            check=False,
+        )
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
+
+
 def check_mineru_models(auto_fix=False, force_download=False):
-    header("步骤 8/10：检测 MinerU 模型（可选，PDF 本地解析用）")
+    header("步骤 8/10：检测 MinerU 4.x 本地模型（可选，PDF 本地解析用）")
 
     # 判断是否使用云端 API 模式
-    env_file = BACKEND_DIR / ".env"
-    use_cloud_api = False
-    if env_file.exists():
-        content = env_file.read_text(encoding="utf-8")
-        has_token = "MINERU_API_TOKEN=" in content and len(content.split("MINERU_API_TOKEN=")[1].split("\n")[0].strip()) > 0
-        backend_mode = ""
-        for line in content.split("\n"):
-            if line.strip().startswith("MINERU_BACKEND="):
-                backend_mode = line.split("=", 1)[1].strip()
-                break
-        if has_token and backend_mode in ("vlm-http-client", "hybrid-http-client"):
-            use_cloud_api = True
-
-    if use_cloud_api:
+    has_token = bool(_read_env_key("MINERU_API_TOKEN"))
+    backend_mode = _read_env_key("MINERU_BACKEND")
+    if has_token and backend_mode in ("vlm-http-client", "hybrid-http-client"):
         ok("已配置 Mineru 云端 API（vlm-http-client 模式）")
-        info("使用云端 API 解析 PDF，无需下载本地 MinerU 模型（节省约 7GB 磁盘空间）")
+        info("使用云端 API 解析 PDF，无需下载本地 MinerU 模型")
         record_pass()
         return True
 
-    info("MinerU 本地 pipeline 模式需要 2 个模型：")
-    info(f"  - {MODELS['mineru_pipeline']['name']}（{MODELS['mineru_pipeline']['size']}）")
-    info(f"  - {MODELS['mineru_vlm']['name']}（{MODELS['mineru_vlm']['size']}）")
-    info(f"  总计约 7GB+，下载时间较长")
-    info(f"  如需使用云端 API 替代，请在 .env 中配置 MINERU_API_TOKEN 和 MINERU_BACKEND=vlm-http-client")
-    print()
+    tier = _mineru_tier()
+    cli = _find_mineru_kit()
 
-    # 检测已有模型
-    pipeline_cached = find_model_cache("mineru_pipeline")
-    vlm_cached = find_model_cache("mineru_vlm")
+    # 2026-10-21：MinerU 3.x → 4.x。判定方式从"嗅探 ModelScope 目录"
+    # 改为"问 4.x 自己"（`mineru-kit models verify`）—— 后者是官方权威校验，
+    # 且知道 $MINERU_HOME/models 与档位（basic/standard）的组合关系。
+    if not cli:
+        fail("未安装 MinerU 4.x（找不到 mineru-kit）")
+        info('安装：pip install -r requirements-mineru.txt   # 即 pip install "mineru>=4.0,<5"')
+        info("若只走云端：在 .env 配置 MINERU_API_TOKEN 与 MINERU_BACKEND=vlm-http-client")
+        record_fail()
+        return False
 
-    if pipeline_cached:
-        ok(f"Pipeline 模型已缓存：{pipeline_cached}")
-    else:
-        fail("Pipeline 模型 (PDF-Extract-Kit-1.0) 未下载")
+    info(f"mineru-kit: {cli}")
+    info(f"解析档位  : {tier}")
 
-    if vlm_cached:
-        ok(f"VLM 模型已缓存：{vlm_cached}")
-    else:
-        fail("VLM 模型 (MinerU2.5-Pro-2604-1.2B) 未下载")
-
-    if pipeline_cached and vlm_cached:
+    rc, output = _run_mineru_kit(["models", "verify", "--tier", tier], timeout=300)
+    if rc == 0:
+        for line in output.strip().splitlines():
+            if line.strip():
+                ok(line.strip())
         record_pass()
         return True
 
-    should_download = force_download
-    if auto_fix and not force_download:
-        # --fix 模式下不自动下载大模型，询问用户
-        warn("MinerU 模型较大（约 7GB），--fix 模式下不自动下载")
-        info("如需下载，请运行：python check_env.py --fix --all")
-        info("或单独下载：python check_env.py --download-mineru")
-        info("或使用云端 API：在 .env 中配置 MINERU_API_TOKEN 并设置 MINERU_BACKEND=vlm-http-client")
+    fail(f"档位 {tier} 的本地模型未就绪")
+    for line in output.strip().splitlines()[-6:]:
+        if line.strip():
+            info(f"  {line.strip()}")
+
+    if not force_download and auto_fix:
+        warn("MinerU 模型约 2–4GB，--fix 模式下不自动下载")
+        info("如需下载：python check_env.py --download-mineru")
+        info(f"或：mineru-kit models download --tier {tier} --source modelscope")
         record_warn()
         return False
 
-    if should_download:
-        # 下载 Pipeline 模型
-        if not pipeline_cached:
-            info("正在下载 Pipeline 模型（PDF-Extract-Kit-1.0，约 5GB）...")
-            info("这可能需要较长时间，请耐心等待")
-            try:
-                model_dir = download_from_modelscope(MODELS["mineru_pipeline"]["modelscope_id"])
-                ok(f"Pipeline 模型已下载：{model_dir}")
+    if force_download:
+        info(f"正在下载档位 {tier} 的模型（约 2–4GB，请耐心等待）...")
+        rc, output = _run_mineru_kit(
+            ["models", "download", "--tier", tier, "--source", "modelscope"]
+        )
+        if rc == 0:
+            ok("MinerU 模型下载完成")
+            rc2, out2 = _run_mineru_kit(["models", "verify", "--tier", tier], timeout=300)
+            if rc2 == 0:
+                ok("校验通过")
                 record_fixed()
-            except Exception as e:
-                fail(f"Pipeline 模型下载失败：{e}")
-                info("请检查网络连接，或手动下载：")
-                info("  pip install modelscope")
-                info("  python -c \"from modelscope import snapshot_download; snapshot_download('OpenDataLab/PDF-Extract-Kit-1.0')\"")
-                record_fail()
-                return False
-
-        # 下载 VLM 模型
-        if not vlm_cached:
-            info("正在下载 VLM 模型（MinerU2.5-Pro-2604-1.2B，约 2.5GB）...")
-            try:
-                model_dir = download_from_modelscope(MODELS["mineru_vlm"]["modelscope_id"])
-                ok(f"VLM 模型已下载：{model_dir}")
-                record_fixed()
-            except Exception as e:
-                fail(f"VLM 模型下载失败：{e}")
-                info("请手动下载：")
-                info("  python -c \"from modelscope import snapshot_download; snapshot_download('OpenDataLab/MinerU2.5-Pro-2604-1.2B')\"")
-                record_fail()
-                return False
-        return True
-    else:
-        warn("MinerU 模型未下载（PDF 本地解析功能不可用）")
-        info("下载命令：python check_env.py --download-mineru")
-        info("或使用云端 API（推荐）：在 .env 中配置 MINERU_API_TOKEN")
-        record_warn()
+                return True
+            fail("下载后校验未通过")
+            for line in out2.strip().splitlines()[-5:]:
+                info(f"  {line.strip()}")
+            record_fail()
+            return False
+        fail("MinerU 模型下载失败")
+        for line in output.strip().splitlines()[-8:]:
+            info(f"  {line.strip()}")
+        record_fail()
         return False
+
+    warn("MinerU 模型未下载（PDF 本地解析功能不可用）")
+    info("下载命令：python check_env.py --download-mineru")
+    info("或使用云端 API：在 .env 中配置 MINERU_API_TOKEN")
+    record_warn()
+    return False
+
 
 # ============================================================
 # 9. 检测并下载 Qwen3-ASR 模型（可选，音视频转写用）

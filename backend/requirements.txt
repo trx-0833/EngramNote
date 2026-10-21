@@ -27,11 +27,13 @@
 #
 #   - pytest / ruff 等 → requirements-dev.txt（用户不需要它们才能跑服务）
 #   - torch / qwen-asr   → 重量级可选，见 requirements-asr.txt
-#   - pyyaml             → 仅 MinerU 本地 pipeline 模式需要，见 requirements-pdf-local.txt
-#                           （同文件里还有 torchvision/ftfy/shapely/pyclipper —— 2026-10-21 补上，
-#                            此前漏登记，照那份装完 pipeline 会在 torchvision 处 ModuleNotFoundError。
-#                            本项目已改用云端 vlm-http-client，见 docs/mineru-backend-decision.md）
+#   - mineru             → 仅本地解析需要，见 requirements-mineru.txt
+#                           （云端 vlm-http-client 是纯 HTTP，**不依赖**该包）
 #   - asyncpg / minio / redis → 项目明确不引入的中间件（见 AGENTS.md 的已否决方向）
+#
+# ⚠️ 2026-10-21：`pyyaml` 曾列在上面这一节，现**已移入下面的正式清单** ——
+#    它是 `config_loader.py:14` 的模块顶层无条件 import，云端路径同样要用，
+#    归到可选清单会让全新环境在 PDF 路径上直接 ModuleNotFoundError。
 
 # ---- Web / ORM / 配置 ----
 fastapi~=0.115.0
@@ -71,6 +73,12 @@ sentence-transformers~=2.2.0
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
 pypdfium2~=5.10.1
 Pillow~=12.3.0
+# ⚠️ 2026-10-21 修正分类：`pyyaml` 此前被归为"仅 MinerU 本地解析模式需要"，
+#    实际 `app/services/mineru/config_loader.py:14` 是**模块顶层无条件 import yaml**，
+#    而该模块被 converter.py 导入、converter.py 又被 Celery 转换任务导入 ——
+#    也就是说**云端路径同样需要它**。放在可选清单里等于让全新环境在 PDF 路径上
+#    ModuleNotFoundError（正是本文件头记录过的那类病，第 3 个实例）。
+pyyaml~=6.0.3
 
 # ---- 运行期可观测性 ----
 psutil~=5.9.0

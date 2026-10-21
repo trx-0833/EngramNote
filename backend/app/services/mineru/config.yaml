@@ -1,9 +1,32 @@
 # MinerU 文档转换配置
 # 迁移自 mineru_plus 项目，适配 EngramNote 项目规范
+#
+# 2026-10-21：随 MinerU 3.x → 4.x 迁移同步字段
+#   - 删：backend / device / modelscope_model_dir / model_version
+#     （4.x 里 device 已无此概念；模型由 MINERU_HOME/models 统一管理）
+#   - 增：tier / small_backend / vlm_engine / mineru_home / model_source / ocr_mode / cli_path
+#   详见 docs/mineru-backend-decision.md
 
 document:
-  backend: pipeline
-  device: cpu
+  # 解析档位：flash / basic / standard / advanced
+  #   实测（拉哇变电站主变运行技术标准.pdf 前 2 页，无 CUDA 机器）：
+  #     flash     8.5s   —— 最快，但会把多行内容并进标题，不适合入库
+  #     basic    23.9s   —— 与 standard 产物逐字节相同
+  #     standard 43.9s   —— 含 VLM，复杂版面/扫描件更稳（默认）
+  tier: standard
+  # 小模型后端：auto / onnx / torch（auto 在无 CUDA 机器上选 onnx）
+  small_backend: auto
+  # VLM 引擎：auto / llama-cpp / vllm / lmdeploy（auto 选 llama-cpp）
+  vlm_engine: auto
+  # 4.x 的配置与模型根；留空则由 4.x 自己决定（默认 ~/.mineru）
+  mineru_home: null
+  # 模型来源：null=auto / huggingface / modelscope / local
+  model_source: null
+  # OCR 模式：auto / txt / ocr
+  ocr_mode: auto
+  # mineru-kit 可执行文件；留空则自动探测（见 model_loader.find_mineru_cli）
+  cli_path: null
+
   timeout: 300
   formula_enable: true
   table_enable: true
@@ -13,7 +36,6 @@ document:
   log_level: INFO
   log_dir: logs
   max_workers: 1
-  modelscope_model_dir: null
   chunk_size: 200
   chunk_overlap: 5
   watermark_patterns:
@@ -22,4 +44,3 @@ document:
     - "版权所有"
   max_blank_lines: 2
   server_url: null
-  model_version: null

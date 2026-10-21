@@ -1,8 +1,10 @@
 # MinerU / ASR 后端与版本决策
 
-> **状态：活文档** ｜ 最后核对：2026-10-21 ｜ 权威性：本主题的现状依据
+> **状态：活文档** ｜ 最后核对：2026-10-21（**同日已执行 4.x 迁移，见 §0.1**）
+> ｜ 权威性：本主题的现状依据
 >
-> 本文记录**一次实测**得出的后端取舍与版本策略，以及随之修掉的 6 个缺陷。
+> 本文记录**两次实测**得出的后端取舍与版本策略：第一次（3.x 时代）得出"暂不升级、
+> 本地 pipeline 跑不了"的结论，第二次（同日）推翻前半段并**完成了 4.x 迁移**。
 > 代码引用带 `文件:行号`；结论与代码冲突时以代码实测为准（`docs/README.md:22-26`）。
 
 ---
@@ -11,11 +13,68 @@
 
 | 问题 | 结论 |
 |---|---|
-| **留 pipeline 还是 VLM？** | **留 VLM（云端 `vlm-http-client`）**，放弃本地 `pipeline` |
-| **本地那 4.6 GB MinerU 模型** | 建议回收（`PDF-Extract-Kit-1.0` + 两个 `MinerU2.5` VLM）—— 需要你确认后我再删 |
-| **mineru 版本** | **保持 3.4.5，暂不升 4.0.12**（4.0 是改版，升级要动集成代码） |
+| **留 pipeline 还是 VLM？** | 默认走**云端 `vlm-http-client`**；本地 **4.x 已跑通**，作为可选第二路径（§0.1） |
+| **本地那些 3.x MinerU 模型** | ✅ **已回收 6.66 GB**（C 盘 23.08 → 29.73 GB） |
+| **mineru 版本** | ✅ **已升到 4.0.12**（3.x 的 `do_parse` 集成已重写为 `mineru-kit parse` 子进程） |
 | **qwen-asr 版本** | **保持 0.0.6**（已是 PyPI 最新），只修一行写错的 pin |
-| **本地 pipeline 现在能跑吗** | ❌ **跑不了** —— 依赖缺失，实测在 `torchvision` 处炸掉 |
+| **本地解析现在能跑吗** | ✅ **能** —— 实测 2 页 PDF 成功，见 §0.1 的耗时表 |
+
+## 0.1 2026-10-21 迁移结果（推翻本文原先"暂不升级"的结论）
+
+原先的判断是"保持 3.4.5、放弃本地 pipeline"，**理由是当时本地根本跑不起来**。
+同日重新评估后发现两点变化，于是决定迁移：
+
+1. **4.x 的默认组合不需要 CUDA**：基础包走 **ONNX CPU 小模型 + llama.cpp VLM**，
+   llama.cpp 在 **Vulkan** 模式下能用上那块 RTX 3050 Ti —— 3.x 的 pipeline 则要求
+   `torchvision` + torch，而本机 torch 是 `2.14.0+cpu`。
+2. **`mineru[torch]` 会顶掉嵌入模型**：它要求 `transformers<6,>=5.10.1`，
+   而项目用 `sentence-transformers~=2.2.0`（transformers 4.x）。
+   所以**只装基础包、不加任何 extra**（`backend/requirements-mineru.txt`）。
+
+### 实测耗时（同一份 2 页技术标准 PDF，无 CUDA）
+
+| 档位 | 耗时 | 整行加粗 | 标题行 | 备注 |
+|---|---|---|---|---|
+| `flash` | **8.5s** | 2 | 20 | 最快，但**把多行内容并进标题**（如 `## 3.1 操作术语3.1.1 保护:投入、退出。…`），不适合入库 |
+| `basic` | **23.9s** | 45 | 6 | 与 `standard` **产物逐字节相同**（sha256 一致） |
+| `standard` | **43.9s** | 45 | 6 | 含 VLM；纯文本件上与 basic 无差别，复杂版面更稳 → **默认** |
+
+> ⚠️ **本地产物与云端产物有风格差异**：4.x 的 `basic`/`standard` 会把
+> **88% 的正文行整行包成 `**…**`**（51 非空行里 45 行），前端渲染就是满屏粗体。
+> 已在 `app/services/mineru/postprocess.py:_unwrap_whole_line_bold` 里归一化
+> （只还原**整行**粗体，行内强调不动）。
+>
+> 另一个**已知差异**：`mineru-kit parse --format zip` 的产物里**没有** 3.x 的
+> `*_content_list.json`，因此本地路径**不再插入 `<!-- page=N -->` 页码锚点**；
+> 云端路径不受影响，仍有锚点。
+
+### 依赖安全性（安装前干跑验证）
+
+`pip install --dry-run 'mineru>=4.0,<5'` 的结果：**新增 21 个包、卸载 0 个、降级 0 个、
+无冲突**。`fastapi` / `pydantic` / `transformers` / `torch` / `sentence-transformers` /
+`numpy` / `pypdfium2` 全部保持原版本 —— 即嵌入链路与 ASR 链路都没被动到。
+
+### 模型位置
+
+4.x 把模型统一放 `$MINERU_HOME/models`（**不再是 ModelScope 缓存目录**）。
+本项目把 `MINERU_HOME` 指向 `D:\engramnote\backend\data\mineru`（与其它模型同处），
+写在 `backend/.env`。档位 `standard` 需要两个仓库：
+
+    MinerU-4_models_onnx              约 0.9 GB
+    MinerU2.5-Pro-2605-1.2B-GGUF      约 0.5 GB
+
+> 注意 4.x 的 VLM 是 **2605**，3.x 时代的 `MinerU2.5-Pro-2604-1.2B` 已作废 ——
+> 那正是被回收的 2.2 GB 之一。
+
+---
+
+## 0.2 原 3.x 时代的结论（**已过时，保留作决策留痕**）
+
+| 问题 | 当时的结论 |
+|---|---|
+| 留 pipeline 还是 VLM？ | 留 VLM（云端 `vlm-http-client`），放弃本地 `pipeline` |
+| mineru 版本 | 保持 3.4.5，暂不升 4.0.12 |
+| 本地 pipeline 当时能跑吗 | ❌ 跑不了 —— 实测在 `torchvision` 处 `ModuleNotFoundError` |
 
 ---
 

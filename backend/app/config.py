@@ -175,8 +175,27 @@ class Settings(BaseSettings):
     mineru_api_token: str = ""
     # Mineru 服务器 URL
     mineru_server_url: str = "https://mineru.net/api/v4/extract/task"
-    # Mineru 解析后端选择："pipeline" 使用本地模型，"vlm-http-client" 使用云端API，"hybrid-http-client" 使用混合模式
+    # Mineru 解析后端选择：
+    #   "vlm-http-client"    使用 mineru.net 云端 API（默认；纯 HTTP，不依赖 mineru 包）
+    #   "pipeline"           使用**本地 MinerU 4.x**（子进程调 `mineru-kit parse`）
+    #   "hybrid-http-client" 混合模式（当前实现同 vlm-http-client）
     mineru_backend: str = "vlm-http-client"  # "pipeline" 或 "vlm-http-client" 或 "hybrid-http-client"
+
+    # ---- MinerU 4.x 本地解析参数（仅 mineru_backend="pipeline" 时生效）----
+    # 解析档位：flash / basic / standard / advanced
+    #   实测（2 页真实 PDF、无 CUDA）：flash 8.5s / basic 23.9s / standard 43.9s
+    #   basic 与 standard 在纯文本件上产物逐字节相同；standard 含 VLM，复杂版面更稳
+    mineru_tier: str = "standard"
+    # 小模型后端：auto / onnx / torch（auto 在无 CUDA 机器上选 onnx）
+    mineru_small_backend: str = "auto"
+    # VLM 引擎：auto / llama-cpp / vllm / lmdeploy（auto 选 llama-cpp）
+    mineru_vlm_engine: str = "auto"
+    # 4.x 的配置与模型根（config.yaml 与 models/ 都在它下面）；留空由 4.x 决定（默认 ~/.mineru）
+    mineru_home: str = ""
+    # mineru-kit 可执行文件路径；留空则自动探测（见 services/mineru/model_loader.py）
+    mineru_cli: str = ""
+    # OCR 模式：auto / txt / ocr（4.x 的 `--ocr-mode`；txt 表示文本层 PDF 不做 OCR）
+    mineru_ocr_mode: str = "auto"
 
     # ---- 文件上传限制 ----
     # 最大上传文件大小（MB）

@@ -60,34 +60,45 @@ classifiers = [
 ]
 
 # 基准运行依赖（与 backend/requirements.txt 对齐；版本策略见该文件头）
+#
+# ⚠️ 2026-10-21：这一份此前**已经漂移**（自称对齐，实则 7 个包版本不一致，
+#    其中 `python-jose~=3.3.0` 还是 requirements.txt 明确记录过的 CVE 版本区间）。
+#    现在两边逐条一致，并由 `backend/tests/test_pyproject_requirements_consistency.py`
+#    守着 —— 改一边不改另一边会直接测试失败。
 dependencies = [
     "fastapi~=0.115.0",
     "uvicorn[standard]~=0.30.0",
-    "sqlalchemy[asyncio]~=2.0.0",
+    "sqlalchemy[asyncio]~=2.0.52",
     "aiosqlite~=0.20.0",
     "pydantic~=2.13.5",
     "pydantic-settings~=2.15.0",
     "email-validator~=2.0.0",
-    "python-multipart~=0.0.9",
-    "python-jose[cryptography]~=3.3.0",
-    "bcrypt~=4.0.0",
+    "python-multipart~=0.0.32",
+    "python-jose[cryptography]~=3.5.0",
+    "bcrypt~=5.0.0",
     "celery~=5.4.0",
     "numpy~=1.24.0",
-    "httpx~=0.27.0",
+    "httpx~=0.28.1",
     "sentence-transformers~=2.2.0",
-    "pypdfium2~=4.30.0",
+    "pypdfium2~=5.10.1",
     "Pillow~=12.3.0",
+    # 2026-10-21：pyyaml 由「仅本地 MinerU 需要」改判为**运行硬依赖** ——
+    # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
+    "pyyaml~=6.0.3",
     "psutil~=5.9.0",
     "alembic~=1.19.2",
-    "openai~=1.0.0",
+    "openai~=2.54.0",
     "soundfile~=0.12.0",
 ]
 
 [project.optional-dependencies]
 # MinerU **本地**解析模式（云端 vlm-http-client 模式不需要它）
-pdf-local = ["pyyaml~=6.0.0", "requests~=2.34.2"]
+# 2026-10-21：随 MinerU 4.x 迁移，由 requirements-pdf-local.txt 改为 requirements-mineru.txt。
+# 4.x 基础包自带 PyYAML/ftfy/shapely/pyclipper，故这里只声明 mineru 本体；
+# 刻意**不加** `[torch]` extra —— 它会要求 transformers>=5.10.1，与 sentence-transformers 冲突。
+mineru = ["mineru>=4.0,<5"]
 # 音视频转写（GB 级：torch 按平台选轮子）
-asr = ["torch>=2.0.0", "qwen-asr>=0.1.0"]
+asr = ["torch>=2.14.0", "qwen-asr>=0.0.6"]
 # 贡献者：测试 + lint
 dev = [
     "pytest~=8.0.0",

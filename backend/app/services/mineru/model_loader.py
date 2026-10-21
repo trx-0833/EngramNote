@@ -1,229 +1,160 @@
 """
-ModelScope 模型加载模块
+MinerU 4.x 本地后端就绪检查
 
-负责配置本地 ModelScope 模型路径，使 MinerU pipeline 后端
-能够正确找到本地缓存的模型文件。
+## 2026-10-21：整体重写（MinerU 3.x → 4.x）
 
-## 2026-10-21：三处修正（依据 docs/mineru-backend-decision.md）
+3.x 时代这个模块做的是"在 ModelScope 缓存里嗅探两个模型目录是否存在"，
+并据此判断 pipeline 后端能不能跑。4.x 把这一切都变了：
 
-1. **假就绪**：原实现只要**目录存在**就返回 True。实测出现
-   `configure_modelscope_models()` 返回 True、紧接着 `do_parse` 就以
-   `ModuleNotFoundError: No module named 'torchvision'` 失败 ——
-   "模型找得到"与"后端跑得起来"是两件事，这里补上运行期能力探测。
-2. **强制两份模型**：原实现要求 pipeline 与 VLM 模型**同时**存在，否则返回 False。
-   而 `converter.py` 只在 `backend == "pipeline"` 时调用本模块 ——
-   只用一种后端的人被迫多下 2.2GB。现按 `backend` 只校验真正需要的那一份。
-3. **模糊匹配会挑错版本**：原 fallback 用 `model_name.split("-")[0]` 做子串匹配，
-   对 `MinerU2.5-Pro-2604-1.2B` 得到 `"MinerU2.5"`，于是**旧的
-   `MinerU2.5-2509-1.2B` 也会命中**，可能静默加载到旧版权重。现要求更具体的匹配，
-   并在走 fallback 时把**实际选中的目录名**打进日志。
+- 模型不再是 `OpenDataLab/PDF-Extract-Kit-1.0` + `MinerU2.5-Pro-2604-1.2B`，
+  而是 4.x 自己的仓库（`MinerU-4_models_onnx` / `MinerU-4_models_torch` /
+  `MinerU2.5-Pro-2605-1.2B(-GGUF)`），统一放在 `$MINERU_HOME/models` 下；
+- 档位（`basic` / `standard`）决定需要哪几个仓库；
+- **4.x 自带权威校验命令** `mineru-kit models verify`。
+
+所以这里不再自己嗅探目录 —— 直接问 4.x 自己。
+这同时修掉了旧实现的两个毛病：
+① "目录存在就返回 True"的**假就绪**；② 强制要求两份模型都在（只用一种也要背两份）。
 """
 
 from __future__ import annotations
 
-import importlib
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-MODELSCOPE_PIPELINE_MODEL = "PDF-Extract-Kit-1.0"
-MODELSCOPE_VLM_MODEL = "MinerU2.5-Pro-2604-1.2B"
-
-#: 本地 pipeline 后端的**运行期**依赖（来源：mineru 3.4.5 的 `[pipeline]` extra）。
-#: 只探这些"缺了就在 import 阶段炸"的包；`torch` / `transformers` /
-#: `safetensors` / `onnxruntime` / `PyYAML` 由主依赖保证，不重复探。
-PIPELINE_RUNTIME_MODULES = ("torchvision", "ftfy", "shapely", "pyclipper")
+#: `mineru-kit models verify` 的默认档位（与 config_loader.DEFAULT_CONFIG["tier"] 对齐）
+DEFAULT_TIER = "standard"
 
 
-def pipeline_runtime_available() -> tuple[bool, str]:
+def find_mineru_cli(config: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """
-    探测本地 pipeline 后端的运行期依赖是否真的可导入。
+    定位 `mineru-kit` 可执行文件（MinerU 4.x 的无状态转换入口）。
 
-    为什么不能只看模型目录：模型齐了但 `torchvision` 没装时，
-    `do_parse(backend="pipeline")` 会在 `mineru/model/layout/pp_doclayoutv2.py`
-    的模块层 import 处抛 `ModuleNotFoundError` —— 报错点在 mineru 内部，
-    与"你少装了一个包"看起来毫无关系。
+    ## 为什么不能只靠 PATH
+
+    实测：`pip install mineru` 把 `mineru-kit.exe` 装进 `<env>\\Scripts`，
+    而该目录**不一定在 PATH 上**（pip 自己会打这条警告）。所以优先找
+    **当前解释器同级的 Scripts**，而不是 `shutil.which`。
+
+    优先级：配置 `cli_path` / 环境变量 `MINERU_CLI` → 同级 Scripts/bin → PATH。
+    """
+    config = config or {}
+    explicit = str(config.get("cli_path") or os.environ.get("MINERU_CLI") or "").strip()
+    if explicit and Path(explicit).exists():
+        return explicit
+
+    exe_dir = Path(sys.executable).resolve().parent
+    for candidate in (
+        exe_dir / "Scripts" / "mineru-kit.exe",   # Windows（conda/venv）
+        exe_dir / "mineru-kit",                    # POSIX venv
+        exe_dir.parent / "bin" / "mineru-kit",     # POSIX conda
+    ):
+        if candidate.exists():
+            return str(candidate)
+
+    for name in ("mineru-kit", "mineru-kit.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def mineru_env(config: Dict[str, Any]) -> Dict[str, str]:
+    """把项目配置翻译成 4.x 认的环境变量（只设非空、非 auto 的项）。"""
+    env = os.environ.copy()
+    for env_key, cfg_key in (
+        ("MINERU_HOME", "mineru_home"),
+        ("MINERU_MODEL_SOURCE", "model_source"),
+    ):
+        value = str(config.get(cfg_key) or "").strip()
+        if value:
+            env[env_key] = value
+    for env_key, cfg_key in (
+        ("MINERU_MODEL_SMALL_BACKEND", "small_backend"),
+        ("MINERU_MODEL_VLM_ENGINE", "vlm_engine"),
+    ):
+        value = str(config.get(cfg_key) or "").strip()
+        if value and value != "auto":
+            env[env_key] = value
+    return env
+
+
+def local_backend_ready(
+    config: Dict[str, Any], tier: Optional[str] = None
+) -> Tuple[bool, str]:
+    """
+    检查本地 MinerU 4.x 后端是否真的可用。
+
+    两步：① `mineru-kit` 在不在；② `mineru-kit models verify` 过不过。
+    后者是 4.x 的权威校验（按当前生效的档位与后端组合核对本地资源）。
+
+    Args:
+        config: 配置字典（含 tier / small_backend / vlm_engine / mineru_home）
+        tier: 覆盖配置里的档位；None 则用 `config["tier"]`，再退回 DEFAULT_TIER
 
     Returns:
-        (是否可用, 不可用原因)；可用时原因为空串
+        (是否就绪, 不可用原因)；就绪时原因为空串
     """
-    missing: list[str] = []
-    for name in PIPELINE_RUNTIME_MODULES:
-        try:
-            importlib.import_module(name)
-        except Exception:  # noqa: BLE001 - 任何导入失败都算缺
-            missing.append(name)
-    if missing:
-        return False, "缺少 Python 依赖: " + ", ".join(missing)
+    cli = find_mineru_cli(config)
+    if not cli:
+        return False, (
+            '找不到 mineru-kit。请安装 MinerU 4.x：pip install "mineru>=4.0,<5"'
+            "（见 backend/requirements-mineru.txt），或用 MINERU_CLI 指定路径"
+        )
+
+    use_tier = str(tier or config.get("tier") or DEFAULT_TIER)
+    argv = [cli, "models", "verify", "--tier", use_tier]
+    small = str(config.get("small_backend") or "").strip()
+    if small and small != "auto":
+        argv += ["--small-backend", small]
+    engine = str(config.get("vlm_engine") or "").strip()
+    if engine and engine != "auto":
+        argv += ["--vlm-engine", engine]
+
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            env=mineru_env(config),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"调用 mineru-kit models verify 失败: {exc}"
+
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = " / ".join(line.strip() for line in tail[-3:] if line.strip())
+        return False, (
+            f"档位 {use_tier} 的本地模型未就绪"
+            + (f"（{detail}）" if detail else "")
+            + f"。补齐：mineru-kit models download --tier {use_tier} --source modelscope"
+        )
     return True, ""
 
 
-def _required_model_names(backend: str) -> list[tuple[str, str]]:
+def verify_local_backend(config: Dict[str, Any]) -> Dict[str, str]:
     """
-    给定后端需要哪几份模型。
-
-    Args:
-        backend: MinerU 后端名
+    就绪状态的**明细**（供自检 / 诊断输出用）。
 
     Returns:
-        [(模型名, 人类可读标签), ...]；云端后端返回空列表（不需要本地模型）
+        {"status": "ok" | 原因, "tier": 档位, "cli": 路径}
     """
-    if backend == "pipeline":
-        return [(MODELSCOPE_PIPELINE_MODEL, "Pipeline")]
-    if backend.startswith("vlm-") or backend.startswith("hybrid-"):
-        # 目前 converter 对这两个后端一律走远程 API（`_process_with_remote_api`），
-        # 因此**不需要**本地权重；将来接本地 VLM 时把这里改成 VLM 模型即可。
-        return []
-    return []
-
-
-def _find_model_dir(modelscope_path: Path, model_name: str) -> str:
-    """
-    在 ModelScope 缓存目录中查找模型路径
-
-    支持三种匹配策略：精确编码名、原始名、模糊匹配。
-
-    Args:
-        modelscope_path: ModelScope 缓存根目录
-        model_name: 模型名称
-
-    Returns:
-        模型目录的绝对路径，未找到返回空字符串
-    """
-    if not modelscope_path.exists():
-        return ""
-
-    # modelscope cache naming: '.' -> '___', other chars preserved
-    encoded_name = model_name.replace(".", "___")
-    direct_path = modelscope_path / encoded_name
-    if direct_path.exists() and direct_path.is_dir():
-        return str(direct_path)
-
-    original_path = modelscope_path / model_name
-    if original_path.exists() and original_path.is_dir():
-        return str(original_path)
-
-    # fallback: 扫目录做部分匹配。
-    #
-    # ⚠️ 这里刻意**不再**用 `model_name.split("-")[0]`：
-    # 对 `MinerU2.5-Pro-2604-1.2B` 它只得到 `"MinerU2.5"`，于是
-    # `MinerU2.5-2509-1.2B`（旧版）同样命中 —— 可能静默加载到旧权重。
-    # 改成"编码名或原始名的前缀"匹配，并把**实际选中的目录**打进日志，
-    # 让"匹配到了但匹配错了"至少留下痕迹。
-    for candidate_key in (encoded_name, model_name):
-        for item in sorted(modelscope_path.iterdir()):
-            if not item.is_dir():
-                continue
-            if item.name == candidate_key:
-                return str(item)
-            if item.name.startswith(candidate_key):
-                logger.warning(
-                    "模型 %s 未精确命中，模糊匹配到 %s（请确认版本是否正确）",
-                    model_name,
-                    item.name,
-                )
-                return str(item)
-
-    return ""
-
-
-def configure_modelscope_models(config: Dict[str, Any], backend: str = "pipeline") -> bool:
-    """
-    配置 ModelScope 模型路径
-
-    根据配置中的 modelscope_model_dir 查找**当前后端需要的**模型，
-    设置 MINERU_MODEL_SOURCE 环境变量为 "local"。
-
-    Args:
-        config: 配置字典，需包含 modelscope_model_dir
-        backend: 当前解析后端；只有 `pipeline` 需要本地模型
-
-    Returns:
-        配置是否成功。**失败不等于后端不可用** —— 云端后端本就不需要本地模型，
-        因此调用方应先判断 backend（见 converter.py 的用法）。
-    """
-    required = _required_model_names(backend)
-    if not required:
-        logger.debug("后端 %s 不需要本地 ModelScope 模型，跳过配置", backend)
-        return True
-
-    modelscope_dir = config.get("modelscope_model_dir", "")
-    if not modelscope_dir:
-        logger.error("modelscope_model_dir 未配置")
-        return False
-
-    modelscope_path = Path(modelscope_dir)
-    if not modelscope_path.exists():
-        logger.error(f"modelscope 模型目录不存在: {modelscope_dir}")
-        logger.error("请先通过 modelscope 下载 MinerU 模型到本地缓存路径")
-        return False
-
-    # 运行期依赖探测：模型齐了但缺包时，早一点、以可读的方式说出来
-    runtime_ok, runtime_reason = pipeline_runtime_available()
-    if not runtime_ok:
-        logger.error(
-            "本地 pipeline 后端不可用：%s。"
-            "补齐：pip install -r requirements-pdf-local.txt；"
-            "或改用云端：MINERU_BACKEND=vlm-http-client（见 docs/mineru-backend-decision.md）",
-            runtime_reason,
-        )
-        return False
-
-    resolved: Dict[str, str] = {}
-    for model_name, label in required:
-        path = _find_model_dir(modelscope_path, model_name)
-        if not path:
-            logger.error(f"{label} 模型未找到，搜索目录: {modelscope_path}")
-            available = sorted(p.name for p in modelscope_path.iterdir() if p.is_dir())
-            logger.error(f"可用的模型目录: {available}")
-            return False
-        resolved[label] = path
-        logger.info(f"{label} 模型路径: {path}")
-
-    os.environ["MINERU_MODEL_SOURCE"] = "local"
-    return True
-
-
-def verify_modelscope_models(config: Dict[str, Any], backend: str = "pipeline") -> Dict[str, str]:
-    """
-    验证 ModelScope 模型是否可用
-
-    Args:
-        config: 配置字典
-        backend: 当前解析后端；决定需要哪几份模型
-
-    Returns:
-        包含 pipeline/vlm 路径和状态的字典
-    """
-    modelscope_dir = config.get("modelscope_model_dir", "")
-    result: Dict[str, str] = {"pipeline": "", "vlm": "", "status": "ok"}
-
-    modelscope_path = Path(modelscope_dir) if modelscope_dir else Path()
-    if not modelscope_path.exists():
-        result["status"] = "modelscope目录不存在"
-        return result
-
-    pipeline_path = _find_model_dir(modelscope_path, MODELSCOPE_PIPELINE_MODEL)
-    vlm_path = _find_model_dir(modelscope_path, MODELSCOPE_VLM_MODEL)
-    result["pipeline"] = pipeline_path
-    result["vlm"] = vlm_path
-
-    required = _required_model_names(backend)
-    for _model_name, label in required:
-        key = "pipeline" if label == "Pipeline" else "vlm"
-        if not result.get(key):
-            available = sorted(p.name for p in modelscope_path.iterdir() if p.is_dir())
-            result["status"] = f"{label}模型缺失，可用的: {available}"
-            return result
-
-    if backend == "pipeline":
-        runtime_ok, runtime_reason = pipeline_runtime_available()
-        if not runtime_ok:
-            result["status"] = f"运行期依赖不满足（{runtime_reason}）"
-            return result
-
-    return result
+    cli = find_mineru_cli(config) or ""
+    tier = str(config.get("tier") or DEFAULT_TIER)
+    ready, reason = local_backend_ready(config, tier=tier)
+    return {
+        "status": "ok" if ready else reason,
+        "tier": tier,
+        "cli": cli,
+    }

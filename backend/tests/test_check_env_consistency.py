@@ -67,9 +67,18 @@ def _normalise(name: str) -> str:
 
 
 def _optional_mode_packages() -> set[str]:
-    """可选模式清单（本地 PDF 解析 / ASR）里声明的包"""
+    """可选模式清单（本地 MinerU 解析 / ASR）里声明的包
+
+    2026-10-21：MinerU 升到 4.x，本地解析清单由 `requirements-pdf-local.txt`
+    （已废弃为存根）改为 `requirements-mineru.txt`。两个名字都读 ——
+    存根文件现在只有注释，读它不会引入任何包，但留着能防"改名后守卫失明"。
+    """
     names: set[str] = set()
-    for filename in ("requirements-pdf-local.txt", "requirements-asr.txt"):
+    for filename in (
+        "requirements-mineru.txt",
+        "requirements-pdf-local.txt",
+        "requirements-asr.txt",
+    ):
         path = REQUIREMENTS.parent / filename
         if not path.exists():
             continue
@@ -118,12 +127,19 @@ class TestCheckEnvMatchesRequirements:
 
         否则会出现"自检全绿但服务跑不起来"（pypdfium2 / Pillow / psutil 曾如此）。
         例外只有两类：重量级可选依赖（有独立下载步骤）与仅本地 PDF 模式需要的。
+
+        2026-10-21 修正：`declared` 侧此前**没有过 `NAME_ALIASES`**，
+        而 `required` 侧过了 —— 两边名字空间不一致。这个 bug 一直隐身，
+        因为 `pyyaml` 当时不在 requirements.txt 里（只在可选清单）。
+        它 2026-10-21 被改判为运行硬依赖、正式登记后，断言立刻报
+        "requirements 里有 pyyaml 但自检没覆盖"（其实自检用的是模块名 `yaml`）。
         """
         required = {_normalise(pkg) for pkg in _extract_required_packages().values()}
         declared = _requirements_packages()
         # 这些有专门的检测/下载步骤，因此不进 REQUIRED_PACKAGES
         exemptions = {"torch", "qwen-asr"} | set(CLASSIFICATION_EXEMPTIONS)
         required = {NAME_ALIASES.get(n, n) for n in required}
+        declared = {NAME_ALIASES.get(n, n) for n in declared}
         uncovered = sorted(declared - required - exemptions)
         assert not uncovered, (
             f"requirements.txt 里这些运行依赖没有进入自检清单：{uncovered}\n"

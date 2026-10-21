@@ -188,8 +188,10 @@ def _log_security_posture() -> None:
         logger.info(
             "未配置 MINERU_API_TOKEN：PDF **云端解析**不可用"
             "（MINERU_BACKEND=vlm-http-client 时需要它）；"
-            "改用本地 pipeline 模式需另装 requirements-pdf-local.txt 并下载约 7GB 模型。"
-            "Markdown / 图片 / Office 不受影响。"
+            "本地解析需另装 MinerU 4.x（pip install -r requirements-mineru.txt）"
+            "并下载对应档位模型（mineru-kit models download --tier %s）。"
+            "Markdown / 图片 / Office 不受影响。",
+            getattr(cfg, "mineru_tier", "standard"),
         )
 
 

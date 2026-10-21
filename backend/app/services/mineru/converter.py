@@ -2,18 +2,30 @@
 MinerU 文档转换核心模块
 
 提供单文件转换 (convert) 和批量文件夹转换 (convert_folder) 功能。
-支持本地 pipeline 和远程 VLM API 两种解析后端，
-大文件自动分块处理，转换后自动清洗 Markdown 内容。
+支持**本地 MinerU 4.x**（子进程调 `mineru-kit parse`）与**远程 MinerU 云端 API**
+（`vlm-http-client`，纯 HTTP）两种解析后端，大文件自动分块处理，
+转换后自动清洗 Markdown 内容。
+
+## 2026-10-21：本地后端从「进程内 3.x API」改为「子进程调 4.x CLI」
+
+原实现 `from mineru.cli.common import do_parse` 是 **MinerU 3.x 专有 API**，
+4.0 已整体改版（`backend` → `tier`、extras 全删、配置搬到 `$MINERU_HOME/config.yaml`），
+该模块不复存在。新实现走 `mineru-kit parse`（4.x 的无状态一次性转换入口），
+理由与实测数据见 `docs/mineru-backend-decision.md`。
+
+云端路径（`_process_with_remote_api`）**一行未动** —— 它是纯 HTTP，
+不依赖 `mineru` 包，本次升级对它零影响。
 """
 
 from __future__ import annotations
 
 import gc
 import json
-import os
 import shutil
+import subprocess
 import tempfile
 import threading
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,7 +38,7 @@ from .intake import (
     intake_pptx,
     intake_xlsx,
 )
-from .model_loader import configure_modelscope_models, pipeline_runtime_available
+from .model_loader import find_mineru_cli, local_backend_ready, mineru_env
 from .models import (
     DOCX_EXTS,
     IMAGE_EXTS,
@@ -102,29 +114,22 @@ def convert(
     file_path = Path(file_path)
 
     if backend == "pipeline":
-        # 预检：模型与运行期依赖都就位才继续。
+        # 预检：CLI 与模型都就位才继续。
         #
-        # 为什么要在这里拦：不拦的话 `do_parse` 会在 mineru 内部的
-        # `mineru/model/layout/pp_doclayoutv2.py:15` 抛
-        # `ModuleNotFoundError: No module named 'torchvision'` ——
-        # 报错点在一个第三方包的深层模块里，用户看不出"我该装什么"。
-        # 实测本机就缺 torchvision/ftfy/shapely/pyclipper 四个包
-        # （见 docs/mineru-backend-decision.md §3）。
-        if not configure_modelscope_models(config, backend=backend):
-            runtime_ok, runtime_reason = pipeline_runtime_available()
-            why = (
-                f"本地 MinerU pipeline 后端不可用：{runtime_reason}"
-                if not runtime_ok
-                else "本地 MinerU pipeline 后端不可用：本地模型未就位"
-            )
+        # 为什么在这里拦：不拦的话 `mineru-kit parse` 会以一个非零退出码 +
+        # 一长串 stderr 结束，用户看不出"我该装什么"。预检把它换成一句可执行的中文。
+        # （4.x 换掉了 3.x 的 `do_parse`，预检口径也随之从"探 Python 包"变成
+        #  "探 CLI + `mineru-kit models verify`"，见 docs/mineru-backend-decision.md）
+        ready, reason = local_backend_ready(config)
+        if not ready:
             return ConversionResult(
                 title="",
                 source_path=str(file_path),
                 error=(
-                    f"{why}。"
-                    "补齐本地路径：pip install -r requirements-pdf-local.txt，"
+                    f"本地 MinerU 4.x 后端不可用：{reason}。"
+                    "补齐本地路径：pip install -r requirements-mineru.txt，"
                     "再运行 python ../check_env.py --download-mineru；"
-                    "或改用云端：把 MINERU_BACKEND 设为 vlm-http-client（推荐，需 MINERU_API_TOKEN）"
+                    "或改用云端：把 MINERU_BACKEND 设为 vlm-http-client（需 MINERU_API_TOKEN）"
                 ),
                 success=False,
             )
@@ -410,6 +415,39 @@ def _route_to_intake(
         raise ValueError(f"不支持的文件格式: {ext}")
 
 
+def _pages_argument(
+    intake_path: Path, start_page_id: int, end_page_id: Optional[int]
+) -> str:
+    """
+    把 3.x 的 0-based `start_page_id` / `end_page_id` 换算成 4.x 的 `--pages` 表达式。
+
+    4.x 的页码是 **1-based 闭区间**，形如 `1-5,8` / `r3-r1` / `all`。
+
+    - `start=0, end=None` → `all`（不传 `--pages`，等价）
+    - 其余 → `{start+1}-{end+1}`；`end=None` 时用文档真实页数收口
+      （4.x 是否支持 `3-` 这种开区间未在文档中说明，这里不赌）
+    """
+    if start_page_id <= 0 and end_page_id is None:
+        return ""
+
+    first = start_page_id + 1
+    last = end_page_id + 1 if end_page_id is not None else None
+
+    if last is None:
+        try:
+            import pypdfium2 as pdfium
+
+            with pdfium.PdfDocument(str(intake_path)) as doc:
+                last = len(doc)
+        except Exception:  # noqa: BLE001 - 读不到页数就不限制上界，退回 all 之后的起点
+            logger.warning("无法读取 PDF 页数，--pages 只给起点: %s", first)
+            return str(first)
+
+    if last < first:
+        return ""
+    return f"{first}-{last}"
+
+
 def _process_with_mineru(
     intake_path: Path,
     output_dir: Optional[str | Path],
@@ -422,7 +460,27 @@ def _process_with_mineru(
     end_page_id: Optional[int],
     config: Dict[str, Any],
 ) -> ConversionResult:
-    """本地 MinerU 处理函数"""
+    """
+    本地 MinerU 处理函数（MinerU **4.x**：子进程调 `mineru-kit parse`）。
+
+    ## 为什么是子进程而不是进程内 API
+
+    3.x 用的 `mineru.cli.common.do_parse` 在 4.0 已不存在（整体改版）。
+    4.x 面向"一次性转换"的入口就是 `mineru-kit parse`（无状态、不需要
+    `mineru server start`），而且它把重型依赖（onnx/llama.cpp/gradio）都关在
+    自己的进程里 —— 与 `AGENTS.md`「重型模型隔离」的既有原则一致。
+
+    ## 为什么用 `--format zip`
+
+    项目下游需要 **Markdown + 页码**两样东西：`page_count` 取自
+    `middle_json.json` 的 `pdf_info`（与 3.x 从 `layout.json` 取的口径一致），
+    `layout.json` 也由它复制而来。`--format markdown` 只给一个 .md，
+    拿不到页数。实测 zip 内含：
+        markdown.md / middle_json.json / model_output.json / structured_content.json
+
+    ⚠️ **已知差异**：zip 里**没有** 3.x 的 `*_content_list.json`，因此本地路径
+    不再插入 `<!-- page=N -->` 页码锚点（云端路径不受影响，仍有）。
+    """
     if backend in ("vlm-http-client", "hybrid-http-client"):
         return _process_with_remote_api(
             intake_path, output_dir, backend, lang,
@@ -430,12 +488,19 @@ def _process_with_mineru(
             start_page_id, end_page_id, config,
         )
 
-    from mineru.cli.common import (
-        do_parse,
-        image_suffixes,
-        read_fn,
-    )
-    from mineru.utils.enum_class import MakeMode
+    cli = find_mineru_cli(config)
+    if not cli:
+        return ConversionResult(
+            title="",
+            source_path=str(intake_path),
+            error=(
+                "找不到 mineru-kit（MinerU 4.x 的命令行入口）。"
+                '请先安装：pip install "mineru>=4.0,<5"（见 backend/requirements-mineru.txt），'
+                "或用环境变量 MINERU_CLI 指定可执行文件路径。"
+                "若不想本地解析，把 MINERU_BACKEND 设为 vlm-http-client 走云端。"
+            ),
+            success=False,
+        )
 
     if output_dir is None:
         temp_dir = Path(tempfile.mkdtemp(prefix="mineru_output_"))
@@ -446,48 +511,50 @@ def _process_with_mineru(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    device = config.get("device", "cpu")
-    os.environ.setdefault("MINERU_DEVICE_MODE", device)
-    os.environ.setdefault("MINERU_MODEL_SOURCE", "local")
-
+    tier = str(config.get("tier") or "standard")
     file_stem = intake_path.stem
-    file_suffix = intake_path.suffix.lstrip(".").lower()
+    zip_path = output_dir / f"{file_stem}.zip"
+    zip_path.unlink(missing_ok=True)
 
-    file_bytes = read_fn(intake_path)
-    if file_suffix in image_suffixes:
-        file_suffix = "pdf"
+    argv = [
+        cli, "parse", str(intake_path),
+        "-o", str(zip_path),
+        "--tier", tier,
+        "--format", "zip",
+    ]
+    pages = _pages_argument(intake_path, start_page_id, end_page_id)
+    if pages:
+        argv += ["--pages", pages]
+    ocr_mode = str(config.get("ocr_mode") or "").strip()
+    if ocr_mode:
+        argv += ["--ocr-mode", ocr_mode]
 
-    parse_method = "auto"
-    if backend == "pipeline":
-        parse_method = "auto"
-    elif backend.startswith("vlm-") or backend.startswith("hybrid-"):
-        parse_method = "vlm"
+    # 4.x 的环境变量映射统一放在 model_loader.mineru_env()，避免两处漂移
+    env = mineru_env(config)
 
-    lang_list = [lang] if lang else ["ch"]
-    make_mode_enum = MakeMode.MM_MD if make_mode in ("mm_md", None) else MakeMode.NLP_MD
-
+    parse_method = f"mineru-kit:{tier}"
+    timeout_s = int(config.get("timeout", 300))
     try:
-        do_parse(
-            output_dir=str(output_dir),
-            pdf_file_names=[file_stem],
-            pdf_bytes_list=[file_bytes],
-            p_lang_list=lang_list,
-            backend=backend,
-            parse_method=parse_method,
-            formula_enable=formula_enable,
-            table_enable=table_enable,
-            f_draw_layout_bbox=False,
-            f_draw_span_bbox=False,
-            f_dump_md=True,
-            f_dump_middle_json=True,
-            f_dump_model_output=True,
-            f_dump_orig_pdf=True,
-            f_dump_content_list=True,
-            f_make_md_mode=make_mode_enum,
-            start_page_id=start_page_id,
-            end_page_id=end_page_id,
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+            env=env,
+            cwd=str(output_dir),
         )
-    except Exception as e:
+    except subprocess.TimeoutExpired:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return ConversionResult(
+            title="",
+            source_path=str(intake_path),
+            error=f"MinerU 本地解析超时（超过 {timeout_s}s，档位={tier}）",
+            success=False,
+        )
+    except Exception as e:  # noqa: BLE001 - 与 3.x 时代保持同样的兜底
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
         return ConversionResult(
@@ -497,17 +564,30 @@ def _process_with_mineru(
             success=False,
         )
 
-    # 生成 layout.json（从 middle.json 复制）
-    middle_candidates = sorted(output_dir.rglob(f"{file_stem}_middle.json"))
-    if middle_candidates:
-        middle_path = middle_candidates[0]
-        layout_path = middle_path.with_name("layout.json")
-        try:
-            shutil.copy2(middle_path, layout_path)
-            logger.info(f"已生成 layout.json: {layout_path}")
-        except Exception as e:
-            logger.warning(f"生成 layout.json 失败: {e}")
+    if proc.returncode != 0 or not zip_path.exists():
+        tail = (proc.stderr or proc.stdout or "").strip()[-800:]
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return ConversionResult(
+            title="",
+            source_path=str(intake_path),
+            error=f"MinerU 本地解析失败（exit={proc.returncode}）: {tail}",
+            success=False,
+        )
 
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            md_name = next((n for n in names if n.endswith("markdown.md")), None)
+            middle_name = next((n for n in names if n.endswith("middle_json.json")), None)
+            if md_name:
+                (output_dir / f"{file_stem}.md").write_bytes(zf.read(md_name))
+            if middle_name:
+                (output_dir / "layout.json").write_bytes(zf.read(middle_name))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("解压 MinerU 产物失败: %s", e)
+
+    # 保底：3.x 时代用 `output_dir.rglob(...)` 找产物，这里沿用同样的收集方式
     md_content = ""
     page_count = 0
     layout_json_data = None
