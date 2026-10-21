@@ -104,8 +104,44 @@ MIN_SIMILARITY = 0.75
 #: **142 张的最近邻是同笔记**（在 `[0.70, 0.75)`），而这一段实测只有 50%
 #: —— 降同笔记下界没有依据。详见 `docs/journal/relation-quality-2026-09-26.md` §13。
 CROSS_NOTE_MIN_SIMILARITY = 0.80
-#: 单次最多处理的卡片数量
-MAX_CARDS_FOR_SUGGEST = 200
+#: 单次最多处理的卡片数量（候选 = "要救的孤点"）
+#:
+#: ## 从 200 提到 600 的依据（A1 P0-1，2026-10-22）
+#:
+#: 真库实测（只读）：**3469 张卡 / 604 条边 / 3028 张孤点（87.3%）**，
+#: 而瓶颈**不是质量是吞吐** —— 2683/3028 张孤点的最近邻**已经过现行阈值**，
+#: 全量跑一遍只要 **725 ms**。旧上限 200 意味着"要跑 ~15 轮才轮到别人"，
+#: 而真库 `suggested` 至今是 **0**。用户点一次"自动发现关系"却什么都没发生，
+#: 那不是"没有相关卡片"，是"这一批恰好没轮到"。
+#:
+#: ## ⚠️ 为什么不能只是调大这个数（P0-1 必须与 P0-2 捆绑）
+#:
+#: 候选 × 目标 = 600 × 3469 ≈ **208 万** 个 1024 维点积。numpy 能扛
+#: （几十 MB 的相似度矩阵 + 秒级），但**一批就能建出几千条边** ——
+#: 全部倾倒进审核队列等于没有队列（7020 条待审 = 用户不会看）。
+#: 所以 P0-2（排序 + 分批）与它**必须同批上线**，见 `CANDIDATE_BATCH_SIZE`。
+MAX_CARDS_FOR_SUGGEST = 600
+#: 单轮**真正写进库**的建议边上限（P0-2 的"分批"那一半）
+#:
+#: 它是审核队列的闸门：无论候选池多大、相似度多高，一轮最多新增这么多条
+#: `suggested`。用户点一次得到一小批**可以看完**的建议，而不是几千条。
+#: 下一轮自然推进到下一批候选（孤点优先 + 按价值排序，见 `_candidate_sort_key`）。
+#:
+#: ⚠️ 与 `MAX_CARDS_FOR_SUGGEST` 的分工不同：前者限**候选池**（算多少），
+#: 后者限**产出**（写多少）。只限前者的话，600 张候选每人 3 条最像的
+#: 仍可能一次写出上千条。
+RELATION_BATCH_SIZE = 200
+#: 同名卡片（疑似重复）不建边，但记下这一对供界面提示（A1 P0-3）
+#:
+#: 真库实测：同名对的相似度**普遍 ~1.000**，盲判过的 3 条**全部是真重复**。
+#: 也就是说它们不是"错的边"，是**重复的卡片** —— 把重复当"相关"存下来，
+#: 等于把"重新理解导致卡片翻倍"这个数据问题藏进图谱里。
+#:
+#: 但**只不建边是不够的**：那样这个数据问题就从"图谱里看得见"变成
+#: "只有日志里看得见"。所以这一轮把疑似重复对**带出去**（返回值里），
+#: 让界面能提示"这 N 对很可能是重复卡片，该合并而不是连边"。
+#: ⚠️ 合并是另一件事（改产品语义），本批**只提示不处理**。
+SUSPECTED_DUPLICATE_SIMILARITY = 0.98
 #: 用于嵌入计算的卡片内容最大长度（字符），避免超长文本稀释相似度
 CONTENT_EMBED_LIMIT = 200
 
@@ -332,6 +368,63 @@ async def get_suggested_relations(
     return suggested
 
 
+def _candidate_sort_key(
+    card_id: str,
+    *,
+    edge_count: Dict[str, int],
+    note_size: Dict[str, int],
+    updated_at: Dict[str, Any],
+) -> tuple:
+    """候选孤点的**价值排序键**（A1 P0-2 的"排序"那一半）
+
+    ## 判据（按优先级）
+
+    1. **现有边数升序** —— 一条边都没有的卡最该被救（它们连"看起来相关"都做不到）；
+    2. **所属笔记的卡片数升序** —— 笔记越小，卡越可能是"这堆里最像的那张"
+    （大笔记里一张卡有几百个同门，少一条边不影响它被人看见）；
+    3. **`updated_at` 降序** —— 最近动过的先看（与"用户现在关心什么"同向）；
+    4. **`card_id` 升序** —— 末位定序，保证**同一批候选每次跑出同样的顺序**
+    （可复现；没有它，同样的输入可能因为字典/集合顺序变化而给出不同结果）。
+
+    ## ⚠️ 这是**代理指标**，不是实测过的价值函数
+
+    `docs/relation-method-research-20261021.md` 里没有"哪条建议更值得先看"的
+    实测标定 —— 要标定需要"人工盲判 + 分批对照"的实验，那属于 P1（弱监督标定）。
+    所以这里只用一个**能说清理由**的排序，而不是编一个看起来精致的打分。
+
+    **它买到的东西是确定的**：把"随便切 200 张"换成"有理由的 200 张"，
+    且下一批与这一批不重复（孤点优先的推进语义不变）。
+    **它买不到的是"这 200 条真的比另外 200 条更有用"** —— 那要 P1 才有依据。
+    """
+    return (
+        edge_count.get(card_id, 0),
+        note_size.get(card_id, 0),
+        # 第 3 位想表达"最近动过的先看"（降序）。用 `-timestamp` 把降序
+        # 折成升序 —— datetime 不能取负，而元组比较要求同类型可比。
+        #
+        # ⚠️ 缺 `updated_at` 的老数据用 **`-inf`**（不是 `+inf`）排到最后：
+        # 这一位是**取过负的**，所以"排最后"对应的极值是负无穷那一边。
+        # 第一版写成 `+inf`，而 `-ts < +inf` 恒真 ⇒ 有时间的反而排在没时间的
+        # **后面**（实测用例抓出来的）。
+        -_ts(updated_at.get(card_id)),
+        card_id,
+    )
+
+
+def _ts(value: Any) -> float:
+    """把 `datetime` 折成可比较、可取负的浮点秒；缺失时返回 `-inf`
+
+    返回 `-inf` 是为了配合调用方的 `-timestamp`：取负之后它变成 `+inf`，
+    在升序里**排到最后**。理由与 `_candidate_sort_key` 的注释同一处。
+    """
+    if value is None:
+        return float("-inf")
+    try:
+        return float(value.timestamp())
+    except (AttributeError, OSError, ValueError):
+        return float("-inf")
+
+
 async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     """
     基于嵌入向量相似度自动建议卡片关系
@@ -369,6 +462,11 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             KnowledgeCard.embedding,
             KnowledgeCard.embedding_dim,
             KnowledgeCard.embedding_model,
+            # A1 P0-2：价值排序的第 3 位判据要它（"最近动过的先看"）。
+            # ⚠️ 必须**显式加进 SELECT** —— 这个查询是 `select(列…)`，
+            # `.all()` 返回的 `Row` 只有列出的那些属性；访问没列的列会
+            # `KeyError: 'updated_at'`（实测 21 条既有用例因此全红）。
+            KnowledgeCard.updated_at,
         ).where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.has_embedding.is_(True),
@@ -477,12 +575,39 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     # `existing_relations` 里了，再发一条相关子查询实测要 **239 ms**（1312 条关系时），
     # 而且随关系数增长 —— 那是本函数最慢的一段（见 `_agenttmp/profile_suggest.py`）。
     # 用同一个集合筛，代价只是几百次哈希查找。
-    # `cards` 已按 `updated_at desc` 排好，切片就是"最新的 N 张孤点"。
+    #
+    # ── A1 P0-2（2026-10-22）：从"最新的 N 张孤点"改成"**按价值排序的** N 张" ──
+    #
+    # 旧实现是 `[c.id for c in cards if ...][:MAX_CARDS_FOR_SUGGEST]`，
+    # 而 `cards` 按 `updated_at desc` 排 —— 于是"谁被选中"只取决于**改动时间**，
+    # 与"哪张卡更需要一条边"无关。上限从 200 提到 600 之后这个问题被放大了：
+    # 一批能进 600 张，选错的空间也大三倍。
+    #
+    # 现在先按 `_candidate_sort_key` 排序再切片。它买到的是"有理由的 600 张"
+    # 而不是"随便 600 张"；买不到的是"这 600 张真的比另外 600 张有用" ——
+    # 那要 P1 的弱监督标定，见那个函数的说明。
     related_ids: set = set()
     for rel in existing_relations:
         related_ids.add(rel.card_id_1)
         related_ids.add(rel.card_id_2)
-    candidate_ids = [c.id for c in cards if c.id not in related_ids][:MAX_CARDS_FOR_SUGGEST]
+
+    # 排序需要的两个统计量（都在内存里算，不发额外查询）
+    edge_count: Dict[str, int] = {}
+    for rel in existing_relations:
+        edge_count[rel.card_id_1] = edge_count.get(rel.card_id_1, 0) + 1
+        edge_count[rel.card_id_2] = edge_count.get(rel.card_id_2, 0) + 1
+    note_size: Dict[str, int] = {}
+    for card in cards:
+        note_size[card.note_id] = note_size.get(card.note_id, 0) + 1
+    updated_at: Dict[str, Any] = {card.id: card.updated_at for card in cards}
+
+    isolated = [c.id for c in cards if c.id not in related_ids]
+    isolated.sort(
+        key=lambda cid: _candidate_sort_key(
+            cid, edge_count=edge_count, note_size=note_size, updated_at=updated_at
+        )
+    )
+    candidate_ids = isolated[:MAX_CARDS_FOR_SUGGEST]
     if not candidate_ids:
         logger.info("没有孤点卡片了，无需建议: user=%s", user_id)
         return 0
@@ -499,7 +624,11 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
 
     # 逐卡取"最像的 TOP_K_PER_CARD 张"。**K 不是判据**，它只是把候选推到高分段；
     # 真正的判据是下面那个按「是否同笔记」分档的下界。
-    new_count = 0
+    #
+    # ⚠️ 这个计数器数的是**本轮找到的合格卡片对**，不是最终写库的条数 ——
+    # 最终条数由下面 P0-2 的闸门（`RELATION_BATCH_SIZE`）决定。
+    # 名字刻意区分开，免得后面读到 `new_count` 时以为它就是返回值。
+    candidate_pairs = 0
     new_relations = []
     # 被「同名闸」挡掉的卡片对（见下面 title_of 的说明）
     same_title_skipped = 0
@@ -566,15 +695,42 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             )
             new_relations.append(relation)
             existing_pairs[pair_key] = relation  # 防止同一对重复创建
-            new_count += 1
+            candidate_pairs += 1
+
+    # ── A1 P0-2：按相似度降序，**只写前 `RELATION_BATCH_SIZE` 条** ──
+    #
+    # 为什么在"已经算完"之后才截断（而不是少算一些）：
+    #
+    # 截断在这里是**为了排序**才成立的 —— 要把**全批最像的**那 200 条给用户，
+    # 就必须先把全批的相似度都算出来。少算候选只省 CPU，但会让"给哪 200 条"
+    # 重新变成随机（回到 P0-2 要修的那个问题）。
+    #
+    # 代价是算完不用：一批 600 候选 × 3469 目标 ≈ 208 万点积，实测秒级
+    # （旧注释记的是 200 × 1181 时"几十毫秒"）。这个代价换的是
+    # **"审核队列首屏是按价值排序的 200 条"**（本项的验收判据之一）。
+    new_relations.sort(
+        key=lambda r: (-(r.similarity_score or 0.0), r.card_id_1, r.card_id_2)
+    )
+    backlog = max(0, len(new_relations) - RELATION_BATCH_SIZE)
+    kept = new_relations[:RELATION_BATCH_SIZE]
 
     # 批量添加
-    for rel in new_relations:
+    for rel in kept:
         db.add(rel)
 
+    new_count = len(kept)
     if new_count > 0:
         await db.commit()
         logger.info(f"自动建议关系: user={user_id[:8]}, 新增 {new_count} 条建议")
+
+    if backlog:
+        # 这条日志不能省：它回答"为什么只出来 200 条"——
+        # 不是"没有更多了"，而是"这一轮按闸门放行了最像的一批，下一轮会继续"。
+        logger.info(
+            "审核队列闸门: user=%s 本轮产出 %d 条、按相似度留下 %d 条待下一轮"
+            "（上限 RELATION_BATCH_SIZE=%d；孤点优先 + 价值排序保证推进）",
+            user_id[:8], len(new_relations), backlog, RELATION_BATCH_SIZE,
+        )
 
     if same_title_skipped:
         # 这条日志**不能省**：同名闸只是"不建边"，重复卡片本身还在库里。
@@ -797,6 +953,49 @@ async def delete_relation(
 
     logger.info(f"删除关系: user={user_id[:8]}, relation={relation_id[:8]}")
     return {"success": True, "relation_id": relation_id}
+
+
+async def count_isolated_cards(user_id: str, db: AsyncSession) -> int:
+    """还剩多少张**一张关系都没有**的卡（A1 P0-2 的"进度"读数）
+
+    ## 为什么必须有这个数
+
+    闸门（一轮最多写 `RELATION_BATCH_SIZE` 条建议）如果不说清"还有多少"，
+    用户点一次拿到 200 条、再点一次又是 200 条，会以为**功能坏了**。
+    实测严据（副本，2026-10-22）：跑 5 轮共 1000 条建议、孤点 3028 → 1972 ——
+    还剩 1972 张，那是**几十轮**的量。用户看不到这个数字就只能靠猜。
+
+    ## 判据与 `auto_suggest_relations` 的候选池**必须一致**
+
+    都用"任何状态的关系行"（含 rejected）：被拒过的卡片对已经有人看过了。
+    两边判据不一致会出现"界面说还剩 N 张、点一次却一条都没新增"这种
+    最难排查的形态 —— 数字在动，功能没动。
+
+    代价：这条查询是 `NOT IN` 两个子查询，比 `auto_suggest_relations` 里
+    那次"已经全量加载在内存里"的筛选贵。但它是**用户在等的那一次**
+    （点完按钮之后），而 `EXPLAIN` 级的小优化不值得用"判据不一致"去换。
+    """
+    from sqlalchemy import select
+
+    from ..models.card_relation import CardRelation
+    from ..models.knowledge_card import KnowledgeCard
+    from ..models.note import Note
+
+    related_1 = select(CardRelation.card_id_1).where(CardRelation.user_id == user_id)
+    related_2 = select(CardRelation.card_id_2).where(CardRelation.user_id == user_id)
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(KnowledgeCard)
+            .where(
+                KnowledgeCard.user_id == user_id,
+                Note.not_trashed(KnowledgeCard.note_id),
+                KnowledgeCard.id.not_in(related_1),
+                KnowledgeCard.id.not_in(related_2),
+            )
+        )
+    ).scalar_one()
+    return int(total)
 
 
 async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str, Any]:

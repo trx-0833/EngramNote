@@ -1090,6 +1090,16 @@ export interface paths {
      *
      *     基于「标题 + 内容」编码全部卡片并计算两两相似度，嵌入编码在 Celery worker
      *     中执行，卡片较多时可能耗时数十秒，因此由用户显式触发，不在页面加载时自动执行。
+     *
+     *     ## A1 P0（2026-10-22）：产出有闸门，所以必须报出"还剩多少"
+     *
+     *     一轮最多写 `RELATION_BATCH_SIZE` 条 `suggested`（审核队列的闸门，
+     *     见 `graph_service` 里那个常量的说明）。实测副本上一轮 ≈ 8 秒、
+     *     新建议 200 条、孤点下降约 200 —— **还剩 1972 张，那是几十轮的量**。
+     *     不报这个数字，用户点两次就会以为功能卡住了。
+     *
+     *     统计失败**不影响**这次建议的结果：`remaining_isolated` 留 `None`
+     *     （"没测到"），而不是 0 —— 0 的含义是"没有孤点了，可以收工"。
      */
     post: operations['suggest_relations_api_api_graph_suggest_post'];
     delete?: never;
@@ -4849,12 +4859,28 @@ export interface components {
      * GraphSuggestResponse
      * @description 基于嵌入相似度的关系建议结果
      *
-     *     出处：`graph.py:161`（`suggest_relations_api` 的 return），
+     *     出处：`graph.py`（`suggest_relations_api` 的 return），
      *     服务层 `graph_service.auto_suggest_relations` 只返回一个 int（新增条数）。
+     *
+     *     ## `remaining_isolated` / `batch_size`（A1 P0-2，2026-10-22）
+     *
+     *     ⚠️ **它们不是装饰**：闸门（一轮最多写 `RELATION_BATCH_SIZE` 条）如果不说清
+     *     "还有多少"，用户点一次只拿到 200 条、再点一次又是 200 条，
+     *     会以为**功能坏了或者卡住了**。实测：副本上跑 5 轮共 1000 条建议、
+     *     孤点从 3028 降到 1972 —— 还剩 1972 张，那是**几十轮**的量，
+     *     而用户看不到这个数字就只能靠猜。
+     *
+     *     `None` = 没统计（例如这一轮抛错了），**不是 0** —— 与
+     *     `/ready` 的 `pending_embeddings` 同一条原则：0 会让"没测到"与
+     *     "真的没有孤点了"长得一模一样，而后者才是"可以收工了"的信号。
      */
     GraphSuggestResponse: {
+      /** Batch Size */
+      batch_size?: number | null;
       /** New Count */
       new_count: number;
+      /** Remaining Isolated */
+      remaining_isolated?: number | null;
       /** Success */
       success: boolean;
     };

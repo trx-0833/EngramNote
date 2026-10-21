@@ -180,12 +180,28 @@ class GraphRelationOperationResponse(BaseModel):
 class GraphSuggestResponse(BaseModel):
     """基于嵌入相似度的关系建议结果
 
-    出处：`graph.py:161`（`suggest_relations_api` 的 return），
+    出处：`graph.py`（`suggest_relations_api` 的 return），
     服务层 `graph_service.auto_suggest_relations` 只返回一个 int（新增条数）。
+
+    ## `remaining_isolated` / `batch_size`（A1 P0-2，2026-10-22）
+
+    ⚠️ **它们不是装饰**：闸门（一轮最多写 `RELATION_BATCH_SIZE` 条）如果不说清
+    "还有多少"，用户点一次只拿到 200 条、再点一次又是 200 条，
+    会以为**功能坏了或者卡住了**。实测：副本上跑 5 轮共 1000 条建议、
+    孤点从 3028 降到 1972 —— 还剩 1972 张，那是**几十轮**的量，
+    而用户看不到这个数字就只能靠猜。
+
+    `None` = 没统计（例如这一轮抛错了），**不是 0** —— 与
+    `/ready` 的 `pending_embeddings` 同一条原则：0 会让"没测到"与
+    "真的没有孤点了"长得一模一样，而后者才是"可以收工了"的信号。
     """
 
     success: bool
     new_count: int
+    #: 本轮之后还剩多少张**一张关系都没有**的卡
+    remaining_isolated: Optional[int] = None
+    #: 本轮的产出闸门（一轮最多写多少条建议）—— 让界面能解释"为什么是 200 条"
+    batch_size: Optional[int] = None
 
 
 class GraphBatchOperationResponse(BaseModel):

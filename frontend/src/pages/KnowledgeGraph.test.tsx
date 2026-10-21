@@ -855,6 +855,76 @@ describe('图谱交互', () => {
 });
 
 /**
+ * A1 P0-2：一轮建议产出有闸门，所以必须报出"还剩多少"（2026-10-22）
+ *
+ * ## 为什么这一组必须存在
+ *
+ * 后端一轮最多写 `batch_size` 条建议（审核队列的闸门 —— 一次倾倒几千条
+ * 等于没有队列）。实测副本上一轮 ≈ 8 秒、产出 200 条、孤点下降约 200，
+ * 而**还剩 1972 张**（几十轮的量）。
+ *
+ * 不报这个数字，用户点两次看到"每次都是 200 条"会**以为功能卡住了** ——
+ * 那与"没有更多相关卡片了"在界面上长得一模一样。
+ *
+ * ## 三条反向断言是重点
+ *
+ * `> 0`、`=== 0`、`null` 三种情况必须**表现不同**：只有确实还有孤点时才提示。
+ * 没有后两条，把判据写成"只要字段存在就提示"也能让第一条绿 ——
+ * 而那会在"已经干完了"和"没测到"时说"还剩 0 张"，既噪音又是假消息。
+ */
+describe('生成建议后的"还剩多少"提示', () => {
+  async function generate() {
+    renderPage();
+    await screen.findByText('知识图谱');
+    await userEvent.click(screen.getByRole('button', { name: /建议/ }));
+    await userEvent.click(screen.getByRole('button', { name: '生成相关建议' }));
+  }
+
+  it('★ 还有孤点时提示还剩多少（否则用户以为卡住了）', async () => {
+    mockedSuggest.mockResolvedValue({
+      success: true,
+      new_count: 200,
+      remaining_isolated: 1972,
+      batch_size: 200,
+    });
+
+    await generate();
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1));
+    expect(String(toast.info.mock.calls[0][0])).toContain('1972');
+  });
+
+  it('★ 已经一张不剩（0）时**不提示** —— 那是"干完了"，不是"还剩 0 张"', async () => {
+    mockedSuggest.mockResolvedValue({
+      success: true,
+      new_count: 3,
+      remaining_isolated: 0,
+      batch_size: 200,
+    });
+
+    await generate();
+    // 等这一轮动作真的跑完（建议面板重新渲染）
+    await waitFor(() => expect(mockedSuggest).toHaveBeenCalled());
+
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('★ 后端没统计到（null）时也不提示 —— "没测到"不能说成"干完了"', async () => {
+    mockedSuggest.mockResolvedValue({
+      success: true,
+      new_count: 3,
+      remaining_isolated: null,
+      batch_size: 200,
+    });
+
+    await generate();
+    await waitFor(() => expect(mockedSuggest).toHaveBeenCalled());
+
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * 侧边栏的**首屏默认值**（overhaul-plan 5.10 移动端补丁）：手机上侧边栏是固定底部抽屉
  * （`max-height: 50vh`），默认展开等于首屏就盖掉半张画布 —— 用户得先找到「收起」才看得见图。
  * 断点与 responsive.css 的 `@media (max-width: 768px)` 同值（两处不同值会出现

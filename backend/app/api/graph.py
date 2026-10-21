@@ -18,6 +18,9 @@
   由用户通过 POST /suggest 显式触发
 """
 
+import logging
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +55,7 @@ from ..services import graph_service
 from ..services.graph_service import GraphSuggestionError, suggest_semantic_relations
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=GraphData)
@@ -160,6 +164,16 @@ async def suggest_relations_api(
 
     基于「标题 + 内容」编码全部卡片并计算两两相似度，嵌入编码在 Celery worker
     中执行，卡片较多时可能耗时数十秒，因此由用户显式触发，不在页面加载时自动执行。
+
+    ## A1 P0（2026-10-22）：产出有闸门，所以必须报出"还剩多少"
+
+    一轮最多写 `RELATION_BATCH_SIZE` 条 `suggested`（审核队列的闸门，
+    见 `graph_service` 里那个常量的说明）。实测副本上一轮 ≈ 8 秒、
+    新建议 200 条、孤点下降约 200 —— **还剩 1972 张，那是几十轮的量**。
+    不报这个数字，用户点两次就会以为功能卡住了。
+
+    统计失败**不影响**这次建议的结果：`remaining_isolated` 留 `None`
+    （"没测到"），而不是 0 —— 0 的含义是"没有孤点了，可以收工"。
     """
     try:
         new_count = await graph_service.auto_suggest_relations(
@@ -170,7 +184,21 @@ async def suggest_relations_api(
         # 保留原始异常链（raise ... from e）：图谱建议失败通常源于上游
         # LLM 超时或额度问题，丢掉 cause 会让排障时看不到真正原因。
         raise AppError(GRAPH_SUGGESTION_FAILED, str(e), 503) from e
-    return {"success": True, "new_count": new_count}
+
+    remaining: Optional[int] = None
+    try:
+        remaining = await graph_service.count_isolated_cards(current_user.id, db)
+    except Exception as exc:  # noqa: BLE001 - 附加读数不该让建议结果丢失
+        logger.warning(
+            "图谱建议：孤点数统计失败（该字段留空）| %s: %s", type(exc).__name__, exc
+        )
+
+    return {
+        "success": True,
+        "new_count": new_count,
+        "remaining_isolated": remaining,
+        "batch_size": graph_service.RELATION_BATCH_SIZE,
+    }
 
 
 @router.post("/confirm", response_model=GraphRelationOperationResponse)

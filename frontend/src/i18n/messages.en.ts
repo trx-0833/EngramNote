@@ -1246,6 +1246,8 @@ const en = {
     operationFailed: 'Action failed',
     batchFailed: 'Batch action failed',
     suggestFailed: 'Could not generate suggestions',
+    suggestRemaining:
+      'One batch of suggestions was generated. {count} card(s) still have no relations — click again to continue',
     deleteFailed: 'Could not delete',
     createFailed: 'Could not create',
     loadFailed: 'Could not load the graph',

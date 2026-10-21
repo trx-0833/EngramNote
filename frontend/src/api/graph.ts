@@ -56,10 +56,32 @@ export async function getSuggestions(): Promise<SuggestedRelation[]> {
  * 手动触发相关关系建议生成
  * 基于嵌入向量相似度挖掘新的潜在关联（卡片较多时可能耗时数十秒）。
  *
- * @returns 新增建议数量
+ * ## `remaining_isolated` / `batch_size`（A1 P0-2，2026-10-22）
+ *
+ * 后端一轮最多写 `batch_size` 条建议（审核队列的闸门 —— 一次倾倒几千条
+ * 等于没有队列）。实测副本上一轮 ≈ 8 秒、产出 200 条、孤点下降约 200，
+ * 而**还剩 1972 张**（几十轮的量）。
+ *
+ * 不把 `remaining_isolated` 带出来的话，用户点两次会看到"每次都是 200 条"
+ * 而**以为功能卡住了** —— 那与"没有更多相关卡片了"看起来一模一样。
+ *
+ * 类型按契约写成**可空**：`null` = 后端没统计到（不是 0）。
+ * 0 的含义是"没有孤点了，可以收工"，两个状态必须能分开。
+ *
+ * @returns 新增建议数量 + 本轮闸门 + 还剩多少孤点
  */
-export async function suggestRelations(): Promise<{ success: boolean; new_count: number }> {
-  return request<{ success: boolean; new_count: number }>('/graph/suggest', {
+export async function suggestRelations(): Promise<{
+  success: boolean;
+  new_count: number;
+  remaining_isolated?: number | null;
+  batch_size?: number | null;
+}> {
+  return request<{
+    success: boolean;
+    new_count: number;
+    remaining_isolated?: number | null;
+    batch_size?: number | null;
+  }>('/graph/suggest', {
     method: 'POST',
   });
 }

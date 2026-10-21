@@ -1471,6 +1471,12 @@ const zhCN = {
     operationFailed: '操作失败',
     batchFailed: '批量操作失败',
     suggestFailed: '生成建议失败',
+    /**
+     * A1 P0-2（2026-10-22）：一轮建议产出有闸门（审核队列不至于被一次倾倒
+     * 几千条冲垮），所以必须把"还剩多少"说出来 —— 否则用户点两次看到
+     * "每次都是 200 条"会以为功能卡住了。
+     */
+    suggestRemaining: '本轮已生成一批建议。还有 {count} 张卡片没有任何关联，可以再次点击继续',
     deleteFailed: '删除失败',
     createFailed: '创建失败',
     loadFailed: '加载图谱失败',

@@ -191,6 +191,21 @@ export function useGraphMutations({
       if (result.new_count > 0) {
         await refetchGraphAndStats('parallel');
       }
+      // ── A1 P0-2（2026-10-22）：把"还剩多少"告诉用户 ──
+      //
+      // 后端一轮最多写 `batch_size` 条建议（审核队列的闸门）。不说清还剩多少，
+      // 用户点两次会看到"每次都是 200 条"而**以为功能卡住了** ——
+      // 那与"没有更多相关卡片了"在界面上长得一模一样。
+      //
+      // 只在**确实还有**孤点时提示（`> 0`）：还有 0 张时说"还剩 0 张"是噪音，
+      // 而 `null`（后端没统计到）也不能当成 0 —— 那会把"没测到"说成"干完了"。
+      if (typeof result.remaining_isolated === 'number' && result.remaining_isolated > 0) {
+        toast.info(
+          translate('graphPage.suggestRemaining', {
+            count: result.remaining_isolated,
+          }),
+        );
+      }
     } catch (err) {
       setSuggestError(err instanceof Error ? err.message : translate('graphPage.suggestFailed'));
     } finally {
