@@ -364,6 +364,55 @@ describe('项目的新建 / 重命名 / 删除', () => {
     expect(screen.getByRole('button', { name: '重命名' })).toBeInTheDocument();
   });
 
+  /**
+   * 清空描述（B3，2026-10-22）
+   *
+   * ## 为什么这一条必须存在
+   *
+   * 走查报告 §2.5 丙-1（BN.3 里仅有的两条「确实影响使用」之一）：
+   * 清空描述 → 保存 → **重载后旧描述还在**。
+   *
+   * 根因在前端这一行：`edit.description.trim() || undefined` ——
+   * 清空时 `''` 变成 `undefined`，而 `undefined` 会被 `JSON.stringify`
+   * **丢掉**，请求体里根本没有 `description` 这个键，后端按"不改"处理。
+   *
+   * 所以判据是**发出去的那个值必须是 `null` 而不是 `undefined`**：
+   * 这两个在断言里长得像（都是"空"），但在 HTTP 上是两件完全不同的事。
+   * 只断言"调用了 updateProject"是不够的 —— 旧实现也调用。
+   */
+  it('★ 清空描述时发的是显式 null，而不是 undefined', async () => {
+    renderPage();
+    await screen.findByText('Transformer 论文精读');
+
+    await userEvent.click(screen.getByRole('button', { name: '重命名' }));
+
+    const descInputs = screen.getAllByPlaceholderText(/描述/);
+    await userEvent.clear(descInputs[descInputs.length - 1]);
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
+    const sent = mockedUpdate.mock.calls[0][2];
+    expect(sent).toBeNull();
+    expect(sent).not.toBeUndefined();
+  });
+
+  it('★ 描述没动时仍然原样带上（清空修好不能变成"总是清空"）', async () => {
+    // 反向断言：只改名称时描述必须原样传过去。
+    // 没有这条，把实现写成"一律传 null"也能让上面那条绿 ——
+    // 而那是把"清空不生效"换成"每次改名都清空描述"，比原 bug 更糟。
+    renderPage();
+    await screen.findByText('Transformer 论文精读');
+
+    await userEvent.click(screen.getByRole('button', { name: '重命名' }));
+    const nameInputs = screen.getAllByPlaceholderText('项目名称');
+    await userEvent.clear(nameInputs[1]);
+    await userEvent.type(nameInputs[1], '只改名字');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
+    expect(mockedUpdate.mock.calls[0][2]).toBe('把注意力机制相关的论文读一遍');
+  });
+
   it('重命名点「取消」不调用接口', async () => {
     renderPage();
     await screen.findByText('Transformer 论文精读');

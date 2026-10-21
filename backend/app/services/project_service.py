@@ -168,18 +168,39 @@ async def update_project(
     user_id: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
+    *,
+    clear_description: bool = False,
 ) -> Dict:
     """
     更新项目信息
 
     项目为纯标签，名称/描述变更不影响物理路径（统一收件箱）。
 
+    ## ⚠️ `description=None` 有两种意思（B3，2026-10-22）
+
+    改造前这里只有 `description: Optional[str] = None`，于是：
+    - "没传这个字段" ⇒ `None` ⇒ 不改（对）
+    - "**显式清空**" ⇒ 也是 `None` ⇒ **也不改**（错 —— 用户的清空被静默丢掉）
+
+    实测（走查报告 §2.5 丙-1）：清空描述 → 保存 → 看起来保存了 →
+    **重载后旧描述还在**。它是 BN.3 里仅有的两条「确实影响使用」之一。
+
+    现在用 `clear_description` 把两种意思分开：
+    - `clear_description=False`（默认）⇒ 与改造前**逐字节相同**（旧客户端不受影响）；
+    - `clear_description=True` ⇒ 显式把描述置空。
+
+    ⚠️ 为什么不用一个哨兵值（`UNSET`）替代：那会把哨兵泄漏到
+    类型签名与所有调用点上，而"显式清空"本来就是**调用方知道、服务层不知道**
+    的信息 —— 由 API 层（它能看到 `model_fields_set`）翻译成一个布尔更直白。
+
     Args:
         db: 异步数据库会话
         project_id: 项目 ID
         user_id: 用户 ID，用于权限校验
         name: 新名称，None 表示不变更
-        description: 新描述，None 表示不变更
+        description: 新描述，None 表示不变更（除非 `clear_description=True`）
+        clear_description: **显式清空**描述。仅在 `description is None` 时有意义
+            （两者同时给出时以 `description` 为准 —— 有值就不该被当成清空）
 
     Returns:
         Dict: 更新后的项目信息
@@ -197,6 +218,9 @@ async def update_project(
         project.name = name
     if description is not None:
         project.description = description
+    elif clear_description:
+        # 显式清空：这两行与上面的分支**互斥**，所以"有值"永远不会被当成清空
+        project.description = None
     await db.commit()
     await db.refresh(project)
 

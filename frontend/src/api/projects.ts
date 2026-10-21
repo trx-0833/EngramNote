@@ -165,16 +165,26 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
  * @param description - 新项目描述
  * @returns 更新后的项目信息
  *
- * ⚠️ **"清空描述"当前做不到**（只报告，未改行为）：契约里 `description` 可空，
- * 但 `description: undefined` 会被 `JSON.stringify` 丢掉，而显式 `null` 与"不传"
- * 在后端是同一个值 —— `services/project_service.py` 的
- * `if description is not None` 把两者都当成"不变更"。
- * 详见调用侧 `pages/projects/useProjects.ts` 的 `edit.description.trim() || undefined`。
+ * ## ⚠️ `undefined` 与 `null` 是**两件事**（B3，2026-10-22 已修）
+ *
+ * `JSON.stringify` 会**丢掉值为 `undefined` 的键**，所以：
+ * - `undefined` ⇒ 请求体里**没有** `description` 这个键 ⇒ 后端"不改它"；
+ * - `null` ⇒ 请求体里是 `"description": null` ⇒ 后端"**显式清空**"。
+ *
+ * 改造前这里只有 `description?: string`，调用方写的是
+ * `edit.description.trim() || undefined` —— 于是用户清空描述时发出去的请求
+ * **根本没有这个键**，后端按"不改"处理，表现是
+ * "清空 → 保存 → 重新加载后旧描述还在"
+ * （走查报告 §2.5 丙-1，BN.3 里仅有的两条「确实影响使用」之一）。
+ *
+ * 修法分两半：这里把类型放宽到 `| null`（让"清空"有地方可写），
+ * 后端用 `model_fields_set` 区分"没传"与"显式 null"
+ * （`api/projects.py` 的 `clear_description`）。
  */
 export async function updateProject(
   projectId: string,
   name?: string,
-  description?: string,
+  description?: string | null,
 ): Promise<Project> {
   // 请求体由契约派生：`PATCH /api/projects/{project_id}`（`ProjectUpdate`：`name` / `description` 均可空）
   const body: BodyOf<'/projects/{project_id}', 'patch'> = { name, description };

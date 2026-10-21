@@ -129,6 +129,26 @@ async def update_project(
     """
     更新项目信息（标签化后名称/描述可改，不影响物理路径）
 
+    ## 「显式清空」与「没传字段」是两件事（B3，2026-10-22）
+
+    `ProjectUpdate.description` 是 `Optional[str] = None`，所以**光看值**
+    分不出这两种请求：
+
+    ```json
+    {"name": "甲"}                    // 没传 description ⇒ 不动它
+    {"name": "甲", "description": null}  // 显式清空 ⇒ 置为 null
+    ```
+
+    而用户的清空操作**确实**会发后者。改造前两种都被当成"不改"，
+    于是"清空描述 → 保存 → 重载后旧描述还在"（走查报告 §2.5 丙-1，
+    BN.3 里仅有的两条「确实影响使用」之一）。
+
+    判据用 pydantic v2 的 `model_fields_set`：它**记录客户端实际发了哪些键**，
+    这正是"值"无法表达的那部分信息。
+
+    ⚠️ 这**只**改「项目描述」一个字段（已拍板：先跑通语义、
+    确认"不传字段的旧客户端行为不变"后再推广到另两处）。
+
     Args:
         project_id: 项目 ID
         req: 项目更新请求
@@ -141,9 +161,18 @@ async def update_project(
     Raises:
         AppError: 项目不存在或无权访问（PROJECT_NOT_FOUND → 404）
     """
+    # `"description" in req.model_fields_set` = 客户端**确实发了这个键**。
+    # 配合 `req.description is None` 才能得出"显式清空"这一个精确含义
+    # （只判前者会把 `{"description": "有值"}` 也当成清空）。
+    clear_description = "description" in req.model_fields_set and req.description is None
     try:
         return await project_service.update_project(
-            db, project_id, current_user.id, req.name, req.description
+            db,
+            project_id,
+            current_user.id,
+            req.name,
+            req.description,
+            clear_description=clear_description,
         )
     except ValueError as e:
         raise AppError(PROJECT_NOT_FOUND, str(e), 404) from e

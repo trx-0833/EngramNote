@@ -107,7 +107,20 @@ export function useProjects() {
     }
     setRenameError('');
     try {
-      await updateProject(p.id, edit.name.trim(), edit.description.trim() || undefined);
+      // ── B3（2026-10-22）：清空描述要真的能保存 ──
+      //
+      // 改造前这里是 `edit.description.trim() || undefined`：用户清空描述时
+      // `''` 变成 `undefined`，而 `undefined` 会被 `JSON.stringify` **丢掉**，
+      // 于是请求体里没有 `description` 这个键，后端按"不改"处理 ——
+      // 表现是"清空 → 保存 → 重新加载后旧描述还在"
+      // （走查报告 §2.5 丙-1，BN.3 里仅有的两条「确实影响使用」之一）。
+      //
+      // 现在清空时发**显式 `null`**，后端用 `model_fields_set` 区分
+      // "没传这个键"与"传了 null"（见 `api/projects.py` 的 `clear_description`）。
+      //
+      // ⚠️ `undefined` 仍然保留给"这次不动描述"的场景（当前没有这种调用，
+      // 但类型上保留它，是为了不让将来的调用方被迫用 `null` 表达"不改"）。
+      await updateProject(p.id, edit.name.trim(), edit.description.trim() || null);
       setRenaming((prev) => {
         const next = { ...prev };
         delete next[p.id];
