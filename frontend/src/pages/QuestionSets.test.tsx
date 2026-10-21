@@ -520,6 +520,21 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
     return state;
   }
 
+  /**
+   * ⚠️ 这四条用例的 `timeout` 是**刻意调大的**（2026-10-21）。
+   *
+   * 它们要把 2500 行 `<tr>` 真的渲染进 jsdom —— 那是本用例组唯一能证明
+   * "页边界漂移时按 id 去重"的方式，但渲染本身很贵：单独跑这一组约 2.7s，
+   * 整仓并发跑时超过 vitest 默认的 5s，于是变成"整仓红、单跑绿"的假失败。
+   *
+   * 已实测这不是产品缺陷：整仓 52 个文件同时跑时，
+   * `npm run test` 下这两条超时；`npx vitest run src/pages/QuestionSets.test.tsx`
+   * 下 19 条全过（9.5s）。所以调的是**测试环境的预算**，不是断言。
+   *
+   * 判据：调大 timeout **不会**让任何断言变松 —— 断言一个都没动。
+   */
+  const RENDER_HEAVY_TIMEOUT = 20_000;
+
   it('多页时**并发**请求，而不是逐页串行', async () => {
     // 2500 条 = 3 页（1000 / 1000 / 500）
     const state = trackingMock(2500);
@@ -530,7 +545,7 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
     // 串行实现下这个值恒为 1 —— 它才是"并发"这件事的直接证据
     expect(state.maxInFlight).toBeGreaterThan(1);
     expect([...state.calls].sort((a, b) => a - b)).toEqual([1, 2, 3]);
-  });
+  }, RENDER_HEAVY_TIMEOUT);
 
   it('页大小按 1000 请求（34 次往返 → 4 次的关键）', async () => {
     const state = trackingMock(2500);
@@ -550,7 +565,7 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
       const ids = dataRows(container).map((r) => r.textContent);
       expect(new Set(ids).size).toBe(ids.length);
     });
-  });
+  }, RENDER_HEAVY_TIMEOUT);
 
   it('单页就能装下时只请求一次（不额外打空页）', async () => {
     const state = trackingMock(300);
@@ -558,7 +573,7 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
 
     await waitFor(() => expect(dataRows(container)).toHaveLength(300));
     expect(state.calls).toEqual([1]);
-  });
+  }, RENDER_HEAVY_TIMEOUT);
 
   it('total 撒谎（远大于实际可返回条数）时靠"空页即停"收工', async () => {
     // 声称 10000 条，实际只有 1000 条 → 第 2 页就是空页
@@ -572,5 +587,5 @@ describe('问题集：分页取数并发化（2026-10-21 提速）', () => {
     await waitFor(() => expect(dataRows(container)).toHaveLength(1000));
     // 第 1 页满 1000 条 ⇒ 会去取第 2 页；第 2 页为空 ⇒ 立即停，不会打到 100 页上限
     await waitFor(() => expect(mockedQuestions.mock.calls.length).toBeLessThan(10));
-  });
+  }, RENDER_HEAVY_TIMEOUT);
 });
