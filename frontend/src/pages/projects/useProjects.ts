@@ -17,6 +17,7 @@
  *    `/projects/{id}` 的形状漂移在归一化时上报，由这里接到全局 toast。
  */
 import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   deleteProject,
   getProjectDetail,
@@ -34,14 +35,22 @@ import { useContractDriftNotice } from '../contractDrift';
 import { unwrapProjects } from './helpers';
 import { translate } from '../../i18n/translate';
 
+/**
+ * 项目列表查询的 key（迁移 5.2 / C1）
+ *
+ * 这个 key 没有参数维度（项目列表是按用户全量的），所以直接用常量。
+ * 四处写操作后失效的都是它 —— 字面量写五遍迟早不一致，
+ * 而那种不一致**不会报错**，只会让"改完某一处列表没刷新"偶尔出现。
+ */
+export const PROJECTS_QUERY_KEY = ['projects'] as const;
+
 export function useProjects() {
   const confirm = useConfirm();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
   /** 页面级失败（加载/删除/扫描/重命名请求失败…）：与重命名校验分开，各报各的 */
   const [error, setError] = useState('');
   /** 重命名表单的校验错误（"项目名称不能为空"），不能被页面级失败的关闭按钮顺手清掉 */
   const [renameError, setRenameError] = useState('');
+  const queryClient = useQueryClient();
 
   // 重命名（行内编辑）
   const [renaming, setRenaming] = useState<Record<string, { name: string; description: string }>>(
@@ -59,27 +68,45 @@ export function useProjects() {
   // 放在既有 hook 之后：新增 hook 不改变上面那些 hook 的调用顺序。
   useContractDriftNotice();
 
-  /** 加载项目列表 */
-  async function loadProjects() {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await getProjects();
-      // 契约漂移兜底见 unwrapProjects：/projects 可能回 204/空体或 {items:[...]} 包装
-      setProjects(unwrapProjects(data));
-    } catch (err) {
-      console.error('加载项目列表失败:', err);
-      setError(translate('projectPage.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }
+  /**
+   * 项目列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## `projects` / `loading` 两个本地状态去哪了
+   *
+   * 改动前是 `loadProjects()` + `useEffect` + 两个 `useState`。
+   * 现在由 `data` / `isLoading` 承担 —— **本地那两个删掉**，不留两套
+   * （计划 §4 风险栏）。`error` **保留为本地状态**：它是页面级失败出口，
+   * 写操作（重命名/删除/扫描）失败时也会往里写，不只是加载失败。
+   *
+   * ## `unwrapProjects` 留在 queryFn 里
+   *
+   * 它是**契约漂移兜底**（`/projects` 可能回 204/空体或 `{items:[...]}` 包装）——
+   * 属于"把服务端响应变成领域对象"，是 queryFn 该做的事。
+   */
+  const {
+    data: projectsData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: PROJECTS_QUERY_KEY,
+    queryFn: async ({ signal }) => unwrapProjects(await getProjects({ signal })),
+  });
 
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
+  const projects = projectsData ?? [];
+
+  // 加载失败也写进页面级 error（与改动前一致：那时它在 loadProjects 的 catch 里）
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadProjects();
-  }, []);
+    if (queryError) {
+      console.error('加载项目列表失败:', queryError);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError(translate('projectPage.loadFailed'));
+    }
+    // ⚠️ `translate` **不能**进依赖数组：它是模块级的 i18n 函数（不是本 hook 里的
+    // `t`），改它不会触发重渲染 —— 放进依赖数组 lint 会报
+    // "unnecessary dependency ... Outer scope values like 'translate' aren't
+    // valid dependencies"。第一版就是那么写的。
+  }, [queryError]);
 
   /** 开始重命名 */
   function startRename(p: Project) {
@@ -126,7 +153,8 @@ export function useProjects() {
         delete next[p.id];
         return next;
       });
-      await loadProjects();
+      // B3：声明这份数据已不可信，由 query 决定何时重取并通知所有依赖它的组件
+      await queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
     } catch (err) {
       console.error('重命名项目失败:', err);
       setError(translate('projectPage.renameFailed'));
@@ -155,7 +183,8 @@ export function useProjects() {
     if (!ok) return;
     try {
       await deleteProject(p.id);
-      await loadProjects();
+      // B3：声明这份数据已不可信，由 query 决定何时重取并通知所有依赖它的组件
+      await queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
     } catch (err) {
       console.error('删除项目失败:', err);
       setError(translate('projectPage.deleteFailed'));
@@ -190,7 +219,8 @@ export function useProjects() {
       setScanResults((prev) => ({ ...prev, [p.id]: result }));
       // 有新导入时刷新项目笔记数
       if (result.imported > 0) {
-        await loadProjects();
+        // B3：声明这份数据已不可信，由 query 决定何时重取并通知所有依赖它的组件
+        await queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
       }
     } catch (err) {
       console.error('扫描导入失败:', err);
@@ -226,7 +256,8 @@ export function useProjects() {
     if (!ok) return;
     try {
       await removeNoteFromProject(p.id, n.id);
-      await loadProjects();
+      // B3：声明这份数据已不可信，由 query 决定何时重取并通知所有依赖它的组件
+      await queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
       await refreshExpandedDetail(p);
     } catch (err) {
       console.error('移出笔记失败:', err);
@@ -255,7 +286,11 @@ export function useProjects() {
     expanded,
     scanning,
     scanResults,
-    loadProjects,
+    /** 重新拉取项目列表（新建项目后由调用方触发）。
+     *  迁移 5.2 / C1 前它叫 `loadProjects`，是手写的取数函数；
+     *  现在就是 query 的 `refetch` —— 语义相同（都返回 Promise、都重新取一次），
+     *  所以直接换名而不是包一层同名的壳（那会留下一个与 query 并行的手写入口）。 */
+    refetch,
     startRename,
     updateRenameField,
     handleRename,

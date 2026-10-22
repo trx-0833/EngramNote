@@ -13,6 +13,8 @@
  * 归 `pages/projects/` 下的组件。拆分是**纯提取**：`renderCard(p, index)` 的 JSX、
  * 加载/空列表两种状态的文案、以及破坏性操作的确认逻辑都一字未动。
  */
+import { useCallback } from 'react';
+
 import Icon from '../components/Icon';
 import NewProjectForm from './projects/NewProjectForm';
 import ProjectCard from './projects/ProjectCard';
@@ -36,7 +38,7 @@ export default function Projects() {
     expanded,
     scanning,
     scanResults,
-    loadProjects,
+    refetch,
     startRename,
     updateRenameField,
     handleRename,
@@ -48,8 +50,24 @@ export default function Projects() {
     handleRemoveNote,
   } = useProjects();
 
+  /**
+   * 刷新项目列表，适配成子组件期望的 `() => Promise<void>`
+   *
+   * 理由见本文件的补丁脚本注释：`useAddNotesPanel` 与 `NewProjectForm`
+   * 只该知道"有个刷新函数"，不该知道 TanStack Query 的返回类型。
+   * `await` 一次是为了把 `Promise<QueryObserverResult<…>>` 收成 `Promise<void>`。
+   */
+  const loadProjects = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
+
   // 添加笔记面板（候选笔记 / 勾选 / 提交）
   const addNotes = useAddNotesPanel({
+    // ⚠️ 这里必须叫 `loadProjects`：它是 `useAddNotesPanel` 自己的**选项名**
+    // （不是本页从 `useProjects()` 解构出来的那个）。迁移时按名字盲替换会把它
+    // 一起改掉，`tsc` 报 TS2353「'refetch' does not exist in type
+    // 'UseAddNotesPanelOptions'」—— 那条错误信息指向选项类型，很容易以为是
+    // 类型定义要改，其实是替换打偏了。
     loadProjects,
     refreshExpandedDetail,
   });

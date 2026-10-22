@@ -42,6 +42,8 @@ import { resetContractDriftNotices } from './contractDrift';
 import graphMutationsSource from './knowledgegraph/useGraphMutations.ts?raw';
 import useProjectsSource from './projects/useProjects.ts?raw';
 
+import { QueryWrapper } from '../test/render';
+
 // ── mock 掉整条 API 层：本文件测的是页面行为，不是接口契约 ──
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
@@ -164,29 +166,35 @@ function NoteDetailStub() {
 
 function renderPage(initialEntry = '/projects') {
   return render(
-    // 真实 ToastProvider（与 main.tsx 一致）：契约漂移提示就走这条全局出口，
-    // 因此"提示出现了没有"可以在真实 DOM 上断言，而不是靠替身自说自话
-    <ToastProvider>
-      {/* 批次 D3 后半：`useProjects` 的两次二次确认改走 `useConfirm()`，
-          渲染树里必须有这个宿主（层级与 main.tsx 一致）。确认框本身是真实的，
-          所以"点确认 / 点取消"都在真实 DOM 上操作，不再靠 confirm 间谍 */}
-      <ConfirmProvider>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <Routes>
-            <Route
-              path="/projects"
-              element={
-                // 与 App.tsx 一致：页面被路由级错误边界包住
-                <ErrorBoundary resetKey="/projects">
-                  <Projects />
-                </ErrorBoundary>
-              }
-            />
-            <Route path="/notes/:noteId" element={<NoteDetailStub />} />
-          </Routes>
-        </MemoryRouter>
-      </ConfirmProvider>
-    </ToastProvider>,
+    // 迁移 5.2 / C1：`useProjects` 的读改走 `useQuery` ⇒ 渲染树必须有取数层。
+    // 这里用 `QueryWrapper` 而不是 `renderWithProviders`：后者只给裸的
+    // `MemoryRouter`，而本用例需要**具体的 `<Routes>`**（两条路由 +
+    // 路由级 ErrorBoundary），光有路由上下文不够。
+    <QueryWrapper>
+      {/* 真实 ToastProvider（与 main.tsx 一致）：契约漂移提示就走这条全局出口，
+          因此"提示出现了没有"可以在真实 DOM 上断言，而不是靠替身自说自话 */}
+      <ToastProvider>
+        {/* 批次 D3 后半：`useProjects` 的两次二次确认改走 `useConfirm()`，
+            渲染树里必须有这个宿主（层级与 main.tsx 一致）。确认框本身是真实的，
+            所以"点确认 / 点取消"都在真实 DOM 上操作，不再靠 confirm 间谍 */}
+        <ConfirmProvider>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route
+                path="/projects"
+                element={
+                  // 与 App.tsx 一致：页面被路由级错误边界包住
+                  <ErrorBoundary resetKey="/projects">
+                    <Projects />
+                  </ErrorBoundary>
+                }
+              />
+              <Route path="/notes/:noteId" element={<NoteDetailStub />} />
+            </Routes>
+          </MemoryRouter>
+        </ConfirmProvider>
+      </ToastProvider>
+    </QueryWrapper>,
   );
 }
 
@@ -973,5 +981,45 @@ describe('窄屏布局：溢出用换行解决，而不是撑破卡片', () => {
     // 内联优先于样式表：留着 0.8rem（12.8px）就会盖掉全局的 `input { font-size: 1rem }`
     // （components.css:115，正好 16px）。jsdom 不加载样式表，所以这里钉的是"没有内联覆盖"。
     expect(input.style.fontSize).toBe('');
+  });
+});
+
+/**
+ * B3（迁移 5.2 / C1）：写操作之后**列表一定刷**
+ *
+ * ## 为什么这条要单独测 —— 它守的是"失效"而不是"能刷新"
+ *
+ * 生产默认 `staleTime: 30_000`。也就是说：**光靠 query 自己，写完之后
+ * 30 秒内是不会重取的**（缓存还新鲜）。所以"改完列表会不会变"完全取决于
+ * 写操作有没有**显式失效**那一条 key。
+ *
+ * 如果哪天有人把 `invalidateQueries` 删掉（或把 key 写错），表现是
+ * "刚改完看不出变化、过一会儿又对了" —— 一个**时快时慢、不会报错**的缺陷。
+ * 这条用例把时间这一维去掉：写完**立刻**断言重新取过。
+ *
+ * ⚠️ **删除**那一路已经有覆盖了：本文件 `:460` 的
+ * `expect(mockedProjects).toHaveBeenCalledTimes(2)`（在 `waitFor` 的 1 秒内）
+ * 同样证明的是"立刻重取"。所以这里只补**重命名**那一路 ——
+ * 原先没有任何用例断言它刷新列表。
+ */
+describe('B3 写后失效（invalidateQueries）', () => {
+  it('★ 重命名项目后立刻重新取列表', async () => {
+    renderPage();
+    await screen.findByText('Transformer 论文精读');
+
+    const before = mockedProjects.mock.calls.length;
+
+    await userEvent.click(screen.getByRole('button', { name: '重命名' }));
+    // 行内编辑区与顶部同名输入框同时存在（都绑同一份状态），取编辑区的那个
+    // —— 与 `:351` 那条既有用例同一手法（`getAllByPlaceholderText` 取 [1]）。
+    // 用 `findByDisplayValue` 会撞上"多个元素同值"而抛错。
+    const nameInputs = screen.getAllByPlaceholderText('项目名称');
+    await userEvent.clear(nameInputs[1]);
+    await userEvent.type(nameInputs[1], '改过的名字');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
+    // ★ 关键断言：**立刻**又取了一次 —— 而不是等 30 秒后自然过期
+    await waitFor(() => expect(mockedProjects.mock.calls.length).toBeGreaterThan(before));
   });
 });

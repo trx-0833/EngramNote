@@ -143,8 +143,11 @@ export async function createProject(name: string, description?: string): Promise
  *
  * @returns 项目列表（含笔记数量）
  */
-export async function getProjects(): Promise<Project[]> {
-  return request<Project[]>('/projects');
+export async function getProjects(
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<Project[]> {
+  return request<Project[]>('/projects', { signal: options?.signal });
 }
 
 /**
