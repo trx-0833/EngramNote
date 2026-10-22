@@ -29,6 +29,8 @@ export async function getNotes(
   pageSize = 20,
   keyword?: string,
   noteRole?: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
 ): Promise<NoteListResponse> {
   // 查询参数由契约派生（阶段 5.1 / S3b）：键序与迁移前逐字一致；
   // `keyword` / `note_role` 为空值时不产生参数（`buildQuery` 跳过 undefined/'' ）
@@ -38,7 +40,7 @@ export async function getNotes(
     keyword,
     note_role: noteRole,
   };
-  return request<NoteListResponse>(`/notes${buildQuery(query)}`);
+  return request<NoteListResponse>(`/notes${buildQuery(query)}`, { signal: options?.signal });
 }
 
 /**
@@ -132,6 +134,8 @@ export async function getArchivedNotes(
   page = 1,
   pageSize = 20,
   noteRole?: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
 ): Promise<NoteListResponse> {
   // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/notes/archive`
   const query: QueryOf<'/notes/archive', 'get'> = {
@@ -139,7 +143,9 @@ export async function getArchivedNotes(
     page_size: pageSize,
     note_role: noteRole,
   };
-  return request<NoteListResponse>(`/notes/archive${buildQuery(query)}`);
+  return request<NoteListResponse>(`/notes/archive${buildQuery(query)}`, {
+    signal: options?.signal,
+  });
 }
 
 /**

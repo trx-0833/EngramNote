@@ -15,9 +15,9 @@
  * | 点击真的调用 `exportNotesZip('clean')` | 按钮看起来响应了但什么都没做 |
  * | 失败时透传**后端文案** | 后端那句"没有可导出的正文 —— …请换一个版本或先清洗"说清了原因与出路，前端自造文案给不出这个信息 |
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { renderWithProviders } from '../test/render';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api/client', () => ({
@@ -55,12 +55,14 @@ function note() {
   } as never;
 }
 
+/**
+ * 迁移 5.2 / C1：页面现在用 useQuery，所以渲染必须带取数层。
+ * 
+enderWithProviders 同时给 Provider 与 MemoryRouter（页面里用了 useNavigate），
+ * 所以原来手写的 <MemoryRouter> 一起并进去了。
+ */
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <NotesList />
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<NotesList />, { route: '/notes' });
 }
 
 /** jsdom 没有 URL.createObjectURL —— 每次都要补，否则下载路径会抛 */

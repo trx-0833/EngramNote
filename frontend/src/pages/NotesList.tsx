@@ -6,7 +6,8 @@
  * 3. 删除笔记（带确认提示）
  * 4. 点击笔记卡片跳转到详情页
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   getNotes,
@@ -15,6 +16,7 @@ import {
   retryConvert,
   exportNotesZip,
   type Note,
+  type NoteListResponse,
 } from '../api/client';
 import { DeleteNoteDialog } from '../components/DeleteNoteDialog';
 import Icon from '../components/Icon';
@@ -50,15 +52,21 @@ import { useTranslation } from '../i18n';
  * - keyword: 搜索关键词，输入时自动重置到第 1 页
  * - loading: 数据加载状态
  */
+/**
+ * 笔记列表的 query key 前缀（迁移 5.2 / C1）
+ *
+ * 导出成常量：写操作（删除/重试）要**就地改写**的就是它。
+ * 字面量在几处各写一遍迟早不一致，而那种不一致**不会报错** ——
+ * 只会让"删完列表没变化"这种问题偶尔出现。
+ */
+export const NOTES_QUERY_KEY = ['notes'] as const;
+
 export default function NotesList() {
   const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
-  /** 当前页的笔记列表 */
-  const [notes, setNotes] = useState<Note[]>([]);
-  /** 笔记总数，用于计算总页数 */
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   /** 当前页码（从 1 开始） */
   const [page, setPage] = useState(1);
   /** 搜索关键词 */
@@ -73,9 +81,7 @@ export default function NotesList() {
     personal_note: false,
   });
   /** 数据加载状态 */
-  const [loading, setLoading] = useState(true);
   /** 错误信息 */
-  const [error, setError] = useState('');
   /** 待移入回收站的笔记（打开删除确认弹窗） */
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
 
@@ -84,28 +90,58 @@ export default function NotesList() {
 
   // 当页码或关键词或筛选条件变化时重新获取笔记列表
   const showArchived = archivedByRole[noteRole];
-  const fetchNotes = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = showArchived
-        ? await getArchivedNotes(page, pageSize, noteRole)
-        : await getNotes(page, pageSize, keyword || undefined, noteRole);
-      setNotes(res.items);
-      setTotal(res.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-    // `t` 进依赖：语言切换后重新加载时，错误文案要是新语言的
-  }, [page, keyword, noteRole, showArchived, t]);
 
-  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchNotes();
-  }, [page, keyword, noteRole, showArchived, fetchNotes]);
+  /**
+   * 笔记列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## `notes` / `total` / `loading` / `error` 四个本地状态去哪了
+   *
+   * 改动前是 `fetchNotes`（`useCallback`）+ `useEffect` + 四个 `useState`。
+   * 现在由 `data` / `isLoading` / `error` 承担 —— **本地那四个整个删掉**，
+   * 不留两套（计划 §4 风险栏："页面里既留旧 state 又用 query"）。
+   *
+   * ## query key 必须把**筛选条件**也算进去
+   *
+   * 分页 / 关键词 / 角色 / 已审阅开关任一变化都要重新取数 —— 这正是
+   * 改动前 `useEffect` 依赖数组里那几项。key 里少一项的后果很隐蔽：
+   * 切到"已审阅"会**显示上一份未筛选的数据**，而且不会报错。
+   * 所以这里把五项一起放进 key，与旧依赖数组逐项对应。
+   *
+   * ## 两种接口按 `showArchived` 分流
+   *
+   * 与改动前完全一致（`getArchivedNotes` 没有 `keyword` 参数，
+   * 已审阅视图本来就不支持搜索）。这个分流是**既有产品行为**，
+   * 迁移不改变它。
+   */
+  const {
+    data: notesData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: [...NOTES_QUERY_KEY, { page, pageSize, keyword, noteRole, showArchived }],
+    queryFn: ({ signal }) =>
+      showArchived
+        ? getArchivedNotes(page, pageSize, noteRole, { signal })
+        : getNotes(page, pageSize, keyword || undefined, noteRole, { signal }),
+  });
+
+  const notes = notesData?.items ?? [];
+  const total = notesData?.total ?? 0;
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('shared.loadFailed')
+    : '';
+
+  /** 就地改写当前这一页的缓存（删除/重试之后，结果确定 ⇒ 不必再问服务器） */
+  function patchCurrentPage(patch: (prev: NoteListResponse) => NoteListResponse) {
+    queryClient.setQueryData<NoteListResponse>(
+      [...NOTES_QUERY_KEY, { page, pageSize, keyword, noteRole, showArchived }],
+      (prev) => (prev ? patch(prev) : prev),
+    );
+  }
 
   /**
    * 处理删除笔记（移入回收站）
@@ -126,9 +162,16 @@ export default function NotesList() {
     if (!noteToDelete) return;
     try {
       await deleteNote(noteToDelete.id);
-      // 乐观更新：从本地状态中移除已删除的笔记，无需重新请求列表
-      setNotes((prev) => prev.filter((n) => n.id !== noteToDelete.id));
-      setTotal((prev) => prev - 1);
+      // 就地改写缓存：移除那一行并把总数减一。
+      // 与改动前的 `setNotes` + `setTotal` 同一语义（结果确定 ⇒ 不必再请求一次），
+      // 只是写进 query 缓存而不是组件状态 —— 这样切页回来时看到的也是更新后的数据。
+      patchCurrentPage((prev) => ({
+        ...prev,
+        items: prev.items.filter((n) => n.id !== noteToDelete.id),
+        total: prev.total - 1,
+      }));
+      // 回收站那一份缓存也失效：刚删的笔记要出现在回收站里
+      await queryClient.invalidateQueries({ queryKey: ['trash'] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('notesList.moveToTrashFailed'));
     } finally {
@@ -145,13 +188,14 @@ export default function NotesList() {
   async function handleRetry(noteId: string) {
     try {
       const result = await retryConvert(noteId);
-      setNotes((prev) =>
-        prev.map((n) =>
+      patchCurrentPage((prev) => ({
+        ...prev,
+        items: prev.items.map((n) =>
           n.id === noteId
             ? { ...n, status: result.status, error_message: result.error_message }
             : n,
         ),
-      );
+      }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('shared.retryFailed'));
     }
@@ -328,7 +372,7 @@ export default function NotesList() {
       {loading ? (
         <LoadingSpinner />
       ) : error ? (
-        <ErrorDisplay message={error} onRetry={fetchNotes} />
+        <ErrorDisplay message={error} onRetry={() => refetch()} />
       ) : notes.length === 0 ? (
         /* 空状态：根据是否有搜索关键词显示不同提示 */
         <EmptyState
