@@ -138,6 +138,8 @@ export async function getKnowledgeCards(
   pageSize = 20,
   noteId?: string,
   keyword?: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
 ): Promise<KnowledgeCardListResponse> {
   // 查询参数由契约派生（阶段 5.1 / S3b）：键序与迁移前一致，空值不产生参数
   const query: QueryOf<'/understanding/cards', 'get'> = {
@@ -146,7 +148,9 @@ export async function getKnowledgeCards(
     note_id: noteId,
     keyword,
   };
-  return request<KnowledgeCardListResponse>(`/understanding/cards${buildQuery(query)}`);
+  return request<KnowledgeCardListResponse>(`/understanding/cards${buildQuery(query)}`, {
+    signal: options?.signal,
+  });
 }
 
 /**

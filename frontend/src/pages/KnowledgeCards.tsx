@@ -3,9 +3,14 @@
  * @description 展示当前用户所有知识卡片，按所属笔记分组，每组可折叠/展开
  *              支持按卡片分类（常规/盲点/拓展）筛选、重点难点标记、掌握度进度条与拓展知识点生成
  */
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getKnowledgeCards, type KnowledgeCard } from '../api/client';
+import {
+  getKnowledgeCards,
+  type KnowledgeCard,
+  type KnowledgeCardListResponse,
+} from '../api/client';
 import { generateExtension, generateExtensionQuestions, markCard } from '../api/knowledge';
 import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -97,19 +102,46 @@ function groupByNote(
     });
 }
 
+/**
+ * 卡片列表查询的 key 前缀（迁移 5.2 / C1）
+ *
+ * 完整 key 是 `[...CARDS_QUERY_KEY, { noteId, keyword, page }]` ——
+ * 三个筛选维度都必须在 key 里，少一项会**显示上一份数据**且不报错。
+ */
+export const CARDS_QUERY_KEY = ['knowledgeCards'] as const;
+
+/**
+ * 缓存里存的**值**的形状
+ *
+ * = `queryFn` 的返回值：接口响应 + 这次实际请求的页码（`wantedPage`）
+ * 与调用方要的页码（`targetPage`）。后两者给下面那个 effect 用来判断
+ * "页码被夹过没有"。
+ */
+type CardsCacheValue = KnowledgeCardListResponse & {
+  wantedPage: number;
+  targetPage: number;
+};
+
 export default function KnowledgeCards() {
   const { t } = useTranslation();
   const { cardTypeLabels, cardCategoryLabels } = useLabels();
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [groups, setGroups] = useState<NoteGroup[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  /**
+   * 分组展开态（迁移 5.2 / C1）
+   *
+   * 与改动前的语义**逐字同义**："每次取数完成后全展开"。
+   * 做法与 B1-5 的 `QuestionSets` 相同 —— 把展开态**绑定到当前数据的签名**上，
+   * 签名不一致就退回"全展开"，因此不需要任何 effect。
+   */
+  const [expandedState, setExpandedState] = useState<{
+    sig: string;
+    ids: Set<string>;
+  } | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [filterTab, setFilterTab] = useState<CategoryFilter>('all');
+  const queryClient = useQueryClient();
   /**
    * 当前页码（服务端分页，见 `PAGE_SIZE` 的说明）。
    *
@@ -137,46 +169,101 @@ export default function KnowledgeCards() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteId = searchParams.get('note_id') || undefined;
 
-  const fetchCards = useCallback(
-    async (keyword?: string, targetPage = 1) => {
-      // 页码越界守卫：`total` 会因为删除卡片/笔记而变小，而 `page` 还停在旧值上，
-      // 于是请求会返回空页 —— 页面显示"暂无知识卡片"（假的），而 `total` 不为 0。
-      // 这里直接不发那个请求，改发最后一页。在**取数之前**判断，所以不会出现
-      // "先渲染一帧空列表"的闪烁。
-      //
-      // ⚠️ 读的是 `totalRef` 而不是 `total` state：`total` 若进依赖数组，
-      // `setTotal` 会让 `fetchCards` 换新引用 → 取数 effect 重跑 → 再取一次，
-      // 变成"每取一次数就多一次请求"。ref 不参与依赖，没有这个问题。
+  /**
+   * 卡片列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 页码越界守卫留在 `queryFn` **内部**、发请求**之前**
+   *
+   * `total` 会因为删除卡片/笔记而变小，而 `page` 还停在旧值上，于是请求会返回
+   * 空页 —— 页面显示"暂无知识卡片"（假的），而 `total` 不为 0。
+   * 必须**直接不发那个请求**、改发最后一页；搬到渲染期就会退化成
+   * "发了再纠正"，那正是它要避免的"先渲染一帧空列表"的闪烁。
+   *
+   * ⚠️ 读的是 `totalRef` 而不是 `total`：后者进依赖会让取数函数换新引用
+   * ⇒ 多一次请求。迁移后 `totalRef` 仍是 ref、不参与任何依赖，理由继续成立。
+   */
+  const {
+    data: cardsData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: [...CARDS_QUERY_KEY, { noteId, keyword: searchKeyword || undefined, page }],
+    queryFn: async ({ signal }) => {
+      const targetPage = page;
       const lastPage = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE));
       const wantedPage = Math.min(targetPage, lastPage);
 
-      setLoading(true);
-      try {
-        // 服务端分页（走查报告 §4）：此前硬编码 page_size=999，
-        // 3469 张卡片只渲染 999 张，界面上没有任何提示 —— 静默丢数据。
-        const data = await getKnowledgeCards(wantedPage, PAGE_SIZE, noteId, keyword);
-        const grouped = groupByNote(data.items, t);
-        setGroups(grouped);
-        setTotal(data.total);
-        totalRef.current = data.total;
-        setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
-        // 页码被夹到最后一页时把 state 同步回来，否则控件上显示的还是旧页码
-        if (wantedPage !== targetPage) setPage(wantedPage);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('knowledgeCards.loadFailed'));
-      } finally {
-        setLoading(false);
-      }
-      // \	\ 进依赖：语言切换后重新加载时，错误文案要是新语言的
+      // 服务端分页（走查报告 §4）：此前硬编码 page_size=999，
+      // 3469 张卡片只渲染 999 张，界面上没有任何提示 —— 静默丢数据。
+      const res = await getKnowledgeCards(
+        wantedPage,
+        PAGE_SIZE,
+        noteId,
+        // ⚠️ `|| undefined` 不能丢：原调用点是 `fetchCards(searchKeyword || undefined, page)`。
+        //    少了它，空搜索词会传成 `''` 而不是 `undefined` —— 实测被既有的分页用例
+        //    当场抓出来（`expected [1, 100, undefined, ''] to deeply equal
+        //    [1, 100, undefined, undefined]`）。虽然 `buildQuery` 对两者都跳过，
+        //    但那是接口层的实现细节，不该由它来兜住调用点的语义。
+        searchKeyword || undefined,
+        { signal },
+      );
+      return { ...res, wantedPage, targetPage };
     },
-    [noteId, t],
-  );
+  });
 
-  // 挂载 / 页码变化 / 搜索词变化时加载数据（数据获取型 effect，同步 setState 豁免）
+  /**
+   * 就地改缓存里的某一张卡片
+   *
+   * 缓存里存的是 `queryFn` 的返回值（`{ ...res, wantedPage, targetPage }`），
+   * 所以改卡片要穿过 `items` 这一层。抽成函数是为了让三处调用点
+   * （标记字段 / 删除 / 将来的其它）形状一致 —— 也为了让"改的是原始列表
+   * 而不是派生的 groups"这件事在调用点**看得见**。
+   */
+  function patchCachedItems(update: (card: KnowledgeCard) => KnowledgeCard) {
+    queryClient.setQueryData<CardsCacheValue>(CARDS_QUERY_KEY, (prev) =>
+      prev ? { ...prev, items: prev.items.map(update) } : prev,
+    );
+  }
+
+  /**
+   * 取数成功后的两件收尾（**必须在 effect 里**，理由见下）
+   *
+   * 1. `totalRef.current = cardsData.total` —— 供下一次 clamp 使用；
+   * 2. 页码被夹到最后一页时把 `page` 同步回来，否则控件上显示的还是旧页码。
+   *
+   * ## 为什么这两件不能挪到渲染期
+   *
+   * 第 1 件写 ref —— React 不允许在渲染期写 ref（会与并发渲染打架）。
+   * 第 2 件是"数据回来之后才知道要改页码"，属于**由数据驱动的状态同步**，
+   * 只能在数据变化之后做。所以这是 effect 的正当用法，不是"派生状态"。
+   */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchCards(searchKeyword || undefined, page);
-  }, [noteId, fetchCards, searchKeyword, page]);
+    if (!cardsData) return;
+    totalRef.current = cardsData.total;
+    if (cardsData.wantedPage !== cardsData.targetPage) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPage(cardsData.wantedPage);
+    }
+  }, [cardsData]);
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('knowledgeCards.loadFailed')
+    : '';
+
+  /** 按笔记分组（渲染期算：切语言不再重新取数，与 B1-5 的 `QuestionSets` 同） */
+  const groups = useMemo(() => groupByNote(cardsData?.items ?? [], t), [cardsData, t]);
+
+  const total = cardsData?.total ?? 0;
+
+  /** 展开态：签名一致才用用户的手动选择，否则退回"全展开" */
+  const groupsSignature = groups.map((g) => g.note_id).join('|');
+  const expandedNotes =
+    expandedState?.sig === groupsSignature
+      ? expandedState.ids
+      : new Set(groups.map((g) => g.note_id));
 
   // 点击页面任意位置时关闭操作菜单
   useEffect(() => {
@@ -206,15 +293,15 @@ export default function KnowledgeCards() {
   }
 
   function toggleGroup(noteId: string) {
-    setExpandedNotes((prev) => {
-      const next = new Set(prev);
-      if (next.has(noteId)) {
-        next.delete(noteId);
-      } else {
-        next.add(noteId);
-      }
-      return next;
-    });
+    // 手动折叠要把**当前签名**一起写进去，否则下一次渲染会被判成"数据变了"
+    // 而退回全展开 —— 表现是"点了折叠没反应"（与 B1-5 的 QuestionSets 同）。
+    const next = new Set(expandedNotes);
+    if (next.has(noteId)) {
+      next.delete(noteId);
+    } else {
+      next.add(noteId);
+    }
+    setExpandedState({ sig: groupsSignature, ids: next });
   }
 
   /** 根据当前筛选 tab 在前端过滤分组 */
@@ -243,12 +330,10 @@ export default function KnowledgeCards() {
     setActionLoadingCardId(card.id);
     try {
       const updated = await markCard(card.id, { [field]: newValue });
-      setGroups((prev) =>
-        prev.map((g) => ({
-          ...g,
-          cards: g.cards.map((c) => (c.id === card.id ? { ...c, ...updated } : c)),
-        })),
-      );
+      // ⚠️ 这里改的是**缓存里的原始列表**（`items`），不是派生出来的 `groups`。
+      //    盲替换 `setGroups(` 时打偏过一次 —— 两种 `prev` 形状完全不同，
+      //    而 `tsc` 只报"找不到某个类型名"，看不出是替换打偏了。
+      patchCachedItems((c) => (c.id === card.id ? { ...c, ...updated } : c));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('knowledgeCards.actionFailed'));
     } finally {
@@ -268,7 +353,8 @@ export default function KnowledgeCards() {
       // `await fetchCards(...)` 仍在同一个 try/finally 里，只是搬到了
       // "用户在框里做了选择"之后（确认与取消都要刷新，逐字保留原行为）
       setConfirmExtensionQuestions(result.parent_card_id);
-      await fetchCards(searchKeyword || undefined, page);
+      // B3：声明这份数据已不可信（生成拓展题会新增卡片，必须重取）
+      await queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('knowledgeCards.generateExtensionFailed'));
     } finally {
@@ -380,7 +466,7 @@ export default function KnowledgeCards() {
       {loading ? (
         <LoadingSpinner />
       ) : error ? (
-        <ErrorDisplay message={error} onRetry={() => fetchCards()} />
+        <ErrorDisplay message={error} onRetry={() => refetch()} />
       ) : filteredGroups.length === 0 ? (
         <EmptyState
           message={t('knowledgeCards.empty')}

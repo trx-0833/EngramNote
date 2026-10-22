@@ -11,12 +11,12 @@
  * 2. 色阶仍然**只有 `getMasteryColor` 一个来源**（与 `difficultyColors` 同源）；
  * 3. `> 0` 的渲染判据没变：从未复习过的卡片不显示"掌握度 0%"。
  */
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getKnowledgeCards, type KnowledgeCard } from '../api/client';
 import { getMasteryColor } from '../utils/labels';
 import KnowledgeCards from './KnowledgeCards';
+import { renderWithProviders } from '../test/render';
 import masteryStyles from '../components/MasteryRing.module.css';
 
 vi.mock('../api/client', () => ({ getKnowledgeCards: vi.fn() }));
@@ -56,12 +56,13 @@ function makeCard(over: Partial<KnowledgeCard> = {}): KnowledgeCard {
   };
 }
 
+/**
+ * 迁移 5.2 / C1：页面现在用 `useQuery`，渲染必须带取数层。
+ * `renderWithProviders` 同时给 Provider 与 `MemoryRouter`
+ * （页面用了 `useSearchParams`）。
+ */
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <KnowledgeCards />
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<KnowledgeCards />, { route: '/cards' });
 }
 
 /** 接口一次性返回整页（`page` / `page_size` 是响应契约的一部分，不能省） */
@@ -148,7 +149,14 @@ describe('知识卡片列表：服务端分页', () => {
     renderPage();
     await screen.findByText('浮充的定义');
 
-    expect(mockedCards).toHaveBeenCalledWith(1, 100, undefined, undefined);
+    // 重新推导（迁移 5.2 / C1）：**前四个参数**逐字未变，新增的第 5 个是
+    // `{ signal }`（卸载即取消）。
+    //
+    // ⚠️ 不用 `toHaveBeenCalledWith(…, expect.anything())`：那个写法在失败时
+    // Vitest 打印的 diff 会把第 4、5 位错开，看起来像"第 4 个参数变了"，
+    // 而实际没有（实测就是这么被误导过一次）。直接断言前四位的切片，
+    // 意图（"不再写死 999"）更直白，也不受后面多几个参数影响。
+    expect(mockedCards.mock.calls[0].slice(0, 4)).toEqual([1, 100, undefined, undefined]);
   });
 
   it('★ 超过一页时出现分页控件，翻页后请求第 2 页', async () => {
@@ -180,7 +188,13 @@ describe('知识卡片列表：服务端分页', () => {
     screen.getByRole('button', { name: '下一页' }).click();
     await screen.findByText('第二页的卡片');
 
-    expect(mockedCards).toHaveBeenLastCalledWith(2, 100, undefined, undefined);
+    // 重新推导（迁移 5.2 / C1）：同样是"前四个参数逐字未变、第 5 个是 `{ signal }`"。
+    // 取**最后一次**调用的切片 —— 与 `toHaveBeenLastCalledWith` 同义。
+    // ⚠️ 不用 `calls.at(-1)`：本项目的 `lib` 目标低于 ES2022，`Array.prototype.at`
+    //    在类型层不存在（实测 TS2550，提示"要不要把 lib 改成 es2022"）。
+    //    为一条测试断言去动全局 `lib` 目标不值得，所以用下标。
+    const calls = mockedCards.mock.calls;
+    expect(calls[calls.length - 1].slice(0, 4)).toEqual([2, 100, undefined, undefined]);
     expect(screen.getByText('第 2 / 35 页')).toBeInTheDocument();
     expect(screen.getByText('本页显示第 101–101 张，共 3469 张')).toBeInTheDocument();
   });

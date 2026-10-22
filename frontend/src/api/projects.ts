@@ -69,10 +69,14 @@ export async function createFolder(
  * @param days - 查询最近多少天的文件夹，默认 7 天
  * @returns 文件夹列表
  */
-export async function getFolders(days = 7): Promise<Folder[]> {
+export async function getFolders(
+  days = 7,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<Folder[]> {
   // 查询参数由契约派生（阶段 5.1 / S3b）：`GET /api/folders` 只有 `days`
   const query: QueryOf<'/folders', 'get'> = { days };
-  return request<Folder[]>(`/folders${buildQuery(query)}`);
+  return request<Folder[]>(`/folders${buildQuery(query)}`, { signal: options?.signal });
 }
 
 /**

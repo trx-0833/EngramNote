@@ -27,6 +27,7 @@ import {
   type FolderDetail,
   type NoteInFolder,
 } from '../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -151,6 +152,14 @@ let pageMemory: { folderId: string | null; scrollY: number } | null = null;
  * - statusFilter: 笔记状态筛选
  * - uploading: 是否正在上传
  */
+/**
+ * 文件夹列表查询的 key（迁移 5.2 / C1）
+ *
+ * 三处写操作（新建/删除/重命名）就地改写的就是它 ——
+ * 字面量写三遍迟早不一致，而那种不一致**不会报错**。
+ */
+export const FOLDERS_QUERY_KEY = ['folders'] as const;
+
 export default function DailyMaterials() {
   const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels } = useLabels();
@@ -173,19 +182,17 @@ export default function DailyMaterials() {
   /** 待应用的滚动位置（详情渲染完才滚，见下面那条 `useLayoutEffect`） */
   const pendingScrollRef = useRef<number | null>(null);
   /** 文件夹列表 */
-  const [folders, setFolders] = useState<Folder[]>([]);
   /** 当前展开的文件夹 ID */
   const [expandedFolderId, setExpandedFolderId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   /** 当前展开文件夹的详情 */
   const [folderDetail, setFolderDetail] = useState<FolderDetail | null>(null);
   /** 笔记状态筛选 */
   const [statusFilter, setStatusFilter] = useState<string>('all');
   /** 数据加载状态 */
-  const [loading, setLoading] = useState(true);
   /** 详情加载状态 */
   const [detailLoading, setDetailLoading] = useState(false);
   /** 错误信息 */
-  const [error, setError] = useState('');
   /** 详情错误信息 */
   const [detailError, setDetailError] = useState('');
   /** 是否正在创建文件夹 */
@@ -268,34 +275,39 @@ export default function DailyMaterials() {
   );
 
   /**
-   * 获取文件夹列表
+   * 文件夹列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 原来那两条 eslint 豁免整块消失了
+   *
+   * 改动前这里是 `fetchFolders()`（组件内普通函数）+ `useEffect([])`，
+   * 并且挂着**两条**注释与豁免：
+   *
+   * - `set-state-in-effect`：数据获取型 effect 的同步 setState；
+   * - `exhaustive-deps`：`fetchFolders` 是普通函数，写进依赖数组会**无限循环**；
+   *   而包 `useCallback` 又会被编译器规则判为 `Existing memoization could not
+   *   be preserved`（它闭包了多个 state，**不适合**记忆化）。
+   *
+   * 也就是说：那条注释记录的是"这个形态在这个仓库里**没有**干净的写法"。
+   * 换成 query 之后两个问题**同时消失** —— 取数不再需要 effect，
+   * 也就不需要往依赖数组里放任何东西。这是迁移顺带清掉的一处结构债。
    */
-  async function fetchFolders() {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await getFolders(7);
-      setFolders(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('dailyMaterials.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }
+  const {
+    data: foldersData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: FOLDERS_QUERY_KEY,
+    queryFn: ({ signal }) => getFolders(7, { signal }),
+  });
 
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchFolders();
-    // ⚠️ 这里**不能**把 `fetchFolders` 写进依赖数组：它是组件内的普通函数
-    // （不是 `useCallback`），每次渲染都是新引用 —— 加进去会**无限循环**。
-    // 试过包 `useCallback`，但它闭包了多个 state，react-hooks 的编译器规则
-    // 直接报 `Existing memoization could not be preserved`，即**它不适合**。
-    // 与 `Trash.tsx` / `Dashboard.tsx` / `LearningGoals.tsx` 是同一形态、同一处理。
-    // ⚠️ 本轮的 i18n 改动**没有**改变这条依赖数组的取值，只是把 `t` 加进另一处
-    // 之后，规则开始检查这里 —— 所以这两条豁免是**本轮引入的**，不是本来就有的。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const folders = foldersData ?? [];
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('dailyMaterials.loadFailed')
+    : '';
 
   /**
    * 从浏览器后退/前进回到本页时，把上次的展开态接回去（批次 E8）。
@@ -395,7 +407,7 @@ export default function DailyMaterials() {
     try {
       const today = new Date().toISOString().split('T')[0];
       const folder = await createFolder(t('dailyMaterials.defaultFolderName', { date: today }));
-      setFolders((prev) => [folder, ...prev]);
+      queryClient.setQueryData<Folder[]>(FOLDERS_QUERY_KEY, (prev) => [folder, ...(prev ?? [])]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('dailyMaterials.createFailed'));
     } finally {
@@ -421,7 +433,9 @@ export default function DailyMaterials() {
   async function performDeleteFolder(folderId: string) {
     try {
       await deleteFolder(folderId);
-      setFolders((prev) => prev.filter((f) => f.id !== folderId));
+      queryClient.setQueryData<Folder[]>(FOLDERS_QUERY_KEY, (prev) =>
+        (prev ?? []).filter((f) => f.id !== folderId),
+      );
       if (expandedFolderId === folderId) {
         setExpandedFolderId(null);
         setFolderDetail(null);
@@ -477,7 +491,9 @@ export default function DailyMaterials() {
     setRenaming(true);
     try {
       const updated = await updateFolder(folderId, trimmed);
-      setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, name: updated.name } : f)));
+      queryClient.setQueryData<Folder[]>(FOLDERS_QUERY_KEY, (prev) =>
+        (prev ?? []).map((f) => (f.id === folderId ? { ...f, name: updated.name } : f)),
+      );
       // 若该文件夹已展开，同步更新详情中的文件夹名
       setFolderDetail((prev) =>
         prev && prev.id === folderId ? { ...prev, name: updated.name } : prev,
@@ -629,7 +645,7 @@ export default function DailyMaterials() {
       {loading ? (
         <LoadingSpinner />
       ) : error ? (
-        <ErrorDisplay message={error} onRetry={fetchFolders} />
+        <ErrorDisplay message={error} onRetry={() => refetch()} />
       ) : folders.length === 0 ? (
         <EmptyState
           message={t('dailyMaterials.emptyFolders')}

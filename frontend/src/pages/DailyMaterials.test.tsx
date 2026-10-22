@@ -35,6 +35,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Folder, FolderDetail, NoteInFolder } from '../api/client';
 import DailyMaterials from './DailyMaterials';
+import { QueryWrapper } from '../test/render';
 
 // ── mock 掉整条 API 层：本文件测的是页面行为，不是接口契约 ──
 // 与 `Projects.test.tsx` 同形：先 spread `importActual`，只把这一页会调的七个函数
@@ -99,13 +100,18 @@ function NotesEntryStub() {
 
 function renderApp(initialEntries: string[]) {
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <Routes>
-        <Route path="/daily" element={<DailyMaterials />} />
-        <Route path="/notes/:noteId" element={<NoteStub />} />
-        <Route path="/home" element={<NotesEntryStub />} />
-      </Routes>
-    </MemoryRouter>,
+    // 迁移 5.2 / C1：页面现在用 `useQuery` ⇒ 渲染树必须有取数层。
+    // 用 `QueryWrapper` 而不是 `renderWithProviders`：本用例需要**具体的
+    // `<Routes>`**（三条路由），光有路由上下文不够。
+    <QueryWrapper>
+      <MemoryRouter initialEntries={initialEntries}>
+        <Routes>
+          <Route path="/daily" element={<DailyMaterials />} />
+          <Route path="/notes/:noteId" element={<NoteStub />} />
+          <Route path="/home" element={<NotesEntryStub />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryWrapper>,
   );
 }
 

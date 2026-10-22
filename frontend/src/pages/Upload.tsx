@@ -6,6 +6,9 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+
+import { PROJECTS_QUERY_KEY } from './projects/useProjects';
 import {
   prepareUpload,
   commitUpload,
@@ -13,7 +16,6 @@ import {
   getNotes,
   getProjects,
   type Note,
-  type Project,
   type PreparedUpload,
 } from '../api/client';
 // 本页私有样式（overhaul-plan 5.6 第三批）：`.upload-zone*` 从 `src/styles/learning.css`
@@ -89,7 +91,6 @@ export default function Upload() {
   /** 笔记角色选择，默认为学习资料 */
   const [noteRole, setNoteRole] = useState('material');
   /** 项目列表 */
-  const [projects, setProjects] = useState<Project[]>([]);
   /** 选中的项目标签 ID 数组（空表示不归属任何项目） */
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   /** 可关联的学习资料列表（仅 personal_note 时加载） */
@@ -118,19 +119,26 @@ export default function Upload() {
     };
   }, []);
 
-  // 加载项目列表，默认不选择项目（留空则不归属任何项目）
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const data = await getProjects();
-        setProjects(data);
-        setSelectedProjectIds([]);
-      } catch (err) {
-        console.error('加载项目列表失败:', err);
-      }
-    };
-    loadProjects();
-  }, []);
+  /**
+   * 项目列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 用的是**项目页那一个 key**
+   *
+   * 改动前这里挂载时取一次就再也不取 —— 在项目页新建项目后切到上传页，
+   * 选择器**看不到新项目**。共用 `PROJECTS_QUERY_KEY` 之后，
+   * 项目页的写操作失效它时这里**跟着更新**（B3 的跨页形态）。
+   *
+   * ## 失败静默（保留原行为）
+   *
+   * 原来 `catch` 只 `console.error`，不向用户报错 —— 项目选择器是可选功能，
+   * 拉不到就不显示。所以这里不接 `error`，保持静默。
+   */
+  const { data: projectsData } = useQuery({
+    queryKey: PROJECTS_QUERY_KEY,
+    queryFn: ({ signal }) => getProjects({ signal }),
+  });
+
+  const projects = projectsData ?? [];
 
   // 当选择"我的笔记"角色时加载可关联的学习资料（派生状态重置豁免）
   useEffect(() => {
