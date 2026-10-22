@@ -152,8 +152,14 @@ export async function getKnowledgeCards(
 /**
  * 获取知识卡片详情
  */
-export async function getKnowledgeCard(cardId: string): Promise<KnowledgeCard> {
-  return request<KnowledgeCard>(`/understanding/cards/${cardId}`);
+export async function getKnowledgeCard(
+  cardId: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<KnowledgeCard> {
+  return request<KnowledgeCard>(`/understanding/cards/${cardId}`, {
+    signal: options?.signal,
+  });
 }
 
 /**

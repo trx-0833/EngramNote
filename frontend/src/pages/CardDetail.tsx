@@ -2,15 +2,14 @@
  * @file 知识卡片详情页面
  * @description 展示单张知识卡片的完整内容、原始出处和关联题目，支持编辑和删除
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   getKnowledgeCard,
   updateKnowledgeCard,
   deleteKnowledgeCard,
   getQuestions,
-  type KnowledgeCard,
-  type QuizItem,
 } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorDisplay from '../components/ErrorDisplay';
@@ -25,17 +24,22 @@ import { useLabels } from '../utils/labels';
 import { useToast } from '../components/Toast';
 import { useTranslation } from '../i18n';
 
+/**
+ * 卡片详情的 query key 前缀（迁移 5.2 / C1）
+ *
+ * 完整 key 是 [...CARD_QUERY_KEY, cardId] —— 前缀单独导出，
+ * 这样失效这一张卡片与失效所有卡片都能表达。
+ */
+export const CARD_QUERY_KEY = ['card'] as const;
+
 export default function CardDetail() {
   const { t } = useTranslation();
   const { cardTypeLabels, difficultyLabels, questionTypeLabels } = useLabels();
   const toast = useToast();
   const { cardId } = useParams<{ cardId: string }>();
   const navigate = useNavigate();
-  const [card, setCard] = useState<KnowledgeCard | null>(null);
-  const [questions, setQuestions] = useState<QuizItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [showAnswer, setShowAnswer] = useState<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
 
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -43,34 +47,55 @@ export default function CardDetail() {
   /** 删除确认框是否打开（批次 D3：原来是同步的 `confirm()`，改成对话框后由 state 承载） */
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const fetchCard = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getKnowledgeCard(cardId!);
-      setCard(data);
-      setEditTitle(data.title);
-      setEditContent(data.content);
-      const qData = await getQuestions(1, 20, data.note_id);
-      const related = qData.items.filter((q) => q.card_id === cardId);
-      setQuestions(related);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('cardDetail.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [cardId, t]);
+  /**
+   * 卡片本体 + 关联题目（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 为什么两样数据仍在**一个** queryFn 里顺序取
+   *
+   * 第二样依赖第一样（`getQuestions(1, 20, data.note_id)` 要用卡片的 `note_id`）。
+   * 拆成两个 query 要么多一次渲染、要么得用 `enabled` 串起来 ——
+   * 两者都会改变请求时序，而 B1 的验收判据是"行为不变"。
+   *
+   * ## `cardId` 缺省时怎么办
+   *
+   * 改动前 `useEffect` 里 `if (!cardId) return;`（不取数、`loading` 永远 true）。
+   * 这里用 `enabled: !!cardId` 表达同一件事 —— 注意 `isLoading` 在 `enabled: false`
+   * 时**也是 true**（query 处于 pending 且没在取数），与改动前的表现一致。
+   */
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: [...CARD_QUERY_KEY, cardId],
+    enabled: !!cardId,
+    queryFn: async ({ signal }) => {
+      const cardData = await getKnowledgeCard(cardId!, { signal });
+      const qData = await getQuestions(1, 20, cardData.note_id);
+      // 只留属于这张卡片的题目（接口按笔记返回）
+      return {
+        card: cardData,
+        questions: qData.items.filter((q) => q.card_id === cardId),
+      };
+    },
+  });
 
-  useEffect(() => {
-    if (!cardId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchCard();
-  }, [cardId, fetchCard]);
+  const card = data?.card ?? null;
+  const questions = data?.questions ?? [];
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('cardDetail.loadFailed')
+    : '';
 
   async function handleSave() {
     if (!card) return;
     try {
       await updateKnowledgeCard(card.id, { title: editTitle, content: editContent });
-      await fetchCard(); // 重新获取完整数据，避免 note_title 丢失
+      // 重新取一遍完整数据，避免 note_title 丢失 —— 与改动前的 `fetchCard()` 同一意图，
+      // 只是交给 query 调度（它还会处理卸载后不 setState）
+      await queryClient.invalidateQueries({ queryKey: [...CARD_QUERY_KEY, cardId] });
       setEditing(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('cardDetail.saveFailed'));
@@ -151,7 +176,18 @@ export default function CardDetail() {
             ) : (
               <>
                 {/* 批次 B3：「编辑 / 删除」此前是全站纯文字按钮 —— 各补一枚图标 */}
-                <button className="btn btn-secondary" onClick={() => setEditing(true)}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    // 进入编辑态时才把当前数据灌进表单 —— 见文件头第 2 点：
+                    // 用 effect 监听数据变化会在用户输入时被后台重取覆盖
+                    if (card) {
+                      setEditTitle(card.title);
+                      setEditContent(card.content);
+                    }
+                    setEditing(true);
+                  }}
+                >
                   <Icon name="edit" size={16} />
                   {t('cardDetail.edit')}
                 </button>
