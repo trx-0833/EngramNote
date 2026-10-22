@@ -36,11 +36,16 @@ from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-#: 原文分段阈值（字符）。中文 1 字 ≈ 1 token 上下，留足输出预算后取 12000
-SEGMENT_CHARS = 12000
+#: 原文分段阈值（字符）。中文 1 字 ≈ 1 token 上下。
+#:
+#: ⚠️ 原本 12000，配合 max_tokens=3000 实测**每段都被截断**。截断的代价不是
+#: 少几条结论，而是**整段白跑**（JSON 不合法 ⇒ 解析成空）。改成 8000
+#: 把输入压小，给输出留预算。
+SEGMENT_CHARS = 8000
 
 #: 每段最多带上多少张卡片标题（卡片多时按顺序截断，避免提示词爆掉）
-MAX_CARD_TITLES = 400
+#: 400 → 200：实测 400 条标题就把输入顶得太大，输出没预算了。
+MAX_CARD_TITLES = 200
 
 SYSTEM_PROMPT = """你是学习材料的审核员。用户给你两样东西：
 
@@ -214,7 +219,10 @@ async def evaluate_note(
             resp = await gateway.chat_detailed(
                 messages,
                 temperature=0.2,
-                max_tokens=3000,
+                # ⚠️ 3000 **不够**：实测最大的一篇（356 卡 + 12000 字原文段）
+                #    连续 4 次全部被截断 ⇒ JSON 不合法 ⇒ 解析成空结果，
+                #    **4 次调用 / 94K tokens 全白花**（与 A4 那边同一个坑）。
+                max_tokens=4096,
                 response_format={"type": "json_object"},
                 scene="note_eval",
             )

@@ -384,6 +384,7 @@ def pick_notes(
     limit: Optional[int],
     min_cards: int = 0,
     note_id: str = "",
+    only_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
     """挑要重跑的笔记：**按卡片数升序**取前 N（小样先挑小的，快且省）
 
@@ -409,6 +410,13 @@ def pick_notes(
                  ORDER BY nc ASC"""
         rows = c.execute(sql, (owner_id, min_cards, note_id, note_id)).fetchall()
         out = [{"id": r[0], "title": r[1], "status": r[2], "cards": r[3]} for r in rows]
+        # `only_ids`：**在同一批语料上做三版对照**。重跑会改变卡片数，所以
+        # "再取前 N 篇"取到的不是同一批 —— 必须显式指定，否则版本差异与
+        # 笔记差异混在一起，结论无效。
+        if only_ids:
+            order = {nid: i for i, nid in enumerate(only_ids)}
+            out = [r for r in out if r["id"] in order]
+            out.sort(key=lambda r: order[r["id"]])
         return out[:limit] if limit else out
     finally:
         con.close()
@@ -428,6 +436,11 @@ def main() -> int:
     )
     ap.add_argument("--skip-done", action="store_true", help="快照里已有该版本就跳过")
     ap.add_argument("--note-id", default="", help="只跑这一篇（验证修复 / 补跑个别笔记）")
+    ap.add_argument(
+        "--note-ids-from",
+        default="",
+        help="从已有快照 JSON 里读 note_id 列表，只跑这些（保证三版对照是同一批语料）",
+    )
     ap.add_argument("--no-stack", action="store_true", help="栈已在跑（不自己起）")
     args = ap.parse_args()
 
@@ -440,7 +453,21 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     versions = [v.strip() for v in args.versions.split(",") if v.strip()]
-    notes = pick_notes(db_path, args.owner, args.limit, args.min_cards, args.note_id)
+    only_ids: Optional[List[str]] = None
+    if args.note_ids_from:
+        src = Path(args.note_ids_from)
+        assert src.exists(), f"找不到快照文件：{src}"
+        snap = json.loads(src.read_text(encoding="utf-8"))
+        only_ids = [r["note_id"] for r in snap.get("runs", []) if r.get("note_id")]
+        # 只保留成功的那些（失败轮不该进对照组）
+        only_ids = [
+            r["note_id"] for r in snap.get("runs", []) if r.get("note_id") and "error" not in r
+        ]
+        _log(f"从 {src.name} 读到 {len(only_ids)} 篇（仅成功轮）")
+
+    notes = pick_notes(
+        db_path, args.owner, args.limit, args.min_cards, args.note_id, only_ids
+    )
     _log(f"要重跑 {len(notes)} 篇 × {len(versions)} 版 = {len(notes) * len(versions)} 轮")
     for n in notes:
         _log(f"  · {n['title'][:34]:36s} 卡片={n['cards']:4d} 状态={n['status']}")
