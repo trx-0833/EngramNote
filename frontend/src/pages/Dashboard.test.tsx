@@ -29,8 +29,7 @@
  * 只钉前一个方向是不够的：把 `errorCodeOf` 写成恒返回 `'GOAL_NONE_ACTIVE'`
  * 也能让第一条绿，但那会把**真的**加载失败也一起吞掉。
  */
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getDailyPlan,
@@ -44,6 +43,7 @@ import {
   updateUserReminderSettings,
 } from '../api/client';
 import Dashboard from './Dashboard';
+import { renderWithProviders } from '../test/render';
 
 vi.mock('../api/client', () => ({
   getNotes: vi.fn(),
@@ -110,12 +110,13 @@ function apiError(code: string | null, message: string): Error {
   return err;
 }
 
+/**
+ * 迁移 5.2 / C1：页面现在用 `useQuery`，渲染必须带取数层。
+ * `renderWithProviders` 同时给 Provider 与 `MemoryRouter`
+ * （页面里用了 `useNavigate` / `<Link>`），所以原来手写的那个并了进去。
+ */
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <Dashboard />
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<Dashboard />, { route: '/' });
 }
 
 const PARTIAL_FAILURE = /部分数据加载失败/;

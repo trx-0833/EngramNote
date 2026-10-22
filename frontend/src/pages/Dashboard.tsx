@@ -9,6 +9,7 @@
  * 5. 最近笔记列表
  */
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   getNotes,
@@ -67,93 +68,163 @@ function errorCodeOf(e: unknown): string | null {
 /**
  * 仪表盘页面组件
  */
+/**
+ * 仪表盘聚合查询的 key（迁移 5.2 / C1）
+ *
+ * 导出成常量而不是在几处写字面量：将来"写操作后要失效仪表盘"时
+ * 引用的就是它。字面量写两遍迟早不一致，而那种不一致**不会报错**。
+ */
+export const DASHBOARD_QUERY_KEY = ['dashboard'] as const;
+
+/** `loadDashboard` 的返回形状（也用来给 `useQuery` 推类型） */
+export interface DashboardData {
+  recentNotes: Note[];
+  reviewStats: ReviewStats | null;
+  dailyReport: DailyReport | null;
+  weeklyTrend: WeeklyTrendItem[];
+  weakPoints: WeakPoint[];
+  goals: LearningGoal[];
+  dailyPlan: DailyPlanResponse | null;
+  /** 非关键接口失败的个数（> 0 时页面显示"部分数据加载失败"提示条） */
+  failedCount: number;
+}
+
+/**
+ * 仪表盘取数（迁移 5.2 / C1，2026-10-22）
+ *
+ * 从原来组件内的 `fetchRecent()` 搬出来，**逻辑逐条保留**：
+ *
+ * 1. 七个请求一次 `Promise.all` 并发；
+ * 2. 除 `notes` 外的六个各自 `.catch()` 并 `failedCount++` ——
+ *    统计类接口失败不再静默吞掉（`docs/decisions.md#F-24`）；
+ * 3. `getDailyPlan` 在"无活跃目标"时返回 400 `GOAL_NONE_ACTIVE`，
+ *    那是**正常业务状态**，按 `error_code` 分流、**不计数** ——
+ *    否则新用户每次打开都会看到"部分数据加载失败"。
+ *
+ * ## ⚠️ 第 3 条为什么必须是 `error_code` 而不是文案匹配
+ *
+ * 2026-10-21 改过一次：这里原来是 `msg.includes('active goals')` ——
+ * 对**英文文案**做子串匹配。后端改一个字（或中文界面走 i18n 表）
+ * 这个分支就**静默失效**，而失效的样子是"控制台红字回来了"而不是报错
+ * （`overhaul-plan` 的 F-19 记的正是这个形态）。搬过来时保持结构化分流。
+ *
+ * ## `signal` 的去向
+ *
+ * 只有 `getNotes` 支持 `signal`（B1-2 加的），所以它拿到了卸载取消；
+ * 其余六个 API 目前不接受 `signal`，因此它们的在途请求**与改动前一样**
+ * 不会被 abort —— 这不是本次引入的退化，但确实还没做（见提交信息"未做"）。
+ */
+async function loadDashboard(
+  /**
+   * ⚠️ 类型取自 `useTranslation()` 的**真实返回**，不要自己重写一遍。
+   *
+   * 第一版写的是 `(key: MessageKey, vars?: Record<string, unknown>) => string`，
+   * 实测 TS2345：项目的 `TranslateParams` 值类型是 `string | number`，
+   * 而 `Record<string, unknown>` 更宽 —— 自己抄一遍签名必然对不上，
+   * 而且**下次改 i18n 的类型时这里不会跟着变**。
+   */
+  t: ReturnType<typeof useTranslation>['t'],
+  signal?: AbortSignal,
+): Promise<DashboardData> {
+  // 取数本身不需要文案：那条 400 是按**结构化的 error_code** 分流的
+  // （见下方注释），所以 `t` 在这里只是保持与调用点签名一致。
+  void t;
+  let failedCount = 0;
+  const [notesRes, statsRes, reportRes, trendRes, weakRes, goalsRes, planRes] = await Promise.all([
+    getNotes(1, 5, undefined, undefined, { signal }),
+    getReviewStats().catch(() => {
+      failedCount++;
+      return null;
+    }),
+    getDailyReport().catch(() => {
+      failedCount++;
+      return null;
+    }),
+    getWeeklyTrend().catch(() => {
+      failedCount++;
+      return null;
+    }),
+    getWeakPoints(3).catch(() => {
+      failedCount++;
+      return null;
+    }),
+    getGoals('active').catch(() => {
+      failedCount++;
+      return null;
+    }),
+    getDailyPlan().catch((e: unknown) => {
+      // 无活跃目标 → 400 `GOAL_NONE_ACTIVE`：正常状态，不算失败（见上方注释）
+      if (errorCodeOf(e) !== 'GOAL_NONE_ACTIVE') {
+        failedCount++;
+      }
+      return null;
+    }),
+  ]);
+
+  return {
+    recentNotes: notesRes.items,
+    reviewStats: statsRes,
+    dailyReport: reportRes,
+    weeklyTrend: trendRes?.items ?? [],
+    weakPoints: weakRes?.items ?? [],
+    goals: goalsRes?.goals ?? [],
+    dailyPlan: planRes,
+    failedCount,
+  };
+}
+
 export default function Dashboard() {
   const { t } = useTranslation();
   const { sourceTypeLabels, statusLabels, cardTypeLabels, questionTypeLabels } = useLabels();
   const navigate = useNavigate();
-  const [recentNotes, setRecentNotes] = useState<Note[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
-  const [dailyReport, setDailyReport] = useState<DailyReport | null>(null);
-  const [weeklyTrend, setWeeklyTrend] = useState<WeeklyTrendItem[]>([]);
-  const [weakPoints, setWeakPoints] = useState<WeakPoint[]>([]);
-  /** 激活学习目标列表（用于今日目标概要） */
-  const [goals, setGoals] = useState<LearningGoal[]>([]);
-  /** 今日每日推荐任务 */
-  const [dailyPlan, setDailyPlan] = useState<DailyPlanResponse | null>(null);
+  /**
+   * 仪表盘取数（迁移 5.2 / C1，2026-10-22）
+   *
+   * 改动前这里是 9 个 `useState` + `fetchRecent()` + `useEffect`。
+   * 现在数据全在 `data` 里，**本地状态一个不留**（计划 §4 风险栏：
+   * "页面里既留旧 state 又用 query"）。
+   *
+   * ## 为什么仍然是"一次 `Promise.all` 取七样"
+   *
+   * 拆成七个 `useQuery` 也能跑，但那会改变**请求时序与并发度**
+   * （七个 query 各自调度、各自重试），而 B1 的验收判据是"行为不变"。
+   * 保持一个聚合 query，请求次数与并发形态与改动前逐次相同。
+   *
+   * 代价是"任何一个非关键接口慢，整页就晚" —— 那是**既有行为**，
+   * 不在这次迁移的改动范围内。
+   */
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: DASHBOARD_QUERY_KEY,
+    queryFn: ({ signal }) => loadDashboard(t, signal),
+  });
 
-  async function fetchRecent() {
-    setLoading(true);
-    setError('');
-    // 统计类接口失败不再静默吞掉——记录失败集合，非关键失败轻提示，
-    // 关键失败（notes）仍走整页错误，见 docs/decisions.md#F-24。
-    // getDailyPlan 在"无活跃目标"时返回 400 `GOAL_NONE_ACTIVE`（正常业务状态，
-    // 不是加载失败），按 error_code 分流、不计数到 failedCount，
-    // 避免新用户每次打开都误报"部分数据加载失败"
-    let failedCount = 0;
-    try {
-      const [notesRes, statsRes, reportRes, trendRes, weakRes, goalsRes, planRes] =
-        await Promise.all([
-          getNotes(1, 5),
-          getReviewStats().catch(() => {
-            failedCount++;
-            return null;
-          }),
-          getDailyReport().catch(() => {
-            failedCount++;
-            return null;
-          }),
-          getWeeklyTrend().catch(() => {
-            failedCount++;
-            return null;
-          }),
-          getWeakPoints(3).catch(() => {
-            failedCount++;
-            return null;
-          }),
-          getGoals('active').catch(() => {
-            failedCount++;
-            return null;
-          }),
-          getDailyPlan().catch((e: unknown) => {
-            // 无活跃目标 → 400 `GOAL_NONE_ACTIVE`：正常状态，不算失败。
-            //
-            // ⚠️ 2026-10-21 改：这里原来是 `msg.includes('active goals')` ——
-            // 对**英文文案**做子串匹配。后端把文案改一个字（或走 i18n 表把
-            // 中文界面的文案换成中文）这个分支就静默失效，而失效的样子是
-            // 「控制台红字回来了」而不是报错 —— 正是 overhaul-plan 的 F-19
-            // 记的那个形态。现在按**结构化的 `error_code`** 分流（阶段 0.11
-            // 给 `ApiError` 加 `code` 字段就是为了这件事，见 `client.ts:431-437`）。
-            if (errorCodeOf(e) !== 'GOAL_NONE_ACTIVE') {
-              failedCount++;
-            }
-            return null;
-          }),
-        ]);
-      setRecentNotes(notesRes.items);
-      if (statsRes) setReviewStats(statsRes);
-      if (reportRes) setDailyReport(reportRes);
-      if (trendRes) setWeeklyTrend(trendRes.items);
-      if (weakRes) setWeakPoints(weakRes.items);
-      if (goalsRes) setGoals(goalsRes.goals);
-      if (planRes) setDailyPlan(planRes);
-      // 非关键失败：显示提示条而不是假装"暂无数据"
-      if (failedCount > 0) {
-        setError(t('dashboard.partialLoadFailed', { count: failedCount }));
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('dashboard.loadFailedRetry'));
-    } finally {
-      setLoading(false);
-    }
-  }
+  // 每一项都给默认值：`data` 在首次加载完成前是 `undefined`
+  const recentNotes = data?.recentNotes ?? [];
+  const reviewStats = data?.reviewStats ?? null;
+  const dailyReport = data?.dailyReport ?? null;
+  const weeklyTrend = data?.weeklyTrend ?? [];
+  const weakPoints = data?.weakPoints ?? [];
+  const goals = data?.goals ?? [];
+  const dailyPlan = data?.dailyPlan ?? null;
 
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchRecent();
-  }, []);
+  /**
+   * 错误文案的优先级：**整页错误** > **部分失败提示** > 无
+   *
+   * ⚠️ 部分失败那条在这里拼（而不是在 queryFn 里）—— 理由见文件头：
+   * 在取数函数里拼好就成了一段固定字符串，切语言不会跟着变。
+   */
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('dashboard.loadFailedRetry')
+    : data && data.failedCount > 0
+      ? t('dashboard.partialLoadFailed', { count: data.failedCount })
+      : '';
 
   /** 格式化复习时长 */
   function formatTime(ms: number): string {
@@ -638,7 +709,7 @@ export default function Dashboard() {
         {loading ? (
           <LoadingSpinner />
         ) : error ? (
-          <ErrorDisplay message={error} onRetry={fetchRecent} />
+          <ErrorDisplay message={error} onRetry={() => refetch()} />
         ) : recentNotes.length === 0 ? (
           <EmptyState
             message={t('dashboard.noNotes')}
