@@ -195,10 +195,17 @@ export function useNoteDetailData({
   useEffect(() => {
     if (note?.status !== 'cleaning' || !noteId) return;
 
+    // 卸载守卫（C1 / 5.2 B2）：`clearInterval` 只挡住"发起新请求"，
+    // **挡不住已经在途的那一次** —— 它回来之后照样会 setNote。
+    // 那个路径没有任何外部信号（React 18 不再为卸载后 setState 报警），
+    // 所以只能显式守。见本文件对应的补丁脚本注释。
+    let alive = true;
+
     const interval = setInterval(async () => {
       if (mutatingRef.current) return;
       try {
         const data = await getNote(noteId);
+        if (!alive) return;
         setNote(data);
         if (data.status !== 'cleaning') {
           clearInterval(interval);
@@ -212,17 +219,24 @@ export function useNoteDetailData({
       }
     }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
   }, [note?.status, noteId]);
 
   // 学习中状态轮询：每 5 秒刷新笔记数据，直到学习完成或失败
   useEffect(() => {
     if (note?.status !== 'learning' || !noteId) return;
 
+    // 卸载守卫：理由同上面清洗轮询那段
+    let alive = true;
+
     const interval = setInterval(async () => {
       if (mutatingRef.current) return;
       try {
         const data = await getNote(noteId);
+        if (!alive) return;
         setNote(data);
         if (data.status !== 'learning') {
           clearInterval(interval);
@@ -232,7 +246,10 @@ export function useNoteDetailData({
       }
     }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
   }, [note?.status, noteId]);
 
   // 视频类型笔记：通过 blob URL 加载视频（需携带 JWT 认证头）
