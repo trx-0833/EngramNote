@@ -235,8 +235,32 @@ def render_markdown(rep: Dict[str, Any], *, top: int) -> str:
     return "\n".join(lines)
 
 
+def _precheck_output_paths(args: argparse.Namespace) -> None:
+    """在**发第一次 LLM 调用之前**校验输出路径可写
+
+    ⚠️ 这个校验必须放在最前面：脚本会跑几百次调用，如果等到最后写文件才发现
+    目录不存在，那几百次调用的额度就白花了。实测踩过一次 ——
+    cwd 是 `backend/`，而文档在仓库根的 `docs/`，写成 `docs/...` 会指向
+    不存在的 `backend/docs/`。
+    """
+    for label, raw in (("--out", args.out), ("--json", args.json)):
+        if not raw:
+            continue
+        target = Path(raw)
+        parent = target.parent if str(target.parent) else Path(".")
+        if not parent.exists():
+            raise SystemExit(
+                f"[a4-llm] 拒绝开跑：{label} 的目录不存在 —— {parent.resolve()}\n"
+                f"        本脚本的 cwd 是 backend/，而项目文档在仓库根的 docs/。\n"
+                f"        要写到项目文档请用：--out ../docs/<文件名>.md"
+            )
+
+
 async def run(args: argparse.Namespace) -> int:
     from app.services.llm.gateway import LLMGateway
+
+    # ⚠️ 放在读库之前：路径错了就一秒都不要浪费
+    _precheck_output_paths(args)
 
     cards = load_cards(args.db, args.user_id)
     if args.limit:
@@ -248,11 +272,38 @@ async def run(args: argparse.Namespace) -> int:
 
     gateway = LLMGateway.from_settings()
 
+    def _dump(res: Any) -> None:
+        """增量落盘：每批写一次，中断不丢结果"""
+        if not args.json:
+            return
+        payload = {
+            "scored": len(res.scores),
+            "calls": res.calls,
+            "tokens": res.total_tokens,
+            "parse_failed": res.parse_failed,
+            "scores": [
+                {
+                    "card_id": x.card_id,
+                    "info_score": x.info_score,
+                    "self_contained_score": x.self_contained_score,
+                    "quizzable_score": x.quizzable_score,
+                    "reason": x.reason,
+                    "suggested_action": x.suggested_action,
+                }
+                for x in res.scores
+            ],
+        }
+        Path(args.json).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
     def progress(done: int, total: int, res: Any) -> None:
         print(
             f"[a4-llm] {done}/{total} 张  调用={res.calls} tokens={res.total_tokens}",
             flush=True,
         )
+        # ⚠️ 每批都落盘：上一轮 kill 掉时 1808 条结果全在内存里、一条没留下
+        _dump(res)
 
     res = await score_cards_batch(
         cards, gateway=gateway, batch_size=args.batch_size, on_progress=progress
@@ -280,13 +331,17 @@ async def run(args: argparse.Namespace) -> int:
         Path(args.out).write_text(md, encoding="utf-8")
         print(f"[a4-llm] 报告已写入 {args.out}", flush=True)
     if args.json:
+        # 最终文件 = 报告摘要 + 逐卡分数（与增量落盘同格式，多一个 report 字段）
+        payload = json.loads(Path(args.json).read_text(encoding="utf-8"))
+        # ⚠️ 只留**可序列化**的汇总字段：	op_low / only_llm_sample 里是
+        #    CardScore 对象，直接塞进 JSON 会 TypeError（实测）。
+        #    逐卡分数已经在 scores 里了，重复一遍没有意义。
+        _skip = {'top_low', 'only_llm_sample', 'only_rule_sample'}
+        payload['report'] = {
+            k: v for k, v in rep.items() if not k.startswith('_') and k not in _skip
+        }
         Path(args.json).write_text(
-            json.dumps(
-                {k: v for k, v in rep.items() if not k.startswith("_")},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         print(f"[a4-llm] JSON 已写入 {args.json}", flush=True)
     if not args.out and not args.json:

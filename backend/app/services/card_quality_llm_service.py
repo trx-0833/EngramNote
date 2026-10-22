@@ -41,8 +41,12 @@ from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-#: 默认批量大小。10 是"省调用"与"单次响应别太长导致截断"之间的折中
-DEFAULT_BATCH_SIZE = 10
+#: 默认批量大小。
+#:
+#: ⚠️ 原本是 10，实测在 `max_tokens=2048` 下第 10 批就被截断 ⇒ 改成 **8**。
+#: 现在 `max_tokens` 已提到 4096，10 大概也够，但 8 有余量 ——
+#: 截断的代价是**10 倍调用**（逐张回退），不值得为省 20% 请求数去赌。
+DEFAULT_BATCH_SIZE = 8
 
 #: 三个维度的合法键（少一个就判该卡解析失败，不静默补 0）
 SCORE_KEYS = ("info_score", "self_contained_score", "quizzable_score")
@@ -284,7 +288,11 @@ async def _score_one_call(
         resp = await gateway.chat_detailed(
             messages,
             temperature=0.2,  # 打分要稳，不要创意
-            max_tokens=2048,
+            # ⚠️ 2048 **不够**：实测第 10 批就被截断（10 条结果 × 3 个分数 +
+            #    中文理由 ≈ 顶到上限）⇒ JSON 不完整 ⇒ 触发逐张回退 ⇒
+            #    那一批从 1 次调用变成 11 次。截断的代价是 10 倍调用，
+            #    余量的代价只是略多的请求数。
+            max_tokens=4096,
             response_format={"type": "json_object"},
             scene="card_quality_score",
         )
