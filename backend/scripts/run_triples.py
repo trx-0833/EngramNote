@@ -63,6 +63,72 @@ def load_notes() -> list[dict]:
         con.close()
 
 
+def _kill_leftover_stacks() -> None:
+    """兜底清理：杀掉命令行里带 `_e2e_full` 的 python 进程
+
+    ⚠️ 必须兜底：`rerun_understanding.py` 的 `finally` 只 terminate 监督器，
+    子进程在 Windows 下不会被带走（`_e2e_full_runner.py` 的 docstring 警告过）。
+    第一版就是因此让端口一直被占、25 篇全部静默失败。
+    """
+    import subprocess as _sp
+
+    try:
+        out = _sp.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                "Where-Object { $_.CommandLine -match '_e2e_full' } | "
+                "ForEach-Object { $_.ProcessId }",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        for line in out.stdout.split():
+            if line.strip().isdigit():
+                _sp.run(["taskkill", "/F", "/PID", line.strip()], capture_output=True, timeout=30)
+    except Exception as e:  # noqa: BLE001
+        print(f"[triples] 兜底清理失败（不致命）：{e}", flush=True)
+
+
+def _start_stack(tmp: str) -> "subprocess.Popen":
+    """起一次隔离栈并等就绪"""
+    import os
+    import socket
+    import time as _t
+
+    env = dict(os.environ)
+    env.update(
+        {
+            "ENGRAMNOTE_E2E_TMP": str(BACKEND / tmp),
+            "ENGRAMNOTE_E2E_KEEP": "1",
+            "PYTHONIOENCODING": "utf-8",
+        }
+    )
+    proc = subprocess.Popen(
+        [sys.executable, str(BACKEND / "scripts" / "_e2e_full_runner.py")],
+        cwd=str(BACKEND),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print("[triples] 已起隔离栈，等控制口 4383…", flush=True)
+    deadline = _t.monotonic() + 300
+    while _t.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            if sock.connect_ex(("127.0.0.1", 4383)) == 0:
+                print("[triples] 栈就绪", flush=True)
+                return proc
+        if proc.poll() is not None:
+            raise SystemExit("[triples] 监督器提前退出 —— 端口可能被占，先清理")
+        _t.sleep(2)
+    proc.terminate()
+    raise SystemExit("[triples] 等栈就绪超时")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="逐篇跑完整三版对照")
     ap.add_argument("--tmp", default="data/_uxwalk")
@@ -88,6 +154,13 @@ def main() -> int:
         print(f"   {n['cards']:4d} 卡  已有 v{','.join(have) or '—':6s} {n['title'][:34]}")
 
     completed = 0
+    failed: list = []
+    stack = None
+    try:
+        stack = _start_stack(args.tmp)
+    except SystemExit as e:
+        print(f"[triples] {e}", flush=True)
+        return 1
     for i, n in enumerate(pending, 1):
         if time.monotonic() >= deadline:
             print(f"[triples] 时间到，停在 {i-1}/{len(pending)}")
@@ -103,7 +176,8 @@ def main() -> int:
             flush=True,
         )
         t0 = time.monotonic()
-        subprocess.run(
+        # ★ `--no-stack`：栈由本脚本起一次（每篇各起一次会让第二篇起端口被占）
+        rc = subprocess.run(
             [
                 sys.executable,
                 str(RERUN),
@@ -113,16 +187,42 @@ def main() -> int:
                 n["id"],
                 "--versions",
                 ",".join(need),
+                "--no-stack",
             ],
             cwd=str(BACKEND),
             check=False,
-        )
+        ).returncode
         took = (time.monotonic() - t0) / 60
-        print(f"[triples]   用时 {took:.1f} 分钟", flush=True)
+        # ★★ 校验"真的产出了"：只看返回码不够 —— 第一版就是每篇 0.1 分钟
+        #    却报"完成"。所以比对快照里该 note 的版本集合是否**真的增加了**。
+        after = load_done().get(n["id"], set())
+        gained = sorted(after - have)
+        if rc != 0 or not gained:
+            failed.append((n["title"], need, rc, round(took, 1)))
+            print(
+                f"[triples]   ✘ 未产出（rc={rc}，{took:.1f} 分钟，"
+                f"版本集合没变）—— 记入失败清单",
+                flush=True,
+            )
+            continue
+        print(f"[triples]   ✔ 新增 v{','.join(gained)}，用时 {took:.1f} 分钟", flush=True)
         completed += 1
 
-    print(f"[triples] 完成 {completed} 篇")
-    return 0
+    if stack is not None:
+        print("[triples] 停栈…", flush=True)
+        stack.terminate()
+        try:
+            stack.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            stack.kill()
+    _kill_leftover_stacks()
+
+    print(f"[triples] 完成 {completed} 篇，失败 {len(failed)} 篇")
+    if failed:
+        print("[triples] ★ 失败清单（这些**没有**产出，不要当成完成）：")
+        for title, need, rc, took in failed:
+            print(f"    {title[:34]}  需补 v{','.join(need)}  rc={rc}  {took} 分钟")
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":
