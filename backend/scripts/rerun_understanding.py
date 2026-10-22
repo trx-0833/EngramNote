@@ -329,7 +329,7 @@ def wait_for_questions(
     return max(last, 0)
 
 
-async def generate_questions_with_retry(
+def generate_questions_with_retry(
     db_path: Path,
     note_id: str,
     version: str,
@@ -485,7 +485,7 @@ def main() -> int:
                     if status not in ("archived", "cleaned"):
                         raise RuntimeError(f"理解未成功，终态 {status}")
 
-                    n_q = await generate_questions_with_retry(
+                    n_q = generate_questions_with_retry(
                         db_path, note["id"], version, token
                     )
                     _log(f"    出题落库：{n_q} 道")
