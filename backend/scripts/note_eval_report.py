@@ -99,6 +99,39 @@ def read_source(note: Dict[str, Any]) -> tuple[str | None, str]:
 
 
 def render_markdown(results: List[Dict[str, Any]], usage: Dict[str, Any]) -> str:
+    # ★★ 硬守卫：**一次调用都没成功**时不得输出"正常报告"
+    #
+    # 实测踩到：网关补全路径不可用 ⇒ 每篇的每次调用都失败 ⇒ 报告写出
+    # 「0 次调用 / 0 tokens」+ 全 0 的清单。那份报告**看起来像"5 篇都覆盖良好"**，
+    # 实际是"一次都没看上"。报告文件是会被传阅的东西，守卫必须长在产物上。
+    if not usage.get("calls"):
+        return "\n".join(
+            [
+                "# B5 ② · AI 复核报告（**本次未能复核**）",
+                "",
+                "> ⚠️ **这不是一份复核结果。**",
+                ">",
+                "> 本次运行**一次 LLM 调用都没成功**（`calls = 0`）——",
+                "> 网关的补全路径不可用（实测日志：`All connection attempts failed`）。",
+                ">",
+                "> **请勿把下面的空清单读成「没有遗漏」** —— 是这些笔记根本没被看上。",
+                ">",
+                f"> 涉及 {len(results)} 篇笔记，全部未复核。",
+                ">",
+                "> 重跑：`python scripts/note_eval_report.py --limit N`",
+                "> （幂等靠 `llm_cache`：已成功过的段重跑不会重复消耗额度）。",
+                "",
+                "## 涉及笔记（均未复核）",
+                "",
+                "| 笔记 | 卡片 | 分段 |",
+                "|---|---|---|",
+                *[
+                    f"| {r['title'][:34]} | {r.get('cards', 0)} | {r.get('segments', '—')} |"
+                    for r in results
+                ],
+                "",
+            ]
+        )
     lines = [
         "# B5 ② · AI 复核报告（遗漏概念 / 理解偏差）",
         "",
@@ -110,16 +143,18 @@ def render_markdown(results: List[Dict[str, Any]], usage: Dict[str, Any]) -> str
         "",
         "## 1. 汇总",
         "",
-        "| 笔记 | 卡片 | 正文来源 | 分段 | 遗漏概念 | 理解偏差 | 调用 | tokens |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 笔记 | 卡片 | 正文来源 | 分段 | 遗漏概念 | 理解偏差 | **未复核段** | 调用 | tokens |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         if r.get("error"):
             lines.append(f"| {r['title'][:26]} | {r.get('cards', 0)} | — | — | — | — | — | — |")
             continue
+        bad = r.get("parse_failed_segments", 0)
         lines.append(
             f"| {r['title'][:26]} | {r['cards']} | {r['source']} | {r['segments']} | "
-            f"**{len(r['missing'])}** | **{len(r['misunderstandings'])}** | {r['calls']} | {r['tokens']:,} |"
+            f"**{len(r['missing'])}** | **{len(r['misunderstandings'])}** | "
+            f"{'**' + str(bad) + '**' if bad else '0'} | {r['calls']} | {r['tokens']:,} |"
         )
 
     tmc: Counter = Counter()
@@ -155,8 +190,18 @@ def render_markdown(results: List[Dict[str, Any]], usage: Dict[str, Any]) -> str
                     f"| {m['name']} | {m['why_important'][:60]} | {m['source_quote'][:70]} |"
                 )
             lines.append("")
+        elif r.get("parse_failed_segments", 0):
+            # ★ 有段被丢弃时**绝不能**说"覆盖良好" —— 那是假阴性
+            lines += [
+                "### 遗漏的概念",
+                "",
+                f"**本次未能复核**：{r['parse_failed_segments']} 段的模型响应没能解析"
+                "（输出被 `max_tokens` 截断后整段丢弃）。",
+                "**这不是「没有遗漏」** —— 是这些段根本没被看上。",
+                "",
+            ]
         else:
-            lines += ["### 遗漏的概念", "", "**未发现明显遗漏**（本段覆盖良好）。", ""]
+            lines += ["### 遗漏的概念", "", "**未发现明显遗漏**（该篇各段都成功复核）。", ""]
         if r["misunderstandings"]:
             lines += [
                 "### 理解偏差",
@@ -170,8 +215,15 @@ def render_markdown(results: List[Dict[str, Any]], usage: Dict[str, Any]) -> str
                     f"{m['source_quote'][:60]} | {m['suggestion'][:50]} |"
                 )
             lines.append("")
+        elif r.get("parse_failed_segments", 0):
+            lines += [
+                "### 理解偏差",
+                "",
+                f"**本次未能复核**：见上（{r['parse_failed_segments']} 段被丢弃）。",
+                "",
+            ]
         else:
-            lines += ["### 理解偏差", "", "**未发现明显偏差**。", ""]
+            lines += ["### 理解偏差", "", "**未发现明显偏差**（该篇各段都成功复核）。", ""]
 
     lines += [
         "## 明确不做的事",
@@ -219,6 +271,7 @@ async def run(args: argparse.Namespace) -> int:
                 "cards": len(cards),
                 "source": label,
                 "segments": res.segments,
+                "parse_failed_segments": res.parse_failed_segments,
                 "source_unavailable": res.source_unavailable,
                 "coverage_note": res.coverage_note,
                 "missing": [

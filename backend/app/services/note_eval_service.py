@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 #: ⚠️ 原本 12000，配合 max_tokens=3000 实测**每段都被截断**。截断的代价不是
 #: 少几条结论，而是**整段白跑**（JSON 不合法 ⇒ 解析成空）。改成 8000
 #: 把输入压小，给输出留预算。
-SEGMENT_CHARS = 8000
+SEGMENT_CHARS = 5000
 
 #: 每段最多带上多少张卡片标题（卡片多时按顺序截断，避免提示词爆掉）
 #: 400 → 200：实测 400 条标题就把输入顶得太大，输出没预算了。
@@ -119,8 +119,14 @@ class NoteEvalResult:
     #: 是否**全部**调用都命中缓存（前端据此明示"未消耗额度"）
     all_cached: bool = True
     segments: int = 0
-    #: 拿不到原文时的说明（前端要如实告诉用户"没原文可对照"）
+    #: 拿不到原文时的说明（前端要如实告诉用户「没原文可对照」）
     source_unavailable: bool = False
+    #: ★ **响应没能解析**的段数。
+    #:
+    #: 为什么必须单独记：实测 10 次「输出被 max_tokens 截断」会让整段被丢弃，
+    #: 而外部看到的只是**空结果** —— 与「确实没遗漏」长得一模一样。
+    #: 不把这两个区分开，报告就会把「整段白跑」写成「覆盖良好」。
+    parse_failed_segments: int = 0
 
 
 def split_source(text: str, limit: int = SEGMENT_CHARS) -> List[str]:
@@ -222,7 +228,7 @@ async def evaluate_note(
                 # ⚠️ 3000 **不够**：实测最大的一篇（356 卡 + 12000 字原文段）
                 #    连续 4 次全部被截断 ⇒ JSON 不合法 ⇒ 解析成空结果，
                 #    **4 次调用 / 94K tokens 全白花**（与 A4 那边同一个坑）。
-                max_tokens=4096,
+                max_tokens=8192,
                 response_format={"type": "json_object"},
                 scene="note_eval",
             )
@@ -236,7 +242,16 @@ async def evaluate_note(
         if not (usage.get("cached") or resp.get("cached")):
             result.all_cached = False
 
-        data = parse_eval_response(resp.get("content") or "")
+        raw_content = resp.get("content") or ""
+        data = parse_eval_response(raw_content)
+        # ⚠️ 空的分片结果 + 非空原文 ⇒ 极可能是被截断后丢弃，记下来
+        if not raw_content.strip() or (
+            not data.get("missing_concepts")
+            and not data.get("misunderstandings")
+            and not (data.get("coverage_note") or "").strip()
+            and raw_content.strip() in ("", "{}")
+        ):
+            result.parse_failed_segments += 1
         for m in data.get("missing_concepts") or []:
             if not isinstance(m, dict) or not (m.get("name") or "").strip():
                 continue
