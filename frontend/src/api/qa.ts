@@ -191,6 +191,8 @@ export async function getQuestions(
   pageSize = 20,
   noteId?: string,
   keyword?: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
 ): Promise<QuizItemListResponse> {
   // 查询参数由契约派生（阶段 5.1 / S3b）
   const query: QueryOf<'/understanding/questions', 'get'> = {
@@ -199,7 +201,9 @@ export async function getQuestions(
     note_id: noteId,
     keyword,
   };
-  return request<QuizItemListResponse>(`/understanding/questions${buildQuery(query)}`);
+  return request<QuizItemListResponse>(`/understanding/questions${buildQuery(query)}`, {
+    signal: options?.signal,
+  });
 }
 
 /**

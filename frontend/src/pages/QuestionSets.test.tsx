@@ -14,12 +14,12 @@
  * 是一个 Proxy（`styles.row` → `_row_xxxxxx`），用来 `querySelector` 没问题，
  * 但**不能枚举**它。`KnowledgeCards.test.tsx` 已有同样的先例。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getQuestions, type QuizItem } from '../api/client';
 import QuestionSets from './QuestionSets';
+import { renderWithProviders } from '../test/render';
 import pageStyles from './QuestionSets.module.css';
 
 vi.mock('../api/client', () => ({ getQuestions: vi.fn() }));
@@ -96,12 +96,13 @@ function mockQuestions(items: QuizItem[] = QUIZ_ITEMS) {
   mockedQuestions.mockResolvedValue({ items, page: 1, page_size: 100, total: items.length });
 }
 
+/**
+ * 迁移 5.2 / C1：页面现在用 `useQuery`，渲染必须带取数层。
+ * `renderWithProviders` 同时给 Provider 与 `MemoryRouter`
+ * （页面用了 `useSearchParams` / `useNavigate`）。
+ */
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <QuestionSets />
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<QuestionSets />, { route: '/questions' });
 }
 
 /** 表头行之外的数据行（`.row` 只挂在题目行上，分组头行挂的是 `.groupHeaderRow`） */

@@ -36,7 +36,8 @@
  * 那一格里的中文徽章是行底色的**文字载体** —— 底色一旦成为唯一线索，
  * 色觉障碍用户就读不出行状态（本批验收要求原话："行三态高亮不能只靠背景色"）。
  */
-import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useMemo, useState, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getQuestions, type QuizItem } from '../api/client';
 import { QuestionEditor } from './questionsets/QuestionEditor';
@@ -473,16 +474,112 @@ function formatTime(value: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * 题目集查询的 key 前缀（迁移 5.2 / C1）
+ *
+ * 完整 key 是 `[...QUESTION_SETS_QUERY_KEY, { noteId, keyword }]` ——
+ * 两个筛选维度都必须在 key 里，否则切笔记/改关键词会**显示上一份数据**且不报错。
+ */
+export const QUESTION_SETS_QUERY_KEY = ['questionSets'] as const;
+
+/**
+ * 取回某个笔记（或全部）的题目，**全部分页**（迁移 5.2 / C1）
+ *
+ * 这段逻辑从组件内的 `fetchQuestions` **整段搬出来**，只把 `setState`
+ * 换成 `return` —— 其余一行未改，连注释一并保留：它们解释的是
+ * "为什么页大小是 1000""为什么要有三道终止兜底"，与代码同等重要。
+ *
+ * 后端 `page_size` 上限 2026-10-21 由 100 放宽到 1000（见
+ * `backend/app/api/understanding.py` 的同名说明）。
+ *
+ * ## 2026-10-21：由「逐页串行」改为「少页 + 有界并发」
+ *
+ * 实测该用户 **3367 道题**。原实现 page_size=100 且逐页 `await`：
+ * **34 次往返全串行**，页面停在「加载中…」约 4.8 秒。
+ *
+ * 关键观察：
+ *   ① 瓶颈是**往返次数**，不是数据量（单页约 78 KB，全量约 2.6 MB）；
+ *   ② 后端是**单进程 uvicorn + SQLite**，并发只重叠网络往返，
+ *      服务端仍近乎串行 —— 所以只并发不改页大小，收益有限。
+ * 因此两件事一起做：页大小 100 → 1000（34 次 → 4 次），再并发取。
+ *
+ * 终止条件仍保留多重兜底（见 docs/overhaul-plan.md §2.8 F-3）：
+ * 原实现只写 `while (allItems.length < totalCount)`，一旦后端返回的
+ * total 与可返回条数不一致（分页越界、软删过滤口径不同、并发写入等），
+ * 这个循环**永远不会结束**，会持续向后端发请求并把页面卡在 loading。
+ * 现在有"最大页数""空页即停""按 total 推算页数"三道。
+ *
+ * @returns 已按 id 去重的题目列表；截断时只含实际取到的那些
+ */
+async function loadQuestionSets(
+  noteId: string | undefined,
+  keyword: string | undefined,
+  signal?: AbortSignal,
+): Promise<QuizItem[]> {
+  const MAX_PAGES = 100;
+  const PAGE_SIZE = 1000;
+  const CONCURRENCY = 4;
+
+  // 第 1 页：既取数据，也取 total（它决定还要取几页）
+  const first = await getQuestions(1, PAGE_SIZE, noteId, keyword, { signal });
+  const firstItems = first.items || [];
+  const totalCount = first.total ?? firstItems.length;
+
+  const allItems: QuizItem[] = [...firstItems];
+  let truncated = false;
+
+  // 空页说明已经取完（后端 total 可能不准），不再继续
+  if (firstItems.length > 0 && firstItems.length < totalCount) {
+    const neededPages = Math.ceil(totalCount / PAGE_SIZE);
+    const lastPage = Math.min(neededPages, MAX_PAGES);
+    truncated = neededPages > MAX_PAGES;
+
+    const remaining: number[] = [];
+    for (let p = 2; p <= lastPage; p++) remaining.push(p);
+
+    for (let i = 0; i < remaining.length; i += CONCURRENCY) {
+      const batch = remaining.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((p) => getQuestions(p, PAGE_SIZE, noteId, keyword, { signal })),
+      );
+      for (const r of results) allItems.push(...(r.items || []));
+      // 这一批里有空页 → 后面也不会有数据了，提前收工
+      if (results.some((r) => (r.items || []).length === 0)) break;
+    }
+  }
+
+  if (truncated) {
+    console.warn(
+      `[QuestionSets] 分页达到上限 ${MAX_PAGES} 页，已加载 ${allItems.length}/${totalCount} 条`,
+    );
+  }
+
+  // 并发取页时若中途有写入，页边界可能重叠 —— 按 id 去重兜底
+  const seen = new Set<string>();
+  return allItems.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
 export default function QuestionSets() {
   const { t } = useTranslation();
   const { questionTypeLabels, difficultyLabels } = useLabels();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [groups, setGroups] = useState<NoteGroup[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  const queryClient = useQueryClient();
+  /**
+   * 分组展开态（迁移 5.2 / C1）
+   *
+   * 与改动前的语义**逐字同义**："每次数据变化后全展开"。
+   * 做法是把展开态**绑定到当前数据的签名**上（见文件头第 3 点）——
+   * 签名不一致就退回"全展开"，因此不需要任何 effect。
+   */
+  const [expandedState, setExpandedState] = useState<{
+    sig: string;
+    ids: Set<string>;
+  } | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   /**
    * 正在行内编辑的题目 id（`null` = 没有在编辑）。
@@ -504,94 +601,60 @@ export default function QuestionSets() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteId = searchParams.get('note_id') || undefined;
 
-  const fetchQuestions = useCallback(
-    async (keyword?: string) => {
-      setLoading(true);
-      try {
-        // 后端 page_size 上限 2026-10-21 由 100 放宽到 1000（见
-        // backend/app/api/understanding.py 的同名说明）。
-        //
-        // ## 2026-10-21：由「逐页串行」改为「少页 + 有界并发」
-        //
-        // 实测该用户 **3367 道题**。原实现 page_size=100 且逐页 `await`：
-        // **34 次往返全串行**，页面停在「加载中…」约 4.8 秒。
-        //
-        // 关键观察：
-        //   ① 瓶颈是**往返次数**，不是数据量（单页约 78 KB，全量约 2.6 MB）；
-        //   ② 后端是**单进程 uvicorn + SQLite**，并发只重叠网络往返，
-        //      服务端仍近乎串行 —— 所以只并发不改页大小，收益有限。
-        // 因此两件事一起做：页大小 100 → 1000（34 次 → 4 次），再并发取。
-        //
-        // 终止条件仍保留多重兜底（见 docs/overhaul-plan.md §2.8 F-3）：
-        // 原实现只写 `while (allItems.length < totalCount)`，一旦后端返回的
-        // total 与可返回条数不一致（分页越界、软删过滤口径不同、并发写入等），
-        // 这个循环**永远不会结束**，会持续向后端发请求并把页面卡在 loading。
-        // 现在有"最大页数""空页即停""按 total 推算页数"三道。
-        const MAX_PAGES = 100;
-        const PAGE_SIZE = 1000;
-        const CONCURRENCY = 4;
+  /**
+   * 题目集（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 取数主体搬去了组件外的 `loadQuestionSets`
+   *
+   * 它包含"少页 + 有界并发 + 三道终止兜底 + 按 id 去重"整段逻辑 ——
+   * **一行没改**。那段是为"真库 3367 道题、34 次串行往返约 4.8 秒"写的性能修复
+   * （见 `backend/app/api/understanding.py` 的同名说明），改动它等于改掉
+   * 那次的实测结论。
+   *
+   * ## `groups` 为什么在渲染期算而不是在 queryFn 里算
+   *
+   * 改动前 `t` 在 `useCallback` 依赖里 ⇒ **切语言会重新取一次数**，
+   * 只为了换分组标签的文案。现在分组由 `useMemo` 在渲染期算，
+   * 切语言立刻反映、且不再多打一次请求（输出逐字相同）。
+   */
+  const {
+    data: rawItems = [],
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: [...QUESTION_SETS_QUERY_KEY, { noteId, keyword: searchKeyword || undefined }],
+    queryFn: ({ signal }) => loadQuestionSets(noteId, searchKeyword || undefined, signal),
+  });
 
-        // 第 1 页：既取数据，也取 total（它决定还要取几页）
-        const first = await getQuestions(1, PAGE_SIZE, noteId, keyword);
-        const firstItems = first.items || [];
-        const totalCount = first.total ?? firstItems.length;
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('shared.loadFailed')
+    : '';
 
-        const allItems: QuizItem[] = [...firstItems];
-        let truncated = false;
+  /** 按笔记分组（渲染期算，见上方说明） */
+  const groups = useMemo(() => groupByNote(rawItems, t), [rawItems, t]);
 
-        // 空页说明已经取完（后端 total 可能不准），不再继续
-        if (firstItems.length > 0 && firstItems.length < totalCount) {
-          const neededPages = Math.ceil(totalCount / PAGE_SIZE);
-          const lastPage = Math.min(neededPages, MAX_PAGES);
-          truncated = neededPages > MAX_PAGES;
+  /**
+   * 总数（`truncated` 时以去重后的条数为准 —— 与改动前那句
+   * `setTotal(truncated ? deduped.length : totalCount)` 同义）
+   *
+   * `loadQuestionSets` 返回的就是"已去重、已按 truncated 修正过"的列表，
+   * 所以这里直接用它的长度：截断时它等于"实际加载到的条数"，
+   * 未截断时它等于后端的 total（因为全部页都取到了）。
+   */
+  const total = rawItems.length;
 
-          const remaining: number[] = [];
-          for (let p = 2; p <= lastPage; p++) remaining.push(p);
-
-          for (let i = 0; i < remaining.length; i += CONCURRENCY) {
-            const batch = remaining.slice(i, i + CONCURRENCY);
-            const results = await Promise.all(
-              batch.map((p) => getQuestions(p, PAGE_SIZE, noteId, keyword)),
-            );
-            for (const r of results) allItems.push(...(r.items || []));
-            // 这一批里有空页 → 后面也不会有数据了，提前收工
-            if (results.some((r) => (r.items || []).length === 0)) break;
-          }
-        }
-
-        if (truncated) {
-          console.warn(
-            `[QuestionSets] 分页达到上限 ${MAX_PAGES} 页，已加载 ${allItems.length}/${totalCount} 条`,
-          );
-        }
-
-        // 并发取页时若中途有写入，页边界可能重叠 —— 按 id 去重兜底
-        const seen = new Set<string>();
-        const deduped = allItems.filter((item) => {
-          if (seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
-        });
-
-        const grouped = groupByNote(deduped, t);
-        setGroups(grouped);
-        setTotal(truncated ? deduped.length : totalCount);
-        setExpandedNotes(new Set(grouped.map((g) => g.note_id)));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('shared.loadFailed'));
-      } finally {
-        setLoading(false);
-      }
-      // 	 进依赖：语言切换后重新加载时，错误文案要是新语言的
-    },
-    [noteId, t],
-  );
-
-  // 挂载/参数变化时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchQuestions(searchKeyword || undefined);
-  }, [noteId, fetchQuestions, searchKeyword]);
+  /**
+   * 展开态：签名一致才用用户的手动选择，否则退回"全展开"
+   * （与改动前"每次取数完成后全展开"逐字同义，见文件头第 3 点）
+   */
+  const groupsSignature = groups.map((g) => g.note_id).join('|');
+  const expandedNotes =
+    expandedState?.sig === groupsSignature
+      ? expandedState.ids
+      : new Set(groups.map((g) => g.note_id));
 
   /**
    * 把编辑后的题目替换进本地状态（B5）
@@ -609,11 +672,11 @@ export default function QuestionSets() {
    * 能出错的点。删除是低频动作，重拉一次最稳妥。
    */
   function replaceQuestion(updated: QuizItem) {
-    setGroups((prev) =>
-      prev.map((g) => ({
-        ...g,
-        questions: g.questions.map((q) => (q.id === updated.id ? updated : q)),
-      })),
+    // 迁移 5.2 / C1：改写的是 **query 缓存里的原始列表** —— `groups` 是渲染期
+    // 从它派生出来的，改派生结果会在下一次重取时被冲掉。
+    queryClient.setQueryData<QuizItem[]>(
+      [...QUESTION_SETS_QUERY_KEY, { noteId, keyword: searchKeyword || undefined }],
+      (prev) => (prev ?? []).map((q) => (q.id === updated.id ? updated : q)),
     );
   }
 
@@ -625,7 +688,9 @@ export default function QuestionSets() {
   }
 
   function toggleGroup(noteId: string) {
-    setExpandedNotes((prev) => toggleInSet(prev, noteId));
+    // 手动折叠要把**当前签名**一起写进去，否则下一次渲染会被判成"数据变了"
+    // 而退回全展开 —— 表现是"点了折叠没反应"。
+    setExpandedState({ sig: groupsSignature, ids: toggleInSet(expandedNotes, noteId) });
   }
 
   function toggleAnswer(questionId: string) {
@@ -777,7 +842,7 @@ export default function QuestionSets() {
       {loading ? (
         <LoadingSpinner />
       ) : error ? (
-        <ErrorDisplay message={error} onRetry={fetchQuestions} />
+        <ErrorDisplay message={error} onRetry={() => refetch()} />
       ) : groups.length === 0 ? (
         <EmptyState message={t('questionSets.empty')} description={t('questionSets.emptyHint')} />
       ) : totalFiltered === 0 ? (
@@ -1039,7 +1104,8 @@ export default function QuestionSets() {
                                           if (updated) {
                                             replaceQuestion(updated);
                                           } else {
-                                            void fetchQuestions(searchKeyword || undefined);
+                                            // 删除会改变总数与分组构成 —— 重取一次最稳妥（与改动前同一意图）
+                                            void refetch();
                                           }
                                         }}
                                       />
