@@ -82,7 +82,23 @@ class QuizItem(BaseModel):
     __tablename__ = "quiz_items"
 
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True, nullable=False)
-    card_id: Mapped[str] = mapped_column(String, ForeignKey("knowledge_cards.id"), index=True, nullable=False)
+    # 来源卡片 ID。
+    #
+    # ⚠️ **可空是 2026-10-22 改的**（此前 `nullable=False`），原因是一个真实缺陷：
+    #    重跑理解时 `understanding.py` 按 `note_id` 删题目，但**题目可以引用别的
+    #    笔记的卡片**（`card_id` 指向的卡不属于本题的 `note_id`）。那类跨笔记题目
+    #    按 `note_id` 删不到，于是紧接着 `DELETE FROM knowledge_cards` 撞外键，
+    #    接口直接 500（实测全库 8 条跨笔记题目、影响 3 篇笔记）。
+    #
+    #    改成可空之后，重跑时把**别的笔记**引用本篇卡片的题目 `card_id` 置空
+    #    （保留题目本身，只断掉指向即将被删的卡片的链）——
+    #    与 `review_log.card_id`（`app/models/review_log.py:79-81`）同一手法，
+    #    那里的注释已经写过这个道理：卡片会被重建，**题目/复习记录不该跟着消失**。
+    #
+    #    置空的语义是"这道题的原卡片已被重建，链接失效"，而不是"这道题没来源"。
+    card_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("knowledge_cards.id"), index=True, nullable=True
+    )
     # 来源笔记 ID；物理删除笔记时置 NULL（题目随卡片存亡，提升卡片时悬挂保留）
     note_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("notes.id", ondelete="SET NULL"), index=True, nullable=True

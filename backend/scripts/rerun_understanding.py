@@ -379,7 +379,11 @@ def generate_questions_with_retry(
 # --------------------------------------------------------------------------
 
 def pick_notes(
-    db_path: Path, owner_id: str, limit: Optional[int], min_cards: int = 0
+    db_path: Path,
+    owner_id: str,
+    limit: Optional[int],
+    min_cards: int = 0,
+    note_id: str = "",
 ) -> List[Dict[str, str]]:
     """挑要重跑的笔记：**按卡片数升序**取前 N（小样先挑小的，快且省）
 
@@ -401,8 +405,9 @@ def pick_notes(
                  FROM notes n
                  WHERE n.user_id=? AND n.trashed_at IS NULL
                    AND (SELECT count(*) FROM knowledge_cards k WHERE k.note_id=n.id) >= ?
+                   AND (? = '' OR n.id = ?)
                  ORDER BY nc ASC"""
-        rows = c.execute(sql, (owner_id, min_cards)).fetchall()
+        rows = c.execute(sql, (owner_id, min_cards, note_id, note_id)).fetchall()
         out = [{"id": r[0], "title": r[1], "status": r[2], "cards": r[3]} for r in rows]
         return out[:limit] if limit else out
     finally:
@@ -422,6 +427,7 @@ def main() -> int:
         help="只跑卡片数 >= N 的笔记（小样应当设成 10 左右，见 pick_notes 的说明）",
     )
     ap.add_argument("--skip-done", action="store_true", help="快照里已有该版本就跳过")
+    ap.add_argument("--note-id", default="", help="只跑这一篇（验证修复 / 补跑个别笔记）")
     ap.add_argument("--no-stack", action="store_true", help="栈已在跑（不自己起）")
     args = ap.parse_args()
 
@@ -434,7 +440,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     versions = [v.strip() for v in args.versions.split(",") if v.strip()]
-    notes = pick_notes(db_path, args.owner, args.limit, args.min_cards)
+    notes = pick_notes(db_path, args.owner, args.limit, args.min_cards, args.note_id)
     _log(f"要重跑 {len(notes)} 篇 × {len(versions)} 版 = {len(notes) * len(versions)} 轮")
     for n in notes:
         _log(f"  · {n['title'][:34]:36s} 卡片={n['cards']:4d} 状态={n['status']}")

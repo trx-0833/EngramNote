@@ -184,6 +184,33 @@ async def start_understanding(
                 )
             )
         )
+    # ★ 断掉"别的笔记引用本篇卡片"的链（2026-10-22，拍板 (b)：置空而非删除）
+    #
+    # 为什么必须在删卡片**之前**做：`quiz_items.card_id` 与 `review_logs.card_id`
+    # 都是指向 `knowledge_cards.id` 的外键，而题目/复习记录**可以引用别的笔记的
+    # 卡片**。下面两行按 `note_id` 删，删不到那些跨笔记的行 ⇒ 删卡片时撞外键 ⇒ 500。
+    #
+    # 实测：全库 8 条跨笔记题目、3 篇笔记重跑必 500（见
+    # `docs/prompt-version-comparison-2026-10-22.md` §4）。
+    #
+    # 置空而不是删除：那些行在**别的笔记**里，删掉就是"重跑 A 笔记导致 B 笔记少题"。
+    # 与 `review_log.card_id` 的既有设计同一手法（`models/review_log.py:79-81`）——
+    # 卡片会被重建，题目/复习记录不该跟着消失。
+    if card_ids:
+        await db.execute(
+            sql_update(QuizItem)
+            .where(QuizItem.card_id.in_(card_ids), QuizItem.note_id != note_id)
+            .values(card_id=None)
+        )
+        await db.execute(
+            # ⚠️ 这里**不加** `note_id != note_id` 过滤：`review_logs.note_id` 可空，
+            #    而 `NULL != 'x'` 求值为 NULL（不是 true）⇒ 那些行会被漏掉、
+            #    照样挡住删除。而且属于**本篇**题目的复习记录在 `:172` 已经删掉了，
+            #    所以此刻还引用这些卡片的行，本来就是"别处来的"。
+            sql_update(ReviewLog)
+            .where(ReviewLog.card_id.in_(card_ids))
+            .values(card_id=None)
+        )
     # 批量删除关联题目和知识卡片
     await db.execute(sql_delete(QuizItem).where(QuizItem.note_id == note_id))
     await db.execute(sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id))

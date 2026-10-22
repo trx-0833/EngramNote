@@ -464,6 +464,32 @@ async def _migrate_sqlite(conn):
                 ))
                 logger.info("SQLite 迁移: 已为 users 表添加 locale 列")
 
+        # `quiz_items.card_id` 仍是 NOT NULL 时**只告警**，不在这里重建表
+        # （对应 Alembic 013，2026-10-22）
+        #
+        # 为什么不做：这条重建在**真实 schema** 上连撞 SQLite 三个特有行为 ——
+        #   ① `ALTER TABLE ... RENAME TO` 默认**改写别处的外键**
+        #      （实测把 `review_logs.quiz_id` 改成指向临时表，副本被搞成
+        #      「新表 0 行 + 残留表 3523 行 + 178 条悬空记录」）；
+        #   ② 改名后**索引跟随旧表且保留原名** ⇒ 建新表撞
+        #      `index ix_quiz_items_card_id already exists`；
+        #   ③ `DROP TABLE` 临时表失败（仍被外键引用 / legacy pragma 在事务里不生效）。
+        #
+        # 本函数的 docstring 自己就写着这是"开发环境的简易迁移，生产环境应使用
+        # Alembic"，而重建表超出它的职责。schema 变更统一走 Alembic ——
+        # 它的 `batch_alter_table` 是专门处理 SQLite 这些限制的成熟实现。
+        if 'quiz_items' in table_names:
+            qi_cols = {c['name']: c for c in inspector.get_columns('quiz_items')}
+            card_col = qi_cols.get('card_id')
+            if card_col is not None and not card_col.get('nullable', True):
+                logger.warning(
+                    "quiz_items.card_id 仍是 NOT NULL —— 需要跑 `alembic upgrade head`。"
+                    "本函数不做这次变更：在真实 schema 上重建表会撞 SQLite 的"
+                    "外键改写/索引冲突/临时表删不掉三个问题，"
+                    "详见 alembic/versions/013_quiz_card_nullable.py 的说明。"
+                )
+
+
         # 检查并创建 projects 表（防御性建表，对应 Alembic 005 迁移）
         # 需在 notes.project_id 列添加之前执行，避免 ALTER REFERENCES 找不到目标表
         if 'projects' not in table_names:
