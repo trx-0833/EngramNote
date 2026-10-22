@@ -298,7 +298,7 @@ def count_quizzes(db_path: Path, note_id: str) -> int:
 
 
 def wait_for_questions(
-    db_path: Path, note_id: str, *, timeout_s: int = 900, interval_s: int = 3
+    db_path: Path, note_id: str, *, timeout_s: int = 300, interval_s: int = 3
 ) -> int:
     """等出题任务落库
 
@@ -326,8 +326,52 @@ def wait_for_questions(
             stable = 0
         last = n
         time.sleep(interval_s)
-    _log(f"    ⚠ 等出题超时（{timeout_s}s），当前 {max(last, 0)} 道 —— 按现状快照")
     return max(last, 0)
+
+
+async def generate_questions_with_retry(
+    db_path: Path,
+    note_id: str,
+    version: str,
+    token: str,
+    *,
+    attempts: int = 4,
+    wait_s: int = 300,
+) -> int:
+    """触发出题，并在产出 0 题时**重新入队**
+
+    ## 为什么需要这层重试 —— 实跑踩到
+
+    出题任务会因为**瞬时 DNS 失败**整体失败：
+    `[Errno 11001] getaddrinfo failed` ⇒ 网关调用重试 5 次仍失败
+    ⇒ `generate_questions_task` 每个批次都失败 ⇒ 该版本产出 **0 道题**。
+
+    实测证据（`data/_uxwalk/logs/errors.log`，2026-10-22 12:13）：同一笔记的
+    批次 1/2/3 全部「LLM API 调用失败，重试 5 次后仍出错」。而同期从**新进程**
+    连测 30 次 DNS 是 30/30 成功 —— 说明是 worker 进程在负载下的瞬时解析失败，
+    不是配置错误。
+
+    ⚠️ 没有这层重试的后果**不是「少几道题」**：`start` 已经删掉了旧题目
+    （`api/understanding.py:188`），所以 0 题意味着这篇笔记在这个版本下
+    **完全没有产物** —— 而对照实验正是要拿这些产物做分布比较。
+    第一版就是这么白等 900s 并记下 0 题的。
+    """
+    n = 0
+    for attempt in range(1, attempts + 1):
+        api(
+            "POST",
+            f"/api/understanding/{note_id}/generate-questions?prompt_version={version}",
+            token,
+        )
+        n = wait_for_questions(db_path, note_id, timeout_s=wait_s)
+        if n > 0:
+            if attempt > 1:
+                _log(f"    出题在第 {attempt} 次尝试后成功：{n} 道")
+            return n
+        if attempt < attempts:
+            _log(f"    ⚠ 出题为 0（第 {attempt}/{attempts} 次），重新入队…")
+    _log(f"    ✘ 出题 {attempts} 次尝试后仍为 0 道")
+    return n
 
 
 # --------------------------------------------------------------------------
@@ -441,13 +485,9 @@ def main() -> int:
                     if status not in ("archived", "cleaned"):
                         raise RuntimeError(f"理解未成功，终态 {status}")
 
-                    api(
-                        "POST",
-                        f"/api/understanding/{note['id']}/generate-questions"
-                        f"?prompt_version={version}",
-                        token,
+                    n_q = await generate_questions_with_retry(
+                        db_path, note["id"], version, token
                     )
-                    n_q = wait_for_questions(db_path, note["id"])
                     _log(f"    出题落库：{n_q} 道")
                     snap = snapshot_note(db_path, note["id"], version)
                     snap["usage"] = usage_delta(db_path, started_iso)
