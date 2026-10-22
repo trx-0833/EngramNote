@@ -70,7 +70,7 @@ def derive_ddl(c: sqlite3.Cursor, table: str, new_name: str) -> str:
     return ddl
 
 
-def migrate(db: Path) -> int:
+def migrate(db: Path, *, confirm_real_db: str = "") -> int:
     """把 `db` 的 `quiz_items.card_id` 改成可空（**会改 schema**）
 
     Args:
@@ -83,8 +83,22 @@ def migrate(db: Path) -> int:
     """
     db = Path(db).resolve()
     if db == REAL_DB or db.name == REAL_DB.name:
-        raise SystemExit(f"[guard] 拒绝执行：{db} 看着像真库（{REAL_DB}）")
-    if not db.parent.parent.name.startswith("_"):
+        # `--confirm-real-db` 必须**原样**等于真库路径才放行。
+        # 用 `--force` 那种布尔开关会被肌肉记忆敲出来；要求打全路径，
+        # 执行者就必须知道自己在动哪个文件。
+        if confirm_real_db.strip() and Path(confirm_real_db.strip()).resolve() == REAL_DB:
+            print(f"[guard] 已显式确认，允许对真库执行：{db}")
+        else:
+            raise SystemExit(
+                f"[guard] 拒绝执行：{db} 看着像真库（{REAL_DB}）。\n"
+                f"        确实要动真库请加：--confirm-real-db \"{REAL_DB}\""
+            )
+    # 第二道守卫（"必须在 `_` 开头的可弃目录里"）同样认那个显式确认 ——
+    # 否则真库永远过不去，而"确认开关存在但没用"比没有开关更糟。
+    confirmed_real = bool(confirm_real_db.strip()) and (
+        Path(confirm_real_db.strip()).resolve() == REAL_DB
+    )
+    if not db.parent.parent.name.startswith("_") and not confirmed_real:
         raise SystemExit(
             f"[guard] 拒绝执行：{db.parent.parent} 不是以 `_` 开头的可弃副本目录"
         )
@@ -166,9 +180,14 @@ def migrate(db: Path) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="把副本的 quiz_items.card_id 改成可空")
-    ap.add_argument("--db", required=True, help="副本数据库路径（拒绝真库）")
+    ap.add_argument("--db", required=True, help="数据库路径（默认拒绝真库）")
+    ap.add_argument(
+        "--confirm-real-db",
+        default="",
+        help=f"确实要动真库时，把真库路径原样传进来（{REAL_DB}）",
+    )
     args = ap.parse_args()
-    return migrate(Path(args.db))
+    return migrate(Path(args.db), confirm_real_db=args.confirm_real_db)
 
 
 if __name__ == "__main__":
