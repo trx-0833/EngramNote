@@ -17,12 +17,12 @@
  *    （创建表单是 0-100），而 `progress >= 0` 恒真 —— 不守卫的话，
  *    "目标 0%"的卡片一建出来就自带金框。
  */
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LearningGoal } from '../api/client';
 import LearningGoals from './LearningGoals';
+import { renderWithProviders } from '../test/render';
 // 达成态的类名（哈希后只在模块里对得上）—— 见文件头
 import styles from './LearningGoals.module.css';
 
@@ -81,12 +81,12 @@ beforeEach(() => {
   );
 });
 
+/**
+ * 迁移 5.2 / C1：页面现在用 `useQuery`，渲染必须带取数层。
+ * `renderWithProviders` 同时给 Provider 与 `MemoryRouter`。
+ */
 function renderPage() {
-  return render(
-    <MemoryRouter>
-      <LearningGoals />
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<LearningGoals />, { route: '/goals' });
 }
 
 describe('学习目标 · 进度条与达成态（批次 E8）', () => {

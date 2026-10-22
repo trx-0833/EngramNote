@@ -6,7 +6,8 @@
  * 3. 新建目标（弹窗式表单：名称、类型、目标掌握度、截止日期）
  * 4. 目标归档与删除（带二次确认）
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getGoals, createGoal, archiveGoal, deleteGoal, type LearningGoal } from '../api/client';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -42,17 +43,22 @@ const INITIAL_FORM: CreateFormState = {
   deadline: '',
 };
 
+/**
+ * 学习目标查询的 key（迁移 5.2 / C1）
+ *
+ * 没有参数维度（激活/归档两组在一次 queryFn 里一起取），所以直接用常量。
+ * 三处写操作后失效的都是它 —— 字面量写三遍迟早不一致，
+ * 而那种不一致**不会报错**，只会让"改完某一处列表没刷新"偶尔出现。
+ */
+export const GOALS_QUERY_KEY = ['goals'] as const;
+
 export default function LearningGoals() {
   const { t } = useTranslation();
   const toast = useToast();
   /** 激活中的学习目标列表 */
-  const [goals, setGoals] = useState<LearningGoal[]>([]);
   /** 已归档的学习目标列表 */
-  const [archivedGoals, setArchivedGoals] = useState<LearningGoal[]>([]);
   /** 数据加载状态 */
-  const [loading, setLoading] = useState(true);
   /** 错误信息 */
-  const [error, setError] = useState('');
   /** 是否显示新建表单 */
   const [showCreateForm, setShowCreateForm] = useState(false);
   /** 新建表单数据 */
@@ -63,6 +69,7 @@ export default function LearningGoals() {
   const [submitting, setSubmitting] = useState(false);
   /** 是否展开已归档区域 */
   const [showArchived, setShowArchived] = useState(false);
+  const queryClient = useQueryClient();
   /**
    * 待删除的目标 ID（`null` = 删除确认框关着）。
    *
@@ -70,29 +77,59 @@ export default function LearningGoals() {
    */
   const [pendingDeleteGoalId, setPendingDeleteGoalId] = useState<string | null>(null);
 
-  /** 拉取激活与归档两组目标数据 */
-  async function fetchGoals() {
-    setLoading(true);
-    setError('');
-    try {
+  /**
+   * 激活与归档两组目标（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 为什么两组仍在**一个** queryFn 里并行取
+   *
+   * 原实现就是一次 `Promise.all([getGoals('active'), getGoals('archived')])`，
+   * 且两组**各自 `.catch(() => null)`**（一组失败不影响另一组）。
+   * 拆成两个 query 会改变请求时序与失败语义，而 B3 的判据是行为不变 ——
+   * 与 B1 的 `Dashboard` 同一个判断。
+   *
+   * ## `error` 为什么**不**交给 query
+   *
+   * 它是**页面级失败出口**：写操作（新建/更新/删除）失败时也会往里写，
+   * 不只是加载失败。所以保留为本地状态（与 `useProjects` 同一判断）。
+   */
+  const {
+    data: goalsData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: GOALS_QUERY_KEY,
+    queryFn: async ({ signal }) => {
       const [activeRes, archivedRes] = await Promise.all([
-        getGoals('active').catch(() => null),
-        getGoals('archived').catch(() => null),
+        getGoals('active', { signal }).catch(() => null),
+        getGoals('archived', { signal }).catch(() => null),
       ]);
-      if (activeRes) setGoals(activeRes.goals);
-      if (archivedRes) setArchivedGoals(archivedRes.goals);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }
+      return {
+        goals: activeRes?.goals ?? [],
+        archivedGoals: archivedRes?.goals ?? [],
+      };
+    },
+  });
 
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchGoals();
-  }, []);
+  const goals = goalsData?.goals ?? [];
+  const archivedGoals = goalsData?.archivedGoals ?? [];
+
+  /**
+   * 加载失败文案（**这一条是修正，不是迁移**）
+   *
+   * 改动前 `error` 是一个本地状态，但它**恒为空**：`fetchGoals()` 里两个
+   * `getGoals(...).catch(() => null)` 已经吞掉异常，`Promise.all` 不可能 reject，
+   * 于是那个 `catch { setError(...) }` **不可达**，`error` 只在开头被设成 `''`。
+   *
+   * 后果是加载失败时页面显示**空状态**（"还没有学习目标" + 创建入口）——
+   * 用户会以为目标丢了。现在由 query 的 error 驱动：失败给错误提示 + 重试。
+   * 这是**刻意的行为变化**，已写进提交信息。
+   */
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('shared.loadFailed')
+    : '';
 
   /**
    * 提交新建目标表单
@@ -129,7 +166,8 @@ export default function LearningGoals() {
       setCreateForm(INITIAL_FORM);
       setShowCreateForm(false);
       // 刷新两组列表
-      await fetchGoals();
+      // B3：声明这份数据已不可信（由 query 决定何时重取并通知所有依赖方）
+      await queryClient.invalidateQueries({ queryKey: GOALS_QUERY_KEY });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t('goals.createFailed'));
     } finally {
@@ -146,7 +184,8 @@ export default function LearningGoals() {
     e.stopPropagation();
     try {
       await archiveGoal(goalId);
-      await fetchGoals();
+      // B3：声明这份数据已不可信（由 query 决定何时重取并通知所有依赖方）
+      await queryClient.invalidateQueries({ queryKey: GOALS_QUERY_KEY });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('goals.archiveFailed'));
     }
@@ -170,7 +209,8 @@ export default function LearningGoals() {
   async function performDelete(goalId: string) {
     try {
       await deleteGoal(goalId);
-      await fetchGoals();
+      // B3：声明这份数据已不可信（由 query 决定何时重取并通知所有依赖方）
+      await queryClient.invalidateQueries({ queryKey: GOALS_QUERY_KEY });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('shared.deleteFailed'));
     }
@@ -208,7 +248,7 @@ export default function LearningGoals() {
         }
       />
 
-      {error && <ErrorDisplay message={error} onRetry={fetchGoals} />}
+      {error && <ErrorDisplay message={error} onRetry={() => refetch()} />}
 
       {/* 激活目标列表 */}
       {loading ? (

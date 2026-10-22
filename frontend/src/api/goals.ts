@@ -56,9 +56,13 @@ export async function createGoal(data: CreateGoalPayload): Promise<LearningGoal>
 }
 
 /** 获取学习目标列表（查询参数由契约派生：`GET /api/goals` 的 `status`） */
-export async function getGoals(status?: string): Promise<GoalListResponse> {
+export async function getGoals(
+  status?: string,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<GoalListResponse> {
   const query: QueryOf<'/goals', 'get'> = { status };
-  return request<GoalListResponse>(`/goals${buildQuery(query)}`);
+  return request<GoalListResponse>(`/goals${buildQuery(query)}`, { signal: options?.signal });
 }
 
 /** 获取单个学习目标详情 */
