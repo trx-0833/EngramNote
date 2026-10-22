@@ -41,6 +41,7 @@
     "docs:links": "node scripts/doc-link-check.mjs"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.102.8",
     "dompurify": "^3.4.15",
     "highlight.js": "^11.12.0",
     "katex": "^0.18.7",
@@ -49,7 +50,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-force-graph-2d": "^1.29.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.4",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

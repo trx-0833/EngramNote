@@ -176,8 +176,18 @@ export type PurgeAllResponse = Schema<'PurgeAllResponse'>;
  *
  * @returns 回收站列表响应
  */
-export async function getTrashedNotes(): Promise<TrashListResponse> {
-  return request<TrashListResponse>(`/notes/trash`);
+export async function getTrashedNotes(options?: {
+  /**
+   * 卸载即取消（迁移 5.2 / C1 的不变量 5）
+   *
+   * 计划 §2.5 第 5 条要求"迁到 `queryFn({ signal })` 时**不能丢**卸载取消"。
+   * `request()` 一直支持 `init.signal`（`client.ts:226`），
+   * 只是这些只读接口此前没有把它**透出来**。参数是可选的，
+   * 所以既有调用方（不传）行为逐字不变。
+   */
+  signal?: AbortSignal;
+}): Promise<TrashListResponse> {
+  return request<TrashListResponse>(`/notes/trash`, { signal: options?.signal });
 }
 
 /**

@@ -44,28 +44,37 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/ConfirmProvider';
 import { LocaleProvider } from './i18n';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './api/queryClient';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 最外层错误边界：即使路由层或布局层抛错也不会白屏 */}
     <ErrorBoundary>
-      {/* 语言（i18n 阶段 0）：放在**最外层**，理由与 ErrorBoundary 同类 ——
-          它下面的每一层（含 Toast 的文案、ConfirmProvider 的按钮、
-          登录页、侧边栏）都要能取到 `t()`。
-          它的初始化函数会同时写 `<html lang>` 与请求头用的模块级变量
-          （见 `i18n/locales.ts` 的 `applyLocale`），所以必须**先于**任何
-          发请求的组件挂载。 */}
-      <LocaleProvider>
-        <ToastProvider>
-          {/* 确认框宿主（批次 D3 后半）：给自定义 hook 里的确认提供 useConfirm()。
-              必须在 App 之外 —— 用到它的 hook 分布在多个页面里 */}
-          <ConfirmProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </ConfirmProvider>
-        </ToastProvider>
-      </LocaleProvider>
+      {/* 取数层（迁移 5.2 / C1）：放在**最外层**，理由与 ErrorBoundary 同类 ——
+          Query 的缓存不依赖路由、也不依赖语言，所以它不该被任何一层重挂载
+          （挂在 `<App>` 里面的话，切路由时若有重挂载就会丢缓存）。
+          ⚠️ 上面那 14 行样式表导入**没有动**：`QueryClientProvider` 是纯 JSX，
+          不参与模块图顺序，所以这次改动不影响 CSS 产物（见文件头那段说明）。 */}
+      <QueryClientProvider client={queryClient}>
+        {/* 语言（i18n 阶段 0）：放在**最外层**，理由与 ErrorBoundary 同类 ——
+            它下面的每一层（含 Toast 的文案、ConfirmProvider 的按钮、
+            登录页、侧边栏）都要能取到 `t()`。
+            它的初始化函数会同时写 `<html lang>` 与请求头用的模块级变量
+            （见 `i18n/locales.ts` 的 `applyLocale`），所以必须**先于**任何
+            发请求的组件挂载。 */}
+        <LocaleProvider>
+          <ToastProvider>
+            {/* 确认框宿主（批次 D3 后半）：给自定义 hook 里的确认提供 useConfirm()。
+                必须在 App 之外 —— 用到它的 hook 分布在多个页面里 */}
+            <ConfirmProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </ConfirmProvider>
+          </ToastProvider>
+        </LocaleProvider>
+      </QueryClientProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

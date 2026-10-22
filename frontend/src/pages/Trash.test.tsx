@@ -19,11 +19,12 @@
  *      （`.btn-danger`）。这一条只能按类名断言 —— "描边还是实底"是纯样式，
  *      没有任何语义出口（角色、可访问名、文本都一样）。
  */
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TrashNoteItem } from '../api/client';
+import { renderWithProviders } from '../test/render';
 import Trash from './Trash';
 
 // ── mock 掉整条 API 层：本文件测的是页面结构，不是接口契约 ──
@@ -72,7 +73,7 @@ beforeEach(() => {
 
 describe('回收站 · 表格化与危险按钮的两级（批次 E8）', () => {
   it('★ 一行一条笔记，列语义由真 <table> + <th scope="col"> 承担', async () => {
-    render(<Trash />);
+    renderWithProviders(<Trash />);
 
     // ① 真表格：三个角色齐在（`display: grid` 会让它们一起消失）
     const table = await screen.findByRole('table');
@@ -96,7 +97,7 @@ describe('回收站 · 表格化与危险按钮的两级（批次 E8）', () => 
 
   it('★ 红色分两级：入口是描边（btn-danger-outline），确认框里才是实底（btn-danger）', async () => {
     const user = userEvent.setup();
-    render(<Trash />);
+    renderWithProviders(<Trash />);
 
     // 页头的「清空回收站」：不可恢复，但它打开的是确认框 —— 用描边
     const clearEntry = await screen.findByRole('button', { name: '清空回收站' });

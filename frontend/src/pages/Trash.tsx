@@ -13,7 +13,8 @@
  *      实底红只留给确认框里那一下（§C2 第 14 行）。
  * 承载结构与样式见 `Trash.module.css`。
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getTrashedNotes,
   restoreNote,
@@ -40,16 +41,20 @@ import { useToast } from '../components/Toast';
 import styles from './Trash.module.css';
 import { useTranslation } from '../i18n';
 
+/**
+ * 回收站查询的 key（迁移 5.2 / C1）
+ *
+ * 导出成常量而不是在几处写字面量：写操作后要失效的就是它，
+ * 字面量写两遍迟早会不一致（而那种不一致**不会报错**，
+ * 只会让"删完列表不刷新"这种问题偶尔出现）。
+ */
+export const TRASH_QUERY_KEY = ['trash'] as const;
+
 export default function Trash() {
   const { t } = useTranslation();
   const { sourceTypeLabels } = useLabels();
   const toast = useToast();
-  /** 回收站列表 */
-  const [items, setItems] = useState<TrashNoteItem[]>([]);
-  /** 数据加载状态 */
-  const [loading, setLoading] = useState(true);
-  /** 错误信息 */
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   /** 操作进行中的笔记 ID（恢复/彻底删除），用于按钮禁用 */
   const [operatingId, setOperatingId] = useState<string | null>(null);
   /** 待彻底删除的笔记（打开 PurgeNoteDialog） */
@@ -57,25 +62,71 @@ export default function Trash() {
   /** 清空回收站确认弹窗 */
   const [showPurgeAll, setShowPurgeAll] = useState(false);
 
-  /** 加载回收站列表 */
-  async function fetchTrash() {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await getTrashedNotes();
-      setItems(res.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('shared.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }
+  /**
+   * 回收站列表（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 三个本地状态去哪了
+   *
+   * 改动前这里是 `items` / `loading` / `error` 三个 `useState` 加一个
+   * `fetchTrash()` 与 `useEffect`。现在它们分别由
+   * `data` / `isLoading` / `error` 承担 —— **本地那三个状态整个删掉**，
+   * 不留两套（计划 §4 的风险栏点了这条："页面里既留旧 state 又用 query"）。
+   *
+   * ## 三种界面与文案**逐字不变**（B1 的验收判据）
+   *
+   * - 加载中：`isLoading`（首次加载，无缓存）→ 仍是 `<LoadingSpinner />`；
+   * - 失败：`error` → 仍是 `<ErrorDisplay message={...} onRetry={refetch} />`，
+   *   文案仍是 `err.message` 或 `t('shared.loadFailed')`；
+   * - 空态：`items.length === 0` → 仍是 `<EmptyState>`。
+   *
+   * ⚠️ 用 `isLoading`（= `isPending && isFetching`）而不是 `isPending`：
+   * 后者在"有缓存但正在后台重取"时也是 true，那会让页面在已有数据时
+   * 闪一下 spinner —— 那是对现状的**行为改动**，B1 不接受。
+   */
+  const {
+    data: trashData,
+    isLoading: loading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: TRASH_QUERY_KEY,
+    queryFn: ({ signal }) => getTrashedNotes({ signal }),
+  });
 
-  // 挂载时加载数据（数据获取型 effect，同步 setState 豁免）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTrash();
-  }, []);
+  /**
+   * ⚠️ `data` 是**整个响应**（`{ items: [...] }`），不是数组本身。
+   *
+   * 第一版写成 `data: items = []`，`tsc` 立刻在 `.length` / `.map` 上报错 4 处 ——
+   * 改动前那句是 `setItems(res.items)`，`items` 是**取出来之后**的名字。
+   * 这类错在 JS 里会一路跑到运行时才炸，这次靠类型层当场拦住。
+   */
+  const items = trashData?.items ?? [];
+
+  const error = queryError
+    ? queryError instanceof Error
+      ? queryError.message
+      : t('shared.loadFailed')
+    : '';
+
+  /**
+   * 从缓存里移除一条（恢复/彻底删除之后）
+   *
+   * ## 为什么用 `setQueryData` 而不是 `invalidateQueries`
+   *
+   * 这两个动作的结果是**确定的**（那条笔记确实不在回收站了），
+   * 本地移除与服务器的答案一致，所以不需要再打一次请求去问。
+   * 现状也是本地 `setItems(filter)` —— 这样请求次数与现状**逐次相同**，
+   * 不会引入 B1 不该有的行为变化。
+   *
+   * 同时失效 `['notes']`：恢复出去的笔记要出现在笔记列表里。
+   * 不失效的话，`staleTime: 30_000` 会让用户"恢复完切到笔记列表却看不到它"
+   * （计划 §4 风险栏第 2 条："缓存掩盖了刷新"）。
+   */
+  function removeFromCache(noteId: string) {
+    queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, (prev) =>
+      (prev ?? []).filter((it) => it.note.id !== noteId),
+    );
+  }
 
   /**
    * 恢复笔记
@@ -89,7 +140,9 @@ export default function Trash() {
       if (res.renamed_to) {
         toast.info(t('trash.restoredRenamed', { name: res.renamed_to }));
       }
-      setItems((prev) => prev.filter((it) => it.note.id !== item.note.id));
+      removeFromCache(item.note.id);
+      // 恢复出去的笔记要出现在笔记列表里（见 removeFromCache 的说明）
+      await queryClient.invalidateQueries({ queryKey: ['notes'] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('trash.restoreFailed'));
     } finally {
@@ -100,10 +153,11 @@ export default function Trash() {
   /** 确认彻底删除单条笔记 */
   async function confirmPurge(promoteKeyCards: boolean) {
     if (!noteToPurge) return;
-    setOperatingId(noteToPurge.note.id);
+    const targetId = noteToPurge.note.id;
+    setOperatingId(targetId);
     try {
-      await purgeNote(noteToPurge.note.id, promoteKeyCards);
-      setItems((prev) => prev.filter((it) => it.note.id !== noteToPurge.note.id));
+      await purgeNote(targetId, promoteKeyCards);
+      removeFromCache(targetId);
       setNoteToPurge(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('trash.purgeFailed'));
@@ -117,7 +171,8 @@ export default function Trash() {
     try {
       const res = await purgeAllTrash();
       setShowPurgeAll(false);
-      setItems([]);
+      // 清空是"整份列表归零"，直接写缓存（与逐条删除同一口径：结果确定，不必再问）
+      queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, []);
       if (res.failed > 0) {
         toast.success(t('trash.purgeResult', { purged: res.purged, failed: res.failed }));
       }
@@ -151,7 +206,7 @@ export default function Trash() {
         }
       />
 
-      {error && <ErrorDisplay message={error} onRetry={fetchTrash} />}
+      {error && <ErrorDisplay message={error} onRetry={() => refetch()} />}
 
       {loading ? (
         <LoadingSpinner />
