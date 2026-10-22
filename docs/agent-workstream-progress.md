@@ -23,7 +23,7 @@
 | B | B3 清空字段语义 | ✅ **完成**（「项目描述」一个字段，按拍板范围） |
 | B | B4 批量导出 / 导入 | 🟡 **批量导出 ZIP 完成**；Markdown 导入未做 |
 | B | B5 题目编辑 / 删除 | ✅ **编辑+删除完成**；「AI 指出遗漏概念」未做（要额度） |
-| C 架构 | C1 前端取数层迁移 | 🟡 **B1 批次完成**（5/5 页）；B2/B3/Z1-Z2 未做 |
+| C 架构 | C1 前端取数层迁移 | 🟡 **B1 完成**（5/5 页）＋ **B2 前半**（轮询 2/3 处 + 第三处的卸载守卫）；B3/Z1-Z2 未做 |
 | C | C2 文档链接完整性守卫 | ✅ **完成** |
 | C | C3 走查缺陷收口 | ✅ **6/6 优先项已处置**（5 条修 + 1 条判为报告不准确） |
 | C | C4 a11y 深层验证 | ✅ **完成**（Tab 顺序 / 焦点陷阱 / 焦点环 三条都有了门禁） |
@@ -692,6 +692,8 @@ i18n 守卫红了 → 补中英双语表；② 我最初在 raise 处写了带�
 ## 本轮之后的仓库状态
 
 ```
+d233951 fix(notes): 状态轮询补上卸载守卫（C1 / 5.2 B2 第三处，前半）
+b28ecf1 feat(query): 轮询迁到 useQuery（C1 / 5.2 B2 前半：TaskProgress + ReminderBanner）
 0c5ccf0 feat(query): 迁移问题集到 useQuery（C1 / 5.2 B1-5，B1 批次完成）
 5fab5f7 feat(query): 迁移卡片详情到 useQuery（C1 / 5.2 B1-4）
 004042d feat(query): 迁移仪表盘到 useQuery（C1 / 5.2 B1-3）
@@ -743,7 +745,7 @@ d72af38 docs: 更正拍板 2 的模型名 —— DeepSeek V4 Flash（不是 V4.1
 
 接着做：
 
-1. **C1 继续**：**B1 已完成**；接着 B2 轮询三处（`TaskProgress` / `useNoteDetailData`×2 / `ReminderBanner`）→ B3 写后刷新五处 → Z1-Z2 Zustand → §3.3 三条口径的前后数字。
+1. **C1 继续**：**B1 完成、B2 前半完成**；接着 B3 写后刷新五处（`Upload` / `DailyMaterials` / `Projects` / `KnowledgeCards` / `LearningGoals`）→ Z1-Z2 Zustand → §3.3 三条口径的前后数字。另：B2 第三处的**完整迁移**（笔记本体变 query + `setNote` 契约变更）单列一轮。
 2. **B4 的 Markdown 目录导入**（双向功能的另一半）。
 3. **A1 P1**（白化 + 多信号排序 + 弱监督标定）→ 修掉 P0-2 那个"代理指标"的已知不足。
 4. **D1 🟠 档那 4.2 GB 的确认**（逐项复核绝对路径 + 停服务 + 先备份）
@@ -780,6 +782,7 @@ d72af38 docs: 更正拍板 2 的模型名 —— DeepSeek V4 Flash（不是 V4.1
 | 2026-10-22 | **A4 规则版完成**（`ce80755`）：卡片质量筛查器 + 真库报告（3469 张卡、1135 张命中、重复标题 72 种/187 张）。判据被实测反例打回两次后收紧。34 条新用例（含只读性守卫），整仓 1586 passed。**A4 🟡 规则版完成**；LLM 语义打分与真去重未做。 |
 | 2026-10-22 | **A1 P0-3 完成**（`0f1dc74`）：疑似重复卡片可见化（后端只读判定 + 前端按需面板，**无操作按钮**）。**顺带修掉 `Note.not_trashed` 的 `.correlate(None)` 恒真 bug**（回收站过滤完全失效，影响 20 处调用）。14+6+9 条新用例，整仓 1606 passed。**A1 的 P0 三件套齐了**；P1/P2-1 未做。 |
 | 2026-10-22 | **B3 完成**（`5403424`）：「清空项目描述」现在真的能保存（BN.3 丙-1）。用 `model_fields_set` 区分"没传键"与"显式 null"，前端发显式 `null`。**做了两次反空转验证**（stash 掉修复后后端 5 红、前端 1 红）。14+2 条新用例，整仓 1620 passed。 |
+| 2026-10-22 | **C1 / B2 前半**（`b28ecf1` `d233951`）：`TaskProgress` 的 `setTimeout` 递归 + 两个手工 ref换成 `refetchInterval` 函数形式（`false` = 停，与原来「终态或查不到即停」逐字同义）；`ReminderBanner` 的取数归 query、弹通知归 effect，并删掉一个**实测没人读的死状态** `polling`。两处都用 `retry: false`（原实现失败即静默，而这是 2 秒一次的高频轮询）。第三处 `useNoteDetailData` **只做了能安全做的半批**：补上卸载守卫（计划 §2.4 点名的那条判据），完整迁移要先把笔记本体变 query 并改掉 hook 导出的 `setNote` 契约，风险不在一个量级。新增 4 条**源码结构守卫**（并明写其价值上限：证明代码还在、不证明代码对），反空转删一处守卫 ⇒ 恰好 1 条红。整仓 707 passed / build 通过 / e2e 21 / a11y 26。 |
 | 2026-10-22 | **C1 / B1 批次完成**（`004042d` `5fab5f7` `0c5ccf0`）：计划 §2.4 的 B1 五个页面（`Trash` / `NotesList` / `Dashboard` / `CardDetail` / `QuestionSets`）全部迁到 `useQuery`，每页一次提交可单独回滚。三处值得记的判断：① `Dashboard` 保持**一个聚合 query**（拆成七个会改请求时序，而 B1 判据是行为不变）；② `CardDetail` 的编辑表单改成**进入编辑态时播种**（用 effect 会在用户输入时被重取覆盖）；③ `QuestionSets` 的展开态**绑定到数据签名**（签名不一致 ⇒ 全展开，与改动前逐字同义且零 effect）。顺带把 `groupByNote` 挪到渲染期 —— 切语言不再重新取数。新增 `getQuestions` / `getKnowledgeCard` / `getNotes` / `getArchivedNotes` / `getTrashedNotes` 的**可选** `signal`（不变量 5）。整仓 703 passed / build 通过 / e2e 21 / a11y 26。 |
 | 2026-10-22 | **C1 开工**（`1ab5b22` / `47aa24c`）：四个待决策项已拍板（都批依赖 / 照用 §2.3 默认值 / AuthContext 不迁 / 同意 §3.3 口径）。装了 `@tanstack/react-query` 5.104.5 + `zustand` 5.0.15，接了 Provider 与 `renderWithProviders`，B1 迁完 `Trash` + `NotesList`（还剩 3 页）。新增 11 条不变量用例（含**卸载即取消**与其反向断言）。⚠️ npm 又剥掉 10 个包的 `libc` 元数据，用一次性脚本以 HEAD 为基线重建锁文件（净 +64/−1 行）。单测 703 passed / build 通过。 |
 | 2026-10-22 | **C4 完成**（dbbfd3）：e2e/focus-order.spec.ts 7 条补齐 11y-audit.md §4 那三条没有任何一层在守的判据。量出文档顺序 = **19 个 nav 项先于 main**（文档里写的 15 是旧数字）；焦点陷阱在真 Chromium 里验（含反空转：停用后第 2 次 Tab 就漏出去）；焦点环判据**加强两轮**才不空转（v1 落在装饰阴影上、v2 被 UA 默认 1px 掩盖）。功能层 21 passed / a11y 26 passed / build 通过。 |
