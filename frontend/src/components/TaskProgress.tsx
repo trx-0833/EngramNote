@@ -20,7 +20,8 @@
  *    后端如实返回 `terminated=false`，界面也必须如实说
  *    "已请求取消，任务会在下一个阶段边界退出"，而不是显示"已取消"。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { cancelTask, isTerminal, listNoteTasks, type TaskRun } from '../api/tasks';
 import { useTranslation } from '../i18n';
 
@@ -43,6 +44,14 @@ interface Props {
   allowCancel?: boolean;
 }
 
+/**
+ * 任务列表查询的 key 前缀（迁移 5.2 / C1）
+ *
+ * 完整 key 是 `[...NOTE_TASKS_QUERY_KEY, noteId]` —— 前缀单独导出，
+ * 这样"失效这一篇笔记的任务"与"失效所有任务"都能表达。
+ */
+export const NOTE_TASKS_QUERY_KEY = ['noteTasks'] as const;
+
 export default function TaskProgress({
   noteId,
   fallbackText,
@@ -55,50 +64,43 @@ export default function TaskProgress({
   // `= t('shared.taskProcessing')`）—— 解构默认值在**组件体外**求值，
   // 取不到 hook，语言切换时它也不会变。改成体内 `??` 才是对的。
   const fallback = fallbackText ?? t('shared.taskProcessing');
-  const [run, setRun] = useState<TaskRun | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  // 用 ref 保存定时器与"是否已卸载"，避免卸载后 setState
-  const timerRef = useRef<number | null>(null);
-  const aliveRef = useRef(true);
 
-  const poll = useCallback(async () => {
-    try {
-      const data = await listNoteTasks(noteId, 5);
-      if (!aliveRef.current) return;
-      setUnavailable(false);
+  /**
+   * 任务进度轮询（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 停止条件与原来逐字同义
+   *
+   * `refetchInterval` 用**函数形式**：返回 `false` 即停止。
+   * 原实现是"终态或查不到任务就停"（`setTimeout` 递归里那句
+   * `if (latest && !isTerminal(latest.status))`），这里一一对应。
+   *
+   * ## `retry: false` 是**这一条 query 的覆盖**
+   *
+   * 原实现 `catch` 后直接退回静态文案、不重试。生产默认是 `retry: 1`，
+   * 而这是个 **2 秒一次**的高频轮询 —— 每次失败多打一次请求会让行为明显变吵。
+   * 覆盖只作用于这一条，全局默认值没动。
+   *
+   * ## 卸载后不再 setState
+   *
+   * 原来靠 `aliveRef` + `timerRef` 手工管理；现在由 query 负责
+   * （它不会在卸载后把结果写进已卸载组件的状态）。两个 ref 因此都删掉了。
+   */
+  const { data, isError: unavailable } = useQuery({
+    queryKey: [...NOTE_TASKS_QUERY_KEY, noteId],
+    queryFn: ({ signal }) => listNoteTasks(noteId, 5, { signal }),
+    retry: false,
+    refetchInterval: (query) => {
       // 取最新的一条：列表已按最新在前排序
-      const latest = data.items[0] ?? null;
-      setRun(latest);
-      return latest;
-    } catch {
-      // 进度是辅助信息：失败就退回静态文案，不向用户报错
-      if (aliveRef.current) setUnavailable(true);
-      return null;
-    }
-  }, [noteId]);
-
-  useEffect(() => {
-    aliveRef.current = true;
-    let stopped = false;
-
-    const tick = async () => {
-      const latest = await poll();
-      if (stopped) return;
+      const latest = query.state.data?.items[0];
       // 终态或查不到任务：停止轮询（页面主数据由父组件自己的轮询负责）
-      if (latest && !isTerminal(latest.status)) {
-        timerRef.current = window.setTimeout(tick, POLL_INTERVAL_MS);
-      }
-    };
-    void tick();
+      if (!latest || isTerminal(latest.status)) return false;
+      return POLL_INTERVAL_MS;
+    },
+  });
 
-    return () => {
-      stopped = true;
-      aliveRef.current = false;
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    };
-  }, [poll]);
+  const run: TaskRun | null = data?.items[0] ?? null;
 
   const handleCancel = async () => {
     if (!run || cancelling) return;

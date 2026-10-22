@@ -39,10 +39,17 @@ export function isTerminal(status: string): boolean {
 }
 
 /** 列出某笔记的近期任务（最新在前） */
-export function listNoteTasks(noteId: string, limit = 20): Promise<TaskRunList> {
+export function listNoteTasks(
+  noteId: string,
+  limit = 20,
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<TaskRunList> {
   // 查询参数由契约派生（阶段 5.1 / S3b）：键名写错会在这一行编译失败
   const query: QueryOf<'/tasks/note/{note_id}', 'get'> = { limit };
-  return request<TaskRunList>(`/tasks/note/${noteId}${buildQuery(query)}`);
+  return request<TaskRunList>(`/tasks/note/${noteId}${buildQuery(query)}`, {
+    signal: options?.signal,
+  });
 }
 
 /** 查询单个任务 */

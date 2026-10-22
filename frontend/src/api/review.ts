@@ -201,8 +201,11 @@ export async function submitQuickReviewAnswer(
 export type ReminderResponse = Schema<'ReminderResponse'>;
 
 /** 获取复习提醒数据 */
-export async function getReminders(): Promise<ReminderResponse> {
-  return request<ReminderResponse>('/review/reminders');
+export async function getReminders(
+  /** 卸载即取消（迁移 5.2 / C1 的不变量 5）。可选 ⇒ 既有调用方行为不变 */
+  options?: { signal?: AbortSignal },
+): Promise<ReminderResponse> {
+  return request<ReminderResponse>('/review/reminders', { signal: options?.signal });
 }
 
 // ---------------------------------------------------------------------------

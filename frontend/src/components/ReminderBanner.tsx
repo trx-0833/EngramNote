@@ -7,8 +7,9 @@
  * 4. 在非静默时段通过桌面通知提醒用户
  */
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getReminders, type ReminderResponse } from '../api/client';
+import { getReminders } from '../api/client';
 import { useToast } from '../components/Toast';
 import {
   requestNotificationPermission,
@@ -20,6 +21,13 @@ import { useTranslation } from '../i18n';
 /** 轮询间隔：10 分钟 */
 const POLL_INTERVAL_MS = 600000;
 
+/**
+ * 提醒数据查询的 key（迁移 5.2 / C1）
+ *
+ * 这个 key 没有参数维度（提醒是按用户聚合的），所以直接用常量而不是数组拼接。
+ */
+export const REMINDERS_QUERY_KEY = ['reminders'] as const;
+
 export default function ReminderBanner() {
   const { t } = useTranslation();
   const toast = useToast();
@@ -28,68 +36,65 @@ export default function ReminderBanner() {
   const [permission, setPermission] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'denied',
   );
-  /** 最新提醒数据 */
-  const [reminders, setReminders] = useState<ReminderResponse | null>(null);
-  /** 是否正在轮询 */
-  const [polling, setPolling] = useState(false);
   /** 用户是否手动关闭了开启提示横幅 */
   const [dismissed, setDismissed] = useState(false);
   /** 已通知过的 due_count 快照，避免重复弹通知 */
   const lastNotifiedDueRef = useRef<number>(0);
-  /** 轮询定时器引用 */
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /**
-   * 拉取一次提醒数据
-   * 取得数据后判断是否需要弹桌面通知
+   * 提醒数据轮询（迁移 5.2 / C1，2026-10-22）
+   *
+   * ## 三个被删掉的东西
+   *
+   * - `pollOnce()`：取数归 queryFn、弹通知归下面的 effect；
+   * - `timerRef`：query 自己管定时器；
+   * - **`polling` 状态**：实测 grep 的 4 处命中**全在 `startPolling`/`stopPolling`
+   *   内部**，外部没有任何消费者 —— 它一直是个没人读的死状态，顺手删掉。
+   *
+   * ## `retry: false` 是这一条 query 的覆盖
+   *
+   * 原实现 `catch {}` 静默失败、**不重试**。生产默认 `retry: 1` 会让这个
+   * 高频轮询每次失败多打一次请求。覆盖只作用于这一条。
    */
-  async function pollOnce() {
-    try {
-      const res = await getReminders();
-      setReminders(res);
-      // 仅按 due_count 值变化去重，避免同一会话只弹一次提醒，见 docs/decisions.md#F-25。
-      if (res.due_count > 0 && res.due_count !== lastNotifiedDueRef.current) {
-        // 静默时段不弹通知
-        if (!isInQuietHours()) {
-          showNotification(t('reminder.title'), t('reminder.dueCount', { count: res.due_count }));
-          // 记录本次已通知的 due_count，值变化才再次通知
-          lastNotifiedDueRef.current = res.due_count;
-        }
-      } else if (res.due_count === 0) {
-        // 待复习清零后重置快照，下次到来时再次通知
-        lastNotifiedDueRef.current = 0;
-      }
-    } catch {
-      // 静默失败，不打扰用户
-    }
-  }
+  const { data: reminders = null } = useQuery({
+    queryKey: REMINDERS_QUERY_KEY,
+    queryFn: ({ signal }) => getReminders({ signal }),
+    // 只在已授权时轮询（原来那个 `if (permission === 'granted') startPolling()`）
+    enabled: permission === 'granted',
+    refetchInterval: POLL_INTERVAL_MS,
+    retry: false,
+  });
 
-  /** 启动轮询：立即拉一次 + 定时拉取 */
-  function startPolling() {
-    if (polling) return;
-    setPolling(true);
-    pollOnce();
-    timerRef.current = setInterval(pollOnce, POLL_INTERVAL_MS);
-  }
-
-  /** 停止轮询并清理定时器 */
-  function stopPolling() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setPolling(false);
-  }
-
-  // 组件挂载时根据权限状态决定是否启动轮询（订阅类 effect，同步 setState 豁免）
+  /**
+   * 取得数据后判断是否需要弹桌面通知
+   *
+   * ## 为什么这段是 effect 而不是 queryFn 的一部分
+   *
+   * 它是**对新数据做出的副作用**（弹系统通知），不是"派生状态" ——
+   * 放在 effect 里是正确位置，`set-state-in-effect` 那条规则针对的是
+   * "在 effect 里同步 setState 来镜像 props/state"，与这里无关。
+   *
+   * 逻辑与原来的 `pollOnce` **逐字相同**：
+   * 仅按 `due_count` 值变化去重（`docs/decisions.md#F-25`）、
+   * 静默时段不弹（`isInQuietHours()`）、清零后重置快照。
+   */
   useEffect(() => {
-    if (permission === 'granted') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      startPolling();
+    if (!reminders) return;
+    if (reminders.due_count > 0 && reminders.due_count !== lastNotifiedDueRef.current) {
+      // 静默时段不弹通知
+      if (!isInQuietHours()) {
+        showNotification(
+          t('reminder.title'),
+          t('reminder.dueCount', { count: reminders.due_count }),
+        );
+        // 记录本次已通知的 due_count，值变化才再次通知
+        lastNotifiedDueRef.current = reminders.due_count;
+      }
+    } else if (reminders.due_count === 0) {
+      // 待复习清零后重置快照，下次到来时再次通知
+      lastNotifiedDueRef.current = 0;
     }
-    return () => stopPolling();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permission]);
+  }, [reminders, t]);
 
   /**
    * 处理t('reminder.enable')按钮点击

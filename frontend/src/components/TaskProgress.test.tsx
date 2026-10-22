@@ -7,11 +7,12 @@
  *   3. 终态停止轮询（否则开着的页面会永远每 2 秒打一次接口）；
  *   4. 取消成功**不等于已停止** —— 后端 `terminated=false` 时必须如实告知。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TaskProgress from './TaskProgress';
+import { renderWithProviders } from '../test/render';
 
 // 只 mock API 层：组件内部的轮询/状态机逻辑必须走真实实现
 vi.mock('../api/tasks', async () => {
@@ -59,7 +60,7 @@ describe('TaskProgress', () => {
 
   it('展示真实进度与阶段名，而不是一句"请稍候"', async () => {
     mockList.mockResolvedValue({ items: [run()], total: 1 });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     expect(await screen.findByTestId('task-progress-stage')).toHaveTextContent('正在清洗文本');
     expect(screen.getByTestId('task-progress-percent')).toHaveTextContent('42%');
@@ -68,7 +69,7 @@ describe('TaskProgress', () => {
 
   it('★ 接口失败时退回静态文案，不报错也不阻塞', async () => {
     mockList.mockRejectedValue(new Error('网络不通'));
-    render(<TaskProgress noteId="n-1" fallbackText="正在转换中，请稍候..." />);
+    renderWithProviders(<TaskProgress noteId="n-1" fallbackText="正在转换中，请稍候..." />);
 
     const fallback = await screen.findByTestId('task-progress-fallback');
     expect(fallback).toHaveTextContent('正在转换中，请稍候...');
@@ -77,14 +78,14 @@ describe('TaskProgress', () => {
 
   it('没有任务记录时也退回静态文案', async () => {
     mockList.mockResolvedValue({ items: [], total: 0 });
-    render(<TaskProgress noteId="n-1" fallbackText="处理中..." />);
+    renderWithProviders(<TaskProgress noteId="n-1" fallbackText="处理中..." />);
 
     expect(await screen.findByTestId('task-progress-fallback')).toHaveTextContent('处理中...');
   });
 
   it('★ 已处于终态时停止轮询（不重复打接口）', async () => {
     mockList.mockResolvedValue({ items: [run({ status: 'succeeded', progress: 1 })], total: 1 });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await screen.findByTestId('task-progress');
     const callsAfterFirst = mockList.mock.calls.length;
@@ -94,7 +95,7 @@ describe('TaskProgress', () => {
 
   it('运行中会继续轮询（进度条要能"动起来"）', async () => {
     mockList.mockResolvedValue({ items: [run()], total: 1 });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await screen.findByTestId('task-progress');
     await waitFor(() => expect(mockList.mock.calls.length).toBeGreaterThan(1), { timeout: 3500 });
@@ -108,7 +109,7 @@ describe('TaskProgress', () => {
       terminated: false,
       detail: '已标记为取消。',
     });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: '取消任务' }));
     const notice = await screen.findByTestId('task-cancel-notice');
@@ -125,7 +126,7 @@ describe('TaskProgress', () => {
       terminated: true,
       detail: '',
     });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: '取消任务' }));
     expect(await screen.findByTestId('task-cancel-notice')).toHaveTextContent('已取消。');
@@ -134,7 +135,7 @@ describe('TaskProgress', () => {
   it('取消失败时提示可重试，且不假装成功', async () => {
     mockList.mockResolvedValue({ items: [run()], total: 1 });
     mockCancel.mockRejectedValue(new Error('任务不存在'));
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: '取消任务' }));
     expect(await screen.findByTestId('task-cancel-notice')).toHaveTextContent('取消失败');
@@ -142,7 +143,7 @@ describe('TaskProgress', () => {
 
   it('终态时不显示取消按钮（已经结束的任务没有可取消的东西）', async () => {
     mockList.mockResolvedValue({ items: [run({ status: 'failed', error: '转换失败' })], total: 1 });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     await screen.findByTestId('task-progress');
     expect(screen.queryByRole('button', { name: '取消任务' })).not.toBeInTheDocument();
@@ -151,14 +152,14 @@ describe('TaskProgress', () => {
 
   it('重试次数大于 1 时展示尝试次数（重试是正常流程，不该让用户以为卡住了）', async () => {
     mockList.mockResolvedValue({ items: [run({ attempt: 2, max_attempts: 3 })], total: 1 });
-    render(<TaskProgress noteId="n-1" />);
+    renderWithProviders(<TaskProgress noteId="n-1" />);
 
     expect(await screen.findByText('第 2/3 次尝试')).toBeInTheDocument();
   });
 
   it('allowCancel=false 时不显示取消按钮（父组件已有产品级停止入口）', async () => {
     mockList.mockResolvedValue({ items: [run()], total: 1 });
-    render(<TaskProgress noteId="n-1" allowCancel={false} />);
+    renderWithProviders(<TaskProgress noteId="n-1" allowCancel={false} />);
 
     await screen.findByTestId('task-progress');
     expect(screen.queryByRole('button', { name: '取消任务' })).not.toBeInTheDocument();

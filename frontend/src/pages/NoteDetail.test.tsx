@@ -24,6 +24,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryWrapper } from '../test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmProvider } from '../components/ConfirmProvider';
@@ -123,15 +124,24 @@ function emptyLinks() {
 
 function renderPage() {
   return render(
-    // 批次 D3 后半：`useNoteActions` / `useNoteAnnotations` 的确认改走 `useConfirm()`，
-    // 渲染树里必须有这个宿主（层级与 main.tsx 一致）
-    <ConfirmProvider>
-      <MemoryRouter initialEntries={['/notes/note-1']}>
-        <Routes>
-          <Route path="/notes/:noteId" element={<NoteDetail />} />
-        </Routes>
-      </MemoryRouter>
-    </ConfirmProvider>,
+    // 迁移 5.2 / C1：`NoteDetail` 的子树里有 `TaskProgress`，它现在用 `useQuery`
+    // ⇒ 渲染树必须有 `QueryClientProvider`。
+    //
+    // ⚠️ 这里用的是 `QueryWrapper` 而不是 `renderWithProviders`：
+    // 后者只给一个裸的 `MemoryRouter`，而这个页面用 `useParams` 取 `noteId`
+    // —— 那要求 `MemoryRouter` 里有**匹配的 `<Route path="/notes/:noteId">`**，
+    // 光有路由上下文不够（实测报错会指向"参数取不到"，与 Provider 无关）。
+    <QueryWrapper>
+      {/* 批次 D3 后半：`useNoteActions` / `useNoteAnnotations` 的确认改走 `useConfirm()`，
+          渲染树里必须有这个宿主（层级与 main.tsx 一致） */}
+      <ConfirmProvider>
+        <MemoryRouter initialEntries={['/notes/note-1']}>
+          <Routes>
+            <Route path="/notes/:noteId" element={<NoteDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ConfirmProvider>
+    </QueryWrapper>,
   );
 }
 
