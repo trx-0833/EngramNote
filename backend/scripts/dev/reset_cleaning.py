@@ -1,7 +1,12 @@
 """重置卡在 cleaning 状态的笔记"""
 import sqlite3
+from pathlib import Path
 
-db_path = r'D:\engramnote\backend\data\db\engramnote.db'
+#: 仓库根：本文件在 `<repo>/backend/scripts/dev/`，向上三级。
+#: 不写死绝对路径 —— 开源仓库里的脚本必须能在别人的克隆里直接跑。
+db_path = str(
+    Path(__file__).resolve().parents[3] / "backend" / "data" / "db" / "engramnote.db"
+)
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 

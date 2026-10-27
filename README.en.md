@@ -131,7 +131,7 @@ Three design principles:
 
 | Software | Version | Notes |
 |---|---|---|
-| **Python** | 3.10+ | conda recommended (`conda create -n mineru_env python=3.10`) |
+| **Python** | **3.11 (recommended; minimum 3.10)** | CI and local verification run on 3.11; `requires-python` in `pyproject.toml` stays `>=3.10`. conda recommended (`conda create -n mineru_env python=3.11`) |
 | **Node.js** | **22.22.2+** | Lower bound is in `frontend/.nvmrc` and `engines.node` |
 | **Git** | 2.0+ | |
 | **pip** | 23+ | |
@@ -153,7 +153,7 @@ git clone https://github.com/trx-0833/EngramNote.git
 cd EngramNote
 
 # 2. (Recommended) create a conda environment
-conda create -n mineru_env python=3.10
+conda create -n mineru_env python=3.11
 conda activate mineru_env
 
 # 3. Detect and auto-fix what is required (deps + .env template + BGE-M3 + VAD)

@@ -19,7 +19,8 @@
 13. 验证复习统计和历史
 14. 验证前端页面可访问性（/today 路由）
 
-运行方式：cd backend && D:\\conda\\envs\\mineru_env\\python.exe scripts/dev/test_week11_e2e.py
+运行方式：cd backend && python scripts/dev/test_week11_e2e.py
+          （先激活项目环境：conda activate mineru_env）
 """
 
 import json

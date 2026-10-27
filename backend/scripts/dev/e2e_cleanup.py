@@ -3,9 +3,15 @@
 import os
 import shutil
 import sqlite3
+from pathlib import Path
 
-DB = r"D:\engramnote\backend\data\db\engramnote.db"
-VAULT = r"D:\engramnote\backend\data\storage"
+#: 仓库根：本文件在 `<repo>/backend/scripts/dev/`，向上三级到仓库根。
+#: 此前这里写死的是作者本机的绝对路径，
+#: 别人 clone 下来只会连到一个不存在的库 —— 改成按文件位置推导。
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+DB = str(_REPO_ROOT / "backend" / "data" / "db" / "engramnote.db")
+VAULT = str(_REPO_ROOT / "backend" / "data" / "storage")
 
 db = sqlite3.connect(DB)
 db.row_factory = sqlite3.Row

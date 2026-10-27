@@ -20,22 +20,20 @@ set "FRONTEND_PORT=5173"
 set "CONDA_ENV=mineru_env"
 set "CONDA_BASE="
 
-:: Auto-detect conda installation path (common locations)
-if exist "D:\miniforge3\condabin\conda.bat" (
-    set "CONDA_BASE=D:\miniforge3"
-) else if exist "%USERPROFILE%\miniforge3\condabin\conda.bat" (
-    set "CONDA_BASE=%USERPROFILE%\miniforge3"
-) else if exist "%ProgramData%\miniforge3\condabin\conda.bat" (
-    set "CONDA_BASE=%ProgramData%\miniforge3"
-) else if exist "%USERPROFILE%\anaconda3\condabin\conda.bat" (
-    set "CONDA_BASE=%USERPROFILE%\anaconda3"
-) else if exist "%USERPROFILE%\miniconda3\condabin\conda.bat" (
-    set "CONDA_BASE=%USERPROFILE%\miniconda3"
-) else if exist "C:\ProgramData\anaconda3\condabin\conda.bat" (
-    set "CONDA_BASE=C:\ProgramData\anaconda3"
+:: Detect the conda installation (no machine-specific path is hard-coded)
+::   1) conda.exe on PATH -- works for any distribution, installed anywhere
+::   2) Common default locations (Miniforge / Miniconda / Anaconda)
+:: When nothing is found, Step 1 falls back to the system Python with a [WARN].
+for /f "delims=" %%I in ('where conda.exe 2^>nul') do (
+    if not defined CONDA_BASE for %%J in ("%%~dpI..") do set "CONDA_BASE=%%~fJ"
 )
+if not defined CONDA_BASE if exist "%USERPROFILE%\miniforge3\condabin\conda.bat" set "CONDA_BASE=%USERPROFILE%\miniforge3"
+if not defined CONDA_BASE if exist "%ProgramData%\miniforge3\condabin\conda.bat" set "CONDA_BASE=%ProgramData%\miniforge3"
+if not defined CONDA_BASE if exist "%USERPROFILE%\anaconda3\condabin\conda.bat" set "CONDA_BASE=%USERPROFILE%\anaconda3"
+if not defined CONDA_BASE if exist "%USERPROFILE%\miniconda3\condabin\conda.bat" set "CONDA_BASE=%USERPROFILE%\miniconda3"
+if not defined CONDA_BASE if exist "%ProgramData%\anaconda3\condabin\conda.bat" set "CONDA_BASE=%ProgramData%\anaconda3"
 :: If auto-detect fails, uncomment and modify the next line:
-:: set "CONDA_BASE=C:\Users\YOUR_USERNAME\anaconda3"
+:: set "CONDA_BASE=C:\Users\YOUR_USERNAME\miniforge3"
 
 echo.
 echo ============================================================

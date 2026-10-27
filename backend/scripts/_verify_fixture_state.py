@@ -3,7 +3,10 @@
 import sqlite3
 from pathlib import Path
 
-DB = Path(r"D:\engramnote\backend\data\db\engramnote.db")
+#: 仓库根：本文件在 `<repo>/backend/scripts/`，向上两级到仓库根。
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+DB = _REPO_ROOT / "backend" / "data" / "db" / "engramnote.db"
 con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 cur = con.cursor()
 for t in ("users", "folders", "learning_goals", "notes", "knowledge_cards", "quiz_items",

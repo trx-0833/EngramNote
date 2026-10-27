@@ -113,7 +113,7 @@ EngramNote 把这条链路收进同一个自托管应用：
 
 | 软件 | 版本 | 说明 |
 |---|---|---|
-| **Python** | 3.10+ | 推荐 conda（脚本会提示 `conda create -n mineru_env python=3.10`） |
+| **Python** | **3.11（推荐；下限 3.10）** | CI 与本地验证都在 3.11 上跑；`pyproject.toml` 的 `requires-python` 仍是 `>=3.10`。推荐 conda（`conda create -n mineru_env python=3.11`） |
 | **Node.js** | **22.22.2+** | 版本下界写在 `frontend/.nvmrc` 与 `frontend/package.json` 的 `engines.node`（`check_env.py` 读后者） |
 | **Git** | 2.0+ | |
 | **pip** | 23+ | |
@@ -134,7 +134,7 @@ git clone https://github.com/trx-0833/EngramNote.git
 cd EngramNote
 
 # 2. （推荐）创建 conda 环境
-conda create -n mineru_env python=3.10
+conda create -n mineru_env python=3.11
 conda activate mineru_env
 
 # 3. 检测并自动修复必需项（依赖 + .env 模板 + BGE-M3 + VAD）

@@ -3,7 +3,11 @@
 import sqlite3
 from pathlib import Path
 
-SNAP = Path(r"D:\engramnote\_backup\20260914-132932-pre-fixture-user-cleanup\engramnote.db")
+#: 仓库根：本文件在 `<repo>/backend/scripts/`，向上两级到仓库根。
+#: 快照目录在仓库根的 `_backup/` 下（该目录不入库，用前需自行准备）。
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+SNAP = _REPO_ROOT / "_backup" / "20260914-132932-pre-fixture-user-cleanup" / "engramnote.db"
 con = sqlite3.connect(f"file:{SNAP}?mode=ro", uri=True)
 con.row_factory = sqlite3.Row
 cur = con.cursor()

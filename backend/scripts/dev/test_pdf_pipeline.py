@@ -3,8 +3,8 @@
 
 使用方法：
     conda activate mineru_env
-    cd D:\engramnote\backend
-    python test_pdf_pipeline.py
+    cd backend
+    python scripts/dev/test_pdf_pipeline.py
 
 流程：
     1. 注册/登录获取 JWT Token

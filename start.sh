@@ -14,16 +14,25 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 BACKEND_PORT=8001
 FRONTEND_PORT=5173
 
-# ---- Conda 环境配置（自动检测） ----
+# ---- Conda 环境配置（自动检测，不写死任何本机路径） ----
 CONDA_ENV="mineru_env"
 CONDA_BASE=""
 
-for cb in "$HOME/anaconda3" "$HOME/miniconda3" "/opt/anaconda3" "/opt/miniconda3"; do
-    if [ -f "$cb/etc/profile.d/conda.sh" ]; then
-        CONDA_BASE="$cb"
-        break
-    fi
-done
+# 1) PATH 上的 conda（conda init 之后的终端都有）—— 任何发行版、装在哪都能找到
+if command -v conda >/dev/null 2>&1; then
+    CONDA_BASE="$(conda info --base 2>/dev/null)"
+fi
+
+# 2) 常见安装位置（Miniforge / Miniconda / Anaconda）
+if [ -z "$CONDA_BASE" ]; then
+    for cb in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/anaconda3" "$HOME/miniconda3" \
+              "/opt/miniforge3" "/opt/miniconda3" "/opt/anaconda3" "/opt/conda"; do
+        if [ -f "$cb/etc/profile.d/conda.sh" ]; then
+            CONDA_BASE="$cb"
+            break
+        fi
+    done
+fi
 
 echo ""
 echo "============================================================"

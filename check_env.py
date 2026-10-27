@@ -284,7 +284,7 @@ def check_python():
     else:
         fail(f"Python 版本过低：{version.major}.{version.minor}.{version.micro}，需要 3.10+")
         info("请安装 Python 3.10+：https://www.python.org/downloads/")
-        info("或使用 conda：conda create -n mineru_env python=3.10")
+        info("或使用 conda：conda create -n mineru_env python=3.11")
         record_fail()
         return False
 
@@ -293,7 +293,7 @@ def check_python():
         ok(f"当前 Conda 环境：{conda_env}")
     else:
         warn("未检测到 Conda 环境，建议使用 conda 管理依赖")
-        info("创建环境：conda create -n mineru_env python=3.10 && conda activate mineru_env")
+        info("创建环境：conda create -n mineru_env python=3.11 && conda activate mineru_env")
         record_warn()
     return True
 

@@ -31,7 +31,11 @@ EMAIL = "e2e0816085528@example.com"
 PASSWORD = "e2e0816085528"
 USERNAME = "e2etester"
 
-VAULT_ROOT = Path(r"d:\engramnote\backend\data\storage")
+#: 仓库根：本文件在 `<repo>/backend/tests/integration/`，向上四级到仓库根。
+#: 此前这里写死作者本机路径，换台机器就指向不存在的目录。
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+VAULT_ROOT = _REPO_ROOT / "backend" / "data" / "storage"
 
 client = httpx.Client(timeout=60.0)
 token = ""

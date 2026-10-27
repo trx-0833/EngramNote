@@ -402,7 +402,7 @@ def _install_real_db_write_guard() -> None:
             return False
         if not url.startswith("sqlite"):
             return False
-        # 形如 sqlite+aiosqlite:///D:/engramnote/backend/data/db/engramnote.db
+        # 形如 sqlite+aiosqlite:///<repo>/backend/data/db/engramnote.db
         path = url.split("///", 1)[-1]
         try:
             return os.path.abspath(path) == _REAL_DB_PATH

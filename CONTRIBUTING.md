@@ -32,8 +32,8 @@
 
 | 软件 | 要求 | 依据 |
 |---|---|---|
-| Python | **3.10+** | `pyproject.toml:44`（`requires-python = ">=3.10"`）、`check_env.py:258` |
-| conda | 推荐（不是必需） | `check_env.py:264-269` 会提示 `conda create -n mineru_env python=3.10` |
+| Python | **3.11（推荐；下限 3.10）** | `pyproject.toml:44`（`requires-python = ">=3.10"`）、`check_env.py:281`；CI 与本地验证都在 3.11 上跑 |
+| conda | 推荐（不是必需） | `check_env.py:287-296` 会提示 `conda create -n mineru_env python=3.11` |
 | Node.js | 见 `frontend/.nvmrc`（当前 `22.22.2`） | `frontend/.nvmrc:1`；下界同时写在 `frontend/package.json:73-75` 的 `engines.node` = `^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0` |
 
 ⚠️ **Node 版本不是"随便挑个新的"**：`engines.node` 是 `jsdom@30` 自己的要求，

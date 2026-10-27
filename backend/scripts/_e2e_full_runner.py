@@ -81,13 +81,48 @@ MIN_PYTHON = (3, 10)
 #: 找后端解释器时优先看的环境变量（值 = python.exe 的绝对路径）
 ENV_PYTHON = "ENGRAMNOTE_E2E_PYTHON"
 
-_CONDA_ENVS = (
-    Path("D:/conda/envs"),
-        Path("D:/miniforge3/envs"),
-        Path.home() / "anaconda3" / "envs",
-    Path.home() / "miniconda3" / "envs",
-    Path("C:/ProgramData/anaconda3/envs"),
-)
+
+def _conda_env_dirs() -> tuple[Path, ...]:
+    """推导 conda 的环境目录列表（**不写死任何本机路径**）
+
+    顺序即优先级：
+
+    1. `CONDA_ENVS_PATH`（conda 自己认的环境目录变量，多个用 `os.pathsep` 分隔）——
+       这是唯一能覆盖「envs_dirs 被 .condarc 改到别处」的通用入口；
+    2. `CONDA_EXE` 推导：`<base>/Scripts/conda.exe` → `<base>/envs`；
+    3. 常见安装位置（Miniforge / Miniconda / Anaconda 的默认目录）。
+
+    此前这里前两项写死成作者本机的绝对路径，
+    别人 clone 下来必然探测失败 —— 失败信息还会被误读成"后端依赖没装"。
+    找不到时的正解是显式传 `ENGRAMNOTE_E2E_PYTHON`（见 `resolve_python()`）。
+    """
+    dirs: list[Path] = []
+
+    for raw in os.environ.get("CONDA_ENVS_PATH", "").split(os.pathsep):
+        if raw.strip():
+            dirs.append(Path(raw.strip()))
+
+    conda_exe = os.environ.get("CONDA_EXE", "").strip()
+    if conda_exe:
+        dirs.append(Path(conda_exe).parent.parent / "envs")
+
+    home = Path.home()
+    dirs.extend(
+        [
+            home / "miniforge3" / "envs",
+            home / "mambaforge" / "envs",
+            home / "anaconda3" / "envs",
+            home / "miniconda3" / "envs",
+            Path("C:/ProgramData/miniforge3/envs"),
+            Path("C:/ProgramData/anaconda3/envs"),
+            Path("/opt/miniforge3/envs"),
+            Path("/opt/conda/envs"),
+        ]
+    )
+    return tuple(dirs)
+
+
+_CONDA_ENVS = _conda_env_dirs()
 
 #: 项目的启动脚本（start.bat / start.sh）用的就是这个环境名
 PREFERRED_CONDA_ENV = "mineru_env"
