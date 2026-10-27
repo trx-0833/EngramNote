@@ -71,7 +71,7 @@ sentence-transformers~=3.0.1
 # chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
-pypdfium2~=5.10.1
+pypdfium2~=5.13.0
 Pillow~=12.3.0
 # ⚠️ 2026-10-21 修正分类：`pyyaml` 此前被归为"仅 MinerU 本地解析模式需要"，
 #    实际 `app/services/mineru/config_loader.py:14` 是**模块顶层无条件 import yaml**，
