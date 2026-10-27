@@ -20,7 +20,7 @@
 14. 获取7天趋势和薄弱点
 15. 验证全局异常处理和认证校验
 
-运行方式：cd backend && C:\\Users\\admin\\anaconda3\\envs\\mineru_env\\python.exe scripts/dev/test_week12_e2e.py
+运行方式：cd backend && D:\\conda\\envs\\mineru_env\\python.exe scripts/dev/test_week12_e2e.py
 """
 
 import json
