@@ -66,29 +66,29 @@ classifiers = [
 #    现在两边逐条一致，并由 `backend/tests/test_pyproject_requirements_consistency.py`
 #    守着 —— 改一边不改另一边会直接测试失败。
 dependencies = [
-    "fastapi~=0.115.0",
-    "uvicorn[standard]~=0.30.0",
+    "fastapi~=0.141.1",
+    "uvicorn[standard]~=0.52.4",
     "sqlalchemy[asyncio]~=2.0.52",
-    "aiosqlite~=0.20.0",
+    "aiosqlite~=0.22.1",
     "pydantic~=2.13.5",
     "pydantic-settings~=2.15.0",
-    "email-validator~=2.0.0",
+    "email-validator~=2.3.0",
     "python-multipart~=0.0.32",
     "python-jose[cryptography]~=3.5.0",
     "bcrypt~=5.0.0",
-    "celery~=5.4.0",
-    "numpy~=1.24.0",
+    "celery~=5.6.3",
+    "numpy~=2.2.6",
     "httpx~=0.28.1",
-    "sentence-transformers~=2.2.0",
+    "sentence-transformers~=3.0.1",
     "pypdfium2~=5.10.1",
     "Pillow~=12.3.0",
     # 2026-10-21：pyyaml 由「仅本地 MinerU 需要」改判为**运行硬依赖** ——
     # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
     "pyyaml~=6.0.3",
-    "psutil~=5.9.0",
+    "psutil~=7.2.2",
     "alembic~=1.19.2",
     "openai~=2.54.0",
-    "soundfile~=0.12.0",
+    "soundfile~=0.14.0",
 ]
 
 [project.optional-dependencies]

@@ -36,13 +36,13 @@
 #    归到可选清单会让全新环境在 PDF 路径上直接 ModuleNotFoundError。
 
 # ---- Web / ORM / 配置 ----
-fastapi~=0.115.0
-uvicorn[standard]~=0.30.0
+fastapi~=0.141.1
+uvicorn[standard]~=0.52.4
 sqlalchemy[asyncio]~=2.0.52
-aiosqlite~=0.20.0
+aiosqlite~=0.22.1
 pydantic~=2.13.5
 pydantic-settings~=2.15.0
-email-validator~=2.0.0
+email-validator~=2.3.0
 python-multipart~=0.0.32
 
 # ---- 认证 ----
@@ -58,16 +58,16 @@ python-jose[cryptography]~=3.5.0
 bcrypt~=5.0.0
 
 # ---- 异步任务 ----
-celery~=5.4.0
+celery~=5.6.3
 
 # ---- 数值 / HTTP ----
 # ⚠️ numpy 被 app/services/graph_service.py 与 asr/asr_engine.py 在**模块顶层** import，
 #    因此它是运行必需，不是"可选数值库"。
-numpy~=1.24.0
+numpy~=2.2.6
 httpx~=0.28.1
 
 # ---- 嵌入模型（本地推理）----
-sentence-transformers~=2.2.0
+sentence-transformers~=3.0.1
 # chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
@@ -81,7 +81,7 @@ Pillow~=12.3.0
 pyyaml~=6.0.3
 
 # ---- 运行期可观测性 ----
-psutil~=5.9.0
+psutil~=7.2.2
 
 # ---- 数据库迁移 ----
 # ⚠️ 启动路径**不调用** alembic（真实迁移靠 app/database.py 的 init_db +
@@ -90,4 +90,4 @@ alembic~=1.19.2
 
 # ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
 openai~=2.54.0
-soundfile~=0.12.0
+soundfile~=0.14.0
