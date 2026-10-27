@@ -36,7 +36,7 @@
 #    归到可选清单会让全新环境在 PDF 路径上直接 ModuleNotFoundError。
 
 # ---- Web / ORM / 配置 ----
-fastapi~=0.141.1
+fastapi~=0.162.0
 uvicorn[standard]~=0.52.4
 sqlalchemy[asyncio]~=2.0.52
 aiosqlite~=0.22.1
