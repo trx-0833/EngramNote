@@ -21,7 +21,13 @@ set "CONDA_ENV=mineru_env"
 set "CONDA_BASE="
 
 :: Auto-detect conda installation path (common locations)
-if exist "%USERPROFILE%\anaconda3\condabin\conda.bat" (
+if exist "D:\miniforge3\condabin\conda.bat" (
+    set "CONDA_BASE=D:\miniforge3"
+) else if exist "%USERPROFILE%\miniforge3\condabin\conda.bat" (
+    set "CONDA_BASE=%USERPROFILE%\miniforge3"
+) else if exist "%ProgramData%\miniforge3\condabin\conda.bat" (
+    set "CONDA_BASE=%ProgramData%\miniforge3"
+) else if exist "%USERPROFILE%\anaconda3\condabin\conda.bat" (
     set "CONDA_BASE=%USERPROFILE%\anaconda3"
 ) else if exist "%USERPROFILE%\miniconda3\condabin\conda.bat" (
     set "CONDA_BASE=%USERPROFILE%\miniconda3"

@@ -82,7 +82,9 @@ MIN_PYTHON = (3, 10)
 ENV_PYTHON = "ENGRAMNOTE_E2E_PYTHON"
 
 _CONDA_ENVS = (
-    Path.home() / "anaconda3" / "envs",
+    Path("D:/conda/envs"),
+        Path("D:/miniforge3/envs"),
+        Path.home() / "anaconda3" / "envs",
     Path.home() / "miniconda3" / "envs",
     Path("C:/ProgramData/anaconda3/envs"),
 )
