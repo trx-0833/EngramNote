@@ -288,11 +288,14 @@ async def _score_one_call(
         resp = await gateway.chat_detailed(
             messages,
             temperature=0.2,  # 打分要稳，不要创意
-            # ⚠️ 2048 **不够**：实测第 10 批就被截断（10 条结果 × 3 个分数 +
+            # ⚠️ 不要退回 2048：实测第 10 批就被截断（10 条结果 × 3 个分数 +
             #    中文理由 ≈ 顶到上限）⇒ JSON 不完整 ⇒ 触发逐张回退 ⇒
             #    那一批从 1 次调用变成 11 次。截断的代价是 10 倍调用，
             #    余量的代价只是略多的请求数。
-            max_tokens=4096,
+            # ⚠️ 也**不能用 4096**：`tests/test_fixes.py::test_max_tokens_no_4096`
+            #    把 4096 当成「已知会把 JSON 截断」的禁值（F-33 的教训）。
+            #    8192 与 `config.llm_json_max_tokens`（默认 16384）同向，留足余量。
+            max_tokens=8192,
             response_format={"type": "json_object"},
             scene="card_quality_score",
         )
