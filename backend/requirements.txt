@@ -67,7 +67,7 @@ numpy~=2.2.6
 httpx~=0.28.1
 
 # ---- 嵌入模型（本地推理）----
-sentence-transformers~=3.0.1
+sentence-transformers~=6.2.0
 # chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
