@@ -19,7 +19,7 @@
 #    于是"照文档装完却跑不起来"是常态。这份清单把它显式登记。
 # 2. **不再需要 `pyyaml` / `torchvision` / `ftfy` / `shapely` / `pyclipper`**。
 #    4.x 的**基础包**已经把 `ftfy` / `shapely` / `pyclipper` / `PyYAML` 列为
-#    核心依赖（实测干跑：装 `mineru>=4.0,<5` 会带进 ftfy-6.3.1 / shapely-2.1.2 /
+#    核心依赖（实测干跑：装 `mineru>=4.1.2,<5` 会带进 ftfy-6.3.1 / shapely-2.1.2 /
 #    pyclipper-1.4.0），而 `torchvision` 只属于 `mineru[torch]` extra。
 # 3. **刻意不加任何 extra**。`mineru[torch]` 要求 `transformers<6,>=5.10.1`，
 #    而本项目用 `sentence-transformers~=2.2.0`（transformers 4.x）——
@@ -32,4 +32,4 @@
 # ⚠️ 升级到 4.x 会**移除** 3.x 的 `mineru.cli.common.do_parse` 等模块；
 #    本项目的集成层已随之改为子进程调用 `mineru-kit parse`
 #    （见 app/services/mineru/converter.py）。
-mineru>=4.0,<5
+mineru>=4.1.2,<5
