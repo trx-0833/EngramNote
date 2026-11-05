@@ -626,7 +626,7 @@ npm --prefix frontend run docs:links
 |---|---|
 | 后端全量 | `pytest -q`：**1722 passed, 30 skipped** |
 | 后端设置/联动 | `tests/test_user_settings.py` 16 条、`tests/test_settings_api.py` 2 条通过 |
-| 前端全量 | `vitest run`：**728 passed / 61 files**（设置页 11 条、通知 5 条） |
+| 前端全量 | `vitest run`：**731 passed / 62 files**（设置页 12 条、ADHD hook 1 条、NoteDetail 22 条、通知 5 条） |
 | 前端 lint / tsc / build | 全绿 |
 | Playwright | `e2e/settings.spec.ts` 2 条通过（六组、PATCH、字号、深链接） |
 | 契约漂移 | `dump_openapi.py --check` 与 `gen:api:drift` 通过 |
@@ -636,6 +636,7 @@ npm --prefix frontend run docs:links
 ### 9.4 与路线的差异 / 未做
 
 - **未做**：深色主题、修改密码、删除账号 —— 分别需要视觉审计、认证/会话策略、不可逆数据策略。
+- **ADHD Reader 默认开启的“只亮按钮”缺陷已修**：设置默认 true 时，首次 effect 常遇到 `markdownRef.current=null`（笔记数据未到），旧代码直接 return 后不再重跑；现在 root 不存在时观察 `document.body`，容器真正挂载后再接上遮罩/块类名/鼠标监听。`useAdhdReader.test.tsx` 与 `NoteDetail.test.tsx` 覆盖“ref 晚于 hook 挂载”和真实正文容器。
 - **免打扰时段存设备本地**：换设备不跟随（刻意选择）。
 - **日界/时区仍固定 Asia/Shanghai**：没有进本批。
 - **Alembic 015 不在测试库执行**：测试库用 `create_all`；生产走 Alembic，开发库走 `_migrate_sqlite()` 补列。
@@ -676,7 +677,7 @@ npm --prefix frontend run docs:links
 | 输出语言 follow/zh/en | worker 解析出 `users.locale` 或显式语言 | `test_resolve_output_locale_follows_user_and_falls_back` |
 | 卡片上限 500→50 | 一次理解最多新增 50 张 | `GateConfig` + `save_cards_idempotent` 既有用例；`understand_tasks` 传参 |
 | 清洗三条开关 | `clean_rules()` 输出随开关变化 | `test_clean_rules_respects_user_override` |
-| 字号/动效/侧栏/ADHD | 根节点、`data-*`、localStorage 变化 | `devicePrefs.test.ts`、`Settings.test.tsx` |
+| 字号/动效/侧栏/ADHD | 根节点、`data-*`、localStorage 变化；ADHD 默认开启时正文容器挂上 `adhdReaderActive` 与 `adhdBlock` | `devicePrefs.test.ts`、`Settings.test.tsx`、`useAdhdReader.test.tsx`、`NoteDetail.test.tsx` |
 | 桌面通知权限/测试 | 权限状态正确；测试通知调用 `Notification` | `notifications.test.ts`、`Settings.test.tsx` |
 | 设置页 PATCH 形状 | 六组控件发对应段，失败回滚 | `Settings.test.tsx`、`e2e/settings.spec.ts` |
 

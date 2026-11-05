@@ -18,7 +18,7 @@ import { AuthProvider } from '../contexts/AuthContext';
 import { getSettings, getSettingsUsage, patchSettings } from '../api/settings';
 import { getReviewStats } from '../api/review';
 import { getLlmUsage } from '../api/llm';
-import { setDevicePref } from '../utils/devicePrefs';
+import { getDevicePrefs, setDevicePref } from '../utils/devicePrefs';
 
 vi.mock('../api/settings', () => ({
   getSettings: vi.fn(),
@@ -301,6 +301,17 @@ describe('Settings 页', () => {
     await user.click(await screen.findByRole('button', { name: '大' }));
 
     expect(document.documentElement.style.fontSize).toBe('18px');
+    expect(mockedPatch).not.toHaveBeenCalled();
+  });
+
+  it('ADHD 默认开关写入设备偏好（供笔记页初始化）', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'ADHD Reader 默认开启' }),
+    );
+    expect(getDevicePrefs().adhdDefault).toBe(true);
     expect(mockedPatch).not.toHaveBeenCalled();
   });
 
