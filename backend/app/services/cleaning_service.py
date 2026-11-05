@@ -354,7 +354,7 @@ _OCR_CORRECTIONS = {
 }
 
 
-def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
+def clean_rules(text: str, settings_override=None) -> Tuple[str, Dict[str, int]]:
     """
     对 Markdown 文本进行规则化清洗
 
@@ -377,6 +377,9 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
         "watermarks_removed": 0,
         "whitespace_trimmed": 0,
     }
+
+    if settings_override is None:
+        settings_override = settings
 
     if not text or not text.strip():
         return text, stats
@@ -486,7 +489,7 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
     stats.setdefault("heading_levels_fixed", 0)
 
     # 7a. 标题层级（整篇一起看：需要跟踪围栏状态）
-    if settings.clean_normalize_heading_levels:
+    if settings_override.clean_normalize_heading_levels:
         result, n_heading = normalize_heading_levels(result)
         stats["heading_levels_fixed"] = n_heading
 
@@ -510,10 +513,10 @@ def clean_rules(text: str) -> Tuple[str, Dict[str, int]]:
             continue
 
         new_line = line
-        if settings.clean_simplify_formula:
+        if settings_override.clean_simplify_formula:
             new_line, n_formula = simplify_inline_math(new_line)
             stats["formula_simplified"] += n_formula
-        if settings.clean_normalize_spacing:
+        if settings_override.clean_normalize_spacing:
             new_line, n_space = normalize_spacing(new_line)
             stats["spacing_normalized"] += n_space
         out_lines.append(new_line)

@@ -249,6 +249,7 @@ async def save_knowledge_cards(
     *,
     already_created: int = 0,
     prompt_version: Optional[str] = None,
+    config=None,
 ) -> "SaveOutcome":
     """
     将知识点存入数据库（阶段 4.8/4.9：质量门 + 内容寻址去重）
@@ -270,6 +271,7 @@ async def save_knowledge_cards(
         db, user_id, note_id, chapter, summary, knowledge_points,
         already_created=already_created,
         prompt_version=prompt_version,
+        config=config,
     )
 
 
@@ -348,6 +350,8 @@ async def process_note_understanding(
     note_id: str,
     user_id: str,
     markdown_content: str,
+    *,
+    max_new_cards_per_run: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     处理笔记的完整理解流程（多轮对话 + 批次处理模式）
@@ -373,6 +377,11 @@ async def process_note_understanding(
         Dict: 处理结果，包含章节摘要和知识点统计
     """
     llm_service = LLMService()
+    from .card_intake_service import GateConfig
+
+    gate_config = GateConfig.from_settings()
+    if max_new_cards_per_run is not None:
+        gate_config.max_new_cards_per_run = int(max_new_cards_per_run)
 
     # 1. 切分章节
     chapters = split_into_chapters(markdown_content)
@@ -474,6 +483,7 @@ async def process_note_understanding(
                         already_created=total_cards,
                         # 阶段 4.6：这条路走的是理解会话，版本取自它用的提示词
                         prompt_version=prompt_version("understanding_session"),
+                        config=gate_config,
                     )
                     total_cards += len(outcome.created)
                     reused_cards += len(outcome.reused)

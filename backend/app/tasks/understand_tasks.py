@@ -42,6 +42,8 @@ from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..models.user import User
+from ..models.user_settings import UserSettings
+from ..services import user_settings_service
 from ..services.llm.prompts import DEFAULT_QUESTION_PROMPT_VERSION
 from ..services.llm.structured import QuizQuestion, validate_items
 
@@ -92,14 +94,31 @@ async def _understand_document(note_id: str):
         original_md_path = note.original_md_path
 
         # 提示词语言（i18n 阶段 4）：worker 里**没有**请求上下文，
-        # 所以只能查库读用户偏好。查不到时留 None，
-        # 提示词层会回落到默认语言（中文）。
+        # 所以只能查库读用户偏好。`output_locale=follow` 时回落到
+        # `users.locale`；查不到时留 None，提示词层会回落到默认语言（中文）。
         locale: Optional[str] = None
+        max_new_cards_per_run: Optional[int] = None
         if user_id:
             user_row = (
-                await session.execute(select(User.locale).where(User.id == user_id))
-            ).scalars().first()
-            locale = user_row or None
+                await session.execute(
+                    select(
+                        User.locale,
+                        UserSettings.output_locale,
+                        UserSettings.card_max_new_per_run,
+                    )
+                    .outerjoin(UserSettings, UserSettings.user_id == User.id)
+                    .where(User.id == user_id)
+                )
+            ).first()
+            if user_row:
+                locale = user_settings_service.resolve_output_locale(
+                    user_row.output_locale, user_row.locale
+                )
+                max_new_cards_per_run = (
+                    int(user_row.card_max_new_per_run)
+                    if user_row.card_max_new_per_run is not None
+                    else None
+                )
 
     # 2. 读取 Markdown 内容（优先清洗版）
     md_path = clean_md_path or original_md_path
@@ -143,6 +162,7 @@ async def _understand_document(note_id: str):
                 note_id=note_id,
                 user_id=user_id,
                 markdown_content=markdown_content,
+                max_new_cards_per_run=max_new_cards_per_run,
             )
 
     # 阶段 4.8/4.9：不能只报"新建了几张卡"。

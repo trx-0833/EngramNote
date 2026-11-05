@@ -36,7 +36,10 @@ def test_settings_patch_flows_into_review_stats(test_db):
     assert snapshot.status_code == 200, snapshot.text
     body = snapshot.json()
     assert body["study"]["daily_review_limit"] == 10
+    assert body["study"]["desired_retention"] == 0.9
     assert body["reminders"]["email_hour"] == 9
+    assert body["content"]["output_locale"] == "follow"
+    assert body["content"]["card_max_new_per_run"] == 500
     assert body["account"]["email"] == "settings-e2e@example.com"
 
     usage = client.get("/api/settings/usage", headers=headers)
@@ -52,6 +55,30 @@ def test_settings_patch_flows_into_review_stats(test_db):
     assert patched.status_code == 200, patched.text
     assert patched.json()["study"]["daily_review_limit"] == 25
     assert patched.json()["reminders"]["email_hour"] == 7
+
+    content_patch = client.patch(
+        "/api/settings",
+        headers=headers,
+        json={
+            "study": {"desired_retention": 0.95, "max_interval_days": 365},
+            "content": {
+                "output_locale": "en",
+                "card_max_new_per_run": 50,
+                "clean_simplify_formula": True,
+                "clean_normalize_spacing": False,
+                "clean_normalize_heading_levels": False,
+            },
+        },
+    )
+    assert content_patch.status_code == 200, content_patch.text
+    content = content_patch.json()
+    assert content["study"]["desired_retention"] == 0.95
+    assert content["study"]["max_interval_days"] == 365
+    assert content["content"]["output_locale"] == "en"
+    assert content["content"]["card_max_new_per_run"] == 50
+    assert content["content"]["clean_simplify_formula"] is True
+    assert content["content"]["clean_normalize_spacing"] is False
+    assert content["content"]["clean_normalize_heading_levels"] is False
 
     # 复习接口读的是同一份有效设置，不是模块常量
     stats = client.get("/api/review/stats", headers=headers)

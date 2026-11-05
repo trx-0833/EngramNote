@@ -19,35 +19,55 @@ import { useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { exportNotesZip } from '../api/client';
+import { getLlmUsage } from '../api/llm';
+import { getReviewStats } from '../api/review';
 import { getSettings, getSettingsUsage, patchSettings, type SettingsPatchBody, type UserSettings } from '../api/settings';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useToast } from '../components/Toast';
 import { useTranslation } from '../i18n';
 import { useDevicePrefs, type FontScale } from '../utils/devicePrefs';
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendTestNotification,
+  type NotificationPermissionState,
+} from '../utils/notifications';
 import styles from './Settings.module.css';
 
 const SETTINGS_KEY = ['settings'] as const;
 const USAGE_KEY = ['settings', 'usage'] as const;
+const STATS_KEY = ['settings', 'review-stats'] as const;
+const LLM_USAGE_KEY = ['settings', 'llm-usage'] as const;
 
 const SECTIONS = [
   { id: 'study', no: '01', labelKey: 'settings.nav.study' },
   { id: 'reminders', no: '02', labelKey: 'settings.nav.reminders' },
-  { id: 'appearance', no: '03', labelKey: 'settings.nav.appearance' },
-  { id: 'account', no: '04', labelKey: 'settings.nav.account' },
-  { id: 'data', no: '05', labelKey: 'settings.nav.data' },
+  { id: 'content', no: '03', labelKey: 'settings.nav.content' },
+  { id: 'appearance', no: '04', labelKey: 'settings.nav.appearance' },
+  { id: 'account', no: '05', labelKey: 'settings.nav.account' },
+  { id: 'data', no: '06', labelKey: 'settings.nav.data' },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]['id'];
 
 function mergePatch(current: UserSettings, body: SettingsPatchBody): UserSettings {
-  const study = body.study?.daily_review_limit;
+  const study = body.study;
   const reminders = body.reminders;
+  const content = body.content;
   return {
     ...current,
     study: {
       ...current.study,
-      ...(typeof study === 'number' ? { daily_review_limit: study } : {}),
+      ...(typeof study?.daily_review_limit === 'number'
+        ? { daily_review_limit: study.daily_review_limit }
+        : {}),
+      ...(typeof study?.desired_retention === 'number'
+        ? { desired_retention: study.desired_retention }
+        : {}),
+      ...(typeof study?.max_interval_days === 'number'
+        ? { max_interval_days: study.max_interval_days }
+        : {}),
     },
     reminders: {
       ...current.reminders,
@@ -56,6 +76,22 @@ function mergePatch(current: UserSettings, body: SettingsPatchBody): UserSetting
         : {}),
       ...(typeof reminders?.email_hour === 'number'
         ? { email_hour: reminders.email_hour }
+        : {}),
+    },
+    content: {
+      ...current.content,
+      ...(content?.output_locale ? { output_locale: content.output_locale } : {}),
+      ...(typeof content?.card_max_new_per_run === 'number'
+        ? { card_max_new_per_run: content.card_max_new_per_run }
+        : {}),
+      ...(typeof content?.clean_simplify_formula === 'boolean'
+        ? { clean_simplify_formula: content.clean_simplify_formula }
+        : {}),
+      ...(typeof content?.clean_normalize_spacing === 'boolean'
+        ? { clean_normalize_spacing: content.clean_normalize_spacing }
+        : {}),
+      ...(typeof content?.clean_normalize_heading_levels === 'boolean'
+        ? { clean_normalize_heading_levels: content.clean_normalize_heading_levels }
         : {}),
     },
   };
@@ -85,11 +121,20 @@ export default function Settings() {
 
   const settingsQuery = useQuery({ queryKey: SETTINGS_KEY, queryFn: getSettings });
   const usageQuery = useQuery({ queryKey: USAGE_KEY, queryFn: getSettingsUsage });
+  const statsQuery = useQuery({ queryKey: STATS_KEY, queryFn: getReviewStats });
+  const llmUsageQuery = useQuery({
+    queryKey: LLM_USAGE_KEY,
+    queryFn: () => getLlmUsage(30),
+  });
 
   const [active, setActive] = useState<SectionId>('study');
   const [savedSection, setSavedSection] = useState<SectionId | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermissionState>(() =>
+    getNotificationPermission(),
+  );
   const dailyInputRef = useRef<HTMLInputElement>(null);
+  const cardCapInputRef = useRef<HTMLInputElement>(null);
   const savedTimer = useRef<number | null>(null);
   const initialHashApplied = useRef(false);
   const spyLocked = useRef(false);
@@ -108,6 +153,11 @@ export default function Settings() {
         if (vars.section === 'study' && dailyInputRef.current) {
           dailyInputRef.current.value = String(context.previous.study.daily_review_limit);
         }
+        if (vars.section === 'content' && cardCapInputRef.current) {
+          cardCapInputRef.current.value = String(
+            context.previous.content.card_max_new_per_run,
+          );
+        }
       }
       toast.error(
         t('settings.saveFailed'),
@@ -116,6 +166,9 @@ export default function Settings() {
     },
     onSuccess: (next, vars) => {
       queryClient.setQueryData(SETTINGS_KEY, next);
+      if (vars.section === 'study') {
+        void queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      }
       setSavedSection(vars.section);
       if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
       savedTimer.current = window.setTimeout(() => setSavedSection(null), 1800);
@@ -215,6 +268,42 @@ export default function Settings() {
     event.currentTarget.value = String(value);
     if (value === settingsQuery.data.study.daily_review_limit) return;
     save('study', { study: { daily_review_limit: value } });
+  }
+
+  function commitCardCap(event: FocusEvent<HTMLInputElement>) {
+    if (!settingsQuery.data) return;
+    const parsed = Number(event.currentTarget.value);
+    const value = Number.isFinite(parsed) ? Math.round(parsed) : NaN;
+    if (!Number.isFinite(value) || value < 50 || value > 1000) {
+      event.currentTarget.value = String(
+        settingsQuery.data.content.card_max_new_per_run,
+      );
+      toast.error(t('settings.content.invalidCardCap'));
+      return;
+    }
+    event.currentTarget.value = String(value);
+    if (value === settingsQuery.data.content.card_max_new_per_run) return;
+    save('content', { content: { card_max_new_per_run: value } });
+  }
+
+  async function handleRequestPermission() {
+    const granted = await requestNotificationPermission();
+    setNotifPermission(getNotificationPermission());
+    if (granted) {
+      toast.success(t('settings.reminders.permissionGranted'));
+    } else {
+      toast.error(t('settings.reminders.permissionDenied'));
+    }
+  }
+
+  function handleTestNotification() {
+    const ok = sendTestNotification(
+      t('settings.reminders.testTitle'),
+      t('settings.reminders.testBody'),
+    );
+    if (!ok) {
+      toast.error(t('settings.reminders.permissionDenied'));
+    }
   }
 
   async function handleExport() {
@@ -356,6 +445,87 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.study.usage')}</span>
+                  <p className={styles.hint}>{t('settings.study.usageHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <span className={styles.readonly}>
+                    {statsQuery.data
+                      ? t('settings.study.usageValue', {
+                          done: statsQuery.data.today_done,
+                          limit: statsQuery.data.daily_limit,
+                          remaining: Math.max(
+                            0,
+                            statsQuery.data.daily_limit - statsQuery.data.today_done,
+                          ),
+                        })
+                      : t('settings.data.loading')}
+                  </span>
+                </div>
+              </div>
+
+              <details className={styles.advanced}>
+                <summary>{t('settings.study.advanced')}</summary>
+                <div className={styles.advancedBody}>
+                  <div className={styles.row}>
+                    <div>
+                      <label className={styles.rowLabel} htmlFor="desired-retention">
+                        {t('settings.study.retention')}
+                      </label>
+                      <p className={styles.hint}>{t('settings.study.retentionHint')}</p>
+                    </div>
+                    <div className={styles.control}>
+                      <select
+                        id="desired-retention"
+                        value={data.study.desired_retention}
+                        onChange={(event) =>
+                          save('study', {
+                            study: {
+                              desired_retention: Number(event.target.value) as 0.8 | 0.85 | 0.9 | 0.95,
+                            },
+                          })
+                        }
+                      >
+                        {[0.8, 0.85, 0.9, 0.95].map((value) => (
+                          <option key={value} value={value}>
+                            {Math.round(value * 100)}%
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className={styles.row}>
+                    <div>
+                      <label className={styles.rowLabel} htmlFor="max-interval">
+                        {t('settings.study.maxInterval')}
+                      </label>
+                      <p className={styles.hint}>{t('settings.study.maxIntervalHint')}</p>
+                    </div>
+                    <div className={styles.control}>
+                      <select
+                        id="max-interval"
+                        value={data.study.max_interval_days}
+                        onChange={(event) =>
+                          save('study', {
+                            study: {
+                              max_interval_days: Number(event.target.value) as 365 | 1825 | 3650,
+                            },
+                          })
+                        }
+                      >
+                        {[365, 1825, 3650].map((value) => (
+                          <option key={value} value={value}>
+                            {t('settings.study.years', { years: value / 365 })}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </details>
             </div>
           </section>
 
@@ -434,6 +604,35 @@ export default function Settings() {
 
               <div className={styles.row}>
                 <div>
+                  <span className={styles.rowLabel}>{t('settings.reminders.permission')}</span>
+                  <p className={styles.hint}>
+                    {t(`settings.reminders.permission_${notifPermission}`)}
+                  </p>
+                </div>
+                <div className={styles.control}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={handleRequestPermission}
+                    disabled={
+                      notifPermission === 'unsupported' || notifPermission === 'granted'
+                    }
+                  >
+                    {t('settings.reminders.requestPermission')}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={handleTestNotification}
+                    disabled={notifPermission !== 'granted'}
+                  >
+                    {t('settings.reminders.testNotification')}
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
                   <span className={styles.rowLabel}>{t('settings.reminders.quiet')}</span>
                   <p className={styles.hint}>{t('settings.reminders.quietHint')}</p>
                 </div>
@@ -469,13 +668,146 @@ export default function Settings() {
           </section>
 
           <section
+            id="settings-content"
+            className={`card ${styles.card}`}
+            aria-labelledby="settings-content-title"
+          >
+            <SectionHeader
+              id="settings-content-title"
+              no="03"
+              title={t('settings.content.title')}
+              desc={t('settings.content.desc')}
+              saved={savedSection === 'content'}
+              saving={mutation.isPending && mutation.variables?.section === 'content'}
+            />
+            <div className={styles.rows}>
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.content.outputLocale')}</span>
+                  <p className={styles.hint}>{t('settings.content.outputLocaleHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <div
+                    className={styles.seg}
+                    role="group"
+                    aria-label={t('settings.content.outputLocale')}
+                  >
+                    {(
+                      [
+                        ['follow', 'settings.content.localeFollow'],
+                        ['zh-CN', 'settings.content.localeZh'],
+                        ['en', 'settings.content.localeEn'],
+                      ] as const
+                    ).map(([value, key]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={data.content.output_locale === value ? styles.segActive : ''}
+                        aria-pressed={data.content.output_locale === value}
+                        onClick={() =>
+                          save('content', {
+                            content: { output_locale: value },
+                          })
+                        }
+                      >
+                        {t(key)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
+                  <label className={styles.rowLabel} htmlFor="card-max-new">
+                    {t('settings.content.cardCap')}
+                  </label>
+                  <p className={styles.hint} id="card-max-new-hint">
+                    {t('settings.content.cardCapHint')}
+                  </p>
+                </div>
+                <div className={styles.control}>
+                  <div className={styles.number}>
+                    <input
+                      id="card-max-new"
+                      ref={cardCapInputRef}
+                      type="number"
+                      min={50}
+                      max={1000}
+                      step={10}
+                      defaultValue={data.content.card_max_new_per_run}
+                      onBlur={commitCardCap}
+                      aria-describedby="card-max-new-hint"
+                    />
+                    <span className={styles.unit}>{t('settings.content.cards')}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.content.cleanFormula')}</span>
+                  <p className={styles.hint}>{t('settings.content.cleanFormulaHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <Toggle
+                    label={t('settings.content.cleanFormula')}
+                    checked={data.content.clean_simplify_formula}
+                    onChange={(checked) =>
+                      save('content', {
+                        content: { clean_simplify_formula: checked },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.content.cleanSpacing')}</span>
+                  <p className={styles.hint}>{t('settings.content.cleanSpacingHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <Toggle
+                    label={t('settings.content.cleanSpacing')}
+                    checked={data.content.clean_normalize_spacing}
+                    onChange={(checked) =>
+                      save('content', {
+                        content: { clean_normalize_spacing: checked },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.content.cleanHeadings')}</span>
+                  <p className={styles.hint}>{t('settings.content.cleanHeadingsHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <Toggle
+                    label={t('settings.content.cleanHeadings')}
+                    checked={data.content.clean_normalize_heading_levels}
+                    onChange={(checked) =>
+                      save('content', {
+                        content: { clean_normalize_heading_levels: checked },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
             id="settings-appearance"
             className={`card ${styles.card}`}
             aria-labelledby="settings-appearance-title"
           >
             <SectionHeader
               id="settings-appearance-title"
-              no="03"
+              no="04"
               title={t('settings.appearance.title')}
               desc={t('settings.appearance.desc')}
               saved={savedSection === 'appearance'}
@@ -582,7 +914,7 @@ export default function Settings() {
           >
             <SectionHeader
               id="settings-account-title"
-              no="04"
+              no="05"
               title={t('settings.account.title')}
               desc={t('settings.account.desc')}
               saved={false}
@@ -612,7 +944,7 @@ export default function Settings() {
           >
             <SectionHeader
               id="settings-data-title"
-              no="05"
+              no="06"
               title={t('settings.data.title')}
               desc={t('settings.data.desc')}
               saved={false}
@@ -644,6 +976,32 @@ export default function Settings() {
                         : t('settings.data.loading')}
                     </span>
                   </div>
+                </div>
+              </div>
+
+              <div className={styles.row}>
+                <div>
+                  <span className={styles.rowLabel}>{t('settings.data.llm')}</span>
+                  <p className={styles.hint}>{t('settings.data.llmHint')}</p>
+                </div>
+                <div className={styles.control}>
+                  <span className={styles.readonly}>
+                    {llmUsageQuery.data
+                      ? t('settings.data.llmValue', {
+                          tokens: llmUsageQuery.data.totals.total_tokens.toLocaleString(locale),
+                          calls: llmUsageQuery.data.totals.calls,
+                        })
+                      : t('settings.data.loading')}
+                  </span>
+                  <span className={styles.progressText}>
+                    {llmUsageQuery.data
+                      ? llmUsageQuery.data.price_configured
+                        ? `${llmUsageQuery.data.totals.cost.toFixed(2)} ${
+                            llmUsageQuery.data.currency ?? ''
+                          }`
+                        : t('settings.data.priceUnavailable')
+                      : ''}
+                  </span>
                 </div>
               </div>
 

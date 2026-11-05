@@ -23,6 +23,7 @@ from ..models.user import User
 from ..schemas.settings import (
     AboutSettings,
     AccountSettings,
+    ContentSettings,
     ReminderSettings,
     SettingsPatch,
     SettingsResponse,
@@ -52,11 +53,24 @@ async def _build_response(db: AsyncSession, user: User) -> SettingsResponse:
     settings = get_settings()
     return SettingsResponse(
         locale=user.locale,
-        study=StudySettings(daily_review_limit=values["daily_review_limit"]),
+        study=StudySettings(
+            daily_review_limit=values["daily_review_limit"],
+            desired_retention=values["desired_retention"],
+            max_interval_days=values["max_interval_days"],
+        ),
         reminders=ReminderSettings(
             email_enabled=bool(user.email_reminder_enabled),
             email_hour=values["email_hour"],
             email_configured=_email_configured(),
+        ),
+        content=ContentSettings(
+            output_locale=values["output_locale"],
+            card_max_new_per_run=values["card_max_new_per_run"],
+            clean_simplify_formula=values["clean_simplify_formula"],
+            clean_normalize_spacing=values["clean_normalize_spacing"],
+            clean_normalize_heading_levels=values[
+                "clean_normalize_heading_levels"
+            ],
         ),
         account=AccountSettings(email=user.email, username=user.username),
         about=AboutSettings(
@@ -83,24 +97,43 @@ async def patch_settings(
 ):
     """部分更新设置；只提交显式给出的字段
 
-    - `study.daily_review_limit` 写入 `user_settings`
+    - `study.daily_review_limit` / `desired_retention` / `max_interval_days`
     - `reminders.email_enabled` 写入 `users.email_reminder_enabled`
-    - `reminders.email_hour` 写入 `user_settings`
+    - `reminders.email_hour`
+    - `content.*`（输出语言、卡片上限、三条清洗开关）
     """
-    daily_review_limit = req.study.daily_review_limit if req.study else None
-    email_hour = req.reminders.email_hour if req.reminders else None
-    email_enabled = req.reminders.email_enabled if req.reminders else None
+    study = req.study
+    reminders = req.reminders
+    content = req.content
 
-    if daily_review_limit is not None or email_hour is not None:
+    setting_values = {
+        "daily_review_limit": study.daily_review_limit if study else None,
+        "desired_retention": study.desired_retention if study else None,
+        "max_interval_days": study.max_interval_days if study else None,
+        "email_hour": reminders.email_hour if reminders else None,
+        "output_locale": content.output_locale if content else None,
+        "card_max_new_per_run": (
+            content.card_max_new_per_run if content else None
+        ),
+        "clean_simplify_formula": (
+            content.clean_simplify_formula if content else None
+        ),
+        "clean_normalize_spacing": (
+            content.clean_normalize_spacing if content else None
+        ),
+        "clean_normalize_heading_levels": (
+            content.clean_normalize_heading_levels if content else None
+        ),
+    }
+    if any(value is not None for value in setting_values.values()):
         await user_settings_service.update_effective_settings(
             db,
             current_user.id,
-            daily_review_limit=daily_review_limit,
-            email_hour=email_hour,
+            **setting_values,
         )
 
-    if email_enabled is not None:
-        current_user.email_reminder_enabled = bool(email_enabled)
+    if reminders and reminders.email_enabled is not None:
+        current_user.email_reminder_enabled = bool(reminders.email_enabled)
         await db.commit()
         await db.refresh(current_user)
 

@@ -1650,6 +1650,115 @@
         "title": "ConfirmRelationRequest",
         "type": "object"
       },
+      "ContentSettings": {
+        "properties": {
+          "card_max_new_per_run": {
+            "maximum": 1000.0,
+            "minimum": 50.0,
+            "title": "Card Max New Per Run",
+            "type": "integer"
+          },
+          "clean_normalize_heading_levels": {
+            "title": "Clean Normalize Heading Levels",
+            "type": "boolean"
+          },
+          "clean_normalize_spacing": {
+            "title": "Clean Normalize Spacing",
+            "type": "boolean"
+          },
+          "clean_simplify_formula": {
+            "title": "Clean Simplify Formula",
+            "type": "boolean"
+          },
+          "output_locale": {
+            "enum": [
+              "follow",
+              "zh-CN",
+              "en"
+            ],
+            "title": "Output Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_locale",
+          "card_max_new_per_run",
+          "clean_simplify_formula",
+          "clean_normalize_spacing",
+          "clean_normalize_heading_levels"
+        ],
+        "title": "ContentSettings",
+        "type": "object"
+      },
+      "ContentSettingsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "card_max_new_per_run": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 50.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Max New Per Run"
+          },
+          "clean_normalize_heading_levels": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Normalize Heading Levels"
+          },
+          "clean_normalize_spacing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Normalize Spacing"
+          },
+          "clean_simplify_formula": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Simplify Formula"
+          },
+          "output_locale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "follow",
+                  "zh-CN",
+                  "en"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Locale"
+          }
+        },
+        "title": "ContentSettingsPatch",
+        "type": "object"
+      },
       "ContentSourceInfo": {
         "description": "一条会往卡片/题目表写行的提示词（报表的覆盖范围）",
         "properties": {
@@ -6325,6 +6434,16 @@
         "additionalProperties": false,
         "description": "`PATCH /api/settings`：每段可选，段内字段也可选\n\n`extra=\"forbid\"` 是刻意的：拼错字段名必须 422，而不是静默忽略后\n让用户以为保存成功（典型例子：把 `daily_review_limit` 写成\n`daily_limit`）。",
         "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentSettingsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reminders": {
             "anyOf": [
               {
@@ -6358,6 +6477,9 @@
           "account": {
             "$ref": "#/components/schemas/AccountSettings"
           },
+          "content": {
+            "$ref": "#/components/schemas/ContentSettings"
+          },
           "locale": {
             "title": "Locale",
             "type": "string"
@@ -6373,6 +6495,7 @@
           "locale",
           "study",
           "reminders",
+          "content",
           "account",
           "about"
         ],
@@ -6433,10 +6556,24 @@
             "minimum": 5.0,
             "title": "Daily Review Limit",
             "type": "integer"
+          },
+          "desired_retention": {
+            "maximum": 0.98,
+            "minimum": 0.7,
+            "title": "Desired Retention",
+            "type": "number"
+          },
+          "max_interval_days": {
+            "maximum": 3650.0,
+            "minimum": 365.0,
+            "title": "Max Interval Days",
+            "type": "integer"
           }
         },
         "required": [
-          "daily_review_limit"
+          "daily_review_limit",
+          "desired_retention",
+          "max_interval_days"
         ],
         "title": "StudySettings",
         "type": "object"
@@ -6456,6 +6593,39 @@
               }
             ],
             "title": "Daily Review Limit"
+          },
+          "desired_retention": {
+            "anyOf": [
+              {
+                "enum": [
+                  0.8,
+                  0.85,
+                  0.9,
+                  0.95
+                ],
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desired Retention"
+          },
+          "max_interval_days": {
+            "anyOf": [
+              {
+                "enum": [
+                  365,
+                  1825,
+                  3650
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Interval Days"
           }
         },
         "title": "StudySettingsPatch",
@@ -12456,7 +12626,7 @@
         ]
       },
       "patch": {
-        "description": "部分更新设置；只提交显式给出的字段\n\n- `study.daily_review_limit` 写入 `user_settings`\n- `reminders.email_enabled` 写入 `users.email_reminder_enabled`\n- `reminders.email_hour` 写入 `user_settings`",
+        "description": "部分更新设置；只提交显式给出的字段\n\n- `study.daily_review_limit` / `desired_retention` / `max_interval_days`\n- `reminders.email_enabled` 写入 `users.email_reminder_enabled`\n- `reminders.email_hour`\n- `content.*`（输出语言、卡片上限、三条清洗开关）",
         "operationId": "patch_settings_api_settings_patch",
         "requestBody": {
           "content": {

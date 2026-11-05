@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { isInQuietHours } from './notifications';
+import { isInQuietHours, getNotificationPermission, sendTestNotification } from './notifications';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -44,5 +44,10 @@ describe('isInQuietHours', () => {
   it('起止相同表示关闭免打扰，而不是全天静默', () => {
     vi.setSystemTime(new Date(2026, 10, 4, 23, 0));
     expect(isInQuietHours(22, 22)).toBe(false);
+  });
+
+  it('浏览器不支持 Notification 时状态是 unsupported，测试通知返回 false', () => {
+    expect(getNotificationPermission()).toBe('unsupported');
+    expect(sendTestNotification('t', 'b')).toBe(false);
   });
 });

@@ -320,8 +320,15 @@ async def submit_card_review(
     # 卡片复习会继续按 SM-2 排期，而两者写的是同一批 review_states 行 ——
     # 同一张卡在两条路径间来回切换会得到互相矛盾的间隔。
     # 现在两条路径都走 `scheduler_service.advance`。
+    effective = await user_settings_service.get_effective_settings(
+        db, current_user.id
+    )
     outcome = scheduler_service.advance(
-        state, quality, method="self_rating", now=now,
+        state,
+        quality,
+        method="self_rating",
+        now=now,
+        settings=user_settings_service.scheduling_settings(effective),
     )
     await review_state_service.apply_schedule_result(
         db, current_user.id, ITEM_TYPE_CARD, card_id,

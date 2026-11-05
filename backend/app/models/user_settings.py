@@ -14,7 +14,15 @@
 只有真正改过设置的用户才会拥有这一行。
 """
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import BaseModel
@@ -33,6 +41,22 @@ class UserSettings(BaseModel):
         CheckConstraint(
             "email_hour BETWEEN 0 AND 23",
             name="ck_user_settings_email_hour",
+        ),
+        CheckConstraint(
+            "desired_retention BETWEEN 0.70 AND 0.98",
+            name="ck_user_settings_desired_retention",
+        ),
+        CheckConstraint(
+            "max_interval_days BETWEEN 365 AND 3650",
+            name="ck_user_settings_max_interval_days",
+        ),
+        CheckConstraint(
+            "output_locale IN ('follow', 'zh-CN', 'en')",
+            name="ck_user_settings_output_locale",
+        ),
+        CheckConstraint(
+            "card_max_new_per_run BETWEEN 50 AND 1000",
+            name="ck_user_settings_card_max",
         ),
     )
 
@@ -59,4 +83,53 @@ class UserSettings(BaseModel):
         nullable=False,
         default=9,
         server_default="9",
+    )
+
+    # ---- 学习节奏（P2） ----
+    # 目标留存率只影响**未来**排期；不做历史重排。
+    desired_retention: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.9,
+        server_default="0.9",
+    )
+    # 单次调度允许的最长间隔（天）；1/5/10 年三档。
+    max_interval_days: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=3650,
+        server_default="3650",
+    )
+
+    # ---- 内容与生成（P2） ----
+    # `follow` = 跟随 users.locale；其余为显式 AI 输出语言。
+    output_locale: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="follow",
+        server_default="follow",
+    )
+    card_max_new_per_run: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=500,
+        server_default="500",
+    )
+    clean_simplify_formula: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    clean_normalize_spacing: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="1",
+    )
+    clean_normalize_heading_levels: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="1",
     )

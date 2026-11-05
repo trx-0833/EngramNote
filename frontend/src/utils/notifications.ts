@@ -7,6 +7,27 @@
 
 import { getDevicePrefs } from './devicePrefs';
 
+export type NotificationPermissionState =
+  | 'unsupported'
+  | 'default'
+  | 'granted'
+  | 'denied';
+
+/** 当前浏览器通知权限状态（不用 `Notification.permission` 直接渲染，避免不支持时抛错） */
+export function getNotificationPermission(): NotificationPermissionState {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return 'unsupported';
+  }
+  return Notification.permission;
+}
+
+/** 发送一条测试通知；返回是否真的发出（未授权/不支持时 false） */
+export function sendTestNotification(title: string, body: string): boolean {
+  if (getNotificationPermission() !== 'granted') return false;
+  showNotification(title, body);
+  return true;
+}
+
 /**
  * 请求浏览器通知权限
  * @returns 是否已授权

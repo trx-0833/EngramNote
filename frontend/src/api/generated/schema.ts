@@ -2723,9 +2723,10 @@ export interface paths {
      * Patch Settings
      * @description 部分更新设置；只提交显式给出的字段
      *
-     *     - `study.daily_review_limit` 写入 `user_settings`
+     *     - `study.daily_review_limit` / `desired_retention` / `max_interval_days`
      *     - `reminders.email_enabled` 写入 `users.email_reminder_enabled`
-     *     - `reminders.email_hour` 写入 `user_settings`
+     *     - `reminders.email_hour`
+     *     - `content.*`（输出语言、卡片上限、三条清洗开关）
      */
     patch: operations['patch_settings_api_settings_patch'];
     trace?: never;
@@ -4285,6 +4286,35 @@ export interface components {
     ConfirmRelationRequest: {
       /** Relation Id */
       relation_id: string;
+    };
+    /** ContentSettings */
+    ContentSettings: {
+      /** Card Max New Per Run */
+      card_max_new_per_run: number;
+      /** Clean Normalize Heading Levels */
+      clean_normalize_heading_levels: boolean;
+      /** Clean Normalize Spacing */
+      clean_normalize_spacing: boolean;
+      /** Clean Simplify Formula */
+      clean_simplify_formula: boolean;
+      /**
+       * Output Locale
+       * @enum {string}
+       */
+      output_locale: 'follow' | 'zh-CN' | 'en';
+    };
+    /** ContentSettingsPatch */
+    ContentSettingsPatch: {
+      /** Card Max New Per Run */
+      card_max_new_per_run?: number | null;
+      /** Clean Normalize Heading Levels */
+      clean_normalize_heading_levels?: boolean | null;
+      /** Clean Normalize Spacing */
+      clean_normalize_spacing?: boolean | null;
+      /** Clean Simplify Formula */
+      clean_simplify_formula?: boolean | null;
+      /** Output Locale */
+      output_locale?: ('follow' | 'zh-CN' | 'en') | null;
     };
     /**
      * ContentSourceInfo
@@ -7012,6 +7042,7 @@ export interface components {
      *     `daily_limit`）。
      */
     SettingsPatch: {
+      content?: components['schemas']['ContentSettingsPatch'] | null;
       reminders?: components['schemas']['ReminderSettingsPatch'] | null;
       study?: components['schemas']['StudySettingsPatch'] | null;
     };
@@ -7022,6 +7053,7 @@ export interface components {
     SettingsResponse: {
       about: components['schemas']['AboutSettings'];
       account: components['schemas']['AccountSettings'];
+      content: components['schemas']['ContentSettings'];
       /** Locale */
       locale: string;
       reminders: components['schemas']['ReminderSettings'];
@@ -7052,11 +7084,19 @@ export interface components {
     StudySettings: {
       /** Daily Review Limit */
       daily_review_limit: number;
+      /** Desired Retention */
+      desired_retention: number;
+      /** Max Interval Days */
+      max_interval_days: number;
     };
     /** StudySettingsPatch */
     StudySettingsPatch: {
       /** Daily Review Limit */
       daily_review_limit?: number | null;
+      /** Desired Retention */
+      desired_retention?: (0.8 | 0.85 | 0.9 | 0.95) | null;
+      /** Max Interval Days */
+      max_interval_days?: (365 | 1825 | 3650) | null;
     };
     /**
      * SubmitAnswerRequest

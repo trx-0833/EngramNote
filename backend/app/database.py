@@ -464,6 +464,48 @@ async def _migrate_sqlite(conn):
                 ))
                 logger.info("SQLite 迁移: 已为 users 表添加 locale 列")
 
+        # 设置表扩展（对应 Alembic 015，2026-11-05）
+        #
+        # 只对**已存在**的表补列；新库由 create_all 直接建出完整列。
+        # 这里不加 CHECK（SQLite 的 ALTER TABLE 不支持 ADD CONSTRAINT），
+        # 新库的 CHECK 由模型建表时带上，生产库由 Alembic 015 负责。
+        if 'user_settings' in table_names:
+            setting_columns = {col['name'] for col in inspector.get_columns('user_settings')}
+            setting_ddl = {
+                'desired_retention': (
+                    "ALTER TABLE user_settings ADD COLUMN desired_retention FLOAT "
+                    "DEFAULT 0.9 NOT NULL"
+                ),
+                'max_interval_days': (
+                    "ALTER TABLE user_settings ADD COLUMN max_interval_days INTEGER "
+                    "DEFAULT 3650 NOT NULL"
+                ),
+                'output_locale': (
+                    "ALTER TABLE user_settings ADD COLUMN output_locale VARCHAR(10) "
+                    "DEFAULT 'follow' NOT NULL"
+                ),
+                'card_max_new_per_run': (
+                    "ALTER TABLE user_settings ADD COLUMN card_max_new_per_run INTEGER "
+                    "DEFAULT 500 NOT NULL"
+                ),
+                'clean_simplify_formula': (
+                    "ALTER TABLE user_settings ADD COLUMN clean_simplify_formula BOOLEAN "
+                    "DEFAULT 0 NOT NULL"
+                ),
+                'clean_normalize_spacing': (
+                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_spacing BOOLEAN "
+                    "DEFAULT 1 NOT NULL"
+                ),
+                'clean_normalize_heading_levels': (
+                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_heading_levels BOOLEAN "
+                    "DEFAULT 1 NOT NULL"
+                ),
+            }
+            for column_name, ddl in setting_ddl.items():
+                if column_name not in setting_columns:
+                    sync_conn.execute(text(ddl))
+                    logger.info("SQLite 迁移: 已为 user_settings 表添加 %s 列", column_name)
+
         # `quiz_items.card_id` 仍是 NOT NULL 时**只告警**，不在这里重建表
         # （对应 Alembic 013，2026-10-22）
         #

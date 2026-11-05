@@ -161,6 +161,31 @@
   margin-top: 8px;
 }
 
+.advanced {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.advanced > summary {
+  padding: 14px 0;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.advanced > summary:hover {
+  color: var(--color-text);
+}
+
+.advancedBody {
+  padding-left: 2px;
+}
+
+.advancedBody > .row:first-child {
+  border-top: 0;
+}
+
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

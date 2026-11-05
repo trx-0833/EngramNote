@@ -1,10 +1,10 @@
 # 设置功能：设计与设置项调研
 
-> **状态：活文档（P0/P1 已落地，P2 未落地）** ｜ 最后核对：2026-11-04 ｜ 权威性：设置主题的现状与方案依据
+> **状态：活文档（P0/P1/P2 主体已落地，密码/删号/深色主题未做）** ｜ 最后核对：2026-11-05 ｜ 权威性：设置主题的现状与方案依据
 >
-> 2026-11-04 更新：PC 设置页、`/api/settings`、`user_settings` 表、每日上限与邮件发送时间联动已落地；
-> 下文 §0–§5 的设计仍有效，P2 项（留存率 / 内容语言 / 清洗规则 / 深色主题 / 改密 / 删号）仍是计划。
-> 落地清单与验证见 §9。
+> 2026-11-05 更新：六组设置页、留存率/最长间隔、AI 输出语言、卡片上限、清洗规则、
+> LLM 用量与桌面通知权限已落地；密码/删号/深色主题仍不在本批范围。
+> 实现与联动验收矩阵见 §9/§10。
 
 > 本文回答两件事：①设置页长什么样、怎么存怎么读；②**具体该放哪些设置**，以及为什么另一些不该放。
 > 全文的现状判断以代码实测为准，逐条带 `文件:行号`。
@@ -16,11 +16,11 @@
 1. **现在没有设置页**。`Sidebar.tsx:217` 的注释自己写着「全仓没有 Setting/Profile 页」。用户今天能改的东西只有三类：
    界面语言、邮件提醒开关、浏览器通知权限 —— 分别住在侧边栏底部、仪表盘卡片、浏览器设置里。
 2. **其余 60+ 个可调参数全在 `.env`**（`backend/app/config.py`）。改一个要重启后端与 worker，普通用户既不知道、也碰不到。
-3. **已做 `/settings` 页（只设计 PC）**：规划六组，首批落地五组（学习节奏 / 提醒 / 外观与语言 / 账号与安全 / 数据与关于）；**内容与生成**因 P2 项尚未接线，暂不渲染。
+3. **已做 `/settings` 页（只设计 PC）**：六组已全部落地：学习节奏 / 提醒 / 内容与生成 / 外观与语言 / 账号与安全 / 数据与关于。
    按阶段点亮：**没接线的组不渲染**，不做灰置占位。
 4. **P0 只「搬家」，不新增行为**：语言、邮件开关、桌面通知、退出所有设备、关于信息。后端只加一个聚合读写门面，不建表。
 5. **P1 才动行为**：每日复习上限、邮件发送时间、免打扰时段、字号、减少动效、侧栏折叠记忆、存储用量、导出入口。
-6. **P2 是要跨层的**：目标留存率（改排期）、AI 输出语言（worker 读库）、清洗规则、深色主题、修改密码、删除账号。
+6. **P2 中已落地**：目标留存率（改排期）、最长间隔、AI 输出语言（worker 读库）、清洗规则、卡片上限、LLM 用量。**仍未做**：深色主题、修改密码、删除账号（单独决策）。
 7. **日界/时区不进 v1**。业务日界硬编码在 `timeutil.py:14-23`（Asia/Shanghai 00:00），而 `review_due_hour=4`
    只影响到期时刻（`scheduler_service.py:242`），两者不是一个口径。只放一个「一天从几点开始」会把口径差异变成用户可见的 bug。
 8. **先修死旋钮，再上新旋钮**。`email_reminder_hour`、`reminder_quiet_hours_start/end` 在 `config.py:548-554`
@@ -88,24 +88,23 @@
 4. **服务端为准，设备本地例外。** 跨设备要一致（语言、每日上限、邮件）→ 落库；只对这台机器有意义（字号、动效、免打扰、侧栏）→ localStorage。
 5. **env 仍是默认值，用户设置是覆盖层。** 不建第二套配置系统；读取顺序固定为 `用户覆盖 → env 默认 → 代码默认`。
 
-### 2.2 信息架构（规划六组 22 项，首批落地五组）
+### 2.2 信息架构（六组 22 项，均已接线）
 
-> 下表保留完整规划，便于 P2 续做。**未接线的行不渲染**（§1.3 第 5 条）：
-> 首批页面只有学习节奏、提醒、外观与语言、账号与安全、数据与关于五组；
-> 「内容与生成」整组待留存率/内容语言/清洗规则接线后再上。
+> 下表保留完整规划。未接线的行不渲染（§1.3 第 5 条）；本批已把内容组与
+> 学习高级项接线，六组全部渲染。仍未做的是密码/删号/深色主题。
 
 | 分组 | 设置项 | 控件 | 默认 | 存储 | 阶段 |
 |---|---|---|---|---|---|
 | **学习节奏** | 每日复习上限 | 数字 5–100 | 10（`config.py:484`） | 服务端 | P1 |
-| | 目标留存率（高级，折叠） | 档位 80/85/90/95% | 90%（`config.py:500`） | 服务端 | P2 |
-| | 最长间隔（高级，折叠） | 档位 1/5/10 年 | 3650 天（`config.py:507`） | 服务端 | P2 |
+| | 目标留存率（高级，折叠） | 档位 80/85/90/95% | 90%（`config.py:500`） | 服务端 | 已落地 |
+| | 最长间隔（高级，折叠） | 档位 1/5/10 年 | 3650 天（`config.py:507`） | 服务端 | 已落地 |
 | **提醒** | 邮件提醒 | 开关 | 用户现值 | 服务端（列已存在） | P0 |
 | | 邮件发送时间 | 0–23 时（北京时间） | 9（`config.py:554`） | 服务端 | P1 |
 | | 免打扰时段 | 起/止两个下拉 | 22–8 | **本地** | P1 |
 | | 桌面通知 | 本地开关 + 权限状态 + 请求按钮 + 测试通知 | 开（有权限时） | **本地（浏览器权限）** | P0 |
-| **内容与生成** | AI 输出语言 | 跟随界面 / 中文 / English | 跟随界面 | 服务端（新字段） | P2 |
-| | 清洗规则（三条） | 开关 | 见 `config.py:279-287` | 服务端（worker） | P2 |
-| | 单次生成卡片上限 | 数字 50–1000 | 500（`config.py:459`） | 服务端 | P2 |
+| **内容与生成** | AI 输出语言 | 跟随界面 / 中文 / English | 跟随界面 | 服务端（新字段） | 已落地 |
+| | 清洗规则（三条） | 开关 | 见 `config.py:279-287` | 服务端（worker） | 已落地 |
+| | 单次生成卡片上限 | 数字 50–1000 | 500（`config.py:459`） | 服务端 | 已落地 |
 | **外观与语言** | 界面语言 | 中文 / English | 跟随浏览器/本地 | 本地 + 服务端回填 | P0 |
 | | 字号 | 小 / 标准 / 大 | 标准 | 本地 | P1 |
 | | 减少动效 | 开关 | 跟随系统 | 本地 | P1 |
@@ -116,7 +115,7 @@
 | | 修改密码 | 表单 | — | 服务端（新端点） | P2 |
 | **数据与关于** | 导出全部笔记 | 按钮（跳转/直接下载） | — | 已有（`notes.ts:545`） | P1 |
 | | 存储用量 | 只读进度 | 配额来自 env | 服务端（新端点） | P1 |
-| | LLM 用量 | 只读（今日配额 + 30 天） | — | 已有（`api/llm.py:141`） | P2 |
+| | LLM 用量 | 只读（今日配额 + 30 天） | — | 已有（`api/llm.py:141`） | 已落地 |
 | | 版本 / 环境 | 只读 | `app/version.py` | 服务端 | P0 |
 
 > 「阶段」= 交付批次，不是优先级排序的全部依据：P0 是「已有能力搬家」，P1 是「小改后端/纯前端」，P2 是「跨层或需产品决策」。
@@ -144,9 +143,9 @@
 
 页面规则：
 
-- **两栏**：左栏 208px 的分组导航（`position: sticky; top: 32px`），右栏最宽 812px（1120 内容区减去 208 左栏与 36 间距），纵向排列五张 `.card`（内容组未接线，不渲染）。
+- **两栏**：左栏 208px 的分组导航（`position: sticky; top: 32px`），右栏最宽 812px（1120 内容区减去 208 左栏与 36 间距），纵向排列六张 `.card`。
 - 左栏点击滚动到对应卡片；滚动时高亮当前组；深链接 `/settings#study` 直接定位。
-- 不再使用顶部横向锚点条 —— 那是移动端的交互残留，PC 上五组用左栏一眼可见。
+- 不再使用顶部横向锚点条 —— 那是移动端的交互残留，PC 上六组用左栏一眼可见。
 - 高级项默认折叠（`<details>`），默认值不隐藏在折叠区里。
 - 危险操作（退出所有设备）用现有 `ConfirmDialog`。
 - 右栏每张卡片宽度固定、内容左对齐；不把行拉成 1000px 长的一行字。
@@ -263,7 +262,11 @@ user_settings
   desired_retention    FLOAT   NOT NULL DEFAULT 0.9
   max_interval_days    INTEGER NOT NULL DEFAULT 3650
   email_hour           INTEGER NOT NULL DEFAULT 9
-  content_locale       VARCHAR(10) NULL       （NULL = 跟随界面语言）
+  output_locale        VARCHAR(10) NOT NULL DEFAULT 'follow' （follow/zh-CN/en）
+  card_max_new_per_run INTEGER NOT NULL DEFAULT 500
+  clean_simplify_formula BOOLEAN NOT NULL DEFAULT 0
+  clean_normalize_spacing BOOLEAN NOT NULL DEFAULT 1
+  clean_normalize_heading_levels BOOLEAN NOT NULL DEFAULT 1
   created_at / updated_at
 ```
 
@@ -271,7 +274,9 @@ user_settings
 
 - `CHECK daily_review_limit BETWEEN 5 AND 100`
 - `CHECK desired_retention BETWEEN 0.70 AND 0.98`
-- `CHECK max_interval_days BETWEEN 30 AND 36500`
+- `CHECK max_interval_days BETWEEN 365 AND 3650`
+- `CHECK output_locale IN ('follow','zh-CN','en')`
+- `CHECK card_max_new_per_run BETWEEN 50 AND 1000`
 - `CHECK email_hour BETWEEN 0 AND 23`
 
 为什么是**显式列**而不是 `users.preferences` JSON：
@@ -291,11 +296,14 @@ GET /api/settings
 200 {
   "locale": "zh-CN",
   "study":   { "daily_review_limit": 10, "desired_retention": 0.9, "max_interval_days": 3650 },
-  "reminders": { "email_enabled": true, "email_hour": 9,
-                 "capabilities": { "email_configured": true } },
-  "content": { "locale": null },
+  "reminders": { "email_enabled": true, "email_hour": 9, "email_configured": true },
+  "content": {
+    "output_locale": "follow", "card_max_new_per_run": 500,
+    "clean_simplify_formula": false, "clean_normalize_spacing": true,
+    "clean_normalize_heading_levels": true
+  },
   "account": { "email": "a@b.c", "username": "alice" },
-  "about":   { "app_version": "0.1.0" }
+  "about":   { "app_version": "0.1.0", "app_env": "prod" }
 }
 
 PATCH /api/settings
@@ -305,13 +313,13 @@ PATCH /api/settings
 
 约定：
 
-- `locale` 是服务端记录（给 worker 与跨设备回填）；`content.locale` 为空表示「AI 输出跟随界面语言」，非空才覆盖。
+- `locale` 是服务端记录（给 worker 与跨设备回填）；`content.output_locale='follow'` 表示「AI 输出跟随界面语言」，非 follow 才覆盖。
 - `PATCH` 每段可选、段内字段可选；`extra="forbid"`，未知字段 422，错误里带字段路径。
 - 现有 `PUT /auth/locale`、`GET/PUT /auth/reminder-settings` **保留**，内部改调同一个 service（同一套校验）；
   设置页走聚合端点，侧栏语言仍可走旧端点，两条路写同一列。
-- `GET /api/settings/usage`（P1）返回：
-  `{"storage": {"used_bytes": 0, "quota_bytes": 0}, "llm": {"today_tokens": 0, "daily_quota": 0, "price_configured": false}}`。
-  存储用 `SUM(Note.file_size)`（与 `upload.py:369-374` 同一口径）；LLM 复用 `api/llm.py:141` 的服务层。
+- `GET /api/settings/usage`（P1）只返回存储：
+  `{"storage": {"used_bytes": 0, "quota_bytes": 0}}`。LLM 用量走既有 `GET /api/llm/usage`（前端 `api/llm.ts` 只读展示）。
+  存储用 `SUM(Note.file_size)`（与 `upload.py` 同一口径）。
 - 能力位（capabilities）用于解释「为什么开关没用」：全局邮件未配置时 `email_configured=false`，
   页面显示「管理员未启用邮件通道」而不是一个点了没反应的开关。
 
@@ -326,8 +334,9 @@ PATCH /api/settings
 | 字号 | localStorage → 根节点属性 | `base.css:284`（`html{font-size:16px}`）+ 令牌层 | 立即 | 三档截图；确认布局不溢出 |
 | 减少动效 | localStorage → 根节点属性 | 现有 `prefers-reduced-motion` 规则改为「媒体查询或属性」 | 立即 | 强制开关后动画停止 |
 | ADHD 默认 | localStorage → `NoteDetail` 初始化 | `useAdhdReader.ts:157` 改成读初值 | 进入笔记时 | 刷新后仍开启 |
-| AI 输出语言 | DB → worker 查库 | `understand_tasks.py:94-102` 改读 `content_locale`，空则回落 `locale` | 下一次理解任务 | 中英各生成一次，断言提示词语言 |
-| 清洗规则 | DB → `clean_tasks` | `cleaning_service` 读配置处改为「用户覆盖优先」 | 下一次清洗 | 三条各开/关一次，比对 diff |
+| AI 输出语言 | DB → worker 查库 | `understand_tasks.py` 读 `output_locale`，`follow` 回落 `locale` | 下一次理解任务 | 中英各生成一次，断言提示词语言 |
+| 单次卡片上限 | DB → worker | `understand_tasks.py` 把上限传给 `save_cards_idempotent(config=...)` | 下一次理解任务 | 超过上限的一批被截断，`SaveOutcome.truncated` 为真 |
+| 清洗规则 | DB → `clean_tasks` | `cleaning_service.clean_rules(..., settings_override=)` | 下一次清洗 | 三条各开/关一次，比对 diff |
 
 ### 3.5 兼容、迁移、回滚
 
@@ -412,7 +421,7 @@ Anki 的官方手册把可调项分成两处（[Preferences](https://docs.ankiwe
 |---|---|---|---|
 | 目标留存率 | 我想记得更牢/复习少点 | 改的是排期，误设代价高；需要「不重排」语义 | `scheduler_service.advance` 入参 + 说明文案 + 单测 |
 | 最长间隔 | 不想 10 年后再见 | 同上，但影响更小 | 同上 |
-| AI 输出语言 | 界面中文，但想用英文生成卡片 | 现在语言**同时**决定 UI 与提示词（`understand_tasks.py:94-102`） | `content_locale` 字段 + worker 回退链 |
+| AI 输出语言 | 界面中文，但想用英文生成卡片 | 现在语言**同时**决定 UI 与提示词（`understand_tasks.py:94-102`） | `output_locale` 字段 + worker 回退链 |
 | 每日新增卡片上限 | 一天别塞太多新卡 | 现在只有「单次最多 500 张」（`config.py:459`），没有「新卡/天」概念 | 当日新卡计数 + 生成/展示延后策略（研究项） |
 | 清洗规则 | 公式/空格/标题按我的习惯处理 | worker 里读配置，需改成读用户覆盖 | `clean_tasks` + `cleaning_service` |
 | 单次生成上限 | 一次别灌太多卡 | 是安全阀，不是偏好；放开会灌库 | 校验 + 上限 |
@@ -467,7 +476,7 @@ Anki 的官方手册把可调项分成两处（[Preferences](https://docs.ankiwe
    `useDevicePrefs`；路由与侧栏入口；`Settings` 图标。**P0 只挂已接线的组**（语言、提醒、账号、数据与关于）。
 3. 搬家：语言、邮件开关、桌面通知、退出所有设备、关于。
 4. Dashboard：把 `EmailReminderToggle` 的 UI 移进设置页，删掉仪表盘那张卡片；仪表盘只留一行「提醒设置」链接。
-5. 测试：`Settings.test.tsx`（渲染五组、开关/数字/下拉调用、失败回滚、设备偏好）、后端 `test_user_settings.py`（默认值/部分更新/越界/每日上限/邮件时间）与 `test_settings_api.py`（注册→PATCH→review stats 的端到端联动）。
+5. 测试：`Settings.test.tsx`（六组、开关/数字/下拉调用、失败回滚、设备偏好、权限状态）、后端 `test_user_settings.py`（默认值/部分更新/越界/每日上限/邮件时间/调度参数/语言/清洗）与 `test_settings_api.py`（注册→PATCH→review stats 的端到端联动）。
 6. 门禁：§6 全部命令。
 
 **回滚**：删路由/页面/端点，Dashboard 恢复卡片。
@@ -484,9 +493,10 @@ Anki 的官方手册把可调项分成两处（[Preferences](https://docs.ankiwe
 
 **回滚**：迁移 downgrade；`review_service` 回常量；Beat 回 9:00。
 
-### 阶段 3：P2（逐项拍板后再做）
+### 阶段 3：P2（主体已落地；密码/删号/深色主题另立计划）
 
-目标留存率 → AI 输出语言 → 清洗规则 → 深色主题 → 修改密码 → LLM 用量 → （日界/删除账号另立计划）。
+2026-11-05 已完成：目标留存率、最长间隔、AI 输出语言、清洗规则、卡片上限、LLM 用量。
+仍未做：深色主题、修改密码、删除账号 —— 它们不是设置页联动问题，而是视觉重构/认证/数据生命周期决策。
 
 每项独立提交、独立门禁；不打包成一次大改。
 
@@ -506,7 +516,7 @@ Anki 的官方手册把可调项分成两处（[Preferences](https://docs.ankiwe
 
 ### 6.2 前端断言
 
-- 五组已接线项都渲染；每组的标题是 `<h2>`，控件有可访问名（`getByLabelText` 能取到）。
+- 六组都已接线项都渲染；每组的标题是 `<h2>`，控件有可访问名（`getByLabelText` 能取到）。
 - 开关失败：回滚到旧值 + toast（不是静默弹回，参考 `Dashboard.tsx:810-818`）。
 - 数字越界：就地提示，不发 `PATCH`。
 - 语言切换后，设置页文案立即变；刷新后保持。
@@ -581,49 +591,55 @@ npm --prefix frontend run docs:links
 
 ---
 
-## 9. 落地记录（2026-11-04）
+## 9. 落地记录（2026-11-05）
 
 ### 9.1 后端
 
 | 落点 | 实现 | 关键约束 |
 |---|---|---|
-| 存储 | `backend/app/models/user_settings.py:36` + `backend/alembic/versions/014_user_settings.py` | `user_id` 唯一、级联删除、`daily_review_limit` 5–100、`email_hour` 0–23 的 CHECK |
-| 读写 | `backend/app/services/user_settings_service.py:27,54,59` | 无行 = 环境默认；`GET` 不写库；PATCH 只改显式字段 |
-| 接口 | `backend/app/api/settings.py:70,79,111` 的 `GET/PATCH /api/settings`、`GET /api/settings/usage` | PATCH 返回合并后的完整快照；未知字段 422；`/usage` 与上传配额同口径 `SUM(Note.file_size)` |
-| 每日上限 | `backend/app/api/review.py:75` 的 `_effective_daily_limit()`；`review_service.py:183,319,603,623` | due / submit / stats 三处都读用户设置；`daily_limit` 响应随设置变化 |
-| 邮件时间 | `backend/app/tasks/reminder_tasks.py:37,43`；`backend/app/tasks/celery_app.py:137` | Beat 改为每小时；按业务时区（Asia/Shanghai）匹配 `email_hour`；`last_reminded_at` 做当日去重 |
-| 兼容 | `PUT /auth/locale`、`PUT /auth/reminder-settings` 保留 | 与聚合端点写同一批列，不另起存储 |
+| 存储 | `backend/app/models/user_settings.py` + `alembic/versions/014_user_settings.py`、`015_settings_expansion.py` | `daily_review_limit` 5–100、`email_hour` 0–23、留存率 0.70–0.98、最长间隔 365–3650、卡片上限 50–1000 的 CHECK |
+| 读写 | `backend/app/services/user_settings_service.py` | 无行 = 环境默认；`GET` 不写库；PATCH 只改显式字段；布尔值用 `is not None` 区分“显式关闭” |
+| 接口 | `backend/app/api/settings.py` 的 `GET/PATCH /api/settings`、`GET /api/settings/usage` | PATCH 返回合并后的完整快照；未知字段 422；`/usage` 与上传配额同口径 |
+| 每日上限 | `api/review.py` 的 `_effective_daily_limit()`；`review_service.py` | due / submit / stats 三处都读用户设置 |
+| 留存率 / 最长间隔 | `review_service.py` 与 `api/review.py` 的卡片复习都传 `scheduling_settings(...)` 给 `scheduler_service.advance` | 只覆盖本次调度的两个字段，不改全局配置；不重排已有卡片 |
+| 邮件时间 | `tasks/reminder_tasks.py` 的 `should_send_now()` / `select_due_recipients()`；`tasks/celery_app.py` | Beat 每小时；按北京时间匹配；`last_reminded_at` 当日去重 |
+| 内容语言 | `tasks/understand_tasks.py` | `output_locale='follow'` 回落 `users.locale`；无请求上下文也能工作 |
+| 卡片上限 / 清洗 | `understanding_service.py`、`card_intake_service.py`、`cleaning_service.clean_rules(..., settings_override=)`、`clean_tasks.py` | 只影响下一次生成/清洗；历史数据不自动重跑 |
+| 兼容 | `PUT /auth/locale`、`PUT /auth/reminder-settings` 保留 | 与聚合端点写同一批列 |
 
 ### 9.2 前端
 
 | 落点 | 实现 |
 |---|---|
-| 路由/入口 | `frontend/src/App.tsx` 的 `/settings` 懒加载；`Sidebar.tsx` 底部「设置」按钮 + 新 `settings` 图标 |
-| 页面 | `frontend/src/pages/Settings.tsx` + `Settings.module.css`：左栏 208px sticky + 右栏五张卡片；即时保存、失败回滚、`aria-live` 状态 |
-| 服务端联动 | `frontend/src/api/settings.ts`：`GET/PATCH /settings`、`GET /settings/usage`；语言仍走既有 `setLocale` |
-| 设备偏好 | `frontend/src/utils/devicePrefs.ts`：字号 / 减少动效 / ADHD 默认 / 侧栏折叠 / 桌面通知 / 免打扰；`useSyncExternalStore` 跨组件同步，`localStorage` 持久化 |
-| 全局接线 | `App.tsx` 侧栏折叠读同一份偏好；`useAdhdReader` 初始态；`notifications.ts` 免打扰默认值；`base.css` 的 `data-reduce-motion` 规则 |
-| 账号 | `AuthContext.logoutAllDevices()` → `POST /auth/logout?all_devices=true`，清本地令牌 |
-| 数据 | 导出复用 `exportNotesZip('clean')`；存储用量读 `/settings/usage` |
+| 路由/入口 | `App.tsx` 的 `/settings` 懒加载；`Sidebar.tsx` 底部「设置」按钮 |
+| 页面 | `pages/Settings.tsx` + `Settings.module.css`：六组；学习高级折叠、内容组、权限状态、LLM 用量、今日额度 |
+| 服务端联动 | `api/settings.ts`、`api/llm.ts`；保存每日上限/留存率后刷新 `reviewStats` |
+| 设备偏好 | `utils/devicePrefs.ts`：字号 / 减少动效 / ADHD 默认 / 侧栏折叠 / 桌面通知 / 免打扰 |
+| 通知权限 | `utils/notifications.ts`：权限状态、请求权限、测试通知；不支持/被拒时按钮降级 |
+| 账号 | `AuthContext.logoutAllDevices()` → 撤销全部刷新令牌 |
+| 数据 | 导出、存储用量、版本、LLM 用量只读 |
+| 去重 | Dashboard 的旧邮件开关已删除，改为 `/settings#reminders` 链接 |
 
 ### 9.3 验证
 
 | 门禁 | 结果 |
 |---|---|
-| 后端全量 | `pytest -q`：**1716 passed, 30 skipped**（含新增 10 条 service/联动用例 + 2 条 HTTP 端到端） |
-| 前端单测 | `vitest run`：**725 passed / 61 files**（含 `Settings.test.tsx` 9 条、`devicePrefs` 4 条、`notifications` 4 条） |
-| 前端 lint / tsc / build | `npm run lint` / `tsc --noEmit` / `npm run build` 全绿 |
-| 契约漂移 | `dump_openapi.py --check` 一致；`gen:api:drift`：`pathMatched 120 / pathMissing 0 / conflict 0` |
-| 真实页面冒烟 | 1440×1000：`/settings` 无控制台错误；每日上限 10 → 20 保存后刷新仍为 20；`/api/settings` 与 `/api/review/stats` 都返回 20 |
-| 文档链接 | `npm run docs:links` 通过（见 §9.5 本次新增后重跑） |
+| 后端全量 | `pytest -q`：**1722 passed, 30 skipped** |
+| 后端设置/联动 | `tests/test_user_settings.py` 16 条、`tests/test_settings_api.py` 2 条通过 |
+| 前端全量 | `vitest run`：**728 passed / 61 files**（设置页 11 条、通知 5 条） |
+| 前端 lint / tsc / build | 全绿 |
+| Playwright | `e2e/settings.spec.ts` 2 条通过（六组、PATCH、字号、深链接） |
+| 契约漂移 | `dump_openapi.py --check` 与 `gen:api:drift` 通过 |
+| 文档链接 | `docs:links` 通过 |
+| 真实冒烟 | 1440×1000 临时库：每日上限 10→25，刷新后 UI/`/api/review/stats` 一致；控制台 0 错误 |
 
 ### 9.4 与路线的差异 / 未做
 
-- **内容与生成组未渲染**：留存率、内容语言、清洗规则、卡片上限仍是 P2；按 §1.3「未接线不上界面」处理。
-- **Dashboard 邮件开关未删除**：原计划搬家，实际保留为快捷入口；它与设置页写同一列 `users.email_reminder_enabled`，不存在第二份状态。若要去重，删 `Dashboard.tsx` 的 `EmailReminderToggle` 即可。
-- **免打扰时段存设备本地**：没有进 `user_settings`；换设备不跟随（这是刻意选择，见 `devicePrefs.ts` 文件头）。
-- **日界/时区仍固定 Asia/Shanghai**：没有进 v1，与 §4.5 一致。
-- **Alembic 014 未在测试中执行**：测试库用 `create_all` 建表；迁移文件按现有 013 的写法补齐，生产走 Alembic。
+- **未做**：深色主题、修改密码、删除账号 —— 分别需要视觉审计、认证/会话策略、不可逆数据策略。
+- **免打扰时段存设备本地**：换设备不跟随（刻意选择）。
+- **日界/时区仍固定 Asia/Shanghai**：没有进本批。
+- **Alembic 015 不在测试库执行**：测试库用 `create_all`；生产走 Alembic，开发库走 `_migrate_sqlite()` 补列。
+- **LLM 用量价格未配置时显示“未配置单价”**，不把 0 元当真实花费。
 
 ### 9.5 复跑命令
 
@@ -639,12 +655,30 @@ npm run lint
 npx tsc --noEmit
 npm test
 npm run build
+npx playwright test e2e/settings.spec.ts --project=chromium
 npm run gen:api:drift
 
 # 文档
 cd ..
 npm --prefix frontend run docs:links
 ```
+
+---
+
+## 10. 联动验收矩阵
+
+| 设置改动 | 可观察结果 | 证据 |
+|---|---|---|
+| 每日上限 10→25 | `/review/stats.daily_limit=25`；due 剩余额度变化；第 26 道 429 | `test_settings_api.py`、`test_user_settings.py` |
+| 留存率 0.80→0.95 | 固定 `rand` 下下一次间隔变短 | `test_higher_retention_shortens_next_interval` |
+| 最长间隔 3650→365 | 间隔被夹紧到 ≤365 | `test_max_interval_is_enforced_from_user_view` |
+| 邮件开关/时间 | 任务按 `email_hour` 选人；当日去重 | `test_reminder_task_selects_users_by_their_own_hour` |
+| 输出语言 follow/zh/en | worker 解析出 `users.locale` 或显式语言 | `test_resolve_output_locale_follows_user_and_falls_back` |
+| 卡片上限 500→50 | 一次理解最多新增 50 张 | `GateConfig` + `save_cards_idempotent` 既有用例；`understand_tasks` 传参 |
+| 清洗三条开关 | `clean_rules()` 输出随开关变化 | `test_clean_rules_respects_user_override` |
+| 字号/动效/侧栏/ADHD | 根节点、`data-*`、localStorage 变化 | `devicePrefs.test.ts`、`Settings.test.tsx` |
+| 桌面通知权限/测试 | 权限状态正确；测试通知调用 `Notification` | `notifications.test.ts`、`Settings.test.tsx` |
+| 设置页 PATCH 形状 | 六组控件发对应段，失败回滚 | `Settings.test.tsx`、`e2e/settings.spec.ts` |
 
 ---
 

@@ -33,7 +33,7 @@ from ..services.sm2_service import (
     grade_answer,
     grade_short_answer_semantically,
 )
-from . import review_state_service
+from . import review_state_service, user_settings_service
 from .review_state_service import ITEM_TYPE_QUIZ
 
 logger = logging.getLogger(__name__)
@@ -423,8 +423,13 @@ async def submit_answer(
             raise RuntimeError(
                 f"无法读取复习状态，拒绝静默不推进调度: quiz={quiz_id}"
             )
+        effective = await user_settings_service.get_effective_settings(db, user_id)
         schedule_outcome = scheduler_service.advance(
-            state, quality, method=grade["method"], now=now,
+            state,
+            quality,
+            method=grade["method"],
+            now=now,
+            settings=user_settings_service.scheduling_settings(effective),
         )
 
         # 4. 更新 QuizItem 的旧调度字段（阶段 3.1 渐进迁移的双写）

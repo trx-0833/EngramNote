@@ -42,17 +42,21 @@ async def test_update_creates_row_and_partial_update_keeps_other_field(
         first = await user_settings_service.update_effective_settings(
             db, user_id, daily_review_limit=25
         )
-        assert first == {"daily_review_limit": 25, "email_hour": 9}
+        assert first["daily_review_limit"] == 25
+        assert first["email_hour"] == 9
+        assert first["desired_retention"] == 0.9
 
         second = await user_settings_service.update_effective_settings(
             db, user_id, email_hour=7
         )
-        assert second == {"daily_review_limit": 25, "email_hour": 7}
+        assert second["daily_review_limit"] == 25
+        assert second["email_hour"] == 7
 
         third = await user_settings_service.update_effective_settings(
             db, user_id, email_hour=8
         )
-        assert third == {"daily_review_limit": 25, "email_hour": 8}
+        assert third["daily_review_limit"] == 25
+        assert third["email_hour"] == 8
 
 
 @pytest.mark.asyncio
@@ -94,6 +98,15 @@ def test_patch_schema_rejects_out_of_range_and_unknown_fields():
 
     with pytest.raises(ValidationError):
         SettingsPatch.model_validate({"reminders": {"email_hour": 24}})
+
+    for bad in (
+        {"study": {"desired_retention": 0.92}},
+        {"study": {"max_interval_days": 400}},
+        {"content": {"output_locale": "fr"}},
+        {"content": {"card_max_new_per_run": 10}},
+    ):
+        with pytest.raises(ValidationError):
+            SettingsPatch.model_validate(bad)
 
     # 合法值 + 只给一段
     patch = SettingsPatch.model_validate({"reminders": {"email_hour": 7}})
@@ -209,3 +222,153 @@ def test_email_task_is_scheduled_hourly():
     assert schedule.minute == {0}
     assert len(schedule.hour) == 24
 
+
+@pytest.mark.asyncio
+async def test_reminder_task_selects_users_by_their_own_hour(
+    test_db, test_user_factory
+):
+    """任务选人必须按每行 email_hour，而不是全局 9 点"""
+    from app.tasks.reminder_tasks import select_due_recipients
+
+    nine, _, _ = await test_user_factory(1)
+    seven, _, _ = await test_user_factory(2)
+    default_nine, _, _ = await test_user_factory(3)
+    async with test_db() as db:
+        db.add(UserSettings(user_id=seven, email_hour=7))
+        db.add(UserSettings(user_id=nine, email_hour=9))
+        await db.commit()
+
+        # 2026-11-04 01:00 UTC = 09:00 Asia/Shanghai
+        at_nine = datetime(2026, 11, 4, 1, 0, tzinfo=timezone.utc)
+        selected = await select_due_recipients(db, at_nine)
+        selected_ids = {user.id for user, _ in selected}
+        assert nine in selected_ids
+        assert default_nine in selected_ids
+        assert seven not in selected_ids
+
+        # 7 点：只有 seven；9 点的那两位不选
+        at_seven = datetime(2026, 11, 3, 23, 0, tzinfo=timezone.utc)
+        selected_seven = await select_due_recipients(db, at_seven)
+        assert {user.id for user, _ in selected_seven} == {seven}
+
+        # 当日已发过 → 去重
+        from app.models.user import User
+
+        user_row = await db.get(User, nine)
+        user_row.last_reminded_at = datetime(2026, 11, 4, 0, 30, tzinfo=timezone.utc)
+        await db.commit()
+        selected_again = await select_due_recipients(db, at_nine)
+        assert nine not in {user.id for user, _ in selected_again}
+
+
+def test_resolve_output_locale_follows_user_and_falls_back():
+    resolve = user_settings_service.resolve_output_locale
+    assert resolve("follow", "en") == "en"
+    assert resolve("follow", "zh-CN") == "zh-CN"
+    assert resolve("zh-CN", "en") == "zh-CN"
+    assert resolve("en", "zh-CN") == "en"
+    assert resolve("follow", "klingon") == "zh-CN"
+    assert resolve(None, None) == "zh-CN"
+
+
+def test_scheduling_settings_does_not_mutate_global_config():
+    base = SimpleNamespace(
+        review_scheduler="fsrs",
+        review_fuzz_ratio=0.05,
+        fsrs_request_retention=0.9,
+        fsrs_max_interval_days=3650,
+    )
+    view = user_settings_service.scheduling_settings(
+        {"desired_retention": 0.8, "max_interval_days": 365}, base=base
+    )
+    assert view.fsrs_request_retention == 0.8
+    assert view.fsrs_max_interval_days == 365
+    # 全局配置不能被某个用户的覆盖值改掉
+    assert base.fsrs_request_retention == 0.9
+    assert base.fsrs_max_interval_days == 3650
+
+
+def test_higher_retention_shortens_next_interval():
+    """留存率不是只存起来：它必须真的进入 FSRS 的下一次间隔计算"""
+    from app.models.review_state import ReviewState, ReviewStateKind
+    from app.services import scheduler_service
+
+    state = ReviewState(
+        user_id="u",
+        item_type="card",
+        item_id="c",
+        interval_days=7,
+        repetition=2,
+        easiness_factor=2.5,
+        state=ReviewStateKind.review,
+    )
+    now = datetime(2026, 11, 4, 1, 0, tzinfo=timezone.utc)
+    base = SimpleNamespace(
+        review_scheduler="fsrs",
+        review_fuzz_ratio=0.0,
+        fsrs_request_retention=0.9,
+        fsrs_max_interval_days=3650,
+    )
+    lower = scheduler_service.advance(
+        state,
+        4,
+        method="self_rating",
+        now=now,
+        settings=user_settings_service.scheduling_settings(
+            {"desired_retention": 0.8, "max_interval_days": 3650}, base=base
+        ),
+        rand=0.5,
+    )
+    higher = scheduler_service.advance(
+        state,
+        4,
+        method="self_rating",
+        now=now,
+        settings=user_settings_service.scheduling_settings(
+            {"desired_retention": 0.95, "max_interval_days": 3650}, base=base
+        ),
+        rand=0.5,
+    )
+    assert lower.interval_days > higher.interval_days
+
+
+def test_max_interval_is_enforced_from_user_view():
+    from app.models.review_state import ReviewStateKind
+    from app.services import scheduler_service
+    from app.services.scheduler_service import ScheduleOutcome
+
+    now = datetime(2026, 11, 4, 1, 0, tzinfo=timezone.utc)
+    outcome = ScheduleOutcome(
+        interval_days=10000,
+        repetition=1,
+        easiness_factor=2.5,
+        next_review_at=now,
+        state=ReviewStateKind.review,
+        algorithm="fsrs",
+    )
+    clamped = scheduler_service.apply_scheduling_policy(
+        outcome,
+        now=now,
+        settings=SimpleNamespace(review_fuzz_ratio=0.0, fsrs_max_interval_days=365),
+        rand=0.5,
+    )
+    assert clamped.interval_days <= 365
+
+
+def test_clean_rules_respects_user_override():
+    from app.services.cleaning_service import clean_rules
+
+    text = "# Title\n\n\n\nA  +  B\n"
+    off = SimpleNamespace(
+        clean_simplify_formula=False,
+        clean_normalize_spacing=False,
+        clean_normalize_heading_levels=False,
+    )
+    on = SimpleNamespace(
+        clean_simplify_formula=True,
+        clean_normalize_spacing=True,
+        clean_normalize_heading_levels=True,
+    )
+    off_text, _ = clean_rules(text, settings_override=off)
+    on_text, _ = clean_rules(text, settings_override=on)
+    assert off_text != on_text

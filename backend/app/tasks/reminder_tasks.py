@@ -68,6 +68,29 @@ def should_send_now(
     return True
 
 
+async def select_due_recipients(db, now: Optional[datetime] = None):
+    """按 `email_hour` 与当日去重选出这一小时该发的用户
+
+    抽出来是为了能在测试里直接建库、造用户，验证 SQL + 时区 + 去重
+    三件事一起工作，而不是只测 `should_send_now()` 这个纯函数。
+    """
+    moment = now or datetime.now(timezone.utc)
+    result = await db.execute(
+        select(User, UserSettings)
+        .outerjoin(UserSettings, UserSettings.user_id == User.id)
+        .where(
+            User.email.isnot(None),
+            User.email != "",
+            User.email_reminder_enabled.is_(True),
+        )
+    )
+    return [
+        (user, pref)
+        for user, pref in result.all()
+        if should_send_now(user, pref, moment)
+    ]
+
+
 @shared_task(name="app.tasks.reminder_tasks.send_daily_review_email")
 def send_daily_review_email():
     """
@@ -90,26 +113,11 @@ def send_daily_review_email():
 
     async def _run():
         async with async_session() as db:
-            # 仅查询开启邮件提醒的用户（email_reminder_enabled=True）
-            # 同时过滤空邮箱：User.email 在模型中为 nullable=False，但仍需排除空字符串
-            result = await db.execute(
-                select(User, UserSettings)
-                .outerjoin(UserSettings, UserSettings.user_id == User.id)
-                .where(
-                    User.email.isnot(None),
-                    User.email != "",
-                    User.email_reminder_enabled.is_(True),
-                )
-            )
-            rows = result.all()
             now = datetime.now(timezone.utc)
+            rows = await select_due_recipients(db, now)
 
             sent_count = 0
-            for user, user_settings in rows:
-                # 每小时跑一次的任务里，真正发给谁由「用户设置的小时」决定。
-                # 没设置过的用户回落到环境默认（与改动前 9:00 的行为兼容）。
-                if not should_send_now(user, user_settings, now):
-                    continue
+            for user, _user_settings in rows:
                 try:
                     ok = await notification_service.send_review_email(
                         user.email, user.id, db
