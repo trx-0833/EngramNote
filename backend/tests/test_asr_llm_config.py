@@ -36,7 +36,7 @@ import os
 
 import pytest
 
-from app.services.asr.converter import _load_llm_config
+from app.services.asr_llm_config import _load_llm_config
 
 
 class TestNormalPath:
