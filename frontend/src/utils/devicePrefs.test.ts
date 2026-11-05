@@ -6,12 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  getDevicePrefs,
-  setDevicePref,
-  subscribeDevicePrefs,
-  useDevicePrefs,
-} from './devicePrefs';
+import { getDevicePrefs, setDevicePref, subscribeDevicePrefs, useDevicePrefs } from './devicePrefs';
 import { act, renderHook } from '@testing-library/react';
 
 beforeEach(() => {

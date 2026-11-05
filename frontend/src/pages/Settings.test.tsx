@@ -153,8 +153,7 @@ beforeEach(() => {
     },
     content: {
       ...BASE.content,
-      output_locale:
-        body.content?.output_locale ?? BASE.content.output_locale,
+      output_locale: body.content?.output_locale ?? BASE.content.output_locale,
       card_max_new_per_run:
         typeof body.content?.card_max_new_per_run === 'number'
           ? body.content.card_max_new_per_run
@@ -184,9 +183,7 @@ describe('Settings 页', () => {
     expect(await screen.findByText('lin@example.com')).toBeInTheDocument();
     expect(screen.getByText('0.1.0')).toBeInTheDocument();
     expect(screen.getByText('1.00 GB / 5.00 GB')).toBeInTheDocument();
-    expect(
-      screen.getByText('已结算 3 / 10 道 · 还剩 7 道'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('已结算 3 / 10 道 · 还剩 7 道')).toBeInTheDocument();
     expect(screen.getByText('150 tokens · 12 次调用')).toBeInTheDocument();
     expect(screen.getByText('未配置单价')).toBeInTheDocument();
     expect(screen.getByText('当前浏览器不支持桌面通知。')).toBeInTheDocument();
@@ -238,9 +235,7 @@ describe('Settings 页', () => {
 
     await user.selectOptions(await screen.findByLabelText('发送时间'), '7');
 
-    await waitFor(() =>
-      expect(mockedPatch).toHaveBeenCalledWith({ reminders: { email_hour: 7 } }),
-    );
+    await waitFor(() => expect(mockedPatch).toHaveBeenCalledWith({ reminders: { email_hour: 7 } }));
   });
 
   it('高级排期：留存率和最长间隔分别提交', async () => {
@@ -267,9 +262,7 @@ describe('Settings 页', () => {
     renderSettings();
 
     const contentRegion = await screen.findByRole('region', { name: '内容与生成' });
-    await user.click(
-      within(contentRegion).getByRole('button', { name: 'English' }),
-    );
+    await user.click(within(contentRegion).getByRole('button', { name: 'English' }));
     await waitFor(() =>
       expect(mockedPatch).toHaveBeenCalledWith({
         content: { output_locale: 'en' },
@@ -308,9 +301,7 @@ describe('Settings 页', () => {
     const user = userEvent.setup();
     renderSettings();
 
-    await user.click(
-      await screen.findByRole('checkbox', { name: 'ADHD Reader 默认开启' }),
-    );
+    await user.click(await screen.findByRole('checkbox', { name: 'ADHD Reader 默认开启' }));
     expect(getDevicePrefs().adhdDefault).toBe(true);
     expect(mockedPatch).not.toHaveBeenCalled();
   });

@@ -7,11 +7,7 @@
 
 import { getDevicePrefs } from './devicePrefs';
 
-export type NotificationPermissionState =
-  | 'unsupported'
-  | 'default'
-  | 'granted'
-  | 'denied';
+export type NotificationPermissionState = 'unsupported' | 'default' | 'granted' | 'denied';
 
 /** 当前浏览器通知权限状态（不用 `Notification.permission` 直接渲染，避免不支持时抛错） */
 export function getNotificationPermission(): NotificationPermissionState {

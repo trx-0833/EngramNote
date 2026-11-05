@@ -21,7 +21,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { exportNotesZip } from '../api/client';
 import { getLlmUsage } from '../api/llm';
 import { getReviewStats } from '../api/review';
-import { getSettings, getSettingsUsage, patchSettings, type SettingsPatchBody, type UserSettings } from '../api/settings';
+import {
+  getSettings,
+  getSettingsUsage,
+  patchSettings,
+  type SettingsPatchBody,
+  type UserSettings,
+} from '../api/settings';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useToast } from '../components/Toast';
@@ -74,9 +80,7 @@ function mergePatch(current: UserSettings, body: SettingsPatchBody): UserSetting
       ...(typeof reminders?.email_enabled === 'boolean'
         ? { email_enabled: reminders.email_enabled }
         : {}),
-      ...(typeof reminders?.email_hour === 'number'
-        ? { email_hour: reminders.email_hour }
-        : {}),
+      ...(typeof reminders?.email_hour === 'number' ? { email_hour: reminders.email_hour } : {}),
     },
     content: {
       ...current.content,
@@ -154,15 +158,10 @@ export default function Settings() {
           dailyInputRef.current.value = String(context.previous.study.daily_review_limit);
         }
         if (vars.section === 'content' && cardCapInputRef.current) {
-          cardCapInputRef.current.value = String(
-            context.previous.content.card_max_new_per_run,
-          );
+          cardCapInputRef.current.value = String(context.previous.content.card_max_new_per_run);
         }
       }
-      toast.error(
-        t('settings.saveFailed'),
-        error instanceof Error ? error.message : undefined,
-      );
+      toast.error(t('settings.saveFailed'), error instanceof Error ? error.message : undefined);
     },
     onSuccess: (next, vars) => {
       queryClient.setQueryData(SETTINGS_KEY, next);
@@ -275,9 +274,7 @@ export default function Settings() {
     const parsed = Number(event.currentTarget.value);
     const value = Number.isFinite(parsed) ? Math.round(parsed) : NaN;
     if (!Number.isFinite(value) || value < 50 || value > 1000) {
-      event.currentTarget.value = String(
-        settingsQuery.data.content.card_max_new_per_run,
-      );
+      event.currentTarget.value = String(settingsQuery.data.content.card_max_new_per_run);
       toast.error(t('settings.content.invalidCardCap'));
       return;
     }
@@ -484,7 +481,8 @@ export default function Settings() {
                         onChange={(event) =>
                           save('study', {
                             study: {
-                              desired_retention: Number(event.target.value) as 0.8 | 0.85 | 0.9 | 0.95,
+                              desired_retention: Number(event.target.value) as
+                                0.8 | 0.85 | 0.9 | 0.95,
                             },
                           })
                         }
@@ -614,9 +612,7 @@ export default function Settings() {
                     className="btn btn-secondary"
                     type="button"
                     onClick={handleRequestPermission}
-                    disabled={
-                      notifPermission === 'unsupported' || notifPermission === 'granted'
-                    }
+                    disabled={notifPermission === 'unsupported' || notifPermission === 'granted'}
                   >
                     {t('settings.reminders.requestPermission')}
                   </button>
@@ -820,7 +816,11 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.appearance.languageHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <div className={styles.seg} role="group" aria-label={t('settings.appearance.language')}>
+                  <div
+                    className={styles.seg}
+                    role="group"
+                    aria-label={t('settings.appearance.language')}
+                  >
                     <button
                       type="button"
                       className={locale === 'zh-CN' ? styles.segActive : ''}
@@ -847,7 +847,11 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.appearance.fontHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <div className={styles.seg} role="group" aria-label={t('settings.appearance.font')}>
+                  <div
+                    className={styles.seg}
+                    role="group"
+                    aria-label={t('settings.appearance.font')}
+                  >
                     {(['sm', 'md', 'lg'] as FontScale[]).map((scale) => (
                       <button
                         key={scale}
@@ -929,7 +933,11 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.account.sessionsHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <button className="btn btn-danger-outline" type="button" onClick={handleLogoutAll}>
+                  <button
+                    className="btn btn-danger-outline"
+                    type="button"
+                    onClick={handleLogoutAll}
+                  >
                     {t('settings.account.logoutAll')}
                   </button>
                 </div>

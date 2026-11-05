@@ -1358,7 +1358,8 @@ const en = {
       usageValue: '{done} / {limit} settled · {remaining} left',
       advanced: 'Advanced: scheduling',
       retention: 'Desired retention',
-      retentionHint: 'Higher means stronger memory but more reviews. Affects future scheduling only; existing cards are not rescheduled.',
+      retentionHint:
+        'Higher means stronger memory but more reviews. Affects future scheduling only; existing cards are not rescheduled.',
       maxInterval: 'Maximum interval',
       maxIntervalHint: 'Longest gap between two reviews.',
       years: '{years} yr',
@@ -1403,9 +1404,11 @@ const en = {
       cards: 'cards / run',
       invalidCardCap: 'Enter a whole number between 50 and 1000',
       cleanFormula: 'Simplify formulas',
-      cleanFormulaHint: 'Tighten extra spaces/symbols in inline math. Affects the next cleaning only.',
+      cleanFormulaHint:
+        'Tighten extra spaces/symbols in inline math. Affects the next cleaning only.',
       cleanSpacing: 'Normalize spacing',
-      cleanSpacingHint: 'Collapse extra spaces around numbers and letters. Affects the next cleaning only.',
+      cleanSpacingHint:
+        'Collapse extra spaces around numbers and letters. Affects the next cleaning only.',
       cleanHeadings: 'Normalize heading levels',
       cleanHeadingsHint: 'Fix skipped Markdown heading levels. Affects the next cleaning only.',
     },
@@ -1435,7 +1438,8 @@ const en = {
       sessionsHint: 'Sign out other devices.',
       logoutAll: 'Sign out everywhere',
       logoutAllConfirm: 'Sign out everywhere?',
-      logoutAllHint: 'This revokes every refresh token, including this device. You will need to sign in again.',
+      logoutAllHint:
+        'This revokes every refresh token, including this device. You will need to sign in again.',
     },
     data: {
       title: 'Data & about',

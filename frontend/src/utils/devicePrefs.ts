@@ -56,8 +56,7 @@ function read(): DevicePrefs {
     if (!raw) return { ...DEFAULTS };
     const parsed = JSON.parse(raw) as Partial<DevicePrefs>;
     return {
-      fontScale:
-        parsed.fontScale === 'sm' || parsed.fontScale === 'lg' ? parsed.fontScale : 'md',
+      fontScale: parsed.fontScale === 'sm' || parsed.fontScale === 'lg' ? parsed.fontScale : 'md',
       reduceMotion: Boolean(parsed.reduceMotion),
       adhdDefault: Boolean(parsed.adhdDefault),
       sidebarCollapsed: Boolean(parsed.sidebarCollapsed),

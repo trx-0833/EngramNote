@@ -36,39 +36,38 @@ async function setup(page: Page): Promise<{ patches: unknown[] }> {
   });
 
   await page.route(
-    (url) =>
-      url.pathname === '/api/settings' ||
-      url.pathname.startsWith('/api/settings/'),
+    (url) => url.pathname === '/api/settings' || url.pathname.startsWith('/api/settings/'),
     async (route) => {
-    const url = new URL(route.request().url());
-    const method = route.request().method();
-    const json = (body: unknown) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      const url = new URL(route.request().url());
+      const method = route.request().method();
+      const json = (body: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
-    if (url.pathname === '/api/settings/usage') {
-      await json({ storage: { used_bytes: 1024 ** 2, quota_bytes: 5 * 1024 ** 3 } });
-      return;
-    }
-    if (url.pathname !== '/api/settings') {
-      await json({});
-      return;
-    }
-    if (method === 'PATCH') {
-      const body = route.request().postDataJSON() as {
-        study?: Partial<typeof BASE.study>;
-        reminders?: Partial<typeof BASE.reminders>;
-        content?: Partial<typeof BASE.content>;
-      };
-      patches.push(body);
-      current = {
-        ...current,
-        study: { ...current.study, ...(body.study ?? {}) },
-        reminders: { ...current.reminders, ...(body.reminders ?? {}) },
-        content: { ...current.content, ...(body.content ?? {}) },
-      };
-    }
-    await json(current);
-  });
+      if (url.pathname === '/api/settings/usage') {
+        await json({ storage: { used_bytes: 1024 ** 2, quota_bytes: 5 * 1024 ** 3 } });
+        return;
+      }
+      if (url.pathname !== '/api/settings') {
+        await json({});
+        return;
+      }
+      if (method === 'PATCH') {
+        const body = route.request().postDataJSON() as {
+          study?: Partial<typeof BASE.study>;
+          reminders?: Partial<typeof BASE.reminders>;
+          content?: Partial<typeof BASE.content>;
+        };
+        patches.push(body);
+        current = {
+          ...current,
+          study: { ...current.study, ...(body.study ?? {}) },
+          reminders: { ...current.reminders, ...(body.reminders ?? {}) },
+          content: { ...current.content, ...(body.content ?? {}) },
+        };
+      }
+      await json(current);
+    },
+  );
 
   await page.route('**/api/review/stats', async (route) => {
     await route.fulfill({
@@ -100,7 +99,14 @@ async function setup(page: Page): Promise<{ patches: unknown[] }> {
         totals: { calls: 12, total_tokens: 150, cost: 0 },
         groups: [],
         price_configured: false,
-        quota: { cost_enforceable: false, cost_limit: 0, cost_used: 0, token_limit: 0, token_used: 0, unlimited: true },
+        quota: {
+          cost_enforceable: false,
+          cost_limit: 0,
+          cost_used: 0,
+          token_limit: 0,
+          token_used: 0,
+          unlimited: true,
+        },
         cache: {},
       }),
     });

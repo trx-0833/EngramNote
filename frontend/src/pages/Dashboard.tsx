@@ -252,9 +252,7 @@ export default function Dashboard() {
         }}
       >
         <span>
-          <span style={{ display: 'block', fontWeight: 600 }}>
-            {t('dashboard.emailReminder')}
-          </span>
+          <span style={{ display: 'block', fontWeight: 600 }}>{t('dashboard.emailReminder')}</span>
           <span style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
             {t('dashboard.emailReminderMoved')}
           </span>
