@@ -19,6 +19,7 @@ import type { RefObject } from 'react';
 // 选择器里的 `:global(.markdown-body)` 是**引用**一个按判据必须留全局的类名
 // （三个不相邻功能在用 + `marked` 生成的 DOM），不是"把类名留全局"。
 import styles from './useAdhdReader.module.css';
+import { getDevicePrefs } from '../utils/devicePrefs';
 
 interface Point2D {
   x: number;
@@ -154,7 +155,7 @@ function extractLineText(block: HTMLElement, point: Point2D): string | null {
  * @returns 当前状态与控制函数
  */
 export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(() => getDevicePrefs().adhdDefault);
   const [currentLineText, setCurrentLineText] = useState('');
 
   const enabledRef = useRef(enabled);

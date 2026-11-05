@@ -180,6 +180,7 @@ async def submit_answer(
     skip_due_check: bool = False,
     self_rating: Optional[int] = None,
     use_semantic_grading: bool = False,
+    daily_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     提交答案并更新 SM-2 调度参数
@@ -211,6 +212,9 @@ async def submit_answer(
         self_rating: 用户自评的 SM-2 质量分（0-5）。给出时优先于自动判分；
                     简答题等 needs_self_assessment 的场景应始终传入。
                     不传且自动判分不可信时，本次提交**不推进调度**（保留复习进度）。
+        daily_max: 该用户的每日结算上限。`None` 时回落到模块级
+                    `DAILY_REVIEW_LIMIT`（环境默认）—— 保留既有调用方与测试
+                    不传参时的行为。
 
     Returns:
         Dict: 判分结果，包含 is_correct, quality, correct_answer, explanation,
@@ -312,9 +316,10 @@ async def submit_answer(
     #
     # 占位记录本身也不计入 today_done：它未推进调度，算作"已完成"是虚报。
     if pending_placeholder is None and not skip_daily_limit:
+        effective_limit = int(daily_max or DAILY_REVIEW_LIMIT)
         today_done = await _count_settled_today(db, user_id, today_start)
-        if today_done >= DAILY_REVIEW_LIMIT:
-            return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {DAILY_REVIEW_LIMIT}"}
+        if today_done >= effective_limit:
+            return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {effective_limit}"}
 
     if pending_placeholder is not None:
         logger.info(
@@ -595,6 +600,7 @@ def _build_submit_result(
 async def get_review_stats(
     user_id: str,
     db: AsyncSession,
+    daily_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     获取用户复习统计数据
@@ -609,10 +615,12 @@ async def get_review_stats(
     Args:
         user_id: 用户 ID
         db: 数据库会话
+        daily_max: 该用户的每日结算上限；`None` = 环境默认
 
     Returns:
         Dict: 复习统计数据
     """
+    effective_limit = int(daily_max or DAILY_REVIEW_LIMIT)
     now = datetime.now(timezone.utc)
     # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
@@ -622,7 +630,7 @@ async def get_review_stats(
     today_done = await _count_settled_today(db, user_id, today_start)
 
     # 今日待复习数（next_review_at <= now 或为 None），考虑每日限额
-    remaining_quota = max(0, DAILY_REVIEW_LIMIT - today_done)
+    remaining_quota = max(0, effective_limit - today_done)
     if remaining_quota <= 0:
         due_count = 0
     else:
@@ -698,7 +706,7 @@ async def get_review_stats(
         "total_correct": total_correct,
         "total_accuracy": round(total_correct / total_reviews * 100, 1) if total_reviews > 0 else 0,
         "total_quizzes": total_quizzes,
-        "daily_limit": DAILY_REVIEW_LIMIT,  # 每日答题上限下发给前端，见 docs/decisions.md#F-12
+        "daily_limit": effective_limit,  # 每日答题上限下发给前端，见 docs/decisions.md#F-12
     }
 
 

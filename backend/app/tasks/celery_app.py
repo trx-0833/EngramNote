@@ -131,10 +131,12 @@ celery_app.conf.update(
             "task": "app.tasks.reminder_tasks.refresh_goal_progress",
             "schedule": crontab(hour=0, minute=30),
         },
-        # 每日 09:00 发送复习提醒邮件（仅对开启邮件提醒的用户）
+        # 每小时发送复习提醒邮件：具体哪一小时发给谁由 user_settings.email_hour
+        # 决定（没有设置行的用户回落到 EMAIL_REMINDER_HOUR，默认 9 点）。
+        # 任务内部用 last_reminded_at 做当日去重，重复调度不会发第二封。
         "send-daily-review-email": {
             "task": "app.tasks.reminder_tasks.send_daily_review_email",
-            "schedule": crontab(hour=9, minute=0),
+            "schedule": crontab(minute=0),
         },
         # 每 5 分钟自愈一次僵尸任务（阶段 1′ 1.8）
         #

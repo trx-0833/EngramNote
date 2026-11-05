@@ -25,6 +25,7 @@ from .chunk import Chunk, pack_vector, unpack_vector
 from .llm_call import LLMCall
 from .llm_cache import LLMCache
 from .refresh_token import RefreshToken
+from .user_settings import UserSettings
 
 __all__ = [
     "User",
@@ -68,4 +69,5 @@ __all__ = [
     "LLMCall",
     "LLMCache",
     "RefreshToken",
+    "UserSettings",
 ]

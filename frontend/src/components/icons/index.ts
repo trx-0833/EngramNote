@@ -77,6 +77,7 @@ import User from './user';
 import Dot from './dot';
 import Info from './info';
 import Relation from './relation';
+import Settings from './settings';
 
 /** 全部图形：键是语义名，值是只画图形的组件 */
 export const ICONS = {
@@ -128,6 +129,7 @@ export const ICONS = {
   dot: Dot,
   info: Info,
   relation: Relation,
+  settings: Settings,
 } satisfies Record<string, ComponentType>;
 
 /** 全部合法语义名（联合类型：`Icon` 的 `name` 用它约束） */

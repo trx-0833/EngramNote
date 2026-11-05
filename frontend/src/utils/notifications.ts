@@ -5,6 +5,8 @@
  * 去重只按 due_count 值变化判断，不再依赖已废弃的 sessionStorage 去重，见 docs/decisions.md#F-25。
  */
 
+import { getDevicePrefs } from './devicePrefs';
+
 /**
  * 请求浏览器通知权限
  * @returns 是否已授权
@@ -46,13 +48,19 @@ export function showNotification(title: string, body: string): void {
 
 /**
  * 检查当前是否在免打扰时段
- * 免打扰时间默认为 22:00 - 08:00
- * @param startHour - 免打扰开始小时（默认 22）
- * @param endHour - 免打扰结束小时（默认 8）
+ *
+ * 起止小时默认来自设备本地偏好（设置页可改）；调用方仍可显式传参，
+ * 保留给测试与将来的"临时静默"场景。
+ * @param startHour - 免打扰开始小时（默认读 devicePrefs）
+ * @param endHour - 免打扰结束小时（默认读 devicePrefs）
  * @returns 是否在免打扰时段
  */
-export function isInQuietHours(startHour = 22, endHour = 8): boolean {
+export function isInQuietHours(
+  startHour: number = getDevicePrefs().quietStart,
+  endHour: number = getDevicePrefs().quietEnd,
+): boolean {
   const hour = new Date().getHours();
+  if (startHour === endHour) return false;
   if (startHour > endHour) {
     // 跨天，如 22-8
     return hour >= startHour || hour < endHour;

@@ -2702,6 +2702,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Settings Snapshot
+     * @description 读取当前用户的完整设置快照（不写库）
+     */
+    get: operations['get_settings_snapshot_api_settings_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Patch Settings
+     * @description 部分更新设置；只提交显式给出的字段
+     *
+     *     - `study.daily_review_limit` 写入 `user_settings`
+     *     - `reminders.email_enabled` 写入 `users.email_reminder_enabled`
+     *     - `reminders.email_hour` 写入 `user_settings`
+     */
+    patch: operations['patch_settings_api_settings_patch'];
+    trace?: never;
+  };
+  '/api/settings/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Settings Usage
+     * @description 存储用量（与上传前的配额校验同一口径：`SUM(Note.file_size)`）
+     */
+    get: operations['get_settings_usage_api_settings_usage_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/tasks/note/{note_id}': {
     parameters: {
       query?: never;
@@ -3416,6 +3464,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AboutSettings */
+    AboutSettings: {
+      /** App Env */
+      app_env: string;
+      /** App Version */
+      app_version: string;
+    };
+    /** AccountSettings */
+    AccountSettings: {
+      /** Email */
+      email: string;
+      /** Username */
+      username: string;
+    };
     /** AnnotationCreateRequest */
     AnnotationCreateRequest: {
       /** Color */
@@ -6633,6 +6695,22 @@ export interface components {
        */
       weak_point_count: number;
     };
+    /** ReminderSettings */
+    ReminderSettings: {
+      /** Email Configured */
+      email_configured: boolean;
+      /** Email Enabled */
+      email_enabled: boolean;
+      /** Email Hour */
+      email_hour: number;
+    };
+    /** ReminderSettingsPatch */
+    ReminderSettingsPatch: {
+      /** Email Enabled */
+      email_enabled?: boolean | null;
+      /** Email Hour */
+      email_hour?: number | null;
+    };
     /**
      * RestoreResponse
      * @description 恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 None）
@@ -6926,6 +7004,34 @@ export interface components {
       success: boolean;
     };
     /**
+     * SettingsPatch
+     * @description `PATCH /api/settings`：每段可选，段内字段也可选
+     *
+     *     `extra="forbid"` 是刻意的：拼错字段名必须 422，而不是静默忽略后
+     *     让用户以为保存成功（典型例子：把 `daily_review_limit` 写成
+     *     `daily_limit`）。
+     */
+    SettingsPatch: {
+      reminders?: components['schemas']['ReminderSettingsPatch'] | null;
+      study?: components['schemas']['StudySettingsPatch'] | null;
+    };
+    /**
+     * SettingsResponse
+     * @description `GET/PATCH /api/settings` 的完整响应
+     */
+    SettingsResponse: {
+      about: components['schemas']['AboutSettings'];
+      account: components['schemas']['AccountSettings'];
+      /** Locale */
+      locale: string;
+      reminders: components['schemas']['ReminderSettings'];
+      study: components['schemas']['StudySettings'];
+    };
+    /** SettingsUsageResponse */
+    SettingsUsageResponse: {
+      storage: components['schemas']['StorageUsage'];
+    };
+    /**
      * SourceType
      * @description 文档来源类型枚举
      *
@@ -6935,6 +7041,23 @@ export interface components {
      * @enum {string}
      */
     SourceType: 'pdf' | 'image' | 'docx' | 'pptx' | 'xlsx' | 'audio' | 'video' | 'markdown';
+    /** StorageUsage */
+    StorageUsage: {
+      /** Quota Bytes */
+      quota_bytes: number;
+      /** Used Bytes */
+      used_bytes: number;
+    };
+    /** StudySettings */
+    StudySettings: {
+      /** Daily Review Limit */
+      daily_review_limit: number;
+    };
+    /** StudySettingsPatch */
+    StudySettingsPatch: {
+      /** Daily Review Limit */
+      daily_review_limit?: number | null;
+    };
     /**
      * SubmitAnswerRequest
      * @description 提交答案请求
@@ -10598,6 +10721,79 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_settings_snapshot_api_settings_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsResponse'];
+        };
+      };
+    };
+  };
+  patch_settings_api_settings_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SettingsPatch'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_settings_usage_api_settings_usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsUsageResponse'];
         };
       };
     };
