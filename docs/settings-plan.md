@@ -624,9 +624,9 @@ npm --prefix frontend run docs:links
 
 | 门禁 | 结果 |
 |---|---|
-| 后端全量 | `pytest -q`：**1722 passed, 30 skipped** |
-| 后端设置/联动 | `tests/test_user_settings.py` 16 条、`tests/test_settings_api.py` 2 条通过 |
-| 前端全量 | `vitest run`：**731 passed / 62 files**（设置页 12 条、ADHD hook 1 条、NoteDetail 22 条、通知 5 条） |
+| 后端全量 | `pytest -q`：**1726 passed, 30 skipped** |
+| 后端设置/联动 | `tests/test_user_settings.py` 17 条、`tests/test_settings_api.py` 5 条通过 |
+| 前端全量 | `vitest run`：**734 passed / 62 files**（设置页 15 条、ADHD hook 1 条、NoteDetail 22 条、通知 5 条） |
 | 前端 lint / tsc / build | 全绿 |
 | Playwright | `e2e/settings.spec.ts` 2 条通过（六组、PATCH、字号、深链接） |
 | 契约漂移 | `dump_openapi.py --check` 与 `gen:api:drift` 通过 |
@@ -636,6 +636,7 @@ npm --prefix frontend run docs:links
 ### 9.4 与路线的差异 / 未做
 
 - **未做**：深色主题、修改密码、删除账号 —— 分别需要视觉审计、认证/会话策略、不可逆数据策略。
+- **2026-11-06 修复的安全项**：`email_configured` 现在要求 SMTP 密码；设置行与邮件开关合并为一次事务；并发首次建行冲突会重试；越界 env 默认值在 `deployment_defaults()` 夹紧。前端只读查询失败显示错误与重试，`cancelQueries` 只取消精确 `['settings']`，非预设档位的部署默认值在下拉框中可见。迁移互斥/缺 CHECK、整点丢信、首行快照语义、AI 输出语言口径仍待人工确认（见任务书 N1/N2/N3/N7/N14）。
 - **ADHD Reader 默认开启的“只亮按钮”缺陷已修**：设置默认 true 时，首次 effect 常遇到 `markdownRef.current=null`（笔记数据未到），旧代码直接 return 后不再重跑；现在 root 不存在时观察 `document.body`，容器真正挂载后再接上遮罩/块类名/鼠标监听。`useAdhdReader.test.tsx` 与 `NoteDetail.test.tsx` 覆盖“ref 晚于 hook 挂载”和真实正文容器。
 - **免打扰时段存设备本地**：换设备不跟随（刻意选择）。
 - **日界/时区仍固定 Asia/Shanghai**：没有进本批。
