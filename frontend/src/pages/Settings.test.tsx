@@ -7,6 +7,7 @@
  */
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Settings from './Settings';
@@ -187,6 +188,22 @@ describe('Settings 页', () => {
     expect(screen.getByText('150 tokens · 12 次调用')).toBeInTheDocument();
     expect(screen.getByText('未配置单价')).toBeInTheDocument();
     expect(screen.getByText('当前浏览器不支持桌面通知。')).toBeInTheDocument();
+  });
+
+  it('保存时只取消 settings 精确 key，不误伤子查询', async () => {
+    const spy = vi.spyOn(QueryClient.prototype, 'cancelQueries');
+    const user = userEvent.setup();
+    renderSettings();
+
+    const input = (await screen.findByLabelText('每日复习上限')) as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, '20');
+    await user.tab();
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['settings'], exact: true }),
+    );
+    spy.mockRestore();
   });
 
   it('修改每日上限：PATCH 只带 study.daily_review_limit', async () => {

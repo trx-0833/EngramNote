@@ -146,7 +146,7 @@ export default function Settings() {
   const mutation = useMutation({
     mutationFn: ({ body }: { section: SectionId; body: SettingsPatchBody }) => patchSettings(body),
     onMutate: async ({ body }) => {
-      await queryClient.cancelQueries({ queryKey: SETTINGS_KEY });
+      await queryClient.cancelQueries({ queryKey: SETTINGS_KEY, exact: true });
       const previous = queryClient.getQueryData<UserSettings>(SETTINGS_KEY);
       if (previous) queryClient.setQueryData(SETTINGS_KEY, mergePatch(previous, body));
       return { previous };
