@@ -74,8 +74,7 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
-describe('导出全部', () => {
-  it('★ 没有搜索关键词时显示「导出全部（ZIP）」', async () => {
+describe('导出全部', () => {  it('★ 没有搜索关键词时显示「导出全部（ZIP）」', async () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /导出全部（ZIP）/ })).toBeInTheDocument();
   });
@@ -117,5 +116,48 @@ describe('导出全部', () => {
         '没有可导出的正文 —— 这些笔记都没有该版本的正文，请换一个版本或先清洗',
       ),
     );
+  });
+});
+
+/**
+ * 整卡可点（2026-11-06）
+ *
+ * ## 为什么这两条判据值得单独写
+ *
+ * "点卡片任何地方都能进详情"是**拉伸链接**做的（标题 `<Link>` 的 `::after`
+ * 铺满整张卡），而 jsdom 没有布局、没有伪元素命中测试 —— 真正的那一下只能由
+ * `e2e/notes-list.spec.ts` 在真浏览器里点。这一层守的是它**赖以成立的两条前提**：
+ *
+ * | 前提 | 破坏了会怎样 |
+ * |---|---|
+ * | 卡片里**只有一个**链接，且卡片不是控件 | 多一个链接 = 多一块"点进去的是别的笔记"的区域；卡片变回 `role="button"` = F-17（nested-interactive）复发 |
+ * | 右箭头是**装饰性图标**、并且在按钮组之外 | 退回 `→` 字符时跨平台字形不一；跟着按钮一起 hover 才出现，就等于"可点性提示"时有时无 |
+ */
+describe('整卡可点（拉伸链接）', () => {
+  it('★★ 卡片里只有标题这一个链接，卡片本身不是控件（F-17 不复发）', async () => {
+    const { container } = renderPage();
+
+    const link = await screen.findByRole('link', { name: '一篇笔记' });
+    expect(link).toHaveAttribute('href', '/notes/n-1');
+
+    const article = container.querySelector('article');
+    expect(article).not.toBeNull();
+    // F-17 的形状是 `article[role="button"][tabindex="0"]` + 手写 Enter：
+    // 那两个属性是"能点却键盘到不了 / 读屏念成按钮"的入口，一个都不能回来。
+    expect(article).not.toHaveAttribute('role');
+    expect(article).not.toHaveAttribute('tabindex');
+    // 拉伸链接的前提：整张卡只有这一个链接，点哪儿都落到它
+    expect(article!.querySelectorAll('a')).toHaveLength(1);
+  });
+
+  it('★ 右侧箭头是装饰性图标，且不再是 `→` 字符', async () => {
+    renderPage();
+
+    const chevron = await screen.findByTestId('note-chevron');
+    expect(chevron).toHaveAttribute('aria-hidden', 'true');
+    expect(chevron.querySelector('svg')).not.toBeNull();
+    // 旧实现是一个 `→` 文本节点：字体不同则宽高不同，而且它当时挂在
+    // `.noteListActions` 里（hover 才可见）—— 作为"整卡可点"的提示太弱。
+    expect(screen.queryByText('→')).not.toBeInTheDocument();
   });
 });
