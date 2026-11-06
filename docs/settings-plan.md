@@ -13,7 +13,7 @@
 
 ## 0. 结论（先看这一页）
 
-1. **现在没有设置页**。`Sidebar.tsx:217` 的注释自己写着「全仓没有 Setting/Profile 页」。用户今天能改的东西只有三类：
+1. **开工前没有设置页**。`Sidebar.tsx:217` 的注释当时自己写着「全仓没有 Setting/Profile 页」。用户那时能改的东西只有三类：
    界面语言、邮件提醒开关、浏览器通知权限 —— 分别住在侧边栏底部、仪表盘卡片、浏览器设置里。
 2. **其余 60+ 个可调参数全在 `.env`**（`backend/app/config.py`）。改一个要重启后端与 worker，普通用户既不知道、也碰不到。
 3. **已做 `/settings` 页（只设计 PC）**：六组已全部落地：学习节奏 / 提醒 / 内容与生成 / 外观与语言 / 账号与安全 / 数据与关于。
@@ -60,8 +60,8 @@
 
 | 项 | 证据 | 后果 |
 |---|---|---|
-| `email_reminder_hour` | `config.py:554`；grep 只有定义处 | 改成 7 点也不生效，Beat 固定 `crontab(hour=9, minute=0)`（`celery_app.py:131`） |
-| `reminder_quiet_hours_start/end` | `config.py:548,550`；grep 只有定义处 | 后端从不读它；前端另写死 22–8（`notifications.ts:54`, `ReminderBanner.tsx:85`） |
+| `email_reminder_hour` | `config.py:554`；`tasks/reminder_tasks.py:61` | **已接线**：没有设置行的用户回落到这个值；Beat 每小时扫描（`celery_app.py`） |
+| `reminder_quiet_hours_start/end` | `config.py:548,550`；grep 只有定义处 | 后端仍不读它；前端按设备本地 22–8（`notifications.ts`） |
 | `chunk_overlap` | `config.py:292-297` 自述「当前不生效」 | 分块器已换成 `markdown_segmenter`，没有字符级重叠 |
 | `review_due_hour` 的注释 vs 代码 | 注释说它改变「今天」的判断边界（`config.py:520-533`），实际只用于到期时刻对齐（`scheduler_service.py:242`）；额度/报告的「今天」走 `timeutil.py:26-45` 的 00:00 | **以代码为准**：两个口径。设置页不要把它们混成一个旋钮 |
 
@@ -670,9 +670,9 @@ npm --prefix frontend run docs:links
 
 | 设置改动 | 可观察结果 | 证据 |
 |---|---|---|
-| 每日上限 10→25 | `/review/stats.daily_limit=25`；due 剩余额度变化；第 26 道 429 | `test_settings_api.py`、`test_user_settings.py` |
+| 每日上限 10→25 | `/review/stats.daily_limit=25`；due 剩余额度变化 | `test_settings_api.py::test_settings_patch_flows_into_review_stats` |
 | 留存率 0.80→0.95 | 固定 `rand` 下下一次间隔变短 | `test_higher_retention_shortens_next_interval` |
-| 最长间隔 3650→365 | 间隔被夹紧到 ≤365 | `test_max_interval_is_enforced_from_user_view` |
+| 最长间隔 3650→365 | `scheduling_settings` 传入 scheduler 后间隔被夹紧到 ≤365 | `test_max_interval_is_enforced_from_user_view`（service 层，非 HTTP） |
 | 邮件开关/时间 | 任务按 `email_hour` 选人；当日去重 | `test_reminder_task_selects_users_by_their_own_hour` |
 | 输出语言 follow/zh/en | worker 解析出 `users.locale` 或显式语言 | `test_resolve_output_locale_follows_user_and_falls_back` |
 | 卡片上限 500→50 | 一次理解最多新增 50 张 | `GateConfig` + `save_cards_idempotent` 既有用例；`understand_tasks` 传参 |
