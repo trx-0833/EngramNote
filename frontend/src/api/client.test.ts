@@ -389,6 +389,16 @@ describe('API 客户端：Content-Disposition 文件名解析', () => {
 
     expect(parseContentDispositionFilename(header)).toBe(name);
   });
+
+  it('★ 批量导出的真实头解出 .zip（后端那条用例的对面）', () => {
+    // 逐字取自 `build_content_disposition("engramnote-export", ".zip")`。
+    // 后端测试守"头里写的是 .zip"，这条守"前端解出来的也是 .zip" ——
+    // 两边一起错（比如都退回 .md）时才不会一起绿。
+    const header =
+      'attachment; filename="engramnote-export.zip"; filename*=UTF-8\'\'engramnote-export.zip';
+
+    expect(parseContentDispositionFilename(header)).toBe('engramnote-export.zip');
+  });
 });
 
 describe('API 客户端：downloadRequest', () => {
