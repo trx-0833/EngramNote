@@ -18,6 +18,7 @@
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -76,34 +77,20 @@ async def get_effective_settings(db: AsyncSession, user_id: str) -> Dict[str, An
     return _effective(await get_settings_row(db, user_id))
 
 
-async def update_effective_settings(
-    db: AsyncSession,
-    user_id: str,
+def _apply_overrides(
+    row: UserSettings,
     *,
-    daily_review_limit: Optional[int] = None,
-    email_hour: Optional[int] = None,
-    desired_retention: Optional[float] = None,
-    max_interval_days: Optional[int] = None,
-    output_locale: Optional[str] = None,
-    card_max_new_per_run: Optional[int] = None,
-    clean_simplify_formula: Optional[bool] = None,
-    clean_normalize_spacing: Optional[bool] = None,
-    clean_normalize_heading_levels: Optional[bool] = None,
-) -> Dict[str, Any]:
-    """部分更新；没有行时创建。返回更新后的完整有效值。
-
-    只更新显式传入的字段（`None` = 不改），这样 PATCH 的语义与
-    "缺省字段保持原值"一致。布尔值必须用 `is not None` 判断 ——
-    用真值判断会让"显式关闭"被当成"没提交"。
-    """
-    row = await get_settings_row(db, user_id)
-    if row is None:
-        row = UserSettings(
-            user_id=user_id,
-            **deployment_defaults(),
-        )
-        db.add(row)
-
+    daily_review_limit: Optional[int],
+    email_hour: Optional[int],
+    desired_retention: Optional[float],
+    max_interval_days: Optional[int],
+    output_locale: Optional[str],
+    card_max_new_per_run: Optional[int],
+    clean_simplify_formula: Optional[bool],
+    clean_normalize_spacing: Optional[bool],
+    clean_normalize_heading_levels: Optional[bool],
+) -> None:
+    """把显式传入的 PATCH 字段写到行上；None = 不改。"""
     if daily_review_limit is not None:
         row.daily_review_limit = int(daily_review_limit)
     if email_hour is not None:
@@ -123,9 +110,69 @@ async def update_effective_settings(
     if clean_normalize_heading_levels is not None:
         row.clean_normalize_heading_levels = bool(clean_normalize_heading_levels)
 
-    await db.commit()
-    await db.refresh(row)
-    return _effective(row)
+
+async def update_effective_settings(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    daily_review_limit: Optional[int] = None,
+    email_hour: Optional[int] = None,
+    desired_retention: Optional[float] = None,
+    max_interval_days: Optional[int] = None,
+    output_locale: Optional[str] = None,
+    card_max_new_per_run: Optional[int] = None,
+    clean_simplify_formula: Optional[bool] = None,
+    clean_normalize_spacing: Optional[bool] = None,
+    clean_normalize_heading_levels: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """部分更新；没有行时创建。返回更新后的完整有效值。
+
+    只更新显式传入的字段（`None` = 不改），这样 PATCH 的语义与
+    "缺省字段保持原值"一致。布尔值必须用 `is not None` 判断 ——
+    用真值判断会让"显式关闭"被当成"没提交"。
+
+    ## 并发首次建行
+
+    两个请求可能同时 `SELECT` 到 None，然后都 INSERT；后提交的会撞
+    `uq_user_settings_user_id`。这里不把 IntegrityError 直接甩给 API
+    （那会变成 500），而是回滚后重取一次，把本次覆盖应用到已存在的行。
+    """
+    kwargs = {
+        "daily_review_limit": daily_review_limit,
+        "email_hour": email_hour,
+        "desired_retention": desired_retention,
+        "max_interval_days": max_interval_days,
+        "output_locale": output_locale,
+        "card_max_new_per_run": card_max_new_per_run,
+        "clean_simplify_formula": clean_simplify_formula,
+        "clean_normalize_spacing": clean_normalize_spacing,
+        "clean_normalize_heading_levels": clean_normalize_heading_levels,
+    }
+
+    for attempt in range(2):
+        row = await get_settings_row(db, user_id)
+        if row is None:
+            row = UserSettings(
+                user_id=user_id,
+                **deployment_defaults(),
+            )
+            db.add(row)
+
+        _apply_overrides(row, **kwargs)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 1:
+                raise
+            # 另一个请求赢了 INSERT：重取它建的行，再应用一次本次覆盖。
+            continue
+
+        await db.refresh(row)
+        return _effective(row)
+
+    raise RuntimeError("unreachable: settings update retry loop exhausted")
+
 
 
 def as_dict(row: Optional[UserSettings]) -> Dict[str, Any]:
