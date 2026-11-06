@@ -795,11 +795,13 @@ README 首页有**可验证的错误陈述**，且**没有任何截图**。
   给出一个 `plugins/` 约定能让社区贡献"某某学科的卡片模板"。
 - **导入/导出与互操作**：Anki（`.apkg`）、Obsidian vault、Markdown 目录导入导出 ——
   **这是笔记类开源项目最重要的"防锁定"承诺**，也是最大的采用入口。
-  ⚠️ **2026-10-19 部分缓解，本条不关闭**：单篇笔记正文导出已落地
+  ⚠️ **2026-10-19 部分缓解，2026-11-06 再缓解一步，本条不关闭**：单篇笔记正文导出已落地
   （`GET /api/notes/{note_id}/export`，详见 `frontend/docs/note-export.md`）——
-  导出的是带 YAML front-matter 的 `.md`，可直接放进 Obsidian vault。
-  但**批量导出（整库搬走）与导入都还没有**，而"整库可搬走"才是这条
-  "防锁定"承诺的实质；`Anki` / `.apkg` / CLI 也都没有。
+  导出的是带 YAML front-matter 的 `.md`，可直接放进 Obsidian vault；
+  批量导出（`GET /api/notes/export` → `application/zip`，解压即 `index.md` + 每篇一个 `.md`）
+  也已落地，整库能一次搬走。
+  但**导入还没有**，而"搬得回来"才是这条"防锁定"承诺的另一半；
+  `Anki` / `.apkg` / CLI 也都没有。
 - **CLI**：`engramnote import ./notes/`、`engramnote export --format anki`
   （依赖 §2.5 的打包能力）。
 - **主题/语言包**：UI 主题现在是内置的"学术优雅"一套；主题包机制成本低、传播性好。
