@@ -1,0 +1,48 @@
+# EngramNote 提交前钩子（lefthook）
+#
+# ⚠️ 当前【未启用】。
+#    启用条件：1) 安装 lefthook 二进制  2) 执行 `lefthook install`
+#    仅存在本文件不会触发任何行为（.git/hooks 下目前无自定义钩子）。
+#
+# 启用步骤见 _governance/01-启用清单.md 第 2 节。
+#
+# 设计取舍：
+#   - pre-commit 只做"秒级"能判的事（格式/lint/密钥）。测试放 pre-push。
+#   - 并行执行，目标总耗时 <10s。超过就把 prettier 挪到 pre-push。
+#   - 逃生口：SKIP_VERIFY=1 git push（写进 AGENTS.md 后再启用）。
+
+pre-commit:
+  parallel: true
+  commands:
+    ruff-check:
+      glob: "*.py"
+      root: "backend/"
+      run: python -m ruff check --fix {staged_files} && git add {staged_files}
+
+    ruff-format:
+      glob: "*.py"
+      root: "backend/"
+      run: python -m ruff format {staged_files} && git add {staged_files}
+
+    eslint:
+      glob: "*.{ts,tsx}"
+      root: "frontend/"
+      run: npx eslint --fix {staged_files} && git add {staged_files}
+
+    prettier:
+      glob: "*.{ts,tsx,css,md,json}"
+      root: "frontend/"
+      run: npx prettier --write {staged_files} && git add {staged_files}
+
+    # 依赖 gitleaks：启用前必须先装（scoop install gitleaks / choco install gitleaks）
+    secrets:
+      run: gitleaks protect --staged --redact
+
+pre-push:
+  # 只跑前端单测（39s）。后端 1760 个用例全量约 3–5min，放 CI；
+  # 后端 lint 已在 pre-commit 对 staged 文件查过，不重复。
+  # 逃生口：SKIP_VERIFY=1 git push
+  commands:
+    vitest:
+      root: "frontend/"
+      run: npx vitest run --reporter=dot
