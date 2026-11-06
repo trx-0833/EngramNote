@@ -7,6 +7,7 @@
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import settings as settings_api
 from app.main import app
@@ -137,4 +138,48 @@ def test_email_configured_requires_password(test_db, monkeypatch):
     with_password = client.get("/api/settings", headers=headers)
     assert with_password.status_code == 200, with_password.text
     assert with_password.json()["reminders"]["email_configured"] is True
+
+
+def test_settings_and_email_toggle_commit_once(test_db, monkeypatch):
+    """设置行与 users.email_reminder_enabled 必须同一次提交
+
+    旧实现先提交设置，再提交邮件开关；第二次失败会留下“设置已改、开关没改”
+    的半截状态。这里让第二次 commit 必炸：合并成一次事务后响应必须仍为 200，
+    且两项都已生效。
+    """
+    client = TestClient(app, client=("198.51.100.24", 9232), raise_server_exceptions=False)
+    headers = _register(client)
+
+    original_commit = AsyncSession.commit
+    calls = 0
+
+    async def fail_second_commit(self):
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            raise RuntimeError("second commit should not happen")
+        return await original_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_second_commit)
+
+    patched = client.patch(
+        "/api/settings",
+        headers=headers,
+        json={
+            "study": {"daily_review_limit": 25},
+            "reminders": {"email_enabled": False},
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    # 1 = 设置/邮件开关的合并事务；2 = get_db 的收尾 commit（框架行为，
+    # 不是业务第二次提交）。旧实现会在业务侧出现第 2 次 commit 并在这里炸。
+    assert calls == 2
+    assert patched.json()["study"]["daily_review_limit"] == 25
+    assert patched.json()["reminders"]["email_enabled"] is False
+
+    after = client.get("/api/settings", headers=headers)
+    assert after.status_code == 200, after.text
+    assert after.json()["study"]["daily_review_limit"] == 25
+    assert after.json()["reminders"]["email_enabled"] is False
+
 
