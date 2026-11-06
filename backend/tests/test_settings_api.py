@@ -4,8 +4,11 @@
 证明联动不是只发生在 service 单测里。
 """
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from app.api import settings as settings_api
 from app.main import app
 
 
@@ -107,3 +110,31 @@ def test_settings_rejects_unknown_field_and_out_of_range(test_db):
         json={"study": {"daily_review_limit": 4}},
     )
     assert out_of_range.status_code == 422
+
+
+def test_email_configured_requires_password(test_db, monkeypatch):
+    """只有 host/user、没有 SMTP 密码时不能宣称“可发信”
+
+    真实发信在 notification_service 里才失败，并被吞成 logger.error；设置页
+    若显示 email_configured=true，用户会以为邮件通道正常。
+    """
+    client = _client()
+    headers = _register(client)
+    fake = SimpleNamespace(
+        email_reminder_enabled=True,
+        smtp_host="smtp.example.com",
+        smtp_user="mailer",
+        smtp_password="",
+        app_env="dev",
+    )
+    monkeypatch.setattr(settings_api, "get_settings", lambda: fake)
+
+    without_password = client.get("/api/settings", headers=headers)
+    assert without_password.status_code == 200, without_password.text
+    assert without_password.json()["reminders"]["email_configured"] is False
+
+    fake.smtp_password = "secret"
+    with_password = client.get("/api/settings", headers=headers)
+    assert with_password.status_code == 200, with_password.text
+    assert with_password.json()["reminders"]["email_configured"] is True
+

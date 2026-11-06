@@ -39,12 +39,17 @@ router = APIRouter()
 
 
 def _email_configured() -> bool:
-    """部署侧是否具备发信能力（全局开关 + SMTP 两项都配了）"""
+    """部署侧是否具备发信能力（全局开关 + SMTP 认证信息齐全）
+
+    只查 host/user 不够：password 为空时 notification_service 会在真正发信时
+    失败，而用户侧看不到任何提示。这里必须与它使用同一组认证字段。
+    """
     settings = get_settings()
     return bool(
         settings.email_reminder_enabled
         and settings.smtp_host
         and settings.smtp_user
+        and settings.smtp_password
     )
 
 
