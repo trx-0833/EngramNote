@@ -336,6 +336,44 @@ class TestSkipAndLimits:
         assert resp.status_code == 400, "回收站里的笔记被导出了"
 
 
+class TestDownloadFilename:
+    """★ 下载名必须是 `.zip` —— 浏览器只按 `Content-Disposition` 命名
+
+    实测：端点的 `media_type` 是 `application/zip`，而头里写的是
+    `engramnote-export.md`。两者打架时**浏览器听头的** —— 用户拿到一个
+    "后缀 md、内容 ZIP"的文件，双击打不开、解压软件才认。这条不报错，
+    所以只能靠断言守。
+    """
+
+    def test_content_disposition_names_a_zip_file(self, test_db, stub_content):
+        asyncio.run(_seed_notes(test_db, [
+            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+        ]))
+
+        resp = _client().get("/api/notes/export", headers=_auth("u1"))
+        cd = resp.headers["content-disposition"]
+
+        assert 'filename="engramnote-export.zip"' in cd, cd
+        # RFC 5987 那份也要是 .zip：现代浏览器优先用它
+        assert cd.endswith("engramnote-export.zip"), cd
+        # 正文真的是 ZIP（两端对得上才算修好，只改一端等于把错配藏起来）
+        assert resp.content[:2] == b"PK"
+
+    def test_single_note_export_keeps_md_extension(self, test_db, stub_content):
+        """反向判据：单篇导出仍是 `.md`（不能为了修 ZIP 把这条改坏）"""
+        asyncio.run(_seed_notes(test_db, [
+            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+        ]))
+
+        resp = _client().get("/api/notes/n-a/export", headers=_auth("u1"))
+
+        cd = resp.headers["content-disposition"]
+        # 两份 `filename` 都在头尾：ASCII 回退在前、RFC 5987 那份在最后，
+        # 两份都必须以 `.md` 结尾（回退里的中文变成 `_`，但后缀是字面量）
+        assert cd.endswith(".md"), cd
+        assert 'filename="A __.md"' in cd, cd
+
+
 class TestZipHelpers:
     """纯函数层（`build_zip_index` / `unique_zip_filename`）"""
 

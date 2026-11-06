@@ -345,7 +345,11 @@ async def export_notes_batch(
         _chunks(),
         media_type="application/zip",
         headers={
-            "Content-Disposition": build_content_disposition("engramnote-export"),
+            # 扩展名必须是 `.zip`：`Content-Disposition` 是浏览器给下载文件命名的
+            # **唯一**依据，它写了 `.md` 的话，用户拿到的是一个"后缀是 Markdown、
+            # 内容其实是 ZIP"的文件 —— 双击打不开，而且全程不报错。
+            # 同一函数服务单篇导出（`.md`），所以走参数而不是在这里拼字符串。
+            "Content-Disposition": build_content_disposition("engramnote-export", ".zip"),
             "Content-Length": str(size),
             # 跳过数放进响应头：用户从浏览器下载时看不到 index.md 里的那句话，
             # 但开发者工具/脚本能读到它。不加这个头，"有 3 篇被跳过"就只能
