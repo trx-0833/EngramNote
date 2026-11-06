@@ -1631,6 +1631,7 @@ const zhCN = {
       maxInterval: '最长间隔',
       maxIntervalHint: '两次复习之间最多隔多久。',
       years: '{years} 年',
+      deploymentValue: '部署默认（{value}）',
     },
     reminders: {
       title: '提醒',

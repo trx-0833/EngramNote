@@ -274,6 +274,28 @@ describe('Settings 页', () => {
     );
   });
 
+  it('部署默认值不在预设档位时，下拉框仍有可见选中项', async () => {
+    mockedGet.mockResolvedValueOnce({
+      ...BASE,
+      study: { ...BASE.study, desired_retention: 0.87, max_interval_days: 1000 },
+    } as never);
+    renderSettings();
+
+    const retention = (await screen.findByLabelText('目标留存率')) as HTMLSelectElement;
+    expect(retention.value).toBe('0.87');
+    expect(
+      (within(retention).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement)
+        .selected,
+    ).toBe(true);
+
+    const maxInterval = (await screen.findByLabelText('最长间隔')) as HTMLSelectElement;
+    expect(maxInterval.value).toBe('1000');
+    expect(
+      (within(maxInterval).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement)
+        .selected,
+    ).toBe(true);
+  });
+
   it('内容与生成：语言、卡片上限、清洗开关都走 content 段', async () => {
     const user = userEvent.setup();
     renderSettings();

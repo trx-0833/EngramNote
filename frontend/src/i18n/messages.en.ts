@@ -1364,6 +1364,7 @@ const en = {
       maxInterval: 'Maximum interval',
       maxIntervalHint: 'Longest gap between two reviews.',
       years: '{years} yr',
+      deploymentValue: 'Deployment default ({value})',
     },
     reminders: {
       title: 'Reminders',
