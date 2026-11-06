@@ -449,18 +449,22 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.study.usageHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <span className={styles.readonly}>
-                    {statsQuery.data
-                      ? t('settings.study.usageValue', {
-                          done: statsQuery.data.today_done,
-                          limit: statsQuery.data.daily_limit,
-                          remaining: Math.max(
-                            0,
-                            statsQuery.data.daily_limit - statsQuery.data.today_done,
-                          ),
-                        })
-                      : t('settings.data.loading')}
-                  </span>
+                  {statsQuery.isError ? (
+                    <ReadFailed onRetry={() => statsQuery.refetch()} />
+                  ) : (
+                    <span className={styles.readonly}>
+                      {statsQuery.data
+                        ? t('settings.study.usageValue', {
+                            done: statsQuery.data.today_done,
+                            limit: statsQuery.data.daily_limit,
+                            remaining: Math.max(
+                              0,
+                              statsQuery.data.daily_limit - statsQuery.data.today_done,
+                            ),
+                          })
+                        : t('settings.data.loading')}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -977,11 +981,15 @@ export default function Settings() {
                       <span style={{ width: `${usagePercent}%` }} />
                     </div>
                     <span className={styles.progressText}>
-                      {storage
-                        ? `${formatBytes(storage.used_bytes)} / ${
-                            storage.quota_bytes > 0 ? formatBytes(storage.quota_bytes) : '∞'
-                          }`
-                        : t('settings.data.loading')}
+                      {usageQuery.isError ? (
+                        <ReadFailed onRetry={() => usageQuery.refetch()} />
+                      ) : storage ? (
+                        `${formatBytes(storage.used_bytes)} / ${
+                          storage.quota_bytes > 0 ? formatBytes(storage.quota_bytes) : '∞'
+                        }`
+                      ) : (
+                        t('settings.data.loading')
+                      )}
                     </span>
                   </div>
                 </div>
@@ -993,23 +1001,29 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.data.llmHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <span className={styles.readonly}>
-                    {llmUsageQuery.data
-                      ? t('settings.data.llmValue', {
-                          tokens: llmUsageQuery.data.totals.total_tokens.toLocaleString(locale),
-                          calls: llmUsageQuery.data.totals.calls,
-                        })
-                      : t('settings.data.loading')}
-                  </span>
-                  <span className={styles.progressText}>
-                    {llmUsageQuery.data
-                      ? llmUsageQuery.data.price_configured
-                        ? `${llmUsageQuery.data.totals.cost.toFixed(2)} ${
-                            llmUsageQuery.data.currency ?? ''
-                          }`
-                        : t('settings.data.priceUnavailable')
-                      : ''}
-                  </span>
+                  {llmUsageQuery.isError ? (
+                    <ReadFailed onRetry={() => llmUsageQuery.refetch()} />
+                  ) : (
+                    <>
+                      <span className={styles.readonly}>
+                        {llmUsageQuery.data
+                          ? t('settings.data.llmValue', {
+                              tokens: llmUsageQuery.data.totals.total_tokens.toLocaleString(locale),
+                              calls: llmUsageQuery.data.totals.calls,
+                            })
+                          : t('settings.data.loading')}
+                      </span>
+                      <span className={styles.progressText}>
+                        {llmUsageQuery.data
+                          ? llmUsageQuery.data.price_configured
+                            ? `${llmUsageQuery.data.totals.cost.toFixed(2)} ${
+                                llmUsageQuery.data.currency ?? ''
+                              }`
+                            : t('settings.data.priceUnavailable')
+                          : ''}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1041,6 +1055,18 @@ export default function Settings() {
         <span>{t('settings.version', { version: data.about.app_version })}</span>
       </footer>
     </div>
+  );
+}
+
+function ReadFailed({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <span className={styles.readFailed} role="alert">
+      {t('settings.readFailed')}
+      <button className="btn btn-secondary" type="button" onClick={onRetry}>
+        {t('settings.retry')}
+      </button>
+    </span>
   );
 }
 

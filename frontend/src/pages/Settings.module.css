@@ -449,6 +449,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.readFailed {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--color-danger);
+  font-size: 0.78rem;
+}
+
 .footer {
   display: flex;
   justify-content: space-between;

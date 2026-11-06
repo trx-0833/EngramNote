@@ -1332,6 +1332,7 @@ const en = {
     navLabel: 'Sections',
     loading: 'Loading settings…',
     loadFailed: 'Could not load settings.',
+    readFailed: 'Could not load. Retry.',
     retry: 'Retry',
     saveFailed: 'Could not save; the previous value was restored',
     saved: 'Saved',

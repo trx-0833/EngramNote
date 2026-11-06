@@ -1600,6 +1600,7 @@ const zhCN = {
     navLabel: '设置分组',
     loading: '正在加载设置…',
     loadFailed: '设置加载失败。',
+    readFailed: '读取失败，请重试。',
     retry: '重试',
     saveFailed: '保存失败，已恢复原值',
     saved: '已保存',

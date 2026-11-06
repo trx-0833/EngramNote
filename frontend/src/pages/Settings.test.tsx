@@ -338,4 +338,19 @@ describe('Settings 页', () => {
 
     await waitFor(() => expect(input.value).toBe('10'));
   });
+
+  it('三处只读数据失败时显示错误与重试，而不是永久加载中', async () => {
+    mockedStats.mockRejectedValueOnce(new Error('stats down'));
+    mockedUsage.mockRejectedValueOnce(new Error('usage down'));
+    mockedLlm.mockRejectedValueOnce(new Error('llm down'));
+    renderSettings();
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts).toHaveLength(3);
+    for (const alert of alerts) {
+      expect(alert).toHaveTextContent('读取失败，请重试。');
+    }
+    expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(3);
+    expect(screen.queryByText('读取中…')).not.toBeInTheDocument();
+  });
 });
