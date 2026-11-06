@@ -183,3 +183,38 @@ def test_settings_and_email_toggle_commit_once(test_db, monkeypatch):
     assert after.json()["reminders"]["email_enabled"] is False
 
 
+def test_env_defaults_are_clamped_to_api_ranges(test_db, monkeypatch):
+    """部署环境写成越界值时，GET 不能被响应模型打成 500"""
+    from app.services import user_settings_service
+
+    client = _client()
+    headers = _register(client)
+    fake = SimpleNamespace(
+        daily_review_limit=4,
+        email_reminder_hour=24,
+        fsrs_request_retention=0.5,
+        fsrs_max_interval_days=90,
+        card_max_new_per_run=20,
+        clean_simplify_formula=False,
+        clean_normalize_spacing=True,
+        clean_normalize_heading_levels=True,
+        email_reminder_enabled=False,
+        smtp_host="",
+        smtp_user="",
+        smtp_password="",
+        app_env="dev",
+    )
+    monkeypatch.setattr(settings_api, "get_settings", lambda: fake)
+    monkeypatch.setattr(user_settings_service, "get_settings", lambda: fake)
+
+    response = client.get("/api/settings", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["study"]["daily_review_limit"] == 5
+    assert body["study"]["desired_retention"] == 0.70
+    assert body["study"]["max_interval_days"] == 365
+    assert body["reminders"]["email_hour"] == 23
+    assert body["content"]["card_max_new_per_run"] == 50
+
+
+

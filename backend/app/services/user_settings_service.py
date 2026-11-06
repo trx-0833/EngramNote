@@ -15,6 +15,9 @@
 模型下与真正的工作负载争锁。只有在 `update_settings()` 时才创建行。
 """
 
+from __future__ import annotations
+
+import logging
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select
@@ -24,17 +27,58 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..models.user_settings import UserSettings
 
+logger = logging.getLogger(__name__)
+
+
+def _clamp(value, low, high, name: str):
+    """把环境默认值夹到 API/DB 都接受的范围，并把越界写进日志。"""
+    clamped = min(high, max(low, value))
+    if clamped != value:
+        logger.warning(
+            "环境配置 %s=%r 超出设置页范围 [%r, %r]，运行时按 %r 处理",
+            name,
+            value,
+            low,
+            high,
+            clamped,
+        )
+    return clamped
+
 
 def deployment_defaults() -> Dict[str, Any]:
-    """环境配置里的默认值（设置页未覆盖时使用）"""
+    """环境配置里的默认值（设置页未覆盖时使用）
+
+    `config.py` 是部署面，可能被写成 4 道/天、0.5 留存率这类越界值；
+    响应模型有范围校验，直接透传会让 `GET /api/settings` 变成 500。
+    在唯一的出口处夹紧，用户行永远不会被写成非法值。
+    """
     settings = get_settings()
     return {
-        "daily_review_limit": int(settings.daily_review_limit),
-        "email_hour": int(settings.email_reminder_hour),
-        "desired_retention": float(settings.fsrs_request_retention),
-        "max_interval_days": int(settings.fsrs_max_interval_days),
+        "daily_review_limit": _clamp(
+            int(settings.daily_review_limit), 5, 100, "DAILY_REVIEW_LIMIT"
+        ),
+        "email_hour": _clamp(
+            int(settings.email_reminder_hour), 0, 23, "EMAIL_REMINDER_HOUR"
+        ),
+        "desired_retention": _clamp(
+            float(settings.fsrs_request_retention),
+            0.70,
+            0.98,
+            "FSRS_REQUEST_RETENTION",
+        ),
+        "max_interval_days": _clamp(
+            int(settings.fsrs_max_interval_days),
+            365,
+            3650,
+            "FSRS_MAX_INTERVAL_DAYS",
+        ),
         "output_locale": "follow",
-        "card_max_new_per_run": int(settings.card_max_new_per_run),
+        "card_max_new_per_run": _clamp(
+            int(settings.card_max_new_per_run),
+            50,
+            1000,
+            "CARD_MAX_NEW_PER_RUN",
+        ),
         "clean_simplify_formula": bool(settings.clean_simplify_formula),
         "clean_normalize_spacing": bool(settings.clean_normalize_spacing),
         "clean_normalize_heading_levels": bool(settings.clean_normalize_heading_levels),
