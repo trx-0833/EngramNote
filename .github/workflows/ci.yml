@@ -515,8 +515,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  docker-nginx-config:
-    name: Docker build context sanity
+  nginx-config-guard:
+    name: Nginx config guard
+    # 2026-11-07 治理调整：原 job 名 `docker-nginx-config`（显示名 "Docker build context
+    # sanity"）名不副实——它守的多数是 nginx 行为，与容器无关。
+    #
+    # 保留：第 1、2 步（client_max_body_size / proxy_buffering off）。
+    #   这两个问题只在反向代理之后暴露：本地 vite dev 走 proxy 配置，永远复现不了；
+    #   而 README 的部署路径里 nginx 是前端托管方案。删掉等于丢掉唯一的自动防线。
+    #
+    # 删除：第 3 步（.dockerignore 排除 node_modules）与第 4 步（Dockerfile 用 npm ci）。
+    #   容器化路线已在 AGENTS.md §2 列为否决方向；Dockerfile 保留仅作历史参考，
+    #   并已在文件头加废弃标注。继续守卫一个不打算使用的构建路径只增噪音。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -535,32 +545,5 @@ jobs:
         run: |
           if ! grep -q "proxy_buffering off" frontend/nginx.conf; then
             echo "::error::frontend/nginx.conf 缺少 proxy_buffering off（流式问答在生产会失效）"
-            exit 1
-          fi
-
-      - name: frontend .dockerignore must exclude node_modules
-        # 回归守卫：缺少它会让宿主 node_modules 覆盖镜像内依赖，Linux 构建失败。
-        run: |
-          if [ ! -f frontend/.dockerignore ] || ! grep -q "node_modules" frontend/.dockerignore; then
-            echo "::error::frontend/.dockerignore 缺失或未排除 node_modules"
-            exit 1
-          fi
-
-      - name: frontend Dockerfile must install from the lockfile
-        # 回归守卫（2026-09-14 补）：该文件此前是 `COPY package.json ./` +
-        # `RUN npm install`，**两处都不对**，而且它们是一对：
-        #   * `npm install` 会忽略锁文件去解析版本 → 镜像里的依赖树可能与
-        #     CI 与本机都不同（"构建出来的东西和被测过的东西不是同一份"）；
-        #   * 只把 `install` 改成 `ci`、却不补锁文件的 COPY，`npm ci` **直接失败**。
-        #     实测：只给 package.json 时 `npm ci` 报 EUSAGE 退出 1；
-        #     补上 package-lock.json 后同一条命令 "added 371 packages" 退出 0。
-        # 所以两条一起守，缺一条都回到"镜像构建与 CI 不是同一份依赖"。
-        run: |
-          if ! grep -q "COPY package.json package-lock.json" frontend/Dockerfile; then
-            echo "::error::frontend/Dockerfile 没有复制 package-lock.json（npm ci 需要它）"
-            exit 1
-          fi
-          if ! grep -q "RUN npm ci" frontend/Dockerfile; then
-            echo "::error::frontend/Dockerfile 不是用 npm ci 安装（锁文件必须被尊重）"
             exit 1
           fi
