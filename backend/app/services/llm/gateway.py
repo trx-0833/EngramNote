@@ -80,7 +80,14 @@ import httpx
 
 from ...config import get_settings
 from ..llm_accounting_service import current_context, record_call
-from .client import _response_snippet, _truncate_messages, build_llm_headers, get_llm_client
+from .client import (
+    LLMGatewayError,
+    _response_snippet,
+    _truncate_messages,
+    build_gateway_error,
+    build_llm_headers,
+    get_llm_client,
+)
 from .json_parse import strip_json_fences
 from .rate_limit import KeyedRateLimiter, RateLimiter
 
@@ -101,6 +108,7 @@ class _LoopResources:
     在前两层等待时**不占用**总闸门的令牌 —— 否则一个被个人限额拖住的用户
     会把全局令牌一起扣住，反而更容易饿死别人。
     """
+
     semaphore: asyncio.Semaphore
     global_limiter: RateLimiter
     user_limiters: KeyedRateLimiter
@@ -255,8 +263,11 @@ class LLMGateway:
     ) -> str:
         """返回助手文本（兼容旧调用方）；需要 finish_reason 时用 `chat_detailed`"""
         meta = await self.chat_detailed(
-            messages, temperature=temperature, max_tokens=max_tokens,
-            response_format=response_format, scene=scene,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            scene=scene,
         )
         return meta["content"]
 
@@ -304,8 +315,12 @@ class LLMGateway:
             from ..llm_cache_service import cache_key
 
             cache_key_value = cache_key(
-                provider=self._provider, base_url=self._base_url, model=self._model,
-                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                provider=self._provider,
+                base_url=self._base_url,
+                model=self._model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
                 response_format=response_format,
             )
             hit = await self._lookup_cache(cache_key_value)
@@ -333,11 +348,15 @@ class LLMGateway:
                     finish_reason = (choice.get("finish_reason") or "").strip() or "stop"
                     content_raw = (choice["message"].get("content")) or ""
                     # JSON 场景剥离代码围栏，避免 json.loads 直接失败，见 docs/decisions.md#F-33
-                    if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+                    if (
+                        response_format
+                        and isinstance(response_format, dict)
+                        and response_format.get("type") == "json_object"
+                    ):
                         content = strip_json_fences(content_raw)
                     else:
                         content = content_raw
-                    truncated = (finish_reason == "length")
+                    truncated = finish_reason == "length"
                     logger.info(
                         f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
                         f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
@@ -352,8 +371,11 @@ class LLMGateway:
                     # 阶段 4.2：记账。**成功也要记** —— 只记失败会得到
                     # "花了多少钱"这个最重要的数字为零。
                     await record_call(
-                        scene=scene, provider=self._provider, model=self._model,
-                        usage=usage, latency_ms=elapsed_ms,
+                        scene=scene,
+                        provider=self._provider,
+                        model=self._model,
+                        usage=usage,
+                        latency_ms=elapsed_ms,
                     )
                     result = {
                         "content": content,
@@ -380,7 +402,15 @@ class LLMGateway:
                             f"status={e.response.status_code} | error={e} | "
                             f"body={_response_snippet(e.response)}"
                         )
-                        raise
+                        # 同一个原因也要交给**调用方**：只写进日志的话，用户手上
+                        # 仍然是一句"Client error '400 Bad Request'"。
+                        # 换成带 body 的 `LLMGatewayError`（见 client.py 的说明），
+                        # 它对所有 `except Exception` 的调用方透明。
+                        raise build_gateway_error(
+                            status_code=e.response.status_code,
+                            model=self._model,
+                            response=e.response,
+                        ) from e
                     if attempt < self._max_retries - 1:
                         delay = min(30 * (attempt + 1), 120)
                         delay = delay * (0.5 + random.random() * 0.5)
@@ -393,7 +423,7 @@ class LLMGateway:
                 except Exception as e:
                     last_error = e
                     if attempt < self._max_retries - 1:
-                        delay = min(self._retry_delay * (2 ** attempt), 60)
+                        delay = min(self._retry_delay * (2**attempt), 60)
                         delay = delay * (0.5 + random.random() * 0.5)
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
@@ -414,7 +444,9 @@ class LLMGateway:
         # 而只记成功等于把最该被看见的那部分成本藏起来。
         # 这里记的是**整次调用**（含全部重试）的耗时与最终结果。
         await record_call(
-            scene=scene, provider=self._provider, model=self._model,
+            scene=scene,
+            provider=self._provider,
+            model=self._model,
             latency_ms=(time.monotonic() - start_time) * 1000,
             success=False,
             error=str(last_error) if last_error else "未知错误",
@@ -473,23 +505,35 @@ class LLMGateway:
             try:
                 # 复用模块级共享客户端，见 docs/decisions.md#F-05
                 client = get_llm_client()
-                async with client.stream(
-                    "POST", url, json=payload, headers=headers
-                ) as response:
+                async with client.stream("POST", url, json=payload, headers=headers) as response:
+                    # 与 `chat_detailed` 同一条判据：4xx（429 除外）不重试，
+                    # 且必须把**上游原因**交给调用方 —— 流式这边它会以
+                    # SSE `event: error` 的形式显示给用户（understanding.py:745）。
+                    # ⚠️ 正文必须在这里读：`async with` 退出时响应会被关闭，
+                    # 到外层 `except` 里再读只会得到 "ResponseNotRead"。
+                    if 400 <= response.status_code < 500 and response.status_code != 429:
+                        await response.aread()
+                        logger.warning(
+                            f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
+                            f"status={response.status_code} | "
+                            f"body={_response_snippet(response)}"
+                        )
+                        raise build_gateway_error(
+                            status_code=response.status_code,
+                            model=self._model,
+                            response=response,
+                        )
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line or not line.startswith("data:"):
                             continue
-                        data_str = line[len("data:"):].strip()
+                        data_str = line[len("data:") :].strip()
                         if data_str == "[DONE]":
                             break
                         try:
                             chunk = json.loads(data_str)
                         except json.JSONDecodeError:
-                            logger.warning(
-                                f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
-                                f"line={data_str[:200]}"
-                            )
+                            logger.warning(f"LLM 流式响应 JSON 解析失败 | scene={scene} | line={data_str[:200]}")
                             continue
                         # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
                         chunk_usage = chunk.get("usage")
@@ -505,8 +549,7 @@ class LLMGateway:
                             yield content
             except httpx.HTTPError as e:
                 logger.warning(
-                    f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
-                    f"model={self._model} | error={e}"
+                    f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | model={self._model} | error={e}"
                 )
                 raise
 
@@ -523,8 +566,11 @@ class LLMGateway:
         # 阶段 4.2：流式路径同样记账。usage 只在最后一个 chunk 里，
         # 所以必须在**流读完之后**记，不能在一开始记。
         await record_call(
-            scene=scene, provider=self._provider, model=self._model,
-            usage=usage, latency_ms=elapsed_ms,
+            scene=scene,
+            provider=self._provider,
+            model=self._model,
+            usage=usage,
+            latency_ms=elapsed_ms,
         )
 
     # ------------------------------------------------------------------
@@ -554,13 +600,20 @@ class LLMGateway:
 
         logger.info("LLM 缓存命中 | model=%s | saved_tokens=%d", self._model, hit.total_tokens)
         await record_call(
-            scene="cache_hit", provider=self._provider, model=self._model,
-            latency_ms=0, cached=True, saved_tokens=hit.total_tokens,
+            scene="cache_hit",
+            provider=self._provider,
+            model=self._model,
+            latency_ms=0,
+            cached=True,
+            saved_tokens=hit.total_tokens,
         )
         return hit.response
 
     async def _store_cache(
-        self, key: str, response: Dict[str, Any], usage: Optional[Dict[str, Any]],
+        self,
+        key: str,
+        response: Dict[str, Any],
+        usage: Optional[Dict[str, Any]],
     ) -> None:
         """把成功响应写入缓存（阶段 4.7）
 
@@ -579,8 +632,10 @@ class LLMGateway:
             await store(
                 None,  # 用独立会话（见 store 的 session_factory 说明）
                 key,
-                provider=self._provider, model=self._model,
-                response=response, usage=usage,
+                provider=self._provider,
+                model=self._model,
+                response=response,
+                usage=usage,
                 finish_reason=response.get("finish_reason"),
                 ttl_days=self._cache_ttl_days,
                 session_factory=factory,
@@ -622,4 +677,4 @@ class LLMGateway:
             raise LLMQuotaExceeded(status)
 
 
-__all__ = ["MAX_CONCURRENCY", "LLMGateway"]
+__all__ = ["MAX_CONCURRENCY", "LLMGateway", "LLMGatewayError"]

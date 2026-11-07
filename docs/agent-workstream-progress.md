@@ -44,6 +44,12 @@
 | 结论 | **网关接受这个名字，不需要改配置。** 全量重跑的前置条件已满足 |
 | 复现 | `& "$env:USERPROFILE\anaconda3\envs\mineru_env\python.exe" _agenttmp\quota\smoke_llm.py` |
 
+> **⚠️ 2026-11-07 更正：那个名字已经被上游下掉了。**
+> `https://opencode.ai/zen/go/v1/chat/completions` 对它回
+> 400 `{"error":{"type":"server_error","message":"Upstream request failed: Model is unavailable."}}`；
+> `GET /zen/go/v1/models` 目录里只剩 `deepseek-v4.1-flash` / `deepseek-v4-pro`。
+> 上表"不需要改配置"只在 2026-10-21 成立 —— 别名不是承诺，**用时先查 `/models`**。
+
 ---
 
 ## C3 走查缺陷收口 —— 🟡 4/6 优先项完成
@@ -795,3 +801,4 @@ d72af38 docs: 更正拍板 2 的模型名 —— DeepSeek V4 Flash（不是 V4.1
 | 2026-10-22 | **D1 完成**（238a570）：docs/data-inventory-2026-10-22.md 只读盘点 6.8 GB，三档清单（🟢 35 MB / 🟠 4.2 GB / 🔴 305 MB），**没删任何字节**。查出计划里「4.6 GB MinerU」已过时（实测 2.0 GB）、一个坏掉的清理脚本、一处文档路径错误。给报告加了 13 条结构守卫（含一次**假通过的反空转**）。整仓 1670 passed。 |
 | 2026-10-22 | **B4 导出完成**（3cc1955）：GET /api/notes/export 出 ZIP（index.md + 每篇一个 .md），文件名去重（真库 72 种重复标题、最多 9 次同名）、跳过可见、路由注册顺序有专门用例。19+4 条新用例，整仓 1657 passed，前端 build 通过。**B4 🟡 导出完成 / 导入未做**。 |
 | 2026-10-22 | **B5 编辑+删除完成**（`499ac2a`）：先实测确认"题目只有 GET、卡片有 PUT/DELETE"，再补 `PUT`（全量替换）+ `DELETE`（级联 `review_logs` / **`review_states`** / 自身）+ 前端行内编辑器。**外科式反空转**：只删 `review_states` 那一条级联 ⇒ 恰好一条红。18+16 条新用例，整仓 1638 passed，前端 `build` 通过。 |
+| 2026-11-07 | **模型 ID 失效导致「生成拓展知识点」全挂**（前端只显示 `Client error '400 Bad Request'`）：日志 body 是 `Upstream request failed: Model is unavailable.`，`GET /zen/go/v1/models` 显示目录里已无 `deepseek-v4-flash`（只剩 `deepseek-v4.1-flash` / `deepseek-v4-pro`）。修：`.env` / `Settings.deepseek_model` / `.env.example` → `deepseek-v4.1-flash`（实调 200 + 3 条结构化拓展）；并把 4xx 的错误消息改成**带响应体**（`services/llm/client.py` 新增 `LLMGatewayError` + `build_gateway_error`，`gateway.py` 4xx 分支改抛它）—— 原来原因只进日志，用户手上只有一句没有动作的 400。7 条新用例（含"4xx 不重试 / 429 仍重试"的反向判据）。 |
