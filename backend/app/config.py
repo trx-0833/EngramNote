@@ -56,15 +56,17 @@ JWT_SECRET_FILE = DATA_DIR / ".jwt-secret"
 # user_id 伪造有效令牌。这类值与"空值"同样不可接受，必须拦下。
 #
 # ⚠️ 新增条目时只放"曾经公开示范过/通用弱值"，不要放真实密钥。
-KNOWN_INSECURE_JWT_SECRETS = frozenset({
-    "engramnote-dev-secret-change-in-production",
-    "your-random-secret-key",
-    "changeme",
-    "change-me",
-    "secret",
-    "test",
-    "dev",
-})
+KNOWN_INSECURE_JWT_SECRETS = frozenset(
+    {
+        "engramnote-dev-secret-change-in-production",
+        "your-random-secret-key",
+        "changeme",
+        "change-me",
+        "secret",
+        "test",
+        "dev",
+    }
+)
 
 #: JWT 允许的签名算法白名单（2026-09-23）
 #
@@ -158,7 +160,13 @@ class Settings(BaseSettings):
     # DeepSeek API 密钥，用于文本润色和标题生成
     deepseek_api_key: str = ""
     # DeepSeek 模型名称
-    deepseek_model: str = "deepseek-v4-flash"
+    #
+    # ⚠️ 这个名字是**上游目录的一部分**，不是本仓库的常量：OpenCode 网关
+    # （`https://opencode.ai/zen/go/v1`）在 2026-11-07 已经下掉旧的
+    # `deepseek-v4-flash`（当时返回 400 `Model is unavailable.`），
+    # 目录里剩 `deepseek-v4.1-flash` / `deepseek-v4-pro`。
+    # 换模型时以 `GET {base_url}/models` 的 `data[].id` 为准，不要沿用旧文档。
+    deepseek_model: str = "deepseek-v4.1-flash"
     # DeepSeek API 基础 URL
     deepseek_base_url: str = "https://api.deepseek.com"
 
@@ -660,9 +668,7 @@ class Settings(BaseSettings):
         if self.app_env not in ("dev", "prod"):
             raise ValueError(f"APP_ENV 只能是 dev 或 prod，收到 {self.app_env!r}")
         if self.llm_provider not in ("auto", "deepseek", "glm"):
-            raise ValueError(
-                f"LLM_PROVIDER 只能是 auto / deepseek / glm，收到 {self.llm_provider!r}"
-            )
+            raise ValueError(f"LLM_PROVIDER 只能是 auto / deepseek / glm，收到 {self.llm_provider!r}")
         if self.debug and self.app_env == "prod":
             self.app_env = "dev"
         return self
@@ -694,9 +700,7 @@ class Settings(BaseSettings):
 
         if not self.is_dev and (not secret or is_known_placeholder):
             reason = (
-                "配置的是**已公开的占位值**（历史文档里的示范密钥，任何人都知道）"
-                if is_known_placeholder
-                else "未配置"
+                "配置的是**已公开的占位值**（历史文档里的示范密钥，任何人都知道）" if is_known_placeholder else "未配置"
             )
             raise ValueError(
                 f"生产环境必须配置 JWT_SECRET_KEY，当前{reason}。"
@@ -704,9 +708,7 @@ class Settings(BaseSettings):
             )
 
         if is_known_placeholder:
-            logger.warning(
-                "JWT_SECRET_KEY 是历史文档里的公开占位值，开发模式下将改用随机密钥"
-            )
+            logger.warning("JWT_SECRET_KEY 是历史文档里的公开占位值，开发模式下将改用随机密钥")
             self.jwt_secret_key = ""
 
         if self.is_dev and not self.jwt_secret_key:
@@ -940,5 +942,5 @@ def get_settings() -> Settings:
     return Settings()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     get_settings()

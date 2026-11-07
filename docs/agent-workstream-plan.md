@@ -498,6 +498,21 @@
 (a) 网关接受这个名字、(b) 返回 200、(c) `llm_calls` 里落下一行成功记录。
 **这一步失败就先查网关与额度，不要开始全量重跑** —— 否则整批跑在错名字上，白等 35 分钟。
 
+> ## ⚠️ 2026-11-07 事后更正：`deepseek-v4-flash` 已被上游下掉
+>
+> 上面那段"不需要改配置"**只在那天成立**。实测（2026-11-07）：同一个端点对这个名字
+> 回 400 `{"error":{"type":"server_error","message":"Upstream request failed: Model is unavailable."}}`，
+> 而 `GET https://opencode.ai/zen/go/v1/models` 的目录里已经只剩
+> **`deepseek-v4.1-flash`** 与 **`deepseek-v4-pro`**。
+>
+> 于是：`.env` / `Settings.deepseek_model` / `.env.example` 都改成
+> `deepseek-v4.1-flash`；同一份「拓展知识点」请求实调 **200 + 3 条结构化结果**。
+> **教训**：模型 ID 是**上游目录**的一部分（不是本仓库的常量），写错/过期时
+> 表现是 400 `Model is unavailable.` —— 换模型前先查 `/models`，不要沿用旧文档。
+> 另外，这个原因原先**只进日志**、用户只看到 `Client error '400 Bad Request'`；
+> 同一轮把 4xx 的错误消息改成带响应体（`services/llm/client.py` 的
+> `LLMGatewayError`），下次会直接告诉用户"哪个模型不可用、上游说了什么"。
+
 ### 5.3 批量模式授权
 
 按 `AGENTS.md` §4，你说一句「批量执行 / 一次做完 / 不要中途问我」即视为
