@@ -165,9 +165,33 @@ jobs:
       - name: Pytest (offline; real network is blocked by tests/conftest.py)
         # 环境变量显式声明"禁止联网测试"，让守卫的意图在 CI 里可见。
         # integration 用例会被自动跳过（它们需要真实 LLM / MinerU API key）。
+        #
+        # 2026-11-07 加覆盖率门禁（决策 D-06）：
+        #   全局门槛 59% = 当前实测值（59.27%），**只防退化，不逼补存量**。
+        #   mineru / asr / embedding_service 已在 pyproject.toml 里 omit——
+        #   它们依赖 GB 级模型权重与外部 API，CI 里无法真实执行，
+        #   计入分母只会把均值稀释掉 11.9pp，让门槛失去意义（剔除后实测 67.27%）。
+        #   门槛每季度 +1~2pp 棘轮上调；见 _governance/05-执行日志.md。
+        #
+        # 注意：这个 job 全量跑约 32 分钟（1760 用例），加 coverage 后略长。
+        # 覆盖率只在 CI 算——本地 `verify.sh fast` 刻意不含它。
         env:
           ENGRAMNOTE_ALLOW_NETWORK_TESTS: "0"
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=59
+
+      - name: Upload coverage report
+        # 失败也上传：覆盖率跌破门槛时，报告正是排查依据。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 14
 
       # 检索质量评测（阶段 2.9）的**绝对指标**刻意不放在 CI 里：
       #   - 绝对指标取决于真实资料内容，写成阈值门禁会在资料更新时误报，

@@ -135,3 +135,6 @@ packages = [
     "app.tasks",
     "app.test_support",
 ]
+
+# 覆盖率配置见 backend/.coveragerc（pytest 在 backend/ 下跑，根目录的
+# [tool.coverage.run] 实测不会被读取，故不在此重复）。
