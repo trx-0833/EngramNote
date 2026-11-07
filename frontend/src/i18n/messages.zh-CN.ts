@@ -665,7 +665,7 @@ const zhCN = {
     errorCount: '错{count}次 | {accuracy}%',
     weeklyTrend: '本周复习趋势',
     accuracyAbove: '正确率 ≥ 60%',
-    accuracyBelow: '正确率 &lt; 60%',
+    accuracyBelow: '正确率 < 60%',
     // ---- 最近笔记 ----
     recentNotes: '最近笔记',
     viewAll: '查看全部',
@@ -1031,7 +1031,7 @@ const zhCN = {
   /** 智能问答页（`QA`，i18n 阶段 3） */
   qa: {
     title: '智能问答',
-    inputPlaceholder: '输入你的问题，AI 将基于你的笔记内容回答...',
+    inputPlaceholder: '输入你的问题…',
     stop: '停止生成',
     ask: '提问',
     empty: '输入问题开始问答',

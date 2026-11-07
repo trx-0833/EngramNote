@@ -508,7 +508,7 @@ const en = {
     errorCount: '{count} wrong | {accuracy}%',
     weeklyTrend: 'This week’s review trend',
     accuracyAbove: 'Accuracy ≥ 60%',
-    accuracyBelow: 'Accuracy &lt; 60%',
+    accuracyBelow: 'Accuracy < 60%',
     recentNotes: 'Recent notes',
     viewAll: 'View all',
     noNotes: 'No notes yet',
@@ -839,7 +839,7 @@ const en = {
 
   qa: {
     title: 'Ask AI',
-    inputPlaceholder: 'Type your question — AI will answer from your notes…',
+    inputPlaceholder: 'Ask a question…',
     stop: 'Stop generating',
     ask: 'Ask',
     empty: 'Type a question to start',

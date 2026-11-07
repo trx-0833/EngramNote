@@ -43,7 +43,11 @@
   align-items: start;
 }
 
-.rail {
+/* 分组导航。类名**不叫 `.rail`**：`notedetail/NotePropertyRail.module.css:58`
+   也有一个 `.rail`，而 `scripts/verify-built-css.mjs` 的跨 chunk 覆盖检查把
+   哈希类名归一后分不出两者（实测会报一条假的「覆盖战：gap」）。改名是让
+   工具和人都能分清，不是纯审美。 */
+.sectionRail {
   position: sticky;
   top: var(--space-xl);
   display: flex;
@@ -473,4 +477,64 @@
   padding: 40px 0;
   color: var(--color-text-secondary);
   font-size: 0.85rem;
+}
+
+/* ── 窄屏（2026-11-07 补齐：本文件此前**一条媒体查询都没有**）──
+ *
+ * 实测（390×844，`e2e/audit-mobile-tmp.spec.ts` 的溢出扫描）：`.layout` 的
+ * `208px + 36px gap` 两栏在 390 宽下只剩 ~114px 给面板，而每行的
+ * `.control` 是 `auto`（数字框 64px + 单位）——于是 `.row` 的左列被压到 **8px**，
+ * "每日复习上限""已结算 7 / 50 道 · 还剩 43 道""e2e@example.com" 全部逐字换行/被裁，
+ * 整页被拉到 **13,899px 高**。
+ *
+ * 断点沿用全站的 768px（`css-convention.md` §3 雷区 2：不新增断点）。 */
+@media (max-width: 768px) {
+  /* 两栏 → 一栏：分组导航落到顶部，改成可换行的横向胶囊条 */
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-lg);
+  }
+
+  .sectionRail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* 竖排导轨上的分组标题（"设置分组"）在横排里没有意义，且会独占一行 */
+  .railLabel {
+    display: none;
+  }
+
+  .railItem {
+    width: auto;
+    padding: 6px 10px;
+  }
+
+  /* 每行：标签在上、控件在下（同一行放不下 —— 控件最小 ~120px，
+     390 宽下留给标签的只剩几像素，那正是"一字一行"的成因） */
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-xs);
+    align-items: start;
+  }
+
+  .control {
+    justify-content: flex-start;
+  }
+
+  /* 卡片内边距收窄，把宽度还给内容 */
+  .card {
+    padding: 18px 16px;
+  }
+
+  .pageHead {
+    flex-wrap: wrap;
+  }
+
+  .footer {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }
