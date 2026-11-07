@@ -28,6 +28,7 @@
 [CmdletBinding()]
 param(
     [string]$Root,
+    [string]$DestRoot,   # 可指定，便于测试；缺省为 <root>/_backup/scheduled
     [int]$KeepDaily = 7,
     [int]$KeepWeekly = 4,
     [int]$KeepMonthly = 3,
@@ -41,7 +42,8 @@ if (-not $Root) {
 }
 
 $dbPath   = Join-Path $Root 'backend\data\db\engramnote.db'
-$destRoot = Join-Path $Root '_backup\scheduled'
+if (-not $DestRoot) { $DestRoot = Join-Path $Root '_backup\scheduled' }
+$destRoot = $DestRoot
 $stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
 $dest     = Join-Path $destRoot $stamp
 
@@ -100,6 +102,20 @@ Write-Host "[backup] 完整性校验通过"
 
 # ---- 3. 三档保留策略（2026-11-07 决策：7 日 + 4 周 + 3 月）------------------
 # 实现说明：不用嵌套管道，逐条 foreach，避免解析器在长管道上给出漂移的错误行号。
+#
+# ⚠ 2026-11-07 修复：下面三行变量定义曾因"按行拼接重写脚本"被整段漏掉，
+#   $dirs 为 $null → foreach 一次都不进 → 保留策略完全不执行，
+#   而脚本仍然 exit 0、不报错（静默失败：_backup/scheduled 只增不减）。
+#   判据：修好后干跑必须打印 "保留：daily=N weekly=M monthly=K"；修复前该行为空。
+$dirs = @(Get-ChildItem -Path $destRoot -Directory -ErrorAction SilentlyContinue |
+          Sort-Object Name -Descending)
+if ($dirs.Count -eq 0) {
+    Write-Host "[prune] 无可清理快照"
+    Write-Host "[backup] 完成"
+    return
+}
+$now = Get-Date
+$keep = @{}
 $entries = @()
 foreach ($d in $dirs) {
     $entries += [pscustomobject]@{
@@ -115,11 +131,20 @@ foreach ($e in $entries) {
     }
 }
 
-# 3.2 周备：7 天窗口，每窗留最新一份
+# 3.2 周备：只在 [KeepDaily, KeepDaily+KeepWeekly*7] 区间内按 7 天窗口留最新一份
+#
+# ⚠ 2026-11-07 修复第二个缺陷：原实现只判断 `age > KeepDaily`，**没有上界**，
+#   于是"40 天前"的快照也算 weekly 候选（(40-7)/7 = 4，一个很靠后的窗口），
+#   被 weekly 抢先占用额度，monthly 拿到的是错误集合。
+#   实测现象：造 8 个快照（1/3/10/12/15/40/50/70 天）应删 2 个，实际只删 1 个，
+#   且 40 天被标成 weekly、50 天被标成 monthly——档位与设计不符。
+#   判据：区间互斥后，weekly 只应吃到 10、15 天；40、50、70 全归 monthly。
+$weeklyEnd = $KeepDaily + ($KeepWeekly * 7)
 $weeklyCount = 0
 $weeklySeen = @{}
 foreach ($e in $entries) {
     if ($e.AgeDays -le $KeepDaily) { continue }
+    if ($e.AgeDays -gt $weeklyEnd) { continue }
     if ($weeklyCount -ge $KeepWeekly) { continue }
     $w = [math]::Floor(($e.AgeDays - $KeepDaily) / 7)
     if ($weeklySeen.ContainsKey($w)) { continue }

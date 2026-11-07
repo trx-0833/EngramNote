@@ -58,7 +58,10 @@ request_id / user_id / task_id / task_name / biz_id
 grep "<request_id>" backend/data/logs/engramnote.log
 
 # 结构化日志（更好：能精确取字段）
-grep "<request_id>" backend/data/logs/engramnote.json.log | jq -c '{ts:.asctime, lvl:.levelname, msg:.message}'
+# 字段名以 JsonLinesFormatter 为准 —— ts/level/logger/message/ctx/exc
+# （见 backend/app/core/logging_config.py:70-93；不是 .asctime/.levelname，照抄会得到 null）
+grep "<request_id>" backend/data/logs/engramnote.json.log \
+  | jq -c '{ts, level, logger, msg: .message, rid: .ctx.request_id}'
 ```
 
 **排查顺序**：
@@ -144,3 +147,55 @@ python -c "import sqlite3;print(sqlite3.connect(r'.tmp\restore-test.db').execute
 | 备份触发器在应用内 | 不用 `start.sh` 起服务就不备份 | 已备 `scripts/backup.ps1`，待注册计划任务 |
 | 无生产启动脚本 | 当前 `start.sh` 是开发模式（`--reload`） | 治理计划 T4.1 |
 | 覆盖率与变异测试未接入 | 测试有效性无数据 | 变异测试基线进行中 |
+
+---
+
+## 9. 快速排障 FAQ
+
+> 三条最常被误判成"系统坏了"的现象。按"现象 → 判据 → 依据"排，先排除这三条，再进第 5 节。
+
+### Q1. `/health` 返回 200，页面接口却大面积 500 —— 该拿哪个端点当判据？
+
+`/health` 只回答"进程还活着"：它刻意不碰数据库、broker 与外部服务（`backend/app/main.py:284-291`、`main.py:833-835`），事件循环能回 JSON 就是 200，所以接口全挂时它照样绿。**能否服务请求看 `/ready`**：它用一次真实业务查询（`task_runs` 分组统计）验证"连得上**且**表齐"，失败回 503、成功回 200，两种响应的字段结构相同（`main.py:407-448`、`main.py:890-917`）。
+
+| 端点 | 回答的问题 | 探针用途 | 失败时 |
+|---|---|---|---|
+| `/health` | 进程还活着吗 | 存活（liveness），决定"重启与否" | 恒 200，依赖抖动不反映 |
+| `/ready` | 现在能不能服务 | 就绪（readiness），决定"摘不摘流量" | 503 + `database.reason`（如 `database_unavailable`） |
+
+`queue.depth` 与 `index.pending_embeddings` 是**报告项**，不参与状态码（`main.py:296-303`、`main.py:862-863`）：积压说明慢，不说明坏。500 的堆栈在 `errors.log`，它只收 ERROR 及以上（`backend/app/core/logging_config.py:141`），用响应体里的 `request_id` 检索。
+
+### Q2. 响应体里的 `request_id` 是 `null`（429 最常见）—— 日志系统坏了吗？
+
+不是日志的问题，是中间件次序：`RateLimitMiddleware` 注册得最晚 ⇒ 实际在**最外层**，跑在 `RequestContextMiddleware` 注入上下文之前，它短路返回的 429 里 `context.get_request_id()` 取到空串，于是 `request_id` 落成 `null`、响应头也没有 `X-Request-ID`（`backend/app/middleware/rate_limit.py:235-242`；次序见 `main.py:804-816` 与 `main.py:795-800` 的已知不一致说明）。
+
+正常路径：`RequestContextMiddleware` 优先透传请求头 `X-Request-ID`（≤64 字符、仅字母数字与连字符），否则生成 uuid4 hex，并对每个响应写 `X-Request-ID`（`backend/app/middleware/request_context.py:94-99`、`request_context.py:138`）；错误响应体的 `request_id` 取自同一份 context（`backend/app/middleware/error_handler.py:113-117`）。
+
+定位这类 429 改用 `限流触发` 日志行，`key=ip:<ip>:<rule>` 即计数键，窗口 60 秒（`rate_limit.py:231-234`、`rate_limit.py:43`）。
+
+### Q3. `verify.sh fast` 全绿，推到 CI 却红 —— 为什么本地测不出来？
+
+因为 `fast` 档**完全不跑后端测试**。它只做三件事：`ruff check`、`eslint`、`vitest`（见 `scripts/verify.sh` 的 `MODE=fast` 分支），pytest 被有意排除在外。
+
+后端只要改了逻辑，就必须单独跑：
+
+```bash
+cd backend && python -m pytest -q        # 1760 用例 / 约 32 分钟
+```
+
+CI 比你多三道关卡：
+
+| 关卡 | 本地 `fast` | CI |
+|---|---|---|
+| ruff / eslint / vitest | ✅ | ✅ |
+| pytest 全量（1760 用例） | ❌ | ✅ |
+| 覆盖率门槛 59% | ❌ | ✅ `--cov-fail-under=59` |
+| 契约漂移检查 | ❌ | ✅ |
+
+**判据**：改过 `backend/app/**` 而没跑 pytest，就不能用 `fast` 的绿灯下结论。跑不动全量时，至少跑相关文件：
+
+```bash
+cd backend && python -m pytest tests/test_<相关模块>.py -q
+```
+
+顺带一个反例：`scripts/backup.ps1` 的保留策略曾在 2026-11-07 出现过「变量未赋值 → 循环一次不进 → 脚本 exit 0 但旧备份永不删除」的静默失败。**"脚本不报错"从来不等于"逻辑执行了"**，判据要落在行为上（那次是靠造 8 个不同年龄的快照、逐条核对是否保留下来的）。
