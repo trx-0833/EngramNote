@@ -153,7 +153,7 @@
 
 **代码侧的工程质量远超它的"开源门面"。**
 后端 43,851 行 / 前端 39,236 行 / 测试 28,246 行，CI 有 4 个 job（backend / frontend /
-security-scan / docker-nginx-config，2026-09-24 用 YAML 解析复核）、契约漂移检查、
+security-scan / docker-nginx-config，2026-09-24 用 YAML 解析复核）、契约漂移检查、（**历史快照**：该 job 于 2026-11-07 改名为 `nginx-config-guard`。本行保留当时核查结论，不再更新。）
 axe 可访问性、依赖扫描 —— 这些是很多千星级项目都没有的。
 但仓库对外的部分基本是**空白**：GitHub 社区健康度 **42%**，
 无 CONTRIBUTING / 模板 / CHANGELOG / release / topics，
