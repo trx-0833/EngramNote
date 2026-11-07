@@ -18,7 +18,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src/ e2e/ scripts/",
+    "lint": "eslint src/ e2e/ scripts/ --cache --cache-location node_modules/.cache/eslint/",
     "lint:fix": "eslint src/ e2e/ scripts/ --fix",
     "test": "vitest run",
     "test:watch": "vitest",
