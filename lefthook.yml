@@ -14,15 +14,24 @@
 pre-commit:
   parallel: true
   commands:
+    # 【解释器选择】ruff 必须用装了 ruff 的那个 python 跑。
+    # 2026-11-07 实测踩坑：默认 `python` 指向 D:\miniforge3\python.exe（base 环境），
+    # 没装 ruff → 钩子报 "No module named ruff"，看起来像代码有问题，其实是环境选错。
+    #
+    # 解决：用 ${PYTHON:-python}。启用前请把 PYTHON 设为项目环境，例如：
+    #   setx PYTHON "D:\conda\envs\aiforlearn\python.exe"
+    # 或每次会话：$env:PYTHON = "D:\conda\envs\aiforlearn\python.exe"
     ruff-check:
       glob: "*.py"
       root: "backend/"
-      run: python -m ruff check --fix {staged_files} && git add {staged_files}
+      stage_fixed: true
+      run: ${PYTHON:-python} -m ruff check --fix {staged_files}
 
     ruff-format:
       glob: "*.py"
       root: "backend/"
-      run: python -m ruff format {staged_files} && git add {staged_files}
+      stage_fixed: true
+      run: ${PYTHON:-python} -m ruff format {staged_files}
 
     eslint:
       glob: "*.{ts,tsx}"

@@ -45,6 +45,26 @@ git checkout -- frontend/package-lock.json              # npm 会剥掉 libc 元
 - `git stash push -- <paths>` → 验证 → `git stash pop`；或
 - 给 worktree **装一份独立的** `node_modules`（不复用链接）
 
+## 3.5 环境与命令（不要猜，照抄）
+
+- **Python**：`D:\conda\envs\aiforlearn\python.exe`（3.11.17，装了 pytest / ruff / pytest-cov）
+  - 钩子与脚本读 `PYTHON` 环境变量；**未设置时会回退到 `python`**，而 PATH 里的 `python`
+    可能是 `D:\miniforge3\python.exe`（base 环境，**没装 ruff**）→ 表现为
+    `No module named ruff`，看着像代码错，其实是解释器选错。
+  - 设置：`setx PYTHON "D:\conda\envs\aiforlearn\python.exe"`
+- **Node**：以 `frontend/package.json` 的 `engines` 为准
+- **后端测试**：`cd backend && python -m pytest -q`（全量 **1760 用例 / 约 32 分钟**）
+- **后端 lint**：`cd backend && python -m ruff check app tests scripts`
+- **前端 lint**：`cd frontend && npm run lint`（已带 `--cache`，热跑约 3s、冷跑约 27s）
+- **前端单测**：`cd frontend && npx vitest run`（约 35–45s / 731 用例）
+- **前端 e2e**：`cd frontend && npm run e2e`
+- **全量验证**：`bash scripts/verify.sh fast`（约 30–60s）；`full` 会加 pytest，很慢
+- **覆盖率**：`cd backend && python -m pytest --cov=app --cov-report=term-missing`
+  （配置在 `backend/.coveragerc`，全局门槛 59%，mineru/asr/embedding 已 omit）
+- **覆盖率/变异产物**：`coverage.xml` 与 `frontend/.stryker-tmp/` 已 gitignore
+
+> 新增环境或改命令时**同时改这里**，否则 agent 会用错环境跑出假绿灯。
+
 ## 4. 工作方式
 
 - **默认先方案后动手**：改哪些文件 / 风险 / 怎么验证，我确认后再改
