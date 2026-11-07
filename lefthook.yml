@@ -39,10 +39,13 @@ pre-commit:
       run: gitleaks protect --staged --redact
 
 pre-push:
-  # 只跑前端单测（39s）。后端 1760 个用例全量约 3–5min，放 CI；
-  # 后端 lint 已在 pre-commit 对 staged 文件查过，不重复。
-  # 逃生口：SKIP_VERIFY=1 git push
-  commands:
-    vitest:
-      root: "frontend/"
-      run: npx vitest run --reporter=dot
+  # 【当前未启用】2026-11-07 决策：只装 pre-commit。
+  # 理由：后端 1760 个用例全量约 32 分钟（实测），不可能进钩子；
+  # 前端 vitest 也要 34-39s，push 时会让人犹豫。这类检查交给 CI。
+  # 想开启时把下面的注释去掉，并在 AGENTS.md 写明 SKIP_VERIFY=1 逃生口。
+  #
+  # commands:
+  #   vitest:
+  #     root: "frontend/"
+  #     run: npx vitest run --reporter=dot
+  skip: true
