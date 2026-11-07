@@ -90,6 +90,30 @@ class TestGateway4xxSurface:
         assert "deepseek-v4-flash" in message, f"消息里没有模型名，用户不知道改哪个：{message}"
         assert "Model is unavailable." in message, f"消息里没有上游原因：{message}"
 
+    async def test_4xx_log_carries_structured_fields(self, monkeypatch, caplog):
+        """★★ 日志必须是**结构化**的，agent 才能直接筛，不用拿正则啃 message
+
+        现场（2026-11-07）：定位那次 400 只能 `Select-String 'LLM 客户端错误不重试'`
+        再手工数行号取下一行 body。结构化之后同样的定位是一条 jq：
+
+            jq -c 'select(.event == "llm.call" and .status >= 400)' engramnote.json.log
+        """
+        from app.services.llm import gateway as gateway_mod
+
+        calls = {"n": 0}
+        monkeypatch.setattr(gateway_mod, "get_llm_client", lambda: _fake_client(400, '{"error":{}}', calls))
+
+        with caplog.at_level("WARNING", logger="engramnote.llm"):
+            with pytest.raises(gateway_mod.LLMGatewayError):
+                await _make_gateway().chat_detailed([{"role": "user", "content": "hi"}], scene="generate_extension")
+
+        record = next(r for r in caplog.records if "客户端错误不重试" in r.getMessage())
+        assert record.event == "llm.call", "缺失 event 字段"
+        assert record.status == 400, f"status 不是 400：{getattr(record, 'status', None)!r}"
+        assert record.scene == "generate_extension"
+        assert record.provider == "deepseek"
+        assert record.model == "deepseek-v4-flash"
+
     async def test_4xx_is_not_retried(self, monkeypatch):
         """★ 4xx 不可重试：`max_retries=3` 也只应发**一次**请求
 

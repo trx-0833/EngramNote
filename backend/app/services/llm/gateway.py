@@ -100,6 +100,43 @@ MAX_CONCURRENCY = 3
 ANONYMOUS_BUCKET = "__anonymous__"
 
 
+def _llm_log_extra(
+    scene: str,
+    provider: str,
+    model: str,
+    *,
+    status: int | None = None,
+    duration_ms: float | None = None,
+) -> dict:
+    """
+    LLM 日志的结构化字段（`extra=` 传进 logging，JSON 日志会平铺到顶层）。
+
+    名字必须落在 `core/logging_config._EXTRA_PASSTHROUGH` 的白名单里，
+    否则只进文本日志、不进 JSON。
+
+    ## 为什么值得在 7 处日志上各加一个参数
+
+    LLM 失败是本系统最常查的一类事故，而此前它的全部信息都**糅在 message 字符串**
+    里（`scene=… | provider=… | status=…`）。要统计"哪个 scene 的失败最多""
+    某个模型最近 4xx 多少次"，只能拿正则去啃文本。有了结构化字段之后：
+
+        jq -c 'select(.event == "llm.call" and .status >= 400)' engramnote.json.log
+        jq -s 'map(select(.event == "llm.call" and .status == 400)) | group_by(.scene)
+               | map({scene: .[0].scene, n: length})'                engramnote.json.log
+    """
+    extra: dict = {
+        "event": "llm.call",
+        "scene": scene,
+        "provider": provider,
+        "model": model,
+    }
+    if status is not None:
+        extra["status"] = status
+    if duration_ms is not None:
+        extra["duration_ms"] = round(duration_ms, 1)
+    return extra
+
+
 @dataclass
 class _LoopResources:
     """一个事件循环内共享的调用资源（信号量 + 三层令牌桶）
@@ -361,12 +398,14 @@ class LLMGateway:
                         f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
                         f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
                         f"total_tokens={usage.get('total_tokens')} | finish_reason={finish_reason} | "
-                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms"
+                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms",
+                        extra=_llm_log_extra(scene, self._provider, self._model, duration_ms=elapsed_ms),
                     )
                     if truncated:
                         logger.warning(
                             f"LLM 输出被 max_tokens 截断 | scene={scene} | max_tokens={max_tokens} | "
-                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量"
+                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量",
+                            extra=_llm_log_extra(scene, self._provider, self._model, duration_ms=elapsed_ms),
                         )
                     # 阶段 4.2：记账。**成功也要记** —— 只记失败会得到
                     # "花了多少钱"这个最重要的数字为零。
@@ -400,7 +439,8 @@ class LLMGateway:
                         logger.warning(
                             f"LLM 客户端错误不重试 | scene={scene} | provider={self._provider} | "
                             f"status={e.response.status_code} | error={e} | "
-                            f"body={_response_snippet(e.response)}"
+                            f"body={_response_snippet(e.response)}",
+                            extra=_llm_log_extra(scene, self._provider, self._model, status=e.response.status_code),
                         )
                         # 同一个原因也要交给**调用方**：只写进日志的话，用户手上
                         # 仍然是一句"Client error '400 Bad Request'"。
@@ -417,7 +457,13 @@ class LLMGateway:
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
                             f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
+                            f"next_delay={delay:.1f}s",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
                         await asyncio.sleep(delay)
                 except Exception as e:
@@ -428,13 +474,25 @@ class LLMGateway:
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
                             f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
+                            f"next_delay={delay:.1f}s",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
                         await asyncio.sleep(delay)
                     else:
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
-                            f"provider={self._provider} | model={self._model} | error={e}"
+                            f"provider={self._provider} | model={self._model} | error={e}",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
 
         # 阶段 4.2：失败的调用也要记账。
@@ -516,7 +574,8 @@ class LLMGateway:
                         logger.warning(
                             f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
                             f"status={response.status_code} | "
-                            f"body={_response_snippet(response)}"
+                            f"body={_response_snippet(response)}",
+                            extra=_llm_log_extra(scene, self._provider, self._model, status=response.status_code),
                         )
                         raise build_gateway_error(
                             status_code=response.status_code,

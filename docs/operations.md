@@ -21,7 +21,7 @@
 
 ## 2. 日志：四路输出，各管一件事
 
-启动时 `app/core/logging_config.py` 会挂四个 handler（`logging_config.py:136-143`）：
+启动时 `app/core/logging_config.py` 会挂四个 handler（`logging_config.py:setup_logging`）：
 
 | 输出 | 文件 | 格式 | 用途 |
 |---|---|---|---|
@@ -34,12 +34,23 @@
 
 **每条日志自动携带上下文**（`core/context.py` 的 contextvars）：
 ```
-request_id / user_id / task_id / task_name / biz_id
+request_id / user_id / task_id / task_name / biz_id / locale
 ```
-格式串见 `logging_config.py:37`：
+格式串见 `logging_config.py:LOG_FORMAT`：
 ```
 %(asctime)s | %(levelname)-8s | %(name)s | %(ctx)s | %(message)s
 ```
+
+**两条可机读的硬约定**（2026-11-08 起，`backend/tests/test_logging_contract.py` 守着）：
+
+- **时间戳带毫秒**：`2026-11-07 20:43:00.227 | INFO | …`。以前只有秒，
+  同一秒内的多条只能靠文件行号排序。
+- **一条记录一行**：消息里的换行被转义成字面量 `\n`。以前上游 4xx 的响应体
+  会把一条日志拆成两条物理行（实测占 29.36%），`grep` 只拿到前半句。
+  异常堆栈仍占多行 —— 那是它本体；JSON 日志里统一收进单行的 `exc` 字段。
+
+**⚠️ 测试不会再写这两个目录**：`tests/conftest.py` 把 `LOG_DIR` 会话级重定向到
+临时目录（否则跑一次 `pytest` 会往真实日志里写几百行从未发生过的"请求"）。
 
 ---
 
@@ -54,15 +65,31 @@ request_id / user_id / task_id / task_name / biz_id
 
 **然后在日志里查**：
 ```bash
-# 文本日志
-grep "<request_id>" backend/data/logs/engramnote.log
+# 文本日志（"请求完成"这一行现在也带 rid/uid —— 2026-11-07 之前它一条都没有）
+grep "rid=<request_id>" backend/data/logs/engramnote.log
 
 # 结构化日志（更好：能精确取字段）
-# 字段名以 JsonLinesFormatter 为准 —— ts/level/logger/message/ctx/exc
-# （见 backend/app/core/logging_config.py:70-93；不是 .asctime/.levelname，照抄会得到 null）
+# 字段名以 JsonLinesFormatter 为准 —— ts/level/logger/message/ctx/exc，
+# 另有业务 extra 白名单：event/status/duration_ms/method/path/error_code/scene/provider/model
 grep "<request_id>" backend/data/logs/engramnote.json.log \
-  | jq -c '{ts, level, logger, msg: .message, rid: .ctx.request_id}'
+  | jq -c '{ts, level, logger, msg: .message, rid: .ctx.request_id, status, duration_ms}'
 ```
+
+**访问日志已结构化**，不要再拿正则啃 message：
+```bash
+# 最近的 4xx/5xx 请求（含耗时与路径）
+jq -c 'select(.event == "http.request" and .status >= 400)
+       | {ts, path, status, duration_ms, rid: .ctx.request_id}' \
+   backend/data/logs/engramnote.json.log
+
+# 某接口的耗时分布（SLO 第 4 节那条 P95 就是用它算的）
+jq -s '[.[] | select(.event == "http.request" and .path == "/api/notes") | .duration_ms]
+       | sort | .[length * 95 / 100 | floor]' backend/data/logs/engramnote.json.log
+```
+
+**时区**：JSON 的 `ts` 是**本地时间且带偏移**（`2026-11-07T20:43:00.227+08:00`），
+而数据库里的时间（如 `llm_calls.created_at`）是 **UTC** —— 跨库对时间时记得换算，
+别再把 8 小时差当成数据错乱。
 
 **排查顺序**：
 1. `errors.log` 里按 request_id 找异常堆栈
@@ -76,13 +103,13 @@ grep "<request_id>" backend/data/logs/engramnote.json.log \
 | 指标 | 目标 | 测量方式 |
 |---|---|---|
 | 可用性 | `/ready` 返回 200 的比例 ≥ 99%（7 天滚动） | 外部探针或手工抽查 |
-| 核心接口延迟 | `/api/notes` P95 < 800ms | 从 `engramnote.json.log` 的访问日志聚合 |
+| 核心接口延迟 | `/api/notes` P95 < 800ms | `engramnote.json.log` 里 `event="http.request"` 的 `duration_ms`（jq 配方见 §3） |
 | 异步任务成功率 | 清洗/嵌入任务失败率 < 2% | worker 日志中 `cleaning_failed` / 重试次数 |
 | 备份新鲜度 | 最近一次成功备份 < 26 小时 | 检查 `_backup/` 最新目录时间 |
 
 **超阈值的第一动作**：
 1. `/ready` 不 200 → 看它返回的原因码（`app/main.py` 里 `/ready` 用稳定原因码，如 db_unreachable / schema_missing）
-2. 延迟劣化 → 看 `engramnote.json.log` 里慢请求的 endpoint 分布
+2. 延迟劣化 → `jq 'select(.event == "http.request")'` 按 `path` 分组看 `duration_ms` 的分布（字段已结构化，不用再解析 message）
 3. 任务失败率上升 → 看 worker 是否卡在模型加载（内存）或被限流
 
 **不要**：把 `/ready` 的失败当成"重启一下就好"。它区分了"进程活着"与"能服务请求"，重启会掩盖原因。

@@ -52,6 +52,7 @@ locale_var: ContextVar[str] = ContextVar("locale", default="")
 
 # ---- 读取辅助函数 ----
 
+
 def get_request_id() -> str:
     """获取当前请求 ID（无则返回空串）"""
     return request_id_var.get()
@@ -105,6 +106,12 @@ def context_dict() -> Dict[str, str]:
         result["task_name"] = tname
     if bid:
         result["biz_id"] = bid
+    # 界面语言：`set_request_context` 一直保存着它，但此前没进日志 ——
+    # 排查"这个用户为什么看到英文/中文"时日志里没有任何证据（2026-11-08 补）。
+    # Celery 任务里没有请求上下文，这个键自然不出现（不造空值）。
+    loc = get_locale()
+    if loc:
+        result["locale"] = loc
     method = method_var.get()
     path = path_var.get()
     if method and path:
@@ -117,7 +124,7 @@ def context_tag() -> str:
     将当前上下文转为可读的日志标签（用于控制台/文本日志）
 
     Returns:
-        str: 形如 "[rid=abc123] [uid=user1] [tid=task-1]" 的标签串
+        str: 形如 "[rid=abc123] [uid=user1] [tid=task-1] [loc=zh-CN]" 的标签串
     """
     parts = []
     rid = get_request_id()
@@ -135,12 +142,16 @@ def context_tag() -> str:
         parts.append(f"task={tname}")
     if bid:
         parts.append(f"biz={bid}")
+    loc = get_locale()
+    if loc:
+        parts.append(f"loc={loc}")
     if not parts:
         return ""
     return "[" + " ".join(parts) + "]"
 
 
 # ---- 写入辅助函数 ----
+
 
 def set_request_context(
     request_id: str,
@@ -196,8 +207,14 @@ def reset_context() -> None:
     异常传播路径上残留脏数据。
     """
     for var in (
-        request_id_var, user_id_var, method_var, path_var,
-        task_id_var, task_name_var, biz_id_var, locale_var,
+        request_id_var,
+        user_id_var,
+        method_var,
+        path_var,
+        task_id_var,
+        task_name_var,
+        biz_id_var,
+        locale_var,
     ):
         try:
             var.set("")

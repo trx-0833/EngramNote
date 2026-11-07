@@ -92,8 +92,8 @@ def get_engine():
     }
     # SQLite 不支持 pool_size / max_overflow 参数，仅 PostgreSQL 需要
     if not is_sqlite:
-        engine_kwargs["pool_size"] = 5       # 连接池保持的连接数
-        engine_kwargs["max_overflow"] = 10   # 超出 pool_size 后允许的最大额外连接数
+        engine_kwargs["pool_size"] = 5  # 连接池保持的连接数
+        engine_kwargs["max_overflow"] = 10  # 超出 pool_size 后允许的最大额外连接数
 
     engine = create_async_engine(_db_url(), **engine_kwargs)
     if is_sqlite:
@@ -181,6 +181,7 @@ class Base(DeclarativeBase):
     所有模型类均继承自此类，SQLAlchemy 通过它来跟踪所有模型与数据表的映射关系。
     Base.metadata 包含了所有模型的元信息，用于创建数据表等操作。
     """
+
     pass
 
 
@@ -335,22 +336,24 @@ async def _ensure_fts_index(conn) -> None:
             # 对 VARCHAR 主键表无效）。检测到不一致就重建 ——
             # 否则 'rebuild' 会因找不到该列而失败，且失败被 except 吞掉后
             # 表现为"索引建好了但查不出东西"。
-            existing = sync_conn.execute(_text(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'"
-            )).fetchone()
+            existing = sync_conn.execute(
+                _text("SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'")
+            ).fetchone()
             if existing and "chunk_rowid" not in (existing[0] or ""):
                 sync_conn.execute(_text("DROP TABLE chunks_fts"))
                 existing = None
             table_existed = existing is not None
 
-            sync_conn.execute(_text(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
-                "  grams,"
-                "  content='chunks',"
-                "  content_rowid='chunk_rowid',"
-                "  tokenize='unicode61'"
-                ")"
-            ))
+            sync_conn.execute(
+                _text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
+                    "  grams,"
+                    "  content='chunks',"
+                    "  content_rowid='chunk_rowid',"
+                    "  tokenize='unicode61'"
+                    ")"
+                )
+            )
             # 索引只在**新建时**重建一次。
             #
             # 为什么不能每次都 rebuild：`init_db()` 在每个进程启动时都跑，
@@ -362,13 +365,9 @@ async def _ensure_fts_index(conn) -> None:
             # **不能**用 `INSERT INTO fts(rowid, col) SELECT ...` ——
             # 那只写倒排索引、不认内容表，查询会返回 0 条（实测踩到）。
             if not table_existed:
-                sync_conn.execute(_text(
-                    "INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')"
-                ))
+                sync_conn.execute(_text("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')"))
         except Exception as exc:  # pragma: no cover - 取决于 SQLite 构建
-            logger.warning(
-                "FTS5 不可用或索引重建失败，词法检索将退化为 Python BM25: %s", exc
-            )
+            logger.warning("FTS5 不可用或索引重建失败，词法检索将退化为 Python BM25: %s", exc)
 
     await conn.run_sync(_create)
 
@@ -384,7 +383,7 @@ def _bigrams_for_migration(text_value: str) -> str:
     cleaned = "".join(ch for ch in (text_value or "") if not ch.isspace())
     if len(cleaned) < 2:
         return cleaned
-    return " ".join(cleaned[i:i + 2] for i in range(len(cleaned) - 1))
+    return " ".join(cleaned[i : i + 2] for i in range(len(cleaned) - 1))
 
 
 def _destructive_migration_allowed() -> bool:
@@ -452,16 +451,14 @@ async def _migrate_sqlite(conn):
         table_names = inspector.get_table_names()
 
         # 检查 users 表是否缺少列（i18n 阶段 0，对应 Alembic 012）
-        if 'users' in table_names:
-            user_columns = {col['name'] for col in inspector.get_columns('users')}
-            if 'locale' not in user_columns:
+        if "users" in table_names:
+            user_columns = {col["name"] for col in inspector.get_columns("users")}
+            if "locale" not in user_columns:
                 # `server_default` 必须给：既有行需要一个值，而
                 # `NOT NULL` 加列时不给默认值会被 SQLite 拒绝。
                 # 默认 `zh-CN` = `core/i18n.DEFAULT_LOCALE`，所以既有用户的
                 # 观感一字不变。
-                sync_conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN locale VARCHAR(10) DEFAULT 'zh-CN' NOT NULL"
-                ))
+                sync_conn.execute(text("ALTER TABLE users ADD COLUMN locale VARCHAR(10) DEFAULT 'zh-CN' NOT NULL"))
                 logger.info("SQLite 迁移: 已为 users 表添加 locale 列")
 
         # 设置表扩展（对应 Alembic 015，2026-11-05）
@@ -469,36 +466,29 @@ async def _migrate_sqlite(conn):
         # 只对**已存在**的表补列；新库由 create_all 直接建出完整列。
         # 这里不加 CHECK（SQLite 的 ALTER TABLE 不支持 ADD CONSTRAINT），
         # 新库的 CHECK 由模型建表时带上，生产库由 Alembic 015 负责。
-        if 'user_settings' in table_names:
-            setting_columns = {col['name'] for col in inspector.get_columns('user_settings')}
+        if "user_settings" in table_names:
+            setting_columns = {col["name"] for col in inspector.get_columns("user_settings")}
             setting_ddl = {
-                'desired_retention': (
-                    "ALTER TABLE user_settings ADD COLUMN desired_retention FLOAT "
-                    "DEFAULT 0.9 NOT NULL"
+                "desired_retention": (
+                    "ALTER TABLE user_settings ADD COLUMN desired_retention FLOAT DEFAULT 0.9 NOT NULL"
                 ),
-                'max_interval_days': (
-                    "ALTER TABLE user_settings ADD COLUMN max_interval_days INTEGER "
-                    "DEFAULT 3650 NOT NULL"
+                "max_interval_days": (
+                    "ALTER TABLE user_settings ADD COLUMN max_interval_days INTEGER DEFAULT 3650 NOT NULL"
                 ),
-                'output_locale': (
-                    "ALTER TABLE user_settings ADD COLUMN output_locale VARCHAR(10) "
-                    "DEFAULT 'follow' NOT NULL"
+                "output_locale": (
+                    "ALTER TABLE user_settings ADD COLUMN output_locale VARCHAR(10) DEFAULT 'follow' NOT NULL"
                 ),
-                'card_max_new_per_run': (
-                    "ALTER TABLE user_settings ADD COLUMN card_max_new_per_run INTEGER "
-                    "DEFAULT 500 NOT NULL"
+                "card_max_new_per_run": (
+                    "ALTER TABLE user_settings ADD COLUMN card_max_new_per_run INTEGER DEFAULT 500 NOT NULL"
                 ),
-                'clean_simplify_formula': (
-                    "ALTER TABLE user_settings ADD COLUMN clean_simplify_formula BOOLEAN "
-                    "DEFAULT 0 NOT NULL"
+                "clean_simplify_formula": (
+                    "ALTER TABLE user_settings ADD COLUMN clean_simplify_formula BOOLEAN DEFAULT 0 NOT NULL"
                 ),
-                'clean_normalize_spacing': (
-                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_spacing BOOLEAN "
-                    "DEFAULT 1 NOT NULL"
+                "clean_normalize_spacing": (
+                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_spacing BOOLEAN DEFAULT 1 NOT NULL"
                 ),
-                'clean_normalize_heading_levels': (
-                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_heading_levels BOOLEAN "
-                    "DEFAULT 1 NOT NULL"
+                "clean_normalize_heading_levels": (
+                    "ALTER TABLE user_settings ADD COLUMN clean_normalize_heading_levels BOOLEAN DEFAULT 1 NOT NULL"
                 ),
             }
             for column_name, ddl in setting_ddl.items():
@@ -520,10 +510,10 @@ async def _migrate_sqlite(conn):
         # 本函数的 docstring 自己就写着这是"开发环境的简易迁移，生产环境应使用
         # Alembic"，而重建表超出它的职责。schema 变更统一走 Alembic ——
         # 它的 `batch_alter_table` 是专门处理 SQLite 这些限制的成熟实现。
-        if 'quiz_items' in table_names:
-            qi_cols = {c['name']: c for c in inspector.get_columns('quiz_items')}
-            card_col = qi_cols.get('card_id')
-            if card_col is not None and not card_col.get('nullable', True):
+        if "quiz_items" in table_names:
+            qi_cols = {c["name"]: c for c in inspector.get_columns("quiz_items")}
+            card_col = qi_cols.get("card_id")
+            if card_col is not None and not card_col.get("nullable", True):
                 logger.warning(
                     "quiz_items.card_id 仍是 NOT NULL —— 需要跑 `alembic upgrade head`。"
                     "本函数不做这次变更：在真实 schema 上重建表会撞 SQLite 的"
@@ -531,12 +521,12 @@ async def _migrate_sqlite(conn):
                     "详见 alembic/versions/013_quiz_card_nullable.py 的说明。"
                 )
 
-
         # 检查并创建 projects 表（防御性建表，对应 Alembic 005 迁移）
         # 需在 notes.project_id 列添加之前执行，避免 ALTER REFERENCES 找不到目标表
-        if 'projects' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "projects" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS projects (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -546,44 +536,36 @@ async def _migrate_sqlite(conn):
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_projects_user_id ON projects (user_id)"
-            ))
+                )
+            )
+            sync_conn.execute(text("CREATE INDEX ix_projects_user_id ON projects (user_id)"))
             logger.info("SQLite 迁移: 已创建 projects 表")
 
         # 检查 notes 表是否缺少列
-        if 'notes' in table_names:
-            existing_columns = {col['name'] for col in inspector.get_columns('notes')}
-            if 'folder_id' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE notes ADD COLUMN folder_id VARCHAR REFERENCES folders(id)"
-                ))
+        if "notes" in table_names:
+            existing_columns = {col["name"] for col in inspector.get_columns("notes")}
+            if "folder_id" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE notes ADD COLUMN folder_id VARCHAR REFERENCES folders(id)"))
                 logger.info("SQLite 迁移: 已为 notes 表添加 folder_id 列")
-            if 'note_role' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"
-                ))
+            if "note_role" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE notes ADD COLUMN note_role VARCHAR DEFAULT 'material' NOT NULL"))
                 logger.info("SQLite 迁移: 已为 notes 表添加 note_role 列")
             # 回收站软删除标记（对应 Alembic 009）
-            if 'trashed_at' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE notes ADD COLUMN trashed_at DATETIME"
-                ))
+            if "trashed_at" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE notes ADD COLUMN trashed_at DATETIME"))
                 logger.info("SQLite 迁移: 已为 notes 表添加 trashed_at 列")
             try:
-                sync_conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_notes_trashed_at ON notes (trashed_at)"
-                ))
+                sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notes_trashed_at ON notes (trashed_at)"))
             except Exception:
                 # 索引已存在时忽略
                 pass
 
         # 检查并创建 note_projects 标签关联表（防御性建表，对应项目标签化重构）
         # 项目从 Vault 第一层目录演化为纯标签后，笔记与项目为多对多关系，承载于此表
-        if 'note_projects' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "note_projects" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS note_projects (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -594,23 +576,19 @@ async def _migrate_sqlite(conn):
                     UNIQUE (note_id, project_id)
                 )
                 """
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_note_projects_note_id ON note_projects (note_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_note_projects_project_id ON note_projects (project_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_note_projects_user_id ON note_projects (user_id)"
-            ))
+                )
+            )
+            sync_conn.execute(text("CREATE INDEX ix_note_projects_note_id ON note_projects (note_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_note_projects_project_id ON note_projects (project_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_note_projects_user_id ON note_projects (user_id)"))
             logger.info("SQLite 迁移: 已创建 note_projects 表")
 
         # 检查并创建 note_material_links 表（防御性建表，正常情况下 create_all 已创建）
         # 端点可空 + ON DELETE SET NULL：物理删除笔记时悬挂保留双链记录（回收站策略）
-        if 'note_material_links' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "note_material_links" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS note_material_links (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -621,13 +599,15 @@ async def _migrate_sqlite(conn):
                     UNIQUE (personal_note_id, material_note_id)
                 )
                 """
-            ))
+                )
+            )
             logger.info("SQLite 迁移: 已创建 note_material_links 表")
 
         # 检查并创建 note_annotations 表（防御性建表，正常情况下 create_all 已创建）
-        if 'note_annotations' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "note_annotations" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS note_annotations (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -642,13 +622,15 @@ async def _migrate_sqlite(conn):
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
-            ))
+                )
+            )
             logger.info("SQLite 迁移: 已创建 note_annotations 表")
 
         # 检查并创建 note_versions 表（防御性建表，对应 Alembic 004 迁移）
-        if 'note_versions' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "note_versions" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS note_versions (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     note_id VARCHAR NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -662,30 +644,30 @@ async def _migrate_sqlite(conn):
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_note_versions_note_id ON note_versions (note_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_note_versions_user_id ON note_versions (user_id)"
-            ))
+                )
+            )
+            sync_conn.execute(text("CREATE INDEX ix_note_versions_note_id ON note_versions (note_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_note_versions_user_id ON note_versions (user_id)"))
             logger.info("SQLite 迁移: 已创建 note_versions 表")
 
         # note_versions (note_id, version_number) 唯一索引（见 docs/decisions.md#F-31）
         # （防并发重号；create_version 捕获 IntegrityError 重试）
-        if 'note_versions' in table_names:
+        if "note_versions" in table_names:
             try:
-                sync_conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_versions_note_version "
-                    "ON note_versions (note_id, version_number)"
-                ))
+                sync_conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_versions_note_version "
+                        "ON note_versions (note_id, version_number)"
+                    )
+                )
             except Exception as e:
                 logger.warning(f"创建 note_versions 唯一索引失败（忽略）: {e}")
 
         # 检查并创建 learning_goals 表（防御性建表，对应 Alembic 004 迁移）
-        if 'learning_goals' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "learning_goals" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS learning_goals (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -702,19 +684,17 @@ async def _migrate_sqlite(conn):
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_learning_goals_user_id ON learning_goals (user_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_learning_goals_status ON learning_goals (status)"
-            ))
+                )
+            )
+            sync_conn.execute(text("CREATE INDEX ix_learning_goals_user_id ON learning_goals (user_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_learning_goals_status ON learning_goals (status)"))
             logger.info("SQLite 迁移: 已创建 learning_goals 表")
 
         # 检查并创建 daily_plans 表（防御性建表，对应 Alembic 004 迁移）
-        if 'daily_plans' not in table_names:
-            sync_conn.execute(text(
-                """
+        if "daily_plans" not in table_names:
+            sync_conn.execute(
+                text(
+                    """
                 CREATE TABLE IF NOT EXISTS daily_plans (
                     id VARCHAR NOT NULL PRIMARY KEY,
                     goal_id VARCHAR NOT NULL REFERENCES learning_goals(id) ON DELETE CASCADE,
@@ -727,89 +707,72 @@ async def _migrate_sqlite(conn):
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_daily_plans_user_id ON daily_plans (user_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_daily_plans_goal_id ON daily_plans (goal_id)"
-            ))
-            sync_conn.execute(text(
-                "CREATE INDEX ix_daily_plans_plan_date ON daily_plans (plan_date)"
-            ))
+                )
+            )
+            sync_conn.execute(text("CREATE INDEX ix_daily_plans_user_id ON daily_plans (user_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_daily_plans_goal_id ON daily_plans (goal_id)"))
+            sync_conn.execute(text("CREATE INDEX ix_daily_plans_plan_date ON daily_plans (plan_date)"))
             logger.info("SQLite 迁移: 已创建 daily_plans 表")
 
         # 检查 assessment_results 表是否缺少 link_signature / is_stale 列
-        if 'assessment_results' in table_names:
-            existing_columns = {col['name'] for col in inspector.get_columns('assessment_results')}
-            if 'link_signature' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE assessment_results ADD COLUMN link_signature VARCHAR(64)"
-                ))
+        if "assessment_results" in table_names:
+            existing_columns = {col["name"] for col in inspector.get_columns("assessment_results")}
+            if "link_signature" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE assessment_results ADD COLUMN link_signature VARCHAR(64)"))
                 logger.info("SQLite 迁移: 已为 assessment_results 表添加 link_signature 列")
-            if 'is_stale' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE assessment_results ADD COLUMN is_stale BOOLEAN DEFAULT 0 NOT NULL"
-                ))
+            if "is_stale" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE assessment_results ADD COLUMN is_stale BOOLEAN DEFAULT 0 NOT NULL"))
                 logger.info("SQLite 迁移: 已为 assessment_results 表添加 is_stale 列")
 
         # 检查 knowledge_cards 表是否缺少新增的 6 列
         # （card_category / is_key_point / is_difficulty / mastery_level / source_note_ids / parent_card_id）
         # 对应 Alembic 003 迁移；create_all 不会 ALTER 已有表，需在此补齐
-        if 'knowledge_cards' in table_names:
-            existing_columns = {col['name'] for col in inspector.get_columns('knowledge_cards')}
-            if 'card_category' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN card_category VARCHAR DEFAULT 'regular' NOT NULL"
-                ))
+        if "knowledge_cards" in table_names:
+            existing_columns = {col["name"] for col in inspector.get_columns("knowledge_cards")}
+            if "card_category" not in existing_columns:
+                sync_conn.execute(
+                    text("ALTER TABLE knowledge_cards ADD COLUMN card_category VARCHAR DEFAULT 'regular' NOT NULL")
+                )
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 card_category 列")
-            if 'is_key_point' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN is_key_point BOOLEAN DEFAULT 0 NOT NULL"
-                ))
+            if "is_key_point" not in existing_columns:
+                sync_conn.execute(
+                    text("ALTER TABLE knowledge_cards ADD COLUMN is_key_point BOOLEAN DEFAULT 0 NOT NULL")
+                )
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 is_key_point 列")
-            if 'is_difficulty' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN is_difficulty BOOLEAN DEFAULT 0 NOT NULL"
-                ))
+            if "is_difficulty" not in existing_columns:
+                sync_conn.execute(
+                    text("ALTER TABLE knowledge_cards ADD COLUMN is_difficulty BOOLEAN DEFAULT 0 NOT NULL")
+                )
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 is_difficulty 列")
-            if 'mastery_level' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN mastery_level FLOAT DEFAULT 0 NOT NULL"
-                ))
+            if "mastery_level" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN mastery_level FLOAT DEFAULT 0 NOT NULL"))
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 mastery_level 列")
-            if 'source_note_ids' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN source_note_ids JSON"
-                ))
+            if "source_note_ids" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN source_note_ids JSON"))
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 source_note_ids 列")
-            if 'parent_card_id' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN parent_card_id VARCHAR"
-                ))
+            if "parent_card_id" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN parent_card_id VARCHAR"))
                 logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 parent_card_id 列")
                 # 为 parent_card_id 创建索引以加速拓展卡片查询
                 try:
-                    sync_conn.execute(text(
-                        "CREATE INDEX ix_knowledge_cards_parent_card_id ON knowledge_cards (parent_card_id)"
-                    ))
+                    sync_conn.execute(
+                        text("CREATE INDEX ix_knowledge_cards_parent_card_id ON knowledge_cards (parent_card_id)")
+                    )
                     logger.info("SQLite 迁移: 已为 knowledge_cards.parent_card_id 创建索引")
                 except Exception:
                     # 索引已存在时忽略
                     pass
 
         # 邮件提醒用户级开关与去重记录（对应 Alembic 010）
-        if 'users' in table_names:
-            existing_columns = {col['name'] for col in inspector.get_columns('users')}
-            if 'email_reminder_enabled' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN email_reminder_enabled BOOLEAN DEFAULT 1 NOT NULL"
-                ))
+        if "users" in table_names:
+            existing_columns = {col["name"] for col in inspector.get_columns("users")}
+            if "email_reminder_enabled" not in existing_columns:
+                sync_conn.execute(
+                    text("ALTER TABLE users ADD COLUMN email_reminder_enabled BOOLEAN DEFAULT 1 NOT NULL")
+                )
                 logger.info("SQLite 迁移: 已为 users 表添加 email_reminder_enabled 列")
-            if 'last_reminded_at' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN last_reminded_at DATETIME"
-                ))
+            if "last_reminded_at" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE users ADD COLUMN last_reminded_at DATETIME"))
                 logger.info("SQLite 迁移: 已为 users 表添加 last_reminded_at 列")
 
         # 复习记录的用户自评列（四档自评闭环）
@@ -818,30 +781,25 @@ async def _migrate_sqlite(conn):
         # 因此不经过 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION 闸门。
         # 语义上它把 review_logs 从「只有一个质量分」升级为
         # 「自动判分分 + 用户自评分」双信号，是校准曲线的前置条件。
-        if 'review_logs' in table_names:
-            existing_columns = {col['name'] for col in inspector.get_columns('review_logs')}
-            if 'self_rating' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN self_rating INTEGER"
-                ))
+        if "review_logs" in table_names:
+            existing_columns = {col["name"] for col in inspector.get_columns("review_logs")}
+            if "self_rating" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE review_logs ADD COLUMN self_rating INTEGER"))
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 self_rating 列")
-            if 'grading_method' not in existing_columns:
+            if "grading_method" not in existing_columns:
                 # 历史行回填 'legacy'：它们的判分方式已不可考，
                 # 不能用 'ungraded' 冒充（那会污染「自动 vs 自评」不一致率的分母）。
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN grading_method VARCHAR(16) "
-                    "NOT NULL DEFAULT 'legacy'"
-                ))
-            if 'grading_detail' not in existing_columns:
+                sync_conn.execute(
+                    text("ALTER TABLE review_logs ADD COLUMN grading_method VARCHAR(16) NOT NULL DEFAULT 'legacy'")
+                )
+            if "grading_detail" not in existing_columns:
                 # 阶段 3.5：LLM 语义判分的结构化明细（verdict/缺失点/误解点/置信度）。
                 # 纯加列、nullable、不触碰已有行。历史行保持 NULL ——
                 # 那时没有语义判分，NULL 是**如实**的表达，不用空对象冒充。
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN grading_detail JSON"
-                ))
+                sync_conn.execute(text("ALTER TABLE review_logs ADD COLUMN grading_detail JSON"))
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 grading_detail 列")
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 grading_method 列（历史行回填 legacy）")
-            if 'card_id' not in existing_columns:
+            if "card_id" not in existing_columns:
                 # 阶段 3.2：把复习记录归到**卡片**上。
                 #
                 # 为什么必须显式列出：`create_all()` 只建缺失的表，
@@ -849,21 +807,22 @@ async def _migrate_sqlite(conn):
                 # 也就是说**新增一个模型字段时，必须同时在这里登记** ——
                 # 否则真库永远缺这一列，而全新库却有（本轮实测踩到，
                 # 表现为 `no such column: card_id`，且只在真库复现）。
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN card_id VARCHAR REFERENCES knowledge_cards(id)"
-                ))
+                sync_conn.execute(
+                    text("ALTER TABLE review_logs ADD COLUMN card_id VARCHAR REFERENCES knowledge_cards(id)")
+                )
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 card_id 列")
                 try:
-                    sync_conn.execute(text(
-                        "CREATE INDEX IF NOT EXISTS ix_review_logs_card_id ON review_logs (card_id)"
-                    ))
+                    sync_conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_review_logs_card_id ON review_logs (card_id)")
+                    )
                 except Exception:
                     pass
                 # 回填：从 quiz_id 反查所属卡片，让历史记录也能被归到卡片上
                 # （度量层按 card_id 聚合，不回填的话老数据参与不了保持率配对）
                 try:
-                    result = sync_conn.execute(text(
-                        """
+                    result = sync_conn.execute(
+                        text(
+                            """
                         UPDATE review_logs
                            SET card_id = (
                                SELECT qi.card_id FROM quiz_items qi
@@ -871,7 +830,8 @@ async def _migrate_sqlite(conn):
                            )
                          WHERE card_id IS NULL AND quiz_id IS NOT NULL
                         """
-                    ))
+                        )
+                    )
                     if result.rowcount:
                         logger.info("SQLite 迁移: 已回填 %d 条 review_logs.card_id", result.rowcount)
                 except Exception as exc:
@@ -886,33 +846,27 @@ async def _migrate_sqlite(conn):
             # 可回忆概率"，只能在复习那一刻写下。历史行永远是 NULL ——
             # 那时没有 FSRS，而用 SM-2 的近似公式补算会往校准曲线的分母里
             # 混入不是"预测"的数字。宁缺勿滥。
-            if 'rating' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN rating INTEGER"
-                ))
+            if "rating" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE review_logs ADD COLUMN rating INTEGER"))
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 rating 列")
-            if 'predicted_retention' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN predicted_retention REAL"
-                ))
+            if "predicted_retention" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE review_logs ADD COLUMN predicted_retention REAL"))
                 logger.info("SQLite 迁移: 已为 review_logs 表添加 predicted_retention 列")
-            if 'item_type' not in existing_columns:
-                sync_conn.execute(text(
-                    "ALTER TABLE review_logs ADD COLUMN item_type VARCHAR(16)"
-                ))
+            if "item_type" not in existing_columns:
+                sync_conn.execute(text("ALTER TABLE review_logs ADD COLUMN item_type VARCHAR(16)"))
                 try:
-                    sync_conn.execute(text(
-                        "CREATE INDEX IF NOT EXISTS ix_review_logs_item_type "
-                        "ON review_logs (item_type)"
-                    ))
+                    sync_conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_review_logs_item_type ON review_logs (item_type)")
+                    )
                 except Exception:
                     pass
                 # 回填：本列引入前的行，用 quiz_id 是否存在区分卡片级复习与答题。
                 # 这是**如实**的判断（那一列本来就是这么用的），不是猜测；
                 # 判不出来（quiz_id 与 card_id 都为空）的行保持 NULL。
                 try:
-                    result = sync_conn.execute(text(
-                        """
+                    result = sync_conn.execute(
+                        text(
+                            """
                         UPDATE review_logs
                            SET item_type = CASE
                                    WHEN quiz_id IS NOT NULL THEN 'quiz'
@@ -921,44 +875,39 @@ async def _migrate_sqlite(conn):
                                END
                          WHERE item_type IS NULL
                         """
-                    ))
-                    if result.rowcount:
-                        logger.info(
-                            "SQLite 迁移: 已回填 %d 条 review_logs.item_type", result.rowcount
                         )
+                    )
+                    if result.rowcount:
+                        logger.info("SQLite 迁移: 已回填 %d 条 review_logs.item_type", result.rowcount)
                 except Exception as exc:
                     logger.warning("回填 review_logs.item_type 失败（不影响启动）: %s", exc)
 
         # ---- review_states 表迁移（阶段 3.6：FSRS 记忆状态）----
-        if 'review_states' in table_names:
-            state_cols = {c['name'] for c in inspector.get_columns('review_states')}
-            if 'stability' not in state_cols:
+        if "review_states" in table_names:
+            state_cols = {c["name"] for c in inspector.get_columns("review_states")}
+            if "stability" not in state_cols:
                 # nullable 且**不填默认值**：真库里 2241 行 SM-2 时期的状态
                 # 并不知道自己的 S/D。填 0 或 1 会让"没算过"与"算出来就这么小"
                 # 再也分不开，而两者的处置不同（前者要由 adopt_legacy_state
                 # 从 interval/EF 换算接管，后者直接用）。
-                sync_conn.execute(text(
-                    "ALTER TABLE review_states ADD COLUMN stability REAL"
-                ))
+                sync_conn.execute(text("ALTER TABLE review_states ADD COLUMN stability REAL"))
                 logger.info("SQLite 迁移: 已为 review_states 表添加 stability 列")
-            if 'difficulty' not in state_cols:
-                sync_conn.execute(text(
-                    "ALTER TABLE review_states ADD COLUMN difficulty REAL"
-                ))
+            if "difficulty" not in state_cols:
+                sync_conn.execute(text("ALTER TABLE review_states ADD COLUMN difficulty REAL"))
                 logger.info("SQLite 迁移: 已为 review_states 表添加 difficulty 列")
 
         # ---- knowledge_cards 表迁移（阶段 4.8：重跑理解的内容寻址键）----
-        if 'knowledge_cards' in table_names:
-            card_cols = {c['name'] for c in inspector.get_columns('knowledge_cards')}
-            if 'content_hash' not in card_cols:
-                sync_conn.execute(text(
-                    "ALTER TABLE knowledge_cards ADD COLUMN content_hash VARCHAR(64)"
-                ))
+        if "knowledge_cards" in table_names:
+            card_cols = {c["name"] for c in inspector.get_columns("knowledge_cards")}
+            if "content_hash" not in card_cols:
+                sync_conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN content_hash VARCHAR(64)"))
                 try:
-                    sync_conn.execute(text(
-                        "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_content_hash "
-                        "ON knowledge_cards (content_hash)"
-                    ))
+                    sync_conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_content_hash "
+                            "ON knowledge_cards (content_hash)"
+                        )
+                    )
                 except Exception:
                     pass
                 # 回填历史行：**复用 `card_intake_service.card_content_hash`**，
@@ -972,23 +921,21 @@ async def _migrate_sqlite(conn):
                 try:
                     from .services.card_intake_service import card_content_hash
 
-                    rows = sync_conn.execute(text(
-                        "SELECT id, title, content FROM knowledge_cards "
-                        "WHERE content_hash IS NULL"
-                    )).fetchall()
+                    rows = sync_conn.execute(
+                        text("SELECT id, title, content FROM knowledge_cards WHERE content_hash IS NULL")
+                    ).fetchall()
                     for card_id, title, content in rows:
                         sync_conn.execute(
                             text("UPDATE knowledge_cards SET content_hash = :h WHERE id = :i"),
                             {"h": card_content_hash(title, content), "i": card_id},
                         )
                     if rows:
-                        logger.info(
-                            "SQLite 迁移: 已回填 %d 行 knowledge_cards.content_hash", len(rows)
-                        )
+                        logger.info("SQLite 迁移: 已回填 %d 行 knowledge_cards.content_hash", len(rows))
                 except Exception as exc:
                     logger.warning(
                         "回填 knowledge_cards.content_hash 失败（不影响启动；"
-                        "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s", exc,
+                        "未回填的行不参与去重判定，重跑理解时会多插一张卡）: %s",
+                        exc,
                     )
 
         # ---- knowledge_cards 向量列（关系判定提速）----
@@ -1004,26 +951,24 @@ async def _migrate_sqlite(conn):
         #
         # 列名与打包方式与 `chunks` 表一致（`app/models/chunk.py:152-157`），
         # 不另立一套 —— AGENTS.md §3：向量与原文同库同表存储。
-        if 'knowledge_cards' in table_names:
-            card_cols = {c['name'] for c in inspector.get_columns('knowledge_cards')}
+        if "knowledge_cards" in table_names:
+            card_cols = {c["name"] for c in inspector.get_columns("knowledge_cards")}
             for col, ddl in (
-                ('embedding_model',
-                 "ALTER TABLE knowledge_cards ADD COLUMN embedding_model VARCHAR(200)"),
-                ('embedding_dim',
-                 "ALTER TABLE knowledge_cards ADD COLUMN embedding_dim INTEGER"),
-                ('embedding',
-                 "ALTER TABLE knowledge_cards ADD COLUMN embedding BLOB"),
-                ('has_embedding',
-                 "ALTER TABLE knowledge_cards ADD COLUMN has_embedding BOOLEAN DEFAULT 0 NOT NULL"),
+                ("embedding_model", "ALTER TABLE knowledge_cards ADD COLUMN embedding_model VARCHAR(200)"),
+                ("embedding_dim", "ALTER TABLE knowledge_cards ADD COLUMN embedding_dim INTEGER"),
+                ("embedding", "ALTER TABLE knowledge_cards ADD COLUMN embedding BLOB"),
+                ("has_embedding", "ALTER TABLE knowledge_cards ADD COLUMN has_embedding BOOLEAN DEFAULT 0 NOT NULL"),
             ):
                 if col not in card_cols:
                     sync_conn.execute(text(ddl))
                     logger.info("SQLite 迁移: 已为 knowledge_cards 表添加 %s 列", col)
             try:
-                sync_conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_user_embed "
-                    "ON knowledge_cards (user_id, has_embedding)"
-                ))
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_user_embed "
+                        "ON knowledge_cards (user_id, has_embedding)"
+                    )
+                )
             except Exception:
                 pass
 
@@ -1034,16 +979,14 @@ async def _migrate_sqlite(conn):
         # 当时用的是哪一版提示词**已经无从得知**（文本改过多次且没有记录）。
         # 填一个 "1" 会让这些行伪装成第一版，从而污染"第一版表现如何"的统计 ——
         # NULL 的含义是"未知"，与 4.2 里 `cost` 记 NULL 而不是 0 同一条原则。
-        for table in ('knowledge_cards', 'quiz_items'):
+        for table in ("knowledge_cards", "quiz_items"):
             if table not in table_names:
                 continue
-            cols = {c['name'] for c in inspector.get_columns(table)}
-            if 'prompt_version' not in cols:
+            cols = {c["name"] for c in inspector.get_columns(table)}
+            if "prompt_version" not in cols:
                 # 不加索引：这一列的用途是**分组统计**（按版本聚合复习表现），
                 # 不是逐行查找；当前规模（千级行）全表扫描比维护索引更省。
-                sync_conn.execute(text(
-                    f"ALTER TABLE {table} ADD COLUMN prompt_version VARCHAR(32)"
-                ))
+                sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN prompt_version VARCHAR(32)"))
                 logger.info("SQLite 迁移: 已为 %s 表添加 prompt_version 列", table)
 
         # ---- llm_calls 表迁移（阶段 4.7：响应缓存的记账字段）----
@@ -1052,47 +995,42 @@ async def _migrate_sqlite(conn):
         # 阶段 4.2 就已经存在了，`create_all` **不会**给它加列 ——
         # 这正是本文件反复强调的那个陷阱（"新增一个模型字段时必须同时在这里
         # 登记，否则真库永远缺这一列，而全新库却有"）。
-        if 'llm_calls' in table_names:
-            call_cols = {c['name'] for c in inspector.get_columns('llm_calls')}
-            if 'cached' not in call_cols:
+        if "llm_calls" in table_names:
+            call_cols = {c["name"] for c in inspector.get_columns("llm_calls")}
+            if "cached" not in call_cols:
                 # NOT NULL + DEFAULT 0：历史行都是"没命中缓存"，语义明确，
                 # 且不需要回填（DEFAULT 会填好）。
-                sync_conn.execute(text(
-                    "ALTER TABLE llm_calls ADD COLUMN cached BOOLEAN NOT NULL DEFAULT 0"
-                ))
+                sync_conn.execute(text("ALTER TABLE llm_calls ADD COLUMN cached BOOLEAN NOT NULL DEFAULT 0"))
                 logger.info("SQLite 迁移: 已为 llm_calls 表添加 cached 列")
-            if 'saved_tokens' not in call_cols:
+            if "saved_tokens" not in call_cols:
                 # nullable：未命中时是"没有节省量"（NULL），不是 0
-                sync_conn.execute(text(
-                    "ALTER TABLE llm_calls ADD COLUMN saved_tokens INTEGER"
-                ))
+                sync_conn.execute(text("ALTER TABLE llm_calls ADD COLUMN saved_tokens INTEGER"))
                 logger.info("SQLite 迁移: 已为 llm_calls 表添加 saved_tokens 列")
 
         # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
-        if 'chunks' in table_names:
-            chunk_cols = {c['name'] for c in inspector.get_columns('chunks')}
-            if 'grams' not in chunk_cols:
+        if "chunks" in table_names:
+            chunk_cols = {c["name"] for c in inspector.get_columns("chunks")}
+            if "grams" not in chunk_cols:
                 # 同上：新增模型字段必须在此登记，否则真库永远缺这一列
                 sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN grams TEXT"))
                 logger.info("SQLite 迁移: 已为 chunks 表添加 grams 列")
-            if 'chunk_rowid' not in chunk_cols:
+            if "chunk_rowid" not in chunk_cols:
                 # 整数 rowid：FTS5 外部内容表的 content_rowid 必须指向它。
                 # VARCHAR 主键会被 SQLite 当成 rowid 的别名，导致 JOIN 对不上
                 # 而静默返回 0 条（见 models/chunk.py 的说明）。
-                sync_conn.execute(text(
-                    "ALTER TABLE chunks ADD COLUMN chunk_rowid INTEGER"
-                ))
-                sync_conn.execute(text(
-                    "UPDATE chunks SET chunk_rowid = ("
-                    "  SELECT COUNT(*) FROM chunks c2 "
-                    "   WHERE c2.note_id < chunks.note_id "
-                    "      OR (c2.note_id = chunks.note_id AND c2.[index] <= chunks.[index])"
-                    ")"
-                ))
-                sync_conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_chunks_chunk_rowid "
-                    "ON chunks (chunk_rowid)"
-                ))
+                sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN chunk_rowid INTEGER"))
+                sync_conn.execute(
+                    text(
+                        "UPDATE chunks SET chunk_rowid = ("
+                        "  SELECT COUNT(*) FROM chunks c2 "
+                        "   WHERE c2.note_id < chunks.note_id "
+                        "      OR (c2.note_id = chunks.note_id AND c2.[index] <= chunks.[index])"
+                        ")"
+                    )
+                )
+                sync_conn.execute(
+                    text("CREATE UNIQUE INDEX IF NOT EXISTS ix_chunks_chunk_rowid ON chunks (chunk_rowid)")
+                )
                 logger.info("SQLite 迁移: 已为 chunks 表添加 chunk_rowid 列并回填")
             # 回填 bigram 切词结果（FTS5 索引读取这一列）
             #
@@ -1100,17 +1038,13 @@ async def _migrate_sqlite(conn):
             # SQL 里做相邻字符滑窗既不可读也易错，而这里是**一次性回填**，
             # 不在热路径上（chunks 只在清洗完成时重建）。
             try:
-                pending = sync_conn.execute(text(
-                    "SELECT rowid, content FROM chunks "
-                    "WHERE grams IS NULL OR grams = '' LIMIT 5000"
-                )).fetchall()
+                pending = sync_conn.execute(
+                    text("SELECT rowid, content FROM chunks WHERE grams IS NULL OR grams = '' LIMIT 5000")
+                ).fetchall()
                 if pending:
                     sync_conn.execute(
                         text("UPDATE chunks SET grams = :g WHERE rowid = :r"),
-                        [
-                            {"g": _bigrams_for_migration(row[1] or ""), "r": row[0]}
-                            for row in pending
-                        ],
+                        [{"g": _bigrams_for_migration(row[1] or ""), "r": row[0]} for row in pending],
                     )
                     logger.info("SQLite 迁移: 已回填 %d 条 chunks.grams", len(pending))
             except Exception as exc:
@@ -1126,20 +1060,48 @@ async def _migrate_sqlite(conn):
         # 所有语句的表名/列名均为代码内硬编码白名单，整条 SQL 写死。
         # (查询语句, 目标表, 孤儿字段, 父表名)
         orphan_checks = [
-            ("SELECT COUNT(*) FROM review_logs WHERE quiz_id IS NOT NULL AND quiz_id NOT IN (SELECT id FROM quiz_items)",
-             "review_logs", "quiz_id", "quiz_items"),
-            ("SELECT COUNT(*) FROM review_logs WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
-             "review_logs", "note_id", "notes"),
-            ("SELECT COUNT(*) FROM quiz_items WHERE card_id IS NOT NULL AND card_id NOT IN (SELECT id FROM knowledge_cards)",
-             "quiz_items", "card_id", "knowledge_cards"),
-            ("SELECT COUNT(*) FROM quiz_items WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
-             "quiz_items", "note_id", "notes"),
-            ("SELECT COUNT(*) FROM knowledge_cards WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
-             "knowledge_cards", "note_id", "notes"),
-            ("SELECT COUNT(*) FROM card_relations WHERE card_id_1 IS NOT NULL AND card_id_1 NOT IN (SELECT id FROM knowledge_cards)",
-             "card_relations", "card_id_1", "knowledge_cards"),
-            ("SELECT COUNT(*) FROM card_relations WHERE card_id_2 IS NOT NULL AND card_id_2 NOT IN (SELECT id FROM knowledge_cards)",
-             "card_relations", "card_id_2", "knowledge_cards"),
+            (
+                "SELECT COUNT(*) FROM review_logs WHERE quiz_id IS NOT NULL AND quiz_id NOT IN (SELECT id FROM quiz_items)",
+                "review_logs",
+                "quiz_id",
+                "quiz_items",
+            ),
+            (
+                "SELECT COUNT(*) FROM review_logs WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+                "review_logs",
+                "note_id",
+                "notes",
+            ),
+            (
+                "SELECT COUNT(*) FROM quiz_items WHERE card_id IS NOT NULL AND card_id NOT IN (SELECT id FROM knowledge_cards)",
+                "quiz_items",
+                "card_id",
+                "knowledge_cards",
+            ),
+            (
+                "SELECT COUNT(*) FROM quiz_items WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+                "quiz_items",
+                "note_id",
+                "notes",
+            ),
+            (
+                "SELECT COUNT(*) FROM knowledge_cards WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM notes)",
+                "knowledge_cards",
+                "note_id",
+                "notes",
+            ),
+            (
+                "SELECT COUNT(*) FROM card_relations WHERE card_id_1 IS NOT NULL AND card_id_1 NOT IN (SELECT id FROM knowledge_cards)",
+                "card_relations",
+                "card_id_1",
+                "knowledge_cards",
+            ),
+            (
+                "SELECT COUNT(*) FROM card_relations WHERE card_id_2 IS NOT NULL AND card_id_2 NOT IN (SELECT id FROM knowledge_cards)",
+                "card_relations",
+                "card_id_2",
+                "knowledge_cards",
+            ),
         ]
 
         for sql, table, col, parent_table in orphan_checks:
@@ -1149,16 +1111,21 @@ async def _migrate_sqlite(conn):
             if count > 0:
                 logger.warning(
                     "孤儿数据检查: %s 表有 %d 条 %s 指向不存在的 %s（未删除，仅报告）",
-                    table, count, col, parent_table,
+                    table,
+                    count,
+                    col,
+                    parent_table,
                 )
 
         # note_projects 标签关联表：清理指向不存在笔记或项目的孤儿行
         # （纯关联表，删除孤儿行无信息损失，且不影响学习记录，保持原行为）
-        if 'note_projects' in table_names:
-            result = sync_conn.execute(text(
-                "DELETE FROM note_projects WHERE note_id NOT IN (SELECT id FROM notes) "
-                "OR project_id NOT IN (SELECT id FROM projects)"
-            ))
+        if "note_projects" in table_names:
+            result = sync_conn.execute(
+                text(
+                    "DELETE FROM note_projects WHERE note_id NOT IN (SELECT id FROM notes) "
+                    "OR project_id NOT IN (SELECT id FROM projects)"
+                )
+            )
             if result.rowcount > 0:
                 logger.info(f"孤儿数据清理: 从 note_projects 中清理了 {result.rowcount} 条标签孤儿记录")
 
@@ -1171,47 +1138,71 @@ async def _migrate_sqlite(conn):
         #
         # 现统一为 5 列口径：(user_id, card_id_1, card_id_2, relation_type, status)。
         # 去重是破坏性删除，改为仅在显式放行时执行；索引创建是无损的，始终执行。
-        if 'card_relations' in table_names:
+        if "card_relations" in table_names:
             if _destructive_migration_allowed():
                 logger.warning("检测到 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION，执行 card_relations 同键去重")
-                result = sync_conn.execute(text(
-                    """
+                result = sync_conn.execute(
+                    text(
+                        """
                     DELETE FROM card_relations WHERE id NOT IN (
                         SELECT MIN(id) FROM card_relations
                         GROUP BY user_id, card_id_1, card_id_2, relation_type, status
                     )
                     """
-                ))
+                    )
+                )
                 if result.rowcount > 0:
                     logger.warning("card_relations 同键去重: 删除 %d 行", result.rowcount)
             else:
-                dup = sync_conn.execute(text(
-                    """
+                dup = (
+                    sync_conn.execute(
+                        text(
+                            """
                     SELECT COUNT(*) FROM (
                         SELECT 1 FROM card_relations
                         GROUP BY user_id, card_id_1, card_id_2, relation_type, status
                         HAVING COUNT(*) > 1
                     )
                     """
-                )).scalar() or 0
+                        )
+                    ).scalar()
+                    or 0
+                )
                 if dup:
                     logger.warning(
                         "card_relations 存在 %d 组同键重复（未删除；如需清理请设置 "
-                        "ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 后重启）", dup
+                        "ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION=1 后重启）",
+                        dup,
                     )
 
             # 幂等建唯一索引（5 列，与上面的 GROUP BY 口径一致）
             try:
-                sync_conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_card_relations_pair_type "
-                    "ON card_relations (user_id, card_id_1, card_id_2, relation_type, status)"
-                ))
-                logger.info("SQLite 迁移: 已确保 card_relations 唯一索引 uq_card_relations_pair_type 存在")
+                # 先看它在不在：`CREATE UNIQUE INDEX IF NOT EXISTS` 不告诉我们
+                # 到底建没建，而**每次进程启动**都会跑一遍 init_db()。
+                # 2026-11-07 的日志统计：这一条 INFO 在 2 个月里出现 **6460** 次
+                # （每个进程每次启动一条），是仅次于访问日志的第二大噪音源，
+                # 会把真正的迁移信息淹掉。幂等命中降 DEBUG，真建了才 INFO。
+                existed = (
+                    sync_conn.execute(
+                        text(
+                            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_card_relations_pair_type'"
+                        )
+                    ).first()
+                    is not None
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_card_relations_pair_type "
+                        "ON card_relations (user_id, card_id_1, card_id_2, relation_type, status)"
+                    )
+                )
+                if existed:
+                    logger.debug("SQLite 迁移: card_relations 唯一索引 uq_card_relations_pair_type 已存在")
+                else:
+                    logger.info("SQLite 迁移: 已创建 card_relations 唯一索引 uq_card_relations_pair_type")
             except Exception as e:
                 # 不静默：索引缺失会让重复关系防护失效，必须显式告警
-                logger.error(
-                    "创建 card_relations 唯一索引失败（重复关系防护未生效，请人工处理）: %s", e
-                )
+                logger.error("创建 card_relations 唯一索引失败（重复关系防护未生效，请人工处理）: %s", e)
 
     await conn.run_sync(_do_migrate)
 
@@ -1402,18 +1393,14 @@ async def _rebuild_dangling_tables() -> None:
                 # （例如 review_logs 的 note_id 与 quiz_id 都不满足）。
                 # 不去重会对同一张表连续重建两次，第二次必然在
                 # `CREATE TABLE ...temp` 或 `DROP TABLE` 处报错。
-                todo = list(dict.fromkeys(
-                    t for t, probe, kind in targets if _column_probe(raw, t, probe, kind)
-                ))
+                todo = list(dict.fromkeys(t for t, probe, kind in targets if _column_probe(raw, t, probe, kind)))
                 if not todo:
                     return
 
                 logger.info("SQLite 迁移: 检测到旧 schema，开始重建悬挂引用表: %s", todo)
                 missing = [t for t in todo if t not in Base.metadata.tables]
                 if missing:
-                    raise RuntimeError(
-                        f"metadata 中缺少表定义 {missing} —— 请在导入 app.models 后调用本函数"
-                    )
+                    raise RuntimeError(f"metadata 中缺少表定义 {missing} —— 请在导入 app.models 后调用本函数")
                 raw.execute("BEGIN")
                 try:
                     for table_name in todo:
@@ -1421,12 +1408,8 @@ async def _rebuild_dangling_tables() -> None:
                         temp_name = f"{table_name}__trash_rebuild"
 
                         # 用 SQLAlchemy 按 metadata 生成与 create_all 完全一致的 DDL
-                        create_ddl = str(
-                            CreateTable(table).compile(dialect=sqlite_dialect.dialect())
-                        ).strip()
-                        create_ddl = create_ddl.replace(
-                            f"CREATE TABLE {table_name}", f'CREATE TABLE "{temp_name}"', 1
-                        )
+                        create_ddl = str(CreateTable(table).compile(dialect=sqlite_dialect.dialect())).strip()
+                        create_ddl = create_ddl.replace(f"CREATE TABLE {table_name}", f'CREATE TABLE "{temp_name}"', 1)
 
                         col_list = ", ".join(f'"{c.name}"' for c in table.columns)
                         raw.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
@@ -1437,14 +1420,10 @@ async def _rebuild_dangling_tables() -> None:
                         if skip:
                             copy_list = ", ".join(f'"{n}"' for n in copy_cols)
                             raw.execute(
-                                f'INSERT INTO "{temp_name}" ({copy_list}) '
-                                f'SELECT {copy_list} FROM "{table_name}"'
+                                f'INSERT INTO "{temp_name}" ({copy_list}) SELECT {copy_list} FROM "{table_name}"'
                             )
                         else:
-                            raw.execute(
-                                f'INSERT INTO "{temp_name}" ({col_list}) '
-                                f'SELECT {col_list} FROM "{table_name}"'
-                            )
+                            raw.execute(f'INSERT INTO "{temp_name}" ({col_list}) SELECT {col_list} FROM "{table_name}"')
                         raw.execute(f'DROP TABLE "{table_name}"')
                         raw.execute(f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"')
                         # 旧索引随 DROP TABLE 消失，按 metadata 重建
@@ -1483,12 +1462,11 @@ async def _rebuild_dangling_tables() -> None:
                             logger.error(
                                 "chunks 重建后 FTS 行数不一致: chunks_fts=%s chunks=%s "
                                 "—— 词法检索可能不完整，请运行 scripts/ 下的重建脚本",
-                                n_fts, n_chunks,
+                                n_fts,
+                                n_chunks,
                             )
                         else:
-                            logger.info(
-                                "SQLite 迁移: chunks 重建后已重建 FTS 索引（%d 行）", n_fts
-                            )
+                            logger.info("SQLite 迁移: chunks 重建后已重建 FTS 索引（%d 行）", n_fts)
                     except Exception as exc:
                         logger.error(
                             "chunks 重建后 FTS 索引重建失败: %s —— "
