@@ -1,0 +1,47 @@
+# EngramNote 密钥扫描配置
+#
+# ⚠️ 当前【未启用】。gitleaks 未安装。
+#
+# 启用：
+#   scoop install gitleaks
+#   cd D:\engramnote
+#   gitleaks detect --no-banner --redacted --report-format json --report-path .tmp/gitleaks.json
+#
+# 第一次务必人工看一遍全历史结果：真阳性要处理（轮换密钥），
+# 假阳性才加进下面的 allowlist。**不要一开始就把 allowlist 写宽**——
+# 那等于把扫描器关掉。
+#
+# 已知需要豁免的假阳性（按项目实际情况，实测后再增删）：
+#   - ci.yml:144  JWT_SECRET_KEY: ci-only-dummy-key-not-a-secret
+#   - backend/.env.example / frontend/.env.example 的示例值
+#   - tests/ 下的假 key / 假 token
+#   - docs/ 里的示例配置片段
+
+title = "EngramNote"
+
+[extend]
+# 用默认规则集；如需扩展用 useDefault = true（gitleaks v8.19+）
+useDefault = true
+
+[allowlist]
+description = "项目内已知的示例值与非生产路径"
+paths = [
+  # 示例配置：只有占位符，没有真实凭据
+  '''(^|/)\.env\.example$''',
+  # 测试夹具里的假 key
+  '''^backend/tests/''',
+  '''^frontend/e2e/''',
+  # 文档里的示例片段
+  '''^docs/''',
+  '''^_governance/''',
+]
+
+regexes = [
+  # CI 里显式声明的哑密钥
+  '''ci-only-dummy-key-not-a-secret''',
+  # 常见占位符写法
+  '''(?i)(your[_-]?api[_-]?key|changeme|placeholder|example|dummy|xxx+)''',
+]
+
+# 注：不要在此文件里再次定义 `[allowlist.paths]` —— `paths` 已在上面 [allowlist]
+# 节中定义，重复定义会让 TOML 解析失败（gitleaks 会直接退出）。
