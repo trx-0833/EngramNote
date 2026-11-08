@@ -182,6 +182,36 @@ const zhCN = {
     sessionExpired: '登录已过期，请重新登录',
     /** 流式响应不可用（`ReadableStream` 缺失，老浏览器） */
     unsupportedStream: '浏览器不支持流式响应',
+
+    /**
+     * 参数校验失败的字段级文案（2026-11-08 补）
+     *
+     * ## 为什么需要
+     *
+     * FastAPI 的 422 `detail` 是数组，元素形如
+     * `{type: "string_too_short", loc: ["body","name"], msg: "String should have at least 1 character"}`。
+     * `readErrorBody()` 原先把 `msg` 直接 join 出来 —— 那是 **Pydantic 的英文**，
+     * 于是中文界面弹出一句英文（实测：建文件夹时名字为空）。
+     *
+     * 做法：按 `type` 查表，用 `ctx` 里的参数插值；**查不到就保留原文**
+     * （宁可英文，也不能把校验原因吞掉）。键名与 Pydantic 的 `type` 一一对应。
+     */
+    validation: {
+      string_too_short: '内容太短（至少 {min_length} 个字符）',
+      string_too_long: '内容太长（最多 {max_length} 个字符）',
+      missing: '缺少必填项',
+      value_error: '取值不合法',
+      int_parsing: '需要一个整数',
+      float_parsing: '需要一个数字',
+      bool_parsing: '需要一个布尔值',
+      string_pattern_mismatch: '格式不符合要求',
+      enum: '取值不在允许范围内',
+      greater_than_equal: '不能小于 {ge}',
+      less_than_equal: '不能大于 {le}',
+      extra_forbidden: '包含不支持的字段',
+      list_type: '需要一个列表',
+      dict_type: '需要是一个对象',
+    },
   },
 
   /**

@@ -469,3 +469,68 @@ describe('API 客户端：downloadRequest', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('API 客户端：参数校验（422）文案本地化', () => {
+  /**
+   * FastAPI 的 422 `detail` 是数组，元素里的 `msg` 是 **Pydantic 的英文**。
+   * 2026-11-08 实测：中文界面下建文件夹（名字为空）会弹
+   * "String should have at least 1 character"。
+   *
+   * ⚠️ `mockFetch` 要自己在**本 describe 内**声明：文件里那个是定义在
+   * 「401 → 刷新 → 重放」describe 内的局部变量，块外用会 ReferenceError
+   * （第一版就是这么挂的）。
+   */
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  it('已知 type → 用消息表里的中文，并把 ctx 参数插进去', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(422, {
+        detail: [
+          {
+            type: 'string_too_short',
+            loc: ['body', 'name'],
+            msg: 'String should have at least 1 character',
+            ctx: { min_length: 1 },
+          },
+        ],
+        error_code: 'VALIDATION_ERROR',
+      }),
+    );
+
+    await expect(request('/folders', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+      message: '内容太短（至少 1 个字符）',
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('未知 type → 保留 Pydantic 原文（不能把原因吞掉）', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(422, {
+        detail: [{ type: 'some_future_error', loc: ['body', 'x'], msg: 'Something odd' }],
+      }),
+    );
+
+    await expect(request('/x', { method: 'POST', body: '{}' })).rejects.toThrow('Something odd');
+  });
+
+  it('多条校验错误用 "; " 连接，逐条本地化', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(422, {
+        detail: [
+          { type: 'missing', loc: ['body', 'a'], msg: 'Field required' },
+          { type: 'string_too_long', loc: ['body', 'b'], msg: 'too long', ctx: { max_length: 5 } },
+        ],
+      }),
+    );
+
+    await expect(request('/x', { method: 'POST', body: '{}' })).rejects.toThrow(
+      '缺少必填项; 内容太长（最多 5 个字符）',
+    );
+  });
+});

@@ -121,6 +121,30 @@ const en = {
     invalidCredentials: 'Incorrect email or password',
     sessionExpired: 'Your session has expired. Please sign in again.',
     unsupportedStream: 'Your browser does not support streaming responses',
+
+    /**
+     * Field-level validation messages (see the zh-CN section for the rationale)
+     *
+     * FastAPI's 422 `detail` is an array of `{type, loc, msg, ctx}`; `msg` is
+     * Pydantic's English. `readErrorBody()` maps `type` to these and falls back
+     * to the raw `msg` for unknown types.
+     */
+    validation: {
+      string_too_short: 'Too short (at least {min_length} characters)',
+      string_too_long: 'Too long (at most {max_length} characters)',
+      missing: 'This field is required',
+      value_error: 'Invalid value',
+      int_parsing: 'Must be a whole number',
+      float_parsing: 'Must be a number',
+      bool_parsing: 'Must be true or false',
+      string_pattern_mismatch: 'Invalid format',
+      enum: 'Value is not allowed',
+      greater_than_equal: 'Must be at least {ge}',
+      less_than_equal: 'Must be at most {le}',
+      extra_forbidden: 'Contains unsupported fields',
+      list_type: 'Must be a list',
+      dict_type: 'Must be an object',
+    },
   },
 
   labels: {
