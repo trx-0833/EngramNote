@@ -86,7 +86,7 @@ dependencies = [
     # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
     "pyyaml~=6.0.3",
     "psutil~=7.2.2",
-    "alembic~=1.19.2",
+    "alembic>=1.19.2,<1.21.0",
     "openai~=2.54.0",
     "soundfile~=0.14.0",
     # Windows 上的 Celery **文件 broker** 硬依赖：`kombu.transport.filesystem`
