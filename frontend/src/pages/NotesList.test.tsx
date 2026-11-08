@@ -74,7 +74,8 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
-describe('导出全部', () => {  it('★ 没有搜索关键词时显示「导出全部（ZIP）」', async () => {
+describe('导出全部', () => {
+  it('★ 没有搜索关键词时显示「导出全部（ZIP）」', async () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /导出全部（ZIP）/ })).toBeInTheDocument();
   });

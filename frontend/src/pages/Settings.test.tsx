@@ -200,9 +200,7 @@ describe('Settings 页', () => {
     await user.type(input, '20');
     await user.tab();
 
-    await waitFor(() =>
-      expect(spy).toHaveBeenCalledWith({ queryKey: ['settings'], exact: true }),
-    );
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['settings'], exact: true }));
     spy.mockRestore();
   });
 
@@ -284,15 +282,13 @@ describe('Settings 页', () => {
     const retention = (await screen.findByLabelText('目标留存率')) as HTMLSelectElement;
     expect(retention.value).toBe('0.87');
     expect(
-      (within(retention).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement)
-        .selected,
+      (within(retention).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement).selected,
     ).toBe(true);
 
     const maxInterval = (await screen.findByLabelText('最长间隔')) as HTMLSelectElement;
     expect(maxInterval.value).toBe('1000');
     expect(
-      (within(maxInterval).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement)
-        .selected,
+      (within(maxInterval).getByRole('option', { name: /部署默认/ }) as HTMLOptionElement).selected,
     ).toBe(true);
   });
 
