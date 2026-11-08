@@ -567,6 +567,22 @@ class Settings(BaseSettings):
     log_max_bytes: int = 10 * 1024 * 1024  # 10MB
     log_backup_count: int = 30
 
+    # 三份日志各自的轮转份数（2026-11-08 分层）
+    #
+    # 改造前三份共用 `log_max_bytes × log_backup_count = 10MB × 30`，
+    # 合计上限 **900MB**；而三份的增长速度差了一个数量级：
+    #   - `engramnote.log`（人读主日志）：2 个月 10MB / 7 万行 → 7 份够回溯一周
+    #   - `errors.log`（仅 ERROR+，95% 是堆栈）：2 个月不到 1MB → 10 份
+    #   - `engramnote.json.log`（机器排障主通道）：最先轮转 → 30 份
+    # 分层后合计上限约 **470MB**，而真正需要长期留的 JSON 反而更多。
+    #
+    # 取值规则（见 `_resolve_log_backup_counts`）：显式给了这三个键就用它们；
+    # 没给但显式设了 `LOG_BACKUP_COUNT`（老配置）→ 三份都回落到它；
+    # 都没给 → 用下面的默认值。
+    log_text_backup_count: int | None = None
+    log_json_backup_count: int | None = None
+    log_error_backup_count: int | None = None
+
     # ---- 应用基本配置 ----
     app_name: str = "EngramNote"
     # 应用对外访问基础 URL（如渲染邮件提醒中的跳转链接），按实际部署域名配置
@@ -656,6 +672,32 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    @model_validator(mode="after")
+    def _resolve_log_backup_counts(self) -> "Settings":
+        """把三份日志的轮转份数解析成具体数字（2026-11-08 分层）
+
+        规则：
+        - 显式给了 `LOG_TEXT_BACKUP_COUNT` / `LOG_JSON_BACKUP_COUNT` /
+          `LOG_ERROR_BACKUP_COUNT` → 用给的值；
+        - 没给，但**显式**设了老的 `LOG_BACKUP_COUNT` → 三份都回落到它
+          （老 `.env` 的意图是"所有日志都留这么多份"，不能静默改成 7/30/10）；
+        - 都没给 → 分层默认值 7 / 30 / 10。
+
+        用 `object.__setattr__` 而不是普通赋值：这里只是把 `None` 解析成数字，
+        不希望把这些键写进 `model_fields_set`（那会让"用户显式设过"变成"永远设过"）。
+        """
+        legacy_explicit = "log_backup_count" in self.model_fields_set
+        defaults = (
+            ("log_text_backup_count", 7),
+            ("log_json_backup_count", 30),
+            ("log_error_backup_count", 10),
+        )
+        for name, default in defaults:
+            if getattr(self, name) is None:
+                value = self.log_backup_count if legacy_explicit else default
+                object.__setattr__(self, name, value)
+        return self
 
     @model_validator(mode="after")
     def _validate_env_switches(self) -> "Settings":

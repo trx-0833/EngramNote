@@ -188,13 +188,23 @@ class JsonLinesFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def _make_handler(stream_or_path, formatter: logging.Formatter, level: int) -> logging.Handler:
+def _make_handler(
+    stream_or_path,
+    formatter: logging.Formatter,
+    level: int,
+    backup_count: int | None = None,
+) -> logging.Handler:
+    """建 handler；文件 handler 的轮转份数按"这份日志的用途"取值
+
+    `backup_count=None` → 用 `settings.log_backup_count`（兼容老配置/控制台）。
+    """
     handler: logging.Handler
     if isinstance(stream_or_path, Path):
+        settings = get_settings()
         handler = RotatingFileHandler(
             str(stream_or_path),
-            maxBytes=get_settings().log_max_bytes,
-            backupCount=get_settings().log_backup_count,
+            maxBytes=settings.log_max_bytes,
+            backupCount=settings.log_backup_count if backup_count is None else backup_count,
             encoding="utf-8",
         )
     else:
@@ -233,12 +243,12 @@ def setup_logging() -> None:
 
     # 1) 控制台
     root_logger.addHandler(_make_handler(None, text_formatter, log_level))
-    # 2) 全量日志文件（轮转）
-    root_logger.addHandler(_make_handler(log_file, text_formatter, log_level))
-    # 3) 独立错误日志（ERROR 及以上，快速定位）
-    root_logger.addHandler(_make_handler(error_file, text_formatter, logging.ERROR))
-    # 4) JSON 结构化日志（JSON Lines，机器可读）
-    root_logger.addHandler(_make_handler(json_file, json_formatter, log_level))
+    # 2) 全量日志文件（轮转）—— 人读主日志，留一周左右即够
+    root_logger.addHandler(_make_handler(log_file, text_formatter, log_level, settings.log_text_backup_count))
+    # 3) 独立错误日志（ERROR 及以上，快速定位）—— 量小，留 10 份
+    root_logger.addHandler(_make_handler(error_file, text_formatter, logging.ERROR, settings.log_error_backup_count))
+    # 4) JSON 结构化日志（JSON Lines，机器可读）—— 排障主通道，留最久
+    root_logger.addHandler(_make_handler(json_file, json_formatter, log_level, settings.log_json_backup_count))
 
     # 配置 engramnote 命名空间日志
     engramnote_logger = logging.getLogger("engramnote")

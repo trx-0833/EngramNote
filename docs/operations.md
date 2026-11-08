@@ -26,9 +26,15 @@
 | 输出 | 文件 | 格式 | 用途 |
 |---|---|---|---|
 | 控制台 | — | 文本，带上下文 | 交互式排障 |
-| 全量文本 | `engramnote.log` | 文本，10MB 轮转 × 30 份 | 人读的主日志 |
-| 错误专档 | `errors.log` | 文本，仅 ERROR+ | 快速定位异常 |
-| **结构化** | `engramnote.json.log` | **JSON Lines** | 机器可查、可导入分析 |
+| 全量文本 | `engramnote.log` | 文本，10MB 轮转 × **7** 份 | 人读的主日志 |
+| 错误专档 | `errors.log` | 文本，仅 ERROR+，10MB × **10** | 快速定位异常 |
+| **结构化** | `engramnote.json.log` | **JSON Lines**，10MB × **30** | 机器可查、可导入分析 |
+
+轮转份数按用途分层（2026-11-08）：文本主日志留一周足够、错误专档量最小、
+JSON 是机器排障主通道所以留最久。合计上限从 **900MB**（改造前三份都是 30 份）
+降到约 **470MB**。配置项：`LOG_MAX_BYTES`（三份共用）+ `LOG_TEXT_BACKUP_COUNT` /
+`LOG_JSON_BACKUP_COUNT` / `LOG_ERROR_BACKUP_COUNT`；老键 `LOG_BACKUP_COUNT`
+仍然有效（显式设了它、又没设新键时，三份都回落到它）。
 
 日志目录由 `LOG_DIR` 决定，默认在 `backend/data/logs/`（`config.py:get_log_dir`）。
 
