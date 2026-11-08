@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..config import get_settings
 from ..models.note import Note
 from ..models.quiz_item import QuizItem
@@ -56,7 +57,9 @@ async def _count_settled_today(db: AsyncSession, user_id: str, today_start) -> i
     故收敛为本函数 —— 限额与展示必须用同一个定义。
     """
     result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+        select(func.count())
+        .select_from(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
             ReviewLog.grading_method != "ungraded",
@@ -139,9 +142,7 @@ async def _query_due_quizzes(
             QuizItem.user_id == user_id,
             or_(
                 QuizItem.note_id.is_(None),
-                select(Note.id).where(
-                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
-                ).exists(),
+                select(Note.id).where(Note.id == QuizItem.note_id, Note.trashed_at.is_(None)).exists(),
             ),
         )
         .group_by(QuizItem.card_id)
@@ -150,14 +151,13 @@ async def _query_due_quizzes(
 
     # 查询到期题目，关联薄弱点排序（回收站笔记的题目暂不可见）
     result = await db.execute(
-        select(QuizItem).where(
+        select(QuizItem)
+        .where(
             QuizItem.user_id == user_id,
             (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
             or_(
                 QuizItem.note_id.is_(None),
-                select(Note.id).where(
-                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
-                ).exists(),
+                select(Note.id).where(Note.id == QuizItem.note_id, Note.trashed_at.is_(None)).exists(),
             ),
         )
         .outerjoin(error_subq, error_subq.c.card_id == QuizItem.card_id)
@@ -251,24 +251,23 @@ async def submit_answer(
     #     （见 docs/decisions.md#F-14）。
     now = datetime.now(timezone.utc)
     from ..utils.timeutil import today_start_utc
+
     today_start = today_start_utc(now)
     existing_logs_result = await db.execute(
-        select(ReviewLog).where(
+        select(ReviewLog)
+        .where(
             ReviewLog.quiz_id == quiz_id,
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
-        ).order_by(ReviewLog.review_at.desc())
+        )
+        .order_by(ReviewLog.review_at.desc())
     )
     existing_logs = list(existing_logs_result.scalars().all())
 
     # 占位记录：自动判分不可信，既未自评也未推进调度，是"未完成"的一次提交
-    pending_placeholder = next(
-        (log for log in existing_logs if log.grading_method == "ungraded"), None
-    )
+    pending_placeholder = next((log for log in existing_logs if log.grading_method == "ungraded"), None)
     # 已判分记录：真正决定了当前调度参数的那一条
-    scored_log = next(
-        (log for log in existing_logs if log.grading_method != "ungraded"), None
-    )
+    scored_log = next((log for log in existing_logs if log.grading_method != "ungraded"), None)
 
     if self_rating is not None:
         # 带自评提交：只能"补完"一条占位记录，不能被占位记录挡回。
@@ -280,17 +279,11 @@ async def submit_answer(
         # （例如客户端先答题后补评、但占位提交失败）是合法路径，
         # 应当照常落一条 self_rating 记录，而不是被幂等逻辑挡掉。
         if scored_log is not None and scored_log.self_rating == self_rating:
-            logger.info(
-                f"答题提交幂等命中: user={user_id[:8]}, quiz={quiz_id[:8]}, "
-                f"同日同自评已提交，返回历史结果"
-            )
+            logger.info(f"答题提交幂等命中: user={user_id[:8]}, quiz={quiz_id[:8]}, 同日同自评已提交，返回历史结果")
             return _build_submit_result(quiz, scored_log, existing_logs=existing_logs)
     elif existing_logs:
         # 不带自评的重复提交（双击/重放）：返回今日最新结果，不重复推进调度
-        logger.info(
-            f"答题提交幂等命中: user={user_id[:8]}, quiz={quiz_id[:8]}, "
-            f"同日已提交，返回历史结果"
-        )
+        logger.info(f"答题提交幂等命中: user={user_id[:8]}, quiz={quiz_id[:8]}, 同日已提交，返回历史结果")
         return _build_submit_result(quiz, existing_logs[0], existing_logs=existing_logs)
 
     # 1.55 普通复习提交校验题目是否到期（未到期拒绝；快速复习跳过），见 docs/decisions.md#F-14
@@ -319,13 +312,15 @@ async def submit_answer(
         effective_limit = int(daily_max or DAILY_REVIEW_LIMIT)
         today_done = await _count_settled_today(db, user_id, today_start)
         if today_done >= effective_limit:
-            return {"error": f"今日已完成 {today_done} 道题，已达每日上限 {effective_limit}"}
+            return {
+                "error": i18n.localize(
+                    f"今日已完成 {today_done} 道题，已达每日上限 {effective_limit}",
+                    f"Daily limit reached: {today_done}/{effective_limit} questions completed",
+                )
+            }
 
     if pending_placeholder is not None:
-        logger.info(
-            f"补完待自评的占位记录: user={user_id[:8]}, quiz={quiz_id[:8]}, "
-            f"self_rating={self_rating}"
-        )
+        logger.info(f"补完待自评的占位记录: user={user_id[:8]}, quiz={quiz_id[:8]}, self_rating={self_rating}")
 
     # 2. 判断正误，计算 SM-2 评分
     correct_answer = quiz.answer
@@ -368,7 +363,8 @@ async def submit_answer(
             semantic_detail = semantic.get("detail")
             logger.info(
                 "简答语义判分: user=%s quiz=%s verdict=%s conf=%.2f quality=%d",
-                user_id[:8], quiz_id[:8],
+                user_id[:8],
+                quiz_id[:8],
                 (semantic_detail or {}).get("verdict"),
                 (semantic_detail or {}).get("confidence", 0),
                 semantic["quality"],
@@ -408,21 +404,20 @@ async def submit_answer(
     # 用复习后的状态算出来的事后数字，校准曲线随即失效。
     schedule_outcome = None
     if grade["needs_self_assessment"]:
-        logger.info(
-            f"答题待自评，暂不推进调度: user={user_id[:8]}, quiz={quiz_id[:8]}, type={question_type}"
-        )
+        logger.info(f"答题待自评，暂不推进调度: user={user_id[:8]}, quiz={quiz_id[:8]}, type={question_type}")
     else:
         state = await review_state_service.get_state(
-            db, user_id, ITEM_TYPE_QUIZ, quiz_id,
+            db,
+            user_id,
+            ITEM_TYPE_QUIZ,
+            quiz_id,
         )
         if state is None:
             # 题目明明刚查出来存在，却拿不到复习状态 —— 这是数据不一致。
             # 不能"当作没调度"继续写一条 ReviewLog：那会让用户看到
             # "已复习、已判分"，而调度其实没动，且没有任何痕迹表明这一点。
             # 按原则 P7（失败必须响亮）在这里失败。
-            raise RuntimeError(
-                f"无法读取复习状态，拒绝静默不推进调度: quiz={quiz_id}"
-            )
+            raise RuntimeError(f"无法读取复习状态，拒绝静默不推进调度: quiz={quiz_id}")
         effective = await user_settings_service.get_effective_settings(db, user_id)
         schedule_outcome = scheduler_service.advance(
             state,
@@ -467,9 +462,7 @@ async def submit_answer(
         # 占位提交（未推进调度）时两者都是 NULL —— 那一次确实没有调度发生，
         # 记一个"预测保持率"会让校准曲线的分母混进非预测值。
         rating=schedule_outcome.rating if schedule_outcome else None,
-        predicted_retention=(
-            schedule_outcome.predicted_retention if schedule_outcome else None
-        ),
+        predicted_retention=(schedule_outcome.predicted_retention if schedule_outcome else None),
         item_type="quiz",
         time_spent_ms=time_spent_ms,
         review_at=now,
@@ -486,16 +479,18 @@ async def submit_answer(
     if schedule_outcome is not None:
         try:
             await review_state_service.apply_schedule_result(
-                db, user_id, ITEM_TYPE_QUIZ, quiz_id,
-                outcome=schedule_outcome, quality=quality, now=now,
+                db,
+                user_id,
+                ITEM_TYPE_QUIZ,
+                quiz_id,
+                outcome=schedule_outcome,
+                quality=quality,
+                now=now,
             )
         except Exception as state_err:
             # 双写失败不应让答题本身失败：题目维度的旧字段仍是权威来源，
             # 且惰性补建会在下次读取时补齐。
-            logger.warning(
-                f"写入 ReviewState 失败（旧字段已更新，不影响答题）: "
-                f"quiz={quiz_id[:8]}, {state_err}"
-            )
+            logger.warning(f"写入 ReviewState 失败（旧字段已更新，不影响答题）: quiz={quiz_id[:8]}, {state_err}")
 
     await db.commit()
     await db.refresh(quiz)
@@ -514,16 +509,17 @@ async def submit_answer(
     # 答题后非阻塞刷新关联卡片掌握度（失败不影响答题响应）
     try:
         from .mastery_service import refresh_card_mastery
+
         await refresh_card_mastery(quiz.card_id, db)
     except Exception as mastery_err:
-        logger.warning(
-            f"刷新卡片掌握度失败 (card_id={quiz.card_id}): {mastery_err}"
-        )
+        logger.warning(f"刷新卡片掌握度失败 (card_id={quiz.card_id}): {mastery_err}")
 
     # 一并把今日已有的记录传给结果构造器：占位记录是「已提交但未完成」的证据，
     # 前端需要它在刷新/重放后仍能正确显示"待自评"，而不是误判为已完成。
     result = _build_submit_result(
-        quiz, review_log, existing_logs=existing_logs + [review_log],
+        quiz,
+        review_log,
+        existing_logs=existing_logs + [review_log],
         completing_placeholder=completing_placeholder,
     )
     # 透出判分可信度，供 UI 决定是否请用户自评（简答题必为 True）
@@ -629,6 +625,7 @@ async def get_review_stats(
     now = datetime.now(timezone.utc)
     # 日界按 Asia/Shanghai（北京时间零点），而非 UTC 零点（见 docs/decisions.md#F-32）
     from ..utils.timeutil import today_start_utc
+
     today_start = today_start_utc(now)
 
     # 今日已完成数（先查，后面 due_count 需要用）；口径见 _count_settled_today
@@ -640,30 +637,27 @@ async def get_review_stats(
         due_count = 0
     else:
         # 使用子查询加 LIMIT，避免扫描全表（回收站笔记的题目暂不可见）
-        due_subq = (
-            select(func.count())
-            .select_from(
-                select(QuizItem.id)
-                .where(
-                    QuizItem.user_id == user_id,
-                    (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
-                    or_(
-                        QuizItem.note_id.is_(None),
-                        select(Note.id).where(
-                            Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
-                        ).exists(),
-                    ),
-                )
-                .limit(remaining_quota)
-                .subquery()
+        due_subq = select(func.count()).select_from(
+            select(QuizItem.id)
+            .where(
+                QuizItem.user_id == user_id,
+                (QuizItem.next_review_at <= now) | (QuizItem.next_review_at.is_(None)),
+                or_(
+                    QuizItem.note_id.is_(None),
+                    select(Note.id).where(Note.id == QuizItem.note_id, Note.trashed_at.is_(None)).exists(),
+                ),
             )
+            .limit(remaining_quota)
+            .subquery()
         )
         due_count_result = await db.execute(due_subq)
         due_count = due_count_result.scalar() or 0
 
     # 今日正确数
     today_correct_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+        select(func.count())
+        .select_from(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
             ReviewLog.review_at >= today_start,
             ReviewLog.is_correct.is_(True),
@@ -673,7 +667,9 @@ async def get_review_stats(
 
     # 累计复习次数
     total_reviews_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+        select(func.count())
+        .select_from(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
         )
     )
@@ -681,7 +677,9 @@ async def get_review_stats(
 
     # 累计正确数
     total_correct_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+        select(func.count())
+        .select_from(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
             ReviewLog.is_correct.is_(True),
         )
@@ -690,13 +688,13 @@ async def get_review_stats(
 
     # 总题目数（回收站笔记的题目暂不可见，不计入）
     total_quizzes_result = await db.execute(
-        select(func.count()).select_from(QuizItem).where(
+        select(func.count())
+        .select_from(QuizItem)
+        .where(
             QuizItem.user_id == user_id,
             or_(
                 QuizItem.note_id.is_(None),
-                select(Note.id).where(
-                    Note.id == QuizItem.note_id, Note.trashed_at.is_(None)
-                ).exists(),
+                select(Note.id).where(Note.id == QuizItem.note_id, Note.trashed_at.is_(None)).exists(),
             ),
         )
     )
@@ -735,7 +733,9 @@ async def get_review_history(
     """
     # 计算总数
     count_result = await db.execute(
-        select(func.count()).select_from(ReviewLog).where(
+        select(func.count())
+        .select_from(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
         )
     )
@@ -743,26 +743,30 @@ async def get_review_history(
 
     # 分页查询
     result = await db.execute(
-        select(ReviewLog).where(
+        select(ReviewLog)
+        .where(
             ReviewLog.user_id == user_id,
-        ).order_by(
-            ReviewLog.review_at.desc()
-        ).offset((page - 1) * page_size).limit(page_size)
+        )
+        .order_by(ReviewLog.review_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     logs = list(result.scalars().all())
 
     items = []
     for log in logs:
-        items.append({
-            "id": log.id,
-            "quiz_id": log.quiz_id,
-            "note_id": log.note_id,
-            "user_answer": log.user_answer,
-            "is_correct": log.is_correct,
-            "quality": log.quality,
-            "time_spent_ms": log.time_spent_ms,
-            "review_at": log.review_at.isoformat() if log.review_at else None,
-        })
+        items.append(
+            {
+                "id": log.id,
+                "quiz_id": log.quiz_id,
+                "note_id": log.note_id,
+                "user_answer": log.user_answer,
+                "is_correct": log.is_correct,
+                "quality": log.quality,
+                "time_spent_ms": log.time_spent_ms,
+                "review_at": log.review_at.isoformat() if log.review_at else None,
+            }
+        )
 
     return {
         "items": items,

@@ -26,6 +26,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..core.app_error import (
     CLEANING_CONTENT_UNREADABLE,
     CLEANING_IN_PROGRESS,
@@ -166,7 +167,7 @@ async def start_cleaning(
     return CleaningStartResponse(
         id=note_id,
         status=NoteStatus.cleaning,
-        message="清洗任务已触发",
+        message=i18n.localize("清洗任务已触发", "Cleaning task started"),
     )
 
 
@@ -226,7 +227,7 @@ async def stop_cleaning(
     return CleaningStopResponse(
         id=note_id,
         status=NoteStatus.cleaning_failed,
-        message="清洗已停止",
+        message=i18n.localize("清洗已停止", "Cleaning stopped"),
     )
 
 

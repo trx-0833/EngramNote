@@ -53,6 +53,7 @@ import numpy as np
 from sqlalchemy import and_, case, distinct, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..models.card_relation import CardRelation, RelationType, RelationStatus
 from ..models.chunk import unpack_vector
 from ..models.knowledge_card import KnowledgeCard
@@ -188,9 +189,7 @@ def _compute_pairwise_similarity(vectors: List[List[float]]) -> np.ndarray:
     return _compute_similarity(vectors, vectors)
 
 
-def _compute_similarity(
-    rows: List[List[float]], cols: List[List[float]]
-) -> np.ndarray:
+def _compute_similarity(rows: List[List[float]], cols: List[List[float]]) -> np.ndarray:
     """
     候选 × 目标 的余弦相似度矩阵（**非对称**：两个集合可以不同大小）
 
@@ -348,22 +347,21 @@ async def get_suggested_relations(
     card_title_map = {row.id: row.title for row in cards_result.all()}
 
     # 任一端卡片在回收站中的建议关系直接跳过
-    relations = [
-        rel for rel in relations
-        if rel.card_id_1 in card_title_map and rel.card_id_2 in card_title_map
-    ]
+    relations = [rel for rel in relations if rel.card_id_1 in card_title_map and rel.card_id_2 in card_title_map]
 
     # 构建建议关系列表
     suggested = []
     for rel in relations:
-        suggested.append(SuggestedRelation(
-            id=rel.id,
-            card_id_1=rel.card_id_1,
-            card_id_2=rel.card_id_2,
-            card_1_title=card_title_map.get(rel.card_id_1, "(未知)"),
-            card_2_title=card_title_map.get(rel.card_id_2, "(未知)"),
-            similarity_score=rel.similarity_score,
-        ))
+        suggested.append(
+            SuggestedRelation(
+                id=rel.id,
+                card_id_1=rel.card_id_1,
+                card_id_2=rel.card_id_2,
+                card_1_title=card_title_map.get(rel.card_id_1, "(未知)"),
+                card_2_title=card_title_map.get(rel.card_id_2, "(未知)"),
+                similarity_score=rel.similarity_score,
+            )
+        )
 
     return suggested
 
@@ -467,27 +465,32 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
             # `.all()` 返回的 `Row` 只有列出的那些属性；访问没列的列会
             # `KeyError: 'updated_at'`（实测 21 条既有用例因此全红）。
             KnowledgeCard.updated_at,
-        ).where(
+        )
+        .where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.has_embedding.is_(True),
             Note.not_trashed(KnowledgeCard.note_id),
-        ).order_by(KnowledgeCard.updated_at.desc())
+        )
+        .order_by(KnowledgeCard.updated_at.desc())
     )
     cards = list(targets_result.all())
 
     if len(cards) < 2:
         # 区分"卡片本来就少"与"卡片有、但都没有向量" —— 后者是部署问题，
         # 静默返回 0 会让用户以为"没有相关卡片"，而实际是没跑补向量
-        total = (await db.execute(
-            select(func.count()).select_from(KnowledgeCard).where(
-                KnowledgeCard.user_id == user_id,
-                Note.not_trashed(KnowledgeCard.note_id),
+        total = (
+            await db.execute(
+                select(func.count())
+                .select_from(KnowledgeCard)
+                .where(
+                    KnowledgeCard.user_id == user_id,
+                    Note.not_trashed(KnowledgeCard.note_id),
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
         if total >= 2 and len(cards) == 0:
             raise GraphSuggestionError(
-                "卡片向量尚未生成，无法自动建议关系。"
-                "请先运行 `python backend/scripts/embed_cards.py` 补向量后重试"
+                "卡片向量尚未生成，无法自动建议关系。请先运行 `python backend/scripts/embed_cards.py` 补向量后重试"
             )
         return 0
 
@@ -509,7 +512,10 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         logger.warning(
             "卡片向量混用了多个模型，只用最多的那一组: user=%s 采用 %s(%s) 共 %d 张；"
             "丢弃 %s —— 跨模型算余弦无意义，请重跑 embed_cards 统一",
-            user_id, biggest[0][0], biggest[0][1], len(biggest[1]),
+            user_id,
+            biggest[0][0],
+            biggest[0][1],
+            len(biggest[1]),
             {f"{k[0]}({k[1]})": len(v) for k, v in groups.items() if k != biggest[0]},
         )
         cards = biggest[1]
@@ -531,9 +537,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     loop = asyncio.get_event_loop()
 
     # 查询已有的所有关系（含 rejected），避免重复建议
-    existing_result = await db.execute(
-        select(CardRelation).where(CardRelation.user_id == user_id)
-    )
+    existing_result = await db.execute(select(CardRelation).where(CardRelation.user_id == user_id))
     existing_relations = list(existing_result.scalars().all())
 
     # 构建已有关系集合：(min_id, max_id) -> relation
@@ -603,9 +607,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
 
     isolated = [c.id for c in cards if c.id not in related_ids]
     isolated.sort(
-        key=lambda cid: _candidate_sort_key(
-            cid, edge_count=edge_count, note_size=note_size, updated_at=updated_at
-        )
+        key=lambda cid: _candidate_sort_key(cid, edge_count=edge_count, note_size=note_size, updated_at=updated_at)
     )
     candidate_ids = isolated[:MAX_CARDS_FOR_SUGGEST]
     if not candidate_ids:
@@ -618,9 +620,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         return 0
 
     # 候选 × 目标 的相似度矩阵（非对称；CPU 密集，放入线程池）
-    sim_matrix = await loop.run_in_executor(
-        None, _compute_similarity, [vectors[p] for p in cand_pos], vectors
-    )
+    sim_matrix = await loop.run_in_executor(None, _compute_similarity, [vectors[p] for p in cand_pos], vectors)
 
     # 逐卡取"最像的 TOP_K_PER_CARD 张"。**K 不是判据**，它只是把候选推到高分段；
     # 真正的判据是下面那个按「是否同笔记」分档的下界。
@@ -708,9 +708,7 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
     # 代价是算完不用：一批 600 候选 × 3469 目标 ≈ 208 万点积，实测秒级
     # （旧注释记的是 200 × 1181 时"几十毫秒"）。这个代价换的是
     # **"审核队列首屏是按价值排序的 200 条"**（本项的验收判据之一）。
-    new_relations.sort(
-        key=lambda r: (-(r.similarity_score or 0.0), r.card_id_1, r.card_id_2)
-    )
+    new_relations.sort(key=lambda r: (-(r.similarity_score or 0.0), r.card_id_1, r.card_id_2))
     backlog = max(0, len(new_relations) - RELATION_BATCH_SIZE)
     kept = new_relations[:RELATION_BATCH_SIZE]
 
@@ -729,16 +727,19 @@ async def auto_suggest_relations(user_id: str, db: AsyncSession) -> int:
         logger.info(
             "审核队列闸门: user=%s 本轮产出 %d 条、按相似度留下 %d 条待下一轮"
             "（上限 RELATION_BATCH_SIZE=%d；孤点优先 + 价值排序保证推进）",
-            user_id[:8], len(new_relations), backlog, RELATION_BATCH_SIZE,
+            user_id[:8],
+            len(new_relations),
+            backlog,
+            RELATION_BATCH_SIZE,
         )
 
     if same_title_skipped:
         # 这条日志**不能省**：同名闸只是"不建边"，重复卡片本身还在库里。
         # 没有这条日志，这个数据问题就从"图谱里看得见"变成"完全看不见"了。
         logger.info(
-            "同名闸: user=%s 跳过了 %d 对同名卡片（它们更可能是重复卡片，"
-            "该合并而不是连边；去重功能尚未实现）",
-            user_id[:8], same_title_skipped,
+            "同名闸: user=%s 跳过了 %d 对同名卡片（它们更可能是重复卡片，该合并而不是连边；去重功能尚未实现）",
+            user_id[:8],
+            same_title_skipped,
         )
 
     return new_count
@@ -861,7 +862,14 @@ async def create_relation(
     try:
         rel_type = RelationType(relation_type)
     except ValueError:
-        return {"success": False, "error": f"无效的关系类型: {relation_type}"}
+        return {
+            "success": False,
+            # 带运行期值 → 表匹配不上，当场按当前语言选一句（i18n.localize）
+            "error": i18n.localize(
+                f"无效的关系类型: {relation_type}",
+                f"Invalid relation type: {relation_type}",
+            ),
+        }
 
     # 无向关系统一排序存储，确保 card_id_1 <= card_id_2
     stored_id_1, stored_id_2 = card_id_1, card_id_2
@@ -913,8 +921,7 @@ async def create_relation(
     await db.refresh(relation)
 
     logger.info(
-        f"手动创建关系: user={user_id[:8]}, "
-        f"card1={stored_id_1[:8]}, card2={stored_id_2[:8]}, type={relation_type}"
+        f"手动创建关系: user={user_id[:8]}, card1={stored_id_1[:8]}, card2={stored_id_2[:8]}, type={relation_type}"
     )
     return {"success": True, "relation_id": relation.id}
 
@@ -1041,20 +1048,26 @@ async def find_suspected_duplicate_cards(
         只含**已嵌入**的卡：没有向量的卡算不出相似度，而按标题就下"疑似重复"
         的结论依据不足（见上）。
     """
-    rows = list((await db.execute(
-        select(
-            KnowledgeCard.id,
-            KnowledgeCard.title,
-            KnowledgeCard.note_id,
-            KnowledgeCard.embedding,
-            KnowledgeCard.embedding_dim,
-            KnowledgeCard.embedding_model,
-        ).where(
-            KnowledgeCard.user_id == user_id,
-            KnowledgeCard.has_embedding.is_(True),
-            Note.not_trashed(KnowledgeCard.note_id),
-        ).order_by(KnowledgeCard.id)
-    )).all())
+    rows = list(
+        (
+            await db.execute(
+                select(
+                    KnowledgeCard.id,
+                    KnowledgeCard.title,
+                    KnowledgeCard.note_id,
+                    KnowledgeCard.embedding,
+                    KnowledgeCard.embedding_dim,
+                    KnowledgeCard.embedding_model,
+                )
+                .where(
+                    KnowledgeCard.user_id == user_id,
+                    KnowledgeCard.has_embedding.is_(True),
+                    Note.not_trashed(KnowledgeCard.note_id),
+                )
+                .order_by(KnowledgeCard.id)
+            )
+        ).all()
+    )
 
     # 按归一化标题分组（只 strip —— 与同名闸同一判据，不能更激进：
     # 见 `title_of` 那段说明，`操作术语` 与 `操作术语定义` 不是重复卡）
@@ -1092,20 +1105,24 @@ async def find_suspected_duplicate_cards(
                 if sim < SUSPECTED_DUPLICATE_SIMILARITY:
                     continue
                 id1, id2 = sorted([a.id, b.id])
-                pairs.append({
-                    "card_id_1": id1,
-                    "card_id_2": id2,
-                    "title": title,
-                    "similarity": round(sim, 4),
-                    "note_id_1": a.note_id,
-                    "note_id_2": b.note_id,
-                })
+                pairs.append(
+                    {
+                        "card_id_1": id1,
+                        "card_id_2": id2,
+                        "title": title,
+                        "similarity": round(sim, 4),
+                        "note_id_1": a.note_id,
+                        "note_id_2": b.note_id,
+                    }
+                )
 
     pairs.sort(key=lambda p: (-p["similarity"], p["card_id_1"], p["card_id_2"]))
     if len(pairs) > limit:
         logger.info(
             "疑似重复卡片: user=%s 共 %d 对，按相似度只返回前 %d 对",
-            user_id[:8], len(pairs), limit,
+            user_id[:8],
+            len(pairs),
+            limit,
         )
     return pairs[:limit]
 
@@ -1158,10 +1175,12 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
 
     # 1. 查询用户的知识卡片，限制 100 张（回收站中的卡片不参与推断）
     cards_result = await db.execute(
-        select(KnowledgeCard).where(
+        select(KnowledgeCard)
+        .where(
             KnowledgeCard.user_id == user_id,
             Note.not_trashed(KnowledgeCard.note_id),
-        ).limit(100)
+        )
+        .limit(100)
     )
     cards = list(cards_result.scalars().all())
 
@@ -1172,9 +1191,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
     #    去重键区分有向/无向——prerequisite/subsequent 保留方向
     #    （prerequisite(A,B) 与 prerequisite(B,A) 语义不同，可共存），
     #    contrast/related 为无向（排序去重），见 docs/decisions.md#F-17
-    existing_result = await db.execute(
-        select(CardRelation).where(CardRelation.user_id == user_id)
-    )
+    existing_result = await db.execute(select(CardRelation).where(CardRelation.user_id == user_id))
     existing_relations = list(existing_result.scalars().all())
     # 有向键：保持存储方向（含类型）
     existing_directed: set = set()
@@ -1184,10 +1201,12 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         if rel.relation_type in (RelationType.prerequisite, RelationType.subsequent):
             existing_directed.add((rel.card_id_1, rel.card_id_2, rel.relation_type.value))
         else:
-            existing_undirected.add((
-                tuple(sorted([rel.card_id_1, rel.card_id_2])),
-                rel.relation_type.value,
-            ))
+            existing_undirected.add(
+                (
+                    tuple(sorted([rel.card_id_1, rel.card_id_2])),
+                    rel.relation_type.value,
+                )
+            )
 
     def _pair_exists(card_a: str, card_b: str, rel_type: RelationType) -> bool:
         """按方向语义检查卡片对是否已有同类型关系"""
@@ -1203,7 +1222,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
     new_relations: List[CardRelation] = []
 
     for start in range(0, len(cards), BATCH_SIZE):
-        batch_cards = cards[start:start + BATCH_SIZE]
+        batch_cards = cards[start : start + BATCH_SIZE]
         batch_ids = {c.id for c in batch_cards}
 
         # 先过滤候选对：若该批内所有卡片对都已有关系，则跳过该批
@@ -1239,10 +1258,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         try:
             relations = await llm_service.infer_card_relations(cards_summary)
         except Exception as e:
-            logger.warning(
-                f"LLM 推断关系异常(批次 {start // BATCH_SIZE + 1}): "
-                f"user={user_id[:8]}, error={e}"
-            )
+            logger.warning(f"LLM 推断关系异常(批次 {start // BATCH_SIZE + 1}): user={user_id[:8]}, error={e}")
             continue
 
         # 校验并创建关系（阶段 4.1 收尾：结构化校验 + **未通过的要报告**）
@@ -1252,9 +1268,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
         # 模型开始返回垃圾时，用户只会看到"关系变少了"，日志里什么都没有。
         validation = validate_items(relations, CardRelationPoint, source="infer_relations")
         if validation.issues:
-            logger.warning(
-                "卡片关系校验（批次 %d）: %s", start // BATCH_SIZE + 1, validation.summary()
-            )
+            logger.warning("卡片关系校验（批次 %d）: %s", start // BATCH_SIZE + 1, validation.summary())
 
         for item in validation.valid:
             rel = item.model_dump()
@@ -1308,9 +1322,7 @@ async def suggest_semantic_relations(user_id: str, db: AsyncSession) -> Dict[str
     if new_count > 0:
         await db.commit()
 
-    logger.info(
-        f"语义关系推断: user={user_id[:8]}, 新增 {new_count} 条建议, 跳过 {skipped_count} 条已有关系"
-    )
+    logger.info(f"语义关系推断: user={user_id[:8]}, 新增 {new_count} 条建议, 跳过 {skipped_count} 条已有关系")
     return {
         "success": True,
         "new_count": new_count,
@@ -1380,8 +1392,7 @@ async def get_graph_stats(user_id: str, db: AsyncSession) -> Dict[str, Any]:
         )
     ).all()
     type_distribution = [
-        {"relation_type": rel_type.value, "count": count}
-        for rel_type, count in sorted(type_rows, key=lambda x: -x[1])
+        {"relation_type": rel_type.value, "count": count} for rel_type, count in sorted(type_rows, key=lambda x: -x[1])
     ]
 
     # 孤立节点：没有任何关系（confirmed 或 suggested）的卡片，用 NOT EXISTS 精确计数
@@ -1526,14 +1537,16 @@ async def get_node_subgraph(
             continue
         other_id = rel.card_id_2 if rel.card_id_1 == node_id else rel.card_id_1
         neighbor_ids.add(other_id)
-        edges_data.append({
-            "id": rel.id,
-            "source": rel.card_id_1,
-            "target": rel.card_id_2,
-            "relation_type": rel.relation_type.value,
-            "status": rel.status.value,
-            "similarity_score": rel.similarity_score,
-        })
+        edges_data.append(
+            {
+                "id": rel.id,
+                "source": rel.card_id_1,
+                "target": rel.card_id_2,
+                "relation_type": rel.relation_type.value,
+                "status": rel.status.value,
+                "similarity_score": rel.similarity_score,
+            }
+        )
 
     # 查询邻居节点详情
     neighbors = []
@@ -1555,8 +1568,7 @@ async def get_node_subgraph(
         # 批量统计邻居的关联数（按无向卡片对去重，单条查询避免逐邻居 N+1）
         neighbor_rel_rows = (
             await db.execute(
-                select(CardRelation.card_id_1, CardRelation.card_id_2)
-                .where(
+                select(CardRelation.card_id_1, CardRelation.card_id_2).where(
                     CardRelation.user_id == user_id,
                     CardRelation.status == RelationStatus.confirmed,
                     or_(
@@ -1574,13 +1586,15 @@ async def get_node_subgraph(
                 neighbor_sets[cid_2].add(cid_1)
 
         for n in neighbor_cards:
-            neighbors.append({
-                "id": n.id,
-                "title": n.title,
-                "card_type": n.card_type.value,
-                "note_id": n.note_id,
-                "relation_count": len(neighbor_sets.get(n.id, set())),
-            })
+            neighbors.append(
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "card_type": n.card_type.value,
+                    "note_id": n.note_id,
+                    "relation_count": len(neighbor_sets.get(n.id, set())),
+                }
+            )
 
     # 统计中心节点关联数：按无向卡片对去重（仅 confirmed）
     center_neighbors: set = set()
@@ -1638,9 +1652,7 @@ async def batch_confirm_suggestions(
 
     if confirmed_count > 0:
         await db.commit()
-        logger.info(
-            f"批量确认: user={user_id[:8]}, 确认 {confirmed_count} 条, 失败 {failed_count} 条"
-        )
+        logger.info(f"批量确认: user={user_id[:8]}, 确认 {confirmed_count} 条, 失败 {failed_count} 条")
 
     return {
         "success": True,
@@ -1685,9 +1697,7 @@ async def batch_reject_suggestions(
 
     if rejected_count > 0:
         await db.commit()
-        logger.info(
-            f"批量拒绝: user={user_id[:8]}, 拒绝 {rejected_count} 条, 失败 {failed_count} 条"
-        )
+        logger.info(f"批量拒绝: user={user_id[:8]}, 拒绝 {rejected_count} 条, 失败 {failed_count} 条")
 
     return {
         "success": True,

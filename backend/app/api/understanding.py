@@ -64,6 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, delete as sql_delete, or_, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..core.app_error import (
     CARD_NOT_FOUND,
     EMPTY_QUESTION,
@@ -159,7 +160,11 @@ async def start_understanding(
         return UnderstandingStartResponse(
             id=note_id,
             status=note.status,
-            message="重新理解将删除该笔记现有的全部学习成果（卡片、题目、复习记录、图谱关系），确认后不可恢复",
+            message=i18n.localize(
+                "重新理解将删除该笔记现有的全部学习成果（卡片、题目、复习记录、图谱关系），确认后不可恢复",
+                "Re-running understanding deletes all existing learning results for this note "
+                "(cards, questions, review history, graph relations). This cannot be undone.",
+            ),
             requires_confirm=True,
             impact=impact,
         )
@@ -226,7 +231,7 @@ async def start_understanding(
     return UnderstandingStartResponse(
         id=note_id,
         status=NoteStatus.learning,
-        message="理解任务已触发",
+        message=i18n.localize("理解任务已触发", "Understanding task started"),
     )
 
 
@@ -789,7 +794,7 @@ async def generate_questions(
 
     return GenerateQuestionsResponse(
         note_id=note_id,
-        message="题目生成任务已触发",
+        message=i18n.localize("题目生成任务已触发", "Question generation started"),
         question_count=0,
     )
 

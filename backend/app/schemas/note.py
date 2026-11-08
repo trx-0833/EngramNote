@@ -3,12 +3,14 @@
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from ..core.error_messages import translate_note_error
 from ..models.note import NoteStatus, SourceType
 
 
 # --- 响应模型 ---
+
 
 class NoteResponse(BaseModel):
     id: str
@@ -31,9 +33,26 @@ class NoteResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("error_message")
+    @classmethod
+    def _localize_error_message(cls, value: Optional[str]) -> Optional[str]:
+        """`error_message` 存的是中文诊断串，**返回时**按请求语言翻译
+
+        为什么在 schema 里做而不是写库时做：
+        - 写库的多数是 Celery 任务（没有请求上下文，拿不到语言）；
+        - 历史行里已经是中文，改写入端治不了老数据；
+        - 这个字段是**所有**笔记响应（列表/详情/状态轮询）的公共出口，
+          在这里做一次，`NotesList.tsx:517` 与 `CleaningPanel.tsx:258` 一起生效。
+
+        匹配不上时原样返回（见 `translate_note_error`）—— 宁可不翻，
+        也不能把诊断串翻丢。
+        """
+        return translate_note_error(value)
+
 
 class NoteDetailResponse(NoteResponse):
     """笔记详情 — 包含 Markdown 内容"""
+
     original_file_path: Optional[str] = None
     original_md_path: Optional[str] = None
     original_md_content: Optional[str] = None
@@ -67,6 +86,7 @@ class NoteListResponse(BaseModel):
 
 # --- 请求模型 ---
 
+
 class NoteUpdateRequest(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
 
@@ -76,17 +96,26 @@ class NoteStatusResponse(BaseModel):
     status: NoteStatus
     error_message: Optional[str] = None
 
+    @field_validator("error_message")
+    @classmethod
+    def _localize_error_message(cls, value: Optional[str]) -> Optional[str]:
+        """与 `NoteResponse` 同一条理由：状态轮询也是"用户看得到 error_message"的出口"""
+        return translate_note_error(value)
+
 
 class NoteContentUpdateRequest(BaseModel):
     """笔记内容更新请求"""
+
     content: str = Field(..., description="Markdown 内容")
     target: Literal["clean", "original"] = Field("clean", description="写入目标：clean 或 original")
 
 
 # --- 回收站（Trash）响应模型 ---
 
+
 class TrashNoteItem(BaseModel):
     """回收站列表项：笔记 + 附属统计（"恢复可还原什么"的展示依据）"""
+
     note: NoteResponse
     card_count: int = 0
     quiz_count: int = 0
@@ -97,12 +126,14 @@ class TrashNoteItem(BaseModel):
 
 class TrashListResponse(BaseModel):
     """回收站列表响应"""
+
     items: List[TrashNoteItem]
     total: int
 
 
 class TrashInfoResponse(BaseModel):
     """删除确认弹窗的关联统计"""
+
     card_count: int = 0
     key_card_count: int = 0
     link_count: int = 0
@@ -110,11 +141,13 @@ class TrashInfoResponse(BaseModel):
 
 class RestoreResponse(BaseModel):
     """恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 None）"""
+
     note: NoteResponse
     renamed_to: Optional[str] = None
 
 
 class PurgeAllResponse(BaseModel):
     """清空回收站结果"""
+
     purged: int
     failed: int
