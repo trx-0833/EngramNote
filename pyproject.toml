@@ -110,7 +110,7 @@ mineru = ["mineru>=4.0,<5"]
 asr = ["torch>=2.14.0", "qwen-asr>=0.0.6"]
 # 贡献者：测试 + lint
 dev = [
-    "pytest~=8.0.0",
+    "pytest>=8.0,<9.3",
     "pytest-asyncio~=1.4.0",
     "ruff~=0.16.0",
 ]
