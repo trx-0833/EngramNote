@@ -89,7 +89,7 @@ psutil~=7.2.2
 alembic~=1.19.2
 
 # ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
-openai~=2.54.0
+openai>=2.54,<3.47
 soundfile~=0.14.0
 
 # ---- Windows：文件 broker 的硬依赖（2026-11-08 补）----
