@@ -188,6 +188,55 @@ class JsonLinesFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+class _SafeRotatingFileHandler(RotatingFileHandler):
+    """轮转失败也不丢日志（Windows 多进程共用同一文件的兜底）
+
+    ## 现场（2026-11-08，API + Celery worker 同时运行）
+
+    ```
+    --- Logging error ---
+      File "…/logging/handlers.py", line 74, in emit
+        self.doRollover()
+    PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。:
+      '…\\engramnote.log' -> '…\\engramnote.log.1'
+    ```
+
+    Windows 不允许重命名"被另一个进程打开着"的文件，而 API 与 worker 都通过
+    `setup_logging()` 挂了同一个 `engramnote.log`。后果比"轮转失败"重得多：
+    `RotatingFileHandler.emit()` 先 `doRollover()` 失败 → 异常冒到
+    `Handler.handleError` → **这条记录被丢弃**；而文件依然超过 `maxBytes`，
+    于是**之后每一条日志都失败**。实测主日志卡在 10.4MB、mtime 冻住 ——
+    那一整段时间"日志全瞎"，比文件大一点糟糕得多。
+
+    ## 兜底策略
+
+    - 轮转失败 → 只告警一次，**继续往当前文件追加**；
+    - 失败后 60 秒内不再尝试 rename（否则每条日志都去撞一次必然失败的调用）。
+    """
+
+    #: 上次轮转失败后，在这个时刻（monotonic）之前不再重试
+    _retry_rollover_after: float = 0.0
+    #: 是否已经为"这次故障窗口"告警过
+    _rollover_warned: bool = False
+
+    def doRollover(self) -> None:  # pragma: no cover - 分支由单测直接驱动
+        now = time.monotonic()
+        if now < self._retry_rollover_after:
+            return
+        try:
+            super().doRollover()
+            self._rollover_warned = False
+        except OSError as exc:
+            self._retry_rollover_after = now + 60.0
+            if not self._rollover_warned:
+                self._rollover_warned = True
+                logging.getLogger(__name__).warning(
+                    "日志轮转失败（多进程共用同一文件时 Windows 不允许重命名），"
+                    "继续写入当前文件、磁盘占用将超过 LOG_MAX_BYTES: %s",
+                    exc,
+                )
+
+
 def _make_handler(
     stream_or_path,
     formatter: logging.Formatter,
@@ -197,11 +246,12 @@ def _make_handler(
     """建 handler；文件 handler 的轮转份数按"这份日志的用途"取值
 
     `backup_count=None` → 用 `settings.log_backup_count`（兼容老配置/控制台）。
+    文件 handler 用 `_SafeRotatingFileHandler`（多进程轮转兜底，见其 docstring）。
     """
     handler: logging.Handler
     if isinstance(stream_or_path, Path):
         settings = get_settings()
-        handler = RotatingFileHandler(
+        handler = _SafeRotatingFileHandler(
             str(stream_or_path),
             maxBytes=settings.log_max_bytes,
             backupCount=settings.log_backup_count if backup_count is None else backup_count,
