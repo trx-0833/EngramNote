@@ -450,12 +450,28 @@ REQUIRED_PACKAGES = {
     "PIL": "Pillow",
     # 嵌入可用性探测（app/services/embedding_service.py:54）
     "psutil": "psutil",
+    # Windows 上的 **Celery 文件 broker 硬依赖**（2026-11-08 补）
+    #
+    # `kombu.transport.filesystem` 在 Windows 是**模块顶层** import `pywintypes`，
+    # 缺它时 `celery worker` 直接 traceback 退出（不是告警），于是"上传后一直转圈"：
+    # MinerU 转换 / 清洗 / 理解 / ASR 全部跑不起来。
+    # Linux/macOS 用不到它（requirements 里带 `sys_platform == "win32"` 标记），
+    # 所以登记进 `PLATFORM_ONLY_PACKAGES`，非 Windows 直接跳过而不是报缺失。
+    "pywintypes": "pywin32",
     "httpx": "httpx",
     "alembic": "alembic",
     # ⚠️ chromadb 已于阶段 2.4 移除（向量改存 chunks 表、词法检索改 FTS5）。
     #    此前它仍留在本清单里，`--fix` 甚至会把已废弃的依赖装回来 ——
     #    这是"清单描述了一个不存在的架构"的典型形态，2026-09-23 删除。
     # torch 移入 OPTIONAL_PACKAGES（需从 pytorch.org 专用源安装）
+}
+
+#: 只在特定平台生效的必需包：`{模块名: sys.platform 值}`
+#:
+#: 与 requirements.txt 里的 PEP 508 标记保持一致（`pywin32; sys_platform == "win32"`）。
+#: 不在这张表里的平台就**跳过**它 —— 跳过不等于"没装"，所以不报缺失。
+PLATFORM_ONLY_PACKAGES = {
+    "pywintypes": "win32",
 }
 
 # 可选包：torch 和 qwen_asr（需专用源安装，不列入必需检测）
@@ -632,6 +648,11 @@ def check_backend_deps(auto_fix=False, deep=False):
 
     missing = []
     for module, package in REQUIRED_PACKAGES.items():
+        required_platform = PLATFORM_ONLY_PACKAGES.get(module)
+        if required_platform and sys.platform != required_platform:
+            # 平台不匹配：这条依赖在**本机**根本用不到（如 Windows 的 pywin32），
+            # 跳过它，而不是报"缺失"——否则 macOS/Linux 上自检天生红一条。
+            continue
         passed, detail = by_module[module]
         if passed:
             ok(f"{package}（仅确认已安装）" if detail == DETAIL_INSTALLED_ONLY else f"{package}")

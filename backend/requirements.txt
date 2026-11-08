@@ -102,4 +102,6 @@ soundfile~=0.14.0
 # 所以这不是可选件：全新 Windows 环境按 requirements.txt 装完照样起不了 worker。
 # 真机实测（2026-11-08，conda env aiforlearn）：装上 pywin32 后 worker 立刻可用，
 # 之前所有异步任务（MinerU 转换 / 清洗 / 理解 / ASR）都跑不起来。
-pywin32>=306; sys_platform == "win32"
+# ⚠️ 标记用**单引号**：`pyproject.toml` 那边是双引号字符串，
+# `test_packaging_metadata` 逐字比两份清单的约束串，引号风格不同会判红。
+pywin32>=306; sys_platform == 'win32'
