@@ -104,4 +104,4 @@ soundfile~=0.14.0
 # 之前所有异步任务（MinerU 转换 / 清洗 / 理解 / ASR）都跑不起来。
 # ⚠️ 标记用**单引号**：`pyproject.toml` 那边是双引号字符串，
 # `test_packaging_metadata` 逐字比两份清单的约束串，引号风格不同会判红。
-pywin32>=306; sys_platform == 'win32'
+pywin32>=312; sys_platform == 'win32'
