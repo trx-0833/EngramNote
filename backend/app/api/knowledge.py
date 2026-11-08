@@ -54,6 +54,7 @@ from ..schemas.knowledge import (
     MasteryOverviewResponse,
 )
 from ..services.knowledge_link_service import extract_combined, generate_extension
+from ..tasks.dispatch import dispatch
 from ..tasks.understand_tasks import generate_questions_task
 
 logger = logging.getLogger(__name__)
@@ -98,9 +99,7 @@ async def generate_extension_endpoint(
     Raises:
         AppError: 生成失败（父卡片不存在、掌握度不足、LLM 调用失败等）（EXTENSION_GENERATE_FAILED → 400）
     """
-    result = await generate_extension(
-        card_id, current_user.id, db, material_note_id=req.material_note_id
-    )
+    result = await generate_extension(card_id, current_user.id, db, material_note_id=req.material_note_id)
     if isinstance(result, dict) and "error" in result:
         raise AppError(EXTENSION_GENERATE_FAILED, result["error"], 400)
     return ExtensionGenerateResponse(**result)
@@ -138,7 +137,8 @@ async def generate_questions_for_extension(
         raise AppError(CARD_NOT_EXTENSION, "仅拓展卡片可使用此端点", 400)
 
     # 触发 Celery 出题任务（定向：拓展类别 + 困难难度）
-    generate_questions_task.delay(
+    dispatch(
+        generate_questions_task,
         card.note_id,
         target_categories=["extension"],
         target_difficulty="hard",

@@ -50,6 +50,7 @@ from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus, SourceType
 from ..services import vault_path
+from .dispatch import dispatch
 from ..services.vault_meta import write_note_meta
 
 settings = get_settings()
@@ -144,6 +145,7 @@ async def _convert_document(
             # 2a. 文档类 → 调用 mineru 子包转换
             try:
                 from ..services.mineru.converter import convert
+
                 result = convert(
                     local_file,
                     backend=backend or settings.mineru_backend,
@@ -159,25 +161,32 @@ async def _convert_document(
                     metadata = result.metadata or {}
                     # 转换成功，更新状态为 converted 并保存页数等元数据
                     await _update_note_status(
-                        note_id, NoteStatus.converted,
+                        note_id,
+                        NoteStatus.converted,
                         page_count=metadata.get("page_count"),
                         metadata_=metadata,
                     )
                 else:
                     # mineru 返回失败结果
                     elapsed = time.monotonic() - start_time
-                    logger.error("Mineru 转换失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+                    logger.error(
+                        "Mineru 转换失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed
+                    )
                     await _update_note_status(
-                        note_id, NoteStatus.failed,
+                        note_id,
+                        NoteStatus.failed,
                         error_message=f"Mineru 转换失败: {result.error}",
                     )
                     return
             except Exception:
                 # mineru 调用异常（如模块未安装、文件损坏等）
                 elapsed = time.monotonic() - start_time
-                logger.error("Mineru 调用异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+                logger.error(
+                    "Mineru 调用异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed
+                )
                 await _update_note_status(
-                    note_id, NoteStatus.failed,
+                    note_id,
+                    NoteStatus.failed,
                     error_message=f"Mineru 调用异常: {traceback.format_exc()}",
                 )
                 return
@@ -188,13 +197,15 @@ async def _convert_document(
                 with open(local_file, "r", encoding="utf-8") as f:
                     markdown_content = f.read()
                 await _update_note_status(
-                    note_id, NoteStatus.converted,
+                    note_id,
+                    NoteStatus.converted,
                 )
             except Exception:
                 elapsed = time.monotonic() - start_time
                 logger.error("Markdown 读取失败: note_id=%s, elapsed=%.1fs", note_id, elapsed)
                 await _update_note_status(
-                    note_id, NoteStatus.failed,
+                    note_id,
+                    NoteStatus.failed,
                     error_message=f"Markdown 文件读取失败: {traceback.format_exc()}",
                 )
                 return
@@ -220,20 +231,25 @@ async def _convert_document(
                     # 将 ASR 生成的标题更新到笔记
                     if result.title and result.title != "未命名":
                         await _update_note_status(
-                            note_id, NoteStatus.converted,
+                            note_id,
+                            NoteStatus.converted,
                             title=result.title,
                             metadata_=metadata,
                         )
                     else:
                         await _update_note_status(
-                            note_id, NoteStatus.converted,
+                            note_id,
+                            NoteStatus.converted,
                             metadata_=metadata,
                         )
                 else:
                     elapsed = time.monotonic() - start_time
-                    logger.error("ASR 转写失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
+                    logger.error(
+                        "ASR 转写失败: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed
+                    )
                     await _update_note_status(
-                        note_id, NoteStatus.failed,
+                        note_id,
+                        NoteStatus.failed,
                         error_message=f"ASR 转写失败: {result.error}",
                     )
                     return
@@ -241,7 +257,8 @@ async def _convert_document(
                 elapsed = time.monotonic() - start_time
                 logger.error("ASR 转写异常: note_id=%s, source_type=%s, elapsed=%.1fs", note_id, source_type, elapsed)
                 await _update_note_status(
-                    note_id, NoteStatus.failed,
+                    note_id,
+                    NoteStatus.failed,
                     error_message=f"ASR 转写异常: {traceback.format_exc()}",
                 )
                 return
@@ -262,14 +279,16 @@ async def _convert_document(
             )
             # 更新笔记的 Markdown 文件路径
             await _update_note_status(
-                note_id, NoteStatus.converted,
+                note_id,
+                NoteStatus.converted,
                 original_md_path=md_object_name,
             )
 
             # 转换成功后自动触发清洗任务
             try:
                 from .clean_tasks import clean_document_task
-                task = clean_document_task.delay(note_id)
+
+                task = dispatch(clean_document_task, note_id)
                 # 记录清洗任务 ID，便于用户停止清洗时撤销任务
                 await _record_clean_task_id(note_id, task.id)
             except Exception:
@@ -326,10 +345,13 @@ def convert_document_task(self, note_id: str, file_path: str, source_type: str, 
                 # （而非 MaxRetriesExceededError），旧代码捕获不到导致笔记
                 # 永久停留在 converting 状态。进入此分支即表示重试次数用尽，
                 # 标记笔记为失败状态（见 docs/decisions.md#F-30）。
-                _run_async(_update_note_status(
-                    note_id, NoteStatus.failed,
-                    error_message=f"转换任务重试失败: {str(exc)}",
-                ))
+                _run_async(
+                    _update_note_status(
+                        note_id,
+                        NoteStatus.failed,
+                        error_message=f"转换任务重试失败: {str(exc)}",
+                    )
+                )
                 _mark_task_failed(self, f"转换任务重试失败: {exc}")
         finally:
             _clear_progress_cache(task_id)

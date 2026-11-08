@@ -81,6 +81,7 @@ from ..models.user import User
 from ..models.knowledge_card import KnowledgeCard
 from ..models.quiz_item import QuizItem, QuestionType
 from ..models.review_log import ReviewLog
+
 # B5：删除题目要级联清 review_states（它没有外键，数据库不会替你做）
 from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
@@ -109,6 +110,7 @@ from ..services.note_service import get_note_detail
 from ..services.understanding_service import detect_card_duplicates
 from ..services.rag_service import RAGService
 from ..services.llm_service import LLMService
+from ..tasks.dispatch import dispatch
 from ..tasks.understand_tasks import understand_document_task, generate_questions_task
 from ..config import get_settings
 
@@ -164,16 +166,12 @@ async def start_understanding(
 
     # 重新学习前清空旧产物（无论当前状态），避免重复卡片
     # 批量删除关联的复习记录
-    quiz_ids_result = await db.execute(
-        select(QuizItem.id).where(QuizItem.note_id == note_id)
-    )
+    quiz_ids_result = await db.execute(select(QuizItem.id).where(QuizItem.note_id == note_id))
     quiz_ids = [row[0] for row in quiz_ids_result.all()]
     if quiz_ids:
         await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
     # 批量删除关联的卡片关系
-    card_ids_result = await db.execute(
-        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
-    )
+    card_ids_result = await db.execute(select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id))
     card_ids = [row[0] for row in card_ids_result.all()]
     if card_ids:
         await db.execute(
@@ -198,18 +196,14 @@ async def start_understanding(
     # 卡片会被重建，题目/复习记录不该跟着消失。
     if card_ids:
         await db.execute(
-            sql_update(QuizItem)
-            .where(QuizItem.card_id.in_(card_ids), QuizItem.note_id != note_id)
-            .values(card_id=None)
+            sql_update(QuizItem).where(QuizItem.card_id.in_(card_ids), QuizItem.note_id != note_id).values(card_id=None)
         )
         await db.execute(
             # ⚠️ 这里**不加** `note_id != note_id` 过滤：`review_logs.note_id` 可空，
             #    而 `NULL != 'x'` 求值为 NULL（不是 true）⇒ 那些行会被漏掉、
             #    照样挡住删除。而且属于**本篇**题目的复习记录在 `:172` 已经删掉了，
             #    所以此刻还引用这些卡片的行，本来就是"别处来的"。
-            sql_update(ReviewLog)
-            .where(ReviewLog.card_id.in_(card_ids))
-            .values(card_id=None)
+            sql_update(ReviewLog).where(ReviewLog.card_id.in_(card_ids)).values(card_id=None)
         )
     # 批量删除关联题目和知识卡片
     await db.execute(sql_delete(QuizItem).where(QuizItem.note_id == note_id))
@@ -223,10 +217,11 @@ async def start_understanding(
     await db.refresh(note)
     # 状态写穿镜像
     from ..services.vault_meta import write_note_meta
+
     write_note_meta(note)
 
     # 触发 Celery 理解任务
-    understand_document_task.delay(note_id)
+    dispatch(understand_document_task, note_id)
 
     return UnderstandingStartResponse(
         id=note_id,
@@ -235,44 +230,38 @@ async def start_understanding(
     )
 
 
-async def _count_understanding_impact(
-    db: AsyncSession, note_id: str
-) -> UnderstandingImpact:
+async def _count_understanding_impact(db: AsyncSession, note_id: str) -> UnderstandingImpact:
     """统计重新理解将删除的旧产物数量（见 docs/decisions.md#F-02）"""
     from sqlalchemy import func as sa_func
 
-    cards = (await db.execute(
-        select(sa_func.count()).select_from(KnowledgeCard).where(
-            KnowledgeCard.note_id == note_id
-        )
-    )).scalar() or 0
+    cards = (
+        await db.execute(select(sa_func.count()).select_from(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
+    ).scalar() or 0
 
-    quizzes = (await db.execute(
-        select(sa_func.count()).select_from(QuizItem).where(
-            QuizItem.note_id == note_id
-        )
-    )).scalar() or 0
+    quizzes = (
+        await db.execute(select(sa_func.count()).select_from(QuizItem).where(QuizItem.note_id == note_id))
+    ).scalar() or 0
 
-    review_logs = (await db.execute(
-        select(sa_func.count()).select_from(ReviewLog).where(
-            ReviewLog.note_id == note_id
-        )
-    )).scalar() or 0
+    review_logs = (
+        await db.execute(select(sa_func.count()).select_from(ReviewLog).where(ReviewLog.note_id == note_id))
+    ).scalar() or 0
 
     relations = 0
-    card_ids_result = await db.execute(
-        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
-    )
+    card_ids_result = await db.execute(select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id))
     card_ids = [row[0] for row in card_ids_result.all()]
     if card_ids:
-        relations = (await db.execute(
-            select(sa_func.count()).select_from(CardRelation).where(
-                or_(
-                    CardRelation.card_id_1.in_(card_ids),
-                    CardRelation.card_id_2.in_(card_ids),
+        relations = (
+            await db.execute(
+                select(sa_func.count())
+                .select_from(CardRelation)
+                .where(
+                    or_(
+                        CardRelation.card_id_1.in_(card_ids),
+                        CardRelation.card_id_2.in_(card_ids),
+                    )
                 )
             )
-        )).scalar() or 0
+        ).scalar() or 0
 
     return UnderstandingImpact(
         cards=cards,
@@ -313,10 +302,12 @@ async def get_chapter_summaries(
 
     # 查询该笔记的知识卡片，按章节分组
     result = await db.execute(
-        select(KnowledgeCard).where(
+        select(KnowledgeCard)
+        .where(
             KnowledgeCard.note_id == note_id,
             KnowledgeCard.user_id == current_user.id,
-        ).order_by(KnowledgeCard.created_at)
+        )
+        .order_by(KnowledgeCard.created_at)
     )
     cards = result.scalars().all()
 
@@ -359,9 +350,13 @@ async def get_note_cards(
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 计算总数
-    count_query = select(func.count()).select_from(KnowledgeCard).where(
-        KnowledgeCard.note_id == note_id,
-        KnowledgeCard.user_id == current_user.id,
+    count_query = (
+        select(func.count())
+        .select_from(KnowledgeCard)
+        .where(
+            KnowledgeCard.note_id == note_id,
+            KnowledgeCard.user_id == current_user.id,
+        )
     )
     total = (await db.execute(count_query)).scalar() or 0
 
@@ -464,9 +459,7 @@ async def get_card_detail(
     # JOIN Note 表获取笔记标题（note_id 为 NULL 的是独立/提升卡片）
     note_title = None
     if card.note_id is not None:
-        note_result = await db.execute(
-            select(Note.title).where(Note.id == card.note_id)
-        )
+        note_result = await db.execute(select(Note.title).where(Note.id == card.note_id))
         note_title_row = note_result.first()
         note_title = note_title_row[0] if note_title_row else "已删除的笔记"
     else:
@@ -505,9 +498,7 @@ async def update_card(
     # JOIN Note 表获取笔记标题（note_id 为 NULL 的是独立/提升卡片）
     note_title = None
     if card.note_id is not None:
-        note_result = await db.execute(
-            select(Note.title).where(Note.id == card.note_id)
-        )
+        note_result = await db.execute(select(Note.title).where(Note.id == card.note_id))
         note_title_row = note_result.first()
         note_title = note_title_row[0] if note_title_row else "已删除的笔记"
     else:
@@ -547,26 +538,18 @@ async def delete_card(
 
     # 解除子卡片的父级引用（parent_card_id 自引用外键为 NO ACTION，需先置 NULL）
     await db.execute(
-        sql_update(KnowledgeCard)
-        .where(KnowledgeCard.parent_card_id == card_id)
-        .values(parent_card_id=None)
+        sql_update(KnowledgeCard).where(KnowledgeCard.parent_card_id == card_id).values(parent_card_id=None)
     )
 
     # 删除关联的复习记录
-    quiz_ids_result = await db.execute(
-        select(QuizItem.id).where(QuizItem.card_id == card_id)
-    )
+    quiz_ids_result = await db.execute(select(QuizItem.id).where(QuizItem.card_id == card_id))
     quiz_ids = [row[0] for row in quiz_ids_result.all()]
     if quiz_ids:
-        await db.execute(
-            sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids))
-        )
+        await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
 
     # 删除关联的题目（Core 批量删除立即执行，确保先于卡片本身的 DELETE，
     # 避免 ORM flush 排序不确定导致 quiz_items 外键约束失败）
-    await db.execute(
-        sql_delete(QuizItem).where(QuizItem.card_id == card_id)
-    )
+    await db.execute(sql_delete(QuizItem).where(QuizItem.card_id == card_id))
     await db.delete(card)
     await db.commit()
 
@@ -595,11 +578,13 @@ async def get_card_duplicates(
     for card in cards:
         dupes = await detect_card_duplicates(db, current_user.id, card)
         for d in dupes:
-            all_duplicates.append({
-                "card_id": card.id,
-                "card_title": card.title,
-                **d,
-            })
+            all_duplicates.append(
+                {
+                    "card_id": card.id,
+                    "card_title": card.title,
+                    **d,
+                }
+            )
 
     return {"duplicates": all_duplicates}
 
@@ -707,7 +692,7 @@ async def ask_question_stream(
                     {
                         "role": "system",
                         "content": "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
-                                   "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。",
+                        "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。",
                     },
                     {"role": "user", "content": req.question},
                 ]
@@ -787,7 +772,9 @@ async def generate_questions(
 
     # 检查是否有知识卡片
     count_result = await db.execute(
-        select(func.count()).select_from(KnowledgeCard).where(
+        select(func.count())
+        .select_from(KnowledgeCard)
+        .where(
             KnowledgeCard.note_id == note_id,
             KnowledgeCard.user_id == current_user.id,
         )
@@ -798,9 +785,7 @@ async def generate_questions(
         raise AppError(UNDERSTANDING_NO_CARDS, "该笔记暂无知识卡片，请先触发理解管道", 400)
 
     # 触发 Celery 题目生成任务（透传定向出题参数 + 提示词版本）
-    generate_questions_task.delay(
-        note_id, target_categories, target_difficulty, prompt_version
-    )
+    dispatch(generate_questions_task, note_id, target_categories, target_difficulty, prompt_version)
 
     return GenerateQuestionsResponse(
         note_id=note_id,
@@ -823,9 +808,13 @@ async def get_note_questions(
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     # 计算总数
-    count_query = select(func.count()).select_from(QuizItem).where(
-        QuizItem.note_id == note_id,
-        QuizItem.user_id == current_user.id,
+    count_query = (
+        select(func.count())
+        .select_from(QuizItem)
+        .where(
+            QuizItem.note_id == note_id,
+            QuizItem.user_id == current_user.id,
+        )
     )
     total = (await db.execute(count_query)).scalar() or 0
 
@@ -1014,9 +1003,7 @@ async def update_question(
     # 与列表端点同一口径填 note_title（编辑后前端直接用它替换列表里那一行，
     # 不该为了一个标题再拉一次列表）
     if quiz.note_id:
-        note_title = (
-            await db.execute(select(Note.title).where(Note.id == quiz.note_id))
-        ).scalar_one_or_none()
+        note_title = (await db.execute(select(Note.title).where(Note.id == quiz.note_id))).scalar_one_or_none()
         item.note_title = note_title or "已删除的笔记"
     else:
         item.note_title = "独立卡片"
