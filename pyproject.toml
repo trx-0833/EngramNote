@@ -112,7 +112,7 @@ asr = ["torch>=2.14.0", "qwen-asr>=0.0.6"]
 dev = [
     "pytest~=8.0.0",
     "pytest-asyncio~=1.4.0",
-    "ruff~=0.16.0",
+    "ruff>=0.16,<0.18",
 ]
 
 [project.urls]
