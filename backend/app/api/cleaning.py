@@ -26,6 +26,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..core.app_error import (
     CLEANING_CONTENT_UNREADABLE,
     CLEANING_IN_PROGRESS,
@@ -57,6 +58,7 @@ from ..services.storage_service import (
     upload_bytes,
 )
 from ..services.cleaning_service import restore_block, delete_block
+from ..tasks.dispatch import dispatch
 from ..config import get_settings
 
 settings = get_settings()
@@ -98,6 +100,7 @@ def _apply_block_operation(clean_md: str, block_index: int, dup_of: Optional[int
 
 
 # --- API 端点 ---
+
 
 @router.post("/{note_id}/start", response_model=CleaningStartResponse)
 async def start_cleaning(
@@ -149,11 +152,13 @@ async def start_cleaning(
     await db.refresh(note)
     # 状态写穿镜像
     from ..services.vault_meta import write_note_meta
+
     write_note_meta(note)
 
     # 触发 Celery 清洗任务
     from ..tasks.clean_tasks import clean_document_task
-    task = clean_document_task.delay(note_id)
+
+    task = dispatch(clean_document_task, note_id)
     # 记录任务 ID 到笔记元数据，便于停止时撤销任务
     note.metadata_ = dict(note.metadata_ or {})
     note.metadata_["clean_task_id"] = task.id
@@ -162,7 +167,7 @@ async def start_cleaning(
     return CleaningStartResponse(
         id=note_id,
         status=NoteStatus.cleaning,
-        message="清洗任务已触发",
+        message=i18n.localize("清洗任务已触发", "Cleaning task started"),
     )
 
 
@@ -207,6 +212,7 @@ async def stop_cleaning(
     if task_id:
         try:
             from ..tasks.celery_app import celery_app
+
             celery_app.control.revoke(task_id)
         except Exception as e:
             logger.warning(f"撤销清洗任务失败: task_id={task_id}, err={e}")
@@ -215,12 +221,13 @@ async def stop_cleaning(
     await db.refresh(note)
     # 状态写穿镜像
     from ..services.vault_meta import write_note_meta
+
     write_note_meta(note)
 
     return CleaningStopResponse(
         id=note_id,
         status=NoteStatus.cleaning_failed,
-        message="清洗已停止",
+        message=i18n.localize("清洗已停止", "Cleaning stopped"),
     )
 
 
@@ -305,18 +312,22 @@ async def get_cleaning_diff(
         block_lines = []
         # 删除的行（原始版有，清洗版无）
         for i in range(i1, i2):
-            block_lines.append(DiffLine(
-                type="removed",
-                content=original_lines[i],
-                line_number_original=i + 1,
-            ))
+            block_lines.append(
+                DiffLine(
+                    type="removed",
+                    content=original_lines[i],
+                    line_number_original=i + 1,
+                )
+            )
         # 新增的行（清洗版有，原始版无）
         for j in range(j1, j2):
-            block_lines.append(DiffLine(
-                type="added",
-                content=clean_lines[j],
-                line_number_clean=j + 1,
-            ))
+            block_lines.append(
+                DiffLine(
+                    type="added",
+                    content=clean_lines[j],
+                    line_number_clean=j + 1,
+                )
+            )
 
         if block_lines:
             diff_blocks.append(DiffBlock(lines=block_lines))
@@ -399,9 +410,7 @@ async def restore_duplicate_block(
     # 更新元数据中的重复块列表
     if note.metadata_ and "duplicates_detail" in note.metadata_:
         duplicates_detail = note.metadata_["duplicates_detail"]
-        duplicates_detail = [
-            d for d in duplicates_detail if d["block_index"] != block_index
-        ]
+        duplicates_detail = [d for d in duplicates_detail if d["block_index"] != block_index]
         note.metadata_["duplicates_detail"] = duplicates_detail
         note.metadata_["duplicate_blocks"] = len(duplicates_detail)
         note.metadata_ = dict(note.metadata_)  # 触发 SQLAlchemy 检测 JSON 字段变更
@@ -476,9 +485,7 @@ async def delete_duplicate_block(
     # 更新元数据中的重复块列表
     if note.metadata_ and "duplicates_detail" in note.metadata_:
         duplicates_detail = note.metadata_["duplicates_detail"]
-        duplicates_detail = [
-            d for d in duplicates_detail if d["block_index"] != block_index
-        ]
+        duplicates_detail = [d for d in duplicates_detail if d["block_index"] != block_index]
         note.metadata_["duplicates_detail"] = duplicates_detail
         note.metadata_["duplicate_blocks"] = len(duplicates_detail)
         note.metadata_ = dict(note.metadata_)  # 触发 SQLAlchemy 检测 JSON 字段变更

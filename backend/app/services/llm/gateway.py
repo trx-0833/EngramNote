@@ -80,7 +80,14 @@ import httpx
 
 from ...config import get_settings
 from ..llm_accounting_service import current_context, record_call
-from .client import _response_snippet, _truncate_messages, build_llm_headers, get_llm_client
+from .client import (
+    LLMGatewayError,
+    _response_snippet,
+    _truncate_messages,
+    build_gateway_error,
+    build_llm_headers,
+    get_llm_client,
+)
 from .json_parse import strip_json_fences
 from .rate_limit import KeyedRateLimiter, RateLimiter
 
@@ -93,6 +100,43 @@ MAX_CONCURRENCY = 3
 ANONYMOUS_BUCKET = "__anonymous__"
 
 
+def _llm_log_extra(
+    scene: str,
+    provider: str,
+    model: str,
+    *,
+    status: int | None = None,
+    duration_ms: float | None = None,
+) -> dict:
+    """
+    LLM 日志的结构化字段（`extra=` 传进 logging，JSON 日志会平铺到顶层）。
+
+    名字必须落在 `core/logging_config._EXTRA_PASSTHROUGH` 的白名单里，
+    否则只进文本日志、不进 JSON。
+
+    ## 为什么值得在 7 处日志上各加一个参数
+
+    LLM 失败是本系统最常查的一类事故，而此前它的全部信息都**糅在 message 字符串**
+    里（`scene=… | provider=… | status=…`）。要统计"哪个 scene 的失败最多""
+    某个模型最近 4xx 多少次"，只能拿正则去啃文本。有了结构化字段之后：
+
+        jq -c 'select(.event == "llm.call" and .status >= 400)' engramnote.json.log
+        jq -s 'map(select(.event == "llm.call" and .status == 400)) | group_by(.scene)
+               | map({scene: .[0].scene, n: length})'                engramnote.json.log
+    """
+    extra: dict = {
+        "event": "llm.call",
+        "scene": scene,
+        "provider": provider,
+        "model": model,
+    }
+    if status is not None:
+        extra["status"] = status
+    if duration_ms is not None:
+        extra["duration_ms"] = round(duration_ms, 1)
+    return extra
+
+
 @dataclass
 class _LoopResources:
     """一个事件循环内共享的调用资源（信号量 + 三层令牌桶）
@@ -101,6 +145,7 @@ class _LoopResources:
     在前两层等待时**不占用**总闸门的令牌 —— 否则一个被个人限额拖住的用户
     会把全局令牌一起扣住，反而更容易饿死别人。
     """
+
     semaphore: asyncio.Semaphore
     global_limiter: RateLimiter
     user_limiters: KeyedRateLimiter
@@ -241,6 +286,15 @@ class LLMGateway:
     def retry_delay(self) -> float:
         return self._retry_delay
 
+    def _backoff_seconds(self, attempt: int) -> float:
+        """第 `attempt` 次失败后要等多久（指数退避 + 抖动，上限 60s）
+
+        与 `chat_detailed` 里那段内联计算同一条公式。抽出来的原因：流式重试
+        （2026-11-08 新增）要用同一套退避，两处各写一遍迟早会分叉。
+        """
+        delay = min(self._retry_delay * (2 ** (attempt - 1)), 60)
+        return delay * (0.5 + random.random() * 0.5)
+
     # ------------------------------------------------------------------
     # 对外接口
     # ------------------------------------------------------------------
@@ -255,8 +309,11 @@ class LLMGateway:
     ) -> str:
         """返回助手文本（兼容旧调用方）；需要 finish_reason 时用 `chat_detailed`"""
         meta = await self.chat_detailed(
-            messages, temperature=temperature, max_tokens=max_tokens,
-            response_format=response_format, scene=scene,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            scene=scene,
         )
         return meta["content"]
 
@@ -304,8 +361,12 @@ class LLMGateway:
             from ..llm_cache_service import cache_key
 
             cache_key_value = cache_key(
-                provider=self._provider, base_url=self._base_url, model=self._model,
-                messages=messages, temperature=temperature, max_tokens=max_tokens,
+                provider=self._provider,
+                base_url=self._base_url,
+                model=self._model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
                 response_format=response_format,
             )
             hit = await self._lookup_cache(cache_key_value)
@@ -333,27 +394,36 @@ class LLMGateway:
                     finish_reason = (choice.get("finish_reason") or "").strip() or "stop"
                     content_raw = (choice["message"].get("content")) or ""
                     # JSON 场景剥离代码围栏，避免 json.loads 直接失败，见 docs/decisions.md#F-33
-                    if response_format and isinstance(response_format, dict) and response_format.get("type") == "json_object":
+                    if (
+                        response_format
+                        and isinstance(response_format, dict)
+                        and response_format.get("type") == "json_object"
+                    ):
                         content = strip_json_fences(content_raw)
                     else:
                         content = content_raw
-                    truncated = (finish_reason == "length")
+                    truncated = finish_reason == "length"
                     logger.info(
                         f"LLM 响应 | scene={scene} | provider={self._provider} | model={self._model} | "
                         f"prompt_tokens={usage.get('prompt_tokens')} | completion_tokens={usage.get('completion_tokens')} | "
                         f"total_tokens={usage.get('total_tokens')} | finish_reason={finish_reason} | "
-                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms"
+                        f"truncated={truncated} | elapsed={elapsed_ms:.0f}ms",
+                        extra=_llm_log_extra(scene, self._provider, self._model, duration_ms=elapsed_ms),
                     )
                     if truncated:
                         logger.warning(
                             f"LLM 输出被 max_tokens 截断 | scene={scene} | max_tokens={max_tokens} | "
-                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量"
+                            f"elapsed={elapsed_ms:.0f}ms | 建议提大 max_tokens 或减小单次输出体量",
+                            extra=_llm_log_extra(scene, self._provider, self._model, duration_ms=elapsed_ms),
                         )
                     # 阶段 4.2：记账。**成功也要记** —— 只记失败会得到
                     # "花了多少钱"这个最重要的数字为零。
                     await record_call(
-                        scene=scene, provider=self._provider, model=self._model,
-                        usage=usage, latency_ms=elapsed_ms,
+                        scene=scene,
+                        provider=self._provider,
+                        model=self._model,
+                        usage=usage,
+                        latency_ms=elapsed_ms,
                     )
                     result = {
                         "content": content,
@@ -378,33 +448,60 @@ class LLMGateway:
                         logger.warning(
                             f"LLM 客户端错误不重试 | scene={scene} | provider={self._provider} | "
                             f"status={e.response.status_code} | error={e} | "
-                            f"body={_response_snippet(e.response)}"
+                            f"body={_response_snippet(e.response)}",
+                            extra=_llm_log_extra(scene, self._provider, self._model, status=e.response.status_code),
                         )
-                        raise
+                        # 同一个原因也要交给**调用方**：只写进日志的话，用户手上
+                        # 仍然是一句"Client error '400 Bad Request'"。
+                        # 换成带 body 的 `LLMGatewayError`（见 client.py 的说明），
+                        # 它对所有 `except Exception` 的调用方透明。
+                        raise build_gateway_error(
+                            status_code=e.response.status_code,
+                            model=self._model,
+                            response=e.response,
+                        ) from e
                     if attempt < self._max_retries - 1:
                         delay = min(30 * (attempt + 1), 120)
                         delay = delay * (0.5 + random.random() * 0.5)
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
                             f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
+                            f"next_delay={delay:.1f}s",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
                         await asyncio.sleep(delay)
                 except Exception as e:
                     last_error = e
                     if attempt < self._max_retries - 1:
-                        delay = min(self._retry_delay * (2 ** attempt), 60)
+                        delay = min(self._retry_delay * (2**attempt), 60)
                         delay = delay * (0.5 + random.random() * 0.5)
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
                             f"provider={self._provider} | model={self._model} | error={e} | "
-                            f"next_delay={delay:.1f}s"
+                            f"next_delay={delay:.1f}s",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
                         await asyncio.sleep(delay)
                     else:
                         logger.warning(
                             f"LLM 调用失败 | scene={scene} | attempt {attempt + 1}/{self._max_retries} | "
-                            f"provider={self._provider} | model={self._model} | error={e}"
+                            f"provider={self._provider} | model={self._model} | error={e}",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
                         )
 
         # 阶段 4.2：失败的调用也要记账。
@@ -414,7 +511,9 @@ class LLMGateway:
         # 而只记成功等于把最该被看见的那部分成本藏起来。
         # 这里记的是**整次调用**（含全部重试）的耗时与最终结果。
         await record_call(
-            scene=scene, provider=self._provider, model=self._model,
+            scene=scene,
+            provider=self._provider,
+            model=self._model,
             latency_ms=(time.monotonic() - start_time) * 1000,
             success=False,
             error=str(last_error) if last_error else "未知错误",
@@ -432,9 +531,12 @@ class LLMGateway:
         """流式聊天接口（OpenAI 兼容 SSE 流式响应）
 
         - 使用 stream=True 接收 SSE 响应，逐 token 产出
-        - 不做重试（流式重试语义复杂，由调用方处理）
+        - **首 token 之前**的 429 / 5xx / 连接错误会重试（指数退避，上限
+          `max_retries` 次）；**已经吐出 token 之后绝不重试**
+          —— 前端按 delta 追加渲染，重试会把半截答案再吐一遍。
+          判据与正反用例见 `tests/test_llm_stream_retry.py`。
+        - 4xx（429 除外）不重试，直接抛带上游原因的 `LLMGatewayError`
         - 不支持 response_format / max_tokens（流式场景一般不需要）
-        - httpx 错误时记录 warning 并原样抛出
 
         ⚠️ **不做响应缓存**（阶段 4.7）：SSE 的 usage 在最后一个 chunk 才到，
         缓存它要在生成器里处理"部分消费即关闭"的语义；而问答的上下文每次都不同，
@@ -470,45 +572,107 @@ class LLMGateway:
 
         async with resources.semaphore:
             await resources.acquire_slots(user_id=user_id, provider=self._provider)
-            try:
-                # 复用模块级共享客户端，见 docs/decisions.md#F-05
-                client = get_llm_client()
-                async with client.stream(
-                    "POST", url, json=payload, headers=headers
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data_str = line[len("data:"):].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
+            client = get_llm_client()
+            max_attempts = max(1, self._max_retries)
+            attempt = 0
+            #: 本轮是否已经吐出过 token —— 唯一的"能不能重试"判据（见下方说明）
+            emitted = False
+
+            while True:
+                attempt += 1
+                try:
+                    async with client.stream("POST", url, json=payload, headers=headers) as response:
+                        # 与 `chat_detailed` 同一条判据：4xx（429 除外）不重试，
+                        # 且必须把**上游原因**交给调用方 —— 流式这边它会以
+                        # SSE `event: error` 的形式显示给用户（understanding.py:745）。
+                        # ⚠️ 正文必须在这里读：`async with` 退出时响应会被关闭，
+                        # 到外层 `except` 里再读只会得到 "ResponseNotRead"。
+                        if 400 <= response.status_code < 500 and response.status_code != 429:
+                            await response.aread()
                             logger.warning(
-                                f"LLM 流式响应 JSON 解析失败 | scene={scene} | "
-                                f"line={data_str[:200]}"
+                                f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
+                                f"status={response.status_code} | "
+                                f"body={_response_snippet(response)}",
+                                extra=_llm_log_extra(scene, self._provider, self._model, status=response.status_code),
                             )
+                            raise build_gateway_error(
+                                status_code=response.status_code,
+                                model=self._model,
+                                response=response,
+                            )
+                        # 429 / 5xx：**首 token 之前**可以重试（此时用户什么都还没看到）。
+                        # 预算用尽后交回 `raise_for_status()`，异常类型与文案与改造前一致。
+                        if (
+                            (response.status_code == 429 or response.status_code >= 500)
+                            and attempt < max_attempts
+                            and not emitted
+                        ):
+                            await response.aread()
+                            retry_delay = self._backoff_seconds(attempt)
+                            logger.warning(
+                                f"LLM 流式调用失败，将重试 | scene={scene} | provider={self._provider} | "
+                                f"status={response.status_code} | attempt {attempt}/{max_attempts} | "
+                                f"next_delay={retry_delay:.1f}s | body={_response_snippet(response)}",
+                                extra=_llm_log_extra(scene, self._provider, self._model, status=response.status_code),
+                            )
+                            await asyncio.sleep(retry_delay)
                             continue
-                        # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
-                        chunk_usage = chunk.get("usage")
-                        if isinstance(chunk_usage, dict):
-                            usage = chunk_usage
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        content = delta.get("content")
-                        if content:
-                            total_content.append(content)
-                            yield content
-            except httpx.HTTPError as e:
-                logger.warning(
-                    f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
-                    f"model={self._model} | error={e}"
-                )
-                raise
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data_str = line[len("data:") :].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                logger.warning(f"LLM 流式响应 JSON 解析失败 | scene={scene} | line={data_str[:200]}")
+                                continue
+                            # 收集 usage（DeepSeek 可能在末尾 chunk 返回）
+                            chunk_usage = chunk.get("usage")
+                            if isinstance(chunk_usage, dict):
+                                usage = chunk_usage
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content")
+                            if content:
+                                emitted = True
+                                total_content.append(content)
+                                yield content
+                    break
+                except httpx.HTTPError as e:
+                    # ⚠️ 已经吐出 token 之后**绝不重试**：前端按 delta 追加渲染，
+                    # 重试会把半截答案再吐一遍（"浮充是……浮充是……"），
+                    # 而重复的文本没有任何办法撤回。契约见
+                    # `tests/test_llm_stream_retry.py::test_error_after_first_token_is_not_retried`。
+                    if emitted or attempt >= max_attempts:
+                        logger.warning(
+                            f"LLM 流式调用失败 | scene={scene} | provider={self._provider} | "
+                            f"model={self._model} | attempt {attempt}/{max_attempts} | "
+                            f"emitted={emitted} | error={e}",
+                            extra=_llm_log_extra(
+                                scene,
+                                self._provider,
+                                self._model,
+                                status=getattr(getattr(e, "response", None), "status_code", None),
+                            ),
+                        )
+                        raise
+                    retry_delay = self._backoff_seconds(attempt)
+                    logger.warning(
+                        f"LLM 流式调用失败，将重试 | scene={scene} | provider={self._provider} | "
+                        f"attempt {attempt}/{max_attempts} | next_delay={retry_delay:.1f}s | error={e}",
+                        extra=_llm_log_extra(
+                            scene,
+                            self._provider,
+                            self._model,
+                            status=getattr(getattr(e, "response", None), "status_code", None),
+                        ),
+                    )
+                    await asyncio.sleep(retry_delay)
 
         elapsed_ms = (time.monotonic() - start_time) * 1000
         full_response = "".join(total_content)
@@ -523,8 +687,11 @@ class LLMGateway:
         # 阶段 4.2：流式路径同样记账。usage 只在最后一个 chunk 里，
         # 所以必须在**流读完之后**记，不能在一开始记。
         await record_call(
-            scene=scene, provider=self._provider, model=self._model,
-            usage=usage, latency_ms=elapsed_ms,
+            scene=scene,
+            provider=self._provider,
+            model=self._model,
+            usage=usage,
+            latency_ms=elapsed_ms,
         )
 
     # ------------------------------------------------------------------
@@ -554,13 +721,20 @@ class LLMGateway:
 
         logger.info("LLM 缓存命中 | model=%s | saved_tokens=%d", self._model, hit.total_tokens)
         await record_call(
-            scene="cache_hit", provider=self._provider, model=self._model,
-            latency_ms=0, cached=True, saved_tokens=hit.total_tokens,
+            scene="cache_hit",
+            provider=self._provider,
+            model=self._model,
+            latency_ms=0,
+            cached=True,
+            saved_tokens=hit.total_tokens,
         )
         return hit.response
 
     async def _store_cache(
-        self, key: str, response: Dict[str, Any], usage: Optional[Dict[str, Any]],
+        self,
+        key: str,
+        response: Dict[str, Any],
+        usage: Optional[Dict[str, Any]],
     ) -> None:
         """把成功响应写入缓存（阶段 4.7）
 
@@ -579,8 +753,10 @@ class LLMGateway:
             await store(
                 None,  # 用独立会话（见 store 的 session_factory 说明）
                 key,
-                provider=self._provider, model=self._model,
-                response=response, usage=usage,
+                provider=self._provider,
+                model=self._model,
+                response=response,
+                usage=usage,
                 finish_reason=response.get("finish_reason"),
                 ttl_days=self._cache_ttl_days,
                 session_factory=factory,
@@ -622,4 +798,4 @@ class LLMGateway:
             raise LLMQuotaExceeded(status)
 
 
-__all__ = ["MAX_CONCURRENCY", "LLMGateway"]
+__all__ = ["MAX_CONCURRENCY", "LLMGateway", "LLMGatewayError"]

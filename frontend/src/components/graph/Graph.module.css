@@ -142,20 +142,34 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-md);
+  /* 两值写法 = 行距 列距：换行后行间距收一档。**不要再拆成
+     `gap` + `row-gap`** —— 同选择器里简写与长写并存会被
+     `scripts/verify-built-css.mjs` 的"简写 vs 长写"检查记为未登记冲突。 */
+  gap: var(--space-sm) var(--space-md);
   flex-shrink: 0;
+  /* 放不下时**换行**，而不是把按钮压成"一字一行"的竖排（实测 1280 宽时
+     右侧 5 个按钮曾被压到 37px，文字逐字换行、按钮还比工具栏高出来）。
+     两段各自也允许换行，见下面 `.graphToolbarLeft/Right`。 */
+  flex-wrap: wrap;
 }
 
 .graphToolbarLeft {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
 }
 
 .graphToolbarRight {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  /* 这一组内部的间距本来就紧，行列同值即可 */
   gap: var(--space-sm);
+  /* 换行后这一组落在第二行时仍然靠右（单行时 `space-between` 已经把它推到右边，
+     这里只在换行的情况下起作用） */
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 /* 图例 */
@@ -186,6 +200,9 @@
   gap: 4px;
   padding: 2px 6px;
   border-radius: var(--radius-full);
+  /* 与 `.graphBtn` 同一条理由：图例项不能被压成两行字 */
+  flex: 0 0 auto;
+  white-space: nowrap;
   transition:
     border-color var(--duration-fast) var(--ease-out-expo),
     color var(--duration-fast) var(--ease-out-expo),
@@ -219,6 +236,11 @@
   padding: 5px 10px;
   border-radius: var(--radius-full);
   font-size: 0.75rem;
+  /* 按钮不参与压缩、文字不换行：flex 默认会让它们缩到 min-content，
+     中文于是变成一字一行（实测 37px 宽、文字竖排）。工具条放不下时由
+     `.graphToolbar` 的 `flex-wrap` 换行解决，不能靠压窄按钮。 */
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-weight: 500;
   border: 1px solid var(--color-border-light);
   background: var(--color-surface);

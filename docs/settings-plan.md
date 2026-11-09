@@ -13,7 +13,7 @@
 
 ## 0. 结论（先看这一页）
 
-1. **现在没有设置页**。`Sidebar.tsx:217` 的注释自己写着「全仓没有 Setting/Profile 页」。用户今天能改的东西只有三类：
+1. **开工前没有设置页**。`Sidebar.tsx:217` 的注释当时自己写着「全仓没有 Setting/Profile 页」。用户那时能改的东西只有三类：
    界面语言、邮件提醒开关、浏览器通知权限 —— 分别住在侧边栏底部、仪表盘卡片、浏览器设置里。
 2. **其余 60+ 个可调参数全在 `.env`**（`backend/app/config.py`）。改一个要重启后端与 worker，普通用户既不知道、也碰不到。
 3. **已做 `/settings` 页（只设计 PC）**：六组已全部落地：学习节奏 / 提醒 / 内容与生成 / 外观与语言 / 账号与安全 / 数据与关于。
@@ -60,8 +60,8 @@
 
 | 项 | 证据 | 后果 |
 |---|---|---|
-| `email_reminder_hour` | `config.py:554`；grep 只有定义处 | 改成 7 点也不生效，Beat 固定 `crontab(hour=9, minute=0)`（`celery_app.py:131`） |
-| `reminder_quiet_hours_start/end` | `config.py:548,550`；grep 只有定义处 | 后端从不读它；前端另写死 22–8（`notifications.ts:54`, `ReminderBanner.tsx:85`） |
+| `email_reminder_hour` | `config.py:554`；`tasks/reminder_tasks.py:61` | **已接线**：没有设置行的用户回落到这个值；Beat 每小时扫描（`celery_app.py`） |
+| `reminder_quiet_hours_start/end` | `config.py:548,550`；grep 只有定义处 | 后端仍不读它；前端按设备本地 22–8（`notifications.ts`） |
 | `chunk_overlap` | `config.py:292-297` 自述「当前不生效」 | 分块器已换成 `markdown_segmenter`，没有字符级重叠 |
 | `review_due_hour` 的注释 vs 代码 | 注释说它改变「今天」的判断边界（`config.py:520-533`），实际只用于到期时刻对齐（`scheduler_service.py:242`）；额度/报告的「今天」走 `timeutil.py:26-45` 的 00:00 | **以代码为准**：两个口径。设置页不要把它们混成一个旋钮 |
 
@@ -624,9 +624,9 @@ npm --prefix frontend run docs:links
 
 | 门禁 | 结果 |
 |---|---|
-| 后端全量 | `pytest -q`：**1722 passed, 30 skipped** |
-| 后端设置/联动 | `tests/test_user_settings.py` 16 条、`tests/test_settings_api.py` 2 条通过 |
-| 前端全量 | `vitest run`：**731 passed / 62 files**（设置页 12 条、ADHD hook 1 条、NoteDetail 22 条、通知 5 条） |
+| 后端全量 | `pytest -q`：**1726 passed, 30 skipped** |
+| 后端设置/联动 | `tests/test_user_settings.py` 17 条、`tests/test_settings_api.py` 5 条通过 |
+| 前端全量 | `vitest run`：**734 passed / 62 files**（设置页 15 条、ADHD hook 1 条、NoteDetail 22 条、通知 5 条） |
 | 前端 lint / tsc / build | 全绿 |
 | Playwright | `e2e/settings.spec.ts` 2 条通过（六组、PATCH、字号、深链接） |
 | 契约漂移 | `dump_openapi.py --check` 与 `gen:api:drift` 通过 |
@@ -636,6 +636,7 @@ npm --prefix frontend run docs:links
 ### 9.4 与路线的差异 / 未做
 
 - **未做**：深色主题、修改密码、删除账号 —— 分别需要视觉审计、认证/会话策略、不可逆数据策略。
+- **2026-11-06 修复的安全项**：`email_configured` 现在要求 SMTP 密码；设置行与邮件开关合并为一次事务；并发首次建行冲突会重试；越界 env 默认值在 `deployment_defaults()` 夹紧。前端只读查询失败显示错误与重试，`cancelQueries` 只取消精确 `['settings']`，非预设档位的部署默认值在下拉框中可见。迁移互斥/缺 CHECK、整点丢信、首行快照语义、AI 输出语言口径仍待人工确认（见任务书 N1/N2/N3/N7/N14）。
 - **ADHD Reader 默认开启的“只亮按钮”缺陷已修**：设置默认 true 时，首次 effect 常遇到 `markdownRef.current=null`（笔记数据未到），旧代码直接 return 后不再重跑；现在 root 不存在时观察 `document.body`，容器真正挂载后再接上遮罩/块类名/鼠标监听。`useAdhdReader.test.tsx` 与 `NoteDetail.test.tsx` 覆盖“ref 晚于 hook 挂载”和真实正文容器。
 - **免打扰时段存设备本地**：换设备不跟随（刻意选择）。
 - **日界/时区仍固定 Asia/Shanghai**：没有进本批。
@@ -670,9 +671,9 @@ npm --prefix frontend run docs:links
 
 | 设置改动 | 可观察结果 | 证据 |
 |---|---|---|
-| 每日上限 10→25 | `/review/stats.daily_limit=25`；due 剩余额度变化；第 26 道 429 | `test_settings_api.py`、`test_user_settings.py` |
+| 每日上限 10→25 | `/review/stats.daily_limit=25`；due 剩余额度变化 | `test_settings_api.py::test_settings_patch_flows_into_review_stats` |
 | 留存率 0.80→0.95 | 固定 `rand` 下下一次间隔变短 | `test_higher_retention_shortens_next_interval` |
-| 最长间隔 3650→365 | 间隔被夹紧到 ≤365 | `test_max_interval_is_enforced_from_user_view` |
+| 最长间隔 3650→365 | `scheduling_settings` 传入 scheduler 后间隔被夹紧到 ≤365 | `test_max_interval_is_enforced_from_user_view`（service 层，非 HTTP） |
 | 邮件开关/时间 | 任务按 `email_hour` 选人；当日去重 | `test_reminder_task_selects_users_by_their_own_hour` |
 | 输出语言 follow/zh/en | worker 解析出 `users.locale` 或显式语言 | `test_resolve_output_locale_follows_user_and_falls_back` |
 | 卡片上限 500→50 | 一次理解最多新增 50 张 | `GateConfig` + `save_cards_idempotent` 既有用例；`understand_tasks` 传参 |

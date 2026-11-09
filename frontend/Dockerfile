@@ -1,5 +1,13 @@
 # EngramNote 前端 Dockerfile
 # 多阶段构建：Node.js 构建 → Nginx 运行
+#
+# ⚠️ **未验证 / 已废弃**（2026-11-07 治理标注）
+#    容器化在 `AGENTS.md` §2 被列为**已否决方向**（本机无 Docker，资源受限）。
+#    本文件仅作历史参考，**不要当作部署路径**。
+#    CI 曾有的 `docker-nginx-config` job 已改名 `nginx-config-guard`，只保留
+#    `frontend/nginx.conf` 的两条 nginx 行为守卫（上传 413 / SSE 缓冲），
+#    针对本文件的 `npm ci` 断言已删除。
+#    若将来恢复容器路线，请先实际构建验证，并同步更新 README 的部署章节。
 
 # ---- 阶段1: 构建前端 ----
 # ⚠️ 22 不是"顺手升级"：锁文件里的 `jsdom@30` 要求 `^22.22.2 || ^24.15.0 || >=26`，

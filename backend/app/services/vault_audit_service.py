@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..models.note import Note
 from ..models.note_version import NoteVersion
-from .vault_path import META_DIR, SOURCE_DIR, TRASH_SLUG
+from .vault_path import ASSETS_DIR, META_DIR, SOURCE_DIR, TRASH_SLUG
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,8 @@ PATH_FIELDS: tuple[tuple[str, str], ...] = (
 @dataclass
 class VaultIssue:
     """一条不一致记录"""
-    kind: str            # missing_file | orphan_file | size_mismatch | hash_mismatch
+
+    kind: str  # missing_file | orphan_file | size_mismatch | hash_mismatch
     note_id: Optional[str]
     object_name: str
     detail: str = ""
@@ -75,6 +76,7 @@ class VaultIssue:
 @dataclass
 class VaultAuditResult:
     """一次校验的结果汇总"""
+
     notes_scanned: int = 0
     db_objects: int = 0
     disk_objects: int = 0
@@ -202,24 +204,28 @@ async def audit_vault(
             expected.add((bucket, object_name))
 
             if not file_exists(bucket, object_name):
-                result.add(VaultIssue(
-                    kind="missing_file",
-                    note_id=note.id,
-                    object_name=object_name,
-                    detail=f"DB 的 {field_name} 指向的文件不存在（笔记在界面上可见但内容缺失）",
-                ))
+                result.add(
+                    VaultIssue(
+                        kind="missing_file",
+                        note_id=note.id,
+                        object_name=object_name,
+                        detail=f"DB 的 {field_name} 指向的文件不存在（笔记在界面上可见但内容缺失）",
+                    )
+                )
                 continue
 
             if deep:
                 actual = sha256_of(bucket, object_name)
                 recorded = _recorded_hash(note, field_name)
                 if actual and recorded and actual != recorded:
-                    result.add(VaultIssue(
-                        kind="hash_mismatch",
-                        note_id=note.id,
-                        object_name=object_name,
-                        detail=f"sha256 不符：DB 记录 {recorded[:12]}… 实际 {actual[:12]}…",
-                    ))
+                    result.add(
+                        VaultIssue(
+                            kind="hash_mismatch",
+                            note_id=note.id,
+                            object_name=object_name,
+                            detail=f"sha256 不符：DB 记录 {recorded[:12]}… 实际 {actual[:12]}…",
+                        )
+                    )
 
     # 版本文件也在 DB 中有记录，同样纳入"应存在"集合
     version_query = select(NoteVersion)
@@ -232,20 +238,25 @@ async def audit_vault(
         result.db_objects += 1
         expected.add((bucket, version.storage_path))
         if not file_exists(bucket, version.storage_path):
-            result.add(VaultIssue(
-                kind="missing_file",
-                note_id=version.note_id,
-                object_name=version.storage_path,
-                detail=f"版本 v{version.version_number} 的文件不存在（版本历史里有记录，内容已丢失）",
-            ))
+            result.add(
+                VaultIssue(
+                    kind="missing_file",
+                    note_id=version.note_id,
+                    object_name=version.storage_path,
+                    detail=f"版本 v{version.version_number} 的文件不存在（版本历史里有记录，内容已丢失）",
+                )
+            )
 
     if include_orphans:
         await _scan_orphans(db, result, expected, user_id)
 
     logger.info(
         "Vault 一致性校验完成: 笔记 %d，DB 对象 %d，磁盘对象 %d，问题 %d（%s）",
-        result.notes_scanned, result.db_objects, result.disk_objects,
-        len(result.issues), result.counts or "无",
+        result.notes_scanned,
+        result.db_objects,
+        result.disk_objects,
+        len(result.issues),
+        result.counts or "无",
     )
     return result
 
@@ -265,7 +276,9 @@ def _recorded_hash(note: Note, field_name: str) -> Optional[str]:
 
 
 def _is_mirror_only(name: str) -> bool:
-    """`output/meta/` 下的写穿镜像不是孤儿
+    """不该被当作孤儿的两类对象：`output/meta/` 镜像 与 `output/assets/` 插图
+
+    ## `output/meta/`（写穿镜像）
 
     每篇笔记的 `output/meta/{base}.json` 是状态旁载镜像，用户级
     `output/meta/projects.json` 是项目标签清单（见 `vault_meta` 模块）。
@@ -273,12 +286,20 @@ def _is_mirror_only(name: str) -> bool:
     Vault 脱离 DB 也能被读懂。既不参与"应存在"集合，也就永远不会
     被 DB 引用 —— 若按"无引用即孤儿"判定，**每一篇笔记都会报一个孤儿**，
     21 条噪声会把真正的孤儿彻底淹没。
+
+    ## `output/assets/`（插图，2026-11-09）
+
+    同理：MinerU 解析出的插图落在 `output/assets/{base}/images/*.jpg`，
+    它们的"引用"是 **markdown 正文里的相对链接**，不是 DB 字段。
+    不排除的话，每张图都会报一条孤儿 —— 一篇带 20 张图的 PDF 就是 20 条噪声。
+    孤儿扫描仍然覆盖 source/ 与 output/markdown/，那才是真正该盯的地方。
     """
     # 判断路径中是否**连续包含** output/meta 段。
     # 第一版取路径**末尾两段**比对，而 meta 对象是
     # "…/inbox/output/meta/{base}.json"，末尾两段是 "meta/x.json" ——
     # 谓词恒为 False，21 条噪声原样漏出。
-    return f"/{META_DIR}/" in f"/{name}/"
+    padded = f"/{name}/"
+    return f"/{META_DIR}/" in padded or f"/{ASSETS_DIR}/" in padded
 
 
 def _is_source_object(name: str) -> bool:
@@ -337,12 +358,14 @@ async def _scan_orphans(
                     # 原文件不属于本桶的枚举范围，由 original 键单独覆盖
                     continue
                 result.disk_objects += 1
-                result.add(VaultIssue(
-                    kind="orphan_file",
-                    note_id=None,
-                    object_name=name,
-                    detail="磁盘上存在但 DB 无任何记录引用（占用空间且无法通过界面删除）",
-                ))
+                result.add(
+                    VaultIssue(
+                        kind="orphan_file",
+                        note_id=None,
+                        object_name=name,
+                        detail="磁盘上存在但 DB 无任何记录引用（占用空间且无法通过界面删除）",
+                    )
+                )
 
 
 def _orphan_scan_prefixes(user_id: Optional[str]) -> Iterable[str]:

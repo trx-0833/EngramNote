@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core import i18n
 from ..models.assessment import AssessmentResult, AssessmentMode
 from ..models.knowledge_card import CardCategory, CardType, KnowledgeCard
 from ..models.note_material_link import NoteMaterialLink
@@ -144,9 +145,7 @@ async def _select_combined_cards(
         select(KnowledgeCard).where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.note_id == personal_id,
-            KnowledgeCard.card_category.in_(
-                [CardCategory.regular, CardCategory.blind_spot]
-            ),
+            KnowledgeCard.card_category.in_([CardCategory.regular, CardCategory.blind_spot]),
         )
     )
     candidates = result.scalars().all()
@@ -158,9 +157,7 @@ async def _select_combined_cards(
     return matched
 
 
-async def _count_combined_cards(
-    db: AsyncSession, user_id: str, personal_id: str, material_id: str
-) -> Tuple[int, int]:
+async def _count_combined_cards(db: AsyncSession, user_id: str, personal_id: str, material_id: str) -> Tuple[int, int]:
     """统计本次 link 联合分析的 regular / blind_spot 卡片数量"""
     cards = await _select_combined_cards(db, user_id, personal_id, material_id)
     regular = sum(1 for c in cards if c.card_category == CardCategory.regular)
@@ -168,18 +165,14 @@ async def _count_combined_cards(
     return regular, blind
 
 
-async def _delete_combined_cards(
-    db: AsyncSession, user_id: str, personal_id: str, material_id: str
-) -> None:
+async def _delete_combined_cards(db: AsyncSession, user_id: str, personal_id: str, material_id: str) -> None:
     """删除本次 link 联合分析产生的旧卡片（仅 regular / blind_spot）"""
     cards = await _select_combined_cards(db, user_id, personal_id, material_id)
     for card in cards:
         await db.delete(card)
 
 
-async def extract_combined(
-    link_id: str, user_id: str, db: AsyncSession
-) -> Dict[str, Any]:
+async def extract_combined(link_id: str, user_id: str, db: AsyncSession) -> Dict[str, Any]:
     """
     对笔记-资料配对执行联合分析，提取常规知识点与盲点
 
@@ -232,9 +225,7 @@ async def extract_combined(
     )
     cached = cached_result.scalars().first()
     if cached:
-        regular_count, blind_spot_count = await _count_combined_cards(
-            db, user_id, personal_id, material_id
-        )
+        regular_count, blind_spot_count = await _count_combined_cards(db, user_id, personal_id, material_id)
         logger.info(
             f"联合分析命中缓存 link_id={link_id} sig={link_signature} "
             f"regular={regular_count} blind_spot={blind_spot_count}"
@@ -305,32 +296,23 @@ async def extract_combined(
         chapter_title = chapter.get("chapter_title", "")
         chapter_content = chapter.get("content", "")
         if len(chapter_content) > MAX_CHAPTER_CONTENT_LEN:
-            chapter_content = (
-                chapter_content[:MAX_CHAPTER_CONTENT_LEN] + "\n...(内容过长已截断)"
-            )
+            chapter_content = chapter_content[:MAX_CHAPTER_CONTENT_LEN] + "\n...(内容过长已截断)"
 
         try:
             response = await session.ask(chapter_content, personal_md)
         except Exception as e:
-            logger.warning(
-                f"联合分析章节 '{chapter_title}' LLM 调用失败，跳过: {e}"
-            )
+            logger.warning(f"联合分析章节 '{chapter_title}' LLM 调用失败，跳过: {e}")
             continue
 
         # 解析 JSON 响应（容错：失败仅 warning 并跳过该轮）
         try:
             data = json.loads(response)
         except json.JSONDecodeError:
-            logger.warning(
-                f"联合分析章节 '{chapter_title}' JSON 解析失败，跳过该轮: "
-                f"{response[:200]}"
-            )
+            logger.warning(f"联合分析章节 '{chapter_title}' JSON 解析失败，跳过该轮: {response[:200]}")
             continue
 
         if not isinstance(data, dict):
-            logger.warning(
-                f"联合分析章节 '{chapter_title}' 响应非 JSON 对象，跳过该轮"
-            )
+            logger.warning(f"联合分析章节 '{chapter_title}' 响应非 JSON 对象，跳过该轮")
             continue
 
         parsed_chapter_count += 1
@@ -339,14 +321,15 @@ async def extract_combined(
         # 阶段 4.1 收尾：结构化校验（Pydantic）。
         # 这条路以前**没有任何校验**：`isinstance(point, dict)` 就算通过，
         # 缺 title 的条目会带着空标题入库（4.9 的入库门只管理解管道那条路）。
-        for category, key in ((CardCategory.regular, "regular_points"),
-                              (CardCategory.blind_spot, "blind_spots")):
+        for category, key in ((CardCategory.regular, "regular_points"), (CardCategory.blind_spot, "blind_spots")):
             raw_points = data.get(key, []) or []
             validation = validate_items(raw_points, CardPoint, source=f"combined:{key}")
             if validation.issues:
                 logger.warning(
                     "联合分析章节 %r 的 %s 校验: %s",
-                    resp_chapter_title, key, validation.summary(),
+                    resp_chapter_title,
+                    key,
+                    validation.summary(),
                 )
             for item in validation.valid:
                 cards_to_add.append(
@@ -481,7 +464,12 @@ async def generate_extension(
             f"生成拓展知识点失败 (parent_card_id={parent_card_id}): {e}",
             exc_info=True,
         )
-        return {"error": f"生成拓展知识点失败: {e}"}
+        return {
+            "error": i18n.localize(
+                f"生成拓展知识点失败: {e}",
+                f"Failed to generate extension cards: {e}",
+            )
+        }
 
     # 5. 创建拓展卡片（阶段 4.1 收尾：先过结构化校验）
     #
@@ -491,9 +479,7 @@ async def generate_extension(
     created_cards: List[KnowledgeCard] = []
     validation = validate_items(extensions, ExtensionPoint, source="generate_extension")
     if validation.issues:
-        logger.warning(
-            "拓展知识点校验 (parent_card_id=%s): %s", parent_card_id, validation.summary()
-        )
+        logger.warning("拓展知识点校验 (parent_card_id=%s): %s", parent_card_id, validation.summary())
     for item in validation.valid:
         ext = item.model_dump()
         card = KnowledgeCard(
@@ -517,14 +503,9 @@ async def generate_extension(
         await db.refresh(card)
 
     # 6. 构建响应（extension_cards 序列化为 KnowledgeCardResponse）
-    extension_cards = [
-        KnowledgeCardResponse.model_validate(card) for card in created_cards
-    ]
+    extension_cards = [KnowledgeCardResponse.model_validate(card) for card in created_cards]
 
-    logger.info(
-        f"拓展知识点生成完成 parent_card_id={parent_card_id} "
-        f"extension_count={len(created_cards)}"
-    )
+    logger.info(f"拓展知识点生成完成 parent_card_id={parent_card_id} extension_count={len(created_cards)}")
 
     return {
         "parent_card_id": parent_card_id,

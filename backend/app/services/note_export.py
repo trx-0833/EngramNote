@@ -110,8 +110,17 @@ def sanitize_filename(title: str, fallback_id: str = "") -> str:
     return name
 
 
-def build_content_disposition(filename_stem: str) -> str:
+def build_content_disposition(filename_stem: str, extension: str = ".md") -> str:
     """构造 `Content-Disposition` 头的值（附件下载）
+
+    ## 扩展名必须由调用方给，不能在这里写死 `.md`
+
+    这个函数服务两个端点：单篇导出（正文是 Markdown）与批量导出（整包是 ZIP）。
+    写死 `.md` 时，浏览器会把 **ZIP 的字节**存成 `engramnote-export.md` ——
+    `application/zip` 与 `Content-Disposition` 打架，而浏览器只认后者来命名。
+    用户手上于是多出一个"扩展名是 md、双击打不开"的文件（解压软件能救，
+    但用户先看到的是一屏乱码式的正文）。而这条**不会报任何错**：
+    下载成功、大小正确、只有一个字错了。
 
     ## 为什么要写两种 `filename`
 
@@ -134,14 +143,18 @@ def build_content_disposition(filename_stem: str) -> str:
     手写编码表是那种"看起来对、遇到某个字符才错"的活。
 
     Args:
-        filename_stem: 文件名主干（**不含** `.md`，由本函数补）
+        filename_stem: 文件名主干（**不含**扩展名，由本函数补）
+        extension: 扩展名，含点；批量导出传 `.zip`。缺省 `.md` 与单篇导出一致
 
     Returns:
         可直接塞进 `headers={"Content-Disposition": …}` 的字符串
     """
     from urllib.parse import quote
 
-    filename = f"{filename_stem}.md"
+    # 容错：`"zip"` 与 `".zip"` 都接受。少写一个点会让下载名变成
+    # `engramnote-exportzip` —— 同样不报错、同样只能靠人看出来。
+    ext = extension if extension.startswith(".") else f".{extension}"
+    filename = f"{filename_stem}{ext}"
     # ASCII 回退：非 ASCII 一律换成 `_`，并顺带处理掉引号与反斜杠
     # （它们是 filename 参数里的转义字符，留着会破坏头的结构）
     ascii_fallback = "".join(

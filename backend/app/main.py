@@ -43,6 +43,8 @@ from .api.router import api_router
 from .version import __version__
 from .config import Settings, get_settings
 from .core import context
+from .core import i18n
+from .core.error_messages import resolve_http_status_message
 from .core.logging_config import setup_logging
 from .core.tempfile_compat import apply_tempfile_compat
 from .database import get_session_factory, init_db
@@ -91,11 +93,7 @@ def _enforce_single_writer() -> None:
     if not _sqlite():
         return
 
-    raw = (
-        os.environ.get("WEB_CONCURRENCY")
-        or os.environ.get("UVICORN_WORKERS")
-        or ""
-    ).strip()
+    raw = (os.environ.get("WEB_CONCURRENCY") or os.environ.get("UVICORN_WORKERS") or "").strip()
     if not raw:
         # 未显式配置：默认单进程（uvicorn 默认即 1），安全
         return
@@ -104,8 +102,7 @@ def _enforce_single_writer() -> None:
         workers = int(raw)
     except ValueError:
         raise RuntimeError(
-            f"无法解析 worker 数量环境变量: WEB_CONCURRENCY={raw!r}。"
-            "请设为整数 1，或改用 PostgreSQL。"
+            f"无法解析 worker 数量环境变量: WEB_CONCURRENCY={raw!r}。请设为整数 1，或改用 PostgreSQL。"
         ) from None
 
     if workers > 1:
@@ -145,8 +142,7 @@ def _log_security_posture() -> None:
 
     cfg = get_settings()
     logger.info(
-        "安全姿态 | app_env=%s | LLM=%s | SQL 日志=%s | traceback 回吐=%s | "
-        "JWT 密钥=%s",
+        "安全姿态 | app_env=%s | LLM=%s | SQL 日志=%s | traceback 回吐=%s | JWT 密钥=%s",
         cfg.app_env,
         cfg.get_llm_config()["provider"],
         "开" if cfg.log_sql else "关",
@@ -160,10 +156,7 @@ def _log_security_posture() -> None:
             "**生产部署务必设为 APP_ENV=prod 并显式配置 JWT_SECRET_KEY**"
         )
     if cfg.log_sql:
-        logger.warning(
-            "已开启 SQL 日志（LOG_SQL=true）：日志包含 bcrypt 哈希与知识卡片/题目正文，"
-            "请勿用于生产"
-        )
+        logger.warning("已开启 SQL 日志（LOG_SQL=true）：日志包含 bcrypt 哈希与知识卡片/题目正文，请勿用于生产")
 
     # 缺 LLM Key 时**显式说明哪些功能不可用**（阶段 2.3 起）
     #
@@ -173,10 +166,14 @@ def _log_security_posture() -> None:
     # 非 LLM 部分都还能用），但用户第一次点"AI 理解"只会看到一句
     # "API key not configured"，不知道**范围**有多大 —— 于是会以为整个应用坏了。
     # 启动时把边界一次讲清楚，比在十几个入口各报一次错便宜得多。
-    configured = [name for name, key in (
-        ("DEEPSEEK_API_KEY", cfg.deepseek_api_key),
-        ("GLM_API_KEY", cfg.glm_api_key),
-    ) if (key or "").strip()]
+    configured = [
+        name
+        for name, key in (
+            ("DEEPSEEK_API_KEY", cfg.deepseek_api_key),
+            ("GLM_API_KEY", cfg.glm_api_key),
+        )
+        if (key or "").strip()
+    ]
     if not configured:
         logger.warning(
             "未配置任何 LLM API Key（DEEPSEEK_API_KEY / GLM_API_KEY）："
@@ -220,6 +217,7 @@ async def lifespan(app: FastAPI):
     # 关闭时：释放共享 LLM HTTP 客户端，见 docs/decisions.md#F-05
     try:
         from .services.llm_service import close_llm_client
+
         close_llm_client()
         logger.info("EngramNote 应用关闭：已释放 LLM 共享客户端")
     except Exception as e:
@@ -229,6 +227,7 @@ async def lifespan(app: FastAPI):
 # ===========================================================================
 # 阶段 0.10：交互式 schema 端点的环境闸门
 # ===========================================================================
+
 
 def _schema_endpoint_kwargs(cfg: Settings) -> dict[str, Any]:
     """按运行环境决定 `/docs`、`/openapi.json`、`/redoc` 是否注册（阶段 0.10）
@@ -373,6 +372,7 @@ class IndexBacklog(BaseModel):
     不是读配置、也不是读进程内存 —— 因为算向量的进程是 worker，
     而 `/ready` 跑在 API 进程里，两者不是同一份内存状态。
     """
+
     pending_embeddings: Optional[int] = None
     #: 来源；测不到时是原因码（如 `chunks_unavailable`）
     source: str
@@ -428,14 +428,14 @@ async def _task_status_counts() -> tuple[Optional[dict[str, int]], Optional[str]
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
-            rows = (await session.execute(
-                select(TaskRun.status, func.count()).group_by(TaskRun.status)
-            )).all()
+            rows = (await session.execute(select(TaskRun.status, func.count()).group_by(TaskRun.status))).all()
     except Exception as exc:
         # 细节只进日志：响应里回的是稳定的原因码（见 DatabaseCheck 的说明）
         logger.error(
             "就绪检查失败：数据库不可用或 schema 未就绪 | %s: %s",
-            type(exc).__name__, exc, exc_info=True,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
         )
         return None, "database_unavailable"
 
@@ -466,9 +466,7 @@ async def _pending_embedding_count() -> tuple[Optional[int], str]:
         session_factory = get_session_factory()
         async with session_factory() as session:
             total = (
-                await session.execute(
-                    select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
-                )
+                await session.execute(select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False)))
             ).scalar_one()
     except Exception as exc:
         # 细节只进日志：响应里回稳定原因码（与 DatabaseCheck 的说明同一口径）
@@ -590,6 +588,7 @@ def _broker_queue_depth(cfg: Settings) -> tuple[Optional[int], str]:
 # 因此在这里注册处理器，保证 4xx/5xx 响应体统一为
 # {"detail", "error_code", "request_id"} 格式，客户端可凭 request_id 定位日志。
 
+
 def _error_payload(status_code: int, detail: "str | list", error_code: str) -> dict:
     """统一错误信封
 
@@ -610,16 +609,35 @@ def _error_payload(status_code: int, detail: "str | list", error_code: str) -> d
 
 
 async def http_exception_handler(request: Request, exc: HTTPException):
+    """`HTTPException` → 统一信封（**按当前语言**翻译 detail）
+
+    ## ⚠️ 这里是 `HTTPException` 文案的唯一生效点（2026-11-08 修正）
+
+    `middleware/error_handler.py` 里也有一段 `except HTTPException` 的翻译逻辑，
+    但 FastAPI 注册的异常处理器在**内层**先跑（`ExceptionMiddleware` 在路由与
+    中间件之间），所以普通请求里的 `HTTPException` 根本到不了中间件那段 ——
+    它只对"中间件自己抛的" HTTPException 生效。
+
+    实测（`Accept-Language: en`）：
+
+        GET /api/notes  无效令牌 → {"detail": "无效或过期的令牌"}   ← 中文
+
+    而 `HTTP_STATUS_MESSAGES` 里明明有这条的英文。原因就是**这里没翻译**。
+    """
+    raw_detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    detail = resolve_http_status_message(raw_detail, i18n.get_locale())
     logger.warning(
         "HTTP 错误 | %s %s | status=%d | detail=%s",
-        request.method, request.url.path, exc.status_code,
-        exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+        request.method,
+        request.url.path,
+        exc.status_code,
+        detail,
     )
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_payload(
             exc.status_code,
-            exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            detail,
             f"HTTP_{exc.status_code}",
         ),
         # 必须转发 exc.headers：否则路由里精心设置的
@@ -656,7 +674,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     ]
     logger.warning(
         "参数校验错误 | %s %s | %d 处 | 首处=%s",
-        request.method, request.url.path, len(errors),
+        request.method,
+        request.url.path,
+        len(errors),
         (errors[0]["loc"], errors[0]["msg"]) if errors else None,
     )
     return JSONResponse(
@@ -673,7 +693,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # 在这里转成稳定错误码，客户端只需认 `error_code`（不随文案变化）。
 async def llm_quota_exceeded_handler(request: Request, exc: LLMQuotaExceeded):
     logger.warning(
-        "LLM 配额耗尽 | %s %s | %s", request.method, request.url.path, exc.detail,
+        "LLM 配额耗尽 | %s %s | %s",
+        request.method,
+        request.url.path,
+        exc.detail,
     )
     return JSONResponse(
         status_code=exc.status_code,
@@ -808,8 +831,8 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         allow_origins=cfg.get_cors_origins(),  # 从配置解析（默认 Vite/CRA 本地端口）
         # 默认 False：本项目不用 Cookie，认证走 Authorization 头（见 config.py 说明）
         allow_credentials=cfg.cors_allow_credentials,
-        allow_methods=["*"],       # 允许所有 HTTP 方法
-        allow_headers=["*"],       # 允许所有请求头
+        allow_methods=["*"],  # 允许所有 HTTP 方法
+        allow_headers=["*"],  # 允许所有请求头
     )
     app.add_middleware(RequestContextMiddleware)
     # 最外层用户中间件：限流（越早拒绝越省事）
@@ -873,18 +896,12 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
         db_ok = counts is not None
         depth, depth_source = _broker_queue_depth(cfg_now)
         # 库都没连上时给 `None` 而不是 0："没测到"与"真的没有积压"必须能分开
-        pending_embeddings, index_source = (
-            await _pending_embedding_count() if db_ok else (None, "database_unavailable")
-        )
-        vector_models, vector_dims = (
-            await _vector_model_snapshot() if db_ok else (None, None)
-        )
+        pending_embeddings, index_source = await _pending_embedding_count() if db_ok else (None, "database_unavailable")
+        vector_models, vector_dims = await _vector_model_snapshot() if db_ok else (None, None)
         # 降级判据：多种模型或多种维度 ⇒ 库里混着不同来源的向量。
         # 只有一种（含"一种都没有"）时是 False —— "还没有向量"不是降级。
         degraded = (
-            None
-            if vector_models is None or vector_dims is None
-            else len(vector_models) > 1 or len(vector_dims) > 1
+            None if vector_models is None or vector_dims is None else len(vector_models) > 1 or len(vector_dims) > 1
         )
 
         payload = ReadinessResponse(

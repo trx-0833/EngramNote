@@ -1,0 +1,34 @@
+{
+    "$schema":  "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+    "_comment":  "⚠️ 当前【未启用】。@stryker-mutator/core 与 vitest-runner 未安装，本文件不会被任何流程读取。启用需 npm i -D（会改 package.json 与 lock），见 _governance/01-启用清单.md 第 5 节。",
+    "testRunner":  "vitest",
+    "_mutate_comment":  "先只跑 utils/hooks，验证工具链通了再扩面。全量变异会很慢。",
+    "mutate":  [
+                   "src/utils/**/*.ts",
+                   "src/hooks/**/*.ts",
+                   "!src/**/*.test.ts",
+                   "!src/**/*.test.tsx",
+                   "!src/api/generated/**"
+               ],
+    "thresholds":  {
+                       "high":  80,
+                       "low":  60,
+                       "break":  50
+                   },
+    "timeoutMS":  20000,
+    "concurrency":  4,
+    "reporters":  [
+                      "html",
+                      "clear-text",
+                      "progress"
+                  ],
+    "htmlReporter":  {
+                         "fileName":  "../_governance/reports/mutation/index.html"
+                     },
+    "ignorePatterns":  [
+                           "dist",
+                           "coverage",
+                           "node_modules",
+                           "src/api/generated"
+                       ]
+}

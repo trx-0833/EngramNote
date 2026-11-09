@@ -898,7 +898,15 @@ export default function QuestionSets() {
                     const sortKey: SortKey | null = col.sortable ? col.id : null;
                     const ariaSort = ariaSortOf(sortKey, sort);
                     return (
-                      <th key={col.id} scope="col" className={styles.th} aria-sort={ariaSort}>
+                      <th
+                        key={col.id}
+                        scope="col"
+                        className={styles.th}
+                        aria-sort={ariaSort}
+                        /* 窄屏隐藏哪几列由 CSS 的 `[data-col=…]` 选择器决定（见模块 CSS
+                           末尾）：这里只负责把列名暴露给样式层，不加任何逻辑 */
+                        data-col={col.id}
+                      >
                         {sortKey ? (
                           // 可排序的列头是**真按钮**：键盘能 Tab 到、能回车触发。
                           // 带 `onClick` 的 `<th>` 键盘到不了（本项目 F-09/F-17/F-30/F-34
@@ -987,7 +995,7 @@ export default function QuestionSets() {
                           <Fragment key={q.id}>
                             <tr className={`${styles.row} ${ROW_STATE_CLASS[q.difficulty] ?? ''}`}>
                               {visibleColumnList.map((col) => (
-                                <td key={col.id} className={styles.td}>
+                                <td key={col.id} className={styles.td} data-col={col.id}>
                                   {col.id === 'question' && (
                                     <p className={styles.questionText}>{q.question}</p>
                                   )}
