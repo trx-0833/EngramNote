@@ -89,6 +89,7 @@ os.environ.setdefault(
 # ---------------------------------------------------------------------------
 
 import atexit  # noqa: E402
+import logging  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
 
@@ -103,6 +104,46 @@ def _cleanup_session_db() -> None:
 
 
 atexit.register(_cleanup_session_db)
+
+
+# ---------------------------------------------------------------------------
+# 日志隔离：测试期间**绝不写** backend/data/logs/
+#
+# ## 为什么（2026-11-07 实测）
+#
+# `app/main.py:211` 的 lifespan 会调 `setup_logging()` 把 4 个文件 handler 挂到
+# root logger 上，而 `tests/conftest.py` 此前没有把 `LOG_DIR` 重定向到临时目录。
+# 于是任何走 `TestClient` 上下文（会跑 lifespan）的用例一旦执行，后续所有用例
+# 的日志都落进**真实日志目录**：
+#
+#   - 一次 `pytest -q` 全量运行（20:30–20:43 那段）往 `data/logs/engramnote.log`
+#     写了 204 行 `SQLite 迁移` + 94 行「请求完成」；
+#   - 而 `test_db` fixture 每个用例都调 `init_db()`（conftest 里那条
+#     `loop.run_until_complete(db_mod.init_db())`），噪音被逐用例放大。
+#
+# 后果不是"磁盘多几 MB"，而是**日志不可信**：事后按 rid / 按时间排查时，会看到
+# 一堆从未发生过的"请求"。生产日志必须只含真实运行。
+#
+# 用 `setdefault`：外部显式指定的 LOG_DIR（CI 想收集日志时）仍然优先。
+# ---------------------------------------------------------------------------
+
+_SESSION_LOG_DIR = tempfile.mkdtemp(prefix="engramnote-test-logs-")
+os.environ.setdefault("LOG_DIR", _SESSION_LOG_DIR)
+
+
+def _cleanup_session_log_dir() -> None:
+    """进程退出时清理会话临时日志目录
+
+    ⚠️ 必须先 `logging.shutdown()`：`setup_logging()` 挂的 RotatingFileHandler
+    直到进程退出都开着文件句柄，Windows 上"删一个仍被打开的文件"会失败，
+    而 `ignore_errors=True` 会把失败吞掉 —— 表现是临时目录一直留在 %TEMP% 里
+    （实测同一套清理逻辑下 `engramnote-test-session-*` 已经堆了 122 个）。
+    """
+    logging.shutdown()
+    shutil.rmtree(_SESSION_LOG_DIR, ignore_errors=True)
+
+
+atexit.register(_cleanup_session_log_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -180,10 +221,9 @@ def _init_session_db() -> None:
 # 网络安全守卫：默认阻断一切真实外呼
 # ---------------------------------------------------------------------------
 
+
 def _network_tests_allowed() -> bool:
     return os.environ.get("ENGRAMNOTE_ALLOW_NETWORK_TESTS", "").strip() in ("1", "true", "True")
-
-
 
 
 class NetworkAccessBlocked(RuntimeError):
@@ -197,14 +237,23 @@ _BLOCK_MESSAGE = (
 
 
 _REAL_DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                 "data", "db", "engramnote.db")
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "db", "engramnote.db")
 )
 
 #: 判定 SQL 是否为写操作的语句首关键字（用于真实库写入守卫）
 _WRITE_KEYWORDS = (
-    "insert", "update", "delete", "replace", "create", "drop", "alter",
-    "truncate", "vacuum", "attach", "detach", "reindex",
+    "insert",
+    "update",
+    "delete",
+    "replace",
+    "create",
+    "drop",
+    "alter",
+    "truncate",
+    "vacuum",
+    "attach",
+    "detach",
+    "reindex",
 )
 
 
@@ -215,7 +264,8 @@ _STALE_TMP_DB_AGE = 6 * 3600
 #: 临时测试库目录（与 `test_db` fixture 用的是同一个）
 _TMP_TEST_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "tmp_test",
+    "data",
+    "tmp_test",
 )
 
 
@@ -262,8 +312,7 @@ def _sweep_stale_test_dbs(tmp_dir: str | None = None) -> int:
     names = os.listdir(target)
     # 第一遍：本轮要清理的主库
     doomed_dbs = {
-        name for name in names
-        if name.startswith("test_") and name.endswith(".db") and _stale(name) is not None
+        name for name in names if name.startswith("test_") and name.endswith(".db") and _stale(name) is not None
     }
 
     # 第二遍：主库 + 孤儿侧车（"主库不在"或"主库本轮将被删"都算孤儿）
@@ -294,9 +343,7 @@ def _sweep_stale_test_dbs(tmp_dir: str | None = None) -> int:
         freed += size
 
     if removed:
-        print(
-            f"\n[conftest] 清理陈旧临时测试库: {removed} 个 / {freed / 1024 / 1024:.1f} MB"
-        )
+        print(f"\n[conftest] 清理陈旧临时测试库: {removed} 个 / {freed / 1024 / 1024:.1f} MB")
     return removed
 
 
@@ -442,8 +489,8 @@ def pytest_collection_modifyitems(config, items):
             src = inspect.getsource(func)
         except (OSError, TypeError):
             continue
-        uses_net = ("requests." in src or "httpx." in src or "urllib" in src)
-        is_mocked = ("mock" in src.lower() or "monkeypatch" in src)
+        uses_net = "requests." in src or "httpx." in src or "urllib" in src
+        is_mocked = "mock" in src.lower() or "monkeypatch" in src
         if uses_net and not is_mocked:
             item.add_marker(network_marker)
 
@@ -566,7 +613,8 @@ def test_db():
 
     tmp_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "tmp_test",
+        "data",
+        "tmp_test",
     )
     os.makedirs(tmp_dir, exist_ok=True)
     db_path = os.path.join(tmp_dir, f"test_{uuid.uuid4().hex[:8]}.db")

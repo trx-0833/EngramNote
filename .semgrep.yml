@@ -1,0 +1,93 @@
+# EngramNote 自定义 SAST 规则
+#
+# ⚠️ 当前【未启用】。semgrep 未安装，且 .github/workflows/ci.yml 中无任何 semgrep 引用。
+#
+# 启用：
+#   pip install semgrep
+#   cd backend && semgrep --config ..\.semgrep.yml app
+#
+# 接入 CI 的要求（阶段三）：
+#   1) 先 continue-on-error: true 跑两周
+#   2) 确认命中量可解释（每条要么修，要么加 # nosemgrep 并写理由）
+#   3) 再转阻断，且只阻断 ERROR 级
+#
+# 规则设计原则：
+#   只写"这个项目真的会犯"的错。通用规则集（p/security-audit）留给 CI 的 --config 参数，
+#   不在这里堆砌——规则越多，越容易被整体忽略。
+
+rules:
+  # ---------------------------------------------------------------
+  # 1) f-string 拼 SQL —— FastAPI + SQLAlchemy 项目最典型的注入面
+  # ---------------------------------------------------------------
+  - id: fastapi-raw-sql-fstring
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL 用 f-string 拼接，存在注入风险。改用 SQLAlchemy 的参数绑定
+      （text("... :param") + params）或 ORM 表达式。
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $DB.execute(f"...")
+          - pattern: $DB.exec_driver_sql(f"...")
+          - pattern: $DB.execute("..." + $X)
+          - pattern: $DB.exec_driver_sql("..." + $X)
+
+  # ---------------------------------------------------------------
+  # 2) vault 路径拼接 —— 文件存储层最容易被穿越的地方
+  # ---------------------------------------------------------------
+  - id: vault-path-join-unchecked
+    languages: [python]
+    severity: ERROR
+    message: >-
+      路径由 base 与外部输入拼接，未做 realpath 归一化，存在目录穿越风险。
+      应 resolve 后校验仍位于 base 之下。
+    metadata:
+      category: security
+      cwe: "CWE-22: Path Traversal"
+    patterns:
+      - pattern: os.path.join($BASE, $USER)
+      - pattern-not-inside: |
+          $P = os.path.realpath(...)
+          ...
+      - pattern-not-inside: |
+          $P = Path(...).resolve()
+          ...
+      - metavariable-pattern:
+          metavariable: $USER
+          patterns:
+            - pattern-either:
+                - pattern: request.$ANY
+                - pattern: $REQ.query_params[...]
+                - pattern: $REQ.path_params[...]
+                - pattern: form[...]
+
+  # ---------------------------------------------------------------
+  # 3) subprocess shell=True —— celery 任务与 MinerU 调用面
+  # ---------------------------------------------------------------
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: WARNING
+    message: >-
+      subprocess 使用 shell=True，参数若含外部输入会导致命令注入。
+      改用参数列表形式（shell=False）。
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  # ---------------------------------------------------------------
+  # 4) 关闭 TLS 校验 —— 内部工具偶发的"先跑起来"写法
+  # ---------------------------------------------------------------
+  - id: requests-verify-false
+    languages: [python]
+    severity: ERROR
+    message: 关闭了 TLS 证书校验（verify=False），中间人可篡改响应。
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+    pattern-either:
+      - pattern: requests.$METHOD(..., verify=False, ...)
+      - pattern: httpx.$METHOD(..., verify=False, ...)

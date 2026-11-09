@@ -16,6 +16,7 @@ import {
   showNotification,
   isInQuietHours,
 } from '../utils/notifications';
+import { getDevicePrefs } from '../utils/devicePrefs';
 import { useTranslation } from '../i18n';
 
 /** 轮询间隔：10 分钟 */
@@ -81,8 +82,8 @@ export default function ReminderBanner() {
   useEffect(() => {
     if (!reminders) return;
     if (reminders.due_count > 0 && reminders.due_count !== lastNotifiedDueRef.current) {
-      // 静默时段不弹通知
-      if (!isInQuietHours()) {
+      // 静默时段不弹通知；设置页的「桌面通知」总开关关掉时也不弹
+      if (getDevicePrefs().desktopNotifications && !isInQuietHours()) {
         showNotification(
           t('reminder.title'),
           t('reminder.dueCount', { count: reminders.due_count }),

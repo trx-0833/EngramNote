@@ -19,6 +19,7 @@ import type { RefObject } from 'react';
 // 选择器里的 `:global(.markdown-body)` 是**引用**一个按判据必须留全局的类名
 // （三个不相邻功能在用 + `marked` 生成的 DOM），不是"把类名留全局"。
 import styles from './useAdhdReader.module.css';
+import { getDevicePrefs } from '../utils/devicePrefs';
 
 interface Point2D {
   x: number;
@@ -154,7 +155,7 @@ function extractLineText(block: HTMLElement, point: Point2D): string | null {
  * @returns 当前状态与控制函数
  */
 export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(() => getDevicePrefs().adhdDefault);
   const [currentLineText, setCurrentLineText] = useState('');
 
   const enabledRef = useRef(enabled);
@@ -271,54 +272,85 @@ export function useAdhdReader(containerRef: RefObject<HTMLElement>) {
   // eslint-disable-next-line react-hooks/refs
   applyFocusRef.current = applyFocus;
 
-  // 给所有 Markdown 顶层块打上类名；内容变化时通过 MutationObserver 自动同步
-  useEffect(() => {
-    const root = containerRef.current;
-    if (!root) return;
-
-    const sync = () => {
-      const blocks = Array.from(root.children).filter(isBlockElement);
-      blocks.forEach((el) => el.classList.add(styles.adhdBlock));
-
-      if (enabledRef.current) {
-        root.classList.add(styles.adhdReaderActive);
-        applyFocusRef.current?.(lastPointRef.current);
-      } else {
-        root.classList.remove(styles.adhdReaderActive);
-        blocks.forEach((el) => {
-          el.classList.remove(styles.adhdCurrentBlock);
-          el.style.filter = '';
-          el.style.opacity = '';
-        });
-        markerRef.current?.remove();
-        markerRef.current = null;
-      }
-    };
-
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(root, { childList: true, subtree: false });
-    return () => observer.disconnect();
-  }, [containerRef, enabled]);
-
-  // 鼠标遮罩模式：跟随鼠标位置高亮所在行/块
+  // 给所有 Markdown 顶层块打上类名；内容变化时通过 MutationObserver 自动同步。
+  //
+  // ## 为什么需要 body 观察器
+  //
+  // 设置里的「ADHD Reader 默认开启」会让 `enabled` 在**首次渲染就是 true**，
+  // 但此时 `MarkdownReader` 往往还没挂载（笔记数据仍在加载，`ref.current=null`），
+  // 首次 effect 直接 return；之后 React 不会因为「ref 里突然有 DOM 了」而重跑
+  // 这个 effect。结果是按钮显示开启、正文却没有遮罩 —— 用户实测到的就是这个。
+  //
+  // 因此 root 不存在时先观察 body，等 Markdown 容器真正挂载后再接上
+  // 块类名、遮罩与鼠标监听。
   useEffect(() => {
     if (!enabled) return;
-    const root = containerRef.current;
-    if (!root) return;
 
-    const onPointer = (e: MouseEvent) => {
-      lastPointRef.current = { x: e.clientX, y: e.clientY };
+    let root: HTMLElement | null = null;
+    let rootObserver: MutationObserver | null = null;
+    let mountObserver: MutationObserver | null = null;
+    let onPointer: ((e: MouseEvent) => void) | null = null;
+
+    const sync = () => {
+      if (!root) return;
+      const blocks = Array.from(root.children).filter(isBlockElement);
+      blocks.forEach((el) => el.classList.add(styles.adhdBlock));
+      root.classList.add(styles.adhdReaderActive);
       applyFocusRef.current?.(lastPointRef.current);
     };
 
-    root.addEventListener('mousemove', onPointer);
-    root.addEventListener('click', onPointer);
-    return () => {
-      root.removeEventListener('mousemove', onPointer);
-      root.removeEventListener('click', onPointer);
+    const attach = (el: HTMLElement) => {
+      root = el;
+      root.classList.add(styles.adhdReaderActive);
+      sync();
+
+      rootObserver = new MutationObserver(sync);
+      rootObserver.observe(root, { childList: true, subtree: false });
+
+      onPointer = (e: MouseEvent) => {
+        lastPointRef.current = { x: e.clientX, y: e.clientY };
+        applyFocusRef.current?.(lastPointRef.current);
+      };
+      root.addEventListener('mousemove', onPointer);
+      root.addEventListener('click', onPointer);
     };
-  }, [enabled, containerRef]);
+
+    const current = containerRef.current;
+    if (current) {
+      attach(current);
+    } else {
+      mountObserver = new MutationObserver(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        mountObserver?.disconnect();
+        mountObserver = null;
+        attach(el);
+      });
+      mountObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    return () => {
+      mountObserver?.disconnect();
+      rootObserver?.disconnect();
+      if (root) {
+        if (onPointer) {
+          root.removeEventListener('mousemove', onPointer);
+          root.removeEventListener('click', onPointer);
+        }
+        root.classList.remove(styles.adhdReaderActive);
+        root.classList.remove(styles.adhdCurrentBlock);
+        Array.from(root.children)
+          .filter(isBlockElement)
+          .forEach((el) => {
+            el.classList.remove(styles.adhdCurrentBlock);
+            el.style.filter = '';
+            el.style.opacity = '';
+          });
+      }
+      markerRef.current?.remove();
+      markerRef.current = null;
+    };
+  }, [containerRef, enabled]);
 
   const enable = useCallback(() => {
     setEnabled(true);

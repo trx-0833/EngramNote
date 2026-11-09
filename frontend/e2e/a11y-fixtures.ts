@@ -708,26 +708,40 @@ function apiFixtures(): Record<string, unknown> {
 
     // ── 仪表盘 ──
     '/api/goals': { goals: [], total: 0 },
-    // 无活跃目标时后端回 400，前端当作正常业务状态（见 Dashboard.tsx）
-    '/api/goals/daily-plan': { __status: 400, detail: 'No active goals' },
-    '/api/review/stats': { due_count: 12, today_done: 7, today_accuracy: 0.86, daily_limit: 50 },
+    // 无活跃目标时后端回 400，前端当作正常业务状态（见 Dashboard.tsx）。
+    // ⚠️ 必须带 `error_code`：前端是按 `GOAL_NONE_ACTIVE` 这个**结构化错误码**
+    // 分流的（`errorCodeOf(e)`），只给 detail 时它会被当成真失败并多计一项，
+    // 仪表盘于是显示「部分数据加载失败（1 项）」—— 线上不会出现这句。
+    '/api/goals/daily-plan': {
+      __status: 400,
+      detail: 'No active goals, please create a goal first',
+      error_code: 'GOAL_NONE_ACTIVE',
+    },
+    '/api/review/stats': { due_count: 12, today_done: 7, today_accuracy: 86, daily_limit: 50 },
     '/api/report/daily': {
       date: '2026-01-06',
       new_mastered: 4,
       total_review_time_ms: 512_000,
       total_reviews: 18,
-      today_accuracy: 0.86,
+      // ⚠️ 后端 `report_service.py:124` 的 `today_accuracy` 是**百分数**
+      // （`round(correct / total * 100, 1)`），不是 0~1 的比率。桩里曾写 0.86，
+      // 页面按 `%` 渲染 ⇒ 截图上是「0.86%」而线上是「86%」。
+      // `question_type_accuracy` 同理，且真实契约（`QuestionTypeAccuracy`）
+      // 还带 `correct` —— 缺了它页面会渲染成「(/10)」。
+      today_accuracy: 86,
       weak_point_count: 2,
-      question_type_accuracy: [{ question_type: 'choice', accuracy: 0.9, total: 10 }],
+      question_type_accuracy: [{ question_type: 'choice', accuracy: 90, total: 10, correct: 9 }],
     },
     '/api/report/weekly-trend': {
       items: [
-        { date: '2026-01-02', review_count: 12, accuracy: 0.8 },
-        { date: '2026-01-03', review_count: 18, accuracy: 0.86 },
-        { date: '2026-01-04', review_count: 9, accuracy: 0.72 },
+        // 同 `today_accuracy`：这三个也是**百分数**（`report_service.py:193`）。
+        // 写成 0.8 时柱状图会按「≥ 60」的阈值判成"低于 60%"，颜色因此全错。
+        { date: '2026-01-02', review_count: 12, accuracy: 80 },
+        { date: '2026-01-03', review_count: 18, accuracy: 86 },
+        { date: '2026-01-04', review_count: 9, accuracy: 72 },
       ],
       total_reviews: 39,
-      avg_accuracy: 0.79,
+      avg_accuracy: 79,
     },
     // ⚠️ 字段名必须与 `WeakPoint` 契约（api/report.ts）一致：`card_title` / `error_count`。
     // 这里原来写的是 `title` / `review_count` —— 页面**不会崩**，只是把 `undefined`
@@ -804,7 +818,16 @@ function apiFixtures(): Record<string, unknown> {
     // ── 答题复习（`Review`）──
     // 与上面那条是**两个不同的接口**：只桩 `/review/cards/due` 时，
     // 打开 `/review` 会停在错误分支（页面照常渲染，且"0 违规"）。
-    '/api/review/due': { items: DUE_QUIZZES, total: DUE_QUIZZES.length },
+    // 真实 `/api/review/due` 一定带这两个字段（`DueQuizListResponse`，后端
+    // `test_review_*` 与真库实测都确认）。桩里缺了它们时，Review 页会直接
+    // 把 `undefined` 渲染成「今日还可结算 undefined 道」—— 截图与 e2e 都会
+    // 看见这个词，而线上不会。缺字段的桩等于**造假**，这里补齐。
+    '/api/review/due': {
+      items: DUE_QUIZZES,
+      total: DUE_QUIZZES.length,
+      remaining_quota: 10,
+      daily_limit: 10,
+    },
     '/api/review/cards/card-1/submit': {
       card_id: 'card-1',
       quality: 4,

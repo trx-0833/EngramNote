@@ -275,7 +275,7 @@ npm run docs:links    # 文档相对链接 + 锚点完整性，阻断（2026-10-
 ```
 
 另外两项在 CI 里跑：`security-scan`（`pip-audit` + `npm audit`，**只归档、不阻断**）与
-`docker-nginx-config`（部署配置守卫，**阻断** —— 任一条 grep 断言失败即 job 失败）。
+| `nginx-config-guard`（原名 `docker-nginx-config`；部署配置守卫，**阻断** —— 任一条 grep 断言失败即 job 失败）。
 逐条理由与当前已知缺口见
 [docs/open-source-readiness.md](docs/open-source-readiness.md)。
 
@@ -335,6 +335,7 @@ EngramNote/
 | [docs/open-source-readiness.md](docs/open-source-readiness.md) | 开源化差距核查：必须修 / 应当修 / 建议新增（带 `文件:行号` 证据） |
 | [docs/agent-workstream-plan.md](docs/agent-workstream-plan.md) | **长跑型改进方案集**（计划已拍板）：12 条工作流 + 事实底账 + 6 项已拍板决策 |
 | [docs/agent-workstream-progress.md](docs/agent-workstream-progress.md) | 上面那份的**执行进度台账**：逐条状态 + commit + 下一轮起点 |
+| [docs/settings-plan.md](docs/settings-plan.md) | **设置功能设计与设置项调研**（六组主体已落地）：现状盘点 + 六组 IA + 契约与存储 + 每日上限/留存率/邮件/内容语言/卡片上限/清洗/LLM 用量 |
 | [frontend/docs/](frontend/docs/) | 契约生成与漂移检查、CSS 约定与迁移、e2e 说明、可访问性审计 |
 | [docs/journal/](docs/journal/) | 过程记录：代码审查、启动验证、工具链检查的**当次报告**（仅供追溯，不是现状依据） |
 | [docs/archive/](docs/archive/) | 历史设计文档（仅供追溯，**不要以它们为准**） |

@@ -411,3 +411,15 @@ a:hover {
     transform: translateX(3px);
   }
 }
+
+/* 设置页的「减少动效」开关：手动覆盖系统偏好。
+   与各模块里的 `@media (prefers-reduced-motion)` 并列生效，而不是替代它 ——
+   用户关掉开关时，系统级偏好仍然应当被尊重。 */
+html[data-reduce-motion='true'] *,
+html[data-reduce-motion='true'] *::before,
+html[data-reduce-motion='true'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

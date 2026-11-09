@@ -2,10 +2,16 @@
 # ========================
 #
 # ⚠️ **未验证：本项目的容器化是历史遗留，从未构建或运行过**（本机没有 Docker）。
-#    见 `README.md:324-336` 与 `AGENTS.md:18`。
-#    CI 里的 `docker-nginx-config` job（`.github/workflows/ci.yml:481-529`）只对
-#    `frontend/` 的几个文件做**文本 grep 守卫**，它不校验这个文件，
-#    也不代表这条路走得通 —— 要用请先自行验证。
+#    见 `README.md:324-336` 与 `AGENTS.md:18`（容器化列为已否决方向）。
+#
+#    【2026-11-07 治理调整】CI 里曾有一个 `docker-nginx-config` job 对 `frontend/`
+#    做文本 grep 守卫，它**从不校验本文件**。该 job 现已改名 `nginx-config-guard`，
+#    只保留 nginx 的两条守卫（上传 413 / SSE 缓冲），与容器相关的两步
+#    （`.dockerignore` 排除 node_modules、Dockerfile 必须用 npm ci）已删除。
+#
+#    因此：**本文件仅作历史参考，不要当作部署路径**。保留它的理由是它记录了
+#    若干兼容性结论（如 `libgl1` 替代已废弃的 `libgl1-mesa-glx`），删了就得重新踩一遍。
+#    若将来真要恢复容器路线，请先自行构建验证，并同步更新 README 的部署章节。
 #
 # 多阶段构建：安装依赖 → 运行服务
 #

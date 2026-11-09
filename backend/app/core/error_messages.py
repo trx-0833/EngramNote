@@ -100,12 +100,20 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
-from .i18n import DEFAULT_LOCALE
+from .i18n import DEFAULT_LOCALE, get_locale
 
 #: 结构：`{key: {locale: 文案}}`，`key` 是错误码或 `<错误码>_ALT[n]`
 ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ── 笔记 ──
     "NOTE_NOT_FOUND": {"zh-CN": "笔记不存在", "en": "Note not found"},
+    # 插图（2026-11-09）：markdown 里的相对图片引用被重写成
+    # `/api/notes/{id}/assets/{path}` 后的两种失败。一张图取不到属于
+    # **页面级小失败**，前端降级成占位符即可，不必整页报错。
+    "ASSET_NOT_FOUND": {"zh-CN": "插图不存在", "en": "Image not found"},
+    "ASSET_TYPE_UNSUPPORTED": {
+        "zh-CN": "不支持的插图类型或路径",
+        "en": "Unsupported image type or path",
+    },
     "NOTE_NOT_VIDEO": {"zh-CN": "该笔记不是视频类型", "en": "This note is not a video"},
     "NOTE_VIDEO_FILE_MISSING": {
         "zh-CN": "视频文件不存在",
@@ -177,8 +185,7 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # 主项选"触发清洗"那条（它是最早写入的、也是最典型的）。
     "NOTE_STATUS_INVALID": {
         "zh-CN": "笔记当前状态为 {status}，只有 converted、cleaned 或 cleaning_failed 状态可以触发清洗",
-        "en": "This note is in status {status}; only converted, cleaned or cleaning_failed "
-        "notes can start cleaning",
+        "en": "This note is in status {status}; only converted, cleaned or cleaning_failed notes can start cleaning",
     },
     "NOTE_STATUS_INVALID_ALT": {
         "zh-CN": "笔记当前状态为 {status}，只有 cleaning 状态可以停止清洗",
@@ -210,7 +217,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "笔记 {material_id} 不是学习资料",
         "en": "Note {material_id} is not a study material",
     },
-
     # ── 批注 ──
     "ANNOTATION_NOT_FOUND": {"zh-CN": "批注不存在", "en": "Annotation not found"},
     "ANNOTATION_TOO_LONG": {"zh-CN": "批注内容过长", "en": "The annotation is too long"},
@@ -222,7 +228,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "view_mode 必须为 original 或 clean",
         "en": "view_mode must be original or clean",
     },
-
     # ── 知识图谱 ──
     "GRAPH_NODE_NOT_FOUND": {
         "zh-CN": "节点不存在或无权访问",
@@ -240,7 +245,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # （实测 `graph_service.py:792`）。确认/拒绝那两条路径的文案在
     # `GRAPH_RELATION_OPERATION_FAILED` 下，那是另一个码、且刻意未翻译
     # （它是"操作没成功"的笼统出口，文案由服务层给，见 UNTRANSLATED_CODES）。
-
     # ── 知识卡片 ──
     "CARD_NOT_FOUND": {"zh-CN": "卡片不存在", "en": "Card not found"},
     "CARD_NOT_FOUND_ALT": {"zh-CN": "知识卡片不存在", "en": "Knowledge card not found"},
@@ -261,10 +265,8 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # 漂移点 —— 改枚举值时要改两处，而文案里那一处不会被编译器发现。
     "CARD_CATEGORY_INVALID": {
         "zh-CN": "无效的卡片类别: {category}，合法值为 regular/blind_spot/extension",
-        "en": "Invalid card category: {category}. Valid values are "
-        "regular/blind_spot/extension",
+        "en": "Invalid card category: {category}. Valid values are regular/blind_spot/extension",
     },
-
     # ── 清洗 ──
     "CLEANING_IN_PROGRESS": {
         "zh-CN": "清洗任务正在进行中，请等待完成或先停止",
@@ -288,7 +290,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "No duplicate marker for block {block_index} was found in the cleaned copy "
         "(it may have been handled already)",
     },
-
     # ── 理解 / 出题 / 问答 ──
     "UNDERSTANDING_IN_PROGRESS": {
         "zh-CN": "理解任务正在进行中，请等待完成",
@@ -299,7 +300,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "This note has no knowledge cards yet. Run the understanding pipeline first.",
     },
     "EMPTY_QUESTION": {"zh-CN": "问题不能为空", "en": "The question cannot be empty"},
-
     # ── 上传 ──
     "UPLOAD_FILE_NAME_EMPTY": {
         "zh-CN": "文件名不能为空",
@@ -357,8 +357,7 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "en": "Only PDF cropping is supported; the current file type is {source_type}",
     },
     "UPLOAD_SCRIPT_CONTENT_REJECTED": {
-        "zh-CN": "检测到疑似脚本注入内容（{violation}），已拒绝上传；"
-        "请移除相关 HTML 标签或事件属性后重试",
+        "zh-CN": "检测到疑似脚本注入内容（{violation}），已拒绝上传；请移除相关 HTML 标签或事件属性后重试",
         "en": "Possible script injection detected ({violation}); the upload was rejected. "
         "Remove the HTML tags or event attributes and try again.",
     },
@@ -386,7 +385,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "临时上传数据异常，请重新选择文件",
         "en": "The temporary upload data is invalid. Please select the file again.",
     },
-
     # ── 文件夹 ──
     "FOLDER_NOT_FOUND": {"zh-CN": "文件夹不存在", "en": "Folder not found"},
     "FOLDER_NOT_FOUND_ALT": {
@@ -397,10 +395,8 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "无效的日期格式，请使用 ISO 格式如 2024-01-15",
         "en": "Invalid date format. Use an ISO date such as 2024-01-15.",
     },
-
     # ── 项目 ──
     "PROJECT_NOT_FOUND": {"zh-CN": "项目不存在", "en": "Project not found"},
-
     # ── 学习目标 ──
     #
     # ⚠️ 这两个码的中文**本来就是英文**（实测：`raise AppError(GOAL_NOT_FOUND,
@@ -420,7 +416,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "目标范围包含不存在或无权访问的文件夹",
         "en": "The goal scope includes a folder that does not exist or is not accessible",
     },
-
     # ── 版本 ──
     #
     # 两条文案都带运行期值（note_id / version_number），但它们的**可变部分
@@ -437,7 +432,6 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "版本不存在",
         "en": "Version not found",
     },
-
     # ── 复习 ──
     "REVIEW_QUIZ_NOT_FOUND": {
         "zh-CN": "题目不存在或不属于该笔记",
@@ -452,10 +446,8 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "获取复习提醒数据失败",
         "en": "Failed to load review reminders",
     },
-
     # ── 任务 ──
     "TASK_NOT_FOUND": {"zh-CN": "任务不存在", "en": "Task not found"},
-
     # ── LLM 用量 / 提示词版本 ──
     # 占位符 `{choices}` / `{version}` 与调用点表达式不同名（那边是
     # `'/'.join(GROUP_BY_CHOICES)` 与 `{version!r}`），见文件头第 1 条约定。
@@ -466,12 +458,10 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ⚠️ 中文文案里的 `unknown` 与 `1 / 2` **刻意保留原样**：它们是**字面量取值**，
     # 不是可翻译的词（调用点写的也是反引号包起来的代码字面量）。
     "PROMPT_VERSION_INVALID": {
-        "zh-CN": "version 只能是 `unknown`（版本未知那一桶）或纯数字版本号"
-        "（如 1 / 2），收到 {version}",
+        "zh-CN": "version 只能是 `unknown`（版本未知那一桶）或纯数字版本号（如 1 / 2），收到 {version}",
         "en": "version must be either `unknown` (the bucket for unknown versions) or a "
         "numeric version (e.g. 1 / 2); got {version}",
     },
-
     # ── 学习目标：带运行期值的校验 ──
     # ⚠️ 调用点给的**原文案是英文**（`goal_service.py:150`
     # 的 `f"Maximum {MAX_ACTIVE_GOALS} active goals"`）—— 实测确认，不是笔误。
@@ -481,11 +471,88 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         "zh-CN": "活跃目标数已达上限（最多 {max_goals} 个）",
         "en": "Maximum {max_goals} active goals",
     },
-
     # ── 认证 ──
     "AUTH_INVALID_CREDENTIALS": {
         "zh-CN": "邮箱或密码错误",
         "en": "Incorrect email or password",
+    },
+    # ── 服务层固定句子（2026-11-08 补）──
+    #
+    # 这些句子由 `graph_service` / `knowledge_link_service` / `review_service`
+    # 以 `{"success": False, "error": "…"}` 返回，API 层原样包成
+    # `AppError(<该模块的码>, result["error"], …)`。所以翻译的键是
+    # **（包装码, 中文原文）**，一条句子在多个模块出现就要登记多条
+    # ——`_ALT_INDEX` 按 `(code, 中文)` 反查，正是为此设计的。
+    #
+    # ⚠️ 中文必须与服务的返回**逐字相同**：`tests/test_i18n.py` 用 AST 扫
+    # `app/services/**` 的 `{"error": "…"}` 字面量逐条比对，改一个字立刻红。
+    "GRAPH_RELATION_OPERATION_FAILED_ALT1": {
+        "zh-CN": "关系不存在",
+        "en": "Relation not found",
+    },
+    "GRAPH_RELATION_OPERATION_FAILED_ALT2": {
+        "zh-CN": "该关系不是建议状态，无法确认",
+        "en": "This relation is not a suggestion and cannot be confirmed",
+    },
+    "GRAPH_RELATION_OPERATION_FAILED_ALT3": {
+        "zh-CN": "该关系不是建议状态，无法拒绝",
+        "en": "This relation is not a suggestion and cannot be rejected",
+    },
+    "GRAPH_RELATION_OPERATION_FAILED_ALT4": {
+        "zh-CN": "卡片不存在或不属于当前用户",
+        "en": "Card not found or not owned by the current user",
+    },
+    "GRAPH_RELATION_OPERATION_FAILED_ALT5": {
+        "zh-CN": "这两张卡片之间已存在关系",
+        "en": "A relation between these two cards already exists",
+    },
+    "GRAPH_RELATION_NOT_FOUND_ALT1": {
+        "zh-CN": "关系不存在",
+        "en": "Relation not found",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT1": {
+        "zh-CN": "笔记-资料关联不存在或无权访问",
+        "en": "Note–material link not found or not accessible",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT2": {
+        "zh-CN": "学习资料不存在或无权访问",
+        "en": "Material not found or not accessible",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT3": {
+        "zh-CN": "用户笔记不存在或无权访问",
+        "en": "Personal note not found or not accessible",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT4": {
+        "zh-CN": "学习资料内容为空，无法进行联合分析",
+        "en": "The material has no content to compare",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT5": {
+        "zh-CN": "用户笔记内容为空，无法进行联合分析",
+        "en": "The personal note has no content to compare",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT6": {
+        "zh-CN": "学习资料无法切分章节",
+        "en": "The material could not be split into sections",
+    },
+    "COMBINED_EXTRACT_FAILED_ALT7": {
+        "zh-CN": "联合分析所有章节均解析失败，请稍后重试",
+        "en": "All sections failed to analyze. Please try again later.",
+    },
+    "EXTENSION_GENERATE_FAILED_ALT1": {
+        "zh-CN": "父卡片不存在或无权访问",
+        "en": "Parent card not found or not accessible",
+    },
+    "EXTENSION_GENERATE_FAILED_ALT2": {
+        "zh-CN": "掌握度未达 80，无法生成拓展知识点",
+        "en": "Mastery is below 80; extension cards are unavailable",
+    },
+    "REVIEW_QUIZ_NOT_FOUND_ALT1": {
+        "zh-CN": "题目不存在",
+        "en": "Question not found",
+    },
+    "REVIEW_QUIZ_NOT_FOUND_ALT2": {
+        "zh-CN": "题目尚未到期，请按复习计划进行",
+        "en": "This question is not due yet; follow the review schedule",
     },
 }
 
@@ -511,6 +578,23 @@ HTTP_STATUS_MESSAGES: Dict[str, Dict[str, str]] = {
     "刷新令牌无效或已失效，请重新登录": {
         "zh-CN": "刷新令牌无效或已失效，请重新登录",
         "en": "Refresh token is invalid or expired. Please sign in again.",
+    },
+    # ── 反方向：FastAPI/Starlette 内建的英文原句（2026-11-08 补）──
+    #
+    # `OAuth2PasswordBearer` 缺令牌时抛的是 `HTTPException(401, "Not authenticated")`，
+    # 英文原文直接进 detail ⇒ **中文界面**上出现英文提示。这张表的键是原文，
+    # 所以把英文原句也登记一份就能反向翻译。
+    "Not authenticated": {
+        "zh-CN": "未认证，请先登录",
+        "en": "Not authenticated",
+    },
+    "Not Found": {
+        "zh-CN": "接口不存在",
+        "en": "Not Found",
+    },
+    "Method Not Allowed": {
+        "zh-CN": "请求方法不被允许",
+        "en": "Method Not Allowed",
     },
 }
 
@@ -563,6 +647,15 @@ VALIDATION_ERROR_MESSAGES: Dict[str, str] = {
 #:    但文案是**固定句式**（不含运行期值），理论上可以直接进表；
 #:    没有本轮做是因为要先把服务层的 `reason` 改成**错误码**而不是句子，
 #:    否则表里存中文、服务层给中文，两边靠字符串相等维系，一改就断。
+#:
+#: ## 2026-11-08：其中 4 个已迁走
+#:
+#: `COMBINED_EXTRACT_FAILED` / `EXTENSION_GENERATE_FAILED` /
+#: `GRAPH_RELATION_OPERATION_FAILED` / `DAILY_REVIEW_LIMIT_REACHED` 的固定句子
+#: 已作为 `_ALT` 条目进表；那三条**带运行期值**的句子（无效的关系类型 /
+#: 生成拓展失败 / 今日已达上限）改成在服务层调 `i18n.localize()` 当场选语言。
+#: "两边靠字符串相等维系"这个风险由 `tests/test_i18n.py` 的 AST 守卫接管：
+#: 服务层每一条 `{"error": "…"}` 都必须能在表里找到逐字相同的 `_ALT`。
 UNTRANSLATED_CODES: frozenset = frozenset(
     {
         # ── 上游透传 ──
@@ -570,8 +663,6 @@ UNTRANSLATED_CODES: frozenset = frozenset(
         "ASSESSMENT_QUIZ_GENERATE_FAILED",
         "ASSESSMENT_ANSWER_REJECTED",
         "ASSESSMENT_ANSWER_FAILED",
-        "COMBINED_EXTRACT_FAILED",
-        "EXTENSION_GENERATE_FAILED",
         "FOLDER_NOT_EMPTY",
         "PROJECT_NOTE_LINK_NOT_FOUND",
         "GRAPH_SUGGESTION_FAILED",
@@ -579,14 +670,168 @@ UNTRANSLATED_CODES: frozenset = frozenset(
         # ── 刻意不翻（诊断串）──
         "NOTE_VERSION_RESTORE_REJECTED",
         # ── 仍待处理（服务层给句子而非错误码）──
-        "DAILY_REVIEW_LIMIT_REACHED",
-        "GRAPH_RELATION_OPERATION_FAILED",
         "UPLOAD_NOTE_COUNT_LIMIT_REACHED",
         "UPLOAD_ARCHIVE_REJECTED",
         "UPLOAD_PDF_TOO_MANY_PAGES",
         "AUTH_REGISTRATION_REJECTED",
+        # ── 文案在服务层用 `i18n.localize()` 当场选语言（2026-11-08）──
+        #
+        # 表只能登记**静态原文**；这一条的句子带两个运行期计数
+        # （`今日已完成 {n} 道题，已达每日上限 {m}`），值一变就匹配不上，
+        # 所以翻译发生在 `review_service` 里，表里没有可登记的原文。
+        # 从 `UNTRANSLATED_CODES` 里删不掉它 —— 删掉会被"每个 code 要么进表、
+        # 要么在名单里"的守卫判红（实测），所以留在这里并写清原因。
+        "DAILY_REVIEW_LIMIT_REACHED",
     }
 )
+
+#: `note.error_message` 的本地化表（2026-11-08）
+#:
+#: ## 为什么单独一张表
+#:
+#: `note.error_message` 是**写进数据库**的诊断文案（谁失败的、为什么），
+#: 由 Celery 任务与上传接口写入，随后被笔记列表与详情直接渲染
+#: （`NotesList.tsx:517`、`CleaningPanel.tsx:258`）。它有两种形态：
+#:
+#: - 整句固定：`用户手动停止清洗`
+#: - 前缀固定 + 运行期尾巴：`转换任务提交失败: <异常文本>`
+#:
+#: 所以翻译发生在**读的时候**（`NoteResponse` 的 field_validator），
+#: 而不是写的时候：库里的中文保持原样（它是日志语义，也便于排查时按原文 grep），
+#: 界面拿到的才是当前语言的句子。历史行因此**也能被翻译**，不需要数据迁移。
+#:
+#: 匹配规则（`translate_note_error`）：整句相等 → 最长前缀 + 冒号尾巴。
+#: 匹配不上就原样返回 —— 宁可不翻，也不能把诊断串翻丢。
+NOTE_ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
+    # 整句
+    "用户手动停止清洗": {
+        "zh-CN": "用户手动停止清洗",
+        "en": "Cleaning stopped by the user",
+    },
+    "笔记缺少原始 Markdown 路径": {
+        "zh-CN": "笔记缺少原始 Markdown 路径",
+        "en": "The note is missing its original Markdown path",
+    },
+    "原始 Markdown 内容为空": {
+        "zh-CN": "原始 Markdown 内容为空",
+        "en": "The original Markdown is empty",
+    },
+    "笔记缺少 Markdown 文件路径": {
+        "zh-CN": "笔记缺少 Markdown 文件路径",
+        "en": "The note is missing its Markdown file path",
+    },
+    "Markdown 内容为空": {
+        "zh-CN": "Markdown 内容为空",
+        "en": "Markdown content is empty",
+    },
+    # 前缀 + 尾巴
+    "文件上传失败": {"zh-CN": "文件上传失败", "en": "File upload failed"},
+    "转换任务提交失败": {
+        "zh-CN": "转换任务提交失败",
+        "en": "Failed to enqueue the conversion task",
+    },
+    "重试提交失败": {"zh-CN": "重试提交失败", "en": "Failed to resubmit for retry"},
+    "读取原始 Markdown 失败": {
+        "zh-CN": "读取原始 Markdown 失败",
+        "en": "Failed to read the original Markdown",
+    },
+    "清洗任务重试失败": {"zh-CN": "清洗任务重试失败", "en": "Cleaning retry failed"},
+    "转换任务重试失败": {
+        "zh-CN": "转换任务重试失败",
+        "en": "Conversion retry failed",
+    },
+    "理解任务重试失败": {
+        "zh-CN": "理解任务重试失败",
+        "en": "Understanding retry failed",
+    },
+    "Mineru 转换失败": {"zh-CN": "Mineru 转换失败", "en": "MinerU conversion failed"},
+    "Mineru 调用异常": {
+        "zh-CN": "Mineru 调用异常",
+        "en": "MinerU call raised an exception",
+    },
+    "Markdown 文件读取失败": {
+        "zh-CN": "Markdown 文件读取失败",
+        "en": "Failed to read the Markdown file",
+    },
+    "读取 Markdown 文件失败": {
+        "zh-CN": "读取 Markdown 文件失败",
+        "en": "Failed to read the Markdown file",
+    },
+    "ASR 转写失败": {"zh-CN": "ASR 转写失败", "en": "ASR transcription failed"},
+    "ASR 转写异常": {
+        "zh-CN": "ASR 转写异常",
+        "en": "ASR transcription raised an exception",
+    },
+    "检索索引未建好": {
+        "zh-CN": "检索索引未建好",
+        "en": "The search index could not be built",
+    },
+}
+
+#: 尾巴与前缀之间的分隔符（写库时两种都出现过：中文全角冒号与半角冒号+空格）
+_TAIL_SEPARATORS = ("：", ": ")
+
+#: 少数几条是**复合句**：前缀 + 动态括号 + 固定建议句，用前缀匹配只能翻半句。
+#: 这里给它们单独立模板（`{reason}` 之类是运行期片段，原样拼回）。
+_NOTE_ERROR_TEMPLATES = (
+    (
+        re.compile(
+            r"^检索索引未建好（(?P<reason>.*?)）。"
+            r"这篇笔记的问答与原文定位暂时不可用，重新清洗一次可重试。$"
+        ),
+        {
+            "zh-CN": "检索索引未建好（{reason}）。这篇笔记的问答与原文定位暂时不可用，重新清洗一次可重试。",
+            "en": "The search index could not be built ({reason}). "
+            "Q&A and source lookup are unavailable for this note; clean it again to retry.",
+        },
+    ),
+)
+
+
+def translate_note_error(text: Optional[str], locale: Optional[str] = None) -> Optional[str]:
+    """
+    把 `note.error_message`（中文原文）翻成目标语言
+
+    Args:
+        text: 库里的原文（可能带运行期尾巴）
+        locale: 目标语言；**不传就取当前请求语言**（`i18n.get_locale()`）
+            ⚠️ 默认值不能写成 `DEFAULT_LOCALE` —— 那是导入时固定的常量，
+            等于永远翻成中文（第一版就这么写的，测试直接红）
+
+    Returns:
+        翻译后的句子；整句与前缀都匹配不上时**原样返回**（不丢诊断信息）
+    """
+    if not text:
+        return text
+    locale = locale or get_locale()
+
+    # 1) 复合句模板（前缀 + 动态括号 + 固定建议句）
+    for pattern, entry in _NOTE_ERROR_TEMPLATES:
+        match = pattern.match(text)
+        if match:
+            template = entry.get(locale) or entry.get(DEFAULT_LOCALE) or text
+            return template.format(**match.groupdict())
+
+    entry = NOTE_ERROR_MESSAGES.get(text)
+    if entry:
+        return entry.get(locale) or entry.get(DEFAULT_LOCALE) or text
+
+    # 最长前缀优先：`转换任务重试失败: …` 不能被 `转换任务提交失败` 之类抢走
+    best_prefix = ""
+    for prefix in NOTE_ERROR_MESSAGES:
+        if text.startswith(prefix) and len(prefix) > len(best_prefix):
+            for sep in _TAIL_SEPARATORS:
+                if text.startswith(prefix + sep):
+                    best_prefix = prefix
+                    break
+    if not best_prefix:
+        return text
+
+    tail = text[len(best_prefix) :]
+    entry = NOTE_ERROR_MESSAGES[best_prefix]
+    translated = entry.get(locale) or entry.get(DEFAULT_LOCALE) or best_prefix
+    return f"{translated}{tail}"
+
 
 #: `(code, fallback) -> key` 的索引，让"同码多文案"能精确命中
 _ALT_INDEX: Dict[tuple, str] = {}

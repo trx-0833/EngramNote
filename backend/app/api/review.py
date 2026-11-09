@@ -61,6 +61,7 @@ from ..services import (
     review_service,
     review_state_service,
     scheduler_service,
+    user_settings_service,
 )
 from ..services.notification_service import NotificationService
 
@@ -69,6 +70,12 @@ router = APIRouter()
 # 模块级通知服务实例，避免每次请求重复创建
 _notification_service = NotificationService()
 logger = logging.getLogger(__name__)
+
+
+async def _effective_daily_limit(db: AsyncSession, user_id: str) -> int:
+    """该用户当前生效的每日结算上限（用户覆盖 → 环境默认）"""
+    values = await user_settings_service.get_effective_settings(db, user_id)
+    return int(values["daily_review_limit"])
 
 
 @router.get("/due", response_model=DueQuizListResponse)
@@ -96,16 +103,18 @@ async def get_due_quizzes(
     前端若自己拿 `/review/stats` 的 `today_done` 去减，两次请求之间
     用户可能刚提交过一道，会算错。
     """
+    daily_max = await _effective_daily_limit(db, current_user.id)
     items, remaining = await review_service.get_due_quizzes(
         user_id=current_user.id,
         db=db,
         limit=limit,
+        daily_max=daily_max,
     )
     return DueQuizListResponse(
         items=[DueQuizResponse.model_validate(q) for q in items],
         total=len(items),
         remaining_quota=remaining,
-        daily_limit=review_service.DAILY_REVIEW_LIMIT,
+        daily_limit=daily_max,
     )
 
 
@@ -133,6 +142,7 @@ async def submit_answer(
         db=db,
         self_rating=req.self_rating,
         use_semantic_grading=req.use_semantic_grading,
+        daily_max=await _effective_daily_limit(db, current_user.id),
     )
 
     if "error" in result:
@@ -159,6 +169,7 @@ async def get_review_stats(
     stats = await review_service.get_review_stats(
         user_id=current_user.id,
         db=db,
+        daily_max=await _effective_daily_limit(db, current_user.id),
     )
     return ReviewStatsResponse(**stats)
 
@@ -309,8 +320,15 @@ async def submit_card_review(
     # 卡片复习会继续按 SM-2 排期，而两者写的是同一批 review_states 行 ——
     # 同一张卡在两条路径间来回切换会得到互相矛盾的间隔。
     # 现在两条路径都走 `scheduler_service.advance`。
+    effective = await user_settings_service.get_effective_settings(
+        db, current_user.id
+    )
     outcome = scheduler_service.advance(
-        state, quality, method="self_rating", now=now,
+        state,
+        quality,
+        method="self_rating",
+        now=now,
+        settings=user_settings_service.scheduling_settings(effective),
     )
     await review_state_service.apply_schedule_result(
         db, current_user.id, ITEM_TYPE_CARD, card_id,

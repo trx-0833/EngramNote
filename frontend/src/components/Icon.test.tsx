@@ -97,6 +97,7 @@ const ICON_NAMES: IconName[] = [
   'dot',
   'info',
   'relation',
+  'settings',
 ];
 
 /** 取渲染结果里的 `<svg>` 根（装饰性图标不在无障碍树里，只能用容器查询） */
@@ -107,8 +108,8 @@ function renderIcon(element: ReactElement) {
   return svg;
 }
 
-describe('唯一出口：46 个图标都画得出来', () => {
-  it('★ 46 个语义名全部能渲染出非空 <svg>', () => {
+describe('唯一出口：47 个图标都画得出来', () => {
+  it('★ 47 个语义名全部能渲染出非空 <svg>', () => {
     for (const name of ICON_NAMES) {
       const { container, unmount } = render(<Icon name={name} />);
       const svg = container.querySelector('svg');
@@ -190,7 +191,7 @@ describe('属性透传', () => {
 });
 
 describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () => {
-  it('★ 46 个图标一律 24 网格 / 线宽 1.5 / currentColor / fill:none / round 端点', () => {
+  it('★ 47 个图标一律 24 网格 / 线宽 1.5 / currentColor / fill:none / round 端点', () => {
     for (const name of ICON_NAMES) {
       const svg = renderIcon(<Icon name={name} />);
       expect(svg.getAttribute('viewBox'), `${name} 的 viewBox`).toBe('0 0 24 24');
@@ -214,7 +215,7 @@ describe('几何参数：visual-design-spec §4.1 的硬约束逐条钉住', () 
 });
 
 describe('编译期护栏：未知语义名进不来', () => {
-  it('★ name 不是 string，而是 46 个字的联合类型（拼错必须让 tsc 失败）', () => {
+  it('★ name 不是 string，而是 47 个字的联合类型（拼错必须让 tsc 失败）', () => {
     // 这条用例的价值几乎全在**编译期**：@ts-expect-error 在"没有错误"时自己会报错，
     // 所以它同时钉住两件事 —— ① 联合类型没有被放宽成 string；② 名字写错必须报错。
     // 运行期不做渲染：ICONS['not-an-icon'] 是 undefined，渲染必然抛
