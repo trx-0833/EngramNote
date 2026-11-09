@@ -23,6 +23,8 @@
   这两个接口恰好会在最需要它们的时刻（访问令牌已过期）不可用。
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -122,6 +124,40 @@ async def get_current_user_dependency(
     return user
 
 
+#: 与 `bearer_scheme` 同一套安全方案，只是**不强制**带令牌
+bearer_scheme_optional = HTTPBearer(auto_error=False, description="JWT 访问令牌（可缺省）")
+
+
+async def get_optional_current_user_dependency(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """**可选**认证：带了合法令牌就返回用户，没带或令牌无效就返回 None
+
+    ## 为什么需要它（2026-11-09）
+
+    插图端点是 `<img src>` 直接请求的 —— 浏览器不会为它附带
+    `Authorization` 头（前端的 JWT 在 localStorage 里、由 `fetch` 手工加）。
+    所以这个端点必须能在**没有 Bearer** 的情况下工作（靠按笔记签名的短期
+    令牌，见 `services/note_assets.issue_assets_token`），同时又不能把
+    "API 客户端带 Bearer 访问"这条既有路径堵死。
+
+    刻意**不**在这里做归属校验：归属是端点自己的事（它要知道具体是哪篇笔记）。
+    这里只回答"这个请求是谁发的，或者谁也没发"。
+    """
+    if credentials is None:
+        return None
+    token = credentials.credentials
+    user_id = decode_access_token(token)
+    if not user_id:
+        return None
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user or not user.is_active:
+        return None
+    return user
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -143,9 +179,7 @@ async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db))
     try:
         user = await register_user(db, req)
     except ValueError as e:
-        raise AppError(
-            AUTH_REGISTRATION_REJECTED, str(e), status.HTTP_400_BAD_REQUEST
-        ) from e
+        raise AppError(AUTH_REGISTRATION_REJECTED, str(e), status.HTTP_400_BAD_REQUEST) from e
 
     # 注册成功后自动签发令牌对，免去用户再次登录
     token = create_access_token(user.id)
@@ -181,7 +215,9 @@ async def login(req: UserLoginRequest, db: AsyncSession = Depends(get_db)):
     if not user:
         # 统一返回"邮箱或密码错误"，不区分是邮箱不存在还是密码错误，防止信息泄露
         raise AppError(
-            AUTH_INVALID_CREDENTIALS, "邮箱或密码错误", status.HTTP_401_UNAUTHORIZED,
+            AUTH_INVALID_CREDENTIALS,
+            "邮箱或密码错误",
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     token = create_access_token(user.id)
@@ -290,9 +326,7 @@ async def logout(req: LogoutRequest = None, db: AsyncSession = Depends(get_db)):
         LogoutResponse: `revoked` = 实际撤销的行数（0 = 无需清理或令牌不可验证）
     """
     body = req or LogoutRequest()
-    revoked = await revoke_refresh_token(
-        db, body.refresh_token, all_devices=body.all_devices
-    )
+    revoked = await revoke_refresh_token(db, body.refresh_token, all_devices=body.all_devices)
     return LogoutResponse(revoked=revoked)
 
 

@@ -86,19 +86,89 @@
  * —— **没有同名属性**，所以没有登记 `CASCADE_PAIRS`
  * （跨属性竞争那种盲区见计划 §5 雷区 12）。
  *
- * ⚠️ `.noteListItem` 原本还有一条 `cursor: pointer`，**本轮删除**（F-37）：
+ * ⚠️ `.noteListItem` 原本还有一条 `cursor: pointer`（F-37 那轮**删掉**了）：
  * F-17 把这张卡片从 `article[role="button"]` 改成"盒子 + 标题链接 + 操作按钮"
  * 之后，可点的只有里面的链接与按钮 —— 卡片上的手型光标是 F-17 那次修复
  * **留下的残迹**（鼠标用户会以为整张卡能点，点了没反应）。
- * 顺带说明为什么它是被"键盘扫描"而不是被人眼发现的：`cursor` 是**继承属性**，
- * 卡片上的 pointer 会把它里面每一个 `span`（徽章、状态、大小）的计算值
- * 都变成 pointer，于是扫描报出"整个手型区域里没有可 Tab 的控件"。
+ *
+ * 现在它**回来了**，但理由正好相反：整卡确实能点了（见下方 `.noteLink`
+ * 的拉伸链接），箭头图标也常驻在右侧。F-37 的扫描判据是"手型区域里必须
+ * 有一个可 Tab 的控件" —— 这张卡里就有那个真链接，所以扫描仍然通过。
+ * 反过来说：哪天有人把标题链接改回 `span`，这条 cursor 会立刻变成
+ * 一次扫描失败，这正是它该有的行为。
  * ════════════════════════════════════════════════════════════════ */
 
 .noteListItem {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* 拉伸链接的定位容器：标题链接的 `::after` 以它为参照铺满整张卡片。
+     `position` 必须在这里，不能挂在 `<article>` 的行内样式上 ——
+     模块里的 `.noteLink::after` 与它是同一个组件的两半。 */
+  position: relative;
+  cursor: pointer;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * 整卡可点：拉伸链接（stretched link）
+ *
+ * ## 为什么不是 `article` 上的 onClick
+ *
+ * 那会退回 F-17 的形状：一个"能点、但键盘到不了"的容器。要让键盘也能用，
+ * 就得补 `tabIndex` / `role` / `onKeyDown` —— 于是又变成"不是按钮的按钮"
+ * （F-37 第 ② ③ 条），而且卡片里还有两个真按钮，nested-interactive 也会回来。
+ *
+ * 拉伸链接把"点击面"与"控件"分开：
+ *   - **控件**仍然是标题里的那个真 `<Link>`（Tab 停在标题上、右键能开新标签页、
+ *     读屏念得出"链接"）；
+ *   - **点击面**由它的 `::after` 提供 —— 绝对定位铺满 `.noteListItem`，
+ *     于是点标题、点元信息、点空白、点右箭头，命中的都是同一个链接。
+ *
+ * ## 为什么操作按钮要浮在上面
+ *
+ * `::after` 覆盖整卡，也覆盖了「重试/删除」。给 `.noteListActions` 加
+ * `position: relative; z-index: 1` 即可让两个按钮重新可点（同一份 CSS 里，
+ * 见下方批次 E2 的 ③）。右箭头**故意不**加 `z-index`：它本身没有行为，
+ * 留在链接下面 ⇒ 点箭头就是进详情，符合"箭头 = 进去"的直觉。
+ *
+ * ## 边界（都是有意的）
+ *
+ * - **整卡不能划选文字**：拖选会变成"拖动链接"。列表行接受这个代价
+ *   （GitHub / Bootstrap 的 stretched-link 同样如此）；需要复制标题的场景
+ *   走详情页或右键"复制链接地址"。
+ * - **`prefers-reduced-motion` 不涉及**：这里没有任何位移/缩放，只有颜色。
+ * - **焦点环画在整卡上**：链接自己的盒子只有标题那么大，光环贴着一个词
+ *   会让人以为"只有标题可点"。键盘焦点进来时给卡片一个 outline，
+ *   实现在下面的 `:has(...:focus-visible)`。
+ * ════════════════════════════════════════════════════════════════ */
+
+.noteLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* 圆角跟随卡片：卡片 `border-radius: var(--radius-md)`，
+     覆盖层本身不可见，但焦点环与 hover 阴影都按卡片外形走 */
+  border-radius: inherit;
+}
+
+.noteLink:focus-visible {
+  /* 光环挪给整张卡（下面那条规则）。`@supports not` 里给它留了回退。 */
+  outline: none;
+}
+
+.noteListItem:has(.noteLink:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* `:has()` 在所有目标浏览器里都支持（项目已用它做过 Sidebar 的同行判断），
+   但焦点可见性是"不能退化"的一类：不支持时退回链接自己的光环，
+   而不是"键盘用户完全没有焦点提示"。 */
+@supports not selector(:has(*)) {
+  .noteLink:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 .noteListActions {
@@ -180,6 +250,12 @@
  * 按钮始终占位，hover 时也不会引起布局跳动。
  */
 .noteListActions {
+  /* 浮在拉伸链接的 `::after` 之上：不加这两行，覆盖层会把「重试/删除」
+     的点击全部吃掉（点到的是"进详情"，而按钮看起来毫无反应）。
+     `position: relative` 是 `z-index` 生效的前提；权重与上面那条同为一个类，
+     靠**源序**（同一文件、同一条规则里）无冲突。 */
+  position: relative;
+  z-index: 1;
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
@@ -189,8 +265,37 @@
   opacity: 1;
 }
 
+/* 右侧尾随区：操作按钮 + 常驻箭头。
+   `flex: 0 0 auto` 让它在窄屏上不被标题挤压；按钮组自己仍按
+   `.noteListActions` 的规则（hover 才显形 / 窄屏常显）。 */
+.noteTrailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 0 0 auto;
+}
+
+/* 常驻右箭头（"这里有下一层"的固定提示）。
+ *
+ * 颜色取 `--color-text-tertiary`：它是**提示**不是内容，不该和标题抢注意力；
+ * 悬停整卡时升到主色，与 `.card-hover` 的边框加深同时发生。
+ * 没有 `z-index` —— 它留在拉伸链接下面，点箭头等于点整卡（见 `.noteLink`）。
+ */
+.noteChevron {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  transition: color var(--duration-fast) var(--ease-out-expo);
+}
+
+.noteListItem:hover .noteChevron,
+.noteListItem:focus-within .noteChevron {
+  color: var(--color-primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .noteListActions {
+  .noteListActions,
+  .noteChevron {
     transition: none;
   }
 }
@@ -204,8 +309,16 @@
     gap: var(--space-sm);
   }
 
-  .noteListItem h3 {
+  /* 标题是 `h2`（F-18 把 h3 改成 h2 时，这条选择器没跟着改，等于**从未生效**）。
+     断点里只剩这一条还在越界：长标题在窄屏会把卡片撑出横向滚动。 */
+  .noteListItem h2 {
     overflow-wrap: anywhere;
+  }
+
+  /* 窄屏下 `.noteTrailing` 自己是一行：按钮与箭头一起靠右，
+     顺序保持"按钮在前、箭头在最后"（箭头顶在卡片右边缘）。 */
+  .noteTrailing {
+    justify-content: flex-end;
   }
 
   .noteListActions {

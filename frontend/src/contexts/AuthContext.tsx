@@ -25,6 +25,8 @@ interface AuthContextType {
   register: (email: string, username: string, password: string) => Promise<void>;
   /** 登出：尽力撤销服务端刷新令牌，然后必定清除本地令牌 */
   logout: () => Promise<void>;
+  /** 退出所有设备：撤销该用户的全部刷新令牌（包括当前设备） */
+  logoutAllDevices: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -67,8 +69,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const logoutAllDevices = useCallback(async () => {
+    const refreshToken = getRefreshToken();
+    try {
+      await apiLogout(refreshToken, true);
+    } catch {
+      // 与 logout 同理：撤销失败也要清掉本地令牌，不能把用户困在会话里
+    } finally {
+      clearTokens();
+      setIsAuthenticated(false);
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, register, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, login, register, logout, logoutAllDevices }}>
       {children}
     </AuthContext.Provider>
   );

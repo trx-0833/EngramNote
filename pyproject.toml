@@ -1,4 +1,4 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
@@ -66,12 +66,12 @@ classifiers = [
 #    现在两边逐条一致，并由 `backend/tests/test_pyproject_requirements_consistency.py`
 #    守着 —— 改一边不改另一边会直接测试失败。
 dependencies = [
-    "fastapi~=0.141.1",
+    "fastapi~=0.162.2",
     "uvicorn[standard]~=0.52.4",
-    "sqlalchemy[asyncio]~=2.0.52",
+    "sqlalchemy[asyncio]~=2.1.8",
     "aiosqlite~=0.22.1",
-    "pydantic~=2.13.5",
-    "pydantic-settings~=2.15.0",
+    "pydantic~=2.14.3",
+    "pydantic-settings~=2.16.2",
     "email-validator~=2.3.0",
     "python-multipart~=0.0.32",
     "python-jose[cryptography]~=3.5.0",
@@ -80,7 +80,7 @@ dependencies = [
     "numpy~=2.2.6",
     "httpx~=0.28.1",
     "sentence-transformers~=3.0.1",
-    "pypdfium2~=5.10.1",
+    "pypdfium2>=5.13,<6",
     "Pillow~=12.3.0",
     # 2026-10-21：pyyaml 由「仅本地 MinerU 需要」改判为**运行硬依赖** ——
     # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
@@ -89,6 +89,15 @@ dependencies = [
     "alembic~=1.19.2",
     "openai~=2.54.0",
     "soundfile~=0.14.0",
+    # Windows 上的 Celery **文件 broker** 硬依赖：`kombu.transport.filesystem`
+    # 在该平台是模块顶层 `import pywintypes`，缺它 worker 直接起不来
+    # （2026-11-08 真机复现）。与 requirements.txt 同一标记 ——
+    # ⚠️ 引号用**单引号**：TOML 这边是双引号字符串（生成器只认成对的 ASCII 双引号），
+    # 标记内部若再出现双引号就得转义，而 `test_packaging_metadata` 的正则会
+    # 在转义处截断；requirements.txt 那边同样写单引号，两边逐字一致。
+    # ⚠️ 这段注释里也**不要**出现 ASCII 双引号 —— 那个测试按双引号对扫整段体，
+    # 注释里的引号会被当成包名（实测报「多了 requirements.txt 里没有的包」）。
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -135,3 +144,6 @@ packages = [
     "app.tasks",
     "app.test_support",
 ]
+
+# 覆盖率配置见 backend/.coveragerc（pytest 在 backend/ 下跑，根目录的
+# [tool.coverage.run] 实测不会被读取，故不在此重复）。

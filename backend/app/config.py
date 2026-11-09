@@ -56,15 +56,17 @@ JWT_SECRET_FILE = DATA_DIR / ".jwt-secret"
 # user_id 伪造有效令牌。这类值与"空值"同样不可接受，必须拦下。
 #
 # ⚠️ 新增条目时只放"曾经公开示范过/通用弱值"，不要放真实密钥。
-KNOWN_INSECURE_JWT_SECRETS = frozenset({
-    "engramnote-dev-secret-change-in-production",
-    "your-random-secret-key",
-    "changeme",
-    "change-me",
-    "secret",
-    "test",
-    "dev",
-})
+KNOWN_INSECURE_JWT_SECRETS = frozenset(
+    {
+        "engramnote-dev-secret-change-in-production",
+        "your-random-secret-key",
+        "changeme",
+        "change-me",
+        "secret",
+        "test",
+        "dev",
+    }
+)
 
 #: JWT 允许的签名算法白名单（2026-09-23）
 #
@@ -158,7 +160,13 @@ class Settings(BaseSettings):
     # DeepSeek API 密钥，用于文本润色和标题生成
     deepseek_api_key: str = ""
     # DeepSeek 模型名称
-    deepseek_model: str = "deepseek-v4-flash"
+    #
+    # ⚠️ 这个名字是**上游目录的一部分**，不是本仓库的常量：OpenCode 网关
+    # （`https://opencode.ai/zen/go/v1`）在 2026-11-07 已经下掉旧的
+    # `deepseek-v4-flash`（当时返回 400 `Model is unavailable.`），
+    # 目录里剩 `deepseek-v4.1-flash` / `deepseek-v4-pro`。
+    # 换模型时以 `GET {base_url}/models` 的 `data[].id` 为准，不要沿用旧文档。
+    deepseek_model: str = "deepseek-v4.1-flash"
     # DeepSeek API 基础 URL
     deepseek_base_url: str = "https://api.deepseek.com"
 
@@ -559,6 +567,22 @@ class Settings(BaseSettings):
     log_max_bytes: int = 10 * 1024 * 1024  # 10MB
     log_backup_count: int = 30
 
+    # 三份日志各自的轮转份数（2026-11-08 分层）
+    #
+    # 改造前三份共用 `log_max_bytes × log_backup_count = 10MB × 30`，
+    # 合计上限 **900MB**；而三份的增长速度差了一个数量级：
+    #   - `engramnote.log`（人读主日志）：2 个月 10MB / 7 万行 → 7 份够回溯一周
+    #   - `errors.log`（仅 ERROR+，95% 是堆栈）：2 个月不到 1MB → 10 份
+    #   - `engramnote.json.log`（机器排障主通道）：最先轮转 → 30 份
+    # 分层后合计上限约 **470MB**，而真正需要长期留的 JSON 反而更多。
+    #
+    # 取值规则（见 `_resolve_log_backup_counts`）：显式给了这三个键就用它们；
+    # 没给但显式设了 `LOG_BACKUP_COUNT`（老配置）→ 三份都回落到它；
+    # 都没给 → 用下面的默认值。
+    log_text_backup_count: int | None = None
+    log_json_backup_count: int | None = None
+    log_error_backup_count: int | None = None
+
     # ---- 应用基本配置 ----
     app_name: str = "EngramNote"
     # 应用对外访问基础 URL（如渲染邮件提醒中的跳转链接），按实际部署域名配置
@@ -650,6 +674,32 @@ class Settings(BaseSettings):
     }
 
     @model_validator(mode="after")
+    def _resolve_log_backup_counts(self) -> "Settings":
+        """把三份日志的轮转份数解析成具体数字（2026-11-08 分层）
+
+        规则：
+        - 显式给了 `LOG_TEXT_BACKUP_COUNT` / `LOG_JSON_BACKUP_COUNT` /
+          `LOG_ERROR_BACKUP_COUNT` → 用给的值；
+        - 没给，但**显式**设了老的 `LOG_BACKUP_COUNT` → 三份都回落到它
+          （老 `.env` 的意图是"所有日志都留这么多份"，不能静默改成 7/30/10）；
+        - 都没给 → 分层默认值 7 / 30 / 10。
+
+        用 `object.__setattr__` 而不是普通赋值：这里只是把 `None` 解析成数字，
+        不希望把这些键写进 `model_fields_set`（那会让"用户显式设过"变成"永远设过"）。
+        """
+        legacy_explicit = "log_backup_count" in self.model_fields_set
+        defaults = (
+            ("log_text_backup_count", 7),
+            ("log_json_backup_count", 30),
+            ("log_error_backup_count", 10),
+        )
+        for name, default in defaults:
+            if getattr(self, name) is None:
+                value = self.log_backup_count if legacy_explicit else default
+                object.__setattr__(self, name, value)
+        return self
+
+    @model_validator(mode="after")
     def _validate_env_switches(self) -> "Settings":
         """校验三个新开关的取值，并把遗留 `debug` 折叠进 `app_env`
 
@@ -660,9 +710,7 @@ class Settings(BaseSettings):
         if self.app_env not in ("dev", "prod"):
             raise ValueError(f"APP_ENV 只能是 dev 或 prod，收到 {self.app_env!r}")
         if self.llm_provider not in ("auto", "deepseek", "glm"):
-            raise ValueError(
-                f"LLM_PROVIDER 只能是 auto / deepseek / glm，收到 {self.llm_provider!r}"
-            )
+            raise ValueError(f"LLM_PROVIDER 只能是 auto / deepseek / glm，收到 {self.llm_provider!r}")
         if self.debug and self.app_env == "prod":
             self.app_env = "dev"
         return self
@@ -694,9 +742,7 @@ class Settings(BaseSettings):
 
         if not self.is_dev and (not secret or is_known_placeholder):
             reason = (
-                "配置的是**已公开的占位值**（历史文档里的示范密钥，任何人都知道）"
-                if is_known_placeholder
-                else "未配置"
+                "配置的是**已公开的占位值**（历史文档里的示范密钥，任何人都知道）" if is_known_placeholder else "未配置"
             )
             raise ValueError(
                 f"生产环境必须配置 JWT_SECRET_KEY，当前{reason}。"
@@ -704,9 +750,7 @@ class Settings(BaseSettings):
             )
 
         if is_known_placeholder:
-            logger.warning(
-                "JWT_SECRET_KEY 是历史文档里的公开占位值，开发模式下将改用随机密钥"
-            )
+            logger.warning("JWT_SECRET_KEY 是历史文档里的公开占位值，开发模式下将改用随机密钥")
             self.jwt_secret_key = ""
 
         if self.is_dev and not self.jwt_secret_key:
@@ -940,5 +984,5 @@ def get_settings() -> Settings:
     return Settings()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     get_settings()

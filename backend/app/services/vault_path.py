@@ -12,7 +12,7 @@ Vault 路径约定模块
     ├── output/meta/{base}.json               # 状态旁载（写穿镜像）
     ├── output/meta/projects.json             # 用户级项目标签清单（镜像）
     ├── history/versions/{note_id}/v{N}.md  # 版本区：手动编辑大版本归档（按笔记隔离）
-    ├── output/assets/                        # 预留（进阶能力，暂不写入）
+    ├── output/assets/{base}/images/{name}     # 生成区：插图（2026-11-09 起写入）
     └── cache/                                # 预留（OCR/ASR 缓存区）
 
 命名关联法则：source/{base}{ext} ↔ output/markdown/{base}.md（仅扩展名不同），
@@ -115,6 +115,37 @@ def history_object(prefix: str, note_id: str, version_no: int) -> str:
     以 note_id 作为子目录维度，避免不同笔记的同号版本文件互相覆盖。
     """
     return f"{prefix}/{VERSIONS_DIR}/{note_id}/v{version_no}.md"
+
+
+def assets_prefix(prefix: str, base: str) -> str:
+    """一篇笔记的资产目录前缀：{P}/output/assets/{base}
+
+    ## 为什么按 `base` 而不是 `note_id` 隔离
+
+    与 `source/{base}{ext}` ↔ `output/markdown/{base}.md` 同一条命名关联法则：
+    脱离数据库也能从文件名反推"这张图属于哪篇笔记"。代价是**回收站期间同名
+    重传会撞车** —— 处理方式与 md 完全一致（移入回收站时按 note_id 隔离，
+    见 `trash_prefix`；恢复时若 inbox 已被占用就整体改名，base 一起变）。
+
+    `output/assets/` 在本模块的文件头里原本标着"预留（进阶能力，暂不写入）"，
+    2026-11-09 起真正写入：MinerU 解析 PDF 时把插图落在 `images/` 下，
+    转换任务把它搬到 `{assets_prefix}/images/{name}`（见 `services/note_assets.py`），
+    分发端点是 `GET /api/notes/{id}/assets/{path}`。
+    """
+    return f"{prefix}/{ASSETS_DIR}/{base}"
+
+
+def assets_object(prefix: str, base: str, rel_path: str) -> str:
+    """资产对象名：{P}/output/assets/{base}/{rel_path}
+
+    Args:
+        prefix: 笔记前缀（如 `{user_id}/inbox`）
+        base: 笔记文件主干
+        rel_path: markdown 里的相对引用路径（如 `images/abc.jpg`）；
+            前导 `/` 会被去掉，`..` **由调用方校验**（见
+            `services/note_assets.is_safe_asset_path`）
+    """
+    return f"{assets_prefix(prefix, base)}/{rel_path.lstrip('/')}"
 
 
 def derive_prefix(note) -> str:

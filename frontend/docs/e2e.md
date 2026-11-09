@@ -96,7 +96,8 @@ npx playwright install chromium
 
 ## 2. 这一层到底测了什么
 
-4 个 spec 文件、**10 条用例（全部执行）**，全部对 Chromium 跑：
+这一层最初是 **4 个 spec 文件 / 10 条用例**，全部对 Chromium 跑（表里是这四条；
+后续新增的 spec 各自在文件头写清"证明什么"，2026-11-06 补的是最后一行）：
 
 | 文件 | 用例 | 证明的事 |
 |---|---|---|
@@ -104,6 +105,7 @@ npx playwright install chromium
 | `e2e/auth-routing.spec.ts` | 2 | 未登录直接访问 `/`、`/notes`、`/graph`、`/upload`、`/review/cards` 都拿到 **200 + 登录页**（SPA fallback 生效）；登录页 → 注册页是客户端路由而非整页刷新 |
 | `e2e/login-form.spec.ts` | 2 | 浏览器**原生约束校验**拦下空表单与非法邮箱，且**一个 `/api` 请求都没发出去** |
 | `e2e/login-api.spec.ts` | 4 | 凭据正确 → 一对令牌落盘 → 切到已登录外壳 → Dashboard 渲染；凭据错误 → 统一文案、不写令牌、留在登录页；**从 `/login` 登录成功 → 地址栏变成 `/` 且渲染 Dashboard（不是 404）**；已登录后访问 `/login`、`/register` → 重定向到 `/` |
+| `e2e/notes-list.spec.ts` | 4 | **整卡可点**（拉伸链接）：点卡片中部的空白处也进详情（`page.mouse.click` 按坐标点，不预设命中谁）；点「删除」不会顺手导航（按钮浮在覆盖层之上）；右箭头在操作按钮还藏着时就已可见；键盘焦点在标题链接上时光环画在**整张卡**上 |
 
 ### 关键设计取舍
 

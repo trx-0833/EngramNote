@@ -24,6 +24,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { type ForceGraphNode, getNodeSize } from '../../components/graph/types';
+import { lookupMessage } from '../../i18n/translate';
 import { type NodeDrawState, drawGraphNode } from './drawNode';
 
 interface FakeCtx {
@@ -71,6 +72,8 @@ function makeCtx() {
     arc: ReturnType<typeof vi.fn>;
     fill: ReturnType<typeof vi.fn>;
     beginPath: ReturnType<typeof vi.fn>;
+    /** 画到画布上的文字（i18n 回归那条用例读它） */
+    fillText: ReturnType<typeof vi.fn>;
     shadowBlur?: number;
   };
 }
@@ -97,6 +100,8 @@ function makeState(over: Partial<NodeDrawState> = {}): NodeDrawState {
     createSecondNode: null,
     searchResultIds: new Set<string>(),
     lowDetail: false,
+    // 用**真实**消息表（不是假 t）：这一层的判据就是"画上去的是不是真文案"
+    t: (key) => lookupMessage(key, 'zh-CN'),
     ...over,
   };
 }
@@ -207,5 +212,46 @@ describe('防回潮', () => {
     drawGraphNode(node, ctx, 1, makeState());
 
     expect((node as unknown as FakeCtx).__bckgDimensions).toBeUndefined();
+  });
+});
+
+/**
+ * 画布文字（i18n 回归，2026-11-07）
+ *
+ * i18n 阶段 3 把 `CARD_TYPE_INITIALS` 的值从「概/式/问/定」换成了键名
+ * （`graphTypes.nodeConcept` 等，见 `components/graph/types.ts:127`），
+ * 而画布这条路径**没有 `t()`**（canvas 里没有 hook）—— 于是节点中间本该显示
+ * 一个字的缩写，实际画的是 `graphTypes.nodeConcept`，一眼能看到
+ * "graphTypes" 这几个字母糊在节点上。
+ *
+ * 判据：画到画布上的文字**不能以 `graphTypes` 开头**，必须是真文案。
+ */
+describe('节点首字：必须是翻译后的字，不是 i18n 键名', () => {
+  it('★★ concept 节点画的是「概」', () => {
+    const ctx = makeCtx();
+    // 首字只在 size >= 8 时画：getNodeSize = 5 + relation_count*2，取 2 → 9
+    drawGraphNode(makeNode({ card_type: 'concept', relation_count: 2 }), ctx, 1, makeState());
+
+    const texts: string[] = ctx.fillText.mock.calls.map((call) => String(call[0]));
+    expect(texts).toContain('概');
+    expect(texts.some((text) => text.startsWith('graphTypes'))).toBe(false);
+  });
+
+  it('★ 四种卡片类型都画真文案（不泄漏键名）', () => {
+    // 元组数组而不是 `Record<string, string>`：`card_type` 是联合类型，
+    // 用对象遍历会把它宽化成 `string`，`makeNode` 当场不认（tsc 会红）。
+    const expected: [ForceGraphNode['card_type'], string][] = [
+      ['concept', '概'],
+      ['formula', '式'],
+      ['qa', '问'],
+      ['definition', '定'],
+    ];
+
+    for (const [cardType, initial] of expected) {
+      const ctx = makeCtx();
+      drawGraphNode(makeNode({ card_type: cardType, relation_count: 2 }), ctx, 1, makeState());
+      const texts: string[] = ctx.fillText.mock.calls.map((call) => String(call[0]));
+      expect(texts, cardType).toContain(initial);
+    }
   });
 });

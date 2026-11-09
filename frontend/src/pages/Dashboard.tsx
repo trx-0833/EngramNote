@@ -8,7 +8,6 @@
  * 4. 7天趋势柱状图
  * 5. 最近笔记列表
  */
-import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -19,8 +18,6 @@ import {
   getWeakPoints,
   getGoals,
   getDailyPlan,
-  getUserReminderSettings,
-  updateUserReminderSettings,
   type Note,
   type ReviewStats,
   type DailyReport,
@@ -44,7 +41,6 @@ import PageHeader from '../components/PageHeader';
 // `.stat-label` 原是全局类名、被本页与 TodayLearn 以同一 DOM 结构共用，
 // 抽成组件后样式随组件进模块 —— 见 StatCard.module.css 文件头
 import StatCard from '../components/StatCard';
-import { useToast } from '../components/Toast';
 import { statusClass, weakPointBadge, useLabels } from '../utils/labels';
 // 仪表盘私有样式（overhaul-plan 5.6）：从 src/styles/dashboard.css 拆出，
 // 连带 768px 的两条响应式规则（见 Dashboard.module.css 文件头）
@@ -241,8 +237,28 @@ export default function Dashboard() {
       {/* 复习提醒横幅（自包含组件，根据权限与待复习数自动展示） */}
       <ReminderBanner />
 
-      {/* 邮件复习提醒开关（用户级设置，独立于浏览器通知权限） */}
-      <EmailReminderToggle />
+      {/* 邮件提醒已搬到设置页；这里只留入口，避免两处开关写同一列 */}
+      <Link
+        to="/settings#reminders"
+        className="card card-hover"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-md)',
+          marginBottom: 'var(--space-lg)',
+          padding: 'var(--space-md) var(--space-lg)',
+          textDecoration: 'none',
+        }}
+      >
+        <span>
+          <span style={{ display: 'block', fontWeight: 600 }}>{t('dashboard.emailReminder')}</span>
+          <span style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
+            {t('dashboard.emailReminderMoved')}
+          </span>
+        </span>
+        <span style={{ color: 'var(--color-accent)' }}>→</span>
+      </Link>
 
       {/* 欢迎区域 */}
       <section style={{ marginBottom: 'var(--space-xl)' }}>
@@ -771,99 +787,6 @@ export default function Dashboard() {
           </div>
         )}
       </section>
-    </div>
-  );
-}
-
-/**
- * 邮件复习提醒开关
- * 读写当前用户的 email_reminder_enabled 设置；独立于浏览器通知权限，
- * 初始加载与更新均容错（失败静默，保持原值，不打断页面）。
- */
-function EmailReminderToggle() {
-  const { t } = useTranslation();
-  const toast = useToast();
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // 挂载时读取当前设置（数据获取型 effect，异步 setState）
-  useEffect(() => {
-    let cancelled = false;
-    getUserReminderSettings()
-      .then((res) => {
-        if (!cancelled) setEnabled(res.email_reminder_enabled);
-      })
-      .catch(() => {
-        /* 容错：读取失败保持未加载状态，不打断页面 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleToggle(checked: boolean) {
-    setBusy(true);
-    try {
-      const res = await updateUserReminderSettings(checked);
-      setEnabled(res.email_reminder_enabled);
-    } catch (err) {
-      // 关键修复（§2.8 F-8）：原实现静默吞掉失败 —— 复选框会弹回原位、
-      // 没有任何提示，用户以为开关坏了而反复点击，且无从判断原因。
-      // 开关类控件必须给出明确反馈，否则"没生效"与"没点中"无法区分。
-      toast.error(
-        checked
-          ? t('dashboard.emailReminderEnableFailed')
-          : t('dashboard.emailReminderDisableFailed'),
-        err instanceof Error ? err.message : undefined,
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div
-      className="card"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 'var(--space-md)',
-        marginBottom: 'var(--space-lg)',
-        padding: 'var(--space-md) var(--space-lg)',
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
-          {t('dashboard.emailReminder')}
-        </p>
-        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          {t('dashboard.emailReminderHint')}
-        </p>
-      </div>
-      <label
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-sm)',
-          cursor: enabled === null || busy ? 'default' : 'pointer',
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={enabled ?? false}
-          onChange={(e) => handleToggle(e.target.checked)}
-          disabled={enabled === null || busy}
-          style={{ accentColor: 'var(--color-primary)' }}
-        />
-        <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-          {enabled === null
-            ? t('shared.loadingDots')
-            : enabled
-              ? t('dashboard.enabled')
-              : t('dashboard.disabled')}
-        </span>
-      </label>
     </div>
   );
 }

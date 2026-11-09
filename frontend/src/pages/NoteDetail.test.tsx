@@ -26,6 +26,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryWrapper } from '../test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setDevicePref } from '../utils/devicePrefs';
 
 import { ConfirmProvider } from '../components/ConfirmProvider';
 import NoteDetail from './NoteDetail';
@@ -168,6 +169,21 @@ describe('加载与状态展示', () => {
     // 清洗版正文出现，原始版正文不出现 —— 用户上次看到的就是清洗结果
     expect(await screen.findByText(/浮充：恒压运行方式/)).toBeInTheDocument();
     expect(screen.queryByText(/浮充是蓄电池的一种运行方式/)).not.toBeInTheDocument();
+  });
+
+  it('★ ADHD 默认开启：正文容器与顶层块真的挂上 reader 类（不是只亮按钮）', async () => {
+    setDevicePref('adhdDefault', true);
+    mockedGetNote.mockResolvedValue(makeNote());
+    const { container } = renderPage();
+
+    const article = await waitFor(() => {
+      const el = container.querySelector('article.markdown-body');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(article.className).toContain('adhdReaderActive');
+    expect(article.querySelector('p')?.className).toContain('adhdBlock');
+    setDevicePref('adhdDefault', false);
   });
 
   it('加载失败时显示错误与重试入口，而不是白屏', async () => {
