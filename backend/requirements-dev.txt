@@ -23,7 +23,7 @@
 # `scripts/check_dependency_drift.py` 可见（只读、不联网）。
 
 # ---- 测试框架 ----
-pytest~=8.0.0
+pytest>=8.0,<9.3
 pytest-asyncio~=1.4.0
 
 # ---- Lint / 格式 ----
