@@ -1,4 +1,4 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
@@ -66,12 +66,12 @@ classifiers = [
 #    现在两边逐条一致，并由 `backend/tests/test_pyproject_requirements_consistency.py`
 #    守着 —— 改一边不改另一边会直接测试失败。
 dependencies = [
-    "fastapi~=0.141.1",
+    "fastapi~=0.162.2",
     "uvicorn[standard]~=0.52.4",
-    "sqlalchemy[asyncio]~=2.0.52",
+    "sqlalchemy[asyncio]~=2.1.8",
     "aiosqlite~=0.22.1",
-    "pydantic~=2.13.5",
-    "pydantic-settings~=2.15.0",
+    "pydantic~=2.14.3",
+    "pydantic-settings~=2.16.2",
     "email-validator~=2.3.0",
     "python-multipart~=0.0.32",
     "python-jose[cryptography]~=3.5.0",
@@ -80,7 +80,7 @@ dependencies = [
     "numpy~=2.2.6",
     "httpx~=0.28.1",
     "sentence-transformers~=3.0.1",
-    "pypdfium2~=5.10.1",
+    "pypdfium2>=5.13,<6",
     "Pillow~=12.3.0",
     # 2026-10-21：pyyaml 由「仅本地 MinerU 需要」改判为**运行硬依赖** ——
     # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
