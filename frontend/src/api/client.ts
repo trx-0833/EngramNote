@@ -12,7 +12,7 @@ import type { BodyOf, Schema } from './generated/types';
 import { getCurrentLocale } from '../i18n/locales';
 // `translate` 是**非组件**版本的 `t()`（本文件是普通模块，没有 hook 上下文）。
 // 它读的也是 `i18n/locales` 里那个模块级语言变量，所以两者始终一致。
-import { translate } from '../i18n/translate';
+import { translate, type MessageKey } from '../i18n/translate';
 
 /**
  * API 基础路径，所有请求都会在此路径前缀下发起
@@ -474,15 +474,67 @@ export class ApiError extends Error {
 async function readErrorBody(response: Response): Promise<{ detail: string; code: string | null }> {
   const error = await response.json().catch(() => ({ detail: response.statusText }));
   // FastAPI 422 验证错误的 detail 是数组，需提取可读信息
+  //
+  // ⚠️ Pydantic 的 `msg` 是**英文**（"String should have at least 1 character"），
+  // 直接 join 出去等于中文界面弹英文（2026-11-08 实测：建文件夹时名字为空）。
+  // 所以按 `type` 查一层本地化映射，**查不到才回退原文** —— 宁可英文，
+  // 也不能把校验原因吞掉。
   const detail = Array.isArray(error.detail)
-    ? error.detail
-        .map((e: { msg?: string; message?: string }) => e.msg || e.message || String(e))
-        .join('; ')
+    ? error.detail.map(localizeValidationError).join('; ')
     : error.detail || translate('misc.requestFailed', { status: response.status });
   // 错误响应统一为 {detail, error_code, request_id}：优先识别稳定的 error_code
   // （存在时前置，供上层按错误码分流/定位），缺失时回退中文 detail 文案兜底。
   const code = typeof error.error_code === 'string' && error.error_code ? error.error_code : null;
   return { detail, code };
+}
+
+/** Pydantic 422 的单个错误项（只取我们用到的字段） */
+interface ValidationIssue {
+  type?: string;
+  msg?: string;
+  message?: string;
+  ctx?: Record<string, unknown>;
+}
+
+/** `type` → 本地化文案的映射键（与 `messages.*.apiErrors.validation` 一一对应） */
+const VALIDATION_KEYS = [
+  'string_too_short',
+  'string_too_long',
+  'missing',
+  'value_error',
+  'int_parsing',
+  'float_parsing',
+  'bool_parsing',
+  'string_pattern_mismatch',
+  'enum',
+  'greater_than_equal',
+  'less_than_equal',
+  'extra_forbidden',
+  'list_type',
+  'dict_type',
+] as const;
+
+type ValidationKey = (typeof VALIDATION_KEYS)[number];
+
+function isValidationKey(type: string | undefined): type is ValidationKey {
+  return typeof type === 'string' && (VALIDATION_KEYS as readonly string[]).includes(type);
+}
+
+/**
+ * 把一条 Pydantic 校验错误转成当前语言的文案
+ *
+ * 映射不到的类型返回 Pydantic 原文（`msg`）—— 那至少能让用户知道哪里不对。
+ */
+function localizeValidationError(issue: ValidationIssue | string): string {
+  if (typeof issue === 'string') return issue;
+  const raw = issue.msg || issue.message || String(issue);
+  if (!isValidationKey(issue.type)) return raw;
+  // `ctx` 里的键随 type 不同（`min_length` / `ge` / …），原样透传给插值
+  const params: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(issue.ctx ?? {})) {
+    if (typeof value === 'string' || typeof value === 'number') params[key] = value;
+  }
+  return translate(`apiErrors.validation.${issue.type}` as MessageKey, params);
 }
 
 /**

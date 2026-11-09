@@ -86,6 +86,40 @@ async def test_update_rejects_out_of_range_values_at_database_layer(
             await db.commit()
 
 
+@pytest.mark.asyncio
+async def test_concurrent_first_row_retries_instead_of_500(
+    test_db, test_user_factory, monkeypatch
+):
+    """两个请求同时首次建行：第二个撞唯一键后应重取并更新，而不是 500"""
+    user_id, _, _ = await test_user_factory(1)
+    original = user_settings_service.get_settings_row
+    inserted = False
+
+    async def raced_get(db, uid):
+        nonlocal inserted
+        row = await original(db, uid)
+        if row is None and not inserted:
+            inserted = True
+            # 模拟另一个请求在本次 SELECT 之后、INSERT 之前完成建行
+            async with test_db() as other:
+                other.add(UserSettings(user_id=uid, daily_review_limit=10, email_hour=9))
+                await other.commit()
+        return row
+
+    monkeypatch.setattr(user_settings_service, "get_settings_row", raced_get)
+
+    async with test_db() as db:
+        values = await user_settings_service.update_effective_settings(
+            db, user_id, daily_review_limit=25
+        )
+        assert values["daily_review_limit"] == 25
+
+        rows = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        assert len(rows.scalars().all()) == 1
+
+
 def test_patch_schema_rejects_out_of_range_and_unknown_fields():
     with pytest.raises(ValidationError):
         SettingsPatch.model_validate({"study": {"daily_review_limit": 4}})

@@ -121,6 +121,30 @@ const en = {
     invalidCredentials: 'Incorrect email or password',
     sessionExpired: 'Your session has expired. Please sign in again.',
     unsupportedStream: 'Your browser does not support streaming responses',
+
+    /**
+     * Field-level validation messages (see the zh-CN section for the rationale)
+     *
+     * FastAPI's 422 `detail` is an array of `{type, loc, msg, ctx}`; `msg` is
+     * Pydantic's English. `readErrorBody()` maps `type` to these and falls back
+     * to the raw `msg` for unknown types.
+     */
+    validation: {
+      string_too_short: 'Too short (at least {min_length} characters)',
+      string_too_long: 'Too long (at most {max_length} characters)',
+      missing: 'This field is required',
+      value_error: 'Invalid value',
+      int_parsing: 'Must be a whole number',
+      float_parsing: 'Must be a number',
+      bool_parsing: 'Must be true or false',
+      string_pattern_mismatch: 'Invalid format',
+      enum: 'Value is not allowed',
+      greater_than_equal: 'Must be at least {ge}',
+      less_than_equal: 'Must be at most {le}',
+      extra_forbidden: 'Contains unsupported fields',
+      list_type: 'Must be a list',
+      dict_type: 'Must be an object',
+    },
   },
 
   labels: {
@@ -508,7 +532,7 @@ const en = {
     errorCount: '{count} wrong | {accuracy}%',
     weeklyTrend: 'This week’s review trend',
     accuracyAbove: 'Accuracy ≥ 60%',
-    accuracyBelow: 'Accuracy &lt; 60%',
+    accuracyBelow: 'Accuracy < 60%',
     recentNotes: 'Recent notes',
     viewAll: 'View all',
     noNotes: 'No notes yet',
@@ -839,7 +863,7 @@ const en = {
 
   qa: {
     title: 'Ask AI',
-    inputPlaceholder: 'Type your question — AI will answer from your notes…',
+    inputPlaceholder: 'Ask a question…',
     stop: 'Stop generating',
     ask: 'Ask',
     empty: 'Type a question to start',
@@ -1305,6 +1329,8 @@ const en = {
     taskCancelFailedWithReason: 'Could not cancel: {reason}',
     selfRatingSubmitFailed: 'Could not submit your self-rating',
     mastery: 'Mastery {percent}%',
+    /** Placeholder shown when an inline image fails to load (see zh-CN) */
+    imageLoadFailed: 'Image failed to load',
   },
 
   /** Quiz navigation (idea 8: move back and forth, jump to any question) */
@@ -1332,6 +1358,7 @@ const en = {
     navLabel: 'Sections',
     loading: 'Loading settings…',
     loadFailed: 'Could not load settings.',
+    readFailed: 'Could not load. Retry.',
     retry: 'Retry',
     saveFailed: 'Could not save; the previous value was restored',
     saved: 'Saved',
@@ -1363,6 +1390,7 @@ const en = {
       maxInterval: 'Maximum interval',
       maxIntervalHint: 'Longest gap between two reviews.',
       years: '{years} yr',
+      deploymentValue: 'Deployment default ({value})',
     },
     reminders: {
       title: 'Reminders',

@@ -275,7 +275,7 @@ npm run docs:links    # 文档相对链接 + 锚点完整性，阻断（2026-10-
 ```
 
 另外两项在 CI 里跑：`security-scan`（`pip-audit` + `npm audit`，**只归档、不阻断**）与
-`docker-nginx-config`（部署配置守卫，**阻断** —— 任一条 grep 断言失败即 job 失败）。
+| `nginx-config-guard`（原名 `docker-nginx-config`；部署配置守卫，**阻断** —— 任一条 grep 断言失败即 job 失败）。
 逐条理由与当前已知缺口见
 [docs/open-source-readiness.md](docs/open-source-readiness.md)。
 

@@ -31,6 +31,7 @@ def _run(coro):
 # F-01 / F-07：唯一索引、外键、安全去重
 # ---------------------------------------------------------------------------
 
+
 def test_f01_unique_index_and_direction_preserved(test_db):
     """完全同键重复被唯一索引拒绝；方向相反/不同类型关系可共存"""
     from sqlalchemy import text
@@ -43,10 +44,15 @@ def test_f01_unique_index_and_direction_preserved(test_db):
 
         async with test_db() as s:
             # 1. 唯一索引存在
-            idx = (await s.execute(text(
-                "SELECT name FROM sqlite_master WHERE type='index' "
-                "AND name='uq_card_relations_pair_type'"
-            ))).scalars().all()
+            idx = (
+                (
+                    await s.execute(
+                        text("SELECT name FROM sqlite_master WHERE type='index' AND name='uq_card_relations_pair_type'")
+                    )
+                )
+                .scalars()
+                .all()
+            )
             assert idx, "uq_card_relations_pair_type 索引缺失"
 
             # 2. 外键开启
@@ -56,46 +62,83 @@ def test_f01_unique_index_and_direction_preserved(test_db):
             # 3. 造数据
             s.add(User(id="u1", email="a@b.c", username="a", hashed_password="x"))
             await s.flush()
-            s.add_all([
-                Note(id="n1", user_id="u1", title="n1", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n1.pdf", original_md_path="/u1/n1.md"),
-                Note(id="n2", user_id="u1", title="n2", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n2.pdf", original_md_path="/u1/n2.md"),
-            ])
+            s.add_all(
+                [
+                    Note(
+                        id="n1",
+                        user_id="u1",
+                        title="n1",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n1.pdf",
+                        original_md_path="/u1/n1.md",
+                    ),
+                    Note(
+                        id="n2",
+                        user_id="u1",
+                        title="n2",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n2.pdf",
+                        original_md_path="/u1/n2.md",
+                    ),
+                ]
+            )
             await s.flush()
-            s.add_all([
-                KnowledgeCard(id="c1", user_id="u1", note_id="n1", title="t1",
-                              content="x", card_type=CardType.concept),
-                KnowledgeCard(id="c2", user_id="u1", note_id="n1", title="t2",
-                              content="x", card_type=CardType.concept),
-            ])
+            s.add_all(
+                [
+                    KnowledgeCard(
+                        id="c1", user_id="u1", note_id="n1", title="t1", content="x", card_type=CardType.concept
+                    ),
+                    KnowledgeCard(
+                        id="c2", user_id="u1", note_id="n1", title="t2", content="x", card_type=CardType.concept
+                    ),
+                ]
+            )
             await s.flush()
             # 正向 prerequisite + 反向 prerequisite（应共存）
-            s.add_all([
-                CardRelation(id="r1", user_id="u1", card_id_1="c1", card_id_2="c2",
-                             relation_type=RelationType.prerequisite,
-                             status=RelationStatus.confirmed),
-                CardRelation(id="r3", user_id="u1", card_id_1="c2", card_id_2="c1",
-                             relation_type=RelationType.prerequisite,
-                             status=RelationStatus.confirmed),
-            ])
+            s.add_all(
+                [
+                    CardRelation(
+                        id="r1",
+                        user_id="u1",
+                        card_id_1="c1",
+                        card_id_2="c2",
+                        relation_type=RelationType.prerequisite,
+                        status=RelationStatus.confirmed,
+                    ),
+                    CardRelation(
+                        id="r3",
+                        user_id="u1",
+                        card_id_1="c2",
+                        card_id_2="c1",
+                        relation_type=RelationType.prerequisite,
+                        status=RelationStatus.confirmed,
+                    ),
+                ]
+            )
             await s.commit()
 
             # 4. 完全同键重复插入必须被拒绝
-            s.add(CardRelation(id="r2", user_id="u1", card_id_1="c1", card_id_2="c2",
-                               relation_type=RelationType.prerequisite,
-                               status=RelationStatus.confirmed))
+            s.add(
+                CardRelation(
+                    id="r2",
+                    user_id="u1",
+                    card_id_1="c1",
+                    card_id_2="c2",
+                    relation_type=RelationType.prerequisite,
+                    status=RelationStatus.confirmed,
+                )
+            )
             with pytest.raises(Exception) as exc_info:
                 await s.commit()
             assert "unique" in str(exc_info.value).lower()
             await s.rollback()
 
             # 5. 方向相反的关系确实共存
-            rows = (await s.execute(text(
-                "SELECT id FROM card_relations ORDER BY id"
-            ))).scalars().all()
+            rows = (await s.execute(text("SELECT id FROM card_relations ORDER BY id"))).scalars().all()
             assert rows == ["r1", "r3"], f"方向相反关系未保留: {rows}"
 
     _run(_run_test())
@@ -115,29 +158,32 @@ def test_f07_delete_note_cleans_note_projects(test_db):
         async with test_db() as s:
             s.add(User(id="u1", email="a@b.c", username="a", hashed_password="x"))
             await s.flush()
-            s.add_all([
-                Note(id="n1", user_id="u1", title="n1", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n1.pdf", original_md_path="/u1/n1.md"),
-                Project(id="p1", user_id="u1", name="proj1"),
-            ])
+            s.add_all(
+                [
+                    Note(
+                        id="n1",
+                        user_id="u1",
+                        title="n1",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n1.pdf",
+                        original_md_path="/u1/n1.md",
+                    ),
+                    Project(id="p1", user_id="u1", name="proj1"),
+                ]
+            )
             await s.commit()
             s.add(NoteProject(id="np1", note_id="n1", project_id="p1", user_id="u1"))
             await s.commit()
 
-            note = (await s.execute(
-                select(Note).where(Note.id == "n1")
-            )).scalar_one()
+            note = (await s.execute(select(Note).where(Note.id == "n1"))).scalar_one()
             await delete_note(s, note)
             await s.commit()
 
-            kc = (await s.execute(text(
-                "SELECT COUNT(*) FROM knowledge_cards WHERE note_id='n1'"
-            ))).scalar()
+            kc = (await s.execute(text("SELECT COUNT(*) FROM knowledge_cards WHERE note_id='n1'"))).scalar()
             assert kc == 0, f"知识卡片残留: {kc}"
-            np = (await s.execute(text(
-                "SELECT COUNT(*) FROM note_projects WHERE note_id='n1'"
-            ))).scalar()
+            np = (await s.execute(text("SELECT COUNT(*) FROM note_projects WHERE note_id='n1'"))).scalar()
             assert np == 0, f"note_projects 孤儿残留: {np}"
 
     _run(_run_test())
@@ -146,6 +192,7 @@ def test_f07_delete_note_cleans_note_projects(test_db):
 # ---------------------------------------------------------------------------
 # F-09：goal scope 归属校验（IDOR）
 # ---------------------------------------------------------------------------
+
 
 def test_f09_goal_scope_idor_rejected(test_db):
     from app.core.app_error import GOAL_SCOPE_FOLDER_INVALID, GOAL_SCOPE_NOTE_INVALID, AppError
@@ -158,26 +205,44 @@ def test_f09_goal_scope_idor_rejected(test_db):
         from app.services.goal_service import goal_service
 
         async with test_db() as s:
-            s.add_all([
-                User(id="u1", email="a@x.c", username="a", hashed_password="x"),
-                User(id="u2", email="b@x.c", username="b", hashed_password="x"),
-            ])
+            s.add_all(
+                [
+                    User(id="u1", email="a@x.c", username="a", hashed_password="x"),
+                    User(id="u2", email="b@x.c", username="b", hashed_password="x"),
+                ]
+            )
             await s.flush()
-            s.add_all([
-                Note(id="n1", user_id="u1", title="n1", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n1.pdf", original_md_path="/u1/n1.md"),
-                Note(id="n2", user_id="u2", title="n2", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u2/n2.pdf", original_md_path="/u2/n2.md"),
-            ])
+            s.add_all(
+                [
+                    Note(
+                        id="n1",
+                        user_id="u1",
+                        title="n1",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n1.pdf",
+                        original_md_path="/u1/n1.md",
+                    ),
+                    Note(
+                        id="n2",
+                        user_id="u2",
+                        title="n2",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u2/n2.pdf",
+                        original_md_path="/u2/n2.md",
+                    ),
+                ]
+            )
             await s.flush()
-            s.add_all([
-                Folder(id="f1", user_id="u1", name="f1",
-                       folder_date=datetime.now(timezone.utc)),
-                Folder(id="f2", user_id="u2", name="f2",
-                       folder_date=datetime.now(timezone.utc)),
-            ])
+            s.add_all(
+                [
+                    Folder(id="f1", user_id="u1", name="f1", folder_date=datetime.now(timezone.utc)),
+                    Folder(id="f2", user_id="u2", name="f2", folder_date=datetime.now(timezone.utc)),
+                ]
+            )
             await s.commit()
 
             # 合法 scope 通过
@@ -188,6 +253,7 @@ def test_f09_goal_scope_idor_rejected(test_db):
                 scope_folders = ["f1"]
                 target_mastery = 80.0
                 deadline = None
+
             await goal_service.create_goal("u1", Req(), s)
 
             # 越权 note 拒绝
@@ -198,6 +264,7 @@ def test_f09_goal_scope_idor_rejected(test_db):
                 scope_folders = []
                 target_mastery = 80.0
                 deadline = None
+
             with pytest.raises(AppError) as exc:
                 await goal_service.create_goal("u1", ReqBad(), s)
             assert exc.value.http_status == 400
@@ -211,6 +278,7 @@ def test_f09_goal_scope_idor_rejected(test_db):
                 scope_folders = ["f2"]
                 target_mastery = 80.0
                 deadline = None
+
             with pytest.raises(AppError) as exc2:
                 await goal_service.create_goal("u1", ReqBad2(), s)
             assert exc2.value.http_status == 400
@@ -222,6 +290,7 @@ def test_f09_goal_scope_idor_rejected(test_db):
 # ---------------------------------------------------------------------------
 # F-14：复习到期校验 + 同日幂等
 # ---------------------------------------------------------------------------
+
 
 def test_f14_due_check_and_idempotency(test_db):
     from datetime import datetime, timedelta, timezone
@@ -236,25 +305,53 @@ def test_f14_due_check_and_idempotency(test_db):
         async with test_db() as s:
             s.add(User(id="u1", email="a@b.c", username="a", hashed_password="x"))
             await s.flush()
-            s.add(Note(id="n1", user_id="u1", title="n1", source_type=SourceType.pdf,
-                       status=NoteStatus.cleaned, file_size=1,
-                       original_file_path="/u1/n1.pdf", original_md_path="/u1/n1.md"))
+            s.add(
+                Note(
+                    id="n1",
+                    user_id="u1",
+                    title="n1",
+                    source_type=SourceType.pdf,
+                    status=NoteStatus.cleaned,
+                    file_size=1,
+                    original_file_path="/u1/n1.pdf",
+                    original_md_path="/u1/n1.md",
+                )
+            )
             await s.flush()
-            s.add(KnowledgeCard(id="c1", user_id="u1", note_id="n1", title="t1",
-                                content="x", card_type=CardType.concept))
+            s.add(
+                KnowledgeCard(id="c1", user_id="u1", note_id="n1", title="t1", content="x", card_type=CardType.concept)
+            )
             await s.flush()
             # 未到期题目（下次复习在未来）
             future = datetime.now(timezone.utc) + timedelta(days=3)
-            s.add(QuizItem(id="q1", user_id="u1", card_id="c1", note_id="n1",
-                           question_type=QuestionType.choice,
-                           difficulty=DifficultyLevel.medium,
-                           question="1+1=?", answer="2", next_review_at=future))
+            s.add(
+                QuizItem(
+                    id="q1",
+                    user_id="u1",
+                    card_id="c1",
+                    note_id="n1",
+                    question_type=QuestionType.choice,
+                    difficulty=DifficultyLevel.medium,
+                    question="1+1=?",
+                    answer="2",
+                    next_review_at=future,
+                )
+            )
             # 到期题目（已到期）
             past = datetime.now(timezone.utc) - timedelta(days=1)
-            s.add(QuizItem(id="q2", user_id="u1", card_id="c1", note_id="n1",
-                           question_type=QuestionType.choice,
-                           difficulty=DifficultyLevel.medium,
-                           question="2+2=?", answer="4", next_review_at=past))
+            s.add(
+                QuizItem(
+                    id="q2",
+                    user_id="u1",
+                    card_id="c1",
+                    note_id="n1",
+                    question_type=QuestionType.choice,
+                    difficulty=DifficultyLevel.medium,
+                    question="2+2=?",
+                    answer="4",
+                    next_review_at=past,
+                )
+            )
             await s.commit()
 
             # 1. 未到期提交被拒（普通复习）
@@ -262,8 +359,7 @@ def test_f14_due_check_and_idempotency(test_db):
             assert "error" in res and "未到期" in res["error"], f"未到期应被拒: {res}"
 
             # 2. 快速复习（skip_due_check）允许
-            res_q = await submit_answer("q1", "u1", "2", 1000, s,
-                                        skip_daily_limit=True, skip_due_check=True)
+            res_q = await submit_answer("q1", "u1", "2", 1000, s, skip_daily_limit=True, skip_due_check=True)
             assert "error" not in res_q, f"快速复习应通过: {res_q}"
 
             # 3. 到期题目提交成功
@@ -274,15 +370,13 @@ def test_f14_due_check_and_idempotency(test_db):
             # 4. 同日重复提交幂等：返回历史结果，SM-2 不叠加
             res3 = await submit_answer("q2", "u1", "4", 1000, s)
             assert "error" not in res3, f"幂等命中不应报错: {res3}"
-            assert res3["sm2"]["repetition"] == first_review_count, \
-                f"幂等未生效，SM-2 被叠加: {res3['sm2']}"
+            assert res3["sm2"]["repetition"] == first_review_count, f"幂等未生效，SM-2 被叠加: {res3['sm2']}"
             from sqlalchemy import select, func
             from app.models.review_log import ReviewLog
-            log_count = (await s.execute(
-                select(func.count()).select_from(ReviewLog).where(
-                    ReviewLog.quiz_id == "q2"
-                )
-            )).scalar()
+
+            log_count = (
+                await s.execute(select(func.count()).select_from(ReviewLog).where(ReviewLog.quiz_id == "q2"))
+            ).scalar()
             assert log_count == 1, f"同日重复提交产生 {log_count} 条日志（应为 1）"
 
     _run(_run_test())
@@ -291,6 +385,7 @@ def test_f14_due_check_and_idempotency(test_db):
 # ---------------------------------------------------------------------------
 # F-16：跨扩展名同名 base 冲突检测
 # ---------------------------------------------------------------------------
+
 
 def test_f16_cross_extension_base_conflict(test_db):
     async def _run_test():
@@ -302,10 +397,18 @@ def test_f16_cross_extension_base_conflict(test_db):
             s.add(User(id="u1", email="a@b.c", username="a", hashed_password="x"))
             await s.flush()
             # 已有 a.pdf（base=a）
-            s.add(Note(id="n1", user_id="u1", title="a", source_type=SourceType.pdf,
-                       status=NoteStatus.uploading, file_size=1,
-                       original_file_path="u1/inbox/source/a.pdf",
-                       original_md_path=""))
+            s.add(
+                Note(
+                    id="n1",
+                    user_id="u1",
+                    title="a",
+                    source_type=SourceType.pdf,
+                    status=NoteStatus.uploading,
+                    file_size=1,
+                    original_file_path="u1/inbox/source/a.pdf",
+                    original_md_path="",
+                )
+            )
             await s.commit()
 
             # 再上传 a.md：base 必须加后缀，不能仍是 a（F-16 修复）
@@ -323,6 +426,7 @@ def test_f16_cross_extension_base_conflict(test_db):
 # ---------------------------------------------------------------------------
 # 回归：understand_tasks._understand_document 变量复用（result 被 execute 覆盖）
 # ---------------------------------------------------------------------------
+
 
 def test_understand_document_no_result_override():
     """
@@ -362,21 +466,30 @@ def test_understand_document_no_result_override():
         fake_process = AsyncMock(return_value={"chapter_count": 1, "total_cards": 3})
         fake_update = AsyncMock()
 
-        with patch.object(ut, "_get_understand_session", return_value=fake_factory), \
-             patch("app.services.storage_service.get_object_bytes", return_value=fake_md), \
-             patch("app.services.storage_service.ensure_buckets_exist", return_value=None), \
-             patch("app.services.understanding_service.process_note_understanding", fake_process), \
-             patch.object(ut, "_update_note_status", fake_update), \
-             patch.object(ut, "generate_questions_task") as fake_gen:
-            fake_gen.delay = MagicMock()
+        with (
+            patch.object(ut, "_get_understand_session", return_value=fake_factory),
+            patch("app.services.storage_service.get_object_bytes", return_value=fake_md),
+            patch("app.services.storage_service.ensure_buckets_exist", return_value=None),
+            patch("app.services.understanding_service.process_note_understanding", fake_process),
+            patch.object(ut, "_update_note_status", fake_update),
+            patch.object(ut, "generate_questions_task") as fake_gen,
+        ):
+            # 2026-11-08：派发统一走 `tasks.dispatch.dispatch()`（它调 `apply_async`
+            # 以便带上发起请求的 `parent_request_id` 消息头），所以这里桩的是
+            # `apply_async` 而不是 `.delay`。
+            fake_gen.apply_async = MagicMock()
             await ut._understand_document("note-1")
 
         # 断言：状态更新为 archived（走完第 7 步，未被 AttributeError 中断）
-        archived_calls = [c for c in fake_update.call_args_list
-                          if len(c.args) >= 2 and c.args[1] == ut.NoteStatus.archived]
+        archived_calls = [
+            c for c in fake_update.call_args_list if len(c.args) >= 2 and c.args[1] == ut.NoteStatus.archived
+        ]
         assert archived_calls, "未走到 archived 状态更新（可能仍在抛异常）"
-        # 断言：题目生成任务被触发
-        fake_gen.delay.assert_called_once_with("note-1")
+        # 断言：题目生成任务被触发（位置参数仍是 note_id，没被 dispatch 改动）
+        fake_gen.apply_async.assert_called_once()
+        call = fake_gen.apply_async.call_args
+        assert call.kwargs["args"] == ("note-1",), call.kwargs
+        assert call.kwargs["kwargs"] == {}, call.kwargs
         # 断言：process 返回值被消费（total_cards=3 进入日志——通过未抛异常间接验证）
 
     _run(_run_test())
@@ -384,7 +497,9 @@ def test_understand_document_no_result_override():
     # 兜底静态断言：源码中 execute 不再复用 result 变量名
     src_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "app", "tasks", "understand_tasks.py",
+        "app",
+        "tasks",
+        "understand_tasks.py",
     )
     with open(src_path, encoding="utf-8") as f:
         src = f.read()
@@ -398,6 +513,7 @@ def test_understand_document_no_result_override():
 # 回归：理解响应 JSON 解析容错（max_tokens 截断 / markdown 包裹）
 # ---------------------------------------------------------------------------
 
+
 def test_parse_understanding_response_robust():
     """代码块包裹剥离 + 截断 JSON 安全降级 + 合法 JSON 正常解析"""
     from app.services.understanding_service import _parse_understanding_response
@@ -410,15 +526,13 @@ def test_parse_understanding_response_robust():
     assert r1.get("chapters") and r1["chapters"][0]["chapter_title"] == "c1", r1
 
     # 2. 截断 JSON（max_tokens 截断的典型形态）→ 不崩溃、返回空结构
-    truncated = ('{"chapters": [{"chapter_title": "1 范围", "summary": "摘要", '
-                 '"points": [{"card_type": "conc')
+    truncated = '{"chapters": [{"chapter_title": "1 范围", "summary": "摘要", "points": [{"card_type": "conc'
     r2 = _parse_understanding_response(truncated)
     assert r2 == {"summary": "", "points": []}, r2
 
     # 3. 合法 JSON 正常解析
     r3 = _parse_understanding_response(
-        '{"chapters": [{"chapter_title": "c1", "summary": "s", '
-        '"points": [{"card_type": "concept", "title": "t"}]}]}'
+        '{"chapters": [{"chapter_title": "c1", "summary": "s", "points": [{"card_type": "concept", "title": "t"}]}]}'
     )
     assert len(r3["chapters"]) == 1
 
@@ -439,6 +553,7 @@ def test_llm_client_loop_rebuild():
     即**被测行为正确、断言方式错误**。
     """
     import asyncio
+
     # 阶段 4.1 起客户端单例归 `services/llm/client.py` 所有：
     # `llm_service` 只再 re-export `close_llm_client`（main.py 需要），
     # 因此这里直接指向真正的属主模块，而不是继续要求上层转发。
@@ -476,7 +591,8 @@ def test_max_tokens_no_4096():
     """
     services_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "app", "services",
+        "app",
+        "services",
     )
     offenders = []
     scanned = []
@@ -497,9 +613,7 @@ def test_max_tokens_no_4096():
                 if not isinstance(node, ast.Call):
                     continue
                 for kw in node.keywords:
-                    if (kw.arg == "max_tokens"
-                            and isinstance(kw.value, ast.Constant)
-                            and kw.value.value == 4096):
+                    if kw.arg == "max_tokens" and isinstance(kw.value, ast.Constant) and kw.value.value == 4096:
                         offenders.append(f"{os.path.relpath(path, services_dir)}:{node.lineno}")
     assert "llm/scenes.py" in [p.replace("\\", "/") for p in scanned], (
         "扫描范围里没有场景模块 —— 这个守卫可能又被搬空了"
@@ -511,6 +625,7 @@ def test_max_tokens_no_4096():
 # F-32：搜索通配符转义
 # ---------------------------------------------------------------------------
 
+
 def test_f32_search_escape(test_db):
     async def _run_test():
         from app.models.user import User
@@ -520,14 +635,30 @@ def test_f32_search_escape(test_db):
         async with test_db() as s:
             s.add(User(id="u1", email="a@b.c", username="a", hashed_password="x"))
             await s.flush()
-            s.add_all([
-                Note(id="n1", user_id="u1", title="进度100%达成", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n1.pdf", original_md_path="/u1/n1.md"),
-                Note(id="n2", user_id="u1", title="进度100达成", source_type=SourceType.pdf,
-                     status=NoteStatus.cleaned, file_size=1,
-                     original_file_path="/u1/n2.pdf", original_md_path="/u1/n2.md"),
-            ])
+            s.add_all(
+                [
+                    Note(
+                        id="n1",
+                        user_id="u1",
+                        title="进度100%达成",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n1.pdf",
+                        original_md_path="/u1/n1.md",
+                    ),
+                    Note(
+                        id="n2",
+                        user_id="u1",
+                        title="进度100达成",
+                        source_type=SourceType.pdf,
+                        status=NoteStatus.cleaned,
+                        file_size=1,
+                        original_file_path="/u1/n2.pdf",
+                        original_md_path="/u1/n2.md",
+                    ),
+                ]
+            )
             await s.commit()
 
             # 搜索字面量 "100%"：只应匹配 n1（F-32 修复前 % 会被当通配符匹配任意）

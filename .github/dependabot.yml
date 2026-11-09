@@ -82,7 +82,22 @@ version: 2
 updates:
   # ---- Python：backend/requirements*.txt ----
   - package-ecosystem: pip
-    directory: /backend
+    # ⚠️ 必须同时覆盖**两个**目录（2026-11-08 修正）
+    #
+    # 本仓库把同一批 pin 写在两处：`backend/requirements.txt`（用户装的）
+    # 与仓库根 `pyproject.toml`（打包元数据），并有守卫
+    # `tests/test_packaging_metadata.py` 逐字比对两份清单。
+    #
+    # 原先这里只写 `directory: /backend` —— Dependabot **看不到仓库根的
+    # pyproject.toml**，于是它每个 minor/patch PR 只改 requirements.txt 一行，
+    # 那条守卫必然红：PR 红的不是代码，是"两份清单不一致"。
+    # 实测：2026-11-05 的三个 PR（fastapi / pydantic / sqlalchemy）全部红在
+    # `Pytest` 步骤，逐个 `git show --stat` 都只有 `backend/requirements.txt`。
+    #
+    # 改成 `directories` 后，同一个 PR 会把两个清单一起改，守卫才有机会变绿。
+    directories:
+      - /backend
+      - /
     schedule:
       interval: weekly
       day: monday

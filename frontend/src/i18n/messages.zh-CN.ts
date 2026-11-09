@@ -182,6 +182,36 @@ const zhCN = {
     sessionExpired: '登录已过期，请重新登录',
     /** 流式响应不可用（`ReadableStream` 缺失，老浏览器） */
     unsupportedStream: '浏览器不支持流式响应',
+
+    /**
+     * 参数校验失败的字段级文案（2026-11-08 补）
+     *
+     * ## 为什么需要
+     *
+     * FastAPI 的 422 `detail` 是数组，元素形如
+     * `{type: "string_too_short", loc: ["body","name"], msg: "String should have at least 1 character"}`。
+     * `readErrorBody()` 原先把 `msg` 直接 join 出来 —— 那是 **Pydantic 的英文**，
+     * 于是中文界面弹出一句英文（实测：建文件夹时名字为空）。
+     *
+     * 做法：按 `type` 查表，用 `ctx` 里的参数插值；**查不到就保留原文**
+     * （宁可英文，也不能把校验原因吞掉）。键名与 Pydantic 的 `type` 一一对应。
+     */
+    validation: {
+      string_too_short: '内容太短（至少 {min_length} 个字符）',
+      string_too_long: '内容太长（最多 {max_length} 个字符）',
+      missing: '缺少必填项',
+      value_error: '取值不合法',
+      int_parsing: '需要一个整数',
+      float_parsing: '需要一个数字',
+      bool_parsing: '需要一个布尔值',
+      string_pattern_mismatch: '格式不符合要求',
+      enum: '取值不在允许范围内',
+      greater_than_equal: '不能小于 {ge}',
+      less_than_equal: '不能大于 {le}',
+      extra_forbidden: '包含不支持的字段',
+      list_type: '需要一个列表',
+      dict_type: '需要是一个对象',
+    },
   },
 
   /**
@@ -665,7 +695,7 @@ const zhCN = {
     errorCount: '错{count}次 | {accuracy}%',
     weeklyTrend: '本周复习趋势',
     accuracyAbove: '正确率 ≥ 60%',
-    accuracyBelow: '正确率 &lt; 60%',
+    accuracyBelow: '正确率 < 60%',
     // ---- 最近笔记 ----
     recentNotes: '最近笔记',
     viewAll: '查看全部',
@@ -1031,7 +1061,7 @@ const zhCN = {
   /** 智能问答页（`QA`，i18n 阶段 3） */
   qa: {
     title: '智能问答',
-    inputPlaceholder: '输入你的问题，AI 将基于你的笔记内容回答...',
+    inputPlaceholder: '输入你的问题…',
     stop: '停止生成',
     ask: '提问',
     empty: '输入问题开始问答',
@@ -1543,6 +1573,8 @@ const zhCN = {
     taskCancelFailedWithReason: '取消失败：{reason}',
     selfRatingSubmitFailed: '自评提交失败',
     mastery: '掌握度 {percent}%',
+    /** 插图加载失败时的占位提示（2026-11-09：markdown 里的相对图片引用） */
+    imageLoadFailed: '图片加载失败',
   },
 
   /**
@@ -1600,6 +1632,7 @@ const zhCN = {
     navLabel: '设置分组',
     loading: '正在加载设置…',
     loadFailed: '设置加载失败。',
+    readFailed: '读取失败，请重试。',
     retry: '重试',
     saveFailed: '保存失败，已恢复原值',
     saved: '已保存',
@@ -1630,6 +1663,7 @@ const zhCN = {
       maxInterval: '最长间隔',
       maxIntervalHint: '两次复习之间最多隔多久。',
       years: '{years} 年',
+      deploymentValue: '部署默认（{value}）',
     },
     reminders: {
       title: '提醒',

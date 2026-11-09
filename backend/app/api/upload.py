@@ -81,6 +81,7 @@ from ..services.upload_safety import (
     check_pdf_pages,
 )
 from ..services.vault_meta import write_note_meta
+from ..tasks.dispatch import dispatch
 from ..tasks.convert_tasks import convert_document_task
 
 settings = get_settings()
@@ -122,9 +123,7 @@ def _owner_file_for(temp_id: str) -> Path:
 
 # 文件扩展名到 SourceType 的映射，决定文件的处理方式
 # 单一来源为 vault_path.EXT_TO_SOURCE_TYPE（upload 与扫描导入共用）
-_EXT_TO_SOURCE_TYPE = {
-    ext: SourceType(v) for ext, v in vault_path.EXT_TO_SOURCE_TYPE.items()
-}
+_EXT_TO_SOURCE_TYPE = {ext: SourceType(v) for ext, v in vault_path.EXT_TO_SOURCE_TYPE.items()}
 
 # 允许的扩展名集合，用于上传校验
 ALLOWED_EXTS = vault_path.ALLOWED_EXTS
@@ -182,7 +181,7 @@ def _validate_magic(ext: str, head: bytes) -> bool:
     if prefix is not None:
         return head.startswith(prefix)
     if contains is not None:
-        return contains in head[: _MAGIC_HEAD_SIZE]
+        return contains in head[:_MAGIC_HEAD_SIZE]
     return True
 
 
@@ -214,9 +213,7 @@ def _sniff_md_content(ext: str, head: bytes) -> Optional[str]:
     return None
 
 
-async def _stream_upload(
-    file: UploadFile, dest_path: str, max_size: int
-) -> tuple[int, str, bytes]:
+async def _stream_upload(file: UploadFile, dest_path: str, max_size: int) -> tuple[int, str, bytes]:
     """
     流式读取上传文件到指定路径，同时校验大小、累积头部字节并计算 SHA-256
 
@@ -249,7 +246,7 @@ async def _stream_upload(
                         params={"max_mb": max_size // (1024 * 1024)},
                     )
                 if len(head) < _MD_SNIFF_HEAD_SIZE:
-                    head += chunk[:_MD_SNIFF_HEAD_SIZE - len(head)]
+                    head += chunk[: _MD_SNIFF_HEAD_SIZE - len(head)]
                 sha256.update(chunk)
                 out.write(chunk)
     except Exception:
@@ -386,11 +383,10 @@ async def _do_upload(
     # 1b. 单用户笔记数上限（阶段 6.4）：容量配额挡不住"传一万个小文件"，
     #     而每个文件都要建笔记、进转换队列、占 inode。
     if settings.max_notes_per_user > 0:
-        count_result = await db.execute(
-            select(func.count()).select_from(Note).where(Note.user_id == current_user.id)
-        )
+        count_result = await db.execute(select(func.count()).select_from(Note).where(Note.user_id == current_user.id))
         note_reason = check_note_count(
-            int(count_result.scalar_one() or 0), max_notes=settings.max_notes_per_user,
+            int(count_result.scalar_one() or 0),
+            max_notes=settings.max_notes_per_user,
         )
         if note_reason:
             raise AppError(UPLOAD_NOTE_COUNT_LIMIT_REACHED, note_reason, 400)
@@ -437,7 +433,7 @@ async def _do_upload(
     # 1. 取文件名（不含扩展名），清理非法字符并截断到 50 字符
     # 2. 优先保留原始文件名（可读）；同名已存在时由 _resolve_unique_base 追加随机后缀
     raw_name = os.path.splitext(filename)[0]
-    safe_stem = "".join(c for c in raw_name if c.isalnum() or c in ('-', '_', ' ', '.')).strip()[:50]
+    safe_stem = "".join(c for c in raw_name if c.isalnum() or c in ("-", "_", " ", ".")).strip()[:50]
 
     # Vault 对象路径：标签化后所有笔记统一落在 {user_id}/inbox/source/{base}{ext}
     prefix = vault_path.inbox_prefix(current_user.id)
@@ -473,11 +469,13 @@ async def _do_upload(
     db.add(note)
     # 打上项目标签（多对多关联表，唯一约束防重复）
     for project in projects:
-        db.add(NoteProject(
-            note_id=note.id,
-            project_id=project.id,
-            user_id=current_user.id,
-        ))
+        db.add(
+            NoteProject(
+                note_id=note.id,
+                project_id=project.id,
+                user_id=current_user.id,
+            )
+        )
     await db.commit()
     await db.refresh(note)
     # 若设置了文件夹，补充 folder_name 供 meta 旁载镜像记录（磁盘/离线浏览可追溯逻辑归属）
@@ -501,15 +499,16 @@ async def _do_upload(
                 # 限制数量
                 if len(material_ids) > 50:
                     material_ids = material_ids[:50]
-                await note_service.create_note_material_links(
-                    db, current_user.id, note.id, material_ids
-                )
+                await note_service.create_note_material_links(db, current_user.id, note.id, material_ids)
         except json.JSONDecodeError:
             pass  # 忽略无效 JSON
 
     logger.info(
         "文件上传成功: user_id=%s, filename=%s, size=%d, source_type=%s",
-        current_user.id, filename, total_size, source_type.value,
+        current_user.id,
+        filename,
+        total_size,
+        source_type.value,
     )
 
     # 4. 保存原始文件到对象存储（临时文件已落盘）
@@ -546,7 +545,7 @@ async def _do_upload(
 
     try:
         # 异步触发文档转换任务（Mineru 或 ASR），传递用户选择的解析后端
-        convert_document_task.delay(note_id, object_name, source_type.value, backend=backend)
+        dispatch(convert_document_task, note_id, object_name, source_type.value, backend=backend)
     except Exception as e:
         # Celery 不可用时标记失败，但文件已保存到对象存储，可手动重试
         note.status = NoteStatus.failed
@@ -649,9 +648,18 @@ async def upload_document(
 
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
         return await _do_upload(
-            db, current_user, tmp_path, file.filename, source_type,
-            file_hash, file.content_type or "application/octet-stream",
-            backend, folder_id, project_ids, note_role, linked_material_ids,
+            db,
+            current_user,
+            tmp_path,
+            file.filename,
+            source_type,
+            file_hash,
+            file.content_type or "application/octet-stream",
+            backend,
+            folder_id,
+            project_ids,
+            note_role,
+            linked_material_ids,
         )
     finally:
         # 本地存储模式下 _do_upload 已把文件移动到 vault；MinIO 模式也已删除
@@ -784,7 +792,11 @@ async def prepare_upload(
 
     logger.info(
         "上传暂存成功: user_id=%s, filename=%s, size=%d, source_type=%s, page_count=%s",
-        current_user.id, filename, os.path.getsize(dest), source_type.value, page_count,
+        current_user.id,
+        filename,
+        os.path.getsize(dest),
+        source_type.value,
+        page_count,
     )
 
     return {
@@ -917,14 +929,19 @@ async def commit_upload(
                 use_path = cropped_path
                 logger.info(
                     "PDF 裁剪完成: user_id=%s, filename=%s, pages=%d/%d",
-                    current_user.id, display_name, len(pages), page_count,
+                    current_user.id,
+                    display_name,
+                    len(pages),
+                    page_count,
                 )
             except ValueError as e:
                 # 阶段 6.8：同上 —— `parse_page_spec` / `crop_pdf` 的 ValueError
                 # 会带上服务器路径与库内部细节，只进日志，不回客户端。
                 logger.warning(
                     "PDF 裁剪失败（详情只进日志）: file=%s, spec=%s, error=%s",
-                    src_path.name, crop_page_range, e,
+                    src_path.name,
+                    crop_page_range,
+                    e,
                 )
                 raise AppError(
                     UPLOAD_PDF_CROP_FAILED,
@@ -945,9 +962,18 @@ async def commit_upload(
 
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
         return await _do_upload(
-            db, current_user, str(use_path), display_name, source_type,
-            file_hash, content_type,
-            backend, folder_id, project_ids, note_role, linked_material_ids,
+            db,
+            current_user,
+            str(use_path),
+            display_name,
+            source_type,
+            file_hash,
+            content_type,
+            backend,
+            folder_id,
+            project_ids,
+            note_role,
+            linked_material_ids,
         )
     finally:
         # 4. 无论成功失败都清理临时目录（本地模式下 use_path 已被移动/删除）
@@ -977,9 +1003,7 @@ async def get_upload_status(
     Raises:
         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
     """
-    result = await db.execute(
-        select(Note).where(Note.id == note_id, Note.user_id == current_user.id)
-    )
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.user_id == current_user.id))
     note = result.scalars().first()
     if not note:
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
@@ -1015,9 +1039,7 @@ async def retry_convert(
         AppError: 笔记不存在或不属于当前用户（NOTE_NOT_FOUND → 404）
         AppError: 笔记状态不允许重试，非 failed 状态（NOTE_STATUS_INVALID → 400）
     """
-    result = await db.execute(
-        select(Note).where(Note.id == note_id, Note.user_id == current_user.id)
-    )
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.user_id == current_user.id))
     note = result.scalars().first()
     if not note:
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
@@ -1040,7 +1062,8 @@ async def retry_convert(
 
     # 重新提交转换任务
     try:
-        convert_document_task.delay(
+        dispatch(
+            convert_document_task,
             note.id,
             note.original_file_path,
             note.source_type.value,

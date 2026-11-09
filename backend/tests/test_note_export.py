@@ -263,6 +263,24 @@ class TestContentDisposition:
         cd = build_content_disposition("标题")
         assert ".md" in cd
 
+    def test_extension_is_configurable_for_the_zip_endpoint(self):
+        """★★ 批量导出必须能要到 `.zip` —— 否则 ZIP 会被存成 `.md`
+
+        实测踩过：`/api/notes/export` 返回 `application/zip`，而
+        `Content-Disposition` 写的是 `engramnote-export.md`。浏览器按头命名
+        ⇒ 用户拿到一个后缀是 Markdown、内容是 ZIP 的文件。整条链路**不报错**，
+        只有"双击打不开"这一个症状。
+        """
+        cd = build_content_disposition("engramnote-export", ".zip")
+        assert 'filename="engramnote-export.zip"' in cd
+        assert cd.endswith("engramnote-export.zip")
+        # 单篇导出的缺省值必须一字不变（回归判据）
+        assert build_content_disposition("engramnote-export").endswith("engramnote-export.md")
+
+    def test_extension_without_leading_dot_is_normalised(self):
+        """`"zip"` 与 `".zip"` 等价 —— 少一个点会变成 `namezip`，同样不报错"""
+        assert "engramnote-export.zip" in build_content_disposition("engramnote-export", "zip")
+
 
 # ---------------------------------------------------------------------------
 # 3. front-matter

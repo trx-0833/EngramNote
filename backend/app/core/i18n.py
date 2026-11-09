@@ -171,3 +171,31 @@ def get_locale() -> str:
 def is_supported(locale: str) -> bool:
     """判断一个语言标记是否受支持（供 API 校验用）"""
     return locale in SUPPORTED_LOCALES
+
+
+def localize(zh: str, en: str) -> str:
+    """
+    就地选择一处文案的中英两版（**带运行期值的动态文案**用这个）
+
+    ## 与 `error_messages.py` 那张表的分工
+
+    表适用于**固定文案**：`(code, 中文原文)` 精确匹配，适合 AST 守卫逐条核对。
+    但有些文案里带运行期值：
+
+        f"无效的关系类型: {relation_type}"
+        f"今日已完成 {today_done} 道题，已达每日上限 {limit}"
+
+    这类字符串的"原文"每次都不同，表匹配不上。给它们各自在表里开一条
+    `_ALT` 也没用（值一变就 miss），所以提供这个函数，在**写的时候**按当前
+    语言选一句：
+
+        return {"error": localize(
+            f"无效的关系类型: {relation_type}",
+            f"Invalid relation type: {relation_type}",
+        )}
+
+    ⚠️ 只能在**请求上下文内**调用（`get_locale()` 依赖 contextvar）；
+    Celery worker 里没有请求上下文，会拿到默认语言 —— 那是预期行为
+    （任务产出的文案写进 DB 时按当时语言固化，见 `note.error_message`）。
+    """
+    return en if get_locale() == "en" else zh

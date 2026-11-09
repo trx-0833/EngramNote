@@ -79,6 +79,9 @@ Pillow
 # ---- 测试与 lint ----
 pytest
 pytest-asyncio
+# 覆盖率门禁（2026-11-07）：CI 用它算全局覆盖率并卡阈值。
+# 缺它 -> `pytest --cov` 在收集阶段直接报 unrecognized arguments。
+pytest-cov
 ruff
 
 # ---- workflow YAML 校验 ----

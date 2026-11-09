@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import json
 import logging
 from typing import Dict, List, Optional
 
@@ -49,9 +50,9 @@ def get_llm_client() -> httpx.AsyncClient:
         # 不主动 aclose()：旧 loop 已关闭，调用 aclose 只会产生未 await 的 coroutine；
         # 连接随旧 loop/GC 释放（文件描述符由 OS 回收）。
         logger.warning(
-            "检测到 LLM 客户端跨事件循环复用，重建共享客户端 "
-            "(old_loop=%s, new_loop=%s)",
-            _shared_llm_client_loop, current_loop,
+            "检测到 LLM 客户端跨事件循环复用，重建共享客户端 (old_loop=%s, new_loop=%s)",
+            _shared_llm_client_loop,
+            current_loop,
         )
         _shared_llm_client = None
         _shared_llm_client_loop = None
@@ -116,6 +117,7 @@ def close_llm_client() -> None:
     if _shared_llm_client is not None:
         try:
             import asyncio
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 loop.create_task(_shared_llm_client.aclose())
@@ -153,3 +155,93 @@ def _response_snippet(response, limit: int = 500) -> str:
     if not text:
         return "<empty>"
     return text[:limit] + ("...(截断)" if len(text) > limit else "")
+
+
+class LLMGatewayError(RuntimeError):
+    """LLM 网关返回 **4xx**（不可重试）时抛出的错误，消息里带响应体片段
+
+    ## 为什么不让 `httpx.HTTPStatusError` 自己冒出去
+
+    `str(httpx.HTTPStatusError)` 只有
+    `Client error '400 Bad Request' for url '…'` —— 而网关把**真实原因**
+    （`Model is unavailable.` / 参数被拒 / 会话缺失）写在 body 里。
+    这条错误会一路冒到 API 响应，用户看到的就是
+
+        生成拓展知识点失败: Client error '400 Bad Request' for url '…'
+
+    这句话不指向任何可执行的动作。2026-11-07 的现场就是这样：真正的原因
+    （配置里的模型已被上游下架）只躺在日志的 `body=` 字段里，而用户手上
+    只有一个 400。（日志那一侧 4xx 分支早就打了 body —— 本类把同一句话
+    也交给调用方。）
+
+    ## 为什么保留 `status_code` / `body` / `model` 三个字段
+
+    上层可能要按状态码分流（401 → 提示改密钥；400 → 提示改模型名），
+    靠解析消息字符串判断是脆的。
+    """
+
+    def __init__(self, *, status_code: int, model: str, body: str, detail: Optional[str] = None) -> None:
+        self.status_code = status_code
+        self.model = model
+        #: 响应体片段（原样，给日志/排查用）
+        self.body = body
+        #: 真正放进消息里给人看的那句：能解析出 `error.message` 时用它，否则回退 body
+        self.detail = detail or body
+        super().__init__(f"LLM 网关返回 {status_code}（不可重试，model={model}）: {self.detail}")
+
+
+def _extract_upstream_message(text: str) -> Optional[str]:
+    """从 OpenAI 风格的错误体里取出**人话**（`error.message` 之类）
+
+    网关的两种典型形态：
+
+        {"error": {"type": "server_error", "message": "Upstream request failed: Model is unavailable."}}
+        {"error": {"type": "MissingSessionID"}}
+
+    第一种把整段 JSON 塞进提示没有意义（用户要读的是那句话），
+    第二种没有 `message`，就用 `type` 顶上；都取不到再回退原样片段。
+    """
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    if isinstance(err, dict):
+        for key in ("message", "type", "code"):
+            value = err.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    elif isinstance(err, str) and err.strip():
+        return err.strip()
+    for key in ("message", "detail"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def build_gateway_error(*, status_code: int, model: str, response) -> LLMGatewayError:
+    """从 4xx 响应构造 `LLMGatewayError`（响应体为空/不可读时给出人话）
+
+    显示用的那句话优先取网关 JSON 里的 `error.message`；取不到才用截断后的
+    原始响应体（例如网关回的是 HTML 错误页）。
+    """
+    try:
+        raw = response.text or ""
+    except Exception:
+        raw = ""
+    body = _response_snippet(response, 300)
+    if body == "<empty>":
+        body = "响应体为空"
+    elif body == "<unreadable>":
+        body = "响应体不可读"
+    return LLMGatewayError(
+        status_code=status_code,
+        model=model,
+        body=body,
+        detail=_extract_upstream_message(raw),
+    )

@@ -36,6 +36,7 @@ from ..services.vault_path import (
     inbox_prefix,
 )
 from ..services.storage_service import list_source_files
+from ..tasks.dispatch import dispatch
 from ..services.vault_meta import write_note_meta, write_project_meta
 
 logger = logging.getLogger(__name__)
@@ -256,9 +257,7 @@ async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> Dic
         raise ValueError("项目不存在或无权访问")
 
     # 先删标签关联行（外键未开启时需手动保证子→父删除顺序）
-    await db.execute(
-        delete(NoteProject).where(NoteProject.project_id == project_id)
-    )
+    await db.execute(delete(NoteProject).where(NoteProject.project_id == project_id))
     await db.delete(project)
     await db.commit()
 
@@ -323,11 +322,13 @@ async def scan_project_source(db: AsyncSession, project: Project, user_id: str) 
         )
         db.add(note)
         # 打上项目标签（多对多关联表，唯一约束防重复）
-        db.add(NoteProject(
-            note_id=note.id,
-            project_id=project.id,
-            user_id=user_id,
-        ))
+        db.add(
+            NoteProject(
+                note_id=note.id,
+                project_id=project.id,
+                user_id=user_id,
+            )
+        )
         await db.commit()
         await db.refresh(note)
         note._project_ids = [project.id]
@@ -337,7 +338,8 @@ async def scan_project_source(db: AsyncSession, project: Project, user_id: str) 
         # 触发异步转换任务（Celery 不可用时标记失败，文件已就位可重试）
         try:
             from ..tasks.convert_tasks import convert_document_task
-            convert_document_task.delay(note.id, object_name, source_type.value)
+
+            dispatch(convert_document_task, note.id, object_name, source_type.value)
         except Exception as e:
             note.status = NoteStatus.failed
             note.error_message = f"转换任务提交失败: {str(e)}"
@@ -369,9 +371,7 @@ async def scan_project_source(db: AsyncSession, project: Project, user_id: str) 
     }
 
 
-async def add_notes_to_project(
-    db: AsyncSession, project_id: str, user_id: str, note_ids: List[str]
-) -> Dict:
+async def add_notes_to_project(db: AsyncSession, project_id: str, user_id: str, note_ids: List[str]) -> Dict:
     """
     将笔记批量添加到项目（打标签）
 
@@ -421,14 +421,18 @@ async def add_notes_to_project(
         for note in notes:
             if note.id in existing:
                 continue
-            db.add(NoteProject(
-                note_id=note.id,
-                project_id=project.id,
-                user_id=user_id,
-            ))
+            db.add(
+                NoteProject(
+                    note_id=note.id,
+                    project_id=project.id,
+                    user_id=user_id,
+                )
+            )
             added += 1
         await db.commit()
-        logger.info("项目添加笔记: user_id=%s, project_id=%s, added=%s, requested=%s", user_id, project_id, added, len(note_ids))
+        logger.info(
+            "项目添加笔记: user_id=%s, project_id=%s, added=%s, requested=%s", user_id, project_id, added, len(note_ids)
+        )
 
     return {
         "project_id": project.id,
@@ -437,9 +441,7 @@ async def add_notes_to_project(
     }
 
 
-async def remove_note_from_project(
-    db: AsyncSession, project_id: str, note_id: str, user_id: str
-) -> Dict:
+async def remove_note_from_project(db: AsyncSession, project_id: str, note_id: str, user_id: str) -> Dict:
     """
     将笔记从项目中移出（移除标签）
 

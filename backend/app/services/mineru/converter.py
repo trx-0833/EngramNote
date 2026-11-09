@@ -27,7 +27,7 @@ import tempfile
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config_loader import DEFAULT_CONFIG, load_config, _load_env_config
@@ -188,10 +188,8 @@ def convert(
 
     try:
         for idx, intake_path in enumerate(intake_paths):
-            chunk_label = f" (分块 {idx+1}/{len(intake_paths)})" if is_chunked else ""
-            logger.info(
-                f"转换开始: {file_path.name}{chunk_label} | 后端={backend} | 语言={lang}"
-            )
+            chunk_label = f" (分块 {idx + 1}/{len(intake_paths)})" if is_chunked else ""
+            logger.info(f"转换开始: {file_path.name}{chunk_label} | 后端={backend} | 语言={lang}")
 
             chunk_timeout = _compute_timeout(timeout, intake_path, ext)
 
@@ -227,9 +225,7 @@ def convert(
 
             try:
                 if worker.is_alive():
-                    logger.error(
-                        f"转换超时: {file_path.name}{chunk_label} | 超时时间={chunk_timeout}秒"
-                    )
+                    logger.error(f"转换超时: {file_path.name}{chunk_label} | 超时时间={chunk_timeout}秒")
                     _timeout_occurred = True
                     _early_result = ConversionResult(
                         title="",
@@ -240,9 +236,7 @@ def convert(
                     )
                     break
                 if _error_holder[0] is not None:
-                    logger.error(
-                        f"转换失败: {file_path.name}{chunk_label} | 错误={str(_error_holder[0])}"
-                    )
+                    logger.error(f"转换失败: {file_path.name}{chunk_label} | 错误={str(_error_holder[0])}")
                     _early_result = ConversionResult(
                         title="",
                         source_type=source_type,
@@ -336,9 +330,7 @@ def convert_folder(
         logger.warning("GPU模式下 max_workers 强制降为 1")
         max_workers = 1
 
-    files = sorted(
-        [f for f in input_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS]
-    )
+    files = sorted([f for f in input_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS])
 
     if not files:
         logger.warning(f"输入目录中无支持格式文件: {input_dir}")
@@ -349,7 +341,7 @@ def convert_folder(
 
     if max_workers <= 1:
         for i, f in enumerate(files):
-            logger.info(f"批量转换进度: {i+1}/{total} - {f.name}")
+            logger.info(f"批量转换进度: {i + 1}/{total} - {f.name}")
             try:
                 call_kwargs = dict(kwargs, output_dir=output_dir)
                 result = convert(f, **call_kwargs)
@@ -371,7 +363,7 @@ def convert_folder(
 
             for i, future in enumerate(as_completed(list(future_to_file.keys()))):
                 f = future_to_file[future]
-                logger.info(f"批量转换进度: {i+1}/{total} - {f.name}")
+                logger.info(f"批量转换进度: {i + 1}/{total} - {f.name}")
                 try:
                     result = future.result()
                 except Exception as e:
@@ -393,9 +385,7 @@ def convert_folder(
 # ── 内部辅助函数 ──────────────────────────────────────────────
 
 
-def _route_to_intake(
-    file_path: Path, ext: str, config: Dict[str, Any]
-) -> Tuple[List[Path], List[Path]]:
+def _route_to_intake(file_path: Path, ext: str, config: Dict[str, Any]) -> Tuple[List[Path], List[Path]]:
     """根据文件扩展名路由到对应的摄入函数"""
     if ext in PDF_EXTS:
         chunk_size = config.get("chunk_size", DEFAULT_CONFIG["chunk_size"])
@@ -415,9 +405,7 @@ def _route_to_intake(
         raise ValueError(f"不支持的文件格式: {ext}")
 
 
-def _pages_argument(
-    intake_path: Path, start_page_id: int, end_page_id: Optional[int]
-) -> str:
+def _pages_argument(intake_path: Path, start_page_id: int, end_page_id: Optional[int]) -> str:
     """
     把 3.x 的 0-based `start_page_id` / `end_page_id` 换算成 4.x 的 `--pages` 表达式。
 
@@ -483,9 +471,16 @@ def _process_with_mineru(
     """
     if backend in ("vlm-http-client", "hybrid-http-client"):
         return _process_with_remote_api(
-            intake_path, output_dir, backend, lang,
-            formula_enable, table_enable, make_mode,
-            start_page_id, end_page_id, config,
+            intake_path,
+            output_dir,
+            backend,
+            lang,
+            formula_enable,
+            table_enable,
+            make_mode,
+            start_page_id,
+            end_page_id,
+            config,
         )
 
     cli = find_mineru_cli(config)
@@ -517,10 +512,15 @@ def _process_with_mineru(
     zip_path.unlink(missing_ok=True)
 
     argv = [
-        cli, "parse", str(intake_path),
-        "-o", str(zip_path),
-        "--tier", tier,
-        "--format", "zip",
+        cli,
+        "parse",
+        str(intake_path),
+        "-o",
+        str(zip_path),
+        "--tier",
+        tier,
+        "--format",
+        "zip",
     ]
     pages = _pages_argument(intake_path, start_page_id, end_page_id)
     if pages:
@@ -575,17 +575,7 @@ def _process_with_mineru(
             success=False,
         )
 
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            names = zf.namelist()
-            md_name = next((n for n in names if n.endswith("markdown.md")), None)
-            middle_name = next((n for n in names if n.endswith("middle_json.json")), None)
-            if md_name:
-                (output_dir / f"{file_stem}.md").write_bytes(zf.read(md_name))
-            if middle_name:
-                (output_dir / "layout.json").write_bytes(zf.read(middle_name))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("解压 MinerU 产物失败: %s", e)
+    _extract_local_zip_artifacts(zip_path, output_dir, file_stem)
 
     # 保底：3.x 时代用 `output_dir.rglob(...)` 找产物，这里沿用同样的收集方式
     md_content = ""
@@ -624,9 +614,7 @@ def _process_with_mineru(
         content_list_candidates = sorted(output_dir.rglob("*_content_list.json"))
     if content_list_candidates:
         try:
-            md_content = _insert_page_markers_from_content_list(
-                md_content, content_list_candidates[0], start_page_id
-            )
+            md_content = _insert_page_markers_from_content_list(md_content, content_list_candidates[0], start_page_id)
         except Exception as e:
             logger.warning(f"插入页码标签失败: {e}")
 
@@ -702,8 +690,7 @@ def _process_with_remote_api(
 
     try:
         submit_url = f"{base_url}/api/v4/file-urls/batch"
-        headers = {"Content-Type": "application/json",
-                   "Authorization": f"Bearer {api_token}"}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_token}"}
         payload = {
             "files": [{"name": intake_path.name, "data_id": file_stem}],
             "model_version": model_version,
@@ -717,7 +704,7 @@ def _process_with_remote_api(
         if not is_ocr_needed(backend):
             payload["is_ocr"] = False
         if end_page_id is not None:
-            payload["page_ranges"] = f"{start_page_id+1}-{end_page_id}"
+            payload["page_ranges"] = f"{start_page_id + 1}-{end_page_id}"
 
         logger.info(f"申请上传地址: {submit_url} -> {intake_path.name}")
         resp = req.post(submit_url, headers=headers, json=payload)
@@ -765,8 +752,9 @@ def _process_with_remote_api(
         logger.info(f"文件上传完成，系统自动提交任务: batch_id={batch_id}")
 
         import time
+
         task_state = None
-        remote_timeout = _compute_timeout(config.get('timeout'), intake_path, intake_path.suffix.lower())
+        remote_timeout = _compute_timeout(config.get("timeout"), intake_path, intake_path.suffix.lower())
         deadline = time.time() + remote_timeout
         logger.info(f"远程API超时设定: timeout={remote_timeout}秒, file={intake_path.name}")
         poll_interval = config.get("poll_interval", 5)
@@ -779,10 +767,10 @@ def _process_with_remote_api(
             "running": "正在解析",
             "converting": "格式转换中",
             "done": "完成",
-            "failed": "解析失败"
+            "failed": "解析失败",
         }
 
-        while time.time() < deadline and task_state != 'done':
+        while time.time() < deadline and task_state != "done":
             try:
                 resp = req.get(f"{query_url}{batch_id}", headers=headers)
                 if resp.status_code == 200:
@@ -796,16 +784,16 @@ def _process_with_remote_api(
                         if task_state:
                             desc = state_desc.get(task_state, task_state)
                             logger.info(f"任务状态: {desc} (file_name={intake_path.name})")
-                            if task_state == 'failed':
-                                error_msg = extract_result[0].get('err_msg', '')
+                            if task_state == "failed":
+                                error_msg = extract_result[0].get("err_msg", "")
                                 return ConversionResult(
                                     title="",
                                     source_path=str(intake_path),
                                     error=f"远程提取失败: {error_msg}",
                                     success=False,
                                 )
-                            if task_state == 'done':
-                                zip_url = extract_result[0].get('full_zip_url', '')
+                            if task_state == "done":
+                                zip_url = extract_result[0].get("full_zip_url", "")
                                 if not zip_url:
                                     return ConversionResult(
                                         title="",
@@ -833,7 +821,7 @@ def _process_with_remote_api(
                                 _safe_extract_zip(zip_path, extract_dir)
                                 zip_path.unlink(missing_ok=True)
                                 break
-                            if task_state not in (None, 'done'):
+                            if task_state not in (None, "done"):
                                 time.sleep(poll_interval)
                                 continue
                         if task_state is None:
@@ -851,7 +839,7 @@ def _process_with_remote_api(
                 success=False,
             )
 
-        if task_state != 'done':
+        if task_state != "done":
             return ConversionResult(
                 title="",
                 source_path=str(intake_path),
@@ -947,8 +935,55 @@ def is_ocr_needed(backend: str) -> bool:
     return backend == "pipeline"
 
 
+def _extract_local_zip_artifacts(zip_path: Path, output_dir: Path, file_stem: str) -> None:
+    """把本地 `mineru-kit parse --format zip` 的产物解出来：markdown + layout + **插图**
+
+    ## 为什么单独抽成函数（2026-11-09）
+
+    原先是 `_process_with_mineru()` 里的一段内联循环，有两个毛病：
+
+    1. **只挑 `markdown.md` 与 `middle_json.json`** —— 插图 `images/*.jpg` 连落盘
+       都没有，页面上自然只剩 alt 文本（云端路径是整包解开的，所以只有本地路径坏）；
+    2. 内联在子进程调用之后，测试必须真的跑一次 MinerU 才能覆盖到它 ——
+       而那需要 GB 级模型，CI 里跑不了。
+
+    抽出来之后 `tests/test_mineru_local_zip.py` 可以用一个**手工构造的 zip**
+    验证：md / layout / 插图都落地、`images/` 之外的图片不落地、
+    `..` 与绝对路径被拒。
+
+    Args:
+        zip_path: `mineru-kit parse -o` 产出的 zip
+        output_dir: 解压目标目录（调用方随后用 `rglob` 找 md/图片）
+        file_stem: 输入文件主干，用来给 markdown 命名（`{file_stem}.md`）
+    """
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            md_name = next((n for n in names if n.endswith("markdown.md")), None)
+            middle_name = next((n for n in names if n.endswith("middle_json.json")), None)
+            if md_name:
+                (output_dir / f"{file_stem}.md").write_bytes(zf.read(md_name))
+            if middle_name:
+                (output_dir / "layout.json").write_bytes(zf.read(middle_name))
+
+            for member_name in names:
+                lowered = member_name.lower()
+                if "/images/" not in lowered and not lowered.startswith("images/"):
+                    continue
+                relative = PurePosixPath(member_name)
+                if relative.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+                    continue
+                if relative.is_absolute() or ".." in relative.parts:
+                    logger.warning("跳过不安全的图片条目: %s", member_name)
+                    continue
+                target = output_dir.joinpath(*relative.parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(member_name))
+    except Exception as e:  # noqa: BLE001 - 解压失败不阻断：随后 rglob 会报"没有产物"
+        logger.warning("解压 MinerU 产物失败: %s", e)
+
+
 def _safe_extract_zip(zip_path: Path, output_dir: Path) -> None:
-    """安全解压 ZIP 文件（防止路径遍历攻击）"""
     import zipfile
     from pathlib import PurePosixPath
 
@@ -983,6 +1018,7 @@ def _safe_extract_zip(zip_path: Path, output_dir: Path) -> None:
 def _normalize_api_base_url(url: str) -> str:
     """规范化 API 基础 URL，去除路径中可能包含的 /api/vX/ 部分"""
     import re
+
     match = re.search(r"/api/v\d+/", url)
     if match:
         return url[: match.start()]
@@ -997,6 +1033,7 @@ def _compute_timeout(timeout: int, intake_path: Path, ext: str, page_count: int 
 
     if page_count <= 0:
         import pypdfium2 as pdfium
+
         try:
             doc = pdfium.PdfDocument(str(intake_path))
             page_count = len(doc)
@@ -1119,7 +1156,7 @@ def _merge_chunks(chunk_results: List[str], config: Dict[str, Any]) -> str:
 
 def _normalize_for_comparison(text: str) -> str:
     """标准化空白符：去除首尾空白，将中间连续空白替换为单个空格"""
-    return ' '.join(text.strip().split())
+    return " ".join(text.strip().split())
 
 
 def _collapse_details_lines(lines):
@@ -1130,12 +1167,12 @@ def _collapse_details_lines(lines):
     detail_lines = 0
 
     for line in lines:
-        if '<details>' in line:
+        if "<details>" in line:
             in_details = True
-            collapsed.append('<DETAILS/>')
+            collapsed.append("<DETAILS/>")
             detail_lines = 1
             continue
-        if '</details>' in line:
+        if "</details>" in line:
             in_details = False
             detail_lines += 1
             orig_counts.append(detail_lines)
@@ -1181,11 +1218,11 @@ def _find_overlap(merged_lines: List[str], chunk_lines: List[str], max_overlap: 
             return sum(chunk_orig_counts[:i])
 
     # 基于签名的模糊匹配
-    merged_full = ' '.join(norm_merged)
-    chunk_full = ' '.join(norm_chunk)
+    merged_full = " ".join(norm_merged)
+    chunk_full = " ".join(norm_chunk)
 
-    merged_nospace = merged_full.replace(' ', '')
-    chunk_nospace = chunk_full.replace(' ', '')
+    merged_nospace = merged_full.replace(" ", "")
+    chunk_nospace = chunk_full.replace(" ", "")
 
     search_start = 0
 
@@ -1199,7 +1236,7 @@ def _find_overlap(merged_lines: List[str], chunk_lines: List[str], max_overlap: 
             overlap_nospace_len = len(merged_nospace) - pos
             cum_chars = 0
             for line_idx, nl in enumerate(norm_chunk):
-                cum_chars += len(nl.replace(' ', ''))
+                cum_chars += len(nl.replace(" ", ""))
                 if cum_chars >= overlap_nospace_len:
                     return max(1, line_idx + 1)
             return len(norm_chunk)
@@ -1228,4 +1265,5 @@ def _cleanup_temp_dirs(dirs: List[Path]) -> None:
     for d in dirs:
         if d and d.exists():
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)

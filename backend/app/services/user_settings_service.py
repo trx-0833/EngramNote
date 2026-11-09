@@ -15,25 +15,70 @@
 模型下与真正的工作负载争锁。只有在 `update_settings()` 时才创建行。
 """
 
+from __future__ import annotations
+
+import logging
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models.user_settings import UserSettings
 
+logger = logging.getLogger(__name__)
+
+
+def _clamp(value, low, high, name: str):
+    """把环境默认值夹到 API/DB 都接受的范围，并把越界写进日志。"""
+    clamped = min(high, max(low, value))
+    if clamped != value:
+        logger.warning(
+            "环境配置 %s=%r 超出设置页范围 [%r, %r]，运行时按 %r 处理",
+            name,
+            value,
+            low,
+            high,
+            clamped,
+        )
+    return clamped
+
 
 def deployment_defaults() -> Dict[str, Any]:
-    """环境配置里的默认值（设置页未覆盖时使用）"""
+    """环境配置里的默认值（设置页未覆盖时使用）
+
+    `config.py` 是部署面，可能被写成 4 道/天、0.5 留存率这类越界值；
+    响应模型有范围校验，直接透传会让 `GET /api/settings` 变成 500。
+    在唯一的出口处夹紧，用户行永远不会被写成非法值。
+    """
     settings = get_settings()
     return {
-        "daily_review_limit": int(settings.daily_review_limit),
-        "email_hour": int(settings.email_reminder_hour),
-        "desired_retention": float(settings.fsrs_request_retention),
-        "max_interval_days": int(settings.fsrs_max_interval_days),
+        "daily_review_limit": _clamp(
+            int(settings.daily_review_limit), 5, 100, "DAILY_REVIEW_LIMIT"
+        ),
+        "email_hour": _clamp(
+            int(settings.email_reminder_hour), 0, 23, "EMAIL_REMINDER_HOUR"
+        ),
+        "desired_retention": _clamp(
+            float(settings.fsrs_request_retention),
+            0.70,
+            0.98,
+            "FSRS_REQUEST_RETENTION",
+        ),
+        "max_interval_days": _clamp(
+            int(settings.fsrs_max_interval_days),
+            365,
+            3650,
+            "FSRS_MAX_INTERVAL_DAYS",
+        ),
         "output_locale": "follow",
-        "card_max_new_per_run": int(settings.card_max_new_per_run),
+        "card_max_new_per_run": _clamp(
+            int(settings.card_max_new_per_run),
+            50,
+            1000,
+            "CARD_MAX_NEW_PER_RUN",
+        ),
         "clean_simplify_formula": bool(settings.clean_simplify_formula),
         "clean_normalize_spacing": bool(settings.clean_normalize_spacing),
         "clean_normalize_heading_levels": bool(settings.clean_normalize_heading_levels),
@@ -76,34 +121,20 @@ async def get_effective_settings(db: AsyncSession, user_id: str) -> Dict[str, An
     return _effective(await get_settings_row(db, user_id))
 
 
-async def update_effective_settings(
-    db: AsyncSession,
-    user_id: str,
+def _apply_overrides(
+    row: UserSettings,
     *,
-    daily_review_limit: Optional[int] = None,
-    email_hour: Optional[int] = None,
-    desired_retention: Optional[float] = None,
-    max_interval_days: Optional[int] = None,
-    output_locale: Optional[str] = None,
-    card_max_new_per_run: Optional[int] = None,
-    clean_simplify_formula: Optional[bool] = None,
-    clean_normalize_spacing: Optional[bool] = None,
-    clean_normalize_heading_levels: Optional[bool] = None,
-) -> Dict[str, Any]:
-    """部分更新；没有行时创建。返回更新后的完整有效值。
-
-    只更新显式传入的字段（`None` = 不改），这样 PATCH 的语义与
-    "缺省字段保持原值"一致。布尔值必须用 `is not None` 判断 ——
-    用真值判断会让"显式关闭"被当成"没提交"。
-    """
-    row = await get_settings_row(db, user_id)
-    if row is None:
-        row = UserSettings(
-            user_id=user_id,
-            **deployment_defaults(),
-        )
-        db.add(row)
-
+    daily_review_limit: Optional[int],
+    email_hour: Optional[int],
+    desired_retention: Optional[float],
+    max_interval_days: Optional[int],
+    output_locale: Optional[str],
+    card_max_new_per_run: Optional[int],
+    clean_simplify_formula: Optional[bool],
+    clean_normalize_spacing: Optional[bool],
+    clean_normalize_heading_levels: Optional[bool],
+) -> None:
+    """把显式传入的 PATCH 字段写到行上；None = 不改。"""
     if daily_review_limit is not None:
         row.daily_review_limit = int(daily_review_limit)
     if email_hour is not None:
@@ -123,9 +154,69 @@ async def update_effective_settings(
     if clean_normalize_heading_levels is not None:
         row.clean_normalize_heading_levels = bool(clean_normalize_heading_levels)
 
-    await db.commit()
-    await db.refresh(row)
-    return _effective(row)
+
+async def update_effective_settings(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    daily_review_limit: Optional[int] = None,
+    email_hour: Optional[int] = None,
+    desired_retention: Optional[float] = None,
+    max_interval_days: Optional[int] = None,
+    output_locale: Optional[str] = None,
+    card_max_new_per_run: Optional[int] = None,
+    clean_simplify_formula: Optional[bool] = None,
+    clean_normalize_spacing: Optional[bool] = None,
+    clean_normalize_heading_levels: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """部分更新；没有行时创建。返回更新后的完整有效值。
+
+    只更新显式传入的字段（`None` = 不改），这样 PATCH 的语义与
+    "缺省字段保持原值"一致。布尔值必须用 `is not None` 判断 ——
+    用真值判断会让"显式关闭"被当成"没提交"。
+
+    ## 并发首次建行
+
+    两个请求可能同时 `SELECT` 到 None，然后都 INSERT；后提交的会撞
+    `uq_user_settings_user_id`。这里不把 IntegrityError 直接甩给 API
+    （那会变成 500），而是回滚后重取一次，把本次覆盖应用到已存在的行。
+    """
+    kwargs = {
+        "daily_review_limit": daily_review_limit,
+        "email_hour": email_hour,
+        "desired_retention": desired_retention,
+        "max_interval_days": max_interval_days,
+        "output_locale": output_locale,
+        "card_max_new_per_run": card_max_new_per_run,
+        "clean_simplify_formula": clean_simplify_formula,
+        "clean_normalize_spacing": clean_normalize_spacing,
+        "clean_normalize_heading_levels": clean_normalize_heading_levels,
+    }
+
+    for attempt in range(2):
+        row = await get_settings_row(db, user_id)
+        if row is None:
+            row = UserSettings(
+                user_id=user_id,
+                **deployment_defaults(),
+            )
+            db.add(row)
+
+        _apply_overrides(row, **kwargs)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 1:
+                raise
+            # 另一个请求赢了 INSERT：重取它建的行，再应用一次本次覆盖。
+            continue
+
+        await db.refresh(row)
+        return _effective(row)
+
+    raise RuntimeError("unreachable: settings update retry loop exhausted")
+
 
 
 def as_dict(row: Optional[UserSettings]) -> Dict[str, Any]:

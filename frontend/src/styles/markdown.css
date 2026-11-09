@@ -197,6 +197,24 @@
   border-radius: var(--radius-sm);
 }
 
+/* 插图加载失败的占位（2026-11-09）
+   ------------------------------------------------------------------
+   标记由 `MarkdownReader` 的 `onErrorCapture` 打上（`data-broken="1"`）。
+   为什么需要它：MinerU 解析出的 markdown 对图写相对引用，资产端点正常时
+   图能取到；但历史笔记（本轮之前转换的）没有资产文件，`src` 会 404。
+   没有这条样式时，用户只看到一条**空白**或一个破图标，分不清"图很小"
+   与"图丢了"。这里画一个虚线框，`alt` 文本会显示在框内。 */
+.markdown-body img[data-broken='1'] {
+  display: inline-block;
+  min-height: 2.5rem;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px dashed var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
 /* 引用块（本轮）：金色左边框 + 金色淡底 → 墨阶左边框 + 纸色底。
    R2 的理由同上（金色是印章）。墨阶用 `--color-text-tertiary`（淡墨）：
    它比正文浅、比边框深，正好是"这是引来的话"该有的分量。 */
