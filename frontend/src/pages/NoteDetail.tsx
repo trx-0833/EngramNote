@@ -194,11 +194,19 @@ export default function NoteDetail() {
   /** 选择要显示的 Markdown 内容 */
   const mdContent = computeMdContent(note, viewMode);
 
-  // 将 Markdown 文本解析为 HTML
-  const htmlContent = renderMarkdown(mdContent);
+  // 插图基准 URL（2026-11-09）：MinerU 解析出来的 markdown 对图写的是
+  // **相对引用**（`![](images/xxx.jpg)`），浏览器没有基准可解析；
+  // 这里给出本笔记的资产端点前缀，渲染时把它拼成同源绝对地址
+  // （DOMPurify 只放行 http(s)，见 utils/sanitize.ts）。
+  // ⚠️ 用 note.id 而不是路由参数 noteId：详情响应才是权威来源
+  // （路由参数可能是旧值/大小写不同，而资产归属是按 note.id 查的）。
+  const assetsBaseUrl = `/api/notes/${note.id}/assets/`;
 
-  // 编辑预览的 HTML
-  const editPreviewHtml = renderMarkdown(editContent);
+  // 将 Markdown 文本解析为 HTML
+  const htmlContent = renderMarkdown(mdContent, assetsBaseUrl);
+
+  // 编辑预览的 HTML（同一个基准：预览里的图同样要能显示）
+  const editPreviewHtml = renderMarkdown(editContent, assetsBaseUrl);
 
   // 是否可以显示清洗版 / diff（cleaned/archived/learning_failed 状态都可以查看）
   const showClean = canShowClean(note);

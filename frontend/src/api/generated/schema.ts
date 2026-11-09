@@ -1714,6 +1714,35 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/{note_id}/assets/{asset_path}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取笔记内的插图
+     * @description 返回笔记 markdown 里相对引用指向的插图
+     *
+     *     前端渲染 markdown 时把 `images/xxx.jpg` 重写成
+     *     `/api/notes/{note_id}/assets/images/xxx.jpg`（见 `utils/markdown.ts`
+     *     的 `rewriteRelativeImageSources`），本端点负责把字节吐回去。
+     *
+     *     Raises:
+     *         AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）
+     *         AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）
+     *         AppError: 对象不存在（ASSET_NOT_FOUND → 404）
+     */
+    get: operations['get_note_asset_api_notes__note_id__assets__asset_path__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/{note_id}/content': {
     parameters: {
       query?: never;
@@ -9717,6 +9746,36 @@ export interface operations {
         content: {
           'text/event-stream': string;
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_note_asset_api_notes__note_id__assets__asset_path__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        note_id: string;
+        asset_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {
