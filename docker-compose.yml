@@ -5,9 +5,11 @@
 #    项目实际以**本地进程**方式运行（后端 8001 / 前端 5173，见 `README.md:181`、`AGENTS.md:22`）；
 #    容器化在本仓库是**历史遗留**，且曾因磁盘空间与资源约束被**明确放弃**
 #    （`AGENTS.md:18`、`README.md:324-336`）。
-#    `.github/workflows/ci.yml` 里的 `docker-nginx-config` job（`:481-529`）只做**文本 grep 守卫**，
-#    它保证的只是"文件没被改坏"，**不代表这条路走得通**。
-#    要用请先自行验证 —— 不要把 `docker compose up -d` 当成可用部署路径。
+#    【2026-11-07 治理结论】保留本文件，**但不要当作部署路径**。
+#    原先的 `docker-nginx-config` CI job 已改名 `nginx-config-guard`，只保留
+#    `frontend/nginx.conf` 的两条 nginx 行为守卫（上传 413 / SSE 缓冲），
+#    与容器相关的两步已删除。因此**本文件现在没有任何 CI 守卫**——
+#    任何 `docker compose up -d` 都是未经测试的操作。
 #
 # ## 这份文件里实际有什么（如实描述）
 #

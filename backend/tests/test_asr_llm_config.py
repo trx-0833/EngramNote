@@ -36,7 +36,7 @@ import os
 
 import pytest
 
-from app.services.asr.converter import _load_llm_config
+from app.services.asr_llm_config import _load_llm_config
 
 
 class TestNormalPath:
@@ -56,7 +56,7 @@ class TestNormalPath:
 
         ASR 是"另一个入口"，最容易出现的问题就是它悄悄用了一套不同的默认值
         （旧的兜底默认 `deepseek-chat` 就是一个：主配置的默认是
-        `deepseek-v4-flash`）。这条断言把"同一个真相"钉住。
+        `deepseek-v4.1-flash`）。这条断言把"同一个真相"钉住。
         """
         from app.config import get_settings
 

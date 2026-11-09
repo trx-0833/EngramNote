@@ -39,12 +39,17 @@ router = APIRouter()
 
 
 def _email_configured() -> bool:
-    """部署侧是否具备发信能力（全局开关 + SMTP 两项都配了）"""
+    """部署侧是否具备发信能力（全局开关 + SMTP 认证信息齐全）
+
+    只查 host/user 不够：password 为空时 notification_service 会在真正发信时
+    失败，而用户侧看不到任何提示。这里必须与它使用同一组认证字段。
+    """
     settings = get_settings()
     return bool(
         settings.email_reminder_enabled
         and settings.smtp_host
         and settings.smtp_user
+        and settings.smtp_password
     )
 
 
@@ -125,15 +130,21 @@ async def patch_settings(
             content.clean_normalize_heading_levels if content else None
         ),
     }
+    if reminders and reminders.email_enabled is not None:
+        # 先只改 ORM 属性，不在这里 commit：设置行与邮件开关必须落在同一次
+        # 事务里，否则第二次 commit 失败会留下“设置已改、开关没改”的半截状态。
+        current_user.email_reminder_enabled = bool(reminders.email_enabled)
+
     if any(value is not None for value in setting_values.values()):
         await user_settings_service.update_effective_settings(
             db,
             current_user.id,
             **setting_values,
         )
-
-    if reminders and reminders.email_enabled is not None:
-        current_user.email_reminder_enabled = bool(reminders.email_enabled)
+        # update_effective_settings 已提交同一 session（含上面的 users 字段）
+        await db.refresh(current_user)
+    elif reminders and reminders.email_enabled is not None:
+        # 只有邮件开关时仍要单独提交一次；这是本请求唯一的事务。
         await db.commit()
         await db.refresh(current_user)
 

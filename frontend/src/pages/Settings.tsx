@@ -115,6 +115,12 @@ function hourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
+/** 环境默认值可能不在预设档位里；把它作为只读选项并入，避免 select 空白。 */
+function withCurrentValue(values: number[], current: number): number[] {
+  if (values.includes(current)) return values;
+  return [...values, current].sort((a, b) => a - b);
+}
+
 export default function Settings() {
   const { t, locale, setLocale } = useTranslation();
   const { logoutAllDevices } = useAuth();
@@ -146,7 +152,7 @@ export default function Settings() {
   const mutation = useMutation({
     mutationFn: ({ body }: { section: SectionId; body: SettingsPatchBody }) => patchSettings(body),
     onMutate: async ({ body }) => {
-      await queryClient.cancelQueries({ queryKey: SETTINGS_KEY });
+      await queryClient.cancelQueries({ queryKey: SETTINGS_KEY, exact: true });
       const previous = queryClient.getQueryData<UserSettings>(SETTINGS_KEY);
       if (previous) queryClient.setQueryData(SETTINGS_KEY, mergePatch(previous, body));
       return { previous };
@@ -373,6 +379,8 @@ export default function Settings() {
 
   const data = settingsQuery.data;
   const storage = usageQuery.data?.storage;
+  const retentionOptions = withCurrentValue([0.8, 0.85, 0.9, 0.95], data.study.desired_retention);
+  const maxIntervalOptions = withCurrentValue([365, 1825, 3650], data.study.max_interval_days);
 
   return (
     <div className={styles.page}>
@@ -385,7 +393,7 @@ export default function Settings() {
       </header>
 
       <div className={styles.layout}>
-        <nav className={styles.rail} aria-label={t('settings.navLabel')}>
+        <nav className={styles.sectionRail} aria-label={t('settings.navLabel')}>
           <div className={styles.railLabel}>{t('settings.navLabel')}</div>
           {SECTIONS.map((section) => (
             <button
@@ -449,18 +457,22 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.study.usageHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <span className={styles.readonly}>
-                    {statsQuery.data
-                      ? t('settings.study.usageValue', {
-                          done: statsQuery.data.today_done,
-                          limit: statsQuery.data.daily_limit,
-                          remaining: Math.max(
-                            0,
-                            statsQuery.data.daily_limit - statsQuery.data.today_done,
-                          ),
-                        })
-                      : t('settings.data.loading')}
-                  </span>
+                  {statsQuery.isError ? (
+                    <ReadFailed onRetry={() => statsQuery.refetch()} />
+                  ) : (
+                    <span className={styles.readonly}>
+                      {statsQuery.data
+                        ? t('settings.study.usageValue', {
+                            done: statsQuery.data.today_done,
+                            limit: statsQuery.data.daily_limit,
+                            remaining: Math.max(
+                              0,
+                              statsQuery.data.daily_limit - statsQuery.data.today_done,
+                            ),
+                          })
+                        : t('settings.data.loading')}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -487,11 +499,19 @@ export default function Settings() {
                           })
                         }
                       >
-                        {[0.8, 0.85, 0.9, 0.95].map((value) => (
-                          <option key={value} value={value}>
-                            {Math.round(value * 100)}%
-                          </option>
-                        ))}
+                        {retentionOptions.map((value) => {
+                          const isCurrent = value === data.study.desired_retention;
+                          const isPreset = [0.8, 0.85, 0.9, 0.95].includes(value);
+                          return (
+                            <option key={value} value={value} disabled={isCurrent && !isPreset}>
+                              {isPreset
+                                ? `${Math.round(value * 100)}%`
+                                : t('settings.study.deploymentValue', {
+                                    value: `${Math.round(value * 100)}%`,
+                                  })}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   </div>
@@ -514,11 +534,17 @@ export default function Settings() {
                           })
                         }
                       >
-                        {[365, 1825, 3650].map((value) => (
-                          <option key={value} value={value}>
-                            {t('settings.study.years', { years: value / 365 })}
-                          </option>
-                        ))}
+                        {maxIntervalOptions.map((value) => {
+                          const isCurrent = value === data.study.max_interval_days;
+                          const isPreset = [365, 1825, 3650].includes(value);
+                          return (
+                            <option key={value} value={value} disabled={isCurrent && !isPreset}>
+                              {isPreset
+                                ? t('settings.study.years', { years: value / 365 })
+                                : t('settings.study.deploymentValue', { value: `${value} 天` })}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   </div>
@@ -977,11 +1003,15 @@ export default function Settings() {
                       <span style={{ width: `${usagePercent}%` }} />
                     </div>
                     <span className={styles.progressText}>
-                      {storage
-                        ? `${formatBytes(storage.used_bytes)} / ${
-                            storage.quota_bytes > 0 ? formatBytes(storage.quota_bytes) : '∞'
-                          }`
-                        : t('settings.data.loading')}
+                      {usageQuery.isError ? (
+                        <ReadFailed onRetry={() => usageQuery.refetch()} />
+                      ) : storage ? (
+                        `${formatBytes(storage.used_bytes)} / ${
+                          storage.quota_bytes > 0 ? formatBytes(storage.quota_bytes) : '∞'
+                        }`
+                      ) : (
+                        t('settings.data.loading')
+                      )}
                     </span>
                   </div>
                 </div>
@@ -993,23 +1023,29 @@ export default function Settings() {
                   <p className={styles.hint}>{t('settings.data.llmHint')}</p>
                 </div>
                 <div className={styles.control}>
-                  <span className={styles.readonly}>
-                    {llmUsageQuery.data
-                      ? t('settings.data.llmValue', {
-                          tokens: llmUsageQuery.data.totals.total_tokens.toLocaleString(locale),
-                          calls: llmUsageQuery.data.totals.calls,
-                        })
-                      : t('settings.data.loading')}
-                  </span>
-                  <span className={styles.progressText}>
-                    {llmUsageQuery.data
-                      ? llmUsageQuery.data.price_configured
-                        ? `${llmUsageQuery.data.totals.cost.toFixed(2)} ${
-                            llmUsageQuery.data.currency ?? ''
-                          }`
-                        : t('settings.data.priceUnavailable')
-                      : ''}
-                  </span>
+                  {llmUsageQuery.isError ? (
+                    <ReadFailed onRetry={() => llmUsageQuery.refetch()} />
+                  ) : (
+                    <>
+                      <span className={styles.readonly}>
+                        {llmUsageQuery.data
+                          ? t('settings.data.llmValue', {
+                              tokens: llmUsageQuery.data.totals.total_tokens.toLocaleString(locale),
+                              calls: llmUsageQuery.data.totals.calls,
+                            })
+                          : t('settings.data.loading')}
+                      </span>
+                      <span className={styles.progressText}>
+                        {llmUsageQuery.data
+                          ? llmUsageQuery.data.price_configured
+                            ? `${llmUsageQuery.data.totals.cost.toFixed(2)} ${
+                                llmUsageQuery.data.currency ?? ''
+                              }`
+                            : t('settings.data.priceUnavailable')
+                          : ''}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1041,6 +1077,18 @@ export default function Settings() {
         <span>{t('settings.version', { version: data.about.app_version })}</span>
       </footer>
     </div>
+  );
+}
+
+function ReadFailed({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <span className={styles.readFailed} role="alert">
+      {t('settings.readFailed')}
+      <button className="btn btn-secondary" type="button" onClick={onRetry}>
+        {t('settings.retry')}
+      </button>
+    </span>
   );
 }
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from .asr_engine import ASREngine, generate_title, has_punctuation, restore_punctuation
+from ..asr_llm_config import _load_llm_config as _load_llm_config_impl
 from .audio_utils import (
     check_ffmpeg,
     cleanup_temp_dir,
@@ -63,27 +64,7 @@ def _load_llm_config() -> tuple[Optional[str], str, str]:
         LLM"，调用方应跳过依赖 LLM 的步骤（标点恢复 / 标题生成），
         转写本身不受影响。
     """
-    try:
-        from ...config import get_settings
-
-        settings = get_settings()
-        llm_config = settings.get_llm_config()
-        return (
-            llm_config["api_key"],
-            llm_config["base_url"],
-            llm_config["model"],
-        )
-    except Exception as exc:
-        # 文案要如实：这里**没有**任何兜底来源，受影响的是两项增强功能，
-        # 不是整个转写（所以是 warning 而不是 error，也不重抛）。
-        logger.warning(
-            "无法读取 EngramNote 的 LLM 配置（%s: %s）：本次转写将跳过"
-            "「标点恢复」与「标题生成」，转写本身不受影响。"
-            "请检查 backend/.env 的 DEEPSEEK_API_KEY 等配置。",
-            type(exc).__name__,
-            exc,
-        )
-        return (None, "", "")
+    return _load_llm_config_impl()
 
 
 def _validate_input(

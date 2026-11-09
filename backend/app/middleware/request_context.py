@@ -73,14 +73,33 @@ def _extract_user_id(request: Request) -> str:
 
         from ..services.auth_service import is_access_token_payload
 
-        payload = jose_jwt.decode(
-            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
-        )
+        payload = jose_jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
         if not is_access_token_payload(payload):
             return ""
         return str(payload.get("sub") or "")
     except Exception:
         return ""
+
+
+def _access_extra(method: str, path: str, status: int, elapsed_ms: float) -> dict:
+    """
+    访问日志的结构化字段。
+
+    JSON 日志会把它们**平铺到顶层**（白名单见
+    `core/logging_config._EXTRA_PASSTHROUGH`），于是 `docs/operations.md` 里
+    那条"从 json.log 的访问日志聚合 P95"才真的能做：
+
+        jq -s 'map(select(.event == "http.request")) | …duration_ms…'
+
+    文本日志不使用 extra（格式串里没有这些位），保持原来的可读性。
+    """
+    return {
+        "event": "http.request",
+        "method": method,
+        "path": path,
+        "status": status,
+        "duration_ms": round(elapsed_ms, 1),
+    }
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -126,22 +145,35 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.error(
                 "请求异常 | %s %s | 耗时 %.0fms",
-                method, path, elapsed_ms,
+                method,
+                path,
+                elapsed_ms,
+                # 结构化字段（JSON 日志会平铺到顶层，见 logging_config._EXTRA_PASSTHROUGH）
+                extra=_access_extra(method, path, 500, elapsed_ms),
             )
             raise
+        else:
+            # ---- 3) 访问日志（含状态码/耗时）----
+            #
+            # ⚠️ 必须写在 `finally` 的 `reset_context()` **之前**：
+            # 这段代码原来在 try/finally 之后，上下文已被清空，于是
+            # 「请求完成」这一行**从来不带 rid/uid**（2026-11-07 实测
+            # 13,225 条里 0 条带 rid）。而它正是排障入口 —— 用户给一个
+            # request_id，服务端要能靠这一行把"哪个请求、多慢、什么状态"
+            # 与同请求的其他日志对上。契约测试见
+            # `tests/test_logging_contract.py::test_access_log_line_carries_request_and_user_context`。
+            elapsed_ms = (time.monotonic() - start) * 1000
+            response.headers["X-Request-ID"] = request_id
+            status_code = response.status_code
+            log_line = "请求完成 | %s %s | status=%d | 耗时 %.0fms"
+            extra = _access_extra(method, path, status_code, elapsed_ms)
+            if status_code >= 500:
+                logger.error(log_line, method, path, status_code, elapsed_ms, extra=extra)
+            elif status_code >= 400:
+                logger.warning(log_line, method, path, status_code, elapsed_ms, extra=extra)
+            else:
+                logger.info(log_line, method, path, status_code, elapsed_ms, extra=extra)
+            return response
         finally:
             # 确保上下文不残留（contextvars 随 Task 自动清理，此处双保险）
             context.reset_context()
-
-        # ---- 3. 访问日志（含状态码/耗时） ----
-        elapsed_ms = (time.monotonic() - start) * 1000
-        response.headers["X-Request-ID"] = request_id
-        status_code = response.status_code
-        log_line = "请求完成 | %s %s | status=%d | 耗时 %.0fms"
-        if status_code >= 500:
-            logger.error(log_line, method, path, status_code, elapsed_ms)
-        elif status_code >= 400:
-            logger.warning(log_line, method, path, status_code, elapsed_ms)
-        else:
-            logger.info(log_line, method, path, status_code, elapsed_ms)
-        return response

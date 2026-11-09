@@ -35,6 +35,27 @@ export default function MarkdownReader({
   onToggleAdhdReader,
 }: MarkdownReaderProps) {
   const { t } = useTranslation();
+
+  /**
+   * 插图加载失败时打个标记（2026-11-09）
+   *
+   * 为什么用**捕获**监听：`error` 事件不冒泡，但会在捕获阶段经过祖先节点。
+   * 为什么要标记而不是替换节点：正文是 `dangerouslySetInnerHTML` 一次性写入的，
+   * 直接改 DOM 不会与 React 的 diff 冲突（React 不 reconcile 这段 HTML）。
+   *
+   * 标记之后由 CSS（`.markdown-body img[data-broken]`）画一个虚线占位框，
+   * 并把 `alt` 补成一句人话 —— 否则用户只看到一个破图标或一条空白，
+   * 分不清"图本来就小"还是"图丢了"。
+   */
+  const handleImageError = (event: React.SyntheticEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target || target.tagName !== 'IMG') return;
+    target.setAttribute('data-broken', '1');
+    if (!target.getAttribute('alt')) {
+      target.setAttribute('alt', t('misc.imageLoadFailed'));
+    }
+  };
+
   return (
     <>
       <div
@@ -113,6 +134,8 @@ export default function MarkdownReader({
         className="card markdown-body"
         dangerouslySetInnerHTML={{ __html: htmlContent }}
         onMouseUp={onMouseUp}
+        // 插图加载失败 → 虚线占位（见 handleImageError）
+        onErrorCapture={handleImageError}
       />
     </>
   );

@@ -39,6 +39,7 @@ import {
   getGraphCanvasTokens,
   getNodeSize,
 } from '../../components/graph/types';
+import type { MessageKey } from '../../i18n/translate';
 import { cardTypeColors as CARD_TYPE_COLORS, FALLBACK_CATEGORY_COLOR } from '../../utils/labels';
 
 /** 节点绘制依赖的页面状态（选中/悬停/创建目标/搜索命中） */
@@ -58,6 +59,15 @@ export interface NodeDrawState {
   searchResultIds: ReadonlySet<string>;
   /** 是否走大图降级路径（见文件头） */
   lowDetail: boolean;
+  /**
+   * 翻译函数（由 `useCanvasObjects` 从 `useTranslation()` 注入）。
+   *
+   * 为什么是**注入**而不是让本文件 `import { translate }`：
+   * canvas 里没有 hook，而"切语言后画布要重画"这条只能靠 React 的依赖数组表达 ——
+   * `t` 的引用随语言变化，于是 `nodeCanvasObject` 换新引用、force-graph 重绘。
+   * 注入还让本文件保持纯函数：测试传一个假 `t` 就能断言"画上去的是什么字"。
+   */
+  t: (key: MessageKey) => string;
 }
 
 /** 自定义节点绘制 */
@@ -75,6 +85,7 @@ export function drawGraphNode(
     createSecondNode,
     searchResultIds,
     lowDetail,
+    t,
   } = state;
 
   // 力导向布局过程中节点坐标可能为 undefined/NaN，跳过无效坐标避免 canvas 抛错
@@ -84,7 +95,17 @@ export function drawGraphNode(
   const size = getNodeSize(node);
   const color = CARD_TYPE_COLORS[node.card_type] || FALLBACK_CATEGORY_COLOR;
   const shape = CARD_TYPE_SHAPES[node.card_type] || 'circle';
-  const initial = CARD_TYPE_INITIALS[node.card_type] || '';
+
+  /**
+   * 节点里的**首字**。
+   *
+   * ⚠️ `CARD_TYPE_INITIALS` 存的是 i18n 键（`graphTypes.nodeConcept` 这类），
+   * 不是文案 —— i18n 阶段 3 把它的值从「概/式/问/定」换成了键名，
+   * 而画布这条路径**没有 `t()`**，于是节点中间一度直接画出
+   * `graphTypes.nodeConcept`（2026-11-07 用户看到的就是这个）。
+   */
+  const initialKey = CARD_TYPE_INITIALS[node.card_type];
+  const initial = initialKey ? t(initialKey) : '';
 
   const isSelected = selectedNode?.id === node.id;
   const isHovered = hoverNode?.id === node.id;

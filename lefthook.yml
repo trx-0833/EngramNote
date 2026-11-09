@@ -1,0 +1,68 @@
+# EngramNote 提交前钩子（lefthook）
+#
+# ✅ 当前【已启用】（2026-11-07）：lefthook 2.2.2 已安装，`lefthook install` 已执行，
+#    `.git/hooks/pre-commit` 由 lefthook 生成，每次 `git commit` 都会触发（实测约 1s）。
+#
+# ⚠️ 两个环境前提，不满足会得到**看起来像代码错**的失败：
+#   1) `PYTHON` 必须指向装了 ruff 的环境：D:\conda\envs\aiforlearn\python.exe
+#      未设置时回退 `python`，而 PATH 里可能是 miniforge base（无 ruff）
+#      → 报 `No module named ruff`。设：setx PYTHON "D:\conda\envs\aiforlearn\python.exe"
+#   2) `gitleaks` 必须在 PATH。注意：PATH 改动对**已打开的 shell 不生效**，新开终端才行。
+#
+# 设计取舍：
+#   - pre-commit 只做"秒级"能判的事（格式/lint/密钥），并行执行。
+#   - pre-push 当前 skip：后端 1760 用例要 32 分钟、前端 vitest 也要 38s，
+#     push 时等待会诱发绕过。
+#   - 逃生口：`LEFTHOOK=0 git commit`。**不要**用 `--no-verify` 去绕环境问题——
+#     那会把真实的 lint/密钥问题一起放过。
+#
+# 手动预跑（lefthook 不在 PATH 时可用完整路径）：
+#   "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\evilmartians.lefthook_*/lefthook.exe" run pre-commit
+
+pre-commit:
+  parallel: true
+  commands:
+    # 【解释器选择】ruff 必须用装了 ruff 的那个 python 跑。
+    # 2026-11-07 实测踩坑：默认 `python` 指向 D:\miniforge3\python.exe（base 环境），
+    # 没装 ruff → 钩子报 "No module named ruff"，看起来像代码有问题，其实是环境选错。
+    #
+    # 解决：用 ${PYTHON:-python}。启用前请把 PYTHON 设为项目环境，例如：
+    #   setx PYTHON "D:\conda\envs\aiforlearn\python.exe"
+    # 或每次会话：$env:PYTHON = "D:\conda\envs\aiforlearn\python.exe"
+    ruff-check:
+      glob: "*.py"
+      root: "backend/"
+      stage_fixed: true
+      run: ${PYTHON:-python} -m ruff check --fix {staged_files}
+
+    ruff-format:
+      glob: "*.py"
+      root: "backend/"
+      stage_fixed: true
+      run: ${PYTHON:-python} -m ruff format {staged_files}
+
+    eslint:
+      glob: "*.{ts,tsx}"
+      root: "frontend/"
+      run: npx eslint --fix {staged_files} && git add {staged_files}
+
+    prettier:
+      glob: "*.{ts,tsx,css,md,json}"
+      root: "frontend/"
+      run: npx prettier --write {staged_files} && git add {staged_files}
+
+    # 依赖 gitleaks：启用前必须先装（scoop install gitleaks / choco install gitleaks）
+    secrets:
+      run: gitleaks protect --staged --redact
+
+pre-push:
+  # 【当前未启用】2026-11-07 决策：只装 pre-commit。
+  # 理由：后端 1760 个用例全量约 32 分钟（实测），不可能进钩子；
+  # 前端 vitest 也要 34-39s，push 时会让人犹豫。这类检查交给 CI。
+  # 想开启时把下面的注释去掉，并在 AGENTS.md 写明 SKIP_VERIFY=1 逃生口。
+  #
+  # commands:
+  #   vitest:
+  #     root: "frontend/"
+  #     run: npx vitest run --reporter=dot
+  skip: true

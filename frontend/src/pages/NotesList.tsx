@@ -397,7 +397,15 @@ export default function NotesList() {
                —— axe 判 nested-interactive（F-17），ARIA 也不允许 article 用
                button 角色（F-16）。改法与已修掉的 Sidebar 同形：**控件之间是兄弟**。
                标题现在就是真链接（可右键、可新标签页、Tab 一次即达），
-               删除/重试是各自独立的按钮，靠 flex + `.note-list-actions` 仍排在右侧。 */
+               删除/重试是各自独立的按钮，靠 flex + `.noteListActions` 仍排在右侧。
+
+               「点整卡进详情」没有靠 `article` 上的 onClick 回来 —— 那会重新制造
+               F-17（一个可点却不可聚焦的容器）。这里走的是"拉伸链接"（stretched
+               link）：标题那个 `<Link>` 的 `::after` 铺满整张卡片（见
+               NotesList.module.css 的 `.noteLink`），于是**点卡片任何空白处
+               命中的都是同一个真链接**；两个操作按钮用 `z-index` 浮在它上面，
+               各自仍可点。键盘用户的路径与改动前一模一样（Tab 停在标题链接上），
+               右键"在新标签页打开"也落在整卡上。 */
             <article key={note.id} className={`card card-hover ${styles.noteListItem}`}>
               {/* 批次 E2：左侧 3px 类型色条（借鉴表 §C3「笔记列表」行 · Trilium）。
                   色值**不在这里写**：它挂 `badge badge-<source_type>`，取的是
@@ -425,9 +433,15 @@ export default function NotesList() {
                   {/* 下划线显式关掉：`base.css` 现在给所有 <a> 默认下划线
                       （正文链接必须与正文可区分，F-13/F-26），而这里链接的
                       文本就是整张卡片的标题 —— 标题带下划线不是这个页面的观感，
-                      而且它并不"嵌在正文里"，不落在那条规则的适用场景内。 */}
+                      而且它并不"嵌在正文里"，不落在那条规则的适用场景内。
+                      `color: inherit` 与 `textDecoration` 留在行内是**故意的**：
+                      `base.css` 的 `a:hover`（0,1,1）权重高于模块类（0,1,0），
+                      挪进 CSS 会让标题在悬停时变成强调色 —— 那是外观改动。
+                      `styles.noteLink` 在这里只负责一件事：给 `::after` 一个
+                      可以铺满整张卡片的载体（拉伸链接）。 */}
                   <Link
                     to={`/notes/${note.id}`}
+                    className={styles.noteLink}
                     style={{ color: 'inherit', textDecoration: 'none' }}
                   >
                     {note.title}
@@ -504,35 +518,46 @@ export default function NotesList() {
                   </p>
                 )}
               </div>
-              {/* 操作按钮区域 */}
-              <div className={styles.noteListActions}>
-                {/* 重试按钮，仅 failed 状态显示 */}
-                {note.status === 'failed' && (
+              {/* 右侧尾随区：操作按钮 + 常驻的"可进详情"箭头。
+                  两个部件分成两个盒子是有原因的 ——
+                  「重试/删除」在桌面端默认 `opacity: 0`（hover 才出现），
+                  而箭头是**常驻的可点性提示**，不能跟着藏起来；
+                  同时按钮要浮在拉伸链接之上（`z-index`），箭头要**留在链接
+                  下面**（点箭头 = 点整卡）。 */}
+              <div className={styles.noteTrailing}>
+                <div className={styles.noteListActions}>
+                  {/* 重试按钮，仅 failed 状态显示 */}
+                  {note.status === 'failed' && (
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                      onClick={() => handleRetry(note.id)}
+                      aria-label={t('notesList.retryNamed', { title: note.title })}
+                    >
+                      {t('notesList.retry')}
+                    </button>
+                  )}
+                  {/* 删除按钮（移入回收站） */}
                   <button
-                    className="btn btn-primary"
+                    className="btn btn-danger"
                     style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                    onClick={() => handleRetry(note.id)}
-                    aria-label={t('notesList.retryNamed', { title: note.title })}
+                    onClick={() => handleDelete(note)}
+                    aria-label={t('notesList.deleteNamed', { title: note.title })}
                   >
-                    {t('notesList.retry')}
+                    {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
+                    <Icon name="delete" size={16} />
+                    {t('notesList.delete')}
                   </button>
-                )}
-                {/* 删除按钮（移入回收站），需要阻止事件冒泡 */}
-                <button
-                  className="btn btn-danger"
-                  style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                  onClick={() => handleDelete(note)}
-                  aria-label={t('notesList.deleteNamed', { title: note.title })}
-                >
-                  {/* 批次 B3：「删除」此前是全站纯文字按钮 —— 补 `delete` 图标 */}
-                  <Icon name="delete" size={16} />
-                  {t('notesList.delete')}
-                </button>
-                <span
-                  style={{ color: 'var(--color-text-secondary)', alignSelf: 'center' }}
-                  aria-hidden="true"
-                >
-                  →
+                </div>
+                {/* 常驻右箭头：这里原来是一个 `→` 字符（`aria-hidden` 的纯装饰）。
+                    换成图标集里的 `chevron` 有两个理由：字符的宽高随字体变、
+                    跨平台字形不一（`→` 在部分中文字体里会被渲染成全角），
+                    而这个位置从"装饰"变成了**整卡可点的固定提示**。
+                    它仍然 `aria-hidden`：真正的可访问名是标题链接，箭头不承载语义，
+                    读屏多念一个"箭头"只是噪音。它**不在** `.noteListActions` 里 ——
+                    那个盒子 hover 才显形，箭头必须一直看得见。 */}
+                <span className={styles.noteChevron} aria-hidden="true" data-testid="note-chevron">
+                  <Icon name="chevron" size={16} />
                 </span>
               </div>
             </article>

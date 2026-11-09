@@ -19,6 +19,7 @@
 import { useCallback, useMemo } from 'react';
 import type { GraphSearchNode } from '../../api/client';
 import type { ForceGraphLink, ForceGraphNode } from '../../components/graph/types';
+import { useTranslation } from '../../i18n';
 import { drawGraphNode } from './drawNode';
 import { drawGraphLink } from './drawLink';
 
@@ -54,6 +55,21 @@ export function useCanvasObjects({
     [searchResults],
   );
 
+  /**
+   * 翻译函数 —— 它**必须进两个 `useCallback` 的依赖数组**。
+   *
+   * 画布上有两处文字（节点里的首字、边中点的关系类型），而 canvas 里拿不到 hook，
+   * 所以把 `t` **注入**进绘制函数（而不是让绘制函数自己读全局语言）：
+   *
+   *   - `t` 的引用只在**语言变化**时改变（`useTranslation` 内部 `useCallback([locale])`），
+   *     于是切语言 → 两个回调引用变化 → force-graph 重绘一次，
+   *     "切到英文"不会留下一屏中文；
+   *   - 绘制函数保持纯函数（测试可以注入任意 `t`，不必先摆好全局语言）。
+   *
+   * 代价：一次语言切换触发一次整图重绘（不是每帧），与既有的选中/悬停重绘同量级。
+   */
+  const { t } = useTranslation();
+
   /** 自定义节点绘制 */
   const nodeCanvasObject = useCallback(
     (node: ForceGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -65,6 +81,7 @@ export function useCanvasObjects({
         createSecondNode,
         searchResultIds,
         lowDetail,
+        t,
       });
     },
     [
@@ -75,15 +92,21 @@ export function useCanvasObjects({
       createSecondNode,
       searchResultIds,
       lowDetail,
+      t,
     ],
   );
 
   /** 自定义边绘制 */
   const linkCanvasObject = useCallback(
     (link: ForceGraphLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      drawGraphLink(link, ctx, globalScale, { selectedLink, hoverLink, highlightedRelationType });
+      drawGraphLink(link, ctx, globalScale, {
+        selectedLink,
+        hoverLink,
+        highlightedRelationType,
+        t,
+      });
     },
-    [selectedLink, hoverLink, highlightedRelationType],
+    [selectedLink, hoverLink, highlightedRelationType, t],
   );
 
   return { nodeCanvasObject, linkCanvasObject };

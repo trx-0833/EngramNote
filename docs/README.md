@@ -92,6 +92,7 @@
 | [agent-workstream-plan.md](./agent-workstream-plan.md)     | 活文档（**计划已拍板，未落地**）               | **长跑型改进方案集**：12 条工作流（A 数据 / B 功能 / C 架构 / D 收口）+ 真库只读事实底账 + 3 条前置约束（10 RPM 限流 / SQLite 单写者 / LLM 缓存键）+ **6 项已拍板决策** + 复现命令；**已复核走查报告的 2 个 P0 已修** | ❌ 否（执行依据）                               |
 | [agent-workstream-progress.md](./agent-workstream-progress.md) | 活文档（台账）                              | **上表的执行进度**：逐条状态 + commit 短哈希 + 门禁结果 + 下一轮起点；只在**有提交**时才改状态，不做"口头完成" | ✅ 是（执行进度主题）                           |
 | [settings-plan.md](./settings-plan.md)                     | 活文档（**六组主体已落地；密码/删号/深色未做**） | **设置功能设计与设置项调研**：现状盘点 + 六组信息架构（学习 / 提醒 / 内容 / 外观 / 账号 / 数据）+ 聚合契约与 `user_settings` 表 + 每日上限/留存率/邮件/内容语言/卡片上限/清洗/LLM 用量 + P0/P1/P2 路线 + 联动验收矩阵 | ✅ 是（六组主体）                              |
+| [settings-fix-brief-2026-11-06.md](./settings-fix-brief-2026-11-06.md) | 过程文档（**安全项已修；N1/N2/N3/N7/N14 待确认**） | **设置功能修复任务书**：N1–N14 分级问题（迁移互斥 / 015 缺 CHECK / 整点丢信 / `email_configured` 等）+ 两条迁移复现脚本 + 每项验收断言 + 交接约束，供执行智能体逐项修 | ✅ 是（问题清单） |
 | [archive/](./archive/)                                     | 历史快照（7 份 + [索引](./archive/README.md)） | 重构前的设计文档与教程（约 390KB，逐份带横幅）                                                                                             | ❌ 否                                           |
 
 > `docs/*.txt`（17 份）是 ruff / eslint / prettier 的**原始输出**，不是 markdown，不适用横幅约定（见 §4）。

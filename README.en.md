@@ -333,7 +333,7 @@ npm run a11y          # axe-core accessibility, blocking
 ```
 
 Two more jobs run in CI: `security-scan` (`pip-audit` + `npm audit`, **archives
-only, non-blocking**) and `docker-nginx-config` (deployment-config guard,
+only, non-blocking**) and `nginx-config-guard` (renamed from `docker-nginx-config`; deployment-config guard,
 **blocking**).
 
 > **After changing a backend interface** you must re-run
