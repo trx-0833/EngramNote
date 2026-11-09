@@ -76,6 +76,18 @@ class NoteDetailResponse(NoteResponse):
     #: 与 `pending_embeddings` 同一条原则：**"没测到"不能长得像"没有问题"**。
     pending_embedding_chunks: Optional[int] = None
 
+    #: 插图访问令牌（2026-11-09）
+    #:
+    #: ## 为什么需要它
+    #:
+    #: 正文里的图片是浏览器用 `<img src>` 直接请求的，**不会**带
+    #: `Authorization` 头（前端把 JWT 放 localStorage、由 `fetch` 手工加）。
+    #: 于是端点若强制 Bearer，图永远 401。这里下发一枚**按笔记签名**的
+    #: 短期令牌（2 小时过期），前端拼成 `…/assets/images/x.jpg?t=…`。
+    #:
+    #: 只出现在**详情**响应里，不进列表：列表不需要渲染正文，少一处泄漏面。
+    assets_token: Optional[str] = None
+
 
 class NoteListResponse(BaseModel):
     items: List[NoteResponse]
