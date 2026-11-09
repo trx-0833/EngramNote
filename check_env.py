@@ -652,6 +652,13 @@ def check_backend_deps(auto_fix=False, deep=False):
         if required_platform and sys.platform != required_platform:
             # 平台不匹配：这条依赖在**本机**根本用不到（如 Windows 的 pywin32），
             # 跳过它，而不是报"缺失"——否则 macOS/Linux 上自检天生红一条。
+            #
+            # ⚠️ 跳过也要**打印一行**（2026-11-08）：CI（Linux）上
+            # `tests/test_check_env_probe.py::test_output_follows_declaration_order`
+            # 断言"输出行数 = REQUIRED_PACKAGES 的条数、且顺序一致"，
+            # 静默 continue 会让行数少一行，那条测试就红了。
+            # 而且"检查器不验证某项"本来就该说出来 —— 沉默在这里等于假绿。
+            ok(f"{package}（仅 {required_platform} 需要，本机跳过）")
             continue
         passed, detail = by_module[module]
         if passed:

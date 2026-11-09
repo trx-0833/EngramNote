@@ -1329,6 +1329,8 @@ const en = {
     taskCancelFailedWithReason: 'Could not cancel: {reason}',
     selfRatingSubmitFailed: 'Could not submit your self-rating',
     mastery: 'Mastery {percent}%',
+    /** Placeholder shown when an inline image fails to load (see zh-CN) */
+    imageLoadFailed: 'Image failed to load',
   },
 
   /** Quiz navigation (idea 8: move back and forth, jump to any question) */
