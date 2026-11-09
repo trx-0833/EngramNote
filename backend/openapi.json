@@ -3847,6 +3847,17 @@
       "NoteDetailResponse": {
         "description": "笔记详情 — 包含 Markdown 内容",
         "properties": {
+          "assets_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets Token"
+          },
           "clean_md_content": {
             "anyOf": [
               {
@@ -10966,6 +10977,71 @@
           }
         ],
         "summary": "Ask Note Stream"
+      }
+    },
+    "/api/notes/{note_id}/assets/{asset_path}": {
+      "get": {
+        "description": "返回笔记 markdown 里相对引用指向的插图\n\n## 两条鉴权路径（必须都留）\n\n1. **签名令牌**（`?t=…`）：浏览器渲染 `<img src>` 时**不会**带\n   `Authorization` 头（前端 JWT 在 localStorage、由 `fetch` 手工加），\n   所以图片必须能靠 URL 里的短期签名访问。令牌由 `GET /api/notes/{id}`\n   随详情下发（`assets_token`），按笔记签名、2 小时过期。\n2. **Bearer 头**：API 客户端 / curl / e2e 继续按老办法访问，否则\n   \"用脚本取图\"这条路会被新机制堵死。\n\n没有任何凭证 → 401（与全站一致）；凭证有效但笔记不属于你 → **404**\n（403 会泄漏\"这个 id 存在\"）。\n\nRaises:\n    AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）\n    AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）\n    AppError: 对象不存在（ASSET_NOT_FOUND → 404）",
+        "operationId": "get_note_asset_api_notes__note_id__assets__asset_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_path",
+            "required": true,
+            "schema": {
+              "title": "Asset Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "按笔记签名的短期访问令牌（见 assets_token）",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按笔记签名的短期访问令牌（见 assets_token）",
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "读取笔记内的插图"
       }
     },
     "/api/notes/{note_id}/content": {

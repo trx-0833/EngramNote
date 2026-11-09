@@ -30,6 +30,7 @@ import tempfile
 import time
 import traceback
 import logging
+from pathlib import Path
 
 from celery.exceptions import Retry
 from sqlalchemy import select
@@ -141,6 +142,16 @@ async def _convert_document(
         markdown_content = ""
         metadata = {}
 
+        # 笔记的 vault 前缀与主干：**转换阶段就要算出来**，因为插图要按
+        # `output/assets/{base}/images/…` 落盘（2026-11-09）。原先这两个值
+        # 只在上传 markdown 时才计算，图就没有落脚点。
+        _parts = file_path.split("/")
+        vault_prefix = "/".join(_parts[:2])
+        vault_base = os.path.splitext(_parts[-1])[0]
+        # 转换产物目录：显式指定而不是让 convert() 自建临时目录 ——
+        # 那样 `images/` 在 convert() 返回时已被删掉（MinerU 的图就丢在这里）
+        convert_out_dir = os.path.join(tmp_dir, "converted")
+
         if source_type_enum in (SourceType.pdf, SourceType.image, SourceType.docx, SourceType.pptx, SourceType.xlsx):
             # 2a. 文档类 → 调用 mineru 子包转换
             try:
@@ -154,11 +165,25 @@ async def _convert_document(
                     table_enable=True,
                     api_token=settings.mineru_api_token,
                     server_url=settings.mineru_server_url,
+                    output_dir=convert_out_dir,
                 )
 
                 if result.success:
                     markdown_content = result.markdown_content
                     metadata = result.metadata or {}
+                    # 插图落盘（2026-11-09）：MinerU 的产物里 `images/*.jpg`
+                    # 与 markdown 里的相对引用是一对；这里把图搬到
+                    # `output/assets/{base}/images/`，相对引用保持原样，
+                    # 由前端渲染时重写成同源的资产 URL（见 api/notes/assets.py）。
+                    # 失败不阻断：转换本身已经成功，缺图只会显示 alt 文本。
+                    try:
+                        from ..services.note_assets import persist_converted_images
+
+                        asset_count = persist_converted_images(Path(convert_out_dir), vault_prefix, vault_base)
+                        if asset_count:
+                            metadata = {**metadata, "asset_count": asset_count}
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("插图落盘失败（忽略继续）: note_id=%s, 错误: %s", note_id, exc)
                     # 转换成功，更新状态为 converted 并保存页数等元数据
                     await _update_note_status(
                         note_id,

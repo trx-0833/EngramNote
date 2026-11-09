@@ -106,6 +106,14 @@ from .i18n import DEFAULT_LOCALE, get_locale
 ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ── 笔记 ──
     "NOTE_NOT_FOUND": {"zh-CN": "笔记不存在", "en": "Note not found"},
+    # 插图（2026-11-09）：markdown 里的相对图片引用被重写成
+    # `/api/notes/{id}/assets/{path}` 后的两种失败。一张图取不到属于
+    # **页面级小失败**，前端降级成占位符即可，不必整页报错。
+    "ASSET_NOT_FOUND": {"zh-CN": "插图不存在", "en": "Image not found"},
+    "ASSET_TYPE_UNSUPPORTED": {
+        "zh-CN": "不支持的插图类型或路径",
+        "en": "Unsupported image type or path",
+    },
     "NOTE_NOT_VIDEO": {"zh-CN": "该笔记不是视频类型", "en": "This note is not a video"},
     "NOTE_VIDEO_FILE_MISSING": {
         "zh-CN": "视频文件不存在",
