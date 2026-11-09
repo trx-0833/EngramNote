@@ -1573,6 +1573,8 @@ const zhCN = {
     taskCancelFailedWithReason: '取消失败：{reason}',
     selfRatingSubmitFailed: '自评提交失败',
     mastery: '掌握度 {percent}%',
+    /** 插图加载失败时的占位提示（2026-11-09：markdown 里的相对图片引用） */
+    imageLoadFailed: '图片加载失败',
   },
 
   /**
