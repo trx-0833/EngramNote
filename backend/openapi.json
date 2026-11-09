@@ -10968,6 +10968,53 @@
         "summary": "Ask Note Stream"
       }
     },
+    "/api/notes/{note_id}/assets/{asset_path}": {
+      "get": {
+        "description": "返回笔记 markdown 里相对引用指向的插图\n\n前端渲染 markdown 时把 `images/xxx.jpg` 重写成\n`/api/notes/{note_id}/assets/images/xxx.jpg`（见 `utils/markdown.ts`\n的 `rewriteRelativeImageSources`），本端点负责把字节吐回去。\n\nRaises:\n    AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）\n    AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）\n    AppError: 对象不存在（ASSET_NOT_FOUND → 404）",
+        "operationId": "get_note_asset_api_notes__note_id__assets__asset_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_path",
+            "required": true,
+            "schema": {
+              "title": "Asset Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "读取笔记内的插图"
+      }
+    },
     "/api/notes/{note_id}/content": {
       "put": {
         "description": "更新笔记的 Markdown 内容\n\n将用户编辑的 Markdown 内容保存到对象存储，覆盖原有文件。\n处理中状态（uploading/converting/cleaning/learning）的笔记不可编辑。",
