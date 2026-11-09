@@ -46,7 +46,7 @@ from ...schemas.note import (
     NoteUpdateRequest,
 )
 from ...config import get_settings
-from ...services import note_service
+from ...services import note_assets, note_service, vault_path
 from ...services.note_export import (
     build_content_disposition,
     build_export_text,
@@ -243,9 +243,7 @@ async def export_notes_batch(
             if note:
                 notes.append(note)
     else:
-        notes, _total = await get_notes_list(
-            db, current_user.id, page=1, page_size=EXPORT_ZIP_MAX_NOTES + 1
-        )
+        notes, _total = await get_notes_list(db, current_user.id, page=1, page_size=EXPORT_ZIP_MAX_NOTES + 1)
 
     if len(notes) > EXPORT_ZIP_MAX_NOTES:
         # ⚠️ 文案**不用 f-string**：`tests/test_i18n.py` 会拿 raise 处的字面量
@@ -287,15 +285,33 @@ async def export_notes_batch(
                 updated_at=note.updated_at,
                 exported_at=datetime.now(timezone.utc).replace(microsecond=0),
             )
+            # 插图随包导出（2026-11-09）：markdown 里对图写的是相对引用
+            # （`images/xxx.jpg`），而 ZIP 里每篇笔记一个平铺文件 —— 不重写
+            # 就指向包外。约定：每篇的图落在 `assets/{base}/images/…`，
+            # 正文里的相对引用同步改写成 `assets/{base}/images/…`（相对 ZIP 根）。
+            note_prefix = vault_path.derive_prefix(note)
+            note_base = vault_path.derive_base(note)
+            asset_names = list(note_assets.iter_asset_names_for_export(note_prefix, note_base))
+            if asset_names:
+                content = note_assets.rewrite_asset_refs(content, f"assets/{note_base}/")
+                for rel in asset_names:
+                    try:
+                        data = note_assets.read_asset(note_prefix, note_base, rel)
+                        if data:
+                            zf.writestr(f"assets/{note_base}/{rel}", data)
+                    except Exception as exc:  # noqa: BLE001 - 单张失败不毁整包
+                        logger.warning("导出插图失败（忽略继续）: note=%s, %s: %s", note.id[:8], rel, exc)
             body = build_export_text(front_matter, content)
             filename = unique_zip_filename(note.title, used_names, fallback_id=note.id)
             zf.writestr(filename, body.encode("utf-8"))
-            entries.append({
-                "filename": filename,
-                "title": note.title,
-                "source_type": note.source_type.value,
-                "status": note.status.value,
-            })
+            entries.append(
+                {
+                    "filename": filename,
+                    "title": note.title,
+                    "source_type": note.source_type.value,
+                    "status": note.status.value,
+                }
+            )
 
         # 目录页最后写：它要列出**实际写进去的**那些文件（含去重后的文件名），
         # 先写就只能列计划写的，两者在撞名时不一致。
@@ -395,6 +411,10 @@ async def get_note(
     resp = NoteDetailResponse.model_validate(note)
     resp.original_md_content = original_md
     resp.clean_md_content = clean_md
+    # 插图访问令牌（2026-11-09）：`<img src>` 带不上 Authorization 头，
+    # 所以图片靠 URL 里的短期签名访问（见 api/notes/assets.py 的两条鉴权路径）。
+    # 每次打开详情重新签发，过期时间 = 2 小时 > 一次阅读会话。
+    resp.assets_token = note_assets.issue_assets_token(note.id)
     # 还没补向量的 chunk 数（B2 的"可见"那半）
     #
     # 为什么在这个端点上算：用户打开笔记详情时**不问问题也能看到**
@@ -417,7 +437,9 @@ async def get_note(
         except Exception as exc:  # noqa: BLE001 - 附加提示不该让详情页失败
             logger.warning(
                 "笔记详情：待嵌入 chunk 统计失败（该字段留空）| note_id=%s | %s: %s",
-                note.id, type(exc).__name__, exc,
+                note.id,
+                type(exc).__name__,
+                exc,
             )
             resp.pending_embedding_chunks = None
     tags = await _load_project_tags(db, [note])
@@ -479,8 +501,10 @@ async def update_note_content(
 
     # 2. 校验处理中状态
     processing_statuses = {
-        NoteStatus.uploading, NoteStatus.converting,
-        NoteStatus.cleaning, NoteStatus.learning,
+        NoteStatus.uploading,
+        NoteStatus.converting,
+        NoteStatus.cleaning,
+        NoteStatus.learning,
     }
     if note.status in processing_statuses:
         raise AppError(
@@ -547,8 +571,10 @@ async def archive_note_api(
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
 
     if note.status not in (
-        NoteStatus.archived, NoteStatus.cleaned,
-        NoteStatus.learning_failed, NoteStatus.converted,
+        NoteStatus.archived,
+        NoteStatus.cleaned,
+        NoteStatus.learning_failed,
+        NoteStatus.converted,
     ):
         raise AppError(
             NOTE_STATUS_INVALID,
@@ -573,6 +599,7 @@ async def archive_note_api(
     await db.refresh(note)
     # 归档状态变更同步写穿 meta 镜像
     from ...services.vault_meta import write_note_meta
+
     write_note_meta(note)
     return await _build_note_response(db, note)
 
@@ -650,9 +677,7 @@ async def stream_video(
         AppError: 视频文件不存在（NOTE_VIDEO_FILE_MISSING → 404）
     """
     # 1. 验证笔记归属和类型
-    result = await db.execute(
-        select(Note).where(Note.id == note_id, Note.user_id == current_user.id)
-    )
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.user_id == current_user.id))
     note = result.scalars().first()
     if not note:
         raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)

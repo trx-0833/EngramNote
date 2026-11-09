@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 共享 Markdown 渲染工具
  * @description 提取自 NoteDetail.tsx 的模块级 marked 配置，供多个页面复用。
  * 包含 KaTeX 数学公式扩展（blockMath/inlineMath）和 highlight.js 代码高亮。
@@ -254,9 +254,72 @@ export function renderMathInHtml(html: string): string {
 }
 
 /**
+ * 判断一个图片地址是否「自带基准」：绝对 URL、协议相对、根路径、锚点、data URI
+ *
+ * 只有「相对路径」才需要拼资产前缀（如 MinerU 产出的 `images/xxx.jpg`）。
+ */
+const HAS_BASE_RE = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|\/\/|\/|#)/;
+
+/**
+ * 把 Markdown 正文里的**相对图片引用**重写成同源资产 URL（2026-11-09）
+ *
+ * ## 为什么必须在 `marked.parse` **之前** 做
+ *
+ * 渲染管道的顺序是 `marked.parse → DOMPurify 白名单 → KaTeX 二次渲染`，
+ * 而 `sanitize.ts` 的 hook 会把**所有**非 `http(s)` 的 `img[src]` 直接
+ * `removeAttribute('src')`（这是防 XSS 的关键一条，不能为了图片放开）。
+ * 于是相对路径必须在 parse 之前变成同源绝对路径 —— 那样它天生符合白名单，
+ * 消毒层一个字都不用改。
+ *
+ * ## 处理两种写法
+ *
+ * 1. Markdown 语法：`![alt](images/x.jpg)` / `![alt](images/x.jpg "title")`
+ *    —— 括号里可能带空格与标题，所以只取第一个空白之前的片段当地址；
+ * 2. 原始 HTML：`<img src="images/x.jpg">`（MinerU 偶尔会直接吐 `<img>`）。
+ *
+ * 已经是绝对地址的一律不动（远程图、`data:`、`#` 锚点）。
+ *
+ * @param text - Markdown 源文本
+ * @param assetsBaseUrl - 资产前缀（形如 `/api/notes/{id}/assets/`，以 `/` 结尾）。
+ *   缺省时原样返回 —— 没有基准就无从重写，保持旧行为。
+ */
+export function rewriteRelativeImageSources(
+  text: string,
+  assetsBaseUrl?: string,
+  assetsQuery?: string,
+): string {
+  if (!text || !assetsBaseUrl) return text;
+  const base = assetsBaseUrl.endsWith('/') ? assetsBaseUrl : `${assetsBaseUrl}/`;
+  // 查询串（形如 `?t=<签名>`）要拼在**每个 src 的末尾**，不能拼在 base 上 ——
+  // 那会变成 `…/assets/?t=…images/x.jpg`，路径全乱。签名令牌见
+  // `backend/app/services/note_assets.issue_assets_token`。
+  const query = assetsQuery ? (assetsQuery.startsWith('?') ? assetsQuery : `?${assetsQuery}`) : '';
+  const join = (src: string) => `${base}${src.replace(/^\.\//, '')}${query}`;
+
+  // 1) Markdown 图片语法
+  const rewrittenMd = text.replace(
+    /(!\[[^\]]*\]\()\s*([^)\s]+)((?:\s+"[^"]*")?\s*\))/g,
+    (whole, head: string, src: string, tail: string) => {
+      if (!src || HAS_BASE_RE.test(src)) return whole;
+      return `${head}${join(src)}${tail}`;
+    },
+  );
+
+  // 2) 原始 HTML 的 <img src="...">
+  return rewrittenMd.replace(
+    /(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']*)\2/gi,
+    (whole, head: string, quote: string, src: string) => {
+      if (!src || HAS_BASE_RE.test(src)) return whole;
+      return `${head}${quote}${join(src)}${quote}`;
+    },
+  );
+}
+
+/**
  * 将 Markdown 文本渲染为 HTML 字符串
  * 内部使用已配置 KaTeX 扩展和代码高亮的 marked 实例。
- * 管道顺序：marked.parse → sanitizeHtml（DOMPurify 白名单消毒）→ renderMathInHtml（KaTeX 二次渲染）。
+ * 管道顺序：**相对图片重写** → marked.parse → sanitizeHtml（DOMPurify 白名单消毒）
+ * → renderMathInHtml（KaTeX 二次渲染）。
  * 空字符串或假值返回空字符串。
  *
  * **容错说明（见 docs/overhaul-plan.md §2.8 F-2）**：
@@ -266,12 +329,15 @@ export function renderMathInHtml(html: string): string {
  * 让用户至少还能读到内容，而不是面对一个白屏。
  *
  * @param text - Markdown 源文本
+ * @param assetsBaseUrl - 资产前缀（`/api/notes/{id}/assets/`）；不传则相对引用保持原样
+ *   （历史行为：DOMPurify 会把它的 `src` 剥掉，只剩 alt 文本）
  * @returns 渲染后的 HTML 字符串（失败时为转义纯文本）
  */
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, assetsBaseUrl?: string, assetsQuery?: string): string {
   if (!text) return '';
   try {
-    const parsed = marked.parse(text) as string;
+    const prepared = rewriteRelativeImageSources(text, assetsBaseUrl, assetsQuery);
+    const parsed = marked.parse(prepared) as string;
     return renderMathInHtml(sanitizeHtml(parsed));
   } catch (err) {
     console.error('[markdown] 渲染失败，降级为纯文本:', err);

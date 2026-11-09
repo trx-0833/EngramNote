@@ -43,6 +43,15 @@ VERSION_CONTENT_UNAVAILABLE = "VERSION_CONTENT_UNAVAILABLE"
 
 # ---- 笔记（notes/**、upload.py、cleaning.py、understanding.py 共用）----
 NOTE_NOT_FOUND = "NOTE_NOT_FOUND"
+# 笔记里的插图取不到（对象不存在 / 笔记不属于当前用户 / 笔记在回收站）
+#
+# 2026-11-09 新增：markdown 里的相对图片引用会被前端重写成
+# `/api/notes/{id}/assets/{path}`（见 api/notes/assets.py）。
+# 一张图缺失是**页面级的小失败**，不该让整篇笔记 500 —— 所以单独给一个码，
+# 前端可以只把这张图降级成占位符。
+ASSET_NOT_FOUND = "ASSET_NOT_FOUND"
+# 资产路径不安全（`..`、绝对路径）或后缀不在图片白名单内（含 `.svg`）
+ASSET_TYPE_UNSUPPORTED = "ASSET_TYPE_UNSUPPORTED"
 # note_role 取值非法（只允许 personal_note / material 等）
 NOTE_ROLE_INVALID = "NOTE_ROLE_INVALID"
 # 该接口只对视频笔记开放

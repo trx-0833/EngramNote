@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file Markdown 渲染管道的回归护栏（为 `marked` 大版本升级而建）
  *
  * ## 为什么现在才建
@@ -45,7 +45,7 @@
  * （比 `vi.mock('marked')` 温和 —— 保留 13 条真实渲染用例的价值）。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { marked, renderKatex, renderMarkdown } from './markdown';
+import { marked, renderKatex, renderMarkdown, rewriteRelativeImageSources } from './markdown';
 
 describe('renderKatex 的直接契约', () => {
   it('块级：displayMode=true 产出 katex-display', () => {
@@ -173,5 +173,153 @@ describe('renderMarkdown：消毒白名单（sanitize.ts:10-44）', () => {
     expect(renderMarkdown('')).toBe('');
     expect(renderMarkdown('**粗体**')).toContain('<strong>');
     expect(renderMarkdown('普通一行')).toContain('普通一行');
+  });
+});
+
+/**
+ * 插图（2026-11-09）：MinerU 解析出的 markdown 对图写**相对引用**
+ * （`![](images/xxx.jpg)`），而 `sanitize.ts` 的白名单只放行 `http(s)` ——
+ * 不重写就等于把图剥成一句 alt。这一组锁住重写这一步：
+ *
+ * | 写法 | 期望 |
+ * |---|---|
+ * | `![alt](images/x.jpg)` | 拼上资产前缀 |
+ * | `![alt](images/x.jpg "标题")` | 标题保留 |
+ * | 绝对 URL / 协议相对 / 根路径 / `#` | 一律不动 |
+ * | `<img src="images/x.jpg">` | 拼上资产前缀 |
+ * | 不传 base | 原样返回（保持旧行为：图退化为 alt） |
+ */
+describe('rewriteRelativeImageSources', () => {
+  const BASE = '/api/notes/n1/assets/';
+
+  it('相对路径的 markdown 图片被拼上前缀', () => {
+    expect(rewriteRelativeImageSources('![](images/x.jpg)', BASE)).toBe(
+      '![](/api/notes/n1/assets/images/x.jpg)',
+    );
+  });
+
+  it('带 title 的写法：地址被重写，title 原样保留', () => {
+    expect(rewriteRelativeImageSources('![图一](images/x.jpg "浮充曲线")', BASE)).toBe(
+      '![图一](/api/notes/n1/assets/images/x.jpg "浮充曲线")',
+    );
+  });
+
+  it('./ 前缀会被吃掉（不产生 `assets/./images`）', () => {
+    expect(rewriteRelativeImageSources('![](./images/x.png)', BASE)).toBe(
+      '![](/api/notes/n1/assets/images/x.png)',
+    );
+  });
+
+  it.each([
+    '![a](https://example.com/x.png)',
+    '![b](//cdn.example.com/x.png)',
+    '![c](/static/x.png)',
+    '![d](#figure-1)',
+    '![e](data:image/png;base64,AAAA)',
+  ])('自带基准的地址不动：%s', (md) => {
+    expect(rewriteRelativeImageSources(md, BASE)).toBe(md);
+  });
+
+  it('原始 HTML 的 <img src> 也会被重写', () => {
+    expect(rewriteRelativeImageSources('<img src="images/x.png" alt="x">', BASE)).toBe(
+      '<img src="/api/notes/n1/assets/images/x.png" alt="x">',
+    );
+  });
+
+  it('不传 base 时原样返回（旧行为）', () => {
+    const md = '![](images/x.jpg)';
+    expect(rewriteRelativeImageSources(md)).toBe(md);
+  });
+
+  it('base 末尾没有斜杠时自动补上', () => {
+    expect(rewriteRelativeImageSources('![](images/x.jpg)', '/api/notes/n1/assets')).toBe(
+      '![](/api/notes/n1/assets/images/x.jpg)',
+    );
+  });
+});
+
+describe('renderMarkdown 带资产前缀', () => {
+  it('相对图片经重写后**不被** DOMPurify 剥掉（src 还在）', () => {
+    const html = renderMarkdown('![](images/x.jpg)', '/api/notes/n1/assets/');
+    expect(html).toContain('<img');
+    expect(html).toContain('src="/api/notes/n1/assets/images/x.jpg"');
+  });
+
+  it('不传前缀时与历史行为一致：src 被剥掉、只剩 alt', () => {
+    const html = renderMarkdown('![图一](images/x.jpg)');
+    expect(html).toContain('alt="图一"');
+    expect(html).not.toContain('src=');
+  });
+
+  it('远程图片不受影响', () => {
+    const html = renderMarkdown('![x](https://example.com/a.png)', '/api/notes/n1/assets/');
+    expect(html).toContain('src="https://example.com/a.png"');
+  });
+});
+
+/**
+ * 位置正确性（2026-11-09）：图必须渲染在**原文的位置**上
+ *
+ * 用一段与 MinerU 真实产物同形的 markdown（图引用紧邻图注），断言渲染后的
+ * HTML 里 `<img>` 出现在「前文」与「图注」**之间** —— 而不是被挪到开头/结尾。
+ * 这条守的是"重写只改 src、不动结构"（改结构就等于把图挪了位置）。
+ */
+describe('renderMarkdown：插图位置不被重写打乱', () => {
+  const MD = [
+    '# 第二节',
+    '',
+    '前一段正文。',
+    '',
+    '![](images/fc17.jpg)',
+    '',
+    '图 1：不同工况下的单体电压曲线。',
+    '',
+    '图注之后还有一句正文。',
+  ].join('\n');
+
+  it('img 位于前文与图注之间', () => {
+    const html = renderMarkdown(MD, '/api/notes/n1/assets/');
+    const beforeIdx = html.indexOf('前一段正文');
+    const imgIdx = html.indexOf('<img');
+    const captionIdx = html.indexOf('图 1：不同工况下的单体电压曲线');
+    expect(beforeIdx).toBeGreaterThan(-1);
+    expect(imgIdx).toBeGreaterThan(beforeIdx);
+    expect(captionIdx).toBeGreaterThan(imgIdx);
+  });
+
+  it('img 的 src 指向资产端点，且没有多余嵌套', () => {
+    const html = renderMarkdown(MD, '/api/notes/n1/assets/');
+    expect(html).toContain('src="/api/notes/n1/assets/images/fc17.jpg"');
+    expect(html).not.toContain('![img]');
+  });
+});
+
+/** 签名令牌（2026-11-09）：`<img src>` 带不上 Authorization 头，图片靠 `?t=` 鉴权 */
+describe('rewriteRelativeImageSources：访问令牌拼接', () => {
+  const BASE = '/api/notes/n1/assets/';
+
+  it('令牌拼在每个 src 末尾（不是拼在 base 上）', () => {
+    const out = rewriteRelativeImageSources('![](images/x.jpg)', BASE, '?t=abc.def');
+    expect(out).toBe('![](/api/notes/n1/assets/images/x.jpg?t=abc.def)');
+  });
+
+  it('多张图各自都带令牌', () => {
+    const out = rewriteRelativeImageSources(
+      '![](images/a.png)\n\n![](images/b.jpg)',
+      BASE,
+      't=abc',
+    );
+    expect(out).toContain('/api/notes/n1/assets/images/a.png?t=abc');
+    expect(out).toContain('/api/notes/n1/assets/images/b.jpg?t=abc');
+  });
+
+  it('绝对地址不追加令牌（远程图不需要）', () => {
+    const md = '![x](https://example.com/a.png)';
+    expect(rewriteRelativeImageSources(md, BASE, '?t=abc')).toBe(md);
+  });
+
+  it('renderMarkdown 透传令牌', () => {
+    const html = renderMarkdown('![](images/x.jpg)', BASE, '?t=abc');
+    expect(html).toContain('src="/api/notes/n1/assets/images/x.jpg?t=abc"');
   });
 });
