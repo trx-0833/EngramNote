@@ -47,7 +47,7 @@ from ..services.storage_service import (
     move_file,
 )
 from ..config import get_settings
-from . import vault_path
+from . import note_assets, vault_path
 from .vault_meta import write_note_meta
 
 settings = get_settings()
@@ -286,6 +286,17 @@ async def trash_note(db: AsyncSession, note: Note) -> Note:
         except Exception as e:
             logger.warning(f"回收站 meta 旁载搬家失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
 
+    # ---- 插图资产随迁（2026-11-09）----
+    # 与 source/md 同一时刻搬到 `{user}/trash/{note_id}/output/assets/{base}/`，
+    # 这样回收站期间同名重传不会覆盖；恢复时再按（可能改过的）base 搬回去。
+    if prefix and base:
+        try:
+            moved_assets = note_assets.move_assets(prefix, tp, base)
+            if moved_assets:
+                logger.info(f"插图资产已随笔记移入回收站: note={note_id[:8]}, 数量={moved_assets}")
+        except Exception as e:
+            logger.warning(f"回收站插图资产搬家失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
+
     # ---- 更新路径字段为 trash 路径（仅覆盖实际搬成功的，失败保留原值避免丢信息） ----
     if note.original_file_path and note.original_file_path in moved:
         note.original_file_path = moved[note.original_file_path]
@@ -409,6 +420,17 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
     # 按写穿机制刷新 inbox 新位置的 meta 旁载，并清掉 trash 里随迁的旧 meta
     write_note_meta(note)
     tp = vault_path.trash_prefix(note.user_id, note_id)
+
+    # ---- 插图资产搬家：trash → inbox（2026-11-09）----
+    # 与 source/md 同一时刻、同一个新 base（改名时 base 会变，图必须跟着走，
+    # 否则 markdown 里的 `images/xxx.jpg` 在新 base 下找不到资产）。
+    try:
+        moved_assets = note_assets.move_assets(tp, vault_path.inbox_prefix(note.user_id), new_base)
+        if moved_assets:
+            logger.info(f"插图资产已随笔记恢复: note={note_id[:8]}, 数量={moved_assets}, base={new_base}")
+    except Exception as e:
+        logger.warning(f"插图资产恢复失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
+
     try:
         old_meta = vault_path.meta_object(tp, base)
         if file_exists(settings.minio_bucket_markdown, old_meta):
@@ -804,6 +826,22 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
                 delete_file(settings.minio_bucket_markdown, vault_path.meta_object(prefix, base))
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
+
+    # ---- 删除插图资产（2026-11-09）----
+    # 与 meta 同一条理由：**按当前实际路径**推导前缀（trash 之后在
+    # `{user}/trash/{note_id}/output/assets/...`），不能用 `derive_prefix`
+    # —— 它恒返回 inbox，会把回收站期间新上传同名笔记的图误删。
+    if note.original_file_path:
+        try:
+            parts = note.original_file_path.split("/")
+            if len(parts) >= 3:
+                prefix = "/".join(parts[:-2])
+                base = vault_path.derive_base(note)
+                deleted = note_assets.delete_assets(prefix, base)
+                if deleted:
+                    logger.info(f"已删除插图资产: note={note_id[:8]}, 数量={deleted}")
+        except Exception as e:
+            logger.warning(f"删除插图资产失败: {note_id}, 错误: {e}")
 
     # ---- 向量数据清理 ----
     #
