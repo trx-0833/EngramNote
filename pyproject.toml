@@ -97,7 +97,7 @@ dependencies = [
     # 在转义处截断；requirements.txt 那边同样写单引号，两边逐字一致。
     # ⚠️ 这段注释里也**不要**出现 ASCII 双引号 —— 那个测试按双引号对扫整段体，
     # 注释里的引号会被当成包名（实测报「多了 requirements.txt 里没有的包」）。
-    "pywin32>=306; sys_platform == 'win32'",
+    "pywin32>=312; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
