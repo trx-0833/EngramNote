@@ -1,4 +1,4 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
@@ -81,7 +81,7 @@ dependencies = [
     "httpx~=0.28.1",
     "sentence-transformers~=3.0.1",
     "pypdfium2~=5.10.1",
-    "Pillow~=12.3.0",
+    "Pillow~=13.0.0",
     # 2026-10-21：pyyaml 由「仅本地 MinerU 需要」改判为**运行硬依赖** ——
     # config_loader.py:14 是模块顶层无条件 import yaml，云端路径同样要用。
     "pyyaml~=6.0.3",
