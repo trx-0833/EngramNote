@@ -1714,6 +1714,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/{note_id}/assets/{asset_path}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取笔记内的插图
+     * @description 返回笔记 markdown 里相对引用指向的插图
+     *
+     *     ## 两条鉴权路径（必须都留）
+     *
+     *     1. **签名令牌**（`?t=…`）：浏览器渲染 `<img src>` 时**不会**带
+     *        `Authorization` 头（前端 JWT 在 localStorage、由 `fetch` 手工加），
+     *        所以图片必须能靠 URL 里的短期签名访问。令牌由 `GET /api/notes/{id}`
+     *        随详情下发（`assets_token`），按笔记签名、2 小时过期。
+     *     2. **Bearer 头**：API 客户端 / curl / e2e 继续按老办法访问，否则
+     *        "用脚本取图"这条路会被新机制堵死。
+     *
+     *     没有任何凭证 → 401（与全站一致）；凭证有效但笔记不属于你 → **404**
+     *     （403 会泄漏"这个 id 存在"）。
+     *
+     *     Raises:
+     *         AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）
+     *         AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）
+     *         AppError: 对象不存在（ASSET_NOT_FOUND → 404）
+     */
+    get: operations['get_note_asset_api_notes__note_id__assets__asset_path__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/{note_id}/content': {
     parameters: {
       query?: never;
@@ -5567,6 +5604,8 @@ export interface components {
      * @description 笔记详情 — 包含 Markdown 内容
      */
     NoteDetailResponse: {
+      /** Assets Token */
+      assets_token?: string | null;
       /** Clean Md Content */
       clean_md_content?: string | null;
       /**
@@ -9717,6 +9756,39 @@ export interface operations {
         content: {
           'text/event-stream': string;
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_note_asset_api_notes__note_id__assets__asset_path__get: {
+    parameters: {
+      query?: {
+        /** @description 按笔记签名的短期访问令牌（见 assets_token） */
+        t?: string | null;
+      };
+      header?: never;
+      path: {
+        note_id: string;
+        asset_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

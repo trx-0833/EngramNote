@@ -8,6 +8,7 @@
 
 from fastapi import APIRouter
 
+from .assets import router as assets_router
 from .trash import router as trash_router
 from .list_detail import router as list_detail_router
 from .versions import router as versions_router
@@ -21,6 +22,11 @@ router = APIRouter()
 # 故回收站模块先于列表与详情模块聚合。
 # /notes 前缀在子路由聚合处声明（FastAPI 要求 include 时 prefix 与端点 path
 # 不能同时为空——list_notes 的 path 为空串，pref 由这里补齐）。
+#
+# `assets` 也放在最前：它的路径是 `/{note_id}/assets/{path}`，比
+# `/{note_id}` 更长更具体，先注册不会与详情路由冲突，但先注册更安全
+# （避免将来有人把详情路由改成通配时把插图吞掉）。
+router.include_router(assets_router, prefix="/notes")
 router.include_router(trash_router, prefix="/notes")
 router.include_router(list_detail_router, prefix="/notes")
 router.include_router(links_router, prefix="/notes")
