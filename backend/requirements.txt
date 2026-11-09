@@ -37,7 +37,7 @@
 
 # ---- Web / ORM / 配置 ----
 fastapi~=0.162.2
-uvicorn[standard]~=0.52.4
+uvicorn[standard]>=0.52.4,<0.55.0
 sqlalchemy[asyncio]~=2.1.8
 aiosqlite~=0.22.1
 pydantic~=2.14.3
