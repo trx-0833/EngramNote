@@ -26,6 +26,7 @@ import LoadingSpinner from './components/LoadingSpinner';
 import styles from './App.module.css';
 // i18n（阶段 1）：汉堡菜单的可访问名
 import { useTranslation } from './i18n';
+import { useDevicePrefs } from './utils/devicePrefs';
 
 // ── 登录前页面（首屏必需，保持静态导入以最快呈现登录框） ──
 import Login from './pages/Login';
@@ -44,6 +45,7 @@ const QA = lazy(() => import('./pages/QA'));
 const Review = lazy(() => import('./pages/Review'));
 const QuestionSets = lazy(() => import('./pages/QuestionSets'));
 const TodayLearn = lazy(() => import('./pages/TodayLearn'));
+const Settings = lazy(() => import('./pages/Settings'));
 const QuickReview = lazy(() => import('./pages/QuickReview'));
 const CardReview = lazy(() => import('./pages/CardReview'));
 const DailyMaterials = lazy(() => import('./pages/DailyMaterials'));
@@ -174,7 +176,8 @@ const WIDTH_CLASS: Record<PageWidth, string> = {
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { prefs: devicePrefs, setPref } = useDevicePrefs();
+  const sidebarCollapsed = devicePrefs.sidebarCollapsed;
   const [mobileOpen, setMobileOpen] = useState(false);
   // i18n 阶段 1：汉堡菜单的可访问名
   const { t } = useTranslation();
@@ -194,7 +197,7 @@ function AppRoutes() {
     <>
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        onToggleCollapse={() => setPref('sidebarCollapsed', !sidebarCollapsed)}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
@@ -248,6 +251,7 @@ function AppRoutes() {
                 <Route path="/assessment" element={<LearningAssessment />} />
                 <Route path="/goals" element={<LearningGoals />} />
                 <Route path="/upload" element={<Upload />} />
+                <Route path="/settings" element={<Settings />} />
                 {/* 设计样板间：开发期验收工具，不进导航、不进生产产物 */}
                 {StyleGuide && <Route path="/styleguide" element={<StyleGuide />} />}
                 {/* 真正的 404，而不是静默重定向 */}

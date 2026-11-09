@@ -47,7 +47,7 @@ from ..services.storage_service import (
     move_file,
 )
 from ..config import get_settings
-from . import vault_path
+from . import note_assets, vault_path
 from .vault_meta import write_note_meta
 
 settings = get_settings()
@@ -100,11 +100,7 @@ async def get_notes_list(
 
     # 可选：按项目标签筛选（多对多关联表 EXISTS 查询）
     if project_id is not None:
-        query = query.where(
-            Note.id.in_(
-                select(NoteProject.note_id).where(NoteProject.project_id == project_id)
-            )
-        )
+        query = query.where(Note.id.in_(select(NoteProject.note_id).where(NoteProject.project_id == project_id)))
 
     # 关键词搜索：使用 ilike 实现不区分大小写的模糊匹配
     # 转义 SQL 通配符（%/_），避免搜索 "100%" 等字面量被放大匹配（见 docs/decisions.md#F-32）
@@ -217,10 +213,13 @@ async def update_note(db: AsyncSession, note: Note, req: NoteUpdateRequest) -> N
 
 # ==================== 回收站（软删除 / 恢复 / 物理删除） ====================
 
+
 async def _abort_processing(db: AsyncSession, note: Note, reason: str = "用户手动删除") -> None:
     """处理中状态安全中止：标记 failed 并等待 Celery 任务感知退出"""
     processing_statuses = {
-        NoteStatus.converting, NoteStatus.cleaning, NoteStatus.learning,
+        NoteStatus.converting,
+        NoteStatus.cleaning,
+        NoteStatus.learning,
     }
     if note.status in processing_statuses:
         note.status = NoteStatus.failed
@@ -263,14 +262,11 @@ async def trash_note(db: AsyncSession, note: Note) -> Note:
 
     moves: List[Tuple[str, str, str]] = []  # (bucket, 旧路径, trash 新路径)
     if note.original_file_path:
-        moves.append((settings.minio_bucket_original, note.original_file_path,
-                      vault_path.source_object(tp, base, ext)))
+        moves.append((settings.minio_bucket_original, note.original_file_path, vault_path.source_object(tp, base, ext)))
     if note.original_md_path:
-        moves.append((settings.minio_bucket_markdown, note.original_md_path,
-                      vault_path.markdown_object(tp, base)))
+        moves.append((settings.minio_bucket_markdown, note.original_md_path, vault_path.markdown_object(tp, base)))
     if note.clean_md_path:
-        moves.append((settings.minio_bucket_markdown, note.clean_md_path,
-                      vault_path.clean_object(tp, base)))
+        moves.append((settings.minio_bucket_markdown, note.clean_md_path, vault_path.clean_object(tp, base)))
 
     moved: Dict[str, str] = {}
     for bucket, old, new in moves:
@@ -289,6 +285,17 @@ async def trash_note(db: AsyncSession, note: Note) -> Note:
                 move_file(settings.minio_bucket_markdown, meta_old, vault_path.meta_object(tp, base))
         except Exception as e:
             logger.warning(f"回收站 meta 旁载搬家失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
+
+    # ---- 插图资产随迁（2026-11-09）----
+    # 与 source/md 同一时刻搬到 `{user}/trash/{note_id}/output/assets/{base}/`，
+    # 这样回收站期间同名重传不会覆盖；恢复时再按（可能改过的）base 搬回去。
+    if prefix and base:
+        try:
+            moved_assets = note_assets.move_assets(prefix, tp, base)
+            if moved_assets:
+                logger.info(f"插图资产已随笔记移入回收站: note={note_id[:8]}, 数量={moved_assets}")
+        except Exception as e:
+            logger.warning(f"回收站插图资产搬家失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
 
     # ---- 更新路径字段为 trash 路径（仅覆盖实际搬成功的，失败保留原值避免丢信息） ----
     if note.original_file_path and note.original_file_path in moved:
@@ -341,14 +348,21 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
         """(bucket, trash 源路径, inbox 目标路径) 列表"""
         items = []
         if note.original_file_path:
-            items.append((settings.minio_bucket_original, note.original_file_path,
-                          vault_path.source_object(prefix, new_base, ext)))
+            items.append(
+                (
+                    settings.minio_bucket_original,
+                    note.original_file_path,
+                    vault_path.source_object(prefix, new_base, ext),
+                )
+            )
         if note.original_md_path:
-            items.append((settings.minio_bucket_markdown, note.original_md_path,
-                          vault_path.markdown_object(prefix, new_base)))
+            items.append(
+                (settings.minio_bucket_markdown, note.original_md_path, vault_path.markdown_object(prefix, new_base))
+            )
         if note.clean_md_path:
-            items.append((settings.minio_bucket_markdown, note.clean_md_path,
-                          vault_path.clean_object(prefix, new_base)))
+            items.append(
+                (settings.minio_bucket_markdown, note.clean_md_path, vault_path.clean_object(prefix, new_base))
+            )
         return items
 
     # ---- 同名冲突检测：目标位置（inbox）被占用则递增后缀，上限 1000 次 ----
@@ -406,6 +420,17 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
     # 按写穿机制刷新 inbox 新位置的 meta 旁载，并清掉 trash 里随迁的旧 meta
     write_note_meta(note)
     tp = vault_path.trash_prefix(note.user_id, note_id)
+
+    # ---- 插图资产搬家：trash → inbox（2026-11-09）----
+    # 与 source/md 同一时刻、同一个新 base（改名时 base 会变，图必须跟着走，
+    # 否则 markdown 里的 `images/xxx.jpg` 在新 base 下找不到资产）。
+    try:
+        moved_assets = note_assets.move_assets(tp, vault_path.inbox_prefix(note.user_id), new_base)
+        if moved_assets:
+            logger.info(f"插图资产已随笔记恢复: note={note_id[:8]}, 数量={moved_assets}, base={new_base}")
+    except Exception as e:
+        logger.warning(f"插图资产恢复失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
+
     try:
         old_meta = vault_path.meta_object(tp, base)
         if file_exists(settings.minio_bucket_markdown, old_meta):
@@ -413,9 +438,7 @@ async def restore_note(db: AsyncSession, note: Note) -> Tuple[Note, Optional[str
     except Exception as e:
         logger.warning(f"清理回收站旧 meta 失败（忽略继续）: note_id={note_id[:8]}, 错误: {e}")
 
-    logger.info(
-        f"笔记已从回收站恢复: id={note_id[:8]}, 标题={note.title}, 改名={renamed_to or '无'}"
-    )
+    logger.info(f"笔记已从回收站恢复: id={note_id[:8]}, 标题={note.title}, 改名={renamed_to or '无'}")
     return note, renamed_to
 
 
@@ -431,9 +454,7 @@ async def get_trashed_notes(db: AsyncSession, user_id: str) -> List[Dict[str, An
     from ..models.note_material_link import NoteMaterialLink
 
     result = await db.execute(
-        select(Note)
-        .where(Note.user_id == user_id, Note.trashed_at.is_not(None))
-        .order_by(Note.trashed_at.desc())
+        select(Note).where(Note.user_id == user_id, Note.trashed_at.is_not(None)).order_by(Note.trashed_at.desc())
     )
     notes = list(result.scalars().all())
     if not notes:
@@ -441,11 +462,13 @@ async def get_trashed_notes(db: AsyncSession, user_id: str) -> List[Dict[str, An
     note_ids = [n.id for n in notes]
 
     async def _count_by(model_note_id_col) -> Dict[str, int]:
-        rows = (await db.execute(
-            select(model_note_id_col, func.count())
-            .where(model_note_id_col.in_(note_ids))
-            .group_by(model_note_id_col)
-        )).all()
+        rows = (
+            await db.execute(
+                select(model_note_id_col, func.count())
+                .where(model_note_id_col.in_(note_ids))
+                .group_by(model_note_id_col)
+            )
+        ).all()
         return {row[0]: row[1] for row in rows}
 
     card_counts = await _count_by(KnowledgeCard.note_id)
@@ -455,14 +478,16 @@ async def get_trashed_notes(db: AsyncSession, user_id: str) -> List[Dict[str, An
 
     # 双向链接数：个人笔记端 + 资料端两路聚合
     link_counts: Dict[str, int] = {nid: 0 for nid in note_ids}
-    link_rows = (await db.execute(
-        select(NoteMaterialLink.personal_note_id, NoteMaterialLink.material_note_id).where(
-            or_(
-                NoteMaterialLink.personal_note_id.in_(note_ids),
-                NoteMaterialLink.material_note_id.in_(note_ids),
+    link_rows = (
+        await db.execute(
+            select(NoteMaterialLink.personal_note_id, NoteMaterialLink.material_note_id).where(
+                or_(
+                    NoteMaterialLink.personal_note_id.in_(note_ids),
+                    NoteMaterialLink.material_note_id.in_(note_ids),
+                )
             )
         )
-    )).all()
+    ).all()
     for pid, mid in link_rows:
         if pid in link_counts:
             link_counts[pid] += 1
@@ -491,24 +516,31 @@ async def get_trash_info(db: AsyncSession, note: Note) -> Dict[str, int]:
         link_count（双向链接数）
     """
     from ..models.note_material_link import NoteMaterialLink
+
     note_id = note.id
 
-    card_count = (await db.execute(
-        select(func.count()).select_from(KnowledgeCard)
-        .where(KnowledgeCard.note_id == note_id)
-    )).scalar() or 0
-    key_card_count = (await db.execute(
-        select(func.count()).select_from(KnowledgeCard)
-        .where(KnowledgeCard.note_id == note_id, KnowledgeCard.is_key_point.is_(True))
-    )).scalar() or 0
-    link_count = (await db.execute(
-        select(func.count()).select_from(NoteMaterialLink).where(
-            or_(
-                NoteMaterialLink.personal_note_id == note_id,
-                NoteMaterialLink.material_note_id == note_id,
+    card_count = (
+        await db.execute(select(func.count()).select_from(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
+    ).scalar() or 0
+    key_card_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(KnowledgeCard)
+            .where(KnowledgeCard.note_id == note_id, KnowledgeCard.is_key_point.is_(True))
+        )
+    ).scalar() or 0
+    link_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(NoteMaterialLink)
+            .where(
+                or_(
+                    NoteMaterialLink.personal_note_id == note_id,
+                    NoteMaterialLink.material_note_id == note_id,
+                )
             )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     return {
         "card_count": int(card_count),
@@ -570,14 +602,10 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             .values(note_id=None)
         )
         if promoted.rowcount:
-            logger.info(
-                f"核心卡片已提升为独立节点: note={note_id[:8]}, 数量={promoted.rowcount}"
-            )
+            logger.info(f"核心卡片已提升为独立节点: note={note_id[:8]}, 数量={promoted.rowcount}")
 
     # ---- 3. 收集剩余（非提升）卡片，删除其题目与复习记录 ----
-    card_ids_result = await db.execute(
-        select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id)
-    )
+    card_ids_result = await db.execute(select(KnowledgeCard.id).where(KnowledgeCard.note_id == note_id))
     card_ids = [row[0] for row in card_ids_result.all()]
 
     quiz_ids: List[str] = []
@@ -593,25 +621,30 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
     quiz_ids = [row[0] for row in quiz_ids_result.all()]
 
     if quiz_ids:
-        await db.execute(
-            sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids))
-        )
-        await db.execute(
-            sql_delete(QuizItem).where(QuizItem.id.in_(quiz_ids))
-        )
+        await db.execute(sql_delete(ReviewLog).where(ReviewLog.quiz_id.in_(quiz_ids)))
+        await db.execute(sql_delete(QuizItem).where(QuizItem.id.in_(quiz_ids)))
+
+    # ---- 3.5 卡片级复习记录（`quiz_id IS NULL`、只带 `card_id`）也必须先清 ----
+    #
+    # ⚠️ 2026-11-08 真机复现：走完「卡片四档自评」（POST /api/review/cards/{id}/submit）
+    # 之后彻底删除笔记 → 500 `FOREIGN KEY constraint failed`。
+    # 根因：`review_logs.card_id` 的外键是 **NO ACTION**（见 models/review_log.py），
+    # 而上面那段只按 `quiz_id` 删 —— 卡片级复习没有题目，一行都没被删到，
+    # 于是删卡片时撞外键。表现为"复习过卡片的笔记永远删不掉"。
+    #
+    # 只清**即将被删除的卡片**：被提升的核心卡片不在 `card_ids` 里，历史照旧保留
+    # （`tests/test_purge_card_review_logs.py` 有正反两条判据）。
+    if card_ids:
+        await db.execute(sql_delete(ReviewLog).where(ReviewLog.card_id.in_(card_ids)))
 
     # ---- 4. 删除剩余卡片行：CardRelation 由 FK SET NULL 自动悬挂，绝不级联删除 ----
     if card_ids:
         # 先解除待删卡片之间的父子引用（parent_card_id 自引用 FK 为 NO ACTION，
         # 同批多行 DELETE 在 SQLite 逐行外键检查下可能因删除顺序失败）
         await db.execute(
-            sql_update(KnowledgeCard)
-            .where(KnowledgeCard.parent_card_id.in_(card_ids))
-            .values(parent_card_id=None)
+            sql_update(KnowledgeCard).where(KnowledgeCard.parent_card_id.in_(card_ids)).values(parent_card_id=None)
         )
-        await db.execute(
-            sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
-        )
+        await db.execute(sql_delete(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
 
     # ---- 4.5 删除该笔记的 chunk（阶段 2.2′ 引入的表） ----
     #
@@ -670,13 +703,9 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             SELECT id FROM learning_goals
             WHERE user_id = :uid AND scope_notes::jsonb ? :nid
         """)
-    hit_goal_ids = (await db.execute(
-        goal_hit_sql, {"uid": note.user_id, "nid": note_id}
-    )).scalars().all()
+    hit_goal_ids = (await db.execute(goal_hit_sql, {"uid": note.user_id, "nid": note_id})).scalars().all()
     if hit_goal_ids:
-        goals = (await db.execute(
-            select(LearningGoal).where(LearningGoal.id.in_(hit_goal_ids))
-        )).scalars().all()
+        goals = (await db.execute(select(LearningGoal).where(LearningGoal.id.in_(hit_goal_ids)))).scalars().all()
         for goal in goals:
             goal.scope_notes = [n for n in (goal.scope_notes or []) if n != note_id]
             logger.info(f"已从学习目标 scope_notes 移除失效笔记: goal_id={goal.id[:8]}, note_id={note_id[:8]}")
@@ -715,14 +744,18 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
                        OR (t->>'card_id' IS NOT NULL AND :card_json::jsonb ? (t->>'card_id'))
               )
         """)
-    hit_plan_ids = (await db.execute(
-        plan_hit_sql,
-        {"uid": note.user_id, "nid": note_id, "quiz_json": quiz_json, "card_json": card_json},
-    )).scalars().all()
+    hit_plan_ids = (
+        (
+            await db.execute(
+                plan_hit_sql,
+                {"uid": note.user_id, "nid": note_id, "quiz_json": quiz_json, "card_json": card_json},
+            )
+        )
+        .scalars()
+        .all()
+    )
     if hit_plan_ids:
-        plans = (await db.execute(
-            select(DailyPlan).where(DailyPlan.id.in_(hit_plan_ids))
-        )).scalars().all()
+        plans = (await db.execute(select(DailyPlan).where(DailyPlan.id.in_(hit_plan_ids)))).scalars().all()
         for plan in plans:
             tasks = dict(plan.recommended_tasks or {})
             new_tasks = {}
@@ -730,7 +763,8 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
             for key, items in tasks.items():
                 if isinstance(items, list):
                     kept = [
-                        t for t in items
+                        t
+                        for t in items
                         if t.get("note_id") != note_id
                         and t.get("quiz_id") not in quiz_ids
                         and t.get("card_id") not in card_ids
@@ -749,15 +783,12 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
                 logger.info(f"已清理每日计划失效任务: plan_id={plan.id[:8]}, note_id={note_id[:8]}")
 
     # ---- 清理项目标签关联（显式双保险，即使 CASCADE 已开启） ----
-    await db.execute(
-        sql_delete(NoteProject).where(NoteProject.note_id == note_id)
-    )
+    await db.execute(sql_delete(NoteProject).where(NoteProject.note_id == note_id))
 
     # ---- 清理批注（显式双保险） ----
     from ..models.note_annotation import NoteAnnotation
-    ann_result = await db.execute(
-        select(NoteAnnotation).where(NoteAnnotation.note_id == note_id)
-    )
+
+    ann_result = await db.execute(select(NoteAnnotation).where(NoteAnnotation.note_id == note_id))
     for ann in ann_result.scalars().all():
         await db.delete(ann)
 
@@ -796,6 +827,22 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
         except Exception as e:
             logger.warning(f"删除状态旁载meta失败: {note_id}, 错误: {e}")
 
+    # ---- 删除插图资产（2026-11-09）----
+    # 与 meta 同一条理由：**按当前实际路径**推导前缀（trash 之后在
+    # `{user}/trash/{note_id}/output/assets/...`），不能用 `derive_prefix`
+    # —— 它恒返回 inbox，会把回收站期间新上传同名笔记的图误删。
+    if note.original_file_path:
+        try:
+            parts = note.original_file_path.split("/")
+            if len(parts) >= 3:
+                prefix = "/".join(parts[:-2])
+                base = vault_path.derive_base(note)
+                deleted = note_assets.delete_assets(prefix, base)
+                if deleted:
+                    logger.info(f"已删除插图资产: note={note_id[:8]}, 数量={deleted}")
+        except Exception as e:
+            logger.warning(f"删除插图资产失败: {note_id}, 错误: {e}")
+
     # ---- 向量数据清理 ----
     #
     # 阶段 2.4 收尾后**不再需要单独清理向量库**：检索向量与去重都不再用
@@ -805,9 +852,7 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
 
     # ---- 删除版本历史记录及其存储文件（history/versions/{note_id}/v{N}.md） ----
     try:
-        ver_result = await db.execute(
-            select(NoteVersion).where(NoteVersion.note_id == note_id)
-        )
+        ver_result = await db.execute(select(NoteVersion).where(NoteVersion.note_id == note_id))
         versions = ver_result.scalars().all()
         for version in versions:
             if version.storage_path:
@@ -838,9 +883,7 @@ async def purge_all_trashed(db: AsyncSession, user_id: str) -> Dict[str, int]:
     Returns:
         Dict[str, int]: {"purged": 成功数, "failed": 失败数}
     """
-    result = await db.execute(
-        select(Note).where(Note.user_id == user_id, Note.trashed_at.is_not(None))
-    )
+    result = await db.execute(select(Note).where(Note.user_id == user_id, Note.trashed_at.is_not(None)))
     trashed = list(result.scalars().all())
     purged, failed = 0, 0
     for note in trashed:
@@ -857,9 +900,13 @@ async def purge_all_trashed(db: AsyncSession, user_id: str) -> Dict[str, int]:
 
 # ==================== 笔记-资料链接管理 ====================
 
-async def create_note_material_links(db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]) -> None:
+
+async def create_note_material_links(
+    db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]
+) -> None:
     """批量创建笔记-资料链接，忽略已存在的；校验 material 归属和角色"""
     from ..models.note_material_link import NoteMaterialLink
+
     if not material_note_ids:
         return
     # 校验所有 material_note_ids 归属当前用户且角色为 material（回收站笔记不可被关联）
@@ -897,10 +944,11 @@ async def create_note_material_links(db: AsyncSession, user_id: str, personal_no
 async def get_linked_materials(db: AsyncSession, user_id: str, personal_note_id: str) -> List[Note]:
     """获取笔记关联的资料列表"""
     from ..models.note_material_link import NoteMaterialLink
+
     result = await db.execute(
-        select(Note).join(
-            NoteMaterialLink, NoteMaterialLink.material_note_id == Note.id
-        ).where(
+        select(Note)
+        .join(NoteMaterialLink, NoteMaterialLink.material_note_id == Note.id)
+        .where(
             NoteMaterialLink.personal_note_id == personal_note_id,
             NoteMaterialLink.user_id == user_id,
             Note.trashed_at.is_(None),
@@ -912,10 +960,11 @@ async def get_linked_materials(db: AsyncSession, user_id: str, personal_note_id:
 async def get_linked_personal_notes(db: AsyncSession, user_id: str, material_note_id: str) -> List[Note]:
     """获取引用该资料的笔记列表（反向查询）"""
     from ..models.note_material_link import NoteMaterialLink
+
     result = await db.execute(
-        select(Note).join(
-            NoteMaterialLink, NoteMaterialLink.personal_note_id == Note.id
-        ).where(
+        select(Note)
+        .join(NoteMaterialLink, NoteMaterialLink.personal_note_id == Note.id)
+        .where(
             NoteMaterialLink.material_note_id == material_note_id,
             NoteMaterialLink.user_id == user_id,
             Note.trashed_at.is_(None),
@@ -924,13 +973,14 @@ async def get_linked_personal_notes(db: AsyncSession, user_id: str, material_not
     return result.scalars().all()
 
 
-async def update_note_material_links(db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]) -> bool:
+async def update_note_material_links(
+    db: AsyncSession, user_id: str, personal_note_id: str, material_note_ids: List[str]
+) -> bool:
     """更新笔记-资料链接，返回是否发生变化"""
     from ..models.note_material_link import NoteMaterialLink
+
     # 获取当前链接
-    result = await db.execute(
-        select(NoteMaterialLink).where(NoteMaterialLink.personal_note_id == personal_note_id)
-    )
+    result = await db.execute(select(NoteMaterialLink).where(NoteMaterialLink.personal_note_id == personal_note_id))
     current_links = result.scalars().all()
     current_ids = {link.material_note_id for link in current_links}
     new_ids = set(material_note_ids)
@@ -960,10 +1010,10 @@ async def update_note_material_links(db: AsyncSession, user_id: str, personal_no
 async def delete_note_material_links(db: AsyncSession, note_id: str) -> None:
     """删除涉及该笔记的所有链接（正向和反向）"""
     from ..models.note_material_link import NoteMaterialLink
+
     result = await db.execute(
         select(NoteMaterialLink).where(
-            (NoteMaterialLink.personal_note_id == note_id) |
-            (NoteMaterialLink.material_note_id == note_id)
+            (NoteMaterialLink.personal_note_id == note_id) | (NoteMaterialLink.material_note_id == note_id)
         )
     )
     links = result.scalars().all()
@@ -974,9 +1024,21 @@ async def delete_note_material_links(db: AsyncSession, note_id: str) -> None:
 
 # ==================== 笔记批注管理 ====================
 
-async def create_annotation(db: AsyncSession, user_id: str, note_id: str, view_mode: str, type: str, text_content: str, context_before: str = "", context_after: str = "", color: Optional[str] = None) -> NoteAnnotation:
+
+async def create_annotation(
+    db: AsyncSession,
+    user_id: str,
+    note_id: str,
+    view_mode: str,
+    type: str,
+    text_content: str,
+    context_before: str = "",
+    context_after: str = "",
+    color: Optional[str] = None,
+) -> NoteAnnotation:
     """创建批注"""
     from ..models.note_annotation import NoteAnnotation
+
     annotation = NoteAnnotation(
         id=str(uuid.uuid4()),
         user_id=user_id,
@@ -994,9 +1056,12 @@ async def create_annotation(db: AsyncSession, user_id: str, note_id: str, view_m
     return annotation
 
 
-async def get_annotations(db: AsyncSession, note_id: str, user_id: str, view_mode: Optional[str] = None) -> List[NoteAnnotation]:
+async def get_annotations(
+    db: AsyncSession, note_id: str, user_id: str, view_mode: Optional[str] = None
+) -> List[NoteAnnotation]:
     """获取笔记的批注列表"""
     from ..models.note_annotation import NoteAnnotation
+
     query = select(NoteAnnotation).where(
         NoteAnnotation.note_id == note_id,
         NoteAnnotation.user_id == user_id,
@@ -1011,6 +1076,7 @@ async def get_annotations(db: AsyncSession, note_id: str, user_id: str, view_mod
 async def delete_annotation(db: AsyncSession, annotation_id: str, user_id: str, note_id: str) -> bool:
     """删除批注，校验 note_id 归属"""
     from ..models.note_annotation import NoteAnnotation
+
     result = await db.execute(
         select(NoteAnnotation).where(
             NoteAnnotation.id == annotation_id,
@@ -1063,9 +1129,7 @@ async def save_note_content(db: AsyncSession, note: Note, content: str, target: 
             current_content = current_bytes.decode("utf-8")
         except Exception as read_err:
             # 文件可能尚不存在（首次保存），以空内容创建版本快照
-            logger.debug(
-                f"读取当前 Markdown 失败（可能首次保存）: note_id={note.id[:8]}, err={read_err}"
-            )
+            logger.debug(f"读取当前 Markdown 失败（可能首次保存）: note_id={note.id[:8]}, err={read_err}")
 
         # 懒加载 version_service，避免循环导入
         from ..services.version_service import version_service
@@ -1079,9 +1143,7 @@ async def save_note_content(db: AsyncSession, note: Note, content: str, target: 
             db=db,
         )
     except Exception as e:
-        logger.warning(
-            f"创建版本快照失败，继续执行主保存流程: note_id={note.id[:8]}, err={e}"
-        )
+        logger.warning(f"创建版本快照失败，继续执行主保存流程: note_id={note.id[:8]}, err={e}")
 
     # 将内容转为字节流
     content_bytes = content.encode("utf-8")

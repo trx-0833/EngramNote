@@ -150,11 +150,20 @@ def parse_requirements(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
             skipped.append(f"{path.name}:{lineno} {line}")
             continue
         name, extras, rest = match.group(1), match.group(2) or "", match.group(3).strip()
+        # PEP 508 的**环境标记**（`pywin32>=306; sys_platform == "win32"`）不是版本
+        # 约束：把它整段喂给 `packaging.specifiers.Specifier` 会抛
+        # `InvalidSpecifier`（2026-11-08 加了 pywin32 之后整个脚本直接崩，
+        # `test_dependency_drift_check` 的 8 条用例全变 ERROR）。
+        # 标记单独存一份：报告里能看见"这条只对某些平台生效"，
+        # 而版本比较只用标记之前的那段。
+        specifier, _, marker = rest.partition(";")
+        specifier, marker = specifier.strip(), marker.strip()
         entries.append(
             {
                 "name": name,
                 "extras": [e.strip() for e in extras.split(",") if e.strip()],
-                "specifier": rest,
+                "specifier": specifier,
+                "marker": marker,
                 "source": path.name,
                 "line": lineno,
                 "raw": line,
@@ -219,9 +228,7 @@ def transitive_dependencies(
     """
     extras_by_name: dict[str, set[str]] = {}
     for entry in declared:
-        extras_by_name.setdefault(canonicalize_name(entry["name"]), set()).update(
-            entry["extras"]
-        )
+        extras_by_name.setdefault(canonicalize_name(entry["name"]), set()).update(entry["extras"])
 
     collected: dict[str, dict[str, Any]] = {}
     import importlib.metadata as md
@@ -385,15 +392,9 @@ def analyze(files: Optional[list[Path]] = None) -> dict[str, Any]:
     known = [e for e in declared if e["installed"] is not None]
     # ---- 空洞守卫：检查自身"什么都没查到"时必须响，而不是报"无漂移" ----
     if not declared:
-        report["problems"].append(
-            "没有解析到任何依赖声明 —— 解析逻辑失效或清单为空，"
-            "此时报告'无漂移'是假结论"
-        )
+        report["problems"].append("没有解析到任何依赖声明 —— 解析逻辑失效或清单为空，此时报告'无漂移'是假结论")
     if declared and not known:
-        report["problems"].append(
-            "所有声明条目都查不到已安装版本 —— 元数据查询失效，"
-            "此时报告'无漂移'同样是假结论"
-        )
+        report["problems"].append("所有声明条目都查不到已安装版本 —— 元数据查询失效，此时报告'无漂移'同样是假结论")
 
     declared_names = {canonicalize_name(e["name"]) for e in declared}
     counts = {
@@ -412,13 +413,9 @@ def analyze(files: Optional[list[Path]] = None) -> dict[str, Any]:
     counts["declared_missing"] = counts[V_NOT_INSTALLED]
     report["counts"] = counts
 
-    out_of_range_parents = {
-        canonicalize_name(e["name"]) for e in declared if e["verdict"] == V_OUT_OF_RANGE
-    }
+    out_of_range_parents = {canonicalize_name(e["name"]) for e in declared if e["verdict"] == V_OUT_OF_RANGE}
     if declared_names:
-        report["transitive"] = transitive_dependencies(
-            declared, declared_names, out_of_range_parents
-        )
+        report["transitive"] = transitive_dependencies(declared, declared_names, out_of_range_parents)
     report["transitive_total"] = len(report["transitive"])
     report["transitive_from_out_of_range_parent"] = sum(
         1 for i in report["transitive"] if i["constraint_from_out_of_range_parent"]
@@ -472,13 +469,7 @@ def print_report(report: dict[str, Any]) -> None:
 
     print(thin)
     print("[1] 声明了版本约束的条目 vs 实际安装（漂移就在这里）")
-    print(
-        "  "
-        + _pad("包", 26)
-        + _pad("声明", 18)
-        + _pad("实际安装", 16)
-        + "判定"
-    )
+    print("  " + _pad("包", 26) + _pad("声明", 18) + _pad("实际安装", 16) + "判定")
     for entry in sorted(report["pinned"], key=lambda e: e["name"].lower()):
         name = entry["name"] + (f"[{','.join(entry['extras'])}]" if entry["extras"] else "")
         print(
@@ -489,8 +480,7 @@ def print_report(report: dict[str, Any]) -> None:
             + _VERDICT_LABEL[entry["verdict"]]
         )
     if counts[V_NOT_INSTALLED]:
-        print(f"  ⚠ 上面 {counts[V_NOT_INSTALLED]} 条是**发现**（清单说该有、本机查不到），"
-              "不是信息：")
+        print(f"  ⚠ 上面 {counts[V_NOT_INSTALLED]} 条是**发现**（清单说该有、本机查不到），不是信息：")
         print("     与'可选 extra 没装'是两件事（后者是 ○ 信息，见 [3]）—— 判据见本文件头部。")
 
     if report["unpinned"]:
@@ -500,13 +490,7 @@ def print_report(report: dict[str, Any]) -> None:
         print("    这本身就是 CI 与本机之间另一条漂移通道，列出来以免被忽略。")
         for entry in sorted(report["unpinned"], key=lambda e: e["name"].lower()):
             name = entry["name"] + (f"[{','.join(entry['extras'])}]" if entry["extras"] else "")
-            print(
-                "  "
-                + _pad(name, 26)
-                + _pad(entry["source"], 22)
-                + "已安装 "
-                + (entry["installed"] or "—（未安装）")
-            )
+            print("  " + _pad(name, 26) + _pad(entry["source"], 22) + "已安装 " + (entry["installed"] or "—（未安装）"))
 
     print(thin)
     print("[3] 清单里没有、但会被带上来的传递依赖（约束取自**已安装**的父包）")
@@ -518,8 +502,7 @@ def print_report(report: dict[str, Any]) -> None:
         print("  （无）")
     for item in report["transitive"]:
         parents = ", ".join(
-            f"{r['parent']} {r['parent_installed']} "
-            + (f"({r['specifier']})" if r["specifier"] else "(任意)")
+            f"{r['parent']} {r['parent_installed']} " + (f"({r['specifier']})" if r["specifier"] else "(任意)")
             for r in item["required_by"]
         )
         absent_optional = item["installed"] is None and item["optional_only"]
@@ -545,13 +528,12 @@ def print_report(report: dict[str, Any]) -> None:
     if report["transitive_missing_required"]:
         print(thin)
         print("[3b] ⚠ 硬依赖缺失（**不是**信息，需要处理）")
-        print("     父包在无条件（extra=\"\"）情形下就声明了它们，本机却查不到 —— 这说明")
+        print('     父包在无条件（extra=""）情形下就声明了它们，本机却查不到 —— 这说明')
         print("     已安装的元数据与已装的文件互相矛盾（典型成因：`pip install --no-deps`），")
         print("     [3] 里与这些包相关的推断都不可信。")
         for brief in report["transitive_missing_required"]:
             parents = ", ".join(
-                f"{r['parent']} {r['parent_installed']}"
-                + (f" ({r['specifier']})" if r["specifier"] else " (任意)")
+                f"{r['parent']} {r['parent_installed']}" + (f" ({r['specifier']})" if r["specifier"] else " (任意)")
                 for r in brief["required_by"]
             )
             print(f"    - {brief['name']}  ←  {parents}")
@@ -564,20 +546,28 @@ def print_report(report: dict[str, Any]) -> None:
 
     print(bar)
     print("汇总")
-    print(f"  声明条目                : {counts['declared']}"
-          f"（带版本约束 {counts['pinned']} / 未锁版本 {counts['unpinned']}）")
+    print(
+        f"  声明条目                : {counts['declared']}"
+        f"（带版本约束 {counts['pinned']} / 未锁版本 {counts['unpinned']}）"
+    )
     print(f"  查到已安装版本          : {counts['installed_known']}")
     print(f"  在声明范围内            : {counts[V_IN_RANGE]}")
     print(f"  超出声明范围（漂移）    : {counts[V_OUT_OF_RANGE]}")
     print(f"  未安装（**声明**了却没装）: {counts[V_NOT_INSTALLED]}   ← 发现，需处理")
     print(f"  无法判定                : {counts[V_UNKNOWN]}")
-    print(f"  传递依赖条目            : {report['transitive_total']}"
-          f"（其中 {report['transitive_from_out_of_range_parent']}"
-          f" 条的约束来自已超出声明范围的父包）")
-    print(f"    其中未安装 · 可选 extras : {counts['transitive_missing_optional']}"
-          "   ← 信息，不算漂移（瘦环境里本来就没有）")
-    print(f"    其中未安装 · 硬依赖     : {counts['transitive_missing_required']}"
-          "   ← 发现，需处理（元数据与已装文件不一致）")
+    print(
+        f"  传递依赖条目            : {report['transitive_total']}"
+        f"（其中 {report['transitive_from_out_of_range_parent']}"
+        f" 条的约束来自已超出声明范围的父包）"
+    )
+    print(
+        f"    其中未安装 · 可选 extras : {counts['transitive_missing_optional']}"
+        "   ← 信息，不算漂移（瘦环境里本来就没有）"
+    )
+    print(
+        f"    其中未安装 · 硬依赖     : {counts['transitive_missing_required']}"
+        "   ← 发现，需处理（元数据与已装文件不一致）"
+    )
     print(bar)
     print("说明：漂移**存在与否都不影响退出码 0** —— 今天这些差异是本仓库的既有事实")
     print("      （requirements.txt 用 ~= 声明、环境早已更新，两者都不是本脚本能改的）。")
@@ -619,9 +609,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     args = build_parser().parse_args(argv)
     files = (
-        [Path(p) if Path(p).is_absolute() else BACKEND / p for p in args.requirements]
-        if args.requirements
-        else None
+        [Path(p) if Path(p).is_absolute() else BACKEND / p for p in args.requirements] if args.requirements else None
     )
     report = analyze(files)
     if args.json:

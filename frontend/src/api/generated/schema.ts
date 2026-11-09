@@ -1714,6 +1714,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/{note_id}/assets/{asset_path}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * 读取笔记内的插图
+     * @description 返回笔记 markdown 里相对引用指向的插图
+     *
+     *     ## 两条鉴权路径（必须都留）
+     *
+     *     1. **签名令牌**（`?t=…`）：浏览器渲染 `<img src>` 时**不会**带
+     *        `Authorization` 头（前端 JWT 在 localStorage、由 `fetch` 手工加），
+     *        所以图片必须能靠 URL 里的短期签名访问。令牌由 `GET /api/notes/{id}`
+     *        随详情下发（`assets_token`），按笔记签名、2 小时过期。
+     *     2. **Bearer 头**：API 客户端 / curl / e2e 继续按老办法访问，否则
+     *        "用脚本取图"这条路会被新机制堵死。
+     *
+     *     没有任何凭证 → 401（与全站一致）；凭证有效但笔记不属于你 → **404**
+     *     （403 会泄漏"这个 id 存在"）。
+     *
+     *     Raises:
+     *         AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）
+     *         AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）
+     *         AppError: 对象不存在（ASSET_NOT_FOUND → 404）
+     */
+    get: operations['get_note_asset_api_notes__note_id__assets__asset_path__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/{note_id}/content': {
     parameters: {
       query?: never;
@@ -2702,6 +2739,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Settings Snapshot
+     * @description 读取当前用户的完整设置快照（不写库）
+     */
+    get: operations['get_settings_snapshot_api_settings_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Patch Settings
+     * @description 部分更新设置；只提交显式给出的字段
+     *
+     *     - `study.daily_review_limit` / `desired_retention` / `max_interval_days`
+     *     - `reminders.email_enabled` 写入 `users.email_reminder_enabled`
+     *     - `reminders.email_hour`
+     *     - `content.*`（输出语言、卡片上限、三条清洗开关）
+     */
+    patch: operations['patch_settings_api_settings_patch'];
+    trace?: never;
+  };
+  '/api/settings/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Settings Usage
+     * @description 存储用量（与上传前的配额校验同一口径：`SUM(Note.file_size)`）
+     */
+    get: operations['get_settings_usage_api_settings_usage_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/tasks/note/{note_id}': {
     parameters: {
       query?: never;
@@ -3416,6 +3502,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AboutSettings */
+    AboutSettings: {
+      /** App Env */
+      app_env: string;
+      /** App Version */
+      app_version: string;
+    };
+    /** AccountSettings */
+    AccountSettings: {
+      /** Email */
+      email: string;
+      /** Username */
+      username: string;
+    };
     /** AnnotationCreateRequest */
     AnnotationCreateRequest: {
       /** Color */
@@ -4223,6 +4323,35 @@ export interface components {
     ConfirmRelationRequest: {
       /** Relation Id */
       relation_id: string;
+    };
+    /** ContentSettings */
+    ContentSettings: {
+      /** Card Max New Per Run */
+      card_max_new_per_run: number;
+      /** Clean Normalize Heading Levels */
+      clean_normalize_heading_levels: boolean;
+      /** Clean Normalize Spacing */
+      clean_normalize_spacing: boolean;
+      /** Clean Simplify Formula */
+      clean_simplify_formula: boolean;
+      /**
+       * Output Locale
+       * @enum {string}
+       */
+      output_locale: 'follow' | 'zh-CN' | 'en';
+    };
+    /** ContentSettingsPatch */
+    ContentSettingsPatch: {
+      /** Card Max New Per Run */
+      card_max_new_per_run?: number | null;
+      /** Clean Normalize Heading Levels */
+      clean_normalize_heading_levels?: boolean | null;
+      /** Clean Normalize Spacing */
+      clean_normalize_spacing?: boolean | null;
+      /** Clean Simplify Formula */
+      clean_simplify_formula?: boolean | null;
+      /** Output Locale */
+      output_locale?: ('follow' | 'zh-CN' | 'en') | null;
     };
     /**
      * ContentSourceInfo
@@ -5475,6 +5604,8 @@ export interface components {
      * @description 笔记详情 — 包含 Markdown 内容
      */
     NoteDetailResponse: {
+      /** Assets Token */
+      assets_token?: string | null;
       /** Clean Md Content */
       clean_md_content?: string | null;
       /**
@@ -6633,6 +6764,22 @@ export interface components {
        */
       weak_point_count: number;
     };
+    /** ReminderSettings */
+    ReminderSettings: {
+      /** Email Configured */
+      email_configured: boolean;
+      /** Email Enabled */
+      email_enabled: boolean;
+      /** Email Hour */
+      email_hour: number;
+    };
+    /** ReminderSettingsPatch */
+    ReminderSettingsPatch: {
+      /** Email Enabled */
+      email_enabled?: boolean | null;
+      /** Email Hour */
+      email_hour?: number | null;
+    };
     /**
      * RestoreResponse
      * @description 恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 None）
@@ -6926,6 +7073,36 @@ export interface components {
       success: boolean;
     };
     /**
+     * SettingsPatch
+     * @description `PATCH /api/settings`：每段可选，段内字段也可选
+     *
+     *     `extra="forbid"` 是刻意的：拼错字段名必须 422，而不是静默忽略后
+     *     让用户以为保存成功（典型例子：把 `daily_review_limit` 写成
+     *     `daily_limit`）。
+     */
+    SettingsPatch: {
+      content?: components['schemas']['ContentSettingsPatch'] | null;
+      reminders?: components['schemas']['ReminderSettingsPatch'] | null;
+      study?: components['schemas']['StudySettingsPatch'] | null;
+    };
+    /**
+     * SettingsResponse
+     * @description `GET/PATCH /api/settings` 的完整响应
+     */
+    SettingsResponse: {
+      about: components['schemas']['AboutSettings'];
+      account: components['schemas']['AccountSettings'];
+      content: components['schemas']['ContentSettings'];
+      /** Locale */
+      locale: string;
+      reminders: components['schemas']['ReminderSettings'];
+      study: components['schemas']['StudySettings'];
+    };
+    /** SettingsUsageResponse */
+    SettingsUsageResponse: {
+      storage: components['schemas']['StorageUsage'];
+    };
+    /**
      * SourceType
      * @description 文档来源类型枚举
      *
@@ -6935,6 +7112,31 @@ export interface components {
      * @enum {string}
      */
     SourceType: 'pdf' | 'image' | 'docx' | 'pptx' | 'xlsx' | 'audio' | 'video' | 'markdown';
+    /** StorageUsage */
+    StorageUsage: {
+      /** Quota Bytes */
+      quota_bytes: number;
+      /** Used Bytes */
+      used_bytes: number;
+    };
+    /** StudySettings */
+    StudySettings: {
+      /** Daily Review Limit */
+      daily_review_limit: number;
+      /** Desired Retention */
+      desired_retention: number;
+      /** Max Interval Days */
+      max_interval_days: number;
+    };
+    /** StudySettingsPatch */
+    StudySettingsPatch: {
+      /** Daily Review Limit */
+      daily_review_limit?: number | null;
+      /** Desired Retention */
+      desired_retention?: (0.8 | 0.85 | 0.9 | 0.95) | null;
+      /** Max Interval Days */
+      max_interval_days?: (365 | 1825 | 3650) | null;
+    };
     /**
      * SubmitAnswerRequest
      * @description 提交答案请求
@@ -9566,6 +9768,39 @@ export interface operations {
       };
     };
   };
+  get_note_asset_api_notes__note_id__assets__asset_path__get: {
+    parameters: {
+      query?: {
+        /** @description 按笔记签名的短期访问令牌（见 assets_token） */
+        t?: string | null;
+      };
+      header?: never;
+      path: {
+        note_id: string;
+        asset_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   update_note_content_api_notes__note_id__content_put: {
     parameters: {
       query?: never;
@@ -10598,6 +10833,79 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_settings_snapshot_api_settings_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsResponse'];
+        };
+      };
+    };
+  };
+  patch_settings_api_settings_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SettingsPatch'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_settings_usage_api_settings_usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SettingsUsageResponse'];
         };
       };
     };

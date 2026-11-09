@@ -22,6 +22,7 @@
 import os
 import time
 import logging
+from types import SimpleNamespace
 
 from celery.exceptions import Retry
 
@@ -44,7 +45,7 @@ from .common import (
 from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
-from ..services import vault_path
+from ..services import user_settings_service, vault_path
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -187,6 +188,11 @@ async def _clean_document(note_id: str):
             return
         original_md_path = note.original_md_path
         user_id = note.user_id
+        clean_prefs = (
+            await user_settings_service.get_effective_settings(session, user_id)
+            if user_id
+            else {}
+        )
 
     if not original_md_path:
         await _update_note_status(
@@ -219,7 +225,10 @@ async def _clean_document(note_id: str):
         return
 
     # 3. 规则化清洗
-    cleaned_text, clean_stats = clean_rules(original_text)
+    cleaned_text, clean_stats = clean_rules(
+        original_text,
+        settings_override=SimpleNamespace(**clean_prefs) if clean_prefs else None,
+    )
 
     # 4. 文本分块（阶段 2.1：统一走 markdown_segmenter，它同时产出
     #    字符偏移与标题路径，供阶段 2.7 的引用回跳使用）

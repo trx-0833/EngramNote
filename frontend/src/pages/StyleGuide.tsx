@@ -123,7 +123,7 @@ const ALL_TOKENS: string[] = [
  */
 const ICON_GROUPS: { title: string; names: IconName[] }[] = [
   {
-    title: '导航与页面（15）',
+    title: '导航与页面（16）',
     names: [
       'dashboard',
       'today',
@@ -140,6 +140,7 @@ const ICON_GROUPS: { title: string; names: IconName[] }[] = [
       'questions',
       'menu',
       'logout',
+      'settings',
     ],
   },
   {

@@ -24,12 +24,21 @@ import {
   getLinkWidth,
   getRelationDash,
 } from '../../components/graph/types';
+import type { MessageKey } from '../../i18n/translate';
 
 /** 边绘制依赖的页面状态（选中/悬停/关系类型高亮） */
 export interface LinkDrawState {
   selectedLink: ForceGraphLink | null;
   hoverLink: ForceGraphLink | null;
   highlightedRelationType: string | null;
+  /**
+   * 翻译函数（由 `useCanvasObjects` 从 `useTranslation()` 注入）
+   *
+   * 为什么不在这里 `import { translate }`：canvas 没有 hook，
+   * "切语言后画布要重画"只能靠 React 依赖数组表达 —— `t` 的引用随语言变化。
+   * 注入也让本文件保持纯函数，测试传假 `t` 就能断言画上去的字。
+   */
+  t: (key: MessageKey) => string;
 }
 
 /** 自定义边绘制 */
@@ -39,7 +48,7 @@ export function drawGraphLink(
   globalScale: number,
   state: LinkDrawState,
 ) {
-  const { selectedLink, hoverLink, highlightedRelationType } = state;
+  const { selectedLink, hoverLink, highlightedRelationType, t } = state;
 
   const src = link.source as ForceGraphNode;
   const tgt = link.target as ForceGraphNode;
@@ -98,7 +107,14 @@ export function drawGraphLink(
   if (isHovered || isSelected) {
     const midX = (src.x! + tgt.x!) / 2;
     const midY = (src.y! + tgt.y!) / 2;
-    const label = RELATION_TYPE_LABELS[link.relation_type] || link.relation_type;
+    /**
+     * ⚠️ `RELATION_TYPE_LABELS` 存的是 i18n 键，不是文案（i18n 阶段 3 起）。
+     * 直接 `fillText(key)` 会让画布上出现 `graphTypes.relationRelated` ——
+     * 2026-11-07 用户看到的那串 "graphTypes" 就是它。canvas 里没有 hook，
+     * 所以用非组件版 `translate()`；未知类型才回退成类型名本身。
+     */
+    const labelKey = RELATION_TYPE_LABELS[link.relation_type];
+    const label = labelKey ? t(labelKey) : link.relation_type;
     const fontSize = Math.max(11 / globalScale, 3);
     ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
     const textWidth = ctx.measureText(label).width;

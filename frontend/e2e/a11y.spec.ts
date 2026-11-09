@@ -1645,9 +1645,10 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
       ready: async () => {
         await loginAs(page, '/qa');
         await expect(page.getByRole('heading', { name: '智能问答' })).toBeVisible();
-        await page
-          .getByPlaceholder('输入你的问题，AI 将基于你的笔记内容回答...')
-          .fill('浮充和均充有什么区别？');
+        // 占位符是「输入你的问题…」（2026-11-07 缩短：原全文 317px，
+        // 而输入框只有 252px，用户看到的是被截断的半句。用正则匹配前缀，
+        // 以后再调措辞不必改这里）
+        await page.getByPlaceholder(/输入你的问题/).fill('浮充和均充有什么区别？');
         await page.getByRole('button', { name: '提问' }).click();
         // **流结束**的标记是引用来源与页脚，不是"AI 正在思考..."（见上）
         await expect(page.getByText('引用来源:')).toBeVisible();

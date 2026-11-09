@@ -34,7 +34,10 @@
 
 # ---- Web / ORM / 配置 ----
 fastapi
-sqlalchemy
+# `[asyncio]` 不能省：SQLAlchemy 的 async 扩展在运行时 import greenlet。
+# 旧行只写 `sqlalchemy`，CI 的干净 Python 3.11 环境因此缺 greenlet，
+# `dump_openapi.py` 在 import app 时就失败（本机装过 greenlet，掩盖了它）。
+sqlalchemy[asyncio]
 aiosqlite
 pydantic
 pydantic-settings
@@ -76,6 +79,9 @@ Pillow
 # ---- 测试与 lint ----
 pytest
 pytest-asyncio
+# 覆盖率门禁（2026-11-07）：CI 用它算全局覆盖率并卡阈值。
+# 缺它 -> `pytest --cov` 在收集阶段直接报 unrecognized arguments。
+pytest-cov
 ruff
 
 # ---- workflow YAML 校验 ----

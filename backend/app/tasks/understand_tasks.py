@@ -42,7 +42,10 @@ from .loop import run_async as _run_async, task_loop as _task_loop
 from ..config import get_settings
 from ..models.note import Note, NoteStatus
 from ..models.user import User
+from ..models.user_settings import UserSettings
+from ..services import user_settings_service
 from ..services.llm.prompts import DEFAULT_QUESTION_PROMPT_VERSION
+from .dispatch import dispatch
 from ..services.llm.structured import QuizQuestion, validate_items
 
 settings = get_settings()
@@ -92,20 +95,34 @@ async def _understand_document(note_id: str):
         original_md_path = note.original_md_path
 
         # 提示词语言（i18n 阶段 4）：worker 里**没有**请求上下文，
-        # 所以只能查库读用户偏好。查不到时留 None，
-        # 提示词层会回落到默认语言（中文）。
+        # 所以只能查库读用户偏好。`output_locale=follow` 时回落到
+        # `users.locale`；查不到时留 None，提示词层会回落到默认语言（中文）。
         locale: Optional[str] = None
+        max_new_cards_per_run: Optional[int] = None
         if user_id:
             user_row = (
-                await session.execute(select(User.locale).where(User.id == user_id))
-            ).scalars().first()
-            locale = user_row or None
+                await session.execute(
+                    select(
+                        User.locale,
+                        UserSettings.output_locale,
+                        UserSettings.card_max_new_per_run,
+                    )
+                    .outerjoin(UserSettings, UserSettings.user_id == User.id)
+                    .where(User.id == user_id)
+                )
+            ).first()
+            if user_row:
+                locale = user_settings_service.resolve_output_locale(user_row.output_locale, user_row.locale)
+                max_new_cards_per_run = (
+                    int(user_row.card_max_new_per_run) if user_row.card_max_new_per_run is not None else None
+                )
 
     # 2. 读取 Markdown 内容（优先清洗版）
     md_path = clean_md_path or original_md_path
     if not md_path:
         await _update_note_status(
-            note_id, NoteStatus.learning_failed,
+            note_id,
+            NoteStatus.learning_failed,
             error_message="笔记缺少 Markdown 文件路径",
         )
         return
@@ -115,14 +132,16 @@ async def _understand_document(note_id: str):
         markdown_content = md_bytes.decode("utf-8")
     except Exception as e:
         await _update_note_status(
-            note_id, NoteStatus.learning_failed,
+            note_id,
+            NoteStatus.learning_failed,
             error_message=f"读取 Markdown 文件失败: {str(e)}",
         )
         return
 
     if not markdown_content.strip():
         await _update_note_status(
-            note_id, NoteStatus.learning_failed,
+            note_id,
+            NoteStatus.learning_failed,
             error_message="Markdown 内容为空",
         )
         return
@@ -134,15 +153,14 @@ async def _understand_document(note_id: str):
     # 没有这层声明的调用照样会被记账，只是 user_id/note_id 为 NULL。
     from ..services.llm_accounting_service import llm_context
 
-    with llm_context(
-        user_id=user_id, note_id=note_id, task="understand_note", locale=locale
-    ):
+    with llm_context(user_id=user_id, note_id=note_id, task="understand_note", locale=locale):
         async with session_factory() as session:
             result = await process_note_understanding(
                 db=session,
                 note_id=note_id,
                 user_id=user_id,
                 markdown_content=markdown_content,
+                max_new_cards_per_run=max_new_cards_per_run,
             )
 
     # 阶段 4.8/4.9：不能只报"新建了几张卡"。
@@ -151,10 +169,12 @@ async def _understand_document(note_id: str):
     # 像"这次什么都没抽出来"；被质量门拦下的卡片若不出现在这里，
     # "不入库"就变成了"静默少了几张"。四个计数一起报才说得清。
     logger.info(
-        "笔记 %s 理解完成: %d 个章节, 新建卡片 %d 张"
-        "（复用 %d 张, 被质量门拦下 %d 张, 超单次上限未入库 %d 张）",
-        note_id, result["chapter_count"], result["total_cards"],
-        result.get("reused_cards", 0), result.get("rejected_cards", 0),
+        "笔记 %s 理解完成: %d 个章节, 新建卡片 %d 张（复用 %d 张, 被质量门拦下 %d 张, 超单次上限未入库 %d 张）",
+        note_id,
+        result["chapter_count"],
+        result["total_cards"],
+        result.get("reused_cards", 0),
+        result.get("rejected_cards", 0),
         result.get("truncated_cards", 0),
     )
 
@@ -172,12 +192,14 @@ async def _understand_document(note_id: str):
     elapsed = time.monotonic() - start_time
     logger.info(
         "文档理解完成: note_id=%s, card_count=%d, elapsed=%.1fs",
-        note_id, result.get("total_cards", 0) if result else 0, elapsed,
+        note_id,
+        result.get("total_cards", 0) if result else 0,
+        elapsed,
     )
 
     # 8. 自动触发题目生成
     try:
-        generate_questions_task.delay(note_id)
+        dispatch(generate_questions_task, note_id)
     except Exception as e:
         logger.warning(f"触发题目生成任务失败 (note_id={note_id}): {e}")
 
@@ -314,9 +336,7 @@ async def _generate_questions(
 
     # 1. 获取知识卡片（立即提取属性值，避免 commit 后延迟加载问题）
     async with session_factory() as session:
-        result = await session.execute(
-            select(KnowledgeCard).where(KnowledgeCard.note_id == note_id)
-        )
+        result = await session.execute(select(KnowledgeCard).where(KnowledgeCard.note_id == note_id))
         cards = result.scalars().all()
 
         if not cards:
@@ -339,22 +359,12 @@ async def _generate_questions(
     # 2. 清理该笔记旧题目（含复习记录），恢复"重新生成"语义，
     #    防止重复触发 generate-questions 累积重复题目，见 docs/decisions.md#F-29
     async with session_factory() as session:
-        old_quiz_ids = (
-            await session.execute(
-                select(QuizItem.id).where(QuizItem.note_id == note_id)
-            )
-        ).scalars().all()
+        old_quiz_ids = (await session.execute(select(QuizItem.id).where(QuizItem.note_id == note_id))).scalars().all()
         if old_quiz_ids:
-            await session.execute(
-                delete(ReviewLog).where(ReviewLog.quiz_id.in_(old_quiz_ids))
-            )
-            await session.execute(
-                delete(QuizItem).where(QuizItem.note_id == note_id)
-            )
+            await session.execute(delete(ReviewLog).where(ReviewLog.quiz_id.in_(old_quiz_ids)))
+            await session.execute(delete(QuizItem).where(QuizItem.note_id == note_id))
             await session.commit()
-            logger.info(
-                f"笔记 {note_id} 重新生成题目：已清理旧题 {len(old_quiz_ids)} 道及其复习记录"
-            )
+            logger.info(f"笔记 {note_id} 重新生成题目：已清理旧题 {len(old_quiz_ids)} 道及其复习记录")
 
     # 3. 创建多轮对话会话（所有批次共用同一窗口）
     #
@@ -373,9 +383,7 @@ async def _generate_questions(
     #: 写成 `question_prompt_version or DEFAULT` 而不是再来一次
     #: `prompt_version("question_session")`：后者的语义是"当前默认版"，
     #: 不是"这一次用的版" —— A3′ 的对比实验就差这一个字。
-    effective_question_prompt_version = (
-        question_prompt_version or DEFAULT_QUESTION_PROMPT_VERSION
-    )
+    effective_question_prompt_version = question_prompt_version or DEFAULT_QUESTION_PROMPT_VERSION
     question_session = llm_service.create_question_session(
         question_types=question_types,
         difficulty_mix=difficulty_mix,
@@ -383,7 +391,9 @@ async def _generate_questions(
     )
     logger.info(
         "出题会话: note=%s prompt_version=%s 题型=%s 难度=%s",
-        note_id, effective_question_prompt_version, question_types or "继承默认",
+        note_id,
+        effective_question_prompt_version,
+        question_types or "继承默认",
         difficulty_mix or "继承默认",
     )
 
@@ -392,12 +402,12 @@ async def _generate_questions(
     batch_size = 30  # 每批30个卡片，减少 API 调用次数
 
     for batch_start in range(0, len(cards_data), batch_size):
-        batch = cards_data[batch_start:batch_start + batch_size]
+        batch = cards_data[batch_start : batch_start + batch_size]
         try:
             # 构建本批知识点文本
             cards_text = ""
             for i, card in enumerate(batch):
-                cards_text += f"\n--- 知识点 {i+1} ---\n"
+                cards_text += f"\n--- 知识点 {i + 1} ---\n"
                 cards_text += f"标题：{card['title']}\n"
                 cards_text += f"类型：{card['card_type']}\n"
                 if target_categories:
@@ -426,7 +436,9 @@ async def _generate_questions(
             if validation.issues:
                 logger.warning(
                     "笔记 %s 批次 %d 题目校验: %s",
-                    note_id, batch_start // batch_size + 1, validation.summary(),
+                    note_id,
+                    batch_start // batch_size + 1,
+                    validation.summary(),
                 )
 
             # 存入数据库（使用新会话）
@@ -479,22 +491,19 @@ async def _generate_questions(
 
                 await session.commit()
                 logger.info(
-                    f"笔记 {note_id} 批次 {batch_start//batch_size + 1} "
+                    f"笔记 {note_id} 批次 {batch_start // batch_size + 1} "
                     f"题目生成: {len(validation.valid)} 道 (累计 {total_questions}) "
                     f"(对话轮次={question_session.turn_count})"
                 )
 
         except Exception as e:
             logger.error(
-                f"为笔记 {note_id} 批次 {batch_start//batch_size + 1} 生成题目失败: {e}",
+                f"为笔记 {note_id} 批次 {batch_start // batch_size + 1} 生成题目失败: {e}",
                 exc_info=True,
             )
             continue
 
-    logger.info(
-        f"笔记 {note_id} 题目生成完成: {total_questions} 道题, "
-        f"共 {question_session.turn_count} 轮对话"
-    )
+    logger.info(f"笔记 {note_id} 题目生成完成: {total_questions} 道题, 共 {question_session.turn_count} 轮对话")
 
 
 def _parse_questions_response(response: str) -> list:
@@ -516,9 +525,7 @@ def _parse_questions_response(response: str) -> list:
     # 出题批量输出被 max_tokens 截断时，抢救出已生成完整的题目而非整批丢弃，见 docs/decisions.md#F-33。
     result, info = parse_json_tolerant(response)
     if info.get("status") == "partial":
-        logger.warning(
-            f"题目生成响应 JSON 被截断，已完成部分数据抢救: {info.get('detail', '')}"
-        )
+        logger.warning(f"题目生成响应 JSON 被截断，已完成部分数据抢救: {info.get('detail', '')}")
     elif result is None:
         logger.warning(f"题目生成响应 JSON 解析失败: {response[:200]}")
         return []
@@ -580,10 +587,13 @@ def understand_document_task(self, note_id: str):
                 # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
                 # learning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
                 try:
-                    _run_async(_update_note_status(
-                        note_id, NoteStatus.learning_failed,
-                        error_message=f"理解任务重试失败: {str(exc)}",
-                    ))
+                    _run_async(
+                        _update_note_status(
+                            note_id,
+                            NoteStatus.learning_failed,
+                            error_message=f"理解任务重试失败: {str(exc)}",
+                        )
+                    )
                 except Exception as update_err:
                     logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
                 _mark_task_failed(self, f"理解任务重试失败: {exc}")
@@ -616,9 +626,7 @@ def generate_questions_task(
     """
     try:
         with _task_loop("generate_questions"):
-            _run_async(_generate_questions(
-                note_id, target_categories, target_difficulty, question_prompt_version
-            ))
+            _run_async(_generate_questions(note_id, target_categories, target_difficulty, question_prompt_version))
     except Exception as exc:
         logger.error(f"题目生成任务异常 (note_id={note_id}): {exc}", exc_info=True)
         try:

@@ -32,4 +32,26 @@
 # ⚠️ 升级到 4.x 会**移除** 3.x 的 `mineru.cli.common.do_parse` 等模块；
 #    本项目的集成层已随之改为子进程调用 `mineru-kit parse`
 #    （见 app/services/mineru/converter.py）。
+#
+# ## 2026-11-09：真机装完发现的两处必须补的约束
+#
+# 1. **`huggingface-hub<1.0`**（下面是显式约束）。
+#    `mineru` 声明 `huggingface-hub[hf_xet]>=0.32.4`，pip 会挑最新的 1.33 ——
+#    而 `transformers 4.57.6` 要求 `huggingface-hub<1.0,>=0.34.0`。
+#    冲突方向很致命：**嵌入模型（bge-m3）走 transformers**，装完本地 MinerU
+#    会让语义检索直接坏掉（`import transformers` 就报 version 检查失败）。
+#    实测：`pip install "huggingface-hub>=0.34,<1.0"` 后两边都正常。
+# 2. **`pypdfium2>=5.13,<6`** 已写进 `requirements.txt`（见那里 2026-11-09 的注释）：
+#    `mineru` 与 `docvortex` 都要 `>=5.13.0`，原来的 `~=5.10.1` 会与之打架。
+#
+# 装完后的自检（本机实测通过，Windows / CPU / 无 CUDA）：
+#     mineru-kit --version                     → MinerU 版本: 4.1.7
+#     mineru-kit models verify --tier standard --small-backend onnx --vlm-engine llama-cpp
+#                                              → MinerU-4_models_onnx: 正常
+#                                                MinerU2.5-Pro-2605-1.2B-GGUF: 正常
+#     python -c "from app.services.mineru.model_loader import *; print(local_backend_ready(load_config(None)))"
+#                                              → (True, '')
 mineru>=4.0,<5
+
+# 见上面第 1 条：把 pip 的选择钉在 transformers 允许的区间里
+huggingface-hub>=0.34,<1.0

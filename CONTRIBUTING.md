@@ -176,7 +176,7 @@ APP_ENV=dev JWT_SECRET_KEY=ci-only-dummy-key-not-a-secret python scripts/dump_op
 | Job | 出处 | 性质 |
 |---|---|---|
 | `security-scan`（`pip-audit` + `npm audit`，归档报告） | `ci.yml:340-362` | 建议性，**但"扫描器没跑起来"（退出码 2）是无条件红灯**（`ci.yml:458-459`） |
-| `docker-nginx-config`（部署配置守卫） | `ci.yml:481-529` | 只做文本 `grep` 守卫 |
+| `nginx-config-guard`（原 `docker-nginx-config`，2026-11-07 改名） | `ci.yml:542-573` | 只做文本 `grep` 守卫，现在只守 nginx 的 413/SSE 两条；`.dockerignore` 与 `Dockerfile` 断言已随容器路线否决而删除 |
 
 ---
 

@@ -131,10 +131,12 @@ celery_app.conf.update(
             "task": "app.tasks.reminder_tasks.refresh_goal_progress",
             "schedule": crontab(hour=0, minute=30),
         },
-        # 每日 09:00 发送复习提醒邮件（仅对开启邮件提醒的用户）
+        # 每小时发送复习提醒邮件：具体哪一小时发给谁由 user_settings.email_hour
+        # 决定（没有设置行的用户回落到 EMAIL_REMINDER_HOUR，默认 9 点）。
+        # 任务内部用 last_reminded_at 做当日去重，重复调度不会发第二封。
         "send-daily-review-email": {
             "task": "app.tasks.reminder_tasks.send_daily_review_email",
-            "schedule": crontab(hour=9, minute=0),
+            "schedule": crontab(minute=0),
         },
         # 每 5 分钟自愈一次僵尸任务（阶段 1′ 1.8）
         #
@@ -283,16 +285,26 @@ def _ensure_worker_schema() -> None:
         _task_logger.info("Worker 数据库 schema 校验完成")
     except Exception as exc:  # pragma: no cover - 依赖运行环境
         _task_logger.error(
-            "Worker 数据库 schema 校验失败（任务可能在写入时报 no such table）: "
-            "%s: %s",
-            type(exc).__name__, exc,
+            "Worker 数据库 schema 校验失败（任务可能在写入时报 no such table）: %s: %s",
+            type(exc).__name__,
+            exc,
         )
 
 
 def _task_prerun(task_id, task, *args, **kwargs):
-    """任务开始前：注入任务上下文（tid/task），后续日志自动携带"""
+    """任务开始前：注入任务上下文（tid/task/prid），后续日志自动携带
+
+    `prid`（= 发起这次任务的 HTTP 请求 ID）来自**消息头**，由
+    `tasks/dispatch.py::dispatch` 在派发时写入。老消息（没有该头）读出来是
+    空串，任务照常跑、日志少一个标签，不报错。
+    """
     context.reset_context()
-    context.set_task_context(task_id=task_id, task_name=task.name)
+    headers = getattr(getattr(task, "request", None), "headers", None) or {}
+    context.set_task_context(
+        task_id=task_id,
+        task_name=task.name,
+        parent_request_id=str(headers.get("parent_request_id") or ""),
+    )
     _task_logger.info("任务开始 | task=%s | task_id=%s", task.name, task_id)
 
 
@@ -301,7 +313,9 @@ def _task_postrun(task_id, task, retval, state, *args, **kwargs):
     try:
         _task_logger.info(
             "任务结束 | task=%s | task_id=%s | state=%s | result=%s",
-            task.name, task_id, state,
+            task.name,
+            task_id,
+            state,
             str(retval)[:200] if retval is not None else "-",
         )
     except Exception:
@@ -315,7 +329,10 @@ def _task_failure(task_id, task, einfo, *args, **kwargs):
     exc = einfo.exception if einfo else None
     _task_logger.error(
         "任务失败 | task=%s | task_id=%s | type=%s | detail=%s",
-        task.name, task_id, type(exc).__name__ if exc else "Unknown", exc,
+        task.name,
+        task_id,
+        type(exc).__name__ if exc else "Unknown",
+        exc,
         exc_info=einfo.exc_info if einfo else None,
     )
 

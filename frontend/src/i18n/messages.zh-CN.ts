@@ -121,6 +121,7 @@ const zhCN = {
     graph: '知识图谱',
     qa: '问答',
     questions: '问题集',
+    settings: '设置',
     upload: '上传资料',
     logout: '退出',
     // ---- 可访问名（读屏用；视觉上不可见，但同样是"用户会看到的内容"）----
@@ -181,6 +182,36 @@ const zhCN = {
     sessionExpired: '登录已过期，请重新登录',
     /** 流式响应不可用（`ReadableStream` 缺失，老浏览器） */
     unsupportedStream: '浏览器不支持流式响应',
+
+    /**
+     * 参数校验失败的字段级文案（2026-11-08 补）
+     *
+     * ## 为什么需要
+     *
+     * FastAPI 的 422 `detail` 是数组，元素形如
+     * `{type: "string_too_short", loc: ["body","name"], msg: "String should have at least 1 character"}`。
+     * `readErrorBody()` 原先把 `msg` 直接 join 出来 —— 那是 **Pydantic 的英文**，
+     * 于是中文界面弹出一句英文（实测：建文件夹时名字为空）。
+     *
+     * 做法：按 `type` 查表，用 `ctx` 里的参数插值；**查不到就保留原文**
+     * （宁可英文，也不能把校验原因吞掉）。键名与 Pydantic 的 `type` 一一对应。
+     */
+    validation: {
+      string_too_short: '内容太短（至少 {min_length} 个字符）',
+      string_too_long: '内容太长（最多 {max_length} 个字符）',
+      missing: '缺少必填项',
+      value_error: '取值不合法',
+      int_parsing: '需要一个整数',
+      float_parsing: '需要一个数字',
+      bool_parsing: '需要一个布尔值',
+      string_pattern_mismatch: '格式不符合要求',
+      enum: '取值不在允许范围内',
+      greater_than_equal: '不能小于 {ge}',
+      less_than_equal: '不能大于 {le}',
+      extra_forbidden: '包含不支持的字段',
+      list_type: '需要一个列表',
+      dict_type: '需要是一个对象',
+    },
   },
 
   /**
@@ -664,7 +695,7 @@ const zhCN = {
     errorCount: '错{count}次 | {accuracy}%',
     weeklyTrend: '本周复习趋势',
     accuracyAbove: '正确率 ≥ 60%',
-    accuracyBelow: '正确率 &lt; 60%',
+    accuracyBelow: '正确率 < 60%',
     // ---- 最近笔记 ----
     recentNotes: '最近笔记',
     viewAll: '查看全部',
@@ -673,6 +704,7 @@ const zhCN = {
     upload: '上传资料',
     // ---- 邮件提醒 ----
     emailReminder: '邮件复习提醒',
+    emailReminderMoved: '开关与发送时间已移到「设置 → 提醒」',
     emailReminderHint: '每日通过邮件发送到期复习提醒',
     emailReminderEnableFailed: '开启邮件提醒失败',
     emailReminderDisableFailed: '关闭邮件提醒失败',
@@ -1029,7 +1061,7 @@ const zhCN = {
   /** 智能问答页（`QA`，i18n 阶段 3） */
   qa: {
     title: '智能问答',
-    inputPlaceholder: '输入你的问题，AI 将基于你的笔记内容回答...',
+    inputPlaceholder: '输入你的问题…',
     stop: '停止生成',
     ask: '提问',
     empty: '输入问题开始问答',
@@ -1541,6 +1573,8 @@ const zhCN = {
     taskCancelFailedWithReason: '取消失败：{reason}',
     selfRatingSubmitFailed: '自评提交失败',
     mastery: '掌握度 {percent}%',
+    /** 插图加载失败时的占位提示（2026-11-09：markdown 里的相对图片引用） */
+    imageLoadFailed: '图片加载失败',
   },
 
   /**
@@ -1589,6 +1623,140 @@ const zhCN = {
      * 还是**被限额挡住了**。
      */
     quotaRemaining: '今日还可结算 {remaining} 道（上限 {limit}）',
+  },
+
+  /** 设置页（PC） */
+  settings: {
+    title: '设置',
+    subtitle: '管理学习节奏、提醒与界面偏好。改动即时保存。',
+    navLabel: '设置分组',
+    loading: '正在加载设置…',
+    loadFailed: '设置加载失败。',
+    readFailed: '读取失败，请重试。',
+    retry: '重试',
+    saveFailed: '保存失败，已恢复原值',
+    saved: '已保存',
+    saving: '保存中…',
+    footer: '设置只影响当前账号与当前设备。',
+    version: '版本 {version}',
+    nav: {
+      study: '学习节奏',
+      reminders: '提醒',
+      content: '内容与生成',
+      appearance: '外观与语言',
+      account: '账号与安全',
+      data: '数据与关于',
+    },
+    study: {
+      title: '学习节奏',
+      desc: '这些设置会影响排期与每日工作量。',
+      daily: '每日复习上限',
+      dailyHint: '每天最多结算多少道题。用完后仍可回看已答过的题。',
+      unit: '道 / 天',
+      invalidLimit: '请输入 5–100 之间的整数',
+      usage: '今日额度',
+      usageHint: '只读；跟着每日上限与今日结算数变化。',
+      usageValue: '已结算 {done} / {limit} 道 · 还剩 {remaining} 道',
+      advanced: '高级：排期参数',
+      retention: '目标留存率',
+      retentionHint: '越高越牢，但复习会更频繁。只影响下一次排期，不重排已有卡片。',
+      maxInterval: '最长间隔',
+      maxIntervalHint: '两次复习之间最多隔多久。',
+      years: '{years} 年',
+      deploymentValue: '部署默认（{value}）',
+    },
+    reminders: {
+      title: '提醒',
+      desc: '邮件与桌面通知是两条独立通道。',
+      email: '邮件提醒',
+      emailHint: '每天一封，只在你开启且有到期题目时发送。',
+      emailUnavailable: '邮件通道尚未配置，当前无法发送。',
+      emailTime: '发送时间',
+      emailTimeHint: '按北京时间。每小时检查一次，到点发送。',
+      desktop: '桌面通知',
+      desktopHint: '本地开关只控制是否弹窗；浏览器权限需单独授予。',
+      permission: '浏览器通知权限',
+      permission_unsupported: '当前浏览器不支持桌面通知。',
+      permission_default: '尚未授权。点「请求权限」让浏览器弹出授权框。',
+      permission_granted: '已授权，可以接收桌面通知。',
+      permission_denied: '权限被拒绝。需要在浏览器地址栏的站点设置里重新允许。',
+      requestPermission: '请求权限',
+      testNotification: '测试通知',
+      permissionGranted: '通知权限已授予',
+      permissionDenied: '未获得通知权限',
+      testTitle: 'EngramNote 测试通知',
+      testBody: '如果你看到这条消息，桌面通知通道是通的。',
+      quiet: '免打扰时段',
+      quietHint: '这段时间不弹桌面通知。',
+      quietStart: '免打扰开始时间',
+      quietEnd: '免打扰结束时间',
+      to: '至',
+    },
+    content: {
+      title: '内容与生成',
+      desc: '控制 AI 生成语言、卡片数量与清洗规则。',
+      outputLocale: 'AI 输出语言',
+      outputLocaleHint: '只影响新生成的内容；已有卡片不会被改写。',
+      localeFollow: '跟随界面',
+      localeZh: '中文',
+      localeEn: 'English',
+      cardCap: '单次生成卡片上限',
+      cardCapHint: '一次理解最多新增多少张卡。范围 50–1000，防止一次灌入太多。',
+      cards: '张 / 次',
+      invalidCardCap: '请输入 50–1000 之间的整数',
+      cleanFormula: '简化公式',
+      cleanFormulaHint: '把行内公式里的多余空格/符号压紧。只影响下一次清洗。',
+      cleanSpacing: '规范化空格',
+      cleanSpacingHint: '压缩数字与字母前后的多余空格。只影响下一次清洗。',
+      cleanHeadings: '规范化标题层级',
+      cleanHeadingsHint: '修正跳级的 Markdown 标题。只影响下一次清洗。',
+    },
+    appearance: {
+      title: '外观与语言',
+      desc: '这些偏好只保存在当前设备。',
+      language: '界面语言',
+      languageHint: '切换后立即生效，并同步给 AI 生成使用。',
+      font: '字号',
+      fontHint: '调整整个界面的根字号。',
+      font_sm: '小',
+      font_md: '标准',
+      font_lg: '大',
+      reduceMotion: '减少动效',
+      reduceMotionHint: '关闭过渡与动画。',
+      adhd: 'ADHD Reader 默认开启',
+      adhdHint: '打开笔记时自动进入专注阅读。',
+      sidebar: '记住侧栏折叠状态',
+      sidebarHint: '刷新后保持收起/展开。',
+    },
+    account: {
+      title: '账号与安全',
+      desc: '账号信息与登录会话。',
+      email: '邮箱',
+      username: '用户名',
+      sessions: '登录设备',
+      sessionsHint: '在其它设备上退出登录。',
+      logoutAll: '退出所有设备',
+      logoutAllConfirm: '退出所有设备？',
+      logoutAllHint: '这会撤销所有刷新令牌，包括当前设备。你需要重新登录。',
+    },
+    data: {
+      title: '数据与关于',
+      desc: '导出、用量与版本。',
+      storage: '存储用量',
+      storageHint: '与上传前的配额校验同一口径。',
+      loading: '读取中…',
+      llm: 'AI 用量（30 天）',
+      llmHint: '只读；按当前账号统计 token 与调用次数。',
+      llmValue: '{tokens} tokens · {calls} 次调用',
+      priceUnavailable: '未配置单价',
+      export: '导出全部笔记',
+      exportHint: '打包为 ZIP，最多 200 篇。',
+      exportAction: '导出',
+      exporting: '导出中…',
+      exportDone: '导出已开始',
+      exportFailed: '导出失败',
+      version: '版本',
+    },
   },
 };
 

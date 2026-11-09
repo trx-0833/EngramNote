@@ -209,13 +209,23 @@ export default function Sidebar({
           ))}
         </div>
 
-        {/* 底部：语言切换 + 退出 */}
+        {/* 底部：设置 + 语言切换 + 退出 */}
         <div className={styles.sidebarFooter}>
+          <button
+            className={`${styles.sidebarItem} ${isActive('/settings') ? styles.sidebarItemActive : ''}`}
+            onClick={() => handleNav('/settings')}
+          >
+            <span className={styles.sidebarItemIcon}>
+              <Icon name="settings" size={20} />
+            </span>
+            <span className={styles.sidebarItemLabel}>{t('nav.settings')}</span>
+          </button>
+
           {/* 语言切换（i18n 阶段 0）。
               ## 为什么放在这里
-              侧边栏底部是全站唯一"属于当前用户、与页面内容无关"的位置，
-              语言偏好正是这种设置。没有独立的设置页（全仓没有 Setting/Profile 页），
-              为它新开一页不划算。
+              侧边栏底部是全站唯一"属于当前用户、与页面内容无关"的位置。
+              设置页也有语言入口；这里保留它是高频快捷方式，两者调同一个
+              `setLocale`，不存在两份状态。
               ## 为什么用 `.segment-control` / `.segment-btn`
               这两个是**既有全局类**（`styles/learning.css:61`），
               视图切换与学习评估页在用 —— 复用它们等于"语言切换"与

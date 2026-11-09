@@ -137,6 +137,10 @@ describe('仪表盘：无活跃目标不算加载失败（走查报告 §4）', 
     await screen.findByText('欢迎使用 EngramNote');
 
     expect(screen.queryByText(PARTIAL_FAILURE)).toBeNull();
+    expect(screen.getByRole('link', { name: /邮件复习提醒/ })).toHaveAttribute(
+      'href',
+      '/settings#reminders',
+    );
   });
 
   it('★ 反向：其它错误码 → 仍然要报「部分数据加载失败」', async () => {

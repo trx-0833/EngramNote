@@ -1336,6 +1336,12 @@ F-20 / F-31）。也就是说：**新增的 10 个页面一个违规都没留下
 - `.noteListItem`（`NotesList.module.css`）与 `.dashboardReviewCard`
   （`Dashboard.module.css`）上的 `cursor: pointer`：**F-17/F-09 那两次修复留下的残迹**
   —— 卡片已经不是可点区域了，鼠标却还是手型。已删除。
+  > **2026-11-06 更新**：`.noteListItem` 的 `cursor: pointer` **加回来了**，
+  > 但方向相反 —— 这一次卡片**真的**整卡可点：标题 `<Link>` 的 `::after`
+  > 铺满整张卡（拉伸链接），右箭头常驻。F-37 的判据是"手型区域里必须有一个
+  > 可 Tab 的控件"，这个区域里有那个真链接，所以扫描照旧通过
+  > （`npm run a11y -- -g 笔记列表` 实测全绿）。这条**不是**给"装饰性手型"
+  > 开口子：哪天标题链接改回 `span`，扫描会立刻报出来。
 - `.graphLegendItem`（`Graph.module.css`）：这个类**两处共用**，
   工具栏那张卡片类型图例是**不可点**的说明，却因为类里写着 `cursor: pointer`
   而显示手型。已把 `cursor: pointer` 从类里去掉（可点的那一处现在是 `<button>`，

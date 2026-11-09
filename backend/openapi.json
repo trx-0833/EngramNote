@@ -1,6 +1,42 @@
 {
   "components": {
     "schemas": {
+      "AboutSettings": {
+        "properties": {
+          "app_env": {
+            "title": "App Env",
+            "type": "string"
+          },
+          "app_version": {
+            "title": "App Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_version",
+          "app_env"
+        ],
+        "title": "AboutSettings",
+        "type": "object"
+      },
+      "AccountSettings": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "username"
+        ],
+        "title": "AccountSettings",
+        "type": "object"
+      },
       "AnnotationCreateRequest": {
         "properties": {
           "color": {
@@ -1612,6 +1648,115 @@
           "relation_id"
         ],
         "title": "ConfirmRelationRequest",
+        "type": "object"
+      },
+      "ContentSettings": {
+        "properties": {
+          "card_max_new_per_run": {
+            "maximum": 1000.0,
+            "minimum": 50.0,
+            "title": "Card Max New Per Run",
+            "type": "integer"
+          },
+          "clean_normalize_heading_levels": {
+            "title": "Clean Normalize Heading Levels",
+            "type": "boolean"
+          },
+          "clean_normalize_spacing": {
+            "title": "Clean Normalize Spacing",
+            "type": "boolean"
+          },
+          "clean_simplify_formula": {
+            "title": "Clean Simplify Formula",
+            "type": "boolean"
+          },
+          "output_locale": {
+            "enum": [
+              "follow",
+              "zh-CN",
+              "en"
+            ],
+            "title": "Output Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_locale",
+          "card_max_new_per_run",
+          "clean_simplify_formula",
+          "clean_normalize_spacing",
+          "clean_normalize_heading_levels"
+        ],
+        "title": "ContentSettings",
+        "type": "object"
+      },
+      "ContentSettingsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "card_max_new_per_run": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 50.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Max New Per Run"
+          },
+          "clean_normalize_heading_levels": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Normalize Heading Levels"
+          },
+          "clean_normalize_spacing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Normalize Spacing"
+          },
+          "clean_simplify_formula": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Simplify Formula"
+          },
+          "output_locale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "follow",
+                  "zh-CN",
+                  "en"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Locale"
+          }
+        },
+        "title": "ContentSettingsPatch",
         "type": "object"
       },
       "ContentSourceInfo": {
@@ -3702,6 +3847,17 @@
       "NoteDetailResponse": {
         "description": "笔记详情 — 包含 Markdown 内容",
         "properties": {
+          "assets_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets Token"
+          },
           "clean_md_content": {
             "anyOf": [
               {
@@ -5746,6 +5902,62 @@
         "title": "ReminderResponse",
         "type": "object"
       },
+      "ReminderSettings": {
+        "properties": {
+          "email_configured": {
+            "title": "Email Configured",
+            "type": "boolean"
+          },
+          "email_enabled": {
+            "title": "Email Enabled",
+            "type": "boolean"
+          },
+          "email_hour": {
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Email Hour",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "email_enabled",
+          "email_hour",
+          "email_configured"
+        ],
+        "title": "ReminderSettings",
+        "type": "object"
+      },
+      "ReminderSettingsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "email_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Enabled"
+          },
+          "email_hour": {
+            "anyOf": [
+              {
+                "maximum": 23.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Hour"
+          }
+        },
+        "title": "ReminderSettingsPatch",
+        "type": "object"
+      },
       "RestoreResponse": {
         "description": "恢复结果：恢复后的笔记 + 同名冲突改名提示（无冲突为 None）",
         "properties": {
@@ -6229,6 +6441,90 @@
         "title": "SemanticRelationsResponse",
         "type": "object"
       },
+      "SettingsPatch": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/settings`：每段可选，段内字段也可选\n\n`extra=\"forbid\"` 是刻意的：拼错字段名必须 422，而不是静默忽略后\n让用户以为保存成功（典型例子：把 `daily_review_limit` 写成\n`daily_limit`）。",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentSettingsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reminders": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReminderSettingsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "study": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudySettingsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SettingsPatch",
+        "type": "object"
+      },
+      "SettingsResponse": {
+        "description": "`GET/PATCH /api/settings` 的完整响应",
+        "properties": {
+          "about": {
+            "$ref": "#/components/schemas/AboutSettings"
+          },
+          "account": {
+            "$ref": "#/components/schemas/AccountSettings"
+          },
+          "content": {
+            "$ref": "#/components/schemas/ContentSettings"
+          },
+          "locale": {
+            "title": "Locale",
+            "type": "string"
+          },
+          "reminders": {
+            "$ref": "#/components/schemas/ReminderSettings"
+          },
+          "study": {
+            "$ref": "#/components/schemas/StudySettings"
+          }
+        },
+        "required": [
+          "locale",
+          "study",
+          "reminders",
+          "content",
+          "account",
+          "about"
+        ],
+        "title": "SettingsResponse",
+        "type": "object"
+      },
+      "SettingsUsageResponse": {
+        "properties": {
+          "storage": {
+            "$ref": "#/components/schemas/StorageUsage"
+          }
+        },
+        "required": [
+          "storage"
+        ],
+        "title": "SettingsUsageResponse",
+        "type": "object"
+      },
       "SourceType": {
         "description": "文档来源类型枚举\n\n标识上传文件的类型，决定后续的转换处理方式：\n- PDF/图片/Office 文档 → 调用 Mineru 转换为 Markdown\n- 音视频 → 调用 ASR 引擎转写为文本",
         "enum": [
@@ -6243,6 +6539,108 @@
         ],
         "title": "SourceType",
         "type": "string"
+      },
+      "StorageUsage": {
+        "properties": {
+          "quota_bytes": {
+            "minimum": 0.0,
+            "title": "Quota Bytes",
+            "type": "integer"
+          },
+          "used_bytes": {
+            "minimum": 0.0,
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_bytes",
+          "quota_bytes"
+        ],
+        "title": "StorageUsage",
+        "type": "object"
+      },
+      "StudySettings": {
+        "properties": {
+          "daily_review_limit": {
+            "maximum": 100.0,
+            "minimum": 5.0,
+            "title": "Daily Review Limit",
+            "type": "integer"
+          },
+          "desired_retention": {
+            "maximum": 0.98,
+            "minimum": 0.7,
+            "title": "Desired Retention",
+            "type": "number"
+          },
+          "max_interval_days": {
+            "maximum": 3650.0,
+            "minimum": 365.0,
+            "title": "Max Interval Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "daily_review_limit",
+          "desired_retention",
+          "max_interval_days"
+        ],
+        "title": "StudySettings",
+        "type": "object"
+      },
+      "StudySettingsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "daily_review_limit": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Review Limit"
+          },
+          "desired_retention": {
+            "anyOf": [
+              {
+                "enum": [
+                  0.8,
+                  0.85,
+                  0.9,
+                  0.95
+                ],
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desired Retention"
+          },
+          "max_interval_days": {
+            "anyOf": [
+              {
+                "enum": [
+                  365,
+                  1825,
+                  3650
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Interval Days"
+          }
+        },
+        "title": "StudySettingsPatch",
+        "type": "object"
       },
       "SubmitAnswerRequest": {
         "description": "提交答案请求",
@@ -10581,6 +10979,71 @@
         "summary": "Ask Note Stream"
       }
     },
+    "/api/notes/{note_id}/assets/{asset_path}": {
+      "get": {
+        "description": "返回笔记 markdown 里相对引用指向的插图\n\n## 两条鉴权路径（必须都留）\n\n1. **签名令牌**（`?t=…`）：浏览器渲染 `<img src>` 时**不会**带\n   `Authorization` 头（前端 JWT 在 localStorage、由 `fetch` 手工加），\n   所以图片必须能靠 URL 里的短期签名访问。令牌由 `GET /api/notes/{id}`\n   随详情下发（`assets_token`），按笔记签名、2 小时过期。\n2. **Bearer 头**：API 客户端 / curl / e2e 继续按老办法访问，否则\n   \"用脚本取图\"这条路会被新机制堵死。\n\n没有任何凭证 → 401（与全站一致）；凭证有效但笔记不属于你 → **404**\n（403 会泄漏\"这个 id 存在\"）。\n\nRaises:\n    AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）\n    AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）\n    AppError: 对象不存在（ASSET_NOT_FOUND → 404）",
+        "operationId": "get_note_asset_api_notes__note_id__assets__asset_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_path",
+            "required": true,
+            "schema": {
+              "title": "Asset Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "按笔记签名的短期访问令牌（见 assets_token）",
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按笔记签名的短期访问令牌（见 assets_token）",
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "读取笔记内的插图"
+      }
+    },
     "/api/notes/{note_id}/content": {
       "put": {
         "description": "更新笔记的 Markdown 内容\n\n将用户编辑的 Markdown 内容保存到对象存储，覆盖原有文件。\n处理中状态（uploading/converting/cleaning/learning）的笔记不可编辑。",
@@ -12209,6 +12672,105 @@
         "summary": "Submit Answer",
         "tags": [
           "复习"
+        ]
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "description": "读取当前用户的完整设置快照（不写库）",
+        "operationId": "get_settings_snapshot_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Settings Snapshot",
+        "tags": [
+          "设置"
+        ]
+      },
+      "patch": {
+        "description": "部分更新设置；只提交显式给出的字段\n\n- `study.daily_review_limit` / `desired_retention` / `max_interval_days`\n- `reminders.email_enabled` 写入 `users.email_reminder_enabled`\n- `reminders.email_hour`\n- `content.*`（输出语言、卡片上限、三条清洗开关）",
+        "operationId": "patch_settings_api_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Settings",
+        "tags": [
+          "设置"
+        ]
+      }
+    },
+    "/api/settings/usage": {
+      "get": {
+        "description": "存储用量（与上传前的配额校验同一口径：`SUM(Note.file_size)`）",
+        "operationId": "get_settings_usage_api_settings_usage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsUsageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Settings Usage",
+        "tags": [
+          "设置"
         ]
       }
     },

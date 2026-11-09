@@ -36,12 +36,12 @@
 #    归到可选清单会让全新环境在 PDF 路径上直接 ModuleNotFoundError。
 
 # ---- Web / ORM / 配置 ----
-fastapi~=0.141.1
+fastapi~=0.162.2
 uvicorn[standard]~=0.52.4
-sqlalchemy[asyncio]~=2.0.52
+sqlalchemy[asyncio]~=2.1.8
 aiosqlite~=0.22.1
-pydantic~=2.13.5
-pydantic-settings~=2.15.0
+pydantic~=2.14.3
+pydantic-settings~=2.16.2
 email-validator~=2.3.0
 python-multipart~=0.0.32
 
@@ -71,7 +71,14 @@ sentence-transformers~=3.0.1
 # chromadb 已移除（阶段 2.4 收尾）：向量改存 chunks 表，词法检索改用 FTS5
 
 # ---- PDF 路径的模块级硬依赖（见文件头说明）----
-pypdfium2~=5.14.0
+# ⚠️ 2026-11-09：从 `~=5.10.1` 放宽到 `>=5.13,<6`。
+#    `mineru>=4.0` 与它的 `docvortex` 都要求 `pypdfium2<6,>=5.13.0`，
+#    而 `~=5.10.1` 只允许 5.10.x —— 装完本地 MinerU 立刻与基础清单冲突，
+#    下一次 `pip install -r requirements.txt` 会把 pypdfium2 降回去，
+#    4.x 的 PDF 解析随即失效（实测：`mineru-kit parse` 直接报依赖不满足）。
+#    本项目的代码对 5.10~5.15 的 API 无差异用法（只用到 `PdfDocument`/`render`），
+#    所以放宽是安全的；`<6` 保留主版本保护。
+pypdfium2>=5.13,<6
 Pillow~=12.3.0
 # ⚠️ 2026-10-21 修正分类：`pyyaml` 此前被归为"仅 MinerU 本地解析模式需要"，
 #    实际 `app/services/mineru/config_loader.py:14` 是**模块顶层无条件 import yaml**，
@@ -91,3 +98,17 @@ alembic~=1.19.2
 # ---- 音视频转写（轻量部分；torch/qwen-asr 见 requirements-asr.txt）----
 openai~=2.54.0
 soundfile~=0.14.0
+
+# ---- Windows：文件 broker 的硬依赖（2026-11-08 补）----
+# `kombu.transport.filesystem` 在 Windows 上 **模块顶层** `import pywintypes`，
+# 缺它时 `celery worker` 直接起不来（不是告警，是 traceback 退出）：
+#     File "…/kombu/transport/filesystem.py", line 115, in <module>
+#       import pywintypes
+#     ModuleNotFoundError: No module named 'pywintypes'
+# 而本项目的队列就是 filesystem broker（docs/sqlite-single-writer.md / start.bat），
+# 所以这不是可选件：全新 Windows 环境按 requirements.txt 装完照样起不了 worker。
+# 真机实测（2026-11-08，conda env aiforlearn）：装上 pywin32 后 worker 立刻可用，
+# 之前所有异步任务（MinerU 转换 / 清洗 / 理解 / ASR）都跑不起来。
+# ⚠️ 标记用**单引号**：`pyproject.toml` 那边是双引号字符串，
+# `test_packaging_metadata` 逐字比两份清单的约束串，引号风格不同会判红。
+pywin32>=306; sys_platform == 'win32'
