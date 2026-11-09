@@ -575,35 +575,7 @@ def _process_with_mineru(
             success=False,
         )
 
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            names = zf.namelist()
-            md_name = next((n for n in names if n.endswith("markdown.md")), None)
-            middle_name = next((n for n in names if n.endswith("middle_json.json")), None)
-            if md_name:
-                (output_dir / f"{file_stem}.md").write_bytes(zf.read(md_name))
-            if middle_name:
-                (output_dir / "layout.json").write_bytes(zf.read(middle_name))
-            # 插图也要取出来（2026-11-09）：markdown 里对图写的是
-            # `![](images/{sha}.jpg)`，而这里原先只挑 md + layout ——
-            # 图连落盘都没有，页面上自然只剩 alt 文本。
-            # 只取 `images/` 下的白名单图片；路径穿越由 `_safe_extract_zip`
-            # 的同类判据把住（这里额外挡 `..` 与绝对路径）。
-            for member_name in names:
-                lowered = member_name.lower()
-                if "/images/" not in lowered and not lowered.startswith("images/"):
-                    continue
-                if PurePosixPath(member_name).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-                    continue
-                relative = PurePosixPath(member_name)
-                if relative.is_absolute() or ".." in relative.parts:
-                    logger.warning("跳过不安全的图片条目: %s", member_name)
-                    continue
-                target = output_dir.joinpath(*relative.parts)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(zf.read(member_name))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("解压 MinerU 产物失败: %s", e)
+    _extract_local_zip_artifacts(zip_path, output_dir, file_stem)
 
     # 保底：3.x 时代用 `output_dir.rglob(...)` 找产物，这里沿用同样的收集方式
     md_content = ""
@@ -963,8 +935,55 @@ def is_ocr_needed(backend: str) -> bool:
     return backend == "pipeline"
 
 
+def _extract_local_zip_artifacts(zip_path: Path, output_dir: Path, file_stem: str) -> None:
+    """把本地 `mineru-kit parse --format zip` 的产物解出来：markdown + layout + **插图**
+
+    ## 为什么单独抽成函数（2026-11-09）
+
+    原先是 `_process_with_mineru()` 里的一段内联循环，有两个毛病：
+
+    1. **只挑 `markdown.md` 与 `middle_json.json`** —— 插图 `images/*.jpg` 连落盘
+       都没有，页面上自然只剩 alt 文本（云端路径是整包解开的，所以只有本地路径坏）；
+    2. 内联在子进程调用之后，测试必须真的跑一次 MinerU 才能覆盖到它 ——
+       而那需要 GB 级模型，CI 里跑不了。
+
+    抽出来之后 `tests/test_mineru_local_zip.py` 可以用一个**手工构造的 zip**
+    验证：md / layout / 插图都落地、`images/` 之外的图片不落地、
+    `..` 与绝对路径被拒。
+
+    Args:
+        zip_path: `mineru-kit parse -o` 产出的 zip
+        output_dir: 解压目标目录（调用方随后用 `rglob` 找 md/图片）
+        file_stem: 输入文件主干，用来给 markdown 命名（`{file_stem}.md`）
+    """
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            md_name = next((n for n in names if n.endswith("markdown.md")), None)
+            middle_name = next((n for n in names if n.endswith("middle_json.json")), None)
+            if md_name:
+                (output_dir / f"{file_stem}.md").write_bytes(zf.read(md_name))
+            if middle_name:
+                (output_dir / "layout.json").write_bytes(zf.read(middle_name))
+
+            for member_name in names:
+                lowered = member_name.lower()
+                if "/images/" not in lowered and not lowered.startswith("images/"):
+                    continue
+                relative = PurePosixPath(member_name)
+                if relative.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+                    continue
+                if relative.is_absolute() or ".." in relative.parts:
+                    logger.warning("跳过不安全的图片条目: %s", member_name)
+                    continue
+                target = output_dir.joinpath(*relative.parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(member_name))
+    except Exception as e:  # noqa: BLE001 - 解压失败不阻断：随后 rglob 会报"没有产物"
+        logger.warning("解压 MinerU 产物失败: %s", e)
+
+
 def _safe_extract_zip(zip_path: Path, output_dir: Path) -> None:
-    """安全解压 ZIP 文件（防止路径遍历攻击）"""
     import zipfile
     from pathlib import PurePosixPath
 
