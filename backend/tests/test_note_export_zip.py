@@ -56,14 +56,20 @@ async def _seed_notes(test_db, specs):
         session.add(User(id="u1", email="a@x.c", username="a", hashed_password="x"))
         await session.flush()
         for nid, title, clean_path, original_path in specs:
-            session.add(Note(
-                id=nid, user_id="u1", title=title, source_type=SourceType.pdf,
-                status=NoteStatus.cleaned, file_size=1,
-                original_file_path=f"/u1/{nid}.pdf",
-                original_md_path=original_path,
-                clean_md_path=clean_path,
-                page_count=10,
-            ))
+            session.add(
+                Note(
+                    id=nid,
+                    user_id="u1",
+                    title=title,
+                    source_type=SourceType.pdf,
+                    status=NoteStatus.cleaned,
+                    file_size=1,
+                    original_file_path=f"/u1/{nid}.pdf",
+                    original_md_path=original_path,
+                    clean_md_path=clean_path,
+                    page_count=10,
+                )
+            )
         await session.commit()
 
 
@@ -109,22 +115,30 @@ class TestRouteOrder:
         声明在 `/{note_id}` 之后，这个 URL 会被当成 `note_id="export"` 的详情
         请求，返回 404。而 404 的文案是"笔记不存在" —— 看起来完全不像路由问题。
         """
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/export", headers=_auth("u1"))
 
-        assert resp.status_code == 200, (
-            f"批量导出端点被 /{{note_id}} 抢走了：{resp.status_code} {resp.text[:200]}"
-        )
+        assert resp.status_code == 200, f"批量导出端点被 /{{note_id}} 抢走了：{resp.status_code} {resp.text[:200]}"
         assert resp.headers["content-type"] == "application/zip"
 
     def test_single_note_export_still_works(self, test_db, stub_content):
         """反向：单篇导出没被新路由影响"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/n-a/export", headers=_auth("u1"))
 
@@ -135,10 +149,15 @@ class TestRouteOrder:
 class TestZipContent:
     def test_zip_contains_index_and_one_file_per_note(self, test_db, stub_content):
         """★ 验收判据：ZIP 里有 index.md + 每篇一个 .md"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "B 笔记", "/u1/b.clean.md", "/u1/b.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "B 笔记", "/u1/b.clean.md", "/u1/b.md"),
+                ],
+            )
+        )
 
         zf = _zip_of(_client().get("/api/notes/export", headers=_auth("u1")))
         names = zf.namelist()
@@ -155,9 +174,14 @@ class TestZipContent:
         两边不一致时用户会得到两种格式的"同一篇笔记"，而那是最容易让人
         怀疑"导出的到底是哪一份"的形态。
         """
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         client = _client()
         single = client.get("/api/notes/n-a/export", headers=_auth("u1")).text
@@ -169,9 +193,14 @@ class TestZipContent:
         assert body_batch == body_single, "同一篇笔记在两条路径下的正文不一致"
 
     def test_index_lists_the_files_and_the_variant(self, test_db, stub_content):
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         zf = _zip_of(_client().get("/api/notes/export", headers=_auth("u1")))
         index = zf.read("index.md").decode("utf-8")
@@ -181,13 +210,16 @@ class TestZipContent:
         assert "clean" in index
 
     def test_variant_original_is_honoured(self, test_db, stub_content):
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
-
-        zf = _zip_of(
-            _client().get("/api/notes/export?variant=original", headers=_auth("u1"))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
         )
+
+        zf = _zip_of(_client().get("/api/notes/export?variant=original", headers=_auth("u1")))
         body = zf.read("A 笔记.md").decode("utf-8")
 
         assert "原始正文" in body
@@ -203,11 +235,16 @@ class TestFilenameDedup:
         真库实测：`标准适用范围` 出现 **9 次**。若不去重，用户导出 9 篇、
         解压后只剩 1 篇 —— 而**全程没有任何提示**。
         """
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "同名笔记", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "同名笔记", "/u1/b.clean.md", "/u1/b.md"),
-            ("n-c", "同名笔记", "/u1/c.clean.md", "/u1/c.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "同名笔记", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "同名笔记", "/u1/b.clean.md", "/u1/b.md"),
+                    ("n-c", "同名笔记", "/u1/c.clean.md", "/u1/c.md"),
+                ],
+            )
+        )
 
         zf = _zip_of(_client().get("/api/notes/export", headers=_auth("u1")))
         names = [n for n in zf.namelist() if n != "index.md"]
@@ -220,10 +257,15 @@ class TestFilenameDedup:
 
     def test_dedup_is_deterministic(self, test_db, stub_content):
         """同样输入两次导出，文件名一致（顺序取决于查询顺序，必须稳定）"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "同名", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "同名", "/u1/b.clean.md", "/u1/b.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "同名", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "同名", "/u1/b.clean.md", "/u1/b.md"),
+                ],
+            )
+        )
 
         client = _client()
         first = sorted(_zip_of(client.get("/api/notes/export", headers=_auth("u1"))).namelist())
@@ -232,17 +274,20 @@ class TestFilenameDedup:
 
 
 class TestSkipAndLimits:
-    def test_note_without_the_requested_version_is_skipped_not_fatal(
-        self, test_db, stub_content
-    ):
+    def test_note_without_the_requested_version_is_skipped_not_fatal(self, test_db, stub_content):
         """★ 一篇没有清洗版 ⇒ **跳过它**，其余照常导出
 
         反过来（整包失败）会让用户在一堆笔记里逐个试错是哪篇的问题。
         """
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "B 笔记", None, "/u1/b.md"),  # 没有清洗版
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "B 笔记", None, "/u1/b.md"),  # 没有清洗版
+                ],
+            )
+        )
 
         zf = _zip_of(_client().get("/api/notes/export", headers=_auth("u1")))
         names = zf.namelist()
@@ -255,10 +300,15 @@ class TestSkipAndLimits:
 
         静默跳过比失败更糟 —— 用户以为"我的库就这么多"。
         """
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "B 笔记", None, "/u1/b.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "B 笔记", None, "/u1/b.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/export", headers=_auth("u1"))
         assert resp.headers.get("X-Export-Skipped") == "1", resp.headers
@@ -269,9 +319,14 @@ class TestSkipAndLimits:
 
     def test_nothing_exportable_returns_400(self, test_db, stub_content):
         """一篇都没有该版本 ⇒ 400（而不是给一个只有 index.md 的空包）"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", None, "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", None, "/u1/a.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/export", headers=_auth("u1"))
 
@@ -280,14 +335,17 @@ class TestSkipAndLimits:
 
     def test_explicit_ids_only_export_those(self, test_db, stub_content):
         """传 `ids` ⇒ 只导这几篇"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-            ("n-b", "B 笔记", "/u1/b.clean.md", "/u1/b.md"),
-        ]))
-
-        zf = _zip_of(
-            _client().get("/api/notes/export?ids=n-a", headers=_auth("u1"))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                    ("n-b", "B 笔记", "/u1/b.clean.md", "/u1/b.md"),
+                ],
+            )
         )
+
+        zf = _zip_of(_client().get("/api/notes/export?ids=n-a", headers=_auth("u1")))
         names = zf.namelist()
         assert "A 笔记.md" in names
         assert "B 笔记.md" not in names
@@ -296,9 +354,14 @@ class TestSkipAndLimits:
         """★ 归属校验：别人的 id 传进来也不会导出（跳过，不泄露内容）"""
         from app.models.user import User
 
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         async def _add_other():
             async with test_db() as session:
@@ -318,15 +381,18 @@ class TestSkipAndLimits:
 
         from app.models.note import Note
 
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         async def _trash():
             async with test_db() as session:
-                note = (await session.execute(
-                    select(Note).where(Note.id == "n-a")
-                )).scalar_one()
+                note = (await session.execute(select(Note).where(Note.id == "n-a"))).scalar_one()
                 note.trashed_at = datetime.now(UTC)
                 await session.commit()
 
@@ -346,9 +412,14 @@ class TestDownloadFilename:
     """
 
     def test_content_disposition_names_a_zip_file(self, test_db, stub_content):
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/export", headers=_auth("u1"))
         cd = resp.headers["content-disposition"]
@@ -361,9 +432,14 @@ class TestDownloadFilename:
 
     def test_single_note_export_keeps_md_extension(self, test_db, stub_content):
         """反向判据：单篇导出仍是 `.md`（不能为了修 ZIP 把这条改坏）"""
-        asyncio.run(_seed_notes(test_db, [
-            ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
-        ]))
+        asyncio.run(
+            _seed_notes(
+                test_db,
+                [
+                    ("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md"),
+                ],
+            )
+        )
 
         resp = _client().get("/api/notes/n-a/export", headers=_auth("u1"))
 
@@ -422,3 +498,47 @@ class TestZipHelpers:
         name = unique_zip_filename("", used, fallback_id=nid)
         assert name.endswith(".md")
         assert nid in name
+
+
+class TestAssetsInZip:
+    """★ 插图随包导出（2026-11-09）
+
+    ZIP 里每篇笔记是一个平铺文件，而图落在 `assets/{base}/images/…`。
+    不重写正文里的相对引用，解压后那张图就指向包外 —— 用户拿到的是
+    "看着有图、打开是空白"的导出包。
+    """
+
+    def test_assets_are_included_and_refs_rewritten(self, test_db, monkeypatch):
+        from app.api.notes import list_detail
+        from app.services import note_assets, vault_path
+        from app.services.storage_service import upload_bytes
+
+        asyncio.run(_seed_notes(test_db, [("n-a", "A 笔记", "/u1/a.clean.md", "/u1/a.md")]))
+
+        # 图：写在 vault 的 `u1/inbox/output/assets/n-a/images/…`
+        prefix = vault_path.inbox_prefix("u1")
+        upload_bytes(
+            note_assets._markdown_bucket(),
+            vault_path.assets_object(prefix, "n-a", "images/fig-1.jpg"),
+            b"\xff\xd8\xff\xe0JPEGDATA",
+            content_type="image/jpeg",
+        )
+
+        async def _fake_content(_note):
+            return "# A\n\n前文。\n\n![](images/fig-1.jpg)\n\n图注。\n"
+
+        async def _fake_original(_note):
+            return await _fake_content(_note)
+
+        monkeypatch.setattr(list_detail, "get_clean_markdown_content", _fake_content)
+        monkeypatch.setattr(list_detail, "get_note_markdown_content", _fake_original)
+
+        zf = _zip_of(_client().get("/api/notes/export", headers=_auth("u1")))
+        names = zf.namelist()
+
+        assert "assets/n-a/images/fig-1.jpg" in names, names
+        assert zf.read("assets/n-a/images/fig-1.jpg") == b"\xff\xd8\xff\xe0JPEGDATA"
+        body = zf.read("A 笔记.md").decode("utf-8")
+        assert "![](assets/n-a/images/fig-1.jpg)" in body, body
+        assert "![](images/fig-1.jpg)" not in body, "相对引用没被重写，解压后指向包外"
+        assert "图注。" in body
