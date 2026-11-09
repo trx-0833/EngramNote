@@ -165,3 +165,53 @@ class TestAssetEndpoint:
         client, _uid, nid = seeded
         resp = client.get(f"/api/notes/{nid}/assets/images/fig-1.jpg")
         assert resp.status_code == 401
+
+
+class TestSignedToken:
+    """★ 签名令牌（2026-11-09）
+
+    浏览器渲染 `<img src>` 时**不会**带 `Authorization` 头（JWT 在
+    localStorage，由 fetch 手工加），所以图片必须能靠 URL 里的短期签名访问。
+    这一组同时守住"没有凭证仍然 401"这条底线。
+    """
+
+    def test_detail_response_carries_assets_token(self, seeded):
+        client, uid, nid = seeded
+        body = client.get(f"/api/notes/{nid}", headers=_auth(uid)).json()
+        token = body.get("assets_token")
+        assert token and "." in token, body
+
+    def test_valid_token_works_without_authorization(self, seeded):
+        client, uid, nid = seeded
+        token = client.get(f"/api/notes/{nid}", headers=_auth(uid)).json()["assets_token"]
+
+        resp = client.get(f"/api/notes/{nid}/assets/images/fig-1.jpg?t={token}")
+        assert resp.status_code == 200, resp.text
+        assert resp.content == JPEG_BYTES
+
+    def test_token_of_another_note_is_rejected(self, seeded, test_db):
+        """令牌按**笔记**签名：拿 A 的令牌读 B 的图必须失败"""
+        client, uid, nid = seeded
+        other_nid = _make_note(test_db, uid)
+        token = client.get(f"/api/notes/{nid}", headers=_auth(uid)).json()["assets_token"]
+
+        resp = client.get(f"/api/notes/{other_nid}/assets/images/fig-1.jpg?t={token}")
+        assert resp.status_code in (401, 404), resp.text
+
+    def test_garbage_token_is_401(self, seeded):
+        client, _uid, nid = seeded
+        resp = client.get(f"/api/notes/{nid}/assets/images/fig-1.jpg?t=123.deadbeef")
+        assert resp.status_code == 401, resp.text
+
+    def test_issue_and_verify_roundtrip(self):
+        from app.services import note_assets
+
+        token = note_assets.issue_assets_token("note-x")
+        assert note_assets.verify_assets_token("note-x", token) is True
+        assert note_assets.verify_assets_token("note-y", token) is False
+
+    def test_expired_token_is_rejected(self):
+        from app.services import note_assets
+
+        token = note_assets.issue_assets_token("note-x", ttl_seconds=-5)
+        assert note_assets.verify_assets_token("note-x", token) is False

@@ -411,6 +411,10 @@ async def get_note(
     resp = NoteDetailResponse.model_validate(note)
     resp.original_md_content = original_md
     resp.clean_md_content = clean_md
+    # 插图访问令牌（2026-11-09）：`<img src>` 带不上 Authorization 头，
+    # 所以图片靠 URL 里的短期签名访问（见 api/notes/assets.py 的两条鉴权路径）。
+    # 每次打开详情重新签发，过期时间 = 2 小时 > 一次阅读会话。
+    resp.assets_token = note_assets.issue_assets_token(note.id)
     # 还没补向量的 chunk 数（B2 的"可见"那半）
     #
     # 为什么在这个端点上算：用户打开笔记详情时**不问问题也能看到**

@@ -293,3 +293,33 @@ describe('renderMarkdown：插图位置不被重写打乱', () => {
     expect(html).not.toContain('![img]');
   });
 });
+
+/** 签名令牌（2026-11-09）：`<img src>` 带不上 Authorization 头，图片靠 `?t=` 鉴权 */
+describe('rewriteRelativeImageSources：访问令牌拼接', () => {
+  const BASE = '/api/notes/n1/assets/';
+
+  it('令牌拼在每个 src 末尾（不是拼在 base 上）', () => {
+    const out = rewriteRelativeImageSources('![](images/x.jpg)', BASE, '?t=abc.def');
+    expect(out).toBe('![](/api/notes/n1/assets/images/x.jpg?t=abc.def)');
+  });
+
+  it('多张图各自都带令牌', () => {
+    const out = rewriteRelativeImageSources(
+      '![](images/a.png)\n\n![](images/b.jpg)',
+      BASE,
+      't=abc',
+    );
+    expect(out).toContain('/api/notes/n1/assets/images/a.png?t=abc');
+    expect(out).toContain('/api/notes/n1/assets/images/b.jpg?t=abc');
+  });
+
+  it('绝对地址不追加令牌（远程图不需要）', () => {
+    const md = '![x](https://example.com/a.png)';
+    expect(rewriteRelativeImageSources(md, BASE, '?t=abc')).toBe(md);
+  });
+
+  it('renderMarkdown 透传令牌', () => {
+    const html = renderMarkdown('![](images/x.jpg)', BASE, '?t=abc');
+    expect(html).toContain('src="/api/notes/n1/assets/images/x.jpg?t=abc"');
+  });
+});

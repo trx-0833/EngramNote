@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 共享 Markdown 渲染工具
  * @description 提取自 NoteDetail.tsx 的模块级 marked 配置，供多个页面复用。
  * 包含 KaTeX 数学公式扩展（blockMath/inlineMath）和 highlight.js 代码高亮。
@@ -283,10 +283,18 @@ const HAS_BASE_RE = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|\/\/|\/|#)/;
  * @param assetsBaseUrl - 资产前缀（形如 `/api/notes/{id}/assets/`，以 `/` 结尾）。
  *   缺省时原样返回 —— 没有基准就无从重写，保持旧行为。
  */
-export function rewriteRelativeImageSources(text: string, assetsBaseUrl?: string): string {
+export function rewriteRelativeImageSources(
+  text: string,
+  assetsBaseUrl?: string,
+  assetsQuery?: string,
+): string {
   if (!text || !assetsBaseUrl) return text;
   const base = assetsBaseUrl.endsWith('/') ? assetsBaseUrl : `${assetsBaseUrl}/`;
-  const join = (src: string) => `${base}${src.replace(/^\.\//, '')}`;
+  // 查询串（形如 `?t=<签名>`）要拼在**每个 src 的末尾**，不能拼在 base 上 ——
+  // 那会变成 `…/assets/?t=…images/x.jpg`，路径全乱。签名令牌见
+  // `backend/app/services/note_assets.issue_assets_token`。
+  const query = assetsQuery ? (assetsQuery.startsWith('?') ? assetsQuery : `?${assetsQuery}`) : '';
+  const join = (src: string) => `${base}${src.replace(/^\.\//, '')}${query}`;
 
   // 1) Markdown 图片语法
   const rewrittenMd = text.replace(
@@ -325,10 +333,10 @@ export function rewriteRelativeImageSources(text: string, assetsBaseUrl?: string
  *   （历史行为：DOMPurify 会把它的 `src` 剥掉，只剩 alt 文本）
  * @returns 渲染后的 HTML 字符串（失败时为转义纯文本）
  */
-export function renderMarkdown(text: string, assetsBaseUrl?: string): string {
+export function renderMarkdown(text: string, assetsBaseUrl?: string, assetsQuery?: string): string {
   if (!text) return '';
   try {
-    const prepared = rewriteRelativeImageSources(text, assetsBaseUrl);
+    const prepared = rewriteRelativeImageSources(text, assetsBaseUrl, assetsQuery);
     const parsed = marked.parse(prepared) as string;
     return renderMathInHtml(sanitizeHtml(parsed));
   } catch (err) {

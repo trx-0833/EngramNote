@@ -221,6 +221,70 @@ def _markdown_bucket() -> str:
     return get_settings().minio_bucket_markdown
 
 
+# ---------------------------------------------------------------------------
+# 资产访问令牌（签名 URL）
+# ---------------------------------------------------------------------------
+#
+# ## 为什么需要它（2026-11-09 真机才发现）
+#
+# 浏览器渲染 `<img src="/api/notes/{id}/assets/images/x.jpg">` 时**不会**带
+# `Authorization` 头 —— 前端把 JWT 放在 localStorage、由 `fetch` 手工加头，
+# 而 `<img>` 是浏览器自己发的请求。于是"端点要求 Bearer"与"图片能被显示"
+# 天然互斥：图永远 401。
+#
+# 三条备选里选了第三条：
+# - 把 JWT 塞进查询串：会把主令牌写进浏览器历史/代理日志，且无法单独过期；
+# - 改用 cookie：本仓库没有 cookie 会话体系，为一个读图端点引入它太重；
+# - **按笔记签名的短期令牌**（本实现）：`HMAC(secret, "{note_id}|{exp}")`，
+#   只对一篇笔记有效、两小时过期、泄漏了也只影响那一篇的图。
+#
+# 令牌由 `GET /api/notes/{id}` 随详情一起下发（`assets_token`），前端把它
+# 拼到每个图片 src 后面（`?t=…`）。API 客户端仍可继续用 Bearer 头访问。
+
+#: 资产令牌有效期（秒）：2 小时 —— 大于一次阅读会话，小于一天
+ASSET_TOKEN_TTL_SECONDS = 2 * 60 * 60
+
+
+def _token_secret() -> bytes:
+    """签名密钥：复用 JWT 密钥 + 用途前缀（不同用途的签名不能互相冒用）"""
+    from ..config import get_settings
+
+    return f"note-assets|{get_settings().jwt_secret_key}".encode("utf-8")
+
+
+def issue_assets_token(note_id: str, ttl_seconds: int = ASSET_TOKEN_TTL_SECONDS) -> str:
+    """签发一篇笔记的资产访问令牌，形如 `{exp}.{sig}`"""
+    import hashlib
+    import hmac
+    import time
+
+    exp = int(time.time()) + int(ttl_seconds)
+    digest = hmac.new(_token_secret(), f"{note_id}|{exp}".encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{digest[:32]}"
+
+
+def verify_assets_token(note_id: str, token: Optional[str]) -> bool:
+    """校验资产令牌：签名对得上、且未过期
+
+    签名比较用 `hmac.compare_digest`（防时序侧信道）。
+    """
+    if not token or "." not in token:
+        return False
+    import hashlib
+    import hmac
+    import time
+
+    exp_text, _, sig = token.partition(".")
+    try:
+        exp = int(exp_text)
+    except ValueError:
+        return False
+    if exp < int(time.time()):
+        return False
+    expected = hmac.new(_token_secret(), f"{note_id}|{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(expected, sig)
+
+
 def iter_asset_names_for_export(prefix: str, base: str) -> Iterable[str]:
     """导出用：列出相对路径（`images/xxx.jpg`），供 ZIP 里建 `assets/{base}/…`"""
     asset_prefix = vault_path.assets_prefix(prefix, base)

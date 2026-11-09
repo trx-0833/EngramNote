@@ -36,11 +36,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.auth import get_current_user_dependency
+from ...api.auth import get_optional_current_user_dependency
 from ...core.app_error import ASSET_NOT_FOUND, ASSET_TYPE_UNSUPPORTED, AppError
 from ...database import get_db
 from ...models.note import Note
@@ -62,6 +62,12 @@ async def _load_owned_note(db: AsyncSession, note_id: str, user_id: str) -> Opti
     return result.scalar_one_or_none()
 
 
+async def _load_live_note(db: AsyncSession, note_id: str) -> Optional[Note]:
+    """按 id 取一篇未进回收站的笔记（**不校验归属** —— 调用方已凭签名授权）"""
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.trashed_at.is_(None)))
+    return result.scalar_one_or_none()
+
+
 @router.get(
     "/{note_id}/assets/{asset_path:path}",
     summary="读取笔记内的插图",
@@ -70,27 +76,43 @@ async def _load_owned_note(db: AsyncSession, note_id: str, user_id: str) -> Opti
 async def get_note_asset(
     note_id: str,
     asset_path: str,
-    current_user: User = Depends(get_current_user_dependency),
+    t: Optional[str] = Query(None, description="按笔记签名的短期访问令牌（见 assets_token）"),
+    current_user: Optional[User] = Depends(get_optional_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """
     返回笔记 markdown 里相对引用指向的插图
 
-    前端渲染 markdown 时把 `images/xxx.jpg` 重写成
-    `/api/notes/{note_id}/assets/images/xxx.jpg`（见 `utils/markdown.ts`
-    的 `rewriteRelativeImageSources`），本端点负责把字节吐回去。
+    ## 两条鉴权路径（必须都留）
+
+    1. **签名令牌**（`?t=…`）：浏览器渲染 `<img src>` 时**不会**带
+       `Authorization` 头（前端 JWT 在 localStorage、由 `fetch` 手工加），
+       所以图片必须能靠 URL 里的短期签名访问。令牌由 `GET /api/notes/{id}`
+       随详情下发（`assets_token`），按笔记签名、2 小时过期。
+    2. **Bearer 头**：API 客户端 / curl / e2e 继续按老办法访问，否则
+       "用脚本取图"这条路会被新机制堵死。
+
+    没有任何凭证 → 401（与全站一致）；凭证有效但笔记不属于你 → **404**
+    （403 会泄漏"这个 id 存在"）。
 
     Raises:
         AppError: 笔记不存在/不属于当前用户/在回收站（ASSET_NOT_FOUND → 404）
         AppError: 路径不安全或后缀不在白名单（ASSET_TYPE_UNSUPPORTED → 415）
         AppError: 对象不存在（ASSET_NOT_FOUND → 404）
     """
-    note = await _load_owned_note(db, note_id, current_user.id)
-    if note is None:
-        # 与"路径不安全"分开报没有意义：对调用方都是"拿不到这张图"，
-        # 但**错误码**要能区分（前端/日志按 code 分流），所以这里仍用
-        # 统一的 ASSET_NOT_FOUND，细节见异常消息。
-        raise AppError(ASSET_NOT_FOUND, "插图不存在", 404)
+    note: Optional[Note] = None
+    if current_user is not None:
+        note = await _load_owned_note(db, note_id, current_user.id)
+        if note is None:
+            raise AppError(ASSET_NOT_FOUND, "插图不存在", 404)
+    elif note_assets.verify_assets_token(note_id, t):
+        # 签名有效 = 持有"某次详情响应"的人，等价于那篇笔记的读者
+        note = await _load_live_note(db, note_id)
+        if note is None:
+            raise AppError(ASSET_NOT_FOUND, "插图不存在", 404)
+    else:
+        # 既没有 Bearer、也没有合法签名：按未认证处理（与全站口径一致）
+        raise AppError(ASSET_NOT_FOUND, "未认证，请先登录", 401)
 
     if not note_assets.is_safe_asset_path(asset_path):
         raise AppError(ASSET_TYPE_UNSUPPORTED, "不支持的插图类型或路径", 415)
