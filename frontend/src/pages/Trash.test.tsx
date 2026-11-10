@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 回收站页的**结构语义**测试（visual-refactor-plan 批次 E8）
  *
  * ## 为什么这一页值得一条测试
@@ -19,7 +19,7 @@
  *      （`.btn-danger`）。这一条只能按类名断言 —— "描边还是实底"是纯样式，
  *      没有任何语义出口（角色、可访问名、文本都一样）。
  */
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -39,7 +39,7 @@ vi.mock('../api/client', async () => {
   };
 });
 
-import { getTrashedNotes } from '../api/client';
+import { ApiError, getTrashedNotes, purgeAllTrash, purgeNote, restoreNote } from '../api/client';
 
 /** 一条已删除的笔记（含五项附属统计 —— 它们是"恢复能还原什么"的展示依据） */
 const TRASHED: TrashNoteItem = {
@@ -114,5 +114,106 @@ describe('回收站 · 表格化与危险按钮的两级（批次 E8）', () => 
     expect(within(dialog).getByRole('button', { name: '清空' })).not.toHaveClass(
       'btn-danger-outline',
     );
+  });
+});
+
+/**
+ * 回收站 · 彻底删除 / 恢复 / 清空的缓存更新（2026-11-10 回归）
+ *
+ * ## 这条回归守的是什么
+ *
+ * 用户报告：「彻底删除时页面出现 `(prev ?? []).filter is not a function`，
+ * 再点一次提示『笔记不存在』」。
+ *
+ * 根因：查询缓存里放的是**整个响应** `{ items, total }`，而写缓存的代码
+ * 按**数组**处理它：
+ *
+ * ```ts
+ * queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, (prev) =>
+ *   (prev ?? []).filter(...)   // prev 是对象 ⇒ .filter 不存在
+ * );
+ * ```
+ *
+ * 于是：① 该行没被移除（异常冒到 `catch` 里，用户只看到一句类型错误文案）；
+ * ② 服务端其实**已经删掉了**，所以第二次点就是 404「笔记不存在」。
+ *
+ * 这三条用例用"行是否消失 / 表格是否变空"当判据 —— 正是用户看到的现象，
+ * 而不是断言某个内部函数被调用过。
+ */
+describe('回收站 · 彻底删除 / 恢复 / 清空（缓存形状回归）', () => {
+  async function openPurgeDialog(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: '彻底删除' }));
+    return screen.findByRole('dialog');
+  }
+
+  it('★ 彻底删除成功后：该行从列表消失（不再出现 filter is not a function）', async () => {
+    const user = userEvent.setup();
+    vi.mocked(purgeNote).mockResolvedValue(undefined as never);
+    renderWithProviders(<Trash />);
+
+    const dialog = await openPurgeDialog(user);
+    await user.click(within(dialog).getByRole('button', { name: '彻底删除' }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(purgeNote).toHaveBeenCalledWith('note-trashed', false);
+  });
+
+  it('★ 恢复成功后：该行同样消失（同一个缓存更新函数）', async () => {
+    const user = userEvent.setup();
+    vi.mocked(restoreNote).mockResolvedValue({ note: TRASHED.note, renamed_to: null } as never);
+    renderWithProviders(<Trash />);
+
+    await user.click(await screen.findByRole('button', { name: '恢复' }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('★ 清空回收站后：表格变空态（缓存写回了 {items} 而不是裸数组）', async () => {
+    const user = userEvent.setup();
+    vi.mocked(purgeAllTrash).mockResolvedValue({ purged: 1, failed: 0 } as never);
+    renderWithProviders(<Trash />);
+
+    await user.click(await screen.findByRole('button', { name: '清空回收站' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '清空' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    });
+  });
+});
+
+/**
+ * 回收站 · 服务端已经删掉时不该报错（2026-11-10）
+ *
+ * 用户报告的第二半：「再点一次彻底删除，提示『笔记不存在』」。
+ * 那说明服务端那次删除**其实成功了**，只是本地没把行移掉
+ * （上一组用例的 `filter` 崩溃）。除了修根因，这里再补一条幂等兜底：
+ * `NOTE_NOT_FOUND` 当作"已删除"处理 —— 移掉该行、关掉弹窗、不弹错误。
+ */
+describe('回收站 · 彻底删除的幂等兜底', () => {
+  it('★ 服务端回 NOTE_NOT_FOUND：按"已删除"处理（行消失、不报错）', async () => {
+    const user = userEvent.setup();
+    vi.mocked(purgeNote).mockRejectedValue(new ApiError('笔记不存在', 'NOTE_NOT_FOUND'));
+    renderWithProviders(<Trash />);
+
+    await user.click(await screen.findByRole('button', { name: '彻底删除' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '彻底删除' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('heading', { name: '已删除：蓄电池寿命与温度的关系' }),
+    ).not.toBeInTheDocument();
   });
 });

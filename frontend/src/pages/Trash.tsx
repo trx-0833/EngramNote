@@ -16,10 +16,12 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ApiError,
   getTrashedNotes,
   restoreNote,
   purgeNote,
   purgeAllTrash,
+  type TrashListResponse,
   type TrashNoteItem,
 } from '../api/client';
 import { PurgeNoteDialog } from '../components/DeleteNoteDialog';
@@ -109,6 +111,37 @@ export default function Trash() {
     : '';
 
   /**
+   * 统一更新回收站缓存里的 `items`（恢复 / 彻底删除 / 清空都走它）
+   *
+   * ## ⚠️ 缓存里是**整个响应**，不是数组（2026-11-10 修）
+   *
+   * 用户实测：彻底删除时页面报 `(prev ?? []).filter is not a function`，
+   * 再点一次提示「笔记不存在」。根因就是这里——
+   *
+   * ```ts
+   * queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, (prev) =>
+   *   (prev ?? []).filter(...)      // 泛型写成了数组，实际值是 { items, total }
+   * );
+   * ```
+   *
+   * `setQueryData` 的泛型**不会**校验缓存里真是什么，写错类型 TSC 一声不响；
+   * 异常在 `confirmPurge` 的 `catch` 里被当成"操作失败"弹给用户，而行还在，
+   * 服务端却已经删了 —— 于是第二次点击就是 404「笔记不存在」。
+   *
+   * 现在：从响应里取 `items` 再改，写回时保留其余字段；`total` 跟着重算。
+   * 同时**容忍历史脏缓存**（旧实现曾把整个响应替换成裸数组），
+   * 那种形状读一次会被顺手纠正回来。
+   */
+  function updateTrashItems(update: (items: TrashNoteItem[]) => TrashNoteItem[]) {
+    queryClient.setQueryData<TrashListResponse | TrashNoteItem[]>(TRASH_QUERY_KEY, (prev) => {
+      const previousItems = Array.isArray(prev) ? prev : (prev?.items ?? []);
+      const items = update(previousItems);
+      const rest = Array.isArray(prev) ? {} : (prev ?? {});
+      return { ...rest, items, total: items.length };
+    });
+  }
+
+  /**
    * 从缓存里移除一条（恢复/彻底删除之后）
    *
    * ## 为什么用 `setQueryData` 而不是 `invalidateQueries`
@@ -123,9 +156,7 @@ export default function Trash() {
    * （计划 §4 风险栏第 2 条："缓存掩盖了刷新"）。
    */
   function removeFromCache(noteId: string) {
-    queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, (prev) =>
-      (prev ?? []).filter((it) => it.note.id !== noteId),
-    );
+    updateTrashItems((previousItems) => previousItems.filter((it) => it.note.id !== noteId));
   }
 
   /**
@@ -160,6 +191,15 @@ export default function Trash() {
       removeFromCache(targetId);
       setNoteToPurge(null);
     } catch (err) {
+      // 服务端说"没有这篇笔记"（NOTE_NOT_FOUND）= 它已经不在了（另一个标签页删过、
+      // 或本地缓存比服务端旧）。那**正是**这次操作想要的结果，不该弹错误：
+      // 把本地这一行移掉、关掉弹窗，用户看到的与"删除成功"完全一致。
+      // 2026-11-10 补：这是用户报告的"再点一次提示笔记不存在"的收尾。
+      if (err instanceof ApiError && err.code === 'NOTE_NOT_FOUND') {
+        removeFromCache(targetId);
+        setNoteToPurge(null);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t('trash.purgeFailed'));
     } finally {
       setOperatingId(null);
@@ -171,8 +211,10 @@ export default function Trash() {
     try {
       const res = await purgeAllTrash();
       setShowPurgeAll(false);
-      // 清空是"整份列表归零"，直接写缓存（与逐条删除同一口径：结果确定，不必再问）
-      queryClient.setQueryData<TrashNoteItem[]>(TRASH_QUERY_KEY, []);
+      // 清空是"整份列表归零"，直接写缓存（与逐条删除同一口径：结果确定，不必再问）。
+      // ⚠️ 走 `updateTrashItems`：缓存里是 `{items,total}`，裸写 `[]`
+      // 会把响应形状写坏（2026-11-10 同一个 bug 的另一半）。
+      updateTrashItems(() => []);
       if (res.failed > 0) {
         toast.success(t('trash.purgeResult', { purged: res.purged, failed: res.failed }));
       }
