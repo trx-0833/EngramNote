@@ -1838,6 +1838,72 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/notes/{note_id}/export-bundle': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Note Bundle
+     * @description 把**一篇**笔记导成 ZIP：正文 `.md` + 它的插图（2026-11-10）
+     *
+     *     ## 为什么需要第二个导出端点
+     *
+     *     单个 `.md` 文件**装不下二进制图片**。带图笔记导出成纯 `.md` 时，正文里的
+     *     `![](images/xxx.jpg)` 全部指向不存在的路径 —— 用户在编辑器里看到的是一排
+     *     破图。批量导出早就解决了这件事（ZIP + `assets/…`），单篇没有。
+     *
+     *     两个形态互斥，所以**不在同一个端点上切 media type**：
+     *
+     *     | 端点 | 产物 | 何时用 |
+     *     |---|---|---|
+     *     | `/{note_id}/export` | `text/markdown` | 这篇没有插图（或用户只要正文） |
+     *     | `/{note_id}/export-bundle` | `application/zip` | 这篇有插图 —— 前端据 `asset_count` 选 |
+     *
+     *     让一个端点的 `Content-Type` 随笔记内容变化，会让"客户端该按什么解析"
+     *     变成运行时才知道的事（OpenAPI 也表达不了），排障时只会变成猜谜。
+     *     前端的判据是详情响应里的 `asset_count`（见 `NoteDetailResponse`）。
+     *
+     *     ## 包内结构
+     *
+     *     ```
+     *     <标题>.md                 ← front-matter + 正文（图片引用已改写）
+     *     assets/images/<name>      ← 正文里用到的那几张
+     *     ```
+     *
+     *     引用改写用 `note_assets.rewrite_asset_refs(content, "assets/")`：
+     *     正文里写的是 `images/x.jpg`，包里是 `assets/images/x.jpg`，
+     *     两者必须对得上，否则解压后还是破图。
+     *
+     *     ## 为什么图片不再套一层 `{base}`
+     *
+     *     批量导出按笔记分了 `assets/{base}/…` —— 那是为了**多篇之间**不冲突。
+     *     单篇只有一个 base，再套一层只会让路径变长、让用户多点一次目录。
+     *
+     *     Args:
+     *         note_id: 笔记 ID
+     *         variant: `clean`（默认）或 `original`
+     *         current_user: 当前认证用户
+     *         db: 异步数据库会话
+     *
+     *     Returns:
+     *         StreamingResponse: `application/zip`，文件名 `<标题>.zip`
+     *
+     *     Raises:
+     *         AppError: 笔记不存在 / 别人的 / 在回收站（NOTE_NOT_FOUND → 404）
+     *         AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）
+     */
+    get: operations['export_note_bundle_api_notes__note_id__export_bundle_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/notes/{note_id}/links': {
     parameters: {
       query?: never;
@@ -5604,6 +5670,11 @@ export interface components {
      * @description 笔记详情 — 包含 Markdown 内容
      */
     NoteDetailResponse: {
+      /**
+       * Asset Count
+       * @default 0
+       */
+      asset_count: number;
       /** Assets Token */
       assets_token?: string | null;
       /** Clean Md Content */
@@ -9858,6 +9929,38 @@ export interface operations {
         content: {
           'text/markdown; charset=utf-8': string;
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  export_note_bundle_api_notes__note_id__export_bundle_get: {
+    parameters: {
+      query?: {
+        /** @description 导出哪一版正文：clean（清洗版，默认）或 original（原始版） */
+        variant?: string;
+      };
+      header?: never;
+      path: {
+        note_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

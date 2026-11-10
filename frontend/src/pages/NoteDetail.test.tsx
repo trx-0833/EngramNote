@@ -49,6 +49,7 @@ vi.mock('../api/client', async () => {
     deleteAnnotation: vi.fn(),
     deleteNote: vi.fn(),
     exportNote: vi.fn(),
+    exportNoteBundle: vi.fn(),
     startUnderstanding: vi.fn(),
     startCleaning: vi.fn(),
     stopCleaning: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock('../api/tasks', async () => {
 import {
   deleteNote,
   exportNote,
+  exportNoteBundle,
   getAnnotations,
   getKnowledgeCards,
   getNote,
@@ -93,6 +95,7 @@ const mockedDelete = vi.mocked(deleteNote);
 const mockedUnderstand = vi.mocked(startUnderstanding);
 const mockedUpdateContent = vi.mocked(updateNoteContent);
 const mockedExport = vi.mocked(exportNote);
+const mockedExportBundle = vi.mocked(exportNoteBundle);
 
 function makeNote(over: Partial<NoteDetailType> = {}): NoteDetailType {
   return {
@@ -450,6 +453,43 @@ describe('导出笔记正文', () => {
     await waitFor(() => expect(clickedAnchors[0].download).toBe('锂离子电池的浮充与均充.md'));
   });
 
+  // ── 带图笔记：走 ZIP（2026-11-10） ───────────────────────────────────
+  it('★ 有插图（asset_count > 0）时走 ZIP 端点，并沿用后端给的 .zip 文件名', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ asset_count: 2 } as never));
+    mockedExportBundle.mockResolvedValue({ blob: new Blob(['zip']), filename: '带图笔记.zip' });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(mockedExportBundle).toHaveBeenCalledWith('note-1', 'clean'));
+    // 纯 `.md` 端点一次都不该被调：单个 md 装不下图片
+    expect(mockedExport).not.toHaveBeenCalled();
+    expect(clickedAnchors[0].download).toBe('带图笔记.zip');
+  });
+
+  it('★ 没有插图时仍然走纯 .md（默认路径不变）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ asset_count: 0 } as never));
+    mockedExport.mockResolvedValue({ blob: new Blob(['md']), filename: '无图.md' });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(mockedExport).toHaveBeenCalledWith('note-1', 'clean'));
+    expect(mockedExportBundle).not.toHaveBeenCalled();
+  });
+
+  it('★ 带图但后端没给文件名时，兜底名是 `.zip`（不是 `.md`）', async () => {
+    mockedGetNote.mockResolvedValue(makeNote({ asset_count: 1 } as never));
+    mockedExportBundle.mockResolvedValue({ blob: new Blob(['zip']), filename: null });
+    renderPage();
+    await screen.findByText('锂离子电池的浮充与均充');
+
+    await userEvent.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(clickedAnchors[0].download).toBe('锂离子电池的浮充与均充.zip'));
+  });
   it('★ 对比视图下禁用导出（"对比"不是某一版，没有"这一版"可导）', async () => {
     mockedGetNote.mockResolvedValue(makeNote());
     renderPage();

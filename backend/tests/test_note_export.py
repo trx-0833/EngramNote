@@ -368,9 +368,7 @@ class TestFrontMatter:
         resp = client.get(f"/api/notes/{nid}/export", headers=_auth(uid))
 
         meta, _ = _parse_front_matter(resp.text)
-        assert not re.search(r"\.\d+", meta["exported_at"]), (
-            f"exported_at 不该带小数秒，实际 {meta['exported_at']}"
-        )
+        assert not re.search(r"\.\d+", meta["exported_at"]), f"exported_at 不该带小数秒，实际 {meta['exported_at']}"
 
     def test_enum_and_int_values_are_not_quoted(self):
         """枚举与整数是安全标量，不加引号（保持 front-matter 可读）"""
@@ -684,6 +682,183 @@ class TestExportEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 5b. 单篇「带图导出」：`GET /api/notes/{id}/export-bundle`（2026-11-10）
+# ---------------------------------------------------------------------------
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake-png-payload"
+BODY_WITH_IMAGE = "# 带图笔记\n\n第一段正文。\n\n![](images/pic.jpg)\n\n图 1：说明\n"
+
+
+@pytest.fixture
+def patched_assets(monkeypatch):
+    """把插图枚举/读取换成离线桩（patch 目标是 `note_assets` 模块上的属性）
+
+    `list_detail` 是 `from ...services import note_assets`（导入的是**模块对象**），
+    所以在这里改属性，端点里调到的就是新实现 —— 与正文桩同一套思路，
+    目的都是"不碰真存储也能测包内结构"。
+    """
+    from app.services import note_assets
+
+    calls = {"iter": 0, "read": []}
+
+    def _iter(prefix: str, base: str):
+        calls["iter"] += 1
+        return ["images/pic.jpg"]
+
+    def _read(prefix: str, base: str, rel: str):
+        calls["read"].append(rel)
+        return PNG_BYTES if rel == "images/pic.jpg" else None
+
+    monkeypatch.setattr(note_assets, "iter_asset_names_for_export", _iter)
+    monkeypatch.setattr(note_assets, "read_asset", _read)
+    # 详情端点用的是 `list_asset_objects`（只要数量，不读内容）—— 两个都补上，
+    # 否则 `asset_count` 还是 0，前端仍然走纯 `.md`（实测踩过一次）
+    monkeypatch.setattr(note_assets, "list_asset_objects", lambda prefix, base: ["images/pic.jpg"])
+    return calls
+
+
+@pytest.fixture
+def patched_body_with_image(monkeypatch):
+    from app.api.notes import list_detail
+
+    async def _clean(note):
+        return BODY_WITH_IMAGE
+
+    async def _original(note):
+        return BODY_WITH_IMAGE
+
+    monkeypatch.setattr(list_detail, "get_clean_markdown_content", _clean)
+    monkeypatch.setattr(list_detail, "get_note_markdown_content", _original)
+
+
+class TestExportBundleEndpoint:
+    """ZIP 里必须有 `.md` **和** 插图，且正文引用要改写成包内路径"""
+
+    def _unzip(self, resp) -> dict:
+        import io
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            return {name: zf.read(name) for name in zf.namelist()}
+
+    def test_zip_contains_markdown_and_image(self, test_db, patched_assets, patched_body_with_image):
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, title="带图笔记")
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid))
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/zip")
+        files = self._unzip(resp)
+        assert sorted(files) == ["assets/images/pic.jpg", "带图笔记.md"], sorted(files)
+        assert files["assets/images/pic.jpg"] == PNG_BYTES
+
+    def test_markdown_refs_are_rewritten_to_zip_paths(self, test_db, patched_assets, patched_body_with_image):
+        """★ 判据是"解压后还能看到图"：引用与包内路径必须对得上"""
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, title="带图笔记")
+
+        files = self._unzip(client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid)))
+
+        md = files["带图笔记.md"].decode("utf-8")
+        assert "![](assets/images/pic.jpg)" in md
+        # 原来的相对引用不该再出现（否则编辑器还会去找包外的 images/）
+        assert "![](images/pic.jpg)" not in md
+        # front-matter 仍然完好
+        assert md.startswith("---\n") and "variant: clean" in md
+        # 正文其他部分逐字不动
+        assert "图 1：说明" in md
+
+    def test_filename_is_zip(self, test_db, patched_assets, patched_body_with_image):
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, title="带图笔记")
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid))
+
+        disposition = resp.headers["content-disposition"]
+        assert ".zip" in disposition, disposition
+
+    def test_without_assets_markdown_is_untouched(self, test_db, patched_body_with_image, monkeypatch):
+        """没有插图时**不改写正文**（"导出不改一个字"那条规矩）"""
+        from app.services import note_assets
+
+        monkeypatch.setattr(note_assets, "iter_asset_names_for_export", lambda prefix, base: [])
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, title="无图笔记")
+
+        files = self._unzip(client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid)))
+
+        md = files["无图笔记.md"].decode("utf-8")
+        assert "![](images/pic.jpg)" in md
+
+    def test_original_variant(self, test_db, patched_assets, patched_body_with_image):
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, title="带图笔记")
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle?variant=original", headers=_auth(uid))
+
+        assert resp.status_code == 200
+        md = self._unzip(resp)["带图笔记.md"].decode("utf-8")
+        assert "variant: original" in md
+
+    def test_other_users_note_is_404(self, test_db, patched_assets, patched_body_with_image):
+        client = _client()
+        _, nid = _make_user_and_note(test_db)
+        outsider, _ = _make_user_and_note(test_db, title="别人的笔记")
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(outsider))
+
+        assert resp.status_code == 404
+
+    def test_trashed_note_is_404(self, test_db, patched_assets, patched_body_with_image):
+        client = _client()
+        uid, nid = _make_user_and_note(test_db, trashed=True)
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid))
+
+        assert resp.status_code == 404
+
+    def test_empty_content_is_400(self, test_db, patched_assets, monkeypatch):
+        from app.api.notes import list_detail
+
+        async def _empty(note):
+            return ""
+
+        monkeypatch.setattr(list_detail, "get_clean_markdown_content", _empty)
+        client = _client()
+        uid, nid = _make_user_and_note(test_db)
+
+        resp = client.get(f"/api/notes/{nid}/export-bundle", headers=_auth(uid))
+
+        assert resp.status_code == 400
+        assert resp.json()["error_code"] == NOTE_EXPORT_EMPTY
+
+
+class TestAssetCountOnDetail:
+    """详情响应里的 `asset_count` 决定前端走哪个导出端点"""
+
+    def test_counts_assets(self, test_db, patched_assets):
+        client = _client()
+        uid, nid = _make_user_and_note(test_db)
+
+        resp = client.get(f"/api/notes/{nid}", headers=_auth(uid))
+
+        assert resp.status_code == 200
+        assert resp.json()["asset_count"] == 1
+
+    def test_zero_when_no_assets(self, test_db, monkeypatch):
+        from app.services import note_assets
+
+        monkeypatch.setattr(note_assets, "list_asset_objects", lambda prefix, base: [])
+        client = _client()
+        uid, nid = _make_user_and_note(test_db)
+
+        resp = client.get(f"/api/notes/{nid}", headers=_auth(uid))
+
+        assert resp.json()["asset_count"] == 0
+
+
 # 6. 契约
 # ---------------------------------------------------------------------------
 

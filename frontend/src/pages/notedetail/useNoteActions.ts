@@ -11,6 +11,7 @@ import {
   archiveNote,
   deleteNote,
   exportNote,
+  exportNoteBundle,
   startUnderstanding,
   updateNoteContent,
   type NoteContentTarget,
@@ -180,12 +181,25 @@ export function useNoteActions({
     const variant: 'clean' | 'original' = viewMode === 'original' ? 'original' : 'clean';
     setExporting(true);
     try {
-      const { blob, filename } = await exportNote(note.id, variant);
+      /**
+       * 带图笔记走 ZIP（2026-11-10）
+       *
+       * 单个 `.md` 装不下二进制图片：导成纯文本时正文里的
+       * `![](images/x.jpg)` 全是破图。后端为这种情况准备了
+       * `/export-bundle`（ZIP 内含 `.md` + `assets/…`，引用已改写）。
+       * 判据是详情响应里的 `asset_count` —— 让一个端点随内容变 media type
+       * 会让客户端只能靠猜，所以分成两个端点、由前端选。
+       */
+      const useBundle = (note.asset_count ?? 0) > 0;
+      const { blob, filename } = useBundle
+        ? await exportNoteBundle(note.id, variant)
+        : await exportNote(note.id, variant);
       const url = URL.createObjectURL(blob);
       try {
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = filename ?? `${note.title}.md`;
+        // 兜底名跟着形态走：带图时后端给的是 `.zip`（拿不到响应头才用这里的猜测）
+        anchor.download = filename ?? (useBundle ? `${note.title}.zip` : `${note.title}.md`);
         document.body.appendChild(anchor);
         anchor.click();
         // 点击后立刻移除：`<a>` 只在这次点击里有用，留在 DOM 里没有任何意义

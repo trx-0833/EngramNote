@@ -415,6 +415,16 @@ async def get_note(
     # 所以图片靠 URL 里的短期签名访问（见 api/notes/assets.py 的两条鉴权路径）。
     # 每次打开详情重新签发，过期时间 = 2 小时 > 一次阅读会话。
     resp.assets_token = note_assets.issue_assets_token(note.id)
+    # 插图数量（2026-11-10）：前端据它决定「导出」走纯 `.md` 还是 ZIP。
+    # 这里只做一次**列举**（不算字节、不读内容），成本与小目录遍历相当。
+    # 出错就留 0（默认值）—— 导出形态的提示不该让详情页失败；
+    # 真出问题时前端会走纯 `.md`，那是"退化"而不是"坏掉"。
+    try:
+        asset_prefix = vault_path.derive_prefix(note)
+        asset_base = vault_path.derive_base(note)
+        resp.asset_count = len(note_assets.list_asset_objects(asset_prefix, asset_base))
+    except Exception as exc:  # noqa: BLE001 - 附加计数不该让详情页 500
+        logger.warning("笔记详情：插图计数失败（该字段留 0）| note_id=%s | %s: %s", note.id, type(exc).__name__, exc)
     # 还没补向量的 chunk 数（B2 的"可见"那半）
     #
     # 为什么在这个端点上算：用户打开笔记详情时**不问问题也能看到**
@@ -854,5 +864,136 @@ async def export_note(
             # 不设 Content-Length 时 Starlette 会走 chunked，行为也对，
             # 但"已知长度"对小文件更友好。
             "Content-Length": str(len(body.encode("utf-8"))),
+        },
+    )
+
+
+@router.get("/{note_id}/export-bundle", response_class=StreamingResponse)
+async def export_note_bundle(
+    note_id: str,
+    variant: str = Query(
+        "clean",
+        pattern="^(clean|original)$",
+        description="导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+    ),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """把**一篇**笔记导成 ZIP：正文 `.md` + 它的插图（2026-11-10）
+
+    ## 为什么需要第二个导出端点
+
+    单个 `.md` 文件**装不下二进制图片**。带图笔记导出成纯 `.md` 时，正文里的
+    `![](images/xxx.jpg)` 全部指向不存在的路径 —— 用户在编辑器里看到的是一排
+    破图。批量导出早就解决了这件事（ZIP + `assets/…`），单篇没有。
+
+    两个形态互斥，所以**不在同一个端点上切 media type**：
+
+    | 端点 | 产物 | 何时用 |
+    |---|---|---|
+    | `/{note_id}/export` | `text/markdown` | 这篇没有插图（或用户只要正文） |
+    | `/{note_id}/export-bundle` | `application/zip` | 这篇有插图 —— 前端据 `asset_count` 选 |
+
+    让一个端点的 `Content-Type` 随笔记内容变化，会让"客户端该按什么解析"
+    变成运行时才知道的事（OpenAPI 也表达不了），排障时只会变成猜谜。
+    前端的判据是详情响应里的 `asset_count`（见 `NoteDetailResponse`）。
+
+    ## 包内结构
+
+    ```
+    <标题>.md                 ← front-matter + 正文（图片引用已改写）
+    assets/images/<name>      ← 正文里用到的那几张
+    ```
+
+    引用改写用 `note_assets.rewrite_asset_refs(content, "assets/")`：
+    正文里写的是 `images/x.jpg`，包里是 `assets/images/x.jpg`，
+    两者必须对得上，否则解压后还是破图。
+
+    ## 为什么图片不再套一层 `{base}`
+
+    批量导出按笔记分了 `assets/{base}/…` —— 那是为了**多篇之间**不冲突。
+    单篇只有一个 base，再套一层只会让路径变长、让用户多点一次目录。
+
+    Args:
+        note_id: 笔记 ID
+        variant: `clean`（默认）或 `original`
+        current_user: 当前认证用户
+        db: 异步数据库会话
+
+    Returns:
+        StreamingResponse: `application/zip`，文件名 `<标题>.zip`
+
+    Raises:
+        AppError: 笔记不存在 / 别人的 / 在回收站（NOTE_NOT_FOUND → 404）
+        AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）
+    """
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
+
+    if variant == "clean":
+        content = await get_clean_markdown_content(note)
+        empty_message = "这篇笔记还没有清洗版，请先清洗或改导原始版"
+    else:
+        content = await get_note_markdown_content(note)
+        empty_message = "这篇笔记的原始版内容读不出来"
+
+    if not content:
+        raise AppError(NOTE_EXPORT_EMPTY, empty_message, 400)
+
+    front_matter = build_front_matter(
+        title=note.title,
+        source_type=note.source_type.value,
+        status=note.status.value,
+        variant=variant,
+        page_count=note.page_count,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+        exported_at=datetime.now(timezone.utc).replace(microsecond=0),
+    )
+
+    note_prefix = vault_path.derive_prefix(note)
+    note_base = vault_path.derive_base(note)
+    asset_names = list(note_assets.iter_asset_names_for_export(note_prefix, note_base))
+    if asset_names:
+        # 有图才改写引用：没有图时正文保持逐字原文（"导出不改一个字"那条规矩）
+        content = note_assets.rewrite_asset_refs(content, "assets/")
+    body = build_export_text(front_matter, content)
+    filename_stem = sanitize_filename(note.title, fallback_id=note.id)
+
+    # 与批量导出同样用 SpooledTemporaryFile：小包不碰磁盘，大包自动落盘
+    spool = tempfile.SpooledTemporaryFile(max_size=1 << 20, mode="w+b")
+    with zipfile.ZipFile(spool, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{filename_stem}.md", body.encode("utf-8"))
+        for rel in asset_names:
+            try:
+                data = note_assets.read_asset(note_prefix, note_base, rel)
+                if data:
+                    zf.writestr(f"assets/{rel}", data)
+            except Exception as exc:  # noqa: BLE001 - 单张失败不毁整包
+                logger.warning("导出插图失败（忽略继续）: note=%s, %s: %s", note.id[:8], rel, exc)
+
+    spool.seek(0)
+    size = spool.seek(0, os.SEEK_END)
+    spool.seek(0)
+
+    def _chunks():
+        try:
+            while True:
+                chunk = spool.read(256 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            # 客户端取消下载时生成器会被 close()，这里仍要执行 ——
+            # 否则临时文件活到进程退出（Windows 上尤其明显：删不掉）。
+            spool.close()
+
+    return StreamingResponse(
+        _chunks(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": build_content_disposition(filename_stem, ".zip"),
+            "Content-Length": str(size),
         },
     )

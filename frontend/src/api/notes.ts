@@ -517,6 +517,33 @@ export async function exportNote(
 }
 
 /**
+ * 单篇「带图导出」为 ZIP（2026-11-10）
+ *
+ * ## 为什么需要它
+ *
+ * 单个 `.md` **装不下二进制图片**：带图笔记导成纯文本时，正文里的
+ * `![](images/x.jpg)` 全是破图。批量导出早就是 ZIP + `assets/…`，单篇没有。
+ *
+ * ## 为什么是两个端点，而不是一个端点换 media type
+ *
+ * 让 `Content-Type` 随笔记内容变，会让"客户端该按什么解析"变成运行时才知道的事
+ * （OpenAPI 也表达不了）。所以：`asset_count > 0` ⇒ 这里；否则 ⇒ `exportNote`。
+ * 包内结构：`<标题>.md` + `assets/images/…`，正文引用已改写成包内路径。
+ *
+ * @param noteId - 笔记 ID
+ * @param variant - `clean`（清洗版）或 `original`（原始版）
+ * @returns blob（ZIP）与后端给出的文件名（`<标题>.zip`，缺失时为 `null`）
+ * @throws {ApiError} 该版本没有正文时 `code` 为 `NOTE_EXPORT_EMPTY`
+ */
+export async function exportNoteBundle(
+  noteId: string,
+  variant: 'clean' | 'original',
+): Promise<{ blob: Blob; filename: string | null }> {
+  const query: QueryOf<'/notes/{note_id}/export-bundle', 'get'> = { variant };
+  return downloadRequest(`/notes/${noteId}/export-bundle${buildQuery(query)}`);
+}
+
+/**
  * 批量导出为 ZIP（B4，2026-10-22）
  *
  * ## 为什么这条才是"防锁定"的真正价值

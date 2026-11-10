@@ -88,6 +88,15 @@ class NoteDetailResponse(NoteResponse):
     #: 只出现在**详情**响应里，不进列表：列表不需要渲染正文，少一处泄漏面。
     assets_token: Optional[str] = None
 
+    #: 这篇笔记的插图数量（2026-11-10）
+    #:
+    #: 前端据它决定「导出」要哪个形态：`0` ⇒ 纯 `.md`；`> 0` ⇒
+    #: `/export-bundle` 的 ZIP（`.md` + `assets/…`）。单个 `.md` 装不下二进制图片，
+    #: 导成纯文本时正文里的 `![](images/x.jpg)` 全是破图 —— 这就是这个字段存在的理由。
+    #:
+    #: 只在**详情**里给：列表不需要它，否则每行都要多读一次存储目录。
+    asset_count: int = 0
+
 
 class NoteListResponse(BaseModel):
     items: List[NoteResponse]

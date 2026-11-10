@@ -56,6 +56,12 @@ NON_JSON_2XX = {
     # 前端是从**实际响应头**里解析的，见 app/schemas/common.py 的
     # `MarkdownDownloadResponse` 与 frontend/src/api/client.ts 的 `downloadRequest`。
     ("GET", "/api/notes/{note_id}/export"),
+    # 单篇「带图导出」（2026-11-10）：`application/zip`（正文 `.md` + `assets/…`）。
+    # 单个 `.md` 装不下图片，所以带图笔记走这个端点；媒体类型是**静态**的
+    # （不随笔记内容变化）—— 前端据详情里的 `asset_count` 选端点，
+    # 而不是让同一个 URL 有时返回 md、有时返回 zip（那在 OpenAPI 里表达不了，
+    # 客户端只能靠猜）。
+    ("GET", "/api/notes/{note_id}/export-bundle"),
 }
 
 #: 本轮补的 4 处"内层空壳"：字段本身必须指向一个 `$ref`，而不是
@@ -110,11 +116,7 @@ def _is_empty_shell(node: dict, comps: dict, depth: int = 0) -> bool:
         return True
     if node.get("additionalProperties") is True and not node.get("properties"):
         return True
-    if (
-        node.get("type") == "object"
-        and "properties" not in node
-        and "additionalProperties" not in node
-    ):
+    if node.get("type") == "object" and "properties" not in node and "additionalProperties" not in node:
         return True
     for key in ("anyOf", "oneOf"):
         members = node.get(key)
@@ -131,8 +133,7 @@ class TestRouteEnumerationWorks:
         paths = spec.get("paths", {})
         operations = list(_operations())
         assert len(paths) >= 100, (
-            f"schema 里只有 {len(paths)} 条路径 —— 枚举方式失效了（app.routes 只有 6 项），"
-            "下面的空壳断言会变成空转"
+            f"schema 里只有 {len(paths)} 条路径 —— 枚举方式失效了（app.routes 只有 6 项），下面的空壳断言会变成空转"
         )
         assert len(operations) >= 110, f"只枚举到 {len(operations)} 个操作"
 
@@ -161,8 +162,7 @@ class TestNoEmptyResponseShells:
                     # 后者必须在白名单里（否则就是"悄悄换掉了 media type"）。
                     if resp.get("content"):
                         offenders.append(
-                            f"{method} {path} {code}: 非 JSON media type "
-                            f"{sorted(resp['content'])} 但不在白名单里"
+                            f"{method} {path} {code}: 非 JSON media type {sorted(resp['content'])} 但不在白名单里"
                         )
                     continue
                 if _is_empty_shell(json_body.get("schema", {}), comps):
@@ -246,10 +246,13 @@ class TestStreamingEndpointsDeclareHonestMediaTypes:
     这条断言防的是"为了让 schema 有类型而给它硬塞一个 JSON 模型"。
     """
 
-    @pytest.mark.parametrize("path", [
-        "/api/understanding/ask/stream",
-        "/api/notes/{note_id}/ask/stream",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/understanding/ask/stream",
+            "/api/notes/{note_id}/ask/stream",
+        ],
+    )
     def test_sse_declares_event_stream(self, path):
         content = _spec()["paths"][path]["post"]["responses"]["200"]["content"]
         assert list(content) == ["text/event-stream"], (

@@ -3847,6 +3847,11 @@
       "NoteDetailResponse": {
         "description": "笔记详情 — 包含 Markdown 内容",
         "properties": {
+          "asset_count": {
+            "default": 0,
+            "title": "Asset Count",
+            "type": "integer"
+          },
           "assets_token": {
             "anyOf": [
               {
@@ -11155,6 +11160,57 @@
           }
         ],
         "summary": "Export Note"
+      }
+    },
+    "/api/notes/{note_id}/export-bundle": {
+      "get": {
+        "description": "把**一篇**笔记导成 ZIP：正文 `.md` + 它的插图（2026-11-10）\n\n## 为什么需要第二个导出端点\n\n单个 `.md` 文件**装不下二进制图片**。带图笔记导出成纯 `.md` 时，正文里的\n`![](images/xxx.jpg)` 全部指向不存在的路径 —— 用户在编辑器里看到的是一排\n破图。批量导出早就解决了这件事（ZIP + `assets/…`），单篇没有。\n\n两个形态互斥，所以**不在同一个端点上切 media type**：\n\n| 端点 | 产物 | 何时用 |\n|---|---|---|\n| `/{note_id}/export` | `text/markdown` | 这篇没有插图（或用户只要正文） |\n| `/{note_id}/export-bundle` | `application/zip` | 这篇有插图 —— 前端据 `asset_count` 选 |\n\n让一个端点的 `Content-Type` 随笔记内容变化，会让\"客户端该按什么解析\"\n变成运行时才知道的事（OpenAPI 也表达不了），排障时只会变成猜谜。\n前端的判据是详情响应里的 `asset_count`（见 `NoteDetailResponse`）。\n\n## 包内结构\n\n```\n<标题>.md                 ← front-matter + 正文（图片引用已改写）\nassets/images/<name>      ← 正文里用到的那几张\n```\n\n引用改写用 `note_assets.rewrite_asset_refs(content, \"assets/\")`：\n正文里写的是 `images/x.jpg`，包里是 `assets/images/x.jpg`，\n两者必须对得上，否则解压后还是破图。\n\n## 为什么图片不再套一层 `{base}`\n\n批量导出按笔记分了 `assets/{base}/…` —— 那是为了**多篇之间**不冲突。\n单篇只有一个 base，再套一层只会让路径变长、让用户多点一次目录。\n\nArgs:\n    note_id: 笔记 ID\n    variant: `clean`（默认）或 `original`\n    current_user: 当前认证用户\n    db: 异步数据库会话\n\nReturns:\n    StreamingResponse: `application/zip`，文件名 `<标题>.zip`\n\nRaises:\n    AppError: 笔记不存在 / 别人的 / 在回收站（NOTE_NOT_FOUND → 404）\n    AppError: 该版本没有正文（NOTE_EXPORT_EMPTY → 400）",
+        "operationId": "export_note_bundle_api_notes__note_id__export_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "clean",
+              "description": "导出哪一版正文：clean（清洗版，默认）或 original（原始版）",
+              "pattern": "^(clean|original)$",
+              "title": "Variant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Note Bundle"
       }
     },
     "/api/notes/{note_id}/links": {
