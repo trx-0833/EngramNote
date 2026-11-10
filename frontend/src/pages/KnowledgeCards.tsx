@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 知识卡片列表页面
  * @description 展示当前用户所有知识卡片，按所属笔记分组，每组可折叠/展开
  *              支持按卡片分类（常规/盲点/拓展）筛选、重点难点标记、掌握度进度条与拓展知识点生成
@@ -28,6 +28,9 @@ import {
   useLabels,
 } from '../utils/labels';
 import { useToast } from '../components/Toast';
+import { useListScrollRestore } from '../hooks/useListScrollRestore';
+import { useRememberListUrl } from '../hooks/useRememberListUrl';
+import { useUrlState } from '../hooks/useUrlState';
 import { useTranslation, type MessageKey } from '../i18n';
 
 interface NoteGroup {
@@ -140,7 +143,18 @@ export default function KnowledgeCards() {
     ids: Set<string>;
   } | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [filterTab, setFilterTab] = useState<CategoryFilter>('all');
+  /**
+   * 分类 Tab（2026-11-10）：挂到 URL（	ab=）
+   *
+   * 从卡片详情返回时原样回到那个 Tab —— 与笔记列表同一套理由，见 hooks/useUrlState。
+   */
+  const [filterTabRaw, setFilterTabRaw] = useUrlState('tab', 'all');
+  const filterTab = filterTabRaw as CategoryFilter;
+  const setFilterTab = setFilterTabRaw;
+  /** 滚动位置恢复（后退回来时停在原处） */
+  /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
+  useRememberListUrl('cards');
+  useListScrollRestore(['cards', filterTab].join(':'));
   const queryClient = useQueryClient();
   /**
    * 当前页码（服务端分页，见 `PAGE_SIZE` 的说明）。

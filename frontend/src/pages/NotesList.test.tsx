@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 「导出全部（ZIP）」按钮（B4，2026-10-22）
  *
  * ## 为什么只测这一个按钮，而不是给整页补一套用例
@@ -160,5 +160,53 @@ describe('整卡可点（拉伸链接）', () => {
     // 旧实现是一个 `→` 文本节点：字体不同则宽高不同，而且它当时挂在
     // `.noteListActions` 里（hover 才可见）—— 作为"整卡可点"的提示太弱。
     expect(screen.queryByText('→')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * 笔记列表：筛选条件从 URL 读回来（2026-11-10）
+ *
+ * ## 这条替代了什么
+ *
+ * 用户从列表点进一篇笔记再返回时，原先列表**重新挂载成默认视图**：
+ * 角色回到「学习资料」、页码回到 1、关键词清空 —— 得重新定位一遍。
+ * 现在这些都在 URL 上，后退回来就是同一个 URL，页面自然渲染同一个视图。
+ *
+ * 断言方式：**直接带着参数挂载页面**（等于"后退回到了那个 URL"），
+ * 看它是否按参数取数、Tab 是否高亮、关键词是否回填。
+ * 这比去戳内部 setState 更接近用户看到的东西。
+ */
+describe('笔记列表 · 筛选条件由 URL 决定', () => {
+  it('★ 带 role/p/q 进来：按该角色与页码取数、Tab 高亮、关键词回填', async () => {
+    renderWithProviders(<NotesList />, {
+      route: '/notes?role=personal_note&p=2&q=%E7%94%B5%E6%B1%A0',
+    });
+
+    await waitFor(() =>
+      expect(mockedGetNotes).toHaveBeenCalledWith(
+        2,
+        20,
+        '电池',
+        'personal_note',
+        expect.anything(),
+      ),
+    );
+    // Tab 高亮：读的是 URL 里的 role，而不是默认值
+    expect(await screen.findByRole('button', { name: '我的笔记' })).toHaveClass(
+      'filter-pill-active',
+    );
+    // 关键词回填到搜索框（用户能看到"我现在筛的是什么"）
+    expect(screen.getByRole('searchbox')).toHaveValue('电池');
+  });
+
+  it('没有参数时：默认学习资料 + 第 1 页 + 无关键词', async () => {
+    renderWithProviders(<NotesList />, { route: '/notes' });
+
+    await waitFor(() =>
+      expect(mockedGetNotes).toHaveBeenCalledWith(1, 20, undefined, 'material', expect.anything()),
+    );
+    expect(await screen.findByRole('button', { name: '学习资料' })).toHaveClass(
+      'filter-pill-active',
+    );
   });
 });

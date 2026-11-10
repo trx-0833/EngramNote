@@ -73,7 +73,7 @@ beforeEach(() => {
 
 describe('回收站 · 表格化与危险按钮的两级（批次 E8）', () => {
   it('★ 一行一条笔记，列语义由真 <table> + <th scope="col"> 承担', async () => {
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     // ① 真表格：三个角色齐在（`display: grid` 会让它们一起消失）
     const table = await screen.findByRole('table');
@@ -97,7 +97,7 @@ describe('回收站 · 表格化与危险按钮的两级（批次 E8）', () => 
 
   it('★ 红色分两级：入口是描边（btn-danger-outline），确认框里才是实底（btn-danger）', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     // 页头的「清空回收站」：不可恢复，但它打开的是确认框 —— 用描边
     const clearEntry = await screen.findByRole('button', { name: '清空回收站' });
@@ -149,7 +149,7 @@ describe('回收站 · 彻底删除 / 恢复 / 清空（缓存形状回归）', 
   it('★ 彻底删除成功后：该行从列表消失（不再出现 filter is not a function）', async () => {
     const user = userEvent.setup();
     vi.mocked(purgeNote).mockResolvedValue(undefined as never);
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     const dialog = await openPurgeDialog(user);
     await user.click(within(dialog).getByRole('button', { name: '彻底删除' }));
@@ -165,7 +165,7 @@ describe('回收站 · 彻底删除 / 恢复 / 清空（缓存形状回归）', 
   it('★ 恢复成功后：该行同样消失（同一个缓存更新函数）', async () => {
     const user = userEvent.setup();
     vi.mocked(restoreNote).mockResolvedValue({ note: TRASHED.note, renamed_to: null } as never);
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     await user.click(await screen.findByRole('button', { name: '恢复' }));
 
@@ -179,7 +179,7 @@ describe('回收站 · 彻底删除 / 恢复 / 清空（缓存形状回归）', 
   it('★ 清空回收站后：表格变空态（缓存写回了 {items} 而不是裸数组）', async () => {
     const user = userEvent.setup();
     vi.mocked(purgeAllTrash).mockResolvedValue({ purged: 1, failed: 0 } as never);
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     await user.click(await screen.findByRole('button', { name: '清空回收站' }));
     const dialog = await screen.findByRole('dialog');
@@ -203,7 +203,7 @@ describe('回收站 · 彻底删除的幂等兜底', () => {
   it('★ 服务端回 NOTE_NOT_FOUND：按"已删除"处理（行消失、不报错）', async () => {
     const user = userEvent.setup();
     vi.mocked(purgeNote).mockRejectedValue(new ApiError('笔记不存在', 'NOTE_NOT_FOUND'));
-    renderWithProviders(<Trash />);
+    renderWithProviders(<Trash />, { route: '/trash' });
 
     await user.click(await screen.findByRole('button', { name: '彻底删除' }));
     const dialog = await screen.findByRole('dialog');

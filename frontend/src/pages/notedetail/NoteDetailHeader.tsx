@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 笔记详情页头部：顶部视图切换 tab、标题与操作按钮、错误提示
  * @description
  * 由 `pages/NoteDetail.tsx` 拆分而来（overhaul-plan 5.5），只做搬运：
@@ -92,6 +92,14 @@ interface NoteDetailHeaderProps {
   /** 跳转路由 */
   navigate: (path: string) => void;
   /**
+   * 「返回列表」（2026-11-10）：走浏览器后退，把筛选/页码/滚动位置一起带回去
+   *
+   * 不能沿用 
+avigate('/notes') —— 那是一次 PUSH 到全新地址，列表会重新挂载。
+   * 兜底逻辑见 hooks/useBackToList。
+   */
+  onBackToList: () => void;
+  /**
    * 页头最下方的内容（2026-10-18 新增）
    *
    * 目前唯一的调用方是 `NoteDetail.tsx` 传进来的**元信息条**
@@ -127,6 +135,7 @@ export default function NoteDetailHeader({
   onExport,
   exporting,
   navigate,
+  onBackToList,
   children,
 }: NoteDetailHeaderProps) {
   const { t } = useTranslation();
@@ -325,7 +334,7 @@ export default function NoteDetailHeader({
             <Icon name="delete" size={16} />
             {t('noteDetail.delete')}
           </button>
-          <button className="btn btn-ghost" onClick={() => navigate('/notes')}>
+          <button className="btn btn-ghost" onClick={onBackToList}>
             {t('noteDetail.back')}
           </button>
         </div>

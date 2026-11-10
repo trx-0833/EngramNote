@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 笔记详情页面（编排层）
  * @description 展示单条笔记的完整内容，包括：
  * 1. 笔记元信息（标题、来源类型、状态、页数、大小、创建时间）
@@ -40,6 +40,7 @@ import SelectionMenu from './notedetail/SelectionMenu';
 import AnnotationAskPanel from './notedetail/AnnotationAskPanel';
 import RelatedCardsSection from './notedetail/RelatedCardsSection';
 import LoadErrorView from './notedetail/LoadErrorView';
+import { useBackToList } from '../hooks/useBackToList';
 import { useNoteAnnotations } from './notedetail/useNoteAnnotations';
 import { useNoteLinks } from './notedetail/useNoteLinks';
 import { useNoteActions } from './notedetail/useNoteActions';
@@ -60,6 +61,11 @@ import styles from './NoteDetail.module.css';
 export default function NoteDetail() {
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
+  /**
+   * 「返回列表」：优先后退（把 URL 里的筛选、页码与滚动位置一起带回去），
+   * 深链接直达时退回 /notes。判据见 hooks/useBackToList。
+   */
+  const backToList = useBackToList('/notes');
 
   /** 引用回跳参数（阶段 2.7）：`?view=clean&cs=<char_start>&ce=<char_end>` */
   const [searchParams, setSearchParams] = useSearchParams();
@@ -188,7 +194,7 @@ export default function NoteDetail() {
 
   // 错误或笔记不存在状态
   if (error || !note) {
-    return <LoadErrorView error={error} onBack={() => navigate('/notes')} />;
+    return <LoadErrorView error={error} onBack={backToList} />;
   }
 
   /** 选择要显示的 Markdown 内容 */
@@ -251,6 +257,7 @@ export default function NoteDetail() {
           )
         }
         navigate={navigate}
+        onBackToList={backToList}
       >
         <NotePropertyRail
           note={note}

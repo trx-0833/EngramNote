@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 回收站页面
  * @description 展示已移入回收站的笔记列表，支持：
  * 1. 查看每项笔记的附属统计（卡片/题目/批注/版本/双向链接数）
@@ -41,6 +41,8 @@ import { useToast } from '../components/Toast';
 // 回收站私有样式（visual-refactor-plan 批次 E8）：表格化的承载结构
 // —— 类名进模块后会被哈希，留在全局样式表里的选择器再也选不中它（css-convention.md §3 雷区 2）
 import styles from './Trash.module.css';
+import { useListScrollRestore } from '../hooks/useListScrollRestore';
+import { useRememberListUrl } from '../hooks/useRememberListUrl';
 import { useTranslation } from '../i18n';
 
 /**
@@ -58,6 +60,10 @@ export default function Trash() {
   const toast = useToast();
   const queryClient = useQueryClient();
   /** 操作进行中的笔记 ID（恢复/彻底删除），用于按钮禁用 */
+  /** 滚动位置恢复（2026-11-10） */
+  /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
+  useRememberListUrl('trash');
+  useListScrollRestore('trash');
   const [operatingId, setOperatingId] = useState<string | null>(null);
   /** 待彻底删除的笔记（打开 PurgeNoteDialog） */
   const [noteToPurge, setNoteToPurge] = useState<TrashNoteItem | null>(null);

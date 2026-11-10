@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 今日资料页面
  * @description 按日期组织学习资料的文件夹视图，支持：
  * 1. 新建文件夹（默认以今天日期命名）
@@ -43,6 +43,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 // 本页私有样式（visual-refactor-plan 批次 E8）：时间线与元数据 chip
 import styles from './DailyMaterials.module.css';
+import { useUrlState } from '../hooks/useUrlState';
 import { useTranslation, type MessageKey } from '../i18n';
 
 /** 允许上传的文件扩展名列表 */
@@ -188,7 +189,10 @@ export default function DailyMaterials() {
   /** 当前展开文件夹的详情 */
   const [folderDetail, setFolderDetail] = useState<FolderDetail | null>(null);
   /** 笔记状态筛选 */
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  /**
+   * 状态筛选（2026-11-10）：挂到 URL（status=）—— 从文件夹详情返回时
+   * 原样回到那个筛选，见 hooks/useUrlState`n   */
+  const [statusFilter, setStatusFilter] = useUrlState('status', 'all');
   /** 数据加载状态 */
   /** 详情加载状态 */
   const [detailLoading, setDetailLoading] = useState(false);

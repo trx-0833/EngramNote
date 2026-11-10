@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 笔记列表页面
  * @description 展示用户所有笔记的列表页面，支持：
  * 1. 按标题关键词搜索
@@ -6,7 +6,7 @@
  * 3. 删除笔记（带确认提示）
  * 4. 点击笔记卡片跳转到详情页
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -23,6 +23,9 @@ import Icon from '../components/Icon';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorDisplay from '../components/ErrorDisplay';
+import { useListScrollRestore } from '../hooks/useListScrollRestore';
+import { useRememberListUrl } from '../hooks/useRememberListUrl';
+import { useUrlNumber, useUrlPatch, useUrlState } from '../hooks/useUrlState';
 import { statusClass, useLabels } from '../utils/labels';
 // 日期**格式**的唯一出口（i18n 阶段 0）：本页此前自己写死 `'zh-CN'`
 import { formatDate } from '../utils/datetime';
@@ -67,26 +70,66 @@ export default function NotesList() {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  /** 当前页码（从 1 开始） */
-  const [page, setPage] = useState(1);
-  /** 搜索关键词 */
-  const [keyword, setKeyword] = useState('');
+  /**
+   * 页码 / 关键词 / 角色 / 已审阅 —— **全部挂在 URL 上**（2026-11-10）
+   *
+   * 原先都是 `useState`：用户点进一篇笔记再返回，列表会重新挂载，
+   * 筛选回默认、回到第 1 页、滚回顶部，得重新定位一遍。
+   * 挂到 URL 后，详情页的「返回列表」走 `navigate(-1)` 就能原样回到
+   * **同一个视图**（`hooks/useUrlState` 文件头有完整理由，含"为什么用 replace"）。
+   *
+   * 四个参数的名字都短（`q` / `p` / `role` / `arch`）：它们会出现在用户
+   * 复制出去的链接里，长名字只是噪音。
+   */
+  const [page, setPage] = useUrlNumber('p', 1);
+  /** 多个筛选项**一次**写进 URL（setSearchParams 连续调用会互相覆盖，见 useUrlPatch） */
+  const patchUrl = useUrlPatch();
+  const [keyword] = useUrlState('q', '');
+  const [noteRoleRaw] = useUrlState('role', 'material');
+  const noteRole: 'material' | 'personal_note' =
+    noteRoleRaw === 'personal_note' ? 'personal_note' : 'material';
+  /**
+   * 已审阅筛选：**两个角色各记一份**（`arch=material,personal`）
+   *
+   * 保留"两个 Tab 下互不影响"的既有行为 —— 换成单个布尔会把
+   * "切到我的笔记时它自动带上学习资料的筛选"这种错一起带进来。
+   */
+  const [archParam] = useUrlState('arch', '');
+  const archivedRoles = useMemo(
+    () => (archParam ? archParam.split(',').filter(Boolean) : []),
+    [archParam],
+  );
+  const archivedByRole: Record<string, boolean> = {
+    material: archivedRoles.includes('material'),
+    personal_note: archivedRoles.includes('personal_note'),
+  };
+  /** 算出改动后的 rch 参数值（空串 = 两个角色都没开，URL 里就不留这个键） */
+  function archivedNext(role: string, value: boolean): string {
+    const next = new Set(archivedRoles);
+    if (value) next.add(role);
+    else next.delete(role);
+    return [...next].sort().join(',');
+  }
   /** 「导出全部」进行中（B4）—— 期间禁用按钮，防止连点生成多份 ZIP */
   const [exportingAll, setExportingAll] = useState(false);
-  /** 当前笔记角色筛选：material=学习资料，personal_note=我的笔记 */
-  const [noteRole, setNoteRole] = useState<'material' | 'personal_note'>('material');
-  /** 各角色下是否只显示已审阅笔记，保持两个 Tab 下已审阅筛选独立 */
-  const [archivedByRole, setArchivedByRole] = useState<Record<string, boolean>>({
-    material: false,
-    personal_note: false,
-  });
-  /** 数据加载状态 */
-  /** 错误信息 */
   /** 待移入回收站的笔记（打开删除确认弹窗） */
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  /** 数据加载状态 */
+  /** 错误信息 */
 
   /** 每页显示条数，固定为 20 */
   const pageSize = 20;
+
+  /**
+   * 滚动位置恢复（2026-11-10）：从详情页后退回来时停在原来那一行附近
+   *
+   * 键里带上筛选条件 —— 换筛选就是另一份列表，行号与高度都对不上。
+   */
+  /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
+  useRememberListUrl('notes');
+  useListScrollRestore(
+    ['notes', noteRole, keyword, page, archivedByRole[noteRole] ? 'archived' : 'all'].join(':'),
+  );
 
   // 当页码或关键词或筛选条件变化时重新获取笔记列表
   const showArchived = archivedByRole[noteRole];
@@ -284,8 +327,7 @@ export default function NotesList() {
             placeholder={t('notesList.searchPlaceholder')}
             value={keyword}
             onChange={(e) => {
-              setKeyword(e.target.value);
-              setPage(1);
+              patchUrl({ q: e.target.value, p: '' });
             }}
             aria-label={t('notesList.searchLabel')}
           />
@@ -307,8 +349,7 @@ export default function NotesList() {
         <button
           className={`filter-pill ${noteRole === 'material' ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setNoteRole('material');
-            setPage(1);
+            patchUrl({ role: 'material', p: '' });
           }}
         >
           {t('notesList.filterMaterial')}
@@ -316,8 +357,7 @@ export default function NotesList() {
         <button
           className={`filter-pill ${noteRole === 'personal_note' ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setNoteRole('personal_note');
-            setPage(1);
+            patchUrl({ role: 'personal_note', p: '' });
           }}
         >
           {t('notesList.filterPersonal')}
@@ -329,8 +369,7 @@ export default function NotesList() {
         <button
           className={`filter-pill ${!archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setArchivedByRole((prev) => ({ ...prev, [noteRole]: false }));
-            setPage(1);
+            patchUrl({ arch: archivedNext(noteRole, false), p: '' });
           }}
         >
           {t('notesList.filterAll')}
@@ -338,8 +377,7 @@ export default function NotesList() {
         <button
           className={`filter-pill ${archivedByRole[noteRole] ? 'filter-pill-active' : ''}`}
           onClick={() => {
-            setArchivedByRole((prev) => ({ ...prev, [noteRole]: true }));
-            setPage(1);
+            patchUrl({ arch: archivedNext(noteRole, true), p: '' });
           }}
         >
           {t('notesList.filterArchived')}
@@ -579,7 +617,7 @@ export default function NotesList() {
           <button
             className="btn btn-secondary"
             disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
+            onClick={() => setPage(page - 1)}
           >
             {t('notesList.prevPage')}
           </button>
@@ -595,7 +633,7 @@ export default function NotesList() {
           <button
             className="btn btn-secondary"
             disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => setPage(page + 1)}
           >
             {t('notesList.nextPage')}
           </button>

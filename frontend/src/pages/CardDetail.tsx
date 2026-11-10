@@ -1,10 +1,11 @@
-/**
+﻿/**
  * @file 知识卡片详情页面
  * @description 展示单张知识卡片的完整内容、原始出处和关联题目，支持编辑和删除
  */
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { useBackToList } from '../hooks/useBackToList';
 import {
   getKnowledgeCard,
   updateKnowledgeCard,
@@ -37,7 +38,8 @@ export default function CardDetail() {
   const { cardTypeLabels, difficultyLabels, questionTypeLabels } = useLabels();
   const toast = useToast();
   const { cardId } = useParams<{ cardId: string }>();
-  const navigate = useNavigate();
+  /** 「返回列表」：能后退就后退（保留卡片列表的筛选与滚动位置），见 hooks/useBackToList */
+  const backToList = useBackToList('/cards');
   const [showAnswer, setShowAnswer] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
 
@@ -110,7 +112,7 @@ export default function CardDetail() {
     if (!card) return;
     try {
       await deleteKnowledgeCard(card.id);
-      navigate('/cards');
+      backToList();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('cardDetail.deleteFailed'));
     }
@@ -145,7 +147,7 @@ export default function CardDetail() {
     return (
       <div style={{ padding: 'var(--space-lg)' }}>
         <ErrorDisplay message={error || t('cardDetail.notFound')} />
-        <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
+        <button className="btn btn-secondary" onClick={backToList}>
           {t('cardDetail.backToList')}
         </button>
       </div>
@@ -197,7 +199,7 @@ export default function CardDetail() {
                 </button>
               </>
             )}
-            <button className="btn btn-secondary" onClick={() => navigate('/cards')}>
+            <button className="btn btn-secondary" onClick={backToList}>
               {t('cardDetail.back')}
             </button>
           </>

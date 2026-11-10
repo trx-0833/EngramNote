@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file 问题集列表页面（visual-refactor-plan 批次 E5「题库 / 问题集」）
  * @description 展示当前用户所有问答题，按所属笔记分组，每组可折叠/展开。
  *
@@ -57,6 +57,8 @@ import {
 // 本页自己的外观（批次 E5）：表格 / 行三态 / 列头排序 / 「列」面板。
 // 从模块取类名是因为它们只被这一个文件写出来（`css-convention.md` §4 判据 2）。
 import styles from './QuestionSets.module.css';
+import { useListScrollRestore } from '../hooks/useListScrollRestore';
+import { useRememberListUrl } from '../hooks/useRememberListUrl';
 import { useTranslation, type MessageKey } from '../i18n';
 
 /**
@@ -600,6 +602,10 @@ export default function QuestionSets() {
   const [expandedAnswers, setExpandedAnswers] = useState<Set<string>>(new Set());
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteId = searchParams.get('note_id') || undefined;
+  /** 滚动位置恢复（2026-11-10）：从题目详情/学习页后退回来时停在原处 */
+  /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
+  useRememberListUrl('questions');
+  useListScrollRestore(['questions', noteId ?? 'all'].join(':'));
 
   /**
    * 题目集（迁移 5.2 / C1，2026-10-22）
