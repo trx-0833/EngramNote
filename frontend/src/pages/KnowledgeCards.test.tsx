@@ -11,7 +11,8 @@
  * 2. 色阶仍然**只有 `getMasteryColor` 一个来源**（与 `difficultyColors` 同源）；
  * 3. `> 0` 的渲染判据没变：从未复习过的卡片不显示"掌握度 0%"。
  */
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getKnowledgeCards, type KnowledgeCard } from '../api/client';
 import { getMasteryColor } from '../utils/labels';
@@ -206,5 +207,67 @@ describe('知识卡片列表：服务端分页', () => {
 
     expect(screen.queryByRole('navigation', { name: '知识卡片分页' })).toBeNull();
     expect(screen.queryByText(/本页显示第/)).toBeNull();
+  });
+});
+/**
+ * 知识卡片列表 · 页码与搜索词挂在 URL 上（2026-11-10）
+ *
+ * ## 这条守的是用户报告的那个 bug
+ *
+ * 「在第二页点进去看知识卡片，退出来就回到第一页了」。
+ *
+ * 原因：卡片详情返回时列表会重新挂载，而 `page` 是 `useState` —— 一卸载就归 1。
+ * 现在页码与搜索词都在 URL 上（`p` / `kw`），返回时"回到同一个 URL"就回到同一页。
+ * 判据因此是"带参数挂载页面，看它按哪一页取数、控件显示第几页"，
+ * 比去戳内部 setState 更接近用户看到的东西。
+ *
+ * `getKnowledgeCards(page, pageSize, noteId, keyword, options)` —— 参数顺序照抄签名，
+ * 写错顺序的断言会以"没被调用过"的形式失败（实测踩过一次）。
+ */
+describe('知识卡片列表：页码与搜索词由 URL 决定', () => {
+  beforeEach(() => {
+    mockedCards.mockReset();
+  });
+
+  it('★ 带 ?p=2 进来：按第 2 页取数，分页控件显示"第 2 / 3 页"', async () => {
+    mockedCards.mockResolvedValue({ items: [makeCard()], page: 2, page_size: 100, total: 250 });
+    renderWithProviders(<KnowledgeCards />, { route: '/cards?p=2' });
+
+    await waitFor(() =>
+      expect(mockedCards).toHaveBeenCalledWith(2, 100, undefined, undefined, expect.anything()),
+    );
+    expect(await screen.findByText('第 2 / 3 页')).toBeInTheDocument();
+  });
+
+  it('没有参数时取第 1 页（默认不变）', async () => {
+    mockedCards.mockResolvedValue({ items: [makeCard()], page: 1, page_size: 100, total: 250 });
+    renderWithProviders(<KnowledgeCards />, { route: '/cards' });
+
+    await waitFor(() =>
+      expect(mockedCards).toHaveBeenCalledWith(1, 100, undefined, undefined, expect.anything()),
+    );
+  });
+
+  it('★ 带 ?kw=浮充 进来：搜索框回填该词，取数带上关键词', async () => {
+    mockedCards.mockResolvedValue({ items: [makeCard()], page: 1, page_size: 100, total: 1 });
+    renderWithProviders(<KnowledgeCards />, { route: '/cards?kw=%E6%B5%AE%E5%85%85' });
+
+    await waitFor(() =>
+      expect(mockedCards).toHaveBeenCalledWith(1, 100, undefined, '浮充', expect.anything()),
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('浮充');
+  });
+
+  it('★ 点「下一页」按第 2 页取数（页码进了 URL，返回才能回到这一页）', async () => {
+    const user = userEvent.setup();
+    mockedCards.mockResolvedValue({ items: [makeCard()], page: 1, page_size: 100, total: 250 });
+    renderWithProviders(<KnowledgeCards />, { route: '/cards' });
+    await screen.findByText('第 1 / 3 页');
+
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+
+    await waitFor(() =>
+      expect(mockedCards).toHaveBeenCalledWith(2, 100, undefined, undefined, expect.anything()),
+    );
   });
 });

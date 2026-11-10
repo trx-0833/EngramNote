@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file 知识卡片列表页面
  * @description 展示当前用户所有知识卡片，按所属笔记分组，每组可折叠/展开
  *              支持按卡片分类（常规/盲点/拓展）筛选、重点难点标记、掌握度进度条与拓展知识点生成
@@ -30,7 +30,7 @@ import {
 import { useToast } from '../components/Toast';
 import { useListScrollRestore } from '../hooks/useListScrollRestore';
 import { useRememberListUrl } from '../hooks/useRememberListUrl';
-import { useUrlState } from '../hooks/useUrlState';
+import { useUrlNumber, useUrlPatch, useUrlState } from '../hooks/useUrlState';
 import { useTranslation, type MessageKey } from '../i18n';
 
 interface NoteGroup {
@@ -142,7 +142,15 @@ export default function KnowledgeCards() {
     sig: string;
     ids: Set<string>;
   } | null>(null);
-  const [searchKeyword, setSearchKeyword] = useState('');
+  /**
+   * 搜索词（2026-11-10）：挂到 URL（`kw=`）
+   *
+   * 与页码同一个理由 —— 从卡片详情返回时要回到"同一个视图"，
+   * 而不是一个只有默认筛选的空壳列表。
+   */
+  const [searchKeyword] = useUrlState('kw', '');
+  /** 多个筛选项一次写进 URL（`setSearchParams` 连调会互相覆盖，见 `useUrlPatch`） */
+  const patchUrl = useUrlPatch();
   /**
    * 分类 Tab（2026-11-10）：挂到 URL（	ab=）
    *
@@ -154,7 +162,6 @@ export default function KnowledgeCards() {
   /** 滚动位置恢复（后退回来时停在原处） */
   /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
   useRememberListUrl('cards');
-  useListScrollRestore(['cards', filterTab].join(':'));
   const queryClient = useQueryClient();
   /**
    * 当前页码（服务端分页，见 `PAGE_SIZE` 的说明）。
@@ -162,14 +169,16 @@ export default function KnowledgeCards() {
    * 搜索词、`note_id` 变化时必须回到第 1 页 —— 否则会停在一个
    * 对新结果集而言越界的页码上，页面显示空白而 `total` 不为 0。
    */
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useUrlNumber('p', 1);
+  /** 滚动位置恢复（后退回来时停在原处；键里带筛选与页码 —— 换一页就是另一份列表） */
+  useListScrollRestore(['cards', filterTab, page].join(':'));
   /**
    * `total` 的镜像（只在 `fetchCards` 里读，见那里的越界守卫说明）。
    *
    * 用 ref 而不是直接读 state 的原因写在 `fetchCards` 的依赖说明里：
    * state 进依赖会让"每取一次数就多一次请求"。
    */
-  const totalRef = useRef(0);
+  const totalRef = useRef<number | null>(null);
   const [openMenuCardId, setOpenMenuCardId] = useState<string | null>(null);
   const [actionLoadingCardId, setActionLoadingCardId] = useState<string | null>(null);
   /**
@@ -205,7 +214,19 @@ export default function KnowledgeCards() {
     queryKey: [...CARDS_QUERY_KEY, { noteId, keyword: searchKeyword || undefined, page }],
     queryFn: async ({ signal }) => {
       const targetPage = page;
-      const lastPage = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE));
+      /**
+       * `total` 未知时（首次取数 / 刚换筛选）**不夹页**
+       *
+       * `totalRef` 初值是 `null`（未知）。按 0 算的话 `ceil(0 / 100) = 0 → max(1, 0) = 1`，
+       * 第一次请求的目标页无论传什么都变成第 1 页 —— 于是"带 `?p=2` 进来"
+       * 会先请求第 1 页、再把 URL 改回 1，深链接与"返回原页"全都失效
+       * （2026-11-10 实测：用户看到的正是"退出来回到第一页"）。
+       * 所以拿不到总数时按调用方要的页去请求，夹页只用于"已知总数、当前页越界"。
+       */
+      const lastPage =
+        totalRef.current === null
+          ? targetPage
+          : Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE));
       const wantedPage = Math.min(targetPage, lastPage);
 
       // 服务端分页（走查报告 §4）：此前硬编码 page_size=999，
@@ -256,10 +277,15 @@ export default function KnowledgeCards() {
     if (!cardsData) return;
     totalRef.current = cardsData.total;
     if (cardsData.wantedPage !== cardsData.targetPage) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // 页码被夹（删除卡片后 `total` 变小）⇒ 把 URL 上的 `p` 同步回最后一页，
+      // 否则控件上显示的还是那个已经不存在的页码。
+      //
+      // `setPage` 现在是 URL 写入（`hooks/useUrlState`），引用随 URL 变化；
+      // 放进依赖后这个 effect 会多跑几次，但上面那个 `!==` 守卫保证**只在夹页时**
+      // 才真的写 URL —— 不会形成"写 URL → 重渲染 → 再写"的循环。
       setPage(cardsData.wantedPage);
     }
-  }, [cardsData]);
+  }, [cardsData, setPage]);
 
   const error = queryError
     ? queryError instanceof Error
@@ -292,17 +318,17 @@ export default function KnowledgeCards() {
   function handleSearchChange(value: string) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      // 搜索词变了就回第 1 页 —— 与 `setSearchKeyword` **放在同一个批**里，
-      // 所以取数 effect 只会跑一次（带上 page=1）。
-      //
-      // ⚠️ 为什么不写成 `useEffect(() => setPage(1), [searchKeyword])`：
-      // 那个 effect 与取数 effect 在同一次 commit 里跑，顺序是"先取数、后重置"，
+      // ⚠️ 为什么不用 `useEffect(() => setPage(1), [searchKeyword])`：
+      // 那个 effect 与取数在同一次 commit 里跑，顺序是"先取数、后重置"，
       // 于是搜索会先按旧页码打一次请求、再按第 1 页打一次（两次请求），
       // 中间那一帧渲染的还是"新搜索结果 + 旧页码"。
       // 也试过"渲染期比较 ref"的写法，被 `react-hooks/refs` 挡下
       // （本仓库不允许在渲染期读写 ref）—— 放在事件处理里是唯一干净的位置。
-      if (page !== 1) setPage(1);
-      setSearchKeyword(value);
+      //
+      // 一次导航同时写"关键词"和"回第 1 页"：分两次 `setSearchParams` 会互相覆盖
+      // （第二次拿到的 `prev` 是尚未提交的那份），结果就是"搜索了但还在旧页码"
+      patchUrl({ kw: value, p: '' });
+      patchUrl({ kw: value, p: '' });
     }, 300);
   }
 
@@ -463,6 +489,12 @@ export default function KnowledgeCards() {
           type="text"
           placeholder={t('knowledgeCards.searchPlaceholder')}
           onChange={(e) => handleSearchChange(e.target.value)}
+          /**
+           * `defaultValue`（而不是 `value`）：输入框保持非受控 —— 打字不必等
+           * 300ms 防抖才回显；而页面从卡片详情返回时会**重新挂载**，那时
+           * `defaultValue` 取的是 URL 里的 `kw`，所以"返回后搜索框还是那个词"成立。
+           */
+          defaultValue={searchKeyword}
           style={{
             width: '100%',
             padding: '8px 12px',
@@ -804,7 +836,7 @@ export default function KnowledgeCards() {
             <button
               className="btn btn-secondary"
               disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => setPage(page - 1)}
             >
               {t('knowledgeCards.prevPage')}
             </button>
@@ -820,7 +852,7 @@ export default function KnowledgeCards() {
             <button
               className="btn btn-secondary"
               disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
             >
               {t('knowledgeCards.nextPage')}
             </button>
