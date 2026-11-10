@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file 问题集列表页面（visual-refactor-plan 批次 E5「题库 / 问题集」）
  * @description 展示当前用户所有问答题，按所属笔记分组，每组可折叠/展开。
  *
@@ -59,6 +59,7 @@ import {
 import styles from './QuestionSets.module.css';
 import { useListScrollRestore } from '../hooks/useListScrollRestore';
 import { useRememberListUrl } from '../hooks/useRememberListUrl';
+import { useUrlPatch, useUrlState } from '../hooks/useUrlState';
 import { useTranslation, type MessageKey } from '../i18n';
 
 /**
@@ -200,6 +201,26 @@ const COLUMNS: ColumnDef[] = [
   },
 ];
 
+/**
+ * 排序状态 ⇄ URL 参数（`sort=created_at:desc`）
+ *
+ * ## 为什么要解析而不是直接 `as`
+ *
+ * URL 是**用户可编辑的**：`?sort=bogus:up` 或 `?sort=created_at:sideways`
+ * 直接断言成 `SortState` 会让 `sortQuestions` 拿着不存在的列去取值，
+ * 表现为"点了排序没反应"甚至运行时错误。所以未知的键与方向**一律当作不排序**
+ * —— 与"缺省参数 = 不排序"同一个语义，不需要额外提示。
+ *
+ * 返回 `null` 表示"不排序"（与 `SortState` 的定义一致）。
+ */
+function parseSortParam(raw: string): SortState {
+  if (!raw) return null;
+  const [key, direction] = raw.split(':');
+  const keys: SortKey[] = ['question', 'question_type', 'difficulty', 'created_at', 'updated_at'];
+  if (!keys.includes(key as SortKey)) return null;
+  if (direction !== 'asc' && direction !== 'desc') return null;
+  return { key: key as SortKey, direction };
+}
 type SortDirection = 'asc' | 'desc';
 
 /**
@@ -238,8 +259,12 @@ type SortState = { key: SortKey; direction: SortDirection } | null;
  */
 type ActiveSort = NonNullable<SortState>;
 
-/** 初始排序状态：不排序（理由见 `SortState` 的长注释） */
-const INITIAL_SORT: SortState = null;
+/**
+ * 初始排序状态：不排序（理由见 `SortState` 的长注释）
+ *
+ * 2026-11-10 起排序存进 URL（`sort=key:dir`）：**缺省即不排序**，
+ * 这个常量不再被引用，语义由 `parseSortParam('') → null` 承担。
+ */
 
 /** 换一列时的初始方向：时间列"最新在前"，其余升序（显式查表，写错 tsc 报错） */
 const INITIAL_DIRECTION: Record<SortKey, SortDirection> = {
@@ -397,7 +422,12 @@ type FilterId = 'question_type' | 'difficulty';
 
 type FilterState = Record<FilterId, string>;
 
-const DEFAULT_FILTERS: FilterState = { question_type: 'all', difficulty: 'all' };
+/**
+ * 筛选的默认值（两个维度都是「全部」）
+ *
+ * 2026-11-10 起筛选存进 URL（`type=` / `diff=`）：**缺省即默认值**，
+ * 这个常量不再被引用，语义由 `useUrlState('type', 'all')` 的默认参数承担。
+ */
 
 interface FilterDimension {
   id: FilterId;
@@ -582,7 +612,37 @@ export default function QuestionSets() {
     sig: string;
     ids: Set<string>;
   } | null>(null);
-  const [searchKeyword, setSearchKeyword] = useState('');
+  /**
+   * 搜索词 / 筛选 / 排序 —— **全部挂在 URL 上**（2026-11-10）
+   *
+   * ## 为什么这一页也需要
+   *
+   * 每组的「查看笔记」会 `navigate('/notes/{id}')`（见下方渲染处的按钮），
+   * 用户回原文核一道题再返回时，本页会**重新挂载**：搜索被清空、题型/难度回到
+   * 「全部」、排序回到接口顺序 —— 于是要在几千道题里重新筛一遍。
+   * 挂到 URL 后，"返回到同一个 URL"就是回到同一个视图。
+   *
+   * ## 参数约定（默认值一律不落进 URL）
+   *
+   * | 参数 | 含义 | 默认（缺省即此值） |
+   * |---|---|---|
+   * | `kw` | 搜索词 | 空 |
+   * | `type` | 题型筛选 | `all` |
+   * | `diff` | 难度筛选 | `all` |
+   * | `sort` | 排序，形如 `created_at:desc` | 不排序 |
+   *
+   * ⚠️ `note_id` 早就在 URL 上（本页的"只显示某篇笔记的题"入口），本次不动。
+   * 列显隐（`visibleColumns`）**刻意不进 URL**：它是跨会话的个人偏好，
+   * 塞进 URL 会让每个分享链接都带着别人的列设置。
+   */
+  const [searchKeyword] = useUrlState('kw', '');
+  const [typeParam] = useUrlState('type', 'all');
+  const [diffParam] = useUrlState('diff', 'all');
+  const [sortParam] = useUrlState('sort', '');
+  /** 多个筛选项**一次**写进 URL（`setSearchParams` 连调会互相覆盖，见 `useUrlPatch`） */
+  const patchUrl = useUrlPatch();
+  const filters: FilterState = { question_type: typeParam, difficulty: diffParam };
+  const sort: SortState = parseSortParam(sortParam);
   /**
    * 正在行内编辑的题目 id（`null` = 没有在编辑）。
    *
@@ -591,8 +651,6 @@ export default function QuestionSets() {
    */
   const [editingId, setEditingId] = useState<string | null>(null);
   // ── 批次 E5 新增的四个状态 ──
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [sort, setSort] = useState<SortState>(INITIAL_SORT);
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(
     () => new Set(COLUMNS.filter((col) => col.defaultVisible).map((col) => col.id)),
   );
@@ -605,7 +663,9 @@ export default function QuestionSets() {
   /** 滚动位置恢复（2026-11-10）：从题目详情/学习页后退回来时停在原处 */
   /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
   useRememberListUrl('questions');
-  useListScrollRestore(['questions', noteId ?? 'all'].join(':'));
+  //
+  // 键里带上筛选/排序：换一组筛选就是另一份列表，旧 Y 对不上（与笔记/卡片页同一口径）
+  useListScrollRestore(['questions', noteId ?? 'all', typeParam, diffParam, sortParam].join(':'));
 
   /**
    * 题目集（迁移 5.2 / C1，2026-10-22）
@@ -689,7 +749,7 @@ export default function QuestionSets() {
   function handleSearchChange(value: string) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      setSearchKeyword(value);
+      patchUrl({ kw: value });
     }, 300);
   }
 
@@ -708,19 +768,14 @@ export default function QuestionSets() {
   }
 
   /**
-   * 设置某一筛选维度的取值。
+   * 设置某一筛选维度的取值（写进 URL）
    *
-   * 写成"先拷一份再按下标写回"而不是 `{ ...prev, [dimensionId]: value }`：
-   * 后者是**联合类型的计算属性名**，TS 对它的推断会退化成索引签名
-   * （拿到的类型不再是 `FilterState`）；按下标写回则由 `FilterState` 兜住，
-   * 哪天 `FilterId` 多一维而 `FilterState` 忘了加，tsc 当场报错。
+   * 两个维度是**两个 URL 参数**，所以一次 `patchUrl` 里只动其中一个 ——
+   * 另一个原样留着（`useUrlPatch` 只改你点名的键）。
    */
   function setFilter(dimensionId: FilterId, value: string) {
-    setFilters((prev) => {
-      const next: FilterState = { ...prev };
-      next[dimensionId] = value;
-      return next;
-    });
+    const key = dimensionId === 'question_type' ? 'type' : 'diff';
+    patchUrl({ [key]: value === 'all' ? '' : value });
   }
 
   /**
@@ -730,11 +785,11 @@ export default function QuestionSets() {
    * 再引入一个三态循环只会让"这一列现在是什么状态"多一种要解释的情况。
    */
   function toggleSort(key: SortKey) {
-    setSort((prev) =>
-      prev !== null && prev.key === key
-        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
-        : { key, direction: INITIAL_DIRECTION[key] },
-    );
+    const next: ActiveSort =
+      sort !== null && sort.key === key
+        ? { key, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: INITIAL_DIRECTION[key] };
+    patchUrl({ sort: `${next.key}:${next.direction}` });
   }
 
   function filterQuestions(questions: QuizItem[]): QuizItem[] {
@@ -784,6 +839,12 @@ export default function QuestionSets() {
           type="text"
           placeholder={t('questionSets.searchPlaceholder')}
           onChange={(e) => handleSearchChange(e.target.value)}
+          /**
+           * `defaultValue`（而不是 `value`）：输入框保持非受控 —— 打字不必等
+           * 300ms 防抖才回显；而页面从笔记详情返回时**会重新挂载**，那时
+           * `defaultValue` 取的是 URL 里的 `kw`，所以"返回后搜索框还是那个词"成立。
+           */
+          defaultValue={searchKeyword}
           style={{
             width: '100%',
             padding: '8px 12px',
