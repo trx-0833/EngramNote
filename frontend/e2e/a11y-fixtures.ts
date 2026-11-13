@@ -924,8 +924,74 @@ function apiFixtures(): Record<string, unknown> {
     },
 
     // ── 智能问答的流式回答（`QA`，路由 /qa）──
-    // 页面挂载时不发任何请求，只有真的提问才有内容 —— 见 rawBody 与 QA_ANSWER_SSE。
+    // 提问后的主内容来自这条流（见 rawBody 与 QA_ANSWER_SSE）。
     '/api/understanding/ask/stream': rawBody(QA_ANSWER_SSE),
+
+    // ── 问答历史（2026-11-13，docs/qa-history-plan.md）──
+    //
+    // ⚠️ `QA` 页挂载时**不再是一个请求都不发**：它现在会拉历史会话列表
+    // （`GET /api/qa/sessions`）。没有这条桩，`qa` 场景会撞上"未定义 501"，
+    // 页面照样渲染（`useQuery` 的 error 分支只是不显示历史条目），
+    // 于是审计会**静默漏掉**新加的页头动作与两句提示文案。
+    //
+    // 列表给两条：一条有标题、一条 `title: null`（前端要显示「未命名对话」）。
+    '/api/qa/sessions': {
+      items: [
+        {
+          id: 'sess-1',
+          surface: 'global',
+          note_id: null,
+          title: '浮充和均充有什么区别？',
+          turn_count: 2,
+          last_question: '那它对寿命有影响吗？',
+          created_at: '2026-11-12T02:00:00Z',
+          updated_at: '2026-11-12T02:05:00Z',
+        },
+        {
+          id: 'sess-2',
+          surface: 'global',
+          note_id: null,
+          title: null,
+          turn_count: 1,
+          last_question: '什么是硫化？',
+          created_at: '2026-11-11T02:00:00Z',
+          updated_at: '2026-11-11T02:01:00Z',
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 50,
+    },
+    '/api/qa/sessions/sess-1': {
+      session: {
+        id: 'sess-1',
+        surface: 'global',
+        note_id: null,
+        title: '浮充和均充有什么区别？',
+        turn_count: 1,
+        last_question: '浮充和均充有什么区别？',
+        created_at: '2026-11-12T02:00:00Z',
+        updated_at: '2026-11-12T02:05:00Z',
+      },
+      turns: [
+        {
+          id: 'turn-1',
+          question: '浮充和均充有什么区别？',
+          answer: '浮充是长期恒压运行，用于补偿自放电；均充是短时升压校正。',
+          status: 'ok',
+          error_code: null,
+          provider: 'DeepSeek',
+          model: 'deepseek-chat',
+          prompt_version: null,
+          retrieval_status: 'full_vector',
+          retrieval_query: '浮充和均充有什么区别？',
+          sources: [],
+          context_turns: 0,
+          latency_ms: 1200,
+          created_at: '2026-11-12T02:05:00Z',
+        },
+      ],
+    },
   };
 }
 

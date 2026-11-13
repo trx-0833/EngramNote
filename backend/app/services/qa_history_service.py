@@ -139,7 +139,16 @@ async def record_turn(
     try:
         clipped_sources = None
         if sources:
-            clipped_sources = [{**s, "snippet": _truncate(str(s.get("snippet") or ""), 200)} for s in sources]
+            # 检索层给的字段名是 `relevant_text`（见 api/understanding.py 里
+            # `AnswerSource(relevant_text=s["relevant_text"])`）；早期草稿以为叫
+            # `snippet`，只截那一个键等于**什么都没截**。两个都处理，前端不必关心来源。
+            clipped_sources = []
+            for item in sources:
+                entry = dict(item)
+                for key in ("relevant_text", "snippet"):
+                    if entry.get(key):
+                        entry[key] = _truncate(str(entry[key]), 200)
+                clipped_sources.append(entry)
         turn = QATurn(
             session_id=session.id,
             user_id=user_id,
@@ -425,9 +434,13 @@ async def strip_snippets_for_note(db: AsyncSession, *, note_id: str) -> int:
             continue
         touched = False
         for item in items:
-            if isinstance(item, dict) and item.get("note_id") == note_id and item.get("snippet"):
-                item["snippet"] = ""
-                touched = True
+            if not isinstance(item, dict) or item.get("note_id") != note_id:
+                continue
+            # 两个键都清：检索层用 `relevant_text`，早期实现用 `snippet`
+            for key in ("relevant_text", "snippet"):
+                if item.get(key):
+                    item[key] = ""
+                    touched = True
         if touched:
             turn.sources_json = json.dumps(items, ensure_ascii=False)
             changed += 1

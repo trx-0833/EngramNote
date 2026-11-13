@@ -652,10 +652,19 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
 export async function askQuestionStream(
   question: string,
   signal?: AbortSignal,
+  /**
+   * 续聊的会话 id（2026-11-13）。**只传 id，不传历史消息**：
+   * 上下文由服务端按 `(session_id, user_id)` 自己查 —— 客户端传数组既可伪造、
+   * 又能把请求体放大到任意长，而"删掉某一轮就不再影响后续回答"也就无从保证。
+   */
+  sessionId?: string,
 ): Promise<ReadableStream<Uint8Array>> {
-  // 请求体按契约派生（`POST /api/understanding/ask/stream`，契约里就是 `{question: string}`）。
+  // 请求体按契约派生（`POST /api/understanding/ask/stream`，契约里是 `{question, session_id?}`）。
   // 响应侧刻意保持手写：SSE 的事件模型（meta/token/sources/done/error）不在 schema 里。
-  const body: BodyOf<'/understanding/ask/stream', 'post'> = { question };
+  const body: BodyOf<'/understanding/ask/stream', 'post'> = {
+    question,
+    ...(sessionId ? { session_id: sessionId } : {}),
+  };
   // 不设超时：流式响应可能持续很久，生命周期由调用方的 signal 控制
   const response = await authorizedFetch('/understanding/ask/stream', {
     method: 'POST',

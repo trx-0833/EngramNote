@@ -152,3 +152,19 @@
     position: static;
   }
 }
+/* ── 问答历史与多轮（2026-11-13，docs/qa-history-plan.md §5.4）──
+   两行提示都是**常驻可见小字**，不用 tooltip：触屏与键盘用户看不到 hover，
+   而这两句话正是"AI 怎么不记得""我删了怎么还在"这两类困惑的唯一答案。 */
+.qaHint {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-tertiary);
+}
+
+/* 「本轮参考了 N 轮上文」——比提示更"实时"，所以颜色稍重一点 */
+.qaContextUsed {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+}

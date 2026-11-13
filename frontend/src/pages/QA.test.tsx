@@ -20,6 +20,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
+import { QueryWrapper } from '../test/render';
 import QA from './QA';
 // 需要按类名查"右栏是不是独立于主列"—— 这是布局事实，
 // 语义查询看不见它（css-convention §6 允许的少数例外）
@@ -30,11 +31,21 @@ vi.mock('../api/client', async () => {
   return { ...actual, askQuestionStream: vi.fn() };
 });
 
+/**
+ * 渲染被测页面
+ *
+ * ⚠️ 2026-11-13 起必须套 `QueryWrapper`：问答页用 `useQuery` 拉历史会话列表
+ * （`GET /api/qa/sessions`），没有 Provider 时直接抛
+ * `No QueryClient set, use QueryClientProvider`。`MemoryRouter` 仍要保留 ——
+ * `useUrlState` 读写 `?s=`（当前会话）依赖路由上下文。
+ */
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/qa']}>
-      <QA />
-    </MemoryRouter>,
+    <QueryWrapper>
+      <MemoryRouter initialEntries={['/qa']}>
+        <QA />
+      </MemoryRouter>
+    </QueryWrapper>,
   );
 }
 

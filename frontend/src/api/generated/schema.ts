@@ -2461,6 +2461,64 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/qa/sessions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Qa Sessions
+     * @description 列出当前用户的问答会话（按最近聊过排序）
+     *
+     *     「最近聊过」= `updated_at` 倒序：会话在被追加轮次时刷新它，
+     *     所以"昨天问过、今天又追问"的会话会顶到最上面 —— 这是用户预期。
+     */
+    get: operations['list_qa_sessions_api_qa_sessions_get'];
+    put?: never;
+    post?: never;
+    /**
+     * Clear Qa Sessions
+     * @description 清空当前用户的**全部**问答历史（软删），返回删掉的会话数
+     *
+     *     为什么返回条数而不是 204：清空之后列表会变空，而"本来就空"与"清掉了 12 个"
+     *     在界面上完全一样 —— 条数是这次操作唯一的反馈。
+     */
+    delete: operations['clear_qa_sessions_api_qa_sessions_delete'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/qa/sessions/{session_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Qa Session
+     * @description 单个会话 + 其轮次（升序）
+     *
+     *     前端点开历史条目时调它：轮次按 `created_at` 升序，与"聊天的阅读顺序"一致。
+     */
+    get: operations['get_qa_session_api_qa_sessions__session_id__get'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Qa Session
+     * @description 删除一个会话（软删；30 天后由 Beat 硬删）
+     *
+     *     再删一次 → 404：与"删除成功"区分开，前端据此提示"对话已被删除"而不是假装成功。
+     */
+    delete: operations['delete_qa_session_api_qa_sessions__session_id__delete'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/report/daily': {
     parameters: {
       query?: never;
@@ -2957,14 +3015,17 @@ export interface paths {
      *     适合前端实时展示生成过程。
      *
      *     流程：
-     *     1. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）
-     *     2. 首事件下发 retrieval_status（meta 事件，供前端展示降级提示）
-     *     3. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）
-     *     4. 调用 llm_service.chat_stream() 流式生成回答
-     *     5. 流式结束后发送 sources 与 done 事件
+     *     1. **解析/创建会话，读出最近 N 轮成功问答**（多轮，2026-11-13）
+     *     2. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）；
+     *        追问时的检索词是"上一问 + 当前问"拼接的（否则"那它呢"检索不到）
+     *     3. 首事件下发 retrieval_status / provider / session_id / history_used
+     *     4. 复用与 rag_answer() 一致的 system prompt 构建 messages
+     *        （有历史时在末尾追加"事实以本轮资料为准"的硬指令）
+     *     5. 调用 llm_service.chat_stream() 流式生成回答
+     *     6. 流式结束后发送 sources 与 done 事件，**并把这一轮落库**（成功/失败/中止三种都落）
      *
      *     SSE 事件格式：
-     *     - event: meta    data: {"retrieval_status": "...", "provider": "..."}  首事件，检索降级状态
+     *     - event: meta    data: {"retrieval_status": "...", "provider": "...", "session_id": "...", "history_used": 2}
      *     - event: token   data: {"content": "..."}                每个 token 片段
      *     - event: sources data: {"sources": [...], "provider": "..."}  流式结束后返回引用来源
      *     - event: done    data: {}                                结束标记
@@ -5641,6 +5702,8 @@ export interface components {
       question: string;
       /** Selected Text */
       selected_text: string;
+      /** Session Id */
+      session_id?: string | null;
       /**
        * View Mode
        * @default original
@@ -6309,6 +6372,125 @@ export interface components {
       purged: number;
     };
     /**
+     * QAClearAllResponse
+     * @description 「清空全部问答历史」的结果
+     *
+     *     为什么不返回 204：用户点完需要看到"清掉了几条"，而那正是这次操作唯一的反馈
+     *     （列表会变空，但"本来就空"与"清掉了 12 条"在界面上一样）。
+     */
+    QAClearAllResponse: {
+      /**
+       * Deleted
+       * @default 0
+       */
+      deleted: number;
+    };
+    /**
+     * QASessionDetailResponse
+     * @description 单个会话 + 其轮次（按时间升序）」
+     */
+    QASessionDetailResponse: {
+      session: components['schemas']['QASessionResponse'];
+      /** Turns */
+      turns?: components['schemas']['QATurnResponse'][];
+    };
+    /**
+     * QASessionListResponse
+     * @description 会话列表（分页）
+     */
+    QASessionListResponse: {
+      /** Items */
+      items?: components['schemas']['QASessionResponse'][];
+      /**
+       * Page
+       * @default 1
+       */
+      page: number;
+      /**
+       * Page Size
+       * @default 20
+       */
+      page_size: number;
+      /**
+       * Total
+       * @default 0
+       */
+      total: number;
+    };
+    /**
+     * QASessionResponse
+     * @description 会话摘要（列表页用，不含轮次）
+     */
+    QASessionResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Id */
+      id: string;
+      /** Last Question */
+      last_question?: string | null;
+      /** Note Id */
+      note_id?: string | null;
+      /** Surface */
+      surface: string;
+      /** Title */
+      title?: string | null;
+      /**
+       * Turn Count
+       * @default 0
+       */
+      turn_count: number;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * QATurnResponse
+     * @description 一轮问答（历史详情里的条目）
+     */
+    QATurnResponse: {
+      /** Answer */
+      answer?: string | null;
+      /**
+       * Context Turns
+       * @default 0
+       */
+      context_turns: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Error Code */
+      error_code?: string | null;
+      /** Id */
+      id: string;
+      /** Latency Ms */
+      latency_ms?: number | null;
+      /** Model */
+      model?: string | null;
+      /** Prompt Version */
+      prompt_version?: string | null;
+      /** Provider */
+      provider?: string | null;
+      /** Question */
+      question: string;
+      /** Retrieval Query */
+      retrieval_query?: string | null;
+      /** Retrieval Status */
+      retrieval_status?: string | null;
+      /** Sources */
+      sources?: {
+        [key: string]: unknown;
+      }[];
+      /** Status */
+      status: string;
+    };
+    /**
      * QuestionAnswerResponse
      * @description 问答响应
      */
@@ -6342,10 +6524,21 @@ export interface components {
     /**
      * QuestionRequest
      * @description 问答请求
+     *
+     *     ## `session_id`（2026-11-13，多轮会话）
+     *
+     *     可选。带上则把这一轮追加到该会话，并让服务端把**最近若干轮**作为上下文
+     *     一起送给模型；不带则新建会话（首问）。
+     *
+     *     ⚠️ 历史消息**不由客户端上传**：只有 `session_id` 一个字段。让客户端传
+     *     `messages` 数组既可伪造、又能把请求体放大到任意长；服务端按
+     *     `(session_id, user_id)` 自己查，才谈得上"删掉某一轮就不再影响后续回答"。
      */
     QuestionRequest: {
       /** Question */
       question: string;
+      /** Session Id */
+      session_id?: string | null;
     };
     /**
      * QuestionType
@@ -10569,6 +10762,124 @@ export interface operations {
         content: {
           'application/json': components['schemas']['ScanImportResponse'];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  list_qa_sessions_api_qa_sessions_get: {
+    parameters: {
+      query?: {
+        /** @description 页码（从 1 开始） */
+        page?: number;
+        /** @description 每页条数（上限 100） */
+        page_size?: number;
+        /** @description 搜索关键词（匹配标题、最后问题与任意轮次的问答正文） */
+        keyword?: string | null;
+        /** @description 按入口过滤：global（/qa）或 note（笔记浮层） */
+        surface?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QASessionListResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  clear_qa_sessions_api_qa_sessions_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QAClearAllResponse'];
+        };
+      };
+    };
+  };
+  get_qa_session_api_qa_sessions__session_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QASessionDetailResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_qa_session_api_qa_sessions__session_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

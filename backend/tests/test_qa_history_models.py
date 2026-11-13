@@ -98,7 +98,7 @@ class TestRecordTurn:
                 session=session,
                 question="浮充是什么？",
                 answer="恒压补偿自放电。",
-                sources=[{"note_id": "n1", "chunk_id": "c1", "snippet": "x" * 500, "score": 0.8}],
+                sources=[{"note_id": "n1", "chunk_id": "c1", "relevant_text": "x" * 500, "score": 0.8}],
                 context_turns=0,
             )
             await db.commit()
@@ -108,7 +108,7 @@ class TestRecordTurn:
             turn = (await db.execute(__import__("sqlalchemy").select(QATurn))).scalars().one()
             assert turn.status == TURN_STATUS_OK
             # ★ 片段截到 200 字：历史里存的是"提示是哪一段"，不是"把笔记复制一份"
-            assert len(__import__("json").loads(turn.sources_json)[0]["snippet"]) <= 201
+            assert len(__import__("json").loads(turn.sources_json)[0]["relevant_text"]) <= 201
 
     async def test_failed_turn_is_stored_but_does_not_advance_counters(self, test_db):
         """失败轮次入历史（可查"我问过但没答出来"），但不推进 turn_count / last_question"""
@@ -283,8 +283,8 @@ class TestStripSnippets:
                 question="这段说的是什么",
                 answer="它说的是浮充。",
                 sources=[
-                    {"note_id": "note-1", "chunk_id": "c1", "snippet": "浮充是长期恒压运行方式"},
-                    {"note_id": "note-2", "chunk_id": "c2", "snippet": "均充是短时升压"},
+                    {"note_id": "note-1", "chunk_id": "c1", "relevant_text": "浮充是长期恒压运行方式"},
+                    {"note_id": "note-2", "chunk_id": "c2", "relevant_text": "均充是短时升压"},
                 ],
             )
             await db.commit()
@@ -298,8 +298,8 @@ class TestStripSnippets:
             await db.refresh(turn)
             sources = json.loads(turn.sources_json)
             by_note = {s["note_id"]: s for s in sources}
-            assert by_note["note-1"]["snippet"] == ""  # 片段的正文副本被清掉
+            assert by_note["note-1"]["relevant_text"] == ""  # 片段的正文副本被清掉
             assert by_note["note-1"]["chunk_id"] == "c1"  # 墓碑保留
-            assert by_note["note-2"]["snippet"] == "均充是短时升压"  # 其他笔记不受影响
+            assert by_note["note-2"]["relevant_text"] == "均充是短时升压"  # 其他笔记不受影响
             assert turn.question == "这段说的是什么"
             assert turn.answer == "它说的是浮充。"

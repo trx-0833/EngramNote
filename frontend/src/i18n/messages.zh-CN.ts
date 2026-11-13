@@ -1075,6 +1075,30 @@ const zhCN = {
     noLocationShort: '（无定位）',
     poweredBy: '由 {provider} 提供支持',
     failed: '问答失败',
+    // ── 问答历史与多轮（2026-11-13，docs/qa-history-plan.md §5.4/§5.5）──
+    history: '历史',
+    historyTitle: '历史对话',
+    historyEmpty: '还没有历史对话',
+    historyUntitled: '未命名对话',
+    newChat: '新建对话',
+    deleteSession: '删除对话',
+    deleteConfirm: '删除后不可恢复，确定删除这个对话？',
+    clearAll: '清空全部',
+    clearAllConfirm: '这会把全部 {count} 个对话移出历史（30 天后彻底删除），确定继续？',
+    clearAllDone: '已清空 {count} 个对话',
+    deleted: '对话已删除',
+    sessionGone: '对话已被删除，已开始新对话',
+    contextUsed: '本轮参考了 {count} 轮上文',
+    historyLoadFailed: '历史对话加载失败',
+    /**
+     * ★ 三句面向用户的提示（计划 §5.4）。数字全部来自配置，不写死：
+     * 调了 `QA_CONTEXT_MAX_TURNS` / 保留期 / 备份份数之后文案必须跟着变，
+     * 否则它会变成"看起来像事实的旧信息"。
+     */
+    inputLabel: '你的问题',
+    multiturnHint: '追问会带上最近 {turns} 轮对话；换话题请点「新建对话」。',
+    retentionHint: '问答历史保留 {days} 天；删除后仍可能留在{weeks}周内的数据库备份里。',
+    noteAskNoContext: '此处提问不带入问答页的上下文。',
   },
 
   /** 知识图谱页（`KnowledgeGraph`，i18n 阶段 3） */

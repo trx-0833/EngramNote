@@ -337,6 +337,12 @@ export default function NoteAskPanel({
             <p className={styles.askAiSelectedHint}>
               {t('noteAsk.selectionPrefix', { text: selectedTextPreview })}
             </p>
+            {/*
+              ★ 计划 §5.4 第 3 句：浮层**不带入**问答页的上下文（决策 2：本轮只落库）。
+              不写这句，用户会拿这里的回答与问答页对比，然后困惑
+              "为什么同一个问题问出来的不一样"。
+            */}
+            <p className={styles.askAiContextHint}>{t('qa.noteAskNoContext')}</p>
             <div className={styles.askAiActions}>
               <button className="btn btn-secondary" onClick={handleClose}>
                 {t('common.cancel')}

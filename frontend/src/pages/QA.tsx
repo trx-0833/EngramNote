@@ -26,10 +26,12 @@
  * 按 AGENTS.md §4 不擅自做，留给用户决策。
  */
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 // `useNavigate` 随引用来源那一行的改动一起去掉了：那一行现在是 `<Link to>`，
 // 不再需要"用 JS 跳转"（见引用列表的注释）。
 import { Link } from 'react-router-dom';
 import { askQuestionStream, type AnswerSource } from '../api/client';
+import { getQaSession, getQaSessions, isSessionGoneError, type QATurnItem } from '../api/qaHistory';
 import { parseSSEStream } from '../utils/sse';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
@@ -42,6 +44,10 @@ import PageHeader from '../components/PageHeader';
 // 连同被哈希的 `@keyframes slideUp`（改名 `qaSlideUp`）—— 见 QA.module.css 文件头
 import styles from './QA.module.css';
 import { useTranslation } from '../i18n';
+import { useUrlState } from '../hooks/useUrlState';
+import { useToast } from '../components/Toast';
+import { QA_LIMITS } from '../constants/qaHistory';
+import QAHistoryDrawer from './qa/QAHistoryDrawer';
 
 interface QARecord {
   question: string;
@@ -127,11 +133,35 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
 
 export default function QA() {
   const { t } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
   const [history, setHistory] = useState<QARecord[]>([]);
+  /** 本轮实际参考了几轮上文（来自 SSE `meta.history_used`；0 时不显示提示） */
+  const [historyUsed, setHistoryUsed] = useState(0);
+  /** 历史抽屉 */
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  /**
+   * 当前会话 id —— **存在 URL 上**（`?s=`）：
+   * 刷新/分享/返回本页都回到同一个会话；"新建对话"就是把它清空。
+   * 与笔记/卡片/题库三处的做法一致（见 hooks/useUrlState）。
+   */
+  const [sessionId, setSessionId] = useUrlState('s', '');
+
+  /**
+   * 历史会话列表
+   *
+   * `staleTime` 用 0：历史列表的变化来自"刚问完一轮"或"删除"，
+   * 都不是高频轮询能解决的，靠 `invalidateQueries` 显式失效更准确。
+   */
+  const sessionsQuery = useQuery({
+    queryKey: ['qa', 'sessions'],
+    queryFn: ({ signal }) => getQaSessions({ page_size: 50 }, { signal }),
+  });
+  const sessions = sessionsQuery.data?.items ?? [];
 
   // 持有当前流式请求的 AbortController 与 reader，用于新问题中止旧流、停止生成与卸载清理
   const abortRef = useRef<AbortController | null>(null);
@@ -153,6 +183,85 @@ export default function QA() {
       }
     };
   }, []);
+
+  /**
+   * 载入 `?s=` 指向的会话（刷新 / 分享 / 从历史抽屉点开）
+   *
+   * 三条与"后端可能已删"有关的处理：
+   * 1. 会话已消失 → 清掉 `?s=`、提示"已开始新对话"，而不是让页面空着；
+   * 2. 载入的轮次按**倒序**塞进 `history`（页面约定 `history[0]` 是最新一轮，
+   *    见 `handleAsk` 里的 `[tempRecord, ...prev]`）；
+   * 3. 载入期间不覆盖用户正在进行的流式回答（`streaming` 时跳过）。
+   *
+   * ⚠️ 两个"防死循环"的细节（2026-11-13 实测踩过：测试挂死 10 分钟不走）：
+   * - `loadedSessionRef` 记住**已经载入过的会话**：`setHistory` 会触发重渲染，
+   *   而重渲染若再次进入本 effect，就会"取详情 → setState → 再取详情"无限循环；
+   * - `toast` / `t` 全部走 ref：`useToast()` 在没有 Provider 时每次渲染都返回
+   *   **新对象**（测试环境正是如此），把它们放进依赖等于依赖"每次渲染"。
+   */
+  const loadedSessionRef = useRef<string | null>(null);
+  const toastRef = useRef(toast);
+  const tRef = useRef(t);
+  useEffect(() => {
+    toastRef.current = toast;
+    tRef.current = t;
+  });
+
+  useEffect(() => {
+    if (!sessionId || streaming) return;
+    if (loadedSessionRef.current === sessionId) return;
+    // 先记账再发请求：请求失败时也不该在下一次渲染里重试成一个死循环
+    loadedSessionRef.current = sessionId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await getQaSession(sessionId);
+        if (cancelled) return;
+        const records: QARecord[] = (detail.turns ?? [])
+          .map((turn: QATurnItem) => ({
+            question: turn.question,
+            answer: turn.answer ?? '',
+            sources: (turn.sources ?? []) as AnswerSource[],
+            provider: turn.provider ?? '',
+            retrievalStatus: turn.retrieval_status ?? '',
+          }))
+          .reverse();
+        setHistory(records);
+        setHistoryUsed(0);
+      } catch (err) {
+        if (cancelled) return;
+        if (isSessionGoneError(err)) {
+          loadedSessionRef.current = null;
+          setSessionId('');
+          setHistory([]);
+          toastRef.current.info(tRef.current('qa.sessionGone'));
+          return;
+        }
+        setError(err instanceof Error ? err.message : tRef.current('qa.historyLoadFailed'));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, streaming, setSessionId]);
+
+  /** 「新建对话」：清空 URL 上的会话与当前轮次（下一问自动开新会话） */
+  function handleNewChat() {
+    stopActiveStream();
+    loadedSessionRef.current = null;
+    setSessionId('');
+    setHistory([]);
+    setHistoryUsed(0);
+    setError('');
+  }
+
+  /** 从抽屉打开一条历史会话：换会话前先停掉正在生成的流 */
+  function handleOpenSession(nextSessionId: string) {
+    stopActiveStream();
+    setDrawerOpen(false);
+    setError('');
+    setSessionId(nextSessionId);
+  }
 
   /** 中止当前流式请求（新问题发起前 / 点击停止生成时调用） */
   function stopActiveStream() {
@@ -198,7 +307,11 @@ export default function QA() {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
     try {
-      const stream = await askQuestionStream(currentQuestion, controller.signal);
+      const stream = await askQuestionStream(
+        currentQuestion,
+        controller.signal,
+        sessionId || undefined,
+      );
       // askQuestionStream 返回 ReadableStream，直接获取读取器
       const r = stream.getReader();
       if (!r) {
@@ -225,6 +338,12 @@ export default function QA() {
             const payload = (data ?? {}) as Record<string, unknown>;
 
             if (eventType === 'meta') {
+              // 会话 id（首问时由服务端新建并回传）与「本轮参考了几轮上文」
+              const nextSessionId = String(payload.session_id || '');
+              if (nextSessionId && nextSessionId !== sessionId) {
+                setSessionId(nextSessionId);
+              }
+              setHistoryUsed(Number(payload.history_used || 0));
               // 首事件：记录检索降级状态，供渲染降级提示
               setHistory((prev) => {
                 if (prev.length === 0) return prev;
@@ -323,6 +442,9 @@ export default function QA() {
       if (readerRef.current === reader) readerRef.current = null;
       setLoading(false);
       setStreaming(false);
+      // 刚问完一轮 / 被中止：历史列表的标题、轮次数与排序都可能变了，
+      // 显式失效比等 staleTime 更准（用户点开抽屉时看到的就是最新的）
+      void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });
     }
   }
 
@@ -342,7 +464,19 @@ export default function QA() {
   return (
     <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
-      <PageHeader title={t('qa.title')} />
+      <PageHeader
+        title={t('qa.title')}
+        actions={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={handleNewChat}>
+              {t('qa.newChat')}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setDrawerOpen(true)}>
+              {t('qa.history')}
+            </button>
+          </>
+        }
+      />
 
       {/* 两栏骨架（批次 E7）：左对话流 / 右常驻引用栏。窄屏收成一栏，见模块 CSS */}
       <div className={styles.qaLayout}>
@@ -358,6 +492,8 @@ export default function QA() {
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={streaming}
+                aria-label={t('qa.inputLabel')}
+                aria-describedby="qa-multiturn-hint"
                 style={{ flex: 1 }}
               />
               {streaming ? (
@@ -370,6 +506,20 @@ export default function QA() {
                 </button>
               )}
             </div>
+            {/*
+              ★ 追问提示（计划 §5.4 第 1 句）。
+
+              数字来自 `QA_LIMITS.contextTurns`（镜像后端 `qa_context_max_turns`），
+              由一条后端用例盯着两处一致 —— 文案里写死 6 会在调参后变成谎言。
+              `aria-describedby` 指向它：读屏用户在输入框上就能听到"追问会带上下文"。
+            */}
+            <p id="qa-multiturn-hint" className={styles.qaHint}>
+              {t('qa.multiturnHint', { turns: QA_LIMITS.contextTurns })}
+            </p>
+            {/* 本轮实际参考了几轮（history_used > 0 才显示：首轮提示"参考了 0 轮"是噪音） */}
+            {historyUsed > 0 && (
+              <p className={styles.qaContextUsed}>{t('qa.contextUsed', { count: historyUsed })}</p>
+            )}
             {error && (
               <p
                 style={{
@@ -512,6 +662,27 @@ export default function QA() {
           )}
         </aside>
       </div>
+
+      <QAHistoryDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        sessions={sessions}
+        loading={sessionsQuery.isLoading}
+        error={
+          sessionsQuery.error instanceof Error
+            ? sessionsQuery.error.message
+            : sessionsQuery.error
+              ? t('qa.historyLoadFailed')
+              : undefined
+        }
+        activeSessionId={sessionId || undefined}
+        onOpenSession={handleOpenSession}
+        onChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });
+        }}
+        retentionDays={QA_LIMITS.retentionDays}
+        backupWeeks={QA_LIMITS.backupWeeks}
+      />
     </div>
   );
 }

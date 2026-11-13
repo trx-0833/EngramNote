@@ -878,6 +878,28 @@ const en = {
     noLocationShort: '(no location)',
     poweredBy: 'Powered by {provider}',
     failed: 'Question failed',
+    // ── Q&A history & multi-turn (2026-11-13, docs/qa-history-plan.md §5.4/§5.5) ──
+    history: 'History',
+    historyTitle: 'Past conversations',
+    historyEmpty: 'No past conversations yet',
+    historyUntitled: 'Untitled conversation',
+    newChat: 'New conversation',
+    deleteSession: 'Delete conversation',
+    deleteConfirm: 'This cannot be undone. Delete this conversation?',
+    clearAll: 'Clear all',
+    clearAllConfirm:
+      'This removes all {count} conversations from history (permanently deleted after 30 days). Continue?',
+    clearAllDone: 'Cleared {count} conversations',
+    deleted: 'Conversation deleted',
+    sessionGone: 'That conversation was deleted — started a new one',
+    contextUsed: 'Used {count} earlier turns as context',
+    historyLoadFailed: 'Failed to load conversations',
+    inputLabel: 'Your question',
+    multiturnHint:
+      'Follow-ups include the last {turns} turns; use "New conversation" when changing topic.',
+    retentionHint:
+      'History is kept for {days} days; deleted items may remain in database backups for up to {weeks} weeks.',
+    noteAskNoContext: 'Questions here do not use the Q&A page context.',
   },
 
   graph: {

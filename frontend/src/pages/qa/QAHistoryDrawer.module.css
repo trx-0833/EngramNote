@@ -1,0 +1,120 @@
+/**
+ * 问答历史抽屉的样式（2026-11-13）
+ *
+ * 只做这一件事：让抽屉里的每一行**可读且可点**，不给全局加任何类
+ * （`css-convention.md` §4：只有能被同一页多处复用的东西才进全局）。
+ *
+ * 两处细节：
+ * - `.itemMain` 是整行可点区域（`<button>`，键盘可 Tab、可回车）；
+ * - `.itemActive` 用左侧 3px 竖条而不是背景色：背景色在与 hover 叠加后
+ *   会变得难以区分"当前会话"与"鼠标悬停"，竖条与两者都不冲突。
+ */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.itemMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.itemMain:hover {
+  background: var(--color-accent-light);
+}
+
+.itemMain:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.itemActive {
+  border-left-color: var(--color-accent);
+}
+
+.itemTitle {
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  /* 长标题两行截断：列表要能一屏看下十条，而不是被一个长标题撑满 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.itemMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.itemDelete {
+  flex: 0 0 auto;
+  padding: 0 var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.itemDelete:hover:not(:disabled) {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.itemDelete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin: 0;
+  padding: var(--space-md) 0;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-md) 0;
+  color: var(--color-error);
+  font-size: 0.875rem;
+}
+
+.note {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-tertiary);
+}
+
+.footer {
+  margin-top: var(--space-md);
+  display: flex;
+  justify-content: flex-end;
+}

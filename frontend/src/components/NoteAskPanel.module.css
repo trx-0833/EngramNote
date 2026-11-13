@@ -102,6 +102,13 @@
   color: var(--color-text-secondary, #888);
   word-break: break-all;
 }
+/* 「此处提问不带入问答页的上下文」（计划 §5.4 第 3 句）：
+   比选区提示更弱一级（tertiary），因为它说明的是"边界"而不是"当前内容" */
+.askAiContextHint {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary, #999);
+}
 
 .askAiActions {
   display: flex;
