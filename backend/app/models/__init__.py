@@ -22,6 +22,7 @@ from .review_state import (
     ITEM_TYPE_QUIZ,
 )
 from .chunk import Chunk, pack_vector, unpack_vector
+from .qa_history import QASession, QATurn, SURFACES, TURN_STATUSES
 from .llm_call import LLMCall
 from .llm_cache import LLMCache
 from .refresh_token import RefreshToken
@@ -67,6 +68,10 @@ __all__ = [
     "pack_vector",
     "unpack_vector",
     "LLMCall",
+    "QASession",
+    "QATurn",
+    "SURFACES",
+    "TURN_STATUSES",
     "LLMCache",
     "RefreshToken",
     "UserSettings",

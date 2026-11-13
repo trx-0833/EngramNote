@@ -50,7 +50,9 @@ def reap_stale_tasks_task() -> dict:
     if result["reaped"]:
         logger.warning(
             "僵尸任务自愈完成: 扫描 %d，标记 %d，释放笔记 %d",
-            result["scanned"], result["reaped"], result["notes_released"],
+            result["scanned"],
+            result["reaped"],
+            result["notes_released"],
         )
     return result
 
@@ -83,7 +85,8 @@ def backup_database_task() -> dict:
     else:
         logger.info(
             "每日备份完成: %s | integrity=%s | 保留策略清理 %d 份",
-            result.get("snapshot"), result.get("integrity"),
+            result.get("snapshot"),
+            result.get("integrity"),
             len(result.get("pruned") or []),
         )
     return result
@@ -166,14 +169,17 @@ def vault_audit_task() -> dict:
     if result.get("ok"):
         logger.info(
             "存储审计通过: 扫描 %d 篇笔记，%d 个对象全部存在",
-            result.get("notes_scanned", 0), result.get("db_objects", 0),
+            result.get("notes_scanned", 0),
+            result.get("db_objects", 0),
         )
     else:
         # 不一致意味着"用户界面上能看到、但打不开"的内容已经存在 —— error 级
         logger.error(
             "存储审计发现不一致: %s | 扫描 %d 篇，DB 对象 %d，磁盘对象 %d",
-            result.get("counts"), result.get("notes_scanned", 0),
-            result.get("db_objects", 0), result.get("disk_objects", 0),
+            result.get("counts"),
+            result.get("notes_scanned", 0),
+            result.get("db_objects", 0),
+            result.get("disk_objects", 0),
         )
     return result
 
@@ -218,14 +224,17 @@ def storage_snapshot_task() -> dict:
     if not result.get("ok"):
         logger.error(
             "存储快照不完整: 不稳定 %d / 失败 %d | %s",
-            len(result.get("unstable") or []), len(result.get("failed") or []),
+            len(result.get("unstable") or []),
+            len(result.get("failed") or []),
             result.get("reason") or result.get("failed"),
         )
     else:
         logger.info(
             "存储快照完成: %s | %d 个文件 / %.1f MB | 清理旧快照 %d 份",
-            result.get("snapshot"), result.get("files", 0),
-            (result.get("bytes") or 0) / 1024 / 1024, len(result.get("pruned") or []),
+            result.get("snapshot"),
+            result.get("files", 0),
+            (result.get("bytes") or 0) / 1024 / 1024,
+            len(result.get("pruned") or []),
         )
     return result
 
@@ -277,8 +286,7 @@ def cleanup_llm_ledger_task() -> dict:
         async with factory() as db:
             expired_cache = await purge_expired(db)
             old_calls = await purge_old_calls(db, retention_days=retention_days)
-        return {"expired_cache_rows": expired_cache, "old_call_rows": old_calls,
-                "retention_days": retention_days}
+        return {"expired_cache_rows": expired_cache, "old_call_rows": old_calls, "retention_days": retention_days}
 
     try:
         with task_loop("cleanup_llm_ledger"):
@@ -289,7 +297,9 @@ def cleanup_llm_ledger_task() -> dict:
 
     logger.info(
         "LLM 账本清理完成: 过期缓存 %d 行，超保留期记账 %d 行（保留 %d 天）",
-        result["expired_cache_rows"], result["old_call_rows"], result["retention_days"],
+        result["expired_cache_rows"],
+        result["old_call_rows"],
+        result["retention_days"],
     )
     return result
 
@@ -345,6 +355,58 @@ def cleanup_refresh_tokens_task() -> dict:
 
     logger.info(
         "刷新令牌清理完成: 删除 %d 行过期记录（%s）",
-        result["removed"], "已排干" if result["drained"] else "仍有积压，下轮继续",
+        result["removed"],
+        "已排干" if result["drained"] else "仍有积压，下轮继续",
+    )
+    return result
+
+
+@celery_app.task(name="app.tasks.maintenance_tasks.cleanup_qa_history")
+def cleanup_qa_history_task() -> dict:
+    """清理问答历史（docs/qa-history-plan.md §6.2）
+
+    ## 两步，口径不同
+
+    | 步骤 | 删什么 | 为什么 |
+    |---|---|---|
+    | `purge_soft_deleted` | 软删超过 30 天的会话 | 删会话是**用户可见的破坏性动作**，留 30 天给"后悔"；超过还留着就是白留敏感文本 |
+    | `purge_expired_sessions` | 超过 `qa_history_retention_days`（默认 90 天）的会话 | 与 `llm_calls` 同一思路：只增不减的表迟早要清 |
+
+    `qa_history_retention_days <= 0` 表示永久保留（默认 90，想永久留就配 0）。
+
+    刻意不抛异常：清理失败不该让 Beat 堆积失败状态，但必须留 error 日志 ——
+    否则"清理没生效"这件事又会静默（与 `cleanup_llm_ledger_task` 同一口径）。
+    """
+    from ..config import get_settings
+    from ..database import get_session_factory
+    from ..services.qa_history_service import purge_expired_sessions, purge_soft_deleted
+
+    settings = get_settings()
+    retention_days = int(getattr(settings, "qa_history_retention_days", 90) or 0)
+
+    async def _run() -> dict:
+        factory = get_session_factory()
+        async with factory() as db:
+            purged_soft = await purge_soft_deleted(db)
+            purged_expired = await purge_expired_sessions(db, retention_days=retention_days)
+            await db.commit()
+        return {
+            "purged_soft_deleted": purged_soft,
+            "purged_expired": purged_expired,
+            "retention_days": retention_days,
+        }
+
+    try:
+        with task_loop("cleanup_qa_history"):
+            result = run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - 清理失败不阻塞 Beat
+        logger.error("问答历史清理失败: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+    logger.info(
+        "问答历史清理完成: 软删超期 %d 个会话，超保留期 %d 个会话（保留 %d 天）",
+        result["purged_soft_deleted"],
+        result["purged_expired"],
+        result["retention_days"],
     )
     return result

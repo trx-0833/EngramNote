@@ -1,0 +1,367 @@
+"""
+问答历史服务层（docs/qa-history-plan.md §3 / §6）
+
+本模块是**问答历史**的唯一读写入口：会话创建、轮次追加、列表与详情、软删与硬删、
+以及保留期清理。端点层（`api/qa.py`）与流式落库（`api/understanding.py` /
+`api/notes/ask.py`）都只调这里。
+
+## 为什么把"落库"做成服务而不是散在端点里
+
+两个 `ask/stream` 端点都要落库（全库问答与笔记浮层），而它们的异常分支、
+中止处理、字段来源**完全一样**。散在端点里写两遍，迟早出现"一处修了另一处没修"。
+本项目的 `pending_embedding_chunks`（`api/notes/list_detail.py`）就是同一思路的先例。
+
+## 三条硬约束
+
+1. **写入失败绝不能穿出去**：问答的主流程是"把答案发出去"，历史只是附加。
+   `record_turn` 内部把异常转成 `logger.warning`，返回 `None`。
+2. **会话归属必须校验**：`session_id` 来自客户端，可能属于别人 —— 一律按
+   `(session_id, user_id)` 查，查不到按"不存在"处理（不泄露 id 是否存在）。
+3. **软删的会话不再参与写入**：往已删会话里追加轮次会让"删了却还在长"成为现实。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Sequence
+
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import get_settings
+from ..models.qa_history import (
+    SURFACE_GLOBAL,
+    TURN_STATUS_OK,
+    QASession,
+    QATurn,
+)
+
+logger = logging.getLogger(__name__)
+
+#: 标题截断长度（`qa_sessions.title` 是 120，留余量给"…"）
+TITLE_MAX_CHARS = 80
+#: `last_question` 截断长度（列表副标题，一行放得下）
+LAST_QUESTION_MAX_CHARS = 80
+#: 软删后多久硬删（天）。与计划 §6.2 一致：给用户"误删后悔"的窗口
+SOFT_DELETE_GRACE_DAYS = 30
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _truncate(text: str, limit: int) -> str:
+    """按字符截断（不做词边界处理：中文没有空格，按词切会切在词中间）"""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+# ---------------------------------------------------------------------------
+# 会话与轮次
+# ---------------------------------------------------------------------------
+
+
+async def get_or_create_session(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    surface: str = SURFACE_GLOBAL,
+    session_id: Optional[str] = None,
+    note_id: Optional[str] = None,
+    first_question: Optional[str] = None,
+) -> Optional[QASession]:
+    """取会话；给了 `session_id` 但取不到（不存在/别人的/已软删）返回 `None`
+
+    **不静默新建**：调用方要能区分"续聊"与"会话已消失"，前者该继续追加，
+    后者要回 `404`（与计划 §4.4 最后一行一致：删了却不报错会让人以为还在写）。
+
+    不给 `session_id` 时新建一个会话（`title` 取首个问题截断）。
+    """
+    if session_id:
+        stmt = select(QASession).where(
+            QASession.id == session_id,
+            QASession.user_id == user_id,
+            QASession.deleted_at.is_(None),
+        )
+        return (await db.execute(stmt)).scalars().first()
+
+    session = QASession(
+        user_id=user_id,
+        surface=surface,
+        note_id=note_id if surface == "note" else None,
+        title=_truncate(first_question, TITLE_MAX_CHARS) if first_question else None,
+        turn_count=0,
+        last_question=_truncate(first_question, LAST_QUESTION_MAX_CHARS) if first_question else None,
+    )
+    db.add(session)
+    await db.flush()
+    return session
+
+
+async def record_turn(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    session: QASession,
+    question: str,
+    answer: Optional[str],
+    status: str = TURN_STATUS_OK,
+    error_code: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    prompt_version: Optional[str] = None,
+    retrieval_status: Optional[str] = None,
+    retrieval_query: Optional[str] = None,
+    sources: Optional[Sequence[Dict[str, Any]]] = None,
+    context_turns: int = 0,
+    source_span_start: Optional[int] = None,
+    source_span_end: Optional[int] = None,
+    source_hash: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+) -> Optional[QATurn]:
+    """追加一轮并刷新会话的 `updated_at` / `turn_count` / `last_question`
+
+    ## 失败只 warning，不抛
+
+    历史是附加功能：写不进去不该让用户拿不到已经生成好的答案
+    （与 `pending_embedding_chunks` 同一条原则）。所以这里 `try/except` 全包，
+    异常转成 `logger.warning` 并返回 `None`。
+
+    ## `sources` 的片段在这里截断
+
+    `snippet` 限 200 字：历史里的引用是"提示是哪一段"，不是"把笔记复制一份"。
+    截断放在服务层而不是端点层，是为了让所有调用方口径一致。
+    """
+    try:
+        clipped_sources = None
+        if sources:
+            clipped_sources = [{**s, "snippet": _truncate(str(s.get("snippet") or ""), 200)} for s in sources]
+        turn = QATurn(
+            session_id=session.id,
+            user_id=user_id,
+            question=question,
+            answer=answer,
+            status=status,
+            error_code=error_code,
+            provider=provider,
+            model=model,
+            prompt_version=prompt_version,
+            retrieval_status=retrieval_status,
+            retrieval_query=retrieval_query,
+            sources_json=json.dumps(clipped_sources, ensure_ascii=False) if clipped_sources else None,
+            context_turns=max(0, int(context_turns)),
+            source_span_start=source_span_start,
+            source_span_end=source_span_end,
+            source_hash=source_hash,
+            latency_ms=latency_ms,
+        )
+        db.add(turn)
+        # 只用**成功**的轮次推进"最后聊过什么"：失败的一轮没有答案，
+        # 拿它当副标题会让人以为那次问成功了
+        session.updated_at = _now()
+        if status == TURN_STATUS_OK:
+            session.turn_count = (session.turn_count or 0) + 1
+            session.last_question = _truncate(question, LAST_QUESTION_MAX_CHARS)
+            if not session.title:
+                session.title = _truncate(question, TITLE_MAX_CHARS)
+        await db.flush()
+        return turn
+    except Exception as exc:  # noqa: BLE001 - 附加功能不该拖垮主流程
+        logger.warning(
+            "问答历史写入失败（忽略继续）: session=%s | %s: %s", (session.id or "")[:8], type(exc).__name__, exc
+        )
+        return None
+
+
+async def list_sessions(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    surface: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> tuple[List[QASession], int]:
+    """列表（按 `updated_at` 倒序），返回 `(items, total)`
+
+    `keyword` 同时匹配 `title` / `last_question` 与**该会话内任意轮次的问答正文**
+    —— 用户记住的往往是"答案里的那句话"，只搜标题等于搜不到。
+    """
+    page = max(1, int(page))
+    page_size = max(1, min(100, int(page_size)))
+
+    stmt = select(QASession).where(
+        QASession.user_id == user_id,
+        QASession.deleted_at.is_(None),
+    )
+    if surface:
+        stmt = stmt.where(QASession.surface == surface)
+    if keyword:
+        like = f"%{keyword.strip()}%"
+        # 子查询：该会话里有轮次命中 question/answer
+        matched_ids = select(QATurn.session_id).where(
+            QATurn.user_id == user_id, or_(QATurn.question.ilike(like), QATurn.answer.ilike(like))
+        )
+        stmt = stmt.where(
+            or_(
+                QASession.title.ilike(like),
+                QASession.last_question.ilike(like),
+                QASession.id.in_(matched_ids),
+            )
+        )
+
+    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    rows = (
+        (await db.execute(stmt.order_by(QASession.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)))
+        .scalars()
+        .all()
+    )
+    return list(rows), int(total)
+
+
+async def get_session_with_turns(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    session_id: str,
+) -> Optional[tuple[QASession, List[QATurn]]]:
+    """取会话 + 其轮次（升序）。别人的/已删的返回 `None`（端点转 404）"""
+    stmt = select(QASession).where(
+        QASession.id == session_id,
+        QASession.user_id == user_id,
+        QASession.deleted_at.is_(None),
+    )
+    session = (await db.execute(stmt)).scalars().first()
+    if session is None:
+        return None
+    turns = (
+        (
+            await db.execute(
+                select(QATurn).where(QATurn.session_id == session.id).order_by(QATurn.created_at.asc(), QATurn.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return session, list(turns)
+
+
+async def soft_delete_session(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    session_id: str,
+    now: Optional[datetime] = None,
+) -> bool:
+    """软删（`deleted_at` 置当前时间）。返回是否真的删掉了一条"""
+    stmt = select(QASession).where(
+        QASession.id == session_id,
+        QASession.user_id == user_id,
+        QASession.deleted_at.is_(None),
+    )
+    session = (await db.execute(stmt)).scalars().first()
+    if session is None:
+        return False
+    session.deleted_at = now or _now()
+    await db.flush()
+    return True
+
+
+async def soft_delete_all_sessions(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    now: Optional[datetime] = None,
+) -> int:
+    """清空该用户的全部会话（软删），返回行数 —— "清空全部问答历史"入口用"""
+    compact = now or _now()
+    result = await db.execute(select(QASession).where(QASession.user_id == user_id, QASession.deleted_at.is_(None)))
+    sessions = result.scalars().all()
+    for session in sessions:
+        session.deleted_at = compact
+    await db.flush()
+    return len(sessions)
+
+
+# ---------------------------------------------------------------------------
+# 保留期清理（Beat 任务调用，见 tasks/maintenance_tasks.py）
+# ---------------------------------------------------------------------------
+
+
+async def purge_soft_deleted(
+    db: AsyncSession,
+    *,
+    grace_days: int = SOFT_DELETE_GRACE_DAYS,
+    now: Optional[datetime] = None,
+) -> int:
+    """硬删"软删已超过宽限期"的会话（轮次由外键级联删除）
+
+    宽限期存在的原因：删会话是**用户可见的破坏性动作**，留 30 天给"后悔"；
+    而超过宽限期还留着，只是把敏感文本无限期留在库里。
+    """
+    cutoff = (now or _now()) - timedelta(days=max(0, int(grace_days)))
+    stmt = select(QASession.id).where(QASession.deleted_at.is_not(None), QASession.deleted_at < cutoff)
+    ids = (await db.execute(stmt)).scalars().all()
+    if not ids:
+        return 0
+    await db.execute(delete(QASession).where(QASession.id.in_(ids)))
+    await db.flush()
+    return len(ids)
+
+
+async def purge_expired_sessions(
+    db: AsyncSession,
+    *,
+    retention_days: Optional[int] = None,
+    now: Optional[datetime] = None,
+) -> int:
+    """硬删超过保留期的会话（含未软删的），返回行数
+
+    `retention_days <= 0` 表示**永久保留**（与 `purge_old_calls` 同一口径）：
+    删掉的是用户自己的对话，默认值必须保守，想永久留就配 0。
+    """
+    if retention_days is None:
+        settings = get_settings()
+        retention_days = int(getattr(settings, "qa_history_retention_days", 90) or 0)
+    if retention_days <= 0:
+        return 0
+    cutoff = (now or _now()) - timedelta(days=int(retention_days))
+    stmt = select(QASession.id).where(QASession.updated_at < cutoff)
+    ids = (await db.execute(stmt)).scalars().all()
+    if not ids:
+        return 0
+    await db.execute(delete(QASession).where(QASession.id.in_(ids)))
+    await db.flush()
+    return len(ids)
+
+
+async def strip_snippets_for_note(db: AsyncSession, *, note_id: str) -> int:
+    """笔记被 purge 后，清空历史里引用它的 `snippet`（保留 `chunk_id` 作墓碑）
+
+    为什么不连轮次一起删：那是**用户自己的问与答**，不该因为笔记被删而消失；
+    但片段是笔记正文的副本，笔记已经彻底删除时它必须跟着走（计划 §6.3）。
+    """
+    stmt = select(QATurn).where(QATurn.sources_json.is_not(None), QATurn.sources_json.like(f"%{note_id}%"))
+    turns = (await db.execute(stmt)).scalars().all()
+    changed = 0
+    for turn in turns:
+        try:
+            items = json.loads(turn.sources_json or "[]")
+        except (TypeError, ValueError):
+            continue
+        touched = False
+        for item in items:
+            if isinstance(item, dict) and item.get("note_id") == note_id and item.get("snippet"):
+                item["snippet"] = ""
+                touched = True
+        if touched:
+            turn.sources_json = json.dumps(items, ensure_ascii=False)
+            changed += 1
+    if changed:
+        await db.flush()
+    return changed

@@ -242,6 +242,17 @@ celery_app.conf.update(
             "task": "app.tasks.embedding_tasks.backfill_embeddings",
             "schedule": crontab(minute="5,35"),
         },
+        # 每日 04:45 清理问答历史（docs/qa-history-plan.md §6.2）
+        #
+        # 两步：软删超 30 天的会话硬删；超过 `qa_history_retention_days`
+        # （默认 90 天）的会话也硬删。排在 04:45：数据库备份（03:30）与清理
+        # （04:15/04:30）都已结束，避开 SQLite 单写者争用。
+        #
+        # ⚠️ 空转是常态：没有可删的会话时就是两条 `SELECT`。
+        "cleanup-qa-history": {
+            "task": "app.tasks.maintenance_tasks.cleanup_qa_history",
+            "schedule": crontab(hour=4, minute=45),
+        },
     },
 )
 

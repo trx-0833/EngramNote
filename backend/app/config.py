@@ -430,6 +430,37 @@ class Settings(BaseSettings):
     # 单用户一年通常也就几万行 —— 保留期主要是防止长期运行后无限增长。
     llm_call_retention_days: int = 365
 
+    # ---- AI 问答历史与多轮（2026-11-13，见 docs/qa-history-plan.md）----
+    #
+    # ## 为什么问答要单独一组配置
+    #
+    # 多轮上下文是**成本与质量的双刃剑**：多带几轮，指代消解更准，但每轮都会把历史
+    # 重新发给模型（prompt token 线性增长）；少带几轮，省钱但"那它的寿命呢"接不上。
+    # 三个值都做成可调，且**落库时记录实际带了几轮**（`qa_turns.context_turns`），
+    # 这样调参有依据，而不是拍脑袋。
+    #
+    # 关闭开关的行为（两个都独立可回滚）：
+    # - `qa_history_enabled=False` ⇒ 不写库、不显示历史入口（已有历史仍可读）
+    # - `qa_multiturn_enabled=False` ⇒ 退回单问单答（历史照存）
+    qa_history_enabled: bool = True
+    qa_multiturn_enabled: bool = True
+
+    #: 追问时最多带几轮历史。6 轮 ≈ 12 条消息：够消解指代，不至于把上下文撑爆
+    qa_context_max_turns: int = 6
+
+    #: 单条历史答案只带前多少字。长答案（尤其带表格的）会把预算吃光，
+    #: 而指代通常只需要开头几句
+    qa_context_answer_chars: int = 400
+
+    #: 历史消息的**总字符上限**（与检索片段共用预算时的兜底），超出从最旧开始丢
+    qa_context_max_chars: int = 4000
+
+    #: 问答历史的保留期（天）。0 表示永不清理。
+    #:
+    #: 与 `llm_call_retention_days` 同一思路：每次问答一轮，量级与使用频次同阶。
+    #: 软删 30 天后硬删（见 `maintenance_tasks.cleanup_qa_history`）。
+    qa_history_retention_days: int = 90
+
     # ---- LLM 配额（阶段 4.3）----
     #
     # **默认 0 = 不限**。理由：一个默认打开的额度上限会在用户毫无预期时
