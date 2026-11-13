@@ -5083,6 +5083,267 @@
         "title": "PurgeAllResponse",
         "type": "object"
       },
+      "QAClearAllResponse": {
+        "description": "「清空全部问答历史」的结果\n\n为什么不返回 204：用户点完需要看到\"清掉了几条\"，而那正是这次操作唯一的反馈\n（列表会变空，但\"本来就空\"与\"清掉了 12 条\"在界面上一样）。",
+        "properties": {
+          "deleted": {
+            "default": 0,
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "title": "QAClearAllResponse",
+        "type": "object"
+      },
+      "QASessionDetailResponse": {
+        "description": "单个会话 + 其轮次（按时间升序）」",
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/QASessionResponse"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/QATurnResponse"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "QASessionDetailResponse",
+        "type": "object"
+      },
+      "QASessionListResponse": {
+        "description": "会话列表（分页）",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QASessionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "QASessionListResponse",
+        "type": "object"
+      },
+      "QASessionResponse": {
+        "description": "会话摘要（列表页用，不含轮次）",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Question"
+          },
+          "note_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "turn_count": {
+            "default": 0,
+            "title": "Turn Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "surface",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "QASessionResponse",
+        "type": "object"
+      },
+      "QATurnResponse": {
+        "description": "一轮问答（历史详情里的条目）",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "context_turns": {
+            "default": 0,
+            "title": "Context Turns",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "retrieval_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Query"
+          },
+          "retrieval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Status"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "status",
+          "created_at"
+        ],
+        "title": "QATurnResponse",
+        "type": "object"
+      },
       "QuestionAnswerResponse": {
         "description": "问答响应",
         "properties": {
@@ -12167,6 +12428,220 @@
         "summary": "Scan Project Source",
         "tags": [
           "项目"
+        ]
+      }
+    },
+    "/api/qa/sessions": {
+      "delete": {
+        "description": "清空当前用户的**全部**问答历史（软删），返回删掉的会话数\n\n为什么返回条数而不是 204：清空之后列表会变空，而\"本来就空\"与\"清掉了 12 个\"\n在界面上完全一样 —— 条数是这次操作唯一的反馈。",
+        "operationId": "clear_qa_sessions_api_qa_sessions_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QAClearAllResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Qa Sessions",
+        "tags": [
+          "问答历史"
+        ]
+      },
+      "get": {
+        "description": "列出当前用户的问答会话（按最近聊过排序）\n\n「最近聊过」= `updated_at` 倒序：会话在被追加轮次时刷新它，\n所以\"昨天问过、今天又追问\"的会话会顶到最上面 —— 这是用户预期。",
+        "operationId": "list_qa_sessions_api_qa_sessions_get",
+        "parameters": [
+          {
+            "description": "页码（从 1 开始）",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "页码（从 1 开始）",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "每页条数（上限 100）",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "每页条数（上限 100）",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "搜索关键词（匹配标题、最后问题与任意轮次的问答正文）",
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "搜索关键词（匹配标题、最后问题与任意轮次的问答正文）",
+              "title": "Keyword"
+            }
+          },
+          {
+            "description": "按入口过滤：global（/qa）或 note（笔记浮层）",
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按入口过滤：global（/qa）或 note（笔记浮层）",
+              "title": "Surface"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QASessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Qa Sessions",
+        "tags": [
+          "问答历史"
+        ]
+      }
+    },
+    "/api/qa/sessions/{session_id}": {
+      "delete": {
+        "description": "删除一个会话（软删；30 天后由 Beat 硬删）\n\n再删一次 → 404：与\"删除成功\"区分开，前端据此提示\"对话已被删除\"而不是假装成功。",
+        "operationId": "delete_qa_session_api_qa_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Qa Session",
+        "tags": [
+          "问答历史"
+        ]
+      },
+      "get": {
+        "description": "单个会话 + 其轮次（升序）\n\n前端点开历史条目时调它：轮次按 `created_at` 升序，与\"聊天的阅读顺序\"一致。",
+        "operationId": "get_qa_session_api_qa_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QASessionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Qa Session",
+        "tags": [
+          "问答历史"
         ]
       }
     },

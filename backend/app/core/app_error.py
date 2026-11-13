@@ -43,6 +43,9 @@ VERSION_CONTENT_UNAVAILABLE = "VERSION_CONTENT_UNAVAILABLE"
 
 # ---- 笔记（notes/**、upload.py、cleaning.py、understanding.py 共用）----
 NOTE_NOT_FOUND = "NOTE_NOT_FOUND"
+#: 问答历史的会话取不到（不存在 / 别人的 / 已软删）。三种情况**共用一个码**，
+#: 与 `NOTE_NOT_FOUND` 同一口径：不泄露"这个 id 存在"。
+QA_SESSION_NOT_FOUND = "QA_SESSION_NOT_FOUND"
 # 笔记里的插图取不到（对象不存在 / 笔记不属于当前用户 / 笔记在回收站）
 #
 # 2026-11-09 新增：markdown 里的相对图片引用会被前端重写成

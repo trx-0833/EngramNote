@@ -110,6 +110,9 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # `/api/notes/{id}/assets/{path}` 后的两种失败。一张图取不到属于
     # **页面级小失败**，前端降级成占位符即可，不必整页报错。
     "ASSET_NOT_FOUND": {"zh-CN": "插图不存在", "en": "Image not found"},
+    # ── AI 问答历史（2026-11-13，docs/qa-history-plan.md）──
+    # 别人的会话与不存在的会话**共用**这一条：不泄露"这个 id 存在"。
+    "QA_SESSION_NOT_FOUND": {"zh-CN": "对话不存在或已被删除", "en": "Conversation not found"},
     "ASSET_TYPE_UNSUPPORTED": {
         "zh-CN": "不支持的插图类型或路径",
         "en": "Unsupported image type or path",

@@ -35,6 +35,7 @@ from .goals import router as goals_router
 from .tasks import router as tasks_router
 from .llm import router as llm_router
 from .settings import router as settings_router
+from .qa import router as qa_router
 
 # 创建总路由器，所有子路由将挂载到此路由器
 api_router = APIRouter()
@@ -73,3 +74,5 @@ api_router.include_router(tasks_router, prefix="/tasks", tags=["任务进度"])
 api_router.include_router(llm_router, prefix="/llm", tags=["LLM 成本"])
 # 注册用户设置路由，前缀 /settings，OpenAPI 标签为"设置"
 api_router.include_router(settings_router, prefix="/settings", tags=["设置"])
+# 注册 AI 问答历史路由，前缀 /qa，OpenAPI 标签为"问答历史"
+api_router.include_router(qa_router, prefix="/qa", tags=["问答历史"])

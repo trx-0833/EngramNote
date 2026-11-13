@@ -62,6 +62,10 @@ NON_JSON_2XX = {
     # 而不是让同一个 URL 有时返回 md、有时返回 zip（那在 OpenAPI 里表达不了，
     # 客户端只能靠猜）。
     ("GET", "/api/notes/{note_id}/export-bundle"),
+    # AI 问答历史的单会话删除（2026-11-13）：204 No Content —— 本来就没有响应体。
+    # 「清空全部」（DELETE /api/qa/sessions）返回 JSON `{deleted}`，**不在**本表里
+    # （用户需要看到清掉了几条，那是那次操作唯一的反馈）。
+    ("DELETE", "/api/qa/sessions/{session_id}"),
 }
 
 #: 本轮补的 4 处"内层空壳"：字段本身必须指向一个 `$ref`，而不是
