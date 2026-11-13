@@ -177,6 +177,75 @@ async def record_turn(
         return None
 
 
+#: 笔记浮层复用会话的时间窗（分钟）
+#:
+#: 浮层不做历史 UI，如果每问一次都新建会话，用户的历史列表会被一串
+#: "只剩一句问答"的碎片会话淹没。30 分钟是"还在读同一篇资料"的合理窗口。
+NOTE_SESSION_REUSE_MINUTES = 30
+
+
+async def get_or_create_session_for_note(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    note_id: str,
+    question: str,
+    now: Optional[datetime] = None,
+) -> QASession:
+    """笔记浮层用：同一篇笔记 30 分钟内复用上一个会话，否则新建
+
+    与 `get_or_create_session` 的区别是"没有 session_id 时该不该新建"：
+    全局问答每次不带 id 都是一次全新的对话（用户明确点了"新建对话"或刚进来），
+    而浮层是随手问，30 分钟内归到同一会话更符合直觉。
+    """
+    when = now or _now()
+    cutoff = when - timedelta(minutes=NOTE_SESSION_REUSE_MINUTES)
+    stmt = (
+        select(QASession)
+        .where(
+            QASession.user_id == user_id,
+            QASession.surface == "note",
+            QASession.note_id == note_id,
+            QASession.deleted_at.is_(None),
+            QASession.updated_at >= cutoff,
+        )
+        .order_by(QASession.updated_at.desc())
+        .limit(1)
+    )
+    recent = (await db.execute(stmt)).scalars().first()
+    if recent is not None:
+        return recent
+    return await get_or_create_session(db, user_id=user_id, surface="note", note_id=note_id, first_question=question)
+
+
+async def recent_ok_turns(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    user_id: str,
+    limit: int,
+) -> List[QATurn]:
+    """取最近 `limit` 条**成功**轮次（按时间升序返回，便于直接拼 `messages`）
+
+    只取 `status='ok'`：失败轮次没有答案、中止轮次只有半截答案
+    （计划 §4.4 —— 把半截答案当事实继承，比不给上下文更糟）。
+    """
+    if limit <= 0:
+        return []
+    stmt = (
+        select(QATurn)
+        .where(
+            QATurn.session_id == session_id,
+            QATurn.user_id == user_id,
+            QATurn.status == TURN_STATUS_OK,
+        )
+        .order_by(QATurn.created_at.desc(), QATurn.id.desc())
+        .limit(int(limit))
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return list(reversed(list(rows)))
+
+
 async def list_sessions(
     db: AsyncSession,
     *,

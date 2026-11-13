@@ -49,8 +49,11 @@
 未预期异常时**只有** `message`（异常文本，不保证有 error_code）。
 """
 
+import asyncio
 import json
 import logging
+import time
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -61,6 +64,9 @@ from ...database import get_db
 from ...models.user import User
 from ...schemas.common import EventStreamResponse
 from ...schemas.note_ask import NoteAskRequest
+from ...database import get_session_factory
+from ...models.qa_history import TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
+from ...services import qa_history_service as qa_service
 from ...services.llm_service import LLMService
 from ...services.note_service import get_note_detail
 from ..auth import get_current_user_dependency
@@ -87,7 +93,64 @@ async def ask_note_stream(
     - event: error   data: {"message": "..."}               异常情况
     """
 
+    # ── 会话（2026-11-13）：浮层**只落库、不做多轮上下文**（计划 §5.3）──
+    #
+    # 复用一个"同一篇笔记 30 分钟内"的会话，而不是每问一次新建一条：
+    # 否则用户的历史列表会被一串只剩一句问答的碎片会话淹没。
+    settings = get_settings()
+    history_enabled = bool(getattr(settings, "qa_history_enabled", True))
+    session = None
+    if history_enabled:
+        if req.session_id:
+            session = await qa_service.get_or_create_session(db, user_id=current_user.id, session_id=req.session_id)
+        if session is None:
+            session = await qa_service.get_or_create_session_for_note(
+                db, user_id=current_user.id, note_id=note_id, question=req.question
+            )
+            await db.commit()
+    session_id = session.id if session is not None else None
+
+    async def _persist_completed_turn(
+        *,
+        status: str,
+        answer_text: str,
+        error_code: Optional[str] = None,
+        provider: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+    ) -> None:
+        """用独立 DB 会话落库（不依赖请求作用域的 `db`，理由同全局问答端点）"""
+        if not history_enabled or session_id is None:
+            return
+        try:
+            factory = get_session_factory()
+            async with factory() as write_db:
+                target = await qa_service.get_or_create_session(
+                    write_db, user_id=current_user.id, session_id=session_id
+                )
+                if target is None:
+                    return
+                await qa_service.record_turn(
+                    write_db,
+                    user_id=current_user.id,
+                    session=target,
+                    question=req.question,
+                    answer=answer_text or None,
+                    status=status,
+                    error_code=error_code,
+                    provider=provider,
+                    sources=None,
+                    context_turns=0,
+                    source_span_start=None,
+                    source_span_end=None,
+                    latency_ms=latency_ms,
+                )
+                await write_db.commit()
+        except Exception as exc:  # noqa: BLE001 - 附加功能绝不打断回答
+            logger.warning("笔记问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
+
     async def event_stream():
+        answer_parts: list[str] = []
+        started_at = time.monotonic()
         try:
             # 校验笔记归属（用户只能访问自己的笔记）
             note = await get_note_detail(db, note_id, current_user.id)
@@ -114,8 +177,8 @@ async def ask_note_stream(
 
             provider = get_settings().get_llm_config()["provider"]
 
-            # 首事件：LLM 提供商标识
-            yield f"event: meta\ndata: {json.dumps({'provider': provider}, ensure_ascii=False)}\n\n"
+            # 首事件：LLM 提供商 + 会话（前端据 session_id 续聊、据 history_used 提示）
+            yield f"event: meta\ndata: {json.dumps({'provider': provider, 'session_id': session_id, 'history_used': 0}, ensure_ascii=False)}\n\n"
 
             # 构建 messages
             messages = [
@@ -138,16 +201,40 @@ async def ask_note_stream(
                 },
             ]
 
-            # 流式输出 token
+            # 流式输出 token（累积起来供落库：中止时也要保留已生成的部分）
             llm_service = LLMService()
             async for chunk in llm_service.chat_stream(messages, scene="note_ask_stream"):
+                answer_parts.append(chunk)
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
             # 结束标记
             yield "event: done\ndata: {}\n\n"
+
+            await _persist_completed_turn(
+                status=TURN_STATUS_OK,
+                answer_text="".join(answer_parts),
+                provider=provider,
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+            )
+        except asyncio.CancelledError:
+            # 客户端断开 / 用户停止：这一轮最需要回看，用 shield 写库（理由见全局问答端点）
+            await asyncio.shield(
+                _persist_completed_turn(
+                    status=TURN_STATUS_ABORTED,
+                    answer_text="".join(answer_parts),
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                )
+            )
+            raise
         except Exception as e:
             logger.warning(f"SSE 笔记 AI 提问失败: {e}", exc_info=True)
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            await _persist_completed_turn(
+                status=TURN_STATUS_FAILED,
+                answer_text="".join(answer_parts),
+                error_code=type(e).__name__,
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+            )
 
     return StreamingResponse(
         event_stream(),

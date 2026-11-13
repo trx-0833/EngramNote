@@ -16,8 +16,10 @@ from ..models.note import NoteStatus
 
 # --- 知识卡片响应模型 ---
 
+
 class KnowledgeCardResponse(BaseModel):
     """知识卡片响应"""
+
     id: str
     user_id: str
     note_id: str
@@ -43,6 +45,7 @@ class KnowledgeCardResponse(BaseModel):
 
 class KnowledgeCardListResponse(BaseModel):
     """知识卡片列表响应"""
+
     items: List[KnowledgeCardResponse]
     total: int
     page: int
@@ -51,14 +54,17 @@ class KnowledgeCardListResponse(BaseModel):
 
 class CardUpdateRequest(BaseModel):
     """卡片更新请求"""
+
     title: Optional[str] = None
     content: Optional[str] = None
 
 
 # --- 题目响应模型 ---
 
+
 class QuizItemResponse(BaseModel):
     """题目响应"""
+
     id: str
     user_id: str
     card_id: str
@@ -79,6 +85,7 @@ class QuizItemResponse(BaseModel):
 
 class QuizItemListResponse(BaseModel):
     """题目列表响应"""
+
     items: List[QuizItemResponse]
     total: int
     page: int
@@ -115,22 +122,23 @@ class QuizItemUpdateRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000, description="题干")
     answer: str = Field(..., min_length=1, max_length=2000, description="正确答案")
     #: 选项列表（仅选择题有意义）。传 `[]` 或 `null` 都表示"没有选项"。
-    options: Optional[List[str]] = Field(
-        None, description="选项列表；非选择题忽略此项"
-    )
+    options: Optional[List[str]] = Field(None, description="选项列表；非选择题忽略此项")
     #: 解析。`null` = 清空解析（PUT 语义下这是明确意思，不是"没传"）
     explanation: Optional[str] = Field(None, max_length=4000, description="解析")
 
 
 # --- 理解管道响应模型 ---
 
+
 class UnderstandingStartRequest(BaseModel):
     """触发理解管道的请求（archived 笔记破坏性重学需显式确认，见 docs/decisions.md#F-02）"""
+
     confirm: bool = False
 
 
 class UnderstandingImpact(BaseModel):
     """重新理解将删除的旧产物数量（二次确认展示，见 docs/decisions.md#F-02）"""
+
     cards: int = 0
     quizzes: int = 0
     review_logs: int = 0
@@ -139,6 +147,7 @@ class UnderstandingImpact(BaseModel):
 
 class UnderstandingStartResponse(BaseModel):
     """触发理解管道的响应"""
+
     id: str
     status: NoteStatus
     message: str
@@ -151,6 +160,7 @@ class UnderstandingStartResponse(BaseModel):
 
 class UnderstandingStatusResponse(BaseModel):
     """理解管道状态查询响应"""
+
     id: str
     status: NoteStatus
     error_message: Optional[str] = None
@@ -160,6 +170,7 @@ class UnderstandingStatusResponse(BaseModel):
 
 class ChapterSummary(BaseModel):
     """章节摘要"""
+
     chapter_index: int
     chapter_title: str
     summary: str
@@ -168,15 +179,29 @@ class ChapterSummary(BaseModel):
 
 class ChapterSummaryListResponse(BaseModel):
     """章节摘要列表响应"""
+
     note_id: str
     chapters: List[ChapterSummary]
 
 
 # --- 问答请求/响应模型 ---
 
+
 class QuestionRequest(BaseModel):
-    """问答请求"""
+    """问答请求
+
+    ## `session_id`（2026-11-13，多轮会话）
+
+    可选。带上则把这一轮追加到该会话，并让服务端把**最近若干轮**作为上下文
+    一起送给模型；不带则新建会话（首问）。
+
+    ⚠️ 历史消息**不由客户端上传**：只有 `session_id` 一个字段。让客户端传
+    `messages` 数组既可伪造、又能把请求体放大到任意长；服务端按
+    `(session_id, user_id)` 自己查，才谈得上"删掉某一轮就不再影响后续回答"。
+    """
+
     question: str
+    session_id: Optional[str] = None
 
 
 class AnswerSource(BaseModel):
@@ -198,6 +223,7 @@ class AnswerSource(BaseModel):
     全部为可选：检索降级（例如向量通道不可用、命中来自历史数据）时可能缺失，
     前端应退化为"只显示来源、不提供跳转"，而不是报错或跳到错误位置。
     """
+
     note_id: str
     note_title: str
     chapter_title: Optional[str] = None
@@ -219,6 +245,7 @@ class AnswerSource(BaseModel):
 
 class QuestionAnswerResponse(BaseModel):
     """问答响应"""
+
     question: str
     answer: str
     sources: List[AnswerSource] = []
@@ -236,8 +263,10 @@ class QuestionAnswerResponse(BaseModel):
 
 # --- 题目生成响应模型 ---
 
+
 class GenerateQuestionsResponse(BaseModel):
     """触发题目生成的响应"""
+
     note_id: str
     message: str
     question_count: int = 0
@@ -245,25 +274,30 @@ class GenerateQuestionsResponse(BaseModel):
 
 # --- 联合分析 / 盲点 / 拓展 / 标记 相关 schema ---
 
+
 class CardMarkRequest(BaseModel):
     """标记重点/难点请求"""
+
     is_key_point: Optional[bool] = None
     is_difficulty: Optional[bool] = None
 
 
 class ExtensionGenerateRequest(BaseModel):
     """生成拓展知识点请求"""
+
     # 可选：指定参考资料上下文的 note_id；不传则仅用父卡片内容
     material_note_id: Optional[str] = None
 
 
 class CombinedExtractRequest(BaseModel):
     """联合分析请求（可选，主要用 link_id 路径参数）"""
+
     pass
 
 
 class CombinedExtractResponse(BaseModel):
     """联合分析响应"""
+
     link_id: str
     material_note_id: str
     personal_note_id: str
@@ -275,6 +309,7 @@ class CombinedExtractResponse(BaseModel):
 
 class ExtensionGenerateResponse(BaseModel):
     """拓展知识点生成响应"""
+
     parent_card_id: str
     extension_cards: List[KnowledgeCardResponse] = []
     message: str = ""
@@ -282,6 +317,7 @@ class ExtensionGenerateResponse(BaseModel):
 
 class BlindSpotListResponse(BaseModel):
     """盲点列表响应"""
+
     items: List[KnowledgeCardResponse]
     total: int
     page: int
@@ -290,6 +326,7 @@ class BlindSpotListResponse(BaseModel):
 
 class MasteryOverviewItem(BaseModel):
     """掌握度概览单项"""
+
     card_id: str
     title: str
     card_category: CardCategory
@@ -301,6 +338,7 @@ class MasteryOverviewItem(BaseModel):
 
 class MasteryOverviewResponse(BaseModel):
     """掌握度概览响应"""
+
     items: List[MasteryOverviewItem]
     total: int
     average_mastery: float

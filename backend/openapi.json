@@ -3806,6 +3806,17 @@
             "title": "Selected Text",
             "type": "string"
           },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
           "view_mode": {
             "default": "original",
             "title": "View Mode",
@@ -5388,11 +5399,22 @@
         "type": "object"
       },
       "QuestionRequest": {
-        "description": "问答请求",
+        "description": "问答请求\n\n## `session_id`（2026-11-13，多轮会话）\n\n可选。带上则把这一轮追加到该会话，并让服务端把**最近若干轮**作为上下文\n一起送给模型；不带则新建会话（首问）。\n\n⚠️ 历史消息**不由客户端上传**：只有 `session_id` 一个字段。让客户端传\n`messages` 数组既可伪造、又能把请求体放大到任意长；服务端按\n`(session_id, user_id)` 自己查，才谈得上\"删掉某一轮就不再影响后续回答\"。",
         "properties": {
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
           }
         },
         "required": [
@@ -13508,7 +13530,7 @@
     },
     "/api/understanding/ask/stream": {
       "post": {
-        "description": "RAG 问答流式接口（SSE）\n\n通过 Server-Sent Events 逐 token 返回 LLM 生成的回答，\n适合前端实时展示生成过程。\n\n流程：\n1. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）\n2. 首事件下发 retrieval_status（meta 事件，供前端展示降级提示）\n3. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）\n4. 调用 llm_service.chat_stream() 流式生成回答\n5. 流式结束后发送 sources 与 done 事件\n\nSSE 事件格式：\n- event: meta    data: {\"retrieval_status\": \"...\", \"provider\": \"...\"}  首事件，检索降级状态\n- event: token   data: {\"content\": \"...\"}                每个 token 片段\n- event: sources data: {\"sources\": [...], \"provider\": \"...\"}  流式结束后返回引用来源\n- event: done    data: {}                                结束标记\n- event: error   data: {\"message\": \"...\"}                异常情况",
+        "description": "RAG 问答流式接口（SSE）\n\n通过 Server-Sent Events 逐 token 返回 LLM 生成的回答，\n适合前端实时展示生成过程。\n\n流程：\n1. **解析/创建会话，读出最近 N 轮成功问答**（多轮，2026-11-13）\n2. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）；\n   追问时的检索词是\"上一问 + 当前问\"拼接的（否则\"那它呢\"检索不到）\n3. 首事件下发 retrieval_status / provider / session_id / history_used\n4. 复用与 rag_answer() 一致的 system prompt 构建 messages\n   （有历史时在末尾追加\"事实以本轮资料为准\"的硬指令）\n5. 调用 llm_service.chat_stream() 流式生成回答\n6. 流式结束后发送 sources 与 done 事件，**并把这一轮落库**（成功/失败/中止三种都落）\n\nSSE 事件格式：\n- event: meta    data: {\"retrieval_status\": \"...\", \"provider\": \"...\", \"session_id\": \"...\", \"history_used\": 2}\n- event: token   data: {\"content\": \"...\"}                每个 token 片段\n- event: sources data: {\"sources\": [...], \"provider\": \"...\"}  流式结束后返回引用来源\n- event: done    data: {}                                结束标记\n- event: error   data: {\"message\": \"...\"}                异常情况",
         "operationId": "ask_question_stream_api_understanding_ask_stream_post",
         "requestBody": {
           "content": {

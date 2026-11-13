@@ -55,8 +55,10 @@ AI 理解管道 API 模块
 未预期异常时**只有** `message`。
 """
 
+import asyncio
 import json
 import logging
+import time
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query
@@ -70,6 +72,7 @@ from ..core.app_error import (
     EMPTY_QUESTION,
     NOTE_NOT_FOUND,
     NOTE_STATUS_INVALID,
+    QA_SESSION_NOT_FOUND,
     QUIZ_OPTIONS_REQUIRED,
     REVIEW_QUIZ_NOT_FOUND,
     UNDERSTANDING_IN_PROGRESS,
@@ -87,6 +90,10 @@ from ..models.review_log import ReviewLog
 from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
+from ..database import get_session_factory
+from ..models.qa_history import TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
+from ..services import qa_history_service as qa_service
+from ..services.qa_context import assemble_messages, build_retrieval_query, usable_history
 from ..schemas.common import EventStreamResponse
 from ..schemas.knowledge import (
     UnderstandingStartRequest,
@@ -646,6 +653,7 @@ async def ask_question(
 async def ask_question_stream(
     req: QuestionRequest,
     current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     RAG 问答流式接口（SSE）
@@ -654,31 +662,117 @@ async def ask_question_stream(
     适合前端实时展示生成过程。
 
     流程：
-    1. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）
-    2. 首事件下发 retrieval_status（meta 事件，供前端展示降级提示）
-    3. 复用与 rag_answer() 一致的 system prompt 构建 messages（命中 DeepSeek 提示词缓存）
-    4. 调用 llm_service.chat_stream() 流式生成回答
-    5. 流式结束后发送 sources 与 done 事件
+    1. **解析/创建会话，读出最近 N 轮成功问答**（多轮，2026-11-13）
+    2. 调用 rag_service.retrieve_context() 完成检索阶段（不调用 LLM）；
+       追问时的检索词是"上一问 + 当前问"拼接的（否则"那它呢"检索不到）
+    3. 首事件下发 retrieval_status / provider / session_id / history_used
+    4. 复用与 rag_answer() 一致的 system prompt 构建 messages
+       （有历史时在末尾追加"事实以本轮资料为准"的硬指令）
+    5. 调用 llm_service.chat_stream() 流式生成回答
+    6. 流式结束后发送 sources 与 done 事件，**并把这一轮落库**（成功/失败/中止三种都落）
 
     SSE 事件格式：
-    - event: meta    data: {"retrieval_status": "...", "provider": "..."}  首事件，检索降级状态
+    - event: meta    data: {"retrieval_status": "...", "provider": "...", "session_id": "...", "history_used": 2}
     - event: token   data: {"content": "..."}                每个 token 片段
     - event: sources data: {"sources": [...], "provider": "..."}  流式结束后返回引用来源
     - event: done    data: {}                                结束标记
     - event: error   data: {"message": "..."}                异常情况
     """
+    settings = get_settings()
+    history_enabled = bool(getattr(settings, "qa_history_enabled", True))
+    multiturn_enabled = history_enabled and bool(getattr(settings, "qa_multiturn_enabled", True))
+    max_turns = int(getattr(settings, "qa_context_max_turns", 6) or 6)
+    answer_chars = int(getattr(settings, "qa_context_answer_chars", 400) or 400)
+    max_chars = int(getattr(settings, "qa_context_max_chars", 4000) or 4000)
+
+    # ── 会话解析放在**流开始之前** ──
+    #
+    # 这样"会话已被删除"能以真正的 HTTP 404 返回（前端 `askQuestionStream` 抛 ApiError，
+    # 据 error_code 清掉 ?s= 并提示）。放进生成器里就只能发一个 error 帧，
+    # 而那时候响应的状态码已经发出去了，客户端得自己再解析一遍。
+    session = None
+    history: List[tuple] = []
+    if history_enabled:
+        if req.session_id:
+            session = await qa_service.get_or_create_session(db, user_id=current_user.id, session_id=req.session_id)
+            if session is None:
+                raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
+        else:
+            session = await qa_service.get_or_create_session(
+                db, user_id=current_user.id, surface="global", first_question=req.question
+            )
+            await db.commit()
+
+        if session is not None and multiturn_enabled:
+            turns = await qa_service.recent_ok_turns(
+                db, session_id=session.id, user_id=current_user.id, limit=max_turns
+            )
+            history = usable_history([(t.question, t.answer, t.status) for t in turns])
+
+    #: 追问时的检索词 = 上一问 + 当前问（计划 §4.3）
+    prev_question = history[-1][0] if history else None
+    retrieval_query = build_retrieval_query(prev_question, req.question)
+    session_id = session.id if session is not None else None
+
+    async def _persist_completed_turn(
+        *,
+        status: str,
+        answer_text: str,
+        error_code: Optional[str] = None,
+        provider: Optional[str] = None,
+        sources: Optional[list] = None,
+        retrieval_status: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+    ) -> None:
+        """用一个**独立的 DB 会话**落库
+
+        ⚠️ 不复用请求作用域的 `db`：流式响应的生成器可能比依赖的生命周期活得更久
+        （客户端慢速读取、或断开后仍在收尾），而 `Depends(get_db)` 会在响应结束时关闭会话。
+        独立会话让"写历史"与"请求生命周期"解耦，这也是能安全处理 `CancelledError` 的前提。
+        """
+        if not history_enabled or session_id is None:
+            return
+        try:
+            factory = get_session_factory()
+            async with factory() as write_db:
+                target = await qa_service.get_or_create_session(
+                    write_db, user_id=current_user.id, session_id=session_id
+                )
+                if target is None:
+                    return
+                await qa_service.record_turn(
+                    write_db,
+                    user_id=current_user.id,
+                    session=target,
+                    question=req.question,
+                    answer=answer_text or None,
+                    status=status,
+                    error_code=error_code,
+                    provider=provider,
+                    prompt_version=None,
+                    retrieval_status=retrieval_status,
+                    retrieval_query=retrieval_query,
+                    sources=sources,
+                    context_turns=len(history),
+                    latency_ms=latency_ms,
+                )
+                await write_db.commit()
+        except Exception as exc:  # noqa: BLE001 - 历史是附加功能，绝不打断回答
+            logger.warning("问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
 
     async def event_stream():
+        answer_parts: list[str] = []
+        started_at = time.monotonic()
         try:
             # 拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用（见 docs/decisions.md#F-31）
             if not req.question or not req.question.strip():
                 yield f"event: error\ndata: {json.dumps({'message': '问题不能为空', 'error_code': 'EMPTY_QUESTION'}, ensure_ascii=False)}\n\n"
                 return
 
-            # 1. 检索阶段（不调用 LLM）
+            # 1. 检索阶段（不调用 LLM）。追问时用拼接后的检索词。
             rag_service = RAGService()
             retrieval = await rag_service.retrieve_context(
-                question=req.question,
+                question=retrieval_query,
                 user_id=current_user.id,
             )
             context = retrieval["context"]
@@ -686,45 +780,56 @@ async def ask_question_stream(
             provider = retrieval["provider"]
             retrieval_status = retrieval.get("retrieval_status", "")
 
-            # 2. 首事件下发检索降级状态（sources 前，供前端即时提示）
-            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider}, ensure_ascii=False)}\n\n"
+            # 1b. 追问时若拼接检索为空，退回只用当前问再检一次（计划 §4.3）。
+            #     两次都空就如实回答"没有找到相关片段"，不编造。
+            if not sources and prev_question:
+                retry = await rag_service.retrieve_context(
+                    question=req.question,
+                    user_id=current_user.id,
+                )
+                if retry.get("sources"):
+                    retrieval = retry
+                    context = retry["context"]
+                    sources = retry["sources"]
+                    provider = retry["provider"]
+                    retrieval_status = retry.get("retrieval_status", "")
 
-            # 3. 构建 messages（system prompt 与 LLMService.rag_answer 保持一致以命中缓存）
+            # 2. 首事件下发检索降级状态 + 会话（前端据此写 ?s= 与提示"参考了 N 轮上文"）
+            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider, 'session_id': session_id, 'history_used': len(history)}, ensure_ascii=False)}\n\n"
+
+            # 3. 构建 messages（有历史时把最近几轮插在 system 与当前问之间）
             llm_service = LLMService()
             if not context.strip():
-                # 无检索结果，使用 LLM 自身知识回答
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
-                        "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。",
-                    },
-                    {"role": "user", "content": req.question},
-                ]
+                system_prompt = (
+                    "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
+                    "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。"
+                )
+                user_content = req.question
             else:
-                # 基于检索上下文回答（与 rag_answer 一致的 prompt）
-                messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是一个知识渊博的学习助手。请根据提供的参考资料回答用户问题。\n\n"
-                            "回答原则：\n"
-                            "1. 优先使用参考资料：如果参考资料中包含相关信息，请以其为主要依据\n"
-                            "2. 自主知识补充：如果参考资料不足或没有相关信息，可以结合你自己的知识来回答，"
-                            "但请说明这部分是基于你的知识补充的\n"
-                            "3. 诚实标注：如果回答中既有参考资料的内容，也有你自己的知识，请尽量区分\n"
-                            "4. 回答应详细有用：不要简单地回复没有相关信息，而是尽力提供有价值的回答\n"
-                            "5. 适当引用：回答中可引用参考资料中的原文来增强可信度"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"参考资料：\n{context}\n\n问题：{req.question}",
-                    },
-                ]
+                system_prompt = (
+                    "你是一个知识渊博的学习助手。请根据提供的参考资料回答用户问题。\n\n"
+                    "回答原则：\n"
+                    "1. 优先使用参考资料：如果参考资料中包含相关信息，请以其为主要依据\n"
+                    "2. 自主知识补充：如果参考资料不足或没有相关信息，可以结合你自己的知识来回答，"
+                    "但请说明这部分是基于你的知识补充的\n"
+                    "3. 诚实标注：如果回答中既有参考资料的内容，也有你自己的知识，请尽量区分\n"
+                    "4. 回答应详细有用：不要简单地回复没有相关信息，而是尽力提供有价值的回答\n"
+                    "5. 适当引用：回答中可引用参考资料中的原文来增强可信度"
+                )
+                user_content = f"参考资料：\n{context}\n\n问题：{req.question}"
 
-            # 4. 流式输出 token
+            messages = assemble_messages(
+                system_prompt=system_prompt,
+                current_user_content=user_content,
+                history=history,
+                max_turns=max_turns,
+                answer_chars=answer_chars,
+                max_chars=max_chars,
+            )
+
+            # 4. 流式输出 token（累积起来供落库：中止时也要保留已生成的部分）
             async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
+                answer_parts.append(chunk)
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
             # 5. 发送 sources 事件
@@ -732,9 +837,36 @@ async def ask_question_stream(
 
             # 6. 发送 done 事件
             yield "event: done\ndata: {}\n\n"
+
+            # 7. 落库（成功）
+            await _persist_completed_turn(
+                status=TURN_STATUS_OK,
+                answer_text="".join(answer_parts),
+                provider=provider,
+                sources=sources,
+                retrieval_status=retrieval_status,
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+            )
+        except asyncio.CancelledError:
+            # 客户端断开 / 用户点「停止生成」：**这一轮最需要回看**，所以用 shield 写库
+            # （裸 await 会被取消立即打断，结果是"点了停止就什么都不留"）
+            await asyncio.shield(
+                _persist_completed_turn(
+                    status=TURN_STATUS_ABORTED,
+                    answer_text="".join(answer_parts),
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                )
+            )
+            raise
         except Exception as e:
             logger.warning(f"SSE 流式问答失败: {e}", exc_info=True)
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            await _persist_completed_turn(
+                status=TURN_STATUS_FAILED,
+                answer_text="".join(answer_parts),
+                error_code=type(e).__name__,
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+            )
 
     return StreamingResponse(
         event_stream(),
