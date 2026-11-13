@@ -286,7 +286,10 @@ export default function QA() {
           // 先把 id 记进"已删除"集合，再清状态：否则下面几个 setState 触发的
           // 重渲染会让 effect 在 URL 还没清掉的那一帧重新拉一次详情（见 ref 的说明）
           goneSessionsRef.current.add(sessionId);
-          loadedSessionRef.current = null;
+          // 与另外两处（新建对话、追问 404）统一用空串：`''` = "当前没有已载入的会话"。
+          // 混用 `null` 与 `''` 时，"清空"路径漏掉一种写法就会出现"看起来清了、
+          // 其实还在比对上一条 id"的假状态 —— 这类错在浏览器里只表现为"偶尔不刷新"。
+          loadedSessionRef.current = '';
           setSessionId('');
           setHistory([]);
           toastRef.current.info(tRef.current('qa.sessionGone'));
