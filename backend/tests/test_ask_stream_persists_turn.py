@@ -378,3 +378,112 @@ class TestNoteAskPersistence:
         assert turns[0].answer == "这是答案。"
         # 浮层不做多轮：context_turns 恒为 0
         assert turns[0].context_turns == 0
+
+
+@pytest.mark.asyncio
+class TestAuditRegressions:
+    """2026-11-13 独立审计发现的问题，逐条钉住（改前全部为红）"""
+
+    async def test_note_session_cannot_be_continued_from_global_endpoint(self, test_db, monkeypatch):
+        """审计 M1：`surface` 必须是**校验**，不能把 global 轮次写进 note 会话"""
+        from app.services import qa_history_service as svc
+
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_rag(monkeypatch)
+        _patch_llm(monkeypatch)
+
+        async with test_db() as db:
+            note_session = await svc.get_or_create_session(
+                db, user_id=uid, surface="note", note_id="note-x", first_question="浮层里的问题"
+            )
+            await db.commit()
+            note_session_id = note_session.id
+
+        resp = client.post(
+            "/api/understanding/ask/stream",
+            json={"question": "全库问答", "session_id": note_session_id},
+            headers=_auth(uid),
+        )
+        assert resp.status_code == 404
+        assert resp.json()["error_code"] == "QA_SESSION_NOT_FOUND"
+
+    async def test_empty_question_creates_no_session(self, test_db, monkeypatch):
+        """审计 m3：空问题原先会留下一条 `turn_count=0` 的「未命名对话」"""
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_rag(monkeypatch)
+        _patch_llm(monkeypatch)
+
+        resp = client.post("/api/understanding/ask/stream", json={"question": "   "}, headers=_auth(uid))
+        assert resp.status_code == 422
+        assert await _read_sessions(test_db) == []
+
+    async def test_retrieval_query_records_the_query_that_actually_worked(self, test_db, monkeypatch):
+        """审计 m2：拼接检索为空、回退用当前问命中时，`retrieval_query` 必须记当前问"""
+        from app.api import understanding
+
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_llm(monkeypatch)
+
+        calls: list[str] = []
+
+        class _RAG:
+            async def retrieve_context(self, *, question, user_id):
+                calls.append(question)
+                # 拼接词 → 空；只用当前问 → 命中
+                if "浮充是什么？" in question and len(question) > len("浮充是什么？"):
+                    return {"context": "", "sources": [], "provider": "stub", "retrieval_status": ""}
+                return {
+                    "context": "浮充是恒压。",
+                    "sources": [{"note_id": "n1", "chunk_id": "c1", "relevant_text": "浮充"}],
+                    "provider": "stub",
+                    "retrieval_status": "full_vector",
+                }
+
+        monkeypatch.setattr(understanding, "RAGService", _RAG)
+
+        first = _stream_events(client, uid, question="浮充是什么？")
+        session_id = next(p for name, p in first if name == "meta")["session_id"]
+        _stream_events(client, uid, question="那它呢", session_id=session_id)
+
+        turns = await _read_turns(test_db)
+        assert len(turns) == 2
+        # 第 2 轮：拼接词空 → 回退当前问 → 落库的必须是当前问
+        assert turns[1].retrieval_query == "那它呢"
+        assert calls[-1] == "那它呢"
+
+    async def test_context_turns_records_the_trimmed_count(self, test_db, monkeypatch):
+        """审计 m1：超预算时 `context_turns` 必须记**真实**带上几轮，而不是 len(history)"""
+        from app.config import get_settings
+
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_rag(monkeypatch)
+        _patch_llm(monkeypatch)
+
+        settings = get_settings()
+        # 让预算必然裁掉一部分：6 轮 × (长问 + 长答) 远超 4000 字符
+        monkeypatch.setattr(settings, "qa_context_max_chars", 300, raising=False)
+        monkeypatch.setattr(settings, "qa_context_answer_chars", 400, raising=False)
+
+        long_q = "很长的问题" * 40  # 200 字：两轮的问答就超过 300 字预算
+        session_id = None
+        for i in range(4):
+            meta = next(
+                p
+                for name, p in _stream_events(client, uid, question=f"{long_q}{i}", session_id=session_id)
+                if name == "meta"
+            )
+            session_id = meta["session_id"]
+
+        last = next(
+            p
+            for name, p in _stream_events(client, uid, question="最后一个问题", session_id=session_id)
+            if name == "meta"
+        )
+        # 5 轮历史，每轮约 200 字，300 字预算 ⇒ 实际只能带 1 轮
+        assert 0 < last["history_used"] < 4, last
+        turns = await _read_turns(test_db)
+        assert turns[-1].context_turns == last["history_used"]

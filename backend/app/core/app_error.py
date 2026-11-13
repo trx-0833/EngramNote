@@ -46,6 +46,8 @@ NOTE_NOT_FOUND = "NOTE_NOT_FOUND"
 #: 问答历史的会话取不到（不存在 / 别人的 / 已软删）。三种情况**共用一个码**，
 #: 与 `NOTE_NOT_FOUND` 同一口径：不泄露"这个 id 存在"。
 QA_SESSION_NOT_FOUND = "QA_SESSION_NOT_FOUND"
+#: 笔记浮层提问时选中文本为空（原先是 SSE 里的一段字面量 code，2026-11-13 审计 m3 提上来后需要常量）
+EMPTY_SELECTED_TEXT = "EMPTY_SELECTED_TEXT"
 # 笔记里的插图取不到（对象不存在 / 笔记不属于当前用户 / 笔记在回收站）
 #
 # 2026-11-09 新增：markdown 里的相对图片引用会被前端重写成

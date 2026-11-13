@@ -20,13 +20,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.app_error import QA_SESSION_NOT_FOUND
+from ..core.app_error import QA_SESSION_NOT_FOUND, AppError
 from ..database import get_db
+from ..models.qa_history import SURFACES
 from ..models.user import User
 from ..schemas.qa import (
     QAClearAllResponse,
@@ -36,10 +38,13 @@ from ..schemas.qa import (
     QATurnResponse,
 )
 from ..services import qa_history_service as qa_service
-from ..core.app_error import AppError
 from .auth import get_current_user_dependency
 
 router = APIRouter()
+
+# 由常量生成正则（审计 n4）：加一个 surface 时只改 `models/qa_history.py`，
+# 这里与前端的选择器都跟着走，不会出现"常量改了、正则没改"。
+_SURFACE_PATTERN = "^(" + "|".join(SURFACES) + ")$"
 
 
 def _session_payload(session) -> QASessionResponse:
@@ -56,8 +61,6 @@ def _session_payload(session) -> QASessionResponse:
 
 
 def _turn_payload(turn) -> QATurnResponse:
-    import json
-
     sources = []
     if turn.sources_json:
         try:
@@ -96,7 +99,7 @@ async def list_qa_sessions(
     #    （`api/client.ts` 的 VALIDATION_KEYS），用户看到的是中文而不是英文校验串；
     # ③ 校验失败时响应里带的是 OpenAPI 声明的 422 schema，契约更准。
     surface: Optional[str] = Query(
-        None, pattern="^(global|note)$", description="按入口过滤：global（/qa）或 note（笔记浮层）"
+        None, pattern=_SURFACE_PATTERN, description="按入口过滤：global（/qa）或 note（笔记浮层）"
     ),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),

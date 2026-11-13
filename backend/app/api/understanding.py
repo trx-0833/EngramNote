@@ -91,9 +91,9 @@ from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
 from ..database import get_session_factory
-from ..models.qa_history import TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
+from ..models.qa_history import SURFACE_GLOBAL, TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
 from ..services import qa_history_service as qa_service
-from ..services.qa_context import assemble_messages, build_retrieval_query, usable_history
+from ..services.qa_context import assemble_messages, build_retrieval_query, context_turns_used, usable_history
 from ..schemas.common import EventStreamResponse
 from ..schemas.knowledge import (
     UnderstandingStartRequest,
@@ -685,23 +685,33 @@ async def ask_question_stream(
     answer_chars = int(getattr(settings, "qa_context_answer_chars", 400) or 400)
     max_chars = int(getattr(settings, "qa_context_max_chars", 4000) or 4000)
 
+    # 拒绝空/纯空白问题 —— 必须在**建会话之前**（2026-11-13 审计 m3）：
+    # 原来这条校验在生成器里，于是一次 `{"question": ""}` 已经在库里留下一条
+    # `turn_count=0` 的"未命名对话"，而用户没有办法只删一条空会话。
+    if not req.question or not req.question.strip():
+        raise AppError(EMPTY_QUESTION, "问题不能为空", 422)
+
     # ── 会话解析放在**流开始之前** ──
     #
     # 这样"会话已被删除"能以真正的 HTTP 404 返回（前端 `askQuestionStream` 抛 ApiError，
     # 据 error_code 清掉 ?s= 并提示）。放进生成器里就只能发一个 error 帧，
     # 而那时候响应的状态码已经发出去了，客户端得自己再解析一遍。
+    #
+    # `surface=SURFACE_GLOBAL` 是**校验**而不只是过滤（审计 M1）：拿一个笔记浮层会话的
+    # id 来全库问答，会被判成"取不到"→ 404，而不是把 global 轮次写进 note 会话。
     session = None
     history: List[tuple] = []
     if history_enabled:
         if req.session_id:
-            session = await qa_service.get_or_create_session(db, user_id=current_user.id, session_id=req.session_id)
+            session = await qa_service.get_or_create_session(
+                db, user_id=current_user.id, session_id=req.session_id, surface=SURFACE_GLOBAL
+            )
             if session is None:
                 raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
         else:
             session = await qa_service.get_or_create_session(
-                db, user_id=current_user.id, surface="global", first_question=req.question
+                db, user_id=current_user.id, surface=SURFACE_GLOBAL, first_question=req.question
             )
-            await db.commit()
 
         if session is not None and multiturn_enabled:
             turns = await qa_service.recent_ok_turns(
@@ -709,9 +719,19 @@ async def ask_question_stream(
             )
             history = usable_history([(t.question, t.answer, t.status) for t in turns])
 
+        # 把连接还回去（审计 m7）：`database.py` 写明流式端点会在**整个流期间**持有
+        # 请求作用域的 session，而这里读完之后只剩生成器里的落库（用的是独立 session）。
+        # 只读事务的提交没有副作用，但能让一条连接在几十秒的生成期间不被占住。
+        await db.commit()
+
     #: 追问时的检索词 = 上一问 + 当前问（计划 §4.3）
     prev_question = history[-1][0] if history else None
     retrieval_query = build_retrieval_query(prev_question, req.question)
+    #: 本轮**实际**带上的轮数。审计 m1：`len(history)` 是"想带几轮"，超预算时会被裁掉，
+    #: 落库与 `meta` 都必须用真实值，否则这个排障信号会撒谎。
+    context_turns = context_turns_used(
+        history=history, max_turns=max_turns, answer_chars=answer_chars, max_chars=max_chars
+    )
     session_id = session.id if session is not None else None
 
     async def _persist_completed_turn(
@@ -753,7 +773,7 @@ async def ask_question_stream(
                     retrieval_status=retrieval_status,
                     retrieval_query=retrieval_query,
                     sources=sources,
-                    context_turns=len(history),
+                    context_turns=context_turns,
                     latency_ms=latency_ms,
                 )
                 await write_db.commit()
@@ -761,14 +781,11 @@ async def ask_question_stream(
             logger.warning("问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
 
     async def event_stream():
+        # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）
+        nonlocal retrieval_query
         answer_parts: list[str] = []
         started_at = time.monotonic()
         try:
-            # 拒绝空/纯空白问题，避免无意义地消耗一次 LLM 调用（见 docs/decisions.md#F-31）
-            if not req.question or not req.question.strip():
-                yield f"event: error\ndata: {json.dumps({'message': '问题不能为空', 'error_code': 'EMPTY_QUESTION'}, ensure_ascii=False)}\n\n"
-                return
-
             # 1. 检索阶段（不调用 LLM）。追问时用拼接后的检索词。
             rag_service = RAGService()
             retrieval = await rag_service.retrieve_context(
@@ -793,9 +810,12 @@ async def ask_question_stream(
                     sources = retry["sources"]
                     provider = retry["provider"]
                     retrieval_status = retry.get("retrieval_status", "")
+                    # 记下**真正**用过的查询词（审计 m2）：`retrieval_query` 这一列存在的
+                    # 唯一理由就是归因"这轮为什么没检索到"，回退了却仍记拼接词等于自相矛盾。
+                    retrieval_query = req.question
 
             # 2. 首事件下发检索降级状态 + 会话（前端据此写 ?s= 与提示"参考了 N 轮上文"）
-            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider, 'session_id': session_id, 'history_used': len(history)}, ensure_ascii=False)}\n\n"
+            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider, 'session_id': session_id, 'history_used': context_turns}, ensure_ascii=False)}\n\n"
 
             # 3. 构建 messages（有历史时把最近几轮插在 system 与当前问之间）
             llm_service = LLMService()

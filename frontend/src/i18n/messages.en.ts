@@ -894,6 +894,11 @@ const en = {
     sessionGone: 'That conversation was deleted — started a new one',
     contextUsed: 'Used {count} earlier turns as context',
     historyLoadFailed: 'Failed to load conversations',
+    // ── Truncation notice + terminal turn states (2026-11-13 audit m6 / M4) ──
+    historyTruncated: '{total} conversations total; showing the {shown} most recent.',
+    turnFailed: 'This turn failed ({code})',
+    turnAborted: 'Generation stopped',
+    turnFailedUnknown: 'This turn failed',
     inputLabel: 'Your question',
     multiturnHint:
       'Follow-ups include the last {turns} turns; use "New conversation" when changing topic.',

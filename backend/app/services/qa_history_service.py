@@ -74,10 +74,17 @@ async def get_or_create_session(
     note_id: Optional[str] = None,
     first_question: Optional[str] = None,
 ) -> Optional[QASession]:
-    """取会话；给了 `session_id` 但取不到（不存在/别人的/已软删）返回 `None`
+    """取会话；给了 `session_id` 但取不到（不存在/别人的/已软删/**surface 不符**）返回 `None`
 
     **不静默新建**：调用方要能区分"续聊"与"会话已消失"，前者该继续追加，
     后者要回 `404`（与计划 §4.4 最后一行一致：删了却不报错会让人以为还在写）。
+
+    ## `surface` 是**校验**而不只是过滤（2026-11-13 审计 M1）
+
+    端点各自声明自己面向哪个入口，续聊时必须对得上：拿一个 `surface=note`
+    的会话 id 来全库问答，会让"笔记浮层的对话"里混进不属于任何笔记的轮次，
+    之后按 `surface` 过滤出来的数据也不再可信。不匹配一律按"取不到"处理（404 口径），
+    而不是静默新建 —— 静默新建会让前端以为续聊成功，`?s=` 指向一个空会话。
 
     不给 `session_id` 时新建一个会话（`title` 取首个问题截断）。
     """
@@ -87,6 +94,8 @@ async def get_or_create_session(
             QASession.user_id == user_id,
             QASession.deleted_at.is_(None),
         )
+        if surface:
+            stmt = stmt.where(QASession.surface == surface)
         return (await db.execute(stmt)).scalars().first()
 
     session = QASession(
@@ -180,6 +189,13 @@ async def record_turn(
         await db.flush()
         return turn
     except Exception as exc:  # noqa: BLE001 - 附加功能不该拖垮主流程
+        # 必须 rollback（2026-11-13 审计 n3）：异常后 session 处于 need-rollback 状态，
+        # 调用方接着 `commit()` 会再抛一次 `PendingRollbackError`，把真正的约束/锁错误
+        # 淹成第二条 warning —— 排障时看到的永远是那条没信息量的。
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001 - 连回滚都失败就只能记日志
+            logger.debug("问答历史写入失败后的 rollback 也失败", exc_info=True)
         logger.warning(
             "问答历史写入失败（忽略继续）: session=%s | %s: %s", (session.id or "")[:8], type(exc).__name__, exc
         )

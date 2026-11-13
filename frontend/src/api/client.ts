@@ -471,7 +471,9 @@ export class ApiError extends Error {
  * `detail`**（理由见 `ApiError` 的注释）—— 上传/流式问答的文案一个字没变，
  * 变的是 `request()` 那一侧：用户不再看到机器码前缀。
  */
-async function readErrorBody(response: Response): Promise<{ detail: string; code: string | null }> {
+export async function readErrorBody(
+  response: Response,
+): Promise<{ detail: string; code: string | null }> {
   const error = await response.json().catch(() => ({ detail: response.statusText }));
   // FastAPI 422 验证错误的 detail 是数组，需提取可读信息
   //

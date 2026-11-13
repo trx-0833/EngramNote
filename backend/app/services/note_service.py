@@ -785,6 +785,24 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
     # ---- 清理项目标签关联（显式双保险，即使 CASCADE 已开启） ----
     await db.execute(sql_delete(NoteProject).where(NoteProject.note_id == note_id))
 
+    # ---- 5.4 清掉问答历史里引用本笔记的**正文片段**（2026-11-13 审计 M5） ----
+    #
+    # `qa_turns.sources_json` 里存着检索片段的 `relevant_text`（截 200 字），
+    # 那是**笔记正文的副本**。笔记被彻底删除后它必须跟着走，否则正文会以
+    # "引用片段"的形式再多留 `qa_history_retention_days`（默认 90 天）。
+    #
+    # 只清片段、保留 `chunk_id` 作墓碑与用户自己的问题/答案：笔记删了，
+    # "我当时问过什么"仍是用户的记录（见计划 §6.3）。
+    #
+    # ⚠️ 这一步此前**只写了函数与单测，没有生产调用方** —— 静态看像已实现，
+    # 只有走 `purge_note` 才能发现片段仍在。`test_qa_history_purge_integration.py`
+    # 从这条路进，就是为了守住"接线"而不是"函数本身"。
+    from .qa_history_service import strip_snippets_for_note
+
+    stripped = await strip_snippets_for_note(db, note_id=note_id)
+    if stripped:
+        logger.info(f"已清理问答历史中的笔记片段: note_id={note_id[:8]}, turns={stripped}")
+
     # ---- 清理批注（显式双保险） ----
     from ..models.note_annotation import NoteAnnotation
 

@@ -168,3 +168,16 @@
   font-size: var(--text-xs);
   color: var(--color-accent);
 }
+
+/* ── 轮次的失败 / 中止（2026-11-13 独立审计 M4）──
+   失败/中止的轮次必须与"思考中"的斜体灰字看起来不同：
+   "思考中"是 `qa.thinking`（italic + --color-text-secondary），它是个**进行中**状态；
+   而 failed / aborted 是**终态**，永远不会自己结束。
+   两者长得一样时，用户会一直等一个已经死掉的轮次（审计 M4 的原始现象），
+   所以这里换成常规字重 + --color-warning —— 只靠颜色不算唯一线索，
+   文案本身也换成了"这一轮没有生成成功（{code}）/ 已停止生成"。 */
+.qaTurnFailed {
+  color: var(--color-warning);
+  line-height: 1.8;
+  font-size: 0.9375rem;
+}

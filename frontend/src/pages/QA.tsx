@@ -24,6 +24,20 @@
  * 契约里也没有对应的范围字段（`schema.ts` 里的 `scope_notes` / `scope_folders`
  * 是**学习目标**的字段，与问答无关）。给后端加字段属于接口改动，
  * 按 AGENTS.md §4 不擅自做，留给用户决策。
+ *
+ * ## 2026-11-13 独立审计批次（本页承担的部分）
+ *
+ * 四条结论落在这一页上，共同病因都是**状态被丢掉了，界面只能猜**：
+ *
+ * | 编号 | 症状 | 这里怎么治 |
+ * |---|---|---|
+ * | M1 | 抽屉只拉 50 条、且不过滤 `surface` | 请求显式带 `surface: 'global'` + 后端上限 `page_size: 100` |
+ * | M3 | 追问的会话已被删 → 一行红字永久卡住，再问还是 404 | 认 `QA_SESSION_NOT_FOUND`：清 `?s=`、清空轮次、`toast` 告知 |
+ * | M4 | 失败/中止的轮次渲染成「AI 正在思考...」，永不结束 | `QARecord` 带上 `status` / `errorCode`，按三态渲染 |
+ * | m1 | `meta.history_used` 的语义（已改成"实际带了几轮"） | **显示逻辑不变**：仍只在 `> 0` 时提示，只是数字更准 |
+ *
+ * 逐条的"为什么"写在对应代码旁边，这里只做索引 —— 抽屉的 M2/m4/m5/m6 在
+ * `pages/qa/QAHistoryDrawer.tsx`，本文件只负责透传 `total`（见那里的文件头）。
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -55,6 +69,17 @@ interface QARecord {
   sources: AnswerSource[];
   provider: string;
   retrievalStatus?: string;
+  /**
+   * 这一轮在后端的落库状态（`qa_turns.status`：`ok` / `failed` / `aborted`）。
+   *
+   * 审计 M4：载入历史时原来把它丢了，于是"失败"与"中止"的轮次和"首字还没到"
+   * 长得**一模一样**（`answer` 都是空串），渲染只能落到兜底的「AI 正在思考...」。
+   * 可这类轮次是**终态**，再也不会有 token 进来 —— 那行提示就永远停在那儿。
+   * 带上它才可能把三态分开（见下面回答渲染的三段分支）。
+   */
+  status?: string;
+  /** 失败原因码（`qa_turns.error_code`）；正常与中止的历史轮次为 `null` */
+  errorCode?: string | null;
 }
 
 /**
@@ -156,10 +181,18 @@ export default function QA() {
    *
    * `staleTime` 用 0：历史列表的变化来自"刚问完一轮"或"删除"，
    * 都不是高频轮询能解决的，靠 `invalidateQueries` 显式失效更准确。
+   *
+   * 两个参数都不是随手写的（审计 M1）：
+   * - `page_size: 100` 是后端允许的上限（更大的值会被截断到 100，写 100 才是
+   *   "一次拿满"）。原来写 50，第 51 条以后的会话在抽屉里**凭空消失**，
+   *   而抽屉又没有任何"还有更多"的提示 —— 用户只会以为历史被吞了；
+   * - `surface: 'global'` 必须显式传。不传后端不做过滤，笔记浮层
+   *   （`NoteAskPanel`，`surface: 'note'`）里问的会话会混进这里的列表，
+   *   点开是一条上下文对不上、正文里没有笔记引用的对话。
    */
   const sessionsQuery = useQuery({
     queryKey: ['qa', 'sessions'],
-    queryFn: ({ signal }) => getQaSessions({ page_size: 50 }, { signal }),
+    queryFn: ({ signal }) => getQaSessions({ page_size: 100, surface: 'global' }, { signal }),
   });
   const sessions = sessionsQuery.data?.items ?? [];
 
@@ -200,6 +233,17 @@ export default function QA() {
    *   **新对象**（测试环境正是如此），把它们放进依赖等于依赖"每次渲染"。
    */
   const loadedSessionRef = useRef<string | null>(null);
+  /**
+   * **已确认被删掉**的会话 id（404 `QA_SESSION_NOT_FOUND`）。
+   *
+   * 审计 M3 的收尾：光把 `?s=` 清掉不够。本 effect 的依赖里有 `setSessionId`，
+   * 而它来自 `useUrlState`，**身份不保证稳定** —— 依赖一变，effect 就会再跑一遍；
+   * 那时 `loadedSessionRef` 也刚被清空，"已载入"标记一点也挡不住，
+   * 于是"刚判定删除、URL 上的 `?s=` 还没清掉"那一帧会再发一次详情请求，
+   * 把旧轮次拉回一个已经清空的页面（实测踩过：页面自己长回历史记录）。
+   * 所以判定删除后先把 id 记进这里，载入 effect 见到它就再不重试。
+   */
+  const goneSessionsRef = useRef<Set<string>>(new Set());
   const toastRef = useRef(toast);
   const tRef = useRef(t);
   useEffect(() => {
@@ -209,6 +253,10 @@ export default function QA() {
 
   useEffect(() => {
     if (!sessionId || streaming) return;
+    // 已经判定"这条会话被删了"的 id 不再重试（审计 M3）：本 effect 的依赖含
+    // `setSessionId`（`useUrlState` 的身份不保证稳定），可能重复运行；只靠下面
+    // 那个"已载入"标记挡不住"刚判定删除、URL 还没清掉"那一帧把旧轮次拉回来。
+    if (goneSessionsRef.current.has(sessionId)) return;
     if (loadedSessionRef.current === sessionId) return;
     // 先记账再发请求：请求失败时也不该在下一次渲染里重试成一个死循环
     loadedSessionRef.current = sessionId;
@@ -224,6 +272,10 @@ export default function QA() {
             sources: (turn.sources ?? []) as AnswerSource[],
             provider: turn.provider ?? '',
             retrievalStatus: turn.retrieval_status ?? '',
+            // 审计 M4：`status` / `error_code` 必须一路带到渲染层，
+            // 否则失败与中止的轮次只能落到兜底的「AI 正在思考...」
+            status: turn.status,
+            errorCode: turn.error_code ?? null,
           }))
           .reverse();
         setHistory(records);
@@ -231,6 +283,9 @@ export default function QA() {
       } catch (err) {
         if (cancelled) return;
         if (isSessionGoneError(err)) {
+          // 先把 id 记进"已删除"集合，再清状态：否则下面几个 setState 触发的
+          // 重渲染会让 effect 在 URL 还没清掉的那一帧重新拉一次详情（见 ref 的说明）
+          goneSessionsRef.current.add(sessionId);
           loadedSessionRef.current = null;
           setSessionId('');
           setHistory([]);
@@ -248,7 +303,10 @@ export default function QA() {
   /** 「新建对话」：清空 URL 上的会话与当前轮次（下一问自动开新会话） */
   function handleNewChat() {
     stopActiveStream();
-    loadedSessionRef.current = null;
+    // 与载入 effect 的判据统一成字符串：`''`（没有会话）而不是 `null`
+    // （审计 M3 的余波 —— 载入 effect 依赖不保证稳定，`null` 与 `''` 各写一半时
+    // 任何一个"清空"路径都可能漏掉一种写法，导致标记看似清空其实还在比对）
+    loadedSessionRef.current = '';
     setSessionId('');
     setHistory([]);
     setHistoryUsed(0);
@@ -343,6 +401,9 @@ export default function QA() {
               if (nextSessionId && nextSessionId !== sessionId) {
                 setSessionId(nextSessionId);
               }
+              // 审计 m1：后端已把 `history_used` 改成「**实际**带了几轮」
+              // （此前报的是请求的轮数，追问一次之后数字会虚高）。前端显示逻辑
+              // 照旧 —— 只在 `> 0` 时提示，改的只是数字本身的含义，不是这里。
               setHistoryUsed(Number(payload.history_used || 0));
               // 首事件：记录检索降级状态，供渲染降级提示
               setHistory((prev) => {
@@ -429,6 +490,22 @@ export default function QA() {
         if (!firstTokenReceived) {
           setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
         }
+      } else if (isSessionGoneError(err)) {
+        // 审计 M3：追问的会话在别处被删了（另一个标签页、或抽屉里的「清空全部」），
+        // 后端回 404 `QA_SESSION_NOT_FOUND`。原来这一支落到下面的 `setError`：
+        // 页面上留一行红字，而 `?s=` 仍指着一条不存在的会话 —— 再问一次还是 404，
+        // 除了手动点「新建对话」没有出路。按"会话已消失"处理：
+        // 1. 记进 `goneSessionsRef`，挡住载入 effect 把旧轮次拉回来（见那里的注释）；
+        // 2. 清掉 `?s=` 和当前轮次，下一问自动开新会话；
+        // 3. 用一个 `toast` 说明发生了什么 —— 内容凭空消失必须给解释。
+        // 注意这里**不清空** `error`：`handleAsk` 开头已经清过一次，
+        // 而这一支压根没往 `error` 里写过东西。
+        goneSessionsRef.current.add(sessionId);
+        loadedSessionRef.current = '';
+        setSessionId('');
+        setHistory([]);
+        setHistoryUsed(0);
+        toastRef.current.info(tRef.current('qa.sessionGone'));
       } else {
         setError(err instanceof Error ? err.message : t('qa.failed'));
         // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
@@ -573,6 +650,24 @@ export default function QA() {
                     ) : record.answer ? (
                       // 流式渲染：答案实时增长
                       <div style={{ lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{record.answer}</div>
+                    ) : record.status === 'failed' ? (
+                      // 审计 M4 之一：**失败**的终态轮次。没有这一支时它落到最后的
+                      // 兜底分支，显示「AI 正在思考...」—— 可它永远等不到 token 了。
+                      // 带上 `error_code` 才有可查的线索；旧数据的 code 可能为空。
+                      //
+                      // 这两支**排在 `record.answer` 之后**是刻意的：失败/中止也可能
+                      // 留下半截回答，把正文换成一句状态会把用户已经看到的文字弄丢。
+                      // 它们只接管"没有正文的终态"—— 那正是原来永远停在「思考中」的那类。
+                      <div className={styles.qaTurnFailed}>
+                        {record.errorCode
+                          ? t('qa.turnFailed', { code: record.errorCode })
+                          : t('qa.turnFailedUnknown')}
+                      </div>
+                    ) : record.status === 'aborted' ? (
+                      // 审计 M4 之二：**主动中止**的终态轮次。与"失败"分开措辞：
+                      // 失败是系统的问题，中止是用户自己的操作，混成一句话会让
+                      // 用户以为"我没停过，它怎么失败了"。
+                      <div className={styles.qaTurnFailed}>{t('qa.turnAborted')}</div>
                     ) : (
                       <div
                         style={{
@@ -676,6 +771,11 @@ export default function QA() {
               : undefined
         }
         activeSessionId={sessionId || undefined}
+        // 审计 m6：服务端总数要透传给抽屉 —— 它据此判断"还有更早的对话没显示"。
+        // 不能用 `sessions.length`：只拉一页时列表看起来"就是全部"，
+        // 而这里 `page_size` 已经是 100（见 sessionsQuery 的注释），
+        // 超过 100 条的用户否则永远不会知道历史被截断了。
+        total={sessionsQuery.data?.total ?? sessions.length}
         onOpenSession={handleOpenSession}
         onChanged={() => {
           void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });

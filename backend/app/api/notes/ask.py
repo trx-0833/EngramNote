@@ -60,6 +60,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import get_settings
+from ...core.app_error import EMPTY_QUESTION, EMPTY_SELECTED_TEXT, NOTE_NOT_FOUND, AppError
+from ...models.qa_history import SURFACE_NOTE
 from ...database import get_db
 from ...models.user import User
 from ...schemas.common import EventStreamResponse
@@ -99,15 +101,33 @@ async def ask_note_stream(
     # 否则用户的历史列表会被一串只剩一句问答的碎片会话淹没。
     settings = get_settings()
     history_enabled = bool(getattr(settings, "qa_history_enabled", True))
+
+    # ── 三条校验提到**建会话之前**（2026-11-13 审计 m3）──
+    #
+    # 它们都只依赖请求体与 `current_user`，搬上来没有副作用；而留在生成器里时，
+    # 一次"空问题"或"对别人的 note_id 提问"就已经在库里留下一条 `turn_count=0`
+    # 的会话（还挂着一个用户并不拥有的 note_id）。
+    if not req.question or not req.question.strip():
+        raise AppError(EMPTY_QUESTION, "问题不能为空", 422)
+    if not req.selected_text or not req.selected_text.strip():
+        raise AppError(EMPTY_SELECTED_TEXT, "选中文本不能为空", 422)
+    note = await get_note_detail(db, note_id, current_user.id)
+    if not note:
+        raise AppError(NOTE_NOT_FOUND, "笔记不存在", 404)
+
     session = None
     if history_enabled:
         if req.session_id:
-            session = await qa_service.get_or_create_session(db, user_id=current_user.id, session_id=req.session_id)
+            # `surface="note"` 同样是校验（审计 M1）：不能把浮层轮次追加进一个全库问答会话
+            session = await qa_service.get_or_create_session(
+                db, user_id=current_user.id, session_id=req.session_id, surface=SURFACE_NOTE
+            )
         if session is None:
             session = await qa_service.get_or_create_session_for_note(
                 db, user_id=current_user.id, note_id=note_id, question=req.question
             )
-            await db.commit()
+        # 把连接还回去（审计 m7）：流的整个期间不再需要请求作用域的 session
+        await db.commit()
     session_id = session.id if session is not None else None
 
     async def _persist_completed_turn(
@@ -124,8 +144,9 @@ async def ask_note_stream(
         try:
             factory = get_session_factory()
             async with factory() as write_db:
+                # 显式传 surface（审计 M1：默认值会把 note 会话过滤掉 → 静默不落库）
                 target = await qa_service.get_or_create_session(
-                    write_db, user_id=current_user.id, session_id=session_id
+                    write_db, user_id=current_user.id, session_id=session_id, surface=SURFACE_NOTE
                 )
                 if target is None:
                     return
@@ -152,19 +173,7 @@ async def ask_note_stream(
         answer_parts: list[str] = []
         started_at = time.monotonic()
         try:
-            # 校验笔记归属（用户只能访问自己的笔记）
-            note = await get_note_detail(db, note_id, current_user.id)
-            if not note:
-                yield f"event: error\ndata: {json.dumps({'message': '笔记不存在'}, ensure_ascii=False)}\n\n"
-                return
-
-            # 拒绝空问题/空选中文本，避免无意义地消耗一次 LLM 调用
-            if not req.question or not req.question.strip():
-                yield f"event: error\ndata: {json.dumps({'message': '问题不能为空', 'error_code': 'EMPTY_QUESTION'}, ensure_ascii=False)}\n\n"
-                return
-            if not req.selected_text or not req.selected_text.strip():
-                yield f"event: error\ndata: {json.dumps({'message': '选中文本不能为空', 'error_code': 'EMPTY_SELECTED_TEXT'}, ensure_ascii=False)}\n\n"
-                return
+            # 笔记归属与输入校验已在**建会话之前**完成（审计 m3），这里不再重复
 
             # 组装选区局部上下文（参考内容由前端提交，仅来自当前笔记）
             context_parts: list[str] = []
