@@ -27,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.app_error import QA_SESSION_NOT_FOUND
 from ..database import get_db
-from ..models.qa_history import SURFACES
 from ..models.user import User
 from ..schemas.qa import (
     QAClearAllResponse,
@@ -91,7 +90,14 @@ async def list_qa_sessions(
     page: int = Query(1, ge=1, description="页码（从 1 开始）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数（上限 100）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（匹配标题、最后问题与任意轮次的问答正文）"),
-    surface: Optional[str] = Query(None, description="按入口过滤：global（/qa）或 note（笔记浮层）"),
+    # 用法用 `pattern` 交给 pydantic 校验（而不是手工 raise AppError）：
+    # ① 错误契约用例要求 `AppError` 的 code 必须是常量名，而"参数不合法"没有语义化 code；
+    # ② 前端对 pydantic 的 `string_pattern_mismatch` 已有本地化映射
+    #    （`api/client.ts` 的 VALIDATION_KEYS），用户看到的是中文而不是英文校验串；
+    # ③ 校验失败时响应里带的是 OpenAPI 声明的 422 schema，契约更准。
+    surface: Optional[str] = Query(
+        None, pattern="^(global|note)$", description="按入口过滤：global（/qa）或 note（笔记浮层）"
+    ),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
@@ -100,9 +106,6 @@ async def list_qa_sessions(
     「最近聊过」= `updated_at` 倒序：会话在被追加轮次时刷新它，
     所以"昨天问过、今天又追问"的会话会顶到最上面 —— 这是用户预期。
     """
-    if surface is not None and surface not in SURFACES:
-        # 与 Query(pattern=...) 同效果，但错误提示更直白（列出合法值）
-        raise AppError("VALIDATION_ERROR", f"surface 只能是 {' / '.join(SURFACES)}", 422)
 
     items, total = await qa_service.list_sessions(
         db,

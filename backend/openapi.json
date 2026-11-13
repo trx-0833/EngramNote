@@ -12536,6 +12536,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "pattern": "^(global|note)$",
                   "type": "string"
                 },
                 {
