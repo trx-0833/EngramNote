@@ -533,3 +533,64 @@ retrieval_query = f"{previous_question} {current_question}".strip()
 后端 **1902 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
 前端 **819 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e **30**、a11y **26（0 违规）**、
 prettier / `docs:links` 通过。
+---
+
+## 15. 第二轮独立审计（2026-11-14）与整改
+
+又开了一个**全新上下文**的子代理，这次只告诉它"审计范围 = 问答功能的那批文件"，
+不说改动来历、不说上一轮审计。报告 `_agenttmp/audit-report-2.md`（669 行），
+结论 **blocker 0 / major 1 / minor 15 / nit 5**，其中 5 条用自建探针实测过
+（浮层 `session_id`、`LIKE` 通配符、`0` 值配置、连接归还、`turn_count` 并发写）。
+
+### 15.1 major 与它连带的那条数据丢失
+
+| 编号    | 问题                                                                                                                                           | 整改                                                                                                                                                               |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MAJOR-1 | 删/清空**当前**会话后不清 `?s=`：页面留着幽灵对话；用户接着提问时 `handleAsk` 先把输入框清空，再带旧 `session_id` 撞 404，**刚敲的问题被吞掉** | 抽屉新增 `onSessionsRemoved(sessionId \| 'all')`，`QA.tsx` 命中当前会话就 `handleNewChat()`；404 分支把 `currentQuestion` 放回输入框（用户打过的字不能被静默丢弃） |
+
+### 15.2 十五个 minor 的处置
+
+| 编号     | 处置                                                                                                                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MINOR-1  | 浮层端点对非法/别人的/跨 note 的 `session_id` 改为 **404**（不再静默新建）；`get_or_create_session` 增 `expect_note_id`，不匹配按取不到处理                                                                     |
+| MINOR-2  | `qa_context_*` 不再用 `x or 默认值`（`0` 被吞成 6/400/4000）；三处 0 的语义写明：不带历史 / 不截断 / 不限总量（`assemble_messages` 对预算做 `>0` 判断）                                                         |
+| MINOR-3  | `keyword` 转义 `\ % _` 并 `ilike(..., escape="\\")`；纯空白等价于不过滤；`max_length=100`                                                                                                                       |
+| MINOR-4  | 新增 `QA_SESSION_SURFACE_MISMATCH`（仍 404）："属于另一个入口"不再被说成"已被删除"（后端用新增的 `get_session_by_id` 区分两种原因）                                                                             |
+| MINOR-5  | `error_code` 改 `classify_exception()`（`LLM_TIMEOUT` / `DB_UNAVAILABLE` / `LLM_UNKNOWN` / `AppError.code`）；SSE `error` 帧只发稳定码 + 固定中文文案，**不再下发 `str(e)`**（原来会把 SQL 与绑定参数送到界面） |
+| MINOR-6  | 详情接口加 `turns_limit`（默认 200，取最近 N 轮再升序）；`GET`/`DELETE` 支持 `surface` 校验                                                                                                                     |
+| MINOR-7  | 两个 purge 改成一条 Core `DELETE`；「清空全部」改成一条 `UPDATE`（不再全量加载 + `IN (...)`，避免 SQL 变量上限整批失败）                                                                                        |
+| MINOR-8  | `retrieve_context` 增 `corpus_empty`；空语料时追问不再白跑第二遍检索                                                                                                                                            |
+| MINOR-9  | 列表响应下发 `limits: {context_turns, retention_days}`（生效值）；前端优先用接口、缺省回退常量；`gen:api` 已再生，删掉临时的 `QASessionListWithLimits` shim                                                     |
+| MINOR-10 | 首问收到 `meta.session_id` 后把 `loadedSessionRef` 指向它，载入 effect 不再拉详情覆盖本地轮次（否则落库失败会让刚读到的答案消失）                                                                               |
+| MINOR-11 | `finally` 里 `setLoading/setStreaming` 进"仍是当前请求"的守卫；`stopActiveStream()` 自己负责收尾（否则点停止后按钮不回来）                                                                                      |
+| MINOR-12 | 每行删除按钮的可访问名带标题（`删除对话：<title>`），读屏能分辨删的是哪条                                                                                                                                       |
+| MINOR-13 | 四个输入字段加 `max_length`（`question` 4000 / `selected_text` 8000 / `context_*` 4000），前端 `maxLength={4000}`；浮层 prompt 去掉重复拼接的 `selected_text`                                                   |
+| MINOR-14 | `deleteQaSession` 的 204/404 用例都补 `toHaveBeenCalledTimes(1)`（守"只发一次请求"，这是上一轮 m4 的原始缺陷）                                                                                                  |
+| MINOR-15 | e2e 桩的 `meta` 补 `session_id`/`history_used`、列表桩改 `page_size=100` + `limits`，并把"挂载不发请求"的过时注释改成事实                                                                                       |
+
+### 15.3 nit
+
+`_persist_completed_turn` 两处已分叉（`surface` 一处显式一处隐式）——**本轮未合并**，
+登记为待办；`type="button"` 已补；轮次数加单位（`qa.turnsCount`）；`t`/`tRef` 用法统一；
+`SURFACE_NOTE` 字面量已换常量、`context_turns_used` 改为复用 `assemble_messages` 计数
+（结构上不可能与真正送进去的轮数漂移）。
+
+### 15.4 审计之外、整改时被测试抓出来的一个真 bug
+
+`created_at` 是 `server_default=func.now()`，**SQLite 只有秒级精度** —— 同一秒内的多轮
+`created_at` 完全相同，于是 `order_by(created_at, id)` 退化成按 UUID 排（等于随机）。
+`turns_limit` 的用例当场变红（取到的"最近两轮"是老的两条）。
+修法：`record_turn` 显式写 `created_at=_now()`（微秒精度）。这一列是"轮次顺序"的唯一依据
+（`recent_ok_turns` 取最近 N 轮、详情取最近 N 轮都靠它），审计把它列为"未验证疑点 2"，
+现在有断言钉住了。
+
+### 15.5 顺带修掉的一处真实可读性问题
+
+a11y 桩补上 `history_used: 1` 之后，「本轮参考了 N 轮上文」那一行首次进入审计视野：
+`--color-accent`（#c9a959）在白底上对比度 **2.25:1**，12px 正文远低于 WCAG AA 的 4.5:1，
+axe 报 `color-contrast [serious]`。改用 `--color-text-secondary`。
+
+### 15.6 门禁
+
+后端 **1909 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
+前端 **822 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。

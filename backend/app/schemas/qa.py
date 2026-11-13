@@ -58,6 +58,25 @@ class QASessionResponse(BaseModel):
     updated_at: datetime
 
 
+class QALimitsResponse(BaseModel):
+    """问答功能当前生效的两个数值上限
+
+    ## 为什么让列表接口顺带下发（2026-11-13 第二轮审计 MINOR-9）
+
+    前端三句提示里的数字（最近 N 轮 / 保留 N 天）原本是**编译期镜像常量**：
+    部署侧在 `.env` 里把 `QA_CONTEXT_MAX_TURNS` 改成 3，界面仍写"最近 6 轮"，
+    而守卫用例只比 `Settings()` 默认值 —— CI 永远是 6，门禁照绿。
+    这与计划 §5.4「数字从配置来，写死就会在某天调参后变成谎言」直接冲突。
+
+    最小修法是**不新增端点**、只在已有的列表响应里多两个字段（计划当初否决
+    `/api/qa/config` 的理由就是"为一个纯展示数字多一处契约"，这里是它的最小心形态）。
+    前端拿不到（老后端 / 请求失败）时回退到常量，不至于让提示空掉。
+    """
+
+    context_turns: int = 0
+    retention_days: int = 0
+
+
 class QASessionListResponse(BaseModel):
     """会话列表（分页）"""
 
@@ -65,6 +84,8 @@ class QASessionListResponse(BaseModel):
     total: int = 0
     page: int = 1
     page_size: int = 20
+    #: 当前生效的数值上限（见 `QALimitsResponse` 的说明）
+    limits: Optional[QALimitsResponse] = None
 
 
 class QASessionDetailResponse(BaseModel):

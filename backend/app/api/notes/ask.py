@@ -60,7 +60,15 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import get_settings
-from ...core.app_error import EMPTY_QUESTION, EMPTY_SELECTED_TEXT, NOTE_NOT_FOUND, AppError
+from ...core.app_error import (
+    EMPTY_QUESTION,
+    EMPTY_SELECTED_TEXT,
+    NOTE_NOT_FOUND,
+    QA_SESSION_NOT_FOUND,
+    QA_SESSION_SURFACE_MISMATCH,
+    AppError,
+    classify_exception,
+)
 from ...models.qa_history import SURFACE_NOTE
 from ...database import get_db
 from ...models.user import User
@@ -118,10 +126,22 @@ async def ask_note_stream(
     session = None
     if history_enabled:
         if req.session_id:
-            # `surface="note"` 同样是校验（审计 M1）：不能把浮层轮次追加进一个全库问答会话
+            # `surface` + `note_id` 都是**校验**（审计 M1 / 第二轮 MINOR-1）：不能把浮层轮次
+            # 追加进全库问答会话，也不能把 note B 的内容写进「note A 的对话」。
             session = await qa_service.get_or_create_session(
-                db, user_id=current_user.id, session_id=req.session_id, surface=SURFACE_NOTE
+                db,
+                user_id=current_user.id,
+                session_id=req.session_id,
+                surface=SURFACE_NOTE,
+                expect_note_id=note_id,
             )
+            if session is None:
+                # 与全局端点同一语义（第二轮 MINOR-1）：给了 id 取不到就 404，
+                # **不静默新建**。原写法会悄悄长出一条新会话，客户端还以为续上了。
+                still_there = await qa_service.get_session_by_id(db, user_id=current_user.id, session_id=req.session_id)
+                if still_there is not None:
+                    raise AppError(QA_SESSION_SURFACE_MISMATCH, "这个对话属于另一个入口", 404)
+                raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
         if session is None:
             session = await qa_service.get_or_create_session_for_note(
                 db, user_id=current_user.id, note_id=note_id, question=req.question
@@ -237,11 +257,12 @@ async def ask_note_stream(
             raise
         except Exception as e:
             logger.warning(f"SSE 笔记 AI 提问失败: {e}", exc_info=True)
-            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            # 同全局端点：只下发稳定码 + 固定文案，不把异常文本送到界面上（MINOR-5）
+            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': classify_exception(e)}, ensure_ascii=False)}\n\n"
             await _persist_completed_turn(
                 status=TURN_STATUS_FAILED,
                 answer_text="".join(answer_parts),
-                error_code=type(e).__name__,
+                error_code=classify_exception(e),
                 latency_ms=int((time.monotonic() - started_at) * 1000),
             )
 

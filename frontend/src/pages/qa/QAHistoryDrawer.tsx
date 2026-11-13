@@ -57,6 +57,13 @@
  * 不必多话，`total > shown` 才说明"还有更早的对话没显示"—— 不说这句，
  * 用户会以为历史被吞了。`total` 由上层从列表响应的 `total` 字段透传，
  * 本组件不去猜，也不为此多发一次请求。
+ *
+ * ## 2026-11-14 审计（本文件承担的两条）
+ *
+ * | 编号 | 原来 | 现在 |
+ * |---|---|---|
+ * | major | 删/清空成功后只 `onChanged()`（= `invalidateQueries`），上层无从知道"删掉的正是页面在看的那条" | 成功后调用 `onSessionsRemoved?.(id \| 'all')`，由上层清 `?s=` 与当前轮次 |
+ * | minor | 每行删除按钮都叫「删除对话」；轮次数是个裸数字 | 可访问名带上会话标题；轮次数带单位 `{count} 轮` |
  */
 import { useMemo, useState } from 'react';
 
@@ -89,6 +96,17 @@ export interface QAHistoryDrawerProps {
   onOpenSession: (sessionId: string) => void;
   /** 删除/清空之后让上层刷新列表 */
   onChanged: () => void;
+  /**
+   * 删除 / 清空**成功**之后通知上层"哪些会话没了"（2026-11-14 审计 major）
+   *
+   * `onChanged` 只让列表重新拉一次；它无法回答"被删掉的是不是**页面正在看的那条**"。
+   * 上层需要这份信息才能把 `?s=` 与当前轮次一起清掉 —— 否则页面继续展示一条
+   * 已经不存在的对话，用户下一次提问会带着旧 id 撞 404，而 `handleAsk` 那时
+   * 已经把输入框清空了（问题被吞掉）。
+   *
+   * @param removedSessionId 被删那一条的 id；`'all'` 表示「清空全部」
+   */
+  onSessionsRemoved?: (removedSessionId: string | 'all') => void;
   /** 保留期（天）与备份周数：由调用方从后端配置读，写死会与配置漂移 */
   retentionDays: number;
   backupWeeks: number;
@@ -104,6 +122,7 @@ export default function QAHistoryDrawer({
   activeSessionId,
   onOpenSession,
   onChanged,
+  onSessionsRemoved,
   retentionDays,
   backupWeeks,
 }: QAHistoryDrawerProps) {
@@ -140,6 +159,9 @@ export default function QAHistoryDrawer({
       await deleteQaSession(session.id);
       toast.info(t('qa.deleted'));
       onChanged();
+      // 2026-11-14 审计 major：删掉的**可能就是页面正在看的那一条**。
+      // 只在成功分支里通知 —— 失败时那条会话还在，上层不该清 `?s=`。
+      onSessionsRemoved?.(session.id);
     } catch (err) {
       // m4：提示失败，**不重试**。重发的危害见文件头。
       toast.error(err instanceof Error ? err.message : t('shared.deleteFailed'));
@@ -158,6 +180,8 @@ export default function QAHistoryDrawer({
       // m5：这个数字是清空动作唯一的反馈，不能丢。
       toast.info(t('qa.clearAllDone', { count: deleted }));
       onChanged();
+      // 2026-11-14 审计 major：清空是"全部都删"，`?s=` 无论指着哪一条都已失效。
+      onSessionsRemoved?.('all');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('shared.deleteFailed'));
     } finally {
@@ -184,7 +208,10 @@ export default function QAHistoryDrawer({
               >
                 <span className={styles.itemTitle}>{session.title || t('qa.historyUntitled')}</span>
                 <span className={styles.itemMeta}>
-                  {formatDateTime(session.updated_at)} · {session.turn_count}
+                  {formatDateTime(session.updated_at)} ·{' '}
+                  {/* 2026-11-14：轮次数**带单位**。原来只有一个裸数字（`· 2`），
+                      离开上下文的读屏/截图里根本看不出那是"轮"还是"条"。 */}
+                  {t('qa.turnsCount', { count: session.turn_count })}
                 </span>
               </button>
               <button
@@ -193,8 +220,11 @@ export default function QAHistoryDrawer({
                 // 审计 M2：这里**只**挂起待确认对象，请求在 `runDelete` 里发
                 onClick={() => setPendingDelete(session)}
                 disabled={busyId === session.id}
-                aria-label={t('qa.deleteSession')}
-                title={t('qa.deleteSession')}
+                // ★ 2026-11-14：可访问名必须能分清"删的是哪一条"。
+                // 原来每行都叫「删除对话」—— 读屏用户列出本页按钮时看到的是
+                // N 个完全同名的按钮，无法判断哪一个对应哪个对话（只能靠数顺序）。
+                aria-label={`${t('qa.deleteSession')}：${session.title || t('qa.historyUntitled')}`}
+                title={`${t('qa.deleteSession')}：${session.title || t('qa.historyUntitled')}`}
               >
                 <Icon name="delete" size={16} />
               </button>

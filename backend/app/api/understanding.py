@@ -70,9 +70,11 @@ from ..core import i18n
 from ..core.app_error import (
     CARD_NOT_FOUND,
     EMPTY_QUESTION,
+    classify_exception,
     NOTE_NOT_FOUND,
     NOTE_STATUS_INVALID,
     QA_SESSION_NOT_FOUND,
+    QA_SESSION_SURFACE_MISMATCH,
     QUIZ_OPTIONS_REQUIRED,
     REVIEW_QUIZ_NOT_FOUND,
     UNDERSTANDING_IN_PROGRESS,
@@ -681,9 +683,21 @@ async def ask_question_stream(
     settings = get_settings()
     history_enabled = bool(getattr(settings, "qa_history_enabled", True))
     multiturn_enabled = history_enabled and bool(getattr(settings, "qa_multiturn_enabled", True))
-    max_turns = int(getattr(settings, "qa_context_max_turns", 6) or 6)
-    answer_chars = int(getattr(settings, "qa_context_answer_chars", 400) or 400)
-    max_chars = int(getattr(settings, "qa_context_max_chars", 4000) or 4000)
+
+    # 三轮预算的读取**不能用 `x or 默认值`**（2026-11-13 第二轮审计 MINOR-2）：
+    # `or` 会把显式配置的 `0` 当成"没配"，于是 `QA_CONTEXT_MAX_TURNS=0`
+    # （最自然的"不要带历史"写法）反而带上 6 轮，配置与行为相反且没有任何日志。
+    # 现在 0 是有意义的取值，语义写在这里：
+    #   - `max_turns=0`     → 不带任何历史（`assemble_messages` 天然支持）
+    #   - `answer_chars=0`  → 单条答案不截断（`_clip` 对 `limit<=0` 原样返回）
+    #   - `max_chars=0`     → 历史总量不限（`assemble_messages` 里对预算做 `>0` 判断）
+    def _int_setting(name: str, default: int) -> int:
+        value = getattr(settings, name, default)
+        return default if value is None else int(value)
+
+    max_turns = _int_setting("qa_context_max_turns", 6)
+    answer_chars = _int_setting("qa_context_answer_chars", 400)
+    max_chars = _int_setting("qa_context_max_chars", 4000)
 
     # 拒绝空/纯空白问题 —— 必须在**建会话之前**（2026-11-13 审计 m3）：
     # 原来这条校验在生成器里，于是一次 `{"question": ""}` 已经在库里留下一条
@@ -707,6 +721,12 @@ async def ask_question_stream(
                 db, user_id=current_user.id, session_id=req.session_id, surface=SURFACE_GLOBAL
             )
             if session is None:
+                # 区分"真的没了"与"入口不对"（第二轮审计 MINOR-4）：两者都是 404
+                # （不泄露存在性），但码不同 —— 否则把一个仍在笔记浮层里的会话
+                # 说成"已被删除"，用户会去找备份。见 `get_session_by_id` 的说明。
+                still_there = await qa_service.get_session_by_id(db, user_id=current_user.id, session_id=req.session_id)
+                if still_there is not None:
+                    raise AppError(QA_SESSION_SURFACE_MISMATCH, "这个对话属于另一个入口", 404)
                 raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
         else:
             session = await qa_service.get_or_create_session(
@@ -799,7 +819,9 @@ async def ask_question_stream(
 
             # 1b. 追问时若拼接检索为空，退回只用当前问再检一次（计划 §4.3）。
             #     两次都空就如实回答"没有找到相关片段"，不编造。
-            if not sources and prev_question:
+            # 语料为空时不要再检索一次（第二轮审计 MINOR-8）：新用户 / 还没补向量时
+            # "拼接词没命中"是必然的，第二遍同样必然为空 —— 白跑一次 embedding + 向量检索。
+            if not sources and prev_question and not retrieval.get("corpus_empty"):
                 retry = await rag_service.retrieve_context(
                     question=req.question,
                     user_id=current_user.id,
@@ -880,11 +902,14 @@ async def ask_question_stream(
             raise
         except Exception as e:
             logger.warning(f"SSE 流式问答失败: {e}", exc_info=True)
-            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            # 只发稳定错误码 + 固定中文文案（第二轮审计 MINOR-5）：原来把 `str(e)` 原样下发，
+            # SQLAlchemy 的 OperationalError 文本里带 SQL 与绑定参数 —— DB 故障时等于把
+            # 内部结构送到界面上。详细异常只进日志（上面那行 warning 已带 exc_info）。
+            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': classify_exception(e)}, ensure_ascii=False)}\n\n"
             await _persist_completed_turn(
                 status=TURN_STATUS_FAILED,
                 answer_text="".join(answer_parts),
-                error_code=type(e).__name__,
+                error_code=classify_exception(e),
                 latency_ms=int((time.monotonic() - started_at) * 1000),
             )
 

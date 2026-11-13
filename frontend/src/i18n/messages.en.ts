@@ -892,6 +892,15 @@ const en = {
     clearAllDone: 'Cleared {count} conversations',
     deleted: 'Conversation deleted',
     sessionGone: 'That conversation was deleted — started a new one',
+    // ── 2026-11-14 audit batch (additions only) ──
+    // The conversation exists but belongs to **another entry point** (`surface`):
+    // its context does not match, so a new conversation is the only way forward —
+    // and the user must be told why the previous one disappeared.
+    sessionSurfaceMismatch: 'That conversation belongs to another entry point — started a new one',
+    // Unit for the turn count: the drawer used to print a bare number (`· 2`).
+    turnsCount: '{count} turns',
+    // Fallback copy for the 4000-character limit on a question (same bound as the backend)
+    inputTooLong: 'Question is too long (max 4000 characters)',
     contextUsed: 'Used {count} earlier turns as context',
     historyLoadFailed: 'Failed to load conversations',
     // ── Truncation notice + terminal turn states (2026-11-13 audit m6 / M4) ──

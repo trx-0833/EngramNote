@@ -108,9 +108,11 @@ def assemble_messages(
 
     ## 裁剪顺序（三条预算）
 
-    1. 只取最后 `max_turns` 轮；
-    2. 每条答案 `_clip` 到 `answer_chars`；
-    3. 若累计字符超过 `max_chars`，从**最旧**开始丢，直到放得下（或丢光）。
+    1. 只取最后 `max_turns` 轮（`0` = 不带任何历史）；
+    2. 每条答案 `_clip` 到 `answer_chars`（`0` = 不截断）；
+    3. 若累计字符超过 `max_chars`，从**最旧**开始丢，直到放得下（或丢光）；
+       `max_chars <= 0` 表示**不限总量**（2026-11-13 第二轮审计 MINOR-2：
+       原来 0 会被当成"预算 0"从而把历史全丢光，与"不限"正好相反）。
 
     "从最旧丢"而不是"从最新丢"：越近的上下文越可能与当前问题相关。
     """
@@ -120,12 +122,10 @@ def assemble_messages(
     # 先按单条答案截断，再算总预算（截断会改变总量，顺序反了会多丢几轮）
     clipped: List[Tuple[str, str]] = [(q, _clip(a, int(answer_chars))) for q, a in kept]
 
-    def total_chars(pairs: Sequence[Tuple[str, str]]) -> int:
-        return sum(len(q) + len(a) for q, a in pairs)
-
-    budget = max(0, int(max_chars))
-    while clipped and total_chars(clipped) > budget:
-        clipped.pop(0)
+    budget = int(max_chars)
+    if budget > 0:
+        while clipped and sum(len(q) + len(a) for q, a in clipped) > budget:
+            clipped.pop(0)
 
     messages: List[Dict[str, str]] = []
     system = system_prompt or ""
@@ -150,11 +150,19 @@ def context_turns_used(
 
     为什么单独算一遍而不用 `len(history)`：预算裁剪之后真正进模型的是更少的轮次，
     而排障时要知道的是**实际值**（"配置说带 6 轮、库里记着 2 轮"才是可诊断的信号）。
+
+    ## 实现方式：复用 `assemble_messages` 再数（审计 NIT-5）
+
+    原来这里把"截断 + 从最旧丢"的循环**又写了一遍**。两处只要有一处改口径，
+    `meta.history_used` 与真正送进模型的轮数就会不一致 —— 而那个数字正是排障依据。
+    现在只调一次组装、数一下 assistant 消息条数，**结构上不可能漂移**。
     """
-    limit_turns = max(0, int(max_turns))
-    kept = list(history)[-limit_turns:] if limit_turns else []
-    clipped: List[Tuple[str, str]] = [(q, _clip(a, int(answer_chars))) for q, a in kept]
-    budget = max(0, int(max_chars))
-    while clipped and sum(len(q) + len(a) for q, a in clipped) > budget:
-        clipped.pop(0)
-    return len(clipped)
+    messages = assemble_messages(
+        system_prompt="",
+        current_user_content="",
+        history=history,
+        max_turns=max_turns,
+        answer_chars=answer_chars,
+        max_chars=max_chars,
+    )
+    return sum(1 for m in messages if m["role"] == "assistant")

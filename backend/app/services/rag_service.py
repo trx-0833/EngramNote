@@ -180,17 +180,19 @@ class BM25Index:
 
             if score > 0:
                 card = self._cards[idx]
-                scored.append({
-                    "note_id": card.get("note_id"),
-                    "note_title": None,
-                    "content": card.get("content"),
-                    "similarity": score,
-                    "block_index": 0,
-                    # 保留卡片特有字段，便于后续构建 sources
-                    "card_id": card.get("card_id"),
-                    "title": card.get("title"),
-                    "chapter_title": card.get("chapter_title"),
-                })
+                scored.append(
+                    {
+                        "note_id": card.get("note_id"),
+                        "note_title": None,
+                        "content": card.get("content"),
+                        "similarity": score,
+                        "block_index": 0,
+                        # 保留卡片特有字段，便于后续构建 sources
+                        "card_id": card.get("card_id"),
+                        "title": card.get("title"),
+                        "chapter_title": card.get("chapter_title"),
+                    }
+                )
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
         return scored[:top_k]
@@ -247,10 +249,7 @@ def build_context_and_sources(
             continue
         seen.add(dedupe_key)
 
-        note_title = (
-            item.get("note_title") or item.get("title")
-            or titles.get(item.get("note_id")) or "未知笔记"
-        )
+        note_title = item.get("note_title") or item.get("title") or titles.get(item.get("note_id")) or "未知笔记"
         chapter_title = item.get("chapter_title")
         chapter_info = f" (章节: {chapter_title})" if chapter_title else ""
 
@@ -258,21 +257,23 @@ def build_context_and_sources(
         index = len(sources) + 1
         parts.append(f"[{index}] 来源: {note_title}{chapter_info}\n{content}")
 
-        sources.append({
-            "note_id": item.get("note_id"),
-            "note_title": note_title,
-            "chapter_title": chapter_title,
-            # 展示用摘要；**不是**切片依据（`relevant_text` 比区间短，见 AnswerSource）
-            "relevant_text": content[:200],
-            # 定位字段（阶段 2.7）
-            "chunk_id": item.get("chunk_id"),
-            "chunk_index": item.get("index"),
-            "char_start": item.get("char_start"),
-            "char_end": item.get("char_end"),
-            "heading_path": item.get("heading_path") or chapter_title,
-            "line_start": item.get("line_start"),
-            "line_end": item.get("line_end"),
-        })
+        sources.append(
+            {
+                "note_id": item.get("note_id"),
+                "note_title": note_title,
+                "chapter_title": chapter_title,
+                # 展示用摘要；**不是**切片依据（`relevant_text` 比区间短，见 AnswerSource）
+                "relevant_text": content[:200],
+                # 定位字段（阶段 2.7）
+                "chunk_id": item.get("chunk_id"),
+                "chunk_index": item.get("index"),
+                "char_start": item.get("char_start"),
+                "char_end": item.get("char_end"),
+                "heading_path": item.get("heading_path") or chapter_title,
+                "line_start": item.get("line_start"),
+                "line_end": item.get("line_end"),
+            }
+        )
 
     return "\n\n".join(parts), sources
 
@@ -302,7 +303,9 @@ class RAGService:
         self._bm25_slot: Optional[tuple[str, str, BM25Index]] = None
 
     def _get_bm25_index(
-        self, user_id: str, cards: List[Dict[str, Any]],
+        self,
+        user_id: str,
+        cards: List[Dict[str, Any]],
     ) -> BM25Index:
         """取得该用户语料的 BM25 索引，语料未变时复用
 
@@ -331,6 +334,7 @@ class RAGService:
         """获取数据库会话工厂（复用主应用会话工厂，避免私有 engine 泄漏，见 docs/decisions.md#F-06）"""
         if self._session_factory is None:
             from ..database import async_session
+
             self._session_factory = async_session
         return self._session_factory
 
@@ -396,14 +400,21 @@ class RAGService:
 
         session_factory = self._get_session_factory()
         async with session_factory() as session:
-            trashed = list((await session.execute(
-                _select(_Note.id).where(
-                    _Note.user_id == user_id, _Note.trashed_at.is_not(None)
+            trashed = list(
+                (
+                    await session.execute(
+                        _select(_Note.id).where(_Note.user_id == user_id, _Note.trashed_at.is_not(None))
+                    )
                 )
-            )).scalars().all())
+                .scalars()
+                .all()
+            )
             return await search_chunks(
-                session, question_embedding, user_id,
-                top_k=top_k, exclude_note_ids=set(trashed) or None,
+                session,
+                question_embedding,
+                user_id,
+                top_k=top_k,
+                exclude_note_ids=set(trashed) or None,
             )
 
     async def _lexical_search(
@@ -431,9 +442,7 @@ class RAGService:
         session_factory = self._get_session_factory()
         async with session_factory() as session:
             if await fts5_available(session):
-                hits = await search_chunks_fts(
-                    session, question, user_id, top_k=top_k
-                )
+                hits = await search_chunks_fts(session, question, user_id, top_k=top_k)
                 if hits:
                     return hits
                 # FTS5 可用但无命中：**不再回落**到 Python BM25。
@@ -458,6 +467,7 @@ class RAGService:
         """
         try:
             from ..tasks.celery_app import celery_app
+
             task = celery_app.send_task(
                 "app.tasks.embedding_tasks.encode_text",
                 args=[[text]],
@@ -585,15 +595,21 @@ class RAGService:
 
         #: 白名单之外的字段也要带过去（定位信息在这里曾经被丢掉）
         carried_keys = (
-            "card_id", "title", "chapter_title",
-            "chunk_id", "index",
-            "char_start", "char_end", "heading_path", "line_start", "line_end",
+            "card_id",
+            "title",
+            "chapter_title",
+            "chunk_id",
+            "index",
+            "char_start",
+            "char_end",
+            "heading_path",
+            "line_start",
+            "line_end",
         )
 
         fused: Dict[tuple, Dict[str, Any]] = {}
 
-        for weight, result_list in ((1.0 - bm25_weight, vector_results),
-                                    (bm25_weight, bm25_results)):
+        for weight, result_list in ((1.0 - bm25_weight, vector_results), (bm25_weight, bm25_results)):
             if weight <= 0:
                 continue
             for rank_idx, item in enumerate(result_list):
@@ -620,9 +636,7 @@ class RAGService:
                     fused[dedupe_key] = merged_item
                 fused[dedupe_key]["similarity"] += rrf_score
 
-        sorted_results = sorted(
-            fused.values(), key=lambda x: x["similarity"], reverse=True
-        )
+        sorted_results = sorted(fused.values(), key=lambda x: x["similarity"], reverse=True)
         return sorted_results[:top_k]
 
     async def retrieve_context(
@@ -682,9 +696,7 @@ class RAGService:
         vector_results: List[Dict[str, Any]] = []
         if question_embedding is not None:
             try:
-                vector_results = await self._search_chunk_vectors(
-                    question_embedding, user_id, top_k=pool
-                )
+                vector_results = await self._search_chunk_vectors(question_embedding, user_id, top_k=pool)
             except Exception as e:
                 logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
                 vector_results = []
@@ -716,9 +728,7 @@ class RAGService:
             logger.warning(f"词法检索失败: {e}")
 
         # 4. 加权 RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
-        fused_results = self._rrf_fusion(
-            vector_results, bm25_results, top_k=5
-        )
+        fused_results = self._rrf_fusion(vector_results, bm25_results, top_k=5)
 
         # 5+6. 同一次遍历产出「上下文编号」与「引用来源」
         #
@@ -751,9 +761,7 @@ class RAGService:
         if missing:
             session_factory = self._get_session_factory()
             async with session_factory() as session:
-                rows = await session.execute(
-                    select(Note.id, Note.title).where(Note.id.in_(missing))
-                )
+                rows = await session.execute(select(Note.id, Note.title).where(Note.id.in_(missing)))
                 titles = {nid: (title or "未知笔记") for nid, title in rows.all()}
 
         context, sources = build_context_and_sources(ordered, titles)
@@ -763,6 +771,11 @@ class RAGService:
             "sources": sources,
             "provider": provider,
             "retrieval_status": retrieval_status,
+            # 语料是否为空（2026-11-13 审计 MINOR-8）：调用方据此区分
+            # "**没有**可检索的语料"（新用户 / 还没补向量）与"**有**语料但没命中"。
+            # 两者都表现为 `sources == []`，但前者再检索一次同样必然为空 ——
+            # 追问的回退检索要靠这个信号避免白跑两遍 embedding + 向量检索。
+            "corpus_empty": not chunks,
         }
 
     async def answer_question(

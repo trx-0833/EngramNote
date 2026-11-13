@@ -32,6 +32,8 @@
  * | `新建对话` | 计划 §5.5（清 `?s=` 与当前轮次） |
  * | `审计 M4：失败/中止的轮次说结论…` | **M4**（failed / aborted 说结论，含无 `error_code` 的兜底） |
  * | `审计 M3：追问时会话已经不在了` | **M3**（404 `QA_SESSION_NOT_FOUND` → 清 `?s=`） |
+ * | `2026-11-14 审计 major：删掉当前会话后不能继续显示它` | 删/清空后要清 `?s=`（否则下一个问题被 404 吞掉） |
+ * | `2026-11-14 审计 minor：提示里的数字来自接口（常量只兜底）` | `limits` 下发后，提示里的数字以接口为准 |
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -149,6 +151,19 @@ function detail(turns: QATurnItem[]): QASessionDetail {
 /** 列表响应；`total` 与 `items.length` 故意可以不等 —— 那正是 m6 的截断场景 */
 function sessionList(items: QASessionSummary[], total = items.length): QASessionList {
   return { items, total, page: 1, page_size: 100 };
+}
+
+/**
+ * 列表响应 + 后端下发的 `limits`（`GET /qa/sessions` 会带上它，见 `api/qaHistory.ts`）
+ *
+ * `limits` 现在在生成类型里（`QASessionListResponse.limits`），不再需要本地扩展类型。
+ */
+function sessionListWithLimits(
+  items: QASessionSummary[],
+  limits: { context_turns: number; retention_days: number },
+  total = items.length,
+): QASessionList {
+  return { ...sessionList(items, total), limits };
 }
 
 /** 断言用的答案片段：唯一、短、不会与提示文案撞 */
@@ -299,7 +314,9 @@ describe('审计 M2：删除与会话清空都要二次确认', () => {
     const drawer = await openDrawer(user);
     const before = getQaSessions.mock.calls.length;
 
-    await user.click(within(drawer).getAllByRole('button', { name: '删除对话' })[0]);
+    // 2026-11-14 起删除按钮的可访问名带上了会话标题（「删除对话：<标题>」），
+    // 所以按前缀正则定位；`[0]` 仍是第一行那条（sess-1）。
+    await user.click(within(drawer).getAllByRole('button', { name: /删除对话：/ })[0]);
 
     // 审计 M2 的原始缺陷：这一步原来直接发 DELETE，点错没有第二次机会
     expect(deleteQaSession).not.toHaveBeenCalled();
@@ -322,7 +339,8 @@ describe('审计 M2：删除与会话清空都要二次确认', () => {
     renderPage();
 
     const drawer = await openDrawer(user);
-    await user.click(within(drawer).getAllByRole('button', { name: '删除对话' })[0]);
+    // 同 M2 第一条：可访问名已带标题，按前缀正则定位（`[0]` = 第一行 sess-1）
+    await user.click(within(drawer).getAllByRole('button', { name: /删除对话：/ })[0]);
     await user.click(confirmButton(await lastDialog()));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
@@ -368,6 +386,89 @@ describe('审计 M2：删除与会话清空都要二次确认', () => {
 
     await waitFor(() => expect(toast.info).toHaveBeenCalled());
     expect(toastLog(toast.info)).toContain('已清空 3 个对话');
+  });
+});
+
+// ── 2026-11-14 审计 major：删/清空之后页面不能还挂着那条会话 ────────────────
+
+/**
+ * 这两条守的是同一个"状态被丢掉"的缺陷：
+ *
+ * 抽屉删完/清空后只调 `onChanged()`（= `invalidateQueries`），于是页面主体
+ * 继续显示**已经不存在的**轮次，`?s=` 也还指着它。用户接着提问时
+ * `handleAsk` 先把输入框清空再带旧 `session_id` 请求 → 后端 404 → 只有 404
+ * 分支才去清 `?s=`，而那一刻用户刚敲的问题已经被清掉了。
+ *
+ * 判据因此分两半：**URL 里的 `?s=` 没了** + **页面回到空态**。
+ * 只断言前者的话，"URL 清了但屏幕上还挂着旧答案"（另一种坏法）会漏过去。
+ */
+describe('2026-11-14 审计 major：删掉当前会话后不能继续显示它', () => {
+  it('删掉**当前**会话（?s=sess-1）→ ?s= 被清、页面回到空态', async () => {
+    const user = userEvent.setup();
+    renderPage('/qa?s=sess-1');
+
+    // 先确认这条会话真的载入了 —— 否则"清掉了"可能只是"本来就没有"
+    expect(await screen.findByText(ANSWER_SNIPPET)).toBeInTheDocument();
+    expect(currentSearch()).toContain('s=sess-1');
+
+    const drawer = await openDrawer(user);
+    // 可访问名带标题（本次改动），所以按标题精确定位到 sess-1 那一行
+    await user.click(within(drawer).getByRole('button', { name: /删除对话：浮充和均充的区别/ }));
+    await user.click(confirmButton(await lastDialog()));
+
+    await waitFor(() => expect(deleteQaSession).toHaveBeenCalledWith('sess-1'));
+    // URL 必须跟着清：否则刷新一次又会去拉一条已删的会话
+    await waitFor(() => expect(currentSearch()).not.toContain('s='));
+    expect(screen.queryByText(ANSWER_SNIPPET)).toBeNull();
+    expect(screen.getByText('输入问题开始问答')).toBeInTheDocument();
+  });
+
+  it('「清空全部」→ ?s= 同样被清、页面回到空态', async () => {
+    const user = userEvent.setup();
+    renderPage('/qa?s=sess-1');
+
+    expect(await screen.findByText(ANSWER_SNIPPET)).toBeInTheDocument();
+
+    const drawer = await openDrawer(user);
+    await user.click(within(drawer).getByRole('button', { name: '清空全部' }));
+    await user.click(confirmButton(await lastDialog()));
+
+    await waitFor(() => expect(clearQaSessions).toHaveBeenCalledTimes(1));
+    // 清空 = 全部都删了：`?s=` 无论指着哪一条都已失效，不存在"保留"的可能
+    await waitFor(() => expect(currentSearch()).not.toContain('s='));
+    expect(screen.queryByText(ANSWER_SNIPPET)).toBeNull();
+    expect(screen.getByText('输入问题开始问答')).toBeInTheDocument();
+  });
+});
+
+// ── 2026-11-14 审计 minor：提示里的数字运行时来自接口 ──────────────────────
+
+/**
+ * 三句提示里的数字原来只读 `QA_LIMITS`（一份镜像常量）。后端开始随
+ * `GET /qa/sessions` 下发 `limits` 之后，接口才是权威，常量只做兜底 ——
+ * 否则调了 `qa_context_max_turns` 的部署会继续在界面上说"最近 6 轮"。
+ */
+describe('2026-11-14 审计 minor：提示里的数字来自接口（常量只兜底）', () => {
+  it('列表响应带 limits → 追问提示显示 9 轮、抽屉显示 33 天', async () => {
+    // 接口给 9 轮 / 33 天，而常量桩是 **9 / 77**：
+    // 轮数两边恰好相同（分不出读的是哪一边），所以**保留期 33 天是决定性判据** ——
+    // 它既不等于常量 77，也不等于真实默认值 90。
+    getQaSessions.mockResolvedValue(
+      sessionListWithLimits([SESSION_1, SESSION_2], { context_turns: 9, retention_days: 33 }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const hint = await screen.findByText(/追问会带上最近 \d+ 轮对话/);
+    expect(hint).toHaveTextContent('9 轮');
+
+    const dialog = await openDrawer(user);
+    // `findByText`（而不是 `getByText`）：列表请求可能还没落地，等到重渲染
+    expect(await within(dialog).findByText(/33 天/)).toBeInTheDocument();
+    // 常量 77 不许出现 —— 出现了就说明接口的值被常量盖掉了
+    expect(within(dialog).queryByText(/77 天/)).toBeNull();
+    // `backupWeeks` 后端不下发，仍取常量（桩值 5 周）
+    expect(within(dialog).getByText(new RegExp(`${LIMITS.backupWeeks}周`))).toBeInTheDocument();
   });
 });
 

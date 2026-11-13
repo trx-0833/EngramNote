@@ -200,8 +200,11 @@ class QuestionRequest(BaseModel):
     `(session_id, user_id)` 自己查，才谈得上"删掉某一轮就不再影响后续回答"。
     """
 
-    question: str
-    session_id: Optional[str] = None
+    # 上限（第二轮审计 MINOR-13）：一次粘贴几百 KB 会进 `qa_turns.question`（长期保留）、
+    # 进 embedding、进 prompt。写死 4000 与前端 `maxLength` 一致，超了就是 422，
+    # 比让 LLM 侧报错或按 token 计费暴涨好。
+    question: str = Field(..., max_length=4000)
+    session_id: Optional[str] = Field(None, max_length=64)
 
 
 class AnswerSource(BaseModel):

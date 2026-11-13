@@ -28,8 +28,16 @@ export type QASessionSummary = Schema<'QASessionResponse'>;
 export type QATurnItem = Schema<'QATurnResponse'>;
 /** 会话详情：会话 + 其轮次 */
 export type QASessionDetail = Schema<'QASessionDetailResponse'>;
-/** 会话列表响应 */
+/**
+ * 会话列表响应
+ *
+ * 后端会在这个响应里**额外下发** `limits: { context_turns, retention_days }`
+ * （三句提示里数字的运行时来源，见 `QALimitsResponse`）。前端不能假设它一定在：
+ * 老版本后端、缓存里的旧响应、以及 e2e 桩都可能没有这个字段，
+ * 那时文案一律回退 `constants/qaHistory.ts` 的常量 —— 否则提示会空掉。
+ */
 export type QASessionList = Schema<'QASessionListResponse'>;
+
 /** 「清空全部」的结果 */
 export type QAClearAllResult = Schema<'QAClearAllResponse'>;
 

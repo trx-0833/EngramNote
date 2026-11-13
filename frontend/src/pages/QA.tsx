@@ -195,6 +195,19 @@ export default function QA() {
     queryFn: ({ signal }) => getQaSessions({ page_size: 100, surface: 'global' }, { signal }),
   });
   const sessions = sessionsQuery.data?.items ?? [];
+  /**
+   * 三句提示里的数字：**运行时从接口拿，回退到常量**（2026-11-14 审计 minor）
+   *
+   * `limits` 由 `GET /api/qa/sessions` 一并下发（`{ context_turns, retention_days }`，
+   * 见 `api/qaHistory.ts` 里 `QASessionList` 的注释）。此前这里只读
+   * `QA_LIMITS` 那份镜像常量：后端调了 `qa_context_max_turns` 之后，界面会继续
+   * 说"最近 6 轮"，而实际带的是别的数字 —— 一句"看起来像事实的旧信息"。
+   *
+   * `limits` 缺省（老后端 / 桩 / 缓存旧响应）时仍回退常量，文案不会因此消失；
+   * 仍在常量里的只剩 `backupWeeks` —— 后端不下发它。
+   */
+  // 后端随列表下发生效值（第二轮审计 MINOR-9）；老后端没有该字段时回退常量
+  const limits = sessionsQuery.data?.limits;
 
   // 持有当前流式请求的 AbortController 与 reader，用于新问题中止旧流、停止生成与卸载清理
   const abortRef = useRef<AbortController | null>(null);
@@ -333,6 +346,15 @@ export default function QA() {
     if (reader) {
       void reader.cancel().catch(() => {});
     }
+    // ★ 2026-11-14：收尾状态必须在这里做。
+    // `handleAsk` 的 `finally` 只在 `abortRef.current === controller` 时复位
+    // `loading` / `streaming`（竞态守卫，见那里），而本函数刚刚把 ref 置空 ——
+    // 只靠那支判断，用户点了「停止生成」之后页面会**永远停在 streaming**：
+    // 停止按钮不消失、输入框一直禁用、`?s=` 的载入 effect 也一直被跳过。
+    // `handleAsk` 自己也会调本函数，但它在同一个同步段里紧接着
+    // `setLoading(true)` / `setStreaming(true)`，React 批量提交后最终值仍是 `true`。
+    setLoading(false);
+    setStreaming(false);
   }
 
   function handleStop() {
@@ -403,10 +425,21 @@ export default function QA() {
               const nextSessionId = String(payload.session_id || '');
               if (nextSessionId && nextSessionId !== sessionId) {
                 setSessionId(nextSessionId);
+                // ★ 2026-11-14 审计 minor：**首问之后不要再用详情覆盖本地轮次**。
+                // `setSessionId` 会唤醒上面那个载入 effect，而它拿到的是
+                // `GET /qa/sessions/{id}` 的详情 —— 里面只有**已经落库**的轮次。
+                // 首问这一轮此刻可能还没写完、甚至落库失败，于是 effect 里那句
+                // `setHistory(records)` 会把用户刚读完的答案从屏幕上**整体覆盖掉**
+                // （同时 `setHistoryUsed(0)` 把"本轮参考了 N 轮"也抹掉）。
+                // 这份本地轮次就是最新的：先把它记成"已载入"，effect 见到这个
+                // 标记就直接返回，不再拉一次详情。
+                loadedSessionRef.current = nextSessionId;
               }
               // 审计 m1：后端已把 `history_used` 改成「**实际**带了几轮」
               // （此前报的是请求的轮数，追问一次之后数字会虚高）。前端显示逻辑
               // 照旧 —— 只在 `> 0` 时提示，改的只是数字本身的含义，不是这里。
+              // 同时它只由这一个事件决定：上面刚把 id 记成"已载入"，载入 effect
+              // 不会再跑，也就不会用 `setHistoryUsed(0)` 把它重置掉。
               setHistoryUsed(Number(payload.history_used || 0));
               // 首事件：记录检索降级状态，供渲染降级提示
               setHistory((prev) => {
@@ -508,20 +541,37 @@ export default function QA() {
         setSessionId('');
         setHistory([]);
         setHistoryUsed(0);
+        // ★ 2026-11-14 审计 major：**用户已经打过的字不能被静默丢弃**。
+        // `handleAsk` 开头就 `setQuestion('')` —— 那是为了"问题已经在气泡里了，
+        // 输入框该空出来"；可这一支把 `history` 整个清空了，气泡跟着没了。
+        // 不复原输入，用户的这句话在屏幕上就**一处都不剩**：他既看不到自己问了什么，
+        // 也看不到回答，只剩下输入框空空如也 —— 只能重敲一遍。
+        setQuestion(currentQuestion);
         toastRef.current.info(tRef.current('qa.sessionGone'));
       } else {
-        setError(err instanceof Error ? err.message : t('qa.failed'));
+        // 与本函数里其它文案统一走 `tRef`：`t` 来自 `useTranslation()`，
+        // 身份不保证稳定（见载入 effect 的注释），而这里已经处在异步分支里。
+        setError(err instanceof Error ? err.message : tRef.current('qa.failed'));
         // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
         if (!firstTokenReceived) {
           setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
         }
       }
     } finally {
-      // 仅当 ref 仍指向当前请求时才清理，避免误清新流
-      if (abortRef.current === controller) abortRef.current = null;
+      // ★ 2026-11-14 竞态守卫：**只有自己仍是当前请求时才复位状态**。
+      // 旧请求的收尾可能晚于新请求落地（点了停止后立刻再问、从抽屉里换会话），
+      // 那时无条件 `setLoading(false)` / `setStreaming(false)` 关掉的是**新请求**的
+      // streaming：停止按钮消失、输入框解禁，而流其实还在跑。
+      // 被新请求接管时这一支什么都不做 —— 状态归新请求所有。
+      // 「用户点了停止 / 新建对话」那条路径不靠这里收尾：`stopActiveStream`
+      // 已经把 ref 置空，届时本守卫为假，所以状态在**那个函数**里就复位了。
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setLoading(false);
+        setStreaming(false);
+      }
+      // 读取器同理：只清理自己那一个，别把新请求刚装上的 reader 抹掉
       if (readerRef.current === reader) readerRef.current = null;
-      setLoading(false);
-      setStreaming(false);
       // 刚问完一轮 / 被中止：历史列表的标题、轮次数与排序都可能变了，
       // 显式失效比等 staleTime 更准（用户点开抽屉时看到的就是最新的）
       void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });
@@ -574,14 +624,22 @@ export default function QA() {
                 disabled={streaming}
                 aria-label={t('qa.inputLabel')}
                 aria-describedby="qa-multiturn-hint"
+                // 与后端 `question` 的上限一致（4000）：超长的输入让浏览器直接截断，
+                // 而不是发出去再吃一个 422 —— 后者会把整轮问答卡在错误分支里。
+                maxLength={4000}
                 style={{ flex: 1 }}
               />
               {streaming ? (
-                <button className="btn btn-danger" onClick={handleStop}>
+                <button type="button" className="btn btn-danger" onClick={handleStop}>
                   {t('qa.stop')}
                 </button>
               ) : (
-                <button className="btn btn-primary" onClick={handleAsk} disabled={!question.trim()}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleAsk}
+                  disabled={!question.trim()}
+                >
                   {t('qa.ask')}
                 </button>
               )}
@@ -589,12 +647,15 @@ export default function QA() {
             {/*
               ★ 追问提示（计划 §5.4 第 1 句）。
 
-              数字来自 `QA_LIMITS.contextTurns`（镜像后端 `qa_context_max_turns`），
-              由一条后端用例盯着两处一致 —— 文案里写死 6 会在调参后变成谎言。
+              数字从 `GET /qa/sessions` 下发的 `limits.context_turns` 来，
+              **缺省时回退 `QA_LIMITS.contextTurns`**（那份常量镜像后端
+              `qa_context_max_turns`，由一条后端用例盯着两处一致）。
+              文案里写死 6 会在调参后变成谎言 —— 而且那时切的是"接口下发"这一层，
+              常量只是接口没给时的兜底。
               `aria-describedby` 指向它：读屏用户在输入框上就能听到"追问会带上下文"。
             */}
             <p id="qa-multiturn-hint" className={styles.qaHint}>
-              {t('qa.multiturnHint', { turns: QA_LIMITS.contextTurns })}
+              {t('qa.multiturnHint', { turns: limits?.context_turns ?? QA_LIMITS.contextTurns })}
             </p>
             {/* 本轮实际参考了几轮（history_used > 0 才显示：首轮提示"参考了 0 轮"是噪音） */}
             {historyUsed > 0 && (
@@ -783,7 +844,17 @@ export default function QA() {
         onChanged={() => {
           void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });
         }}
-        retentionDays={QA_LIMITS.retentionDays}
+        // ★ 2026-11-14 审计 major：删掉 / 清空**当前会话**之后必须把 `?s=` 一起清掉。
+        // 只做 `invalidateQueries` 是不够的：页面主体仍显示那条已删的轮次、
+        // URL 还指着它；用户接着提问时 `handleAsk` 先 `setQuestion('')` 再带旧
+        // `session_id` 请求 → 后端 404 → 只有 404 分支才去清 `?s=`，而那时
+        // 用户刚敲的问题已经被清掉了。`handleNewChat` 这条路径做全了：
+        // 停流、清 ref、清 `?s=`、清 history/historyUsed/error。
+        onSessionsRemoved={(removedSessionId) => {
+          if (removedSessionId === 'all' || removedSessionId === sessionId) handleNewChat();
+        }}
+        // 保留期同样"接口优先、常量兜底"；`backupWeeks` 后端不下发，仍用常量。
+        retentionDays={limits?.retention_days ?? QA_LIMITS.retentionDays}
         backupWeeks={QA_LIMITS.backupWeeks}
       />
     </div>

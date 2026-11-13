@@ -1088,13 +1088,23 @@ const zhCN = {
     clearAllDone: '已清空 {count} 个对话',
     deleted: '对话已删除',
     sessionGone: '对话已被删除，已开始新对话',
+    // ── 2026-11-14 审计批次（纯追加）──
+    // 会话存在、但属于**另一个入口**（`surface`：问答页 vs 笔记浮层）：
+    // 上下文对不上，只能开新对话，并且必须说明"为什么刚才那段没了"。
+    sessionSurfaceMismatch: '这个对话属于另一个入口，已开始新对话',
+    // 轮次数的**单位**：抽屉里原来只有一个裸数字（`· 2`），离开上下文就不可读。
+    turnsCount: '{count} 轮',
+    // 输入框 `maxLength` 之外的兜底文案（与后端 `question` 的 4000 字上限一致）
+    inputTooLong: '问题太长了，请精简到 4000 字以内',
     contextUsed: '本轮参考了 {count} 轮上文',
     historyLoadFailed: '历史对话加载失败',
     // ── 抽屉截断提示与轮次的**终态**（2026-11-13 独立审计 m6 / M4）──
     // 截断：只拉了一页时，用户看不到"还有更多"，必须把总数与显示数都写出来。
     historyTruncated: '共 {total} 个对话，这里显示最近 {shown} 个。',
     // 终态：失败/中止要说出结论。修复前它们落到"AI 正在思考..."分支，那句话永远不结束。
-    // `{code}` 由后端错误码填入；日志里没有 code 时用下一行的无参数版本。
+    // `{code}` 是**稳定的错误码**（如 `LLM_TIMEOUT`），不是 Python 类名 ——
+    // 后端已把 `error_code` 换成可枚举的码值，所以文案不用改，改的是它更可读了。
+    // 日志里没有 code 时用下一行的无参数版本。
     turnFailed: '这一轮没有生成成功（{code}）',
     turnAborted: '已停止生成',
     turnFailedUnknown: '这一轮没有生成成功',

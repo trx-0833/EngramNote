@@ -26,12 +26,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..core.app_error import QA_SESSION_NOT_FOUND, AppError
 from ..database import get_db
 from ..models.qa_history import SURFACES
 from ..models.user import User
 from ..schemas.qa import (
     QAClearAllResponse,
+    QALimitsResponse,
     QASessionDetailResponse,
     QASessionListResponse,
     QASessionResponse,
@@ -92,7 +94,9 @@ def _turn_payload(turn) -> QATurnResponse:
 async def list_qa_sessions(
     page: int = Query(1, ge=1, description="页码（从 1 开始）"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数（上限 100）"),
-    keyword: Optional[str] = Query(None, description="搜索关键词（匹配标题、最后问题与任意轮次的问答正文）"),
+    keyword: Optional[str] = Query(
+        None, max_length=100, description="搜索关键词（匹配标题、最后问题与任意轮次的问答正文）"
+    ),
     # 用法用 `pattern` 交给 pydantic 校验（而不是手工 raise AppError）：
     # ① 错误契约用例要求 `AppError` 的 code 必须是常量名，而"参数不合法"没有语义化 code；
     # ② 前端对 pydantic 的 `string_pattern_mismatch` 已有本地化映射
@@ -118,25 +122,58 @@ async def list_qa_sessions(
         keyword=keyword,
         surface=surface,
     )
+    settings = get_settings()
     return QASessionListResponse(
         items=[_session_payload(s) for s in items],
         total=total,
         page=page,
         page_size=page_size,
+        # 审计 MINOR-9：把**生效值**下发，前端提示文案才不会与部署配置漂移
+        # （不改配置时它等于默认值，行为与之前一致）
+        limits=QALimitsResponse(
+            context_turns=int(getattr(settings, "qa_context_max_turns", 6)),
+            retention_days=int(getattr(settings, "qa_history_retention_days", 90)),
+        ),
     )
 
 
 @router.get("/sessions/{session_id}", response_model=QASessionDetailResponse)
 async def get_qa_session(
     session_id: str,
+    turns_limit: int = Query(
+        200,
+        ge=1,
+        le=500,
+        description="最多返回最近多少轮（升序）。会话没有自动切分机制，长会话可达上千轮",
+    ),
+    surface: Optional[str] = Query(None, pattern=_SURFACE_PATTERN, description="按入口校验：传了就要求会话属于该入口"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
-    """单个会话 + 其轮次（升序）
+    """单个会话 + 其轮次（升序，最多 `turns_limit` 轮）
 
-    前端点开历史条目时调它：轮次按 `created_at` 升序，与"聊天的阅读顺序"一致。
+    ## 为什么要 `turns_limit`（2026-11-13 第二轮审计 MINOR-6）
+
+    会话没有自动切分机制（保留期按整个会话算），聊得久的会话可能是上千轮。
+    原实现把**全部**轮次的 `question` + `answer` + `sources_json` 一次性读进内存再序列化，
+    前端还会整段渲染（无虚拟化）—— 单个响应可能是数 MB。
+    现在默认只给最近 200 轮；总数看 `session.turn_count`，需要更早的可以调大或翻页。
+
+    ## `surface` 是**校验**（审计 MINOR-6 的后半）
+
+    写路径把 surface 当边界（`qa_history_service.get_or_create_session`），
+    读路径不管的话，"笔记浮层的对话可以在 /qa 接口里被读和删"—— 同一用户内不算越权，
+    但"surface 是上下文边界"这个设计就只落地了一半。传了就校验，不匹配回 404。
     """
-    found = await qa_service.get_session_with_turns(db, user_id=current_user.id, session_id=session_id)
+    if surface is not None:
+        found = await qa_service.get_or_create_session(
+            db, user_id=current_user.id, session_id=session_id, surface=surface
+        )
+        if found is None:
+            raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
+    found = await qa_service.get_session_with_turns(
+        db, user_id=current_user.id, session_id=session_id, turns_limit=turns_limit
+    )
     if found is None:
         raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
     session, turns = found
@@ -149,13 +186,21 @@ async def get_qa_session(
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_qa_session(
     session_id: str,
+    surface: Optional[str] = Query(None, pattern=_SURFACE_PATTERN, description="按入口校验：传了就要求会话属于该入口"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
     """删除一个会话（软删；30 天后由 Beat 硬删）
 
     再删一次 → 404：与"删除成功"区分开，前端据此提示"对话已被删除"而不是假装成功。
+    `surface` 传了就校验（理由同详情接口）。
     """
+    if surface is not None:
+        owned = await qa_service.get_or_create_session(
+            db, user_id=current_user.id, session_id=session_id, surface=surface
+        )
+        if owned is None:
+            raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
     deleted = await qa_service.soft_delete_session(db, user_id=current_user.id, session_id=session_id)
     if not deleted:
         raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)

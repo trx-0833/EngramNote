@@ -113,6 +113,11 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ── AI 问答历史（2026-11-13，docs/qa-history-plan.md）──
     # 别人的会话与不存在的会话**共用**这一条：不泄露"这个 id 存在"。
     "QA_SESSION_NOT_FOUND": {"zh-CN": "对话不存在或已被删除", "en": "Conversation not found"},
+    #: 会话属于另一个入口（例如拿笔记浮层的会话去全库问答）：**不是**"已被删除"，别误导用户
+    "QA_SESSION_SURFACE_MISMATCH": {
+        "zh-CN": "这个对话属于另一个入口",
+        "en": "That conversation belongs to another entry point",
+    },
     #: 笔记浮层提问时选中文本为空（2026-11-13 审计 m3：原先它是 SSE 里的一段字面量，`n    #: 校验上移到建会话之前后需要一个真正的 code）
     "EMPTY_SELECTED_TEXT": {"zh-CN": "选中文本不能为空", "en": "Selected text is empty"},
     "ASSET_TYPE_UNSUPPORTED": {

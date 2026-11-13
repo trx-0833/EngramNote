@@ -12,13 +12,15 @@
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NoteAskRequest(BaseModel):
-    question: str
-    selected_text: str
-    context_before: str = ""
-    context_after: str = ""
+    # 上限（第二轮审计 MINOR-13）：这四个字段都会进 prompt 与 `qa_turns.question`。
+    # 此前全部无 `max_length`，一次超长粘贴就能把上下文顶爆。
+    question: str = Field(..., max_length=4000)
+    selected_text: str = Field(..., max_length=8000)
+    context_before: str = Field("", max_length=4000)
+    context_after: str = Field("", max_length=4000)
     view_mode: str = "original"  # original / clean（仅供参考语义，后端不据此读取全文）
-    session_id: Optional[str] = None
+    session_id: Optional[str] = Field(None, max_length=64)

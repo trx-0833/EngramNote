@@ -99,6 +99,10 @@ describe('deleteQaSession', () => {
     await expect(deleteQaSession('s1')).resolves.toBeUndefined();
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe('DELETE');
+    // 守的是「删除只发一次请求」：`authorizedFetch` 一旦加上"失败重试"，
+    // 这里立刻红。破坏性请求被发两次的后果是"第一次其实已成功、第二次拿到 404"，
+    // 用户会看到"对话不存在"而列表仍是旧的（审计 m4）。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('再次删除（404）抛出 QA_SESSION_NOT_FOUND', async () => {
@@ -110,6 +114,9 @@ describe('deleteQaSession', () => {
     );
 
     await expect(deleteQaSession('s1')).rejects.toBeInstanceOf(ApiError);
+    // 同上：**失败分支也不许补发一次**。原先的错误本地化正是又调了一次
+    // `deleteQaSession`，于是失败路径上 DELETE 被发了两次。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

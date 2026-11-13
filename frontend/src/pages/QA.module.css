@@ -166,7 +166,13 @@
 .qaContextUsed {
   margin: var(--space-xs) 0 0;
   font-size: var(--text-xs);
-  color: var(--color-accent);
+  /*
+   * 用 `--color-text-secondary` 而不是 `--color-accent`（2026-11-13 第二轮审计）：
+   * accent 是 #c9a959，在白底上对比度只有 **2.25:1**，12px 正文远低于 WCAG AA 的 4.5:1 ——
+   * a11y 门禁的 axe 当场报 `color-contrast [serious]`。这一行是"信息"不是"装饰"，
+   * 可读性优先于品牌色。
+   */
+  color: var(--color-text-secondary);
 }
 
 /* ── 轮次的失败 / 中止（2026-11-13 独立审计 M4）──

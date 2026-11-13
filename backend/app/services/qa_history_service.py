@@ -27,12 +27,13 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models.qa_history import (
     SURFACE_GLOBAL,
+    SURFACE_NOTE,
     TURN_STATUS_OK,
     QASession,
     QATurn,
@@ -73,8 +74,9 @@ async def get_or_create_session(
     session_id: Optional[str] = None,
     note_id: Optional[str] = None,
     first_question: Optional[str] = None,
+    expect_note_id: Optional[str] = None,
 ) -> Optional[QASession]:
-    """取会话；给了 `session_id` 但取不到（不存在/别人的/已软删/**surface 不符**）返回 `None`
+    """取会话；给了 `session_id` 但取不到（不存在/别人的/已软删/surface 不符/note 不符）返回 `None`
 
     **不静默新建**：调用方要能区分"续聊"与"会话已消失"，前者该继续追加，
     后者要回 `404`（与计划 §4.4 最后一行一致：删了却不报错会让人以为还在写）。
@@ -86,6 +88,13 @@ async def get_or_create_session(
     之后按 `surface` 过滤出来的数据也不再可信。不匹配一律按"取不到"处理（404 口径），
     而不是静默新建 —— 静默新建会让前端以为续聊成功，`?s=` 指向一个空会话。
 
+    ## `expect_note_id` 同理（2026-11-13 第二轮审计 MINOR-1）
+
+    笔记浮层的会话还绑着 `note_id`。只校验 surface 不够：拿 note A 的会话 id
+    去问 note B，会把 B 的内容写进"A 的对话"里，之后 `get_or_create_session_for_note`
+    按 `note_id` 复用会话时还会继续往同一条里塞 —— 数据归属错位。
+    给了 `expect_note_id` 时一并 `where`，不匹配同样按"取不到"处理。
+
     不给 `session_id` 时新建一个会话（`title` 取首个问题截断）。
     """
     if session_id:
@@ -96,12 +105,14 @@ async def get_or_create_session(
         )
         if surface:
             stmt = stmt.where(QASession.surface == surface)
+        if expect_note_id is not None:
+            stmt = stmt.where(QASession.note_id == expect_note_id)
         return (await db.execute(stmt)).scalars().first()
 
     session = QASession(
         user_id=user_id,
         surface=surface,
-        note_id=note_id if surface == "note" else None,
+        note_id=note_id if surface == SURFACE_NOTE else None,
         title=_truncate(first_question, TITLE_MAX_CHARS) if first_question else None,
         turn_count=0,
         last_question=_truncate(first_question, LAST_QUESTION_MAX_CHARS) if first_question else None,
@@ -109,6 +120,27 @@ async def get_or_create_session(
     db.add(session)
     await db.flush()
     return session
+
+
+async def get_session_by_id(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    session_id: str,
+) -> Optional[QASession]:
+    """只按 `(id, user_id, 未删)` 取会话，**不过滤 surface / note_id**
+
+    存在的意义只有一个（2026-11-13 第二轮审计 MINOR-4）：端点在"取不到"时
+    要能区分两种原因 —— 会话真的不在（该说"已被删除"）与**会话在、但不是这个入口的**
+    （该说"属于另一个入口"）。两种都回 404 不泄露存在性，但文案不同，
+    否则用户会被告知"对话已被删除"，转头却在另一个入口看见它。
+    """
+    stmt = select(QASession).where(
+        QASession.id == session_id,
+        QASession.user_id == user_id,
+        QASession.deleted_at.is_(None),
+    )
+    return (await db.execute(stmt)).scalars().first()
 
 
 async def record_turn(
@@ -161,6 +193,13 @@ async def record_turn(
         turn = QATurn(
             session_id=session.id,
             user_id=user_id,
+            # `created_at` 由**应用侧**写入（第二轮审计"疑点 2"：SQLite 的
+            # `CURRENT_TIMESTAMP` 只有秒级精度，同一秒内的多轮 `created_at` 完全相同，
+            # 于是 `order_by(created_at, id)` 退化成按 UUID 排 —— 等价于随机）。
+            # 这一列是"轮次顺序"的唯一依据：`recent_ok_turns` 取最近 N 轮、
+            # 详情接口的 `turns_limit` 取最近 N 轮都靠它。微秒精度记下来，
+            # 同一秒内的顺序才是确定的；历史行仍可能是秒级值，混排时秒级更旧，符合直觉。
+            created_at=_now(),
             question=question,
             answer=answer,
             status=status,
@@ -296,18 +335,30 @@ async def list_sessions(
     if surface:
         stmt = stmt.where(QASession.surface == surface)
     if keyword:
-        like = f"%{keyword.strip()}%"
-        # 子查询：该会话里有轮次命中 question/answer
-        matched_ids = select(QATurn.session_id).where(
-            QATurn.user_id == user_id, or_(QATurn.question.ilike(like), QATurn.answer.ilike(like))
-        )
-        stmt = stmt.where(
-            or_(
-                QASession.title.ilike(like),
-                QASession.last_question.ilike(like),
-                QASession.id.in_(matched_ids),
+        # LIKE 通配符必须转义（2026-11-13 审计 MINOR-3）：`keyword="%"` 或 `"_"`
+        # 原本会命中**全部**会话（`%%` / `__`），用户看到"搜索像是失效了"；
+        # 纯空白条 `strip()` 后同样是 `%%`，所以先判空。
+        raw = keyword.strip()
+        if not raw:
+            keyword = None
+        else:
+            escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{escaped}%"
+            # 子查询：该会话里有轮次命中 question/answer
+            matched_ids = select(QATurn.session_id).where(
+                QATurn.user_id == user_id,
+                or_(
+                    QATurn.question.ilike(like, escape="\\"),
+                    QATurn.answer.ilike(like, escape="\\"),
+                ),
             )
-        )
+            stmt = stmt.where(
+                or_(
+                    QASession.title.ilike(like, escape="\\"),
+                    QASession.last_question.ilike(like, escape="\\"),
+                    QASession.id.in_(matched_ids),
+                )
+            )
 
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     rows = (
@@ -323,8 +374,14 @@ async def get_session_with_turns(
     *,
     user_id: str,
     session_id: str,
+    turns_limit: Optional[int] = None,
 ) -> Optional[tuple[QASession, List[QATurn]]]:
-    """取会话 + 其轮次（升序）。别人的/已删的返回 `None`（端点转 404）"""
+    """取会话 + 其轮次（升序）。别人的/已删的返回 `None`（端点转 404）
+
+    `turns_limit` 给了就只取**最近**这么多轮（仍按升序返回）：会话没有自动切分，
+    长会话可达上千轮，一次性载入会把内存与响应体都撑大（审计 MINOR-6）。
+    实现方式是"倒序取 N 条再反转"，这样不会先扫全表再切片。
+    """
     stmt = select(QASession).where(
         QASession.id == session_id,
         QASession.user_id == user_id,
@@ -333,15 +390,16 @@ async def get_session_with_turns(
     session = (await db.execute(stmt)).scalars().first()
     if session is None:
         return None
-    turns = (
-        (
-            await db.execute(
-                select(QATurn).where(QATurn.session_id == session.id).order_by(QATurn.created_at.asc(), QATurn.id.asc())
-            )
+    turn_stmt = select(QATurn).where(QATurn.session_id == session.id)
+    if turns_limit is not None and turns_limit > 0:
+        recent = (
+            (await db.execute(turn_stmt.order_by(QATurn.created_at.desc(), QATurn.id.desc()).limit(int(turns_limit))))
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
+        turns = list(reversed(list(recent)))
+        return session, turns
+    turns = (await db.execute(turn_stmt.order_by(QATurn.created_at.asc(), QATurn.id.asc()))).scalars().all()
     return session, list(turns)
 
 
@@ -372,14 +430,23 @@ async def soft_delete_all_sessions(
     user_id: str,
     now: Optional[datetime] = None,
 ) -> int:
-    """清空该用户的全部会话（软删），返回行数 —— "清空全部问答历史"入口用"""
+    """清空该用户的全部会话（软删），返回行数 —— "清空全部问答历史"入口用
+
+    ## 一条 `UPDATE` 而不是"全量加载 + 逐行赋值"（2026-11-13 审计 MINOR-7）
+
+    原写法 `select(...).scalars().all()` 会把这个用户的**每个**会话都读进内存再改，
+    并发 N 条 `UPDATE`，且每条都被 `BaseModel.updated_at` 的 `onupdate` 顺带刷新 ——
+    在 SQLite 单写者下是一条很长的写事务，还会把"最后活跃时间"改成删除时间。
+    改成单条 `UPDATE ... WHERE deleted_at IS NULL` 后：一次往返、行数取 `rowcount`、
+    `updated_at` 也能显式沿用同一次赋值口径（这里刻意不写它 ——
+    删除时间记在 `deleted_at` 上，`updated_at` 保留"最后一次真的聊过"的语义）。
+    """
     compact = now or _now()
-    result = await db.execute(select(QASession).where(QASession.user_id == user_id, QASession.deleted_at.is_(None)))
-    sessions = result.scalars().all()
-    for session in sessions:
-        session.deleted_at = compact
+    result = await db.execute(
+        update(QASession).where(QASession.user_id == user_id, QASession.deleted_at.is_(None)).values(deleted_at=compact)
+    )
     await db.flush()
-    return len(sessions)
+    return int(result.rowcount or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -399,13 +466,13 @@ async def purge_soft_deleted(
     而超过宽限期还留着，只是把敏感文本无限期留在库里。
     """
     cutoff = (now or _now()) - timedelta(days=max(0, int(grace_days)))
-    stmt = select(QASession.id).where(QASession.deleted_at.is_not(None), QASession.deleted_at < cutoff)
-    ids = (await db.execute(stmt)).scalars().all()
-    if not ids:
-        return 0
-    await db.execute(delete(QASession).where(QASession.id.in_(ids)))
+    # 一条 Core DELETE（2026-11-13 审计 MINOR-7）：原写法先把**全部**命中 id 读成
+    # Python list 再拼 `IN (...)`。`IN` 的参数个数有驱动级上限（标准 SQLite 构建是
+    # 32766），超了就整批失败，而任务只记 error 日志 —— 表现为"清理从此静默不生效"。
+    # 轮次由外键 `ON DELETE CASCADE` 带走（`PRAGMA foreign_keys=ON`，已被用例钉住）。
+    result = await db.execute(delete(QASession).where(QASession.deleted_at.is_not(None), QASession.deleted_at < cutoff))
     await db.flush()
-    return len(ids)
+    return int(result.rowcount or 0)
 
 
 async def purge_expired_sessions(
@@ -425,13 +492,10 @@ async def purge_expired_sessions(
     if retention_days <= 0:
         return 0
     cutoff = (now or _now()) - timedelta(days=int(retention_days))
-    stmt = select(QASession.id).where(QASession.updated_at < cutoff)
-    ids = (await db.execute(stmt)).scalars().all()
-    if not ids:
-        return 0
-    await db.execute(delete(QASession).where(QASession.id.in_(ids)))
+    # 同上：一条 Core DELETE，不把 id 读进内存（审计 MINOR-7）。
+    result = await db.execute(delete(QASession).where(QASession.updated_at < cutoff))
     await db.flush()
-    return len(ids)
+    return int(result.rowcount or 0)
 
 
 async def strip_snippets_for_note(db: AsyncSession, *, note_id: str) -> int:

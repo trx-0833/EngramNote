@@ -2500,9 +2500,20 @@ export interface paths {
     };
     /**
      * Get Qa Session
-     * @description 单个会话 + 其轮次（升序）
+     * @description 单个会话 + 其轮次（升序，最多 `turns_limit` 轮）
      *
-     *     前端点开历史条目时调它：轮次按 `created_at` 升序，与"聊天的阅读顺序"一致。
+     *     ## 为什么要 `turns_limit`（2026-11-13 第二轮审计 MINOR-6）
+     *
+     *     会话没有自动切分机制（保留期按整个会话算），聊得久的会话可能是上千轮。
+     *     原实现把**全部**轮次的 `question` + `answer` + `sources_json` 一次性读进内存再序列化，
+     *     前端还会整段渲染（无虚拟化）—— 单个响应可能是数 MB。
+     *     现在默认只给最近 200 轮；总数看 `session.turn_count`，需要更早的可以调大或翻页。
+     *
+     *     ## `surface` 是**校验**（审计 MINOR-6 的后半）
+     *
+     *     写路径把 surface 当边界（`qa_history_service.get_or_create_session`），
+     *     读路径不管的话，"笔记浮层的对话可以在 /qa 接口里被读和删"—— 同一用户内不算越权，
+     *     但"surface 是上下文边界"这个设计就只落地了一半。传了就校验，不匹配回 404。
      */
     get: operations['get_qa_session_api_qa_sessions__session_id__get'];
     put?: never;
@@ -2512,6 +2523,7 @@ export interface paths {
      * @description 删除一个会话（软删；30 天后由 Beat 硬删）
      *
      *     再删一次 → 404：与"删除成功"区分开，前端据此提示"对话已被删除"而不是假装成功。
+     *     `surface` 传了就校验（理由同详情接口）。
      */
     delete: operations['delete_qa_session_api_qa_sessions__session_id__delete'];
     options?: never;
@@ -6386,6 +6398,33 @@ export interface components {
       deleted: number;
     };
     /**
+     * QALimitsResponse
+     * @description 问答功能当前生效的两个数值上限
+     *
+     *     ## 为什么让列表接口顺带下发（2026-11-13 第二轮审计 MINOR-9）
+     *
+     *     前端三句提示里的数字（最近 N 轮 / 保留 N 天）原本是**编译期镜像常量**：
+     *     部署侧在 `.env` 里把 `QA_CONTEXT_MAX_TURNS` 改成 3，界面仍写"最近 6 轮"，
+     *     而守卫用例只比 `Settings()` 默认值 —— CI 永远是 6，门禁照绿。
+     *     这与计划 §5.4「数字从配置来，写死就会在某天调参后变成谎言」直接冲突。
+     *
+     *     最小修法是**不新增端点**、只在已有的列表响应里多两个字段（计划当初否决
+     *     `/api/qa/config` 的理由就是"为一个纯展示数字多一处契约"，这里是它的最小心形态）。
+     *     前端拿不到（老后端 / 请求失败）时回退到常量，不至于让提示空掉。
+     */
+    QALimitsResponse: {
+      /**
+       * Context Turns
+       * @default 0
+       */
+      context_turns: number;
+      /**
+       * Retention Days
+       * @default 0
+       */
+      retention_days: number;
+    };
+    /**
      * QASessionDetailResponse
      * @description 单个会话 + 其轮次（按时间升序）」
      */
@@ -6401,6 +6440,7 @@ export interface components {
     QASessionListResponse: {
       /** Items */
       items?: components['schemas']['QASessionResponse'][];
+      limits?: components['schemas']['QALimitsResponse'] | null;
       /**
        * Page
        * @default 1
@@ -10834,7 +10874,12 @@ export interface operations {
   };
   get_qa_session_api_qa_sessions__session_id__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description 最多返回最近多少轮（升序）。会话没有自动切分机制，长会话可达上千轮 */
+        turns_limit?: number;
+        /** @description 按入口校验：传了就要求会话属于该入口 */
+        surface?: string | null;
+      };
       header?: never;
       path: {
         session_id: string;
@@ -10865,7 +10910,10 @@ export interface operations {
   };
   delete_qa_session_api_qa_sessions__session_id__delete: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description 按入口校验：传了就要求会话属于该入口 */
+        surface?: string | null;
+      };
       header?: never;
       path: {
         session_id: string;

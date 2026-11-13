@@ -91,7 +91,12 @@ class TestListEndpoint:
         uid, _ = await _make_session(test_db, count=0)
         resp = client.get("/api/qa/sessions", headers=_auth(uid))
         assert resp.status_code == 200
-        assert resp.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
+        body = resp.json()
+        assert body["items"] == [] and body["total"] == 0
+        assert body["page"] == 1 and body["page_size"] == 20
+        # `limits`（第二轮审计 MINOR-9）：前端提示文案里的数字来源，缺了它文案只能退回常量
+        assert body["limits"]["context_turns"] == 6
+        assert body["limits"]["retention_days"] == 90
 
     async def test_lists_own_sessions_with_pagination(self, test_db):
         client = _client()

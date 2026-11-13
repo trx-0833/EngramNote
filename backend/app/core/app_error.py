@@ -46,6 +46,40 @@ NOTE_NOT_FOUND = "NOTE_NOT_FOUND"
 #: 问答历史的会话取不到（不存在 / 别人的 / 已软删）。三种情况**共用一个码**，
 #: 与 `NOTE_NOT_FOUND` 同一口径：不泄露"这个 id 存在"。
 QA_SESSION_NOT_FOUND = "QA_SESSION_NOT_FOUND"
+#: 会话在这个入口不该被续聊（surface / note_id 不匹配）。**状态码仍是 404**（不泄露存在性），
+#: 但码不同：前端据此说"属于另一个入口"，而不是误报"对话已被删除"（第二轮审计 MINOR-4）。
+QA_SESSION_SURFACE_MISMATCH = "QA_SESSION_SURFACE_MISMATCH"
+
+# ---- 流式问答的失败分类（2026-11-13 第二轮审计 MINOR-5）----
+#
+# `qa_turns.error_code` 是**可聚合的排障字段**，不能用 Python 类名：
+# 同一个 `OperationalError` 可能来自锁、连接、SQL 语法，按类名分组等于没分组；
+# 而且类名会随驱动升级改名（`PendingRollbackError` 这类），历史数据从此不可比。
+# 这里只做"够用且稳定"的三分法；新增原因时在这里加常量，不要在端点里拼字符串。
+LLM_TIMEOUT = "LLM_TIMEOUT"
+DB_UNAVAILABLE = "DB_UNAVAILABLE"
+LLM_UNKNOWN = "LLM_UNKNOWN"
+
+
+def classify_exception(exc: BaseException) -> str:
+    """把任意异常映射成稳定的错误码
+
+    ⚠️ 刻意**不 import** SQLAlchemy 的异常类：`core/` 是本项目的依赖洼地
+    （被中间件与错误契约引用），为一个字符串判断把 ORM 拖进来不划算。
+    按类名判断足够区分这三类，且类名变动的风险由"未知一律 LLM_UNKNOWN"兜住。
+    """
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code.isupper():
+        # 业务异常（AppError）自己就带语义化 code，原样透传
+        return code
+    name = type(exc).__name__.lower()
+    if "timeout" in name or "timedout" in name:
+        return LLM_TIMEOUT
+    if "operational" in name or "database" in name or "disconnect" in name or "integrity" in name:
+        return DB_UNAVAILABLE
+    return LLM_UNKNOWN
+
+
 #: 笔记浮层提问时选中文本为空（原先是 SSE 里的一段字面量 code，2026-11-13 审计 m3 提上来后需要常量）
 EMPTY_SELECTED_TEXT = "EMPTY_SELECTED_TEXT"
 # 笔记里的插图取不到（对象不存在 / 笔记不属于当前用户 / 笔记在回收站）

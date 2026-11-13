@@ -219,7 +219,8 @@ class TestStreamPersistence:
         turns = await _read_turns(test_db)
         assert len(turns) == 1
         assert turns[0].status == TURN_STATUS_FAILED
-        assert turns[0].error_code == "RuntimeError"
+        # 第二轮审计 MINOR-5：落库的是**稳定码**，不是 Python 类名（可聚合、不随驱动改名）
+        assert turns[0].error_code == "LLM_UNKNOWN"
 
     async def test_cancelled_stream_persists_aborted_turn(self, test_db, monkeypatch):
         """★ 用户点「停止生成」的那一轮最需要回看：必须留下 aborted + 已生成部分"""
@@ -406,7 +407,9 @@ class TestAuditRegressions:
             headers=_auth(uid),
         )
         assert resp.status_code == 404
-        assert resp.json()["error_code"] == "QA_SESSION_NOT_FOUND"
+        # 第二轮审计 MINOR-4：note 会话仍在，只是入口不对 -> 用 mismatch 码，
+        # 免得界面把「属于另一个入口」说成「已被删除」
+        assert resp.json()["error_code"] == "QA_SESSION_SURFACE_MISMATCH"
 
     async def test_empty_question_creates_no_session(self, test_db, monkeypatch):
         """审计 m3：空问题原先会留下一条 `turn_count=0` 的「未命名对话」"""

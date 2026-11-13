@@ -558,8 +558,9 @@ const ARCHIVED_GOALS = [
  *
  * ## 为什么这个桩必须是**流**而不是 JSON
  *
- * `QA` 页在挂载时**一个请求都不发**（它只有一个输入框 + 空状态），
- * 主页面的内容**只有真的问过一次之后才存在**。所以 `qa` 场景必须先
+ * `QA` 页的主内容（回答 + 引用来源）**只有真的问过一次之后才存在**：
+ * 挂载时它只有一个输入框 + 空状态（外加 2026-11-13 起的一次历史列表请求，
+ * 见下面 `/api/qa/sessions` 的说明）。所以 `qa` 场景必须先
  * 完成一次真实的"输入 → 提问"，并且桩要按 `text/event-stream` 回一段
  * 事件流（见 `rawBody`）—— 否则页面永远停在 `AI 正在思考...`，
  * 而那一句**既是加载态也是空答案态**（`QA.tsx:248/267`），
@@ -568,10 +569,24 @@ const ARCHIVED_GOALS = [
  * 事件形状取自 `api/client.ts:441-449`。`retrieval_status` 用 `hybrid`
  * （不是 `bm25_only`，那是"向量服务不可用"的降级横幅，是另一个渲染分支），
  * `provider` 用 `deepseek` —— 页脚会渲染成「由 DeepSeek 提供支持」。
+ *
+ * ## `meta` 帧为什么要带 `session_id` / `history_used`（2026-11-14）
+ *
+ * 真实后端在首问的 `meta` 里就会回传新建的 `session_id`，并把本轮实际带上的
+ * 上文轮数放在 `history_used`。桩里缺这两项时，**两条渲染路径都没被扫到**：
+ *   - 没有 `session_id` → URL 永远不会出现 `?s=`，页面也就不会去"记住这是哪个会话"；
+ *   - 没有 `history_used` → 「本轮参考了 N 轮上文」那一行永远不出现（它是 `> 0` 才渲染）。
+ * 给 `history_used: 1`（而不是 0）是刻意的：0 时那一行**按设计不显示**，
+ * 用它当桩等于让这条渲染分支继续不被判定。
  */
 export const QA_ANSWER_SSE = [
   'event: meta',
-  `data: ${JSON.stringify({ retrieval_status: 'hybrid', provider: 'deepseek' })}`,
+  `data: ${JSON.stringify({
+    retrieval_status: 'hybrid',
+    provider: 'deepseek',
+    session_id: 'sess-1',
+    history_used: 1,
+  })}`,
   '',
   'event: token',
   `data: ${JSON.stringify({ content: '浮充是长期恒压运行，' })}`,
@@ -960,7 +975,14 @@ function apiFixtures(): Record<string, unknown> {
       ],
       total: 2,
       page: 1,
-      page_size: 50,
+      // 与前端实际请求的参数一致（`QA.tsx` 的 `sessionsQuery`：后端上限 100）。
+      // 写 50 时桩"看起来能用"，但页面拿到的永远不会是它请求的那一页形状。
+      page_size: 100,
+      // 2026-11-14：后端开始随列表下发这两条展示用上限，前端的数字以它为准
+      // （缺省才回退 `constants/qaHistory.ts` 的常量）。桩里给 6 / 90
+      // ——与常量默认值相同，所以实际断言的是"字段被读到且不破坏渲染"，
+      // 而不是"数字来自接口"（那件事由 `QA.history.test.tsx` 的 limits 用例守）。
+      limits: { context_turns: 6, retention_days: 90 },
     },
     '/api/qa/sessions/sess-1': {
       session: {
