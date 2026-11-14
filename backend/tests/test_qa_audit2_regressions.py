@@ -288,3 +288,118 @@ class TestSnippetStrippingScope:
             stranger_sources = _json.loads(rows[stranger].sources_json)
             assert owner_sources[0]["relevant_text"] == ""
             assert stranger_sources[0]["relevant_text"] == "别人的正文"
+
+
+@pytest.mark.asyncio
+class TestAclosePersistence:
+    """第三轮审计 M2：`aclose()` 收尾（`GeneratorExit`）也必须落库
+
+    `aclose()` 抛的是 `GeneratorExit`（`BaseException` 子类），原来的两个
+    `except Exception` / `except CancelledError` 都抓不到 —— 于是整个轮次一条不写。
+    修法是把落库放进 `finally`。这条用例就是那个形态：取两个事件后直接 `aclose()`。
+    """
+
+    async def test_aclose_persists_aborted_turn(self, test_db, monkeypatch):
+        from app.api import understanding
+        from app.database import get_session_factory
+        from app.schemas.knowledge import QuestionRequest
+        from sqlalchemy import select as _select
+
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+
+        class _RAG:
+            async def retrieve_context(self, *, question, user_id):
+                return {
+                    "context": "浮充是恒压。",
+                    "sources": [{"note_id": "n1", "chunk_id": "c1", "relevant_text": "浮充"}],
+                    "provider": "stub",
+                    "retrieval_status": "full_vector",
+                    "corpus_empty": False,
+                }
+
+        class _LLM:
+            async def chat_stream(self, messages, scene="rag_answer_stream"):
+                yield "浮充是"
+                yield "恒压。"
+
+        monkeypatch.setattr(understanding, "RAGService", _RAG)
+        monkeypatch.setattr(understanding, "LLMService", _LLM)
+
+        async with test_db() as db:
+            user = (await db.execute(_select(User).where(User.id == uid))).scalars().one()
+            response = await understanding.ask_question_stream(QuestionRequest(question="浮充是什么？"), user, db)
+            gen = response.body_iterator
+            assert "event: meta" in await gen.__anext__()
+            assert "event: token" in await gen.__anext__()
+            # ★ 关键：用 aclose() 收尾（不是 athrow(CancelledError)）
+            await gen.aclose()
+
+        factory = get_session_factory()
+        async with factory() as db:
+            turns = (await db.execute(_select(svc.QATurn))).scalars().all()
+        assert len(turns) == 1, "aclose 收尾时整轮都没落库（落库没在 finally 里）"
+        assert turns[0].status == "aborted"
+        assert turns[0].answer == "浮充是", "已生成的半截文本应当保留"
+
+
+@pytest.mark.asyncio
+class TestClearAllScope:
+    """第三轮审计 M1：清空全部必须能按 surface 收窄
+
+    抽屉只列 `surface=global`，确认框的数字也来自那份列表；如果后端"清空"不认
+    `surface`，就会把用户在界面上**看不到**的浮层会话一起删掉，
+    表现为"确认 1 个、toast 2 个"，而且被多删的那条无从发现。
+    """
+
+    async def test_clear_with_surface_only_touches_that_surface(self, test_db):
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+            g = await svc.get_or_create_session(db, user_id=uid, surface="global", first_question="g")
+            n = await svc.get_or_create_session(db, user_id=uid, surface="note", note_id="note-1", first_question="n")
+            await svc.record_turn(db, user_id=uid, session=g, question="g", answer="a")
+            await svc.record_turn(db, user_id=uid, session=n, question="n", answer="a")
+            await db.commit()
+
+        client = _client()
+        body = client.delete("/api/qa/sessions?surface=global", headers=_auth(uid)).json()
+        assert body == {"deleted": 1}, "确认框按 global 的条数问，删除也必须只动 global"
+
+        # global 已清空、note 仍在（列表按入口分开看，才看得出"只动了 global"）
+        assert client.get("/api/qa/sessions?surface=global", headers=_auth(uid)).json()["total"] == 0
+        assert client.get("/api/qa/sessions?surface=note", headers=_auth(uid)).json()["total"] == 1
+
+    async def test_clear_without_surface_still_means_everything(self, test_db):
+        """不传 surface 保持"真·全部"语义（运维/脚本用），并如实返回条数"""
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+            await svc.get_or_create_session(db, user_id=uid, surface="global", first_question="g")
+            await svc.get_or_create_session(db, user_id=uid, surface="note", note_id="note-1", first_question="n")
+            await db.commit()
+
+        client = _client()
+        assert client.delete("/api/qa/sessions", headers=_auth(uid)).json() == {"deleted": 2}
+
+
+@pytest.mark.asyncio
+class TestTurnCountSemantics:
+    """第三轮审计 m2：三种状态都计入轮数（封面数字要与点开后的条数一致）"""
+
+    async def test_failed_and_aborted_turns_are_counted(self, test_db):
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+            session = await svc.get_or_create_session(db, user_id=uid, first_question="q")
+            await svc.record_turn(db, user_id=uid, session=session, question="q1", answer="a")
+            await svc.record_turn(db, user_id=uid, session=session, question="q2", answer=None, status="failed")
+            await svc.record_turn(db, user_id=uid, session=session, question="q3", answer="半截", status="aborted")
+            await db.commit()
+
+        async with test_db() as db:
+            refreshed = (await db.execute(select(svc.QASession).where(svc.QASession.id == session.id))).scalars().one()
+            turns = (await db.execute(select(svc.QATurn).where(svc.QATurn.session_id == session.id))).scalars().all()
+        assert len(turns) == 3
+        assert refreshed.turn_count == 3, "封面写 0 轮、点开有 3 条（只统计了 ok）"

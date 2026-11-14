@@ -2480,10 +2480,16 @@ export interface paths {
     post?: never;
     /**
      * Clear Qa Sessions
-     * @description 清空当前用户的**全部**问答历史（软删），返回删掉的会话数
+     * @description 清空问答历史（软删），返回删掉的会话数
      *
      *     为什么返回条数而不是 204：清空之后列表会变空，而"本来就空"与"清掉了 12 个"
      *     在界面上完全一样 —— 条数是这次操作唯一的反馈。
+     *
+     *     ## `surface`（第三轮审计 M1）
+     *
+     *     抽屉只列 `surface=global`，所以它必须也只清 global —— 否则确认框按 global 的
+     *     条数问「共 1 个」，实际却把 `surface=note` 的浮层会话一起删了（那个入口在界面上
+     *     **不可见**，用户既不会预期、也无从发现）。UI 固定传 `global`；不传仍是真·全部。
      */
     delete: operations['clear_qa_sessions_api_qa_sessions_delete'];
     options?: never;
@@ -10854,7 +10860,10 @@ export interface operations {
   };
   clear_qa_sessions_api_qa_sessions_delete: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description 只清这个入口的会话；不传 = 真·全部 */
+        surface?: string | null;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -10868,6 +10877,15 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['QAClearAllResponse'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
         };
       };
     };

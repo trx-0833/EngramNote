@@ -12489,8 +12489,29 @@
     },
     "/api/qa/sessions": {
       "delete": {
-        "description": "清空当前用户的**全部**问答历史（软删），返回删掉的会话数\n\n为什么返回条数而不是 204：清空之后列表会变空，而\"本来就空\"与\"清掉了 12 个\"\n在界面上完全一样 —— 条数是这次操作唯一的反馈。",
+        "description": "清空问答历史（软删），返回删掉的会话数\n\n为什么返回条数而不是 204：清空之后列表会变空，而\"本来就空\"与\"清掉了 12 个\"\n在界面上完全一样 —— 条数是这次操作唯一的反馈。\n\n## `surface`（第三轮审计 M1）\n\n抽屉只列 `surface=global`，所以它必须也只清 global —— 否则确认框按 global 的\n条数问「共 1 个」，实际却把 `surface=note` 的浮层会话一起删了（那个入口在界面上\n**不可见**，用户既不会预期、也无从发现）。UI 固定传 `global`；不传仍是真·全部。",
         "operationId": "clear_qa_sessions_api_qa_sessions_delete",
+        "parameters": [
+          {
+            "description": "只清这个入口的会话；不传 = 真·全部",
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(global|note)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只清这个入口的会话；不传 = 真·全部",
+              "title": "Surface"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12501,6 +12522,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

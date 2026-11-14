@@ -897,10 +897,11 @@ const en = {
     // its context does not match, so a new conversation is the only way forward —
     // and the user must be told why the previous one disappeared.
     sessionSurfaceMismatch: 'That conversation belongs to another entry point — started a new one',
+    retentionHintForever:
+      'History is kept indefinitely; deleted items may remain in database backups for up to {weeks} weeks.',
     // Unit for the turn count: the drawer used to print a bare number (`· 2`).
     turnsCount: '{count} turns',
     // Fallback copy for the 4000-character limit on a question (same bound as the backend)
-    inputTooLong: 'Question is too long (max 4000 characters)',
     contextUsed: 'Used {count} earlier turns as context',
     historyLoadFailed: 'Failed to load conversations',
     // ── Truncation notice + terminal turn states (2026-11-13 audit m6 / M4) ──

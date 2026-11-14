@@ -45,7 +45,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 // 不再需要"用 JS 跳转"（见引用列表的注释）。
 import { Link } from 'react-router-dom';
 import { askQuestionStream, type AnswerSource } from '../api/client';
-import { getQaSession, getQaSessions, isSessionGoneError, type QATurnItem } from '../api/qaHistory';
+import {
+  getQaSession,
+  getQaSessions,
+  isSessionGoneError,
+  isSurfaceMismatch,
+  type QATurnItem,
+} from '../api/qaHistory';
 import { parseSSEStream } from '../utils/sse';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
@@ -305,7 +311,11 @@ export default function QA() {
           loadedSessionRef.current = '';
           setSessionId('');
           setHistory([]);
-          toastRef.current.info(tRef.current('qa.sessionGone'));
+          // 第三轮审计 m1：两个码都清 `?s=`，但文案不同 ——
+          // 把「属于另一个入口」说成「已被删除」会让人去找备份。
+          toastRef.current.info(
+            tRef.current(isSurfaceMismatch(err) ? 'qa.sessionSurfaceMismatch' : 'qa.sessionGone'),
+          );
           return;
         }
         setError(err instanceof Error ? err.message : tRef.current('qa.historyLoadFailed'));
@@ -547,7 +557,9 @@ export default function QA() {
         // 不复原输入，用户的这句话在屏幕上就**一处都不剩**：他既看不到自己问了什么，
         // 也看不到回答，只剩下输入框空空如也 —— 只能重敲一遍。
         setQuestion(currentQuestion);
-        toastRef.current.info(tRef.current('qa.sessionGone'));
+        toastRef.current.info(
+          tRef.current(isSurfaceMismatch(err) ? 'qa.sessionSurfaceMismatch' : 'qa.sessionGone'),
+        );
       } else {
         // 与本函数里其它文案统一走 `tRef`：`t` 来自 `useTranslation()`，
         // 身份不保证稳定（见载入 effect 的注释），而这里已经处在异步分支里。
@@ -854,6 +866,7 @@ export default function QA() {
           if (removedSessionId === 'all' || removedSessionId === sessionId) handleNewChat();
         }}
         // 保留期同样"接口优先、常量兜底"；`backupWeeks` 后端不下发，仍用常量。
+        surface="global"
         retentionDays={limits?.retention_days ?? QA_LIMITS.retentionDays}
         backupWeeks={QA_LIMITS.backupWeeks}
       />

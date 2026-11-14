@@ -179,6 +179,11 @@ async def ask_note_stream(
     async def event_stream():
         answer_parts: list[str] = []
         started_at = time.monotonic()
+        # 同全局端点（第三轮审计 M2）：状态由标志位决定，落库统一在 finally
+        status = TURN_STATUS_OK
+        error_code: Optional[str] = None
+        provider_name = ""
+        completed = False
         try:
             # 笔记归属与输入校验已在**建会话之前**完成（审计 m3），这里不再重复
 
@@ -226,32 +231,34 @@ async def ask_note_stream(
             # 结束标记
             yield "event: done\ndata: {}\n\n"
 
-            await _persist_completed_turn(
-                status=TURN_STATUS_OK,
-                answer_text="".join(answer_parts),
-                provider=provider,
-                latency_ms=int((time.monotonic() - started_at) * 1000),
-            )
+            completed = True
         except asyncio.CancelledError:
-            # 客户端断开 / 用户停止：这一轮最需要回看，用 shield 写库（理由见全局问答端点）
-            await asyncio.shield(
-                _persist_completed_turn(
-                    status=TURN_STATUS_ABORTED,
-                    answer_text="".join(answer_parts),
-                    latency_ms=int((time.monotonic() - started_at) * 1000),
-                )
-            )
+            # 客户端断开 / 用户停止：标成 aborted，写库在 finally（理由见全局问答端点）
+            status = TURN_STATUS_ABORTED
             raise
         except Exception as e:
             logger.warning(f"SSE 笔记 AI 提问失败: {e}", exc_info=True)
+            status = TURN_STATUS_FAILED
+            error_code = classify_exception(e)
             # 同全局端点：只下发稳定码 + 固定文案，不把异常文本送到界面上（MINOR-5）
-            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': classify_exception(e)}, ensure_ascii=False)}\n\n"
-            await _persist_completed_turn(
-                status=TURN_STATUS_FAILED,
-                answer_text="".join(answer_parts),
-                error_code=classify_exception(e),
-                latency_ms=int((time.monotonic() - started_at) * 1000),
-            )
+            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': error_code}, ensure_ascii=False)}\n\n"
+        finally:
+            # ★ 同全局端点（第三轮审计 M2）：`aclose()` 抛的 `GeneratorExit` 两个 except 都抓不到，
+            # 落库写在 except 里就会整轮消失。
+            if not completed and status == TURN_STATUS_OK:
+                status = TURN_STATUS_ABORTED
+            try:
+                await asyncio.shield(
+                    _persist_completed_turn(
+                        status=status,
+                        answer_text="".join(answer_parts),
+                        error_code=error_code,
+                        provider=provider_name or None,
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                )
+            except Exception:  # noqa: BLE001 - 收尾写库失败不影响已经发出去的内容
+                logger.warning("笔记问答收尾落库失败（忽略）", exc_info=True)
 
     return StreamingResponse(
         event_stream(),

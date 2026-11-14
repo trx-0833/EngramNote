@@ -111,16 +111,37 @@ export async function deleteQaSession(
  * 返回条数而不是 void：清空后列表变空，"本来就空"与"清掉了 12 个"在界面上一样，
  * 条数是那次操作唯一的反馈。
  */
-export async function clearQaSessions(options?: {
-  signal?: AbortSignal;
-}): Promise<QAClearAllResult> {
-  return request<QAClearAllResult>('/qa/sessions', {
+export async function clearQaSessions(
+  // `surface`（第三轮审计 M1）：抽屉只列 `surface=global`，确认框的条数也来自那份列表，
+  // 所以清空必须也只清 global —— 不传是"真·全部"，会把用户在界面上看不到的浮层会话
+  // 一起删掉（"确认 1 个、toast 2 个"）。
+  params: { surface?: string } = {},
+  options?: { signal?: AbortSignal },
+): Promise<QAClearAllResult> {
+  const query: QueryOf<'/qa/sessions', 'delete'> = { surface: params.surface };
+  return request<QAClearAllResult>(`/qa/sessions${buildQuery(query)}`, {
     method: 'DELETE',
     signal: options?.signal,
   });
 }
 
-/** 判定"会话已消失"（前端据此清掉 `?s=` 并提示已开始新对话） */
+/**
+ * 判定"这条会话不能再用了"（前端据此清掉 `?s=`、把输入还给用户）
+ *
+ * 两个码都算（第三轮审计 m1）：
+ * - `QA_SESSION_NOT_FOUND`：会话真的没了（被删 / 不是你的 / 不存在）；
+ * - `QA_SESSION_SURFACE_MISMATCH`：会话还在，但属于另一个入口（例如拿笔记浮层的
+ *   会话 id 来全库问答）。**它不是"已被删除"**，所以提示文案分开（见 `isSurfaceMismatch`）。
+ *
+ * 只认前者时，`?s=` 会一直指着那条会话，再问一次还是 404 —— 用户卡在永久错误态，
+ * 而且 `handleAsk` 开头已经清空了输入框，他刚打的字一个都不剩。
+ */
 export function isSessionGoneError(error: unknown): boolean {
-  return (error as ApiError | undefined)?.code === 'QA_SESSION_NOT_FOUND';
+  const code = (error as ApiError | undefined)?.code;
+  return code === 'QA_SESSION_NOT_FOUND' || code === 'QA_SESSION_SURFACE_MISMATCH';
+}
+
+/** 区分"入口不对"与"真的没了"：两者的提示文案不同（第三轮审计 m1） */
+export function isSurfaceMismatch(error: unknown): boolean {
+  return (error as ApiError | undefined)?.code === 'QA_SESSION_SURFACE_MISMATCH';
 }

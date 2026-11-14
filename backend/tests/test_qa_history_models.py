@@ -110,7 +110,7 @@ class TestRecordTurn:
             # ★ 片段截到 200 字：历史里存的是"提示是哪一段"，不是"把笔记复制一份"
             assert len(__import__("json").loads(turn.sources_json)[0]["relevant_text"]) <= 201
 
-    async def test_failed_turn_is_stored_but_does_not_advance_counters(self, test_db):
+    async def test_failed_turn_is_stored_and_counted(self, test_db):
         """失败轮次入历史（可查"我问过但没答出来"），但不推进 turn_count / last_question"""
         async with test_db() as db:
             uid = _uid()
@@ -126,8 +126,10 @@ class TestRecordTurn:
                 error_code="LLM_TIMEOUT",
             )
             await db.commit()
-            assert session.turn_count == 0
-            assert session.last_question == "q1"  # 仍是最初那句（成功的）
+            # 第三轮审计 m2：三种状态都计入轮数 —— 失败的一轮在历史里**可见**，
+            # 只数 ok 会出现"封面写 0 轮、点开有 1 条"。副标题同样跟随最近一轮。
+            assert session.turn_count == 1
+            assert session.last_question == "q2"
 
     async def test_aborted_turn_keeps_partial_answer(self, test_db):
         async with test_db() as db:

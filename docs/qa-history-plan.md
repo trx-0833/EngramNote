@@ -663,3 +663,51 @@ note 会话过滤掉 → 静默不落库，上一轮真踩过）。现在只有�
 
 后端 **1911 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
 前端 **823 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。
+---
+
+## 17. 第三轮独立审计（2026-11-14）与整改
+
+第三个**全新上下文**的子代理，口径同前（只说范围，不说来历），但额外加了一句方法论：
+**「代码注释会写为什么这么做和日期编号，但以代码实际行为为准，注释只当线索」**。
+它去验证注释是否成立，结果正好抓到两条「注释承诺了、代码没做到」。
+
+报告 `_agenttmp/audit-report-3.md`（524 行）：**blocker 0 / major 2 / minor 10 / nit 5**，
+三条自建探针跑在系统临时目录的独立 SQLite 上（不碰 `backend/data`）。
+
+### 17.1 两条 major
+
+| 编号 | 问题                                                                                                                                                                                       | 整改                                                                                                                                                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1   | **「清空全部」跨 surface 删**：抽屉只列 `global`、确认框条数也取 global，但删除不带 `surface` 条件 → 探针实测「确认 1 个、toast 2 个」，被多删的那条浮层会话在界面上**没有任何入口**能看到 | `DELETE /api/qa/sessions` 加 `surface` 参数、`soft_delete_all_sessions` 加同名过滤；抽屉固定传 `global`。不传仍是"真·全部"（运维/脚本用）。用例：1 global + 1 note → 删 global 后 note 仍在                             |
+| M2   | **落库只在两个 `except` 里、没有 `finally`**：`aclose()` 抛的是 `GeneratorExit`（`BaseException` 子类），两个 except 都抓不到 → 探针实测 0 条。计划 §4.5 原话是"必须放在 finally"          | 两个端点改成状态机 + `finally`：正常走到 `done` 才置 ok，中途关闭按 aborted 记；`finally` 里 `asyncio.shield(persist_turn(...))` 写一次。用例：取两个事件后 `aclose()` → 断言库里有一条 `status=aborted` 且保留半截文本 |
+
+M2 的可怕之处在于**今天不丢**：本机 uvicorn 声明 ASGI `spec_version=2.3`，走 task-group 取消路径抛
+`CancelledError`，所以现有用例全绿。升级 spec 或换 server 才会暴露 —— 而这属于"环境变化后静默丢数据"。
+
+### 17.2 十一个 minor 里改掉的
+
+| 编号 | 处置                                                                                                                                                                                          |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| m1   | `QA_SESSION_SURFACE_MISMATCH` 前端完全不认（永久错误态 + 吞输入、i18n 死键）→ `isSessionGoneError` 接受两个码，另加 `isSurfaceMismatch()` 区分文案；两处分支都清 `?s=` 并把用户输入放回输入框 |
+| m2   | `turn_count` 只数 ok → 抽屉封面「0 轮」而点开有 1 条 → 改成三种状态都计（上下文预算仍只取 ok，与这一列无关）                                                                                  |
+| m3   | `retention_days=0`（永久保留）被渲染成「保留 0 天」→ 新增 `qa.retentionHintForever`，按 `> 0` 分支                                                                                            |
+| m5   | 软删/清空/记账三处都被 `updated_at` 的 `onupdate` 改写 → Core UPDATE 显式写回；列表排序补 `id` tiebreaker（offset 分页跨页会重复或漏行）                                                      |
+| m8   | 从抽屉切会话时不清 `history`，详情失败时屏幕留着**上一个会话**的轮次 → `handleOpenSession` 先清屏                                                                                             |
+| n1   | `"note"` / `"ok"` 字面量改用常量                                                                                                                                                              |
+| n2   | 死键 `qa.inputTooLong` 删除（前端 `maxLength` + 后端 422 都轮不到它）                                                                                                                         |
+| n3   | `purge_expired_sessions` 加 `deleted_at IS NULL`，与"30 天后悔窗口"分工                                                                                                                       |
+
+### 17.3 明确**未做**并登记（`docs/qa-history-plan.md` §1.2 的"已知未做"同步更新）
+
+- **m4** 详情截断不可见（`turns_limit` 已生效，但响应没告诉前端"还有更早的"）；
+- **m6** `qa_turns.source_span_*` / `prompt_version` 仍无写入路径（`model` 也未写）；
+- **m7** `NoteAskPanel` 里 `sources` / `retrievalStatus` 是死路径（浮层不做检索），注释已改成事实，代码未删；
+- **m9** 关键词搜索只有后端（抽屉没有搜索框），计划目标 4 的"可搜索"仍只满足一半；
+- **m10** 清理任务不分批（同文件的 refresh_token 已有分批先例），大库首轮会长时间持写锁。
+
+这五条都在报告里标了行号与建议，属"知道但本轮不做"，不是遗漏。
+
+### 17.4 门禁
+
+后端 **1915 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
+前端 **823 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。

@@ -217,20 +217,34 @@ async def record_turn(
             latency_ms=latency_ms,
         )
         db.add(turn)
-        # 只用**成功**的轮次推进"最后聊过什么"：失败的一轮没有答案，
-        # 拿它当副标题会让人以为那次问成功了
-        session.updated_at = _now()
-        if status == TURN_STATUS_OK:
-            # `turn_count` 用 **SQL 级自增**而不是"读出来 +1 再写回"（第二轮审计 §4 疑点 1）：
-            # 两个并发追问各自在独立 session 里读到同一个旧值再各自 +1，会丢更新 ——
-            # 表现为列表里的轮次数比实际少，而且**不报错**，只能靠人去数。
-            # `UPDATE ... SET turn_count = turn_count + 1` 交给数据库做，天然不丢。
-            await db.execute(
-                update(QASession).where(QASession.id == session.id).values(turn_count=QASession.turn_count + 1)
+        # `turn_count` 用 **SQL 级自增**而不是"读出来 +1 再写回"（第二轮审计 §4 疑点 1）：
+        # 两个并发追问各自在独立 session 里读到同一个旧值再各自 +1，会丢更新 ——
+        # 表现为列表里的轮次数比实际少，而且**不报错**，只能靠人去数。
+        # `UPDATE ... SET turn_count = turn_count + 1` 交给数据库做，天然不丢。
+        #
+        # 三种状态都计（第三轮审计 m2）：`failed` / `aborted` 的轮次在历史里**可见**
+        # （M4 整改后还有专门样式），只数 ok 会出现"封面写 0 轮、点开有 1 条"。
+        # 上下文预算那条（`recent_ok_turns`）仍只取 ok，与这一列无关。
+        #
+        # `updated_at` 显式给值（第三轮审计 m5）：Core UPDATE 同样触发
+        # `BaseModel.updated_at` 的 `onupdate=func.now()`，而 SQLite 的 CURRENT_TIMESTAMP
+        # 只有秒级精度 —— 不显式给就会把应用侧刚写好的微秒覆盖掉，同一秒内两个会话的
+        # 排序随之退化成按 UUID（列表还是 offset/limit 分页，跨页会重复或漏行）。
+        touched_at = _now()
+        await db.execute(
+            update(QASession)
+            .where(QASession.id == session.id)
+            .values(
+                turn_count=QASession.turn_count + 1,
+                last_question=_truncate(question, LAST_QUESTION_MAX_CHARS),
+                updated_at=touched_at,
             )
-            session.last_question = _truncate(question, LAST_QUESTION_MAX_CHARS)
-            if not session.title:
-                session.title = _truncate(question, TITLE_MAX_CHARS)
+        )
+        session.updated_at = touched_at
+        # "最后问过什么"永远跟着最近一轮走（三种状态都算）：失败的那一轮也是用户问过的，
+        # 副标题只说明"最后一句问的是什么"，不是"答成了没有"。
+        if not session.title:
+            session.title = _truncate(question, TITLE_MAX_CHARS)
         await db.flush()
         # 自增之后把内存里的对象对齐（`flush` 不会重新读这一列）；
         # 不刷新的话，同一事务里后续读 `session.turn_count` 会拿到旧值。
@@ -277,7 +291,7 @@ async def get_or_create_session_for_note(
         select(QASession)
         .where(
             QASession.user_id == user_id,
-            QASession.surface == "note",
+            QASession.surface == SURFACE_NOTE,
             QASession.note_id == note_id,
             QASession.deleted_at.is_(None),
             QASession.updated_at >= cutoff,
@@ -288,7 +302,9 @@ async def get_or_create_session_for_note(
     recent = (await db.execute(stmt)).scalars().first()
     if recent is not None:
         return recent
-    return await get_or_create_session(db, user_id=user_id, surface="note", note_id=note_id, first_question=question)
+    return await get_or_create_session(
+        db, user_id=user_id, surface=SURFACE_NOTE, note_id=note_id, first_question=question
+    )
 
 
 async def recent_ok_turns(
@@ -511,6 +527,7 @@ async def soft_delete_all_sessions(
     db: AsyncSession,
     *,
     user_id: str,
+    surface: Optional[str] = None,
     now: Optional[datetime] = None,
 ) -> int:
     """清空该用户的全部会话（软删），返回行数 —— "清空全部问答历史"入口用
@@ -525,9 +542,16 @@ async def soft_delete_all_sessions(
     删除时间记在 `deleted_at` 上，`updated_at` 保留"最后一次真的聊过"的语义）。
     """
     compact = now or _now()
-    result = await db.execute(
-        update(QASession).where(QASession.user_id == user_id, QASession.deleted_at.is_(None)).values(deleted_at=compact)
-    )
+    # `surface` 必须能选（第三轮审计 M1）：抽屉只列 `surface=global`，而这里原来把
+    # `surface=note` 的浮层会话一并软删 —— 确认框按 global 的条数问"全部 1 个"，
+    # 实际却删了 2 个（多出的那个在界面上**没有任何入口**能看到）。
+    # 不传仍是"真·全部"（运维/脚本用），但 UI 必须显式传自己那一维。
+    stmt = update(QASession).where(QASession.user_id == user_id, QASession.deleted_at.is_(None))
+    if surface:
+        stmt = stmt.where(QASession.surface == surface)
+    # `updated_at=self`（第三轮审计 m5）：这一列的语义是"最后一次真的聊过"，
+    # 删除时刻记在 `deleted_at` 上；不显式写就会被 `onupdate=func.now()` 顶到删除那一刻。
+    result = await db.execute(stmt.values(deleted_at=compact, updated_at=QASession.updated_at))
     await db.flush()
     return int(result.rowcount or 0)
 

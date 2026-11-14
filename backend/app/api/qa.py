@@ -209,14 +209,21 @@ async def delete_qa_session(
 
 @router.delete("/sessions", response_model=QAClearAllResponse)
 async def clear_qa_sessions(
+    surface: Optional[str] = Query(None, pattern=_SURFACE_PATTERN, description="只清这个入口的会话；不传 = 真·全部"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
-    """清空当前用户的**全部**问答历史（软删），返回删掉的会话数
+    """清空问答历史（软删），返回删掉的会话数
 
     为什么返回条数而不是 204：清空之后列表会变空，而"本来就空"与"清掉了 12 个"
     在界面上完全一样 —— 条数是这次操作唯一的反馈。
+
+    ## `surface`（第三轮审计 M1）
+
+    抽屉只列 `surface=global`，所以它必须也只清 global —— 否则确认框按 global 的
+    条数问「共 1 个」，实际却把 `surface=note` 的浮层会话一起删了（那个入口在界面上
+    **不可见**，用户既不会预期、也无从发现）。UI 固定传 `global`；不传仍是真·全部。
     """
-    deleted = await qa_service.soft_delete_all_sessions(db, user_id=current_user.id)
+    deleted = await qa_service.soft_delete_all_sessions(db, user_id=current_user.id, surface=surface)
     await db.commit()
     return QAClearAllResponse(deleted=deleted)

@@ -794,6 +794,14 @@ async def ask_question_stream(
         nonlocal retrieval_query
         answer_parts: list[str] = []
         started_at = time.monotonic()
+        # `finally` 的状态机（第三轮审计 M2）：默认 ok，只在正常走到 `done` 之后成立；
+        # 中途被关闭（GeneratorExit / aclose）时状态仍是 ok ⇒ finally 会按 aborted 记。
+        status = TURN_STATUS_OK
+        error_code: Optional[str] = None
+        provider = ""
+        sources: list = []
+        retrieval_status = ""
+        completed = False
         try:
             # 1. 检索阶段（不调用 LLM）。追问时用拼接后的检索词。
             rag_service = RAGService()
@@ -869,38 +877,43 @@ async def ask_question_stream(
             # 6. 发送 done 事件
             yield "event: done\ndata: {}\n\n"
 
-            # 7. 落库（成功）
-            await _persist_completed_turn(
-                status=TURN_STATUS_OK,
-                answer_text="".join(answer_parts),
-                provider=provider,
-                sources=sources,
-                retrieval_status=retrieval_status,
-                latency_ms=int((time.monotonic() - started_at) * 1000),
-            )
+            # 7. 正常结束：只置标记，真正的落库统一在 `finally` 里做一次
+            completed = True
         except asyncio.CancelledError:
-            # 客户端断开 / 用户点「停止生成」：**这一轮最需要回看**，所以用 shield 写库
-            # （裸 await 会被取消立即打断，结果是"点了停止就什么都不留"）
-            await asyncio.shield(
-                _persist_completed_turn(
-                    status=TURN_STATUS_ABORTED,
-                    answer_text="".join(answer_parts),
-                    latency_ms=int((time.monotonic() - started_at) * 1000),
-                )
-            )
+            # 客户端断开 / 用户点「停止生成」：这一轮最需要回看，标成 aborted 后交给 finally
+            status = TURN_STATUS_ABORTED
             raise
         except Exception as e:
             logger.warning(f"SSE 流式问答失败: {e}", exc_info=True)
+            status = TURN_STATUS_FAILED
+            error_code = classify_exception(e)
             # 只发稳定错误码 + 固定中文文案（第二轮审计 MINOR-5）：原来把 `str(e)` 原样下发，
             # SQLAlchemy 的 OperationalError 文本里带 SQL 与绑定参数 —— DB 故障时等于把
             # 内部结构送到界面上。详细异常只进日志（上面那行 warning 已带 exc_info）。
-            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': classify_exception(e)}, ensure_ascii=False)}\n\n"
-            await _persist_completed_turn(
-                status=TURN_STATUS_FAILED,
-                answer_text="".join(answer_parts),
-                error_code=classify_exception(e),
-                latency_ms=int((time.monotonic() - started_at) * 1000),
-            )
+            yield f"event: error\ndata: {json.dumps({'message': '生成回答时出错，请稍后重试', 'error_code': error_code}, ensure_ascii=False)}\n\n"
+        finally:
+            # ★ 落库必须在 `finally`（第三轮审计 M2；计划 §4.5 原话也是"必须放在 finally 里"）。
+            # 原来只在两个 `except` 里写，而生成器被 `aclose()` 收尾时抛的是 `GeneratorExit`
+            # —— `BaseException` 的子类，两个 except 都抓不到，于是这一轮的 question 与
+            # 半截答案一起消失（探针实测 0 条）。本机 uvicorn 暂时走 task-group 取消路径
+            # （抛 CancelledError）才有幸没丢；换 server 或升 ASGI spec 就变成静默丢数据。
+            if not completed and status == TURN_STATUS_OK:
+                # 既没正常结束、也没报错 ⇒ 是被中途关闭的，按"中止"记，不假装成功
+                status = TURN_STATUS_ABORTED
+            try:
+                await asyncio.shield(
+                    _persist_completed_turn(
+                        status=status,
+                        answer_text="".join(answer_parts),
+                        error_code=error_code,
+                        provider=provider or None,
+                        sources=sources,
+                        retrieval_status=retrieval_status or None,
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                )
+            except Exception:  # noqa: BLE001 - 收尾写库失败不影响已经发出去的内容
+                logger.warning("流式问答收尾落库失败（忽略）", exc_info=True)
 
     return StreamingResponse(
         event_stream(),

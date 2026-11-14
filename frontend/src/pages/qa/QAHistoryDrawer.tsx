@@ -110,6 +110,14 @@ export interface QAHistoryDrawerProps {
   /** 保留期（天）与备份周数：由调用方从后端配置读，写死会与配置漂移 */
   retentionDays: number;
   backupWeeks: number;
+  /**
+   * 当前入口（默认 `global`）："清空全部"只清这一维（第三轮审计 M1）
+   *
+   * 抽屉只列 `surface=global`，确认框的条数也来自那份列表；如果清空不传 surface，
+   * 后端会连 `surface=note` 的浮层会话一起删 —— 那个入口在界面上**不可见**，
+   * 用户既不会预期、也无从发现，而确认框说 1 个、toast 说 2 个。
+   */
+  surface?: string;
 }
 
 export default function QAHistoryDrawer({
@@ -125,6 +133,7 @@ export default function QAHistoryDrawer({
   onSessionsRemoved,
   retentionDays,
   backupWeeks,
+  surface = 'global',
 }: QAHistoryDrawerProps) {
   const { t } = useTranslation();
   // 审计 m4/m5：两条失败路径（删除、清空）与一次成功反馈（清掉几个）都要
@@ -176,7 +185,9 @@ export default function QAHistoryDrawer({
   async function runClearAll() {
     setClearing(true);
     try {
-      const { deleted } = await clearQaSessions();
+      // 只清本抽屉展示的那一维（第三轮审计 M1）：不传会把浮层会话一起删掉，
+      // 于是确认框按 global 的条数问、toast 却报出更大的数字，而多删的那一条看不见。
+      const { deleted } = await clearQaSessions({ surface });
       // m5：这个数字是清空动作唯一的反馈，不能丢。
       toast.info(t('qa.clearAllDone', { count: deleted }));
       onChanged();
@@ -245,7 +256,11 @@ export default function QAHistoryDrawer({
         {/* 保留期提示（计划 §5.4 第 2 句）：数字来自配置，不写死。
             审计改造后仍在抽屉**顶部** —— 这句是"删了会怎样"的唯一解释。 */}
         <p className={styles.note}>
-          {t('qa.retentionHint', { days: retentionDays, weeks: backupWeeks })}
+          {/* `retentionDays <= 0` 是"永久保留"（后端配置语义），不能渲染成"保留 0 天" ——
+              那会让用户以为自己的对话马上要被删（第三轮审计 m3）。 */}
+          {retentionDays > 0
+            ? t('qa.retentionHint', { days: retentionDays, weeks: backupWeeks })
+            : t('qa.retentionHintForever', { weeks: backupWeeks })}
         </p>
 
         {body}
