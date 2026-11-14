@@ -665,3 +665,35 @@ describe('A 方案：失败与中止的轮次可以重试', () => {
     expect(screen.getByRole('button', { name: /重试：浮充是什么？/ })).toBeInTheDocument();
   });
 });
+
+// ── 答案重复（2026-11-14 实测事故）────────────────────────────────────────
+
+describe('答案不能重复拼接', () => {
+  it('多个 token + done 之后，答案文本只出现一次', async () => {
+    // 标记用不会在别处出现的字符串：问题气泡、提示文案里都没有它
+    askQuestionStream.mockResolvedValue(
+      sseStream([
+        ['meta', { session_id: 'sess-1', history_used: 0, provider: 'DeepSeek' }],
+        ['token', { content: '重复检测标记MARKER' }],
+        ['token', { content: '第二段' }],
+        ['token', { content: '结尾' }],
+        ['done', {}],
+      ]),
+    );
+    const user = userEvent.setup();
+    const { container } = renderPage();
+
+    await user.type(screen.getByRole('textbox', { name: '你的问题' }), '问一句');
+    await user.click(screen.getByRole('button', { name: '提问' }));
+
+    expect(await screen.findByText(/重复检测标记MARKER/)).toBeInTheDocument();
+
+    // ★ 关键：节流累积器提交后必须清空缓冲。旧实现第 k 次提交追加的是
+    // "从开始到现在的全部文本"，再加上 done 与流收尾各 flush 一次 ——
+    // 用户看到的就是一大段连续重复（答案随长度平方级膨胀）。
+    // 断言"整段恰好出现一次"，而不是 `findByText(/片段/)`（重复几遍都能匹上）。
+    const text = container.textContent ?? '';
+    expect(text.match(/重复检测标记MARKER/g) ?? []).toHaveLength(1);
+    expect(text).toContain('重复检测标记MARKER第二段结尾');
+  });
+});

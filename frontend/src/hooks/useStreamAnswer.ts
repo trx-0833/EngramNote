@@ -18,6 +18,22 @@ export function useThrottledStream(flushIntervalMs = 80) {
   const bufferRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * 取出缓冲里**尚未提交**的文本并清空
+   *
+   * ★ 必须"取出并清空"（2026-11-14 实测事故）：原实现提交后不清空，
+   * 于是第 k 次提交追加的是"从本轮开始到现在的全部文本"——
+   * 答案变成 `A` + `AB` + `ABC` + … 的拼接，用户看到一大段连续重复，
+   * 且随回答变长呈平方级膨胀（追问时答案更长，最明显）。
+   *
+   * 清空之后 `flush` 天然幂等：`done` 事件与"流自然结束"各调一次也不会重复提交。
+   */
+  const takePending = useCallback(() => {
+    const pending = bufferRef.current;
+    bufferRef.current = '';
+    return pending;
+  }, []);
+
   /** 追加文本，并按节流间隔提交 */
   const push = useCallback(
     (chunk: string, commit: (text: string) => void) => {
@@ -25,20 +41,25 @@ export function useThrottledStream(flushIntervalMs = 80) {
       if (timerRef.current !== null) return;
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
-        if (bufferRef.current) commit(bufferRef.current);
+        const pending = takePending();
+        if (pending) commit(pending);
       }, flushIntervalMs);
     },
-    [flushIntervalMs],
+    [flushIntervalMs, takePending],
   );
 
-  /** 立即提交剩余文本（流结束、出错、或组件卸载前调用） */
-  const flush = useCallback((commit: (text: string) => void) => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (bufferRef.current) commit(bufferRef.current);
-  }, []);
+  /** 立即提交剩余文本（流结束、出错、或组件卸载前调用）。幂等。 */
+  const flush = useCallback(
+    (commit: (text: string) => void) => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      const pending = takePending();
+      if (pending) commit(pending);
+    },
+    [takePending],
+  );
 
   /** 清空缓冲（开始新一轮回答时调用） */
   const reset = useCallback(() => {

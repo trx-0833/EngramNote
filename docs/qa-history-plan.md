@@ -758,3 +758,70 @@ M2 的可怕之处在于**今天不丢**：本机 uvicorn 声明 ASGI `spec_vers
 
 门禁：前端 **827 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）；
 后端未改动。
+---
+
+## 19. 追问后出现「一大段连续重复」——节流累积器不清空缓冲（2026-11-14）
+
+### 19.1 现象与根因
+
+用户报：追问之后答案里出现一大段连续重复的内容。
+
+根因在 `frontend/src/hooks/useStreamAnswer.ts` 的 `useThrottledStream`：
+
+```js
+bufferRef.current += chunk;
+if (timerRef.current !== null) return;
+timerRef.current = setTimeout(() => {
+  if (bufferRef.current) commit(bufferRef.current);
+}, 80);
+```
+
+**提交了缓冲，却没有清空它。** 于是第 k 次提交追加的不是"新增的那一段"，而是
+"从本轮开始到现在的全部文本"：
+
+| 时刻        | 缓冲内容 | 实际追加给答案的      |
+| ----------- | -------- | --------------------- |
+| 第 1 个窗口 | `A`      | `A`                   |
+| 第 2 个窗口 | `AB`     | `AB` → 答案变成 `AAB` |
+| 第 3 个窗口 | `ABC`    | `ABC` → `AABABC`      |
+
+平方级膨胀。再叠一层：`done` 事件会 `flush()` 一次（`QA.tsx:549`）、流自然结束后
+还会再 `flush()` 一次（`QA.tsx:573`），缓冲不清空时这两次把**同一整段**又各追加一遍
+—— 哪怕回答短到只装进一个窗口，答案也至少重复三遍。
+
+**为什么"追问"才明显**：追问带上下文、答案更长、跨过的 80ms 窗口更多，
+重复的总量按平方增长；首问若短到只装进一个窗口，用户更容易误认为是模型在复读。
+
+### 19.2 修法
+
+`push` 的定时器与 `flush` 都改成「取出并清空」：
+
+```js
+const takePending = () => {
+  const pending = bufferRef.current;
+  bufferRef.current = "";
+  return pending;
+};
+```
+
+顺带让 `flush` 变成**幂等**：`done` 与"流自然结束"各调一次也不会重复提交
+（`QA.tsx` 那两处调用因此不需要改）。`NoteAskPanel` 用的是同一个 hook，一并修好。
+
+### 19.3 为什么此前测试是绿的（测试有效性问题）
+
+假 SSE 流一次性把全部事件派发完，80ms 定时器根本没机会触发，只剩两次 `flush`；
+而断言写的是 `findByText(/浮充电压更低/)` 这类**正则**——重复两遍依然匹配。
+「重复」这个缺陷恰好落在"宽松断言"的盲区里。
+
+所以这次补了两层断言：
+
+- `frontend/src/hooks/useStreamAnswer.test.ts`（新文件，4 条）：多窗口只提交新增段、
+  连续两次 `flush` 不重复、`flush` 取消未触发的定时器、`reset` 后不带上轮残余；
+- `QA.history.test.tsx`：`多个 token + done 之后，答案文本只出现一次` ——
+  对 `container.textContent` 计数唯一标记串的出现次数，**而不是** `findByText(/片段/)`。
+
+两条都验证过「先红后绿」：把 hook 改回旧实现，hook 用例 2 红、页面用例 1 红。
+
+### 19.4 门禁
+
+前端 **832 passed（69 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。
