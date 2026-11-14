@@ -6608,6 +6608,8 @@ export interface components {
     QuestionRequest: {
       /** Question */
       question: string;
+      /** Retry Of */
+      retry_of?: string | null;
       /** Session Id */
       session_id?: string | null;
     };
