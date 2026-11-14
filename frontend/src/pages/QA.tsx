@@ -162,6 +162,40 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
   );
 }
 
+/**
+ * 失败 / 中止轮次的「重试」按钮（A 方案：同一问题再发一次）
+ *
+ * 为什么不是"原地替换那一轮"：那需要后端支持 `retry_of` 与轮次可见性（B 方案）。
+ * 本次只做前端能保证正确的那一半 —— **重发**，历史里如实留下两条：
+ * 用户看到"失败的一条 + 重试后成功的一条"，比"失败那条凭空消失"更接近真实发生的事。
+ *
+ * `disabled={streaming}`：重试期间禁用，避免两条流同时在飞
+ * （`handleAsk` 内部也会 `stopActiveStream()`，但按钮先禁掉更直观）。
+ */
+function RetryButton({
+  question,
+  disabled,
+  onRetry,
+}: {
+  question: string;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      className="btn btn-secondary"
+      onClick={onRetry}
+      disabled={disabled}
+      // 读屏要能分清"重试哪一句"：列表里可能有多条失败轮次
+      aria-label={`${t('qa.retry')}：${question}`}
+    >
+      {t('qa.retry')}
+    </button>
+  );
+}
+
 export default function QA() {
   const { t } = useTranslation();
   const toast = useToast();
@@ -371,8 +405,22 @@ export default function QA() {
     stopActiveStream();
   }
 
-  async function handleAsk() {
-    if (!question.trim()) return;
+  /**
+   * 发起一次提问
+   *
+   * @param override 覆盖输入框里的问题（「重试」用它把**原来那句话**再问一遍）
+   * @param keepDraft 不清空输入框（重试时用户可能已经打了下一句草稿；
+   *                  正常提问仍然清空 —— 问题已经进气泡了，输入框该空出来）
+   *
+   * ## 为什么「重试」不改接口（A 方案）
+   *
+   * 就是"同一个问题再发一次"，服务端按**新的一轮**处理：多轮上下文照常带，
+   * 历史里会留下两条（旧的那条仍是 failed/aborted）。真·重新生成需要 `retry_of`
+   * 与服务端的轮次可见性（B 方案），本次不做。
+   */
+  async function handleAsk(override?: string, keepDraft = false) {
+    const rawQuestion = (override ?? question).trim();
+    if (!rawQuestion) return;
     // 新问题发起前中止上一个未完成的流，避免旧 token 污染新答案
     stopActiveStream();
     // 清空上一轮可能残留的节流缓冲
@@ -383,7 +431,7 @@ export default function QA() {
     setLoading(true);
     setStreaming(true);
     setError('');
-    const currentQuestion = question.trim();
+    const currentQuestion = rawQuestion;
 
     // 创建一个临时记录，答案会逐步填充
     const tempRecord: QARecord = {
@@ -393,7 +441,7 @@ export default function QA() {
       provider: '',
     };
     setHistory((prev) => [tempRecord, ...prev]);
-    setQuestion('');
+    if (!keepDraft) setQuestion('');
 
     // 标记是否已收到首个 token，用于切换"思考中"与"流式渲染"状态
     let firstTokenReceived = false;
@@ -532,10 +580,14 @@ export default function QA() {
       });
     } catch (err) {
       if (controller.signal.aborted) {
-        // 用户主动停止：保留已生成文本；若尚无任何文本则移除空气泡
-        if (!firstTokenReceived) {
-          setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
-        }
+        // 用户主动停止：保留已生成文本。A 方案下**即使首字未到也留一条 `aborted`** ——
+        // 后端同样落库了 `status='aborted'`，而且用户需要一个「重试」入口。
+        setHistory((prev) => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          updated[0] = { ...updated[0], status: 'aborted' };
+          return updated;
+        });
       } else if (isSessionGoneError(err)) {
         // 审计 M3：追问的会话在别处被删了（另一个标签页、或抽屉里的「清空全部」），
         // 后端回 404 `QA_SESSION_NOT_FOUND`。原来这一支落到下面的 `setError`：
@@ -564,10 +616,17 @@ export default function QA() {
         // 与本函数里其它文案统一走 `tRef`：`t` 来自 `useTranslation()`，
         // 身份不保证稳定（见载入 effect 的注释），而这里已经处在异步分支里。
         setError(err instanceof Error ? err.message : tRef.current('qa.failed'));
-        // 如果首字未到，移除空白的临时记录，避免列表中出现空白气泡
-        if (!firstTokenReceived) {
-          setHistory((prev) => (prev.length > 0 ? prev.slice(1) : prev));
-        }
+        // ★ A 方案：失败**也留成一条轮次**（`status='failed'`），而不是把空气泡删掉。
+        // 两个理由：
+        // 1. 后端本来就落库了 `status='failed'`，刷新后再载入历史会看到这一条 ——
+        //    若此刻把它删掉，"刚失败"与"刷新后"就长得不一样；
+        // 2. 「重试」按钮挂在失败轮次上，删了气泡就没有入口，用户只能重敲问题。
+        setHistory((prev) => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          updated[0] = { ...updated[0], status: 'failed' };
+          return updated;
+        });
       }
     } finally {
       // ★ 2026-11-14 竞态守卫：**只有自己仍是当前请求时才复位状态**。
@@ -649,7 +708,9 @@ export default function QA() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={handleAsk}
+                  // 不能写 `onClick={handleAsk}`：`handleAsk` 的第一个参数是**问题文本**
+                  // （「重试」复用它），直接把 MouseEvent 传进去会变成 `override`。
+                  onClick={() => void handleAsk()}
                   disabled={!question.trim()}
                 >
                   {t('qa.ask')}
@@ -734,16 +795,30 @@ export default function QA() {
                       // 这两支**排在 `record.answer` 之后**是刻意的：失败/中止也可能
                       // 留下半截回答，把正文换成一句状态会把用户已经看到的文字弄丢。
                       // 它们只接管"没有正文的终态"—— 那正是原来永远停在「思考中」的那类。
-                      <div className={styles.qaTurnFailed}>
-                        {record.errorCode
-                          ? t('qa.turnFailed', { code: record.errorCode })
-                          : t('qa.turnFailedUnknown')}
-                      </div>
+                      <>
+                        <div className={styles.qaTurnFailed}>
+                          {record.errorCode
+                            ? t('qa.turnFailed', { code: record.errorCode })
+                            : t('qa.turnFailedUnknown')}
+                        </div>
+                        <RetryButton
+                          question={record.question}
+                          disabled={streaming}
+                          onRetry={() => void handleAsk(record.question, true)}
+                        />
+                      </>
                     ) : record.status === 'aborted' ? (
                       // 审计 M4 之二：**主动中止**的终态轮次。与"失败"分开措辞：
                       // 失败是系统的问题，中止是用户自己的操作，混成一句话会让
                       // 用户以为"我没停过，它怎么失败了"。
-                      <div className={styles.qaTurnFailed}>{t('qa.turnAborted')}</div>
+                      <>
+                        <div className={styles.qaTurnFailed}>{t('qa.turnAborted')}</div>
+                        <RetryButton
+                          question={record.question}
+                          disabled={streaming}
+                          onRetry={() => void handleAsk(record.question, true)}
+                        />
+                      </>
                     ) : (
                       <div
                         style={{

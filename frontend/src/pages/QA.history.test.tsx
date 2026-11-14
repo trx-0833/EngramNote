@@ -594,3 +594,74 @@ describe('审计 MINOR-10：首问不再多拉一次详情', () => {
     expect(screen.getByText(/刚生成好的答案/)).toBeInTheDocument();
   });
 });
+
+// ── A 方案：失败/中止轮次的「重试」───────────────────────────────────────
+
+describe('A 方案：失败与中止的轮次可以重试', () => {
+  it('失败轮次带「重试」，点击后用同一句话重发，且不清空输入框草稿', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({
+          status: 'failed',
+          answer: null,
+          error_code: 'LLM_TIMEOUT',
+          question: '浮充是什么？',
+        }),
+      ]),
+    );
+    askQuestionStream.mockResolvedValue(
+      sseStream([
+        ['meta', { session_id: 'sess-1', history_used: 0, provider: 'DeepSeek' }],
+        ['token', { content: '重试之后的答案' }],
+        ['done', {}],
+      ]),
+    );
+    const user = userEvent.setup();
+    renderPage('/qa?s=sess-1');
+
+    // 失败态先渲染出来（否则下面的按钮可能来自别处）
+    expect(await screen.findByText(/这一轮没有生成成功/)).toBeInTheDocument();
+
+    // 用户可能已经打了下一句草稿 —— 重试**不许**把它清掉
+    const input = screen.getByRole('textbox', { name: '你的问题' });
+    await user.type(input, '草稿');
+
+    await user.click(screen.getByRole('button', { name: /重试：浮充是什么？/ }));
+
+    // 同一句话、同一个会话重发
+    await waitFor(() => expect(askQuestionStream).toHaveBeenCalledTimes(1));
+    expect(askQuestionStream.mock.calls[0][0]).toBe('浮充是什么？');
+    expect(askQuestionStream.mock.calls[0][2]).toBe('sess-1');
+    // 新答案出现，草稿还在
+    expect(await screen.findByText(/重试之后的答案/)).toBeInTheDocument();
+    expect(input).toHaveValue('草稿');
+  });
+
+  it('中止轮次也有「重试」', async () => {
+    getQaSession.mockResolvedValue(detail([turn({ status: 'aborted', answer: null })]));
+    renderPage('/qa?s=sess-1');
+    expect(await screen.findByText('已停止生成')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /重试：/ })).toBeInTheDocument();
+  });
+
+  it('成功的轮次没有「重试」（A 方案不做"重新生成"）', async () => {
+    getQaSession.mockResolvedValue(detail([turn({ status: 'ok', answer: '浮充是恒压。' })]));
+    renderPage('/qa?s=sess-1');
+    expect(await screen.findByText(/浮充是恒压/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重试：/ })).toBeNull();
+  });
+
+  it('刚失败的那一轮也留成轮次（而不是只剩一行红字）', async () => {
+    askQuestionStream.mockRejectedValue(new Error('网络断了'));
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByRole('textbox', { name: '你的问题' }), '浮充是什么？');
+    await user.click(screen.getByRole('button', { name: '提问' }));
+
+    // 失败之后：红字解释 + 一条可重试的失败轮次（后端也落库了这一轮）
+    expect(await screen.findByText('网络断了')).toBeInTheDocument();
+    expect(screen.getByText(/这一轮没有生成成功/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /重试：浮充是什么？/ })).toBeInTheDocument();
+  });
+});

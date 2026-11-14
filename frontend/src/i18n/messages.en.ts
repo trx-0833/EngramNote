@@ -908,6 +908,7 @@ const en = {
     historyTruncated: '{total} conversations total; showing the {shown} most recent.',
     turnFailed: 'This turn failed ({code})',
     turnAborted: 'Generation stopped',
+    retry: 'Retry',
     turnFailedUnknown: 'This turn failed',
     inputLabel: 'Your question',
     multiturnHint:
