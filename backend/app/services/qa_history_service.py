@@ -35,6 +35,7 @@ from ..models.qa_history import (
     SURFACE_GLOBAL,
     SURFACE_NOTE,
     TURN_STATUS_OK,
+    TURN_STATUS_SUPERSEDED,
     QASession,
     QATurn,
 )
@@ -352,6 +353,34 @@ async def rename_session(db: AsyncSession, *, user_id: str, session_id: str, tit
     return session
 
 
+async def get_turn(db: AsyncSession, *, user_id: str, turn_id: str) -> Optional[QATurn]:
+    """取一轮（校验归属）；别人的/不存在返回 `None`"""
+    return (await db.execute(select(QATurn).where(QATurn.id == turn_id, QATurn.user_id == user_id))).scalars().first()
+
+
+async def supersede_turn(db: AsyncSession, *, session_id: str, turn_id: str) -> bool:
+    """把一轮标成 `superseded`，并把会话的 `turn_count` 减 1
+
+    `turn_count` 要跟着减：它表示"这个对话有几轮"，重新生成是**替换**而不是新增，
+    不减的话封面数字会一轮一轮往上飘。用 SQL 级自减，避免读-改-写丢更新
+    （与 `record_turn` 的自增同一口径）。
+    """
+    result = await db.execute(
+        update(QATurn)
+        .where(QATurn.id == turn_id, QATurn.status != TURN_STATUS_SUPERSEDED)
+        .values(status=TURN_STATUS_SUPERSEDED)
+    )
+    if int(result.rowcount or 0) == 0:
+        return False
+    await db.execute(
+        update(QASession)
+        .where(QASession.id == session_id)
+        .values(turn_count=func.max(QASession.turn_count - 1, 0), updated_at=QASession.updated_at)
+    )
+    await db.flush()
+    return True
+
+
 async def recent_ok_turns(
     db: AsyncSession,
     *,
@@ -535,7 +564,9 @@ async def get_session_with_turns(
     session = (await db.execute(stmt)).scalars().first()
     if session is None:
         return None
-    turn_stmt = select(QATurn).where(QATurn.session_id == session.id)
+    # `superseded` 是「被重新生成替换掉」的旧轮（阶段 3）：留在库里可追溯，
+    # 但用户不该在列表/详情里看到两份同样的问答。
+    turn_stmt = select(QATurn).where(QATurn.session_id == session.id, QATurn.status != TURN_STATUS_SUPERSEDED)
     if before_turn_id:
         # 游标分页（阶段 2）：取这一轮**之前**的 N 轮。
         # 用 `(created_at, id)` 复合比较而不是只比 `created_at` —— 同一微秒内

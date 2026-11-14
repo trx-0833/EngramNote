@@ -115,3 +115,45 @@ class TestCursorPaging:
         body = client.get(f"/api/qa/sessions/{sid}?before={uuid.uuid4()}", headers=_auth(uid)).json()
         assert body["turns"] == []
         assert body["has_more"] is False
+
+
+@pytest.mark.asyncio
+class TestSupersededVisibility:
+    """阶段 3 的地基：被「重新生成」替换掉的旧轮不进详情，且不重复计轮数
+
+    真正的 `retry_of` 端到端接线本轮**未完成**（见 docs/qa-deepseek-redesign.md），
+    但"旧轮该怎么被藏起来"是它唯一的产品语义，先把它钉住：
+    否则接上 retry_of 时会出现"同一问答显示两份、封面轮数一轮一轮涨"。
+    """
+
+    async def test_superseded_turn_is_hidden_and_uncounted(self, test_db):
+        from app.models.qa_history import TURN_STATUS_OK, TURN_STATUS_SUPERSEDED
+
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+            session = await svc.get_or_create_session(db, user_id=uid, first_question="q")
+            old = await svc.record_turn(db, user_id=uid, session=session, question="q", answer="旧答案")
+            await svc.record_turn(db, user_id=uid, session=session, question="追问", answer="新答案")
+            await db.commit()
+            sid, old_id = session.id, old.id
+            assert session.turn_count == 2
+
+        async with test_db() as db:
+            assert await svc.supersede_turn(db, session_id=sid, turn_id=old_id) is True
+            await db.commit()
+            # 幂等：再标一次不重复扣减
+            assert await svc.supersede_turn(db, session_id=sid, turn_id=old_id) is False
+            await db.commit()
+
+        client = _client()
+        detail = client.get(f"/api/qa/sessions/{sid}", headers=_auth(uid)).json()
+        assert [t["question"] for t in detail["turns"]] == ["追问"]
+        assert detail["turns"][0]["status"] == TURN_STATUS_OK
+        # 轮数跟着减：替换不是新增
+        assert detail["session"]["turn_count"] == 1
+
+        async with test_db() as db:
+            row = (await db.execute(select(svc.QATurn).where(svc.QATurn.id == old_id))).scalars().one()
+        assert row.status == TURN_STATUS_SUPERSEDED
+        assert row.answer == "旧答案"  # 数据保留，只是不再展示

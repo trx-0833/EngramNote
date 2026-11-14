@@ -205,6 +205,11 @@ class QuestionRequest(BaseModel):
     # 比让 LLM 侧报错或按 token 计费暴涨好。
     question: str = Field(..., max_length=4000)
     session_id: Optional[str] = Field(None, max_length=64)
+    #: 「重新生成」（阶段 3）：指向被替换的轮次 id
+    #:
+    #: 服务端据此把上下文截到**该轮之前**（否则等于让模型看着自己上一次的
+    #: 回答再答一遍），成功后把旧轮标成 `superseded`（不进列表/详情/上下文）。
+    retry_of: Optional[str] = Field(None, max_length=64)
 
 
 class AnswerSource(BaseModel):
