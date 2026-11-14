@@ -221,11 +221,20 @@ async def record_turn(
         # 拿它当副标题会让人以为那次问成功了
         session.updated_at = _now()
         if status == TURN_STATUS_OK:
-            session.turn_count = (session.turn_count or 0) + 1
+            # `turn_count` 用 **SQL 级自增**而不是"读出来 +1 再写回"（第二轮审计 §4 疑点 1）：
+            # 两个并发追问各自在独立 session 里读到同一个旧值再各自 +1，会丢更新 ——
+            # 表现为列表里的轮次数比实际少，而且**不报错**，只能靠人去数。
+            # `UPDATE ... SET turn_count = turn_count + 1` 交给数据库做，天然不丢。
+            await db.execute(
+                update(QASession).where(QASession.id == session.id).values(turn_count=QASession.turn_count + 1)
+            )
             session.last_question = _truncate(question, LAST_QUESTION_MAX_CHARS)
             if not session.title:
                 session.title = _truncate(question, TITLE_MAX_CHARS)
         await db.flush()
+        # 自增之后把内存里的对象对齐（`flush` 不会重新读这一列）；
+        # 不刷新的话，同一事务里后续读 `session.turn_count` 会拿到旧值。
+        await db.refresh(session, attribute_names=["turn_count"])
         return turn
     except Exception as exc:  # noqa: BLE001 - 附加功能不该拖垮主流程
         # 必须 rollback（2026-11-13 审计 n3）：异常后 session 处于 need-rollback 状态，
@@ -308,6 +317,80 @@ async def recent_ok_turns(
     )
     rows = (await db.execute(stmt)).scalars().all()
     return list(reversed(list(rows)))
+
+
+async def persist_turn(
+    *,
+    user_id: str,
+    session_id: str,
+    surface: str,
+    question: str,
+    answer: Optional[str],
+    status: str,
+    error_code: Optional[str] = None,
+    provider: Optional[str] = None,
+    prompt_version: Optional[str] = None,
+    retrieval_status: Optional[str] = None,
+    retrieval_query: Optional[str] = None,
+    sources: Optional[Sequence[Dict[str, Any]]] = None,
+    context_turns: int = 0,
+    source_span_start: Optional[int] = None,
+    source_span_end: Optional[int] = None,
+    source_hash: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+) -> Optional[QATurn]:
+    """把一轮问答落库（**打开自己的 DB 会话**，与请求生命周期解耦）
+
+    ## 为什么在服务层而不是各端点各写一份（第二轮审计 NIT-1）
+
+    两个 `ask/stream` 端点原本各有一个 `_persist_completed_turn`，逻辑几乎逐字相同，
+    但**已经分叉**：`surface` 一处显式传、一处靠默认值 —— 而默认值 `global`
+    会把笔记浮层的会话过滤掉，表现为"那一轮静默不落库"（上一轮真踩过）。
+    收进这里之后 `surface` 是**必填关键字**，两个调用点都得说清自己是谁。
+
+    ## 为什么不复用请求作用域的 session
+
+    流式生成器可能比 `Depends(get_db)` 活得更久（客户端慢速读取、断开后仍在收尾）。
+    独立 session 让"写历史"与"请求生命周期"解耦，这也是能安全处理 `CancelledError`
+    的前提（取消时调用方用 `asyncio.shield` 包住本函数）。
+
+    ## 失败只 warning
+
+    历史是附加功能：写不进去不该让用户拿不到已经生成好的答案。
+    `record_turn` 内部已 rollback，这里再兜一层异常。
+    """
+    from ..database import get_session_factory
+
+    try:
+        factory = get_session_factory()
+        async with factory() as write_db:
+            target = await get_or_create_session(write_db, user_id=user_id, session_id=session_id, surface=surface)
+            if target is None:
+                return None
+            turn = await record_turn(
+                write_db,
+                user_id=user_id,
+                session=target,
+                question=question,
+                answer=answer or None,
+                status=status,
+                error_code=error_code,
+                provider=provider,
+                prompt_version=prompt_version,
+                retrieval_status=retrieval_status,
+                retrieval_query=retrieval_query,
+                sources=sources,
+                context_turns=context_turns,
+                source_span_start=source_span_start,
+                source_span_end=source_span_end,
+                source_hash=source_hash,
+                latency_ms=latency_ms,
+            )
+            await write_db.commit()
+            return turn
+    except Exception as exc:  # noqa: BLE001 - 附加功能绝不打断回答
+        logger.warning("问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
+        return None
 
 
 async def list_sessions(
@@ -498,13 +581,22 @@ async def purge_expired_sessions(
     return int(result.rowcount or 0)
 
 
-async def strip_snippets_for_note(db: AsyncSession, *, note_id: str) -> int:
+async def strip_snippets_for_note(db: AsyncSession, *, note_id: str, user_id: Optional[str] = None) -> int:
     """笔记被 purge 后，清空历史里引用它的 `snippet`（保留 `chunk_id` 作墓碑）
 
     为什么不连轮次一起删：那是**用户自己的问与答**，不该因为笔记被删而消失；
     但片段是笔记正文的副本，笔记已经彻底删除时它必须跟着走（计划 §6.3）。
     """
-    stmt = select(QATurn).where(QATurn.sources_json.is_not(None), QATurn.sources_json.like(f"%{note_id}%"))
+    # `user_id` 过滤不是可选项的"优化"，而是**范围界定**（第二轮审计 §4 疑点 4）：
+    # 引用这篇笔记的轮次只可能属于笔记的所有者。不加它，删一篇笔记就要扫
+    # **全部用户**的全部轮次（`LIKE '%id%'` 走不了索引）；加了至少能先用
+    # `ix_qa_turns_user_created` 把范围收窄到一个人。
+    stmt = select(QATurn).where(
+        QATurn.sources_json.is_not(None),
+        QATurn.sources_json.like(f"%{note_id}%"),
+    )
+    if user_id is not None:
+        stmt = stmt.where(QATurn.user_id == user_id)
     turns = (await db.execute(stmt)).scalars().all()
     changed = 0
     for turn in turns:

@@ -92,7 +92,6 @@ from ..models.review_log import ReviewLog
 from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
-from ..database import get_session_factory
 from ..models.qa_history import SURFACE_GLOBAL, TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
 from ..services import qa_history_service as qa_service
 from ..services.qa_context import assemble_messages, build_retrieval_query, context_turns_used, usable_history
@@ -772,33 +771,23 @@ async def ask_question_stream(
         """
         if not history_enabled or session_id is None:
             return
-        try:
-            factory = get_session_factory()
-            async with factory() as write_db:
-                target = await qa_service.get_or_create_session(
-                    write_db, user_id=current_user.id, session_id=session_id
-                )
-                if target is None:
-                    return
-                await qa_service.record_turn(
-                    write_db,
-                    user_id=current_user.id,
-                    session=target,
-                    question=req.question,
-                    answer=answer_text or None,
-                    status=status,
-                    error_code=error_code,
-                    provider=provider,
-                    prompt_version=None,
-                    retrieval_status=retrieval_status,
-                    retrieval_query=retrieval_query,
-                    sources=sources,
-                    context_turns=context_turns,
-                    latency_ms=latency_ms,
-                )
-                await write_db.commit()
-        except Exception as exc:  # noqa: BLE001 - 历史是附加功能，绝不打断回答
-            logger.warning("问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
+        # 落库逻辑在服务层（第二轮审计 NIT-1）：`surface` 必填，两个端点各写一份
+        # 时已经分叉过一次（默认值把 note 会话过滤掉 → 静默不落库）。
+        await qa_service.persist_turn(
+            user_id=current_user.id,
+            session_id=session_id,
+            surface=SURFACE_GLOBAL,
+            question=req.question,
+            answer=answer_text,
+            status=status,
+            error_code=error_code,
+            provider=provider,
+            retrieval_status=retrieval_status,
+            retrieval_query=retrieval_query,
+            sources=sources,
+            context_turns=context_turns,
+            latency_ms=latency_ms,
+        )
 
     async def event_stream():
         # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）

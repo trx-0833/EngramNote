@@ -594,3 +594,72 @@ axe 报 `color-contrast [serious]`。改用 `--color-text-secondary`。
 
 后端 **1909 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
 前端 **822 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。
+---
+
+## 16. 承接第二轮审计 §4「未验证疑点」（2026-11-14）
+
+报告 §4 列了 6 条"没法验证/未验证"的疑点。逐条处置如下。
+
+### 16.1 疑点 1：`turn_count` 并发丢更新 —— 已修，并有先红后绿的用例
+
+原实现是"读出来 +1 再写回"（`session.turn_count = (session.turn_count or 0) + 1`）。
+两个并发追问各自在独立 session 里读到同一个旧值，后写的那一方会把前一方覆盖掉：
+库里轮次数比实际少，**而且不报错**，只能靠人去数。
+
+改成 SQL 级自增：
+
+```python
+await db.execute(
+    update(QASession).where(QASession.id == session.id)
+    .values(turn_count=QASession.turn_count + 1)
+)
+```
+
+用例 `TestTurnCountConcurrency::test_stale_session_objects_do_not_lose_count`
+用**陈旧对象**复现（两个独立 session 各读一份再先后写），不依赖真并发：
+
+- 旧实现下红：`turn_count` 停在 1（实际 2 轮）；
+- 新实现下绿：`turn_count == 2`。
+
+### 16.2 疑点 3：首问后用详情覆盖本地轮次 —— 已修，并补了断言
+
+第二轮 MINOR-10 的修法是"收到 `meta.session_id` 后把 `loadedSessionRef` 指向它"。
+本轮补了用例 `审计 MINOR-10：首问不再多拉一次详情`：问一句 → 断言答案渲染出来、
+`?s=` 写入、**`getQaSession` 一次都没被调用**、答案仍在。把那一行改回 `''` 时该用例变红。
+
+### 16.3 疑点 4：`strip_snippets_for_note` 的全表 LIKE 扫描 —— 已收窄范围
+
+原来只按 `sources_json LIKE '%<note_id>%'` 扫**全部用户**的全部轮次。
+引用这篇笔记的轮次只可能属于笔记的所有者，于是加 `user_id` 过滤
+（至少能先用 `ix_qa_turns_user_created` 把范围收进一个人），`purge_note` 传入 `note.user_id`。
+用例 `TestSnippetStrippingScope::test_stripping_is_scoped_to_the_owner` 钉住
+"同一个 note_id 出现在别人轮次里时不会被误清"。
+
+代价仍然存在（`LIKE` 走不了索引），要彻底解决得给引用建关联表 —— 留作后续，
+现在的量级（单用户几十到几千轮）可以接受。
+
+### 16.4 疑点 2：`asyncio.shield` 在双重取消下的可靠性 —— 仍未验证，但缩小了暴露面
+
+真断连 + 服务器 teardown 双发取消需要真 uvicorn 与 RST 注入，只读环境下构造不出稳定复现。
+可现在落库这条路已经收进服务层一个函数（见 §16.5），要验证时只需针对
+`persist_turn` 写一个集成用例；端点侧只是 `await asyncio.shield(persist_turn(...))` 一行。
+
+### 16.5 NIT-1：两处 `_persist_completed_turn` 收进服务层
+
+审计指出两份实现"已经分叉"（`surface` 一处显式、一处靠默认值，而默认值会把
+note 会话过滤掉 → 静默不落库，上一轮真踩过）。现在只有一个入口：
+
+`qa_history_service.persist_turn(..., surface=必填)` —— 打开独立 DB 会话、复核会话、
+写库、`record_turn` 内部 rollback、异常只 warning，全部在这一处；
+两个端点各自把"这一轮有什么字段"递进去。
+
+### 16.6 疑点 5 / 6
+
+- 疑点 5（问答正文里可能整段复述笔记内容，而 `purge_note` 只清片段）：属**产品语义**，
+  方案 §6.3 就是这么定的，本轮不动，已在文档里写明。
+- 疑点 6（e2e 未复跑）：本轮与上一轮都已跑，`e2e` 30 / `a11y` 26 全绿。
+
+### 16.7 门禁
+
+后端 **1911 passed / 30 skipped**、ruff 0、`dump_openapi --check` 与 `gen_env_example --check` 一致；
+前端 **823 passed（68 文件）**、tsc 0、eslint 0、build 0、e2e 30、a11y 26（0 违规）。

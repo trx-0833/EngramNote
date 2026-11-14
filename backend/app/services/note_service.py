@@ -799,7 +799,7 @@ async def purge_note(db: AsyncSession, note: Note, promote_key_cards: bool = Fal
     # 从这条路进，就是为了守住"接线"而不是"函数本身"。
     from .qa_history_service import strip_snippets_for_note
 
-    stripped = await strip_snippets_for_note(db, note_id=note_id)
+    stripped = await strip_snippets_for_note(db, note_id=note_id, user_id=note.user_id)
     if stripped:
         logger.info(f"已清理问答历史中的笔记片段: note_id={note_id[:8]}, turns={stripped}")
 

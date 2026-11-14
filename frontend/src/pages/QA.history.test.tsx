@@ -549,3 +549,48 @@ describe('审计 M3：追问时会话已经不在了', () => {
     expect(toastLog(toast.info)).toContain('对话已被删除');
   });
 });
+
+// ── 第二轮审计 MINOR-10：首问之后不要再用详情覆盖本地轮次 ──────────────────
+
+/** 造一段最小可用的 SSE 流：meta → token → done */
+function sseStream(events: Array<[string, unknown]>): ReadableStream<Uint8Array> {
+  const text = events
+    .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+    .join('');
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+describe('审计 MINOR-10：首问不再多拉一次详情', () => {
+  it('meta 回传 session_id 之后，不会再 GET 一次详情把本地轮次覆盖掉', async () => {
+    const user = userEvent.setup();
+    askQuestionStream.mockResolvedValue(
+      sseStream([
+        ['meta', { session_id: 'sess-new', history_used: 0, provider: 'DeepSeek' }],
+        ['token', { content: '刚生成好的答案' }],
+        ['done', {}],
+      ]),
+    );
+    renderPage();
+
+    await user.type(screen.getByRole('textbox', { name: '你的问题' }), '浮充是什么？');
+    await user.click(screen.getByRole('button', { name: '提问' }));
+
+    // 答案真的渲染出来了（否则下面那条断言恒真）
+    expect(await screen.findByText(/刚生成好的答案/)).toBeInTheDocument();
+    // 会话 id 写进了 URL
+    await waitFor(() => expect(currentSearch()).toContain('s=sess-new'));
+
+    // ★ 关键：`?s=` 变化不该触发载入 effect —— 否则会多打一次详情请求，
+    // 并且用库里的内容**整体替换**刚流式渲染出来的轮次；一旦那一轮落库失败
+    // （`persist_turn` 刻意吞异常），用户刚读完的答案会从屏幕上消失。
+    expect(getQaSession).not.toHaveBeenCalled();
+    // 答案仍在（没有被替换成空）
+    expect(screen.getByText(/刚生成好的答案/)).toBeInTheDocument();
+  });
+});

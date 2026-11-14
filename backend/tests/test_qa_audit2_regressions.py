@@ -206,3 +206,85 @@ class TestInputLimits:
             headers=_auth(uid),
         )
         assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+class TestTurnCountConcurrency:
+    """第二轮审计 §4 疑点 1：`turn_count` 的读-改-写会丢更新
+
+    用**陈旧对象**复现而不是真并发：开两个独立 session 各自把同一个会话读进内存，
+    然后先后各写一轮。旧实现（`session.turn_count = (session.turn_count or 0) + 1`）
+    会让后写的那一方把 1 覆盖成 1 —— 库里只剩 1，而实际有 2 轮，且**不报错**。
+    新实现是 SQL 级自增，两方各 `+1`，最终 2。
+    """
+
+    async def test_stale_session_objects_do_not_lose_count(self, test_db):
+        uid = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, uid)
+            session = await svc.get_or_create_session(db, user_id=uid, first_question="q")
+            await db.commit()
+            sid = session.id
+
+        # 两个独立 session 各读一份（此时都读到 turn_count=0）
+        async with test_db() as db1, test_db() as db2:
+            stale1 = (await db1.execute(select(svc.QASession).where(svc.QASession.id == sid))).scalars().one()
+            stale2 = (await db2.execute(select(svc.QASession).where(svc.QASession.id == sid))).scalars().one()
+            assert stale1.turn_count == 0 and stale2.turn_count == 0
+
+            await svc.record_turn(db1, user_id=uid, session=stale1, question="q1", answer="a1")
+            await db1.commit()
+            # db2 手里的对象仍是旧值；旧实现会把它写回成 1（覆盖掉 db1 的成果）
+            await svc.record_turn(db2, user_id=uid, session=stale2, question="q2", answer="a2")
+            await db2.commit()
+
+        async with test_db() as db:
+            final = (await db.execute(select(svc.QASession).where(svc.QASession.id == sid))).scalars().one()
+            turns = (await db.execute(select(svc.QATurn).where(svc.QATurn.session_id == sid))).scalars().all()
+        assert len(turns) == 2
+        assert final.turn_count == 2, "陈旧对象把轮次数覆盖了（应改成 SQL 级自增）"
+
+
+@pytest.mark.asyncio
+class TestSnippetStrippingScope:
+    async def test_stripping_is_scoped_to_the_owner(self, test_db):
+        """第二轮审计 §4 疑点 4：清理必须按 user_id 收窄，不能扫全部用户"""
+        owner, stranger = str(uuid.uuid4()), str(uuid.uuid4())
+        shared_note_id = str(uuid.uuid4())
+        async with test_db() as db:
+            await _seed_user(db, owner)
+            await _seed_user(db, stranger)
+            s1 = await svc.get_or_create_session(db, user_id=owner, first_question="q1")
+            await svc.record_turn(
+                db,
+                user_id=owner,
+                session=s1,
+                question="q1",
+                answer="a1",
+                sources=[{"note_id": shared_note_id, "chunk_id": "c1", "relevant_text": "正文"}],
+            )
+            s2 = await svc.get_or_create_session(db, user_id=stranger, first_question="q2")
+            await svc.record_turn(
+                db,
+                user_id=stranger,
+                session=s2,
+                question="q2",
+                answer="a2",
+                sources=[{"note_id": shared_note_id, "chunk_id": "c2", "relevant_text": "别人的正文"}],
+            )
+            await db.commit()
+
+        async with test_db() as db:
+            # 只清 owner 的：陌生人那一行必须原样保留
+            changed = await svc.strip_snippets_for_note(db, note_id=shared_note_id, user_id=owner)
+            await db.commit()
+            assert changed == 1
+
+        async with test_db() as db:
+            rows = {r.user_id: r for r in (await db.execute(select(svc.QATurn))).scalars().all()}
+            import json as _json
+
+            owner_sources = _json.loads(rows[owner].sources_json)
+            stranger_sources = _json.loads(rows[stranger].sources_json)
+            assert owner_sources[0]["relevant_text"] == ""
+            assert stranger_sources[0]["relevant_text"] == "别人的正文"

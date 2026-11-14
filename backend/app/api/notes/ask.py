@@ -74,7 +74,6 @@ from ...database import get_db
 from ...models.user import User
 from ...schemas.common import EventStreamResponse
 from ...schemas.note_ask import NoteAskRequest
-from ...database import get_session_factory
 from ...models.qa_history import TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
 from ...services import qa_history_service as qa_service
 from ...services.llm_service import LLMService
@@ -161,33 +160,21 @@ async def ask_note_stream(
         """用独立 DB 会话落库（不依赖请求作用域的 `db`，理由同全局问答端点）"""
         if not history_enabled or session_id is None:
             return
-        try:
-            factory = get_session_factory()
-            async with factory() as write_db:
-                # 显式传 surface（审计 M1：默认值会把 note 会话过滤掉 → 静默不落库）
-                target = await qa_service.get_or_create_session(
-                    write_db, user_id=current_user.id, session_id=session_id, surface=SURFACE_NOTE
-                )
-                if target is None:
-                    return
-                await qa_service.record_turn(
-                    write_db,
-                    user_id=current_user.id,
-                    session=target,
-                    question=req.question,
-                    answer=answer_text or None,
-                    status=status,
-                    error_code=error_code,
-                    provider=provider,
-                    sources=None,
-                    context_turns=0,
-                    source_span_start=None,
-                    source_span_end=None,
-                    latency_ms=latency_ms,
-                )
-                await write_db.commit()
-        except Exception as exc:  # noqa: BLE001 - 附加功能绝不打断回答
-            logger.warning("笔记问答历史落库失败（忽略继续）: %s: %s", type(exc).__name__, exc)
+        # 与全局端点共用服务层实现（第二轮审计 NIT-1）；`surface` 必填，
+        # 靠默认值会把这个 note 会话过滤掉 → 那一轮静默不落库。
+        await qa_service.persist_turn(
+            user_id=current_user.id,
+            session_id=session_id,
+            surface=SURFACE_NOTE,
+            question=req.question,
+            answer=answer_text,
+            status=status,
+            error_code=error_code,
+            provider=provider,
+            sources=None,
+            context_turns=0,
+            latency_ms=latency_ms,
+        )
 
     async def event_stream():
         answer_parts: list[str] = []
