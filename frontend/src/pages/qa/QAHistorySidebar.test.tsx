@@ -30,6 +30,7 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof QAHistoryS
     onOpenSession: vi.fn(),
     onNewChat: vi.fn(),
     onOpenManage: vi.fn(),
+    onRenameSession: vi.fn().mockResolvedValue(undefined),
     collapsed: false,
     onToggleCollapsed: vi.fn(),
     total: 2,
@@ -47,16 +48,16 @@ describe('QAHistorySidebar：宽屏常驻会话栏', () => {
     expect(screen.getByRole('heading', { name: '今天' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '更早' })).toBeInTheDocument();
 
-    const active = screen.getByRole('button', { name: /对话 a/ });
+    const active = screen.getByRole('button', { name: /^对话 a/ });
     expect(active).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: /对话 b/ })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: /^对话 b/ })).not.toHaveAttribute('aria-current');
   });
 
   it('点会话项与「新建」都会回调（侧栏只是入口，状态在页面里）', async () => {
     const user = userEvent.setup();
     const { props } = renderSidebar();
 
-    await user.click(screen.getByRole('button', { name: /对话 a/ }));
+    await user.click(screen.getByRole('button', { name: /^对话 a/ }));
     expect(props.onOpenSession).toHaveBeenCalledWith('a');
 
     // 「＋ 新建对话」与页头同名按钮的可访问名不同（前缀 ＋），这里按侧栏那一个点
@@ -76,7 +77,7 @@ describe('QAHistorySidebar：宽屏常驻会话栏', () => {
   it('收起时只留按钮，列表与搜索框都不在 DOM 里（不是只靠 CSS 隐藏）', () => {
     renderSidebar({ collapsed: true });
     expect(screen.queryByLabelText('搜索对话')).toBeNull();
-    expect(screen.queryByRole('button', { name: /对话 a/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^对话 a/ })).toBeNull();
     // 折叠按钮的 aria-expanded 要如实反映状态
     expect(screen.getByRole('button', { name: '展开对话历史' })).toHaveAttribute(
       'aria-expanded',

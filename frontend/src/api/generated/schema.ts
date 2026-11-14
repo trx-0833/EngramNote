@@ -2534,7 +2534,16 @@ export interface paths {
     delete: operations['delete_qa_session_api_qa_sessions__session_id__delete'];
     options?: never;
     head?: never;
-    patch?: never;
+    /**
+     * Rename Qa Session
+     * @description 重命名会话（侧栏行内改名用）
+     *
+     *     - 空标题 / 超 80 字 → 422（`QASessionRenameRequest` 的约束）；
+     *     - 别人的、已删除的、`surface` 不匹配的 → 一律 404，不区分原因
+     *       （区分会变成探测他人会话是否存在的接口）；
+     *     - **不动 `updated_at`**：改名不该把会话顶到列表最前面，也不该影响保留期判定。
+     */
+    patch: operations['rename_qa_session_api_qa_sessions__session_id__patch'];
     trace?: never;
   };
   '/api/report/daily': {
@@ -6432,9 +6441,14 @@ export interface components {
     };
     /**
      * QASessionDetailResponse
-     * @description 单个会话 + 其轮次（按时间升序）」
+     * @description 单个会话 + 其轮次（按时间升序）
      */
     QASessionDetailResponse: {
+      /**
+       * Has More
+       * @default false
+       */
+      has_more: boolean;
       session: components['schemas']['QASessionResponse'];
       /** Turns */
       turns?: components['schemas']['QATurnResponse'][];
@@ -6462,6 +6476,17 @@ export interface components {
        * @default 0
        */
       total: number;
+    };
+    /**
+     * QASessionRenameRequest
+     * @description 重命名会话（`PATCH /api/qa/sessions/{id}`）
+     *
+     *     `min_length=1`：空标题会让侧栏与抽屉都退化成"未命名对话"，
+     *     用户点了重命名却看到名字消失 —— 那是一次静默的失败，所以直接 422。
+     */
+    QASessionRenameRequest: {
+      /** Title */
+      title: string;
     };
     /**
      * QASessionResponse
@@ -10895,6 +10920,8 @@ export interface operations {
       query?: {
         /** @description 最多返回最近多少轮（升序）。会话没有自动切分机制，长会话可达上千轮 */
         turns_limit?: number;
+        /** @description 游标：只返回这一轮**之前**的轮次（向上翻页） */
+        before?: string | null;
         /** @description 按入口校验：传了就要求会话属于该入口 */
         surface?: string | null;
       };
@@ -10946,6 +10973,44 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  rename_qa_session_api_qa_sessions__session_id__patch: {
+    parameters: {
+      query?: {
+        /** @description 按入口校验：传了就要求会话属于该入口 */
+        surface?: string | null;
+      };
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QASessionRenameRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QASessionResponse'];
+        };
       };
       /** @description Validation Error */
       422: {

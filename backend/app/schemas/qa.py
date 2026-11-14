@@ -88,11 +88,26 @@ class QASessionListResponse(BaseModel):
     limits: Optional[QALimitsResponse] = None
 
 
+class QASessionRenameRequest(BaseModel):
+    """重命名会话（`PATCH /api/qa/sessions/{id}`）
+
+    `min_length=1`：空标题会让侧栏与抽屉都退化成"未命名对话"，
+    用户点了重命名却看到名字消失 —— 那是一次静默的失败，所以直接 422。
+    """
+
+    title: str = Field(..., min_length=1, max_length=80)
+
+
 class QASessionDetailResponse(BaseModel):
-    """单个会话 + 其轮次（按时间升序）」"""
+    """单个会话 + 其轮次（按时间升序）"""
 
     session: QASessionResponse
     turns: List[QATurnResponse] = Field(default_factory=list)
+    #: 本次返回的最早一轮之前**还有没有**更早的轮次（游标分页用）
+    #:
+    #: 没有它前端只能拿 `len(turns) == limit` 猜，而"正好取满"与"还有更多"
+    #: 在那种猜法下无法区分 —— 会多显示一个点了没反应的「加载更早」。
+    has_more: bool = False
 
 
 class QAClearAllResponse(BaseModel):

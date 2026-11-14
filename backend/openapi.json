@@ -5129,8 +5129,13 @@
         "type": "object"
       },
       "QASessionDetailResponse": {
-        "description": "单个会话 + 其轮次（按时间升序）」",
+        "description": "单个会话 + 其轮次（按时间升序）",
         "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "session": {
             "$ref": "#/components/schemas/QASessionResponse"
           },
@@ -5185,6 +5190,22 @@
           }
         },
         "title": "QASessionListResponse",
+        "type": "object"
+      },
+      "QASessionRenameRequest": {
+        "description": "重命名会话（`PATCH /api/qa/sessions/{id}`）\n\n`min_length=1`：空标题会让侧栏与抽屉都退化成\"未命名对话\"，\n用户点了重命名却看到名字消失 —— 那是一次静默的失败，所以直接 422。",
+        "properties": {
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "QASessionRenameRequest",
         "type": "object"
       },
       "QASessionResponse": {
@@ -12734,6 +12755,25 @@
             }
           },
           {
+            "description": "游标：只返回这一轮**之前**的轮次（向上翻页）",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "游标：只返回这一轮**之前**的轮次（向上翻页）",
+              "title": "Before"
+            }
+          },
+          {
             "description": "按入口校验：传了就要求会话属于该入口",
             "in": "query",
             "name": "surface",
@@ -12781,6 +12821,81 @@
           }
         ],
         "summary": "Get Qa Session",
+        "tags": [
+          "问答历史"
+        ]
+      },
+      "patch": {
+        "description": "重命名会话（侧栏行内改名用）\n\n- 空标题 / 超 80 字 → 422（`QASessionRenameRequest` 的约束）；\n- 别人的、已删除的、`surface` 不匹配的 → 一律 404，不区分原因\n  （区分会变成探测他人会话是否存在的接口）；\n- **不动 `updated_at`**：改名不该把会话顶到列表最前面，也不该影响保留期判定。",
+        "operationId": "rename_qa_session_api_qa_sessions__session_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "按入口校验：传了就要求会话属于该入口",
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(global|note)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按入口校验：传了就要求会话属于该入口",
+              "title": "Surface"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QASessionRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QASessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rename Qa Session",
         "tags": [
           "问答历史"
         ]

@@ -73,11 +73,18 @@ export async function getQaSessions(
  */
 export async function getQaSession(
   sessionId: string,
+  // `before`：向上翻页的游标（阶段 2）。`turnsLimit` 缺省用后端默认（200）。
+  params: { before?: string; turnsLimit?: number } = {},
   options?: { signal?: AbortSignal },
 ): Promise<QASessionDetail> {
-  return request<QASessionDetail>(`/qa/sessions/${encodeURIComponent(sessionId)}`, {
-    signal: options?.signal,
-  });
+  const query: QueryOf<'/qa/sessions/{session_id}', 'get'> = {
+    before: params.before,
+    turns_limit: params.turnsLimit,
+  };
+  return request<QASessionDetail>(
+    `/qa/sessions/${encodeURIComponent(sessionId)}${buildQuery(query)}`,
+    { signal: options?.signal },
+  );
 }
 
 /**
@@ -121,6 +128,19 @@ export async function clearQaSessions(
   const query: QueryOf<'/qa/sessions', 'delete'> = { surface: params.surface };
   return request<QAClearAllResult>(`/qa/sessions${buildQuery(query)}`, {
     method: 'DELETE',
+    signal: options?.signal,
+  });
+}
+
+/** 重命名会话（阶段 2） */
+export async function renameQaSession(
+  sessionId: string,
+  title: string,
+  options?: { signal?: AbortSignal },
+): Promise<QASessionSummary> {
+  return request<QASessionSummary>(`/qa/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
     signal: options?.signal,
   });
 }

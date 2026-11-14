@@ -27,7 +27,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -307,6 +307,51 @@ async def get_or_create_session_for_note(
     )
 
 
+async def count_turns_before(db: AsyncSession, *, session_id: str, turn: QATurn) -> int:
+    """这一轮之前还有多少轮（给详情的 `has_more` 用）
+
+    用 `count()` 而不是"再取一页看看"：前者是一条聚合查询、不传正文，
+    后者会把最多 `limit` 轮的 `answer` 与 `sources_json` 白白读进内存。
+    """
+    stmt = select(func.count(QATurn.id)).where(
+        QATurn.session_id == session_id,
+        or_(
+            QATurn.created_at < turn.created_at,
+            and_(QATurn.created_at == turn.created_at, QATurn.id < turn.id),
+        ),
+    )
+    return int((await db.execute(stmt)).scalar() or 0)
+
+
+async def rename_session(db: AsyncSession, *, user_id: str, session_id: str, title: str) -> Optional[QASession]:
+    """重命名会话；别人的/已删的返回 `None`（端点转 404）
+
+    **不动 `updated_at`**：这一列是"最后一次真的聊过"，改个名字不该把会话顶到
+    列表最前面，也不该影响保留期清理的判定（`purge_expired_sessions` 按它算）。
+    """
+    session = (
+        (
+            await db.execute(
+                select(QASession).where(
+                    QASession.id == session_id,
+                    QASession.user_id == user_id,
+                    QASession.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if session is None:
+        return None
+    await db.execute(
+        update(QASession).where(QASession.id == session.id).values(title=title.strip(), updated_at=QASession.updated_at)
+    )
+    await db.refresh(session, attribute_names=["title", "updated_at"])
+    await db.flush()
+    return session
+
+
 async def recent_ok_turns(
     db: AsyncSession,
     *,
@@ -474,6 +519,7 @@ async def get_session_with_turns(
     user_id: str,
     session_id: str,
     turns_limit: Optional[int] = None,
+    before_turn_id: Optional[str] = None,
 ) -> Optional[tuple[QASession, List[QATurn]]]:
     """取会话 + 其轮次（升序）。别人的/已删的返回 `None`（端点转 404）
 
@@ -490,6 +536,25 @@ async def get_session_with_turns(
     if session is None:
         return None
     turn_stmt = select(QATurn).where(QATurn.session_id == session.id)
+    if before_turn_id:
+        # 游标分页（阶段 2）：取这一轮**之前**的 N 轮。
+        # 用 `(created_at, id)` 复合比较而不是只比 `created_at` —— 同一微秒内
+        # 两轮冲突时只比时间会漏行；`id` 是 UUID，只作稳定的 tiebreaker。
+        cursor = (
+            (await db.execute(select(QATurn).where(QATurn.session_id == session.id, QATurn.id == before_turn_id)))
+            .scalars()
+            .first()
+        )
+        if cursor is None:
+            # 游标不在这个会话里：当作"没有更早的"，而不是悄悄返回最新一页
+            # （后者会让前端点一次「加载更早」原地不动，看起来像 bug）。
+            return session, []
+        turn_stmt = turn_stmt.where(
+            or_(
+                QATurn.created_at < cursor.created_at,
+                and_(QATurn.created_at == cursor.created_at, QATurn.id < cursor.id),
+            )
+        )
     if turns_limit is not None and turns_limit > 0:
         recent = (
             (await db.execute(turn_stmt.order_by(QATurn.created_at.desc(), QATurn.id.desc()).limit(int(turns_limit))))

@@ -32,6 +32,7 @@ from ..database import get_db
 from ..models.qa_history import SURFACES
 from ..models.user import User
 from ..schemas.qa import (
+    QASessionRenameRequest,
     QAClearAllResponse,
     QALimitsResponse,
     QASessionDetailResponse,
@@ -146,6 +147,7 @@ async def get_qa_session(
         le=500,
         description="最多返回最近多少轮（升序）。会话没有自动切分机制，长会话可达上千轮",
     ),
+    before: Optional[str] = Query(None, max_length=64, description="游标：只返回这一轮**之前**的轮次（向上翻页）"),
     surface: Optional[str] = Query(None, pattern=_SURFACE_PATTERN, description="按入口校验：传了就要求会话属于该入口"),
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
@@ -172,15 +174,51 @@ async def get_qa_session(
         if found is None:
             raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
     found = await qa_service.get_session_with_turns(
-        db, user_id=current_user.id, session_id=session_id, turns_limit=turns_limit
+        db,
+        user_id=current_user.id,
+        session_id=session_id,
+        turns_limit=turns_limit,
+        before_turn_id=before,
     )
     if found is None:
         raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
     session, turns = found
+    # `has_more` 用一条 count 算（阶段 2）：不让前端拿 `len(turns) == limit` 猜 ——
+    # "正好取满"与"还有更多"在那种猜法下无法区分，会多一个点了没反应的「加载更早」。
+    has_more = bool(turns) and await qa_service.count_turns_before(db, session_id=session.id, turn=turns[0]) > 0
     return QASessionDetailResponse(
         session=_session_payload(session),
         turns=[_turn_payload(t) for t in turns],
+        has_more=has_more,
     )
+
+
+@router.patch("/sessions/{session_id}", response_model=QASessionResponse)
+async def rename_qa_session(
+    session_id: str,
+    payload: QASessionRenameRequest,
+    surface: Optional[str] = Query(None, pattern=_SURFACE_PATTERN, description="按入口校验：传了就要求会话属于该入口"),
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名会话（侧栏行内改名用）
+
+    - 空标题 / 超 80 字 → 422（`QASessionRenameRequest` 的约束）；
+    - 别人的、已删除的、`surface` 不匹配的 → 一律 404，不区分原因
+      （区分会变成探测他人会话是否存在的接口）；
+    - **不动 `updated_at`**：改名不该把会话顶到列表最前面，也不该影响保留期判定。
+    """
+    if surface is not None:
+        found = await qa_service.get_or_create_session(
+            db, user_id=current_user.id, session_id=session_id, surface=surface
+        )
+        if found is None:
+            raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
+    renamed = await qa_service.rename_session(db, user_id=current_user.id, session_id=session_id, title=payload.title)
+    if renamed is None:
+        raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
+    await db.commit()
+    return _session_payload(renamed)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

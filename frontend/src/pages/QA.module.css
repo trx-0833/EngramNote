@@ -398,3 +398,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 「加载更早」（阶段 2）：贴在消息流顶部居中 */
+.qaLoadEarlier {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-xs) 0 var(--space-sm);
+}

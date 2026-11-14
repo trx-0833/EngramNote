@@ -185,3 +185,32 @@
     display: none;
   }
 }
+/* 行内改名（阶段 2）：默认不显示，hover / 键盘聚焦时出现 */
+.itemRow {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.renameButton {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.itemRow:hover .renameButton,
+.itemRow:focus-within .renameButton {
+  opacity: 1;
+}
+
+.renameInput {
+  width: 100%;
+}

@@ -145,7 +145,8 @@ function turn(overrides: Partial<QATurnItem> = {}): QATurnItem {
 }
 
 function detail(turns: QATurnItem[]): QASessionDetail {
-  return { session: SESSION_1, turns };
+  // `has_more: false`（阶段 2 新增字段）：详情默认没有更早的了
+  return { session: SESSION_1, turns, has_more: false };
 }
 
 /** 列表响应；`total` 与 `items.length` 故意可以不等 —— 那正是 m6 的截断场景 */

@@ -53,6 +53,7 @@ import {
   type QATurnItem,
 } from '../api/qaHistory';
 import { parseSSEStream } from '../utils/sse';
+import { renameQaSession } from '../api/qaHistory';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
 import Icon from '../components/Icon';
@@ -70,6 +71,8 @@ import QAHistoryDrawer from './qa/QAHistoryDrawer';
 import QAHistorySidebar from './qa/QAHistorySidebar';
 
 interface QARecord {
+  /** 后端轮次 id（`qa_turns.id`）；本地刚发起、还没落库的那一轮没有 */
+  id?: string;
   question: string;
   answer: string;
   sources: AnswerSource[];
@@ -238,6 +241,9 @@ export default function QA() {
    * 仍然会为每个中间值发请求。
    */
   const [keyword, setKeyword] = useState('');
+  /** `has_more`（阶段 2）：详情接口直接给，前端不靠 `len==limit` 猜 */
+  const [hasMoreTurns, setHasMoreTurns] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword.trim()), 300);
@@ -681,6 +687,59 @@ export default function QA() {
     }
   }
 
+  /** 行内重命名（阶段 2）：成功/失败都提示，失败时列表保持原样 */
+  async function handleRenameSession(id: string, title: string) {
+    try {
+      await renameQaSession(id, title);
+      toastRef.current.info(tRef.current('qa.renameDone'));
+      void queryClient.invalidateQueries({ queryKey: ['qa', 'sessions'] });
+      if (id === sessionId) {
+        // 当前会话被改名：详情里的 `session.title` 也要跟着变，否则侧栏与标题打架
+        void queryClient.invalidateQueries({ queryKey: ['qa', 'session', id] });
+      }
+    } catch (err) {
+      toastRef.current.error(err instanceof Error ? err.message : tRef.current('qa.failed'));
+    }
+  }
+
+  /**
+   * 「加载更早」（阶段 2）：以当前最早一轮为游标向上翻一页
+   *
+   * 用 `before=<最早那一轮的 id>` 而不是 `offset` —— 游标分页在"翻页期间又问了
+   * 新一轮"时不会重复或漏行（offset 会整体后移一行）。
+   */
+  async function handleLoadEarlier() {
+    if (!sessionId || history.length === 0 || loadingEarlier) return;
+    const oldest = history[history.length - 1];
+    if (!oldest.id) return;
+    setLoadingEarlier(true);
+    try {
+      const detail = await getQaSession(sessionId, { before: oldest.id, turnsLimit: 50 });
+      const older = (detail.turns ?? [])
+        .map((turn) => ({
+          id: turn.id,
+          question: turn.question,
+          answer: turn.answer ?? '',
+          sources: (turn.sources ?? []) as QARecord['sources'],
+          provider: turn.provider ?? '',
+          retrievalStatus: turn.retrieval_status ?? undefined,
+          status: turn.status,
+          errorCode: turn.error_code ?? undefined,
+        }))
+        // 接口按升序返回；页面约定 `history[0]` 是最新，所以倒序追加到尾部
+        .reverse();
+      setHistory((prev) => [...prev, ...older]);
+      setHasMoreTurns(Boolean(detail.has_more));
+      if (older.length > 0) {
+        toastRef.current.info(tRef.current('qa.loadEarlierDone', { count: older.length }));
+      }
+    } catch (err) {
+      toastRef.current.error(err instanceof Error ? err.message : tRef.current('qa.failed'));
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }
+
   /** 复制一条回答（DeepSeek 每轮都有的操作） */
   async function handleCopyAnswer(answer: string) {
     try {
@@ -740,12 +799,26 @@ export default function QA() {
           onOpenSession={handleOpenSession}
           onNewChat={handleNewChat}
           onOpenManage={() => setDrawerOpen(true)}
+          onRenameSession={handleRenameSession}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={toggleSidebar}
           total={sessionsQuery.data?.total ?? sessions.length}
         />
         <div className={styles.qaMain}>
           {/* 问答历史 */}
+          {hasMoreTurns && history.length > 0 && (
+            <div className={styles.qaLoadEarlier}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => void handleLoadEarlier()}
+                disabled={loadingEarlier}
+              >
+                {t('qa.loadEarlier')}
+              </button>
+            </div>
+          )}
+
           {history.length === 0 ? (
             // DeepSeek 范式空态：一句标题 + 三张推荐问题。点一下**填入**输入框而不是
             // 直接发送 —— 用户多半想改一改再问，直接发出去反而要等一次失败。

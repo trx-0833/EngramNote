@@ -1110,6 +1110,10 @@ const zhCN = {
     untitledSession: '未命名对话',
     sidebarTruncated: '仅显示最近 {shown} 条（共 {total} 条）',
     manageHistory: '管理（删除 / 清空）',
+    renameSession: '重命名对话',
+    renameDone: '已重命名',
+    loadEarlier: '加载更早的对话',
+    loadEarlierDone: '已加载 {count} 轮更早的对话',
     // 每条回答的操作行
     copyAnswer: '复制回答',
     copied: '已复制',

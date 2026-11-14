@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from '../../i18n';
 import type { QASessionSummary } from '../../api/qaHistory';
 import { groupSessions } from './sessionGroups';
@@ -21,6 +22,8 @@ export interface QAHistorySidebarProps {
    * （两份迟早分叉），不如让侧栏把"管理"交给抽屉；阶段 2 做重命名时再把行内操作搬来。
    */
   onOpenManage: () => void;
+  /** 行内重命名（阶段 2）：成功与否由页面负责提示，侧栏只负责收起编辑态 */
+  onRenameSession: (sessionId: string, title: string) => Promise<void>;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   /** 服务端总数：与 `sessions.length` 不等时说明只显示了一页 */
@@ -55,12 +58,28 @@ export default function QAHistorySidebar({
   onOpenSession,
   onNewChat,
   onOpenManage,
+  onRenameSession,
   collapsed,
   onToggleCollapsed,
   total,
 }: QAHistorySidebarProps) {
   const { t } = useTranslation();
   const groups = groupSessions(sessions);
+  // 正在改名的会话 id + 草稿（行内编辑，不做弹窗：改名是小操作，
+  // 弹窗会打断「正在翻历史」的上下文）
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  async function commitRename() {
+    const id = editingId;
+    const title = draft.trim();
+    if (!id || !title) {
+      setEditingId(null);
+      return;
+    }
+    await onRenameSession(id, title);
+    setEditingId(null);
+  }
 
   return (
     <nav
@@ -128,8 +147,28 @@ export default function QAHistorySidebar({
                   {group.items.map((session) => {
                     const active = session.id === activeSessionId;
                     const label = session.title || session.last_question || t('qa.untitledSession');
+                    if (editingId === session.id) {
+                      return (
+                        <li key={session.id}>
+                          <input
+                            className={`input ${styles.renameInput}`}
+                            value={draft}
+                            autoFocus
+                            maxLength={80}
+                            aria-label={t('qa.renameSession')}
+                            onChange={(e) => setDraft(e.target.value)}
+                            onBlur={() => void commitRename()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void commitRename();
+                              // Esc 放弃：改名是低频操作，别让它变成"必须改完才能走"
+                              if (e.key === 'Escape') setEditingId(null);
+                            }}
+                          />
+                        </li>
+                      );
+                    }
                     return (
-                      <li key={session.id}>
+                      <li key={session.id} className={styles.itemRow}>
                         <button
                           type="button"
                           className={`${styles.item} ${active ? styles.itemActive : ''}`}
@@ -141,6 +180,17 @@ export default function QAHistorySidebar({
                           <span className={styles.itemMeta}>
                             {t('qa.turnsCount', { count: session.turn_count })}
                           </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.renameButton}
+                          onClick={() => {
+                            setEditingId(session.id);
+                            setDraft(label);
+                          }}
+                          aria-label={`${t('qa.renameSession')}：${label}`}
+                        >
+                          改名
                         </button>
                       </li>
                     );
