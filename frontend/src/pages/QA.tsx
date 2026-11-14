@@ -758,12 +758,6 @@ export default function QA() {
     }
   }
 
-  /**
-   * 右栏的来源 = **最新一轮**（`history[0]` 就是最新，见 handleAsk 里的
-   * `[tempRecord, ...prev]`）。历史轮次的引用仍在各自卡片里，不在这里重复列。
-   */
-  const latestSources = history[0]?.sources ?? [];
-
   return (
     <div className="page-enter">
       {/* 页面标题（批次 C1：统一进 <PageHeader>，字号本就 1.5rem） */}
@@ -806,266 +800,254 @@ export default function QA() {
         />
         <div className={styles.qaMain}>
           {/* 问答历史 */}
-          {hasMoreTurns && history.length > 0 && (
-            <div className={styles.qaLoadEarlier}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => void handleLoadEarlier()}
-                disabled={loadingEarlier}
-              >
-                {t('qa.loadEarlier')}
-              </button>
-            </div>
-          )}
-
-          {history.length === 0 ? (
-            // DeepSeek 范式空态：一句标题 + 三张推荐问题。点一下**填入**输入框而不是
-            // 直接发送 —— 用户多半想改一改再问，直接发出去反而要等一次失败。
-            <div className={styles.qaEmpty}>
-              <h2 className={styles.qaEmptyTitle}>{t('qa.empty')}</h2>
-              <p className={styles.qaEmptyHint}>{t('qa.emptyHint')}</p>
-              <p className={styles.qaSuggestTitle}>{t('qa.suggestionTitle')}</p>
-              <div className={styles.qaSuggestions}>
-                {(['qa.suggestion1', 'qa.suggestion2', 'qa.suggestion3'] as const).map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={styles.qaSuggestion}
-                    onClick={() => setQuestion(t(key))}
-                  >
-                    {t(key)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            history.map((record, idx) => {
-              // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
-              const isThinking = idx === 0 && loading && record.answer === '';
-              return (
-                // key 必须**稳定**：原实现把 answer 的前 20 字符拼进 key，
-                // 于是答案每增长约 20 字符 key 就变化一次，React 会把整条记录
-                // （问题气泡 + AI 卡片 + 引用列表）卸载重建 —— 焦点、文本选区、
-                // 滚动位置全部丢失，并成倍放大流式渲染开销（§2.8 F-10）。
-                // question + idx 在本列表内已唯一且不随流式内容变化。
-                <div key={`${record.question}#${idx}`} style={{ marginBottom: 'var(--space-md)' }}>
-                  {/* 问题 */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'flex-end',
-                      marginBottom: 'var(--space-sm)',
-                    }}
-                  >
-                    <div className={styles.qaUserBubble}>{record.question}</div>
-                  </div>
-                  {/* 回答 */}
-                  <div className={styles.qaMsgAi}>
-                    {isThinking ? (
-                      // 思考中状态：首字到达前显示
-                      <div
-                        style={{
-                          color: 'var(--color-text-secondary)',
-                          fontStyle: 'italic',
-                          lineHeight: 1.8,
-                        }}
-                      >
-                        {t('qa.thinking')}
-                      </div>
-                    ) : record.answer ? (
-                      // 流式渲染：答案实时增长
-                      <div className={styles.qaAnswerText}>
-                        {record.answer}
-                        {/* 流式光标：只在最新一轮、且正在流式时出现 */}
-                        {streaming && idx === 0 && (
-                          <span className={styles.qaCursor} aria-hidden="true">
-                            ▍
-                          </span>
-                        )}
-                      </div>
-                    ) : record.status === 'failed' ? (
-                      // 审计 M4 之一：**失败**的终态轮次。没有这一支时它落到最后的
-                      // 兜底分支，显示「AI 正在思考...」—— 可它永远等不到 token 了。
-                      // 带上 `error_code` 才有可查的线索；旧数据的 code 可能为空。
-                      //
-                      // 这两支**排在 `record.answer` 之后**是刻意的：失败/中止也可能
-                      // 留下半截回答，把正文换成一句状态会把用户已经看到的文字弄丢。
-                      // 它们只接管"没有正文的终态"—— 那正是原来永远停在「思考中」的那类。
-                      <>
-                        <div className={styles.qaTurnFailed}>
-                          {record.errorCode
-                            ? t('qa.turnFailed', { code: record.errorCode })
-                            : t('qa.turnFailedUnknown')}
-                        </div>
-                        <RetryButton
-                          question={record.question}
-                          disabled={streaming}
-                          onRetry={() => void handleAsk(record.question, true)}
-                        />
-                      </>
-                    ) : record.status === 'aborted' ? (
-                      // 审计 M4 之二：**主动中止**的终态轮次。与"失败"分开措辞：
-                      // 失败是系统的问题，中止是用户自己的操作，混成一句话会让
-                      // 用户以为"我没停过，它怎么失败了"。
-                      <>
-                        <div className={styles.qaTurnFailed}>{t('qa.turnAborted')}</div>
-                        <RetryButton
-                          question={record.question}
-                          disabled={streaming}
-                          onRetry={() => void handleAsk(record.question, true)}
-                        />
-                      </>
-                    ) : (
-                      <div
-                        style={{
-                          color: 'var(--color-text-secondary)',
-                          fontStyle: 'italic',
-                          lineHeight: 1.8,
-                        }}
-                      >
-                        {t('qa.thinking')}
-                      </div>
-                    )}
-                    {/* 检索降级提示：向量检索没命中（`hybrid`）或向量服务不可用（`bm25_only`）
-                        都该如实告诉用户 —— 修复前只提示后者，而实际发生的是前者
-                        （见 utils/retrievalNotice.ts 与 overhaul-plan 附录 BN.4） */}
-                    {retrievalNotice(record.retrievalStatus) && (
-                      <p
-                        style={{
-                          fontSize: '0.75rem',
-                          color: 'var(--color-warning)',
-                          marginTop: 'var(--space-sm)',
-                        }}
-                      >
-                        {retrievalNotice(record.retrievalStatus)}
-                      </p>
-                    )}
-                    {/* 引用来源（批次 E7：这一份**保留**，右栏是增强不是替代 —— 见文件头） */}
-                    {record.sources.length > 0 && (
-                      // 折叠用原生 `<details>`：键盘可达、读屏可播报，不需要自己维护
-                      // 展开状态（阶段 1 之前这段是永远展开的，长回答里会把正文挤出屏幕）。
-                      <details className={styles.qaSourcesFold}>
-                        <summary className={styles.qaSourcesSummary}>
-                          <Icon name="quote" size={16} />
-                          {t('qa.sourcesFold', { count: record.sources.length })}
-                        </summary>
-                        <div className={styles.qaSourcesBody}>
-                          <SourceLinks sources={record.sources} />
-                        </div>
-                      </details>
-                    )}
-
-                    {/* 每轮操作行：复制 / 重试。只在有正文时给「复制」，
-                        失败/中止的空轮次只有「重试」（下面那两支里已经渲染）。 */}
-                    {record.answer && (
-                      <div className={styles.qaActions}>
-                        <button
-                          type="button"
-                          className={`btn btn-ghost ${styles.qaActionButton}`}
-                          onClick={() => void handleCopyAnswer(record.answer)}
-                          aria-label={`${t('qa.copyAnswer')}：${record.question}`}
-                        >
-                          {t('qa.copyAnswer')}
-                        </button>
-                      </div>
-                    )}
-                    {record.provider && (
-                      <p
-                        style={{
-                          fontSize: '0.7rem',
-                          color: 'var(--color-text-secondary)',
-                          marginTop: 'var(--space-xs)',
-                          textAlign: 'right',
-                        }}
-                      >
-                        {t('qa.poweredBy', {
-                          provider: record.provider === 'glm' ? 'GLM' : 'DeepSeek',
-                        })}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* ── 底部粘性输入区（DeepSeek 范式）──
-              放在消息流**之后**：`position: sticky; bottom: 0` 才会贴着视口底部；
-              放在前面时它随内容滚上去，用户必须滚到底才能提问。 */}
-        <div className={styles.qaComposer}>
-          <div className={styles.qaComposerInner}>
-            <textarea
-              className={`input ${styles.qaTextarea}`}
-              placeholder={t('qa.inputPlaceholder')}
-              value={question}
-              onChange={(e) => {
-                setQuestion(e.target.value);
-                // 自适应高度：先归零再按 scrollHeight 撑开，最多 200px
-                const el = e.currentTarget;
-                el.style.height = 'auto';
-                el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-              }}
-              onKeyDown={handleKeyDown}
-              disabled={streaming}
-              aria-label={t('qa.inputLabel')}
-              aria-describedby="qa-multiturn-hint"
-              // 与后端 `question` 的上限一致（4000）：超长让浏览器直接截断，
-              // 而不是发出去再吃一个 422 —— 后者会把整轮问答卡在错误分支里。
-              maxLength={4000}
-              rows={1}
-            />
-            <div className={styles.qaComposerFoot}>
-              <div className={styles.qaComposerHints}>
-                <span id="qa-multiturn-hint" className={styles.qaHint}>
-                  {t('qa.multiturnHint', {
-                    turns: limits?.context_turns ?? QA_LIMITS.contextTurns,
-                  })}
-                </span>
-                {historyUsed > 0 && (
-                  <span className={styles.qaContextUsed}>
-                    {t('qa.contextUsed', { count: historyUsed })}
-                  </span>
-                )}
-                {error && <span className={styles.qaComposerError}>{error}</span>}
-              </div>
-              {streaming ? (
-                <button type="button" className="btn btn-danger" onClick={handleStop}>
-                  {t('qa.stop')}
-                </button>
-              ) : (
+          <div className={styles.qaThread}>
+            {hasMoreTurns && history.length > 0 && (
+              <div className={styles.qaLoadEarlier}>
                 <button
                   type="button"
-                  className="btn btn-primary"
-                  // 不能写 `onClick={handleAsk}`：它的第一个参数是**问题文本**
-                  // （「重试」复用它），直接把 MouseEvent 传进去会变成 `override`。
-                  onClick={() => void handleAsk()}
-                  disabled={!question.trim()}
+                  className="btn btn-ghost"
+                  onClick={() => void handleLoadEarlier()}
+                  disabled={loadingEarlier}
                 >
-                  {t('qa.ask')}
+                  {t('qa.loadEarlier')}
                 </button>
-              )}
+              </div>
+            )}
+
+            {history.length === 0 ? (
+              // DeepSeek 范式空态：一句标题 + 三张推荐问题。点一下**填入**输入框而不是
+              // 直接发送 —— 用户多半想改一改再问，直接发出去反而要等一次失败。
+              <div className={styles.qaEmpty}>
+                <h2 className={styles.qaEmptyTitle}>{t('qa.empty')}</h2>
+                <p className={styles.qaEmptyHint}>{t('qa.emptyHint')}</p>
+                <p className={styles.qaSuggestTitle}>{t('qa.suggestionTitle')}</p>
+                <div className={styles.qaSuggestions}>
+                  {(['qa.suggestion1', 'qa.suggestion2', 'qa.suggestion3'] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={styles.qaSuggestion}
+                      onClick={() => setQuestion(t(key))}
+                    >
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              history.map((record, idx) => {
+                // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
+                const isThinking = idx === 0 && loading && record.answer === '';
+                return (
+                  // key 必须**稳定**：原实现把 answer 的前 20 字符拼进 key，
+                  // 于是答案每增长约 20 字符 key 就变化一次，React 会把整条记录
+                  // （问题气泡 + AI 卡片 + 引用列表）卸载重建 —— 焦点、文本选区、
+                  // 滚动位置全部丢失，并成倍放大流式渲染开销（§2.8 F-10）。
+                  // question + idx 在本列表内已唯一且不随流式内容变化。
+                  <div
+                    key={`${record.question}#${idx}`}
+                    style={{ marginBottom: 'var(--space-md)' }}
+                  >
+                    {/* 问题 */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        marginBottom: 'var(--space-sm)',
+                      }}
+                    >
+                      <div className={styles.qaUserBubble}>{record.question}</div>
+                    </div>
+                    {/* 回答 */}
+                    <div className={styles.qaMsgAi}>
+                      {isThinking ? (
+                        // 思考中状态：首字到达前显示
+                        <div
+                          style={{
+                            color: 'var(--color-text-secondary)',
+                            fontStyle: 'italic',
+                            lineHeight: 1.8,
+                          }}
+                        >
+                          {t('qa.thinking')}
+                        </div>
+                      ) : record.answer ? (
+                        // 流式渲染：答案实时增长
+                        <div className={styles.qaAnswerText}>
+                          {record.answer}
+                          {/* 流式光标：只在最新一轮、且正在流式时出现 */}
+                          {streaming && idx === 0 && (
+                            <span className={styles.qaCursor} aria-hidden="true">
+                              ▍
+                            </span>
+                          )}
+                        </div>
+                      ) : record.status === 'failed' ? (
+                        // 审计 M4 之一：**失败**的终态轮次。没有这一支时它落到最后的
+                        // 兜底分支，显示「AI 正在思考...」—— 可它永远等不到 token 了。
+                        // 带上 `error_code` 才有可查的线索；旧数据的 code 可能为空。
+                        //
+                        // 这两支**排在 `record.answer` 之后**是刻意的：失败/中止也可能
+                        // 留下半截回答，把正文换成一句状态会把用户已经看到的文字弄丢。
+                        // 它们只接管"没有正文的终态"—— 那正是原来永远停在「思考中」的那类。
+                        <>
+                          <div className={styles.qaTurnFailed}>
+                            {record.errorCode
+                              ? t('qa.turnFailed', { code: record.errorCode })
+                              : t('qa.turnFailedUnknown')}
+                          </div>
+                          <RetryButton
+                            question={record.question}
+                            disabled={streaming}
+                            onRetry={() => void handleAsk(record.question, true)}
+                          />
+                        </>
+                      ) : record.status === 'aborted' ? (
+                        // 审计 M4 之二：**主动中止**的终态轮次。与"失败"分开措辞：
+                        // 失败是系统的问题，中止是用户自己的操作，混成一句话会让
+                        // 用户以为"我没停过，它怎么失败了"。
+                        <>
+                          <div className={styles.qaTurnFailed}>{t('qa.turnAborted')}</div>
+                          <RetryButton
+                            question={record.question}
+                            disabled={streaming}
+                            onRetry={() => void handleAsk(record.question, true)}
+                          />
+                        </>
+                      ) : (
+                        <div
+                          style={{
+                            color: 'var(--color-text-secondary)',
+                            fontStyle: 'italic',
+                            lineHeight: 1.8,
+                          }}
+                        >
+                          {t('qa.thinking')}
+                        </div>
+                      )}
+                      {/* 检索降级提示：向量检索没命中（`hybrid`）或向量服务不可用（`bm25_only`）
+                        都该如实告诉用户 —— 修复前只提示后者，而实际发生的是前者
+                        （见 utils/retrievalNotice.ts 与 overhaul-plan 附录 BN.4） */}
+                      {retrievalNotice(record.retrievalStatus) && (
+                        <p
+                          style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--color-warning)',
+                            marginTop: 'var(--space-sm)',
+                          }}
+                        >
+                          {retrievalNotice(record.retrievalStatus)}
+                        </p>
+                      )}
+                      {/* 引用来源（批次 E7：这一份**保留**，右栏是增强不是替代 —— 见文件头） */}
+                      {record.sources.length > 0 && (
+                        // 折叠用原生 `<details>`：键盘可达、读屏可播报，不需要自己维护
+                        // 展开状态（阶段 1 之前这段是永远展开的，长回答里会把正文挤出屏幕）。
+                        <details className={styles.qaSourcesFold}>
+                          <summary className={styles.qaSourcesSummary}>
+                            <Icon name="quote" size={16} />
+                            {t('qa.sourcesFold', { count: record.sources.length })}
+                          </summary>
+                          <div className={styles.qaSourcesBody}>
+                            <SourceLinks sources={record.sources} />
+                          </div>
+                        </details>
+                      )}
+
+                      {/* 每轮操作行：复制 / 重试。只在有正文时给「复制」，
+                        失败/中止的空轮次只有「重试」（下面那两支里已经渲染）。 */}
+                      {record.answer && (
+                        <div className={styles.qaActions}>
+                          <button
+                            type="button"
+                            className={`btn btn-ghost ${styles.qaActionButton}`}
+                            onClick={() => void handleCopyAnswer(record.answer)}
+                            aria-label={`${t('qa.copyAnswer')}：${record.question}`}
+                          >
+                            {t('qa.copyAnswer')}
+                          </button>
+                        </div>
+                      )}
+                      {record.provider && (
+                        <p
+                          style={{
+                            fontSize: '0.7rem',
+                            color: 'var(--color-text-secondary)',
+                            marginTop: 'var(--space-xs)',
+                            textAlign: 'right',
+                          }}
+                        >
+                          {t('qa.poweredBy', {
+                            provider: record.provider === 'glm' ? 'GLM' : 'DeepSeek',
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* ── 底部粘性输入区（DeepSeek 范式）──
+              放在消息流**之后**：`position: sticky; bottom: 0` 才会贴着视口底部；
+              放在前面时它随内容滚上去，用户必须滚到底才能提问。 */}
+          <div className={styles.qaComposer}>
+            <div className={styles.qaComposerInner}>
+              <textarea
+                className={`input ${styles.qaTextarea}`}
+                placeholder={t('qa.inputPlaceholder')}
+                value={question}
+                onChange={(e) => {
+                  setQuestion(e.target.value);
+                  // 自适应高度：先归零再按 scrollHeight 撑开，最多 200px
+                  const el = e.currentTarget;
+                  el.style.height = 'auto';
+                  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={streaming}
+                aria-label={t('qa.inputLabel')}
+                aria-describedby="qa-multiturn-hint"
+                // 与后端 `question` 的上限一致（4000）：超长让浏览器直接截断，
+                // 而不是发出去再吃一个 422 —— 后者会把整轮问答卡在错误分支里。
+                maxLength={4000}
+                rows={1}
+              />
+              <div className={styles.qaComposerFoot}>
+                <div className={styles.qaComposerHints}>
+                  <span id="qa-multiturn-hint" className={styles.qaHint}>
+                    {t('qa.multiturnHint', {
+                      turns: limits?.context_turns ?? QA_LIMITS.contextTurns,
+                    })}
+                  </span>
+                  {historyUsed > 0 && (
+                    <span className={styles.qaContextUsed}>
+                      {t('qa.contextUsed', { count: historyUsed })}
+                    </span>
+                  )}
+                  {error && <span className={styles.qaComposerError}>{error}</span>}
+                </div>
+                {streaming ? (
+                  <button type="button" className="btn btn-danger" onClick={handleStop}>
+                    {t('qa.stop')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    // 不能写 `onClick={handleAsk}`：它的第一个参数是**问题文本**
+                    // （「重试」复用它），直接把 MouseEvent 传进去会变成 `override`。
+                    onClick={() => void handleAsk()}
+                    disabled={!question.trim()}
+                  >
+                    {t('qa.ask')}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
-
-        {/* ── 常驻引用栏（批次 E7，Khoj 的 Reference Panel 做法）── */}
-        <aside className={styles.qaRail} aria-label={t('qa.sources')}>
-          <p className={styles.qaRailTitle}>
-            <Icon name="quote" size={16} />
-            {latestSources.length > 0
-              ? t('qa.sourcesCount', { count: latestSources.length })
-              : t('qa.sources')}
-          </p>
-          {latestSources.length > 0 ? (
-            <div className={styles.qaRailList}>
-              <SourceLinks sources={latestSources} />
-            </div>
-          ) : (
-            <p className={styles.qaRailEmpty}>{t('qa.sourcesRailHint')}</p>
-          )}
-        </aside>
       </div>
 
       <QAHistoryDrawer

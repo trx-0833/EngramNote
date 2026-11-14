@@ -49,32 +49,35 @@ function renderPage() {
   );
 }
 
-describe('QA 页的两栏骨架（批次 E7）', () => {
-  it('右栏是可跳转的 complementary 区域，名字叫「引用来源」', () => {
-    renderPage();
-
-    const rail = screen.getByRole('complementary', { name: '引用来源' });
-    expect(rail).toBeInTheDocument();
-    expect(rail.tagName).toBe('ASIDE');
-  });
-
-  it('★ 右栏与对话流并列，而不是被塞进主列', () => {
+describe('QA 页的骨架（2026-11-14 改版：两栏 + 底部输入）', () => {
+  it('引用不再有页面级 aside；来源属于每一轮回答自己的折叠', () => {
     const { container } = renderPage();
 
-    const rail = screen.getByRole('complementary', { name: '引用来源' });
+    // 常驻右栏已删除：页面里不该再有 complementary 区域（它曾把主区挤到 300px 宽）
+    expect(screen.queryByRole('complementary')).toBeNull();
+    // 主列存在，且消息流与输入框都在它里面（输入框不能再当 grid 的独立子项，
+    // 那正是改版前"主区被压成竖排文字"的根因）
     const main = container.querySelector(`.${styles.qaMain}`);
-
     expect(main).not.toBeNull();
-    expect(main?.contains(rail)).toBe(false); // 并列：主列里不该有它
-    // 两者的共同父节点才是那层两栏网格
-    expect(main?.parentElement).toBe(rail.parentElement);
+    expect(main?.querySelector(`.${styles.qaComposer}`)).not.toBeNull();
+    expect(main?.querySelector(`.${styles.qaThread}`)).not.toBeNull();
   });
 
-  it('还没提问时右栏给出一句说明，而不是一片空白', () => {
+  it('输入区是底部粘性的 textarea（多行自适应，而不是单行 input）', () => {
     renderPage();
+    const box = screen.getByPlaceholderText(/输入你的问题/);
+    expect(box.tagName).toBe('TEXTAREA');
+    expect(box).toHaveAttribute('rows', '1');
+  });
 
-    // 空右栏看起来像加载失败 —— 这里要的是一句"它将会装什么"
-    expect(screen.getByText(/会列在这里/)).toBeInTheDocument();
+  it('还没提问时给推荐问题，而不是一片空白', () => {
+    renderPage();
+    // 原来是"空右栏给一句说明"；现在空态由标题 + 推荐问题承担
+    expect(screen.getByText('输入问题开始问答')).toBeInTheDocument();
+    expect(screen.getByText('试试这样问')).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button', { name: /总结我最近的笔记|浮充和均充|帮我解释/ }),
+    ).toHaveLength(3);
   });
 
   it('输入区与空状态都还在（本批没有动问答流程本身）', () => {
