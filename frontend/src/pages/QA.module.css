@@ -99,7 +99,8 @@
   display: grid;
   /* `minmax(0, 1fr)` 而不是 `1fr`：网格子项默认 `min-width: auto`，
      会被长 URL / 长标题顶开，整页跟着横向滚动 */
-  grid-template-columns: minmax(0, 1fr) 300px;
+  /* 三栏（docs/qa-deepseek-redesign.md 阶段 1）：左栏会话（自身按 232px 定宽）| 主区 | 右栏引用 */
+  grid-template-columns: auto minmax(0, 1fr) 300px;
   gap: var(--space-lg);
   align-items: start;
 }
@@ -186,4 +187,214 @@
   color: var(--color-warning);
   line-height: 1.8;
   font-size: 0.9375rem;
+}
+/* ── 阶段 1：DeepSeek 范式（docs/qa-deepseek-redesign.md）──
+ *
+ * 消息流改"通栏杂志式"：用户气泡靠右、助手回答不套卡片边框（卡片会把长答案
+ * 框成一个小盒子，滚动时视觉噪音很大）。所有颜色走设计令牌，不写字面色值。
+ */
+
+.qaMsgAi {
+  padding: var(--space-sm) 0 var(--space-xs);
+  border-left: none;
+}
+
+.qaAnswerText {
+  line-height: 1.85;
+  white-space: pre-wrap;
+  /* 长英文/URL 不撑破容器 */
+  overflow-wrap: anywhere;
+}
+
+/* 流式光标：只做提示，不参与朗读（aria-hidden），颜色用次文本色避免抢注意力 */
+.qaCursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--color-text-secondary);
+  animation: qaCursorBlink 1s steps(2, start) infinite;
+}
+
+@keyframes qaCursorBlink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qaCursor {
+    animation: none;
+  }
+}
+
+/* 每轮操作行 */
+.qaActions {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+/* 操作按钮用**正文色**：`btn-ghost` 的次文本色 (#828299) 在面板底色 #faf9f7 上
+   只有 3.56:1（axe 实测），而这里不是"次要信息"而是可点的操作。
+   也没用 opacity 做"低调"——那会等比压低对比度。 */
+.qaActionButton {
+  color: var(--color-text);
+}
+
+/* 引用来源：原生 <details>，默认收起（长回答不再被来源列表挤到屏幕外） */
+.qaSourcesFold {
+  margin-top: var(--space-sm);
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--space-xs);
+  font-size: var(--text-xs);
+}
+
+.qaSourcesSummary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  /* 去掉 Safari 的默认三角后再手动加，保证与文本基线对齐 */
+  list-style: none;
+}
+
+.qaSourcesSummary::-webkit-details-marker {
+  display: none;
+}
+
+.qaSourcesSummary::before {
+  content: '▸';
+  font-size: 0.7em;
+}
+
+.qaSourcesFold[open] > .qaSourcesSummary::before {
+  content: '▾';
+}
+
+.qaSourcesBody {
+  padding-top: var(--space-xs);
+}
+
+/* ── 空态：标题 + 推荐问题 ── */
+
+.qaEmpty {
+  padding: var(--space-xl) 0;
+  text-align: center;
+}
+
+.qaEmptyTitle {
+  margin: 0 0 var(--space-xs);
+  font-size: 1.5rem;
+}
+
+.qaEmptyHint {
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.qaSuggestTitle {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qaSuggestions {
+  display: grid;
+  gap: var(--space-sm);
+  /* 宽屏三列、窄屏一列，不用写两个媒体查询 */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.qaSuggestion {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.qaSuggestion:hover {
+  border-color: var(--color-accent);
+}
+
+.qaSuggestion:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── 底部粘性输入区 ── */
+
+.qaComposer {
+  position: sticky;
+  bottom: 0;
+  /* 向下留白 + 渐变遮罩：滚到中间时上方内容不会"贴"在输入框边上 */
+  padding: var(--space-sm) 0 var(--space-md);
+  background: linear-gradient(to bottom, transparent, var(--color-bg) 28%);
+  z-index: 2;
+}
+
+.qaComposerInner {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--space-sm);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 6%);
+}
+
+/* textarea 而不是 input：多行问题（贴一段笔记再提问）在单行里看不见全貌 */
+.qaTextarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 200px;
+  resize: none;
+  border: none;
+  background: transparent;
+  font: inherit;
+  line-height: 1.6;
+  padding: var(--space-xs) var(--space-xs) 0;
+}
+
+.qaTextarea:focus {
+  outline: none;
+}
+
+/* 焦点环画在容器上：textarea 自身描边被去掉了，但键盘用户必须看得见焦点 */
+.qaComposerInner:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.qaComposerFoot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.qaComposerHints {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.qaComposerError {
+  font-size: var(--text-xs);
+  color: var(--color-error);
+}
+
+@media (max-width: 1023px) {
+  /* 窄屏：侧栏自己的模块已经隐藏，这里把栅格收成一列 */
+  .qaLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

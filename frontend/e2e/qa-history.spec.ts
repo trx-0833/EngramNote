@@ -52,7 +52,9 @@ test.describe('问答历史抽屉', () => {
     await installA11yStubs(page);
     await loginAs(page, '/qa');
 
-    const historyButton = page.getByRole('button', { name: '历史' });
+    // `exact: true`：Playwright 的 name 默认是**子串**匹配，而侧栏的折叠按钮
+    // 可访问名是「收起对话历史」——不加 exact 会同时命中两个按钮（strict 违规）。
+    const historyButton = page.getByRole('button', { name: '历史', exact: true });
     await expect(historyButton).toBeVisible();
 
     // 追问提示常驻可见（计划 §5.4 第 1 句）
@@ -77,7 +79,7 @@ test.describe('问答历史抽屉', () => {
     await installA11yStubs(page);
     await loginAs(page, '/qa');
 
-    await page.getByRole('button', { name: '历史' }).click();
+    await page.getByRole('button', { name: '历史', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 

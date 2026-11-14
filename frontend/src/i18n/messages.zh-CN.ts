@@ -1096,6 +1096,32 @@ const zhCN = {
     retentionHintForever: '问答历史会一直保留；删除后仍可能留在{weeks}周内的数据库备份里。',
     // 轮次数的**单位**：抽屉里原来只有一个裸数字（`· 2`），离开上下文就不可读。
     turnsCount: '{count} 轮',
+    // ── 问答页重构（DeepSeek 范式，docs/qa-deepseek-redesign.md 阶段 1）──
+    // 左栏按**日历天**分组（前端按 `updated_at` 算，服务端不参与）
+    groupToday: '今天',
+    groupWeek: '7 天内',
+    groupMonth: '30 天内',
+    groupOlder: '更早',
+    sidebarExpand: '展开对话历史',
+    sidebarCollapse: '收起对话历史',
+    searchLabel: '搜索对话',
+    searchPlaceholder: '搜索对话…',
+    searchNoMatch: '没有匹配的对话',
+    untitledSession: '未命名对话',
+    sidebarTruncated: '仅显示最近 {shown} 条（共 {total} 条）',
+    manageHistory: '管理（删除 / 清空）',
+    // 每条回答的操作行
+    copyAnswer: '复制回答',
+    copied: '已复制',
+    copyFailed: '复制失败，请手动选择文本',
+    // 来源改成可折叠（宽屏仍保留右栏）
+    sourcesFold: '引用来源（{count} 篇）',
+    // 空态推荐问题：点一下填进输入框，不直接发送（用户还能改）
+    suggestionTitle: '试试这样问',
+    suggestion1: '总结我最近的笔记里有哪些要点',
+    historyLoading: '载入中…',
+    suggestion2: '浮充和均充有什么区别？',
+    suggestion3: '帮我解释一个没看懂的概念',
     // 输入框 `maxLength` 之外的兜底文案（与后端 `question` 的 4000 字上限一致）
     contextUsed: '本轮参考了 {count} 轮上文',
     historyLoadFailed: '历史对话加载失败',

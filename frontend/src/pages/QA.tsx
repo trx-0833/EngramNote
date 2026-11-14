@@ -55,7 +55,6 @@ import {
 import { parseSSEStream } from '../utils/sse';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
-import EmptyState from '../components/EmptyState';
 import Icon from '../components/Icon';
 // 页面标题（visual-refactor-plan 批次 C1）：字号本就 1.5rem，观感不变。
 // 导航名「问答」与页内标题「智能问答」的不一致属于产品语义，本批只登记不改
@@ -68,6 +67,7 @@ import { useUrlState } from '../hooks/useUrlState';
 import { useToast } from '../components/Toast';
 import { QA_LIMITS } from '../constants/qaHistory';
 import QAHistoryDrawer from './qa/QAHistoryDrawer';
+import QAHistorySidebar from './qa/QAHistorySidebar';
 
 interface QARecord {
   question: string;
@@ -230,11 +230,31 @@ export default function QA() {
    *   （`NoteAskPanel`，`surface: 'note'`）里问的会话会混进这里的列表，
    *   点开是一条上下文对不上、正文里没有笔记引用的对话。
    */
-  const sessionsQuery = useQuery({
-    queryKey: ['qa', 'sessions'],
-    queryFn: ({ signal }) => getQaSessions({ page_size: 100, surface: 'global' }, { signal }),
-  });
-  const sessions = sessionsQuery.data?.items ?? [];
+  /**
+   * 侧栏搜索词（阶段 1 接上的已有后端能力 `keyword`）
+   *
+   * 防抖 300ms：每敲一个字就发一次请求既浪费也会让列表闪。
+   * 这里用"延迟提交进 queryKey"而不是 `useDeferredValue` —— 后者只降优先级，
+   * 仍然会为每个中间值发请求。
+   */
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedKeyword(keyword.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [keyword]);
+
+  /** 侧栏折叠状态：跨会话记住（用户既然收起了，下次进来还是收起的） */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('qa.sidebar.collapsed') === '1',
+  );
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('qa.sidebar.collapsed', next ? '1' : '0');
+      return next;
+    });
+  }
   /**
    * 三句提示里的数字：**运行时从接口拿，回退到常量**（2026-11-14 审计 minor）
    *
@@ -247,7 +267,19 @@ export default function QA() {
    * 仍在常量里的只剩 `backupWeeks` —— 后端不下发它。
    */
   // 后端随列表下发生效值（第二轮审计 MINOR-9）；老后端没有该字段时回退常量
+
+  const sessionsQuery = useQuery({
+    // `keyword` 进 key（否则改词不重新取数）
+    queryKey: ['qa', 'sessions', debouncedKeyword],
+    queryFn: ({ signal }) =>
+      getQaSessions(
+        { page_size: 100, surface: 'global', keyword: debouncedKeyword || undefined },
+        { signal },
+      ),
+  });
+  // 后端随列表下发生效值（第二轮审计 MINOR-9）；老后端没有该字段时回退常量
   const limits = sessionsQuery.data?.limits;
+  const sessions = sessionsQuery.data?.items ?? [];
 
   // 持有当前流式请求的 AbortController 与 reader，用于新问题中止旧流、停止生成与卸载清理
   const abortRef = useRef<AbortController | null>(null);
@@ -649,6 +681,17 @@ export default function QA() {
     }
   }
 
+  /** 复制一条回答（DeepSeek 每轮都有的操作） */
+  async function handleCopyAnswer(answer: string) {
+    try {
+      await navigator.clipboard.writeText(answer);
+      toastRef.current.info(tRef.current('qa.copied'));
+    } catch {
+      // 非 https / 无权限时 `clipboard` 会 reject：如实说"手动选"，不要假装成功
+      toastRef.current.error(tRef.current('qa.copyFailed'));
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -681,75 +724,48 @@ export default function QA() {
 
       {/* 两栏骨架（批次 E7）：左对话流 / 右常驻引用栏。窄屏收成一栏，见模块 CSS */}
       <div className={styles.qaLayout}>
+        <QAHistorySidebar
+          sessions={sessions}
+          loading={sessionsQuery.isLoading}
+          error={
+            sessionsQuery.error instanceof Error
+              ? sessionsQuery.error.message
+              : sessionsQuery.error
+                ? t('qa.historyLoadFailed')
+                : undefined
+          }
+          activeSessionId={sessionId || undefined}
+          keyword={keyword}
+          onKeywordChange={setKeyword}
+          onOpenSession={handleOpenSession}
+          onNewChat={handleNewChat}
+          onOpenManage={() => setDrawerOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebar}
+          total={sessionsQuery.data?.total ?? sessions.length}
+        />
         <div className={styles.qaMain}>
-          {/* 输入区域 */}
-          <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-            <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-              <input
-                type="text"
-                className="input"
-                placeholder={t('qa.inputPlaceholder')}
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={streaming}
-                aria-label={t('qa.inputLabel')}
-                aria-describedby="qa-multiturn-hint"
-                // 与后端 `question` 的上限一致（4000）：超长的输入让浏览器直接截断，
-                // 而不是发出去再吃一个 422 —— 后者会把整轮问答卡在错误分支里。
-                maxLength={4000}
-                style={{ flex: 1 }}
-              />
-              {streaming ? (
-                <button type="button" className="btn btn-danger" onClick={handleStop}>
-                  {t('qa.stop')}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  // 不能写 `onClick={handleAsk}`：`handleAsk` 的第一个参数是**问题文本**
-                  // （「重试」复用它），直接把 MouseEvent 传进去会变成 `override`。
-                  onClick={() => void handleAsk()}
-                  disabled={!question.trim()}
-                >
-                  {t('qa.ask')}
-                </button>
-              )}
-            </div>
-            {/*
-              ★ 追问提示（计划 §5.4 第 1 句）。
-
-              数字从 `GET /qa/sessions` 下发的 `limits.context_turns` 来，
-              **缺省时回退 `QA_LIMITS.contextTurns`**（那份常量镜像后端
-              `qa_context_max_turns`，由一条后端用例盯着两处一致）。
-              文案里写死 6 会在调参后变成谎言 —— 而且那时切的是"接口下发"这一层，
-              常量只是接口没给时的兜底。
-              `aria-describedby` 指向它：读屏用户在输入框上就能听到"追问会带上下文"。
-            */}
-            <p id="qa-multiturn-hint" className={styles.qaHint}>
-              {t('qa.multiturnHint', { turns: limits?.context_turns ?? QA_LIMITS.contextTurns })}
-            </p>
-            {/* 本轮实际参考了几轮（history_used > 0 才显示：首轮提示"参考了 0 轮"是噪音） */}
-            {historyUsed > 0 && (
-              <p className={styles.qaContextUsed}>{t('qa.contextUsed', { count: historyUsed })}</p>
-            )}
-            {error && (
-              <p
-                style={{
-                  color: 'var(--color-error)',
-                  marginTop: 'var(--space-sm)',
-                  fontSize: '0.875rem',
-                }}
-              >
-                {error}
-              </p>
-            )}
-          </div>
-
           {/* 问答历史 */}
           {history.length === 0 ? (
-            <EmptyState message={t('qa.empty')} description={t('qa.emptyHint')} />
+            // DeepSeek 范式空态：一句标题 + 三张推荐问题。点一下**填入**输入框而不是
+            // 直接发送 —— 用户多半想改一改再问，直接发出去反而要等一次失败。
+            <div className={styles.qaEmpty}>
+              <h2 className={styles.qaEmptyTitle}>{t('qa.empty')}</h2>
+              <p className={styles.qaEmptyHint}>{t('qa.emptyHint')}</p>
+              <p className={styles.qaSuggestTitle}>{t('qa.suggestionTitle')}</p>
+              <div className={styles.qaSuggestions}>
+                {(['qa.suggestion1', 'qa.suggestion2', 'qa.suggestion3'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={styles.qaSuggestion}
+                    onClick={() => setQuestion(t(key))}
+                  >
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             history.map((record, idx) => {
               // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
@@ -772,7 +788,7 @@ export default function QA() {
                     <div className={styles.qaUserBubble}>{record.question}</div>
                   </div>
                   {/* 回答 */}
-                  <div className={`card ${styles.qaAiCard}`}>
+                  <div className={styles.qaMsgAi}>
                     {isThinking ? (
                       // 思考中状态：首字到达前显示
                       <div
@@ -786,7 +802,15 @@ export default function QA() {
                       </div>
                     ) : record.answer ? (
                       // 流式渲染：答案实时增长
-                      <div style={{ lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{record.answer}</div>
+                      <div className={styles.qaAnswerText}>
+                        {record.answer}
+                        {/* 流式光标：只在最新一轮、且正在流式时出现 */}
+                        {streaming && idx === 0 && (
+                          <span className={styles.qaCursor} aria-hidden="true">
+                            ▍
+                          </span>
+                        )}
+                      </div>
                     ) : record.status === 'failed' ? (
                       // 审计 M4 之一：**失败**的终态轮次。没有这一支时它落到最后的
                       // 兜底分支，显示「AI 正在思考...」—— 可它永远等不到 token 了。
@@ -846,28 +870,31 @@ export default function QA() {
                     )}
                     {/* 引用来源（批次 E7：这一份**保留**，右栏是增强不是替代 —— 见文件头） */}
                     {record.sources.length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 'var(--space-md)',
-                          paddingTop: 'var(--space-sm)',
-                          borderTop: '1px solid var(--color-border)',
-                        }}
-                      >
-                        <p
-                          style={{
-                            fontSize: '0.75rem',
-                            color: 'var(--color-text-secondary)',
-                            marginBottom: 'var(--space-xs)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                          }}
-                        >
-                          {/* 批次 B3：引用来源补 `quote` 图标（一对上引号） */}
+                      // 折叠用原生 `<details>`：键盘可达、读屏可播报，不需要自己维护
+                      // 展开状态（阶段 1 之前这段是永远展开的，长回答里会把正文挤出屏幕）。
+                      <details className={styles.qaSourcesFold}>
+                        <summary className={styles.qaSourcesSummary}>
                           <Icon name="quote" size={16} />
-                          {t('qa.sources')}:
-                        </p>
-                        <SourceLinks sources={record.sources} />
+                          {t('qa.sourcesFold', { count: record.sources.length })}
+                        </summary>
+                        <div className={styles.qaSourcesBody}>
+                          <SourceLinks sources={record.sources} />
+                        </div>
+                      </details>
+                    )}
+
+                    {/* 每轮操作行：复制 / 重试。只在有正文时给「复制」，
+                        失败/中止的空轮次只有「重试」（下面那两支里已经渲染）。 */}
+                    {record.answer && (
+                      <div className={styles.qaActions}>
+                        <button
+                          type="button"
+                          className={`btn btn-ghost ${styles.qaActionButton}`}
+                          onClick={() => void handleCopyAnswer(record.answer)}
+                          aria-label={`${t('qa.copyAnswer')}：${record.question}`}
+                        >
+                          {t('qa.copyAnswer')}
+                        </button>
                       </div>
                     )}
                     {record.provider && (
@@ -889,6 +916,65 @@ export default function QA() {
               );
             })
           )}
+        </div>
+
+        {/* ── 底部粘性输入区（DeepSeek 范式）──
+              放在消息流**之后**：`position: sticky; bottom: 0` 才会贴着视口底部；
+              放在前面时它随内容滚上去，用户必须滚到底才能提问。 */}
+        <div className={styles.qaComposer}>
+          <div className={styles.qaComposerInner}>
+            <textarea
+              className={`input ${styles.qaTextarea}`}
+              placeholder={t('qa.inputPlaceholder')}
+              value={question}
+              onChange={(e) => {
+                setQuestion(e.target.value);
+                // 自适应高度：先归零再按 scrollHeight 撑开，最多 200px
+                const el = e.currentTarget;
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+              }}
+              onKeyDown={handleKeyDown}
+              disabled={streaming}
+              aria-label={t('qa.inputLabel')}
+              aria-describedby="qa-multiturn-hint"
+              // 与后端 `question` 的上限一致（4000）：超长让浏览器直接截断，
+              // 而不是发出去再吃一个 422 —— 后者会把整轮问答卡在错误分支里。
+              maxLength={4000}
+              rows={1}
+            />
+            <div className={styles.qaComposerFoot}>
+              <div className={styles.qaComposerHints}>
+                <span id="qa-multiturn-hint" className={styles.qaHint}>
+                  {t('qa.multiturnHint', {
+                    turns: limits?.context_turns ?? QA_LIMITS.contextTurns,
+                  })}
+                </span>
+                {historyUsed > 0 && (
+                  <span className={styles.qaContextUsed}>
+                    {t('qa.contextUsed', { count: historyUsed })}
+                  </span>
+                )}
+                {error && <span className={styles.qaComposerError}>{error}</span>}
+              </div>
+              {streaming ? (
+                <button type="button" className="btn btn-danger" onClick={handleStop}>
+                  {t('qa.stop')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  // 不能写 `onClick={handleAsk}`：它的第一个参数是**问题文本**
+                  // （「重试」复用它），直接把 MouseEvent 传进去会变成 `override`。
+                  onClick={() => void handleAsk()}
+                  disabled={!question.trim()}
+                >
+                  {t('qa.ask')}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── 常驻引用栏（批次 E7，Khoj 的 Reference Panel 做法）── */}

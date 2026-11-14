@@ -709,6 +709,11 @@ async function findFakeAffordances(page: Page): Promise<string[]> {
       if (tabindex !== null) return Number(tabindex) >= 0;
       const tag = el.tagName.toLowerCase();
       if (tag === 'a' || tag === 'area') return el.hasAttribute('href');
+      // `summary` 是**原生**可聚焦控件：它在 Tab 序列里，Enter/Space 都能展开/收起
+      // `<details>`（HTML 规范）。原来这里漏了它，于是"手型光标 + summary"被误报成
+      // F-37 ①（2026-11-14 阶段 1 把来源改成 `<details>` 时踩到）。
+      // 补的是**扫描器的漏判**，不放宽任何判据：① 仍然要求区域内真有可 Tab 的控件。
+      if (tag === 'summary') return true;
       return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea';
     };
     const NATIVE_INTERACTIVE = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary']);
@@ -1653,7 +1658,13 @@ test.describe('可访问性审计（axe-core，真 Chromium）', () => {
         await page.getByPlaceholder(/输入你的问题/).fill('浮充和均充有什么区别？');
         await page.getByRole('button', { name: '提问' }).click();
         // **流结束**的标记是引用来源与页脚，不是"AI 正在思考..."（见上）
-        await expect(page.getByText('引用来源:')).toBeVisible();
+        //
+        // 阶段 1 起来源是 `<details>`（默认收起）：先等 summary 出现，再**展开**，
+        // 否则下面那条"引用来源那一行可以 Tab 到"的走查会找不到链接 ——
+        // 收起状态下它本来就不该被扫描（axe 也扫不到 display:none 的内容）。
+        const sourcesSummary = page.getByText(/引用来源（\d+ 篇）/);
+        await expect(sourcesSummary).toBeVisible();
+        await sourcesSummary.click();
         await expect(
           page.getByText('浮充是长期恒压运行，用于补偿自放电；均充是短时升压校正。'),
         ).toBeVisible();
