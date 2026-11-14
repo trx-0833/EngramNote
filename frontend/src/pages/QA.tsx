@@ -53,6 +53,7 @@ import {
   type QATurnItem,
 } from '../api/qaHistory';
 import { parseSSEStream } from '../utils/sse';
+import { renderMarkdown } from '../utils/markdown';
 import { renameQaSession } from '../api/qaHistory';
 import { retrievalNotice } from '../utils/retrievalNotice';
 import { useThrottledStream } from '../hooks/useStreamAnswer';
@@ -243,6 +244,11 @@ export default function QA() {
   const [keyword, setKeyword] = useState('');
   /** `has_more`（阶段 2）：详情接口直接给，前端不靠 `len==limit` 猜 */
   const [hasMoreTurns, setHasMoreTurns] = useState(false);
+  /**
+   * 强制重载计数：`setSessionId(同一个 id)` 不会触发 effect，而用户点同一会话
+   * 想「再进一次」（尤其上一次加载失败过）是合理操作。改这个 key 才能真的重跑。
+   */
+  const [reloadToken, setReloadToken] = useState(0);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   useEffect(() => {
@@ -349,6 +355,7 @@ export default function QA() {
     // 那个"已载入"标记挡不住"刚判定删除、URL 还没清掉"那一帧把旧轮次拉回来。
     if (goneSessionsRef.current.has(sessionId)) return;
     if (loadedSessionRef.current === sessionId) return;
+    // reloadToken 进来是为了让「再点同一会话」能重跑（见它的声明处）
     // 先记账再发请求：请求失败时也不该在下一次渲染里重试成一个死循环
     loadedSessionRef.current = sessionId;
     let cancelled = false;
@@ -390,13 +397,18 @@ export default function QA() {
           );
           return;
         }
+        // ★ 失败必须复位（2026-11-14 用户上报「刷新后点历史进不去」）：
+        // 上面是**先记账再发请求**（防自旋），但请求失败后标记仍留着，
+        // 于是这个会话之后每次点击都被 `loadedSessionRef.current === sessionId`
+        // 直接挡掉 —— 点了没反应、也没有任何提示。
+        loadedSessionRef.current = '';
         setError(err instanceof Error ? err.message : tRef.current('qa.historyLoadFailed'));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, streaming, setSessionId]);
+  }, [sessionId, streaming, setSessionId, reloadToken]);
 
   /** 「新建对话」：清空 URL 上的会话与当前轮次（下一问自动开新会话） */
   function handleNewChat() {
@@ -416,6 +428,17 @@ export default function QA() {
     stopActiveStream();
     setDrawerOpen(false);
     setError('');
+    // ★ 三个"清"缺一不可（2026-11-14 用户上报「刷新后点历史进不去」）：
+    // 1. `loadedSessionRef` 清空 —— 否则再点**同一个**会话时，载入 effect 会以
+    //    "已载入"为由直接 return，页面停在空屏或旧内容且没有任何提示；
+    // 2. `history` 清空 —— 否则详情还没回来时屏幕上留着上一个会话的问答；
+    // 3. `reloadToken` 自增 —— `setSessionId(同一个 id)` 不会触发 effect，
+    //    没有这步"再进一次"永远无效。
+    setHistory([]);
+    setHistoryUsed(0);
+    setHasMoreTurns(false);
+    loadedSessionRef.current = '';
+    setReloadToken((n) => n + 1);
     setSessionId(nextSessionId);
   }
 
@@ -835,9 +858,12 @@ export default function QA() {
                 </div>
               </div>
             ) : (
-              history.map((record, idx) => {
+              // 倒序渲染：`history[0]` 是最新，但用户期望它出现在**下面**
+              [...history].reverse().map((record, idx) => {
                 // 第一条记录且处于"思考中"阶段（loading=true 且尚未收到任何 token）
-                const isThinking = idx === 0 && loading && record.answer === '';
+                // 倒序渲染之后，最新那条在末尾
+                const isLatest = idx === history.length - 1;
+                const isThinking = isLatest && loading && record.answer === '';
                 return (
                   // key 必须**稳定**：原实现把 answer 的前 20 字符拼进 key，
                   // 于是答案每增长约 20 字符 key 就变化一次，React 会把整条记录
@@ -874,9 +900,15 @@ export default function QA() {
                       ) : record.answer ? (
                         // 流式渲染：答案实时增长
                         <div className={styles.qaAnswerText}>
-                          {record.answer}
+                          {/* Markdown 渲染（2026-11-14 用户上报「还是原始格式」）：
+                              renderMarkdown 内部是 marked + DOMPurify（项目统一出口）——
+                              模型输出属于不可信内容，不能直接塞进 DOM。 */}
+                          <div
+                            className={styles.qaMarkdown}
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(record.answer) }}
+                          />
                           {/* 流式光标：只在最新一轮、且正在流式时出现 */}
-                          {streaming && idx === 0 && (
+                          {streaming && isLatest && (
                             <span className={styles.qaCursor} aria-hidden="true">
                               ▍
                             </span>

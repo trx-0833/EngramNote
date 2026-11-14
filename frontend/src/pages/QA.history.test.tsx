@@ -35,7 +35,7 @@
  * | `2026-11-14 审计 major：删掉当前会话后不能继续显示它` | 删/清空后要清 `?s=`（否则下一个问题被 404 吞掉） |
  * | `2026-11-14 审计 minor：提示里的数字来自接口（常量只兜底）` | `limits` 下发后，提示里的数字以接口为准 |
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -696,5 +696,54 @@ describe('答案不能重复拼接', () => {
     const text = container.textContent ?? '';
     expect(text.match(/重复检测标记MARKER/g) ?? []).toHaveLength(1);
     expect(text).toContain('重复检测标记MARKER第二段结尾');
+  });
+});
+
+// ── 2026-11-14 用户上报的三条 ─────────────────────────────────────────────
+
+describe('用户上报：markdown / 追加方向 / 重新进入', () => {
+  it('答案按 Markdown 渲染（`**加粗**` 变成 <strong>，而不是原样显示星号）', async () => {
+    getQaSession.mockResolvedValue(detail([turn({ answer: '**浮充**是长期恒压运行' })]));
+    renderPage('/qa?s=sess-1');
+
+    // 文本在 <strong> 里；若没走 renderMarkdown，屏上会是带星号的一整串
+    const bold = await screen.findByText('浮充');
+    expect(bold.tagName).toBe('STRONG');
+    expect(screen.queryByText(/\*\*浮充\*\*/)).toBeNull();
+  });
+
+  it('最新一轮追加在**下面**（第一条在前、最后一条在后）', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({ id: 't1', question: '第一问', answer: '第一答' }),
+        turn({ id: 't2', question: '第二问', answer: '第二答' }),
+      ]),
+    );
+    renderPage('/qa?s=sess-1');
+
+    const first = await screen.findByText('第一问');
+    const second = screen.getByText('第二问');
+    // DOM 顺序：second 出现在 first 之后（追加在底部）
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('加载失败之后，再点同一个会话会重新请求（不会永久卡在"点了没反应"）', async () => {
+    getQaSession.mockRejectedValueOnce(new Error('网络断了'));
+    getQaSession.mockResolvedValue(detail([turn({ answer: '这次加载出来了' })]));
+    const { container } = renderPage('/qa?s=sess-1');
+
+    // 第一次：失败（页面上留一行错误）
+    await waitFor(() => expect(getQaSession).toHaveBeenCalledTimes(1));
+
+    // 从侧栏点同一个会话（`loadedSessionRef` 若没复位，这里会一次请求都不发）
+    // 必须是 button：[class*=item] 会先命中侧栏的 <ul class=...items>，点它没有 onClick
+    const item = container.querySelector('button[class*="item"]') as HTMLElement | null;
+    expect(item).not.toBeNull();
+    act(() => {
+      item?.click();
+    });
+
+    await waitFor(() => expect(getQaSession).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('这次加载出来了')).toBeInTheDocument();
   });
 });

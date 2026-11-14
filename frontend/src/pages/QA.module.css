@@ -212,7 +212,7 @@
 
 .qaAnswerText {
   line-height: 1.85;
-  white-space: pre-wrap;
+  /* 不再 pre-wrap：Markdown 已把换行变成块级元素，留着会多出一堆空行 */
   /* 长英文/URL 不撑破容器 */
   overflow-wrap: anywhere;
 }
@@ -429,4 +429,72 @@
   justify-content: flex-end;
   gap: var(--space-sm);
   padding-right: 2px;
+}
+/* ── Markdown 答案（2026-11-14）──
+   模型输出经 marked 渲染成 HTML；这里只补"块级元素在气泡里的呼吸感"。
+   原来整段是 `white-space: pre-wrap` 的纯文本，所以 `**加粗**`、列表、代码块
+   都是原样显示 —— 那是用户上报的「markdown 依旧是原始格式」。 */
+.qaMarkdown {
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.qaMarkdown > :first-child {
+  margin-top: 0;
+}
+
+.qaMarkdown > :last-child {
+  margin-bottom: 0;
+}
+
+.qaMarkdown p {
+  margin: 0 0 var(--space-sm);
+}
+
+.qaMarkdown ul,
+.qaMarkdown ol {
+  margin: 0 0 var(--space-sm);
+  padding-left: 1.4em;
+}
+
+.qaMarkdown li + li {
+  margin-top: 2px;
+}
+
+.qaMarkdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.05));
+  font-size: 0.92em;
+}
+
+.qaMarkdown pre {
+  margin: 0 0 var(--space-sm);
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.05));
+  overflow-x: auto;
+}
+
+.qaMarkdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.qaMarkdown blockquote {
+  margin: 0 0 var(--space-sm);
+  padding-left: var(--space-sm);
+  border-left: 3px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.qaMarkdown table {
+  border-collapse: collapse;
+  margin: 0 0 var(--space-sm);
+}
+
+.qaMarkdown th,
+.qaMarkdown td {
+  border: 1px solid var(--color-border-light);
+  padding: 4px 8px;
 }
