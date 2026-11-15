@@ -48,8 +48,8 @@ _ENV_RE = re.compile(r"^#?\s*([A-Z][A-Z0-9_]{2,})\s*=", re.M)
 
 #: 这些字段由代码内部推导，不需要用户配置
 NOT_USER_FACING = {
-    "app_name",           # 固定为 EngramNote
-    "api_prefix",         # 路由前缀，改动需同步前端
+    "app_name",  # 固定为 EngramNote
+    "api_prefix",  # 路由前缀，改动需同步前端
 }
 
 #: 追加时的分组建议（关键词 → 分组标题），未命中的进"其他"
@@ -106,10 +106,12 @@ def append_missing(missing: list[str]) -> int:
     for field in missing:
         buckets.setdefault(group_of(field), []).append(field)
 
-    chunks = ["\n# ---- 由 scripts/gen_env_example.py 补齐的配置项（阶段 2.3）----",
-              "# 这些字段此前只在 app/config.py 里存在，模板未登记 —— 访客因此看不出",
-              "# 系统有配额、有调度器切换、有备份保留策略。默认值即代码默认值。",
-              ""]
+    chunks = [
+        "\n# ---- 由 scripts/gen_env_example.py 补齐的配置项（阶段 2.3）----",
+        "# 这些字段此前只在 app/config.py 里存在，模板未登记 —— 访客因此看不出",
+        "# 系统有配额、有调度器切换、有备份保留策略。默认值即代码默认值。",
+        "",
+    ]
     for title, items in buckets.items():
         chunks.append(f"# ---- {title} ----")
         for field in items:
@@ -122,6 +124,15 @@ def append_missing(missing: list[str]) -> int:
             # 于是下一次 --append 会把它当缺失项**再追加一遍**（实测发生过）。
             chunks.append(f"# {field.upper()}={value}")
         chunks.append("")
+
+    # 幂等（2026-11-15 审计 m7）：先把上一次追加的自动段落整段删掉再写，
+    # 否则每跑一次 `--append` 就多一段"由脚本补齐"的横幅（实测出现 3 份）。
+    current = ENV_EXAMPLE.read_text(encoding="utf-8")
+    marker = "\n# ---- 由 scripts/gen_env_example.py 补齐的配置项（阶段 2.3）----"
+    cut = current.find(marker)
+    if cut >= 0:
+        current = current[:cut].rstrip() + "\n"
+        ENV_EXAMPLE.write_text(current, encoding="utf-8")
 
     with open(ENV_EXAMPLE, "a", encoding="utf-8") as fh:
         fh.write("\n".join(chunks) + "\n")

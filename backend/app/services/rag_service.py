@@ -671,8 +671,14 @@ class RAGService:
 
     @staticmethod
     def _chunk_identity(item: Dict[str, Any]) -> tuple:
-        """同一条 chunk 的稳定标识（融合层与词法层的字段集合不同）"""
-        return item.get("chunk_id") or (item.get("note_id"), (item.get("content") or "")[:200])
+        """同一条 chunk 的稳定标识（融合层与词法层的字段集合不同）
+
+        ⚠️ 兜底比较必须**两侧截断到同一长度**（2026-11-15 审计 m1）：融合层的
+        `content` 是完整正文，BM25 兜底给的可能是另一种长度；前 200 字相同也会判成
+        不同条目 —— 同一条 chunk 于是被保底插入两次（上下文里出现两遍）。
+        80 字既够区分相邻块，又不受截断差异影响。
+        """
+        return item.get("chunk_id") or (item.get("note_id"), (item.get("content") or "")[:80])
 
     def _ensure_lexical_hits(
         self,
@@ -864,9 +870,15 @@ class RAGService:
         # 统一语料（阶段 2.3）后每个结果天然带 `chunk_id`，按 chunk 去重既无重复
         # 又能逐段对应；同一笔记保留多个引用是**有意的** ——
         # 一段长资料里不同位置各自回答了问题的不同侧面。
+        # 排序键：先按**笔记标题**，再按篇内位置（2026-11-15 审计 m4）。
+        # 原来按 `note_id`（UUID）："按原文顺序读"只在单篇内成立，跨篇顺序随机，
+        # 用户对着 `[1][2][3]` 核对时毫无规律。标题缺失时回落到 id 保证稳定。
         ordered = sorted(
             (it for it in fused_results if it.get("note_id") is not None),
-            key=lambda it: (it["note_id"], it.get("char_start") or 0),
+            key=lambda it: (
+                it.get("note_title") or it.get("title") or it["note_id"],
+                it.get("char_start") or 0,
+            ),
         )
 
         # 标题缺失时回查（BM25 结果不带 note_title）

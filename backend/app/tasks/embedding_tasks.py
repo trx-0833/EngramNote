@@ -322,6 +322,7 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
     from sqlalchemy import func, or_, select, update
 
     from ..models.chunk import Chunk, pack_vector
+    from ..models.note import Note
     from .common import get_sync_session
 
     session_factory = get_sync_session()
@@ -336,7 +337,14 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
                         Chunk.has_embedding.is_(False),
                         Chunk.embedding_model.is_(None),
                         Chunk.embedding_model != expected_model,
-                    )
+                    ),
+                    # 与 _pending_counts 一致：回收站里的不算待补（审计 m6）
+                    Chunk.note_id.notin_(
+                        select(Note.id).where(
+                            Note.user_id == Chunk.user_id,
+                            Note.trashed_at.is_not(None),
+                        )
+                    ),
                 )
                 .order_by(Chunk.note_id, Chunk.index)
                 .limit(limit)
@@ -471,7 +479,14 @@ async def _pending_counts() -> Dict[str, int]:
             Chunk.embedding_model.is_(None),
             Chunk.embedding_model != expected_model,
         )
-        chunks = (await session.execute(select(func.count()).select_from(Chunk).where(needs_embed))).scalar_one()
+        # 回收站笔记的 chunk 不算待补（2026-11-15 审计 m6）：卡片计数已排除，
+        # chunk 这边没有 —— 结果是持续给已删除内容算向量，纯浪费算力。
+        in_trash = select(Note.id).where(Note.user_id == Chunk.user_id, Note.trashed_at.is_not(None))
+        chunks = (
+            await session.execute(
+                select(func.count()).select_from(Chunk).where(needs_embed, Chunk.note_id.notin_(in_trash))
+            )
+        ).scalar_one()
         cards = (
             await session.execute(
                 select(func.count())
