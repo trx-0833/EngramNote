@@ -1385,6 +1385,8 @@ const en = {
       'Keyword search was used this time (semantic search is unavailable, so results may be less precise)',
     hybrid:
       'Only keyword search was used this time (vector search found nothing — recently imported material may not be indexed yet)',
+    vectorDimMismatch:
+      'Vector search is temporarily unavailable (the index does not match the current model), so only keyword search was used; the index needs rebuilding',
   },
 
   misc: {

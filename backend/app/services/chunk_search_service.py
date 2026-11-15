@@ -53,6 +53,7 @@ async def search_chunks(
     *,
     top_k: int = 5,
     exclude_note_ids: Optional[set[str]] = None,
+    stats: Optional[Dict[str, int]] = None,
 ) -> List[Dict[str, Any]]:
     """在用户的 chunk 向量上做余弦检索
 
@@ -109,6 +110,17 @@ async def search_chunks(
             sim += a * b
         scored.append((sim, row))
 
+    if stats is not None:
+        # 2026-11-15（审计 blocker #1）：**把跳过数交给调用方**。
+        # 原来只有一行 warning，上层拿不到"整批被跳过"这个事实，
+        # 于是 `retrieval_status` 落成 `hybrid`（前端解释成"资料没建索引"），
+        # 而用户看到的是"没找到"——两种完全不同的故障被压成同一句话。
+        stats["scanned"] = len(rows)
+        stats["skipped_dim"] = skipped_dim
+        stats["matched_dim"] = len(rows) - skipped_dim
+        if rows and skipped_dim == len(rows):
+            stats["all_skipped"] = 1
+
     if skipped_dim:
         logger.warning(
             "向量检索跳过 %d 条维度不符的 chunk（库中维度混杂会得到无意义的相似度）",
@@ -143,8 +155,6 @@ async def embedded_model_names(db: AsyncSession, user_id: str) -> set[str]:
     from sqlalchemy import distinct
 
     result = await db.execute(
-        select(distinct(Chunk.embedding_model)).where(
-            Chunk.user_id == user_id, Chunk.has_embedding.is_(True)
-        )
+        select(distinct(Chunk.embedding_model)).where(Chunk.user_id == user_id, Chunk.has_embedding.is_(True))
     )
     return {m for (m,) in result.all() if m}

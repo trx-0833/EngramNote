@@ -67,6 +67,7 @@ def _get_embedding_service():
     if _embedding_service is None:
         # 延迟导入，避免在模块加载时就触发 sentence-transformers 依赖检查
         from ..services.embedding_service import EmbeddingService
+
         _embedding_service = EmbeddingService()
     return _embedding_service
 
@@ -199,16 +200,18 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
 
     session_factory = get_sync_session()
     async with session_factory() as session:
-        rows = (await session.execute(
-            select(KnowledgeCard.id, KnowledgeCard.title, KnowledgeCard.content)
-            .where(
-                KnowledgeCard.user_id == user_id,
-                KnowledgeCard.has_embedding.is_(False),
-                Note.not_trashed(KnowledgeCard.note_id),
+        rows = (
+            await session.execute(
+                select(KnowledgeCard.id, KnowledgeCard.title, KnowledgeCard.content)
+                .where(
+                    KnowledgeCard.user_id == user_id,
+                    KnowledgeCard.has_embedding.is_(False),
+                    Note.not_trashed(KnowledgeCard.note_id),
+                )
+                .order_by(KnowledgeCard.updated_at.desc())
+                .limit(limit)
             )
-            .order_by(KnowledgeCard.updated_at.desc())
-            .limit(limit)
-        )).all()
+        ).all()
 
         if not rows:
             return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0}
@@ -237,17 +240,25 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
             embedded += 1
         await session.commit()
 
-        remaining = (await session.execute(
-            select(func.count()).select_from(KnowledgeCard).where(
-                KnowledgeCard.user_id == user_id,
-                KnowledgeCard.has_embedding.is_(False),
-                Note.not_trashed(KnowledgeCard.note_id),
+        remaining = (
+            await session.execute(
+                select(func.count())
+                .select_from(KnowledgeCard)
+                .where(
+                    KnowledgeCard.user_id == user_id,
+                    KnowledgeCard.has_embedding.is_(False),
+                    Note.not_trashed(KnowledgeCard.note_id),
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
 
     logger.info(
         "embed_cards: user=%s 扫描 %d 张 → 写入 %d、失败 %d，剩余 %d",
-        user_id, len(rows), embedded, failed, remaining,
+        user_id,
+        len(rows),
+        embedded,
+        failed,
+        remaining,
     )
     return {
         "scanned": len(rows),
@@ -308,19 +319,29 @@ def embed_chunks(limit: int = EMBED_CHUNKS_BATCH) -> Dict[str, int]:
 
 async def _embed_chunks_async(limit: int) -> Dict[str, int]:
     """`embed_chunks` 的异步主体（要读写库，因此必须跑在任务事件循环里）"""
-    from sqlalchemy import func, select, update
+    from sqlalchemy import func, or_, select, update
 
     from ..models.chunk import Chunk, pack_vector
     from .common import get_sync_session
 
     session_factory = get_sync_session()
     async with session_factory() as session:
-        rows = (await session.execute(
-            select(Chunk.id, Chunk.content)
-            .where(Chunk.has_embedding.is_(False))
-            .order_by(Chunk.note_id, Chunk.index)
-            .limit(limit)
-        )).all()
+        # 与 `_pending_counts` 同一判据：模型不符的也要重算
+        expected_model = settings.embedding_model
+        rows = (
+            await session.execute(
+                select(Chunk.id, Chunk.content)
+                .where(
+                    or_(
+                        Chunk.has_embedding.is_(False),
+                        Chunk.embedding_model.is_(None),
+                        Chunk.embedding_model != expected_model,
+                    )
+                )
+                .order_by(Chunk.note_id, Chunk.index)
+                .limit(limit)
+            )
+        ).all()
 
         if not rows:
             return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0, "model": ""}
@@ -328,6 +349,25 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
         texts = [content or "" for _cid, content in rows]
         vectors = encode_text(texts)
         model_name = _model_name()
+
+        # 降级态**拒写**（审计 blocker #2）：内存不足时 `EmbeddingService` 会从
+        # bge-m3 降到 bge-small-zh（1024 → 512 维）。照写会让库里出现第二种维度，
+        # 检索时整批跳过 —— 而且有上面那条判据之后会变成"每轮重写一遍"。
+        # 这里的取舍：**宁可不补，也不要写进不同维度**（写错比不写更难发现）。
+        if model_name and model_name != settings.embedding_model:
+            logger.warning(
+                "嵌入模型已降级为 %s（配置 %s），本轮拒绝写入以免产生混杂维度；请释放内存后重跑 backfill",
+                model_name,
+                settings.embedding_model,
+            )
+            return {
+                "scanned": len(rows),
+                "embedded": 0,
+                "failed": 0,
+                "remaining": len(rows),
+                "model": model_name,
+                "skipped_reason": "fallback_model",
+            }
 
         embedded = failed = 0
         # strict=True：`encode_text` 保证一条文本一个向量，长度不等说明任务坏了，
@@ -349,13 +389,17 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
             embedded += 1
         await session.commit()
 
-        remaining = (await session.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
-        )).scalar_one()
+        remaining = (
+            await session.execute(select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False)))
+        ).scalar_one()
 
     logger.info(
         "embed_chunks: 扫描 %d 条 → 写入 %d、失败 %d，剩余 %d（模型 %s）",
-        len(rows), embedded, failed, remaining, model_name,
+        len(rows),
+        embedded,
+        failed,
+        remaining,
+        model_name,
     )
     return {
         "scanned": len(rows),
@@ -409,7 +453,7 @@ def backfill_embeddings(limit: int = BACKFILL_ROUND_LIMIT) -> Dict[str, object]:
 
 async def _pending_counts() -> Dict[str, int]:
     """两类待补数量（chunk 全库、卡片按用户）"""
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     from ..models.chunk import Chunk
     from ..models.knowledge_card import KnowledgeCard
@@ -418,15 +462,26 @@ async def _pending_counts() -> Dict[str, int]:
 
     session_factory = get_sync_session()
     async with session_factory() as session:
-        chunks = (await session.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
-        )).scalar_one()
-        cards = (await session.execute(
-            select(func.count()).select_from(KnowledgeCard).where(
-                KnowledgeCard.has_embedding.is_(False),
-                Note.not_trashed(KnowledgeCard.note_id),
+        # 2026-11-15（审计 blocker #2）：**模型不符也算待补**。
+        # 只看 `has_embedding` 时，"512 维但 has_embedding=1"的行永远不会被重算，
+        # 库里两种维度永久混存，检索每次整批跳过其中一种。
+        expected_model = settings.embedding_model
+        needs_embed = or_(
+            Chunk.has_embedding.is_(False),
+            Chunk.embedding_model.is_(None),
+            Chunk.embedding_model != expected_model,
+        )
+        chunks = (await session.execute(select(func.count()).select_from(Chunk).where(needs_embed))).scalar_one()
+        cards = (
+            await session.execute(
+                select(func.count())
+                .select_from(KnowledgeCard)
+                .where(
+                    KnowledgeCard.has_embedding.is_(False),
+                    Note.not_trashed(KnowledgeCard.note_id),
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
     return {"chunks": int(chunks), "cards": int(cards)}
 
 
@@ -440,12 +495,18 @@ async def _card_user_ids() -> List[str]:
 
     session_factory = get_sync_session()
     async with session_factory() as session:
-        rows = (await session.execute(
-            select(distinct(KnowledgeCard.user_id)).where(
-                KnowledgeCard.has_embedding.is_(False),
-                Note.not_trashed(KnowledgeCard.note_id),
+        rows = (
+            (
+                await session.execute(
+                    select(distinct(KnowledgeCard.user_id)).where(
+                        KnowledgeCard.has_embedding.is_(False),
+                        Note.not_trashed(KnowledgeCard.note_id),
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
     return [uid for uid in rows if uid]
 
 
@@ -481,8 +542,7 @@ async def _backfill_embeddings_async(limit: int) -> Dict[str, object]:
     else:
         result["cards"] = {"skipped": True}
 
-    logger.info("backfill_embeddings: 待补 chunk=%d 卡片=%d → %s",
-                pending["chunks"], pending["cards"], result)
+    logger.info("backfill_embeddings: 待补 chunk=%d 卡片=%d → %s", pending["chunks"], pending["cards"], result)
     return result
 
 
@@ -504,4 +564,3 @@ def _model_name() -> Optional[str]:
     """
     service = _get_embedding_service()
     return getattr(service, "loaded_model_name", None) or settings.embedding_model
-

@@ -834,14 +834,23 @@ async def ask_question_stream(
                     retrieval_query = req.question
 
             # 2. 首事件下发检索降级状态 + 会话（前端据此写 ?s= 与提示"参考了 N 轮上文"）
-            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider, 'session_id': session_id, 'history_used': context_turns}, ensure_ascii=False)}\n\n"
+            # `grounded`：本轮回答有没有检索依据（前端据此标注"未基于你的笔记"）
+            yield f"event: meta\ndata: {json.dumps({'retrieval_status': retrieval_status, 'provider': provider, 'session_id': session_id, 'history_used': context_turns, 'grounded': bool(context.strip())}, ensure_ascii=False)}\n\n"
 
             # 3. 构建 messages（有历史时把最近几轮插在 system 与当前问之间）
             llm_service = LLMService()
-            if not context.strip():
+            # 无检索依据时**不许凭自有知识作答**（2026-11-15 审计 blocker #3）：
+            # 原来这里让模型"用你自己的知识来回答"，于是用户看到一段像模像样的答案，
+            # 却以为那是从自己笔记里查到的 —— 这比直接说"没找到"危险得多。
+            # 同一问题的非流式端点（`/ask`）一直答"没找到"，两个端点必须一致。
+            grounded = bool(context.strip())
+            if not grounded:
                 system_prompt = (
-                    "你是一个知识渊博的学习助手。用户的问题没有在 TA 的笔记中找到相关信息，"
-                    "请用你自己的知识来回答这个问题。回答时请说明这是基于你的通用知识。"
+                    "你是一个学习助手。用户的问题在 TA 的笔记中**没有检索到任何相关片段**。\n"
+                    "回答原则：\n"
+                    "1. 如实说明「没有在你的笔记中找到相关内容」，不要编造笔记里的细节；\n"
+                    "2. **不要**用你自己的通用知识把答案说得像是笔记里的内容；\n"
+                    "3. 可以给一句简短的下一步建议（换个问法、确认资料是否已导入或索引是否就绪）。"
                 )
                 user_content = req.question
             else:

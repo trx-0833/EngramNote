@@ -12,6 +12,7 @@ import { translate } from '../i18n/translate';
  * | `full_vector` | 问题编码成功 + 向量检索有命中 | 不用提示 |
  * | `hybrid` | 问题编码成功，但**向量检索 0 条命中** —— 本次实际只用关键词 | 该提示：答案只靠关键词匹配 |
  * | `bm25_only` | **问题**编码失败（向量服务不可用），只剩关键词 | 该提示：向量服务坏了 |
+ * | `vector_dim_mismatch` | 编码成功，但库里向量的维度**全部对不上**（模型与索引不一致）| 该提示：向量检索不可用，需重建索引 |
  *
  * ## 这一轮修的是什么
  *
@@ -34,6 +35,10 @@ const NOTICES: Record<string, string> = {
   // 与改造前的文案**逐字一致**：这条不是本轮新增的，只是搬进了这里
   bm25_only: translate('retrievalNotice.bm25Only'),
   hybrid: translate('retrievalNotice.hybrid'),
+  // 2026-11-15（审计 blocker #1）：查询向量与库里向量**维度全不符**。
+  // 这是「模型与索引不一致」，不是「没命中」—— 必须与 hybrid 分开说，
+  // 否则用户会以为资料里没有这段内容（实测就是这样被误读的）。
+  vector_dim_mismatch: translate('retrievalNotice.vectorDimMismatch'),
 };
 
 /**

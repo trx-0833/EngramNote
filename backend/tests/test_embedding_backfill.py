@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.config import get_settings
+
 
 #: 假向量：固定 4 维，够 `pack_vector` 打包，也不需要任何模型
 _FAKE_VEC = [0.1, 0.2, 0.3, 0.4]
@@ -99,7 +101,8 @@ async def _seed_chunks(test_db, specs):
                     has_embedding=has_emb,
                     embedding=pack_vector(_FAKE_VEC) if has_emb else None,
                     embedding_dim=len(_FAKE_VEC) if has_emb else None,
-                    embedding_model="test" if has_emb else None,
+                    # 2026-11-15：模型名要与配置一致，否则新判据（模型不符→待补）会把它算成待补。
+                    embedding_model=get_settings().embedding_model if has_emb else None,
                 )
                 for i, (cid, has_emb) in enumerate(specs)
             ]
@@ -138,14 +141,12 @@ class TestEmbedChunks:
         state = await _chunk_state(test_db)
         assert state["c1"][0] is True and state["c3"][0] is True, "缺向量的行没被补上"
         assert state["c1"][1] == len(_FAKE_VEC), "embedding_dim 没写"
-        assert state["c2"][2] == "test", "已嵌入的行被重算了（embedding_model 被覆盖）"
+        assert state["c2"][2] == get_settings().embedding_model, "已嵌入的行被重算了（embedding_model 被覆盖）"
 
         # 只编码了那两条（不是三条）—— 这是"不重算"的直接证据。
         # ⚠️ 口径：`encode_text` 是**逐条**调的（它内部对每条文本查 lru_cache），
         # 所以假实现收到的是 2 次单元素调用，不是 1 次两元素调用。
-        assert fake_embedding.calls == [["第 0 段内容"], ["第 2 段内容"]], (
-            f"实际编码的文本不对：{fake_embedding.calls}"
-        )
+        assert fake_embedding.calls == [["第 0 段内容"], ["第 2 段内容"]], f"实际编码的文本不对：{fake_embedding.calls}"
 
     @pytest.mark.asyncio
     async def test_no_pending_returns_zero_and_does_not_encode(self, test_db, fake_embedding):
@@ -232,11 +233,14 @@ class TestBackfillEmbeddings:
 
         result = await et._embed_chunks_async(limit=100)
 
+        # 2026-11-15（审计 blocker #2）语义变更：降级模型**拒写**，而不是照写 512 维。
+        # 照写会让库里出现第二种维度、检索整批跳过；而不写至少是可观测的缺失。
         assert result["model"] == "BAAI/bge-small-zh-v1.5"
+        assert result["embedded"] == 0
+        assert result.get("skipped_reason") == "fallback_model"
         state = await _chunk_state(test_db)
-        assert state["c1"][2] == "BAAI/bge-small-zh-v1.5", (
-            f"embedding_model 记成了 {state['c1'][2]!r} —— 降级向量被标成主模型"
-        )
+        assert state["c1"][0] is False, "降级态不该写入 has_embedding"
+        assert state["c1"][2] is None, f"embedding_model 记成了 {state['c1'][2]!r} —— 降级向量被写进了库"
 
 
 class TestBeatScheduleRegistration:
@@ -279,6 +283,4 @@ class TestBeatScheduleRegistration:
         minute_spec = str(entry["schedule"])
         # crontab(minute="5,35") 的字符串形态里含 "5,35"；这里只断言它**不是**
         # 那几个整点任务的分钟值（30 会撞 00:30 与 03:30）
-        assert "30" not in minute_spec, (
-            f"排期 {minute_spec!r} 落在 :30 —— 会与 00:30 目标进度 / 03:30 备份重叠"
-        )
+        assert "30" not in minute_spec, f"排期 {minute_spec!r} 落在 :30 —— 会与 00:30 目标进度 / 03:30 备份重叠"

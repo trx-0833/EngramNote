@@ -382,6 +382,7 @@ class RAGService:
         question_embedding: List[float],
         user_id: str,
         top_k: int = 5,
+        stats: Optional[Dict[str, int]] = None,
     ) -> List[Dict[str, Any]]:
         """在 `chunks` 表上做向量检索（一次 SQL，取代遍历 N 个 collection）
 
@@ -415,6 +416,7 @@ class RAGService:
                 user_id,
                 top_k=top_k,
                 exclude_note_ids=set(trashed) or None,
+                stats=stats,
             )
 
     async def _lexical_search(
@@ -743,9 +745,13 @@ class RAGService:
         # 检索只需拿 query 向量做点积，不需要模型。旧路径要起一个 worker
         # 任务、遍历 24 个 Chroma collection（D-9），现在是一次 SQL。
         vector_results: List[Dict[str, Any]] = []
+        # 维度统计（审计 blocker #1）：整批维度不符要能被上层看见
+        vector_stats: Dict[str, int] = {}
         if question_embedding is not None:
             try:
-                vector_results = await self._search_chunk_vectors(question_embedding, user_id, top_k=pool)
+                vector_results = await self._search_chunk_vectors(
+                    question_embedding, user_id, top_k=pool, stats=vector_stats
+                )
             except Exception as e:
                 logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
                 vector_results = []
@@ -756,6 +762,11 @@ class RAGService:
         # 向量通道完整返回 -> 全向量两路融合
         if question_embedding is None:
             retrieval_status = "bm25_only"
+        elif vector_stats.get("all_skipped"):
+            # 查询向量与库里向量**维度全不符**（审计 blocker #1）：这是配置/模型不一致，
+            # 不是"没命中"。单独给状态值，前端才能说人话（"向量检索暂时不可用"），
+            # 而不是让用户以为资料里没有。
+            retrieval_status = "vector_dim_mismatch"
         elif not vector_results:
             retrieval_status = "hybrid"
         else:
