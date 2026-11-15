@@ -141,8 +141,11 @@ const PAGE_WIDTH_ROUTES: { pattern: RegExp; width: PageWidth; why: string }[] = 
   },
   {
     pattern: /^\/qa\//,
-    width: 'reading',
-    why: '智能问答：对话流是单列（收敛前 800px）',
+    width: 'standard',
+    // 2026-11-15：问答页已改成「会话栏 + 对话流」两栏，760px 会被会话栏挤掉一半
+    // （实测 <main> 内容区 696px，减去会话栏 208 后正文只剩 464px）。
+    // 正文行宽改由页面内部 `.qaThread` / `.qaComposer` 的 820px 自己守。
+    why: '智能问答：会话栏 + 对话流两栏，需要标准档；正文行宽在页面内收敛到 820px',
   },
 ];
 
