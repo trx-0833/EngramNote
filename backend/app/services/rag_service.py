@@ -639,6 +639,53 @@ class RAGService:
         sorted_results = sorted(fused.values(), key=lambda x: x["similarity"], reverse=True)
         return sorted_results[:top_k]
 
+    @staticmethod
+    def _chunk_identity(item: Dict[str, Any]) -> tuple:
+        """同一条 chunk 的稳定标识（融合层与词法层的字段集合不同）"""
+        return item.get("chunk_id") or (item.get("note_id"), (item.get("content") or "")[:200])
+
+    def _ensure_lexical_hits(
+        self,
+        fused: List[Dict[str, Any]],
+        lexical: List[Dict[str, Any]],
+        *,
+        top_k: int,
+        quota: int,
+    ) -> List[Dict[str, Any]]:
+        """保证词法通道的前 `quota` 条出现在最终结果里
+
+        ## 为什么需要这一层（2026-11-15 实测）
+
+        用户问「水导轴承有几块」，向量通道把该笔记的「1 范围」开头块排在第一
+        （它和问题共享"拉哇水电站"这类高频词），而真正写着"几块瓦"的段落
+        在 RRF 里被挤到 5 名之后 —— 于是模型手里只有开头块，只能答"没找到"。
+
+        词法通道（FTS5/BM25）对**罕见专名**更敏感，它排在前面的结果恰恰是
+        含关键词的那几段。所以给它们留保底名额，而不是让两路完全按分数竞争。
+
+        保底名额从融合结果**尾部**挤掉同样数量的条目（尾部本来也进不了前 top_k）。
+        """
+        if quota <= 0 or not lexical:
+            return fused
+
+        present = {self._chunk_identity(it) for it in fused}
+        missing = [it for it in lexical[:quota] if self._chunk_identity(it) not in present][:quota]
+        if not missing:
+            return fused
+
+        kept = fused[: max(0, top_k - len(missing))]
+        # 词法结果的 `similarity` 可能是 0（它只有排名，没有融合分）：
+        # 给一个略低于末位的分数，保持"保底"的语义，不冒充高分。
+        floor = min((it.get("similarity") or 0.0) for it in kept) if kept else 0.0
+        boosted = []
+        for item in missing:
+            entry = dict(item)
+            entry["similarity"] = max(float(entry.get("similarity") or 0.0), floor)
+            entry["lexical_guaranteed"] = True
+            boosted.append(entry)
+        logger.debug("词法保底补入 %d 条（top_k=%d）", len(boosted), top_k)
+        return kept + boosted
+
     async def retrieve_context(
         self,
         question: str,
@@ -728,7 +775,33 @@ class RAGService:
             logger.warning(f"词法检索失败: {e}")
 
         # 4. 加权 RRF 融合两路结果（阶段 2.6：n-gram 通道已删除）
-        fused_results = self._rrf_fusion(vector_results, bm25_results, top_k=5)
+        # top_k 提为配置（2026-11-15）：写死 5 而候选池是 20，融合结果里第 6~20 名
+        # 全被丢掉，含答案的具体段落经常正好落在这一截。
+        top_k = int(getattr(settings, "rag_context_top_k", 8) or 8)
+        fused_results = self._rrf_fusion(vector_results, bm25_results, top_k=top_k)
+        # 文档头降权（2026-11-15）：`# 标题` / `## 1 范围` 这类块与问题共享
+        # "拉哇水电站"等高频道词，几乎总能排在前面，但对"有几块瓦"这种具体问题
+        # 信息量最低 —— 实测 top-8 里 5 条是各篇笔记的"1 范围"。给它们打折，
+        # 让写着具体参数的段落上位。
+        penalized = 0
+        for item in fused_results:
+            head = (item.get("content") or "")[:300].lstrip()
+            if head.startswith("# ") or "## 1 范围" in head or "## 1 总则" in head:
+                item["similarity"] = float(item.get("similarity") or 0.0) * 0.4
+                item["doc_header_penalized"] = True
+                penalized += 1
+        if penalized:
+            fused_results.sort(key=lambda x: x.get("similarity") or 0.0, reverse=True)
+            logger.debug("文档头降权 %d 条", penalized)
+
+        # 词法强命中保底（同上）：向量倾向把「1 范围」这类泛化开头块排前，
+        # 让「命中关键词的那一段」也一定有机会进入上下文。
+        fused_results = self._ensure_lexical_hits(
+            fused_results,
+            bm25_results,
+            top_k=top_k,
+            quota=int(getattr(settings, "rag_lexical_quota", 2) or 0),
+        )
 
         # 5+6. 同一次遍历产出「上下文编号」与「引用来源」
         #

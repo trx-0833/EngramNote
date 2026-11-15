@@ -327,6 +327,15 @@ class Settings(BaseSettings):
     # 变强的那一路。重扫方式见 docs/overhaul-plan.md 附录 Q。
     rag_rrf_k: int = 1
     rag_rrf_bm25_weight: float = 0.65
+    #: 进上下文的检索片段条数（2026-11-15：5 → 8）
+    #:
+    #: 5 条时向量把泛化的「1 范围」开头块排前，含答案的具体段落被挤出候选
+    #: （实测「水导轴承有几块」上下文里只有开头块）。提到 8 并配合下面的
+    #: 词法保底名额，才能把「命中关键词的那一段」带进来。
+    #: 上限受 `qa_context_max_chars` 约束，调大后回答成本会上升。
+    rag_context_top_k: int = 8
+    #: 融合结果里为**词法强命中**保底的名额（见 `rag_service._ensure_lexical_hits`）
+    rag_lexical_quota: int = 2
     # 每路送入融合的候选数。融合取 top-5，但候选池要大于 5 ——
     # 池=5 时融合只能在那 10 条里排，答错就出局；池=20 给排序留出余地。
     # 实测：池=5 → 60.18%，池=20 → 60.87%（同参数下）。
