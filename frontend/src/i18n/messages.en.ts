@@ -918,6 +918,7 @@ const en = {
     loadEarlier: 'Load earlier messages',
     loadEarlierDone: 'Loaded {count} earlier messages',
     copyAnswer: 'Copy answer',
+    regenerate: 'Regenerate',
     copied: 'Copied',
     copyFailed: 'Copy failed — select the text manually',
     sourcesFold: 'Sources ({count})',

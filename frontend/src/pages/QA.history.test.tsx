@@ -747,3 +747,34 @@ describe('用户上报：markdown / 追加方向 / 重新进入', () => {
     expect(await screen.findByText('这次加载出来了')).toBeInTheDocument();
   });
 });
+
+// ── 「重新生成」（2026-11-15 用户要求）──────────────────────────────────
+
+describe('重新生成：最新一轮可以再要一版', () => {
+  it('最新一轮有「重新生成」，点击用同一句话重发；历史轮次没有这个按钮', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({ id: 't1', question: '旧问题', answer: '旧答案' }),
+        turn({ id: 't2', question: '浮充和均充有什么区别？', answer: '最新答案' }),
+      ]),
+    );
+    askQuestionStream.mockResolvedValue(
+      sseStream([
+        ['meta', { session_id: 'sess-1', history_used: 1, provider: 'DeepSeek' }],
+        ['token', { content: '第二版答案' }],
+        ['done', {}],
+      ]),
+    );
+    const user = userEvent.setup();
+    renderPage('/qa?s=sess-1');
+
+    // 只有**最新**那一轮有：重跑历史轮次会带着后面的上下文，语义不清
+    const button = await screen.findByRole('button', { name: /重新生成：浮充和均充有什么区别/ });
+    expect(screen.getAllByRole('button', { name: /重新生成：/ })).toHaveLength(1);
+
+    await user.click(button);
+    await waitFor(() => expect(askQuestionStream).toHaveBeenCalled());
+    expect(askQuestionStream.mock.calls[0][0]).toBe('浮充和均充有什么区别？');
+    expect(await screen.findByText(/第二版答案/)).toBeInTheDocument();
+  });
+});

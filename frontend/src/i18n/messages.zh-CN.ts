@@ -1116,6 +1116,10 @@ const zhCN = {
     loadEarlierDone: '已加载 {count} 轮更早的对话',
     // 每条回答的操作行
     copyAnswer: '复制回答',
+    // 「重新生成」：同一句话再要一版（服务端当新一轮，历史里会多一条）。
+    // 真·替换旧轮需要后端 retry_of，见 docs/qa-deepseek-redesign.md §6.2。
+
+    regenerate: '重新生成',
     copied: '已复制',
     copyFailed: '复制失败，请手动选择文本',
     // 来源改成可折叠（宽屏仍保留右栏）

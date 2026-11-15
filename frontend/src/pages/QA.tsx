@@ -998,6 +998,21 @@ export default function QA() {
                           >
                             {t('qa.copyAnswer')}
                           </button>
+                          {/* 「重新生成」（2026-11-15 用户要求）：同一句话再要一版。
+                              语义边界：服务端当**新一轮**处理，历史里会多一条（旧的仍在）。
+                              真·替换旧轮需要后端 retry_of + superseded 可见性 —— 后端
+                              地基已在（qa_history_service.supersede_turn），端到端
+                              接线待做，见 docs/qa-deepseek-redesign.md §6.2。 */}
+                          {isLatest && !streaming && (
+                            <button
+                              type="button"
+                              className={`btn btn-ghost ${styles.qaActionButton}`}
+                              onClick={() => void handleAsk(record.question, true)}
+                              aria-label={`${t('qa.regenerate')}：${record.question}`}
+                            >
+                              {t('qa.regenerate')}
+                            </button>
+                          )}
                         </div>
                       )}
                       {record.provider && (
