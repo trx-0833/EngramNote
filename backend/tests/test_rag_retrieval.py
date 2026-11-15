@@ -53,8 +53,7 @@ class TestNGramChannelRemoved:
 
         params = list(inspect.signature(RAGService._rrf_fusion).parameters)
         assert params == ["vector_results", "bm25_results", "k", "bm25_weight", "top_k"], (
-            f"RRF 融合的参数列表已变化: {params}。"
-            "若新增了检索通道，请先补一份能证明它带来增益的评测（阶段 2.9）。"
+            f"RRF 融合的参数列表已变化: {params}。若新增了检索通道，请先补一份能证明它带来增益的评测（阶段 2.9）。"
         )
         # 前两个必须仍是两路结果
         assert params[:2] == ["vector_results", "bm25_results"]
@@ -72,9 +71,7 @@ class TestNGramChannelRemoved:
 
         for w in (0.0, 0.5, 0.65, 1.0):
             both = RAGService._rrf_fusion([doc], [doc], k=60, bm25_weight=w)
-            assert both[0]["similarity"] == pytest.approx(1 / 61), (
-                f"w={w} 时两路都命中的总分应恒为 1/61"
-            )
+            assert both[0]["similarity"] == pytest.approx(1 / 61), f"w={w} 时两路都命中的总分应恒为 1/61"
 
     def test_bm25_weight_actually_shifts_ranking(self):
         """权重必须真的改变排序（否则配置是装饰）
@@ -98,18 +95,14 @@ class TestNGramChannelRemoved:
         导致分数几乎只反映"是否两路同时出现"。这里锁住这个性质，
         避免有人"为了方便"把 k 调回大值。
         """
-        docs = [
-            {"note_id": f"n{i}", "content": f"内容{i}", "note_title": None, "block_index": 0}
-            for i in range(5)
-        ]
+        docs = [{"note_id": f"n{i}", "content": f"内容{i}", "note_title": None, "block_index": 0} for i in range(5)]
+
         def spread(k: int) -> float:
             out = RAGService._rrf_fusion(docs, [], k=k, bm25_weight=0.0)
             s = {d["note_id"]: d["similarity"] for d in out}
             return s["n0"] / s["n4"]
 
-        assert spread(1) > spread(60) * 2, (
-            f"k=1 与 k=60 的名次区分度差异不足：{spread(1):.2f} vs {spread(60):.2f}"
-        )
+        assert spread(1) > spread(60) * 2, f"k=1 与 k=60 的名次区分度差异不足：{spread(1):.2f} vs {spread(60):.2f}"
 
     def test_positional_fields_survive_fusion(self):
         """**阶段 2.7 的前提**：chunk 的定位字段必须穿过融合层
@@ -119,17 +112,28 @@ class TestNGramChannelRemoved:
         引用回跳的链路断在第一层（附录 N.4）。
         """
         chunk = {
-            "note_id": "n1", "content": "原文段落", "note_title": "笔记", "block_index": 0,
-            "chunk_id": "c1", "index": 3,
-            "char_start": 100, "char_end": 200,
-            "heading_path": "第一章 > 1.2", "line_start": 5, "line_end": 9,
+            "note_id": "n1",
+            "content": "原文段落",
+            "note_title": "笔记",
+            "block_index": 0,
+            "chunk_id": "c1",
+            "index": 3,
+            "char_start": 100,
+            "char_end": 200,
+            "heading_path": "第一章 > 1.2",
+            "line_start": 5,
+            "line_end": 9,
         }
         fused = RAGService._rrf_fusion([chunk], [], k=1, bm25_weight=0.5)
         assert len(fused) == 1
         got = fused[0]
         for key, want in (
-            ("chunk_id", "c1"), ("char_start", 100), ("char_end", 200),
-            ("heading_path", "第一章 > 1.2"), ("line_start", 5), ("line_end", 9),
+            ("chunk_id", "c1"),
+            ("char_start", 100),
+            ("char_end", 200),
+            ("heading_path", "第一章 > 1.2"),
+            ("line_start", 5),
+            ("line_end", 9),
         ):
             assert got.get(key) == want, f"融合后丢失定位字段 {key}: {got}"
 
@@ -192,9 +196,7 @@ class TestNoUnboundedCache:
         """
         from app.services import rag_service
 
-        assert not hasattr(rag_service, "invalidate_kb_cache"), (
-            "缓存失效入口被重新引入 —— 说明缓存又回来了。"
-        )
+        assert not hasattr(rag_service, "invalidate_kb_cache"), "缓存失效入口被重新引入 —— 说明缓存又回来了。"
 
     def test_callers_do_not_reference_removed_cache(self):
         """所有曾调用 `invalidate_kb_cache` 的模块都不得再引用它
@@ -244,12 +246,19 @@ class TestChunkCorpus:
         assert len(chunks) == 2
         assert isinstance(chunks[0], dict), f"返回了 {type(chunks[0])}，应为 dict"
         required = {
-            "chunk_id", "note_id", "index", "title", "content", "chapter_title",
-            "char_start", "char_end", "heading_path", "line_start", "line_end",
+            "chunk_id",
+            "note_id",
+            "index",
+            "title",
+            "content",
+            "chapter_title",
+            "char_start",
+            "char_end",
+            "heading_path",
+            "line_start",
+            "line_end",
         }
-        assert required <= set(chunks[0]), (
-            f"缺少字段: {required - set(chunks[0])}"
-        )
+        assert required <= set(chunks[0]), f"缺少字段: {required - set(chunks[0])}"
         # 偏移必须自洽：区间长度等于内容长度
         for c in chunks:
             assert c["char_end"] - c["char_start"] == len(c["content"])
@@ -274,9 +283,7 @@ class TestChunkCorpus:
         service._session_factory = test_db
         chunks = await service._get_user_chunks(uid)
 
-        assert chunks == [], (
-            f"回收站笔记的 chunk 仍在语料中: {[c['content'] for c in chunks]}"
-        )
+        assert chunks == [], f"回收站笔记的 chunk 仍在语料中: {[c['content'] for c in chunks]}"
 
     async def test_includes_unembedded_chunks(self, test_db):
         """未嵌入的 chunk **必须**留在 BM25 语料里
@@ -325,15 +332,14 @@ class TestChunkCorpus:
         assert hits, "未回收时应当检索得到"
 
         from datetime import datetime
+
         async with test_db() as db:
             note = (await db.execute(_select_note(note_id))).scalar_one()
             note.trashed_at = datetime.utcnow()
             await db.commit()
 
         hits_after = await service._search_chunk_vectors(vec, uid, top_k=5)
-        assert hits_after == [], (
-            f"回收站笔记的 chunk 仍被向量检索到: {[h['chunk_id'] for h in hits_after]}"
-        )
+        assert hits_after == [], f"回收站笔记的 chunk 仍被向量检索到: {[h['chunk_id'] for h in hits_after]}"
 
     async def test_vector_search_returns_positional_fields(self, test_db):
         """向量结果必须带定位字段 —— 2.7 回跳的数据基础
@@ -349,8 +355,7 @@ class TestChunkCorpus:
         hits = await service._search_chunk_vectors([1.0, 0.0, 0.0, 0.0], uid, top_k=5)
 
         assert hits
-        for key in ("chunk_id", "char_start", "char_end", "heading_path",
-                    "line_start", "line_end"):
+        for key in ("chunk_id", "char_start", "char_end", "heading_path", "line_start", "line_end"):
             assert key in hits[0], f"向量结果缺少定位字段 {key}"
 
 
@@ -366,18 +371,45 @@ class TestCitationSources:
     def _items():
         """两条来自同一笔记、一条来自另一笔记（按原文位置已排序）"""
         return [
-            {"note_id": "n1", "note_title": "笔记甲", "chapter_title": "第一章",
-             "content": "第一段内容", "chunk_id": "c1", "index": 0,
-             "char_start": 0, "char_end": 10, "heading_path": "第一章",
-             "line_start": 0, "line_end": 3},
-            {"note_id": "n1", "note_title": "笔记甲", "chapter_title": "第二章",
-             "content": "第二段内容", "chunk_id": "c2", "index": 1,
-             "char_start": 20, "char_end": 30, "heading_path": "第二章",
-             "line_start": 5, "line_end": 9},
-            {"note_id": "n2", "note_title": "笔记乙", "chapter_title": None,
-             "content": "另一篇内容", "chunk_id": "c3", "index": 0,
-             "char_start": 0, "char_end": 8, "heading_path": None,
-             "line_start": 0, "line_end": 2},
+            {
+                "note_id": "n1",
+                "note_title": "笔记甲",
+                "chapter_title": "第一章",
+                "content": "第一段内容",
+                "chunk_id": "c1",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 10,
+                "heading_path": "第一章",
+                "line_start": 0,
+                "line_end": 3,
+            },
+            {
+                "note_id": "n1",
+                "note_title": "笔记甲",
+                "chapter_title": "第二章",
+                "content": "第二段内容",
+                "chunk_id": "c2",
+                "index": 1,
+                "char_start": 20,
+                "char_end": 30,
+                "heading_path": "第二章",
+                "line_start": 5,
+                "line_end": 9,
+            },
+            {
+                "note_id": "n2",
+                "note_title": "笔记乙",
+                "chapter_title": None,
+                "content": "另一篇内容",
+                "chunk_id": "c3",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 8,
+                "heading_path": None,
+                "line_start": 0,
+                "line_end": 2,
+            },
         ]
 
     def test_context_numbering_matches_sources_order(self):
@@ -392,14 +424,10 @@ class TestCitationSources:
         context, sources = build_context_and_sources(self._items())
 
         for i, src in enumerate(sources, start=1):
-            assert f"[{i}] 来源: {src['note_title']}" in context, (
-                f"上下文里缺少与 sources[{i-1}] 对应的 [{i}] 编号"
-            )
+            assert f"[{i}] 来源: {src['note_title']}" in context, f"上下文里缺少与 sources[{i - 1}] 对应的 [{i}] 编号"
             # 该编号下的内容必须是这一条的内容，而不是别人的
             block = context.split(f"[{i}] 来源:", 1)[1]
-            assert src["relevant_text"][:10] in block, (
-                f"[{i}] 指向的内容与 sources[{i-1}] 不一致"
-            )
+            assert src["relevant_text"][:10] in block, f"[{i}] 指向的内容与 sources[{i - 1}] 不一致"
 
     def test_keeps_multiple_chunks_from_same_note(self):
         """同一笔记的多个 chunk 都要保留
@@ -433,10 +461,13 @@ class TestCitationSources:
 
         s = sources[0]
         for key, want in (
-            ("chunk_id", "c1"), ("chunk_index", 0),
-            ("char_start", 0), ("char_end", 10),
+            ("chunk_id", "c1"),
+            ("chunk_index", 0),
+            ("char_start", 0),
+            ("char_end", 10),
             ("heading_path", "第一章"),
-            ("line_start", 0), ("line_end", 3),
+            ("line_start", 0),
+            ("line_end", 3),
         ):
             assert s.get(key) == want, f"sources 缺少/错位定位字段 {key}: {s}"
 
@@ -444,11 +475,19 @@ class TestCitationSources:
         """`heading_path` 缺失时退回 `chapter_title`（两条路径来源不同）"""
         from app.services.rag_service import build_context_and_sources
 
-        items = [{
-            "note_id": "n1", "note_title": "甲", "chapter_title": "第三章",
-            "content": "内容", "chunk_id": "c1", "index": 0,
-            "char_start": 0, "char_end": 2, "heading_path": None,
-        }]
+        items = [
+            {
+                "note_id": "n1",
+                "note_title": "甲",
+                "chapter_title": "第三章",
+                "content": "内容",
+                "chunk_id": "c1",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 2,
+                "heading_path": None,
+            }
+        ]
         _, sources = build_context_and_sources(items)
         assert sources[0]["heading_path"] == "第三章"
 
@@ -456,11 +495,18 @@ class TestCitationSources:
         """BM25 结果不带 note_title → 用回查到的标题补齐"""
         from app.services.rag_service import build_context_and_sources
 
-        items = [{
-            "note_id": "n9", "note_title": None, "chapter_title": None,
-            "content": "内容", "chunk_id": "c9", "index": 0,
-            "char_start": 0, "char_end": 2,
-        }]
+        items = [
+            {
+                "note_id": "n9",
+                "note_title": None,
+                "chapter_title": None,
+                "content": "内容",
+                "chunk_id": "c9",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 2,
+            }
+        ]
         context, sources = build_context_and_sources(items, {"n9": "回查标题"})
         assert sources[0]["note_title"] == "回查标题"
         assert "回查标题" in context
@@ -469,11 +515,18 @@ class TestCitationSources:
         """标题彻底查不到时用占位文案，不得抛异常或产出 None"""
         from app.services.rag_service import build_context_and_sources
 
-        items = [{
-            "note_id": "n9", "note_title": None, "chapter_title": None,
-            "content": "内容", "chunk_id": "c9", "index": 0,
-            "char_start": 0, "char_end": 2,
-        }]
+        items = [
+            {
+                "note_id": "n9",
+                "note_title": None,
+                "chapter_title": None,
+                "content": "内容",
+                "chunk_id": "c9",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 2,
+            }
+        ]
         _, sources = build_context_and_sources(items, {})
         assert sources[0]["note_title"] == "未知笔记"
 
@@ -536,14 +589,28 @@ class TestBM25ScoringUnchanged:
 
     #: 与生产同构的测试语料
     CARDS = [
-        {"card_id": "c1", "note_id": "n1", "title": "水电站",
-         "content": "拉哇水电站装设多台水轮发电机组", "chapter_title": "第一章"},
-        {"card_id": "c2", "note_id": "n2", "title": "变电站",
-         "content": "500kV 配电装置采用户外敞开式布置", "chapter_title": None},
-        {"card_id": "c3", "note_id": "n3", "title": "继电保护",
-         "content": "线路保护应双重化配置", "chapter_title": "第三章"},
-        {"card_id": "c4", "note_id": "n4", "title": "无关内容",
-         "content": "今天天气很好", "chapter_title": None},
+        {
+            "card_id": "c1",
+            "note_id": "n1",
+            "title": "水电站",
+            "content": "拉哇水电站装设多台水轮发电机组",
+            "chapter_title": "第一章",
+        },
+        {
+            "card_id": "c2",
+            "note_id": "n2",
+            "title": "变电站",
+            "content": "500kV 配电装置采用户外敞开式布置",
+            "chapter_title": None,
+        },
+        {
+            "card_id": "c3",
+            "note_id": "n3",
+            "title": "继电保护",
+            "content": "线路保护应双重化配置",
+            "chapter_title": "第三章",
+        },
+        {"card_id": "c4", "note_id": "n4", "title": "无关内容", "content": "今天天气很好", "chapter_title": None},
     ]
 
     @staticmethod
@@ -595,24 +662,33 @@ class TestBM25ScoringUnchanged:
                     score += idf_val * numerator / denominator
             if score > 0:
                 card = doc["card"]
-                scored.append({
-                    "note_id": card["note_id"], "note_title": None,
-                    "content": card["content"], "similarity": score,
-                    "block_index": 0, "card_id": card["card_id"],
-                    "title": card["title"], "chapter_title": card["chapter_title"],
-                })
+                scored.append(
+                    {
+                        "note_id": card["note_id"],
+                        "note_title": None,
+                        "content": card["content"],
+                        "similarity": score,
+                        "block_index": 0,
+                        "card_id": card["card_id"],
+                        "title": card["title"],
+                        "chapter_title": card["chapter_title"],
+                    }
+                )
         scored.sort(key=lambda x: x["similarity"], reverse=True)
         return scored[:top_k]
 
-    @pytest.mark.parametrize("question", [
-        "水电站装设什么",
-        "500kV 配电装置",
-        "继电保护配置要求",
-        "天气",
-        "完全无关的查询词",
-        "a",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "水电站装设什么",
+            "500kV 配电装置",
+            "继电保护配置要求",
+            "天气",
+            "完全无关的查询词",
+            "a",
+            "",
+        ],
+    )
     def test_scores_match_legacy_implementation(self, question):
         """逐条比对：新实现与重构前实现的分数、顺序、字段必须完全一致
 
@@ -628,7 +704,10 @@ class TestBM25ScoringUnchanged:
             assert got["similarity"] == pytest.approx(want["similarity"], rel=1e-12), (
                 f"BM25 分数变化: {got['similarity']} vs {want['similarity']}"
             )
-            assert got == want, "结果字段发生变化"
+            # 2026-11-15（第二轮审计 m1）：BM25 结果新增定位字段（chunk_id 等），
+            # 所以不再要求"字典完全相等"；但 legacy 的每个字段值仍必须逐项一致。
+            assert {k: got[k] for k in want} == want, "结果字段发生变化"
+            assert set(got) >= set(want), "有关键字段丢失"
 
     def test_index_reuse_does_not_change_results(self):
         """复用索引与每次重建索引必须给出相同结果
@@ -651,8 +730,8 @@ class TestBM25ScoringUnchanged:
         """语料增删必须改变指纹（否则会一直用旧索引）"""
         base = RAGService.build_bm25_index(self.CARDS)
         added = RAGService.build_bm25_index(
-            self.CARDS + [{"card_id": "c9", "note_id": "n9", "title": "新卡片",
-                           "content": "新增内容", "chapter_title": None}]
+            self.CARDS
+            + [{"card_id": "c9", "note_id": "n9", "title": "新卡片", "content": "新增内容", "chapter_title": None}]
         )
         removed = RAGService.build_bm25_index(self.CARDS[:-1])
 
@@ -681,9 +760,7 @@ class TestBM25ScoringUnchanged:
         assert after_first > 0, "首次构建应当分词"
 
         service._get_bm25_index("u1", self.CARDS)
-        assert calls["n"] == after_first, (
-            f"语料未变却重新分词了 {calls['n'] - after_first} 次（索引未被复用）"
-        )
+        assert calls["n"] == after_first, f"语料未变却重新分词了 {calls['n'] - after_first} 次（索引未被复用）"
 
     def test_index_slot_does_not_grow_with_users(self):
         """索引槽位必须有硬上界（不得重蹈 `_kb_cache` 覆辙）
@@ -792,8 +869,7 @@ def _make_fixture_db(path: str, *, pairs: int = 6) -> None:
         for i in range(pairs):
             cid, nid = f"card-{i}", f"note-{i}"
             body = (
-                f"拉哇水电站第 {i} 台水轮发电机组额定容量为 {100 + i}MW，"
-                f"转子重量约 {i}00 吨，由厂家 {i} 号车间制造。"
+                f"拉哇水电站第 {i} 台水轮发电机组额定容量为 {100 + i}MW，转子重量约 {i}00 吨，由厂家 {i} 号车间制造。"
             )
             con.execute("INSERT INTO notes (id, trashed_at) VALUES (?, NULL)", (nid,))
             con.execute(
@@ -803,8 +879,7 @@ def _make_fixture_db(path: str, *, pairs: int = 6) -> None:
                 (cid, nid, f"机组 {i}", body, f"第 {i} 章", body),
             )
             con.execute(
-                "INSERT INTO quiz_items (id, question, card_id, note_id) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO quiz_items (id, question, card_id, note_id) VALUES (?, ?, ?, ?)",
                 (f"quiz-{i}", f"第 {i} 台机组的额定容量是多少？", cid, nid),
             )
         con.commit()
@@ -859,9 +934,7 @@ class TestRetrievalEvalHarness:
         big = ("无关的前置内容。" * 200) + truth + ("无关的后置内容。" * 200)
         small = truth
 
-        assert self._containment(truth, big) >= 0.99, (
-            "检索单元比真值大得多时被误判为不相关（Jaccard 的老问题）"
-        )
+        assert self._containment(truth, big) >= 0.99, "检索单元比真值大得多时被误判为不相关（Jaccard 的老问题）"
         assert self._containment(truth, small) >= 0.99
         # 大到 100 倍仍应命中：长度不应影响判定
         assert self._overlaps(truth, big)
@@ -894,9 +967,7 @@ class TestRetrievalEvalHarness:
         db = str(tmp_path / "fixture.db")
         _make_fixture_db(db, pairs=6)
 
-        proc = _run_eval_cli(
-            "--db", db, "--limit", "5", "--corpus", "cards", "--show-missed", "0"
-        )
+        proc = _run_eval_cli("--db", db, "--limit", "5", "--corpus", "cards", "--show-missed", "0")
 
         assert proc.returncode == 0, f"评测脚本退出码 {proc.returncode}: {proc.stderr[-800:]}"
         assert "Recall@5" in proc.stdout, f"输出缺少指标:\n{proc.stdout[-800:]}"
@@ -931,13 +1002,10 @@ class TestRetrievalEvalHarness:
         这条用例钉住三件事：退出码 2、消息里带 `--db` 的路径、没有 traceback。
         """
         missing = str(tmp_path / "not-there.db")
-        proc = _run_eval_cli(
-            "--db", missing, "--limit", "5", "--corpus", "cards", "--show-missed", "0"
-        )
+        proc = _run_eval_cli("--db", missing, "--limit", "5", "--corpus", "cards", "--show-missed", "0")
 
         assert proc.returncode == 2, (
-            f"退出码应为 2（检查自身空转），实际 {proc.returncode}；"
-            f"输出尾部：{(proc.stdout + proc.stderr)[-500:]}"
+            f"退出码应为 2（检查自身空转），实际 {proc.returncode}；输出尾部：{(proc.stdout + proc.stderr)[-500:]}"
         )
         assert missing in proc.stdout, "错误消息里没有给出 --db 指向的路径"
         assert "Traceback" not in proc.stderr, f"仍然是裸 traceback：\n{proc.stderr[-500:]}"
@@ -946,6 +1014,7 @@ class TestRetrievalEvalHarness:
 # ---------------------------------------------------------------------------
 # 辅助
 # ---------------------------------------------------------------------------
+
 
 def _select_note(note_id: str):
     from sqlalchemy import select
@@ -969,14 +1038,24 @@ async def _make_user_and_note(session_factory) -> tuple[str, str]:
     uid = str(uuid.uuid4())
     nid = str(uuid.uuid4())
     async with session_factory() as db:
-        await db.execute(insert(User).values(
-            id=uid, email=f"{uid[:8]}@example.com", username=f"u{uid[:8]}",
-            hashed_password="x", is_active=True,
-        ))
-        await db.execute(insert(Note).values(
-            id=nid, user_id=uid, title=f"笔记 {nid[:6]}",
-            source_type=SourceType.pdf.value, status=NoteStatus.cleaned.value,
-        ))
+        await db.execute(
+            insert(User).values(
+                id=uid,
+                email=f"{uid[:8]}@example.com",
+                username=f"u{uid[:8]}",
+                hashed_password="x",
+                is_active=True,
+            )
+        )
+        await db.execute(
+            insert(Note).values(
+                id=nid,
+                user_id=uid,
+                title=f"笔记 {nid[:6]}",
+                source_type=SourceType.pdf.value,
+                status=NoteStatus.cleaned.value,
+            )
+        )
         await db.commit()
     return uid, nid
 
@@ -1002,22 +1081,24 @@ async def _add_chunks(
     async with session_factory() as db:
         for i in range(2):
             vec = [1.0] + [0.0] * (dim - 1) if has_embedding else None
-            await db.execute(insert(Chunk).values(
-                user_id=user_id,
-                note_id=note_id,
-                index=i,
-                content=f"{content}#{i}",
-                char_start=i * 100,
-                char_end=i * 100 + len(f"{content}#{i}"),
-                heading_path=f"第一章 > 1.{i}",
-                line_start=i * 5,
-                line_end=i * 5 + 3,
-                char_count=len(f"{content}#{i}"),
-                source_md_path=f"{note_id}/clean.md",
-                content_hash="testhash",
-                has_embedding=has_embedding,
-                embedding=pack_vector(vec) if vec else None,
-                embedding_model="test-model" if vec else None,
-                embedding_dim=dim if vec else None,
-            ))
+            await db.execute(
+                insert(Chunk).values(
+                    user_id=user_id,
+                    note_id=note_id,
+                    index=i,
+                    content=f"{content}#{i}",
+                    char_start=i * 100,
+                    char_end=i * 100 + len(f"{content}#{i}"),
+                    heading_path=f"第一章 > 1.{i}",
+                    line_start=i * 5,
+                    line_end=i * 5 + 3,
+                    char_count=len(f"{content}#{i}"),
+                    source_md_path=f"{note_id}/clean.md",
+                    content_hash="testhash",
+                    has_embedding=has_embedding,
+                    embedding=pack_vector(vec) if vec else None,
+                    embedding_model="test-model" if vec else None,
+                    embedding_dim=dim if vec else None,
+                )
+            )
         await db.commit()

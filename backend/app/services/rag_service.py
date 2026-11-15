@@ -191,6 +191,17 @@ class BM25Index:
                         "card_id": card.get("card_id"),
                         "title": card.get("title"),
                         "chapter_title": card.get("chapter_title"),
+                        # ⚠️ 定位字段必须原样带出（2026-11-15 第二轮审计 m1）：
+                        # 缺 `chunk_id` 时 `_chunk_identity` 退化成"截断文本比较"，
+                        # 与融合层的字段集不同 → 同一条 chunk 被词法保底插入两次，
+                        # 上下文里出现两遍（实测复现）。
+                        "chunk_id": card.get("chunk_id"),
+                        "index": card.get("index"),
+                        "char_start": card.get("char_start"),
+                        "char_end": card.get("char_end"),
+                        "heading_path": card.get("heading_path"),
+                        "line_start": card.get("line_start"),
+                        "line_end": card.get("line_end"),
                     }
                 )
 
@@ -504,8 +515,13 @@ class RAGService:
             # 超时可配（2026-11-15）：10 秒对冷启动不够，见 config 注释
             timeout = int(getattr(settings, "rag_encode_timeout_seconds", 90) or 90)
             result = await asyncio.to_thread(task.get, timeout)
-            if result:
+            # ★ 必须同时判内层（2026-11-15 第二轮审计 M2 重提）：
+            # worker 编码失败时返回 `[[]]`，`if result:` 判真而 `result[0]` 是空列表
+            # ⇒ 上层看到"编码成功但没有向量"，状态被记成 `hybrid`（前端解释成
+            # "资料还没建索引"），还白扫一遍全表向量。`[[], []]` 同理。
+            if result and result[0]:
                 return result[0]
+            logger.warning("Celery 编码返回空向量，按失败处理（降级为仅 BM25）")
             return None
         except Exception as e:
             logger.warning(f"Celery 嵌入编码失败，将降级为仅 BM25 检索: {e}")
@@ -710,13 +726,16 @@ class RAGService:
             return fused
 
         kept = fused[: max(0, top_k - len(missing))]
-        # 词法结果的 `similarity` 可能是 0（它只有排名，没有融合分）：
-        # 给一个略低于末位的分数，保持"保底"的语义，不冒充高分。
-        floor = min((it.get("similarity") or 0.0) for it in kept) if kept else 0.0
+        # 词法结果的 `similarity` 是 **BM25 原始分**，量纲与融合分完全不同
+        # （实测可到 7.7，而融合分只有 0.0x）—— 直接沿用会让保底项冒充最高分，
+        # 把真正两路共识的结果挤下去（2026-11-15 第二轮审计 m1/m3 实测）。
+        # 保底的语义是"让你进来"，不是"让你排第一"：分数压到低于末位一点。
+        tail = min((float(it.get("similarity") or 0.0) for it in fused), default=0.0)
+        step = max(abs(tail) * 0.01, 1e-6)
         boosted = []
-        for item in missing:
+        for offset, item in enumerate(missing, start=1):
             entry = dict(item)
-            entry["similarity"] = max(float(entry.get("similarity") or 0.0), floor)
+            entry["similarity"] = tail - step * offset
             entry["lexical_guaranteed"] = True
             boosted.append(entry)
         logger.debug("词法保底补入 %d 条（top_k=%d）", len(boosted), top_k)

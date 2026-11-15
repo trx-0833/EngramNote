@@ -831,10 +831,15 @@ async def ask_question_stream(
         # ② 旧轮 id 取 `req.retry_of`，不依赖新轮返回什么；
         # ③ 失败要吞掉异常：替换是**收尾动作**，它挂了不该让"回答其实已经落库"变红。
         if retry_of and status == TURN_STATUS_OK:
+            # ⚠️ `db` 是**位置参数**（`qa_history_service.py` 的签名），漏了它必抛
+            # TypeError；而下面的 `except Exception` 会把它吞成一行 warning ——
+            # 于是「重新生成」看起来正常，实际旧轮永不 superseded、`turn_count` 不减、
+            # 刷新后新旧两条并存（2026-11-15 第二轮审计 blocker，实测复现）。
+            # 失败仍然只警告（替换是收尾动作），但错误类型要打全，便于下次定位。
             try:
-                await qa_service.supersede_turn(session_id=session_id, turn_id=retry_of)
+                await qa_service.supersede_turn(db, session_id=session_id, turn_id=retry_of)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("替换旧轮失败（新轮已落库）: %s", exc)
+                logger.warning("替换旧轮失败（新轮已落库）: %s: %s", type(exc).__name__, exc)
 
     async def event_stream():
         # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）

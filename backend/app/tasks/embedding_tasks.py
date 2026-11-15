@@ -354,9 +354,28 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
         if not rows:
             return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0, "model": ""}
 
+        # 先判模型再编码（2026-11-15 第二轮审计）：上一版是编码完再拒写，
+        # 于是每 30 分钟白编码 100 条再丢掉。_model_name() 只读已加载的服务实例，
+        # 不额外加载模型；降级态直接返回，一条都不编码。
+        model_name = _model_name()
+        if model_name and model_name != settings.embedding_model:
+            logger.warning(
+                "嵌入模型已降级为 %s（配置 %s），本轮跳过 %d 条待补（不编码、不写入）",
+                model_name,
+                settings.embedding_model,
+                len(rows),
+            )
+            return {
+                "scanned": 0,
+                "embedded": 0,
+                "failed": 0,
+                "remaining": len(rows),
+                "model": model_name,
+                "skipped_reason": "fallback_model",
+            }
+
         texts = [content or "" for _cid, content in rows]
         vectors = encode_text(texts)
-        model_name = _model_name()
 
         # 降级态**拒写**（审计 blocker #2）：内存不足时 `EmbeddingService` 会从
         # bge-m3 降到 bge-small-zh（1024 → 512 维）。照写会让库里出现第二种维度，

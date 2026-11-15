@@ -919,6 +919,8 @@ const en = {
     loadEarlierDone: 'Loaded {count} earlier messages',
     copyAnswer: 'Copy answer',
     regenerate: 'Regenerate',
+    notGrounded:
+      'Nothing relevant was found in your notes; the answer below is not based on your material',
     copied: 'Copied',
     copyFailed: 'Copy failed — select the text manually',
     sourcesFold: 'Sources ({count})',

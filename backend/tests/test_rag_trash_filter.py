@@ -91,7 +91,7 @@ async def _seed_note_only(db, *, note_id: str, trashed: bool, uid: str) -> None:
 
 @pytest.mark.asyncio
 class TestLexicalExcludesTrash:
-    async def test_trashed_note_is_not_in_lexical_hits(self, test_db):
+    async def test_trashed_note_is_not_in_lexical_hits(self, test_db, monkeypatch):
         from app.services.rag_service import RAGService
 
         uid = "user-trash-1"
@@ -107,8 +107,28 @@ class TestLexicalExcludesTrash:
         trashed = await service._trashed_note_ids(uid)
         assert trashed == {"n-dead"}, "回收站集合没取到"
 
-        hits = await service._lexical_search(uid, "水导轴承", [], top_k=10, exclude_note_ids=trashed)
-        ids = {h.get("note_id") for h in hits}
-        assert "n-dead" not in ids, "回收站笔记的 chunk 泄漏进了词法检索结果"
-        # 仍然能检到未删除的那篇（不是把语料清空）
-        assert "n-live" in ids or hits == [], "活着的笔记应当仍可检索到"
+        # ★ 契约级断言（2026-11-15 第二轮审计）：FTS 查询必须带上回收站集合。
+        #
+        # 为什么不再断言"结果里没有 n-dead"：测试库 `chunks_fts` 为空时，实现会从
+        # `hits == []` 的逃生口返回，`return hits` 根本没执行 —— 那种断言恒真。
+        # 这里改为记录实际参数，直接守"有没有把 exclude_note_ids 传下去"。
+        captured: dict = {}
+
+        async def _fake_search(_session, question, user_id, *, top_k=20, exclude_note_ids=None):
+            captured["exclude_note_ids"] = exclude_note_ids
+            captured["question"] = question
+            return []
+
+        from app.services import fts_search_service as _fts
+
+        async def _fts_available(_session):
+            return True
+
+        monkeypatch.setattr(_fts, "fts5_available", _fts_available)
+        monkeypatch.setattr(_fts, "search_chunks_fts", _fake_search)
+
+        await service._lexical_search(uid, "水导轴承", [], top_k=10, exclude_note_ids=trashed)
+
+        assert captured.get("exclude_note_ids") == {"n-dead"}, (
+            f"FTS 查询没带回收站集合（实际 {captured.get('exclude_note_ids')!r}） —— 已删除笔记的正文会照样进上下文"
+        )

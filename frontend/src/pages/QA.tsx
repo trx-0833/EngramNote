@@ -80,6 +80,12 @@ interface QARecord {
   provider: string;
   retrievalStatus?: string;
   /**
+   * 本轮回答**有没有检索依据**（后端 `meta.grounded`，2026-11-15 审计 round2）。
+   * `false` = 一条片段都没检到，后端已禁止模型凭自有知识作答；前端据此标注，
+   * 否则用户会把"模型自己的话"当成笔记里的内容。
+   */
+  grounded?: boolean;
+  /**
    * 这一轮在后端的落库状态（`qa_turns.status`：`ok` / `failed` / `aborted`）。
    *
    * 审计 M4：载入历史时原来把它丢了，于是"失败"与"中止"的轮次和"首字还没到"
@@ -577,6 +583,8 @@ export default function QA() {
                 updated[0] = {
                   ...updated[0],
                   retrievalStatus: String(payload.retrieval_status || ''),
+                  // `grounded === false` 才标注；字段缺失时保持 undefined（不误报）
+                  grounded: typeof payload.grounded === 'boolean' ? payload.grounded : undefined,
                 };
                 return updated;
               });
@@ -916,6 +924,13 @@ export default function QA() {
                       ) : record.answer ? (
                         // 流式渲染：答案实时增长
                         <div className={styles.qaAnswerText}>
+                          {/* 没有检索依据时明确标注（2026-11-15 审计 round2）：
+                              后端 `meta.grounded === false` 表示这一轮一条片段都没检到、
+                              模型被禁止凭自有知识作答。不标的话，用户会以为这句话
+                              是从自己笔记里查到的。 */}
+                          {record.grounded === false && (
+                            <p className={styles.qaNotGrounded}>{t('qa.notGrounded')}</p>
+                          )}
                           {/* Markdown 渲染（2026-11-14 用户上报「还是原始格式」）：
                               renderMarkdown 内部是 marked + DOMPurify（项目统一出口）——
                               模型输出属于不可信内容，不能直接塞进 DOM。 */}

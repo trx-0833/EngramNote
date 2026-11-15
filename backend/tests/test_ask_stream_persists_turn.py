@@ -125,10 +125,19 @@ def _patch_llm(monkeypatch, *, chunks=("浮充", "是恒压。"), raises: Except
     return seen
 
 
-def _stream_events(client: TestClient, user_id: str, *, question: str = "浮充是什么？", session_id=None):
+def _stream_events(
+    client: TestClient,
+    user_id: str,
+    *,
+    question: str = "浮充是什么？",
+    session_id=None,
+    retry_of=None,
+):
     body = {"question": question}
     if session_id is not None:
         body["session_id"] = session_id
+    if retry_of is not None:
+        body["retry_of"] = retry_of
     events: list[tuple[str, dict]] = []
     with client.stream("POST", "/api/understanding/ask/stream", json=body, headers=_auth(user_id)) as resp:
         assert resp.status_code == 200, resp.read()
@@ -164,6 +173,42 @@ class TestStreamPersistence:
         assert turns[0].retrieval_query == "浮充是什么？"
         assert turns[0].context_turns == 0
         assert turns[0].session_id == meta["session_id"]
+
+    async def test_retry_of_supersedes_old_turn_end_to_end(self, test_db, monkeypatch):
+        """★ 「重新生成」的端到端判据（审计 round2 blocker）
+
+        服务层单测只证明 `supersede_turn(db, ...)` 本身可用；端点里**漏传 `db`**
+        抛出的 TypeError 会被 `except Exception` 吞成一行 warning —— 表现为
+        "重新生成了一切正常"，但旧轮永远不是 `superseded`、`turn_count` 不减、
+        刷新后新旧两条并存。所以必须走完整个 SSE。
+        """
+        from app.models.qa_history import TURN_STATUS_SUPERSEDED
+
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_rag(monkeypatch)
+        _patch_llm(monkeypatch)
+
+        first = _stream_events(client, uid, question="浮充是什么？")
+        session_id = next(p for name, p in first if name == "meta")["session_id"]
+
+        before = await _read_turns(test_db)
+        assert len(before) == 1
+        old_id = before[0].id
+
+        # 对最新一轮重新生成
+        events = _stream_events(client, uid, question="浮充是什么？", session_id=session_id, retry_of=old_id)
+        assert [name for name, _ in events][-1] == "done"
+
+        after = await _read_turns(test_db)
+        old_turn = next(t for t in after if t.id == old_id)
+        assert old_turn.status == TURN_STATUS_SUPERSEDED, (
+            f"旧轮没被替换（status={old_turn.status!r}）—— 端点里调用 supersede 失败且被吞掉了"
+        )
+
+        # 会话计数：替换是"换一版"而不是"多一轮"，净变化必须为 0
+        session = next(s for s in await _read_sessions(test_db) if s.id == session_id)
+        assert session.turn_count == 1, f"turn_count 应为 1（净变化 0），实际 {session.turn_count}"
 
     async def test_second_turn_carries_first_turn_into_messages(self, test_db, monkeypatch):
         """★ 多轮的核心判据：第二轮的 messages 里必须出现第一轮"""

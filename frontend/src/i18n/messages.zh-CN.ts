@@ -1120,6 +1120,8 @@ const zhCN = {
     // 真·替换旧轮需要后端 retry_of，见 docs/qa-deepseek-redesign.md §6.2。
 
     regenerate: '重新生成',
+    // 没有检索依据时的标注（后端 meta.grounded === false）
+    notGrounded: '这一轮没有在你的笔记里检索到相关内容，下面的回答不基于你的资料',
     copied: '已复制',
     copyFailed: '复制失败，请手动选择文本',
     // 来源改成可折叠（宽屏仍保留右栏）

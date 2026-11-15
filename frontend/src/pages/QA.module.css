@@ -503,3 +503,16 @@
   border: 1px solid var(--color-border-light);
   padding: 4px 8px;
 }
+
+/* 没有检索依据时的标注（2026-11-15 审计 round2）：需要能被注意到，
+   但不能抢走答案本身的注意力 —— 所以用左边框 + 次级文字色，不用大红。 */
+.qaNotGrounded {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-warning, #d97706);
+  border-radius: 4px;
+  background: var(--color-bg-subtle, rgba(217, 119, 6, 0.08));
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
