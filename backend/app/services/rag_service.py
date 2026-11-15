@@ -377,6 +377,30 @@ class RAGService:
         async with session_factory() as session:
             return await get_user_chunks(session, user_id)
 
+    async def _trashed_note_ids(self, user_id: str) -> set[str]:
+        """该用户**回收站**里的笔记 id
+
+        向量路与词法路共用（2026-11-15 审计 major）：FTS5 查询本身支持
+        exclude_note_ids，但 _lexical_search 调用时没传 —— 于是**已删除的资料
+        仍会出现在回答里**，正确性与隐私双失。
+        """
+        from sqlalchemy import select as _select
+
+        from ..models.note import Note as _Note
+
+        session_factory = self._get_session_factory()
+        async with session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        _select(_Note.id).where(_Note.user_id == user_id, _Note.trashed_at.is_not(None))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return set(rows)
+
     async def _search_chunk_vectors(
         self,
         question_embedding: List[float],
@@ -394,28 +418,18 @@ class RAGService:
         回收站笔记的 chunk 在此排除（`get_user_chunks` 已排除，
         但向量路直接查表，需要单独处理）。
         """
-        from sqlalchemy import select as _select
-
-        from ..models.note import Note as _Note
         from .chunk_search_service import search_chunks
 
+        # 复用公共方法（2026-11-15）：词法路也要同一份回收站集合
+        trashed = await self._trashed_note_ids(user_id)
         session_factory = self._get_session_factory()
         async with session_factory() as session:
-            trashed = list(
-                (
-                    await session.execute(
-                        _select(_Note.id).where(_Note.user_id == user_id, _Note.trashed_at.is_not(None))
-                    )
-                )
-                .scalars()
-                .all()
-            )
             return await search_chunks(
                 session,
                 question_embedding,
                 user_id,
                 top_k=top_k,
-                exclude_note_ids=set(trashed) or None,
+                exclude_note_ids=trashed or None,
                 stats=stats,
             )
 
@@ -425,6 +439,7 @@ class RAGService:
         question: str,
         chunks: List[Dict[str, Any]],
         top_k: int,
+        exclude_note_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """词法检索：FTS5 优先，Python BM25 兜底（阶段 2.5′）
 
@@ -444,7 +459,15 @@ class RAGService:
         session_factory = self._get_session_factory()
         async with session_factory() as session:
             if await fts5_available(session):
-                hits = await search_chunks_fts(session, question, user_id, top_k=top_k)
+                # 回收站必须排除（2026-11-15 审计 major）：FTS5 支持该参数，
+                # 原来只是没传 —— 已删除笔记的正文会照样进上下文与引用列表。
+                hits = await search_chunks_fts(
+                    session,
+                    question,
+                    user_id,
+                    top_k=top_k,
+                    exclude_note_ids=exclude_note_ids or None,
+                )
                 if hits:
                     return hits
                 # FTS5 可用但无命中：**不再回落**到 Python BM25。
@@ -452,6 +475,9 @@ class RAGService:
                 # 使评测无法解释。空结果就是空结果。
                 return []
 
+        # Python BM25 兜底同理：语料里先剔掉回收站笔记的 chunk
+        if exclude_note_ids:
+            chunks = [c for c in chunks if c.get("note_id") not in exclude_note_ids]
         return self._get_bm25_index(user_id, chunks).search(question, top_k=top_k)
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
@@ -783,7 +809,9 @@ class RAGService:
         # 构建可能没有；词法通道不该因为一个可选扩展缺失就整体不可用。
         bm25_results: List[Dict[str, Any]] = []
         try:
-            bm25_results = await self._lexical_search(user_id, question, chunks, pool)
+            # 回收站集合与向量路共用同一份（2026-11-15 审计 major）
+            trashed_ids = await self._trashed_note_ids(user_id)
+            bm25_results = await self._lexical_search(user_id, question, chunks, pool, exclude_note_ids=trashed_ids)
         except Exception as e:
             logger.warning(f"词法检索失败: {e}")
 

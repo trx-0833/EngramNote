@@ -126,6 +126,20 @@ async def search_chunks(
             "向量检索跳过 %d 条维度不符的 chunk（库中维度混杂会得到无意义的相似度）",
             skipped_dim,
         )
+    # 低分过滤（2026-11-15 审计 minor）：ector_similarity_floor 之前是**死配置**
+    # —— 注释写着阈值语义，代码里零引用。这里把它接上：单位向量的余弦 < floor 的
+    # 结果视为不相关，不进入融合（否则没命中与命中了毫不相干的块无法区分）。
+    # 0 表示不过滤（保持旧行为）。
+    if scored:
+        from ..config import get_settings as _get_settings
+
+        floor = float(getattr(_get_settings(), "vector_similarity_floor", 0.0) or 0.0)
+        if floor > 0:
+            before = len(scored)
+            scored = [(sim, row) for sim, row in scored if sim >= floor]
+            if len(scored) != before:
+                logger.debug("向量相似度过滤：%d → %d（floor=%.2f）", before, len(scored), floor)
+
     if not scored:
         return []
 
