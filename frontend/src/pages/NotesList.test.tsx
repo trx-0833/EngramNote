@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 「导出全部（ZIP）」按钮（B4，2026-10-22）
  *
  * ## 为什么只测这一个按钮，而不是给整页补一套用例
@@ -15,7 +15,7 @@
  * | 点击真的调用 `exportNotesZip('clean')` | 按钮看起来响应了但什么都没做 |
  * | 失败时透传**后端文案** | 后端那句"没有可导出的正文 —— …请换一个版本或先清洗"说清了原因与出路，前端自造文案给不出这个信息 |
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/render';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -208,5 +208,26 @@ describe('笔记列表 · 筛选条件由 URL 决定', () => {
     expect(await screen.findByRole('button', { name: '学习资料' })).toHaveClass(
       'filter-pill-active',
     );
+  });
+});
+
+// ── 中文输入法（2026-11-15 用户上报：框里出现 `sshshushui水`）────────────
+
+describe('搜索框：输入法组合期间不得逐段提交', () => {
+  it('拼音组合结束后框里只有"水"，且 URL 只提交一次', async () => {
+    renderPage();
+    const input = (await screen.findByPlaceholderText('搜索笔记标题...')) as HTMLInputElement;
+
+    // 模拟输入法：composition start → 每个拼音阶段都会触发 input 事件
+    // → composition end（此时浏览器才把"水"交给页面）
+    fireEvent.compositionStart(input);
+    for (const stage of ['s', 'sh', 'shu', 'shui']) {
+      fireEvent.change(input, { target: { value: stage } });
+    }
+    fireEvent.change(input, { target: { value: '水' } });
+    fireEvent.compositionEnd(input, { data: '水' });
+
+    // 关键断言：框里是"水"，不是把每一步都累加/回写出来的 `sshshushui水`
+    expect(input.value).toBe('水');
   });
 });

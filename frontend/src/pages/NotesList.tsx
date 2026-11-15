@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file 笔记列表页面
  * @description 展示用户所有笔记的列表页面，支持：
  * 1. 按标题关键词搜索
@@ -6,7 +6,7 @@
  * 3. 删除笔记（带确认提示）
  * 4. 点击笔记卡片跳转到详情页
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -84,7 +84,27 @@ export default function NotesList() {
   const [page, setPage] = useUrlNumber('p', 1);
   /** 多个筛选项**一次**写进 URL（setSearchParams 连续调用会互相覆盖，见 useUrlPatch） */
   const patchUrl = useUrlPatch();
-  const [keyword] = useUrlState('q', '');
+  // ── 搜索框：本地草稿驱动输入，URL 只承载「已提交的查询词」（2026-11-15 修）──
+  //
+  // 回归成因（`71e7ee6` 引入）：那次把输入框从 `useState` 改成直接绑
+  // `useUrlState('q')` —— `value` 来自 URL，而 `setSearchParams` 是异步导航。
+  // 中文输入法组合期间（拼音 s→sh→shu→shui→水）React 会用旧值回写受控 input，
+  // 输入法只好把每个中间阶段都当成"已提交" —— 框里出现 `sshshushui水`。
+  //
+  // 现在：`keywordDraft` 同步驱动 `value`；组合期间不写 URL（不触发导航），
+  // 组合结束/普通输入时才提交。查询与"往返保留"仍用 URL 里的 `keywordParam`。
+  const [keywordParam] = useUrlState('q', '');
+  // 用派生值而不是 effect 同步（eslint 规则禁止在 effect 里同步 setState）：
+  // `base` 记住草稿是基于哪个 URL 值写的；URL 一变（前进/后退/外部跳转）自动跟随，
+  // 没变就用草稿 —— 组合期间 URL 不动，所以草稿不会被覆盖。
+  const [draft, setDraft] = useState({ base: keywordParam, text: keywordParam });
+  const keywordDraft = draft.base === keywordParam ? draft.text : keywordParam;
+  const composingRef = useRef(false);
+
+  function commitKeyword(next: string) {
+    if (next === keywordParam) return;
+    patchUrl({ q: next, p: '' });
+  }
   const [noteRoleRaw] = useUrlState('role', 'material');
   const noteRole: 'material' | 'personal_note' =
     noteRoleRaw === 'personal_note' ? 'personal_note' : 'material';
@@ -128,7 +148,9 @@ export default function NotesList() {
   /** 离开本页时记住完整 URL：详情页返回时连筛选一起带回来（见 hooks/useRememberListUrl） */
   useRememberListUrl('notes');
   useListScrollRestore(
-    ['notes', noteRole, keyword, page, archivedByRole[noteRole] ? 'archived' : 'all'].join(':'),
+    ['notes', noteRole, keywordParam, page, archivedByRole[noteRole] ? 'archived' : 'all'].join(
+      ':',
+    ),
   );
 
   // 当页码或关键词或筛选条件变化时重新获取笔记列表
@@ -162,11 +184,14 @@ export default function NotesList() {
     error: queryError,
     refetch,
   } = useQuery({
-    queryKey: [...NOTES_QUERY_KEY, { page, pageSize, keyword, noteRole, showArchived }],
+    queryKey: [
+      ...NOTES_QUERY_KEY,
+      { page, pageSize, keyword: keywordParam, noteRole, showArchived },
+    ],
     queryFn: ({ signal }) =>
       showArchived
         ? getArchivedNotes(page, pageSize, noteRole, { signal })
-        : getNotes(page, pageSize, keyword || undefined, noteRole, { signal }),
+        : getNotes(page, pageSize, keywordParam || undefined, noteRole, { signal }),
   });
 
   const notes = notesData?.items ?? [];
@@ -181,7 +206,7 @@ export default function NotesList() {
   /** 就地改写当前这一页的缓存（删除/重试之后，结果确定 ⇒ 不必再问服务器） */
   function patchCurrentPage(patch: (prev: NoteListResponse) => NoteListResponse) {
     queryClient.setQueryData<NoteListResponse>(
-      [...NOTES_QUERY_KEY, { page, pageSize, keyword, noteRole, showArchived }],
+      [...NOTES_QUERY_KEY, { page, pageSize, keyword: keywordParam, noteRole, showArchived }],
       (prev) => (prev ? patch(prev) : prev),
     );
   }
@@ -325,9 +350,19 @@ export default function NotesList() {
           <input
             type="search"
             placeholder={t('notesList.searchPlaceholder')}
-            value={keyword}
+            value={keywordDraft}
             onChange={(e) => {
-              patchUrl({ q: e.target.value, p: '' });
+              setDraft({ base: keywordParam, text: e.target.value });
+              // 组合期间只更新草稿：此时写 URL 会让受控值被异步回写成旧值，
+              // 输入法就把拼音的每个阶段都提交一遍（`sshshushui水`）。
+              if (!composingRef.current) commitKeyword(e.target.value);
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false;
+              commitKeyword(e.currentTarget.value);
             }}
             aria-label={t('notesList.searchLabel')}
           />
@@ -394,7 +429,7 @@ export default function NotesList() {
 
           ⚠️ 计划里明确把"批量选择 UI（勾选框）"列为配套、不在本轮，
           所以这里只有"导出全部"一个动作，没有"导出选中的 N 篇"。 */}
-      {!keyword && (
+      {!keywordParam && (
         <div style={{ marginBottom: 'var(--space-md)' }}>
           <button className="btn btn-secondary" onClick={handleExportAll} disabled={exportingAll}>
             {/* 图标集里**没有**下载图标（`components/icons/` 只有 upload 等 40 个）。
@@ -414,10 +449,10 @@ export default function NotesList() {
       ) : notes.length === 0 ? (
         /* 空状态：根据是否有搜索关键词显示不同提示 */
         <EmptyState
-          message={keyword ? t('notesList.noMatch') : t('notesList.empty')}
-          description={keyword ? undefined : t('notesList.emptyHint')}
+          message={keywordParam ? t('notesList.noMatch') : t('notesList.empty')}
+          description={keywordParam ? undefined : t('notesList.emptyHint')}
           action={
-            !keyword ? (
+            !keywordParam ? (
               <button className="btn btn-primary" onClick={() => navigate('/upload')}>
                 {/* 批次 B3：空状态里的上传入口补 `upload` 图标 */}
                 <Icon name="upload" size={16} />
