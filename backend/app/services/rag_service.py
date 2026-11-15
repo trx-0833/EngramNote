@@ -473,7 +473,9 @@ class RAGService:
                 args=[[text]],
             )
             # task.get() 是阻塞调用，放入线程池避免卡死事件循环（见 docs/decisions.md#F-06）
-            result = await asyncio.to_thread(task.get, 10)
+            # 超时可配（2026-11-15）：10 秒对冷启动不够，见 config 注释
+            timeout = int(getattr(settings, "rag_encode_timeout_seconds", 90) or 90)
+            result = await asyncio.to_thread(task.get, timeout)
             if result:
                 return result[0]
             return None

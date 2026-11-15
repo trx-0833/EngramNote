@@ -336,6 +336,10 @@ class Settings(BaseSettings):
     rag_context_top_k: int = 8
     #: 融合结果里为**词法强命中**保底的名额（见 `rag_service._ensure_lexical_hits`）
     rag_lexical_quota: int = 2
+    #: 走 Celery worker 编码问题的超时（秒）。原写死 10 ——
+    #: worker 冷启动要加载嵌入模型（bge-m3 首次 ~20s），10 秒必然超时，
+    #: 于是一次冷启动会让**整个问答退化成纯关键词检索**，而日志只有一行 warning。
+    rag_encode_timeout_seconds: int = 90
     # 每路送入融合的候选数。融合取 top-5，但候选池要大于 5 ——
     # 池=5 时融合只能在那 10 条里排，答错就出局；池=20 给排序留出余地。
     # 实测：池=5 → 60.18%，池=20 → 60.87%（同参数下）。
