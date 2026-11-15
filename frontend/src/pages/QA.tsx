@@ -365,6 +365,10 @@ export default function QA() {
         if (cancelled) return;
         const records: QARecord[] = (detail.turns ?? [])
           .map((turn: QATurnItem) => ({
+            // id 必须带上（2026-11-15）：「重新生成」要拿它当 retry_of。
+            // 漏了它时按钮会**静默降级**成普通提问（多一条而不是替换一条），
+            // 用户只会觉得重新生成没生效。这条与 handleLoadEarlier 的映射必须一致。
+            id: turn.id,
             question: turn.question,
             answer: turn.answer ?? '',
             sources: (turn.sources ?? []) as AnswerSource[],
@@ -479,7 +483,12 @@ export default function QA() {
    * 历史里会留下两条（旧的那条仍是 failed/aborted）。真·重新生成需要 `retry_of`
    * 与服务端的轮次可见性（B 方案），本次不做。
    */
-  async function handleAsk(override?: string, keepDraft = false) {
+  /**
+   * 发问。`retryOf` 非空表示**真·重新生成**（2026-11-15）：
+   * 服务端会把那一轮标成 `superseded`（详情默认不返回，等于隐藏旧版），
+   * 成功后本地也要把它从列表里摘掉，否则屏幕上会出现两条一模一样的问答。
+   */
+  async function handleAsk(override?: string, keepDraft = false, retryOf?: string) {
     const rawQuestion = (override ?? question).trim();
     if (!rawQuestion) return;
     // 新问题发起前中止上一个未完成的流，避免旧 token 污染新答案
@@ -513,6 +522,7 @@ export default function QA() {
         currentQuestion,
         controller.signal,
         sessionId || undefined,
+        retryOf,
       );
       // askQuestionStream 返回 ReadableStream，直接获取读取器
       const r = stream.getReader();
@@ -639,6 +649,12 @@ export default function QA() {
           return updated;
         });
       });
+
+      // 真·重新生成成功（2026-11-15）：服务端已把旧轮标成 `superseded`（详情不再返回），
+      // 本地也要摘掉 —— 否则屏幕上会同时出现新旧两条一模一样的问答。
+      if (retryOf) {
+        setHistory((prev) => prev.filter((r) => r.id !== retryOf));
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         // 用户主动停止：保留已生成文本。A 方案下**即使首字未到也留一条 `aborted`** ——
@@ -1007,7 +1023,7 @@ export default function QA() {
                             <button
                               type="button"
                               className={`btn btn-ghost ${styles.qaActionButton}`}
-                              onClick={() => void handleAsk(record.question, true)}
+                              onClick={() => void handleAsk(record.question, true, record.id)}
                               aria-label={`${t('qa.regenerate')}：${record.question}`}
                             >
                               {t('qa.regenerate')}

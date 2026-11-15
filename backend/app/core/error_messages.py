@@ -113,6 +113,24 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # ── AI 问答历史（2026-11-13，docs/qa-history-plan.md）──
     # 别人的会话与不存在的会话**共用**这一条：不泄露"这个 id 存在"。
     "QA_SESSION_NOT_FOUND": {"zh-CN": "对话不存在或已被删除", "en": "Conversation not found"},
+    # ── 「重新生成」（2026-11-15）──
+    # 文案与 raise 处**逐字一致**（`test_i18n` 会比对），改一处就要改两处。
+    "QA_RETRY_TARGET_INVALID": {
+        "zh-CN": "要重新生成的回答不在这个对话里",
+        "en": "That answer is not part of this conversation",
+    },
+    "QA_RETRY_SUPERSEDED": {
+        "zh-CN": "这条回答已经被重新生成过，请对最新那条操作",
+        "en": "That answer was already regenerated; use the latest one",
+    },
+    "QA_RETRY_NOT_OK": {
+        "zh-CN": "失败的问答请用「重试」，不要用「重新生成」",
+        "en": "Use retry for failed answers, not regenerate",
+    },
+    "QA_RETRY_NOT_LATEST": {
+        "zh-CN": "只能对最新一条回答重新生成",
+        "en": "Only the latest answer can be regenerated",
+    },
     #: 会话属于另一个入口（例如拿笔记浮层的会话去全库问答）：**不是**"已被删除"，别误导用户
     "QA_SESSION_SURFACE_MISMATCH": {
         "zh-CN": "这个对话属于另一个入口",

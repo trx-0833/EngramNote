@@ -775,6 +775,10 @@ describe('重新生成：最新一轮可以再要一版', () => {
     await user.click(button);
     await waitFor(() => expect(askQuestionStream).toHaveBeenCalled());
     expect(askQuestionStream.mock.calls[0][0]).toBe('浮充和均充有什么区别？');
+    // 真·重新生成：第 4 个参数是被替换的那一轮 id（2026-11-15）
+    expect(askQuestionStream.mock.calls[0][3]).toBe('t2');
     expect(await screen.findByText(/第二版答案/)).toBeInTheDocument();
+    // 旧轮被替换 → 本地也要摘掉，否则屏幕上新旧两条并存
+    await waitFor(() => expect(screen.queryByText('最新答案')).not.toBeInTheDocument());
   });
 });

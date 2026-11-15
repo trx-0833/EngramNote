@@ -358,6 +358,28 @@ async def get_turn(db: AsyncSession, *, user_id: str, turn_id: str) -> Optional[
     return (await db.execute(select(QATurn).where(QATurn.id == turn_id, QATurn.user_id == user_id))).scalars().first()
 
 
+async def is_latest_turn(db: AsyncSession, *, session_id: str, turn_id: str) -> bool:
+    """这一轮是不是该会话里**最新的**那一轮（`superseded` 不算）
+
+    只允许对最新一轮"重新生成"（2026-11-15 产品决定）：对历史轮替换会牵扯
+    "它之后的轮次怎么办"—— 后面那些轮次是基于旧回答的追问，替换后就成了悬空引用。
+    第一版把范围收在最新一轮，代价可控。
+    """
+    latest_id = (
+        (
+            await db.execute(
+                select(QATurn.id)
+                .where(QATurn.session_id == session_id, QATurn.status != TURN_STATUS_SUPERSEDED)
+                .order_by(QATurn.created_at.desc(), QATurn.id.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    return latest_id == turn_id
+
+
 async def supersede_turn(db: AsyncSession, *, session_id: str, turn_id: str) -> bool:
     """把一轮标成 `superseded`，并把会话的 `turn_count` 减 1
 

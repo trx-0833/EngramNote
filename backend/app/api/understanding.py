@@ -73,6 +73,10 @@ from ..core.app_error import (
     classify_exception,
     NOTE_NOT_FOUND,
     NOTE_STATUS_INVALID,
+    QA_RETRY_NOT_LATEST,
+    QA_RETRY_NOT_OK,
+    QA_RETRY_SUPERSEDED,
+    QA_RETRY_TARGET_INVALID,
     QA_SESSION_NOT_FOUND,
     QA_SESSION_SURFACE_MISMATCH,
     QUIZ_OPTIONS_REQUIRED,
@@ -92,7 +96,13 @@ from ..models.review_log import ReviewLog
 from ..models.review_state import ITEM_TYPE_QUIZ, ReviewState
 from ..models.card_relation import CardRelation
 from ..api.auth import get_current_user_dependency
-from ..models.qa_history import SURFACE_GLOBAL, TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK
+from ..models.qa_history import (
+    SURFACE_GLOBAL,
+    TURN_STATUS_ABORTED,
+    TURN_STATUS_FAILED,
+    TURN_STATUS_OK,
+    TURN_STATUS_SUPERSEDED,
+)
 from ..services import qa_history_service as qa_service
 from ..services.qa_context import assemble_messages, build_retrieval_query, context_turns_used, usable_history
 from ..schemas.common import EventStreamResponse
@@ -714,6 +724,9 @@ async def ask_question_stream(
     # id 来全库问答，会被判成"取不到"→ 404，而不是把 global 轮次写进 note 会话。
     session = None
     history: List[tuple] = []
+    #: 要**替换**的那一轮（`retry_of` 指向它）；None 表示普通提问（2026-11-15）
+    retry_of = req.retry_of or None
+    retry_target = None
     if history_enabled:
         if req.session_id:
             session = await qa_service.get_or_create_session(
@@ -732,10 +745,33 @@ async def ask_question_stream(
                 db, user_id=current_user.id, surface=SURFACE_GLOBAL, first_question=req.question
             )
 
+        # ── 「重新生成」的目标校验（2026-11-15）──
+        #
+        # `req.retry_of` 指向**要被替换**的那一轮。四种拒绝各有独立错误码：
+        # 取不到/跨会话 404、已替换 409、非成功轮 422、非最新轮 422。
+        # 拒绝要明确 —— 静默当成普通提问会让用户以为按钮没生效。
+        if retry_of:
+            if session is None:
+                raise AppError(QA_RETRY_TARGET_INVALID, "要重新生成的回答不在这个对话里", 404)
+            retry_target = await qa_service.get_turn(db, user_id=current_user.id, turn_id=retry_of)
+            if retry_target is None or retry_target.session_id != session.id:
+                raise AppError(QA_RETRY_TARGET_INVALID, "要重新生成的回答不在这个对话里", 404)
+            if retry_target.status == TURN_STATUS_SUPERSEDED:
+                raise AppError(QA_RETRY_SUPERSEDED, "这条回答已经被重新生成过，请对最新那条操作", 409)
+            if retry_target.status != TURN_STATUS_OK:
+                raise AppError(QA_RETRY_NOT_OK, "失败的问答请用「重试」，不要用「重新生成」", 422)
+            if not await qa_service.is_latest_turn(db, session_id=session.id, turn_id=retry_target.id):
+                raise AppError(QA_RETRY_NOT_LATEST, "只能对最新一条回答重新生成", 422)
+
         if session is not None and multiturn_enabled:
             turns = await qa_service.recent_ok_turns(
                 db, session_id=session.id, user_id=current_user.id, limit=max_turns
             )
+            # 重新生成时，上下文只取**该轮之前**的轮次（2026-11-15）：
+            # 否则模型会看着自己上一次的回答再答一遍 —— 那不是"换个说法"，
+            # 而是被上一版牵着走，越改越像。
+            if retry_of and retry_target is not None:
+                turns = [t for t in turns if t.created_at < retry_target.created_at]
             history = usable_history([(t.question, t.answer, t.status) for t in turns])
 
         # 把连接还回去（审计 m7）：`database.py` 写明流式端点会在**整个流期间**持有
@@ -788,6 +824,17 @@ async def ask_question_stream(
             context_turns=context_turns,
             latency_ms=latency_ms,
         )
+
+        # 「重新生成」的**替换**动作（2026-11-15）：先写新轮，成功了再把旧轮标掉。
+        #
+        # 三个必须：① 只有 `status == ok` 才标 —— 新轮失败还标旧轮，两轮内容一起没；
+        # ② 旧轮 id 取 `req.retry_of`，不依赖新轮返回什么；
+        # ③ 失败要吞掉异常：替换是**收尾动作**，它挂了不该让"回答其实已经落库"变红。
+        if retry_of and status == TURN_STATUS_OK:
+            try:
+                await qa_service.supersede_turn(session_id=session_id, turn_id=retry_of)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("替换旧轮失败（新轮已落库）: %s", exc)
 
     async def event_stream():
         # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）

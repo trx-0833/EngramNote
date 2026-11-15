@@ -50,6 +50,19 @@ QA_SESSION_NOT_FOUND = "QA_SESSION_NOT_FOUND"
 #: 但码不同：前端据此说"属于另一个入口"，而不是误报"对话已被删除"（第二轮审计 MINOR-4）。
 QA_SESSION_SURFACE_MISMATCH = "QA_SESSION_SURFACE_MISMATCH"
 
+# ---- 「重新生成」的校验（2026-11-15）----
+#
+# `retry_of` 是**有状态**的：它会把一条回答变成"一组可替换的版本"。这两种情况
+# 必须让用户看见，而不是静默当成普通提问 —— 否则用户会以为"重新生成"没生效：
+#: `retry_of` 指向的轮次取不到 / 不属于本会话（404，不泄露存在性）
+QA_RETRY_TARGET_INVALID = "QA_RETRY_TARGET_INVALID"
+#: 那条回答**已经被替换过**了（409）：继续对旧版本操作会把它标成 superseded 两次
+QA_RETRY_SUPERSEDED = "QA_RETRY_SUPERSEDED"
+#: 那条回答不是成功状态（422）：失败/中止请用「重试」
+QA_RETRY_NOT_OK = "QA_RETRY_NOT_OK"
+#: 只允许对**最新**一条重新生成（422）：历史轮替换会牵扯"它之后的轮次怎么办"
+QA_RETRY_NOT_LATEST = "QA_RETRY_NOT_LATEST"
+
 # ---- 流式问答的失败分类（2026-11-13 第二轮审计 MINOR-5）----
 #
 # `qa_turns.error_code` 是**可聚合的排障字段**，不能用 Python 类名：

@@ -660,12 +660,18 @@ export async function askQuestionStream(
    * 又能把请求体放大到任意长，而"删掉某一轮就不再影响后续回答"也就无从保证。
    */
   sessionId?: string,
+  /**
+   * 要**替换**的那一轮（2026-11-15「重新生成」）。服务端只接受会话里**最新**的一条，
+   * 成功后把旧轮标 `superseded`（详情默认不返回），失败则不标。
+   */
+  retryOf?: string,
 ): Promise<ReadableStream<Uint8Array>> {
   // 请求体按契约派生（`POST /api/understanding/ask/stream`，契约里是 `{question, session_id?}`）。
   // 响应侧刻意保持手写：SSE 的事件模型（meta/token/sources/done/error）不在 schema 里。
   const body: BodyOf<'/understanding/ask/stream', 'post'> = {
     question,
     ...(sessionId ? { session_id: sessionId } : {}),
+    ...(retryOf ? { retry_of: retryOf } : {}),
   };
   // 不设超时：流式响应可能持续很久，生命周期由调用方的 signal 控制
   const response = await authorizedFetch('/understanding/ask/stream', {
