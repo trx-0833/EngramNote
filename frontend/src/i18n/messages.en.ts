@@ -919,6 +919,7 @@ const en = {
     loadEarlierDone: 'Loaded {count} earlier messages',
     copyAnswer: 'Copy answer',
     regenerate: 'Regenerate',
+    sourceNotCited: '(not cited)',
     notGrounded:
       'Nothing relevant was found in your notes; the answer below is not based on your material',
     copied: 'Copied',

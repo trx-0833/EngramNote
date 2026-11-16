@@ -998,14 +998,37 @@ class RAGService:
         # 若将来确实需要"通用知识"模式，应当是**用户显式选择**的另一个入口
         # （界面上明确标注"以下回答不来自你的资料"），而不是静默降级。
         if not context.strip():
-            return {
-                "answer": (
-                    "在你的资料中没有找到与这个问题相关的内容。\n\n"
+            # A2（research/topics/qa-gap-triage.md）：拒答文案必须分因 ——
+            # `vector_dim_mismatch` / `bm25_only` 是**系统侧故障**，
+            # 说成"资料里没有"会让用户去补并不缺的资料（实测就有人这么被误导过）。
+            if retrieval_status == "vector_dim_mismatch":
+                reason = (
+                    "向量检索当前不可用（索引与当前模型不一致），本次仅用关键词检索，"
+                    "所以没找到相关内容。\n\n"
+                    "这不是「资料里没有」—— 索引需要重建后才能语义检索。"
+                )
+                tips = (
+                    "可以尝试：\n"
+                    "- 用更接近资料原文的关键词再问一次\n"
+                    "- 联系维护者重建向量索引（`scripts/embed_chunks.py`）"
+                )
+            elif retrieval_status == "bm25_only":
+                reason = (
+                    "向量检索当前不可用（问题编码失败），本次仅用关键词检索，"
+                    "所以没找到相关内容。\n\n"
+                    "这与「资料里没有」不是一回事 —— 语义检索恢复后可能就找到了。"
+                )
+                tips = "可以尝试：\n- 用更接近资料原文的关键词再问一次\n- 稍后重试（向量服务可能是临时不可用）"
+            else:
+                reason = "在你的资料中没有找到与这个问题相关的内容。"
+                tips = (
                     "可以尝试：\n"
                     "- 换一种问法，或使用更接近资料原文的关键词\n"
                     "- 确认相关资料已经上传并完成「理解」流程\n"
                     "- 若资料确实未覆盖该主题，先补充资料再提问"
-                ),
+                )
+            return {
+                "answer": f"{reason}\n\n{tips}",
                 "sources": [],
                 "provider": llm_service._provider,
                 "retrieval_status": retrieval_status,

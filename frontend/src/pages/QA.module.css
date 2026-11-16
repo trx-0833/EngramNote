@@ -516,3 +516,11 @@
   font-size: 0.875rem;
   line-height: 1.5;
 }
+
+/* A3：未被引用的来源标注。要能被看见，但不能抢走标题的注意力 —— */
+/* 所以用更小的字号 + 次级文字色，不加背景块。 */
+.qaNotCited {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}

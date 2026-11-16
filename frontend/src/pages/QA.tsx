@@ -105,8 +105,28 @@ interface QARecord {
  * "这条引用能不能跳到原文那一段"，各写一遍的话迟早有一边会忘记，
  * 而忘记的后果是"跳到笔记开头"—— 用户会以为引用就是开头那段，比不给跳转更容易误导。
  */
-function SourceLinks({ sources }: { sources: AnswerSource[] }) {
+/**
+ * 回答正文里被引用到的来源编号（1 基），用于 A3「标出未被引用的来源」。
+ *
+ * 只认落在 `1..total` 的编号：越界的 `[9]` 不算"引用了第 9 条"——
+ * 那种情况属于 A1 的结构校验，本轮不做（用户只选了 A2/A3）。
+ */
+export function citedSourceIndexes(answer: string, total: number): Set<number> {
+  const cited = new Set<number>();
+  const re = /\[(\d+)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(answer)) !== null) {
+    const n = Number(m[1]);
+    if (Number.isInteger(n) && n >= 1 && n <= total) cited.add(n);
+  }
+  return cited;
+}
+
+function SourceLinks({ sources, answer = '' }: { sources: AnswerSource[]; answer?: string }) {
   const { t } = useTranslation();
+  // A3：本次回答实际引用了哪几条（1 基）。空 answer（流式中/失败轮）→ 空集合，
+  // 但那种情况下 sources 通常也为空，不会误标成"全部未引用"。
+  const cited = answer ? citedSourceIndexes(answer, sources.length) : null;
   return (
     <>
       {sources.map((source, sIdx) => {
@@ -159,6 +179,11 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
                 中间凭空多出 gap）。 */}
             [{sIdx + 1}] <Icon name="file" size={16} style={{ verticalAlign: 'middle' }} />{' '}
             {source.note_title}
+            {/* A3：检索到了却没被引用 —— 这是最便宜的检索质量信号，
+                也是"看起来有依据、其实没用到"的直观提示。 */}
+            {cited && !cited.has(sIdx + 1) && (
+              <span className={styles.qaNotCited}>{t('qa.sourceNotCited')}</span>
+            )}
             {source.heading_path
               ? ` > ${source.heading_path}`
               : source.chapter_title
@@ -1045,7 +1070,7 @@ export default function QA() {
                             {t('qa.sourcesFold', { count: record.sources.length })}
                           </summary>
                           <div className={styles.qaSourcesBody}>
-                            <SourceLinks sources={record.sources} />
+                            <SourceLinks sources={record.sources} answer={record.answer} />
                           </div>
                         </details>
                       )}
