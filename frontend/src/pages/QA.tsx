@@ -1054,22 +1054,29 @@ export default function QA() {
                               判据用**黑名单**：后端将来加状态（如 truncated）不会被静默藏掉。 */}
                           {isLatest &&
                             !streaming &&
-                            (record.status === 'aborted' || record.status === 'failed' ? (
+                            (record.status === undefined || record.status === 'ok' ? (
+                              // 成功轮（或本地新轮）才有资格「重新生成」：服务端对
+                              // `status != ok` 一律 422。没有 id 就不显示 —— 没有 id
+                              // 就没有"替换"可言（A1 兜底）。
+                              record.id ? (
+                                <button
+                                  type="button"
+                                  className={`btn btn-ghost ${styles.qaActionButton}`}
+                                  onClick={() => void handleAsk(record.question, true, record.id)}
+                                  aria-label={`${t('qa.regenerate')}：${record.question}`}
+                                >
+                                  {t('qa.regenerate')}
+                                </button>
+                              ) : null
+                            ) : (
+                              // 其余**任何**状态都给「重试」——包括后端将来新增的状态。
+                              // 这样既不会"点了必 422"，也不会"一个按钮都没有"（round4 m5）。
                               <RetryButton
                                 question={record.question}
                                 disabled={streaming}
                                 onRetry={() => void handleAsk(record.question, true)}
                               />
-                            ) : record.id ? (
-                              <button
-                                type="button"
-                                className={`btn btn-ghost ${styles.qaActionButton}`}
-                                onClick={() => void handleAsk(record.question, true, record.id)}
-                                aria-label={`${t('qa.regenerate')}：${record.question}`}
-                              >
-                                {t('qa.regenerate')}
-                              </button>
-                            ) : null)}
+                            ))}
                         </div>
                       )}
                       {record.provider && (

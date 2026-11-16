@@ -247,6 +247,27 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
         texts = [build_text(title, content) for _cid, title, content in rows]
         vectors = encode_text(texts)
 
+        # M4（round4）：与 chunk 侧同一条护栏 —— 编码**前**取的 model_name 在冷 worker 上
+        # 可能还是配置名（模型尚未加载），编码时才真正加载并降级。若此时照写，库里就是
+        # "配置名 + 降级维度"，而且 `_pending_counts` 会认为模型相符 ⇒ **永不重算**。
+        # 代价是浪费这一轮编码；换来的是不会留下永久错标。
+        model_after = _model_name()
+        if model_after and model_after != settings.embedding_model:
+            logger.warning(
+                "卡片编码后才确认模型降级为 %s（配置 %s），本轮丢弃 %d 张结果不写库",
+                model_after,
+                settings.embedding_model,
+                len(rows),
+            )
+            return {
+                "scanned": 0,
+                "embedded": 0,
+                "failed": 0,
+                "remaining": len(rows),
+                "model": model_after,
+                "skipped_reason": "fallback_model",
+            }
+
         embedded = failed = 0
         # strict=True：`encode_text` 保证一条文本一个向量，长度不等说明任务坏了，
         # 宁可让任务报错，也不能悄悄少写几张卡（那会让它们永远没有向量）

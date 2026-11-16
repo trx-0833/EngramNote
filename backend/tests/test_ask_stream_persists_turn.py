@@ -213,6 +213,38 @@ class TestStreamPersistence:
         session = next(s for s in await _read_sessions(test_db) if s.id == session_id)
         assert session.turn_count == 1, f"turn_count 应为 1（净变化 0），实际 {session.turn_count}"
 
+    async def test_first_persist_failure_still_writes_one_turn(self, test_db, monkeypatch):
+        """★ M2（round4）：提前落库失败时，finally 必须补写 —— 恰好 1 条
+
+        上一版 `persisted = True` 是无条件置真：`persist_turn` 返回 None（写库失败被吞）
+        时，finally 认为"已经写过"而不补写 ⇒ 这一轮**直接消失**（审计探针 E2 实测 0 条）。
+        """
+        from app.services import qa_history_service as _svc
+
+        client = _client()
+        uid = await _make_user(test_db)
+        _patch_rag(monkeypatch)
+        _patch_llm(monkeypatch)
+
+        real = _svc.persist_turn
+        calls = {"n": 0}
+
+        async def flaky(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None  # 模拟"写库失败但被吞"
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(_svc, "persist_turn", flaky)
+
+        events = _stream_events(client, uid)
+        assert [name for name, _ in events][-1] == "done"
+
+        turns = await _read_turns(test_db)
+        assert len(turns) == 1, f"写库失败后没有补写（实际 {len(turns)} 条）"
+        assert turns[0].status == TURN_STATUS_OK
+        assert calls["n"] == 2, f"应当恰好尝试两次（提前 + 补写），实际 {calls['n']}"
+
     async def test_second_turn_carries_first_turn_into_messages(self, test_db, monkeypatch):
         """★ 多轮的核心判据：第二轮的 messages 里必须出现第一轮"""
         client = _client()

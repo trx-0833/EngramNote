@@ -15,7 +15,7 @@
  * | 点击真的调用 `exportNotesZip('clean')` | 按钮看起来响应了但什么都没做 |
  * | 失败时透传**后端文案** | 后端那句"没有可导出的正文 —— …请换一个版本或先清洗"说清了原因与出路，前端自造文案给不出这个信息 |
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/render';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -214,15 +214,22 @@ describe('笔记列表 · 筛选条件由 URL 决定', () => {
 // ── A8：草稿非空时「导出全部」隐藏 ─────────────────────────────────
 
 describe('导出全部按钮的可见性', () => {
-  it('输入框有草稿（还没提交查询）时，不显示「导出全部（ZIP）」', async () => {
-    const user = userEvent.setup();
+  it('IME 组合期间（URL 还没有 q）就不显示「导出全部（ZIP）」', async () => {
     renderPage();
-
-    // 先在输入框里打字（草稿非空，但 URL 还没有 q）
     const input = (await screen.findByPlaceholderText('搜索笔记标题...')) as HTMLInputElement;
-    await user.type(input, '水');
 
-    // A8：判据用草稿 ⇒ 按钮必须消失，避免用户以为"导出全部"导的是搜索结果
+    // 关键：用 **IME 组合期间** 的形态。普通 `user.type` 会逐字 onChange →
+    // `commitKeyword` 立刻写 URL ⇒ `keywordParam` 也变成"水"，旧实现同样隐藏按钮，
+    // 那种断言是恒真的（round4 审计已证明）。
+    // 组合期间只更新草稿、不写 URL —— 这才是 A8 真正要守的场景。
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '水' } });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /导出全部/ })).not.toBeInTheDocument(),
+    );
+    // 组合结束（提交查询）后仍然隐藏 —— 两种状态下都不该误显示
+    fireEvent.compositionEnd(input, { data: '水' });
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /导出全部/ })).not.toBeInTheDocument(),
     );

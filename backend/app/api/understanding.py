@@ -796,6 +796,8 @@ async def ask_question_stream(
     persisted = False
     #: 内层写库任务（第三轮审计：持有它才能在 finally 里判断"是否仍在飞"）
     persist_task: "asyncio.Task | None" = None
+    #: 本轮**本应**落库吗（历史关闭 / 无会话 id 时不写是正常的，不该在 finally 反复重试）
+    should_persist = history_enabled and session_id is not None
 
     async def _persist_completed_turn(
         *,
@@ -974,7 +976,10 @@ async def ask_question_stream(
             )
             try:
                 turn_id = await asyncio.shield(persist_task)
-                persisted = True
+                # M2（round4）：`persisted` 必须表示"确实写进去了"，而不是"这段跑过了"。
+                # `_persist_completed_turn` 在 `persist_turn` 失败时返回 None —— 那时
+                # finally 必须补写，否则这一轮直接消失（审计探针 E2 实测 0 条）。
+                persisted = turn_id is not None
             except Exception:  # noqa: BLE001 - 提前落库失败/被取消都不阻断回答
                 logger.warning("提前落库未完成，交由 finally 处理", exc_info=True)
 
@@ -1013,12 +1018,12 @@ async def ask_question_stream(
             # 此时它最终会提交，所以这里必须先等它，而不是直接补写 —— 否则写两条。
             if not persisted and persist_task is not None:
                 try:
-                    await asyncio.shield(persist_task)
-                    persisted = True
+                    flight_result = await asyncio.shield(persist_task)
+                    persisted = flight_result is not None
                 except Exception:  # noqa: BLE001 - 在飞任务失败 ⇒ 下面补写
                     logger.warning("在飞落库任务失败，改由 finally 补写", exc_info=True)
 
-            if not persisted:
+            if not persisted and should_persist:
                 try:
                     await asyncio.shield(
                         _persist_completed_turn(
