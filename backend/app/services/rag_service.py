@@ -747,6 +747,7 @@ class RAGService:
         self,
         question: str,
         user_id: str,
+        exclude_note_ids: Optional[set] = None,
     ) -> Dict[str, Any]:
         """
         仅执行检索阶段，返回上下文和引用来源（不调用 LLM）
@@ -798,8 +799,18 @@ class RAGService:
         # 检索只需拿 query 向量做点积，不需要模型。旧路径要起一个 worker
         # 任务、遍历 24 个 Chroma collection（D-9），现在是一次 SQL。
         vector_results: List[Dict[str, Any]] = []
-        # 回收站集合**只查一次**，向量路与词法路共用（审计 round2 m7′）
-        trashed_ids = await self._trashed_note_ids(user_id)
+        # 回收站集合：向量路与词法路共用一份（审计 round2 m7′），
+        # 且**实例级缓存**（2026-11-16 第三轮审计 A6）—— `/ask/stream` 的
+        # 「检索为空再检一次」会连着调两次 `retrieve_context`，而 `RAGService`
+        # 在端点是请求内创建的，所以缓存天然不跨请求（审计提醒过这一点）。
+        if exclude_note_ids is not None:
+            trashed_ids = exclude_note_ids
+        else:
+            cached = getattr(self, "_trashed_cache", None)
+            if cached is None:
+                cached = await self._trashed_note_ids(user_id)
+                self._trashed_cache = cached
+            trashed_ids = cached
         # 维度统计（审计 blocker #1）：整批维度不符要能被上层看见
         vector_stats: Dict[str, int] = {}
         if question_embedding is not None:
