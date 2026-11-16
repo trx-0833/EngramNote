@@ -83,7 +83,7 @@ async def run(args) -> int:
     from app.config import get_settings
 
     from app.models.chunk import Chunk
-    from app.tasks.embedding_tasks import _needs_embed_clause
+    from app.tasks.embedding_tasks import _pending_counts
 
     settings = get_settings()
     await db_mod.init_db()
@@ -91,19 +91,10 @@ async def run(args) -> int:
 
     # ---- 1. 待处理量与内存检查 ----
     async with session_factory() as db:
-        pending = (
-            await db.execute(
-                select(func.count())
-                .select_from(Chunk)
-                .where(
-                    _needs_embed_clause(
-                        get_settings().embedding_model,
-                        Chunk.has_embedding,
-                        Chunk.embedding_model,
-                    )
-                )
-            )
-        ).scalar() or 0
+        # 与调度器**逐字同源**（round6）：直接用 `_pending_counts()`。
+        # 只统一判据不统一范围的话，回收站里的待补会让脚本一直报"未全部完成"，
+        # 而调度器认为没事做 —— 两个数字各说各话。
+        pending = int((await _pending_counts()).get("chunks", 0))
         done = (
             await db.execute(
                 select(func.count())
@@ -206,19 +197,8 @@ async def run(args) -> int:
 
     # ---- 4. 收尾自检 ----
     async with session_factory() as db:
-        still = (
-            await db.execute(
-                select(func.count())
-                .select_from(Chunk)
-                .where(
-                    _needs_embed_clause(
-                        get_settings().embedding_model,
-                        Chunk.has_embedding,
-                        Chunk.embedding_model,
-                    )
-                )
-            )
-        ).scalar() or 0
+        # 同上（round6）：范围也要一致，否则收尾自检永远说"还差 N 条"
+        still = int((await _pending_counts()).get("chunks", 0))
         models = list(
             (
                 await db.execute(

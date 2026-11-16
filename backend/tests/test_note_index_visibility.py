@@ -147,6 +147,48 @@ def _seed(
 
 
 class TestPendingEmbeddingChunks:
+    """`pending_embedding_chunks` 的口径（round6 补：模型不符必须计入）
+
+    只看 `has_embedding` 时，换过模型之后笔记页会报"待补 0"，而检索整批跳过 ——
+    用户看到的数字与实际状态不符。
+    """
+
+    def test_model_mismatch_counts_as_pending(self, test_db):
+        import asyncio
+
+        from app.api.notes._common import _count_pending_embedding_chunks
+        from app.config import get_settings
+        from app.models.chunk import Chunk
+
+        uid, nid = _seed(test_db, embedded=0, pending=0)
+        expected = get_settings().embedding_model
+        stale = "BAAI/bge-small-zh-v1.5" if expected != "BAAI/bge-small-zh-v1.5" else "BAAI/bge-m3"
+
+        async def _go():
+            async with test_db() as db:
+                db.add(
+                    Chunk(
+                        id="c-stale",
+                        user_id=uid,
+                        note_id=nid,
+                        index=99,
+                        content="旧模型算过的",
+                        char_start=99,
+                        char_end=100,
+                        line_start=99,
+                        line_end=99,
+                        char_count=1,
+                        has_embedding=True,
+                        embedding_model=stale,
+                        embedding_dim=4,
+                    )
+                )
+                await db.commit()
+                return await _count_pending_embedding_chunks(db, nid)
+
+        got = asyncio.run(_go())
+        assert got == 1, f"模型不符的 chunk 没被计入待补（实际 {got}）"
+
     """端点把"还没建索引"如实报出来（`NoteDetailResponse.pending_embedding_chunks`）"""
 
     def test_counts_only_unembedded_chunks(self, test_db, patched_content):
