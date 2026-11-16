@@ -782,3 +782,21 @@ describe('重新生成：最新一轮可以再要一版', () => {
     await waitFor(() => expect(screen.queryByText('最新答案')).not.toBeInTheDocument());
   });
 });
+
+// ── A2：中止/失败轮不显示「重新生成」（点了必被 422 拒）──────────────────
+
+describe('重新生成的可用条件', () => {
+  it('中止轮只显示「重试」，不显示「重新生成」', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({ id: 't-abort', question: '被中止的问题', answer: '半截答案', status: 'aborted' }),
+      ]),
+    );
+    renderPage('/qa?s=sess-1');
+
+    // 等记录渲染出来
+    expect(await screen.findByText(/被中止的问题/)).toBeInTheDocument();
+    // A2：中止轮不该出现「重新生成」
+    expect(screen.queryByRole('button', { name: /重新生成：/ })).not.toBeInTheDocument();
+  });
+});

@@ -458,21 +458,20 @@ async def _pending_embedding_count() -> tuple[Optional[int], str]:
     Returns:
         (待嵌入行数, 来源)；测不到时行数为 `None`、来源是原因码
     """
-    from sqlalchemy import func, select
-
-    from .models.chunk import Chunk
+    # 复用调度器那条判据（2026-11-16 第三轮审计）：原来这里只看 `has_embedding=False`，
+    # 于是"算过的模型与配置不一致"（混存/降级残留）在就绪探针上显示 0 待补，
+    # 而 `_pending_counts` 认为是 897 —— 两个数字各说各话，排查时最误导人。
+    from .tasks.embedding_tasks import _pending_counts
 
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
-            total = (
-                await session.execute(select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False)))
-            ).scalar_one()
+        pending = await _pending_counts()
+        total = int(pending.get("chunks", 0))
     except Exception as exc:
         # 细节只进日志：响应里回稳定原因码（与 DatabaseCheck 的说明同一口径）
         logger.warning("就绪检查：chunk 待嵌入数查询失败 | %s: %s", type(exc).__name__, exc)
         return None, "chunks_unavailable"
-    return int(total), "chunks_table"
+    # 来源码改成调度器口径（第三轮审计）：与 _pending_counts 同源，避免第三份逻辑
+    return int(total), "pending_counts"
 
 
 async def _vector_model_snapshot() -> tuple[Optional[Dict[str, int]], Optional[Dict[str, int]]]:

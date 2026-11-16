@@ -37,7 +37,12 @@ from app.config import Settings
 
 #: 断言 503 响应体里不得出现的片段（都是"实现细节"，不是给探针看的东西）
 _LEAKY_FRAGMENTS = (
-    "engramnote.db", "D:\\", "sqlite3", "RuntimeError", "unable to open", "SELECT",
+    "engramnote.db",
+    "D:\\",
+    "sqlite3",
+    "RuntimeError",
+    "unable to open",
+    "SELECT",
 )
 
 
@@ -63,11 +68,13 @@ async def _seed_task_runs(session_factory, statuses) -> None:
 
     async with session_factory() as session:
         for status in statuses:
-            session.add(TaskRun(
-                task_id=f"ready-test-{uuid.uuid4().hex[:12]}",
-                task_name="app.tasks.convert_tasks.convert_document_task",
-                status=status,
-            ))
+            session.add(
+                TaskRun(
+                    task_id=f"ready-test-{uuid.uuid4().hex[:12]}",
+                    task_name="app.tasks.convert_tasks.convert_document_task",
+                    status=status,
+                )
+            )
         await session.commit()
 
 
@@ -102,24 +109,43 @@ async def _seed_chunks(
     uid = str(_uuid.uuid4())
     nid = note_id or str(_uuid.uuid4())
     async with session_factory() as db:
-        await db.execute(insert(User).values(
-            id=uid, email=f"{uid[:8]}@example.com", username=f"u{uid[:8]}",
-            hashed_password="x", is_active=True,
-        ))
-        await db.execute(insert(Note).values(
-            id=nid, user_id=uid, title=f"笔记 {nid[:6]}",
-            source_type=SourceType.pdf.value, status=NoteStatus.cleaned.value,
-        ))
+        await db.execute(
+            insert(User).values(
+                id=uid,
+                email=f"{uid[:8]}@example.com",
+                username=f"u{uid[:8]}",
+                hashed_password="x",
+                is_active=True,
+            )
+        )
+        await db.execute(
+            insert(Note).values(
+                id=nid,
+                user_id=uid,
+                title=f"笔记 {nid[:6]}",
+                source_type=SourceType.pdf.value,
+                status=NoteStatus.cleaned.value,
+            )
+        )
         for i in range(embedded + pending):
             has = i < embedded
-            db.add(Chunk(
-                user_id=uid, note_id=nid, index=start_index + i, content=f"chunk {i}",
-                char_start=i, char_end=i + 1, line_start=i, line_end=i,
-                char_count=1, has_embedding=has,
-                # 已嵌入的行带上模型与维度（`/ready` 的向量快照读的就是这两列）
-                embedding_model=model if has else None,
-                embedding_dim=dim if has else None,
-            ))
+            db.add(
+                Chunk(
+                    user_id=uid,
+                    note_id=nid,
+                    index=start_index + i,
+                    content=f"chunk {i}",
+                    char_start=i,
+                    char_end=i + 1,
+                    line_start=i,
+                    line_end=i,
+                    char_count=1,
+                    has_embedding=has,
+                    # 已嵌入的行带上模型与维度（`/ready` 的向量快照读的就是这两列）
+                    embedding_model=model if has else None,
+                    embedding_dim=dim if has else None,
+                )
+            )
         await db.commit()
 
 
@@ -138,7 +164,9 @@ def _pin_broker(monkeypatch, tmp_path: Path, *, backend: str = "local") -> Path:
 
     monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path)
     cfg = Settings(
-        app_env="prod", debug=False, jwt_secret_key="ready-test-key",
+        app_env="prod",
+        debug=False,
+        jwt_secret_key="ready-test-key",
         celery_backend=backend,
     )
     # 就绪端点自己调 `get_settings()`（而不是复用 import 时冻结的模块属性），
@@ -152,7 +180,6 @@ def _pin_broker(monkeypatch, tmp_path: Path, *, backend: str = "local") -> Path:
 
 @pytest.mark.asyncio
 class TestReadinessWithHealthyDatabase:
-
     async def test_ready_when_database_is_usable(self, test_db):
         """★ 一切正常：200 + ready，数据库检查为 ok"""
         async with _client() as client:
@@ -180,14 +207,17 @@ class TestReadinessWithHealthyDatabase:
         """★ 深度不是装饰：`task_runs` 里有几行在执行/在等，就要报几"""
         from app.models.task_run import TaskStatus
 
-        await _seed_task_runs(test_db, [
-            TaskStatus.running,
-            TaskStatus.running,
-            TaskStatus.pending,
-            # 终态不计入"在跑"：已结束的任务不是积压
-            TaskStatus.succeeded,
-            TaskStatus.failed,
-        ])
+        await _seed_task_runs(
+            test_db,
+            [
+                TaskStatus.running,
+                TaskStatus.running,
+                TaskStatus.pending,
+                # 终态不计入"在跑"：已结束的任务不是积压
+                TaskStatus.succeeded,
+                TaskStatus.failed,
+            ],
+        )
 
         async with _client() as client:
             body = (await client.get("/ready")).json()
@@ -260,8 +290,7 @@ class TestReadinessWithHealthyDatabase:
         assert index["vector_models"] == {"BAAI/bge-m3": 2, "BAAI/bge-small-zh-v1.5": 1}, index
         assert index["vector_dims"] == {"1024": 2, "512": 1}, index
         assert index["degraded"] is True, (
-            "库里混着两种模型/维度却没报 degraded —— 跨模型余弦相似度没有意义，"
-            "这正是要暴露的状态"
+            "库里混着两种模型/维度却没报 degraded —— 跨模型余弦相似度没有意义，这正是要暴露的状态"
         )
 
     async def test_single_model_is_not_reported_as_degraded(self, test_db):
@@ -287,13 +316,19 @@ class TestReadinessWithHealthyDatabase:
         在有人跑 `scripts/embed_chunks.py` 之前**只被 BM25 检索到**（附录 BN.4）。
         3 条已嵌入 + 2 条未嵌入必须报 2。
         """
-        await _seed_chunks(test_db, embedded=3, pending=2)
+        # 2026-11-16 第三轮审计：待补判据已纳入模型比对，已嵌入行必须带上
+        # 与配置一致的模型名，否则会被正确算成"模型不符 ⇒ 待补"（5 而不是 2）。
+        from app.config import get_settings
+
+        await _seed_chunks(test_db, embedded=3, pending=2, model=get_settings().embedding_model)
 
         async with _client() as client:
             body = (await client.get("/ready")).json()
 
         assert body["index"]["pending_embeddings"] == 2, body["index"]
-        assert body["index"]["source"] == "chunks_table"
+        # 2026-11-16 第三轮审计：来源码随「复用 _pending_counts」改为调度器口径，
+        # 这样就绪探针与后台补嵌入任务看的是同一个数字（原来各说各话）。
+        assert body["index"]["source"] == "pending_counts"
 
     async def test_index_backlog_does_not_flip_readiness(self, test_db):
         """★ 积压是**报告项**：有积压照样 200
@@ -314,7 +349,6 @@ class TestReadinessWithHealthyDatabase:
 
 @pytest.mark.asyncio
 class TestNotReady:
-
     async def test_not_ready_when_database_is_unreachable(self, test_db, monkeypatch):
         """★ 数据库不可用 → 503（而不是 500：500 与"应用本身崩了"无法区分）"""
         import app.main as main_mod
@@ -345,9 +379,7 @@ class TestNotReady:
         import app.main as main_mod
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{(tmp_path / 'empty.db').as_posix()}"
-        )
+        engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'empty.db').as_posix()}")
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         monkeypatch.setattr(main_mod, "get_session_factory", lambda: factory)
         try:
@@ -413,7 +445,10 @@ class TestQueueDepthFromBroker:
     """
 
     async def test_broker_backlog_counts_only_real_queue_messages(
-        self, test_db, tmp_path, monkeypatch,
+        self,
+        test_db,
+        tmp_path,
+        monkeypatch,
     ):
         """★ 只数业务队列的消息，**不数控制消息**
 
@@ -452,7 +487,10 @@ class TestQueueDepthFromBroker:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["queue"] == {
-            "depth": 50, "running": 1, "pending": 0, "source": "filesystem_broker",
+            "depth": 50,
+            "running": 1,
+            "pending": 0,
+            "source": "filesystem_broker",
         }
 
     async def test_redis_backend_reports_unknown_depth(self, test_db, tmp_path, monkeypatch):
@@ -477,7 +515,9 @@ class TestQueueDepthFromBroker:
 
         monkeypatch.setattr(config_mod, "DATA_DIR", tmp_path)
         cfg = Settings(
-            app_env="prod", debug=False, jwt_secret_key="ready-test-key",
+            app_env="prod",
+            debug=False,
+            jwt_secret_key="ready-test-key",
             celery_backend="local",
         )
         monkeypatch.setattr(main_mod, "get_settings", lambda: cfg)
@@ -512,9 +552,7 @@ class TestReadyContract:
         ok = responses["200"]["content"]["application/json"]["schema"]
         not_ready = responses["503"]["content"]["application/json"]["schema"]
         assert ok.get("$ref") and not_ready.get("$ref"), (ok, not_ready)
-        assert ok["$ref"] == not_ready["$ref"], (
-            "200 与 503 的响应模型必须是同一个（探针用一套解析逻辑处理两种情况）"
-        )
+        assert ok["$ref"] == not_ready["$ref"], "200 与 503 的响应模型必须是同一个（探针用一套解析逻辑处理两种情况）"
 
     def test_health_body_is_unchanged(self):
         """既有端点的响应体不得被本次改动顺手改掉"""

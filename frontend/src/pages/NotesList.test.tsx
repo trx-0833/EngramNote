@@ -210,3 +210,21 @@ describe('笔记列表 · 筛选条件由 URL 决定', () => {
     );
   });
 });
+
+// ── A8：草稿非空时「导出全部」隐藏 ─────────────────────────────────
+
+describe('导出全部按钮的可见性', () => {
+  it('输入框有草稿（还没提交查询）时，不显示「导出全部（ZIP）」', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    // 先在输入框里打字（草稿非空，但 URL 还没有 q）
+    const input = (await screen.findByPlaceholderText('搜索笔记标题...')) as HTMLInputElement;
+    await user.type(input, '水');
+
+    // A8：判据用草稿 ⇒ 按钮必须消失，避免用户以为"导出全部"导的是搜索结果
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /导出全部/ })).not.toBeInTheDocument(),
+    );
+  });
+});
