@@ -90,6 +90,8 @@ def _seed(
     ⚠️ **必须在 `TestClient(app)` 之后调用**（理由见 `test_note_export.py`）：
     `test_db` 会重建数据库单例，先建库再建 client 会让 client 拿到被丢弃的引擎。
     """
+    from app.config import get_settings
+
     from app.models.chunk import Chunk
 
     uid = str(uuid.uuid4())
@@ -133,6 +135,9 @@ def _seed(
                         line_end=i,
                         char_count=1,
                         has_embedding=i < embedded,
+                        # 2026-11-16（round5）：待补判据已纳入模型比对 ——
+                        # 已嵌入行必须带**与配置一致**的模型名，否则会被正确算成待补。
+                        embedding_model=(get_settings().embedding_model if i < embedded else None),
                     )
                 )
             await db.commit()
@@ -156,9 +161,7 @@ class TestPendingEmbeddingChunks:
         resp = client.get(f"/api/notes/{nid}", headers=_auth(uid))
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["pending_embedding_chunks"] == 2, resp.json().get(
-            "pending_embedding_chunks"
-        )
+        assert resp.json()["pending_embedding_chunks"] == 2, resp.json().get("pending_embedding_chunks")
 
     def test_fully_indexed_note_reports_zero(self, test_db, patched_content):
         """全部已嵌入 ⇒ 0（前端据此**不显示**提示 —— 0 是常态，不是问题）"""
@@ -197,13 +200,10 @@ class TestPendingEmbeddingChunks:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["pending_embedding_chunks"] is None, (
-            f"status={status} 时报了 {resp.json()['pending_embedding_chunks']!r} —— "
-            f"未清洗的笔记必须是 None（'没测到'）"
+            f"status={status} 时报了 {resp.json()['pending_embedding_chunks']!r} —— 未清洗的笔记必须是 None（'没测到'）"
         )
 
-    def test_query_failure_degrades_to_none_and_does_not_break_the_page(
-        self, test_db, patched_content, monkeypatch
-    ):
+    def test_query_failure_degrades_to_none_and_does_not_break_the_page(self, test_db, patched_content, monkeypatch):
         """★★ 统计查询失败 ⇒ `None`，且详情页**照常 200**
 
         这个字段是笔记详情的**附加提示**。为了它让整页 500 是本末倒置 ——
@@ -228,9 +228,7 @@ class TestPendingEmbeddingChunks:
         resp = client.get(f"/api/notes/{nid}", headers=_auth(uid))
 
         assert resp.status_code == 200, "统计失败把整页带崩了"
-        assert resp.json()["pending_embedding_chunks"] is None, (
-            "统计失败时报了数字 —— 假的好消息比没消息危险"
-        )
+        assert resp.json()["pending_embedding_chunks"] is None, "统计失败时报了数字 —— 假的好消息比没消息危险"
         # 详情页的其它字段照旧
         assert resp.json()["clean_md_content"] == "# 清洗后正文\n"
 
@@ -247,11 +245,10 @@ class TestFrontendConsumesTheField:
         import pathlib
 
         repo = pathlib.Path(__file__).resolve().parents[2]
-        src = (repo / "frontend" / "src" / "pages" / "notedetail" / "NoteDetailHeader.tsx")
+        src = repo / "frontend" / "src" / "pages" / "notedetail" / "NoteDetailHeader.tsx"
         text = src.read_text(encoding="utf-8")
         assert "pending_embedding_chunks" in text, (
-            "NoteDetailHeader.tsx 没有读 pending_embedding_chunks —— "
-            "后端的可见性字段没有出口，用户还是看不到"
+            "NoteDetailHeader.tsx 没有读 pending_embedding_chunks —— 后端的可见性字段没有出口，用户还是看不到"
         )
         assert "noteDetail.indexPending" in text, "读了字段却没有可见文案"
 

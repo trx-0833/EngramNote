@@ -7,10 +7,15 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config import get_settings
 from ...models.note import Note, SourceType
 from ...models.note_project import NoteProject
 from ...models.project import Project
 from ...schemas.note import NoteResponse
+
+from ...tasks.embedding_tasks import _needs_embed_clause
+
+settings = get_settings()
 
 
 def _fill_project_names(resp: NoteResponse, note: Note, mapping: dict) -> None:
@@ -64,7 +69,17 @@ async def _count_pending_embedding_chunks(db: AsyncSession, note_id: str) -> Opt
             await db.execute(
                 select(func.count())
                 .select_from(Chunk)
-                .where(Chunk.note_id == note_id, Chunk.has_embedding.is_(False))
+                .where(
+                    Chunk.note_id == note_id,
+                    # round5：与调度器同一条判据（模型不符也算待补）。
+                    # 只看 `has_embedding` 时，换过模型之后这里会报"待补 0"，
+                    # 而检索整批跳过 —— 用户看到的数字与实际状态不符。
+                    _needs_embed_clause(
+                        settings.embedding_model,
+                        Chunk.has_embedding,
+                        Chunk.embedding_model,
+                    ),
+                )
             )
         ).scalar_one()
     except Exception:

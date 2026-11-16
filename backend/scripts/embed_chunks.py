@@ -67,7 +67,7 @@ def _free_gb() -> float:
     try:
         import psutil
 
-        return psutil.virtual_memory().available / (1024 ** 3)
+        return psutil.virtual_memory().available / (1024**3)
     except Exception:
         return float("inf")
 
@@ -81,7 +81,9 @@ async def run(args) -> int:
 
     from app import database as db_mod
     from app.config import get_settings
+
     from app.models.chunk import Chunk
+    from app.tasks.embedding_tasks import _needs_embed_clause
 
     settings = get_settings()
     await db_mod.init_db()
@@ -89,12 +91,29 @@ async def run(args) -> int:
 
     # ---- 1. 待处理量与内存检查 ----
     async with session_factory() as db:
-        pending = (await db.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
-        )).scalar() or 0
-        done = (await db.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(True))
-        )).scalar() or 0
+        pending = (
+            await db.execute(
+                select(func.count())
+                .select_from(Chunk)
+                .where(
+                    _needs_embed_clause(
+                        get_settings().embedding_model,
+                        Chunk.has_embedding,
+                        Chunk.embedding_model,
+                    )
+                )
+            )
+        ).scalar() or 0
+        done = (
+            await db.execute(
+                select(func.count())
+                .select_from(Chunk)
+                .where(
+                    Chunk.has_embedding.is_(True),
+                    Chunk.embedding_model == get_settings().embedding_model,
+                )
+            )
+        ).scalar() or 0
 
     free = _free_gb()
     _log(f"配置模型        : {settings.embedding_model}")
@@ -108,8 +127,10 @@ async def run(args) -> int:
         _log("（--check 模式，未做任何改动）")
         return 0
     if free < MIN_FREE_GB_BEFORE:
-        _log(f"可用内存不足（{free:.2f} GB < {MIN_FREE_GB_BEFORE} GB）。"
-             f"请关闭占内存的程序后重试 —— 编码中途 OOM 会留下混合索引。")
+        _log(
+            f"可用内存不足（{free:.2f} GB < {MIN_FREE_GB_BEFORE} GB）。"
+            f"请关闭占内存的程序后重试 —— 编码中途 OOM 会留下混合索引。"
+        )
         return 2
 
     # ---- 2. 加载模型 ----
@@ -127,8 +148,10 @@ async def run(args) -> int:
         _log("模型未成功加载，中止。")
         return 2
     if settings.embedding_model and model_name != settings.embedding_model:
-        _log(f"⚠️ 实际加载的是 {model_name}，与配置的 {settings.embedding_model} 不一致。"
-             f"这通常是内存不足触发了降级 —— 继续会把降级模型写进库，故中止。")
+        _log(
+            f"⚠️ 实际加载的是 {model_name}，与配置的 {settings.embedding_model} 不一致。"
+            f"这通常是内存不足触发了降级 —— 继续会把降级模型写进库，故中止。"
+        )
         return 2
 
     # ---- 3. 分批编码并落库 ----
@@ -151,7 +174,7 @@ async def run(args) -> int:
     from app.tasks.embedding_tasks import embed_chunks as embed_chunks_task
 
     batch_size = max(1, args.batch_size)
-    limit = args.limit or 10 ** 9
+    limit = args.limit or 10**9
     written = 0
     batches = 0
 
@@ -165,16 +188,17 @@ async def run(args) -> int:
         written += result["embedded"]
         batches += 1
         if batches % 5 == 0 or result["remaining"] == 0:
-            _log(f"  已写入 {written}/{min(pending, limit)}   "
-                 f"可用内存 {_free_gb():.2f} GB")
+            _log(f"  已写入 {written}/{min(pending, limit)}   可用内存 {_free_gb():.2f} GB")
 
         if result["embedded"] == 0 and result["failed"] > 0:
             _log(f"本批 {result['failed']} 条编码失败、0 条成功，主动停止以免空转。")
             return 3
 
         if _free_gb() < MIN_FREE_GB_DURING:
-            _log(f"可用内存降至 {_free_gb():.2f} GB（安全线 {MIN_FREE_GB_DURING} GB），"
-                 f"主动停止。已写入 {written} 条**有效**，重跑本脚本可继续。")
+            _log(
+                f"可用内存降至 {_free_gb():.2f} GB（安全线 {MIN_FREE_GB_DURING} GB），"
+                f"主动停止。已写入 {written} 条**有效**，重跑本脚本可继续。"
+            )
             return 3
 
     _log("")
@@ -182,19 +206,37 @@ async def run(args) -> int:
 
     # ---- 4. 收尾自检 ----
     async with session_factory() as db:
-        still = (await db.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False))
-        )).scalar() or 0
-        models = list((await db.execute(
-            select(Chunk.embedding_model, func.count())
-            .where(Chunk.has_embedding.is_(True))
-            .group_by(Chunk.embedding_model)
-        )).all())
-        dims = list((await db.execute(
-            select(Chunk.embedding_dim, func.count())
-            .where(Chunk.has_embedding.is_(True))
-            .group_by(Chunk.embedding_dim)
-        )).all())
+        still = (
+            await db.execute(
+                select(func.count())
+                .select_from(Chunk)
+                .where(
+                    _needs_embed_clause(
+                        get_settings().embedding_model,
+                        Chunk.has_embedding,
+                        Chunk.embedding_model,
+                    )
+                )
+            )
+        ).scalar() or 0
+        models = list(
+            (
+                await db.execute(
+                    select(Chunk.embedding_model, func.count())
+                    .where(Chunk.has_embedding.is_(True))
+                    .group_by(Chunk.embedding_model)
+                )
+            ).all()
+        )
+        dims = list(
+            (
+                await db.execute(
+                    select(Chunk.embedding_dim, func.count())
+                    .where(Chunk.has_embedding.is_(True))
+                    .group_by(Chunk.embedding_dim)
+                )
+            ).all()
+        )
 
     _log(f"未嵌入剩余      : {still}")
     _log(f"向量按模型分布  : {models}")

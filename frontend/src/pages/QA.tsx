@@ -194,6 +194,21 @@ export function statusAfterAbort(record: { id?: string; status?: string }): QARe
   return 'aborted';
 }
 
+/**
+ * 中止之后如何更新列表（round5：把"是否用了 statusAfterAbort"也纳入可测范围）。
+ *
+ * 只做两件事：算出这一轮应有的状态；状态没变就不产生新数组（少一次渲染）。
+ */
+export function applyAbort<T extends { id?: string; status?: string }>(prev: T[]): T[] {
+  if (prev.length === 0) return prev;
+  const head = prev[0];
+  const nextStatus = statusAfterAbort(head);
+  if (nextStatus === head.status) return prev;
+  const updated = [...prev];
+  updated[0] = { ...head, status: nextStatus };
+  return updated;
+}
+
 function RetryButton({
   question,
   disabled,
@@ -690,15 +705,7 @@ export default function QA() {
         // m4（round3）：但如果 `done` 已经到过（`id` 已回填），库里其实是 `ok` ——
         // 此时改写成 aborted 会让"库里成功、界面已中止"，而 A2 的按钮条件又会把
         // 「重新生成」藏掉。这种情况保持原状态不动。
-        setHistory((prev) => {
-          if (prev.length === 0) return prev;
-          const head = prev[0];
-          const nextStatus = statusAfterAbort(head);
-          if (nextStatus === head.status) return prev;
-          const updated = [...prev];
-          updated[0] = { ...head, status: nextStatus };
-          return updated;
-        });
+        setHistory(applyAbort);
       } else if (isSessionGoneError(err)) {
         // 审计 M3：追问的会话在别处被删了（另一个标签页、或抽屉里的「清空全部」），
         // 后端回 404 `QA_SESSION_NOT_FOUND`。原来这一支落到下面的 `setError`：
