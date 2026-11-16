@@ -941,6 +941,11 @@ function apiFixtures(): Record<string, unknown> {
     // ── 智能问答的流式回答（`QA`，路由 /qa）──
     // 提问后的主内容来自这条流（见 rawBody 与 QA_ANSWER_SSE）。
     '/api/understanding/ask/stream': rawBody(QA_ANSWER_SSE),
+    // A7：空态建议问题（生成 3 条）。qa 场景进页面时就会请求它 ——
+    // 没有桩的话页面会 501，a11y 会以「有接口没桩」直接失败。
+    '/api/understanding/suggestions': {
+      suggestions: ['水导轴承有几块瓦？', '油温报警值是多少？', '顶盖排水泵怎么切换？'],
+    },
 
     // ── 问答历史（2026-11-13，docs/qa-history-plan.md）──
     //
