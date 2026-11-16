@@ -182,6 +182,18 @@ function SourceLinks({ sources }: { sources: AnswerSource[] }) {
  * `disabled={streaming}`：重试期间禁用，避免两条流同时在飞
  * （`handleAsk` 内部也会 `stopActiveStream()`，但按钮先禁掉更直观）。
  */
+/**
+ * 中止（用户点停止 / 连接断开）之后这一轮的状态（round4 m4）。
+ *
+ * `id` 存在 = `done` 已经到过、库里这一轮是 `ok` —— 此时再改写成 `aborted` 会让
+ * "库里成功、界面已中止"，而 A2 的按钮条件又会把「重新生成」藏掉。
+ * 抽成纯函数是为了能直接测这条不变量（jsdom 里很难让流结束之后再 abort）。
+ */
+export function statusAfterAbort(record: { id?: string; status?: string }): QARecord['status'] {
+  if (record.id) return record.status as QARecord['status'];
+  return 'aborted';
+}
+
 function RetryButton({
   question,
   disabled,
@@ -681,9 +693,10 @@ export default function QA() {
         setHistory((prev) => {
           if (prev.length === 0) return prev;
           const head = prev[0];
-          if (head.id) return prev;
+          const nextStatus = statusAfterAbort(head);
+          if (nextStatus === head.status) return prev;
           const updated = [...prev];
-          updated[0] = { ...head, status: 'aborted' };
+          updated[0] = { ...head, status: nextStatus };
           return updated;
         });
       } else if (isSessionGoneError(err)) {
@@ -1052,13 +1065,15 @@ export default function QA() {
                                 而用户诉求（"这段不是我要的，再来一次"）无处可点；
                               - 其余轮给「重新生成」，且要求 `id`（没有 id 就没有"替换"可言）。
                               判据用**黑名单**：后端将来加状态（如 truncated）不会被静默藏掉。 */}
-                          {isLatest &&
-                            !streaming &&
+                          {/* m5（round4）：`isLatest` 只约束「重新生成」——「重试」对**任何**
+                              非 ok 轮次都该有。否则用户点过「停止生成」之后再问一句，那一轮
+                              就变成历史轮，永远没有重试入口。 */}
+                          {!streaming &&
                             (record.status === undefined || record.status === 'ok' ? (
                               // 成功轮（或本地新轮）才有资格「重新生成」：服务端对
-                              // `status != ok` 一律 422。没有 id 就不显示 —— 没有 id
-                              // 就没有"替换"可言（A1 兜底）。
-                              record.id ? (
+                              // `status != ok` 一律 422；且只允许**最新**轮（`isLatest`）。
+                              // 没有 id 就不显示 —— 没有 id 就没有"替换"可言（A1 兜底）。
+                              isLatest && record.id ? (
                                 <button
                                   type="button"
                                   className={`btn btn-ghost ${styles.qaActionButton}`}

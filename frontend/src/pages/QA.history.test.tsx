@@ -823,3 +823,29 @@ describe('中止轮的动作按钮', () => {
     expect(screen.queryByRole('button', { name: /重新生成：/ })).not.toBeInTheDocument();
   });
 });
+
+// ── m5（round4）：历史轮的中止轮也要有「重试」 ─────────────────────
+
+describe('历史轮的重试入口', () => {
+  it('不是最新一轮的中止轮，也显示「重试」', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({
+          id: 't-old-abort',
+          question: '早先被中止的问题',
+          answer: '半截',
+          status: 'aborted',
+        }),
+        turn({ id: 't-new', question: '后来的问题', answer: '完整答案' }),
+      ]),
+    );
+    renderPage('/qa?s=sess-1');
+
+    expect(await screen.findByText(/早先被中止的问题/)).toBeInTheDocument();
+    // m5：历史轮不再是"一个按钮都没有"
+    const retries = screen.getAllByRole('button', { name: /^重试/ });
+    expect(retries.length).toBeGreaterThan(0);
+    // 「重新生成」仍然只给最新轮
+    expect(screen.getAllByRole('button', { name: /重新生成：/ })).toHaveLength(1);
+  });
+});
