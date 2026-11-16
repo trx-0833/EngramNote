@@ -39,6 +39,10 @@ MULTITURN_SYSTEM_RULE = (
 #: 检索查询词里，历史问题最多取多少字（避免把整段旧问题拼进查询把向量检索带偏）
 RETRIEVAL_PREV_MAX_CHARS = 120
 
+#: A8：上文锚点（上一轮引用到的笔记标题）最多拼多少字。
+#: 标题通常 10–30 字；给 60 是留余量，同时避免把自己拼成长文本把查询向量带糊。
+ANCHOR_MAX_CHARS = 60
+
 
 def _clip(text: str, limit: int) -> str:
     """按字符截断并标记省略（中文没有空格，按词切开会切在词中间）"""
@@ -48,7 +52,11 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit].rstrip() + "…（略）"
 
 
-def build_retrieval_query(prev_question: Optional[str], current_question: str) -> str:
+def build_retrieval_query(
+    prev_question: Optional[str],
+    current_question: str,
+    anchor_titles: Optional[Sequence[str]] = None,
+) -> str:
     """追问时的检索查询词 = 上一问 + 当前问（计划 §4.3）
 
     ## 为什么不是"只用当前问"
@@ -63,11 +71,16 @@ def build_retrieval_query(prev_question: Optional[str], current_question: str) -
     """
     current = (current_question or "").strip()
     prev = _clip(prev_question or "", RETRIEVAL_PREV_MAX_CHARS)
-    if not prev or prev in current:
+    # A8：把"上文锚点"（上一轮引用到的笔记标题）放到最前面。
+    # "那它呢"这类追问本身没有信息量，主题词靠前更接近用户真实意图。
+    anchors = " ".join(dict.fromkeys(t for t in (anchor_titles or []) if t))[:ANCHOR_MAX_CHARS]
+    parts = [p for p in (anchors, prev, current) if p]
+    if not parts:
         return current
-    if not current:
-        return prev
-    return f"{prev} {current}"
+    if prev and prev in current:
+        # 与旧行为一致：上一问已经包含在当前问里就不重复拼
+        parts = [p for p in (anchors, current) if p]
+    return " ".join(parts)
 
 
 def usable_history(turns: Sequence[Tuple[str, str, str]]) -> List[Tuple[str, str]]:

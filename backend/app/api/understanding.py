@@ -818,6 +818,8 @@ async def ask_question_stream(
     # retry_of 只存在于 StreamQuestionRequest 上（A5）。这里直接取属性而不是
     # getattr(..., None)（n5，round3）：后者会把"传错请求类型"这类错误静默吞掉。
     retry_of = req.retry_of or None
+    #: A8：追问时拼进检索词的上文锚点（上一轮引用到的笔记标题）
+    anchor_titles: list[str] = []
     retry_target = None
     if history_enabled:
         if req.session_id:
@@ -865,6 +867,13 @@ async def ask_question_stream(
             if retry_of and retry_target is not None:
                 turns = [t for t in turns if t.created_at < retry_target.created_at]
             history = usable_history([(t.question, t.answer, t.status) for t in turns])
+            # A8：追问的上文锚点 = 上一轮回答引用到的**第一篇**笔记标题。
+            # `recent_ok_turns` 按时间升序返回，所以上一轮是 turns[-1]。
+            if turns:
+                prev_sources = getattr(turns[-1], "sources", None) or []
+                for src in prev_sources[:1]:
+                    if isinstance(src, dict) and src.get("note_title"):
+                        anchor_titles.append(str(src["note_title"]))
 
         # 把连接还回去（审计 m7）：`database.py` 写明流式端点会在**整个流期间**持有
         # 请求作用域的 session，而这里读完之后只剩生成器里的落库（用的是独立 session）。
@@ -873,7 +882,7 @@ async def ask_question_stream(
 
     #: 追问时的检索词 = 上一问 + 当前问（计划 §4.3）
     prev_question = history[-1][0] if history else None
-    retrieval_query = build_retrieval_query(prev_question, req.question)
+    retrieval_query = build_retrieval_query(prev_question, req.question, anchor_titles)
     #: 本轮**实际**带上的轮数。审计 m1：`len(history)` 是"想带几轮"，超预算时会被裁掉，
     #: 落库与 `meta` 都必须用真实值，否则这个排障信号会撒谎。
     context_turns = context_turns_used(
