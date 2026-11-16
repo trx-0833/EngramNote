@@ -1,4 +1,11 @@
-import { readFileSync } from 'node:fs';
+// 构建期把源码作为字符串导进来（不依赖运行时 cwd）。
+// 原来用 readFileSync，在 CI 上因 cwd/root 与本地不同而 ENOENT，
+// 表现就是「本地绿、CI 红」。
+const rawSources = import.meta.glob('./QA.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
 
 import { describe, expect, it } from 'vitest';
 
@@ -30,6 +37,7 @@ describe('applyAbort（round5：守住 abort 分支的接线）', () => {
 // 硬写会得到恒真用例 —— A8 踩过）。这里退一步用源码断言，
 // 至少能抓住"把调用点换回内联逻辑"这类变异。
 it('abort 分支必须调用 applyAbort（源码断言）', () => {
-  const src = readFileSync('src/pages/QA.tsx', 'utf8');
-  expect(src).toContain('setHistory(applyAbort)');
+  const raw = rawSources['./QA.tsx'];
+  expect(typeof raw).toBe('string');
+  expect(raw).toContain('setHistory(applyAbort)');
 });
