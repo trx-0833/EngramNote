@@ -120,6 +120,8 @@ from ..schemas.knowledge import (
     QuizItemResponse,
     QuizItemListResponse,
     QuizItemUpdateRequest,
+    QASuggestionsRequest,
+    QASuggestionsResponse,
     QuestionRequest,
     StreamQuestionRequest,
     QuestionAnswerResponse,
@@ -137,6 +139,93 @@ from ..config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.post("/suggestions", response_model=QASuggestionsResponse)
+async def suggest_questions(
+    req: QASuggestionsRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+) -> QASuggestionsResponse:
+    """空态建议问题（A7，`research/topics/qa-gap-triage.md`）
+
+    报告方案：用"当前笔记标题 + 最近 3 篇笔记标题"生成 3 条问题；失败回退静态文案。
+
+    **失败一律返回空数组**（不是 5xx）：这是锦上添花的接口，空态页不能因为它挂掉，
+    前端拿到空数组就用 i18n 里的静态三条。无笔记时同样返回空（没什么可出题的）。
+    """
+    from sqlalchemy import select as _select
+
+    from ..models.note import Note as _Note
+    from ..services.llm_service import LLMService
+
+    titles: list[str] = []
+    try:
+        stmt = (
+            _select(_Note.title)
+            .where(
+                _Note.user_id == current_user.id,
+                _Note.trashed_at.is_(None),
+                _Note.title.is_not(None),
+            )
+            .order_by(_Note.updated_at.desc())
+            .limit(4)
+        )
+        titles = [t for t in (await db.execute(stmt)).scalars().all() if t]
+        if req.note_id:
+            own = (
+                (
+                    await db.execute(
+                        _select(_Note.title).where(_Note.id == req.note_id, _Note.user_id == current_user.id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if own and own not in titles:
+                titles.insert(0, own)
+    except Exception as exc:  # noqa: BLE001 - 取标题失败不该让空态页报错
+        logger.warning("建议问题：取笔记标题失败 | %s: %s", type(exc).__name__, exc)
+        return QASuggestionsResponse(suggestions=[])
+
+    if not titles:
+        return QASuggestionsResponse(suggestions=[])
+
+    titles_text = "\n".join(f"- {t}" for t in titles[:4])
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是一个学习助手。根据用户笔记的标题，提出 3 个**具体、可在这些资料里找到答案**的问题。"
+                "要求：每行一个问题，不要编号、不要解释、不要引号；每行不超过 30 个字；"
+                "问题要指向具体内容，不要泛泛地问「讲讲这个」。"
+            ),
+        },
+        {"role": "user", "content": f"我的笔记标题：\n{titles_text}\n\n请给出 3 个问题。"},
+    ]
+
+    try:
+        raw = await LLMService().chat(messages, temperature=0.8, max_tokens=200, scene="qa_suggestions")
+    except Exception as exc:  # noqa: BLE001 - LLM 挂了就回退静态文案
+        logger.warning("建议问题：LLM 调用失败 | %s: %s", type(exc).__name__, exc)
+        return QASuggestionsResponse(suggestions=[])
+
+    suggestions: list[str] = []
+    for line in (raw or "").splitlines():
+        s = line.strip().strip('"').strip("'")
+        # 去掉 "1. " / "- " / "1) " 这类前缀
+        for prefix in ("- ", "* "):
+            if s.startswith(prefix):
+                s = s[len(prefix) :].strip()
+        s = s.lstrip("0123456789").lstrip(".、) ").strip()
+        if not s or len(s) > 60:
+            continue
+        if s not in suggestions:
+            suggestions.append(s)
+        if len(suggestions) == 3:
+            break
+
+    return QASuggestionsResponse(suggestions=suggestions)
 
 
 @router.post("/{note_id}/start", response_model=UnderstandingStartResponse)

@@ -219,6 +219,18 @@ class QuestionRequest(BaseModel):
     # （2026-11-15 第二轮审计 m6′）。
 
 
+class QASuggestionsRequest(BaseModel):
+    """空态建议问题的请求（A7）：带上当前笔记则优先围绕它出题。"""
+
+    note_id: Optional[str] = Field(None, max_length=64)
+
+
+class QASuggestionsResponse(BaseModel):
+    """3 条建议问题；空数组表示"用前端的静态文案"。"""
+
+    suggestions: List[str]
+
+
 class StreamQuestionRequest(QuestionRequest):
     """`/ask/stream` 专用（2026-11-15 第二轮审计 m6′）
 

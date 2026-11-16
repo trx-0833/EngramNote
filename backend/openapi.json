@@ -5277,6 +5277,42 @@
         "title": "QASessionResponse",
         "type": "object"
       },
+      "QASuggestionsRequest": {
+        "description": "空态建议问题的请求（A7）：带上当前笔记则优先围绕它出题。",
+        "properties": {
+          "note_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
+          }
+        },
+        "title": "QASuggestionsRequest",
+        "type": "object"
+      },
+      "QASuggestionsResponse": {
+        "description": "3 条建议问题；空数组表示\"用前端的静态文案\"。",
+        "properties": {
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestions"
+        ],
+        "title": "QASuggestionsResponse",
+        "type": "object"
+      },
       "QATurnResponse": {
         "description": "一轮问答（历史详情里的条目）",
         "properties": {
@@ -14276,6 +14312,53 @@
           }
         ],
         "summary": "Update Question",
+        "tags": [
+          "理解"
+        ]
+      }
+    },
+    "/api/understanding/suggestions": {
+      "post": {
+        "description": "空态建议问题（A7，`research/topics/qa-gap-triage.md`）\n\n报告方案：用\"当前笔记标题 + 最近 3 篇笔记标题\"生成 3 条问题；失败回退静态文案。\n\n**失败一律返回空数组**（不是 5xx）：这是锦上添花的接口，空态页不能因为它挂掉，\n前端拿到空数组就用 i18n 里的静态三条。无笔记时同样返回空（没什么可出题的）。",
+        "operationId": "suggest_questions_api_understanding_suggestions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QASuggestionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QASuggestionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Suggest Questions",
         "tags": [
           "理解"
         ]

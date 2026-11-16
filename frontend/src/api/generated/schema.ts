@@ -3208,6 +3208,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/understanding/suggestions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Suggest Questions
+     * @description 空态建议问题（A7，`research/topics/qa-gap-triage.md`）
+     *
+     *     报告方案：用"当前笔记标题 + 最近 3 篇笔记标题"生成 3 条问题；失败回退静态文案。
+     *
+     *     **失败一律返回空数组**（不是 5xx）：这是锦上添花的接口，空态页不能因为它挂掉，
+     *     前端拿到空数组就用 i18n 里的静态三条。无笔记时同样返回空（没什么可出题的）。
+     */
+    post: operations['suggest_questions_api_understanding_suggestions_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/understanding/{note_id}/cards': {
     parameters: {
       query?: never;
@@ -6518,6 +6543,22 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * QASuggestionsRequest
+     * @description 空态建议问题的请求（A7）：带上当前笔记则优先围绕它出题。
+     */
+    QASuggestionsRequest: {
+      /** Note Id */
+      note_id?: string | null;
+    };
+    /**
+     * QASuggestionsResponse
+     * @description 3 条建议问题；空数组表示"用前端的静态文案"。
+     */
+    QASuggestionsResponse: {
+      /** Suggestions */
+      suggestions: string[];
     };
     /**
      * QATurnResponse
@@ -11836,6 +11877,39 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  suggest_questions_api_understanding_suggestions_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QASuggestionsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QASuggestionsResponse'];
+        };
       };
       /** @description Validation Error */
       422: {

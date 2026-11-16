@@ -44,7 +44,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 // `useNavigate` 随引用来源那一行的改动一起去掉了：那一行现在是 `<Link to>`，
 // 不再需要"用 JS 跳转"（见引用列表的注释）。
 import { Link } from 'react-router-dom';
-import { askQuestionStream, type AnswerSource } from '../api/client';
+import { askQuestionStream, getQaSuggestions, type AnswerSource } from '../api/client';
 import {
   getQaSession,
   getQaSessions,
@@ -298,6 +298,20 @@ export default function QA() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
   const [history, setHistory] = useState<QARecord[]>([]);
+
+  // ── A7：空态建议问题（先取生成的，拿不到回退静态三条）──────────────────
+  // `enabled` 只在空态才请求：已经有对话时这个数据没人看，白花一次 LLM 调用。
+  const { data: generatedSuggestions } = useQuery({
+    queryKey: ['qa', 'suggestions'],
+    queryFn: () => getQaSuggestions(),
+    enabled: history.length === 0,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const suggestions =
+    generatedSuggestions && generatedSuggestions.length > 0
+      ? generatedSuggestions
+      : [t('qa.suggestion1'), t('qa.suggestion2'), t('qa.suggestion3')];
   /** 本轮实际参考了几轮上文（来自 SSE `meta.history_used`；0 时不显示提示） */
   const [historyUsed, setHistoryUsed] = useState(0);
   /** 历史抽屉 */
@@ -958,14 +972,16 @@ export default function QA() {
                 <p className={styles.qaEmptyHint}>{t('qa.emptyHint')}</p>
                 <p className={styles.qaSuggestTitle}>{t('qa.suggestionTitle')}</p>
                 <div className={styles.qaSuggestions}>
-                  {(['qa.suggestion1', 'qa.suggestion2', 'qa.suggestion3'] as const).map((key) => (
+                  {/* A7：优先用**生成**的建议（围绕当前笔记的标题）；拿不到就回退静态三条。
+                      生成接口刻意"永不报错"，所以这里不需要 error 分支。 */}
+                  {suggestions.map((text, sIdx) => (
                     <button
-                      key={key}
+                      key={`${sIdx}-${text}`}
                       type="button"
                       className={styles.qaSuggestion}
-                      onClick={() => setQuestion(t(key))}
+                      onClick={() => setQuestion(text)}
                     >
-                      {t(key)}
+                      {text}
                     </button>
                   ))}
                 </div>

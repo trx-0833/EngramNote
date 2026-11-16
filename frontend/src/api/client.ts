@@ -651,6 +651,23 @@ export async function uploadRequest<T>(path: string, formData: FormData): Promis
  * - event: done / data: {}
  * - event: error / data: {"message":"..."}
  */
+/**
+ * 空态建议问题（A7）——生成 3 条，失败/为空时返回 `[]`。
+ *
+ * 后端刻意把这条接口做成"永不 5xx"：取标题失败、LLM 挂了、解析不出，都返回空数组。
+ * 前端拿到空数组就用 i18n 里的静态文案，空态页不会因为它是空白。
+ */
+export async function getQaSuggestions(noteId?: string): Promise<string[]> {
+  const response = await authorizedFetch('/understanding/suggestions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(noteId ? { note_id: noteId } : {}),
+  });
+  if (!response.ok) return [];
+  const data = (await response.json()) as { suggestions?: string[] };
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
+}
+
 export async function askQuestionStream(
   question: string,
   signal?: AbortSignal,
