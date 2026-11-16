@@ -5452,7 +5452,7 @@
         "type": "object"
       },
       "QuestionRequest": {
-        "description": "问答请求\n\n## `session_id`（2026-11-13，多轮会话）\n\n可选。带上则把这一轮追加到该会话，并让服务端把**最近若干轮**作为上下文\n一起送给模型；不带则新建会话（首问）。\n\n⚠️ 历史消息**不由客户端上传**：只有 `session_id` 一个字段。让客户端传\n`messages` 数组既可伪造、又能把请求体放大到任意长；服务端按\n`(session_id, user_id)` 自己查，才谈得上\"删掉某一轮就不再影响后续回答\"。",
+        "additionalProperties": false,
         "properties": {
           "question": {
             "maxLength": 4000,
@@ -6904,6 +6904,7 @@
         "type": "object"
       },
       "StreamQuestionRequest": {
+        "additionalProperties": false,
         "description": "`/ask/stream` 专用（2026-11-15 第二轮审计 m6′）\n\n`retry_of` 只在这里：它表示\"把这一轮**替换**掉\"。非流式 `/ask` 不实现替换语义，\n字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。",
         "properties": {
           "question": {

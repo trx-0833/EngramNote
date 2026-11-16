@@ -407,6 +407,26 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
         texts = [content or "" for _cid, content in rows]
         vectors = encode_text(texts)
 
+        # 冷启动失明（2026-11-16 第三轮审计）：编码**前**取的 _model_name() 在模型尚未
+        # 加载时返回配置名，守卫因此通过；编码时才加载、才发现是降级模型。若此时直接写库，
+        # 就会得到"配置名 + 降级维度"这种最难查的组合。代价是浪费这一轮编码。
+        model_after = _model_name()
+        if model_after and model_after != settings.embedding_model:
+            logger.warning(
+                "编码后才确认模型降级为 %s（配置 %s），本轮丢弃 %d 条结果不写库",
+                model_after,
+                settings.embedding_model,
+                len(rows),
+            )
+            return {
+                "scanned": 0,
+                "embedded": 0,
+                "failed": 0,
+                "remaining": len(rows),
+                "model": model_after,
+                "skipped_reason": "fallback_model",
+            }
+
         # 降级态**拒写**（审计 blocker #2）：内存不足时 `EmbeddingService` 会从
         # bge-m3 降到 bge-small-zh（1024 → 512 维）。照写会让库里出现第二种维度，
         # 检索时整批跳过 —— 而且有上面那条判据之后会变成"每轮重写一遍"。
@@ -452,7 +472,14 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
             await session.execute(
                 select(func.count())
                 .select_from(Chunk)
-                .where(_needs_embed_clause(settings.embedding_model, Chunk.has_embedding, Chunk.embedding_model))
+                .where(
+                    _needs_embed_clause(settings.embedding_model, Chunk.has_embedding, Chunk.embedding_model),
+                    # A4 第三处（第三轮审计）：remaining 也要排除回收站，
+                    # 否则与 _pending_counts 仍不同源，日志继续撒谎。
+                    Chunk.note_id.notin_(
+                        select(Note.id).where(Note.user_id == Chunk.user_id, Note.trashed_at.is_not(None))
+                    ),
+                )
             )
         ).scalar_one()
 
@@ -562,7 +589,14 @@ async def _pending_counts() -> Dict[str, int]:
                 select(func.count())
                 .select_from(KnowledgeCard)
                 .where(
-                    KnowledgeCard.has_embedding.is_(False),
+                    # 2026-11-16 第三轮审计：这里原来只看 has_embedding，
+                    # 于是周期任务在**门口**就被判"无待补 ⇒ skipped"，
+                    # A3 的降级守卫与新判据永远跑不到（实测编码 0 次）。
+                    _needs_embed_clause(
+                        expected_model,
+                        KnowledgeCard.has_embedding,
+                        KnowledgeCard.embedding_model,
+                    ),
                     Note.not_trashed(KnowledgeCard.note_id),
                 )
             )
@@ -584,7 +618,12 @@ async def _card_user_ids() -> List[str]:
             (
                 await session.execute(
                     select(distinct(KnowledgeCard.user_id)).where(
-                        KnowledgeCard.has_embedding.is_(False),
+                        # 同上（第三轮审计）：门也要用统一判据
+                        _needs_embed_clause(
+                            settings.embedding_model,
+                            KnowledgeCard.has_embedding,
+                            KnowledgeCard.embedding_model,
+                        ),
                         Note.not_trashed(KnowledgeCard.note_id),
                     )
                 )

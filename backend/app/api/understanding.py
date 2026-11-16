@@ -794,6 +794,8 @@ async def ask_question_stream(
 
     #: 本轮是否已经落库（A1：`done` 之前要拿 id，所以提前落一次；finally 兜底不重复）
     persisted = False
+    #: 内层写库任务（第三轮审计：持有它才能在 finally 里判断"是否仍在飞"）
+    persist_task: "asyncio.Task | None" = None
 
     async def _persist_completed_turn(
         *,
@@ -852,7 +854,7 @@ async def ask_question_stream(
 
     async def event_stream():
         # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）
-        nonlocal retrieval_query, persisted
+        nonlocal retrieval_query, persisted, persist_task
         answer_parts: list[str] = []
         started_at = time.monotonic()
         # `finally` 的状态机（第三轮审计 M2）：默认 ok，只在正常走到 `done` 之后成立；
@@ -952,20 +954,24 @@ async def ask_question_stream(
             # 「必须在 finally 落库」的保证不放松：下面 `persisted` 只是防重复，
             # 提前落库失败时 finally 仍会补写一次。
             turn_id = None
-            try:
-                turn_id = await asyncio.shield(
-                    _persist_completed_turn(
-                        status=TURN_STATUS_OK,
-                        answer_text="".join(answer_parts),
-                        provider=provider or None,
-                        sources=sources,
-                        retrieval_status=retrieval_status or None,
-                        latency_ms=int((time.monotonic() - started_at) * 1000),
-                    )
+            # 用 **Task** 持有这次写库（2026-11-16 第三轮审计）：裸 `shield(coro)` 被取消时
+            # 内层协程仍在跑并提交，而 `persisted` 仍是 False ⇒ finally 又写一次，
+            # 实测得到 ok + aborted 两条、turn_count=2。持有 Task 才能"先看它在不在飞"。
+            persist_task = asyncio.create_task(
+                _persist_completed_turn(
+                    status=TURN_STATUS_OK,
+                    answer_text="".join(answer_parts),
+                    provider=provider or None,
+                    sources=sources,
+                    retrieval_status=retrieval_status or None,
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
                 )
+            )
+            try:
+                turn_id = await asyncio.shield(persist_task)
                 persisted = True
-            except Exception:  # noqa: BLE001 - 提前落库失败不阻断回答
-                logger.warning("提前落库失败，交由 finally 兜底", exc_info=True)
+            except Exception:  # noqa: BLE001 - 提前落库失败/被取消都不阻断回答
+                logger.warning("提前落库未完成，交由 finally 处理", exc_info=True)
 
             # 7. 发送 done 事件（A1：带上本轮 turn_id，前端据此回填）
             done_payload: dict = {}
@@ -997,6 +1003,16 @@ async def ask_question_stream(
                 status = TURN_STATUS_ABORTED
             # 已在发送 `done` 之前落过（A1）就不再重复写。
             # 注意不能用 `return` 提前退出 —— `finally` 里的 return 会吞掉异常（ruff B012）。
+            #
+            # 关键（第三轮审计）：`persist_task` 可能**仍在飞**（取消落在 shield 窗口内）。
+            # 此时它最终会提交，所以这里必须先等它，而不是直接补写 —— 否则写两条。
+            if not persisted and persist_task is not None:
+                try:
+                    await asyncio.shield(persist_task)
+                    persisted = True
+                except Exception:  # noqa: BLE001 - 在飞任务失败 ⇒ 下面补写
+                    logger.warning("在飞落库任务失败，改由 finally 补写", exc_info=True)
+
             if not persisted:
                 try:
                     await asyncio.shield(

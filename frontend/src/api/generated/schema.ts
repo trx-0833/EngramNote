@@ -6592,19 +6592,7 @@ export interface components {
        */
       sources: components['schemas']['AnswerSource'][];
     };
-    /**
-     * QuestionRequest
-     * @description 问答请求
-     *
-     *     ## `session_id`（2026-11-13，多轮会话）
-     *
-     *     可选。带上则把这一轮追加到该会话，并让服务端把**最近若干轮**作为上下文
-     *     一起送给模型；不带则新建会话（首问）。
-     *
-     *     ⚠️ 历史消息**不由客户端上传**：只有 `session_id` 一个字段。让客户端传
-     *     `messages` 数组既可伪造、又能把请求体放大到任意长；服务端按
-     *     `(session_id, user_id)` 自己查，才谈得上"删掉某一轮就不再影响后续回答"。
-     */
+    /** QuestionRequest */
     QuestionRequest: {
       /** Question */
       question: string;

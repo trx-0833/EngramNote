@@ -896,12 +896,22 @@ class RAGService:
         # 统一语料（阶段 2.3）后每个结果天然带 `chunk_id`，按 chunk 去重既无重复
         # 又能逐段对应；同一笔记保留多个引用是**有意的** ——
         # 一段长资料里不同位置各自回答了问题的不同侧面。
-        # 排序键：先按**笔记标题**，再按篇内位置（2026-11-15 审计 m4）。
-        # 原来按 `note_id`（UUID）："按原文顺序读"只在单篇内成立，跨篇顺序随机，
-        # 用户对着 `[1][2][3]` 核对时毫无规律。标题缺失时回落到 id 保证稳定。
+        # 排序键：**相关度降序**，同分再按标题/篇内位置（2026-11-16 第三轮审计 A7 +
+        # 第二轮 m4′）。
+        #
+        # 两轮审计合起来说明了一件事：
+        #   - round2 m4′：上一版先按 `note_id`（UUID）、后来按 `note_title`，都是
+        #     "与相关度无关"的顺序 —— 最相关的那段可能排在 `[8]`，长上下文里模型对
+        #     尾部证据利用更差；
+        #   - round3：`_ensure_lexical_hits` 费力把保底项分数压低，但 `similarity`
+        #     **一个消费者都没有**，所以那个处理等于白做。
+        # 让 `similarity` 当主键，两件事同时成立：上下文按相关度读，保底项（分数被压到
+        # 末位以下）自然排在最后，不会挤掉两路共识的命中。
+        # 编号与 sources 下标的对应关系不受影响（仍是同一次遍历产出）。
         ordered = sorted(
             (it for it in fused_results if it.get("note_id") is not None),
             key=lambda it: (
+                -(float(it.get("similarity") or 0.0)),
                 it.get("note_title") or it.get("title") or it["note_id"],
                 it.get("char_start") or 0,
             ),

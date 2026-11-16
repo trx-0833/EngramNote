@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..models.knowledge_card import CardType, CardCategory
 from ..models.quiz_item import QuestionType, DifficultyLevel
@@ -188,6 +188,11 @@ class ChapterSummaryListResponse(BaseModel):
 
 
 class QuestionRequest(BaseModel):
+    # 未知字段一律 422（2026-11-16 第三轮审计 A5）：retry_of 搬到流式子类之后，
+    # 非流式 /ask 收到它时 pydantic 默认**静默丢弃** —— 那和明确不支持不是一回事，
+    # 客户端会以为替换生效了。forbid 让这种误用立刻可见。
+    model_config = ConfigDict(extra="forbid")
+
     """问答请求
 
     ## `session_id`（2026-11-13，多轮会话）
