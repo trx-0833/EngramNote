@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from app.models.qa_history import TURN_STATUS_ABORTED, TURN_STATUS_FAILED, TURN_STATUS_OK, QASession, QATurn
 from app.models.user import User
-from app.schemas.knowledge import QuestionRequest
+from app.schemas.knowledge import StreamQuestionRequest
 from app.services.auth_service import create_access_token
 
 UTC = timezone.utc
@@ -282,7 +282,9 @@ class TestStreamPersistence:
         # 直接取端点的异步生成器（HTTP 客户端复现不了 CancelledError）
         async with test_db() as db:
             user = (await db.execute(select(User).where(User.id == uid))).scalars().one()
-            response = await understanding.ask_question_stream(QuestionRequest(question="浮充是什么？"), user, db)
+            # n5（round3）：流式端点必须用 `StreamQuestionRequest` —— 用基类会让端点里
+            # 那个 `getattr(req, "retry_of", None)` 继续吞掉"传错类型"这类错误。
+            response = await understanding.ask_question_stream(StreamQuestionRequest(question="浮充是什么？"), user, db)
             gen = response.body_iterator
             first = await gen.__anext__()  # meta
             assert "event: meta" in first

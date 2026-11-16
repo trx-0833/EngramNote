@@ -672,12 +672,18 @@ export default function QA() {
       }
     } catch (err) {
       if (controller.signal.aborted) {
-        // 用户主动停止：保留已生成文本。A 方案下**即使首字未到也留一条 `aborted`** ——
-        // 后端同样落库了 `status='aborted'`，而且用户需要一个「重试」入口。
+        // 用户主动停止：保留已生成文本。A 方案下**即使首字未到也留一条 aborted** ——
+        // 后端同样落库了 status='aborted'，而且用户需要一个「重试」入口。
+        //
+        // m4（round3）：但如果 `done` 已经到过（`id` 已回填），库里其实是 `ok` ——
+        // 此时改写成 aborted 会让"库里成功、界面已中止"，而 A2 的按钮条件又会把
+        // 「重新生成」藏掉。这种情况保持原状态不动。
         setHistory((prev) => {
           if (prev.length === 0) return prev;
+          const head = prev[0];
+          if (head.id) return prev;
           const updated = [...prev];
-          updated[0] = { ...updated[0], status: 'aborted' };
+          updated[0] = { ...head, status: 'aborted' };
           return updated;
         });
       } else if (isSessionGoneError(err)) {
@@ -1041,12 +1047,20 @@ export default function QA() {
                               真·替换旧轮需要后端 retry_of + superseded 可见性 —— 后端
                               地基已在（qa_history_service.supersede_turn），端到端
                               接线待做，见 docs/qa-deepseek-redesign.md §6.2。 */}
-                          {/* A1 兜底：没有 id 就没有"替换"可言，宁可不显示；
-                              A2：中止/失败轮走「重试」，不在这里出现（否则必被 422 拒） */}
+                          {/* 按状态分派（round3 m5 / n4）：
+                              - 中止/失败轮**一律给「重试」**：A2 之后这里什么都不显示，
+                                而用户诉求（"这段不是我要的，再来一次"）无处可点；
+                              - 其余轮给「重新生成」，且要求 `id`（没有 id 就没有"替换"可言）。
+                              判据用**黑名单**：后端将来加状态（如 truncated）不会被静默藏掉。 */}
                           {isLatest &&
                             !streaming &&
-                            record.id &&
-                            (record.status === undefined || record.status === 'ok') && (
+                            (record.status === 'aborted' || record.status === 'failed' ? (
+                              <RetryButton
+                                question={record.question}
+                                disabled={streaming}
+                                onRetry={() => void handleAsk(record.question, true)}
+                              />
+                            ) : record.id ? (
                               <button
                                 type="button"
                                 className={`btn btn-ghost ${styles.qaActionButton}`}
@@ -1055,7 +1069,7 @@ export default function QA() {
                               >
                                 {t('qa.regenerate')}
                               </button>
-                            )}
+                            ) : null)}
                         </div>
                       )}
                       {record.provider && (

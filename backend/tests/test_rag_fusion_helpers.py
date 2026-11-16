@@ -27,7 +27,10 @@ class TestEnsureLexicalHits:
     def test_inserts_missing_lexical_items_without_fake_high_scores(self):
         svc = RAGService()
         fused = [_item("c1", similarity=0.9), _item("c2", similarity=0.8)]
-        lexical = [_item("c3", content="只被词法命中的块", similarity=0.0)]
+        # 词法项用 **FTS 的真实量纲**（`-bm25()`，实测可达 7.7）：
+        # 若实现沿用原分，保底项会变成全表最高分并挤掉两路共识的命中。
+        # 旧断言喂的是 0.0（`max(0.0, floor)` 恰好等于 floor），那种回归抓不住。
+        lexical = [_item("c3", content="只被词法命中的块", similarity=7.7)]
 
         out = svc._ensure_lexical_hits(fused, lexical, top_k=3, quota=2)
 
@@ -37,8 +40,11 @@ class TestEnsureLexicalHits:
         inserted = next(it for it in out if it.get("chunk_id") == "c3")
         # A7：必须**严格低于**所有既有项 —— FTS 的 similarity 是 -bm25()，实测可达 7.7，
         # 沿用原分会让保底项冒充最高分（审计 round2 m1/m3 实测）
-        assert inserted["similarity"] < min(0.9, 0.8), f"保底项分数 {inserted['similarity']} 没被压低"
-        assert inserted["similarity"] < 0.8
+        # 上限从 fused **派生**（原来写死的 `min(0.9, 0.8)` 恒等于 0.8，且与下一行重复）
+        floor_from_fused = min(float(it["similarity"]) for it in fused)
+        assert inserted["similarity"] < floor_from_fused, (
+            f"保底项分数 {inserted['similarity']} 没被压低到 {floor_from_fused} 以下"
+        )
         assert inserted.get("lexical_guaranteed") is True
 
     def test_does_not_insert_duplicates(self):

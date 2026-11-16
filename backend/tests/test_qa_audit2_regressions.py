@@ -302,7 +302,7 @@ class TestAclosePersistence:
     async def test_aclose_persists_aborted_turn(self, test_db, monkeypatch):
         from app.api import understanding
         from app.database import get_session_factory
-        from app.schemas.knowledge import QuestionRequest
+        from app.schemas.knowledge import StreamQuestionRequest
         from sqlalchemy import select as _select
 
         uid = str(uuid.uuid4())
@@ -329,7 +329,8 @@ class TestAclosePersistence:
 
         async with test_db() as db:
             user = (await db.execute(_select(User).where(User.id == uid))).scalars().one()
-            response = await understanding.ask_question_stream(QuestionRequest(question="浮充是什么？"), user, db)
+            # n5（round3）：流式端点要用 `StreamQuestionRequest`（`retry_of` 只在该子类上）
+            response = await understanding.ask_question_stream(StreamQuestionRequest(question="浮充是什么？"), user, db)
             gen = response.body_iterator
             assert "event: meta" in await gen.__anext__()
             assert "event: token" in await gen.__anext__()

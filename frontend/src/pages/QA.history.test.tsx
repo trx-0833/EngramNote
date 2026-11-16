@@ -800,3 +800,26 @@ describe('重新生成的可用条件', () => {
     expect(screen.queryByRole('button', { name: /重新生成：/ })).not.toBeInTheDocument();
   });
 });
+
+// ── m5：有半截答案的中止轮也要有「重试」入口 ─────────────────────
+
+describe('中止轮的动作按钮', () => {
+  it('有半截答案的中止轮显示「重试」，而不是一个按钮都没有', async () => {
+    getQaSession.mockResolvedValue(
+      detail([
+        turn({
+          id: 't-half',
+          question: '被中止的问题',
+          answer: '这是一段半截答案',
+          status: 'aborted',
+        }),
+      ]),
+    );
+    renderPage('/qa?s=sess-1');
+
+    expect(await screen.findByText(/这是一段半截答案/)).toBeInTheDocument();
+    // round3 m5：A2 藏掉「重新生成」之后，这里必须还有「重试」
+    expect(screen.getByRole('button', { name: /^重试/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重新生成：/ })).not.toBeInTheDocument();
+  });
+});

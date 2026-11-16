@@ -349,7 +349,7 @@ def embed_chunks(limit: int = EMBED_CHUNKS_BATCH) -> Dict[str, int]:
 
 async def _embed_chunks_async(limit: int) -> Dict[str, int]:
     """`embed_chunks` 的异步主体（要读写库，因此必须跑在任务事件循环里）"""
-    from sqlalchemy import func, or_, select, update
+    from sqlalchemy import func, select, update
 
     from ..models.chunk import Chunk, pack_vector
     from ..models.note import Note
@@ -363,11 +363,9 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
             await session.execute(
                 select(Chunk.id, Chunk.content)
                 .where(
-                    or_(
-                        Chunk.has_embedding.is_(False),
-                        Chunk.embedding_model.is_(None),
-                        Chunk.embedding_model != expected_model,
-                    ),
+                    # n3（round3）：「统一判据」原来只覆盖 7 处里的 4 处，这里仍内联复制
+                    # `or_(...)` —— 下次改判据还会分叉。现在全部走同一个 helper。
+                    _needs_embed_clause(expected_model, Chunk.has_embedding, Chunk.embedding_model),
                     # 与 _pending_counts 一致：回收站里的不算待补（审计 m6）
                     Chunk.note_id.notin_(
                         select(Note.id).where(

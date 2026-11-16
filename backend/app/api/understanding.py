@@ -726,9 +726,9 @@ async def ask_question_stream(
     session = None
     history: List[tuple] = []
     #: 要**替换**的那一轮（`retry_of` 指向它）；None 表示普通提问（2026-11-15）
-    # retry_of 只存在于 StreamQuestionRequest 上（A5）；用 getattr 是为了让
-    # 直接构造基类的测试/内部调用不至于 AttributeError。
-    retry_of = getattr(req, "retry_of", None) or None
+    # retry_of 只存在于 StreamQuestionRequest 上（A5）。这里直接取属性而不是
+    # getattr(..., None)（n5，round3）：后者会把"传错请求类型"这类错误静默吞掉。
+    retry_of = req.retry_of or None
     retry_target = None
     if history_enabled:
         if req.session_id:
@@ -806,7 +806,12 @@ async def ask_question_stream(
         sources: Optional[list] = None,
         retrieval_status: Optional[str] = None,
         latency_ms: Optional[int] = None,
-    ) -> None:
+    ) -> Optional[str]:
+        """落库一轮，返回新轮 id（`done` 事件要用它回填前端）。
+
+        n1（round3）：注解原来写 `-> None`，而函数体在末尾 `return created.id` ——
+        ruff 管不到，mypy/IDE 就会把这个类型错误当成不存在。
+        """
         """用一个**独立的 DB 会话**落库
 
         ⚠️ 不复用请求作用域的 `db`：流式响应的生成器可能比依赖的生命周期活得更久
