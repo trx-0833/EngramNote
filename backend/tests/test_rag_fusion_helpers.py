@@ -82,12 +82,12 @@ class TestRetrievalStatus:
         async def _encode(_text):
             return [1.0, 0.0, 0.0]
 
-        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None):
+        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None, allow_note_ids=None):
             if stats is not None:
                 stats.update({"scanned": 890, "skipped_dim": 890, "matched_dim": 0, "all_skipped": 1})
             return []
 
-        async def _lexical(_uid, _q, _chunks, _top_k, exclude_note_ids=None):
+        async def _lexical(_uid, _q, _chunks, _top_k, exclude_note_ids=None, allow_note_ids=None):
             return [_item("c1", content="词法命中的内容")]
 
         async def _chunks(_uid):
@@ -118,12 +118,12 @@ class TestRetrievalStatus:
         async def _encode(_text):
             return [1.0, 0.0, 0.0]
 
-        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None):
+        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None, allow_note_ids=None):
             if stats is not None:
                 stats.update({"scanned": 890, "skipped_dim": 0, "matched_dim": 890})
             return []
 
-        async def _lexical(_uid, _q, _chunks, _top_k, exclude_note_ids=None):
+        async def _lexical(_uid, _q, _chunks, _top_k, exclude_note_ids=None, allow_note_ids=None):
             return []
 
         async def _chunks(_uid):

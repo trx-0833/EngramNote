@@ -40,7 +40,9 @@ class TestTrashedSetReuse:
 
         monkeypatch.setattr(svc, "_trashed_note_ids", _counting)
 
-        async def _fake_search(_session, _emb, _uid, *, top_k=5, exclude_note_ids=None, stats=None):
+        async def _fake_search(
+            _session, _emb, _uid, *, top_k=5, exclude_note_ids=None, allow_note_ids=None, stats=None
+        ):
             return []
 
         monkeypatch.setattr("app.services.chunk_search_service.search_chunks", _fake_search)

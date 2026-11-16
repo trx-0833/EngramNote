@@ -164,6 +164,7 @@ async def record_turn(
     source_span_end: Optional[int] = None,
     source_hash: Optional[str] = None,
     latency_ms: Optional[int] = None,
+    scope_note_ids: Optional[Sequence[str]] = None,
 ) -> Optional[QATurn]:
     """追加一轮并刷新会话的 `updated_at` / `turn_count` / `last_question`
 
@@ -211,6 +212,8 @@ async def record_turn(
             retrieval_status=retrieval_status,
             retrieval_query=retrieval_query,
             sources_json=json.dumps(clipped_sources, ensure_ascii=False) if clipped_sources else None,
+            # B4：生效后的检索范围（调用方已做越权交集）。`None` = 不限范围。
+            scope_json=(json.dumps(sorted(scope_note_ids), ensure_ascii=False) if scope_note_ids is not None else None),
             context_turns=max(0, int(context_turns)),
             source_span_start=source_span_start,
             source_span_end=source_span_end,
@@ -450,6 +453,7 @@ async def persist_turn(
     source_span_end: Optional[int] = None,
     source_hash: Optional[str] = None,
     latency_ms: Optional[int] = None,
+    scope_note_ids: Optional[Sequence[str]] = None,
 ) -> Optional[QATurn]:
     """把一轮问答落库（**打开自己的 DB 会话**，与请求生命周期解耦）
 
@@ -497,6 +501,7 @@ async def persist_turn(
                 source_span_end=source_span_end,
                 source_hash=source_hash,
                 latency_ms=latency_ms,
+                scope_note_ids=scope_note_ids,
             )
             await write_db.commit()
             return turn

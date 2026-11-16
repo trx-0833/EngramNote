@@ -310,7 +310,7 @@ class TestAclosePersistence:
             await _seed_user(db, uid)
 
         class _RAG:
-            async def retrieve_context(self, *, question, user_id):
+            async def retrieve_context(self, *, question, user_id, **_kw):
                 return {
                     "context": "浮充是恒压。",
                     "sources": [{"note_id": "n1", "chunk_id": "c1", "relevant_text": "浮充"}],

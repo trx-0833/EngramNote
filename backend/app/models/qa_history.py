@@ -137,6 +137,18 @@ class QATurn(BaseModel):
     retrieval_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     retrieval_query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sources_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    #: B2：用户对**这一轮**的反馈（`'up'` / `'down'` / NULL）
+    #:
+    #: 用字符串而不是布尔：将来要加"中性""举报"不必再改列。
+    #: 可空、旧行不回填（AGENTS §2）。
+    feedback: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+
+    #: B4：本轮**实际生效**的检索范围（A4 求交集之后的笔记 id 集合，JSON 数组）
+    #:
+    #: 空/NULL = 不限范围。存它是为了"这轮为什么没检索到某篇笔记"能事后归因 ——
+    #: 只存客户端请求的范围是不够的：越权 id 会被丢掉，那才是真相。
+    scope_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_span_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     source_span_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

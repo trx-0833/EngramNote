@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Literal, Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -118,3 +118,13 @@ class QAClearAllResponse(BaseModel):
     """
 
     deleted: int = 0
+
+
+class QATurnFeedbackRequest(BaseModel):
+    """B2：对某一轮回答的反馈。
+
+    `None` = 取消反馈（用户点了已选中的按钮）；用字符串而不是布尔，
+    将来要加"中性""举报"不必再改列。
+    """
+
+    rating: Optional[Literal["up", "down"]] = None

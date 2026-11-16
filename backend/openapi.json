@@ -5313,6 +5313,28 @@
         "title": "QASuggestionsResponse",
         "type": "object"
       },
+      "QATurnFeedbackRequest": {
+        "description": "B2：对某一轮回答的反馈。\n\n`None` = 取消反馈（用户点了已选中的按钮）；用字符串而不是布尔，\n将来要加\"中性\"\"举报\"不必再改列。",
+        "properties": {
+          "rating": {
+            "anyOf": [
+              {
+                "enum": [
+                  "up",
+                  "down"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          }
+        },
+        "title": "QATurnFeedbackRequest",
+        "type": "object"
+      },
       "QATurnResponse": {
         "description": "一轮问答（历史详情里的条目）",
         "properties": {
@@ -5490,10 +5512,30 @@
       "QuestionRequest": {
         "additionalProperties": false,
         "properties": {
+          "allow_general_knowledge": {
+            "default": false,
+            "title": "Allow General Knowledge",
+            "type": "boolean"
+          },
           "question": {
             "maxLength": 4000,
             "title": "Question",
             "type": "string"
+          },
+          "scope_note_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Note Ids"
           },
           "session_id": {
             "anyOf": [
@@ -6943,6 +6985,11 @@
         "additionalProperties": false,
         "description": "`/ask/stream` 专用（2026-11-15 第二轮审计 m6′）\n\n`retry_of` 只在这里：它表示\"把这一轮**替换**掉\"。非流式 `/ask` 不实现替换语义，\n字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。",
         "properties": {
+          "allow_general_knowledge": {
+            "default": false,
+            "title": "Allow General Knowledge",
+            "type": "boolean"
+          },
           "question": {
             "maxLength": 4000,
             "title": "Question",
@@ -6959,6 +7006,21 @@
               }
             ],
             "title": "Retry Of"
+          },
+          "scope_note_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Note Ids"
           },
           "session_id": {
             "anyOf": [
@@ -12972,6 +13034,57 @@
           }
         ],
         "summary": "Rename Qa Session",
+        "tags": [
+          "问答历史"
+        ]
+      }
+    },
+    "/api/qa/turns/{turn_id}/feedback": {
+      "post": {
+        "description": "B2：给某一轮回答点赞/踩（可取消）。\n\n越权一律 404：既要挡住改别人的数据，也不要通过 403/404 的差异泄露\"这条存在\"。",
+        "operationId": "submit_turn_feedback_api_qa_turns__turn_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QATurnFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Turn Feedback",
         "tags": [
           "问答历史"
         ]

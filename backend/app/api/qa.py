@@ -23,15 +23,16 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..core.app_error import QA_SESSION_NOT_FOUND, AppError
+from ..core.app_error import QA_SESSION_NOT_FOUND, QA_TURN_NOT_FOUND, AppError
 from ..database import get_db
 from ..models.qa_history import SURFACES
 from ..models.user import User
 from ..schemas.qa import (
+    QATurnFeedbackRequest,
     QASessionRenameRequest,
     QAClearAllResponse,
     QALimitsResponse,
@@ -243,6 +244,26 @@ async def delete_qa_session(
     if not deleted:
         raise AppError(QA_SESSION_NOT_FOUND, "对话不存在或已被删除", 404)
     await db.commit()
+
+
+@router.post("/turns/{turn_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
+async def submit_turn_feedback(
+    turn_id: str,
+    payload: QATurnFeedbackRequest,
+    current_user: User = Depends(get_current_user_dependency),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """B2：给某一轮回答点赞/踩（可取消）。
+
+    越权一律 404：既要挡住改别人的数据，也不要通过 403/404 的差异泄露"这条存在"。
+    """
+    turn = await qa_service.get_turn(db, user_id=current_user.id, turn_id=turn_id)
+    if turn is None:
+        # 与项目既有约定一致：语义化 code + 显式 http_status（AppError 默认 500）
+        raise AppError(QA_TURN_NOT_FOUND, "这条回答不存在或已删除", 404)
+    turn.feedback = payload.rating
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/sessions", response_model=QAClearAllResponse)

@@ -85,7 +85,7 @@ def _patch_rag(monkeypatch, *, context: str = "浮充是长期恒压运行方式
     captured = calls if calls is not None else []
 
     class _RAG:
-        async def retrieve_context(self, *, question, user_id):
+        async def retrieve_context(self, *, question, user_id, **_kw):
             captured.append(question)
             return {
                 "context": context,
@@ -290,7 +290,10 @@ class TestStreamPersistence:
         # 这条断言真的走了"端点 → 落库 → 读回 JSON → 拼检索词"，所以一旦有人把
         # 字段名从 `sources_json` 写回 `sources`，这里就会红 —— 之前正是因为
         # 只看函数不看接线，A8 在真实会话里一直是死的却全绿。
-        assert calls[1] == "电池 浮充和均充的区别？ 那它对寿命有影响吗？"
+        # A8 **默认关闭**（2026-11-17 实测 Δ=+0.0 点，未达 +5 点，按报告回退生效）。
+        # 关掉后检索词 = "上一问 + 当前问"，与引入 A8 之前逐字相同 —— 这就是基线。
+        # 若把 `_A8_ANCHOR_ENABLED` 打开，这里应改回 "电池 浮充和均充的区别？ 那它对寿命有影响吗？"
+        assert calls[1] == "浮充和均充的区别？ 那它对寿命有影响吗？"
 
     async def test_llm_error_persists_failed_turn(self, test_db, monkeypatch):
         client = _client()
@@ -520,7 +523,7 @@ class TestAuditRegressions:
         calls: list[str] = []
 
         class _RAG:
-            async def retrieve_context(self, *, question, user_id):
+            async def retrieve_context(self, *, question, user_id, **_kw):
                 calls.append(question)
                 # 拼接词 → 空；只用当前问 → 命中
                 if "浮充是什么？" in question and len(question) > len("浮充是什么？"):

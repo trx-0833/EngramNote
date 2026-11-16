@@ -210,6 +210,21 @@ class QuestionRequest(BaseModel):
     # 比让 LLM 侧报错或按 token 计费暴涨好。
     question: str = Field(..., max_length=4000)
     session_id: Optional[str] = Field(None, max_length=64)
+
+    #: **A4 范围过滤**（`research/topics/qa-gap-triage.md`）
+    #:
+    #: 只在这些笔记里检索。客户端传别人的 / 已删除的 id **不会报错，而是被安静丢弃**
+    #: —— 报错会让"文件夹里混进了别人的笔记"变成一个 400，而正确行为是"就按你能看的
+    #: 范围检索"。所以服务端先与"当前用户未回收站的笔记"求交集，再作为白名单下传。
+    scope_note_ids: Optional[List[str]] = Field(None, max_length=500)
+
+    #: **A6 通用知识显式开关**
+    #:
+    #: 默认 `False`：没有资料依据时如实说"没找到"（这是产品承诺）。
+    #: 只有用户**显式**打开，才允许用模型自身的知识回答，且答案开头会带上
+    #: 固定标注（`【以下内容来自模型通用知识，不来自你的资料】`），
+    #: `meta.grounded=False`。这样"未标注的模型知识"= 0，由代码保证而不是靠模型自觉。
+    allow_general_knowledge: bool = False
     #: 「重新生成」（阶段 3）：指向被替换的轮次 id
     #:
     #: 服务端据此把上下文截到**该轮之前**（否则等于让模型看着自己上一次的

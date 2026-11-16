@@ -189,6 +189,12 @@ ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
     # `str(e)`（`versions.py:215`），内容是 `笔记不存在: note_id=...` 这类
     # 带标识符的诊断串。翻译它没有意义（受众是排查问题的人），
     # 所以登记在 UNTRANSLATED_CODES 里。
+    # B2：反馈端点找不到该轮（或不属于当前用户）。两者刻意不区分 —— 说清"不是你的"
+    # 等于确认它存在。文案对用户只说"这条回答不在了"，不带标识符。
+    "QA_TURN_NOT_FOUND": {
+        "zh-CN": "这条回答不存在或已删除",
+        "en": "This answer does not exist or has been deleted",
+    },
     "NOTE_NOT_PERSONAL": {
         "zh-CN": "仅个人笔记可设置关联资料",
         "en": "Only personal notes can have linked materials",

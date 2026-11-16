@@ -419,6 +419,7 @@ class RAGService:
         top_k: int = 5,
         stats: Optional[Dict[str, int]] = None,
         exclude_note_ids: Optional[set] = None,
+        allow_note_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """在 `chunks` 表上做向量检索（一次 SQL，取代遍历 N 个 collection）
 
@@ -443,6 +444,7 @@ class RAGService:
                 user_id,
                 top_k=top_k,
                 exclude_note_ids=trashed or None,
+                allow_note_ids=allow_note_ids,
                 stats=stats,
             )
 
@@ -453,6 +455,7 @@ class RAGService:
         chunks: List[Dict[str, Any]],
         top_k: int,
         exclude_note_ids: Optional[set] = None,
+        allow_note_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """词法检索：FTS5 优先，Python BM25 兜底（阶段 2.5′）
 
@@ -480,6 +483,7 @@ class RAGService:
                     user_id,
                     top_k=top_k,
                     exclude_note_ids=exclude_note_ids or None,
+                    allow_note_ids=allow_note_ids or None,
                 )
                 if hits:
                     return hits
@@ -491,6 +495,9 @@ class RAGService:
         # Python BM25 兜底同理：语料里先剔掉回收站笔记的 chunk
         if exclude_note_ids:
             chunks = [c for c in chunks if c.get("note_id") not in exclude_note_ids]
+        if allow_note_ids is not None:
+            # A4：空集合 => 语料为空 => BM25 返回 0 条（与向量路一致，不退化成"不限"）
+            chunks = [c for c in chunks if c.get("note_id") in allow_note_ids]
         return self._get_bm25_index(user_id, chunks).search(question, top_k=top_k)
 
     async def _encode_via_celery(self, text: str) -> Optional[List[float]]:
@@ -748,6 +755,7 @@ class RAGService:
         question: str,
         user_id: str,
         exclude_note_ids: Optional[set] = None,
+        allow_note_ids: Optional[set] = None,
     ) -> Dict[str, Any]:
         """
         仅执行检索阶段，返回上下文和引用来源（不调用 LLM）
@@ -811,6 +819,10 @@ class RAGService:
                 cached = await self._trashed_note_ids(user_id)
                 self._trashed_cache = cached
             trashed_ids = cached
+        # A4 范围过滤：`allow_note_ids` 是**已经与本人笔记求过交集**的白名单
+        # （越权在 `understanding.py` 就丢掉了）。这里只做"只查这些"。
+        allow_ids = set(allow_note_ids) if allow_note_ids is not None else None
+
         # 维度统计（审计 blocker #1）：整批维度不符要能被上层看见
         vector_stats: Dict[str, int] = {}
         if question_embedding is not None:
@@ -821,6 +833,7 @@ class RAGService:
                     top_k=pool,
                     stats=vector_stats,
                     exclude_note_ids=trashed_ids,
+                    allow_note_ids=allow_ids,
                 )
             except Exception as e:
                 logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
@@ -854,7 +867,14 @@ class RAGService:
         bm25_results: List[Dict[str, Any]] = []
         try:
             # 复用上面查好的那一份（不再重复查）
-            bm25_results = await self._lexical_search(user_id, question, chunks, pool, exclude_note_ids=trashed_ids)
+            bm25_results = await self._lexical_search(
+                user_id,
+                question,
+                chunks,
+                pool,
+                exclude_note_ids=trashed_ids,
+                allow_note_ids=allow_ids,
+            )
         except Exception as e:
             logger.warning(f"词法检索失败: {e}")
 

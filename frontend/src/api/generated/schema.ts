@@ -2546,6 +2546,28 @@ export interface paths {
     patch: operations['rename_qa_session_api_qa_sessions__session_id__patch'];
     trace?: never;
   };
+  '/api/qa/turns/{turn_id}/feedback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Submit Turn Feedback
+     * @description B2：给某一轮回答点赞/踩（可取消）。
+     *
+     *     越权一律 404：既要挡住改别人的数据，也不要通过 403/404 的差异泄露"这条存在"。
+     */
+    post: operations['submit_turn_feedback_api_qa_turns__turn_id__feedback_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/report/daily': {
     parameters: {
       query?: never;
@@ -6561,6 +6583,17 @@ export interface components {
       suggestions: string[];
     };
     /**
+     * QATurnFeedbackRequest
+     * @description B2：对某一轮回答的反馈。
+     *
+     *     `None` = 取消反馈（用户点了已选中的按钮）；用字符串而不是布尔，
+     *     将来要加"中性""举报"不必再改列。
+     */
+    QATurnFeedbackRequest: {
+      /** Rating */
+      rating?: ('up' | 'down') | null;
+    };
+    /**
      * QATurnResponse
      * @description 一轮问答（历史详情里的条目）
      */
@@ -6635,8 +6668,15 @@ export interface components {
     };
     /** QuestionRequest */
     QuestionRequest: {
+      /**
+       * Allow General Knowledge
+       * @default false
+       */
+      allow_general_knowledge: boolean;
       /** Question */
       question: string;
+      /** Scope Note Ids */
+      scope_note_ids?: string[] | null;
       /** Session Id */
       session_id?: string | null;
     };
@@ -7491,10 +7531,17 @@ export interface components {
      *     字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。
      */
     StreamQuestionRequest: {
+      /**
+       * Allow General Knowledge
+       * @default false
+       */
+      allow_general_knowledge: boolean;
       /** Question */
       question: string;
       /** Retry Of */
       retry_of?: string | null;
+      /** Scope Note Ids */
+      scope_note_ids?: string[] | null;
       /** Session Id */
       session_id?: string | null;
     };
@@ -11055,6 +11102,39 @@ export interface operations {
         content: {
           'application/json': components['schemas']['QASessionResponse'];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  submit_turn_feedback_api_qa_turns__turn_id__feedback_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QATurnFeedbackRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

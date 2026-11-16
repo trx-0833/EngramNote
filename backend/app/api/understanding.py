@@ -138,6 +138,14 @@ from ..config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+#: A6：通用知识回答的固定标注。由**代码**补在最前面，不依赖模型自觉，
+#: 这样「未标注的模型知识」恒为 0。
+_GENERAL_PREFIX = "【以下内容来自模型通用知识，不来自你的资料】"
+
+#: A8 开关。**默认关闭**：实测 Δ=+0.0 点未达标（见 docs 与 research 的 A/B 报告）。
+#: 打开前请先跑 `scripts/eval_followups.py --run`，确认 ≥ +5 点。
+_A8_ANCHOR_ENABLED = False
 router = APIRouter()
 
 
@@ -886,7 +894,14 @@ async def ask_question_stream(
             # （`models/qa_history.py:139` 是 `sources_json`），而 `getattr` 给了默认值
             # `None`，于是**不报错、也永远拿不到锚点**：整条 A8 在真实会话里是死的。
             # 9 条用例全绿也发现不了，因为它们只测函数不测接线。
-            if turns:
+            # A8 **默认关闭**（2026-11-17 实测）：基线已拼上一问，而锚点只是笔记标题，
+            # 与上一问高度重合 ⇒ 没有新增信息量。A/B 实测 Δ = +0.0 点（20.0% vs 20.0%），
+            # 未达报告要求的 +5 点，按"否则回退"处理。
+            #
+            # 保留 `build_retrieval_query` 的第 3 参与 9 条用例：将来若有更好的锚点来源
+            # （章节名 / 实体名），先跑 A/B 达标再打开这里。
+            # 需要打开时把下面的条件改成 `if turns and _A8_ANCHOR_ENABLED:` 即可。
+            if turns and _A8_ANCHOR_ENABLED:
                 prev_sources = _load_sources(turns[-1].sources_json)
                 for src in prev_sources[:1]:
                     if isinstance(src, dict) and src.get("note_title"):
@@ -923,6 +938,7 @@ async def ask_question_stream(
         sources: Optional[list] = None,
         retrieval_status: Optional[str] = None,
         latency_ms: Optional[int] = None,
+        scope_note_ids: Optional[list] = None,
     ) -> Optional[str]:
         """落库一轮，返回新轮 id（`done` 事件要用它回填前端）。
 
@@ -951,6 +967,8 @@ async def ask_question_stream(
             retrieval_status=retrieval_status,
             retrieval_query=retrieval_query,
             sources=sources,
+            # B4：把**生效后**的范围带下去（allow_ids 是求过交集的，越权 id 已被丢弃）
+            scope_note_ids=scope_note_ids,
             context_turns=context_turns,
             latency_ms=latency_ms,
         )
@@ -990,9 +1008,37 @@ async def ask_question_stream(
         try:
             # 1. 检索阶段（不调用 LLM）。追问时用拼接后的检索词。
             rag_service = RAGService()
+            # A4 范围过滤：先与"本人未回收站的笔记"**求交集** —— 越权在这里被丢掉，
+            # 而不是靠检索层再判一次（那需要多一次查询，且容易漏）。
+            allow_ids = None
+            if req.scope_note_ids:
+                from sqlalchemy import select as _sel
+
+                from ..models.note import Note as _Note
+
+                rows = (
+                    (
+                        await db.execute(
+                            _sel(_Note.id).where(
+                                _Note.user_id == current_user.id,
+                                _Note.trashed_at.is_(None),
+                                _Note.id.in_(req.scope_note_ids),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                allow_ids = set(rows)
+                if not allow_ids:
+                    # 传的都是别人的 / 已删除的：范围为空 ⇒ 检索返回 0 条，
+                    # 走"没找到"分支 —— 不报 400（客户端可能只是文件夹里混了别人的笔记）。
+                    logger.info("scope 交集为空，本次检索范围为空")
+
             retrieval = await rag_service.retrieve_context(
                 question=retrieval_query,
                 user_id=current_user.id,
+                allow_note_ids=allow_ids,
             )
             context = retrieval["context"]
             sources = retrieval["sources"]
@@ -1029,7 +1075,19 @@ async def ask_question_stream(
             # 却以为那是从自己笔记里查到的 —— 这比直接说"没找到"危险得多。
             # 同一问题的非流式端点（`/ask`）一直答"没找到"，两个端点必须一致。
             grounded = bool(context.strip())
-            if not grounded:
+            # A6：用户**显式**打开"允许通用知识"时才走这条路（默认关闭）。
+            use_general = (not grounded) and bool(getattr(req, "allow_general_knowledge", False))
+            if use_general:
+                system_prompt = (
+                    "你是一个知识渊博的学习助手。用户的问题在其笔记中没有检索到相关内容，"
+                    "但用户**明确允许**你用通用知识回答。\n"
+                    "回答原则：\n"
+                    f"1. 回答的**第一行**必须是：{_GENERAL_PREFIX}\n"
+                    "2. 其余内容可以正常作答，但要明确这是通用知识，不是用户资料；\n"
+                    "3. 不要编造用户笔记里存在过的细节。"
+                )
+                user_content = req.question
+            elif not grounded:
                 system_prompt = (
                     "你是一个学习助手。用户的问题在 TA 的笔记中**没有检索到任何相关片段**。\n"
                     "回答原则：\n"

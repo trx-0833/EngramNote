@@ -687,6 +687,8 @@ export async function askQuestionStream(
   // 响应侧刻意保持手写：SSE 的事件模型（meta/token/sources/done/error）不在 schema 里。
   const body: BodyOf<'/understanding/ask/stream', 'post'> = {
     question,
+    // A6：默认关闭 —— 不许用模型通用知识冒充资料内容；界面上显式打开才传 true
+    allow_general_knowledge: false,
     ...(sessionId ? { session_id: sessionId } : {}),
     ...(retryOf ? { retry_of: retryOf } : {}),
   };

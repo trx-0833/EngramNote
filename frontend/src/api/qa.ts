@@ -171,7 +171,10 @@ export async function getKnowledgeCard(
  */
 export async function askQuestion(question: string): Promise<QuestionAnswerResponse> {
   // `POST /understanding/ask` 的请求体：契约 `QuestionRequest` = `{ question: string }`
-  const body: BodyOf<'/understanding/ask', 'post'> = { question };
+  const body: BodyOf<'/understanding/ask', 'post'> = {
+    question,
+    allow_general_knowledge: false,
+  };
   return request<QuestionAnswerResponse>('/understanding/ask', {
     method: 'POST',
     body: JSON.stringify(body),

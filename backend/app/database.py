@@ -1014,6 +1014,17 @@ async def _migrate_sqlite(conn):
                 # 同上：新增模型字段必须在此登记，否则真库永远缺这一列
                 sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN grams TEXT"))
                 logger.info("SQLite 迁移: 已为 chunks 表添加 grams 列")
+            # B2 / B4（2026-11-17）：问答轮次的用户反馈与生效范围。
+            # 两列都可空、旧行不回填 —— 回退方式 = 保留列不读（AGENTS §2）。
+            qa_turn_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(qa_turns)"))}
+            for col, ddl in (
+                ("feedback", "ALTER TABLE qa_turns ADD COLUMN feedback VARCHAR(16)"),
+                ("scope_json", "ALTER TABLE qa_turns ADD COLUMN scope_json TEXT"),
+            ):
+                if col not in qa_turn_cols:
+                    sync_conn.execute(text(ddl))
+                    logger.info("SQLite 迁移: 已为 qa_turns 表添加 %s 列", col)
+
             if "chunk_rowid" not in chunk_cols:
                 # 整数 rowid：FTS5 外部内容表的 content_rowid 必须指向它。
                 # VARCHAR 主键会被 SQLite 当成 rowid 的别名，导致 JOIN 对不上

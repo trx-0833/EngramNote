@@ -114,7 +114,7 @@ class TestLexicalExcludesTrash:
         # 这里改为记录实际参数，直接守"有没有把 exclude_note_ids 传下去"。
         captured: dict = {}
 
-        async def _fake_search(_session, question, user_id, *, top_k=20, exclude_note_ids=None):
+        async def _fake_search(_session, question, user_id, *, top_k=20, exclude_note_ids=None, allow_note_ids=None):
             captured["exclude_note_ids"] = exclude_note_ids
             captured["question"] = question
             return []

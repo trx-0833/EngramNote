@@ -46,6 +46,9 @@ NOTE_NOT_FOUND = "NOTE_NOT_FOUND"
 #: 问答历史的会话取不到（不存在 / 别人的 / 已软删）。三种情况**共用一个码**，
 #: 与 `NOTE_NOT_FOUND` 同一口径：不泄露"这个 id 存在"。
 QA_SESSION_NOT_FOUND = "QA_SESSION_NOT_FOUND"
+
+#: B2：反馈端点找不到该轮（或不属于当前用户 —— 两者刻意不区分，避免泄露存在性）
+QA_TURN_NOT_FOUND = "QA_TURN_NOT_FOUND"
 #: 会话在这个入口不该被续聊（surface / note_id 不匹配）。**状态码仍是 404**（不泄露存在性），
 #: 但码不同：前端据此说"属于另一个入口"，而不是误报"对话已被删除"（第二轮审计 MINOR-4）。
 QA_SESSION_SURFACE_MISMATCH = "QA_SESSION_SURFACE_MISMATCH"

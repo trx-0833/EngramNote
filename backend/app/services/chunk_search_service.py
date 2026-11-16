@@ -53,6 +53,7 @@ async def search_chunks(
     *,
     top_k: int = 5,
     exclude_note_ids: Optional[set[str]] = None,
+    allow_note_ids: Optional[set[str]] = None,
     stats: Optional[Dict[str, int]] = None,
 ) -> List[Dict[str, Any]]:
     """在用户的 chunk 向量上做余弦检索
@@ -63,6 +64,8 @@ async def search_chunks(
         user_id: 用户 ID（多租户隔离）
         top_k: 返回条数
         exclude_note_ids: 排除这些笔记的 chunk（回收站笔记）
+        allow_note_ids: **只**在这些笔记里检索（A4 范围过滤）。空集合表示"允许 0 篇"，
+            与 `None`（不限）不同 —— 调用方已经与本人笔记求过交集，这里不再做权限判断
 
     Returns:
         List[Dict]: 每项含
@@ -89,6 +92,12 @@ async def search_chunks(
     )
     if exclude_note_ids:
         query = query.where(Chunk.note_id.notin_(exclude_note_ids))
+    if allow_note_ids is not None:
+        # 空集合是合法输入（"在这个范围里检索"但范围是空的）—— 它必须返回 0 条，
+        # 而不是退化成"不限"。`notin_([])` 在 SQLAlchemy 里会生成恒真，所以单独判。
+        if not allow_note_ids:
+            return []
+        query = query.where(Chunk.note_id.in_(allow_note_ids))
 
     rows = list((await db.execute(query)).scalars().all())
     if not rows:

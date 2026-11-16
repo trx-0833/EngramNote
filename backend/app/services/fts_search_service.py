@@ -66,7 +66,7 @@ def to_bigrams(text_value: str) -> str:
     cleaned = "".join(ch for ch in (text_value or "") if not ch.isspace())
     if len(cleaned) < 2:
         return cleaned
-    return " ".join(cleaned[i:i + 2] for i in range(len(cleaned) - 1))
+    return " ".join(cleaned[i : i + 2] for i in range(len(cleaned) - 1))
 
 
 def to_match_expression(question: str) -> str:
@@ -83,7 +83,7 @@ def to_match_expression(question: str) -> str:
         return '"' + cleaned.replace('"', '""') + '"'
     grams, seen = [], set()
     for i in range(len(cleaned) - 1):
-        gram = cleaned[i:i + 2]
+        gram = cleaned[i : i + 2]
         if gram not in seen:
             seen.add(gram)
             grams.append(gram)
@@ -98,9 +98,7 @@ async def fts5_available(db: AsyncSession) -> bool:
     一个可选扩展缺失就整体不可用。
     """
     try:
-        row = await db.execute(text(
-            f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{FTS_TABLE}'"
-        ))
+        row = await db.execute(text(f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{FTS_TABLE}'"))
         return row.first() is not None
     except Exception:
         return False
@@ -154,6 +152,7 @@ async def search_chunks_fts(
     *,
     top_k: int = 20,
     exclude_note_ids: Optional[set] = None,
+    allow_note_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """用 FTS5 检索 chunk，返回与 `BM25Index.search` 同构的结果
 
@@ -181,6 +180,14 @@ async def search_chunks_fts(
         sql += f" AND c.note_id NOT IN ({placeholders})"
         for i, nid in enumerate(exclude_note_ids):
             params[f"ex{i}"] = nid
+    if allow_note_ids is not None:
+        # A4 范围过滤：空集合 => 命中 0 条（不能退化成"不限"）
+        if not allow_note_ids:
+            return []
+        ph = ", ".join(f":al{i}" for i in range(len(allow_note_ids)))
+        sql += f" AND c.note_id IN ({ph})"
+        for i, nid in enumerate(allow_note_ids):
+            params[f"al{i}"] = nid
     sql += " ORDER BY score LIMIT :limit"
 
     try:
