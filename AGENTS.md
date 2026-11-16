@@ -47,6 +47,27 @@ git checkout -- frontend/package-lock.json              # npm 会剥掉 libc 元
 
 ## 3.5 环境与命令（不要猜，照抄）
 
+### ⚠️ 用 PowerShell 改文件时：反引号必须避开双引号 here-string
+
+**实测（2026-11-16，pwsh 7.4.6）**：
+
+| 写法 | 结果 |
+| --- | --- |
+| `@"..."@`（双引号 here-string） | 反引号被当转义符吃掉落，`A \`retry_of\` B` → 12 字符、**不含**反引号 |
+| `@'...'@`（单引号 here-string） | 原样保留 → 14 字符、**含**反引号 |
+
+后果不是"少个字符"：反引号 + 后面的字母会被解释成控制字符（`` `r `` = 回车），
+把一行注释拆成两行废话，直接造成语法错误。本仓库已因此出过**五次**同类事故
+（`\netry_of`、`\nemaining` 这种残行）。
+
+规则：
+
+- 待写入文本里**只要有反引号**（代码注释里的 `` `retry_of` `` 之类），就不要用
+  `pwsh -c "..."` 或 `@"..."@`；改写**文件脚本**再执行，或用 `write` 工具直接落盘；
+- 需要内联时只能用 `@'...'@`（单引号）；
+- 反引号是 PowerShell **语言**层面的转义符，装 PowerShell 7 **不能**解决这一点
+  （7 只把默认编码改成 UTF-8，解决了编码类事故）。
+
 - **Python**：`D:\conda\envs\aiforlearn\python.exe`（3.11.17，装了 pytest / ruff / pytest-cov）
   - 钩子与脚本读 `PYTHON` 环境变量；**未设置时会回退到 `python`**，而 PATH 里的 `python`
     可能是 `D:\miniforge3\python.exe`（base 环境，**没装 ruff**）→ 表现为
