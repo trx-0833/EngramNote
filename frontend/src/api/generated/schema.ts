@@ -6608,8 +6608,6 @@ export interface components {
     QuestionRequest: {
       /** Question */
       question: string;
-      /** Retry Of */
-      retry_of?: string | null;
       /** Session Id */
       session_id?: string | null;
     };
@@ -7455,6 +7453,21 @@ export interface components {
       quota_bytes: number;
       /** Used Bytes */
       used_bytes: number;
+    };
+    /**
+     * StreamQuestionRequest
+     * @description `/ask/stream` 专用（2026-11-15 第二轮审计 m6′）
+     *
+     *     `retry_of` 只在这里：它表示"把这一轮**替换**掉"。非流式 `/ask` 不实现替换语义，
+     *     字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。
+     */
+    StreamQuestionRequest: {
+      /** Question */
+      question: string;
+      /** Retry Of */
+      retry_of?: string | null;
+      /** Session Id */
+      session_id?: string | null;
     };
     /** StudySettings */
     StudySettings: {
@@ -11594,7 +11607,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['QuestionRequest'];
+        'application/json': components['schemas']['StreamQuestionRequest'];
       };
     };
     responses: {

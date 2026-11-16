@@ -209,6 +209,19 @@ class QuestionRequest(BaseModel):
     #:
     #: 服务端据此把上下文截到**该轮之前**（否则等于让模型看着自己上一次的
     #: 回答再答一遍），成功后把旧轮标成 `superseded`（不进列表/详情/上下文）。
+    # 注意：`retry_of` **不在**这里 —— 见下面的 `StreamQuestionRequest`。
+    # 它只对 `/ask/stream` 有意义；挂在共享基类上时 `/ask` 会静默忽略它
+    # （2026-11-15 第二轮审计 m6′）。
+
+
+class StreamQuestionRequest(QuestionRequest):
+    """`/ask/stream` 专用（2026-11-15 第二轮审计 m6′）
+
+    `retry_of` 只在这里：它表示"把这一轮**替换**掉"。非流式 `/ask` 不实现替换语义，
+    字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。
+    """
+
+    #: 要替换的那一轮（只接受会话里**最新**的一条）
     retry_of: Optional[str] = Field(None, max_length=64)
 
 

@@ -418,6 +418,7 @@ class RAGService:
         user_id: str,
         top_k: int = 5,
         stats: Optional[Dict[str, int]] = None,
+        exclude_note_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """在 `chunks` 表上做向量检索（一次 SQL，取代遍历 N 个 collection）
 
@@ -431,8 +432,9 @@ class RAGService:
         """
         from .chunk_search_service import search_chunks
 
-        # 复用公共方法（2026-11-15）：词法路也要同一份回收站集合
-        trashed = await self._trashed_note_ids(user_id)
+        # 优先用调用方传进来的集合（2026-11-15 第二轮审计 m7′）：原来向量路与词法路
+        # 各自查一次，注释却写"共用同一份"；`/ask/stream` 的回退分支会让一次提问查 4 遍。
+        trashed = exclude_note_ids if exclude_note_ids is not None else await self._trashed_note_ids(user_id)
         session_factory = self._get_session_factory()
         async with session_factory() as session:
             return await search_chunks(
@@ -796,12 +798,18 @@ class RAGService:
         # 检索只需拿 query 向量做点积，不需要模型。旧路径要起一个 worker
         # 任务、遍历 24 个 Chroma collection（D-9），现在是一次 SQL。
         vector_results: List[Dict[str, Any]] = []
+        # 回收站集合**只查一次**，向量路与词法路共用（审计 round2 m7′）
+        trashed_ids = await self._trashed_note_ids(user_id)
         # 维度统计（审计 blocker #1）：整批维度不符要能被上层看见
         vector_stats: Dict[str, int] = {}
         if question_embedding is not None:
             try:
                 vector_results = await self._search_chunk_vectors(
-                    question_embedding, user_id, top_k=pool, stats=vector_stats
+                    question_embedding,
+                    user_id,
+                    top_k=pool,
+                    stats=vector_stats,
+                    exclude_note_ids=trashed_ids,
                 )
             except Exception as e:
                 logger.warning(f"向量检索失败，降级为仅 BM25: {e}")
@@ -834,8 +842,7 @@ class RAGService:
         # 构建可能没有；词法通道不该因为一个可选扩展缺失就整体不可用。
         bm25_results: List[Dict[str, Any]] = []
         try:
-            # 回收站集合与向量路共用同一份（2026-11-15 审计 major）
-            trashed_ids = await self._trashed_note_ids(user_id)
+            # 复用上面查好的那一份（不再重复查）
             bm25_results = await self._lexical_search(user_id, question, chunks, pool, exclude_note_ids=trashed_ids)
         except Exception as e:
             logger.warning(f"词法检索失败: {e}")

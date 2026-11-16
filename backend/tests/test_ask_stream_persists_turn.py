@@ -165,6 +165,9 @@ class TestStreamPersistence:
         assert meta["session_id"], "meta 必须带回 session_id（前端据此写 ?s=）"
         assert meta["history_used"] == 0
         assert [name for name, _ in events][-1] == "done"
+        # A1：done 必须带回本轮 id，否则前端页内新轮补不上 id →「重新生成」静默降级
+        done_payload = next(payload for name, payload in events if name == "done")
+        assert done_payload.get("turn_id"), f"done 没带 turn_id：{done_payload}"
 
         turns = await _read_turns(test_db)
         assert len(turns) == 1

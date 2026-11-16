@@ -35,7 +35,10 @@ class TestEnsureLexicalHits:
         assert "c3" in ids, "词法强命中没被补入"
         # 不许冒充高分：补入项的分数不得高于原本最后一名
         inserted = next(it for it in out if it.get("chunk_id") == "c3")
-        assert inserted["similarity"] <= 0.8
+        # A7：必须**严格低于**所有既有项 —— FTS 的 similarity 是 -bm25()，实测可达 7.7，
+        # 沿用原分会让保底项冒充最高分（审计 round2 m1/m3 实测）
+        assert inserted["similarity"] < min(0.9, 0.8), f"保底项分数 {inserted['similarity']} 没被压低"
+        assert inserted["similarity"] < 0.8
         assert inserted.get("lexical_guaranteed") is True
 
     def test_does_not_insert_duplicates(self):
@@ -73,7 +76,7 @@ class TestRetrievalStatus:
         async def _encode(_text):
             return [1.0, 0.0, 0.0]
 
-        async def _vectors(_emb, _uid, top_k=5, stats=None):
+        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None):
             if stats is not None:
                 stats.update({"scanned": 890, "skipped_dim": 890, "matched_dim": 0, "all_skipped": 1})
             return []
@@ -109,7 +112,7 @@ class TestRetrievalStatus:
         async def _encode(_text):
             return [1.0, 0.0, 0.0]
 
-        async def _vectors(_emb, _uid, top_k=5, stats=None):
+        async def _vectors(_emb, _uid, top_k=5, stats=None, exclude_note_ids=None):
             if stats is not None:
                 stats.update({"scanned": 890, "skipped_dim": 0, "matched_dim": 890})
             return []

@@ -5459,18 +5459,6 @@
             "title": "Question",
             "type": "string"
           },
-          "retry_of": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Retry Of"
-          },
           "session_id": {
             "anyOf": [
               {
@@ -6913,6 +6901,45 @@
           "quota_bytes"
         ],
         "title": "StorageUsage",
+        "type": "object"
+      },
+      "StreamQuestionRequest": {
+        "description": "`/ask/stream` 专用（2026-11-15 第二轮审计 m6′）\n\n`retry_of` 只在这里：它表示\"把这一轮**替换**掉\"。非流式 `/ask` 不实现替换语义，\n字段放在共享基类上等于骗人 —— 收到也会被静默忽略，用户却会以为按钮生效了。",
+        "properties": {
+          "question": {
+            "maxLength": 4000,
+            "title": "Question",
+            "type": "string"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "StreamQuestionRequest",
         "type": "object"
       },
       "StudySettings": {
@@ -13782,7 +13809,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/QuestionRequest"
+                "$ref": "#/components/schemas/StreamQuestionRequest"
               }
             }
           },

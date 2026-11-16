@@ -121,6 +121,7 @@ from ..schemas.knowledge import (
     QuizItemListResponse,
     QuizItemUpdateRequest,
     QuestionRequest,
+    StreamQuestionRequest,
     QuestionAnswerResponse,
     AnswerSource,
     GenerateQuestionsResponse,
@@ -662,7 +663,7 @@ async def ask_question(
 
 @router.post("/ask/stream", response_class=EventStreamResponse)
 async def ask_question_stream(
-    req: QuestionRequest,
+    req: StreamQuestionRequest,
     current_user: User = Depends(get_current_user_dependency),
     db: AsyncSession = Depends(get_db),
 ):
@@ -725,7 +726,9 @@ async def ask_question_stream(
     session = None
     history: List[tuple] = []
     #: 要**替换**的那一轮（`retry_of` 指向它）；None 表示普通提问（2026-11-15）
-    retry_of = req.retry_of or None
+    # retry_of 只存在于 StreamQuestionRequest 上（A5）；用 getattr 是为了让
+    # 直接构造基类的测试/内部调用不至于 AttributeError。
+    retry_of = getattr(req, "retry_of", None) or None
     retry_target = None
     if history_enabled:
         if req.session_id:
@@ -789,6 +792,9 @@ async def ask_question_stream(
     )
     session_id = session.id if session is not None else None
 
+    #: 本轮是否已经落库（A1：`done` 之前要拿 id，所以提前落一次；finally 兜底不重复）
+    persisted = False
+
     async def _persist_completed_turn(
         *,
         status: str,
@@ -809,7 +815,7 @@ async def ask_question_stream(
             return
         # 落库逻辑在服务层（第二轮审计 NIT-1）：`surface` 必填，两个端点各写一份
         # 时已经分叉过一次（默认值把 note 会话过滤掉 → 静默不落库）。
-        await qa_service.persist_turn(
+        created = await qa_service.persist_turn(
             user_id=current_user.id,
             session_id=session_id,
             surface=SURFACE_GLOBAL,
@@ -841,9 +847,12 @@ async def ask_question_stream(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("替换旧轮失败（新轮已落库）: %s: %s", type(exc).__name__, exc)
 
+        #: 新轮 id（A1）：`done` 事件用它回传，前端回填 `history[0].id`
+        return getattr(created, "id", None)
+
     async def event_stream():
         # fallback 分支会改写检索词（审计 m2），所以先声明（`nonlocal` 必须在**任何读之前**）
-        nonlocal retrieval_query
+        nonlocal retrieval_query, persisted
         answer_parts: list[str] = []
         started_at = time.monotonic()
         # `finally` 的状态机（第三轮审计 M2）：默认 ok，只在正常走到 `done` 之后成立；
@@ -935,10 +944,35 @@ async def ask_question_stream(
             # 5. 发送 sources 事件
             yield f"event: sources\ndata: {json.dumps({'sources': sources, 'provider': provider}, ensure_ascii=False)}\n\n"
 
-            # 6. 发送 done 事件
-            yield "event: done\ndata: {}\n\n"
+            # 6. 先落库拿到本轮 id，再发 done（A1）
+            #
+            # 为什么把落库提前：`done` 发出时若还没落库，就拿不到 id，前端页内新轮
+            # 永远补不上 `history[0].id` ⇒ 点「重新生成」传 undefined ⇒ 服务端当普通
+            # 提问处理（多一条而不是替换一条，`QA.tsx` 注释警告过的形态）。
+            # 「必须在 finally 落库」的保证不放松：下面 `persisted` 只是防重复，
+            # 提前落库失败时 finally 仍会补写一次。
+            turn_id = None
+            try:
+                turn_id = await asyncio.shield(
+                    _persist_completed_turn(
+                        status=TURN_STATUS_OK,
+                        answer_text="".join(answer_parts),
+                        provider=provider or None,
+                        sources=sources,
+                        retrieval_status=retrieval_status or None,
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                )
+                persisted = True
+            except Exception:  # noqa: BLE001 - 提前落库失败不阻断回答
+                logger.warning("提前落库失败，交由 finally 兜底", exc_info=True)
 
-            # 7. 正常结束：只置标记，真正的落库统一在 `finally` 里做一次
+            # 7. 发送 done 事件（A1：带上本轮 turn_id，前端据此回填）
+            done_payload: dict = {}
+            if turn_id:
+                done_payload["turn_id"] = turn_id
+            yield f"event: done\ndata: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+
             completed = True
         except asyncio.CancelledError:
             # 客户端断开 / 用户点「停止生成」：这一轮最需要回看，标成 aborted 后交给 finally
@@ -961,20 +995,23 @@ async def ask_question_stream(
             if not completed and status == TURN_STATUS_OK:
                 # 既没正常结束、也没报错 ⇒ 是被中途关闭的，按"中止"记，不假装成功
                 status = TURN_STATUS_ABORTED
-            try:
-                await asyncio.shield(
-                    _persist_completed_turn(
-                        status=status,
-                        answer_text="".join(answer_parts),
-                        error_code=error_code,
-                        provider=provider or None,
-                        sources=sources,
-                        retrieval_status=retrieval_status or None,
-                        latency_ms=int((time.monotonic() - started_at) * 1000),
+            # 已在发送 `done` 之前落过（A1）就不再重复写。
+            # 注意不能用 `return` 提前退出 —— `finally` 里的 return 会吞掉异常（ruff B012）。
+            if not persisted:
+                try:
+                    await asyncio.shield(
+                        _persist_completed_turn(
+                            status=status,
+                            answer_text="".join(answer_parts),
+                            error_code=error_code,
+                            provider=provider or None,
+                            sources=sources,
+                            retrieval_status=retrieval_status or None,
+                            latency_ms=int((time.monotonic() - started_at) * 1000),
+                        )
                     )
-                )
-            except Exception:  # noqa: BLE001 - 收尾写库失败不影响已经发出去的内容
-                logger.warning("流式问答收尾落库失败（忽略）", exc_info=True)
+                except Exception:  # noqa: BLE001 - 收尾写库失败不影响已发出的内容
+                    logger.warning("流式问答收尾落库失败（忽略）", exc_info=True)
 
     return StreamingResponse(
         event_stream(),

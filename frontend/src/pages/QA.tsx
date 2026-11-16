@@ -626,6 +626,13 @@ export default function QA() {
             }
 
             if (eventType === 'done') {
+              // A1：本轮 turn_id 回填到最新那条记录上（页内新轮原本没有 id）
+              if (typeof payload.turn_id === 'string' && payload.turn_id) {
+                const newId = payload.turn_id;
+                setHistory((prev) =>
+                  prev.length === 0 ? prev : [{ ...prev[0], id: newId }, ...prev.slice(1)],
+                );
+              }
               flushDelta((delta) => {
                 setHistory((prev) => {
                   if (prev.length === 0) return prev;
@@ -1034,16 +1041,21 @@ export default function QA() {
                               真·替换旧轮需要后端 retry_of + superseded 可见性 —— 后端
                               地基已在（qa_history_service.supersede_turn），端到端
                               接线待做，见 docs/qa-deepseek-redesign.md §6.2。 */}
-                          {isLatest && !streaming && (
-                            <button
-                              type="button"
-                              className={`btn btn-ghost ${styles.qaActionButton}`}
-                              onClick={() => void handleAsk(record.question, true, record.id)}
-                              aria-label={`${t('qa.regenerate')}：${record.question}`}
-                            >
-                              {t('qa.regenerate')}
-                            </button>
-                          )}
+                          {/* A1 兜底：没有 id 就没有"替换"可言，宁可不显示；
+                              A2：中止/失败轮走「重试」，不在这里出现（否则必被 422 拒） */}
+                          {isLatest &&
+                            !streaming &&
+                            record.id &&
+                            (record.status === undefined || record.status === 'ok') && (
+                              <button
+                                type="button"
+                                className={`btn btn-ghost ${styles.qaActionButton}`}
+                                onClick={() => void handleAsk(record.question, true, record.id)}
+                                aria-label={`${t('qa.regenerate')}：${record.question}`}
+                              >
+                                {t('qa.regenerate')}
+                              </button>
+                            )}
                         </div>
                       )}
                       {record.provider && (

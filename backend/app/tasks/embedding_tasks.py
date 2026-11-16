@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import functools
 import hashlib
 import logging
@@ -205,7 +207,13 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
                 select(KnowledgeCard.id, KnowledgeCard.title, KnowledgeCard.content)
                 .where(
                     KnowledgeCard.user_id == user_id,
-                    KnowledgeCard.has_embedding.is_(False),
+                    # 2026-11-15 第二轮审计 m1′：只看 has_embedding 时，降级写入的卡片
+                    # 永远"已完成"，两种维度永久混存；模型不符也算待补。
+                    _needs_embed_clause(
+                        settings.embedding_model,
+                        KnowledgeCard.has_embedding,
+                        KnowledgeCard.embedding_model,
+                    ),
                     Note.not_trashed(KnowledgeCard.note_id),
                 )
                 .order_by(KnowledgeCard.updated_at.desc())
@@ -216,9 +224,28 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
         if not rows:
             return {"scanned": 0, "embedded": 0, "failed": 0, "remaining": 0}
 
+        # 与 chunk 侧同一个守卫，且放在**编码之前**（审计 m1′/m2′）：
+        # 降级态下卡片照写会把 512 维向量混进 1024 维库，检索时整批跳过；
+        # 写到编码之后就是"白编码再丢掉"。
+        model_name = _model_name()
+        if model_name and model_name != settings.embedding_model:
+            logger.warning(
+                "嵌入模型已降级为 %s（配置 %s），本轮跳过 %d 张卡片（不编码、不写入）",
+                model_name,
+                settings.embedding_model,
+                len(rows),
+            )
+            return {
+                "scanned": 0,
+                "embedded": 0,
+                "failed": 0,
+                "remaining": len(rows),
+                "model": model_name,
+                "skipped_reason": "fallback_model",
+            }
+
         texts = [build_text(title, content) for _cid, title, content in rows]
         vectors = encode_text(texts)
-        model_name = _model_name()
 
         embedded = failed = 0
         # strict=True：`encode_text` 保证一条文本一个向量，长度不等说明任务坏了，
@@ -245,8 +272,11 @@ async def _embed_cards_async(user_id: str, limit: int, build_text) -> Dict[str, 
                 select(func.count())
                 .select_from(KnowledgeCard)
                 .where(
-                    KnowledgeCard.user_id == user_id,
-                    KnowledgeCard.has_embedding.is_(False),
+                    _needs_embed_clause(
+                        settings.embedding_model,
+                        KnowledgeCard.has_embedding,
+                        KnowledgeCard.embedding_model,
+                    ),
                     Note.not_trashed(KnowledgeCard.note_id),
                 )
             )
@@ -416,8 +446,14 @@ async def _embed_chunks_async(limit: int) -> Dict[str, int]:
             embedded += 1
         await session.commit()
 
+        # A4：与 _pending_counts 同源（原来这里是 has_embedding=False，
+        # 全库模型不符时日志会写"剩余 0"而实际 897）
         remaining = (
-            await session.execute(select(func.count()).select_from(Chunk).where(Chunk.has_embedding.is_(False)))
+            await session.execute(
+                select(func.count())
+                .select_from(Chunk)
+                .where(_needs_embed_clause(settings.embedding_model, Chunk.has_embedding, Chunk.embedding_model))
+            )
         ).scalar_one()
 
     logger.info(
@@ -478,9 +514,28 @@ def backfill_embeddings(limit: int = BACKFILL_ROUND_LIMIT) -> Dict[str, object]:
         return run_async(_backfill_embeddings_async(limit))
 
 
+def _needs_embed_clause(model: Any, has_embedding: Any, embedding_model: Any):
+    """「这一行需要（重新）算向量」的统一判据
+
+    2026-11-15 第二轮审计 m1′/m2′：这条判据原来散在三处，口径各不相同 ——
+    改了一处、漏了另两处，于是日志里的 `remaining` 与新判据说的不是一件事
+    （全库 `has_embedding=1` 但模型不符时，日志写"剩余 0"，实际待补 897）。
+
+    统一为：没算过 **或** 算过的模型与当前配置不一致。
+    调用方负责再叠加"排除回收站"（各表关联方式不同）。
+    """
+    from sqlalchemy import or_ as _or
+
+    return _or(
+        has_embedding.is_(False),
+        embedding_model.is_(None),
+        embedding_model != model,
+    )
+
+
 async def _pending_counts() -> Dict[str, int]:
     """两类待补数量（chunk 全库、卡片按用户）"""
-    from sqlalchemy import func, or_, select
+    from sqlalchemy import func, select
 
     from ..models.chunk import Chunk
     from ..models.knowledge_card import KnowledgeCard
@@ -493,11 +548,7 @@ async def _pending_counts() -> Dict[str, int]:
         # 只看 `has_embedding` 时，"512 维但 has_embedding=1"的行永远不会被重算，
         # 库里两种维度永久混存，检索每次整批跳过其中一种。
         expected_model = settings.embedding_model
-        needs_embed = or_(
-            Chunk.has_embedding.is_(False),
-            Chunk.embedding_model.is_(None),
-            Chunk.embedding_model != expected_model,
-        )
+        needs_embed = _needs_embed_clause(expected_model, Chunk.has_embedding, Chunk.embedding_model)
         # 回收站笔记的 chunk 不算待补（2026-11-15 审计 m6）：卡片计数已排除，
         # chunk 这边没有 —— 结果是持续给已删除内容算向量，纯浪费算力。
         in_trash = select(Note.id).where(Note.user_id == Chunk.user_id, Note.trashed_at.is_not(None))

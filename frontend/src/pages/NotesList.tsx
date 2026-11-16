@@ -429,7 +429,9 @@ export default function NotesList() {
 
           ⚠️ 计划里明确把"批量选择 UI（勾选框）"列为配套、不在本轮，
           所以这里只有"导出全部"一个动作，没有"导出选中的 N 篇"。 */}
-      {!keywordParam && (
+      {/* A8：判据用草稿而不是已提交的 URL 值 —— 输入法组合期间框里已有字，
+          但 keywordParam 还是空串，按钮会误显示为导出全部 */}
+      {!keywordDraft && (
         <div style={{ marginBottom: 'var(--space-md)' }}>
           <button className="btn btn-secondary" onClick={handleExportAll} disabled={exportingAll}>
             {/* 图标集里**没有**下载图标（`components/icons/` 只有 upload 等 40 个）。
