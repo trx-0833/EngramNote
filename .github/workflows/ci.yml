@@ -187,7 +187,7 @@ jobs:
       - name: Upload coverage report
         # 失败也上传：覆盖率跌破门槛时，报告正是排查依据。
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage.xml
@@ -213,7 +213,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 版本**读 `frontend/.nvmrc`**（= 开发机 `nvm use` 用的同一个文件），
           # 不在 CI 里另写一个常量 —— 这就是本轮反复出现的那类缺陷：
