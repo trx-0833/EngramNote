@@ -750,6 +750,18 @@ async def ask_question(
     )
 
 
+def _load_sources(raw: Optional[str]) -> list:
+    """把 `qa_turns.sources_json` 解成列表；坏数据返回空列表（不影响问答本身）。"""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("sources_json 解析失败，A8 锚点将为空")
+        return []
+    return data if isinstance(data, list) else []
+
+
 @router.post("/ask/stream", response_class=EventStreamResponse)
 async def ask_question_stream(
     req: StreamQuestionRequest,
@@ -869,8 +881,13 @@ async def ask_question_stream(
             history = usable_history([(t.question, t.answer, t.status) for t in turns])
             # A8：追问的上文锚点 = 上一轮回答引用到的**第一篇**笔记标题。
             # `recent_ok_turns` 按时间升序返回，所以上一轮是 turns[-1]。
+            #
+            # ⚠️ round7：这里原来读 `turns[-1].sources` —— 模型上没有这个属性
+            # （`models/qa_history.py:139` 是 `sources_json`），而 `getattr` 给了默认值
+            # `None`，于是**不报错、也永远拿不到锚点**：整条 A8 在真实会话里是死的。
+            # 9 条用例全绿也发现不了，因为它们只测函数不测接线。
             if turns:
-                prev_sources = getattr(turns[-1], "sources", None) or []
+                prev_sources = _load_sources(turns[-1].sources_json)
                 for src in prev_sources[:1]:
                     if isinstance(src, dict) and src.get("note_title"):
                         anchor_titles.append(str(src["note_title"]))

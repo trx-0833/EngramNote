@@ -285,7 +285,12 @@ class TestStreamPersistence:
 
         # 第 1 次是首轮检索；第 2 次是追问（拼接后）
         assert calls[0] == "浮充和均充的区别？"
-        assert calls[1] == "浮充和均充的区别？ 那它对寿命有影响吗？"
+        # A8（round7 升级为**接线**回归）：锚点来自上一轮落库的 `sources_json`
+        # 里第一篇的 `note_title`（桩里是"电池"），拼在最前面。
+        # 这条断言真的走了"端点 → 落库 → 读回 JSON → 拼检索词"，所以一旦有人把
+        # 字段名从 `sources_json` 写回 `sources`，这里就会红 —— 之前正是因为
+        # 只看函数不看接线，A8 在真实会话里一直是死的却全绿。
+        assert calls[1] == "电池 浮充和均充的区别？ 那它对寿命有影响吗？"
 
     async def test_llm_error_persists_failed_turn(self, test_db, monkeypatch):
         client = _client()
