@@ -99,6 +99,37 @@ interface QARecord {
 }
 
 /**
+ * 引用结构审计（A1）：越界编号 + 覆盖率。
+ *
+ * 报告给的验收：含越界/无引用的答案必须被标出，正常答案误报 0。
+ * 只做**结构**判断（编号是否存在于 `sources`），不做语义蕴含 —— 后者是 C1。
+ */
+export function citationAudit(
+  answer: string,
+  total: number,
+): { invalid: number[]; cited: Set<number>; coverage: number } {
+  const invalid: number[] = [];
+  const cited = new Set<number>();
+  const re = /\[(\d+)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(answer)) !== null) {
+    const n = Number(m[1]);
+    if (!Number.isInteger(n)) continue;
+    if (n >= 1 && n <= total) cited.add(n);
+    else invalid.push(n);
+  }
+  // 覆盖率 = 含至少一个引用的句子 / 总句子。
+  // 句子切分用中英文句末标点 —— 够用即可，不做分句器（那是为评测准备的）。
+  const sentences = answer
+    .split(/[。！？!?\n]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const withCitation = sentences.filter((s) => /\[\d+\]/.test(s)).length;
+  const coverage = sentences.length === 0 ? 0 : withCitation / sentences.length;
+  return { invalid, cited, coverage };
+}
+
+/**
  * 引用来源列表（批次 E7 抽出，右栏与卡片内共用）
  *
  * 抽出来的唯一理由是**判据只能有一份**：`canJump` 那三条判断决定了
@@ -1070,6 +1101,35 @@ export default function QA() {
                             {t('qa.sourcesFold', { count: record.sources.length })}
                           </summary>
                           <div className={styles.qaSourcesBody}>
+                            {/* A1：引用结构审计。只报异常（越界 / 覆盖率过低），
+                                正常答案不打扰 —— 报告要求"正常答案误报 0"。 */}
+                            {(() => {
+                              const audit = citationAudit(record.answer, record.sources.length);
+                              if (audit.invalid.length > 0) {
+                                const list = [...new Set(audit.invalid)]
+                                  .map((n) => `[${n}]`)
+                                  .join('、');
+                                return (
+                                  <p className={styles.qaCitationWarn}>
+                                    {t('qa.citationInvalid', { list })}
+                                  </p>
+                                );
+                              }
+                              if (
+                                record.answer &&
+                                record.sources.length > 0 &&
+                                audit.coverage < 0.5
+                              ) {
+                                return (
+                                  <p className={styles.qaCitationWarn}>
+                                    {t('qa.citationLowCoverage', {
+                                      percent: Math.round(audit.coverage * 100),
+                                    })}
+                                  </p>
+                                );
+                              }
+                              return null;
+                            })()}
                             <SourceLinks sources={record.sources} answer={record.answer} />
                           </div>
                         </details>

@@ -920,6 +920,9 @@ const en = {
     copyAnswer: 'Copy answer',
     regenerate: 'Regenerate',
     sourceNotCited: '(not cited)',
+    citationInvalid: 'The answer cites sources that do not exist: {list}',
+    citationLowCoverage:
+      'Only {percent}% of sentences carry a citation — please verify the sources',
     notGrounded:
       'Nothing relevant was found in your notes; the answer below is not based on your material',
     copied: 'Copied',

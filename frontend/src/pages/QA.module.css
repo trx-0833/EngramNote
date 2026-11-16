@@ -524,3 +524,15 @@
   font-size: 0.72rem;
   color: var(--color-text-secondary);
 }
+
+/* A1：引用结构审计的提示。用警示色左边框，但不做成红块 ——
+   它是「建议核对」，不是「出错了」。 */
+.qaCitationWarn {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-warning, #d97706);
+  border-radius: 4px;
+  background: var(--color-bg-subtle, rgba(217, 119, 6, 0.06));
+  font-size: 0.8rem;
+  line-height: 1.5;
+}

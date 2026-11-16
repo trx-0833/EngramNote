@@ -1123,6 +1123,9 @@ const zhCN = {
     // 没有检索依据时的标注（后端 meta.grounded === false）
     // A3：检索到了但回答没引用它 —— 最便宜的检索质量信号
     sourceNotCited: '（未被引用）',
+    // A1：引用结构审计（只在异常时出现）
+    citationInvalid: '回答里出现了不存在的引用：{list}',
+    citationLowCoverage: '这句回答只有 {percent}% 的句子标了引用，建议核对来源',
     notGrounded: '这一轮没有在你的笔记里检索到相关内容，下面的回答不基于你的资料',
     copied: '已复制',
     copyFailed: '复制失败，请手动选择文本',
