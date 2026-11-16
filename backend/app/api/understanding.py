@@ -1011,7 +1011,9 @@ async def ask_question_stream(
             # A4 范围过滤：先与"本人未回收站的笔记"**求交集** —— 越权在这里被丢掉，
             # 而不是靠检索层再判一次（那需要多一次查询，且容易漏）。
             allow_ids = None
-            if req.scope_note_ids:
+            # 空列表与 None 语义不同：前者是「范围为空」（必须 0 条），后者是「不限」。
+            # 用真值判断会把空列表当成没传。
+            if req.scope_note_ids is not None:
                 from sqlalchemy import select as _sel
 
                 from ..models.note import Note as _Note
@@ -1050,9 +1052,12 @@ async def ask_question_stream(
             # 语料为空时不要再检索一次（第二轮审计 MINOR-8）：新用户 / 还没补向量时
             # "拼接词没命中"是必然的，第二遍同样必然为空 —— 白跑一次 embedding + 向量检索。
             if not sources and prev_question and not retrieval.get("corpus_empty"):
+                # round8 blocker：这条 fallback 原来**没带白名单** —— 追问我用拼接词在
+                # scope 内没命中、再用当前问重检时，范围就放开了（越权/范围逃逸）。
                 retry = await rag_service.retrieve_context(
                     question=req.question,
                     user_id=current_user.id,
+                    allow_note_ids=allow_ids,
                 )
                 if retry.get("sources"):
                     retrieval = retry
@@ -1119,6 +1124,13 @@ async def ask_question_stream(
             )
 
             # 4. 流式输出 token（累积起来供落库：中止时也要保留已生成的部分）
+            # A6（round8）：标注**由代码**先发出去，不依赖模型写。只写进 prompt 的话，
+            # 模型不写就没有标注 —— 那样"未标注的模型知识 = 0"是假的。
+            if use_general:
+                yield_prefix = _GENERAL_PREFIX + "\n\n"
+                answer_parts.append(yield_prefix)
+                yield f"event: token\ndata: {json.dumps({'content': yield_prefix}, ensure_ascii=False)}\n\n"
+
             async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
                 answer_parts.append(chunk)
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
@@ -1145,6 +1157,9 @@ async def ask_question_stream(
                     sources=sources,
                     retrieval_status=retrieval_status or None,
                     latency_ms=int((time.monotonic() - started_at) * 1000),
+                    # B4：把**生效后**的范围带下去（round8 blocker：原来两个调用点都没传，
+                    # 参数加了却没人给值，`scope_json` 恒 NULL —— 死代码）
+                    scope_note_ids=(sorted(allow_ids) if allow_ids is not None else None),
                 )
             )
             try:
@@ -1207,6 +1222,8 @@ async def ask_question_stream(
                             sources=sources,
                             retrieval_status=retrieval_status or None,
                             latency_ms=int((time.monotonic() - started_at) * 1000),
+                            # B4：补写路径同样要带范围（round8 blocker：两处都没传）
+                            scope_note_ids=(sorted(allow_ids) if allow_ids is not None else None),
                         )
                     )
                 except Exception:  # noqa: BLE001 - 收尾写库失败不影响已发出的内容

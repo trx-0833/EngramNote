@@ -5370,6 +5370,17 @@
             ],
             "title": "Error Code"
           },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          },
           "id": {
             "title": "Id",
             "type": "string"

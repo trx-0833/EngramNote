@@ -39,6 +39,9 @@ class QATurnResponse(BaseModel):
     retrieval_query: Optional[str] = None
     #: 引用来源（检索层原样返回；`snippet` 已截到 200 字）
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    #: B2：用户反馈（`up` / `down` / None）。round8：只写不读等于没有 —— 详情接口要能读回，
+    #: 否则前端刷新后点赞态丢失，聚合分析也拿不到。
+    feedback: Optional[str] = None
     #: 本轮实际带上了几轮历史（预算裁剪后的真实值）
     context_turns: int = 0
     latency_ms: Optional[int] = None

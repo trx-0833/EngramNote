@@ -6612,6 +6612,8 @@ export interface components {
       created_at: string;
       /** Error Code */
       error_code?: string | null;
+      /** Feedback */
+      feedback?: string | null;
       /** Id */
       id: string;
       /** Latency Ms */

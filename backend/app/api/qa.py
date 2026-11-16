@@ -86,6 +86,8 @@ def _turn_payload(turn) -> QATurnResponse:
         retrieval_status=turn.retrieval_status,
         retrieval_query=turn.retrieval_query,
         sources=sources,
+        # B2：把反馈读回去（round8：只写不读等于没有）
+        feedback=turn.feedback,
         context_turns=turn.context_turns or 0,
         latency_ms=turn.latency_ms,
         created_at=turn.created_at,

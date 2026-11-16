@@ -483,7 +483,9 @@ class RAGService:
                     user_id,
                     top_k=top_k,
                     exclude_note_ids=exclude_note_ids or None,
-                    allow_note_ids=allow_note_ids or None,
+                    # 注意：**不能**写 or None —— set() 表示「允许 0 篇」，
+                    # 变成 None 就是「不限」，传别人的 id 反而能查到自己的笔记。
+                    allow_note_ids=allow_note_ids,
                 )
                 if hits:
                     return hits
