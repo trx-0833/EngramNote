@@ -91,15 +91,11 @@ def check_archive(
     limit_bytes = max_uncompressed_mb * 1024 * 1024
     if max_uncompressed_mb > 0 and stats.total_uncompressed_bytes > limit_bytes:
         return (
-            f"解压后体积过大（{stats.total_uncompressed_bytes // (1024 * 1024)}MB > "
-            f"{max_uncompressed_mb}MB），已拒绝"
+            f"解压后体积过大（{stats.total_uncompressed_bytes // (1024 * 1024)}MB > {max_uncompressed_mb}MB），已拒绝"
         )
 
     if max_compression_ratio > 0 and stats.compression_ratio > max_compression_ratio:
-        return (
-            f"压缩比异常（{stats.compression_ratio:.0f}:1 > {max_compression_ratio}:1），"
-            "疑似压缩炸弹，已拒绝"
-        )
+        return f"压缩比异常（{stats.compression_ratio:.0f}:1 > {max_compression_ratio}:1），疑似压缩炸弹，已拒绝"
     return None
 
 
@@ -109,6 +105,48 @@ def check_pdf_pages(page_count: Optional[int], *, max_pages: int) -> Optional[st
         return None
     if page_count > max_pages:
         return f"PDF 页数过多（{page_count} > {max_pages}），请拆分后上传"
+    return None
+
+
+def validate_staged_file(
+    path: Path,
+    ext: str,
+    source_type: str,
+    *,
+    max_uncompressed_mb: int,
+    max_compression_ratio: float,
+    max_entries: int,
+    max_pdf_pages: int,
+    pdf_page_count,
+) -> Optional[str]:
+    """上传落盘后的**统一**安全闸门（2026-11-18 安全审计 F1）。
+
+    ## 为什么要有这个函数
+
+    历史上校验散落在各入口里：`prepare`（两阶段第一阶段）调了
+    `check_archive` + `check_pdf_pages`，而 `POST /api/upload`（单次直传）
+    **一个都没调** —— 实测 3000 页 PDF 与 1025:1 的 docx 炸弹都能传上去并入队。
+
+    把校验收成一个函数、在**两条入口的唯一汇合点**调用，新增入口就不可能忘。
+
+    ## 返回
+
+    `None` 表示通过；非 `None` 是要展示给用户的原因字符串。
+    """
+    if ext in ARCHIVE_EXTS:
+        reason = check_archive(
+            path,
+            max_uncompressed_mb=max_uncompressed_mb,
+            max_compression_ratio=max_compression_ratio,
+            max_entries=max_entries,
+        )
+        if reason:
+            return reason
+
+    reason = check_pdf_pages(pdf_page_count, max_pages=max_pdf_pages)
+    if reason:
+        return reason
+
     return None
 
 

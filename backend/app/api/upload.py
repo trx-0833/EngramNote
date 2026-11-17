@@ -79,6 +79,7 @@ from ..services.upload_safety import (
     check_archive,
     check_note_count,
     check_pdf_pages,
+    validate_staged_file,
 )
 from ..services.vault_meta import write_note_meta
 from ..tasks.dispatch import dispatch
@@ -359,6 +360,30 @@ async def _do_upload(
         AppError: note_role 值无效（NOTE_ROLE_INVALID → 400）
         AppError: 文件上传到对象存储失败（UPLOAD_STORAGE_WRITE_FAILED → 500）
     """
+    # 安全闸门（2026-11-18 审计 F1）：**两条入口都必须过这里**。
+    # 历史问题：`POST /api/upload` 单次直传完全不校验压缩包与 PDF 页数，
+    # 实测 3000 页 PDF / 1025:1 docx 炸弹都能入队（配合 solo worker 可占住数百小时）。
+    _ext = os.path.splitext(filename)[1].lower()
+    _pages = None
+    if source_type == SourceType.pdf:
+        try:
+            _pages = pdf_crop.get_pdf_page_count(tmp_path)
+        except Exception:  # noqa: BLE001 - 页数读不出时交给下面 check_pdf_pages 判空
+            _pages = None
+    _reason = validate_staged_file(
+        Path(tmp_path),
+        _ext,
+        source_type.value,
+        max_uncompressed_mb=settings.max_archive_uncompressed_mb,
+        max_compression_ratio=settings.max_archive_compression_ratio,
+        max_entries=settings.max_archive_entries,
+        max_pdf_pages=settings.max_pdf_pages,
+        pdf_page_count=_pages,
+    )
+    if _reason:
+        logger.warning("上传安全闸门未通过: file=%s, reason=%s", filename, _reason)
+        raise AppError(UPLOAD_ARCHIVE_REJECTED, _reason, 400)
+
     ext = os.path.splitext(filename)[1].lower()
     total_size = os.path.getsize(tmp_path)
 
