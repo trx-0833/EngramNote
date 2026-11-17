@@ -48,6 +48,10 @@ from ..models.note import Note
 from ..services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
+
+#: A6：通用知识回答的固定标注。**由代码拼在最前面**，不依赖模型自觉 ——
+#: 只写进 prompt 的话，模型不写就没有标注，"未标注的模型知识 = 0" 就不成立。
+_GENERAL_PREFIX = "【以下内容来自模型通用知识，不来自你的资料】"
 settings = get_settings()
 
 
@@ -977,6 +981,8 @@ class RAGService:
         self,
         question: str,
         user_id: str,
+        allow_note_ids: Optional[set] = None,
+        allow_general: bool = False,
     ) -> Dict[str, Any]:
         """
         RAG 问答完整流程（混合检索 + RRF 融合）
@@ -1001,7 +1007,7 @@ class RAGService:
         llm_service = LLMService()
 
         # 1. 检索阶段（不调用 LLM）
-        retrieval = await self.retrieve_context(question, user_id)
+        retrieval = await self.retrieve_context(question, user_id, allow_note_ids=allow_note_ids)
         context = retrieval["context"]
         sources = retrieval["sources"]
         retrieval_status = retrieval.get("retrieval_status", "bm25_only")
@@ -1019,6 +1025,29 @@ class RAGService:
         #   - 代价：用户想问通用问题时得不到回答
         # 若将来确实需要"通用知识"模式，应当是**用户显式选择**的另一个入口
         # （界面上明确标注"以下回答不来自你的资料"），而不是静默降级。
+        if not context.strip() and allow_general:
+            # A6：用户**显式**允许用通用知识。标注由代码拼，不靠模型写。
+            answer = await llm_service.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是一个知识渊博的学习助手。用户在笔记里没有相关资料，"
+                            "但**明确允许**你用通用知识回答。不要编造笔记细节。"
+                        ),
+                    },
+                    {"role": "user", "content": question},
+                ],
+                scene="rag_answer_general",
+            )
+            return {
+                "answer": f"{_GENERAL_PREFIX}\n\n{answer}",
+                "sources": [],
+                "provider": llm_service._provider,
+                "retrieval_status": retrieval_status,
+                "grounded": False,
+            }
+
         if not context.strip():
             # A2（research/topics/qa-gap-triage.md）：拒答文案必须分因 ——
             # `vector_dim_mismatch` / `bm25_only` 是**系统侧故障**，

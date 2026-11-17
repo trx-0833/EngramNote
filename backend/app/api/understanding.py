@@ -726,9 +726,34 @@ async def ask_question(
         raise AppError(EMPTY_QUESTION, "问题不能为空", 422)
 
     rag_service = RAGService()
+    # A4/A6（round8 遗留）：/ask 原来**静默忽略**这两个字段 —— 与 retry_of 当年的坑同形。
+    # 现在与流式端点同一套语义：先求交集（越权 0），再把 allow_general 透传。
+    allow_ids = None
+    if req.scope_note_ids is not None:
+        from sqlalchemy import select as _sel
+
+        from ..models.note import Note as _Note
+
+        rows = (
+            (
+                await db.execute(
+                    _sel(_Note.id).where(
+                        _Note.user_id == current_user.id,
+                        _Note.trashed_at.is_(None),
+                        _Note.id.in_(req.scope_note_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        allow_ids = set(rows)
+
     result = await rag_service.answer_question(
         question=req.question,
         user_id=current_user.id,
+        allow_note_ids=allow_ids,
+        allow_general=bool(req.allow_general_knowledge),
     )
 
     return QuestionAnswerResponse(
