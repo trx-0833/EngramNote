@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 
+from .qa_context import GENERAL_BANNER, strip_general_banner
 from ..config import get_settings
 from ..models.note import Note
 from ..services.llm_service import LLMService
@@ -51,7 +52,8 @@ logger = logging.getLogger(__name__)
 
 #: A6：通用知识回答的固定标注。**由代码拼在最前面**，不依赖模型自觉 ——
 #: 只写进 prompt 的话，模型不写就没有标注，"未标注的模型知识 = 0" 就不成立。
-_GENERAL_PREFIX = "【以下内容来自模型通用知识，不来自你的资料】"
+# 常量与剥离逻辑都来自 `services/qa_context.py`（唯一定义处）
+_GENERAL_PREFIX = GENERAL_BANNER
 settings = get_settings()
 
 
@@ -1040,6 +1042,9 @@ class RAGService:
                 ],
                 scene="rag_answer_general",
             )
+            # 回归审计 R1：先剥掉模型**自己写的**那一次，再由代码加一份。
+            # 原实现直接拼接 ⇒ 模型守规矩时反而变成两份横幅（实测 2 次）。
+            answer = strip_general_banner(answer)
             return {
                 "answer": f"{_GENERAL_PREFIX}\n\n{answer}",
                 "sources": [],

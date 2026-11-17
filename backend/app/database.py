@@ -901,15 +901,19 @@ async def _migrate_sqlite(conn):
             card_cols = {c["name"] for c in inspector.get_columns("knowledge_cards")}
             if "content_hash" not in card_cols:
                 sync_conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN content_hash VARCHAR(64)"))
-                try:
-                    sync_conn.execute(
-                        text(
-                            "CREATE INDEX IF NOT EXISTS ix_knowledge_cards_content_hash "
-                            "ON knowledge_cards (content_hash)"
-                        )
-                    )
-                except Exception:
-                    pass
+            # ⚠️ 2026-11-18 隔离审计 1-3：索引与**回填**原先都嵌在上面这个 `if` 里，
+            # 于是"加列那一刻"之后永远不会再跑。实测真库仍有 6 行 NULL ——
+            # 那些卡片不参与去重判定，重跑理解时会多插一张卡（正是 content_hash 要修的重复）。
+            # 现在索引与回填都在**每次启动**执行（幂等、分批、报剩余）。
+            try:
+                sync_conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_knowledge_cards_content_hash ON knowledge_cards (content_hash)")
+                )
+            except Exception:
+                pass
+
+            if True:
+                BATCH = 2000
                 # 回填历史行：**复用 `card_intake_service.card_content_hash`**，
                 # 不在这里另写一套规范化。
                 #
@@ -921,16 +925,31 @@ async def _migrate_sqlite(conn):
                 try:
                     from .services.card_intake_service import card_content_hash
 
-                    rows = sync_conn.execute(
-                        text("SELECT id, title, content FROM knowledge_cards WHERE content_hash IS NULL")
-                    ).fetchall()
-                    for card_id, title, content in rows:
-                        sync_conn.execute(
-                            text("UPDATE knowledge_cards SET content_hash = :h WHERE id = :i"),
-                            {"h": card_content_hash(title, content), "i": card_id},
+                    total = 0
+                    while True:
+                        rows = sync_conn.execute(
+                            text("SELECT id, title, content FROM knowledge_cards WHERE content_hash IS NULL LIMIT :n"),
+                            {"n": BATCH},
+                        ).fetchall()
+                        if not rows:
+                            break
+                        for card_id, title, content in rows:
+                            sync_conn.execute(
+                                text("UPDATE knowledge_cards SET content_hash = :h WHERE id = :i"),
+                                {"h": card_content_hash(title, content), "i": card_id},
+                            )
+                        total += len(rows)
+                    if total:
+                        logger.info("SQLite 迁移: 已回填 %d 行 knowledge_cards.content_hash", total)
+                    remaining = sync_conn.execute(
+                        text("SELECT COUNT(*) FROM knowledge_cards WHERE content_hash IS NULL")
+                    ).scalar()
+                    if remaining:
+                        logger.warning(
+                            "knowledge_cards.content_hash 仍有 %d 行为 NULL"
+                            "（这些卡不参与去重，重跑理解会多插卡），请检查上面的异常",
+                            remaining,
                         )
-                    if rows:
-                        logger.info("SQLite 迁移: 已回填 %d 行 knowledge_cards.content_hash", len(rows))
                 except Exception as exc:
                     logger.warning(
                         "回填 knowledge_cards.content_hash 失败（不影响启动；"

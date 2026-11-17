@@ -1,5 +1,5 @@
 import type { KeyboardEvent, RefObject, MutableRefObject } from 'react';
-import { useCallback, useEffect, useId, useRef } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import Icon from '../Icon';
 import Minimap from './Minimap';
@@ -121,11 +121,28 @@ export default function GraphCanvas({
    */
   const viewportSizeRef = useRef({ width: 0, height: 0 });
   const transformSyncedRef = useRef(false);
+  /**
+   * 画布自身尺寸（供 `<ForceGraph2D width height>` 用）。
+   *
+   * 为什么必须显式传：不传时库按 1280×默认高建 canvas，而容器实测只有 638px 宽，
+   * 于是右半张被 `overflow: hidden` 裁掉，且窗口缩放也不会重算（前端审计 blocker，
+   * 截图 `_agenttmp/ui-audit/graph-canvas-wider-than-container-clipped.png`）。
+   *
+   * 与 `viewportSizeRef` 并存：ref 给每帧的剔除判据（读它不触发重渲染），
+   * state 只在尺寸真变化时更新一次，用于让库重建画布。
+   */
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const element = graphCanvasRef.current;
     if (!element) return;
     const measure = () => {
-      viewportSizeRef.current = { width: element.clientWidth, height: element.clientHeight };
+      const next = { width: element.clientWidth, height: element.clientHeight };
+      viewportSizeRef.current = next;
+      // 只在尺寸**真的变了**时 setState：ResizeObserver 回调很频繁，
+      // 每次都 set 会让 ForceGraph2D 反复重建画布。
+      setCanvasSize((prev) =>
+        prev.width === next.width && prev.height === next.height ? prev : next,
+      );
     };
     measure();
     // ⚠️ jsdom **没有** `ResizeObserver`：不判类型直接用会抛
@@ -213,6 +230,10 @@ export default function GraphCanvas({
     >
       <ForceGraph2D
         ref={graphRef}
+        /* 显式尺寸：不传时库按默认 1280 建画布，宽于容器就会被裁（见 canvasSize 说明）。
+           初始 0 时传 undefined，避免建出 0×0 的画布。 */
+        width={canvasSize.width || undefined}
+        height={canvasSize.height || undefined}
         graphData={forceGraphData}
         nodeCanvasObject={nodeCanvasObject}
         /* 每帧绘制之前同步真实视口变换（见 `syncViewportTransform` 的说明）：

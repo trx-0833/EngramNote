@@ -103,6 +103,7 @@ from ..models.qa_history import (
     TURN_STATUS_OK,
     TURN_STATUS_SUPERSEDED,
 )
+from ..services.qa_context import GENERAL_BANNER, strip_general_banner
 from ..services import qa_history_service as qa_service
 from ..services.qa_context import assemble_messages, build_retrieval_query, context_turns_used, usable_history
 from ..schemas.common import EventStreamResponse
@@ -141,11 +142,16 @@ logger = logging.getLogger(__name__)
 
 #: A6：通用知识回答的固定标注。由**代码**补在最前面，不依赖模型自觉，
 #: 这样「未标注的模型知识」恒为 0。
-_GENERAL_PREFIX = "【以下内容来自模型通用知识，不来自你的资料】"
+# 常量来自 `services/qa_context.py`（唯一定义处）
+_GENERAL_PREFIX = GENERAL_BANNER
 
 #: A8 开关。**默认关闭**：实测 Δ=+0.0 点未达标（见 docs 与 research 的 A/B 报告）。
 #: 打开前请先跑 `scripts/eval_followups.py --run`，确认 ≥ +5 点。
 _A8_ANCHOR_ENABLED = False
+
+
+#: 剥离逻辑与常量都来自 `services/qa_context.py`（唯一定义处，见那里的说明）。
+_strip_general_banner = strip_general_banner
 router = APIRouter()
 
 
@@ -1168,29 +1174,30 @@ async def ask_question_stream(
             async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
                 if use_general and not _stripped_leading:
                     _pending += chunk
-                    # 累积到足够判断的长度（横幅 + 少量后续字符）再决定
-                    if len(_pending) < len(_GENERAL_PREFIX) + 8 and not _pending.strip():
+                    # 判据是「当前缓冲**是否可能**是横幅的前缀」，不是「是否纯空白」——
+                    # 后者会让半个横幅（如「【以下内容来自」）立刻定型并当正文发出，
+                    # 后半个照常到达 ⇒ 最终仍是 2 次（回归审计 R1 实测）。
+                    head = _pending.lstrip()
+                    if len(head) < len(_GENERAL_PREFIX) and _GENERAL_PREFIX.startswith(head):
+                        continue  # 还可能是横幅开头，继续等
+                    candidate = _strip_general_banner(_pending).lstrip(chr(10))
+                    if not candidate:
+                        # 横幅恰好在本块结束，紧随的换行落在下一块：保持“未定型”
+                        # 让下一块的开头也被清掉（否则正文会带前导空行）。
+                        _pending = ""
                         continue
-                    stripped = _pending.lstrip()
-                    if stripped.startswith(_GENERAL_PREFIX):
-                        # 模型自己也写了一遍：丢掉这一份，保留后续内容
-                        stripped = stripped[len(_GENERAL_PREFIX) :].lstrip("\n")
+                    chunk = candidate
                     _stripped_leading = True
-                    chunk = stripped
                     _pending = ""
-                    if not chunk:
-                        continue
                 answer_parts.append(chunk)
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
             if use_general and not _stripped_leading and _pending:
-                # 流很短，全部折在缓冲里
-                stripped = _pending.lstrip()
-                if stripped.startswith(_GENERAL_PREFIX):
-                    stripped = stripped[len(_GENERAL_PREFIX) :].lstrip("\n")
-                if stripped:
-                    answer_parts.append(stripped)
-                    yield f"event: token\ndata: {json.dumps({'content': stripped}, ensure_ascii=False)}\n\n"
+                # 流很短，整段折在缓冲里（或整段就是一个横幅前缀）
+                tail = _strip_general_banner(_pending)
+                if tail.strip():
+                    answer_parts.append(tail)
+                    yield f"event: token\ndata: {json.dumps({'content': tail}, ensure_ascii=False)}\n\n"
 
             # 5. 发送 sources 事件
             yield f"event: sources\ndata: {json.dumps({'sources': sources, 'provider': provider}, ensure_ascii=False)}\n\n"

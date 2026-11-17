@@ -44,6 +44,25 @@ RETRIEVAL_PREV_MAX_CHARS = 120
 ANCHOR_MAX_CHARS = 60
 
 
+#: A6 通用知识横幅（**唯一定义处**）。
+#:
+#: 为什么集中在这里：这个字符串曾被写过三份（`understanding.py`、`rag_service.py`、
+#: 各处的 prompt），结果"只改一处"的事故重复发生。现在两侧都 import 这一份。
+GENERAL_BANNER = "【以下内容来自模型通用知识，不来自你的资料】"
+
+
+def strip_general_banner(text: str) -> str:
+    """剥掉文本**开头**的通用知识横幅（只剥一次）。
+
+    为什么必须剥：提示词只是"请不要写"，模型不保证遵守（回归审计实测仍有模型自己写，
+    且分块吐出时更明显）。只剥开头 —— 正文里正常提到这句话时不该被删。
+    """
+    s = text.lstrip()
+    if s.startswith(GENERAL_BANNER):
+        return s[len(GENERAL_BANNER) :].lstrip("\n")
+    return text
+
+
 def _clip(text: str, limit: int) -> str:
     """按字符截断并标记省略（中文没有空格，按词切开会切在词中间）"""
     text = (text or "").strip()
