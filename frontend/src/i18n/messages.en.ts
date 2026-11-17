@@ -920,6 +920,9 @@ const en = {
     copyAnswer: 'Copy answer',
     regenerate: 'Regenerate',
     sourceNotCited: '(not cited)',
+    allowGeneral: "Answer from the model's own knowledge when my notes have nothing",
+    allowGeneralWarn:
+      'When on, answers may include content not from your notes; it will be labelled at the top',
     citationInvalid: 'The answer cites sources that do not exist: {list}',
     citationLowCoverage:
       'Only {percent}% of sentences carry a citation — please verify the sources',

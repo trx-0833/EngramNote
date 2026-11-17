@@ -294,6 +294,8 @@ export default function QA() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [question, setQuestion] = useState('');
+  // A6：是否允许模型用自身通用知识回答（默认关 —— 产品承诺是"基于你的资料"）
+  const [allowGeneral, setAllowGeneral] = useState(false);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
@@ -626,6 +628,7 @@ export default function QA() {
         controller.signal,
         sessionId || undefined,
         retryOf,
+        allowGeneral,
       );
       // askQuestionStream 返回 ReadableStream，直接获取读取器
       const r = stream.getReader();
@@ -1259,6 +1262,20 @@ export default function QA() {
                     <span className={styles.qaContextUsed}>
                       {t('qa.contextUsed', { count: historyUsed })}
                     </span>
+                  )}
+                  {/* A6：通用知识开关。标签本身就说清后果，不靠 tooltip —— */}
+                  {/* 打开后答案会带一行"不来自你的资料"的标注。 */}
+                  <label className={styles.qaGeneralToggle}>
+                    <input
+                      type="checkbox"
+                      checked={allowGeneral}
+                      disabled={streaming}
+                      onChange={(e) => setAllowGeneral(e.target.checked)}
+                    />
+                    <span>{t('qa.allowGeneral')}</span>
+                  </label>
+                  {allowGeneral && (
+                    <span className={styles.qaGeneralWarn}>{t('qa.allowGeneralWarn')}</span>
                   )}
                   {error && <span className={styles.qaComposerError}>{error}</span>}
                 </div>

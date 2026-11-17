@@ -682,13 +682,22 @@ export async function askQuestionStream(
    * 成功后把旧轮标 `superseded`（详情默认不返回），失败则不标。
    */
   retryOf?: string,
+  /**
+   * A6：是否允许用**模型自身的通用知识**回答（默认 `false`）。
+   *
+   * 打开后：没有资料依据时也会作答，但答案开头会带一行由**服务端代码**
+   * 插入的标注（`【以下内容来自模型通用知识，不来自你的资料】`），
+   * 且 `meta.grounded === false`。这是产品语义上的「显式选择」，
+   * 不是静默降级 —— 所以默认必须是关的。
+   */
+  allowGeneral = false,
 ): Promise<ReadableStream<Uint8Array>> {
   // 请求体按契约派生（`POST /api/understanding/ask/stream`，契约里是 `{question, session_id?}`）。
   // 响应侧刻意保持手写：SSE 的事件模型（meta/token/sources/done/error）不在 schema 里。
   const body: BodyOf<'/understanding/ask/stream', 'post'> = {
     question,
     // A6：默认关闭 —— 不许用模型通用知识冒充资料内容；界面上显式打开才传 true
-    allow_general_knowledge: false,
+    allow_general_knowledge: allowGeneral,
     ...(sessionId ? { session_id: sessionId } : {}),
     ...(retryOf ? { retry_of: retryOf } : {}),
   };

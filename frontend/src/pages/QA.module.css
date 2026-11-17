@@ -536,3 +536,32 @@
   font-size: 0.8rem;
   line-height: 1.5;
 }
+
+/* A6：通用知识开关。做成轻量的一行 —— 它是「显式选择」，不是主操作。 */
+.qaGeneralToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  /* 用主文字色而不是次级色：勾选它是有后果的动作，不该看起来像说明文字 */
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.qaGeneralToggle input {
+  /* 默认尺寸在高 DPI 下偏小，显式给 14px 才够点 */
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* 打开后才出现的警示行：用警示色边框，与 A1 的引用提示同一套视觉语言 */
+.qaGeneralWarn {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 3px solid var(--color-warning, #d97706);
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
