@@ -42,6 +42,11 @@ class QATurnResponse(BaseModel):
     #: B2：用户反馈（`up` / `down` / None）。round8：只写不读等于没有 —— 详情接口要能读回，
     #: 否则前端刷新后点赞态丢失，聚合分析也拿不到。
     feedback: Optional[str] = None
+    #: B4：本轮**实际生效**的检索范围（笔记 id 列表）。`None` = 不限范围。
+    #:
+    #: round9：`scope_json` 一度只写不读、全仓零消费者 —— 那样等于没存。暴露出来才能回答
+    #: "这轮为什么没检索到某篇笔记"（越权 id 被丢掉这件事本身就是答案）。
+    scope: Optional[List[str]] = None
     #: 本轮实际带上了几轮历史（预算裁剪后的真实值）
     context_turns: int = 0
     latency_ms: Optional[int] = None

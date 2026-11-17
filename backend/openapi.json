@@ -5455,6 +5455,20 @@
             ],
             "title": "Retrieval Status"
           },
+          "scope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
           "sources": {
             "items": {
               "additionalProperties": true,

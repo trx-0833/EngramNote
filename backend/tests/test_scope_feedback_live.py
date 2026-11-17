@@ -113,19 +113,48 @@ class TestScopeAndFeedbackAreLive:
         assert row[0] is not None, "scope_json 恒 NULL —— B4 又成死代码了"
         assert json.loads(row[0]) == ["n-1"]
 
-    async def test_empty_scope_returns_nothing(self, test_db, monkeypatch):
-        """A4：空列表 = 范围为空 ⇒ 检索必须 0 条（不能被 `or None` 变成"不限"）"""
-        _patch_rag(monkeypatch, sources=[{"note_id": "n-x", "note_title": "别的", "chunk_id": "cx"}])
+    async def test_empty_scope_passes_empty_set_to_retrieval(self, test_db, monkeypatch):
+        """A4：`[]` 必须以**空集合**传进检索，不能退化成 None（= 不限）。
+
+        原用例只有一句 `assert meta["grounded"] in (True, False)` —— 恒真，
+        什么都守不住（round9 审计的变异 M1b 就是被它漏掉的）。
+        这里直接断言检索层收到的实参，才守得住 round8 那个 blocker 的形态。
+        """
+        seen: list = []
+
+        from app.api import understanding
+
+        class _RAG:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            async def retrieve_context(self, *, question, user_id, allow_note_ids=None, **_kw):
+                seen.append(allow_note_ids)
+                return {
+                    "context": "",
+                    "sources": [],
+                    "provider": "stub",
+                    "retrieval_status": "",
+                }
+
+        class _LLM:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            async def chat_stream(self, *_a, **_kw):
+                yield "答。"
+
+        monkeypatch.setattr(understanding, "RAGService", _RAG)
+        monkeypatch.setattr(understanding, "LLMService", _LLM)
 
         async with test_db() as db:
             await _seed(db)
 
         with _client() as client:
             events = _sse(client, _ME, {"question": "问", "scope_note_ids": []})
-        meta = next(p for n, p in events if n == "meta")
-        # 桩不看白名单，所以这里只断言"契约把空列表当范围"，不是"不限"：
-        # 真正的过滤在 rag_service，由 test_qa_scope_filter 守。
-        assert meta["grounded"] in (True, False)
+        assert any(n == "done" for n, _ in events), events
+        assert seen, "检索层一次都没被调用"
+        assert seen[0] == set(), f"空列表没被当成空集合（实际 {seen[0]!r}）"
 
     async def test_general_knowledge_prefix_is_added_by_code(self, test_db, monkeypatch):
         """A6：桩**不写**标注，代码必须补 —— 否则"未标注模型知识=0"不成立"""
@@ -138,6 +167,9 @@ class TestScopeAndFeedbackAreLive:
             events = _sse(client, _ME, {"question": "问", "allow_general_knowledge": True})
         text_all = "".join(p.get("content", "") for n, p in events if n == "token")
         assert "模型通用知识" in text_all, f"代码没补标注：{text_all!r}"
+        # round9 major-2：提示词曾要求模型也写一遍 ⇒ 合规模型会写两次横幅。
+        # 现在提示词明确"不要再写"，所以这里要求**恰好一次**。
+        assert text_all.count("模型通用知识") == 1, f"标注重复了：{text_all!r}"
 
     async def test_no_prefix_when_switch_is_off(self, test_db, monkeypatch):
         """默认关闭时不许出现标注（否则用户以为一切回答都不可信）"""

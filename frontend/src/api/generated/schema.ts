@@ -6630,6 +6630,8 @@ export interface components {
       retrieval_query?: string | null;
       /** Retrieval Status */
       retrieval_status?: string | null;
+      /** Scope */
+      scope?: string[] | null;
       /** Sources */
       sources?: {
         [key: string]: unknown;

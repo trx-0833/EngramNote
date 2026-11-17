@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,18 @@ from ..schemas.qa import (
 )
 from ..services import qa_history_service as qa_service
 from .auth import get_current_user_dependency
+
+
+def _load_scope(raw: Optional[str]) -> Optional[List[str]]:
+    """把 `qa_turns.scope_json` 解成列表；坏数据 / NULL 都返回 None（= 不限范围）。"""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
 
 router = APIRouter()
 
@@ -88,6 +100,9 @@ def _turn_payload(turn) -> QATurnResponse:
         sources=sources,
         # B2：把反馈读回去（round8：只写不读等于没有）
         feedback=turn.feedback,
+        # B4（round9）：范围也要读回去 —— 只写不读同样是"等于没存"。
+        # 坏 JSON 退化为 None（不影响详情接口可用）。
+        scope=_load_scope(turn.scope_json),
         context_turns=turn.context_turns or 0,
         latency_ms=turn.latency_ms,
         created_at=turn.created_at,

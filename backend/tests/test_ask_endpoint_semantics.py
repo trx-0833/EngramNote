@@ -35,6 +35,12 @@ def _stub_retrieve(svc, monkeypatch, *, sources=None, context=""):
     monkeypatch.setattr(svc, "retrieve_context", _retrieve)
 
 
+def _auth(uid: str) -> dict:
+    from app.services.auth_service import create_access_token
+
+    return {"Authorization": f"Bearer {create_access_token(uid)}"}
+
+
 @pytest.mark.asyncio
 class TestAskHonoursScope:
     async def test_empty_scope_passes_through_as_empty_set(self, test_db, monkeypatch):
@@ -99,3 +105,83 @@ class TestSchemaStillForbidsUnknown:
         """`extra=forbid` 还在：拼错字段名会 422，而不是静默丢弃"""
         with pytest.raises(ValidationError):
             QuestionRequest(question="q", scoped_note_ids=["x"])
+
+
+@pytest.mark.asyncio
+class TestAskEndpointWiring:
+    """端点级：`/ask` 里的交集与空列表判定（round9 补）"""
+
+    async def test_ask_endpoint_passes_empty_scope(self, test_db, monkeypatch):
+        """`scope_note_ids: []` ⇒ service 必须收到**空集合**（不是 None）"""
+        from fastapi.testclient import TestClient
+        from sqlalchemy import insert
+
+        from app.api import understanding
+        from app.main import app
+        from app.models.user import User
+
+        uid = "user-ask-ep"
+        async with test_db() as db:
+            await db.execute(
+                insert(User).values(id=uid, email="ep@t.local", username="ep", hashed_password="x", is_active=True)
+            )
+            await db.commit()
+
+        seen: dict = {}
+
+        class _RAG:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            async def answer_question(self, **kw):
+                seen.update(kw)
+                return {
+                    "answer": "答",
+                    "sources": [],
+                    "provider": "stub",
+                    "retrieval_status": "",
+                }
+
+        monkeypatch.setattr(understanding, "RAGService", _RAG)
+
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/understanding/ask",
+                json={"question": "问", "scope_note_ids": []},
+                headers=_auth(uid),
+            )
+        assert r.status_code == 200, r.text
+        assert seen.get("allow_note_ids") == set(), f"端点没把空列表当空集合（实际 {seen.get('allow_note_ids')!r}）"
+
+    async def test_ask_endpoint_passes_none_when_absent(self, test_db, monkeypatch):
+        """不传 ⇒ service 收到 None（= 不限），与 `[]` 必须不同"""
+        from fastapi.testclient import TestClient
+        from sqlalchemy import insert
+
+        from app.api import understanding
+        from app.main import app
+        from app.models.user import User
+
+        uid = "user-ask-ep2"
+        async with test_db() as db:
+            await db.execute(
+                insert(User).values(id=uid, email="ep2@t.local", username="ep2", hashed_password="x", is_active=True)
+            )
+            await db.commit()
+
+        seen: dict = {}
+
+        class _RAG:
+            def __init__(self, *_a, **_kw):
+                pass
+
+            async def answer_question(self, **kw):
+                seen.update(kw)
+                return {"answer": "答", "sources": [], "provider": "s", "retrieval_status": ""}
+
+        monkeypatch.setattr(understanding, "RAGService", _RAG)
+
+        with TestClient(app) as client:
+            r = client.post("/api/understanding/ask", json={"question": "问"}, headers=_auth(uid))
+        assert r.status_code == 200, r.text
+        assert seen.get("allow_note_ids") is None

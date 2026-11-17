@@ -1007,16 +1007,12 @@ async def _migrate_sqlite(conn):
                 sync_conn.execute(text("ALTER TABLE llm_calls ADD COLUMN saved_tokens INTEGER"))
                 logger.info("SQLite 迁移: 已为 llm_calls 表添加 saved_tokens 列")
 
-        # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
-        if "chunks" in table_names:
-            chunk_cols = {c["name"] for c in inspector.get_columns("chunks")}
-            if "grams" not in chunk_cols:
-                # 同上：新增模型字段必须在此登记，否则真库永远缺这一列
-                sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN grams TEXT"))
-                logger.info("SQLite 迁移: 已为 chunks 表添加 grams 列")
-            # B2 / B4（2026-11-17）：问答轮次的用户反馈与生效范围。
-            # 两列都可空、旧行不回填 —— 回退方式 = 保留列不读（AGENTS §2）。
+        # ---- qa_turns 表迁移（B2 / B4，round9 minor-11）----
+        # 原先这段在 `if "chunks" in table_names:` 里 —— 库里没有 chunks 表时这两列
+        # 永远不会被加，而代码已经在读 `turn.feedback`。迁移不能挂在别的表的存在性上。
+        if "qa_turns" in table_names:
             qa_turn_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(qa_turns)"))}
+            # 两列都可空、旧行不回填 —— 回退方式 = 保留列不读（AGENTS §2）
             for col, ddl in (
                 ("feedback", "ALTER TABLE qa_turns ADD COLUMN feedback VARCHAR(16)"),
                 ("scope_json", "ALTER TABLE qa_turns ADD COLUMN scope_json TEXT"),
@@ -1025,6 +1021,13 @@ async def _migrate_sqlite(conn):
                     sync_conn.execute(text(ddl))
                     logger.info("SQLite 迁移: 已为 qa_turns 表添加 %s 列", col)
 
+        # ---- chunks 表迁移（阶段 2.2′ / 2.5′）----
+        if "chunks" in table_names:
+            chunk_cols = {c["name"] for c in inspector.get_columns("chunks")}
+            if "grams" not in chunk_cols:
+                # 同上：新增模型字段必须在此登记，否则真库永远缺这一列
+                sync_conn.execute(text("ALTER TABLE chunks ADD COLUMN grams TEXT"))
+                logger.info("SQLite 迁移: 已为 chunks 表添加 grams 列")
             if "chunk_rowid" not in chunk_cols:
                 # 整数 rowid：FTS5 外部内容表的 content_rowid 必须指向它。
                 # VARCHAR 主键会被 SQLite 当成 rowid 的别名，导致 JOIN 对不上
