@@ -958,7 +958,9 @@ async def commit_upload(
                     break
                 sha256.update(chunk)
         file_hash = sha256.hexdigest()
-        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        # 用 display_name（此时已确定），不是请求参数 filename ——
+        # 后者是可选的，`guess_type(None)` 会抛 TypeError ⇒ 500，还会捎带删掉暂存目录。
+        content_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
 
         # 3. 复用核心流程：配额校验 → 入库 → 保存 → 触发转换
         return await _do_upload(

@@ -54,6 +54,11 @@ from .title_extractor import extract_title
 
 import logging
 
+
+#: 单个 HTTPS 请求的上限（秒）。云端不回包时不能无限挂起 ——
+#: Windows 上 Celery 的 --pool=solo 无法强制终止任务，一次挂起就是全站停摆。
+_REQ_TIMEOUT = 120
+
 logger = logging.getLogger(__name__)
 
 # 文件扩展名到源类型的映射
@@ -739,7 +744,7 @@ def _process_with_remote_api(
         for upload_url in file_urls:
             logger.info(f"上传文件: {intake_path.name}")
             with open(intake_path, "rb") as f:
-                upload_resp = req.put(upload_url, data=f)
+                upload_resp = req.put(upload_url, data=f, timeout=_REQ_TIMEOUT)
             if upload_resp.status_code not in (200, 201):
                 return ConversionResult(
                     title="",
@@ -772,7 +777,7 @@ def _process_with_remote_api(
 
         while time.time() < deadline and task_state != "done":
             try:
-                resp = req.get(f"{query_url}{batch_id}", headers=headers)
+                resp = req.get(f"{query_url}{batch_id}", headers=headers, timeout=_REQ_TIMEOUT)
                 if resp.status_code == 200:
                     data = resp.json().get("data", {})
                     tasks = data if isinstance(data, list) else [data]
@@ -804,7 +809,7 @@ def _process_with_remote_api(
 
                                 zip_path = output_dir / f"{file_stem}_result.zip"
                                 logger.info(f"下载结果: {zip_url}")
-                                zip_resp = req.get(zip_url, stream=True)
+                                zip_resp = req.get(zip_url, stream=True, timeout=_REQ_TIMEOUT)
                                 if zip_resp.status_code != 200:
                                     return ConversionResult(
                                         title="",
