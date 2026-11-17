@@ -146,8 +146,12 @@ class QATurn(BaseModel):
 
     #: B4：本轮**实际生效**的检索范围（A4 求交集之后的笔记 id 集合，JSON 数组）
     #:
-    #: 空/NULL = 不限范围。存它是为了"这轮为什么没检索到某篇笔记"能事后归因 ——
-    #: 只存客户端请求的范围是不够的：越权 id 会被丢掉，那才是真相。
+    #: ⚠️ 两种"空"语义**相反**（回归审计 R6：原注释写反了）：
+    #: - `NULL`      = **不限范围**（检索该用户全部笔记）
+    #: - `"[]"`      = **范围为空**（本轮必须 0 条；客户端传的 id 全部越权或已删除）
+    #:
+    #: 存它是为了"这轮为什么没检索到某篇笔记"能事后归因 —— 只存客户端请求的范围是不够的：
+    #: 越权 id 会被丢掉，那才是真相。
     scope_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_span_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

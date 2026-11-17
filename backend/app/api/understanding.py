@@ -716,6 +716,49 @@ async def get_card_duplicates(
     return {"duplicates": all_duplicates}
 
 
+async def _resolve_scope_note_ids(
+    db: "AsyncSession", user_id: str, scope_note_ids: Optional[List[str]]
+) -> Optional[set]:
+    """把客户端请求的 `scope_note_ids` 收敛成**实际允许检索**的笔记 id 集合。
+
+    ## 语义（唯一一处定义，R5）
+
+    - `None`  ⇒ 返回 `None`，表示**不限范围**（检索该用户全部笔记）
+    - `[]`    ⇒ 返回 `set()`，表示**范围为空**（必须检索到 0 条）
+    - 有 id   ⇒ 返回 **与本人未删除笔记的交集**：越权的 id 被丢掉，
+                 别人传进来的 id 不会扩大范围
+
+    ## 为什么要抽出来
+
+    `/ask` 与 `/ask/stream` 原本各写一份**逐字相同**的查询。这个语义改过多次
+    （空集合曾因 `or None` 变成"不限"，fallback 分支曾漏传导致范围逃逸），
+    每次"只改一处"都会漏掉另一处。现在只有这一份。
+
+    ⚠️ 判据必须是 `is not None`，不能用真值判断 —— `[]` 是有效输入。
+    """
+    if scope_note_ids is None:
+        return None
+
+    from sqlalchemy import select as _sel
+
+    from ..models.note import Note as _Note
+
+    rows = (
+        (
+            await db.execute(
+                _sel(_Note.id).where(
+                    _Note.user_id == user_id,
+                    _Note.trashed_at.is_(None),
+                    _Note.id.in_(scope_note_ids),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return set(rows)
+
+
 @router.post("/ask", response_model=QuestionAnswerResponse)
 async def ask_question(
     req: QuestionRequest,
@@ -734,26 +777,7 @@ async def ask_question(
     rag_service = RAGService()
     # A4/A6（round8 遗留）：/ask 原来**静默忽略**这两个字段 —— 与 retry_of 当年的坑同形。
     # 现在与流式端点同一套语义：先求交集（越权 0），再把 allow_general 透传。
-    allow_ids = None
-    if req.scope_note_ids is not None:
-        from sqlalchemy import select as _sel
-
-        from ..models.note import Note as _Note
-
-        rows = (
-            (
-                await db.execute(
-                    _sel(_Note.id).where(
-                        _Note.user_id == current_user.id,
-                        _Note.trashed_at.is_(None),
-                        _Note.id.in_(req.scope_note_ids),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        allow_ids = set(rows)
+    allow_ids = await _resolve_scope_note_ids(db, current_user.id, req.scope_note_ids)
 
     result = await rag_service.answer_question(
         question=req.question,
@@ -1044,29 +1068,11 @@ async def ask_question_stream(
             allow_ids = None
             # 空列表与 None 语义不同：前者是「范围为空」（必须 0 条），后者是「不限」。
             # 用真值判断会把空列表当成没传。
-            if req.scope_note_ids is not None:
-                from sqlalchemy import select as _sel
-
-                from ..models.note import Note as _Note
-
-                rows = (
-                    (
-                        await db.execute(
-                            _sel(_Note.id).where(
-                                _Note.user_id == current_user.id,
-                                _Note.trashed_at.is_(None),
-                                _Note.id.in_(req.scope_note_ids),
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                allow_ids = set(rows)
-                if not allow_ids:
-                    # 传的都是别人的 / 已删除的：范围为空 ⇒ 检索返回 0 条，
-                    # 走"没找到"分支 —— 不报 400（客户端可能只是文件夹里混了别人的笔记）。
-                    logger.info("scope 交集为空，本次检索范围为空")
+            allow_ids = await _resolve_scope_note_ids(db, current_user.id, req.scope_note_ids)
+            if allow_ids is not None and not allow_ids:
+                # 传的都是别人的 / 已删除的：范围为空 ⇒ 检索返回 0 条，
+                # 走"没找到"分支 —— 不报 400（客户端可能只是文件夹里混了别人的笔记）。
+                logger.info("scope 交集为空，本次检索范围为空")
 
             retrieval = await rag_service.retrieve_context(
                 question=retrieval_query,

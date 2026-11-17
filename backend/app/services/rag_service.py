@@ -1045,6 +1045,11 @@ class RAGService:
             # 回归审计 R1：先剥掉模型**自己写的**那一次，再由代码加一份。
             # 原实现直接拼接 ⇒ 模型守规矩时反而变成两份横幅（实测 2 次）。
             answer = strip_general_banner(answer)
+            if not answer.strip():
+                # 回归审计 N1：模型只回了横幅（或整段就是横幅）时，剥完是空串。
+                # 直接拼会得到「横幅 + 空正文」，用户看到一句标注下面是空白。
+                logger.info("通用知识回答剥完为空（模型只回了横幅），已兜底")
+                answer = "模型没有给出实质内容，请换个问法或补充资料后重试。"
             return {
                 "answer": f"{_GENERAL_PREFIX}\n\n{answer}",
                 "sources": [],
