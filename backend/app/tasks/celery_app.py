@@ -53,6 +53,15 @@ _result_dir.mkdir(parents=True, exist_ok=True)
 # 创建 Celery 应用实例
 # broker: 消息队列，用于分发任务
 # backend: 结果存储，用于查询任务状态和结果
+#: 长任务（转换 / 清洗 / 理解）的时间上限（秒）。
+#:
+#: 为什么不用全局 `task_time_limit`：全局值 1800s 是给短任务的兜底，
+#: 而 500 页文档实测需要远超 30 分钟（约 66.6 万字符 / 1500 chunk / 980 章）。
+#: 在 `--pool=solo` 下被硬杀还会阻塞整个队列，所以长任务要单独放宽。
+#: 各任务用 `@app.task(time_limit=..., soft_time_limit=...)` 覆盖。
+LONG_TASK_TIME_LIMIT = 7200
+LONG_TASK_SOFT_TIME_LIMIT = 6900
+
 celery_app = Celery(
     "engramnote",
     broker=settings.get_celery_broker_url(),
@@ -91,6 +100,8 @@ celery_app.conf.update(
     # 30 分钟 hard / 28 分钟 soft 对小文件无影响，只兜住真正卡死的任务。
     task_time_limit=1800,
     task_soft_time_limit=1680,
+    # 长任务（转换 / 清洗 / 理解）单独放宽，见 LONG_TASK_* 常量：
+    # 500 页文档实测需要远超 30 分钟，用全局值会**必然**被杀。
     # 结果后端是文件系统：任务失败时不重试 ack，交由上面的 reject_on_worker_lost
     # 与僵尸任务自愈（reminder_tasks.reap_stale_tasks）兜底
     task_acks_on_failure_or_timeout=True,

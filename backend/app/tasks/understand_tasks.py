@@ -27,6 +27,7 @@ from celery.exceptions import Retry
 from sqlalchemy import select, delete
 
 from .celery_app import celery_app
+from .celery_app import LONG_TASK_SOFT_TIME_LIMIT, LONG_TASK_TIME_LIMIT
 from .common import (
     get_sync_session as _get_understand_session,
     update_note_status as _update_note_status,
@@ -550,7 +551,15 @@ def _parse_questions_response(response: str) -> list:
     return []
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=60, rate_limit="3/m")
+@celery_app.task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+    rate_limit="3/m",
+    # 长文件：30+ 批 LLM 调用，单批可达数分钟
+    time_limit=LONG_TASK_TIME_LIMIT,
+    soft_time_limit=LONG_TASK_SOFT_TIME_LIMIT,
+)
 def understand_document_task(self, note_id: str):
     """
     Celery 任务：文档理解

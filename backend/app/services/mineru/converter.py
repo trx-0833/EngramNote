@@ -712,7 +712,7 @@ def _process_with_remote_api(
             payload["page_ranges"] = f"{start_page_id + 1}-{end_page_id}"
 
         logger.info(f"申请上传地址: {submit_url} -> {intake_path.name}")
-        resp = req.post(submit_url, headers=headers, json=payload)
+        resp = req.post(submit_url, headers=headers, json=payload, timeout=_REQ_TIMEOUT)
         if resp.status_code != 200:
             return ConversionResult(
                 title="",
@@ -1047,7 +1047,13 @@ def _compute_timeout(timeout: int, intake_path: Path, ext: str, page_count: int 
             return base_timeout
 
     per_page = 30
-    return max(base_timeout, 60 + page_count * per_page)
+    # 夹到任务上限之内：500 页按 30s/页 会算出 15060s，而任务 itself 只有 7200s，
+    # 预算永远用不完就被 Celery 杀掉（长文件审计指出）。
+    from ..tasks.celery_app import LONG_TASK_SOFT_TIME_LIMIT
+
+    budget = max(base_timeout, 60 + page_count * per_page)
+    # 留 10% 余量给收尾（写失败状态、清理临时文件）
+    return min(budget, int(LONG_TASK_SOFT_TIME_LIMIT * 0.9))
 
 
 # 页面辅助类型，不作为页码定位标记

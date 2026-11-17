@@ -18,7 +18,6 @@
 - 清洗统计信息存储在笔记的 metadata_ 字段中
 """
 
-
 import os
 import time
 import logging
@@ -29,6 +28,7 @@ from celery.exceptions import Retry
 from sqlalchemy import select
 
 from .celery_app import celery_app
+from .celery_app import LONG_TASK_SOFT_TIME_LIMIT, LONG_TASK_TIME_LIMIT
 from .common import (
     get_sync_session as _get_clean_session,
     update_note_status as _update_note_status,
@@ -125,9 +125,7 @@ async def _create_auto_clean_version(note_id: str, user_id: str, clean_md_path: 
                 db=session,
             )
     except Exception as e:
-        logger.warning(
-            f"创建清洗版本快照失败，继续执行清洗主流程: note_id={note_id[:8]}, err={e}"
-        )
+        logger.warning(f"创建清洗版本快照失败，继续执行清洗主流程: note_id={note_id[:8]}, err={e}")
 
 
 async def _clean_document(note_id: str):
@@ -188,15 +186,12 @@ async def _clean_document(note_id: str):
             return
         original_md_path = note.original_md_path
         user_id = note.user_id
-        clean_prefs = (
-            await user_settings_service.get_effective_settings(session, user_id)
-            if user_id
-            else {}
-        )
+        clean_prefs = await user_settings_service.get_effective_settings(session, user_id) if user_id else {}
 
     if not original_md_path:
         await _update_note_status(
-            note_id, NoteStatus.cleaning_failed,
+            note_id,
+            NoteStatus.cleaning_failed,
             error_message="笔记缺少原始 Markdown 路径",
         )
         return
@@ -207,14 +202,16 @@ async def _clean_document(note_id: str):
         original_text = md_bytes.decode("utf-8")
     except Exception as e:
         await _update_note_status(
-            note_id, NoteStatus.cleaning_failed,
+            note_id,
+            NoteStatus.cleaning_failed,
             error_message=f"读取原始 Markdown 失败: {str(e)}",
         )
         return
 
     if not original_text.strip():
         await _update_note_status(
-            note_id, NoteStatus.cleaning_failed,
+            note_id,
+            NoteStatus.cleaning_failed,
             error_message="原始 Markdown 内容为空",
         )
         return
@@ -250,7 +247,8 @@ async def _clean_document(note_id: str):
             content_type="text/markdown; charset=utf-8",
         )
         await _update_note_status(
-            note_id, NoteStatus.cleaned,
+            note_id,
+            NoteStatus.cleaned,
             clean_md_path=clean_md_path,
             metadata_={
                 "clean_stats": clean_stats,
@@ -280,7 +278,9 @@ async def _clean_document(note_id: str):
         dedup_mode = "lightweight"
         logger.error(
             "嵌入向量生成失败，降级为无模型文本去重: note_id=%s, err=%s, 可用内存=%.1fGB",
-            note_id, e, get_available_memory_gb(),
+            note_id,
+            e,
+            get_available_memory_gb(),
         )
 
     # 检查用户是否已停止清洗（向量存储前）
@@ -303,9 +303,7 @@ async def _clean_document(note_id: str):
             duplicates = find_duplicates_by_embedding(chunks, embeddings)
         except Exception as e:
             # 去重失败不影响清洗，降级文本去重后继续生成副本
-            logger.warning(
-                "向量去重失败，降级为文本去重: note_id=%s, err=%s", note_id, e
-            )
+            logger.warning("向量去重失败，降级为文本去重: note_id=%s, err=%s", note_id, e)
             duplicates = find_duplicates_lightweight(chunks)
             dedup_mode = "lightweight"
     else:
@@ -314,7 +312,8 @@ async def _clean_document(note_id: str):
             duplicates = find_duplicates_lightweight(chunks)
         except Exception as e:
             await _update_note_status(
-                note_id, NoteStatus.cleaning_failed,
+                note_id,
+                NoteStatus.cleaning_failed,
                 error_message=(
                     f"嵌入向量生成失败且文本去重兜底也失败: {str(e)}。"
                     f"当前可用内存约 {get_available_memory_gb():.1f}GB，"
@@ -362,7 +361,9 @@ async def _clean_document(note_id: str):
     if paragraph_duplicates:
         logger.info(
             "段落级去重补充: note_id=%s, 新增 %d 条（块级 %d 条）",
-            note_id, len(paragraph_duplicates), len(duplicates),
+            note_id,
+            len(paragraph_duplicates),
+            len(duplicates),
         )
 
     # 8. 生成清洗副本
@@ -376,9 +377,7 @@ async def _clean_document(note_id: str):
     # `granularity="chunk"`（`block_index` 按检索块坐标）。段落级那批
     # **不能混进同一次调用** —— 两套索引不是同一个坐标系，混着传会让标记
     # 打在错误的行上。所以段落级的标记单独走一次（下面 8b）。
-    clean_copy, copy_stats = generate_clean_copy(
-        original_text, cleaned_text, duplicates, total_blocks=len(chunks)
-    )
+    clean_copy, copy_stats = generate_clean_copy(original_text, cleaned_text, duplicates, total_blocks=len(chunks))
 
     # 8b. 段落级的重复标记：按**行范围**追加（与块级标记并存，互不覆盖）
     para_marked = 0
@@ -445,7 +444,8 @@ async def _clean_document(note_id: str):
         return
 
     await _update_note_status(
-        note_id, NoteStatus.cleaned,
+        note_id,
+        NoteStatus.cleaned,
         clean_md_path=clean_md_path,
         metadata_=metadata,
     )
@@ -529,8 +529,7 @@ async def _rebuild_chunk_index_with_retry(
                     chunk_size=settings.chunk_size,
                 )
                 await chunk_db.commit()
-            logger.info("chunk 索引已重建: note_id=%s, chunks=%d（第 %d 次尝试）",
-                        note_id, n_chunks, attempt)
+            logger.info("chunk 索引已重建: note_id=%s, chunks=%d（第 %d 次尝试）", note_id, n_chunks, attempt)
             return True, ""
         except Exception as exc:  # noqa: BLE001 - 失败要记下来，不能让清洗任务挂
             last_err = f"{type(exc).__name__}: {exc}"
@@ -538,7 +537,10 @@ async def _rebuild_chunk_index_with_retry(
                 break
             logger.warning(
                 "chunk 索引重建失败（第 %d 次），%.1fs 后重试: note_id=%s, %s",
-                attempt, delay, note_id, last_err,
+                attempt,
+                delay,
+                note_id,
+                last_err,
             )
             await asyncio.sleep(delay)
 
@@ -546,7 +548,8 @@ async def _rebuild_chunk_index_with_retry(
     logger.error(
         "chunk 索引重建最终失败 —— 该笔记在检索通道里没有语料"
         "（问答与原文回跳都查不到它，不是'少一层优化'）: note_id=%s, %s",
-        note_id, last_err,
+        note_id,
+        last_err,
     )
     return False, last_err
 
@@ -565,23 +568,25 @@ async def _mark_index_failure(note_id: str, reason: str) -> None:
 
     from ..models.note import Note
 
-    message = (
-        f"检索索引未建好（{reason}）。这篇笔记的问答与原文定位暂时不可用，"
-        f"重新清洗一次可重试。"
-    )
+    message = f"检索索引未建好（{reason}）。这篇笔记的问答与原文定位暂时不可用，重新清洗一次可重试。"
     try:
         session_factory = _get_clean_session()
         async with session_factory() as db:
-            await db.execute(
-                update(Note).where(Note.id == note_id).values(error_message=message)
-            )
+            await db.execute(update(Note).where(Note.id == note_id).values(error_message=message))
             await db.commit()
         logger.info("已把索引失败写进 note.error_message: note_id=%s", note_id)
     except Exception as exc:  # noqa: BLE001 - 尽力而为
         logger.warning("写 note.error_message 失败（索引失败本身已记 error）: %s", exc)
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
+@celery_app.task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+    # 长文件：500 页 ≈ 980 章 / 1500 块，清洗必然超过全局 1800s
+    time_limit=LONG_TASK_TIME_LIMIT,
+    soft_time_limit=LONG_TASK_SOFT_TIME_LIMIT,
+)
 def clean_document_task(self, note_id: str):
     """
     Celery 任务：文档清洗
@@ -648,10 +653,13 @@ def clean_document_task(self, note_id: str):
                 # MaxRetriesExceededError，旧代码捕获不到导致笔记永久停留在
                 # cleaning 状态。进入此分支即表示重试次数用尽，标记失败状态（见 docs/decisions.md#F-30）。
                 try:
-                    _run_async(_update_note_status(
-                        note_id, NoteStatus.cleaning_failed,
-                        error_message=f"清洗任务重试失败: {str(exc)}",
-                    ))
+                    _run_async(
+                        _update_note_status(
+                            note_id,
+                            NoteStatus.cleaning_failed,
+                            error_message=f"清洗任务重试失败: {str(exc)}",
+                        )
+                    )
                 except Exception as update_err:
                     logger.error(f"更新笔记状态失败 (note_id={note_id}): {update_err}")
                 _mark_task_failed(self, f"清洗任务重试失败: {exc}")

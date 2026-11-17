@@ -1158,9 +1158,39 @@ async def ask_question_stream(
                 answer_parts.append(yield_prefix)
                 yield f"event: token\ndata: {json.dumps({'content': yield_prefix}, ensure_ascii=False)}\n\n"
 
+            # A6 去重（2026-11-18 回归审计）：提示词只说了"不要写"，那不是保证。
+            # 实测模型仍会自己写一遍 ⇒ 出现两次横幅。所以输出侧兜一层：
+            # 只剥**开头**的一次（模型通常在开头重复），且必须在同一位置剥，
+            # 否则模型正常行文里提到这句话就会被误删。
+            _stripped_leading = False
+            _pending = ""  # 用于跨 chunk 检测开头横幅
+
             async for chunk in llm_service.chat_stream(messages, scene="rag_answer_stream"):
+                if use_general and not _stripped_leading:
+                    _pending += chunk
+                    # 累积到足够判断的长度（横幅 + 少量后续字符）再决定
+                    if len(_pending) < len(_GENERAL_PREFIX) + 8 and not _pending.strip():
+                        continue
+                    stripped = _pending.lstrip()
+                    if stripped.startswith(_GENERAL_PREFIX):
+                        # 模型自己也写了一遍：丢掉这一份，保留后续内容
+                        stripped = stripped[len(_GENERAL_PREFIX) :].lstrip("\n")
+                    _stripped_leading = True
+                    chunk = stripped
+                    _pending = ""
+                    if not chunk:
+                        continue
                 answer_parts.append(chunk)
                 yield f"event: token\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+
+            if use_general and not _stripped_leading and _pending:
+                # 流很短，全部折在缓冲里
+                stripped = _pending.lstrip()
+                if stripped.startswith(_GENERAL_PREFIX):
+                    stripped = stripped[len(_GENERAL_PREFIX) :].lstrip("\n")
+                if stripped:
+                    answer_parts.append(stripped)
+                    yield f"event: token\ndata: {json.dumps({'content': stripped}, ensure_ascii=False)}\n\n"
 
             # 5. 发送 sources 事件
             yield f"event: sources\ndata: {json.dumps({'sources': sources, 'provider': provider}, ensure_ascii=False)}\n\n"

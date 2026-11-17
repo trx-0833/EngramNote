@@ -124,13 +124,15 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
 
     # 如果没有切分出任何章节，将整个文本作为一个章节
     if not chapters and markdown_text.strip():
-        chapters.append({
-            "chapter_index": 0,
-            "chapter_title": "全文",
-            "content": markdown_text,
-            "level": 0,
-            "hierarchical_path": "全文",
-        })
+        chapters.append(
+            {
+                "chapter_index": 0,
+                "chapter_title": "全文",
+                "content": markdown_text,
+                "level": 0,
+                "hierarchical_path": "全文",
+            }
+        )
 
     # 合并短章节：**只合并"未命名"的散落文本**，不合并有自己标题的章节。
     #
@@ -143,10 +145,7 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
     # 标题是作者给出的结构信息，比 200 字符阈值更可信，必须尊重。
     merged: List[Dict[str, Any]] = []
     for chapter in chapters:
-        is_unnamed = (
-            chapter.get("level") == 0
-            or str(chapter.get("chapter_title", "")).startswith("未命名章节")
-        )
+        is_unnamed = chapter.get("level") == 0 or str(chapter.get("chapter_title", "")).startswith("未命名章节")
         if merged and is_unnamed and len(chapter["content"].strip()) < 200:
             # 无标题的零散文本并入前一章节
             merged[-1]["content"] += "\n\n" + chapter["content"]
@@ -171,13 +170,15 @@ def split_into_chapters(markdown_text: str) -> List[Dict[str, Any]]:
             sub_parts = make_segments(blocks, 8000)
             for idx, part in enumerate(sub_parts):
                 suffix = f" (续{idx + 1})" if len(sub_parts) > 1 else ""
-                result.append({
-                    "chapter_index": len(result),
-                    "chapter_title": chapter["chapter_title"] + suffix,
-                    "content": part,
-                    "level": chapter["level"],
-                    "hierarchical_path": chapter["hierarchical_path"] + suffix,
-                })
+                result.append(
+                    {
+                        "chapter_index": len(result),
+                        "chapter_title": chapter["chapter_title"] + suffix,
+                        "content": part,
+                        "level": chapter["level"],
+                        "hierarchical_path": chapter["hierarchical_path"] + suffix,
+                    }
+                )
         else:
             chapter["chapter_index"] = len(result)
             result.append(chapter)
@@ -206,9 +207,7 @@ async def generate_chapter_summary(
         )
         return summary
     except Exception as e:
-        logger.error(
-            f"生成章节摘要失败 (chapter={chapter['chapter_title']}): {e}"
-        )
+        logger.error(f"生成章节摘要失败 (chapter={chapter['chapter_title']}): {e}")
         return f"摘要生成失败: {str(e)}"
 
 
@@ -233,9 +232,7 @@ async def extract_knowledge_points_from_chapter(
         )
         return points
     except Exception as e:
-        logger.error(
-            f"提取知识点失败 (chapter={chapter['chapter_title']}): {e}"
-        )
+        logger.error(f"提取知识点失败 (chapter={chapter['chapter_title']}): {e}")
         return []
 
 
@@ -268,7 +265,12 @@ async def save_knowledge_cards(
     from .card_intake_service import save_cards_idempotent
 
     return await save_cards_idempotent(
-        db, user_id, note_id, chapter, summary, knowledge_points,
+        db,
+        user_id,
+        note_id,
+        chapter,
+        summary,
+        knowledge_points,
         already_created=already_created,
         prompt_version=prompt_version,
         config=config,
@@ -303,13 +305,12 @@ def _parse_understanding_response(response: str) -> Dict[str, Any]:
     # 解析升级为健壮 JSON 解析（围栏剥离 + 尾缀杂文 + 截断抢救），
     # 即使输出被 max_tokens 截断也能抢救出已生成完整的章节/知识点，而非整批丢弃，见 docs/decisions.md#F-33。
     from ..services.llm_service import parse_json_tolerant
+
     result, info = parse_json_tolerant(response)
     if info.get("status") == "partial":
         # 截断抢救：记录实际抢救出的内容规模，供排查
         recovered = info.get("detail", "")
-        logger.warning(
-            f"理解响应 JSON 被截断，已完成部分数据抢救: {recovered} | head={response[:120]!r}"
-        )
+        logger.warning(f"理解响应 JSON 被截断，已完成部分数据抢救: {recovered} | head={response[:120]!r}")
     elif result is None:
         logger.warning(f"理解响应 JSON 解析失败: {response[:200]!r}")
         return {"summary": "", "points": []}
@@ -398,8 +399,12 @@ async def process_note_understanding(
     batch_size = 3
 
     # 3. 将章节每 batch_size 个一组，合并发送
+    # 长文件审计：如实统计被丢弃的字符与章节（原实现只把剩余量写进日志，等于静默丢弃）
+    dropped_chars = 0
+    dropped_chapters: set[str] = set()
+
     for batch_start in range(0, len(chapters), batch_size):
-        batch = chapters[batch_start:batch_start + batch_size]
+        batch = chapters[batch_start : batch_start + batch_size]
 
         # 构建合并的章节内容
         combined_content = ""
@@ -408,23 +413,42 @@ async def process_note_understanding(
             chapter_content = chapter["content"]
             max_content = 8000
             if len(chapter_content) > max_content:
-                # 防御性截断改为按块边界，不切破段落/表格/代码块。
-                # 正常情况下章节已被结构感知分段控制在 ≤8000；此处仅在单一原子块
-                # 超限（如一个超长句子）时兜底，剩余部分明确提示已顺延（不静默丢弃），见 docs/decisions.md#F-34。
+                # 防御性截断：按块边界，不切破段落/表格/代码块。
+                #
+                # ⚠️ 2026-11-18 长文件审计：这里原来说"剩余部分按块顺延"——
+                # **那是假的**：`_rest` 只进了日志，全仓没有任何消费方。
+                # 500 页文档会静默丢掉大量内容，用户只看到一条 warning 和"理解完成"。
+                # 现在改为**如实丢弃并计数**（`dropped_chars`），由上层汇报给用户。
                 from ..services.markdown_segmenter import truncate_to_complete_blocks
+
                 _prefix, _rest = truncate_to_complete_blocks(chapter_content, max_content)
                 if not _prefix and _rest:
                     from ..services.markdown_segmenter import split_oversized_block
+
                     _chunks = split_oversized_block(chapter_content, max_content)
                     _prefix = _chunks[0] if _chunks else chapter_content[:max_content]
-                    _rest = chapter_content[len(_prefix):]
-                chapter_content = _prefix + (
-                    f"\n...(内容过长，已前置 {len(_prefix)} 字，剩余 {len(_rest)} 字按块顺延)" if _rest else ""
-                )
-                logger.warning(
-                    f"章节 '{chapter_title}' 长度 {len(chapter_content)}>8000，"
-                    f"已按块边界截断（剩余 {len(_rest)} 字顺延）"
-                )
+                    _rest = chapter_content[len(_prefix) :]
+                # 探针实测过的坑：`truncate_to_complete_blocks` 可能返回满额 prefix，
+                # 此时 `_rest` 为空但内容**并没有被截断**——不要在这种情况记"丢弃"。
+                if len(_prefix) > max_content:
+                    # 单块本身超限且无法按块边界切开：如实记录"整块送入"，
+                    # 因为再切就会切破表格/代码块。
+                    logger.info(
+                        "章节 %r 含超长原子块（%d 字），整块送入提示词（不切，避免破坏表格/代码）",
+                        chapter_title,
+                        len(_prefix),
+                    )
+                    _rest = ""
+                chapter_content = _prefix
+                if _rest:
+                    dropped_chars += len(_rest)
+                    dropped_chapters.add(chapter_title)
+                    logger.warning(
+                        "章节 %r 超出单批上限 %d 字：**已丢弃 %d 字**（不再声称“顺延”）",
+                        chapter_title,
+                        max_content,
+                        len(_rest),
+                    )
             combined_content += (
                 f"--- 章节 {batch_start // batch_size + 1}.{batch.index(chapter) + 1}: {chapter_title} ---\n"
                 f"{chapter_content}\n\n"
@@ -439,6 +463,7 @@ async def process_note_understanding(
             # 重试后仍为空则接受该批为空，避免无限重试），见 docs/decisions.md#F-33。
             if not parsed.get("chapters") and not parsed.get("summary"):
                 from ..config import get_settings as _get_settings
+
                 _sf = _get_settings()
                 _cur = getattr(session, "_max_tokens", 0) or _sf.llm_json_max_tokens
                 escalated = min(max(_cur * 2, _sf.llm_json_max_tokens), _sf.llm_json_max_tokens_ceiling)
@@ -454,11 +479,13 @@ async def process_note_understanding(
             chapters_data = parsed.get("chapters", [])
             if not chapters_data:
                 # 兼容旧版单章节格式
-                chapters_data = [{
-                    "chapter_title": batch[0]["chapter_title"],
-                    "summary": parsed.get("summary", ""),
-                    "points": parsed.get("points", []),
-                }]
+                chapters_data = [
+                    {
+                        "chapter_title": batch[0]["chapter_title"],
+                        "summary": parsed.get("summary", ""),
+                        "points": parsed.get("points", []),
+                    }
+                ]
 
             # 为批次中的每个章节分配结果
             for i, chapter_data in enumerate(chapters_data):
@@ -479,7 +506,12 @@ async def process_note_understanding(
                 # 存入数据库（阶段 4.8/4.9：质量门 + 内容寻址去重）
                 if knowledge_points:
                     outcome = await save_knowledge_cards(
-                        db, user_id, note_id, chapter, summary, knowledge_points,
+                        db,
+                        user_id,
+                        note_id,
+                        chapter,
+                        summary,
+                        knowledge_points,
                         already_created=total_cards,
                         # 阶段 4.6：这条路走的是理解会话，版本取自它用的提示词
                         prompt_version=prompt_version("understanding_session"),
@@ -497,12 +529,14 @@ async def process_note_understanding(
                     card_count = 0
                     logger.info(f"章节 '{chapter['chapter_title']}' 未提取到知识点")
 
-                chapter_summaries.append({
-                    "chapter_index": chapter["chapter_index"],
-                    "chapter_title": chapter["chapter_title"],
-                    "summary": summary,
-                    "card_count": card_count,
-                })
+                chapter_summaries.append(
+                    {
+                        "chapter_index": chapter["chapter_index"],
+                        "chapter_title": chapter["chapter_title"],
+                        "summary": summary,
+                        "card_count": card_count,
+                    }
+                )
 
         except Exception as e:
             logger.error(
@@ -510,17 +544,17 @@ async def process_note_understanding(
                 exc_info=True,
             )
             for chapter in batch:
-                chapter_summaries.append({
-                    "chapter_index": chapter["chapter_index"],
-                    "chapter_title": chapter["chapter_title"],
-                    "summary": f"摘要生成失败: {str(e)}",
-                    "card_count": 0,
-                })
+                chapter_summaries.append(
+                    {
+                        "chapter_index": chapter["chapter_index"],
+                        "chapter_title": chapter["chapter_title"],
+                        "summary": f"摘要生成失败: {str(e)}",
+                        "card_count": 0,
+                    }
+                )
 
     logger.info(
-        f"笔记 {note_id} 理解完成: "
-        f"{len(chapters)} 个章节, {total_cards} 个知识卡片, "
-        f"共 {session.turn_count} 轮对话"
+        f"笔记 {note_id} 理解完成: {len(chapters)} 个章节, {total_cards} 个知识卡片, 共 {session.turn_count} 轮对话"
     )
 
     # 阶段 4.8/4.9：复用、拒收、截断都必须**可见**。
@@ -531,16 +565,21 @@ async def process_note_understanding(
     if reused_cards or rejected_cards or truncated_cards:
         logger.info(
             "笔记 %s 卡片入库明细: 新建=%d 复用=%d 被拒=%d 超限未入库=%d",
-            note_id[:8], total_cards, reused_cards, len(rejected_cards), truncated_cards,
+            note_id[:8],
+            total_cards,
+            reused_cards,
+            len(rejected_cards),
+            truncated_cards,
         )
     if rejected_cards:
         reasons: Dict[str, int] = {}
         for _title, reason in rejected_cards:
             reasons[reason] = reasons.get(reason, 0) + 1
         logger.warning(
-            "笔记 %s 有 %d 张卡片未通过质量门: %s。"
-            "若比例很高，应先检查提示词或分段，而不是放宽质量门",
-            note_id[:8], len(rejected_cards), reasons,
+            "笔记 %s 有 %d 张卡片未通过质量门: %s。若比例很高，应先检查提示词或分段，而不是放宽质量门",
+            note_id[:8],
+            len(rejected_cards),
+            reasons,
         )
 
     return {
@@ -576,17 +615,17 @@ async def detect_card_duplicates(
         List[Dict]: 重复候选列表，每个包含 existing_card_id, existing_title, similarity
     """
     result = await db.execute(
-        select(KnowledgeCard).where(
+        select(KnowledgeCard)
+        .where(
             KnowledgeCard.user_id == user_id,
             KnowledgeCard.id != card.id,
             # 回收站笔记的卡片不参与重复检测（独立/提升卡片保留）
             or_(
                 KnowledgeCard.note_id.is_(None),
-                select(Note.id).where(
-                    Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)
-                ).exists(),
+                select(Note.id).where(Note.id == KnowledgeCard.note_id, Note.trashed_at.is_(None)).exists(),
             ),
-        ).limit(500)
+        )
+        .limit(500)
     )
     existing_cards = result.scalars().all()
     if not existing_cards:
@@ -596,7 +635,7 @@ async def detect_card_duplicates(
     card_keywords = set()
     for length in range(4, 1, -1):
         for i in range(len(card_text) - length + 1):
-            card_keywords.add(card_text[i:i + length])
+            card_keywords.add(card_text[i : i + length])
     card_keywords = {kw for kw in card_keywords if len(kw) >= 2}
 
     duplicates = []
@@ -607,12 +646,14 @@ async def detect_card_duplicates(
             if kw in existing_text:
                 score += len(kw)
         if score > threshold:
-            duplicates.append({
-                "existing_card_id": existing.id,
-                "existing_title": existing.title,
-                "similarity": min(score / 100.0, 1.0),
-                "score": score,
-            })
+            duplicates.append(
+                {
+                    "existing_card_id": existing.id,
+                    "existing_title": existing.title,
+                    "similarity": min(score / 100.0, 1.0),
+                    "score": score,
+                }
+            )
 
     duplicates.sort(key=lambda x: x["score"], reverse=True)
     return duplicates[:5]

@@ -36,6 +36,7 @@ from celery.exceptions import Retry
 from sqlalchemy import select
 
 from .celery_app import celery_app
+from .celery_app import LONG_TASK_SOFT_TIME_LIMIT, LONG_TASK_TIME_LIMIT
 from .common import (
     get_sync_session as _get_sync_session,
     update_note_status as _update_note_status,
@@ -325,7 +326,14 @@ async def _convert_document(
     await _report_progress(task_id, 0.95, "转换完成")
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
+@celery_app.task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+    # 长文件需要远超全局 1800s：大 PDF 转换可达数十分钟到两小时。
+    time_limit=LONG_TASK_TIME_LIMIT,
+    soft_time_limit=LONG_TASK_SOFT_TIME_LIMIT,
+)
 def convert_document_task(self, note_id: str, file_path: str, source_type: str, backend: Optional[str] = None):
     """
     Celery 任务：文档转换

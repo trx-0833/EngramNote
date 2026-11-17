@@ -1155,18 +1155,33 @@ async def _migrate_sqlite(conn):
         if "card_relations" in table_names:
             if _destructive_migration_allowed():
                 logger.warning("检测到 ENGRAMNOTE_ALLOW_DESTRUCTIVE_MIGRATION，执行 card_relations 同键去重")
-                result = sync_conn.execute(
+                # ⚠️ 2026-11-18 隔离审计：SQL 的 GROUP BY 把 **NULL 归成同一组**，
+                # 而"悬挂关系"（某一端 card_id 为 NULL）是合法的历史数据 ——
+                # 实测真库 16 条里会被删掉 14 条。所以：
+                #   1. 只在两端都非 NULL 时判同键；
+                #   2. 不再自动 DELETE，只**列出**待删清单（删除交给人工）。
+                rows = sync_conn.execute(
                     text(
                         """
-                    DELETE FROM card_relations WHERE id NOT IN (
+                    SELECT id FROM card_relations
+                     WHERE card_id_1 IS NOT NULL AND card_id_2 IS NOT NULL
+                       AND id NOT IN (
                         SELECT MIN(id) FROM card_relations
+                         WHERE card_id_1 IS NOT NULL AND card_id_2 IS NOT NULL
                         GROUP BY user_id, card_id_1, card_id_2, relation_type, status
                     )
                     """
                     )
-                )
-                if result.rowcount > 0:
-                    logger.warning("card_relations 同键去重: 删除 %d 行", result.rowcount)
+                ).fetchall()
+                if rows:
+                    sample = [r[0] for r in rows[:10]]
+                    logger.warning(
+                        "card_relations 同键重复 %d 行（**未删除**，请人工确认）：样例 %s",
+                        len(rows),
+                        sample,
+                    )
+                else:
+                    logger.info("card_relations 无同键重复（已排除 card_id 为 NULL 的悬挂关系）")
             else:
                 dup = (
                     sync_conn.execute(
@@ -1174,6 +1189,7 @@ async def _migrate_sqlite(conn):
                             """
                     SELECT COUNT(*) FROM (
                         SELECT 1 FROM card_relations
+                         WHERE card_id_1 IS NOT NULL AND card_id_2 IS NOT NULL
                         GROUP BY user_id, card_id_1, card_id_2, relation_type, status
                         HAVING COUNT(*) > 1
                     )
@@ -1196,24 +1212,34 @@ async def _migrate_sqlite(conn):
                 # 2026-11-07 的日志统计：这一条 INFO 在 2 个月里出现 **6460** 次
                 # （每个进程每次启动一条），是仅次于访问日志的第二大噪音源，
                 # 会把真正的迁移信息淹掉。幂等命中降 DEBUG，真建了才 INFO。
-                existed = (
-                    sync_conn.execute(
-                        text(
-                            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_card_relations_pair_type'"
-                        )
-                    ).first()
-                    is not None
-                )
+                # ⚠️ 2026-11-18 隔离审计：`IF NOT EXISTS` 在"索引已存在但**列不同**"时
+                # 什么都不做。实测真库那个索引只有 4 列（缺 status）⇒ 防护形同虚设，
+                # 而日志永远不会报出来。所以要比对列集，不一致就重建。
+                wanted = ["user_id", "card_id_1", "card_id_2", "relation_type", "status"]
+                existing_cols = [
+                    r[2] for r in sync_conn.execute(text("PRAGMA index_info('uq_card_relations_pair_type')")).fetchall()
+                ]
+                if existing_cols and existing_cols != wanted:
+                    logger.warning(
+                        "card_relations 唯一索引列集不符（现有 %s，期望 %s）→ 重建",
+                        existing_cols,
+                        wanted,
+                    )
+                    sync_conn.execute(text("DROP INDEX IF EXISTS uq_card_relations_pair_type"))
+                    existing_cols = []
+
                 sync_conn.execute(
                     text(
                         "CREATE UNIQUE INDEX IF NOT EXISTS uq_card_relations_pair_type "
-                        "ON card_relations (user_id, card_id_1, card_id_2, relation_type, status)"
+                        "ON card_relations (user_id, card_id_1, card_id_2, relation_type, status) "
+                        # 部分索引：排除 NULL 端，否则悬挂关系会互相冲突、索引建不起来
+                        "WHERE card_id_1 IS NOT NULL AND card_id_2 IS NOT NULL"
                     )
                 )
-                if existed:
-                    logger.debug("SQLite 迁移: card_relations 唯一索引 uq_card_relations_pair_type 已存在")
+                if existing_cols == wanted:
+                    logger.debug("SQLite 迁移: card_relations 唯一索引已存在且列集正确")
                 else:
-                    logger.info("SQLite 迁移: 已创建 card_relations 唯一索引 uq_card_relations_pair_type")
+                    logger.info("SQLite 迁移: card_relations 唯一索引已按 5 列重建")
             except Exception as e:
                 # 不静默：索引缺失会让重复关系防护失效，必须显式告警
                 logger.error("创建 card_relations 唯一索引失败（重复关系防护未生效，请人工处理）: %s", e)
