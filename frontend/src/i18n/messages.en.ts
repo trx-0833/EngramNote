@@ -926,6 +926,8 @@ const en = {
     citationInvalid: 'The answer cites sources that do not exist: {list}',
     citationLowCoverage:
       'Only {percent}% of sentences carry a citation — please verify the sources',
+    numericMismatch:
+      'Numbers in {count} sentence(s) were not found in the cited text — please verify',
     notGrounded:
       'Nothing relevant was found in your notes; the answer below is not based on your material',
     copied: 'Copied',

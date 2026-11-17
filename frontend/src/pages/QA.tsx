@@ -130,6 +130,65 @@ export function citationAudit(
 }
 
 /**
+ * C1 降级版：检查答案里的**数字**是否出现在引用来源的原文里。
+ *
+ * 为什么只做数字：错误代价最高（"12 块" vs "8 块"），且纯规则可判 —— 不需要 LLM、
+ * 零成本、可离线。语义蕴含（"这句话是否被原文支持"）仍是 C1 正式版的事。
+ *
+ * 为什么区分 `unsupported` 与 `unverifiable`：`relevant_text` 只是前 200 字摘要
+ * （`schemas/knowledge.py` 的注释明确说不能拿它切片）。文本被截断时"找不到数字"
+ * 可能只是没显示出来 —— 把它报成"编造"会误伤，比漏报更糟。
+ */
+export function numericCitationAudit(
+  answer: string,
+  sources: AnswerSource[],
+): {
+  checked: number;
+  unsupported: { sentence: string; numbers: string[] }[];
+  unverifiable: number;
+} {
+  const unsupported: { sentence: string; numbers: string[] }[] = [];
+  let checked = 0;
+  let unverifiable = 0;
+
+  const TRUNCATED = 200; // 后端截断阈值
+
+  const sentences = answer
+    .split(/[。！？!?\n]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  for (const sentence of sentences) {
+    // 先把引用标记 [n] 剥掉 —— 否则「[1]」里的 1 会被当成内容里的数字（会误报）。
+    const content = sentence.replace(/\[\d+\]/g, '');
+    const numbers = content.match(/\d+(?:\.\d+)?/g);
+    if (!numbers) continue;
+    checked += 1;
+
+    // 这句话引用了哪几条？没写引用就用全部来源兜底（避免把"忘了标引用"当成"编造"）
+    const refs = [...sentence.matchAll(/\[(\d+)\]/g)]
+      .map((m) => Number(m[1]))
+      .filter((n) => n >= 1 && n <= sources.length);
+    const pool = refs.length > 0 ? refs.map((n) => sources[n - 1]) : sources;
+    const haystack = pool.map((s) => s.relevant_text || '').join('\n');
+    if (!haystack) {
+      // 来源没有可读文本（降级检索 / 历史数据），无法判断
+      if (numbers.length > 0) unverifiable += 1;
+      continue;
+    }
+
+    const missing = numbers.filter((n) => !haystack.includes(n));
+    if (missing.length === 0) continue;
+
+    const mayBeTruncated = pool.some((s) => (s.relevant_text || '').length >= TRUNCATED);
+    if (mayBeTruncated) unverifiable += 1;
+    else unsupported.push({ sentence, numbers: missing });
+  }
+
+  return { checked, unsupported, unverifiable };
+}
+
+/**
  * 引用来源列表（批次 E7 抽出，右栏与卡片内共用）
  *
  * 抽出来的唯一理由是**判据只能有一份**：`canJump` 那三条判断决定了
@@ -1148,6 +1207,17 @@ export default function QA() {
                                 );
                               }
                               return null;
+                            })()}
+                            {/* C1 降级版：答案里的数字在引用原文里找不到（确认，不是"可能被截断"）。
+                                只在确有硬错时出现 —— `unverifiable` 的留给自己看，不打扰用户。 */}
+                            {(() => {
+                              const num = numericCitationAudit(record.answer, record.sources);
+                              if (num.unsupported.length === 0) return null;
+                              return (
+                                <p className={styles.qaCitationWarn}>
+                                  {t('qa.numericMismatch', { count: num.unsupported.length })}
+                                </p>
+                              );
                             })()}
                             <SourceLinks sources={record.sources} answer={record.answer} />
                           </div>

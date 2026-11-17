@@ -1129,6 +1129,8 @@ const zhCN = {
     // A1：引用结构审计（只在异常时出现）
     citationInvalid: '回答里出现了不存在的引用：{list}',
     citationLowCoverage: '这句回答只有 {percent}% 的句子标了引用，建议核对来源',
+    // C1 降级版：数字在引用原文里找不到（只在确认时出现）
+    numericMismatch: '有 {count} 句话里的数字在引用原文里找不到，建议核对',
     notGrounded: '这一轮没有在你的笔记里检索到相关内容，下面的回答不基于你的资料',
     copied: '已复制',
     copyFailed: '复制失败，请手动选择文本',
