@@ -59,6 +59,8 @@ import logging
 #: Windows 上 Celery 的 --pool=solo 无法强制终止任务，一次挂起就是全站停摆。
 _REQ_TIMEOUT = 120
 
+from ...tasks.celery_app import LONG_TASK_SOFT_TIME_LIMIT  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # 文件扩展名到源类型的映射
@@ -1047,9 +1049,12 @@ def _compute_timeout(timeout: int, intake_path: Path, ext: str, page_count: int 
             return base_timeout
 
     per_page = 30
-    # 夹到任务上限之内：500 页按 30s/页 会算出 15060s，而任务 itself 只有 7200s，
+    # 夹到任务上限之内：500 页按 30s/页 会算出 15060s，而任务本身只有 7200s，
     # 预算永远用不完就被 Celery 杀掉（长文件审计指出）。
-    from ..tasks.celery_app import LONG_TASK_SOFT_TIME_LIMIT
+    #
+    # ⚠️ 常量在模块顶层 import（不是函数体内）：写在函数里时，层级写错
+    # （..tasks = pp.services.tasks）要到运行时才炸，2008 条用例和
+    # p_import_all 都抓不到 —— 表现是"任何 PDF 都转不过去"。
 
     budget = max(base_timeout, 60 + page_count * per_page)
     # 留 10% 余量给收尾（写失败状态、清理临时文件）
